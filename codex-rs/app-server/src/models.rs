@@ -14,7 +14,7 @@ pub async fn supported_models(
     include_hidden: bool,
 ) -> Vec<Model> {
     thread_manager
-        .list_models(RefreshStrategy::OnlineIfUncached)
+        .list_models(RefreshStrategy::Offline)
         .await
         .into_iter()
         .filter(|preset| include_hidden || preset.show_in_picker)

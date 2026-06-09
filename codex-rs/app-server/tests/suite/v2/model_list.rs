@@ -159,6 +159,7 @@ async fn list_models_includes_hidden_models() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Astral disables OpenAI remote model catalog"]
 async fn list_models_uses_chatgpt_remote_catalog_as_source_of_truth() -> Result<()> {
     let server = MockServer::start().await;
     let remote_model: ModelInfo = serde_json::from_value(json!({
