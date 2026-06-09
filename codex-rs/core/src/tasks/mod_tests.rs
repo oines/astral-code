@@ -182,10 +182,10 @@ fn emit_turn_memory_metric_records_config_disabled_without_citations() {
 }
 
 #[test]
-fn emit_compact_metric_records_manual_remote_v2() {
+fn emit_compact_metric_records_manual_local() {
     let session_telemetry = test_session_telemetry();
 
-    emit_compact_metric(&session_telemetry, "remote_v2", /*manual*/ true);
+    emit_compact_metric(&session_telemetry, "local", /*manual*/ true);
 
     let snapshot = session_telemetry
         .snapshot_metrics()
@@ -197,7 +197,7 @@ fn emit_compact_metric_records_manual_remote_v2() {
         attrs,
         BTreeMap::from([
             ("manual".to_string(), "true".to_string()),
-            ("type".to_string(), "remote_v2".to_string()),
+            ("type".to_string(), "local".to_string()),
         ])
     );
 }

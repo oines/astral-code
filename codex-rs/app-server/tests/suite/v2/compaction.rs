@@ -1,17 +1,15 @@
 //! End-to-end compaction flow tests.
 //!
 //! Phases:
-//! 1) Arrange: mock responses/compact endpoints + config.
+//! 1) Arrange: mock model response endpoints + config.
 //! 2) Act: start a thread and submit multiple turns to trigger auto-compaction.
 //! 3) Assert: verify item/started + item/completed notifications for context compaction.
 
 #![expect(clippy::expect_used)]
 
 use anyhow::Result;
-use app_test_support::ChatGptAuthFixture;
 use app_test_support::TestAppServer;
 use app_test_support::to_response;
-use app_test_support::write_chatgpt_auth;
 use app_test_support::write_mock_responses_config_toml;
 use codex_app_server_protocol::ItemCompletedNotification;
 use codex_app_server_protocol::ItemStartedNotification;
@@ -28,9 +26,6 @@ use codex_app_server_protocol::TurnCompletedNotification;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::UserInput as V2UserInput;
-use codex_config::types::AuthCredentialsStoreMode;
-use codex_protocol::models::ContentItem;
-use codex_protocol::models::ResponseItem;
 use core_test_support::responses;
 use core_test_support::skip_if_no_network;
 use pretty_assertions::assert_eq;
@@ -108,9 +103,9 @@ async fn auto_compaction_local_emits_started_and_completed_items() -> Result<()>
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn auto_compaction_remote_emits_started_and_completed_items() -> Result<()> {
+async fn auto_compaction_local_emits_compaction_turn_metadata() -> Result<()> {
     skip_if_no_network!(Ok(()));
-    const REMOTE_AUTO_COMPACT_LIMIT: i64 = 200_000;
+    const LOCAL_AUTO_COMPACT_LIMIT: i64 = 200_000;
 
     let server = responses::start_mock_server().await;
     let sse1 = responses::sse(vec![
@@ -122,48 +117,27 @@ async fn auto_compaction_remote_emits_started_and_completed_items() -> Result<()
         responses::ev_completed_with_tokens("r2", /*total_tokens*/ 330_000),
     ]);
     let sse3 = responses::sse(vec![
-        responses::ev_assistant_message("m3", "FINAL_REPLY"),
-        responses::ev_completed_with_tokens("r3", /*total_tokens*/ 120),
+        responses::ev_assistant_message("m3", "LOCAL_SUMMARY"),
+        responses::ev_completed_with_tokens("r3", /*total_tokens*/ 200),
     ]);
-    let responses_log = responses::mount_sse_sequence(&server, vec![sse1, sse2, sse3]).await;
-
-    let compacted_history = vec![
-        ResponseItem::Message {
-            id: None,
-            role: "assistant".to_string(),
-            content: vec![ContentItem::OutputText {
-                text: "REMOTE_COMPACT_SUMMARY".to_string(),
-            }],
-            phase: None,
-        },
-        ResponseItem::Compaction {
-            encrypted_content: "ENCRYPTED_COMPACTION_SUMMARY".to_string(),
-        },
-    ];
-    let compact_mock = responses::mount_compact_json_once(
-        &server,
-        serde_json::json!({ "output": compacted_history }),
-    )
-    .await;
+    let sse4 = responses::sse(vec![
+        responses::ev_assistant_message("m4", "FINAL_REPLY"),
+        responses::ev_completed_with_tokens("r4", /*total_tokens*/ 120),
+    ]);
+    let responses_log = responses::mount_sse_sequence(&server, vec![sse1, sse2, sse3, sse4]).await;
 
     let codex_home = TempDir::new()?;
     write_mock_responses_config_toml(
         codex_home.path(),
         &server.uri(),
         &BTreeMap::default(),
-        REMOTE_AUTO_COMPACT_LIMIT,
-        Some(true),
+        LOCAL_AUTO_COMPACT_LIMIT,
+        /*requires_openai_auth*/ None,
         "mock_provider",
         COMPACT_PROMPT,
     )?;
-    write_chatgpt_auth(
-        codex_home.path(),
-        ChatGptAuthFixture::new("access-chatgpt").plan_type("pro"),
-        AuthCredentialsStoreMode::File,
-    )?;
 
-    let mut mcp =
-        TestAppServer::new_with_env(codex_home.path(), &[("ASTRAL_API_KEY", None)]).await?;
+    let mut mcp = TestAppServer::new(codex_home.path()).await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
 
     let thread_id = start_thread(&mut mcp).await?;
@@ -185,13 +159,14 @@ async fn auto_compaction_remote_emits_started_and_completed_items() -> Result<()
     assert_eq!(completed.thread_id, thread_id);
     assert_eq!(started_id, completed_id);
 
-    let compact_requests = compact_mock.requests();
-    assert_eq!(compact_requests.len(), 1);
-    assert_eq!(compact_requests[0].path(), "/v1/responses/compact");
-
     let response_requests = responses_log.requests();
-    assert_eq!(response_requests.len(), 3);
-    let turn_metadata = response_requests
+    assert_eq!(response_requests.len(), 4);
+    let turn_requests = [
+        &response_requests[0],
+        &response_requests[1],
+        &response_requests[3],
+    ];
+    let turn_metadata = turn_requests
         .iter()
         .map(|request| {
             request
@@ -201,7 +176,7 @@ async fn auto_compaction_remote_emits_started_and_completed_items() -> Result<()
                 .unwrap_or_else(|| panic!("turn request should include turn metadata"))
         })
         .collect::<Vec<_>>();
-    for (request, metadata) in response_requests.iter().zip(&turn_metadata) {
+    for (request, metadata) in turn_requests.iter().zip(&turn_metadata) {
         assert_eq!(metadata["request_kind"].as_str(), Some("turn"));
         assert!(
             metadata["turn_id"]
@@ -216,7 +191,7 @@ async fn auto_compaction_remote_emits_started_and_completed_items() -> Result<()
         assert!(metadata.get("compaction").is_none());
     }
 
-    let compact_metadata = compact_requests[0]
+    let compact_metadata = response_requests[2]
         .header("x-codex-turn-metadata")
         .as_deref()
         .map(parse_json_header)
@@ -230,7 +205,7 @@ async fn auto_compaction_remote_emits_started_and_completed_items() -> Result<()
         serde_json::json!({
             "trigger": "auto",
             "reason": "context_limit",
-            "implementation": "responses_compact",
+            "implementation": "responses",
             "phase": "pre_turn",
             "strategy": "memento",
         })
@@ -241,7 +216,7 @@ async fn auto_compaction_remote_emits_started_and_completed_items() -> Result<()
     );
     assert_eq!(
         compact_metadata["window_id"].as_str(),
-        compact_requests[0].header("x-codex-window-id").as_deref()
+        response_requests[2].header("x-codex-window-id").as_deref()
     );
 
     Ok(())

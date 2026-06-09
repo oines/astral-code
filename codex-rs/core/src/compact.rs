@@ -42,8 +42,6 @@ use codex_utils_output_truncation::truncate_text;
 use futures::prelude::*;
 use tracing::error;
 
-use codex_model_provider_info::ModelProviderInfo;
-
 pub use codex_prompts::SUMMARIZATION_PROMPT;
 pub use codex_prompts::SUMMARY_PREFIX;
 const COMPACT_USER_MESSAGE_MAX_TOKENS: usize = 20_000;
@@ -61,10 +59,6 @@ const COMPACT_USER_MESSAGE_MAX_TOKENS: usize = 20_000;
 pub(crate) enum InitialContextInjection {
     BeforeLastUserMessage,
     DoNotInject,
-}
-
-pub(crate) fn should_use_remote_compact_task(_provider: &ModelProviderInfo) -> bool {
-    false
 }
 
 pub(crate) async fn run_inline_auto_compact_task(
@@ -460,7 +454,7 @@ pub(crate) fn is_summary_message(message: &str) -> bool {
 /// - If no real user messages remain, insert before the compaction summary so
 ///   the summary stays last.
 /// - If there are no user messages, insert before the last compaction item so
-///   that item remains last (remote compaction may return only compaction items).
+///   that item remains last.
 /// - If there are no user messages or compaction items, append the context.
 pub(crate) fn insert_initial_context_before_last_real_user_or_summary(
     mut compacted_history: Vec<ResponseItem>,
@@ -507,6 +501,74 @@ pub(crate) fn insert_initial_context_before_last_real_user_or_summary(
     }
 
     compacted_history
+}
+
+#[cfg(test)]
+pub(crate) async fn process_compacted_history(
+    sess: &Session,
+    turn_context: &TurnContext,
+    mut compacted_history: Vec<ResponseItem>,
+    initial_context_injection: InitialContextInjection,
+) -> Vec<ResponseItem> {
+    // Mid-turn compaction is the only path that must inject initial context above the last user
+    // message in the replacement history. Pre-turn compaction instead injects context after the
+    // compaction item, but mid-turn compaction keeps the compaction item last for model training.
+    let initial_context = if matches!(
+        initial_context_injection,
+        InitialContextInjection::BeforeLastUserMessage
+    ) {
+        sess.build_initial_context(turn_context).await
+    } else {
+        Vec::new()
+    };
+
+    compacted_history.retain(should_keep_compacted_history_item);
+    insert_initial_context_before_last_real_user_or_summary(compacted_history, initial_context)
+}
+
+/// Returns whether an item from compacted transcript output should be preserved.
+///
+/// Called while processing the model-provided compacted transcript, before we
+/// append fresh canonical context from the current session.
+///
+/// We drop:
+/// - `developer` messages because compact output can include stale/duplicated
+///   instruction content.
+/// - non-user-content `user` messages (session prefix/instruction wrappers),
+///   while preserving real user messages and persisted hook prompts.
+///
+/// This intentionally keeps:
+/// - `assistant` messages (future compaction models may emit them)
+/// - `user`-role warnings that parse as `TurnItem::UserMessage` and compaction-generated summary
+///   messages. Legacy warning fragments are filtered by `parse_turn_item` before they reach this
+///   check.
+#[cfg(test)]
+pub(crate) fn should_keep_compacted_history_item(item: &ResponseItem) -> bool {
+    match item {
+        ResponseItem::Message { role, .. } if role == "developer" => false,
+        ResponseItem::Message { role, .. } if role == "user" => {
+            matches!(
+                crate::event_mapping::parse_turn_item(item),
+                Some(TurnItem::UserMessage(_) | TurnItem::HookPrompt(_))
+            )
+        }
+        ResponseItem::Message { role, .. } if role == "assistant" => true,
+        ResponseItem::Message { .. } => false,
+        ResponseItem::AgentMessage { .. } => true,
+        ResponseItem::Compaction { .. } | ResponseItem::ContextCompaction { .. } => true,
+        ResponseItem::CompactionTrigger => false,
+        ResponseItem::Reasoning { .. }
+        | ResponseItem::LocalShellCall { .. }
+        | ResponseItem::FunctionCall { .. }
+        | ResponseItem::ToolSearchCall { .. }
+        | ResponseItem::FunctionCallOutput { .. }
+        | ResponseItem::ToolSearchOutput { .. }
+        | ResponseItem::CustomToolCall { .. }
+        | ResponseItem::CustomToolCallOutput { .. }
+        | ResponseItem::WebSearchCall { .. }
+        | ResponseItem::ImageGenerationCall { .. }
+        | ResponseItem::Other => false,
+    }
 }
 
 pub(crate) fn build_compacted_history(
@@ -591,8 +653,8 @@ async fn drain_to_completed(
             turn_context.reasoning_summary,
             turn_context.config.service_tier.clone(),
             turn_metadata_header,
-            // Rollout tracing currently models remote compaction only; local compaction streams
-            // are left untraced until the reducer has a first-class local compaction lifecycle.
+            // Local compaction streams are left untraced until the reducer has a first-class
+            // local compaction lifecycle.
             &InferenceTraceContext::disabled(),
         )
         .await?;

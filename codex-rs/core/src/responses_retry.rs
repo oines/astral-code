@@ -14,7 +14,6 @@ use tracing::warn;
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ResponsesStreamRequest {
     Sampling,
-    RemoteCompactionV2,
 }
 
 /// Handles a retryable stream error and returns `Ok(())` when the caller should
@@ -54,7 +53,7 @@ pub(crate) async fn handle_retryable_response_stream_error(
             }
             _ => backoff(retry_count),
         };
-        log_retry(request, turn_context, &err, retry_count, max_retries, delay);
+        log_retry(request, retry_count, max_retries, delay);
 
         // In release builds, hide the first websocket retry notification to reduce noisy
         // transient reconnect messages. In debug builds, keep full visibility for diagnosis.
@@ -78,27 +77,11 @@ pub(crate) async fn handle_retryable_response_stream_error(
     Err(err)
 }
 
-fn log_retry(
-    request: ResponsesStreamRequest,
-    turn_context: &TurnContext,
-    err: &CodexErr,
-    retries: u64,
-    max_retries: u64,
-    delay: Duration,
-) {
+fn log_retry(request: ResponsesStreamRequest, retries: u64, max_retries: u64, delay: Duration) {
     match request {
         ResponsesStreamRequest::Sampling => {
             warn!(
                 "stream disconnected - retrying sampling request ({retries}/{max_retries} in {delay:?})...",
-            );
-        }
-        ResponsesStreamRequest::RemoteCompactionV2 => {
-            warn!(
-                turn_id = %turn_context.sub_id,
-                retries,
-                max_retries,
-                compact_error = %err,
-                "remote compaction v2 stream failed; retrying request after delay"
             );
         }
     }

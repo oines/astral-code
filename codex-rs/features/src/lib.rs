@@ -209,8 +209,6 @@ pub enum Feature {
     RealtimeConversation,
     /// Prevent idle system sleep while a turn is actively running.
     PreventIdleSleep,
-    /// Enable remote compaction v2 over the normal Responses API.
-    RemoteCompactionV2,
     /// Enable workspace dependency support.
     WorkspaceDependencies,
 
@@ -1232,12 +1230,6 @@ pub const FEATURES: &[FeatureSpec] = &[
         id: Feature::ResponsesWebsocketsV2,
         key: "responses_websockets_v2",
         stage: Stage::Removed,
-        default_enabled: false,
-    },
-    FeatureSpec {
-        id: Feature::RemoteCompactionV2,
-        key: "remote_compaction_v2",
-        stage: Stage::UnderDevelopment,
         default_enabled: false,
     },
     FeatureSpec {

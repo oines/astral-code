@@ -29,38 +29,17 @@ impl SessionTask for CompactTask {
         _cancellation_token: CancellationToken,
     ) -> Option<String> {
         let session = session.clone_session();
-        let _ = if crate::compact::should_use_remote_compact_task(ctx.provider.info()) {
-            if ctx
-                .features
-                .enabled(codex_features::Feature::RemoteCompactionV2)
-            {
-                emit_compact_metric(
-                    &session.services.session_telemetry,
-                    "remote_v2",
-                    /*manual*/ true,
-                );
-                crate::compact_remote_v2::run_remote_compact_task(session.clone(), ctx).await
-            } else {
-                emit_compact_metric(
-                    &session.services.session_telemetry,
-                    "remote",
-                    /*manual*/ true,
-                );
-                crate::compact_remote::run_remote_compact_task(session.clone(), ctx).await
-            }
-        } else {
-            emit_compact_metric(
-                &session.services.session_telemetry,
-                "local",
-                /*manual*/ true,
-            );
-            let input = vec![UserInput::Text {
-                text: ctx.compact_prompt().to_string(),
-                // Compaction prompt is synthesized; no UI element ranges to preserve.
-                text_elements: Vec::new(),
-            }];
-            crate::compact::run_compact_task(session.clone(), ctx, input).await
-        };
+        emit_compact_metric(
+            &session.services.session_telemetry,
+            "local",
+            /*manual*/ true,
+        );
+        let input = vec![UserInput::Text {
+            text: ctx.compact_prompt().to_string(),
+            // Compaction prompt is synthesized; no UI element ranges to preserve.
+            text_elements: Vec::new(),
+        }];
+        let _ = crate::compact::run_compact_task(session.clone(), ctx, input).await;
         None
     }
 }
