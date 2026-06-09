@@ -394,7 +394,7 @@ struct InstructionEntry {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum InstructionProvenance {
-    /// User-level instructions, normally loaded from CODEX_HOME.
+    /// User-level instructions, normally loaded from ASTRAL_HOME.
     User(AbsolutePathBuf),
 
     /// Workspace instructions discovered from project AGENTS.md files.

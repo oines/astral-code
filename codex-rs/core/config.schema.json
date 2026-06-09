@@ -285,10 +285,10 @@
       ]
     },
     "AuthCredentialsStoreMode": {
-      "description": "Determine where Codex should store CLI auth credentials.",
+      "description": "Determine where Astral should store CLI auth credentials.",
       "oneOf": [
         {
-          "description": "Persist credentials in CODEX_HOME/auth.json.",
+          "description": "Persist credentials in ASTRAL_HOME/auth.json.",
           "enum": [
             "file"
           ],
@@ -302,7 +302,7 @@
           "type": "string"
         },
         {
-          "description": "Use keyring when available; otherwise, fall back to a file in CODEX_HOME.",
+          "description": "Use keyring when available; otherwise, fall back to a file in ASTRAL_HOME.",
           "enum": [
             "auto"
           ],
@@ -767,7 +767,7 @@
               "$ref": "#/definitions/AbsolutePathBuf"
             }
           ],
-          "description": "Directory where Codex writes effective session config lock files."
+          "description": "Directory where Astral writes effective session config lock files."
         },
         "load_path": {
           "allOf": [
@@ -1004,7 +1004,7 @@
     },
     "History": {
       "additionalProperties": false,
-      "description": "Settings that govern if and what will be written to `~/.codex/history.jsonl`.",
+      "description": "Settings that govern if and what will be written to `~/.astral-code/history.jsonl`.",
       "properties": {
         "max_bytes": {
           "default": null,
@@ -1974,17 +1974,17 @@
       ]
     },
     "OAuthCredentialsStoreMode": {
-      "description": "Determine where Codex should store and read MCP credentials.",
+      "description": "Determine where Astral should store and read MCP credentials.",
       "oneOf": [
         {
-          "description": "`Keyring` when available; otherwise, `File`. Credentials stored in the keyring will only be readable by Codex unless the user explicitly grants access via OS-level keyring access.",
+          "description": "`Keyring` when available; otherwise, `File`. Credentials stored in the keyring will only be readable by Astral unless the user explicitly grants access via OS-level keyring access.",
           "enum": [
             "auto"
           ],
           "type": "string"
         },
         {
-          "description": "CODEX_HOME/.credentials.json This file will be readable to Codex and other applications running as the same user.",
+          "description": "ASTRAL_HOME/.credentials.json This file will be readable to Astral and other applications running as the same user.",
           "enum": [
             "file"
           ],
@@ -2975,7 +2975,7 @@
         },
         "pet": {
           "default": null,
-          "description": "Pet id to preselect in the terminal pet picker.\n\nCustom pet ids resolve against CODEX_HOME/pets/<pet-id>/pet.json.",
+          "description": "Pet id to preselect in the terminal pet picker.\n\nCustom pet ids resolve against ASTRAL_HOME/pets/<pet-id>/pet.json.",
           "type": "string"
         },
         "pet_anchor": {
@@ -3036,7 +3036,7 @@
         },
         "theme": {
           "default": null,
-          "description": "Syntax highlighting theme name (kebab-case).\n\nWhen set, overrides automatic light/dark theme detection. Use `/theme` in the TUI or see `$CODEX_HOME/themes` for custom themes.",
+          "description": "Syntax highlighting theme name (kebab-case).\n\nWhen set, overrides automatic light/dark theme detection. Use `/theme` in the TUI or see `$ASTRAL_HOME/themes` for custom themes.",
           "type": "string"
         },
         "vim_mode_default": {
@@ -4357,7 +4357,7 @@
       "type": "object"
     }
   },
-  "description": "Base config deserialized from ~/.codex/config.toml.",
+  "description": "Base config deserialized from ~/.astral-code/config.toml.",
   "properties": {
     "agents": {
       "allOf": [
@@ -4448,7 +4448,7 @@
         }
       ],
       "default": null,
-      "description": "Preferred backend for storing CLI auth credentials. file (default): Use a file in the Codex home directory. keyring: Use an OS-specific keyring service. auto: Use the keyring if available, otherwise use a file."
+      "description": "Preferred backend for storing CLI auth credentials. file (default): Use a file in the Astral home directory. keyring: Use an OS-specific keyring service. auto: Use the keyring if available, otherwise use a file."
     },
     "compact_prompt": {
       "description": "Compact prompt used for history compaction.",
@@ -4852,7 +4852,7 @@
         "max_bytes": null,
         "persistence": "save-all"
       },
-      "description": "Settings that govern if and what will be written to `~/.codex/history.jsonl`."
+      "description": "Settings that govern if and what will be written to `~/.astral-code/history.jsonl`."
     },
     "hooks": {
       "allOf": [
@@ -4888,7 +4888,7 @@
           "$ref": "#/definitions/AbsolutePathBuf"
         }
       ],
-      "description": "Directory where Codex writes log files. Setting this value explicitly also enables the TUI text log in this directory. Defaults to `$CODEX_HOME/log`."
+      "description": "Directory where Astral writes log files. Setting this value explicitly also enables the TUI text log in this directory. Defaults to `$ASTRAL_HOME/log`."
     },
     "marketplaces": {
       "additionalProperties": {
@@ -4915,14 +4915,14 @@
         }
       ],
       "default": null,
-      "description": "Preferred backend for storing MCP OAuth credentials. keyring: Use an OS-specific keyring service. https://github.com/openai/codex/blob/main/codex-rs/rmcp-client/src/oauth.rs#L2 file: Use a file in the Codex home directory. auto (default): Use the OS-specific keyring service if available, otherwise use a file."
+      "description": "Preferred backend for storing MCP OAuth credentials. keyring: Use an OS-specific keyring service. https://github.com/openai/codex/blob/main/codex-rs/rmcp-client/src/oauth.rs#L2 file: Use a file in the Astral home directory. auto (default): Use the OS-specific keyring service if available, otherwise use a file."
     },
     "mcp_servers": {
       "additionalProperties": {
         "$ref": "#/definitions/RawMcpServerConfig"
       },
       "default": {},
-      "description": "Definition for MCP servers that Codex can reach out to for tool calls.",
+      "description": "Definition for MCP servers that Astral can reach out to for tool calls.",
       "type": "object"
     },
     "memories": {
@@ -5090,7 +5090,7 @@
     },
     "project_root_markers": {
       "default": null,
-      "description": "Markers used to detect the project root when searching parent directories for `.codex` folders. Defaults to [\".git\"] when unset.",
+      "description": "Markers used to detect the project root when searching parent directories for `.astral-code` folders. Defaults to [\".git\"] when unset.",
       "items": {
         "type": "string"
       },
@@ -5168,7 +5168,7 @@
           "$ref": "#/definitions/AbsolutePathBuf"
         }
       ],
-      "description": "Directory where Codex stores the SQLite state DB. Defaults to `$CODEX_SQLITE_HOME` when set. Otherwise uses `$CODEX_HOME`."
+      "description": "Directory where Astral stores the SQLite state DB. Defaults to `$ASTRAL_SQLITE_HOME` when set. Otherwise uses `$ASTRAL_HOME`."
     },
     "suppress_unstable_features_warning": {
       "description": "Suppress warnings about unstable (under development) features.",

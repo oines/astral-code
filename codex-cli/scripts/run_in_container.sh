@@ -10,8 +10,8 @@ set -e
 
 # Default the work directory to WORKSPACE_ROOT_DIR if not provided.
 WORK_DIR="${WORKSPACE_ROOT_DIR:-$(pwd)}"
-# Default allowed domains - can be overridden with OPENAI_ALLOWED_DOMAINS env var
-OPENAI_ALLOWED_DOMAINS="${OPENAI_ALLOWED_DOMAINS:-api.openai.com}"
+# Allowed domains must be supplied explicitly for the selected provider.
+ASTRAL_ALLOWED_DOMAINS="${ASTRAL_ALLOWED_DOMAINS:-}"
 
 # Parse optional flag.
 if [ "$1" = "--work_dir" ]; then
@@ -26,7 +26,7 @@ fi
 WORK_DIR=$(realpath "$WORK_DIR")
 
 # Generate a unique container name based on the normalized work directory
-CONTAINER_NAME="codex_$(echo "$WORK_DIR" | sed 's/\//_/g' | sed 's/[^a-zA-Z0-9_-]//g')"
+CONTAINER_NAME="astral_$(echo "$WORK_DIR" | sed 's/\//_/g' | sed 's/[^a-zA-Z0-9_-]//g')"
 
 # Define cleanup to remove the container on script exit, ensuring no leftover containers
 cleanup() {
@@ -47,9 +47,9 @@ if [ -z "$WORK_DIR" ]; then
   exit 1
 fi
 
-# Verify that OPENAI_ALLOWED_DOMAINS is not empty
-if [ -z "$OPENAI_ALLOWED_DOMAINS" ]; then
-  echo "Error: OPENAI_ALLOWED_DOMAINS is empty."
+# Verify that ASTRAL_ALLOWED_DOMAINS is not empty
+if [ -z "$ASTRAL_ALLOWED_DOMAINS" ]; then
+  echo "Error: ASTRAL_ALLOWED_DOMAINS is empty."
   exit 1
 fi
 
@@ -58,26 +58,26 @@ cleanup
 
 # Run the container with the specified directory mounted at the same path inside the container.
 docker run --name "$CONTAINER_NAME" -d \
-  -e OPENAI_API_KEY \
+  -e ASTRAL_API_KEY \
   --cap-add=NET_ADMIN \
   --cap-add=NET_RAW \
   -v "$WORK_DIR:/app$WORK_DIR" \
-  codex \
+  astral-code \
   sleep infinity
 
 # Write the allowed domains to a file in the container
-docker exec --user root "$CONTAINER_NAME" bash -c "mkdir -p /etc/codex"
-for domain in $OPENAI_ALLOWED_DOMAINS; do
+docker exec --user root "$CONTAINER_NAME" bash -c "mkdir -p /etc/astral-code"
+for domain in $ASTRAL_ALLOWED_DOMAINS; do
   # Validate domain format to prevent injection
   if [[ ! "$domain" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
     echo "Error: Invalid domain format: $domain"
     exit 1
   fi
-  echo "$domain" | docker exec --user root -i "$CONTAINER_NAME" bash -c "cat >> /etc/codex/allowed_domains.txt"
+  echo "$domain" | docker exec --user root -i "$CONTAINER_NAME" bash -c "cat >> /etc/astral-code/allowed_domains.txt"
 done
 
 # Set proper permissions on the domains file
-docker exec --user root "$CONTAINER_NAME" bash -c "chmod 444 /etc/codex/allowed_domains.txt && chown root:root /etc/codex/allowed_domains.txt"
+docker exec --user root "$CONTAINER_NAME" bash -c "chmod 444 /etc/astral-code/allowed_domains.txt && chown root:root /etc/astral-code/allowed_domains.txt"
 
 # Initialize the firewall inside the container as root user
 docker exec --user root "$CONTAINER_NAME" bash -c "/usr/local/bin/init_firewall.sh"
@@ -92,4 +92,4 @@ quoted_args=""
 for arg in "$@"; do
   quoted_args+=" $(printf '%q' "$arg")"
 done
-docker exec -it "$CONTAINER_NAME" bash -c "cd \"/app$WORK_DIR\" && codex --sandbox workspace-write --ask-for-approval on-request ${quoted_args}"
+docker exec -it "$CONTAINER_NAME" bash -c "cd \"/app$WORK_DIR\" && astral --sandbox workspace-write --ask-for-approval on-request ${quoted_args}"

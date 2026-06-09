@@ -203,7 +203,7 @@ fn missing_state_db_check(scan: RolloutScan, details: Vec<String>) -> DoctorChec
                 scan.reached_scan_cap
             ))
             .expected("rollout directories are fully scannable")
-            .remedy("Check file permissions and unexpected files under CODEX_HOME sessions."),
+            .remedy("Check file permissions and unexpected files under ASTRAL_HOME sessions."),
         );
     }
     check
@@ -414,7 +414,7 @@ fn parity_check_from_scan_and_rows(
                 scan.reached_scan_cap
             ))
             .expected("rollout directories are fully scannable")
-            .remedy("Check file permissions and unexpected files under CODEX_HOME sessions."),
+            .remedy("Check file permissions and unexpected files under ASTRAL_HOME sessions."),
         );
     }
     check

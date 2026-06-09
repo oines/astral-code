@@ -21,7 +21,7 @@ use crate::protocol::WritableRoot;
 
 const PROTECTED_METADATA_GIT_PATH_NAME: &str = ".git";
 const PROTECTED_METADATA_AGENTS_PATH_NAME: &str = ".agents";
-const PROTECTED_METADATA_CODEX_PATH_NAME: &str = ".codex";
+const PROTECTED_METADATA_CODEX_PATH_NAME: &str = ".astral-code";
 
 /// Top-level workspace metadata paths that stay protected under writable roots.
 pub const PROTECTED_METADATA_PATH_NAMES: &[&str] = &[
@@ -566,7 +566,10 @@ impl FileSystemSandboxPolicy {
 
         append_default_read_only_project_root_subpath_if_no_explicit_rule(&mut entries, ".git");
         append_default_read_only_project_root_subpath_if_no_explicit_rule(&mut entries, ".agents");
-        append_default_read_only_project_root_subpath_if_no_explicit_rule(&mut entries, ".codex");
+        append_default_read_only_project_root_subpath_if_no_explicit_rule(
+            &mut entries,
+            ".astral-code",
+        );
         for writable_root in writable_roots {
             for protected_path in default_read_only_subpaths_for_writable_root(
                 writable_root,
@@ -987,8 +990,8 @@ impl FileSystemSandboxPolicy {
             // as separate WritableRoot values and are checked independently.
             // Preserve symlink path components that live under the writable root
             // so downstream sandboxes can still mask the symlink inode itself.
-            // Example: if `<root>/.codex -> <root>/decoy`, bwrap must still see
-            // `<root>/.codex`, not only the resolved `<root>/decoy`.
+            // Example: if `<root>/.astral-code -> <root>/decoy`, bwrap must still see
+            // `<root>/.astral-code`, not only the resolved `<root>/decoy`.
             read_only_subpaths.extend(
                 resolved_entries
                     .iter()
@@ -1044,7 +1047,7 @@ impl FileSystemSandboxPolicy {
                 protected_metadata_names,
                 root,
                 // Preserve literal in-root protected paths like `.git` and
-                // `.codex` so downstream sandboxes can still detect and mask
+                // `.astral-code` so downstream sandboxes can still detect and mask
                 // the symlink itself instead of only its resolved target.
                 read_only_subpaths: dedup_absolute_paths(
                     read_only_subpaths,
@@ -1570,7 +1573,7 @@ pub(crate) fn default_read_only_subpaths_for_writable_root(
         subpaths.push(top_level_agents);
     }
 
-    // Keep top-level project metadata under .codex read-only to the agent by
+    // Keep top-level project metadata under .astral-code read-only to the agent by
     // default. For the workspace root itself, protect it even before the
     // directory exists so first-time creation still goes through the
     // protected-path approval flow.
@@ -1925,7 +1928,7 @@ mod tests {
             cwd.path().canonicalize().expect("canonicalize cwd"),
         )
         .expect("absolute canonical root");
-        let expected_dot_codex = expected_root.join(".codex");
+        let expected_dot_codex = expected_root.join(".astral-code");
 
         let policy = FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
             path: FileSystemPath::Special {
@@ -1982,7 +1985,7 @@ mod tests {
                 },
                 FileSystemSandboxEntry {
                     path: FileSystemPath::Special {
-                        value: FileSystemSpecialPath::project_roots(Some(".codex".into())),
+                        value: FileSystemSpecialPath::project_roots(Some(".astral-code".into())),
                     },
                     access: FileSystemAccessMode::Read,
                 },
@@ -2019,7 +2022,7 @@ mod tests {
             cwd.path().canonicalize().expect("canonicalize cwd"),
         )
         .expect("absolute canonical root");
-        let explicit_dot_codex = expected_root.join(".codex");
+        let explicit_dot_codex = expected_root.join(".astral-code");
 
         let policy = FileSystemSandboxPolicy::restricted(vec![
             FileSystemSandboxEntry {
@@ -2044,14 +2047,14 @@ mod tests {
         assert!(
             !workspace_root
                 .protected_metadata_names
-                .contains(&".codex".to_string()),
-            "explicit .codex rule should remove the metadata-name protection"
+                .contains(&".astral-code".to_string()),
+            "explicit .astral-code rule should remove the metadata-name protection"
         );
         assert!(
             !workspace_root
                 .read_only_subpaths
                 .contains(&explicit_dot_codex),
-            "explicit .codex rule should win over the default protected carveout"
+            "explicit .astral-code rule should win over the default protected carveout"
         );
         assert!(
             policy.can_write_path_with_cwd(
@@ -2066,7 +2069,7 @@ mod tests {
         let cwd = TempDir::new().expect("tempdir");
         let dot_git_config = cwd.path().join(".git").join("config");
         let dot_agents_config = cwd.path().join(".agents").join("config");
-        let dot_codex_config = cwd.path().join(".codex").join("config.toml");
+        let dot_codex_config = cwd.path().join(".astral-code").join("config.toml");
         let root = AbsolutePathBuf::from_absolute_path(cwd.path()).expect("absolute cwd");
         let file_system_policy =
             FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
@@ -2085,7 +2088,7 @@ mod tests {
             vec![
                 ".git".to_string(),
                 ".agents".to_string(),
-                ".codex".to_string(),
+                ".astral-code".to_string(),
             ]
         );
         assert!(!writable_roots[0].is_path_writable(&dot_git_config));
@@ -2160,7 +2163,7 @@ mod tests {
         );
         assert!(
             !file_system_policy
-                .can_write_path_with_cwd(Path::new(".codex/config.toml"), relative_cwd,)
+                .can_write_path_with_cwd(Path::new(".astral-code/config.toml"), relative_cwd,)
         );
         assert!(
             !file_system_policy.can_write_path_with_cwd(
@@ -2177,10 +2180,10 @@ mod tests {
         let real_root = cwd.path().join("real");
         let link_root = cwd.path().join("link");
         let blocked = real_root.join("blocked");
-        let codex_dir = real_root.join(".codex");
+        let codex_dir = real_root.join(".astral-code");
 
         fs::create_dir_all(&blocked).expect("create blocked");
-        fs::create_dir_all(&codex_dir).expect("create .codex");
+        fs::create_dir_all(&codex_dir).expect("create .astral-code");
         symlink_dir(&real_root, &link_root).expect("create symlinked root");
 
         let link_root =
@@ -2188,7 +2191,7 @@ mod tests {
         let link_blocked = link_root.join("blocked");
         let expected_root = link_root.clone();
         let expected_blocked = link_blocked.clone();
-        let expected_codex = link_root.join(".codex");
+        let expected_codex = link_root.join(".astral-code");
 
         let policy = FileSystemSandboxPolicy::restricted(vec![
             FileSystemSandboxEntry {
@@ -2229,11 +2232,11 @@ mod tests {
         let link_root = cwd.path().join("link");
         let blocked = real_root.join("blocked");
         let agents_dir = real_root.join(".agents");
-        let codex_dir = real_root.join(".codex");
+        let codex_dir = real_root.join(".astral-code");
 
         fs::create_dir_all(&blocked).expect("create blocked");
         fs::create_dir_all(&agents_dir).expect("create .agents");
-        fs::create_dir_all(&codex_dir).expect("create .codex");
+        fs::create_dir_all(&codex_dir).expect("create .astral-code");
         symlink_dir(&real_root, &link_root).expect("create symlinked cwd");
 
         let link_blocked =
@@ -2242,7 +2245,7 @@ mod tests {
             AbsolutePathBuf::from_absolute_path(&link_root).expect("absolute symlinked root");
         let expected_blocked = link_blocked.clone();
         let expected_agents = expected_root.join(".agents");
-        let expected_codex = expected_root.join(".codex");
+        let expected_codex = expected_root.join(".astral-code");
 
         let policy = FileSystemSandboxPolicy::restricted(vec![
             FileSystemSandboxEntry {
@@ -2298,18 +2301,18 @@ mod tests {
         let cwd = TempDir::new().expect("tempdir");
         let root = cwd.path().join("root");
         let decoy = root.join("decoy-codex");
-        let dot_codex = root.join(".codex");
+        let dot_codex = root.join(".astral-code");
         fs::create_dir_all(&decoy).expect("create decoy");
-        symlink_dir(&decoy, &dot_codex).expect("create .codex symlink");
+        symlink_dir(&decoy, &dot_codex).expect("create .astral-code symlink");
 
         let root = AbsolutePathBuf::from_absolute_path(&root).expect("absolute root");
         let expected_dot_codex = AbsolutePathBuf::from_absolute_path(
             root.as_path()
                 .canonicalize()
                 .expect("canonicalize root")
-                .join(".codex"),
+                .join(".astral-code"),
         )
-        .expect("absolute .codex symlink");
+        .expect("absolute .astral-code symlink");
         let unexpected_decoy =
             AbsolutePathBuf::from_absolute_path(decoy.canonicalize().expect("canonicalize decoy"))
                 .expect("absolute canonical decoy");
@@ -2483,10 +2486,10 @@ mod tests {
         let real_tmpdir = cwd.path().join("real-tmpdir");
         let link_tmpdir = cwd.path().join("link-tmpdir");
         let blocked = real_tmpdir.join("blocked");
-        let codex_dir = real_tmpdir.join(".codex");
+        let codex_dir = real_tmpdir.join(".astral-code");
 
         fs::create_dir_all(&blocked).expect("create blocked");
-        fs::create_dir_all(&codex_dir).expect("create .codex");
+        fs::create_dir_all(&codex_dir).expect("create .astral-code");
         symlink_dir(&real_tmpdir, &link_tmpdir).expect("create symlinked tmpdir");
 
         let link_blocked =
@@ -2494,7 +2497,7 @@ mod tests {
         let expected_root =
             AbsolutePathBuf::from_absolute_path(&link_tmpdir).expect("absolute symlinked tmpdir");
         let expected_blocked = link_blocked.clone();
-        let expected_codex = expected_root.join(".codex");
+        let expected_codex = expected_root.join(".astral-code");
 
         unsafe {
             std::env::set_var("TMPDIR", &link_tmpdir);

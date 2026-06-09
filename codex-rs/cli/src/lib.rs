@@ -29,7 +29,7 @@ pub struct SeatbeltCommand {
     #[arg(long = "permissions-profile", short = 'P', value_name = "NAME")]
     pub permissions_profile: Option<String>,
 
-    /// Layer $CODEX_HOME/<name>.config.toml on top of the base user config.
+    /// Layer $ASTRAL_HOME/<name>.config.toml on top of the base user config.
     #[arg(long = "profile", short = 'p')]
     pub config_profile: Option<ProfileV2Name>,
 
@@ -77,7 +77,7 @@ pub struct LandlockCommand {
     #[arg(long = "permissions-profile", short = 'P', value_name = "NAME")]
     pub permissions_profile: Option<String>,
 
-    /// Layer $CODEX_HOME/<name>.config.toml on top of the base user config.
+    /// Layer $ASTRAL_HOME/<name>.config.toml on top of the base user config.
     #[arg(long = "profile", short = 'p')]
     pub config_profile: Option<ProfileV2Name>,
 
@@ -112,7 +112,7 @@ pub struct WindowsCommand {
     #[arg(long = "permissions-profile", short = 'P', value_name = "NAME")]
     pub permissions_profile: Option<String>,
 
-    /// Layer $CODEX_HOME/<name>.config.toml on top of the base user config.
+    /// Layer $ASTRAL_HOME/<name>.config.toml on top of the base user config.
     #[arg(long = "profile", short = 'p')]
     pub config_profile: Option<ProfileV2Name>,
 

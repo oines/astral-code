@@ -138,7 +138,7 @@ pub async fn run_remote_environment(
     loop {
         let response = client.register_environment(&config.environment_id).await?;
         eprintln!(
-            "codex exec-server remote environment registered with environment_id {}",
+            "astral exec-server remote environment registered with environment_id {}",
             response.environment_id
         );
 

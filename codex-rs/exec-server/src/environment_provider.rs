@@ -2,11 +2,11 @@ use async_trait::async_trait;
 
 use crate::Environment;
 use crate::ExecServerError;
-use crate::environment::CODEX_EXEC_SERVER_URL_ENV_VAR;
+use crate::environment::ASTRAL_EXEC_SERVER_URL_ENV_VAR;
 use crate::environment::LOCAL_ENVIRONMENT_ID;
 use crate::environment::REMOTE_ENVIRONMENT_ID;
 
-/// Lists the concrete environments available to Codex.
+/// Lists the concrete environments available to Astral.
 ///
 /// Implementations own a startup snapshot containing both the available
 /// environment list in configured order and the default environment
@@ -32,21 +32,21 @@ pub enum EnvironmentDefault {
     EnvironmentId(String),
 }
 
-/// Default provider backed by `CODEX_EXEC_SERVER_URL`.
+/// Default provider backed by `ASTRAL_EXEC_SERVER_URL`.
 #[derive(Clone, Debug)]
 pub struct DefaultEnvironmentProvider {
     exec_server_url: Option<String>,
 }
 
 impl DefaultEnvironmentProvider {
-    /// Builds a provider from an already-read raw `CODEX_EXEC_SERVER_URL` value.
+    /// Builds a provider from an already-read raw `ASTRAL_EXEC_SERVER_URL` value.
     pub fn new(exec_server_url: Option<String>) -> Self {
         Self { exec_server_url }
     }
 
-    /// Builds a provider by reading `CODEX_EXEC_SERVER_URL`.
+    /// Builds a provider by reading `ASTRAL_EXEC_SERVER_URL`.
     pub fn from_env() -> Self {
-        Self::new(std::env::var(CODEX_EXEC_SERVER_URL_ENV_VAR).ok())
+        Self::new(std::env::var(ASTRAL_EXEC_SERVER_URL_ENV_VAR).ok())
     }
 
     pub(crate) fn snapshot_inner(&self) -> EnvironmentProviderSnapshot {

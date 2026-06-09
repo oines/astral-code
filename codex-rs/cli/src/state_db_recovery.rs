@@ -20,7 +20,7 @@ pub(crate) fn confirm_repair(startup_error: &LocalStateDbStartupError) -> std::i
     eprintln!("Codex couldn't start because its local database appears to be damaged.");
     eprintln!("Codex can try a safe repair by backing up those files and rebuilding them.");
     print_technical_details(startup_error);
-    crate::confirm("Repair Codex local data now? [y/N]: ")
+    crate::confirm("Repair Astral local data now? [y/N]: ")
 }
 
 pub(crate) async fn repair_files(
@@ -59,7 +59,7 @@ pub(crate) async fn repair_files(
 
     if backups.is_empty() {
         return Err(std::io::Error::other(
-            "no repairable Codex local data files were found",
+            "no repairable Astral local data files were found",
         ));
     }
 
@@ -67,7 +67,7 @@ pub(crate) async fn repair_files(
 }
 
 pub(crate) fn print_repair_backups(backups: &[PathBuf]) {
-    eprintln!("Backed up Codex local data before repair:");
+    eprintln!("Backed up Astral local data before repair:");
     for backup in backups {
         eprintln!("  {}", backup.display());
     }
@@ -82,8 +82,8 @@ pub(crate) fn print_diagnostic_guidance(startup_error: &LocalStateDbStartupError
 }
 
 pub(crate) fn print_locked_guidance(startup_error: &LocalStateDbStartupError) {
-    eprintln!("Codex couldn't start because another Codex process is using its local data.");
-    eprintln!("Quit any other copies of Codex that may still be running, then try again.");
+    eprintln!("Astral couldn't start because another Astral process is using its local data.");
+    eprintln!("Quit any other copies of Astral that may still be running, then try again.");
     print_technical_details(startup_error);
 }
 

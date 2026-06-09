@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Unified entry point for the Codex CLI.
+// Unified entry point for the Astral CLI.
 
 import { spawn } from "node:child_process";
 import { existsSync, realpathSync } from "fs";
@@ -13,12 +13,12 @@ const __dirname = path.dirname(__filename);
 const require = createRequire(import.meta.url);
 
 const PLATFORM_PACKAGE_BY_TARGET = {
-  "x86_64-unknown-linux-musl": "@openai/codex-linux-x64",
-  "aarch64-unknown-linux-musl": "@openai/codex-linux-arm64",
-  "x86_64-apple-darwin": "@openai/codex-darwin-x64",
-  "aarch64-apple-darwin": "@openai/codex-darwin-arm64",
-  "x86_64-pc-windows-msvc": "@openai/codex-win32-x64",
-  "aarch64-pc-windows-msvc": "@openai/codex-win32-arm64",
+  "x86_64-unknown-linux-musl": "astral-code-linux-x64",
+  "aarch64-unknown-linux-musl": "astral-code-linux-arm64",
+  "x86_64-apple-darwin": "astral-code-darwin-x64",
+  "aarch64-apple-darwin": "astral-code-darwin-arm64",
+  "x86_64-pc-windows-msvc": "astral-code-win32-x64",
+  "aarch64-pc-windows-msvc": "astral-code-win32-arm64",
 };
 
 const { platform, arch } = process;
@@ -75,7 +75,7 @@ if (!platformPackage) {
   throw new Error(`Unsupported target triple: ${targetTriple}`);
 }
 
-function findCodexExecutable() {
+function findAstralExecutable() {
   let vendorRoot;
   try {
     const packageJsonPath = require.resolve(`${platformPackage}/package.json`);
@@ -84,27 +84,27 @@ function findCodexExecutable() {
     vendorRoot = path.join(__dirname, "..", "vendor");
   }
 
-  const codexExecutable = path.join(
+  const astralExecutable = path.join(
     vendorRoot,
     targetTriple,
     "bin",
-    process.platform === "win32" ? "codex.exe" : "codex",
+    process.platform === "win32" ? "astral.exe" : "astral",
   );
-  if (existsSync(codexExecutable)) {
-    return codexExecutable;
+  if (existsSync(astralExecutable)) {
+    return astralExecutable;
   }
 
   const packageManager = detectPackageManager();
   const updateCommand =
     packageManager === "bun"
-      ? "bun install -g @openai/codex@latest"
-      : "npm install -g @openai/codex@latest";
+      ? "bun install -g astral-code@latest"
+      : "npm install -g astral-code@latest";
   throw new Error(
-    `Missing optional dependency ${platformPackage}. Reinstall Codex: ${updateCommand}`,
+    `Missing optional dependency ${platformPackage}. Reinstall Astral: ${updateCommand}`,
   );
 }
 
-const binaryPath = findCodexExecutable();
+const binaryPath = findAstralExecutable();
 
 // Use an asynchronous spawn instead of spawnSync so that Node is able to
 // respond to signals (e.g. Ctrl-C / SIGINT) while the native binary is
@@ -113,7 +113,7 @@ const binaryPath = findCodexExecutable();
 // receives a fatal signal, both processes exit in a predictable manner.
 
 /**
- * Use heuristics to detect the package manager that was used to install Codex
+ * Use heuristics to detect the package manager that was used to install Astral
  * in order to give the user a hint about how to update it.
  */
 function detectPackageManager() {
@@ -139,12 +139,12 @@ function detectPackageManager() {
 
 const packageManagerEnvVar =
   detectPackageManager() === "bun"
-    ? "CODEX_MANAGED_BY_BUN"
-    : "CODEX_MANAGED_BY_NPM";
+    ? "ASTRAL_MANAGED_BY_BUN"
+    : "ASTRAL_MANAGED_BY_NPM";
 const env = {
   ...process.env,
   [packageManagerEnvVar]: "1",
-  CODEX_MANAGED_PACKAGE_ROOT: realpathSync(path.join(__dirname, "..")),
+  ASTRAL_MANAGED_PACKAGE_ROOT: realpathSync(path.join(__dirname, "..")),
 };
 
 const child = spawn(binaryPath, process.argv.slice(2), {

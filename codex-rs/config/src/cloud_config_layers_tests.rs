@@ -84,7 +84,7 @@ fn enterprise_layers_precede_user_and_override_system() {
     let base_dir = base_dir();
     let mut layers = vec![ConfigLayerEntry::new(
         ConfigLayerSource::System {
-            file: test_path_buf("/etc/codex/config.toml").abs(),
+            file: test_path_buf("/etc/astral-code/config.toml").abs(),
         },
         toml(
             r#"
@@ -106,7 +106,7 @@ review_model = "system-review"
     );
     layers.push(ConfigLayerEntry::new(
         ConfigLayerSource::User {
-            file: test_path_buf("/home/alice/.codex/config.toml").abs(),
+            file: test_path_buf("/home/alice/.astral-code/config.toml").abs(),
             profile: None,
         },
         toml("model = \"user\""),
@@ -130,7 +130,7 @@ review_model = "system-review"
             .collect::<Vec<_>>(),
         vec![
             ConfigLayerSource::System {
-                file: test_path_buf("/etc/codex/config.toml").abs(),
+                file: test_path_buf("/etc/astral-code/config.toml").abs(),
             },
             ConfigLayerSource::EnterpriseManaged {
                 id: "low".to_string(),
@@ -141,7 +141,7 @@ review_model = "system-review"
                 name: "High priority".to_string(),
             },
             ConfigLayerSource::User {
-                file: test_path_buf("/home/alice/.codex/config.toml").abs(),
+                file: test_path_buf("/home/alice/.astral-code/config.toml").abs(),
                 profile: None,
             },
         ]

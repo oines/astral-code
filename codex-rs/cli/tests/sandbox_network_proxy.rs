@@ -31,8 +31,8 @@ mode = "full"
     )?;
 
     let url = format!("http://127.0.0.2:{port}/");
-    let output = std::process::Command::new(codex_utils_cargo_bin::cargo_bin("codex")?)
-        .env("CODEX_HOME", codex_home.path())
+    let output = std::process::Command::new(codex_utils_cargo_bin::cargo_bin("astral")?)
+        .env("ASTRAL_HOME", codex_home.path())
         .args([
             "sandbox",
             "--permissions-profile",

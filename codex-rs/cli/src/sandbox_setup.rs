@@ -17,7 +17,7 @@ pub(crate) struct SandboxSetupCommand {
     #[arg(long = "elevated", action = ArgAction::SetTrue)]
     elevated_sandbox_level: bool,
 
-    /// Windows user that will run Codex after managed deployment.
+    /// Windows user that will run Astral after managed deployment.
     #[arg(
         long = "user",
         value_name = "USER",
@@ -26,7 +26,7 @@ pub(crate) struct SandboxSetupCommand {
     )]
     user: Option<String>,
 
-    /// Use the current Windows user as the Codex user.
+    /// Use the current Windows user as the Astral user.
     #[arg(
         long = "current-user",
         default_value_t = false,
@@ -34,8 +34,8 @@ pub(crate) struct SandboxSetupCommand {
     )]
     current_user: bool,
 
-    /// CODEX_HOME for the Codex user. Required with --user.
-    #[arg(long = "codex-home", value_name = "DIR")]
+    /// ASTRAL_HOME for the Astral user. Required with --user.
+    #[arg(long = "astral-home", value_name = "DIR")]
     codex_home: Option<PathBuf>,
 }
 
@@ -49,7 +49,7 @@ impl SandboxSetupCommand {
         if self.elevated_sandbox_level {
             Ok(SandboxSetupLevel::Elevated)
         } else {
-            anyhow::bail!("`codex sandbox setup` currently requires --elevated");
+            anyhow::bail!("`astral sandbox setup` currently requires --elevated");
         }
     }
 }
@@ -131,7 +131,7 @@ fn resolve_sandbox_setup_identity(
     let codex_home = cmd
         .codex_home
         .clone()
-        .ok_or_else(|| anyhow::anyhow!("--codex-home is required with --user"))?;
+        .ok_or_else(|| anyhow::anyhow!("--astral-home is required with --user"))?;
     Ok(SandboxSetupIdentity {
         real_user,
         codex_home,
@@ -149,8 +149,8 @@ mod tests {
             "--elevated",
             "--user",
             "DOMAIN\\alice",
-            "--codex-home",
-            r"C:\Users\alice\.codex",
+            "--astral-home",
+            r"C:\Users\alice\.astral-code",
         ])
         .expect("parse");
 
@@ -159,7 +159,7 @@ mod tests {
         assert!(!command.current_user);
         assert_eq!(
             command.codex_home.as_deref(),
-            Some(std::path::Path::new(r"C:\Users\alice\.codex"))
+            Some(std::path::Path::new(r"C:\Users\alice\.astral-code"))
         );
     }
 
@@ -187,8 +187,8 @@ mod tests {
             "--elevated".to_string(),
             "--user".to_string(),
             r"DOMAIN\alice".to_string(),
-            "--codex-home".to_string(),
-            r"C:\Users\alice\.codex".to_string(),
+            "--astral-home".to_string(),
+            r"C:\Users\alice\.astral-code".to_string(),
         ])
         .expect("parse")
         .expect("setup command");

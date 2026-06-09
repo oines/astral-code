@@ -28,7 +28,7 @@ use crate::plugin_cmd::configured_marketplace_snapshot_issues;
 use crate::plugin_cmd::configured_marketplace_sources;
 
 #[derive(Debug, Parser)]
-#[command(bin_name = "codex plugin marketplace")]
+#[command(bin_name = "astral plugin marketplace")]
 pub struct MarketplaceCli {
     #[clap(flatten)]
     pub config_overrides: CliConfigOverrides,
@@ -42,7 +42,7 @@ enum MarketplaceSubcommand {
     /// Add a local or Git marketplace to the configured marketplace sources.
     Add(AddMarketplaceArgs),
 
-    /// List plugin marketplaces Codex is currently considering and their roots.
+    /// List plugin marketplaces Astral is currently considering and their roots.
     List(ListMarketplaceArgs),
 
     /// Refresh configured Git marketplace snapshots.
@@ -56,8 +56,8 @@ enum MarketplaceSubcommand {
 
 #[derive(Debug, Parser)]
 #[command(
-    bin_name = "codex plugin marketplace add",
-    after_help = "Examples:\n  codex plugin marketplace add ./path/to/marketplace\n  codex plugin marketplace add owner/repo --ref main\n  codex plugin marketplace add https://github.com/owner/repo --sparse plugins/foo"
+    bin_name = "astral plugin marketplace add",
+    after_help = "Examples:\n  astral plugin marketplace add ./path/to/marketplace\n  astral plugin marketplace add owner/repo --ref main\n  astral plugin marketplace add https://github.com/owner/repo --sparse plugins/foo"
 )]
 struct AddMarketplaceArgs {
     /// Marketplace source: a local path, owner/repo[@ref], HTTPS Git URL, or SSH Git URL.
@@ -82,7 +82,7 @@ struct AddMarketplaceArgs {
 }
 
 #[derive(Debug, Parser)]
-#[command(bin_name = "codex plugin marketplace list")]
+#[command(bin_name = "astral plugin marketplace list")]
 struct ListMarketplaceArgs {
     /// Output marketplace list as JSON.
     #[arg(long = "json")]
@@ -91,8 +91,8 @@ struct ListMarketplaceArgs {
 
 #[derive(Debug, Parser)]
 #[command(
-    bin_name = "codex plugin marketplace upgrade",
-    after_help = "Examples:\n  codex plugin marketplace upgrade\n  codex plugin marketplace upgrade debug"
+    bin_name = "astral plugin marketplace upgrade",
+    after_help = "Examples:\n  astral plugin marketplace upgrade\n  astral plugin marketplace upgrade debug"
 )]
 struct UpgradeMarketplaceArgs {
     /// Optional configured marketplace name to upgrade. Omit to upgrade all Git marketplaces.
@@ -106,8 +106,8 @@ struct UpgradeMarketplaceArgs {
 
 #[derive(Debug, Parser)]
 #[command(
-    bin_name = "codex plugin marketplace remove",
-    after_help = "Example:\n  codex plugin marketplace remove debug"
+    bin_name = "astral plugin marketplace remove",
+    after_help = "Example:\n  astral plugin marketplace remove debug"
 )]
 struct RemoveMarketplaceArgs {
     /// Configured marketplace name to remove.
@@ -149,7 +149,7 @@ async fn run_add(args: AddMarketplaceArgs) -> Result<()> {
         json,
     } = args;
 
-    let codex_home = find_codex_home().context("failed to resolve CODEX_HOME")?;
+    let codex_home = find_codex_home().context("failed to resolve ASTRAL_HOME")?;
     let outcome = add_marketplace(
         codex_home.to_path_buf(),
         MarketplaceAddRequest {
@@ -373,7 +373,7 @@ async fn run_upgrade(
     let config = Config::load_with_cli_overrides(overrides)
         .await
         .context("failed to load configuration")?;
-    let codex_home = find_codex_home().context("failed to resolve CODEX_HOME")?;
+    let codex_home = find_codex_home().context("failed to resolve ASTRAL_HOME")?;
     let manager = PluginsManager::new(codex_home.to_path_buf());
     let plugins_input = config.plugins_config_input();
     let outcome = manager
@@ -391,7 +391,7 @@ async fn run_remove(args: RemoveMarketplaceArgs) -> Result<()> {
         marketplace_name,
         json,
     } = args;
-    let codex_home = find_codex_home().context("failed to resolve CODEX_HOME")?;
+    let codex_home = find_codex_home().context("failed to resolve ASTRAL_HOME")?;
     let outcome = remove_marketplace(
         codex_home.to_path_buf(),
         MarketplaceRemoveRequest { marketplace_name },
