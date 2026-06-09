@@ -41,6 +41,7 @@ const DEFAULT_READ_TIMEOUT: Duration = Duration::from_secs(60);
 const DEFAULT_READ_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[tokio::test]
+#[ignore = "Astral disables OpenAI web search extension"]
 async fn standalone_web_search_round_trips_output() -> Result<()> {
     let call_id = "web-run-1";
     let server = responses::start_mock_server().await;
