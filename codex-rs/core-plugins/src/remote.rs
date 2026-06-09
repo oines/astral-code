@@ -94,6 +94,10 @@ const REMOTE_INSTALLED_MARKETPLACE_DISPLAY_ORDER: [(&str, &str); 5] = [
     ),
 ];
 
+pub fn remote_plugin_background_sync_available() -> bool {
+    false
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemotePluginServiceConfig {
     pub chatgpt_base_url: String,

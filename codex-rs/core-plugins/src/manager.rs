@@ -575,7 +575,10 @@ impl PluginsManager {
         config: &PluginsConfigInput,
         auth: Option<&CodexAuth>,
     ) -> Vec<crate::remote::RemoteDiscoverablePlugin> {
-        if !config.plugins_enabled || !config.remote_plugin_enabled {
+        if !config.plugins_enabled
+            || !config.remote_plugin_enabled
+            || !crate::remote::remote_plugin_background_sync_available()
+        {
             return Vec::new();
         }
         let Some(auth) = auth.filter(|auth| auth.uses_codex_backend()) else {
@@ -679,7 +682,7 @@ impl PluginsManager {
         notify: RemoteInstalledPluginsCacheRefreshNotify,
         on_effective_plugins_changed: Option<Arc<dyn Fn() + Send + Sync + 'static>>,
     ) {
-        if !config.plugins_enabled {
+        if !config.plugins_enabled || !crate::remote::remote_plugin_background_sync_available() {
             return;
         }
 
@@ -699,7 +702,7 @@ impl PluginsManager {
         auth: Option<CodexAuth>,
         on_effective_plugins_changed: Option<Arc<dyn Fn() + Send + Sync + 'static>>,
     ) {
-        if !config.plugins_enabled {
+        if !config.plugins_enabled || !crate::remote::remote_plugin_background_sync_available() {
             return;
         }
 
@@ -727,7 +730,10 @@ impl PluginsManager {
         config: &PluginsConfigInput,
         auth: Option<CodexAuth>,
     ) {
-        if !config.plugins_enabled || !config.remote_plugin_enabled {
+        if !config.plugins_enabled
+            || !config.remote_plugin_enabled
+            || !crate::remote::remote_plugin_background_sync_available()
+        {
             return;
         }
 
@@ -814,7 +820,7 @@ impl PluginsManager {
         config: &PluginsConfigInput,
         auth: Option<&CodexAuth>,
     ) -> Result<Vec<String>, RemotePluginFetchError> {
-        if !config.plugins_enabled {
+        if !config.plugins_enabled || !crate::remote::remote_plugin_background_sync_available() {
             return Ok(Vec::new());
         }
 
@@ -846,8 +852,8 @@ impl PluginsManager {
 
     pub async fn install_plugin_with_remote_sync(
         &self,
-        config: &PluginsConfigInput,
-        auth: Option<&CodexAuth>,
+        _config: &PluginsConfigInput,
+        _auth: Option<&CodexAuth>,
         request: PluginInstallRequest,
     ) -> Result<PluginInstallOutcome, PluginInstallError> {
         let resolved = find_installable_marketplace_plugin(
@@ -855,15 +861,6 @@ impl PluginsManager {
             &request.plugin_name,
             self.restriction_product,
         )?;
-        let plugin_id = resolved.plugin_id.as_key();
-        // This only forwards the backend mutation before the local install flow.
-        crate::remote_legacy::enable_remote_plugin(
-            &remote_plugin_service_config(config),
-            auth,
-            &plugin_id,
-        )
-        .await
-        .map_err(PluginInstallError::from)?;
         self.install_resolved_plugin(resolved).await
     }
 
@@ -934,22 +931,11 @@ impl PluginsManager {
 
     pub async fn uninstall_plugin_with_remote_sync(
         &self,
-        config: &PluginsConfigInput,
-        auth: Option<&CodexAuth>,
+        _config: &PluginsConfigInput,
+        _auth: Option<&CodexAuth>,
         plugin_id: String,
     ) -> Result<(), PluginUninstallError> {
-        // TODO: Remove this legacy remote-sync path once remote plugins have
-        // their own manager and installed-state API.
         let plugin_id = PluginId::parse(&plugin_id)?;
-        let plugin_key = plugin_id.as_key();
-        // This only forwards the backend mutation before the local uninstall flow.
-        crate::remote_legacy::uninstall_remote_plugin(
-            &remote_plugin_service_config(config),
-            auth,
-            &plugin_key,
-        )
-        .await
-        .map_err(PluginUninstallError::from)?;
         self.uninstall_plugin_id(plugin_id).await
     }
 
@@ -1348,7 +1334,9 @@ impl PluginsManager {
                     auth.clone(),
                     on_effective_plugins_changed,
                 );
-                if config_for_remote_sync.remote_plugin_enabled {
+                if config_for_remote_sync.remote_plugin_enabled
+                    && crate::remote::remote_plugin_background_sync_available()
+                {
                     match crate::remote::fetch_and_cache_global_remote_plugin_catalog(
                         manager.codex_home.as_path(),
                         &remote_plugin_service_config(&config_for_remote_sync),
@@ -1578,6 +1566,9 @@ impl PluginsManager {
     }
 
     fn start_curated_repo_sync(self: &Arc<Self>) {
+        if !crate::remote::remote_plugin_background_sync_available() {
+            return;
+        }
         if CURATED_REPO_SYNC_STARTED.swap(true, Ordering::SeqCst) {
             return;
         }
