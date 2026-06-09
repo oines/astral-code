@@ -60,7 +60,7 @@ async fn tmux_split_preserves_fresh_session_composer_row_after_resize_reflow() -
             .arg("--")
             .arg("env")
             .arg(format!("CODEX_HOME={}", codex_home.path().display()))
-            .arg("OPENAI_API_KEY=dummy")
+            .arg("ASTRAL_API_KEY=dummy")
             .arg(codex)
             .arg("-c")
             .arg("analytics.enabled=false")
@@ -232,7 +232,7 @@ async fn tmux_width_resize_restore_keeps_visible_content_anchored() -> Result<()
             .arg("--")
             .arg("env")
             .arg(format!("CODEX_HOME={}", codex_home.path().display()))
-            .arg("OPENAI_API_KEY=dummy")
+            .arg("ASTRAL_API_KEY=dummy")
             .arg(codex)
             .arg("-c")
             .arg("analytics.enabled=false")
@@ -361,7 +361,7 @@ async fn run_repeated_resize_smoke(terminal_resize_reflow_enabled: bool) -> Resu
             .arg("--")
             .arg("env")
             .arg(format!("CODEX_HOME={}", codex_home.path().display()))
-            .arg("OPENAI_API_KEY=dummy")
+            .arg("ASTRAL_API_KEY=dummy")
             .arg(codex)
             .arg("-c")
             .arg("analytics.enabled=false")
@@ -514,7 +514,7 @@ trust_level = "trusted"
 fn write_auth(codex_home: &Path) -> Result<()> {
     std::fs::write(
         codex_home.join("auth.json"),
-        r#"{"OPENAI_API_KEY":"dummy","tokens":null,"last_refresh":null}"#,
+        r#"{"ASTRAL_API_KEY":"dummy","tokens":null,"last_refresh":null}"#,
     )?;
     Ok(())
 }

@@ -43,7 +43,7 @@ fn login_with_api_key_reads_stdin_and_writes_auth_json() -> Result<()> {
     .stderr(contains("Successfully logged in"));
 
     let auth = read_auth_json(codex_home.path())?;
-    assert_eq!(auth["OPENAI_API_KEY"], "sk-test");
+    assert_eq!(auth["ASTRAL_API_KEY"], "sk-test");
     assert!(auth.get("tokens").is_none());
     assert!(auth.get("agent_identity").is_none());
 

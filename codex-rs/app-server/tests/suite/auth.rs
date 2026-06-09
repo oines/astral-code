@@ -112,7 +112,7 @@ async fn get_auth_status_no_auth() -> Result<()> {
     create_config_toml(codex_home.path())?;
 
     let mut mcp =
-        TestAppServer::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
+        TestAppServer::new_with_env(codex_home.path(), &[("ASTRAL_API_KEY", None)]).await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
 
     let request_id = mcp
@@ -185,7 +185,7 @@ async fn get_auth_status_with_personal_access_token_omits_token() -> Result<()> 
     let mut mcp = TestAppServer::new_with_env(
         codex_home.path(),
         &[
-            ("OPENAI_API_KEY", None),
+            ("ASTRAL_API_KEY", None),
             ("CODEX_ACCESS_TOKEN", Some("at-test-token")),
             ("CODEX_AUTHAPI_BASE_URL", Some(authapi_base_url.as_str())),
         ],
@@ -344,7 +344,7 @@ async fn get_auth_status_omits_token_after_permanent_refresh_failure() -> Result
     let mut mcp = TestAppServer::new_with_env(
         codex_home.path(),
         &[
-            ("OPENAI_API_KEY", None),
+            ("ASTRAL_API_KEY", None),
             (
                 REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR,
                 Some(refresh_url.as_str()),
@@ -426,7 +426,7 @@ async fn get_auth_status_omits_token_after_proactive_refresh_failure() -> Result
     let mut mcp = TestAppServer::new_with_env(
         codex_home.path(),
         &[
-            ("OPENAI_API_KEY", None),
+            ("ASTRAL_API_KEY", None),
             (
                 REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR,
                 Some(refresh_url.as_str()),
@@ -493,7 +493,7 @@ async fn get_auth_status_returns_token_after_proactive_refresh_recovery() -> Res
     let mut mcp = TestAppServer::new_with_env(
         codex_home.path(),
         &[
-            ("OPENAI_API_KEY", None),
+            ("ASTRAL_API_KEY", None),
             (
                 REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR,
                 Some(refresh_url.as_str()),

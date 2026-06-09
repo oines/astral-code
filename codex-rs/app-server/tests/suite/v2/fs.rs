@@ -14,7 +14,7 @@ use codex_app_server_protocol::FsWatchResponse;
 use codex_app_server_protocol::FsWriteFileParams;
 use codex_app_server_protocol::JSONRPCNotification;
 use codex_app_server_protocol::RequestId;
-use codex_exec_server::CODEX_EXEC_SERVER_URL_ENV_VAR;
+use codex_exec_server::ASTRAL_EXEC_SERVER_URL_ENV_VAR;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use pretty_assertions::assert_eq;
 use serde_json::json;
@@ -127,7 +127,7 @@ async fn fs_methods_return_error_when_local_environment_is_disabled() -> Result<
 
     let mut mcp = TestAppServer::new_with_env(
         codex_home.path(),
-        &[(CODEX_EXEC_SERVER_URL_ENV_VAR, Some("none"))],
+        &[(ASTRAL_EXEC_SERVER_URL_ENV_VAR, Some("none"))],
     )
     .await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;

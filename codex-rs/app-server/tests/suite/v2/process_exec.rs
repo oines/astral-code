@@ -6,7 +6,7 @@ use codex_app_server_protocol::ProcessExitedNotification;
 use codex_app_server_protocol::ProcessKillParams;
 use codex_app_server_protocol::ProcessSpawnParams;
 use codex_app_server_protocol::RequestId;
-use codex_exec_server::CODEX_EXEC_SERVER_URL_ENV_VAR;
+use codex_exec_server::ASTRAL_EXEC_SERVER_URL_ENV_VAR;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use pretty_assertions::assert_eq;
 use std::collections::HashMap;
@@ -110,7 +110,7 @@ async fn process_spawn_returns_error_when_local_environment_is_disabled() -> Res
     create_config_toml(codex_home.path(), &server.uri(), "never")?;
     let mut mcp = TestAppServer::new_with_env(
         codex_home.path(),
-        &[(CODEX_EXEC_SERVER_URL_ENV_VAR, Some("none"))],
+        &[(ASTRAL_EXEC_SERVER_URL_ENV_VAR, Some("none"))],
     )
     .await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;

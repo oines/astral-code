@@ -25,7 +25,7 @@ use codex_config::config_toml::RealtimeWsMode;
 use codex_config::config_toml::RealtimeWsVersion;
 use codex_login::CodexAuth;
 use codex_login::default_client::default_headers;
-use codex_login::read_openai_api_key_from_env;
+use codex_login::read_astral_api_key_from_env;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
@@ -962,7 +962,7 @@ fn realtime_api_key(auth: Option<&CodexAuth>, provider: &ModelProviderInfo) -> C
     // TODO(aibrahim): Remove this temporary fallback once realtime auth no longer
     // requires API key auth for ChatGPT/SIWC sessions.
     if provider.is_openai()
-        && let Some(api_key) = read_openai_api_key_from_env()
+        && let Some(api_key) = read_astral_api_key_from_env()
     {
         return Ok(api_key);
     }

@@ -637,7 +637,7 @@ async fn thread_fork_surfaces_cloud_config_bundle_load_errors() -> Result<()> {
     let mut mcp = TestAppServer::new_with_env(
         codex_home.path(),
         &[
-            ("OPENAI_API_KEY", None),
+            ("ASTRAL_API_KEY", None),
             (
                 REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR,
                 Some(refresh_token_url.as_str()),

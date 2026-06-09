@@ -16,7 +16,7 @@ use codex_app_server_protocol::CancelLoginAccountParams;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::LoginAccountParams;
 use codex_app_server_protocol::LoginAccountResponse;
-use codex_login::read_openai_api_key_from_env;
+use codex_login::read_astral_api_key_from_env;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
@@ -632,7 +632,7 @@ impl AuthModeWidget {
             "".into(),
         ];
         if state.prepopulated_from_env {
-            intro_lines.push("  Detected OPENAI_API_KEY environment variable.".into());
+            intro_lines.push("  Detected ASTRAL_API_KEY environment variable.".into());
             intro_lines.push(
                 "  Paste a different key if you prefer to use another account."
                     .dim()
@@ -773,7 +773,7 @@ impl AuthModeWidget {
             return;
         }
         self.set_error(/*message*/ None);
-        let prefill_from_env = read_openai_api_key_from_env();
+        let prefill_from_env = read_astral_api_key_from_env();
         let mut guard = self.sign_in_state.write().unwrap();
         match &mut *guard {
             SignInState::ApiKeyEntry(state) => {

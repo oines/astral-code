@@ -513,19 +513,11 @@ impl ChatgptAuth {
     }
 }
 
-pub const OPENAI_API_KEY_ENV_VAR: &str = "OPENAI_API_KEY";
-pub const CODEX_API_KEY_ENV_VAR: &str = "CODEX_API_KEY";
+pub const ASTRAL_API_KEY_ENV_VAR: &str = "ASTRAL_API_KEY";
 pub const CODEX_ACCESS_TOKEN_ENV_VAR: &str = "CODEX_ACCESS_TOKEN";
 
-pub fn read_openai_api_key_from_env() -> Option<String> {
-    env::var(OPENAI_API_KEY_ENV_VAR)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-}
-
-pub fn read_codex_api_key_from_env() -> Option<String> {
-    read_non_empty_env_var(CODEX_API_KEY_ENV_VAR)
+pub fn read_astral_api_key_from_env() -> Option<String> {
+    read_non_empty_env_var(ASTRAL_API_KEY_ENV_VAR)
 }
 
 pub fn read_codex_access_token_from_env() -> Option<String> {
@@ -807,7 +799,7 @@ async fn load_auth(
     chatgpt_base_url: Option<&str>,
 ) -> std::io::Result<Option<CodexAuth>> {
     // API key via env var takes precedence over any other auth method.
-    if enable_codex_api_key_env && let Some(api_key) = read_codex_api_key_from_env() {
+    if enable_codex_api_key_env && let Some(api_key) = read_astral_api_key_from_env() {
         return Ok(Some(CodexAuth::from_api_key(api_key.as_str())));
     }
 

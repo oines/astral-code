@@ -1,7 +1,7 @@
 use assert_cmd::Command as AssertCommand;
 use codex_git_utils::collect_git_info;
+use codex_login::ASTRAL_API_KEY_ENV_VAR;
 use codex_login::CODEX_ACCESS_TOKEN_ENV_VAR;
-use codex_login::CODEX_API_KEY_ENV_VAR;
 use codex_protocol::protocol::GitInfo;
 use core_test_support::fs_wait;
 use core_test_support::responses;
@@ -76,7 +76,7 @@ fn personal_access_token_exec_command(server: &MockServer, home: &TempDir) -> As
     cmd.env("CODEX_HOME", home.path())
         .env(CODEX_ACCESS_TOKEN_ENV_VAR, PERSONAL_ACCESS_TOKEN)
         .env("CODEX_AUTHAPI_BASE_URL", server.uri())
-        .env_remove(CODEX_API_KEY_ENV_VAR)
+        .env_remove(ASTRAL_API_KEY_ENV_VAR)
         .env_remove("OPENAI_API_KEY");
     cmd
 }
@@ -180,7 +180,7 @@ async fn responses_mode_stream_cli() {
         .arg(&repo_root)
         .arg("hello?");
     cmd.env("CODEX_HOME", home.path())
-        .env("OPENAI_API_KEY", "dummy");
+        .env(ASTRAL_API_KEY_ENV_VAR, "dummy");
 
     let output = cmd.output().unwrap();
     println!("Status: {}", output.status);
@@ -221,7 +221,7 @@ async fn responses_mode_stream_cli_supports_openai_base_url_config_override() {
         .arg(&repo_root)
         .arg("hello?");
     cmd.env("CODEX_HOME", home.path())
-        .env("OPENAI_API_KEY", "dummy");
+        .env(ASTRAL_API_KEY_ENV_VAR, "dummy");
 
     let output = cmd.output().unwrap();
     assert!(output.status.success());
@@ -277,7 +277,7 @@ async fn exec_cli_applies_model_instructions_file() {
         .arg(&repo_root)
         .arg("hello?\n");
     cmd.env("CODEX_HOME", home.path())
-        .env("OPENAI_API_KEY", "dummy");
+        .env(ASTRAL_API_KEY_ENV_VAR, "dummy");
 
     let output = cmd.output().unwrap();
     println!("Status: {}", output.status);
@@ -347,7 +347,7 @@ async fn exec_cli_profile_applies_model_instructions_file() {
         .arg(&repo_root)
         .arg("hello?\n");
     cmd.env("CODEX_HOME", home.path())
-        .env("OPENAI_API_KEY", "dummy");
+        .env(ASTRAL_API_KEY_ENV_VAR, "dummy");
 
     let output = cmd.output().unwrap();
     println!("Status: {}", output.status);
@@ -389,7 +389,7 @@ async fn responses_api_stream_cli() {
         .arg(&repo_root)
         .arg("hello?");
     cmd.env("CODEX_HOME", home.path())
-        .env("OPENAI_API_KEY", "dummy");
+        .env(ASTRAL_API_KEY_ENV_VAR, "dummy");
 
     let output = cmd.output().unwrap();
     assert!(output.status.success());
@@ -431,7 +431,7 @@ async fn integration_creates_and_checks_session_file() -> anyhow::Result<()> {
         .arg(&repo_root)
         .arg(&prompt);
     cmd.env("CODEX_HOME", home.path())
-        .env(CODEX_API_KEY_ENV_VAR, "dummy");
+        .env(ASTRAL_API_KEY_ENV_VAR, "dummy");
 
     let output = cmd.output().unwrap();
     assert!(
@@ -554,7 +554,7 @@ async fn integration_creates_and_checks_session_file() -> anyhow::Result<()> {
         .arg("resume")
         .arg("--last");
     cmd2.env("CODEX_HOME", home.path())
-        .env("OPENAI_API_KEY", "dummy");
+        .env(ASTRAL_API_KEY_ENV_VAR, "dummy");
 
     let output2 = cmd2.output().unwrap();
     assert!(output2.status.success(), "resume codex-cli run failed");

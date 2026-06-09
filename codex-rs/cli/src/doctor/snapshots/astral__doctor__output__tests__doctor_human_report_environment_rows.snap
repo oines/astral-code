@@ -36,7 +36,7 @@ Environment
 
 Configuration
   ✗ auth         token expired — Run `astral login`.
-      OPENAI_API_KEY           present
+      ASTRAL_API_KEY           present
 
 Updates
   ✓ updates      update configuration is locally consistent

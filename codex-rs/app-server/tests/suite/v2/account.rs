@@ -202,7 +202,7 @@ async fn logout_account_removes_auth_and_notifies() -> Result<()> {
     assert!(codex_home.path().join("auth.json").exists());
 
     let mut mcp =
-        TestAppServer::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
+        TestAppServer::new_with_env(codex_home.path(), &[("ASTRAL_API_KEY", None)]).await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
 
     let id = mcp.send_logout_account_request().await?;
@@ -270,7 +270,7 @@ async fn set_auth_token_updates_account_and_notifies() -> Result<()> {
     )?;
 
     let mut mcp =
-        TestAppServer::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
+        TestAppServer::new_with_env(codex_home.path(), &[("ASTRAL_API_KEY", None)]).await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
 
     let set_id = mcp
@@ -345,7 +345,7 @@ async fn account_read_refresh_token_is_noop_in_external_mode() -> Result<()> {
     )?;
 
     let mut mcp =
-        TestAppServer::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
+        TestAppServer::new_with_env(codex_home.path(), &[("ASTRAL_API_KEY", None)]).await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
 
     let set_id = mcp
@@ -471,7 +471,7 @@ async fn external_auth_refreshes_on_unauthorized() -> Result<()> {
     )?;
 
     let mut mcp =
-        TestAppServer::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
+        TestAppServer::new_with_env(codex_home.path(), &[("ASTRAL_API_KEY", None)]).await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
 
     let set_id = mcp
@@ -579,7 +579,7 @@ async fn external_auth_refresh_error_fails_turn() -> Result<()> {
     )?;
 
     let mut mcp =
-        TestAppServer::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
+        TestAppServer::new_with_env(codex_home.path(), &[("ASTRAL_API_KEY", None)]).await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
 
     let set_id = mcp
@@ -703,7 +703,7 @@ async fn external_auth_refresh_mismatched_workspace_fails_turn() -> Result<()> {
     )?;
 
     let mut mcp =
-        TestAppServer::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
+        TestAppServer::new_with_env(codex_home.path(), &[("ASTRAL_API_KEY", None)]).await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
 
     let set_id = mcp
@@ -820,7 +820,7 @@ async fn external_auth_refresh_invalid_access_token_fails_turn() -> Result<()> {
     )?;
 
     let mut mcp =
-        TestAppServer::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
+        TestAppServer::new_with_env(codex_home.path(), &[("ASTRAL_API_KEY", None)]).await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
 
     let set_id = mcp
@@ -1033,7 +1033,7 @@ async fn login_account_chatgpt_device_code_returns_error_when_disabled() -> Resu
     let mut mcp = TestAppServer::new_with_env(
         codex_home.path(),
         &[
-            ("OPENAI_API_KEY", None),
+            ("ASTRAL_API_KEY", None),
             (LOGIN_ISSUER_ENV_VAR, Some(issuer.as_str())),
         ],
     )
@@ -1098,7 +1098,7 @@ async fn login_account_chatgpt_device_code_succeeds_and_notifies() -> Result<()>
     let mut mcp = TestAppServer::new_with_env(
         codex_home.path(),
         &[
-            ("OPENAI_API_KEY", None),
+            ("ASTRAL_API_KEY", None),
             (LOGIN_ISSUER_ENV_VAR, Some(issuer.as_str())),
         ],
     )
@@ -1175,7 +1175,7 @@ async fn login_account_chatgpt_device_code_failure_notifies_without_account_upda
     let mut mcp = TestAppServer::new_with_env(
         codex_home.path(),
         &[
-            ("OPENAI_API_KEY", None),
+            ("ASTRAL_API_KEY", None),
             (LOGIN_ISSUER_ENV_VAR, Some(issuer.as_str())),
         ],
     )
@@ -1250,7 +1250,7 @@ async fn login_account_chatgpt_device_code_can_be_cancelled() -> Result<()> {
     let mut mcp = TestAppServer::new_with_env(
         codex_home.path(),
         &[
-            ("OPENAI_API_KEY", None),
+            ("ASTRAL_API_KEY", None),
             (LOGIN_ISSUER_ENV_VAR, Some(issuer.as_str())),
         ],
     )
@@ -1538,7 +1538,7 @@ async fn get_account_no_auth() -> Result<()> {
     )?;
 
     let mut mcp =
-        TestAppServer::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
+        TestAppServer::new_with_env(codex_home.path(), &[("ASTRAL_API_KEY", None)]).await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
 
     let params = GetAccountParams {
@@ -1696,7 +1696,7 @@ async fn get_account_with_chatgpt() -> Result<()> {
     )?;
 
     let mut mcp =
-        TestAppServer::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
+        TestAppServer::new_with_env(codex_home.path(), &[("ASTRAL_API_KEY", None)]).await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
 
     let params = GetAccountParams {
@@ -1759,7 +1759,7 @@ async fn get_account_omits_chatgpt_after_permanent_refresh_failure() -> Result<(
     let mut mcp = TestAppServer::new_with_env(
         codex_home.path(),
         &[
-            ("OPENAI_API_KEY", None),
+            ("ASTRAL_API_KEY", None),
             (
                 REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR,
                 Some(refresh_url.as_str()),
@@ -1823,7 +1823,7 @@ async fn get_account_with_chatgpt_missing_plan_claim_returns_unknown() -> Result
     )?;
 
     let mut mcp =
-        TestAppServer::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
+        TestAppServer::new_with_env(codex_home.path(), &[("ASTRAL_API_KEY", None)]).await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
 
     let params = GetAccountParams {

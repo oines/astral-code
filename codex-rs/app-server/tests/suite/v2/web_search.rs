@@ -79,7 +79,7 @@ async fn standalone_web_search_round_trips_output() -> Result<()> {
     )?;
 
     let mut mcp =
-        TestAppServer::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
+        TestAppServer::new_with_env(codex_home.path(), &[("ASTRAL_API_KEY", None)]).await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
 
     let thread_req = mcp
@@ -195,7 +195,7 @@ async fn standalone_web_search_round_trips_output() -> Result<()> {
 
     drop(mcp);
     let mut reloaded_mcp =
-        TestAppServer::new_with_env(codex_home.path(), &[("OPENAI_API_KEY", None)]).await?;
+        TestAppServer::new_with_env(codex_home.path(), &[("ASTRAL_API_KEY", None)]).await?;
     timeout(DEFAULT_READ_TIMEOUT, reloaded_mcp.initialize()).await??;
     let read_req = reloaded_mcp
         .send_thread_read_request(ThreadReadParams {

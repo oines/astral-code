@@ -3,8 +3,8 @@ use anyhow::Result;
 use chrono::Utc;
 use codex_config::config_toml::RealtimeWsVersion;
 use codex_core::test_support::auth_manager_from_auth;
+use codex_login::ASTRAL_API_KEY_ENV_VAR;
 use codex_login::CodexAuth;
-use codex_login::OPENAI_API_KEY_ENV_VAR;
 use codex_protocol::ThreadId;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
@@ -193,10 +193,10 @@ fn run_realtime_conversation_test_in_subprocess(
     }
     match openai_api_key {
         Some(openai_api_key) => {
-            command.env(OPENAI_API_KEY_ENV_VAR, openai_api_key);
+            command.env(ASTRAL_API_KEY_ENV_VAR, openai_api_key);
         }
         None => {
-            command.env_remove(OPENAI_API_KEY_ENV_VAR);
+            command.env_remove(ASTRAL_API_KEY_ENV_VAR);
         }
     }
     let output = command.output()?;
@@ -819,10 +819,10 @@ async fn conversation_webrtc_sideband_connect_failure_closes_with_error() -> Res
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn conversation_start_uses_openai_env_key_fallback_with_chatgpt_auth() -> Result<()> {
+async fn conversation_start_uses_astral_env_key_fallback_with_chatgpt_auth() -> Result<()> {
     if std::env::var_os(REALTIME_CONVERSATION_TEST_SUBPROCESS_ENV_VAR).is_none() {
         return run_realtime_conversation_test_in_subprocess(
-            "suite::realtime_conversation::conversation_start_uses_openai_env_key_fallback_with_chatgpt_auth",
+            "suite::realtime_conversation::conversation_start_uses_astral_env_key_fallback_with_chatgpt_auth",
             Some("env-realtime-key"),
         );
     }

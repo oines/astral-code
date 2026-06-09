@@ -32,7 +32,7 @@ use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::UserInput as V2UserInput;
 use codex_core::shell::default_user_shell;
-use codex_exec_server::CODEX_EXEC_SERVER_URL_ENV_VAR;
+use codex_exec_server::ASTRAL_EXEC_SERVER_URL_ENV_VAR;
 use codex_features::FEATURES;
 use codex_features::Feature;
 use pretty_assertions::assert_eq;
@@ -195,7 +195,7 @@ async fn thread_shell_command_returns_error_when_local_environment_is_disabled()
 
     let mut mcp = TestAppServer::new_with_env(
         codex_home.as_path(),
-        &[(CODEX_EXEC_SERVER_URL_ENV_VAR, Some("none"))],
+        &[(ASTRAL_EXEC_SERVER_URL_ENV_VAR, Some("none"))],
     )
     .await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;

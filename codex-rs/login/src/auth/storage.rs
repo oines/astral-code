@@ -28,13 +28,13 @@ use codex_keyring_store::KeyringStore;
 use codex_protocol::account::PlanType as AccountPlanType;
 use once_cell::sync::Lazy;
 
-/// Expected structure for $CODEX_HOME/auth.json.
+/// Expected structure for $ASTRAL_HOME/auth.json.
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
 pub struct AuthDotJson {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth_mode: Option<AuthMode>,
 
-    #[serde(rename = "OPENAI_API_KEY")]
+    #[serde(rename = "ASTRAL_API_KEY")]
     pub openai_api_key: Option<String>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -113,7 +113,7 @@ impl FileAuthStorage {
         Self { codex_home }
     }
 
-    /// Attempt to read and parse the `auth.json` file in the given `CODEX_HOME` directory.
+    /// Attempt to read and parse the `auth.json` file in the given `ASTRAL_HOME` directory.
     /// Returns the full AuthDotJson structure.
     pub(super) fn try_read_auth_json(&self, auth_file: &Path) -> std::io::Result<AuthDotJson> {
         let mut file = File::open(auth_file)?;

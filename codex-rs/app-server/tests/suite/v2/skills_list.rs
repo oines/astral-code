@@ -19,7 +19,7 @@ use codex_app_server_protocol::SkillsListParams;
 use codex_app_server_protocol::SkillsListResponse;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_config::types::AuthCredentialsStoreMode;
-use codex_exec_server::CODEX_EXEC_SERVER_URL_ENV_VAR;
+use codex_exec_server::ASTRAL_EXEC_SERVER_URL_ENV_VAR;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;
@@ -414,7 +414,7 @@ async fn skills_list_skips_cwd_roots_when_environment_disabled() -> Result<()> {
 
     let mut mcp = TestAppServer::new_with_env(
         codex_home.path(),
-        &[(CODEX_EXEC_SERVER_URL_ENV_VAR, Some("none"))],
+        &[(ASTRAL_EXEC_SERVER_URL_ENV_VAR, Some("none"))],
     )
     .await?;
     timeout(DEFAULT_TIMEOUT, mcp.initialize()).await??;
@@ -749,7 +749,7 @@ async fn skills_changed_notification_is_emitted_after_skill_change() -> Result<(
     write_skill(&codex_home, "demo")?;
 
     let mut mcp =
-        TestAppServer::new_with_env(codex_home.path(), &[(CODEX_EXEC_SERVER_URL_ENV_VAR, None)])
+        TestAppServer::new_with_env(codex_home.path(), &[(ASTRAL_EXEC_SERVER_URL_ENV_VAR, None)])
             .await?;
     timeout(DEFAULT_TIMEOUT, mcp.initialize()).await??;
     let initial_skills_request_id = mcp

@@ -37,7 +37,7 @@ fn create_test_cache(codex_home: &Path) -> CloudConfigBundleCache {
 async fn auth_manager_with_api_key() -> Arc<AuthManager> {
     let tmp = tempdir().expect("tempdir");
     let auth_json = json!({
-        "OPENAI_API_KEY": "sk-test-key",
+        "ASTRAL_API_KEY": "sk-test-key",
         "tokens": null,
         "last_refresh": null,
     });
@@ -146,7 +146,7 @@ fn chatgpt_auth_json_with_mode(
     let fake_jwt = format!("{header_b64}.{payload_b64}.{signature_b64}");
 
     let mut auth_json = json!({
-        "OPENAI_API_KEY": null,
+        "ASTRAL_API_KEY": null,
         "tokens": {
             "id_token": fake_jwt,
             "access_token": access_token,
