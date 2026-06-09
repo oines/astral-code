@@ -342,7 +342,6 @@ use codex_git_utils::git_diff_to_remote;
 use codex_git_utils::resolve_root_git_project_for_trust;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
-use codex_login::auth::login_with_chatgpt_auth_tokens;
 use codex_login::login_with_api_key;
 use codex_mcp::McpRuntimeContext;
 use codex_mcp::McpServerStatusSnapshot;

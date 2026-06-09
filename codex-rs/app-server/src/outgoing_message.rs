@@ -269,7 +269,8 @@ impl OutgoingMessageSender {
         self.request_contexts.lock().await.len()
     }
 
-    pub(crate) async fn send_request(
+    #[cfg(test)]
+    async fn send_request(
         &self,
         request: ServerRequestPayload,
     ) -> (RequestId, oneshot::Receiver<ClientRequestResult>) {

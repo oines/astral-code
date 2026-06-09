@@ -10,7 +10,6 @@ use codex_core::config::ConfigOverrides;
 use codex_exec_server::LOCAL_FS;
 use codex_features::feature_for_key;
 use codex_login::AuthManager;
-use codex_login::default_client::set_default_client_residency_requirement;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_json_to_toml::json_to_toml;
 use std::collections::BTreeMap;
@@ -120,18 +119,6 @@ impl ConfigManager {
             .read()
             .map(|guard| Arc::clone(&*guard))
             .unwrap_or_else(|_| Arc::new(codex_config::NoopThreadConfigLoader))
-    }
-
-    pub(crate) async fn sync_default_client_residency_requirement(&self) {
-        match self.load_latest_config(/*fallback_cwd*/ None).await {
-            Ok(config) => {
-                set_default_client_residency_requirement(config.enforce_residency.value());
-            }
-            Err(err) => warn!(
-                error = %err,
-                "failed to sync default client residency requirement after auth refresh"
-            ),
-        }
     }
 
     pub(crate) async fn load_latest_config(

@@ -19,6 +19,8 @@ pub(crate) struct AccountRequestProcessor {
 
 const CHATGPT_LOGIN_DISABLED_MESSAGE: &str =
     "ChatGPT login is disabled in astral-code. Use API key login instead.";
+const CHATGPT_AUTH_TOKENS_DISABLED_MESSAGE: &str =
+    "External ChatGPT auth tokens are disabled in astral-code. Use API key login instead.";
 
 impl AccountRequestProcessor {
     pub(crate) fn new(
@@ -178,18 +180,8 @@ impl AccountRequestProcessor {
             LoginAccountParams::Chatgpt { .. } | LoginAccountParams::ChatgptDeviceCode => {
                 self.reject_chatgpt_login_v2(request_id).await;
             }
-            LoginAccountParams::ChatgptAuthTokens {
-                access_token,
-                chatgpt_account_id,
-                chatgpt_plan_type,
-            } => {
-                self.login_chatgpt_auth_tokens(
-                    request_id,
-                    access_token,
-                    chatgpt_account_id,
-                    chatgpt_plan_type,
-                )
-                .await;
+            LoginAccountParams::ChatgptAuthTokens { .. } => {
+                self.reject_chatgpt_auth_tokens_login_v2(request_id).await;
             }
         }
         Ok(())
@@ -198,6 +190,12 @@ impl AccountRequestProcessor {
     async fn reject_chatgpt_login_v2(&self, request_id: ConnectionRequestId) {
         let result: Result<LoginAccountResponse, JSONRPCErrorError> =
             Err(invalid_request(CHATGPT_LOGIN_DISABLED_MESSAGE));
+        self.outgoing.send_result(request_id, result).await;
+    }
+
+    async fn reject_chatgpt_auth_tokens_login_v2(&self, request_id: ConnectionRequestId) {
+        let result: Result<LoginAccountResponse, JSONRPCErrorError> =
+            Err(invalid_request(CHATGPT_AUTH_TOKENS_DISABLED_MESSAGE));
         self.outgoing.send_result(request_id, result).await;
     }
 
@@ -261,67 +259,6 @@ impl AccountRequestProcessor {
         Ok(CancelLoginAccountResponse {
             status: CancelLoginAccountStatus::NotFound,
         })
-    }
-
-    async fn login_chatgpt_auth_tokens(
-        &self,
-        request_id: ConnectionRequestId,
-        access_token: String,
-        chatgpt_account_id: String,
-        chatgpt_plan_type: Option<String>,
-    ) {
-        let result = self
-            .login_chatgpt_auth_tokens_response(access_token, chatgpt_account_id, chatgpt_plan_type)
-            .await;
-        let logged_in = result.is_ok();
-        self.outgoing.send_result(request_id, result).await;
-
-        if logged_in {
-            self.send_login_success_notifications(/*login_id*/ None)
-                .await;
-        }
-    }
-
-    async fn login_chatgpt_auth_tokens_response(
-        &self,
-        access_token: String,
-        chatgpt_account_id: String,
-        chatgpt_plan_type: Option<String>,
-    ) -> Result<LoginAccountResponse, JSONRPCErrorError> {
-        if matches!(
-            self.config.forced_login_method,
-            Some(ForcedLoginMethod::Api)
-        ) {
-            return Err(invalid_request(
-                "External ChatGPT auth is disabled. Use API key login instead.",
-            ));
-        }
-
-        if let Some(expected_workspaces) = self.config.forced_chatgpt_workspace_id.as_deref()
-            && !expected_workspaces.contains(&chatgpt_account_id)
-        {
-            return Err(invalid_request(format!(
-                "External auth must use one of workspace(s) {expected_workspaces:?}, but received {chatgpt_account_id:?}.",
-            )));
-        }
-
-        login_with_chatgpt_auth_tokens(
-            &self.config.codex_home,
-            &access_token,
-            &chatgpt_account_id,
-            chatgpt_plan_type.as_deref(),
-        )
-        .map_err(|err| internal_error(format!("failed to set external auth: {err}")))?;
-        self.auth_manager.reload().await;
-        self.config_manager.replace_cloud_config_bundle_loader(
-            self.auth_manager.clone(),
-            self.config.chatgpt_base_url.clone(),
-        );
-        self.config_manager
-            .sync_default_client_residency_requirement()
-            .await;
-
-        Ok(LoginAccountResponse::ChatgptAuthTokens {})
     }
 
     async fn send_login_success_notifications(&self, login_id: Option<Uuid>) {

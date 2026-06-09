@@ -241,83 +241,49 @@ async fn logout_account_removes_auth_and_notifies() -> Result<()> {
 }
 
 #[tokio::test]
-async fn set_auth_token_updates_account_and_notifies() -> Result<()> {
+async fn login_account_chatgpt_auth_tokens_rejected() -> Result<()> {
     let codex_home = TempDir::new()?;
-    let mock_server = MockServer::start().await;
-    create_config_toml(
-        codex_home.path(),
-        CreateConfigTomlParams {
-            requires_openai_auth: Some(true),
-            base_url: Some(format!("{}/v1", mock_server.uri())),
-            ..Default::default()
-        },
-    )?;
-    write_models_cache(codex_home.path())?;
+    create_config_toml(codex_home.path(), CreateConfigTomlParams::default())?;
 
-    let access_token = encode_id_token(
-        &ChatGptIdTokenClaims::new()
-            .email("embedded@example.com")
-            .plan_type("pro")
-            .chatgpt_account_id(WORKSPACE_ID_EMBEDDED),
-    )?;
-
-    let mut mcp =
-        TestAppServer::new_with_env(codex_home.path(), &[("ASTRAL_API_KEY", None)]).await?;
+    let mut mcp = TestAppServer::new(codex_home.path()).await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
 
-    let set_id = mcp
+    let request_id = mcp
         .send_chatgpt_auth_tokens_login_request(
-            access_token,
+            "access-token".to_string(),
             WORKSPACE_ID_EMBEDDED.to_string(),
             Some("pro".to_string()),
         )
         .await?;
-    let set_resp: JSONRPCResponse = timeout(
+    let err: JSONRPCError = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(set_id)),
+        mcp.read_stream_until_error_message(RequestId::Integer(request_id)),
     )
     .await??;
-    let response: LoginAccountResponse = to_response(set_resp)?;
-    assert_eq!(response, LoginAccountResponse::ChatgptAuthTokens {});
+    assert_eq!(
+        err.error.message,
+        "External ChatGPT auth tokens are disabled in astral-code. Use API key login instead."
+    );
 
-    let note = timeout(
-        DEFAULT_READ_TIMEOUT,
+    let maybe_updated = timeout(
+        Duration::from_millis(500),
         mcp.read_stream_until_notification_message("account/updated"),
     )
-    .await??;
-    let parsed: ServerNotification = note.try_into()?;
-    let ServerNotification::AccountUpdated(payload) = parsed else {
-        bail!("unexpected notification: {parsed:?}");
-    };
-    assert_eq!(payload.auth_mode, Some(AuthMode::ChatgptAuthTokens));
-    assert_eq!(payload.plan_type, Some(AccountPlanType::Pro));
-
-    let get_id = mcp
-        .send_get_account_request(GetAccountParams {
-            refresh_token: false,
-        })
-        .await?;
-    let get_resp: JSONRPCResponse = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(get_id)),
-    )
-    .await??;
-    let account: GetAccountResponse = to_response(get_resp)?;
-    assert_eq!(
-        account,
-        GetAccountResponse {
-            account: Some(Account::Chatgpt {
-                email: "embedded@example.com".to_string(),
-                plan_type: AccountPlanType::Pro,
-            }),
-            requires_openai_auth: true,
-        }
+    .await;
+    assert!(
+        maybe_updated.is_err(),
+        "account/updated should not be emitted when external ChatGPT auth is rejected"
+    );
+    assert!(
+        !codex_home.path().join("auth.json").exists(),
+        "auth.json should not be created when external ChatGPT auth is rejected"
     );
 
     Ok(())
 }
 
 #[tokio::test]
+#[ignore = "Astral disables external ChatGPT auth tokens"]
 async fn account_read_refresh_token_is_noop_in_external_mode() -> Result<()> {
     let codex_home = TempDir::new()?;
     create_config_toml(
@@ -421,6 +387,7 @@ async fn respond_to_refresh_request(
 }
 
 #[tokio::test]
+#[ignore = "Astral disables external ChatGPT auth tokens"]
 // 401 response triggers account/chatgptAuthTokens/refresh and retries with new tokens.
 async fn external_auth_refreshes_on_unauthorized() -> Result<()> {
     let codex_home = TempDir::new()?;
@@ -543,6 +510,7 @@ async fn external_auth_refreshes_on_unauthorized() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Astral disables external ChatGPT auth tokens"]
 // Client returns JSON-RPC error to refresh; turn fails.
 async fn external_auth_refresh_error_fails_turn() -> Result<()> {
     let codex_home = TempDir::new()?;
@@ -660,6 +628,7 @@ async fn external_auth_refresh_error_fails_turn() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Astral disables external ChatGPT auth tokens"]
 // Refresh returns tokens for the wrong workspace; turn fails.
 async fn external_auth_refresh_mismatched_workspace_fails_turn() -> Result<()> {
     let codex_home = TempDir::new()?;
@@ -784,6 +753,7 @@ async fn external_auth_refresh_mismatched_workspace_fails_turn() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Astral disables external ChatGPT auth tokens"]
 // Refresh returns a malformed access token; turn fails.
 async fn external_auth_refresh_invalid_access_token_fails_turn() -> Result<()> {
     let codex_home = TempDir::new()?;
