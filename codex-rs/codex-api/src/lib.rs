@@ -1,3 +1,4 @@
+pub mod agent_adapters;
 pub(crate) mod api_bridge;
 pub(crate) mod auth;
 pub(crate) mod common;
