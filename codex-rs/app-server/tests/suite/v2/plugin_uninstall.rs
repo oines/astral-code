@@ -80,6 +80,7 @@ enabled = true
 }
 
 #[tokio::test]
+#[ignore = "Astral disables analytics event uploads"]
 async fn plugin_uninstall_tracks_analytics_event() -> Result<()> {
     let analytics_server = start_analytics_events_server().await?;
     let codex_home = TempDir::new()?;

@@ -37,6 +37,7 @@ use super::analytics::wait_for_analytics_event;
 const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 #[tokio::test]
+#[ignore = "Astral disables analytics event uploads"]
 async fn turn_steer_requires_active_turn() -> Result<()> {
     let tmp = TempDir::new()?;
     let codex_home = tmp.path().join("codex_home");
@@ -217,6 +218,7 @@ async fn turn_steer_rejects_oversized_text_input() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Astral disables analytics event uploads"]
 async fn turn_steer_returns_active_turn_id() -> Result<()> {
     #[cfg(target_os = "windows")]
     let shell_command = vec![

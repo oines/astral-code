@@ -820,6 +820,7 @@ async fn thread_start_omits_empty_instruction_overrides_from_model_request() -> 
 }
 
 #[tokio::test]
+#[ignore = "Astral disables analytics event uploads"]
 async fn turn_start_tracks_turn_event_analytics() -> Result<()> {
     let server = responses::start_mock_server().await;
     let response_mock = responses::mount_response_sequence(

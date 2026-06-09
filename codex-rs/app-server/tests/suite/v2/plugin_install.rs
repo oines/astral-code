@@ -687,6 +687,7 @@ async fn plugin_install_returns_invalid_request_for_disallowed_product_plugin() 
 }
 
 #[tokio::test]
+#[ignore = "Astral disables analytics event uploads"]
 async fn plugin_install_tracks_analytics_event() -> Result<()> {
     let analytics_server = start_analytics_events_server().await?;
     let codex_home = TempDir::new()?;
@@ -753,6 +754,7 @@ async fn plugin_install_tracks_analytics_event() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Astral disables analytics event uploads"]
 async fn plugin_install_tracks_remote_plugin_analytics_event() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;

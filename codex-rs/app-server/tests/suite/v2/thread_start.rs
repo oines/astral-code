@@ -446,6 +446,7 @@ fn normalize_path_for_comparison(path: impl AsRef<Path>) -> PathBuf {
 }
 
 #[tokio::test]
+#[ignore = "Astral disables analytics event uploads"]
 async fn thread_start_tracks_thread_initialized_analytics() -> Result<()> {
     let server = create_mock_responses_server_repeating_assistant("Done").await;
 

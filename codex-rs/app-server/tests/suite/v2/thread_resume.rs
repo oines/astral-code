@@ -464,6 +464,7 @@ async fn thread_goal_get_rejects_unmaterialized_thread() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Astral disables analytics event uploads"]
 async fn thread_resume_tracks_thread_initialized_analytics() -> Result<()> {
     let server = create_mock_responses_server_repeating_assistant("Done").await;
 
