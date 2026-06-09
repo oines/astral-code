@@ -1,6 +1,7 @@
 //! Shared tool definitions and Responses API tool primitives that can live
 //! outside `codex-core`.
 
+mod astral_flavor;
 mod code_mode;
 mod dynamic_tool;
 mod function_call_error;
@@ -20,6 +21,25 @@ mod tool_payload;
 mod tool_search;
 mod tool_spec;
 
+pub use astral_flavor::AGENT_TOOL_NAME;
+pub use astral_flavor::ASK_USER_QUESTION_TOOL_NAME;
+pub use astral_flavor::ASTRAL_CORE_TOOL_NAMES;
+pub use astral_flavor::BASH_TOOL_NAME;
+pub use astral_flavor::EDIT_TOOL_NAME;
+pub use astral_flavor::GLOB_TOOL_NAME;
+pub use astral_flavor::GREP_TOOL_NAME;
+pub use astral_flavor::LIST_MCP_RESOURCES_TOOL_NAME;
+pub use astral_flavor::READ_MCP_RESOURCE_TOOL_NAME;
+pub use astral_flavor::READ_TOOL_NAME;
+pub use astral_flavor::REQUEST_PERMISSIONS_TOOL_NAME;
+pub use astral_flavor::SEND_MESSAGE_TOOL_NAME;
+pub use astral_flavor::SKILL_TOOL_NAME;
+pub use astral_flavor::TASK_STOP_TOOL_NAME;
+pub use astral_flavor::TODO_WRITE_TOOL_NAME;
+pub use astral_flavor::TOOL_SEARCH_FLAVOR_TOOL_NAME;
+pub use astral_flavor::WRITE_TOOL_NAME;
+pub use astral_flavor::astral_core_tool_by_name;
+pub use astral_flavor::astral_core_tools;
 pub use code_mode::augment_tool_spec_for_code_mode;
 pub use code_mode::code_mode_name_for_tool_name;
 pub use code_mode::collect_code_mode_exec_prompt_tool_definitions;
