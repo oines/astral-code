@@ -183,8 +183,8 @@ enum Subcommand {
     /// Fork a previous interactive session (picker by default; use --last to fork the most recent).
     Fork(ForkCommand),
 
-    /// [EXPERIMENTAL] Browse tasks from Astral Cloud and apply changes locally.
-    #[clap(name = "cloud", alias = "cloud-tasks")]
+    /// Legacy ChatGPT cloud task surface.
+    #[clap(name = "cloud", alias = "cloud-tasks", hide = true)]
     Cloud(CloudTasksCli),
 
     /// Internal: run the responses API proxy.
@@ -786,6 +786,10 @@ fn run_update_command() -> anyhow::Result<()> {
     }
 }
 
+fn reject_legacy_cloud_tasks_command() -> anyhow::Result<()> {
+    anyhow::bail!("legacy ChatGPT cloud tasks are disabled in astral-code");
+}
+
 fn run_execpolicycheck(cmd: ExecPolicyCheckCommand) -> anyhow::Result<()> {
     cmd.run()
 }
@@ -1353,18 +1357,13 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
             )
             .await?;
         }
-        Some(Subcommand::Cloud(mut cloud_cli)) => {
+        Some(Subcommand::Cloud(_cloud_cli)) => {
             reject_remote_mode_for_subcommand(
                 root_remote.as_deref(),
                 root_remote_auth_token_env.as_deref(),
                 "cloud",
             )?;
-            prepend_config_flags(
-                &mut cloud_cli.config_overrides,
-                root_config_overrides.clone(),
-            );
-            codex_cloud_tasks::run_main(cloud_cli, arg0_paths.codex_linux_sandbox_exe.clone())
-                .await?;
+            reject_legacy_cloud_tasks_command()?;
         }
         Some(Subcommand::Sandbox(mut sandbox_cli)) => {
             #[cfg(target_os = "windows")]
@@ -3288,6 +3287,25 @@ mod tests {
         let app_server =
             app_server_from_args(["astral", "app-server", "--analytics-default-enabled"].as_ref());
         assert!(app_server.analytics_default_enabled);
+    }
+
+    #[test]
+    fn cloud_tasks_command_is_hidden_from_help() {
+        let help = MultitoolCli::command().render_help().to_string();
+
+        assert!(!help.contains("cloud-tasks"));
+        assert!(!help.contains("Legacy ChatGPT cloud task surface"));
+    }
+
+    #[test]
+    fn cloud_tasks_command_is_disabled() {
+        let error =
+            reject_legacy_cloud_tasks_command().expect_err("legacy cloud command should fail");
+
+        assert_eq!(
+            error.to_string(),
+            "legacy ChatGPT cloud tasks are disabled in astral-code"
+        );
     }
 
     #[test]
