@@ -8,22 +8,15 @@
 //! support can request from users.
 
 use codex_app_server_protocol::AuthMode;
-use codex_config::types::AuthCredentialsStoreMode;
 use codex_core::config::Config;
-use codex_login::CLIENT_ID;
 use codex_login::CodexAuth;
-use codex_login::ServerOptions;
-use codex_login::login_with_access_token;
 use codex_login::login_with_api_key;
 use codex_login::logout_with_revoke;
-use codex_login::run_device_code_login;
-use codex_login::run_login_server;
 use codex_protocol::config_types::ForcedLoginMethod;
 use codex_utils_cli::CliConfigOverrides;
 use std::fs::OpenOptions;
 use std::io::IsTerminal;
 use std::io::Read;
-use std::path::PathBuf;
 use tracing_appender::non_blocking;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::EnvFilter;
@@ -31,12 +24,9 @@ use tracing_subscriber::Layer;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
-const CHATGPT_LOGIN_DISABLED_MESSAGE: &str =
-    "ChatGPT login is disabled. Use API key login instead.";
-const API_KEY_LOGIN_DISABLED_MESSAGE: &str =
-    "API key login is disabled. Use ChatGPT login instead.";
-const ACCESS_TOKEN_LOGIN_DISABLED_MESSAGE: &str =
-    "Access token login is disabled. Use API key login instead.";
+const CHATGPT_LOGIN_DISABLED_MESSAGE: &str = "Browser/device ChatGPT login is not available in Astral. Use `astral login --with-api-key` or set ASTRAL_API_KEY.";
+const API_KEY_LOGIN_DISABLED_MESSAGE: &str = "API key login is disabled by configuration.";
+const ACCESS_TOKEN_LOGIN_DISABLED_MESSAGE: &str = "Access token login is not available in Astral. Use `astral login --with-api-key` or set ASTRAL_API_KEY.";
 const LOGIN_SUCCESS_MESSAGE: &str = "Successfully logged in";
 
 /// Installs a small file-backed tracing layer for direct `astral login` flows.
@@ -107,58 +97,9 @@ fn init_login_file_logging(config: &Config) -> Option<WorkerGuard> {
     Some(guard)
 }
 
-fn print_login_server_start(actual_port: u16, auth_url: &str) {
-    eprintln!(
-        "Starting local login server on http://localhost:{actual_port}.\nIf your browser did not open, navigate to this URL to authenticate:\n\n{auth_url}\n\nOn a remote or headless machine? Use `astral login --device-auth` instead."
-    );
-}
-
-pub async fn login_with_chatgpt(
-    codex_home: PathBuf,
-    forced_chatgpt_workspace_id: Option<Vec<String>>,
-    cli_auth_credentials_store_mode: AuthCredentialsStoreMode,
-) -> std::io::Result<()> {
-    let opts = ServerOptions::new(
-        codex_home,
-        CLIENT_ID.to_string(),
-        forced_chatgpt_workspace_id,
-        cli_auth_credentials_store_mode,
-    );
-    let server = run_login_server(opts)?;
-
-    print_login_server_start(server.actual_port, &server.auth_url);
-
-    server.block_until_done().await
-}
-
-pub async fn run_login_with_chatgpt(cli_config_overrides: CliConfigOverrides) -> ! {
-    let config = load_config_or_exit(cli_config_overrides).await;
-    let _login_log_guard = init_login_file_logging(&config);
-    tracing::info!("starting browser login flow");
-
-    if matches!(config.forced_login_method, Some(ForcedLoginMethod::Api)) {
-        eprintln!("{CHATGPT_LOGIN_DISABLED_MESSAGE}");
-        std::process::exit(1);
-    }
-
-    let forced_chatgpt_workspace_id = config.forced_chatgpt_workspace_id.clone();
-
-    match login_with_chatgpt(
-        config.codex_home.to_path_buf(),
-        forced_chatgpt_workspace_id,
-        config.cli_auth_credentials_store_mode,
-    )
-    .await
-    {
-        Ok(_) => {
-            eprintln!("{LOGIN_SUCCESS_MESSAGE}");
-            std::process::exit(0);
-        }
-        Err(e) => {
-            eprintln!("Error logging in: {e}");
-            std::process::exit(1);
-        }
-    }
+pub async fn run_login_with_chatgpt(_cli_config_overrides: CliConfigOverrides) -> ! {
+    eprintln!("{CHATGPT_LOGIN_DISABLED_MESSAGE}");
+    std::process::exit(1);
 }
 
 pub async fn run_login_with_api_key(
@@ -191,40 +132,16 @@ pub async fn run_login_with_api_key(
 }
 
 pub async fn run_login_with_access_token(
-    cli_config_overrides: CliConfigOverrides,
-    access_token: String,
+    _cli_config_overrides: CliConfigOverrides,
+    _access_token: String,
 ) -> ! {
-    let config = load_config_or_exit(cli_config_overrides).await;
-    let _login_log_guard = init_login_file_logging(&config);
-    tracing::info!("starting access token login flow");
-
-    if matches!(config.forced_login_method, Some(ForcedLoginMethod::Api)) {
-        eprintln!("{ACCESS_TOKEN_LOGIN_DISABLED_MESSAGE}");
-        std::process::exit(1);
-    }
-
-    match login_with_access_token(
-        &config.codex_home,
-        &access_token,
-        config.cli_auth_credentials_store_mode,
-        Some(&config.chatgpt_base_url),
-    )
-    .await
-    {
-        Ok(_) => {
-            eprintln!("{LOGIN_SUCCESS_MESSAGE}");
-            std::process::exit(0);
-        }
-        Err(e) => {
-            eprintln!("Error logging in with access token: {e}");
-            std::process::exit(1);
-        }
-    }
+    eprintln!("{ACCESS_TOKEN_LOGIN_DISABLED_MESSAGE}");
+    std::process::exit(1);
 }
 
 pub fn read_api_key_from_stdin() -> String {
     read_stdin_secret(
-        "--with-api-key expects the API key on stdin. Try piping it, e.g. `printenv OPENAI_API_KEY | astral login --with-api-key`.",
+        "--with-api-key expects the API key on stdin. Try piping it, e.g. `printenv ASTRAL_API_KEY | astral login --with-api-key`.",
         "Reading API key from stdin...",
         "No API key provided via stdin.",
     )
@@ -232,7 +149,7 @@ pub fn read_api_key_from_stdin() -> String {
 
 pub fn read_access_token_from_stdin() -> String {
     read_stdin_secret(
-        "--with-access-token expects the access token on stdin. Try piping it, e.g. `printenv CODEX_ACCESS_TOKEN | astral login --with-access-token`.",
+        "--with-access-token is not available in Astral.",
         "Reading access token from stdin...",
         "No access token provided via stdin.",
     )
@@ -265,101 +182,22 @@ fn read_stdin_secret(terminal_message: &str, reading_message: &str, empty_messag
 
 /// Login using the OAuth device code flow.
 pub async fn run_login_with_device_code(
-    cli_config_overrides: CliConfigOverrides,
-    issuer_base_url: Option<String>,
-    client_id: Option<String>,
+    _cli_config_overrides: CliConfigOverrides,
+    _issuer_base_url: Option<String>,
+    _client_id: Option<String>,
 ) -> ! {
-    let config = load_config_or_exit(cli_config_overrides).await;
-    let _login_log_guard = init_login_file_logging(&config);
-    tracing::info!("starting device code login flow");
-    if matches!(config.forced_login_method, Some(ForcedLoginMethod::Api)) {
-        eprintln!("{CHATGPT_LOGIN_DISABLED_MESSAGE}");
-        std::process::exit(1);
-    }
-    let forced_chatgpt_workspace_id = config.forced_chatgpt_workspace_id.clone();
-    let mut opts = ServerOptions::new(
-        config.codex_home.to_path_buf(),
-        client_id.unwrap_or(CLIENT_ID.to_string()),
-        forced_chatgpt_workspace_id,
-        config.cli_auth_credentials_store_mode,
-    );
-    if let Some(iss) = issuer_base_url {
-        opts.issuer = iss;
-    }
-    match run_device_code_login(opts).await {
-        Ok(()) => {
-            eprintln!("{LOGIN_SUCCESS_MESSAGE}");
-            std::process::exit(0);
-        }
-        Err(e) => {
-            eprintln!("Error logging in with device code: {e}");
-            std::process::exit(1);
-        }
-    }
+    eprintln!("{CHATGPT_LOGIN_DISABLED_MESSAGE}");
+    std::process::exit(1);
 }
 
-/// Prefers device-code login (with `open_browser = false`) when headless environment is detected, but keeps
-/// `astral login` working in environments where device-code may be disabled/feature-gated.
-/// If `run_device_code_login` returns `ErrorKind::NotFound` ("device-code unsupported"), this
-/// falls back to starting the local browser login server.
+/// Legacy entry point retained for callers that still request device-code fallback.
 pub async fn run_login_with_device_code_fallback_to_browser(
-    cli_config_overrides: CliConfigOverrides,
-    issuer_base_url: Option<String>,
-    client_id: Option<String>,
+    _cli_config_overrides: CliConfigOverrides,
+    _issuer_base_url: Option<String>,
+    _client_id: Option<String>,
 ) -> ! {
-    let config = load_config_or_exit(cli_config_overrides).await;
-    let _login_log_guard = init_login_file_logging(&config);
-    tracing::info!("starting login flow with device code fallback");
-    if matches!(config.forced_login_method, Some(ForcedLoginMethod::Api)) {
-        eprintln!("{CHATGPT_LOGIN_DISABLED_MESSAGE}");
-        std::process::exit(1);
-    }
-
-    let forced_chatgpt_workspace_id = config.forced_chatgpt_workspace_id.clone();
-    let mut opts = ServerOptions::new(
-        config.codex_home.to_path_buf(),
-        client_id.unwrap_or(CLIENT_ID.to_string()),
-        forced_chatgpt_workspace_id,
-        config.cli_auth_credentials_store_mode,
-    );
-    if let Some(iss) = issuer_base_url {
-        opts.issuer = iss;
-    }
-    opts.open_browser = false;
-
-    match run_device_code_login(opts.clone()).await {
-        Ok(()) => {
-            eprintln!("{LOGIN_SUCCESS_MESSAGE}");
-            std::process::exit(0);
-        }
-        Err(e) => {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                eprintln!("Device code login is not enabled; falling back to browser login.");
-                match run_login_server(opts) {
-                    Ok(server) => {
-                        print_login_server_start(server.actual_port, &server.auth_url);
-                        match server.block_until_done().await {
-                            Ok(()) => {
-                                eprintln!("{LOGIN_SUCCESS_MESSAGE}");
-                                std::process::exit(0);
-                            }
-                            Err(e) => {
-                                eprintln!("Error logging in: {e}");
-                                std::process::exit(1);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("Error logging in: {e}");
-                        std::process::exit(1);
-                    }
-                }
-            } else {
-                eprintln!("Error logging in with device code: {e}");
-                std::process::exit(1);
-            }
-        }
-    }
+    eprintln!("{CHATGPT_LOGIN_DISABLED_MESSAGE}");
+    std::process::exit(1);
 }
 
 pub async fn run_login_status(cli_config_overrides: CliConfigOverrides) -> ! {

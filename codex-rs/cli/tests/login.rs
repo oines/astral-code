@@ -51,7 +51,20 @@ fn login_with_api_key_reads_stdin_and_writes_auth_json() -> Result<()> {
 }
 
 #[test]
-fn login_with_access_token_rejects_invalid_jwt() -> Result<()> {
+fn login_without_flags_rejects_chatgpt_flow() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    write_file_auth_config(codex_home.path())?;
+
+    let mut cmd = codex_command(codex_home.path())?;
+    cmd.arg("login").assert().failure().stderr(contains(
+        "Browser/device ChatGPT login is not available in Astral",
+    ));
+
+    Ok(())
+}
+
+#[test]
+fn login_with_access_token_is_not_available() -> Result<()> {
     let codex_home = TempDir::new()?;
     write_file_auth_config(codex_home.path())?;
 
@@ -60,7 +73,23 @@ fn login_with_access_token_rejects_invalid_jwt() -> Result<()> {
         .write_stdin("not-a-jwt\n")
         .assert()
         .failure()
-        .stderr(contains("Error logging in with access token"));
+        .stderr(contains("Access token login is not available in Astral"));
+
+    Ok(())
+}
+
+#[test]
+fn login_with_device_auth_rejects_chatgpt_flow() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    write_file_auth_config(codex_home.path())?;
+
+    let mut cmd = codex_command(codex_home.path())?;
+    cmd.args(["login", "--device-auth"])
+        .assert()
+        .failure()
+        .stderr(contains(
+            "Browser/device ChatGPT login is not available in Astral",
+        ));
 
     Ok(())
 }
