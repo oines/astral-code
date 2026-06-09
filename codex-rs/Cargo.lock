@@ -1883,6 +1883,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-agent-protocol"
+version = "0.0.0"
+dependencies = [
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "codex-analytics"
 version = "0.0.0"
 dependencies = [
@@ -1922,6 +1931,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "chrono",
+ "codex-agent-protocol",
  "codex-client",
  "codex-protocol",
  "codex-utils-rustls-provider",
