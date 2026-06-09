@@ -15,6 +15,7 @@ mod dynamic_tools;
 mod experimental_api;
 mod experimental_feature_list;
 mod external_agent_config;
+mod feedback;
 mod fs;
 mod hooks_list;
 mod imagegen_extension;
