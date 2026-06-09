@@ -4,6 +4,8 @@ use super::*;
 use chrono::DateTime;
 #[cfg(test)]
 use chrono::Utc;
+#[cfg(test)]
+use std::io::Error as IoError;
 
 #[cfg(test)]
 pub(crate) async fn read_summary_from_rollout(

@@ -149,14 +149,6 @@ async fn mock_device_code_usercode(server: &MockServer, interval_seconds: u64) {
         .await;
 }
 
-async fn mock_device_code_usercode_failure(server: &MockServer, status: u16) {
-    Mock::given(method("POST"))
-        .and(path("/api/accounts/deviceauth/usercode"))
-        .respond_with(ResponseTemplate::new(status))
-        .mount(server)
-        .await;
-}
-
 async fn mock_device_code_token_success(server: &MockServer) {
     Mock::given(method("POST"))
         .and(path("/api/accounts/deviceauth/token"))
@@ -987,15 +979,9 @@ async fn login_account_api_key_rejected_when_forced_chatgpt() -> Result<()> {
 }
 
 #[tokio::test]
-async fn login_account_chatgpt_rejected_when_forced_api() -> Result<()> {
+async fn login_account_chatgpt_rejected() -> Result<()> {
     let codex_home = TempDir::new()?;
-    create_config_toml(
-        codex_home.path(),
-        CreateConfigTomlParams {
-            forced_method: Some("api".to_string()),
-            ..Default::default()
-        },
-    )?;
+    create_config_toml(codex_home.path(), CreateConfigTomlParams::default())?;
 
     let mut mcp = TestAppServer::new(codex_home.path()).await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
@@ -1009,7 +995,7 @@ async fn login_account_chatgpt_rejected_when_forced_api() -> Result<()> {
 
     assert_eq!(
         err.error.message,
-        "ChatGPT login is disabled. Use API key login instead."
+        "ChatGPT login is disabled in astral-code. Use API key login instead."
     );
     Ok(())
 }
@@ -1017,27 +1003,9 @@ async fn login_account_chatgpt_rejected_when_forced_api() -> Result<()> {
 #[tokio::test]
 async fn login_account_chatgpt_device_code_returns_error_when_disabled() -> Result<()> {
     let codex_home = TempDir::new()?;
-    let mock_server = MockServer::start().await;
-    create_config_toml(
-        codex_home.path(),
-        CreateConfigTomlParams {
-            requires_openai_auth: Some(true),
-            base_url: Some(format!("{}/v1", mock_server.uri())),
-            ..Default::default()
-        },
-    )?;
-    write_models_cache(codex_home.path())?;
-    mock_device_code_usercode_failure(&mock_server, /*status*/ 404).await;
+    create_config_toml(codex_home.path(), CreateConfigTomlParams::default())?;
 
-    let issuer = mock_server.uri();
-    let mut mcp = TestAppServer::new_with_env(
-        codex_home.path(),
-        &[
-            ("ASTRAL_API_KEY", None),
-            (LOGIN_ISSUER_ENV_VAR, Some(issuer.as_str())),
-        ],
-    )
-    .await?;
+    let mut mcp = TestAppServer::new(codex_home.path()).await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
 
     let request_id = mcp.send_login_account_chatgpt_device_code_request().await?;
@@ -1046,12 +1014,9 @@ async fn login_account_chatgpt_device_code_returns_error_when_disabled() -> Resu
         mcp.read_stream_until_error_message(RequestId::Integer(request_id)),
     )
     .await??;
-    assert!(
-        err.error
-            .message
-            .contains("device code login is not enabled"),
-        "unexpected error: {:?}",
-        err.error.message
+    assert_eq!(
+        err.error.message,
+        "ChatGPT login is disabled in astral-code. Use API key login instead."
     );
 
     let maybe_completed = timeout(
@@ -1071,6 +1036,7 @@ async fn login_account_chatgpt_device_code_returns_error_when_disabled() -> Resu
 }
 
 #[tokio::test]
+#[ignore = "Astral disables ChatGPT device code login"]
 async fn login_account_chatgpt_device_code_succeeds_and_notifies() -> Result<()> {
     let codex_home = TempDir::new()?;
     let mock_server = MockServer::start().await;
@@ -1155,6 +1121,7 @@ async fn login_account_chatgpt_device_code_succeeds_and_notifies() -> Result<()>
 }
 
 #[tokio::test]
+#[ignore = "Astral disables ChatGPT device code login"]
 async fn login_account_chatgpt_device_code_failure_notifies_without_account_update() -> Result<()> {
     let codex_home = TempDir::new()?;
     let mock_server = MockServer::start().await;
@@ -1230,6 +1197,7 @@ async fn login_account_chatgpt_device_code_failure_notifies_without_account_upda
 }
 
 #[tokio::test]
+#[ignore = "Astral disables ChatGPT device code login"]
 async fn login_account_chatgpt_device_code_can_be_cancelled() -> Result<()> {
     let codex_home = TempDir::new()?;
     let mock_server = MockServer::start().await;
@@ -1314,6 +1282,7 @@ async fn login_account_chatgpt_device_code_can_be_cancelled() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Astral disables ChatGPT browser login"]
 // Serialize tests that launch the login server since it binds to a fixed port.
 #[serial(login_port)]
 async fn login_account_chatgpt_start_can_be_cancelled() -> Result<()> {
@@ -1380,6 +1349,7 @@ async fn login_account_chatgpt_start_can_be_cancelled() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Astral disables ChatGPT browser login"]
 // Serialize tests that launch the login server since it binds to a fixed port.
 #[serial(login_port)]
 async fn set_auth_token_cancels_active_chatgpt_login() -> Result<()> {
@@ -1449,6 +1419,7 @@ async fn set_auth_token_cancels_active_chatgpt_login() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Astral disables ChatGPT browser login"]
 // Serialize tests that launch the login server since it binds to a fixed port.
 #[serial(login_port)]
 async fn login_account_chatgpt_includes_forced_workspace_query_param() -> Result<()> {
@@ -1483,6 +1454,7 @@ async fn login_account_chatgpt_includes_forced_workspace_query_param() -> Result
 }
 
 #[tokio::test]
+#[ignore = "Astral disables ChatGPT browser login"]
 // Serialize tests that launch the login server since it binds to a fixed port.
 #[serial(login_port)]
 async fn login_account_chatgpt_includes_forced_workspace_allowlist_query_param() -> Result<()> {
