@@ -1489,14 +1489,13 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
             );
             run_apply_command(apply_cli, /*cwd*/ None).await?;
         }
-        Some(Subcommand::ResponsesApiProxy(args)) => {
+        Some(Subcommand::ResponsesApiProxy(_args)) => {
             reject_remote_mode_for_subcommand(
                 root_remote.as_deref(),
                 root_remote_auth_token_env.as_deref(),
                 "responses-api-proxy",
             )?;
-            tokio::task::spawn_blocking(move || codex_responses_api_proxy::run_main(args))
-                .await??;
+            anyhow::bail!("responses-api-proxy is disabled in astral-code");
         }
         Some(Subcommand::StdioToUds(cmd)) => {
             reject_remote_mode_for_subcommand(
