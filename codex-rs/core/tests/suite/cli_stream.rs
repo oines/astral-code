@@ -73,7 +73,7 @@ fn personal_access_token_exec_command(server: &MockServer, home: &TempDir) -> As
         .arg("-C")
         .arg(repo_root())
         .arg("hello?");
-    cmd.env("CODEX_HOME", home.path())
+    cmd.env("ASTRAL_HOME", home.path())
         .env(CODEX_ACCESS_TOKEN_ENV_VAR, PERSONAL_ACCESS_TOKEN)
         .env("CODEX_AUTHAPI_BASE_URL", server.uri())
         .env_remove(ASTRAL_API_KEY_ENV_VAR)
@@ -179,7 +179,7 @@ async fn responses_mode_stream_cli() {
         .arg("-C")
         .arg(&repo_root)
         .arg("hello?");
-    cmd.env("CODEX_HOME", home.path())
+    cmd.env("ASTRAL_HOME", home.path())
         .env(ASTRAL_API_KEY_ENV_VAR, "dummy");
 
     let output = cmd.output().unwrap();
@@ -220,7 +220,7 @@ async fn responses_mode_stream_cli_supports_openai_base_url_config_override() {
         .arg("-C")
         .arg(&repo_root)
         .arg("hello?");
-    cmd.env("CODEX_HOME", home.path())
+    cmd.env("ASTRAL_HOME", home.path())
         .env(ASTRAL_API_KEY_ENV_VAR, "dummy");
 
     let output = cmd.output().unwrap();
@@ -276,7 +276,7 @@ async fn exec_cli_applies_model_instructions_file() {
         .arg("-C")
         .arg(&repo_root)
         .arg("hello?\n");
-    cmd.env("CODEX_HOME", home.path())
+    cmd.env("ASTRAL_HOME", home.path())
         .env(ASTRAL_API_KEY_ENV_VAR, "dummy");
 
     let output = cmd.output().unwrap();
@@ -300,7 +300,7 @@ async fn exec_cli_applies_model_instructions_file() {
     );
 }
 
-/// Verify that `codex exec --profile ...` preserves the active user config
+/// Verify that `astral exec --profile ...` preserves the active user config
 /// profile when it starts the in-process app-server thread, so the selected
 /// profile's `model_instructions_file` reaches the outbound request.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -346,7 +346,7 @@ async fn exec_cli_profile_applies_model_instructions_file() {
         .arg("-C")
         .arg(&repo_root)
         .arg("hello?\n");
-    cmd.env("CODEX_HOME", home.path())
+    cmd.env("ASTRAL_HOME", home.path())
         .env(ASTRAL_API_KEY_ENV_VAR, "dummy");
 
     let output = cmd.output().unwrap();
@@ -388,7 +388,7 @@ async fn responses_api_stream_cli() {
         .arg("-C")
         .arg(&repo_root)
         .arg("hello?");
-    cmd.env("CODEX_HOME", home.path())
+    cmd.env("ASTRAL_HOME", home.path())
         .env(ASTRAL_API_KEY_ENV_VAR, "dummy");
 
     let output = cmd.output().unwrap();
@@ -430,7 +430,7 @@ async fn integration_creates_and_checks_session_file() -> anyhow::Result<()> {
         .arg("-C")
         .arg(&repo_root)
         .arg(&prompt);
-    cmd.env("CODEX_HOME", home.path())
+    cmd.env("ASTRAL_HOME", home.path())
         .env(ASTRAL_API_KEY_ENV_VAR, "dummy");
 
     let output = cmd.output().unwrap();
@@ -553,7 +553,7 @@ async fn integration_creates_and_checks_session_file() -> anyhow::Result<()> {
         .arg(&prompt2)
         .arg("resume")
         .arg("--last");
-    cmd2.env("CODEX_HOME", home.path())
+    cmd2.env("ASTRAL_HOME", home.path())
         .env(ASTRAL_API_KEY_ENV_VAR, "dummy");
 
     let output2 = cmd2.output().unwrap();
