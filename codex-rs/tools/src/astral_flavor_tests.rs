@@ -5,6 +5,7 @@ use super::ASTRAL_CORE_TOOL_NAMES;
 use super::BASH_TOOL_NAME;
 use super::EDIT_TOOL_NAME;
 use super::GREP_TOOL_NAME;
+use super::MONITOR_TOOL_NAME;
 use super::READ_TOOL_NAME;
 use super::TODO_WRITE_TOOL_NAME;
 use super::astral_core_tool_by_name;
@@ -34,6 +35,7 @@ fn bash_schema_uses_claudeish_command_shape() {
                 "command": { "type": "string", "description": "The command to execute" },
                 "timeout": { "type": "number", "description": "Optional timeout in milliseconds" },
                 "description": { "type": "string", "description": "Clear, concise description of what this command does in active voice" },
+                "environment_id": { "type": "string", "description": "Optional target execution environment id when multiple environments exist" },
                 "run_in_background": { "type": "boolean", "description": "Set to true to run this command in the background and read output later" }
             },
             "required": ["command"],
@@ -68,6 +70,17 @@ fn todo_write_uses_legacy_task_list_shape() {
     assert_eq!(
         tool.input_schema["properties"]["todos"]["items"]["properties"]["status"]["enum"],
         json!(["pending", "in_progress", "completed"])
+    );
+}
+
+#[test]
+fn monitor_uses_running_session_shape() {
+    let tool = astral_core_tool_by_name(MONITOR_TOOL_NAME).expect("Monitor exists");
+
+    assert_eq!(tool.input_schema["required"], json!(["session_id"]));
+    assert_eq!(
+        tool.input_schema["properties"]["session_id"]["type"],
+        json!("integer")
     );
 }
 

@@ -434,7 +434,7 @@ fn apply_patch_accepts_environment_id(spec: &ToolSpec) -> bool {
 #[tokio::test]
 async fn request_user_input_tool_respects_experimental_config_gate() {
     let enabled = probe(|_| {}).await;
-    enabled.assert_visible_contains(&["request_user_input"]);
+    enabled.assert_visible_contains(&["AskUserQuestion"]);
     enabled.assert_registered_contains(&["request_user_input"]);
 
     let disabled = probe(|turn| {
@@ -443,7 +443,7 @@ async fn request_user_input_tool_respects_experimental_config_gate() {
         });
     })
     .await;
-    disabled.assert_visible_lacks(&["request_user_input"]);
+    disabled.assert_visible_lacks(&["AskUserQuestion"]);
     disabled.assert_registered_lacks(&["request_user_input"]);
 }
 
@@ -456,11 +456,11 @@ async fn shell_family_registers_visible_unified_exec_and_hidden_legacy_shell() {
     })
     .await;
 
-    plan.assert_visible_contains(&["exec_command", "write_stdin"]);
+    plan.assert_visible_contains(&["Bash", "Monitor"]);
     plan.assert_visible_lacks(&["shell_command"]);
     plan.assert_registered_contains(&["exec_command", "write_stdin", "shell_command"]);
     assert_eq!(plan.exposure("shell_command"), ToolExposure::Hidden);
-    assert!(has_parameter(plan.visible_spec("exec_command"), "shell"));
+    assert!(has_parameter(plan.visible_spec("Bash"), "command"));
 }
 
 #[tokio::test]
@@ -493,12 +493,12 @@ async fn shell_zsh_fork_stays_standalone_until_unified_exec_composition_is_enabl
     .await;
 
     if codex_utils_pty::conpty_supported() {
-        composed.assert_visible_contains(&["exec_command", "write_stdin"]);
+        composed.assert_visible_contains(&["Bash", "Monitor"]);
         composed.assert_visible_lacks(&["shell_command"]);
         composed.assert_registered_contains(&["exec_command", "write_stdin", "shell_command"]);
         assert_eq!(composed.exposure("shell_command"), ToolExposure::Hidden);
     } else {
-        composed.assert_visible_contains(&["shell_command"]);
+        composed.assert_visible_contains(&["Bash", "Monitor"]);
         composed.assert_visible_lacks(&["exec_command", "write_stdin"]);
     }
 }
@@ -524,8 +524,8 @@ async fn zsh_fork_unified_exec_hides_shell_parameter() {
     })
     .await;
 
-    plan.assert_visible_contains(&["exec_command", "write_stdin"]);
-    assert!(!has_parameter(plan.visible_spec("exec_command"), "shell"));
+    plan.assert_visible_contains(&["Bash", "Monitor"]);
+    assert!(!has_parameter(plan.visible_spec("Bash"), "shell"));
 }
 
 #[tokio::test]
@@ -568,12 +568,8 @@ async fn zsh_fork_unified_exec_keeps_shell_parameter_when_remote_environment_ava
     })
     .await;
 
-    plan.assert_visible_contains(&["exec_command", "write_stdin"]);
-    assert!(has_parameter(plan.visible_spec("exec_command"), "shell"));
-    assert!(has_parameter(
-        plan.visible_spec("exec_command"),
-        "environment_id"
-    ));
+    plan.assert_visible_contains(&["Bash", "Monitor"]);
+    assert!(has_parameter(plan.visible_spec("Bash"), "environment_id"));
 }
 
 #[tokio::test]
@@ -587,6 +583,8 @@ async fn environment_count_controls_environment_backed_tools() {
     no_environment.assert_visible_lacks(&[
         "shell_command",
         "exec_command",
+        "Bash",
+        "Monitor",
         "apply_patch",
         "view_image",
     ]);
@@ -604,9 +602,9 @@ async fn environment_count_controls_environment_backed_tools() {
         turn.model_info.apply_patch_tool_type = Some(ApplyPatchToolType::Freeform);
     })
     .await;
-    multiple_environments.assert_visible_contains(&["exec_command", "apply_patch", "view_image"]);
+    multiple_environments.assert_visible_contains(&["Bash", "apply_patch", "view_image"]);
     assert!(has_parameter(
-        multiple_environments.visible_spec("exec_command"),
+        multiple_environments.visible_spec("Bash"),
         "environment_id"
     ));
     assert!(apply_patch_accepts_environment_id(
@@ -647,9 +645,9 @@ async fn mcp_and_tool_search_follow_direct_and_deferred_tool_exposure() {
     )
     .await;
     direct_mcp.assert_visible_contains(&[
-        "list_mcp_resources",
+        "ListMcpResourcesTool",
         "list_mcp_resource_templates",
-        "read_mcp_resource",
+        "ReadMcpResourceTool",
     ]);
     assert_eq!(
         direct_mcp.namespace_function_names("mcp__direct"),
@@ -671,18 +669,18 @@ async fn mcp_and_tool_search_follow_direct_and_deferred_tool_exposure() {
         },
     )
     .await;
-    missing_model_capability.assert_visible_lacks(&["tool_search"]);
+    missing_model_capability.assert_visible_lacks(&["ToolSearch"]);
 
     let missing_deferred_tools = probe(|turn| {
         set_feature(turn, Feature::Collab, /*enabled*/ false);
         turn.model_info.supports_search_tool = true;
     })
     .await;
-    missing_deferred_tools.assert_visible_lacks(&["tool_search"]);
+    missing_deferred_tools.assert_visible_lacks(&["ToolSearch"]);
     missing_deferred_tools.assert_visible_lacks(&[
-        "list_mcp_resources",
+        "ListMcpResourcesTool",
         "list_mcp_resource_templates",
-        "read_mcp_resource",
+        "ReadMcpResourceTool",
     ]);
 
     let bedrock_namespace_capability = probe_with(
@@ -696,7 +694,7 @@ async fn mcp_and_tool_search_follow_direct_and_deferred_tool_exposure() {
         },
     )
     .await;
-    bedrock_namespace_capability.assert_visible_contains(&["tool_search"]);
+    bedrock_namespace_capability.assert_visible_contains(&["ToolSearch"]);
 
     let enabled = probe_with(
         |turn| {
@@ -705,7 +703,7 @@ async fn mcp_and_tool_search_follow_direct_and_deferred_tool_exposure() {
         searchable_mcp,
     )
     .await;
-    enabled.assert_visible_contains(&["tool_search"]);
+    enabled.assert_visible_contains(&["ToolSearch"]);
     enabled.assert_registered_contains(&[
         "tool_search",
         &ToolName::namespaced("mcp__searchable", "lookup").to_string(),
@@ -725,7 +723,7 @@ async fn deferred_extension_tools_are_discoverable_with_tool_search() {
     )
     .await;
 
-    plan.assert_visible_contains(&["tool_search"]);
+    plan.assert_visible_contains(&["ToolSearch"]);
     plan.assert_visible_lacks(&["extension_echo"]);
     plan.assert_registered_contains(&["extension_echo"]);
     assert_eq!(plan.exposure("extension_echo"), ToolExposure::Deferred);
@@ -822,7 +820,7 @@ async fn install_suggestion_tools_stay_visible_without_tool_search() {
         "list_available_plugins_to_install",
         "request_plugin_install",
     ]);
-    plan.assert_visible_lacks(&["tool_search"]);
+    plan.assert_visible_lacks(&["ToolSearch"]);
 }
 
 #[tokio::test]
@@ -1008,17 +1006,26 @@ async fn multi_agent_feature_selects_one_agent_tool_family() {
     })
     .await;
     v2.assert_visible_contains(&[
-        "spawn_agent",
-        "send_message",
+        "Agent",
+        "SendMessage",
         "followup_task",
         "wait_agent",
-        "interrupt_agent",
+        "TaskStop",
         "list_agents",
     ]);
-    v2.assert_visible_lacks(&["send_input", "resume_agent", "assign_task", "close_agent"]);
-    let spawn_agent_description = match v2.visible_spec("spawn_agent") {
+    v2.assert_visible_lacks(&[
+        "spawn_agent",
+        "send_message",
+        "send_input",
+        "resume_agent",
+        "assign_task",
+        "close_agent",
+        "interrupt_agent",
+    ]);
+    v2.assert_registered_contains(&["spawn_agent", "send_message", "interrupt_agent"]);
+    let spawn_agent_description = match v2.visible_spec("Agent") {
         ToolSpec::Function(tool) => tool.description.as_str(),
-        other => panic!("expected spawn_agent function spec, got {other:?}"),
+        other => panic!("expected Agent function spec, got {other:?}"),
     };
     assert!(spawn_agent_description.contains("max_concurrent_threads_per_session = 17"));
 
@@ -1036,7 +1043,7 @@ async fn multi_agent_feature_selects_one_agent_tool_family() {
         });
     })
     .await;
-    direct_model_only.assert_visible_contains(&["spawn_agent", "send_message", "wait_agent"]);
+    direct_model_only.assert_visible_contains(&["Agent", "SendMessage", "wait_agent"]);
     assert_eq!(
         direct_model_only.exposure("spawn_agent"),
         ToolExposure::DirectModelOnly
@@ -1049,7 +1056,11 @@ async fn multi_agent_v2_message_schemas_are_encrypted() {
         set_feature(turn, Feature::MultiAgentV2, /*enabled*/ true);
     })
     .await;
-    for tool_name in ["spawn_agent", "send_message", "followup_task"] {
+    for (tool_name, encrypted_property) in [
+        ("Agent", "prompt"),
+        ("SendMessage", "message"),
+        ("followup_task", "message"),
+    ] {
         let ToolSpec::Function(tool) = plan.visible_spec(tool_name) else {
             panic!("expected {tool_name} function spec");
         };
@@ -1060,7 +1071,7 @@ async fn multi_agent_v2_message_schemas_are_encrypted() {
             .expect("tool should use object params");
         assert_eq!(
             properties
-                .get("message")
+                .get(encrypted_property)
                 .and_then(|schema| schema.encrypted),
             Some(true)
         );
@@ -1090,7 +1101,7 @@ async fn v1_multi_agent_tools_defer_when_tool_search_available() {
     })
     .await;
 
-    plan.assert_visible_contains(&["tool_search"]);
+    plan.assert_visible_contains(&["ToolSearch"]);
     plan.assert_visible_lacks(&[
         "spawn_agent",
         "send_input",
@@ -1120,10 +1131,13 @@ async fn v1_multi_agent_tools_defer_when_tool_search_available() {
         );
         assert_eq!(plan.exposure(&namespaced_tool_name), ToolExposure::Deferred);
     }
-    let ToolSpec::ToolSearch { description, .. } = plan.visible_spec("tool_search") else {
-        panic!("expected visible tool_search spec");
+    let ToolSpec::Function(tool) = plan.visible_spec("ToolSearch") else {
+        panic!("expected visible ToolSearch function spec");
     };
-    assert!(description.contains("- Multi-agent tools: Spawn and manage sub-agents."));
+    assert!(
+        tool.description
+            .contains("- Multi-agent tools: Spawn and manage sub-agents.")
+    );
 }
 
 #[tokio::test]
@@ -1315,11 +1329,11 @@ async fn hosted_tools_follow_provider_auth_model_and_config_gates() {
             codex_code_mode::PUBLIC_TOOL_NAME,
             codex_code_mode::WAIT_TOOL_NAME,
             // Multi-agent v2 tools.
-            "spawn_agent",
-            "send_message",
+            "Agent",
+            "SendMessage",
             "followup_task",
             "wait_agent",
-            "interrupt_agent",
+            "TaskStop",
             "list_agents",
             // Hosted Responses tools.
             "web_search",

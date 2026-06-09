@@ -64,9 +64,24 @@ use codex_protocol::openai_models::ToolMode;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
+use codex_tools::AGENT_TOOL_NAME;
+use codex_tools::ASK_USER_QUESTION_TOOL_NAME;
+use codex_tools::BASH_TOOL_NAME;
 use codex_tools::DiscoverableTool;
+use codex_tools::EDIT_TOOL_NAME;
+use codex_tools::GLOB_TOOL_NAME;
+use codex_tools::GREP_TOOL_NAME;
+use codex_tools::LIST_MCP_RESOURCES_TOOL_NAME;
+use codex_tools::MONITOR_TOOL_NAME;
+use codex_tools::READ_MCP_RESOURCE_TOOL_NAME;
+use codex_tools::READ_TOOL_NAME;
+use codex_tools::REQUEST_PERMISSIONS_TOOL_NAME;
 use codex_tools::ResponsesApiNamespace;
 use codex_tools::ResponsesApiNamespaceTool;
+use codex_tools::SEND_MESSAGE_TOOL_NAME;
+use codex_tools::TASK_STOP_TOOL_NAME;
+use codex_tools::TODO_WRITE_TOOL_NAME;
+use codex_tools::TOOL_SEARCH_FLAVOR_TOOL_NAME;
 use codex_tools::TOOL_SEARCH_TOOL_NAME;
 use codex_tools::ToolCall as ExtensionToolCall;
 use codex_tools::ToolEnvironmentMode;
@@ -76,10 +91,13 @@ use codex_tools::ToolOutput;
 use codex_tools::ToolSearchInfo;
 use codex_tools::ToolSpec;
 use codex_tools::UnifiedExecShellMode;
+use codex_tools::WRITE_TOOL_NAME;
+use codex_tools::astral_core_tool_by_name;
 use codex_tools::can_request_original_image_detail;
 use codex_tools::collect_code_mode_exec_prompt_tool_definitions;
 use codex_tools::collect_request_plugin_install_entries;
 use codex_tools::default_namespace_description;
+use codex_tools::parse_tool_input_schema_without_compaction;
 use codex_tools::request_user_input_available_modes;
 use codex_tools::shell_command_backend_for_features;
 use codex_tools::shell_type_for_model_and_features;
@@ -196,6 +214,11 @@ fn build_model_visible_specs_and_registry(
     } = planned_tools;
     let mut specs = Vec::new();
     let mut seen_tool_names = HashSet::new();
+    let registered_tool_names = runtimes
+        .iter()
+        .map(|runtime| runtime.tool_name())
+        .collect::<HashSet<_>>();
+    let mut seen_model_visible_names = HashSet::new();
     for runtime in &runtimes {
         let tool_name = runtime.tool_name();
         if !seen_tool_names.insert(tool_name.clone()) {
@@ -205,15 +228,22 @@ fn build_model_visible_specs_and_registry(
         if exposure.is_direct() && !is_hidden_by_code_mode_only(turn_context, &tool_name, exposure)
         {
             let spec = runtime.spec();
-            specs.push(spec_for_model_request(
-                turn_context,
-                exposure,
-                &tool_name,
-                spec,
-            ));
+            let spec = spec_for_model_request(turn_context, exposure, &tool_name, spec);
+            let spec = astral_spec_for_model_request(&tool_name, spec, &registered_tool_names);
+            push_model_visible_spec(&mut specs, &mut seen_model_visible_names, spec);
         }
     }
-    specs.extend(hosted_specs);
+    append_astral_file_search_specs(
+        turn_context,
+        &registered_tool_names,
+        &mut specs,
+        &mut seen_model_visible_names,
+    );
+    for spec in hosted_specs {
+        let tool_name = ToolName::plain(spec.name());
+        let spec = astral_spec_for_model_request(&tool_name, spec, &registered_tool_names);
+        push_model_visible_spec(&mut specs, &mut seen_model_visible_names, spec);
+    }
 
     let registry = ToolRegistry::from_tools(runtimes);
     let model_visible_specs = merge_into_namespaces(specs)
@@ -224,6 +254,164 @@ fn build_model_visible_specs_and_registry(
         .collect();
 
     (model_visible_specs, registry)
+}
+
+fn push_model_visible_spec(
+    specs: &mut Vec<ToolSpec>,
+    seen_names: &mut HashSet<String>,
+    spec: ToolSpec,
+) {
+    if matches!(spec, ToolSpec::Namespace(_)) {
+        specs.push(spec);
+        return;
+    }
+
+    if seen_names.insert(spec.name().to_string()) {
+        specs.push(spec);
+    }
+}
+
+fn append_astral_file_search_specs(
+    turn_context: &TurnContext,
+    registered_tool_names: &HashSet<ToolName>,
+    specs: &mut Vec<ToolSpec>,
+    seen_names: &mut HashSet<String>,
+) {
+    if matches!(
+        turn_context.tool_mode,
+        ToolMode::CodeMode | ToolMode::CodeModeOnly
+    ) {
+        return;
+    }
+
+    if !registered_tool_names.contains(&ToolName::plain("exec_command")) {
+        return;
+    }
+
+    for tool_name in [
+        READ_TOOL_NAME,
+        WRITE_TOOL_NAME,
+        EDIT_TOOL_NAME,
+        GLOB_TOOL_NAME,
+        GREP_TOOL_NAME,
+    ] {
+        push_model_visible_spec(specs, seen_names, astral_tool_spec(tool_name));
+    }
+}
+
+fn astral_spec_for_model_request(
+    tool_name: &ToolName,
+    spec: ToolSpec,
+    registered_tool_names: &HashSet<ToolName>,
+) -> ToolSpec {
+    if tool_name.namespace.is_some() {
+        return spec;
+    }
+
+    let astral_tool_name = match tool_name.name.as_str() {
+        "exec_command" => Some(BASH_TOOL_NAME),
+        "write_stdin" => Some(MONITOR_TOOL_NAME),
+        "shell_command" if registered_tool_names.contains(&ToolName::plain("exec_command")) => {
+            Some(BASH_TOOL_NAME)
+        }
+        "update_plan" => Some(TODO_WRITE_TOOL_NAME),
+        "request_user_input" => Some(ASK_USER_QUESTION_TOOL_NAME),
+        "request_permissions" => Some(REQUEST_PERMISSIONS_TOOL_NAME),
+        TOOL_SEARCH_TOOL_NAME => Some(TOOL_SEARCH_FLAVOR_TOOL_NAME),
+        "list_mcp_resources" => Some(LIST_MCP_RESOURCES_TOOL_NAME),
+        "read_mcp_resource" => Some(READ_MCP_RESOURCE_TOOL_NAME),
+        "spawn_agent" => Some(AGENT_TOOL_NAME),
+        "send_message" => Some(SEND_MESSAGE_TOOL_NAME),
+        "interrupt_agent" => Some(TASK_STOP_TOOL_NAME),
+        _ => None,
+    };
+
+    let Some(astral_tool_name) = astral_tool_name else {
+        return spec;
+    };
+
+    astral_tool_spec_from_source(astral_tool_name, &spec)
+}
+
+fn astral_tool_spec(name: &str) -> ToolSpec {
+    astral_tool_spec_from_source(
+        name,
+        /*source*/
+        &ToolSpec::ImageGeneration {
+            output_format: String::new(),
+        },
+    )
+}
+
+fn astral_tool_spec_from_source(name: &str, source: &ToolSpec) -> ToolSpec {
+    let tool = astral_core_tool_by_name(name).unwrap_or_else(|| {
+        panic!("astral core tool `{name}` should have a schema");
+    });
+    let mut parameters = parse_tool_input_schema_without_compaction(&tool.input_schema)
+        .unwrap_or_else(|err| panic!("astral core tool `{name}` schema should parse: {err}"));
+    propagate_sensitive_tool_schema_metadata(name, source, &mut parameters);
+    let description = source_description(source).map_or(tool.description.clone(), |source| {
+        if source.trim().is_empty() || source == tool.description {
+            tool.description.clone()
+        } else {
+            format!("{}\n\n{}", tool.description, source)
+        }
+    });
+    ToolSpec::Function(codex_tools::ResponsesApiTool {
+        name: tool.name,
+        description,
+        strict: false,
+        defer_loading: None,
+        parameters,
+        output_schema: None,
+    })
+}
+
+fn source_description(source: &ToolSpec) -> Option<&str> {
+    match source {
+        ToolSpec::Function(tool) => Some(tool.description.as_str()),
+        ToolSpec::ToolSearch { description, .. } => Some(description.as_str()),
+        ToolSpec::Namespace(_)
+        | ToolSpec::ImageGeneration { .. }
+        | ToolSpec::WebSearch { .. }
+        | ToolSpec::Freeform(_) => None,
+    }
+}
+
+fn propagate_sensitive_tool_schema_metadata(
+    astral_tool_name: &str,
+    source: &ToolSpec,
+    parameters: &mut codex_tools::JsonSchema,
+) {
+    let ToolSpec::Function(source_tool) = source else {
+        return;
+    };
+    let Some(source_properties) = source_tool.parameters.properties.as_ref() else {
+        return;
+    };
+    let Some(target_properties) = parameters.properties.as_mut() else {
+        return;
+    };
+    let source_message_encrypted = source_properties
+        .get("message")
+        .and_then(|schema| schema.encrypted);
+    if source_message_encrypted != Some(true) {
+        return;
+    }
+
+    match astral_tool_name {
+        AGENT_TOOL_NAME => {
+            if let Some(prompt) = target_properties.get_mut("prompt") {
+                prompt.encrypted = Some(true);
+            }
+        }
+        SEND_MESSAGE_TOOL_NAME => {
+            if let Some(message) = target_properties.get_mut("message") {
+                message.encrypted = Some(true);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn spec_for_model_request(

@@ -17,7 +17,7 @@ fn canonicalize_function(name: &str, arguments: Value) -> anyhow::Result<(ToolNa
 }
 
 #[test]
-fn canonicalizes_bash_to_shell_command() -> anyhow::Result<()> {
+fn canonicalizes_bash_to_unified_exec() -> anyhow::Result<()> {
     let (tool_name, arguments) = canonicalize_function(
         BASH_TOOL_NAME,
         json!({
@@ -28,16 +28,112 @@ fn canonicalizes_bash_to_shell_command() -> anyhow::Result<()> {
         }),
     )?;
 
-    assert_eq!(tool_name, ToolName::plain("shell_command"));
+    assert_eq!(tool_name, ToolName::plain("exec_command"));
     assert_eq!(
         arguments,
         json!({
-            "command": "npm test",
+            "cmd": "npm test",
             "workdir": "/workspace/app",
-            "timeout_ms": 120000,
+            "yield_time_ms": 120000,
             "description": "Run tests"
         })
     );
+    Ok(())
+}
+
+#[test]
+fn canonicalizes_monitor_to_write_stdin() -> anyhow::Result<()> {
+    let (tool_name, arguments) = canonicalize_function(
+        MONITOR_TOOL_NAME,
+        json!({
+            "shell_id": 42,
+            "chars": "y\n",
+            "yield_time_ms": 30000,
+            "max_output_tokens": 2000
+        }),
+    )?;
+
+    assert_eq!(tool_name, ToolName::plain("write_stdin"));
+    assert_eq!(
+        arguments,
+        json!({
+            "session_id": 42,
+            "chars": "y\n",
+            "yield_time_ms": 30000,
+            "max_output_tokens": 2000
+        })
+    );
+    Ok(())
+}
+
+#[test]
+fn canonicalizes_file_tools_to_unified_exec_commands() -> anyhow::Result<()> {
+    let (tool_name, arguments) = canonicalize_function(
+        READ_TOOL_NAME,
+        json!({ "file_path": "/workspace/src/lib.rs", "offset": 3, "limit": 5 }),
+    )?;
+    assert_eq!(tool_name, ToolName::plain("exec_command"));
+    let cmd = arguments["cmd"].as_str().expect("Read command");
+    assert!(cmd.contains("python3"));
+    assert!(cmd.contains("/workspace/src/lib.rs"));
+    assert!(cmd.contains(" 3 5"));
+
+    let (tool_name, arguments) = canonicalize_function(
+        WRITE_TOOL_NAME,
+        json!({ "file_path": "/workspace/notes.txt", "content": "hello world\n" }),
+    )?;
+    assert_eq!(tool_name, ToolName::plain("exec_command"));
+    let cmd = arguments["cmd"].as_str().expect("Write command");
+    assert!(cmd.contains("python3"));
+    assert!(cmd.contains("/workspace/notes.txt"));
+    assert!(cmd.contains("hello world"));
+
+    let (tool_name, arguments) = canonicalize_function(
+        EDIT_TOOL_NAME,
+        json!({
+            "file_path": "/workspace/notes.txt",
+            "old_string": "hello",
+            "new_string": "goodbye",
+            "replace_all": true
+        }),
+    )?;
+    assert_eq!(tool_name, ToolName::plain("exec_command"));
+    let cmd = arguments["cmd"].as_str().expect("Edit command");
+    assert!(cmd.contains("/workspace/notes.txt"));
+    assert!(cmd.contains("goodbye"));
+    assert!(cmd.ends_with(" true"));
+    Ok(())
+}
+
+#[test]
+fn canonicalizes_search_tools_to_unified_exec_commands() -> anyhow::Result<()> {
+    let (tool_name, arguments) = canonicalize_function(
+        GLOB_TOOL_NAME,
+        json!({ "pattern": "**/*.rs", "path": "/workspace" }),
+    )?;
+    assert_eq!(tool_name, ToolName::plain("exec_command"));
+    let cmd = arguments["cmd"].as_str().expect("Glob command");
+    assert!(cmd.contains("python3"));
+    assert!(cmd.contains("/workspace"));
+    assert!(cmd.contains("**/*.rs"));
+
+    let (tool_name, arguments) = canonicalize_function(
+        GREP_TOOL_NAME,
+        json!({
+            "pattern": "struct .*Args",
+            "path": "/workspace",
+            "glob": "*.rs",
+            "output_mode": "content",
+            "-n": true,
+            "-C": 2,
+            "head_limit": 10
+        }),
+    )?;
+    assert_eq!(tool_name, ToolName::plain("exec_command"));
+    let cmd = arguments["cmd"].as_str().expect("Grep command");
+    assert!(cmd.contains("python3"));
+    assert!(cmd.contains("struct .*Args"));
+    assert!(cmd.contains("head_limit"));
     Ok(())
 }
 

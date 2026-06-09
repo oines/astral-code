@@ -29,6 +29,7 @@ pub use astral_flavor::EDIT_TOOL_NAME;
 pub use astral_flavor::GLOB_TOOL_NAME;
 pub use astral_flavor::GREP_TOOL_NAME;
 pub use astral_flavor::LIST_MCP_RESOURCES_TOOL_NAME;
+pub use astral_flavor::MONITOR_TOOL_NAME;
 pub use astral_flavor::READ_MCP_RESOURCE_TOOL_NAME;
 pub use astral_flavor::READ_TOOL_NAME;
 pub use astral_flavor::REQUEST_PERMISSIONS_TOOL_NAME;

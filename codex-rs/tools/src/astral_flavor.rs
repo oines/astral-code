@@ -11,6 +11,7 @@ pub const EDIT_TOOL_NAME: &str = "Edit";
 pub const GLOB_TOOL_NAME: &str = "Glob";
 pub const GREP_TOOL_NAME: &str = "Grep";
 pub const LIST_MCP_RESOURCES_TOOL_NAME: &str = "ListMcpResourcesTool";
+pub const MONITOR_TOOL_NAME: &str = "Monitor";
 pub const READ_MCP_RESOURCE_TOOL_NAME: &str = "ReadMcpResourceTool";
 pub const READ_TOOL_NAME: &str = "Read";
 pub const REQUEST_PERMISSIONS_TOOL_NAME: &str = "RequestPermissions";
@@ -29,6 +30,7 @@ pub const ASTRAL_CORE_TOOL_NAMES: &[&str] = &[
     GLOB_TOOL_NAME,
     GREP_TOOL_NAME,
     LIST_MCP_RESOURCES_TOOL_NAME,
+    MONITOR_TOOL_NAME,
     READ_MCP_RESOURCE_TOOL_NAME,
     READ_TOOL_NAME,
     REQUEST_PERMISSIONS_TOOL_NAME,
@@ -56,6 +58,7 @@ pub fn astral_core_tool_by_name(name: &str) -> Option<AgentTool> {
         GLOB_TOOL_NAME => Some(glob_tool()),
         GREP_TOOL_NAME => Some(grep_tool()),
         LIST_MCP_RESOURCES_TOOL_NAME => Some(list_mcp_resources_tool()),
+        MONITOR_TOOL_NAME => Some(monitor_tool()),
         READ_MCP_RESOURCE_TOOL_NAME => Some(read_mcp_resource_tool()),
         READ_TOOL_NAME => Some(read_tool()),
         REQUEST_PERMISSIONS_TOOL_NAME => Some(request_permissions_tool()),
@@ -80,6 +83,10 @@ fn bash_tool() -> AgentTool {
                 string_property(
                     "description",
                     "Clear, concise description of what this command does in active voice",
+                ),
+                string_property(
+                    "environment_id",
+                    "Optional target execution environment id when multiple environments exist",
                 ),
                 bool_property(
                     "run_in_background",
@@ -274,6 +281,25 @@ fn task_stop_tool() -> AgentTool {
                 string_property("shell_id", "Deprecated alias for task_id"),
             ],
             [],
+        ),
+    )
+}
+
+fn monitor_tool() -> AgentTool {
+    tool(
+        MONITOR_TOOL_NAME,
+        "Poll or write to a running background Bash command.",
+        object(
+            [
+                integer_property("session_id", "The running Bash session id"),
+                string_property("chars", "Optional stdin bytes to write before polling"),
+                integer_property(
+                    "yield_time_ms",
+                    "Milliseconds to wait for fresh output before returning",
+                ),
+                integer_property("max_output_tokens", "Maximum output tokens to return"),
+            ],
+            ["session_id"],
         ),
     )
 }
