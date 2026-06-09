@@ -1,8 +1,6 @@
 #[cfg(unix)]
 use std::process::Command as StdCommand;
 #[cfg(unix)]
-use std::process::Stdio;
-#[cfg(unix)]
 use std::time::Duration;
 
 #[cfg(unix)]
@@ -14,10 +12,6 @@ use anyhow::bail;
 use futures::FutureExt;
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
-#[cfg(unix)]
-use tokio::io::AsyncWriteExt;
-#[cfg(unix)]
-use tokio::process::Command;
 #[cfg(unix)]
 use tokio::signal::unix::Signal;
 #[cfg(unix)]
@@ -147,7 +141,7 @@ pub(crate) fn reexec_managed_updater(managed_codex_bin: &std::path::Path) -> Res
         .exec();
     Err(err).with_context(|| {
         format!(
-            "failed to replace updater with managed Codex binary {}",
+            "failed to replace updater with managed Astral binary {}",
             managed_codex_bin.display()
         )
     })
@@ -155,41 +149,7 @@ pub(crate) fn reexec_managed_updater(managed_codex_bin: &std::path::Path) -> Res
 
 #[cfg(unix)]
 async fn install_latest_standalone() -> Result<()> {
-    let script = reqwest::get("https://chatgpt.com/codex/install.sh")
-        .await
-        .context("failed to fetch standalone Codex updater")?
-        .error_for_status()
-        .context("standalone Codex updater request failed")?
-        .bytes()
-        .await
-        .context("failed to read standalone Codex updater")?;
-
-    let mut child = Command::new("/bin/sh")
-        .arg("-s")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .context("failed to invoke standalone Codex updater")?;
-    let mut stdin = child
-        .stdin
-        .take()
-        .context("standalone Codex updater stdin was unavailable")?;
-    stdin
-        .write_all(&script)
-        .await
-        .context("failed to pass standalone Codex updater to shell")?;
-    drop(stdin);
-    let status = child
-        .wait()
-        .await
-        .context("failed to wait for standalone Codex updater")?;
-
-    if status.success() {
-        Ok(())
-    } else {
-        anyhow::bail!("standalone Codex updater exited with status {status}")
-    }
+    anyhow::bail!("managed standalone auto-update is disabled in astral-code")
 }
 
 #[cfg(all(test, unix))]

@@ -75,7 +75,6 @@ use codex_features::Stage;
 use codex_features::is_known_feature_key;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
-use codex_login::read_codex_access_token_from_env;
 use codex_memories_write::clear_memory_roots_contents;
 use codex_models_manager::bundled_models_response;
 use codex_models_manager::manager::RefreshStrategy;
@@ -561,7 +560,7 @@ struct ExecServerCommand {
     #[arg(long = "name", value_name = "NAME")]
     name: Option<String>,
 
-    /// Use Agent Identity auth from CODEX_ACCESS_TOKEN for remote registration.
+    /// Deprecated: Agent Identity auth is disabled in Astral.
     #[arg(long = "use-agent-identity-auth", requires = "remote")]
     use_agent_identity_auth: bool,
 }
@@ -1659,24 +1658,20 @@ async fn load_exec_server_remote_auth_provider(
     use_agent_identity_auth: bool,
 ) -> anyhow::Result<codex_api::SharedAuthProvider> {
     if use_agent_identity_auth {
-        let agent_identity_jwt = read_codex_access_token_from_env().ok_or_else(|| {
-            anyhow::anyhow!("CODEX_ACCESS_TOKEN is required when --use-agent-identity-auth is set")
-        })?;
-        let auth =
-            CodexAuth::from_agent_identity_jwt(&agent_identity_jwt, Some(&config.chatgpt_base_url))
-                .await?;
-        return Ok(codex_model_provider::auth_provider_from_auth(&auth));
+        anyhow::bail!(
+            "Agent Identity auth is not available in Astral; use API-key auth with ASTRAL_API_KEY"
+        );
     }
 
     let auth = load_exec_server_remote_auth(
         config,
-        "remote exec-server registration requires ChatGPT authentication or API key authentication; run `astral login` or set ASTRAL_API_KEY",
+        "remote exec-server registration requires API-key authentication; run `astral login --with-api-key` or set ASTRAL_API_KEY",
     )
     .await?;
 
     if !is_supported_exec_server_remote_auth(&auth) {
         anyhow::bail!(
-            "remote exec-server registration requires ChatGPT authentication or API key authentication; Agent Identity auth requires --use-agent-identity-auth"
+            "remote exec-server registration requires API-key authentication; ChatGPT and Agent Identity auth are disabled in Astral"
         );
     }
 
@@ -1688,7 +1683,7 @@ async fn load_exec_server_remote_auth_provider(
 }
 
 fn is_supported_exec_server_remote_auth(auth: &CodexAuth) -> bool {
-    auth.is_chatgpt_auth() || auth.is_api_key_auth()
+    auth.is_api_key_auth()
 }
 
 fn validate_api_key_remote_host(base_url: &str) -> anyhow::Result<()> {
@@ -1703,22 +1698,15 @@ fn validate_api_key_remote_host(base_url: &str) -> anyhow::Result<()> {
         url::Host::Ipv4(ip) => ip.is_loopback(),
         url::Host::Ipv6(ip) => ip.is_loopback(),
     };
-    let is_openai_host = match &host {
-        url::Host::Domain(host) => ["openai.com", "openai.org"].into_iter().any(|domain| {
-            host.eq_ignore_ascii_case(domain)
-                || host.to_ascii_lowercase().ends_with(&format!(".{domain}"))
-        }),
-        _ => false,
-    };
     let is_allowed = match url.scheme() {
-        "https" => is_loopback || is_openai_host,
+        "https" => true,
         "http" => is_loopback,
         _ => false,
     };
 
     if !is_allowed {
         anyhow::bail!(
-            "remote exec-server API-key authentication is restricted to HTTPS openai.com and openai.org hosts and subdomains or loopback hosts"
+            "remote exec-server API-key authentication requires HTTPS or a loopback HTTP host"
         );
     }
 
@@ -2415,12 +2403,18 @@ mod tests {
     }
 
     #[test]
-    fn exec_server_remote_api_key_auth_accepts_https_openai_domains() {
+    fn exec_server_remote_auth_rejects_chatgpt_auth() {
+        let auth = CodexAuth::create_dummy_chatgpt_auth_for_testing();
+
+        assert!(!is_supported_exec_server_remote_auth(&auth));
+    }
+
+    #[test]
+    fn exec_server_remote_api_key_auth_accepts_https_hosts() {
         for base_url in [
-            "https://openai.com/api",
-            "https://service.openai.com/api",
-            "https://openai.org/api",
-            "https://service.openai.org/api",
+            "https://api.deepseek.com/v1",
+            "https://gateway.example/api",
+            "https://service.openai.org.evil.example/api",
         ] {
             assert!(validate_api_key_remote_host(base_url).is_ok());
         }
@@ -2438,29 +2432,24 @@ mod tests {
     }
 
     #[test]
-    fn exec_server_remote_api_key_auth_rejects_http_openai_domain() {
-        for base_url in [
-            "http://service.openai.com/api",
-            "http://service.openai.org/api",
-        ] {
-            let error = validate_api_key_remote_host(base_url)
-                .expect_err("reject plaintext OpenAI destination");
-
-            assert_eq!(
-                error.to_string(),
-                "remote exec-server API-key authentication is restricted to HTTPS openai.com and openai.org hosts and subdomains or loopback hosts"
-            );
-        }
-    }
-
-    #[test]
-    fn exec_server_remote_api_key_auth_rejects_suffix_spoof() {
-        let error = validate_api_key_remote_host("https://service.openai.org.evil.example/api")
-            .expect_err("reject suffix spoof");
+    fn exec_server_remote_api_key_auth_rejects_public_http_host() {
+        let error = validate_api_key_remote_host("http://gateway.example/api")
+            .expect_err("reject plaintext remote destination");
 
         assert_eq!(
             error.to_string(),
-            "remote exec-server API-key authentication is restricted to HTTPS openai.com and openai.org hosts and subdomains or loopback hosts"
+            "remote exec-server API-key authentication requires HTTPS or a loopback HTTP host"
+        );
+    }
+
+    #[test]
+    fn exec_server_remote_api_key_auth_rejects_unsupported_scheme() {
+        let error =
+            validate_api_key_remote_host("ws://gateway.example/api").expect_err("reject scheme");
+
+        assert_eq!(
+            error.to_string(),
+            "remote exec-server API-key authentication requires HTTPS or a loopback HTTP host"
         );
     }
 
