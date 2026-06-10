@@ -15,20 +15,23 @@ use serde::Serialize;
 use strum_macros::Display;
 use ts_rs::TS;
 
-/// Authentication mode for OpenAI-backed providers.
+/// Authentication mode for Astral-managed credentials.
+///
+/// Astral actively supports API-key auth. Token-backed variants are retained
+/// only so legacy payloads can be identified and rejected cleanly.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Display, JsonSchema, TS)]
 #[serde(rename_all = "lowercase")]
 pub enum AuthMode {
-    /// OpenAI API key provided by the caller and stored by Codex.
+    /// Provider API key supplied by the caller and stored locally.
     ApiKey,
-    /// ChatGPT OAuth managed by Codex (tokens persisted and refreshed by Codex).
+    /// Legacy ChatGPT OAuth mode; not accepted by Astral.
     Chatgpt,
-    /// Programmatic Codex auth backed by a registered Agent Identity.
+    /// Legacy Agent Identity mode; not accepted by Astral.
     #[serde(rename = "agentIdentity")]
     #[ts(rename = "agentIdentity")]
     #[strum(serialize = "agentIdentity")]
     AgentIdentity,
-    /// Programmatic Codex auth backed by a personal access token.
+    /// Legacy personal access token mode; not accepted by Astral.
     #[serde(rename = "personalAccessToken")]
     #[ts(rename = "personalAccessToken")]
     #[strum(serialize = "personalAccessToken")]
@@ -36,7 +39,7 @@ pub enum AuthMode {
 }
 
 impl AuthMode {
-    /// Returns whether this mode represents an authenticated human ChatGPT account.
+    /// Returns whether this legacy mode represented a human ChatGPT account.
     pub fn has_chatgpt_account(self) -> bool {
         match self {
             Self::Chatgpt | Self::PersonalAccessToken => true,

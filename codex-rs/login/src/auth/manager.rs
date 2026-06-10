@@ -17,8 +17,6 @@ use std::sync::atomic::Ordering;
 use tokio::sync::Semaphore;
 use tokio::sync::watch;
 
-use codex_agent_identity::decode_agent_identity_jwt;
-use codex_agent_identity::fetch_agent_identity_jwks;
 use codex_app_server_protocol::AuthMode;
 use codex_app_server_protocol::AuthMode as ApiAuthMode;
 use codex_protocol::config_types::ModelProviderAuthInfo;
@@ -32,7 +30,6 @@ pub use crate::auth::storage::AuthDotJson;
 use crate::auth::storage::AuthStorageBackend;
 use crate::auth::storage::create_auth_storage;
 use crate::auth::util::try_parse_error_message;
-use crate::default_client::build_reqwest_client;
 use crate::default_client::create_client;
 use crate::token_data::TokenData;
 use crate::token_data::parse_chatgpt_jwt_claims;
@@ -91,7 +88,6 @@ const REFRESH_TOKEN_UNKNOWN_MESSAGE: &str =
 const REFRESH_TOKEN_ACCOUNT_MISMATCH_MESSAGE: &str = "Your access token could not be refreshed because you have since logged out or signed in to another account. Please sign in again.";
 const UNSUPPORTED_OPENAI_AUTH_MESSAGE: &str =
     "Stored OpenAI/ChatGPT credentials are not supported by Astral. Use API key auth instead.";
-const DEFAULT_CHATGPT_BACKEND_BASE_URL: &str = "https://chatgpt.com/backend-api";
 const REFRESH_TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
 pub(super) const REVOKE_TOKEN_URL: &str = "https://auth.openai.com/oauth/revoke";
 pub const REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR: &str = "CODEX_REFRESH_TOKEN_URL_OVERRIDE";
@@ -210,20 +206,17 @@ impl CodexAuth {
     }
 
     pub async fn from_agent_identity_jwt(
-        jwt: &str,
-        chatgpt_base_url: Option<&str>,
+        _jwt: &str,
+        _chatgpt_base_url: Option<&str>,
     ) -> std::io::Result<Self> {
-        let base_url = chatgpt_base_url
-            .unwrap_or(DEFAULT_CHATGPT_BACKEND_BASE_URL)
-            .trim_end_matches('/')
-            .to_string();
-        let record = verified_agent_identity_record(jwt, &base_url).await?;
-        Ok(Self::AgentIdentity(AgentIdentityAuth::load(record).await?))
+        Err(std::io::Error::other(
+            UNSUPPORTED_OPENAI_AUTH_MESSAGE.to_string(),
+        ))
     }
 
-    pub async fn from_personal_access_token(access_token: &str) -> std::io::Result<Self> {
-        Ok(Self::PersonalAccessToken(
-            PersonalAccessTokenAuth::load(access_token).await?,
+    pub async fn from_personal_access_token(_access_token: &str) -> std::io::Result<Self> {
+        Err(std::io::Error::other(
+            UNSUPPORTED_OPENAI_AUTH_MESSAGE.to_string(),
         ))
     }
 
@@ -449,18 +442,6 @@ fn read_non_empty_env_var(key: &str) -> Option<String> {
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
-}
-
-async fn verified_agent_identity_record(
-    jwt: &str,
-    chatgpt_base_url: &str,
-) -> std::io::Result<AgentIdentityAuthRecord> {
-    AgentIdentityAuthRecord::from_agent_identity_jwt(jwt)?;
-    let jwks = fetch_agent_identity_jwks(&build_reqwest_client(), chatgpt_base_url)
-        .await
-        .map_err(std::io::Error::other)?;
-    let claims = decode_agent_identity_jwt(jwt, Some(&jwks)).map_err(std::io::Error::other)?;
-    Ok(claims.into())
 }
 
 /// Delete the auth.json file inside `codex_home` if it exists. Returns `Ok(true)`
@@ -726,13 +707,19 @@ impl AuthDotJson {
         if let Some(mode) = self.auth_mode {
             return mode;
         }
-        if self.personal_access_token.is_some() {
-            return ApiAuthMode::PersonalAccessToken;
-        }
         if self.openai_api_key.is_some() {
             return ApiAuthMode::ApiKey;
         }
-        ApiAuthMode::Chatgpt
+        if self.personal_access_token.is_some() {
+            return ApiAuthMode::PersonalAccessToken;
+        }
+        if self.agent_identity.is_some() {
+            return ApiAuthMode::AgentIdentity;
+        }
+        if self.tokens.is_some() {
+            return ApiAuthMode::Chatgpt;
+        }
+        ApiAuthMode::ApiKey
     }
 }
 

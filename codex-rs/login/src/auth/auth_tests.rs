@@ -1,11 +1,7 @@
 use super::*;
 use crate::auth::storage::FileAuthStorage;
 use crate::auth::storage::get_auth_file;
-use crate::token_data::IdTokenInfo;
 use codex_app_server_protocol::AuthMode;
-use codex_protocol::account::PlanType as AccountPlanType;
-use codex_protocol::auth::KnownPlan as InternalKnownPlan;
-use codex_protocol::auth::PlanType as InternalPlanType;
 
 use base64::Engine;
 use codex_protocol::config_types::ModelProviderAuthInfo;
@@ -15,13 +11,6 @@ use serde_json::json;
 use std::sync::Arc;
 use tempfile::TempDir;
 use tempfile::tempdir;
-use wiremock::Mock;
-use wiremock::MockServer;
-use wiremock::ResponseTemplate;
-use wiremock::matchers::method;
-use wiremock::matchers::path;
-
-const WORKSPACE_ID_ALLOWED: &str = "123e4567-e89b-42d3-a456-426614174000";
 
 #[tokio::test]
 async fn refresh_without_id_token() {
@@ -100,9 +89,9 @@ async fn missing_auth_json_returns_none() {
 
 #[tokio::test]
 #[serial(codex_auth_env)]
-async fn pro_account_with_no_api_key_uses_chatgpt_auth() {
+async fn stored_chatgpt_auth_without_api_key_is_rejected() {
     let codex_home = tempdir().unwrap();
-    let fake_jwt = write_auth_file(
+    write_auth_file(
         AuthFileParams {
             openai_api_key: None,
             chatgpt_plan_type: Some("pro".to_string()),
@@ -112,49 +101,16 @@ async fn pro_account_with_no_api_key_uses_chatgpt_auth() {
     )
     .expect("failed to write auth file");
 
-    let auth = super::load_auth(
+    let err = super::load_auth(
         codex_home.path(),
         /*enable_codex_api_key_env*/ false,
         AuthCredentialsStoreMode::File,
         /*chatgpt_base_url*/ None,
     )
     .await
-    .unwrap()
-    .unwrap();
-    assert_eq!(None, auth.api_key());
-    assert_eq!(AuthMode::Chatgpt, auth.auth_mode());
-    assert_eq!(auth.get_chatgpt_user_id().as_deref(), Some("user-12345"));
+    .expect_err("stored ChatGPT auth should be rejected");
 
-    let auth_dot_json = auth
-        .get_current_auth_json()
-        .expect("AuthDotJson should exist");
-    let last_refresh = auth_dot_json
-        .last_refresh
-        .expect("last_refresh should be recorded");
-
-    assert_eq!(
-        AuthDotJson {
-            auth_mode: None,
-            openai_api_key: None,
-            tokens: Some(TokenData {
-                id_token: IdTokenInfo {
-                    email: Some("user@example.com".to_string()),
-                    chatgpt_plan_type: Some(InternalPlanType::Known(InternalKnownPlan::Pro)),
-                    chatgpt_user_id: Some("user-12345".to_string()),
-                    chatgpt_account_id: None,
-                    chatgpt_account_is_fedramp: false,
-                    raw_jwt: fake_jwt,
-                },
-                access_token: "test-access-token".to_string(),
-                refresh_token: "test-refresh-token".to_string(),
-                account_id: None,
-            }),
-            last_refresh: Some(last_refresh),
-            agent_identity: None,
-            personal_access_token: None,
-        },
-        auth_dot_json
-    );
+    assert_eq!(err.to_string(), UNSUPPORTED_OPENAI_AUTH_MESSAGE);
 }
 
 #[tokio::test]
@@ -229,58 +185,6 @@ async fn unauthorized_recovery_reports_mode_and_step_names() {
     };
     assert_eq!(external.mode_name(), "external");
     assert_eq!(external.step_name(), "external_refresh");
-}
-
-#[tokio::test]
-#[serial(codex_auth_env)]
-async fn refresh_failure_is_scoped_to_the_matching_auth_snapshot() {
-    let codex_home = tempdir().unwrap();
-    write_auth_file(
-        AuthFileParams {
-            openai_api_key: None,
-            chatgpt_plan_type: Some("pro".to_string()),
-            chatgpt_account_id: Some(WORKSPACE_ID_ALLOWED.to_string()),
-        },
-        codex_home.path(),
-    )
-    .expect("failed to write auth file");
-
-    let auth = super::load_auth(
-        codex_home.path(),
-        /*enable_codex_api_key_env*/ false,
-        AuthCredentialsStoreMode::File,
-        /*chatgpt_base_url*/ None,
-    )
-    .await
-    .expect("load auth")
-    .expect("auth available");
-    let mut updated_auth_dot_json = auth
-        .get_current_auth_json()
-        .expect("AuthDotJson should exist");
-    let updated_tokens = updated_auth_dot_json
-        .tokens
-        .as_mut()
-        .expect("tokens should exist");
-    updated_tokens.access_token = "new-access-token".to_string();
-    updated_tokens.refresh_token = "new-refresh-token".to_string();
-    let updated_auth = CodexAuth::from_auth_dot_json(
-        codex_home.path(),
-        updated_auth_dot_json,
-        AuthCredentialsStoreMode::File,
-        /*chatgpt_base_url*/ None,
-    )
-    .await
-    .expect("updated auth should parse");
-
-    let manager = AuthManager::from_auth_for_testing(auth.clone());
-    let error = RefreshTokenFailedError::new(
-        RefreshTokenFailedReason::Exhausted,
-        "refresh token already used",
-    );
-    manager.record_permanent_refresh_failure_if_unchanged(&auth, &error);
-
-    assert_eq!(manager.refresh_failure_for_auth(&auth), Some(error));
-    assert_eq!(manager.refresh_failure_for_auth(&updated_auth), None);
 }
 
 #[tokio::test]
@@ -581,36 +485,6 @@ impl Drop for EnvVarGuard {
 
 #[tokio::test]
 #[serial(codex_auth_env)]
-async fn personal_access_token_does_not_offer_unauthorized_recovery() {
-    let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/v1/user-auth-credential/whoami"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_json(personal_access_token_whoami(WORKSPACE_ID_ALLOWED)),
-        )
-        .expect(1)
-        .mount(&server)
-        .await;
-    let _authapi_guard = EnvVarGuard::set("CODEX_AUTHAPI_BASE_URL", &server.uri());
-    let auth = CodexAuth::from_personal_access_token("at-no-unauthorized-recovery")
-        .await
-        .expect("personal access token should load");
-    let manager = AuthManager::from_auth_for_testing(auth);
-
-    let recovery = manager.unauthorized_recovery();
-
-    assert!(!recovery.has_next());
-    assert_eq!(recovery.unavailable_reason(), "not_refreshable_auth");
-    manager
-        .refresh_token_from_authority()
-        .await
-        .expect("personal access tokens do not use OAuth refresh");
-    server.verify().await;
-}
-
-#[tokio::test]
-#[serial(codex_auth_env)]
 async fn load_auth_keeps_astral_api_key_env_precedence() {
     let codex_home = tempdir().unwrap();
     let _api_key_guard = EnvVarGuard::set(ASTRAL_API_KEY_ENV_VAR, "sk-env");
@@ -626,280 +500,4 @@ async fn load_auth_keeps_astral_api_key_env_precedence() {
     .expect("env auth should be present");
 
     assert_eq!(auth.api_key(), Some("sk-env"));
-}
-
-fn agent_identity_record(account_id: &str) -> AgentIdentityAuthRecord {
-    let key_material =
-        codex_agent_identity::generate_agent_key_material().expect("generate agent key material");
-    AgentIdentityAuthRecord {
-        agent_runtime_id: "agent-runtime-id".to_string(),
-        agent_private_key: key_material.private_key_pkcs8_base64,
-        account_id: account_id.to_string(),
-        chatgpt_user_id: "user-id".to_string(),
-        email: "user@example.com".to_string(),
-        plan_type: AccountPlanType::Pro,
-        chatgpt_account_is_fedramp: false,
-    }
-}
-
-fn signed_agent_identity_jwt(
-    record: &AgentIdentityAuthRecord,
-    plan_type: serde_json::Value,
-) -> jsonwebtoken::errors::Result<String> {
-    let mut header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::RS256);
-    header.kid = Some("test-key".to_string());
-    jsonwebtoken::encode(
-        &header,
-        &json!({
-            "iss": "https://chatgpt.com/codex-backend/agent-identity",
-            "aud": "codex-app-server",
-            "iat": 1_700_000_000usize,
-            "exp": 4_000_000_000usize,
-            "agent_runtime_id": record.agent_runtime_id,
-            "agent_private_key": record.agent_private_key,
-            "account_id": record.account_id,
-            "chatgpt_user_id": record.chatgpt_user_id,
-            "email": record.email,
-            "plan_type": plan_type,
-            "chatgpt_account_is_fedramp": record.chatgpt_account_is_fedramp,
-        }),
-        &jsonwebtoken::EncodingKey::from_rsa_pem(TEST_AGENT_IDENTITY_RSA_PRIVATE_KEY_PEM)?,
-    )
-}
-
-fn test_jwks_body() -> serde_json::Value {
-    json!({
-        "keys": [{
-            "kty": "RSA",
-            "kid": "test-key",
-            "use": "sig",
-            "alg": "RS256",
-            "n": "1qQF2MqTrGAMDm7wXbjJP5sWqGA83tAGUs2ksy7iJXLJdhCg4AtwGm4SFl4f6kxhCSzlN1QdXuZjvRT2wZZiGUi9xUE28rf4WLrTxSnwqLuTy5knMP08yC0t_0YU_FGPZMcWb14hG05IvZr8UbmRaVagxSR8H4rSIymRoVwwmFSrqz068XrWGSYNIfLEASyo5GdAaqmk1JALINHgYGQJVxMxtwcvDxoVKmC7eltUNymMNBZhsv4E8sx9YNLpBoEibznfEpDU_DGzrM5eZCsQzaqbhBOlGd427ifud_Nnd9cPqzgCUc23-0FXSPfpbgksCXAwAmD0OFjQWrgqVdKL6Q",
-            "e": "AQAB",
-        }]
-    })
-}
-
-fn personal_access_token_whoami(account_id: &str) -> serde_json::Value {
-    json!({
-        "email": "user@example.com",
-        "chatgpt_user_id": "user-123",
-        "chatgpt_account_id": account_id,
-        "chatgpt_plan_type": "business",
-        "chatgpt_account_is_fedramp": true,
-    })
-}
-
-const TEST_AGENT_IDENTITY_RSA_PRIVATE_KEY_PEM: &[u8] = br#"-----BEGIN PRIVATE KEY-----
-MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDWpAXYypOsYAwO
-bvBduMk/mxaoYDze0AZSzaSzLuIlcsl2EKDgC3AabhIWXh/qTGEJLOU3VB1e5mO9
-FPbBlmIZSL3FQTbyt/hYutPFKfCou5PLmScw/TzILS3/RhT8UY9kxxZvXiEbTki9
-mvxRuZFpVqDFJHwfitIjKZGhXDCYVKurPTrxetYZJg0h8sQBLKjkZ0BqqaTUkAsg
-0eBgZAlXEzG3By8PGhUqYLt6W1Q3KYw0FmGy/gTyzH1g0ukGgSJvOd8SkNT8MbOs
-zl5kKxDNqpuEE6UZ3jbuJ+5382d31w+rOAJRzbf7QVdI9+luCSwJcDACYPQ4WNBa
-uCpV0ovpAgMBAAECggEAVu84LwZdqYN9XpswX8VoPYrjMm9IODapWQBRpQFoNyK2
-1ksF3bjEPvA2Azk8U/l7k+vLKw22l6lY3EyRZPcz5GnB8xLm3ogE3mtNOp4yCyVu
-RxhQ91aaN7mU17/a4BdorLi2LYVCg3zBmYociD1Q2AluNGsCmwPu+K7tfR2J0Sg8
-NjqiTbDG1XDpR/icwgC9t6vh8lZpCHDhF4tbQfLLVLeA/OdcuzXDyMCXbmdVIdBQ
-rm4aIFmr2e1/2ctTbCg85S6AGFTH+pSLjrwTzyvf+F6NW5uNjLQAQLFj+EznBDxj
-Xdx90cySrjsKK6PVWQF4RiTvkSW8eWL7R6B2FZbGwQKBgQDuVQRj72hWloR7mbEL
-aUEEv3pIXTMXWEsoMBNczos/1L1RnAN1AI44TurznasPZAWvQj+kVbLDR+TAeZrL
-iA8HIWswQUI18hFmgKzSkwIXGtubcKVrgsKeS4lMDKCM/Ef6WAYdeq6ronoY5lCN
-YrJFmGp81W5zcV7lyiycgbSiGwKBgQDmjWYf6pZjrK7Z+OJ3X1AZfi2vss15SCvL
-3fPgzIDbViztpGyQhc3DQZIsBNIu0xZp/veGce9TEeTds2ro9NfdJFeou8+fC7Pq
-sOsM3amGFFi+ZW/9BWyjZEM88bgWWAjqLHbpfHDxjAf5CSxddqxgHlbP0Ytyb1Vg
-gmPDn9YKSwKBgQDbTi3hC35WFuDHn0/zcSHcDZmnFuOZeqyFyV83yfMGhGrEuqvP
-sPgtRikajJ3IZsB4WZyYSidZXEFY/0z6NjOl2xF38MTNQPbT/FmK1q1Yt2UWrlv5
-BvSwlk87RG9D7C0LZo4R+D7cPoDdgqjiwMvMEIkEX5zn641oI1ZTmWKuuwKBgQCD
-KF+3unnRvHRAVoFnTZbA2fJdqMeRvogD04GhGlYX8V9f1hFY6nXTJaNlXVzA/J8c
-r8ra9kgjJuPfZ+ljG58OFFW2DRohLcQtuHYPfK6rMzoFHqnl9EcIcMp7ijuionR3
-29HOJFgQYgxLFXfit9d6WugiE+BTupiEbckZif13HwKBgE/lAlkVHP6YahOO2Ljc
-J1bwkqKZTB5dHolX9A58e/xXnfZ5P8f3Z83+Izap3FwqQulk7b1WO1MQcHuVg2NN
-5da0D4h2rYOXnbYIg0BVu4spQbaM6ewsp66b8+MzLOBvj8SzWdt1Oyw0q/MRyQAR
-8U4M2TSWCKUY/A6sT4W8+mT9
------END PRIVATE KEY-----"#;
-
-#[tokio::test]
-#[serial(codex_auth_env)]
-async fn agent_identity_plan_type_maps_raw_enterprise_alias() {
-    assert_agent_identity_plan_alias(json!("hc"), AccountPlanType::Enterprise).await;
-}
-
-#[tokio::test]
-#[serial(codex_auth_env)]
-async fn agent_identity_plan_type_maps_raw_education_alias() {
-    assert_agent_identity_plan_alias(json!("education"), AccountPlanType::Edu).await;
-}
-
-async fn assert_agent_identity_plan_alias(
-    plan_type: serde_json::Value,
-    expected_plan_type: AccountPlanType,
-) {
-    let record = agent_identity_record("account-id");
-    let jwt = signed_agent_identity_jwt(&record, plan_type).expect("agent identity jwt");
-    let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/backend-api/wham/agent-identities/jwks"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(test_jwks_body()))
-        .expect(1)
-        .mount(&server)
-        .await;
-    Mock::given(method("POST"))
-        .and(path("/backend-api/v1/agent/agent-runtime-id/task/register"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "task_id": "task-123",
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
-    let chatgpt_base_url = format!("{}/backend-api", server.uri());
-    let _authapi_guard =
-        EnvVarGuard::set("CODEX_AGENT_IDENTITY_AUTHAPI_BASE_URL", &chatgpt_base_url);
-    let auth = CodexAuth::from_agent_identity_jwt(&jwt, Some(&chatgpt_base_url))
-        .await
-        .expect("agent identity auth");
-
-    pretty_assertions::assert_eq!(auth.account_plan_type(), Some(expected_plan_type));
-    server.verify().await;
-}
-
-#[tokio::test]
-#[serial(codex_auth_env)]
-async fn plan_type_maps_known_plan() {
-    let codex_home = tempdir().unwrap();
-    let _jwt = write_auth_file(
-        AuthFileParams {
-            openai_api_key: None,
-            chatgpt_plan_type: Some("pro".to_string()),
-            chatgpt_account_id: None,
-        },
-        codex_home.path(),
-    )
-    .expect("failed to write auth file");
-
-    let auth = super::load_auth(
-        codex_home.path(),
-        /*enable_codex_api_key_env*/ false,
-        AuthCredentialsStoreMode::File,
-        /*chatgpt_base_url*/ None,
-    )
-    .await
-    .expect("load auth")
-    .expect("auth available");
-
-    pretty_assertions::assert_eq!(auth.account_plan_type(), Some(AccountPlanType::Pro));
-}
-
-#[tokio::test]
-#[serial(codex_auth_env)]
-async fn plan_type_maps_self_serve_business_usage_based_plan() {
-    let codex_home = tempdir().unwrap();
-    let _jwt = write_auth_file(
-        AuthFileParams {
-            openai_api_key: None,
-            chatgpt_plan_type: Some("self_serve_business_usage_based".to_string()),
-            chatgpt_account_id: None,
-        },
-        codex_home.path(),
-    )
-    .expect("failed to write auth file");
-
-    let auth = super::load_auth(
-        codex_home.path(),
-        /*enable_codex_api_key_env*/ false,
-        AuthCredentialsStoreMode::File,
-        /*chatgpt_base_url*/ None,
-    )
-    .await
-    .expect("load auth")
-    .expect("auth available");
-
-    pretty_assertions::assert_eq!(
-        auth.account_plan_type(),
-        Some(AccountPlanType::SelfServeBusinessUsageBased)
-    );
-}
-
-#[tokio::test]
-#[serial(codex_auth_env)]
-async fn plan_type_maps_enterprise_cbp_usage_based_plan() {
-    let codex_home = tempdir().unwrap();
-    let _jwt = write_auth_file(
-        AuthFileParams {
-            openai_api_key: None,
-            chatgpt_plan_type: Some("enterprise_cbp_usage_based".to_string()),
-            chatgpt_account_id: None,
-        },
-        codex_home.path(),
-    )
-    .expect("failed to write auth file");
-
-    let auth = super::load_auth(
-        codex_home.path(),
-        /*enable_codex_api_key_env*/ false,
-        AuthCredentialsStoreMode::File,
-        /*chatgpt_base_url*/ None,
-    )
-    .await
-    .expect("load auth")
-    .expect("auth available");
-
-    pretty_assertions::assert_eq!(
-        auth.account_plan_type(),
-        Some(AccountPlanType::EnterpriseCbpUsageBased)
-    );
-}
-
-#[tokio::test]
-#[serial(codex_auth_env)]
-async fn plan_type_maps_unknown_to_unknown() {
-    let codex_home = tempdir().unwrap();
-    let _jwt = write_auth_file(
-        AuthFileParams {
-            openai_api_key: None,
-            chatgpt_plan_type: Some("mystery-tier".to_string()),
-            chatgpt_account_id: None,
-        },
-        codex_home.path(),
-    )
-    .expect("failed to write auth file");
-
-    let auth = super::load_auth(
-        codex_home.path(),
-        /*enable_codex_api_key_env*/ false,
-        AuthCredentialsStoreMode::File,
-        /*chatgpt_base_url*/ None,
-    )
-    .await
-    .expect("load auth")
-    .expect("auth available");
-
-    pretty_assertions::assert_eq!(auth.account_plan_type(), Some(AccountPlanType::Unknown));
-}
-
-#[tokio::test]
-#[serial(codex_auth_env)]
-async fn missing_plan_type_maps_to_unknown() {
-    let codex_home = tempdir().unwrap();
-    let _jwt = write_auth_file(
-        AuthFileParams {
-            openai_api_key: None,
-            chatgpt_plan_type: None,
-            chatgpt_account_id: None,
-        },
-        codex_home.path(),
-    )
-    .expect("failed to write auth file");
-
-    let auth = super::load_auth(
-        codex_home.path(),
-        /*enable_codex_api_key_env*/ false,
-        AuthCredentialsStoreMode::File,
-        /*chatgpt_base_url*/ None,
-    )
-    .await
-    .expect("load auth")
-    .expect("auth available");
-
-    pretty_assertions::assert_eq!(auth.account_plan_type(), Some(AccountPlanType::Unknown));
 }

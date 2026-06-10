@@ -946,31 +946,31 @@
       ]
     },
     "AuthMode": {
-      "description": "Authentication mode for OpenAI-backed providers.",
+      "description": "Authentication mode for Astral-managed credentials.\n\nAstral actively supports API-key auth. Token-backed variants are retained only so legacy payloads can be identified and rejected cleanly.",
       "oneOf": [
         {
-          "description": "OpenAI API key provided by the caller and stored by Codex.",
+          "description": "Provider API key supplied by the caller and stored locally.",
           "enum": [
             "apikey"
           ],
           "type": "string"
         },
         {
-          "description": "ChatGPT OAuth managed by Codex (tokens persisted and refreshed by Codex).",
+          "description": "Legacy ChatGPT OAuth mode; not accepted by Astral.",
           "enum": [
             "chatgpt"
           ],
           "type": "string"
         },
         {
-          "description": "Programmatic Codex auth backed by a registered Agent Identity.",
+          "description": "Legacy Agent Identity mode; not accepted by Astral.",
           "enum": [
             "agentIdentity"
           ],
           "type": "string"
         },
         {
-          "description": "Programmatic Codex auth backed by a personal access token.",
+          "description": "Legacy personal access token mode; not accepted by Astral.",
           "enum": [
             "personalAccessToken"
           ],
