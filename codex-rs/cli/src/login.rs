@@ -12,7 +12,6 @@ use codex_core::config::Config;
 use codex_login::CodexAuth;
 use codex_login::login_with_api_key;
 use codex_login::logout_with_revoke;
-use codex_protocol::config_types::ForcedLoginMethod;
 use codex_utils_cli::CliConfigOverrides;
 use std::fs::OpenOptions;
 use std::io::IsTerminal;
@@ -25,7 +24,6 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
 const CHATGPT_LOGIN_DISABLED_MESSAGE: &str = "Browser/device ChatGPT login is not available in Astral. Set ASTRAL_API_KEY for the active model provider.";
-const API_KEY_LOGIN_DISABLED_MESSAGE: &str = "API key login is disabled by configuration.";
 const ACCESS_TOKEN_LOGIN_DISABLED_MESSAGE: &str = "Access token login is not available in Astral. Set ASTRAL_API_KEY for the active model provider.";
 const LOGIN_SUCCESS_MESSAGE: &str = "Successfully logged in";
 const UNSUPPORTED_STORED_AUTH_MESSAGE: &str = "Stored OpenAI/ChatGPT credentials are not supported by Astral. Run `astral logout`, then set ASTRAL_API_KEY.";
@@ -112,11 +110,6 @@ pub async fn run_login_with_api_key(
     let config = load_config_or_exit(cli_config_overrides).await;
     let _login_log_guard = init_login_file_logging(&config);
     tracing::info!("starting api key login flow");
-
-    if matches!(config.forced_login_method, Some(ForcedLoginMethod::Chatgpt)) {
-        eprintln!("{API_KEY_LOGIN_DISABLED_MESSAGE}");
-        std::process::exit(1);
-    }
 
     match login_with_api_key(
         &config.codex_home,
@@ -209,7 +202,7 @@ pub async fn run_login_status(cli_config_overrides: CliConfigOverrides) -> ! {
     match CodexAuth::from_auth_storage(
         &config.codex_home,
         config.cli_auth_credentials_store_mode,
-        Some(&config.chatgpt_base_url),
+        /*chatgpt_base_url*/ None,
     )
     .await
     {
