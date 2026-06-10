@@ -11,6 +11,7 @@ use crate::tools::handlers::AstralFileToolHandler;
 use crate::tools::handlers::AstralFileToolKind;
 use crate::tools::handlers::AstralMonitorHandler;
 use crate::tools::handlers::AstralRequestPermissionsHandler;
+use crate::tools::handlers::AstralSendMessageHandler;
 use crate::tools::handlers::AstralTodoWriteHandler;
 use crate::tools::handlers::AstralToolSearchHandler;
 use crate::tools::handlers::CodeModeExecuteHandler;
@@ -49,7 +50,6 @@ use crate::tools::handlers::multi_agents_spec::WaitAgentTimeoutOptions;
 use crate::tools::handlers::multi_agents_v2::FollowupTaskHandler as FollowupTaskHandlerV2;
 use crate::tools::handlers::multi_agents_v2::InterruptAgentHandler;
 use crate::tools::handlers::multi_agents_v2::ListAgentsHandler as ListAgentsHandlerV2;
-use crate::tools::handlers::multi_agents_v2::SendMessageHandler as SendMessageHandlerV2;
 use crate::tools::handlers::multi_agents_v2::WaitAgentHandler as WaitAgentHandlerV2;
 use crate::tools::handlers::view_image_spec::ViewImageToolOptions;
 use crate::tools::hosted_spec::WebSearchToolOptions;
@@ -322,7 +322,6 @@ fn astral_spec_for_model_request(
         "update_plan" => Some(TODO_WRITE_TOOL_NAME),
         "list_mcp_resources" => Some(LIST_MCP_RESOURCES_TOOL_NAME),
         "read_mcp_resource" => Some(READ_MCP_RESOURCE_TOOL_NAME),
-        "send_message" => Some(SEND_MESSAGE_TOOL_NAME),
         "interrupt_agent" => Some(TASK_STOP_TOOL_NAME),
         _ => None,
     };
@@ -948,7 +947,7 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mu
                 exposure,
             ));
             planned_tools.add_arc(override_tool_exposure(
-                multi_agent_v2_handler(SendMessageHandlerV2, tool_namespace),
+                multi_agent_v2_handler(AstralSendMessageHandler::new(), tool_namespace),
                 exposure,
             ));
             planned_tools.add_arc(override_tool_exposure(

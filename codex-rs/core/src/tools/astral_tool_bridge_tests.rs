@@ -8,6 +8,7 @@ use codex_tools::GREP_TOOL_NAME;
 use codex_tools::MONITOR_TOOL_NAME;
 use codex_tools::READ_TOOL_NAME;
 use codex_tools::REQUEST_PERMISSIONS_TOOL_NAME;
+use codex_tools::SEND_MESSAGE_TOOL_NAME;
 use codex_tools::TODO_WRITE_TOOL_NAME;
 use codex_tools::TOOL_SEARCH_FLAVOR_TOOL_NAME;
 use codex_tools::WRITE_TOOL_NAME;
@@ -299,12 +300,13 @@ fn canonicalizes_multi_agent_tools() -> anyhow::Result<()> {
             "message": { "text": "Please include runtime tests" }
         }),
     )?;
-    assert_eq!(tool_name, ToolName::plain("send_message"));
+    assert_eq!(tool_name, ToolName::plain(SEND_MESSAGE_TOOL_NAME));
     assert_eq!(
         arguments,
         json!({
-            "target": "agent-1",
-            "message": "{\"text\":\"Please include runtime tests\"}"
+            "to": "agent-1",
+            "summary": "new input",
+            "message": { "text": "Please include runtime tests" }
         })
     );
 
