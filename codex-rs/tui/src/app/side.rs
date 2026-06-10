@@ -91,9 +91,9 @@ impl SideParentStatus {
             | ServerRequest::PermissionsRequestApproval { .. }
             | ServerRequest::ApplyPatchApproval { .. }
             | ServerRequest::ExecCommandApproval { .. } => Some(SideParentStatus::NeedsApproval),
-            ServerRequest::DynamicToolCall { .. }
-            | ServerRequest::AttestationGenerate { .. }
-            | ServerRequest::ChatgptAuthTokensRefresh { .. } => None,
+            ServerRequest::DynamicToolCall { .. } | ServerRequest::AttestationGenerate { .. } => {
+                None
+            }
         }
     }
 }

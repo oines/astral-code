@@ -1,5 +1,4 @@
 use crate::protocol::common::AuthMode;
-use codex_experimental_api_macros::ExperimentalApi;
 use codex_protocol::account::PlanType;
 use codex_protocol::account::ProviderAccount;
 use codex_protocol::protocol::CreditsSnapshot as CoreCreditsSnapshot;
@@ -41,7 +40,7 @@ impl From<ProviderAccount> for Account {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS, ExperimentalApi)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(tag = "type")]
 #[ts(tag = "type")]
 #[ts(export_to = "v2/")]
@@ -62,24 +61,6 @@ pub enum LoginAccountParams {
     #[serde(rename = "chatgptDeviceCode")]
     #[ts(rename = "chatgptDeviceCode")]
     ChatgptDeviceCode,
-    /// [UNSTABLE] FOR OPENAI INTERNAL USE ONLY - DO NOT USE.
-    /// The access token must contain the same scopes that Codex-managed ChatGPT auth tokens have.
-    #[experimental("account/login/start.chatgptAuthTokens")]
-    #[serde(rename = "chatgptAuthTokens", rename_all = "camelCase")]
-    #[ts(rename = "chatgptAuthTokens", rename_all = "camelCase")]
-    ChatgptAuthTokens {
-        /// Access token (JWT) supplied by the client.
-        /// This token is used for backend API requests and email extraction.
-        access_token: String,
-        /// Workspace/account identifier supplied by the client.
-        chatgpt_account_id: String,
-        /// Optional plan type supplied by the client.
-        ///
-        /// When `null`, Codex attempts to derive the plan type from access-token
-        /// claims. If unavailable, the plan defaults to `unknown`.
-        #[ts(optional = nullable)]
-        chatgpt_plan_type: Option<String>,
-    },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -110,9 +91,6 @@ pub enum LoginAccountResponse {
         /// One-time code the user must enter after signing in.
         user_code: String,
     },
-    #[serde(rename = "chatgptAuthTokens", rename_all = "camelCase")]
-    #[ts(rename = "chatgptAuthTokens", rename_all = "camelCase")]
-    ChatgptAuthTokens {},
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -215,39 +193,6 @@ pub enum AccountSessionWorkspaceKind {
 #[ts(export_to = "v2/")]
 pub struct LogoutAccountResponse {}
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "v2/")]
-pub enum ChatgptAuthTokensRefreshReason {
-    /// Codex attempted a backend request and received `401 Unauthorized`.
-    Unauthorized,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "v2/")]
-pub struct ChatgptAuthTokensRefreshParams {
-    pub reason: ChatgptAuthTokensRefreshReason,
-    /// Workspace/account identifier that Codex was previously using.
-    ///
-    /// Clients that manage multiple accounts/workspaces can use this as a hint
-    /// to refresh the token for the correct workspace.
-    ///
-    /// This may be `null` when the prior auth state did not include a workspace
-    /// identifier (`chatgpt_account_id`).
-    #[ts(optional = nullable)]
-    pub previous_account_id: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "v2/")]
-pub struct ChatgptAuthTokensRefreshResponse {
-    pub access_token: String,
-    pub chatgpt_account_id: String,
-    pub chatgpt_plan_type: Option<String>,
-}
-
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
@@ -321,9 +266,7 @@ pub enum AddCreditsNudgeEmailStatus {
 pub struct GetAccountParams {
     /// When `true`, requests a proactive token refresh before returning.
     ///
-    /// In managed auth mode this triggers the normal refresh-token flow. In
-    /// external auth mode this flag is ignored. Clients should refresh tokens
-    /// themselves and call `account/login/start` with `chatgptAuthTokens`.
+    /// In managed auth mode this triggers the normal refresh-token flow.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub refresh_token: bool,
 }

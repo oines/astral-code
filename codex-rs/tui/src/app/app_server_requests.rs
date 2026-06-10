@@ -133,7 +133,6 @@ impl PendingAppServerRequests {
                     message: "Dynamic tool calls are not available in TUI yet.".to_string(),
                 })
             }
-            ServerRequest::ChatgptAuthTokensRefresh { .. } => None,
             ServerRequest::AttestationGenerate { request_id, .. } => {
                 Some(UnsupportedAppServerRequest {
                     request_id: request_id.clone(),
@@ -337,7 +336,6 @@ impl PendingAppServerRequests {
                 .values()
                 .any(|pending_request_id| pending_request_id == request_id),
             ServerRequest::DynamicToolCall { .. }
-            | ServerRequest::ChatgptAuthTokensRefresh { .. }
             | ServerRequest::AttestationGenerate { .. }
             | ServerRequest::ApplyPatchApproval { .. }
             | ServerRequest::ExecCommandApproval { .. } => true,
@@ -667,22 +665,6 @@ mod tests {
         assert_eq!(
             unsupported.message,
             "Dynamic tool calls are not available in TUI yet."
-        );
-    }
-
-    #[test]
-    fn does_not_mark_chatgpt_auth_refresh_as_unsupported() {
-        let mut pending = PendingAppServerRequests::default();
-
-        assert_eq!(
-            pending.note_server_request(&ServerRequest::ChatgptAuthTokensRefresh {
-                request_id: AppServerRequestId::Integer(100),
-                params: codex_app_server_protocol::ChatgptAuthTokensRefreshParams {
-                    reason: codex_app_server_protocol::ChatgptAuthTokensRefreshReason::Unauthorized,
-                    previous_account_id: Some("workspace-1".to_string()),
-                },
-            }),
-            None
         );
     }
 

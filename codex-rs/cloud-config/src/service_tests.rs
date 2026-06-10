@@ -792,61 +792,6 @@ async fn get_bundle_surfaces_auth_recovery_message() {
 }
 
 #[tokio::test]
-async fn get_bundle_unauthorized_without_recovery_uses_generic_message() {
-    let auth_home = tempdir().expect("tempdir");
-    write_auth_json(
-        auth_home.path(),
-        chatgpt_auth_json_with_mode(
-            "enterprise",
-            Some("user-12345"),
-            Some("account-12345"),
-            "test-access-token",
-            "test-refresh-token",
-            "2025-01-01T00:00:00Z",
-            Some("chatgptAuthTokens"),
-        ),
-    )
-    .expect("write auth");
-    let auth_manager = Arc::new(
-        AuthManager::new(
-            auth_home.path().to_path_buf(),
-            /*enable_codex_api_key_env*/ false,
-            AuthCredentialsStoreMode::File,
-            /*chatgpt_base_url*/ None,
-        )
-        .await,
-    );
-
-    let fetcher = Arc::new(UnauthorizedBundleClient {
-        message:
-            "GET https://chatgpt.com/backend-api/wham/config/bundle failed: 401; content-type=text/html; body=<html>nope</html>"
-                .to_string(),
-        request_count: AtomicUsize::new(0),
-    });
-    let codex_home = tempdir().expect("tempdir");
-    let service = CloudConfigBundleService::new(
-        auth_manager,
-        fetcher.clone(),
-        codex_home.path().to_path_buf(),
-        CLOUD_CONFIG_BUNDLE_TIMEOUT,
-    );
-
-    let err = service
-        .load_startup_bundle()
-        .await
-        .expect_err("cloud config bundle should fail closed");
-    assert_eq!(
-        err,
-        CloudConfigBundleLoadError::new(
-            CloudConfigBundleLoadErrorCode::Auth,
-            Some(401),
-            CLOUD_CONFIG_BUNDLE_AUTH_RECOVERY_FAILED_MESSAGE,
-        )
-    );
-    assert_eq!(fetcher.request_count.load(Ordering::SeqCst), 1);
-}
-
-#[tokio::test]
 async fn get_bundle_does_not_use_cache_when_auth_identity_is_incomplete() {
     let codex_home = tempdir().expect("tempdir");
     let prime_service = CloudConfigBundleService::new(

@@ -23,14 +23,6 @@ pub enum AuthMode {
     ApiKey,
     /// ChatGPT OAuth managed by Codex (tokens persisted and refreshed by Codex).
     Chatgpt,
-    /// [UNSTABLE] FOR OPENAI INTERNAL USE ONLY - DO NOT USE.
-    ///
-    /// ChatGPT auth tokens are supplied by an external host app and are only
-    /// stored in memory. Token refresh must be handled by the external host app.
-    #[serde(rename = "chatgptAuthTokens")]
-    #[ts(rename = "chatgptAuthTokens")]
-    #[strum(serialize = "chatgptAuthTokens")]
-    ChatgptAuthTokens,
     /// Programmatic Codex auth backed by a registered Agent Identity.
     #[serde(rename = "agentIdentity")]
     #[ts(rename = "agentIdentity")]
@@ -47,7 +39,7 @@ impl AuthMode {
     /// Returns whether this mode represents an authenticated human ChatGPT account.
     pub fn has_chatgpt_account(self) -> bool {
         match self {
-            Self::Chatgpt | Self::ChatgptAuthTokens | Self::PersonalAccessToken => true,
+            Self::Chatgpt | Self::PersonalAccessToken => true,
             Self::ApiKey | Self::AgentIdentity => false,
         }
     }
@@ -947,7 +939,6 @@ client_request_definitions! {
 
     LoginAccount => "account/login/start" {
         params: v2::LoginAccountParams,
-        inspect_params: true,
         serialization: global("account-auth"),
         response: v2::LoginAccountResponse,
     },
@@ -1406,11 +1397,6 @@ server_request_definitions! {
     DynamicToolCall => "item/tool/call" {
         params: v2::DynamicToolCallParams,
         response: v2::DynamicToolCallResponse,
-    },
-
-    ChatgptAuthTokensRefresh => "account/chatgptAuthTokens/refresh" {
-        params: v2::ChatgptAuthTokensRefreshParams,
-        response: v2::ChatgptAuthTokensRefreshResponse,
     },
 
     /// Generate a fresh upstream attestation result on demand.
@@ -2269,29 +2255,6 @@ mod tests {
     }
 
     #[test]
-    fn serialize_chatgpt_auth_tokens_refresh_request() -> Result<()> {
-        let request = ServerRequest::ChatgptAuthTokensRefresh {
-            request_id: RequestId::Integer(8),
-            params: v2::ChatgptAuthTokensRefreshParams {
-                reason: v2::ChatgptAuthTokensRefreshReason::Unauthorized,
-                previous_account_id: Some("org-123".to_string()),
-            },
-        };
-        assert_eq!(
-            json!({
-                "method": "account/chatgptAuthTokens/refresh",
-                "id": 8,
-                "params": {
-                    "reason": "unauthorized",
-                    "previousAccountId": "org-123"
-                }
-            }),
-            serde_json::to_value(&request)?,
-        );
-        Ok(())
-    }
-
-    #[test]
     fn serialize_attestation_generate_request() -> Result<()> {
         let params = v2::AttestationGenerateParams {};
         let request = ServerRequest::AttestationGenerate {
@@ -2633,32 +2596,6 @@ mod tests {
             json!({
                 "method": "account/logout",
                 "id": 5,
-            }),
-            serde_json::to_value(&request)?,
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn serialize_account_login_chatgpt_auth_tokens() -> Result<()> {
-        let request = ClientRequest::LoginAccount {
-            request_id: RequestId::Integer(6),
-            params: v2::LoginAccountParams::ChatgptAuthTokens {
-                access_token: "access-token".to_string(),
-                chatgpt_account_id: "org-123".to_string(),
-                chatgpt_plan_type: Some("business".to_string()),
-            },
-        };
-        assert_eq!(
-            json!({
-                "method": "account/login/start",
-                "id": 6,
-                "params": {
-                    "type": "chatgptAuthTokens",
-                    "accessToken": "access-token",
-                    "chatgptAccountId": "org-123",
-                    "chatgptPlanType": "business"
-                }
             }),
             serde_json::to_value(&request)?,
         );

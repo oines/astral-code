@@ -265,12 +265,7 @@ impl ModelProviderInfo {
         let openai_auth_mode = self.is_openai()
             && matches!(
                 auth_mode,
-                Some(
-                    AuthMode::Chatgpt
-                        | AuthMode::ChatgptAuthTokens
-                        | AuthMode::AgentIdentity
-                        | AuthMode::PersonalAccessToken
-                )
+                Some(AuthMode::Chatgpt | AuthMode::AgentIdentity | AuthMode::PersonalAccessToken)
             );
         let default_base_url = if openai_auth_mode {
             CHATGPT_CODEX_BASE_URL

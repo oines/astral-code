@@ -217,10 +217,7 @@ pub async fn run_login_status(cli_config_overrides: CliConfigOverrides) -> ! {
                     std::process::exit(1);
                 }
             },
-            AuthMode::Chatgpt
-            | AuthMode::ChatgptAuthTokens
-            | AuthMode::AgentIdentity
-            | AuthMode::PersonalAccessToken => {
+            AuthMode::Chatgpt | AuthMode::AgentIdentity | AuthMode::PersonalAccessToken => {
                 eprintln!("{UNSUPPORTED_STORED_AUTH_MESSAGE}");
                 std::process::exit(1);
             }

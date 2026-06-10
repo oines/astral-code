@@ -102,60 +102,6 @@
       "title": "AttestationGenerateResponse",
       "type": "object"
     },
-    "ChatgptAuthTokensRefreshParams": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "properties": {
-        "previousAccountId": {
-          "description": "Workspace/account identifier that Codex was previously using.\n\nClients that manage multiple accounts/workspaces can use this as a hint to refresh the token for the correct workspace.\n\nThis may be `null` when the prior auth state did not include a workspace identifier (`chatgpt_account_id`).",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "reason": {
-          "$ref": "#/definitions/ChatgptAuthTokensRefreshReason"
-        }
-      },
-      "required": [
-        "reason"
-      ],
-      "title": "ChatgptAuthTokensRefreshParams",
-      "type": "object"
-    },
-    "ChatgptAuthTokensRefreshReason": {
-      "oneOf": [
-        {
-          "description": "Codex attempted a backend request and received `401 Unauthorized`.",
-          "enum": [
-            "unauthorized"
-          ],
-          "type": "string"
-        }
-      ]
-    },
-    "ChatgptAuthTokensRefreshResponse": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "properties": {
-        "accessToken": {
-          "type": "string"
-        },
-        "chatgptAccountId": {
-          "type": "string"
-        },
-        "chatgptPlanType": {
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "accessToken",
-        "chatgptAccountId"
-      ],
-      "title": "ChatgptAuthTokensRefreshResponse",
-      "type": "object"
-    },
     "ClientInfo": {
       "properties": {
         "name": {
@@ -5446,30 +5392,6 @@
           "type": "object"
         },
         {
-          "properties": {
-            "id": {
-              "$ref": "#/definitions/v2/RequestId"
-            },
-            "method": {
-              "enum": [
-                "account/chatgptAuthTokens/refresh"
-              ],
-              "title": "Account/chatgptAuthTokens/refreshRequestMethod",
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/definitions/ChatgptAuthTokensRefreshParams"
-            }
-          },
-          "required": [
-            "id",
-            "method",
-            "params"
-          ],
-          "title": "Account/chatgptAuthTokens/refreshRequest",
-          "type": "object"
-        },
-        {
           "description": "Generate a fresh upstream attestation result on demand.",
           "properties": {
             "id": {
@@ -6661,13 +6583,6 @@
             "description": "ChatGPT OAuth managed by Codex (tokens persisted and refreshed by Codex).",
             "enum": [
               "chatgpt"
-            ],
-            "type": "string"
-          },
-          {
-            "description": "[UNSTABLE] FOR OPENAI INTERNAL USE ONLY - DO NOT USE.\n\nChatGPT auth tokens are supplied by an external host app and are only stored in memory. Token refresh must be handled by the external host app.",
-            "enum": [
-              "chatgptAuthTokens"
             ],
             "type": "string"
           },
@@ -9619,7 +9534,7 @@
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {
           "refreshToken": {
-            "description": "When `true`, requests a proactive token refresh before returning.\n\nIn managed auth mode this triggers the normal refresh-token flow. In external auth mode this flag is ignored. Clients should refresh tokens themselves and call `account/login/start` with `chatgptAuthTokens`.",
+            "description": "When `true`, requests a proactive token refresh before returning.\n\nIn managed auth mode this triggers the normal refresh-token flow.",
             "type": "boolean"
           }
         },
@@ -10781,40 +10696,6 @@
             ],
             "title": "ChatgptDeviceCodev2::LoginAccountParams",
             "type": "object"
-          },
-          {
-            "description": "[UNSTABLE] FOR OPENAI INTERNAL USE ONLY - DO NOT USE. The access token must contain the same scopes that Codex-managed ChatGPT auth tokens have.",
-            "properties": {
-              "accessToken": {
-                "description": "Access token (JWT) supplied by the client. This token is used for backend API requests and email extraction.",
-                "type": "string"
-              },
-              "chatgptAccountId": {
-                "description": "Workspace/account identifier supplied by the client.",
-                "type": "string"
-              },
-              "chatgptPlanType": {
-                "description": "Optional plan type supplied by the client.\n\nWhen `null`, Codex attempts to derive the plan type from access-token claims. If unavailable, the plan defaults to `unknown`.",
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "type": {
-                "enum": [
-                  "chatgptAuthTokens"
-                ],
-                "title": "ChatgptAuthTokensv2::LoginAccountParamsType",
-                "type": "string"
-              }
-            },
-            "required": [
-              "accessToken",
-              "chatgptAccountId",
-              "type"
-            ],
-            "title": "ChatgptAuthTokensv2::LoginAccountParams",
-            "type": "object"
           }
         ],
         "title": "LoginAccountParams"
@@ -10891,22 +10772,6 @@
               "verificationUrl"
             ],
             "title": "ChatgptDeviceCodev2::LoginAccountResponse",
-            "type": "object"
-          },
-          {
-            "properties": {
-              "type": {
-                "enum": [
-                  "chatgptAuthTokens"
-                ],
-                "title": "ChatgptAuthTokensv2::LoginAccountResponseType",
-                "type": "string"
-              }
-            },
-            "required": [
-              "type"
-            ],
-            "title": "ChatgptAuthTokensv2::LoginAccountResponse",
             "type": "object"
           }
         ],

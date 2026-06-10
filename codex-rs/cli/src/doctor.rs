@@ -1315,7 +1315,6 @@ fn stored_auth_mode(auth: &codex_login::AuthDotJson) -> &'static str {
     match stored_auth_mode_value(auth) {
         codex_app_server_protocol::AuthMode::ApiKey => "api_key",
         codex_app_server_protocol::AuthMode::Chatgpt => "chatgpt",
-        codex_app_server_protocol::AuthMode::ChatgptAuthTokens => "chatgpt_auth_tokens",
         codex_app_server_protocol::AuthMode::AgentIdentity => "agent_identity",
         codex_app_server_protocol::AuthMode::PersonalAccessToken => "personal_access_token",
     }
@@ -1364,22 +1363,6 @@ fn stored_auth_issues(
             }
             if auth.last_refresh.is_none() {
                 issues.push("ChatGPT auth is missing refresh metadata");
-            }
-        }
-        codex_app_server_protocol::AuthMode::ChatgptAuthTokens => {
-            match auth.tokens.as_ref() {
-                Some(tokens) => {
-                    if tokens.access_token.trim().is_empty() {
-                        issues.push("external ChatGPT auth is missing an access token");
-                    }
-                    if tokens.account_id.is_none() && tokens.id_token.chatgpt_account_id.is_none() {
-                        issues.push("external ChatGPT auth is missing a ChatGPT account id");
-                    }
-                }
-                None => issues.push("external ChatGPT auth is missing token data"),
-            }
-            if auth.last_refresh.is_none() {
-                issues.push("external ChatGPT auth is missing refresh metadata");
             }
         }
         codex_app_server_protocol::AuthMode::AgentIdentity => {
@@ -2427,7 +2410,6 @@ fn auth_mode_name(auth: &CodexAuth) -> &'static str {
     match auth.auth_mode() {
         codex_app_server_protocol::AuthMode::ApiKey => "api_key",
         codex_app_server_protocol::AuthMode::Chatgpt => "chatgpt",
-        codex_app_server_protocol::AuthMode::ChatgptAuthTokens => "chatgpt_auth_tokens",
         codex_app_server_protocol::AuthMode::AgentIdentity => "agent_identity",
         codex_app_server_protocol::AuthMode::PersonalAccessToken => "personal_access_token",
     }
@@ -2555,7 +2537,6 @@ fn provider_auth_reachability_mode_from_auth(
         Some(codex_app_server_protocol::AuthMode::ApiKey) => ProviderAuthReachabilityMode::ApiKey,
         Some(
             codex_app_server_protocol::AuthMode::Chatgpt
-            | codex_app_server_protocol::AuthMode::ChatgptAuthTokens
             | codex_app_server_protocol::AuthMode::AgentIdentity
             | codex_app_server_protocol::AuthMode::PersonalAccessToken,
         )

@@ -209,7 +209,6 @@ impl ModelProvider for ConfiguredModelProvider {
                 .and_then(|auth| match &auth {
                     CodexAuth::ApiKey(_) => Some(Ok(ProviderAccount::ApiKey)),
                     CodexAuth::Chatgpt(_)
-                    | CodexAuth::ChatgptAuthTokens(_)
                     | CodexAuth::AgentIdentity(_)
                     | CodexAuth::PersonalAccessToken(_) => None,
                 })

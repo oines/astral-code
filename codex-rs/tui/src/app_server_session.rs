@@ -1191,7 +1191,6 @@ pub(crate) fn status_account_display_from_auth_mode(
     match auth_mode {
         Some(AuthMode::ApiKey) => Some(StatusAccountDisplay::ApiKey),
         Some(AuthMode::Chatgpt)
-        | Some(AuthMode::ChatgptAuthTokens)
         | Some(AuthMode::AgentIdentity)
         | Some(AuthMode::PersonalAccessToken) => Some(StatusAccountDisplay::ChatGpt {
             email: None,

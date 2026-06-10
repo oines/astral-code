@@ -19,7 +19,6 @@ pub use auth::AuthManagerConfig;
 pub use auth::CLIENT_ID;
 pub use auth::CodexAuth;
 pub use auth::ExternalAuth;
-pub use auth::ExternalAuthChatgptMetadata;
 pub use auth::ExternalAuthRefreshContext;
 pub use auth::ExternalAuthRefreshReason;
 pub use auth::ExternalAuthTokens;

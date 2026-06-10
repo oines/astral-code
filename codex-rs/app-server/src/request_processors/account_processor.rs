@@ -17,7 +17,6 @@ pub(crate) struct AccountRequestProcessor {
 
 const CHATGPT_LOGIN_DISABLED_MESSAGE: &str =
     "ChatGPT login is disabled in astral-code. Set ASTRAL_API_KEY for the active model provider.";
-const CHATGPT_AUTH_TOKENS_DISABLED_MESSAGE: &str = "External ChatGPT auth tokens are disabled in astral-code. Set ASTRAL_API_KEY for the active model provider.";
 const ACCOUNT_BACKEND_DISABLED_MESSAGE: &str = "Astral-managed account usage and rate-limit APIs are unavailable for the active model provider.";
 
 impl AccountRequestProcessor {
@@ -179,9 +178,6 @@ impl AccountRequestProcessor {
             LoginAccountParams::Chatgpt { .. } | LoginAccountParams::ChatgptDeviceCode => {
                 self.reject_chatgpt_login_v2(request_id).await;
             }
-            LoginAccountParams::ChatgptAuthTokens { .. } => {
-                self.reject_chatgpt_auth_tokens_login_v2(request_id).await;
-            }
         }
         Ok(())
     }
@@ -192,20 +188,10 @@ impl AccountRequestProcessor {
         self.outgoing.send_result(request_id, result).await;
     }
 
-    async fn reject_chatgpt_auth_tokens_login_v2(&self, request_id: ConnectionRequestId) {
-        let result: Result<LoginAccountResponse, JSONRPCErrorError> =
-            Err(invalid_request(CHATGPT_AUTH_TOKENS_DISABLED_MESSAGE));
-        self.outgoing.send_result(request_id, result).await;
-    }
-
     async fn login_api_key_common(
         &self,
         params: &LoginApiKeyParams,
     ) -> std::result::Result<(), JSONRPCErrorError> {
-        if self.auth_manager.is_external_chatgpt_auth_active() {
-            self.auth_manager.clear_external_auth();
-        }
-
         match login_with_api_key(
             &self.config.codex_home,
             &params.api_key,

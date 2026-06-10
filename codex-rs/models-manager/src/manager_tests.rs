@@ -194,9 +194,9 @@ fn static_manager_for_tests(model_catalog: ModelsResponse) -> StaticModelsManage
     StaticModelsManager::new(/*auth_manager*/ None, model_catalog)
 }
 
-async fn chatgpt_auth_tokens_for_tests(codex_home: &Path) -> CodexAuth {
+async fn chatgpt_auth_for_tests(codex_home: &Path) -> CodexAuth {
     let auth_dot_json = codex_login::AuthDotJson {
-        auth_mode: Some(AuthMode::ChatgptAuthTokens),
+        auth_mode: Some(AuthMode::Chatgpt),
         openai_api_key: None,
         tokens: Some(TokenData {
             id_token: codex_login::token_data::parse_chatgpt_jwt_claims(
@@ -828,15 +828,15 @@ async fn refresh_available_models_uses_cached_chatgpt_when_external_api_key_is_u
 }
 
 #[tokio::test]
-async fn refresh_available_models_fetches_with_chatgpt_auth_tokens() {
-    let dynamic_slug = "dynamic-model-only-for-test-chatgpt-auth-tokens";
+async fn refresh_available_models_fetches_with_chatgpt_auth() {
+    let dynamic_slug = "dynamic-model-only-for-test-chatgpt-auth";
     let codex_home = tempdir().expect("temp dir");
     let endpoint = TestModelsEndpoint::new(vec![vec![remote_model(
         dynamic_slug,
-        "ChatGPT Auth Tokens",
+        "ChatGPT Auth",
         /*priority*/ 1,
     )]]);
-    let auth = chatgpt_auth_tokens_for_tests(codex_home.path()).await;
+    let auth = chatgpt_auth_for_tests(codex_home.path()).await;
     let manager = openai_manager_for_tests_with_auth(
         codex_home.path().to_path_buf(),
         endpoint.clone(),
@@ -846,7 +846,7 @@ async fn refresh_available_models_fetches_with_chatgpt_auth_tokens() {
     manager
         .refresh_available_models(RefreshStrategy::Online)
         .await
-        .expect("refresh should fetch with ChatGPT auth tokens");
+        .expect("refresh should fetch with ChatGPT auth");
 
     assert!(
         manager

@@ -1652,15 +1652,6 @@ async fn handle_server_request(
             )
             .await
         }
-        ServerRequest::ChatgptAuthTokensRefresh { request_id, .. } => {
-            reject_server_request(
-                client,
-                request_id,
-                &method,
-                "chatgpt auth token refresh is not supported in exec mode".to_string(),
-            )
-            .await
-        }
         ServerRequest::AttestationGenerate { request_id, .. } => {
             reject_server_request(
                 client,
