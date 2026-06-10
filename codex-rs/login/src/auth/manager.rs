@@ -514,14 +514,9 @@ impl ChatgptAuth {
 }
 
 pub const ASTRAL_API_KEY_ENV_VAR: &str = "ASTRAL_API_KEY";
-pub const CODEX_ACCESS_TOKEN_ENV_VAR: &str = "CODEX_ACCESS_TOKEN";
 
 pub fn read_astral_api_key_from_env() -> Option<String> {
     read_non_empty_env_var(ASTRAL_API_KEY_ENV_VAR)
-}
-
-pub fn read_codex_access_token_from_env() -> Option<String> {
-    read_non_empty_env_var(CODEX_ACCESS_TOKEN_ENV_VAR)
 }
 
 fn read_non_empty_env_var(key: &str) -> Option<String> {
@@ -818,21 +813,6 @@ async fn load_auth(
         )
         .await?;
         return Ok(Some(auth));
-    }
-
-    if let Some(access_token) = read_codex_access_token_from_env() {
-        return match classify_codex_access_token(&access_token) {
-            CodexAccessToken::PersonalAccessToken(access_token) => {
-                CodexAuth::from_personal_access_token(access_token)
-                    .await
-                    .map(Some)
-            }
-            CodexAccessToken::AgentIdentityJwt(jwt) => {
-                CodexAuth::from_agent_identity_jwt(jwt, chatgpt_base_url)
-                    .await
-                    .map(Some)
-            }
-        };
     }
 
     // If the caller explicitly requested ephemeral auth, there is no persisted fallback.

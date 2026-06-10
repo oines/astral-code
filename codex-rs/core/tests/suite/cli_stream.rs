@@ -1,7 +1,6 @@
 use assert_cmd::Command as AssertCommand;
 use codex_git_utils::collect_git_info;
 use codex_login::ASTRAL_API_KEY_ENV_VAR;
-use codex_login::CODEX_ACCESS_TOKEN_ENV_VAR;
 use codex_protocol::protocol::GitInfo;
 use core_test_support::fs_wait;
 use core_test_support::responses;
@@ -10,18 +9,7 @@ use pretty_assertions::assert_eq;
 use std::time::Duration;
 use tempfile::TempDir;
 use uuid::Uuid;
-use wiremock::Mock;
 use wiremock::MockServer;
-use wiremock::ResponseTemplate;
-use wiremock::matchers::header;
-use wiremock::matchers::method;
-use wiremock::matchers::path;
-
-const PERSONAL_ACCESS_TOKEN: &str = "at-cli-test";
-const PERSONAL_ACCESS_TOKEN_AUTHORIZATION: &str = "Bearer at-cli-test";
-const PERSONAL_ACCESS_TOKEN_ACCOUNT_ID: &str = "account-pat";
-const WHOAMI_PATH: &str = "/v1/user-auth-credential/whoami";
-const CLOUD_CONFIG_BUNDLE_PATH: &str = "/backend-api/wham/config/bundle";
 
 fn repo_root() -> std::path::PathBuf {
     #[expect(clippy::expect_used)]
@@ -34,118 +22,6 @@ fn cli_sse_response() -> String {
         responses::ev_assistant_message("msg-fixture", "fixture hello"),
         responses::ev_completed("resp-fixture"),
     ])
-}
-
-async fn mount_personal_access_token_startup(server: &MockServer) {
-    Mock::given(method("GET"))
-        .and(path(WHOAMI_PATH))
-        .and(header("authorization", PERSONAL_ACCESS_TOKEN_AUTHORIZATION))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "email": "user@example.com",
-            "chatgpt_user_id": "user-pat",
-            "chatgpt_account_id": PERSONAL_ACCESS_TOKEN_ACCOUNT_ID,
-            "chatgpt_plan_type": "enterprise",
-            "chatgpt_account_is_fedramp": true,
-        })))
-        .expect(1..)
-        .mount(server)
-        .await;
-    Mock::given(method("GET"))
-        .and(path(CLOUD_CONFIG_BUNDLE_PATH))
-        .and(header("authorization", PERSONAL_ACCESS_TOKEN_AUTHORIZATION))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
-        .expect(1)
-        .mount(server)
-        .await;
-}
-
-#[expect(clippy::unwrap_used)]
-fn personal_access_token_exec_command(server: &MockServer, home: &TempDir) -> AssertCommand {
-    let bin = codex_utils_cargo_bin::cargo_bin("codex").unwrap();
-    let mut cmd = AssertCommand::new(bin);
-    cmd.timeout(Duration::from_secs(30));
-    cmd.arg("exec")
-        .arg("--skip-git-repo-check")
-        .arg("-c")
-        .arg(format!("openai_base_url=\"{}/api/codex\"", server.uri()))
-        .arg("-c")
-        .arg(format!("chatgpt_base_url=\"{}/backend-api\"", server.uri()))
-        .arg("-C")
-        .arg(repo_root())
-        .arg("hello?");
-    cmd.env("ASTRAL_HOME", home.path())
-        .env(CODEX_ACCESS_TOKEN_ENV_VAR, PERSONAL_ACCESS_TOKEN)
-        .env("CODEX_AUTHAPI_BASE_URL", server.uri())
-        .env_remove(ASTRAL_API_KEY_ENV_VAR)
-        .env_remove("OPENAI_API_KEY");
-    cmd
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn responses_mode_stream_cli_supports_personal_access_tokens() {
-    skip_if_no_network!();
-
-    let server = MockServer::start().await;
-    mount_personal_access_token_startup(&server).await;
-    let resp_mock = responses::mount_sse_once(&server, cli_sse_response()).await;
-    let home = TempDir::new().unwrap();
-
-    let output = personal_access_token_exec_command(&server, &home)
-        .output()
-        .unwrap();
-
-    assert!(
-        output.status.success(),
-        "codex-cli exec failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let request = resp_mock.single_request();
-    assert_eq!(request.path(), "/api/codex/responses");
-    assert_eq!(
-        request.header("authorization").as_deref(),
-        Some("Bearer at-cli-test")
-    );
-    assert_eq!(
-        request.header("chatgpt-account-id").as_deref(),
-        Some(PERSONAL_ACCESS_TOKEN_ACCOUNT_ID)
-    );
-    assert_eq!(request.header("x-openai-fedramp").as_deref(), Some("true"));
-    server.verify().await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn responses_mode_stream_cli_does_not_attempt_oauth_refresh_for_personal_access_tokens_after_401()
- {
-    skip_if_no_network!();
-
-    let server = MockServer::start().await;
-    mount_personal_access_token_startup(&server).await;
-    Mock::given(method("POST"))
-        .and(path("/api/codex/responses"))
-        .and(header("authorization", PERSONAL_ACCESS_TOKEN_AUTHORIZATION))
-        .and(header(
-            "chatgpt-account-id",
-            PERSONAL_ACCESS_TOKEN_ACCOUNT_ID,
-        ))
-        .and(header("x-openai-fedramp", "true"))
-        .respond_with(ResponseTemplate::new(401).set_body_string("unauthorized"))
-        .expect(1..)
-        .mount(&server)
-        .await;
-    Mock::given(method("POST"))
-        .and(path("/oauth/token"))
-        .respond_with(ResponseTemplate::new(500))
-        .expect(0)
-        .mount(&server)
-        .await;
-    let home = TempDir::new().unwrap();
-
-    let output = personal_access_token_exec_command(&server, &home)
-        .output()
-        .unwrap();
-
-    assert!(!output.status.success());
-    server.verify().await;
 }
 
 /// Tests streaming the Responses API through the CLI using a mock server.
@@ -167,7 +43,7 @@ async fn responses_mode_stream_cli() {
         "model_providers.mock={{ name = \"mock\", base_url = \"{}/v1\", env_key = \"PATH\", wire_api = \"responses\" }}",
         server.uri()
     );
-    let bin = codex_utils_cargo_bin::cargo_bin("codex").unwrap();
+    let bin = codex_utils_cargo_bin::cargo_bin("astral").unwrap();
     let mut cmd = AssertCommand::new(bin);
     cmd.timeout(Duration::from_secs(30));
     cmd.arg("exec")
@@ -210,7 +86,7 @@ async fn responses_mode_stream_cli_supports_openai_base_url_config_override() {
     let resp_mock = responses::mount_sse_once(&server, sse).await;
 
     let home = TempDir::new().unwrap();
-    let bin = codex_utils_cargo_bin::cargo_bin("codex").unwrap();
+    let bin = codex_utils_cargo_bin::cargo_bin("astral").unwrap();
     let mut cmd = AssertCommand::new(bin);
     cmd.timeout(Duration::from_secs(30));
     cmd.arg("exec")
@@ -263,7 +139,7 @@ async fn exec_cli_applies_model_instructions_file() {
 
     let home = TempDir::new().unwrap();
     let repo_root = repo_root();
-    let bin = codex_utils_cargo_bin::cargo_bin("codex").unwrap();
+    let bin = codex_utils_cargo_bin::cargo_bin("astral").unwrap();
     let mut cmd = AssertCommand::new(bin);
     cmd.arg("exec")
         .arg("--skip-git-repo-check")
@@ -333,7 +209,7 @@ async fn exec_cli_profile_applies_model_instructions_file() {
     .unwrap();
 
     let repo_root = repo_root();
-    let bin = codex_utils_cargo_bin::cargo_bin("codex").unwrap();
+    let bin = codex_utils_cargo_bin::cargo_bin("astral").unwrap();
     let mut cmd = AssertCommand::new(bin);
     cmd.arg("exec")
         .arg("--skip-git-repo-check")
@@ -378,7 +254,7 @@ async fn responses_api_stream_cli() {
     let repo_root = repo_root();
 
     let home = TempDir::new().unwrap();
-    let bin = codex_utils_cargo_bin::cargo_bin("codex").unwrap();
+    let bin = codex_utils_cargo_bin::cargo_bin("astral").unwrap();
     let mut cmd = AssertCommand::new(bin);
     cmd.timeout(Duration::from_secs(30));
     cmd.arg("exec")
@@ -419,8 +295,8 @@ async fn integration_creates_and_checks_session_file() -> anyhow::Result<()> {
         responses::mount_sse_sequence(&server, vec![cli_sse_response(), cli_sse_response()]).await;
     let repo_root = repo_root();
 
-    // 4. Run the codex CLI and invoke `exec`, which is what records a session.
-    let bin = codex_utils_cargo_bin::cargo_bin("codex").unwrap();
+    // 4. Run the astral CLI and invoke `exec`, which is what records a session.
+    let bin = codex_utils_cargo_bin::cargo_bin("astral").unwrap();
     let mut cmd = AssertCommand::new(bin);
     cmd.timeout(Duration::from_secs(30));
     cmd.arg("exec")
@@ -436,7 +312,7 @@ async fn integration_creates_and_checks_session_file() -> anyhow::Result<()> {
     let output = cmd.output().unwrap();
     assert!(
         output.status.success(),
-        "codex-cli exec failed: {}",
+        "astral exec failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
@@ -541,7 +417,7 @@ async fn integration_creates_and_checks_session_file() -> anyhow::Result<()> {
     // Second run: resume should update the existing file.
     let marker2 = format!("integration-resume-{}", Uuid::new_v4());
     let prompt2 = format!("echo {marker2}");
-    let bin2 = codex_utils_cargo_bin::cargo_bin("codex").unwrap();
+    let bin2 = codex_utils_cargo_bin::cargo_bin("astral").unwrap();
     let mut cmd2 = AssertCommand::new(bin2);
     cmd2.timeout(Duration::from_secs(30));
     cmd2.arg("exec")
@@ -557,7 +433,7 @@ async fn integration_creates_and_checks_session_file() -> anyhow::Result<()> {
         .env(ASTRAL_API_KEY_ENV_VAR, "dummy");
 
     let output2 = cmd2.output().unwrap();
-    assert!(output2.status.success(), "resume codex-cli run failed");
+    assert!(output2.status.success(), "resume astral run failed");
     assert_eq!(resp_mock.requests().len(), 2);
 
     // Find the new session file containing the resumed marker.

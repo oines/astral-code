@@ -46,7 +46,6 @@ use codex_install_context::StandalonePlatform;
 use codex_login::ASTRAL_API_KEY_ENV_VAR;
 use codex_login::AuthDotJson;
 use codex_login::AuthManager;
-use codex_login::CODEX_ACCESS_TOKEN_ENV_VAR;
 use codex_login::CodexAuth;
 use codex_login::default_client::build_reqwest_client;
 use codex_login::default_client::default_headers;
@@ -1171,7 +1170,7 @@ fn auth_check(config: &Config) -> DoctorCheck {
     ));
     details.push(format!("auth file: {}", auth_path.display()));
 
-    let env_auth_vars = [ASTRAL_API_KEY_ENV_VAR, CODEX_ACCESS_TOKEN_ENV_VAR]
+    let env_auth_vars = [ASTRAL_API_KEY_ENV_VAR]
         .into_iter()
         .filter(|name| env_var_present(name))
         .collect::<Vec<_>>();
@@ -2555,9 +2554,6 @@ fn provider_auth_reachability_mode_from_auth(
     }
     if env_var_present(ASTRAL_API_KEY_ENV_VAR) {
         return ProviderAuthReachabilityMode::ApiKey;
-    }
-    if env_var_present(CODEX_ACCESS_TOKEN_ENV_VAR) {
-        return ProviderAuthReachabilityMode::Chatgpt;
     }
     match stored_auth.map(stored_auth_mode_value) {
         Some(codex_app_server_protocol::AuthMode::ApiKey) => ProviderAuthReachabilityMode::ApiKey,

@@ -595,7 +595,7 @@ impl TestCodexBuilder {
         };
         config.cwd = cwd_override;
         config.model_provider = model_provider;
-        if let Ok(path) = codex_utils_cargo_bin::cargo_bin("codex") {
+        if let Ok(path) = codex_utils_cargo_bin::cargo_bin("astral") {
             config.codex_self_exe = Some(path);
         } else if let Ok(path) = codex_utils_cargo_bin::cargo_bin("codex-exec") {
             // `codex-exec` also supports `--codex-run-as-apply-patch`, so use it
@@ -604,7 +604,7 @@ impl TestCodexBuilder {
         } else if let Ok(exe) = std::env::current_exe()
             && let Some(bin_dir) = exe.parent().and_then(|parent| parent.parent())
         {
-            let codex = bin_dir.join("codex");
+            let codex = bin_dir.join("astral");
             let codex_exec = bin_dir.join("codex-exec");
             if codex.is_file() {
                 config.codex_self_exe = Some(codex);
