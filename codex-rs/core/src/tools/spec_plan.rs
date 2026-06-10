@@ -4,6 +4,8 @@ use crate::session::turn_context::TurnContext;
 use crate::tools::code_mode::execute_spec::create_code_mode_tool;
 use crate::tools::context::ToolInvocation;
 use crate::tools::handlers::ApplyPatchHandler;
+use crate::tools::handlers::AstralFileToolHandler;
+use crate::tools::handlers::AstralFileToolKind;
 use crate::tools::handlers::CodeModeExecuteHandler;
 use crate::tools::handlers::CodeModeWaitHandler;
 use crate::tools::handlers::DynamicToolHandler;
@@ -747,6 +749,7 @@ fn code_mode_namespace_descriptions(
 
 fn add_tool_sources(context: &CoreToolPlanContext<'_>, planned_tools: &mut PlannedTools) {
     add_shell_tools(context, planned_tools);
+    add_astral_file_tools(context, planned_tools);
     add_mcp_resource_tools(context, planned_tools);
     add_core_utility_tools(context, planned_tools);
     add_collaboration_tools(context, planned_tools);
@@ -755,6 +758,32 @@ fn add_tool_sources(context: &CoreToolPlanContext<'_>, planned_tools: &mut Plann
     add_dynamic_tools(context, planned_tools);
     for spec in hosted_model_tool_specs(context) {
         planned_tools.add_hosted_spec(spec);
+    }
+}
+
+fn add_astral_file_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut PlannedTools) {
+    if matches!(
+        context.turn_context.tool_mode,
+        ToolMode::CodeMode | ToolMode::CodeModeOnly
+    ) {
+        return;
+    }
+    if !context
+        .turn_context
+        .tool_environment_mode()
+        .has_environment()
+    {
+        return;
+    }
+
+    for kind in [
+        AstralFileToolKind::Read,
+        AstralFileToolKind::Write,
+        AstralFileToolKind::Edit,
+        AstralFileToolKind::Glob,
+        AstralFileToolKind::Grep,
+    ] {
+        planned_tools.add(AstralFileToolHandler::new(kind));
     }
 }
 

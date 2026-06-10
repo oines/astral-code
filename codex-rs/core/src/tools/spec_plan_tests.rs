@@ -456,9 +456,18 @@ async fn shell_family_registers_visible_unified_exec_and_hidden_legacy_shell() {
     })
     .await;
 
-    plan.assert_visible_contains(&["Bash", "Monitor"]);
+    plan.assert_visible_contains(&["Bash", "Monitor", "Read", "Write", "Edit", "Glob", "Grep"]);
     plan.assert_visible_lacks(&["shell_command"]);
-    plan.assert_registered_contains(&["exec_command", "write_stdin", "shell_command"]);
+    plan.assert_registered_contains(&[
+        "exec_command",
+        "write_stdin",
+        "shell_command",
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Grep",
+    ]);
     assert_eq!(plan.exposure("shell_command"), ToolExposure::Hidden);
     assert!(has_parameter(plan.visible_spec("Bash"), "command"));
 }
@@ -585,12 +594,22 @@ async fn environment_count_controls_environment_backed_tools() {
         "exec_command",
         "Bash",
         "Monitor",
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Grep",
         "apply_patch",
         "view_image",
     ]);
     no_environment.assert_registered_lacks(&[
         "shell_command",
         "exec_command",
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Grep",
         "apply_patch",
         "view_image",
     ]);

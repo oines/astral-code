@@ -1,4 +1,9 @@
 use super::*;
+use codex_tools::EDIT_TOOL_NAME;
+use codex_tools::GLOB_TOOL_NAME;
+use codex_tools::GREP_TOOL_NAME;
+use codex_tools::READ_TOOL_NAME;
+use codex_tools::WRITE_TOOL_NAME;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 use serde_json::json;
@@ -67,26 +72,26 @@ fn canonicalizes_monitor_to_write_stdin() -> anyhow::Result<()> {
 }
 
 #[test]
-fn canonicalizes_file_tools_to_unified_exec_commands() -> anyhow::Result<()> {
+fn leaves_file_tools_native_for_astral_handlers() -> anyhow::Result<()> {
     let (tool_name, arguments) = canonicalize_function(
         READ_TOOL_NAME,
         json!({ "file_path": "/workspace/src/lib.rs", "offset": 3, "limit": 5 }),
     )?;
-    assert_eq!(tool_name, ToolName::plain("exec_command"));
-    let cmd = arguments["cmd"].as_str().expect("Read command");
-    assert!(cmd.contains("python3"));
-    assert!(cmd.contains("/workspace/src/lib.rs"));
-    assert!(cmd.contains(" 3 5"));
+    assert_eq!(tool_name, ToolName::plain(READ_TOOL_NAME));
+    assert_eq!(
+        arguments,
+        json!({ "file_path": "/workspace/src/lib.rs", "offset": 3, "limit": 5 })
+    );
 
     let (tool_name, arguments) = canonicalize_function(
         WRITE_TOOL_NAME,
         json!({ "file_path": "/workspace/notes.txt", "content": "hello world\n" }),
     )?;
-    assert_eq!(tool_name, ToolName::plain("exec_command"));
-    let cmd = arguments["cmd"].as_str().expect("Write command");
-    assert!(cmd.contains("python3"));
-    assert!(cmd.contains("/workspace/notes.txt"));
-    assert!(cmd.contains("hello world"));
+    assert_eq!(tool_name, ToolName::plain(WRITE_TOOL_NAME));
+    assert_eq!(
+        arguments,
+        json!({ "file_path": "/workspace/notes.txt", "content": "hello world\n" })
+    );
 
     let (tool_name, arguments) = canonicalize_function(
         EDIT_TOOL_NAME,
@@ -97,25 +102,30 @@ fn canonicalizes_file_tools_to_unified_exec_commands() -> anyhow::Result<()> {
             "replace_all": true
         }),
     )?;
-    assert_eq!(tool_name, ToolName::plain("exec_command"));
-    let cmd = arguments["cmd"].as_str().expect("Edit command");
-    assert!(cmd.contains("/workspace/notes.txt"));
-    assert!(cmd.contains("goodbye"));
-    assert!(cmd.ends_with(" true"));
+    assert_eq!(tool_name, ToolName::plain(EDIT_TOOL_NAME));
+    assert_eq!(
+        arguments,
+        json!({
+            "file_path": "/workspace/notes.txt",
+            "old_string": "hello",
+            "new_string": "goodbye",
+            "replace_all": true
+        })
+    );
     Ok(())
 }
 
 #[test]
-fn canonicalizes_search_tools_to_unified_exec_commands() -> anyhow::Result<()> {
+fn leaves_search_tools_native_for_astral_handlers() -> anyhow::Result<()> {
     let (tool_name, arguments) = canonicalize_function(
         GLOB_TOOL_NAME,
         json!({ "pattern": "**/*.rs", "path": "/workspace" }),
     )?;
-    assert_eq!(tool_name, ToolName::plain("exec_command"));
-    let cmd = arguments["cmd"].as_str().expect("Glob command");
-    assert!(cmd.contains("python3"));
-    assert!(cmd.contains("/workspace"));
-    assert!(cmd.contains("**/*.rs"));
+    assert_eq!(tool_name, ToolName::plain(GLOB_TOOL_NAME));
+    assert_eq!(
+        arguments,
+        json!({ "pattern": "**/*.rs", "path": "/workspace" })
+    );
 
     let (tool_name, arguments) = canonicalize_function(
         GREP_TOOL_NAME,
@@ -129,11 +139,19 @@ fn canonicalizes_search_tools_to_unified_exec_commands() -> anyhow::Result<()> {
             "head_limit": 10
         }),
     )?;
-    assert_eq!(tool_name, ToolName::plain("exec_command"));
-    let cmd = arguments["cmd"].as_str().expect("Grep command");
-    assert!(cmd.contains("python3"));
-    assert!(cmd.contains("struct .*Args"));
-    assert!(cmd.contains("head_limit"));
+    assert_eq!(tool_name, ToolName::plain(GREP_TOOL_NAME));
+    assert_eq!(
+        arguments,
+        json!({
+            "pattern": "struct .*Args",
+            "path": "/workspace",
+            "glob": "*.rs",
+            "output_mode": "content",
+            "-n": true,
+            "-C": 2,
+            "head_limit": 10
+        })
+    );
     Ok(())
 }
 
