@@ -4,6 +4,7 @@ use crate::session::turn_context::TurnContext;
 use crate::tools::code_mode::execute_spec::create_code_mode_tool;
 use crate::tools::context::ToolInvocation;
 use crate::tools::handlers::ApplyPatchHandler;
+use crate::tools::handlers::AstralAskUserQuestionHandler;
 use crate::tools::handlers::AstralBashHandler;
 use crate::tools::handlers::AstralFileToolHandler;
 use crate::tools::handlers::AstralFileToolKind;
@@ -70,7 +71,6 @@ use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
 use codex_tools::AGENT_TOOL_NAME;
-use codex_tools::ASK_USER_QUESTION_TOOL_NAME;
 use codex_tools::BASH_TOOL_NAME;
 use codex_tools::DiscoverableTool;
 use codex_tools::EDIT_TOOL_NAME;
@@ -320,7 +320,6 @@ fn astral_spec_for_model_request(
             Some(BASH_TOOL_NAME)
         }
         "update_plan" => Some(TODO_WRITE_TOOL_NAME),
-        "request_user_input" => Some(ASK_USER_QUESTION_TOOL_NAME),
         "request_permissions" => Some(REQUEST_PERMISSIONS_TOOL_NAME),
         TOOL_SEARCH_TOOL_NAME => Some(TOOL_SEARCH_FLAVOR_TOOL_NAME),
         "list_mcp_resources" => Some(LIST_MCP_RESOURCES_TOOL_NAME),
@@ -870,9 +869,9 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut
     planned_tools.add_dispatch_only(PlanHandler);
 
     if turn_context.config.experimental_request_user_input_enabled {
-        planned_tools.add(RequestUserInputHandler {
-            available_modes: request_user_input_available_modes(features),
-        });
+        let available_modes = request_user_input_available_modes(features);
+        planned_tools.add(AstralAskUserQuestionHandler::new(available_modes.clone()));
+        planned_tools.add_dispatch_only(RequestUserInputHandler { available_modes });
     }
 
     if features.enabled(Feature::RequestPermissionsTool) {

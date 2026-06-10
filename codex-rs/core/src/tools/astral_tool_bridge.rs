@@ -2,7 +2,6 @@ use crate::function_tool::FunctionCallError;
 use crate::tools::context::ToolPayload;
 use codex_protocol::models::SearchToolCallParams;
 use codex_tools::AGENT_TOOL_NAME;
-use codex_tools::ASK_USER_QUESTION_TOOL_NAME;
 use codex_tools::LIST_MCP_RESOURCES_TOOL_NAME;
 use codex_tools::READ_MCP_RESOURCE_TOOL_NAME;
 use codex_tools::REQUEST_PERMISSIONS_TOOL_NAME;
@@ -32,11 +31,6 @@ pub(crate) fn canonicalize_astral_tool_call(
     };
 
     let payload = match tool_name.name.as_str() {
-        ASK_USER_QUESTION_TOOL_NAME => rewrite_function_payload(
-            payload,
-            ASK_USER_QUESTION_TOOL_NAME,
-            rewrite_ask_user_question_args,
-        )?,
         REQUEST_PERMISSIONS_TOOL_NAME => rewrite_function_payload(
             payload,
             REQUEST_PERMISSIONS_TOOL_NAME,
@@ -63,7 +57,6 @@ fn canonical_astral_plain_name(tool_name: &ToolName) -> Option<&'static str> {
     }
 
     match tool_name.name.as_str() {
-        ASK_USER_QUESTION_TOOL_NAME => Some("request_user_input"),
         REQUEST_PERMISSIONS_TOOL_NAME => Some("request_permissions"),
         TOOL_SEARCH_FLAVOR_TOOL_NAME => Some(TOOL_SEARCH_TOOL_NAME),
         LIST_MCP_RESOURCES_TOOL_NAME => Some("list_mcp_resources"),
@@ -103,30 +96,6 @@ fn serialize_json_arguments(tool_name: &str, value: Value) -> Result<String, Fun
             "failed to serialize canonical {tool_name} arguments: {err}"
         ))
     })
-}
-
-fn rewrite_ask_user_question_args(value: Value) -> Result<Value, FunctionCallError> {
-    let args: AstralAskUserQuestionArgs = serde_json::from_value(value).map_err(|err| {
-        FunctionCallError::RespondToModel(format!(
-            "failed to parse {ASK_USER_QUESTION_TOOL_NAME} arguments: {err}"
-        ))
-    })?;
-
-    let questions = args
-        .questions
-        .into_iter()
-        .enumerate()
-        .map(|(index, question)| {
-            json!({
-                "id": question.id.unwrap_or_else(|| format!("question_{}", index + 1)),
-                "header": question.header,
-                "question": question.question,
-                "options": question.options,
-            })
-        })
-        .collect::<Vec<_>>();
-
-    Ok(json!({ "questions": questions }))
 }
 
 fn rewrite_request_permissions_args(value: Value) -> Result<Value, FunctionCallError> {
@@ -214,27 +183,6 @@ fn rewrite_task_stop_args(value: Value) -> Result<Value, FunctionCallError> {
     })?;
 
     Ok(json!({ "target": target }))
-}
-
-#[derive(Deserialize)]
-struct AstralAskUserQuestionArgs {
-    questions: Vec<AstralQuestion>,
-}
-
-#[derive(Deserialize)]
-struct AstralQuestion {
-    #[serde(default)]
-    id: Option<String>,
-    header: String,
-    question: String,
-    #[serde(default)]
-    options: Option<Vec<AstralQuestionOption>>,
-}
-
-#[derive(Deserialize, serde::Serialize)]
-struct AstralQuestionOption {
-    label: String,
-    description: String,
 }
 
 #[derive(Deserialize)]

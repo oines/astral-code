@@ -1,4 +1,5 @@
 use super::*;
+use codex_tools::ASK_USER_QUESTION_TOOL_NAME;
 use codex_tools::BASH_TOOL_NAME;
 use codex_tools::EDIT_TOOL_NAME;
 use codex_tools::GLOB_TOOL_NAME;
@@ -186,7 +187,7 @@ fn leaves_todo_write_native_for_astral_handler() -> anyhow::Result<()> {
 }
 
 #[test]
-fn canonicalizes_ask_user_question_to_request_user_input() -> anyhow::Result<()> {
+fn leaves_ask_user_question_native_for_astral_handler() -> anyhow::Result<()> {
     let (tool_name, arguments) = canonicalize_function(
         ASK_USER_QUESTION_TOOL_NAME,
         json!({
@@ -202,18 +203,18 @@ fn canonicalizes_ask_user_question_to_request_user_input() -> anyhow::Result<()>
         }),
     )?;
 
-    assert_eq!(tool_name, ToolName::plain("request_user_input"));
+    assert_eq!(tool_name, ToolName::plain(ASK_USER_QUESTION_TOOL_NAME));
     assert_eq!(
         arguments,
         json!({
             "questions": [{
-                "id": "question_1",
                 "header": "Scope",
                 "question": "How deep should the rewrite go?",
                 "options": [
                     { "label": "Thin", "description": "Keep it narrow" },
                     { "label": "Deep", "description": "Rewrite internals" }
-                ]
+                ],
+                "multiSelect": false
             }]
         })
     );
