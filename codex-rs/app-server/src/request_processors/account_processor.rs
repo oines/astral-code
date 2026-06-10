@@ -1,7 +1,5 @@
 use super::*;
 
-const ACCOUNT_TOKEN_USAGE_FETCH_TIMEOUT: Duration = Duration::from_secs(/*secs*/ 10);
-
 enum RefreshTokenRequestOutcome {
     NotAttemptedOrSucceeded,
     FailedTransiently,
@@ -114,9 +112,10 @@ impl AccountRequestProcessor {
 
     fn current_account_updated_notification(&self) -> AccountUpdatedNotification {
         let auth = self.auth_manager.auth_cached();
+        let supported_auth = auth.as_ref().filter(|auth| !auth.uses_codex_backend());
         AccountUpdatedNotification {
-            auth_mode: auth.as_ref().map(CodexAuth::api_auth_mode),
-            plan_type: auth.as_ref().and_then(CodexAuth::account_plan_type),
+            auth_mode: supported_auth.map(CodexAuth::api_auth_mode),
+            plan_type: supported_auth.and_then(CodexAuth::account_plan_type),
         }
     }
 
@@ -199,27 +198,12 @@ impl AccountRequestProcessor {
         self.outgoing.send_result(request_id, result).await;
     }
 
-    fn external_auth_active_error(&self) -> JSONRPCErrorError {
-        invalid_request(
-            "External auth is active. Use account/login/start (chatgptAuthTokens) to update it or account/logout to clear it.",
-        )
-    }
-
     async fn login_api_key_common(
         &self,
         params: &LoginApiKeyParams,
     ) -> std::result::Result<(), JSONRPCErrorError> {
         if self.auth_manager.is_external_chatgpt_auth_active() {
-            return Err(self.external_auth_active_error());
-        }
-
-        if matches!(
-            self.config.forced_login_method,
-            Some(ForcedLoginMethod::Chatgpt)
-        ) {
-            return Err(invalid_request(
-                "API key login is disabled by configuration.",
-            ));
+            self.auth_manager.clear_external_auth();
         }
 
         match login_with_api_key(
@@ -334,7 +318,12 @@ impl AccountRequestProcessor {
     }
 
     async fn refresh_token_if_requested(&self, do_refresh: bool) -> RefreshTokenRequestOutcome {
-        if self.auth_manager.is_external_chatgpt_auth_active() {
+        if self
+            .auth_manager
+            .auth_cached()
+            .as_ref()
+            .is_some_and(CodexAuth::uses_codex_backend)
+        {
             return RefreshTokenRequestOutcome::NotAttemptedOrSucceeded;
         }
         if do_refresh && let Err(err) = self.auth_manager.refresh_token().await {
@@ -375,6 +364,11 @@ impl AccountRequestProcessor {
                 self.auth_manager.auth().await
             };
             match auth {
+                Some(auth) if auth.uses_codex_backend() => GetAuthStatusResponse {
+                    auth_method: None,
+                    auth_token: None,
+                    requires_openai_auth: Some(true),
+                },
                 Some(auth) => {
                     let permanent_refresh_failure =
                         self.auth_manager.refresh_failure_for_auth(&auth).is_some();
@@ -445,225 +439,19 @@ impl AccountRequestProcessor {
     async fn get_account_rate_limits_response(
         &self,
     ) -> Result<GetAccountRateLimitsResponse, JSONRPCErrorError> {
-        self.ensure_account_backend_available()?;
-        self.fetch_account_rate_limits()
-            .await
-            .map(
-                |(rate_limits, rate_limits_by_limit_id)| GetAccountRateLimitsResponse {
-                    rate_limits: rate_limits.into(),
-                    rate_limits_by_limit_id: Some(
-                        rate_limits_by_limit_id
-                            .into_iter()
-                            .map(|(limit_id, snapshot)| (limit_id, snapshot.into()))
-                            .collect(),
-                    ),
-                },
-            )
+        Err(invalid_request(ACCOUNT_BACKEND_DISABLED_MESSAGE))
     }
 
     async fn get_account_token_usage_response(
         &self,
     ) -> Result<GetAccountTokenUsageResponse, JSONRPCErrorError> {
-        self.ensure_account_backend_available()?;
-        let Some(auth) = self.auth_manager.auth().await else {
-            return Err(invalid_request(
-                "Astral-managed account authentication required to read token usage",
-            ));
-        };
-
-        if !auth.uses_codex_backend() {
-            return Err(invalid_request(
-                "Astral-managed account authentication required to read token usage",
-            ));
-        }
-
-        let client = BackendClient::from_auth(self.config.chatgpt_base_url.clone(), &auth)
-            .map_err(|err| internal_error(format!("failed to construct backend client: {err}")))?;
-        let profile = tokio::time::timeout(
-            ACCOUNT_TOKEN_USAGE_FETCH_TIMEOUT,
-            client.get_token_usage_profile(),
-        )
-        .await
-        .map_err(|_| internal_error("token usage profile fetch timed out"))?
-        .map_err(|err| internal_error(format!("failed to fetch token usage profile: {err}")))?;
-        Ok(Self::account_token_usage_response(profile))
-    }
-
-    fn account_token_usage_response(profile: TokenUsageProfile) -> GetAccountTokenUsageResponse {
-        let stats = profile.stats;
-        GetAccountTokenUsageResponse {
-            summary: AccountTokenUsageSummary {
-                lifetime_tokens: stats.lifetime_tokens,
-                peak_daily_tokens: stats.peak_daily_tokens,
-                longest_running_turn_sec: stats.longest_running_turn_sec,
-                current_streak_days: stats.current_streak_days,
-                longest_streak_days: stats.longest_streak_days,
-            },
-            daily_usage_buckets: stats.daily_usage_buckets.map(|buckets| {
-                buckets
-                    .into_iter()
-                    .map(|bucket| AccountTokenUsageDailyBucket {
-                        start_date: bucket.start_date,
-                        tokens: bucket.tokens,
-                    })
-                    .collect()
-            }),
-        }
+        Err(invalid_request(ACCOUNT_BACKEND_DISABLED_MESSAGE))
     }
 
     async fn send_add_credits_nudge_email_response(
         &self,
-        params: SendAddCreditsNudgeEmailParams,
+        _params: SendAddCreditsNudgeEmailParams,
     ) -> Result<SendAddCreditsNudgeEmailResponse, JSONRPCErrorError> {
-        self.send_add_credits_nudge_email_inner(params)
-            .await
-            .map(|status| SendAddCreditsNudgeEmailResponse { status })
-    }
-
-    async fn send_add_credits_nudge_email_inner(
-        &self,
-        params: SendAddCreditsNudgeEmailParams,
-    ) -> Result<AddCreditsNudgeEmailStatus, JSONRPCErrorError> {
-        self.ensure_account_backend_available()?;
-        let Some(auth) = self.auth_manager.auth().await else {
-            return Err(invalid_request(
-                "Astral-managed account authentication required to notify workspace owner",
-            ));
-        };
-
-        if !auth.uses_codex_backend() {
-            return Err(invalid_request(
-                "Astral-managed account authentication required to notify workspace owner",
-            ));
-        }
-
-        let client = BackendClient::from_auth(self.config.chatgpt_base_url.clone(), &auth)
-            .map_err(|err| internal_error(format!("failed to construct backend client: {err}")))?;
-
-        match client
-            .send_add_credits_nudge_email(Self::backend_credit_type(params.credit_type))
-            .await
-        {
-            Ok(()) => Ok(AddCreditsNudgeEmailStatus::Sent),
-            Err(err) if err.status().is_some_and(|status| status.as_u16() == 429) => {
-                Ok(AddCreditsNudgeEmailStatus::CooldownActive)
-            }
-            Err(err) => Err(internal_error(format!(
-                "failed to notify workspace owner: {err}"
-            ))),
-        }
-    }
-
-    fn backend_credit_type(value: AddCreditsNudgeCreditType) -> BackendAddCreditsNudgeCreditType {
-        match value {
-            AddCreditsNudgeCreditType::Credits => BackendAddCreditsNudgeCreditType::Credits,
-            AddCreditsNudgeCreditType::UsageLimit => BackendAddCreditsNudgeCreditType::UsageLimit,
-        }
-    }
-
-    async fn fetch_account_rate_limits(
-        &self,
-    ) -> Result<
-        (
-            CoreRateLimitSnapshot,
-            HashMap<String, CoreRateLimitSnapshot>,
-        ),
-        JSONRPCErrorError,
-    > {
-        self.ensure_account_backend_available()?;
-        let Some(auth) = self.auth_manager.auth().await else {
-            return Err(invalid_request(
-                "Astral-managed account authentication required to read rate limits",
-            ));
-        };
-
-        if !auth.uses_codex_backend() {
-            return Err(invalid_request(
-                "Astral-managed account authentication required to read rate limits",
-            ));
-        }
-
-        let client = BackendClient::from_auth(self.config.chatgpt_base_url.clone(), &auth)
-            .map_err(|err| internal_error(format!("failed to construct backend client: {err}")))?;
-
-        let snapshots = client
-            .get_rate_limits_many()
-            .await
-            .map_err(|err| internal_error(format!("failed to fetch codex rate limits: {err}")))?;
-        if snapshots.is_empty() {
-            return Err(internal_error(
-                "failed to fetch codex rate limits: no snapshots returned",
-            ));
-        }
-
-        let rate_limits_by_limit_id: HashMap<String, CoreRateLimitSnapshot> = snapshots
-            .iter()
-            .cloned()
-            .map(|snapshot| {
-                let limit_id = snapshot
-                    .limit_id
-                    .clone()
-                    .unwrap_or_else(|| "codex".to_string());
-                (limit_id, snapshot)
-            })
-            .collect();
-
-        let primary = snapshots
-            .iter()
-            .find(|snapshot| snapshot.limit_id.as_deref() == Some("codex"))
-            .cloned()
-            .unwrap_or_else(|| snapshots[0].clone());
-
-        Ok((primary, rate_limits_by_limit_id))
-    }
-
-    fn ensure_account_backend_available(&self) -> Result<(), JSONRPCErrorError> {
-        if self.config.model_provider.requires_openai_auth {
-            Ok(())
-        } else {
-            Err(invalid_request(ACCOUNT_BACKEND_DISABLED_MESSAGE))
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use codex_backend_client::TokenUsageProfileDailyBucket;
-    use codex_backend_client::TokenUsageProfileStats;
-    use pretty_assertions::assert_eq;
-
-    #[test]
-    fn account_token_usage_response_maps_profile_stats_and_daily_buckets() {
-        let response = AccountRequestProcessor::account_token_usage_response(TokenUsageProfile {
-            stats: TokenUsageProfileStats {
-                lifetime_tokens: Some(123),
-                peak_daily_tokens: Some(45),
-                longest_running_turn_sec: Some(67),
-                current_streak_days: Some(8),
-                longest_streak_days: Some(9),
-                daily_usage_buckets: Some(vec![TokenUsageProfileDailyBucket {
-                    start_date: "2026-05-29".to_string(),
-                    tokens: 10,
-                }]),
-            },
-        });
-
-        assert_eq!(
-            response,
-            GetAccountTokenUsageResponse {
-                summary: AccountTokenUsageSummary {
-                    lifetime_tokens: Some(123),
-                    peak_daily_tokens: Some(45),
-                    longest_running_turn_sec: Some(67),
-                    current_streak_days: Some(8),
-                    longest_streak_days: Some(9),
-                },
-                daily_usage_buckets: Some(vec![AccountTokenUsageDailyBucket {
-                    start_date: "2026-05-29".to_string(),
-                    tokens: 10,
-                }]),
-            }
-        );
+        Err(invalid_request(ACCOUNT_BACKEND_DISABLED_MESSAGE))
     }
 }

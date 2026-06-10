@@ -185,10 +185,7 @@ impl ModelProvider for ConfiguredModelProvider {
     }
 
     fn supports_attestation(&self) -> bool {
-        self.auth_manager
-            .as_ref()
-            .and_then(|auth_manager| auth_manager.auth_cached())
-            .is_some_and(|auth| auth.is_chatgpt_auth())
+        false
     }
 
     async fn auth(&self) -> Option<CodexAuth> {
@@ -209,22 +206,12 @@ impl ModelProvider for ConfiguredModelProvider {
                     }
                     Some(auth)
                 })
-                .map(|auth| match &auth {
-                    CodexAuth::ApiKey(_) => Ok(ProviderAccount::ApiKey),
+                .and_then(|auth| match &auth {
+                    CodexAuth::ApiKey(_) => Some(Ok(ProviderAccount::ApiKey)),
                     CodexAuth::Chatgpt(_)
                     | CodexAuth::ChatgptAuthTokens(_)
                     | CodexAuth::AgentIdentity(_)
-                    | CodexAuth::PersonalAccessToken(_) => {
-                        let email = auth.get_account_email();
-                        let plan_type = auth.account_plan_type();
-
-                        match (email, plan_type) {
-                            (Some(email), Some(plan_type)) => {
-                                Ok(ProviderAccount::Chatgpt { email, plan_type })
-                            }
-                            _ => Err(ProviderAccountError::MissingChatgptAccountDetails),
-                        }
-                    }
+                    | CodexAuth::PersonalAccessToken(_) => None,
                 })
                 .transpose()?
         } else {
@@ -472,7 +459,7 @@ mod tests {
     }
 
     #[test]
-    fn openai_provider_rejects_chatgpt_account_state_without_email() {
+    fn openai_provider_hides_unsupported_chatgpt_account_state() {
         let provider = create_model_provider(
             ModelProviderInfo::create_openai_provider(/*base_url*/ None),
             Some(AuthManager::from_auth_for_testing(
@@ -482,7 +469,10 @@ mod tests {
 
         assert_eq!(
             provider.account_state(),
-            Err(ProviderAccountError::MissingChatgptAccountDetails)
+            Ok(ProviderAccountState {
+                account: None,
+                requires_openai_auth: true,
+            })
         );
     }
 
