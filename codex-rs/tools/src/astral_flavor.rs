@@ -173,7 +173,7 @@ fn edit_tool() -> AgentTool {
 fn glob_tool() -> AgentTool {
     tool(
         GLOB_TOOL_NAME,
-        "Find files by glob pattern.",
+        "Find files by glob pattern, sorted by modification time.",
         object(
             [
                 string_property("pattern", "The glob pattern to match files against"),

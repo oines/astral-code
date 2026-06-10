@@ -380,13 +380,23 @@ async fn glob_files(
     let root = resolve_path(cwd, args.path.as_deref().unwrap_or("."));
     let matcher = glob_regex(&args.pattern)?;
     let files = collect_files(fs, sandbox, &root).await?;
-    let mut matches = files
-        .into_iter()
-        .filter(|path| matcher.is_match(&relative_slash_path(path, &root)))
-        .map(|path| display_path(&path, cwd))
-        .collect::<Vec<_>>();
-    matches.sort();
-    Ok(join_limited_lines(matches, MAX_RESULT_LINES))
+    let mut matches = Vec::new();
+    for path in files {
+        if !matcher.is_match(&relative_slash_path(&path, &root)) {
+            continue;
+        }
+        let modified_at_ms = fs
+            .get_metadata(&path, Some(sandbox))
+            .await
+            .ok()
+            .map_or(0, |metadata| metadata.modified_at_ms);
+        matches.push((display_path(&path, cwd), modified_at_ms));
+    }
+    matches.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+    Ok(join_limited_lines(
+        matches.into_iter().map(|(path, _)| path).collect(),
+        MAX_RESULT_LINES,
+    ))
 }
 
 #[derive(Deserialize)]
