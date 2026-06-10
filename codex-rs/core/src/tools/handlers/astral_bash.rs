@@ -24,6 +24,8 @@ use serde::Deserialize;
 use serde_json::Map;
 use serde_json::Value;
 
+const BACKGROUND_BASH_YIELD_TIME_MS: u64 = 250;
+
 pub struct AstralBashHandler {
     backend: AstralBashBackend,
 }
@@ -198,7 +200,7 @@ fn rewrite_bash_arguments(arguments: &str) -> Result<String, FunctionCallError> 
     move_field_if_absent(&mut object, "command", "cmd");
     move_field_if_absent(&mut object, "cwd", "workdir");
     move_field_if_absent(&mut object, "timeout", "timeout_ms");
-    object.remove("run_in_background");
+    apply_run_in_background_yield(&mut object);
 
     serde_json::to_string(&object).map_err(|err| {
         FunctionCallError::RespondToModel(format!(
@@ -235,6 +237,19 @@ fn move_field_if_absent(object: &mut Map<String, Value>, from: &str, to: &str) {
     }
 }
 
+fn apply_run_in_background_yield(object: &mut Map<String, Value>) {
+    let run_in_background = object
+        .remove("run_in_background")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    if run_in_background && !object.contains_key("yield_time_ms") {
+        object.insert(
+            "yield_time_ms".to_string(),
+            Value::Number(BACKGROUND_BASH_YIELD_TIME_MS.into()),
+        );
+    }
+}
+
 fn bash_tool_input(payload: &ToolPayload) -> Option<Value> {
     let ToolPayload::Function { arguments } = payload else {
         return None;
@@ -244,3 +259,7 @@ fn bash_tool_input(payload: &ToolPayload) -> Option<Value> {
         .ok()
         .map(|args| serde_json::json!({ "command": args.command }))
 }
+
+#[cfg(test)]
+#[path = "astral_bash_tests.rs"]
+mod tests;
