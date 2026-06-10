@@ -93,11 +93,21 @@ fn monitor_uses_running_session_shape() {
 }
 
 #[test]
-fn unknown_tool_name_is_not_exposed() {
-    assert_eq!(astral_core_tool_by_name("CronCreate"), None);
+fn skill_uses_claudeish_skill_and_args_shape() {
+    let tool = astral_core_tool_by_name(SKILL_TOOL_NAME).expect("Skill exists");
+
+    assert_eq!(tool.input_schema["required"], json!(["skill"]));
+    assert_eq!(
+        tool.input_schema["properties"]["skill"]["type"],
+        json!("string")
+    );
+    assert_eq!(
+        tool.input_schema["properties"]["args"]["type"],
+        json!("string")
+    );
 }
 
 #[test]
-fn skill_is_hidden_until_a_runtime_handler_exists() {
-    assert_eq!(astral_core_tool_by_name(SKILL_TOOL_NAME), None);
+fn unknown_tool_name_is_not_exposed() {
+    assert_eq!(astral_core_tool_by_name("CronCreate"), None);
 }

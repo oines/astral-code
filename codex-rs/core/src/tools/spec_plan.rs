@@ -14,6 +14,7 @@ use crate::tools::handlers::AstralMonitorHandler;
 use crate::tools::handlers::AstralReadMcpResourceHandler;
 use crate::tools::handlers::AstralRequestPermissionsHandler;
 use crate::tools::handlers::AstralSendMessageHandler;
+use crate::tools::handlers::AstralSkillHandler;
 use crate::tools::handlers::AstralTaskStopHandler;
 use crate::tools::handlers::AstralTodoWriteHandler;
 use crate::tools::handlers::AstralToolSearchHandler;
@@ -760,6 +761,15 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut
 
     planned_tools.add(AstralTodoWriteHandler::new());
     planned_tools.add_dispatch_only(PlanHandler);
+
+    if turn_context
+        .turn_skills
+        .outcome
+        .skills_with_enabled()
+        .any(|(_, enabled)| enabled)
+    {
+        planned_tools.add(AstralSkillHandler);
+    }
 
     if turn_context.config.experimental_request_user_input_enabled {
         let available_modes = request_user_input_available_modes(features);
