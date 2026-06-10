@@ -421,15 +421,6 @@ fn has_parameter(spec: &ToolSpec, parameter_name: &str) -> bool {
         .is_some()
 }
 
-fn apply_patch_accepts_environment_id(spec: &ToolSpec) -> bool {
-    match spec {
-        ToolSpec::Freeform(tool) if tool.name == "apply_patch" => {
-            tool.format.definition.contains("Environment ID")
-        }
-        _ => false,
-    }
-}
-
 #[tokio::test]
 async fn request_user_input_tool_respects_experimental_config_gate() {
     let enabled = probe(|_| {}).await;
@@ -599,7 +590,6 @@ async fn environment_count_controls_environment_backed_tools() {
         "Edit",
         "Glob",
         "Grep",
-        "apply_patch",
         "view_image",
     ]);
     no_environment.assert_registered_lacks(&[
@@ -610,7 +600,6 @@ async fn environment_count_controls_environment_backed_tools() {
         "Edit",
         "Glob",
         "Grep",
-        "apply_patch",
         "view_image",
     ]);
 
@@ -621,13 +610,16 @@ async fn environment_count_controls_environment_backed_tools() {
         turn.model_info.apply_patch_tool_type = Some(ApplyPatchToolType::Freeform);
     })
     .await;
-    multiple_environments.assert_visible_contains(&["Bash", "apply_patch", "view_image"]);
+    multiple_environments.assert_visible_contains(&["Bash", "view_image"]);
+    multiple_environments.assert_visible_lacks(&["apply_patch"]);
+    multiple_environments.assert_registered_contains(&["apply_patch"]);
+    assert_eq!(
+        multiple_environments.exposure("apply_patch"),
+        ToolExposure::Hidden
+    );
     assert!(has_parameter(
         multiple_environments.visible_spec("Bash"),
         "environment_id"
-    ));
-    assert!(apply_patch_accepts_environment_id(
-        multiple_environments.visible_spec("apply_patch")
     ));
     assert!(has_parameter(
         multiple_environments.visible_spec("view_image"),
