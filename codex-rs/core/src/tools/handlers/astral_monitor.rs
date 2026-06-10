@@ -14,6 +14,7 @@ use codex_tools::ToolSpec;
 use codex_tools::astral_core_tool_by_name;
 use codex_tools::parse_tool_input_schema_without_compaction;
 use serde_json::Map;
+use serde_json::Number;
 use serde_json::Value;
 
 pub struct AstralMonitorHandler {
@@ -109,6 +110,7 @@ fn rewrite_monitor_arguments(arguments: &str) -> Result<String, FunctionCallErro
 
     move_field_if_absent(&mut object, "task_id", "session_id");
     move_field_if_absent(&mut object, "shell_id", "session_id");
+    normalize_session_id(&mut object)?;
 
     serde_json::to_string(&object).map_err(|err| {
         FunctionCallError::RespondToModel(format!(
@@ -125,3 +127,32 @@ fn move_field_if_absent(object: &mut Map<String, Value>, from: &str, to: &str) {
         object.insert(to.to_string(), value);
     }
 }
+
+fn normalize_session_id(object: &mut Map<String, Value>) -> Result<(), FunctionCallError> {
+    let Some(value) = object.remove("session_id") else {
+        return Err(FunctionCallError::RespondToModel(
+            "Monitor requires `session_id`, `task_id`, or `shell_id` from a previous background Bash result".to_string(),
+        ));
+    };
+
+    let session_id = match value {
+        Value::Number(number) => number.as_i64().and_then(|value| i32::try_from(value).ok()),
+        Value::String(value) => value.trim().parse::<i32>().ok(),
+        _ => None,
+    }
+    .ok_or_else(|| {
+        FunctionCallError::RespondToModel(
+            "Monitor session id must be a numeric Bash session id".to_string(),
+        )
+    })?;
+
+    object.insert(
+        "session_id".to_string(),
+        Value::Number(Number::from(session_id)),
+    );
+    Ok(())
+}
+
+#[cfg(test)]
+#[path = "astral_monitor_tests.rs"]
+mod tests;

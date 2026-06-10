@@ -332,9 +332,12 @@ fn monitor_tool() -> AgentTool {
         "Poll or write to a running background Bash command.",
         object(
             [
-                integer_property("session_id", "The running Bash session id"),
-                integer_property("task_id", "Alias for session_id when using task-style ids"),
-                integer_property("shell_id", "Deprecated alias for session_id"),
+                session_identifier_property("session_id", "The running Bash session id"),
+                session_identifier_property(
+                    "task_id",
+                    "Alias for session_id when using task-style ids",
+                ),
+                session_identifier_property("shell_id", "Deprecated alias for session_id"),
                 string_property("chars", "Optional stdin bytes to write before polling"),
                 integer_property(
                     "yield_time_ms",
@@ -506,6 +509,19 @@ fn bool_property(name: &'static str, description: &'static str) -> (&'static str
 
 fn json_property(name: &'static str, description: &'static str) -> (&'static str, Value) {
     (name, json!({ "description": description }))
+}
+
+fn session_identifier_property(
+    name: &'static str,
+    description: &'static str,
+) -> (&'static str, Value) {
+    (
+        name,
+        json!({
+            "anyOf": [{ "type": "integer" }, { "type": "string" }],
+            "description": description
+        }),
+    )
 }
 
 fn enum_property<const N: usize>(

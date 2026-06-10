@@ -91,12 +91,12 @@ fn monitor_uses_running_session_shape() {
 
     assert_eq!(tool.input_schema["required"], json!([]));
     assert_eq!(
-        tool.input_schema["properties"]["session_id"]["type"],
-        json!("integer")
+        tool.input_schema["properties"]["session_id"]["anyOf"],
+        json!([{ "type": "integer" }, { "type": "string" }])
     );
     assert_eq!(
-        tool.input_schema["properties"]["shell_id"]["type"],
-        json!("integer")
+        tool.input_schema["properties"]["shell_id"]["anyOf"],
+        json!([{ "type": "integer" }, { "type": "string" }])
     );
 }
 
