@@ -124,7 +124,7 @@ impl AnalyticsEventsClient {
         analytics_enabled: Option<bool>,
     ) -> Self {
         Self {
-            queue: (analytics_enabled != Some(false))
+            queue: (analytics_enabled == Some(true))
                 .then(|| AnalyticsEventsQueue::new(Arc::clone(&auth_manager), base_url)),
         }
     }

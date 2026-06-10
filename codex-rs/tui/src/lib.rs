@@ -1111,7 +1111,7 @@ pub async fn run_main(
             &config,
             env!("CARGO_PKG_VERSION"),
             /*service_name_override*/ None,
-            /*default_analytics_enabled*/ true,
+            /*default_analytics_enabled*/ false,
         )
     })) {
         Ok(Ok(otel)) => otel,
