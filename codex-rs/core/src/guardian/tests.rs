@@ -1304,7 +1304,7 @@ fn guardian_output_schema_requires_only_outcome_and_allows_optional_details() {
 
 async fn guardian_request_model_for_auto_review_override(
     auto_review_model_override: Option<String>,
-) -> anyhow::Result<(String, String, String)> {
+) -> anyhow::Result<(String, String)> {
     let server = start_mock_server().await;
     let guardian_assessment = serde_json::json!({
         "outcome": "allow",
@@ -1326,7 +1326,6 @@ async fn guardian_request_model_for_auto_review_override(
         .model_info
         .auto_review_model_override = auto_review_model_override;
     let parent_model = turn.model_info.slug.clone();
-    let preferred_model = turn.provider.approval_review_preferred_model().to_string();
     seed_guardian_parent_history(&session, &turn).await;
 
     let outcome = run_guardian_review_session_for_test(
@@ -1357,36 +1356,32 @@ async fn guardian_request_model_for_auto_review_override(
         .expect("guardian request should include a model")
         .to_string();
 
-    Ok((request_model, parent_model, preferred_model))
+    Ok((request_model, parent_model))
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn guardian_review_uses_model_catalog_override_when_preferred_review_model_exists()
--> anyhow::Result<()> {
+async fn guardian_review_uses_model_catalog_override() -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
 
     let override_model = "guardian-review-model-override".to_string();
-    let (request_model, parent_model, preferred_model) =
+    let (request_model, parent_model) =
         guardian_request_model_for_auto_review_override(Some(override_model.clone())).await?;
 
     assert_eq!(request_model, override_model);
     assert_ne!(request_model, parent_model);
-    assert_ne!(request_model, preferred_model);
 
     Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn guardian_review_uses_preferred_review_model_without_model_catalog_override()
--> anyhow::Result<()> {
+async fn guardian_review_uses_current_model_without_model_catalog_override() -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
 
-    let (request_model, parent_model, preferred_model) =
+    let (request_model, parent_model) =
         guardian_request_model_for_auto_review_override(/*auto_review_model_override*/ None)
             .await?;
 
-    assert_eq!(request_model, preferred_model);
-    assert_ne!(request_model, parent_model);
+    assert_eq!(request_model, parent_model);
 
     Ok(())
 }

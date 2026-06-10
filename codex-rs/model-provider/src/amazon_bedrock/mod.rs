@@ -9,7 +9,6 @@ use codex_api::Provider;
 use codex_api::SharedAuthProvider;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
-use codex_model_provider_info::AMAZON_BEDROCK_GPT_5_4_MODEL_ID;
 use codex_model_provider_info::ModelProviderAwsAuthInfo;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_models_manager::manager::SharedModelsManager;
@@ -62,10 +61,6 @@ impl ModelProvider for AmazonBedrockModelProvider {
             image_generation: false,
             web_search: false,
         }
-    }
-
-    fn approval_review_preferred_model(&self) -> &'static str {
-        AMAZON_BEDROCK_GPT_5_4_MODEL_ID
     }
 
     fn auth_manager(&self) -> Option<Arc<AuthManager>> {
@@ -144,18 +139,6 @@ mod tests {
                 image_generation: false,
                 web_search: false,
             }
-        );
-    }
-
-    #[test]
-    fn approval_review_preferred_model_uses_bedrock_gpt_5_4() {
-        let provider = AmazonBedrockModelProvider::new(
-            ModelProviderInfo::create_amazon_bedrock_provider(/*aws*/ None),
-        );
-
-        assert_eq!(
-            provider.approval_review_preferred_model(),
-            AMAZON_BEDROCK_GPT_5_4_MODEL_ID
         );
     }
 }

@@ -691,8 +691,7 @@ pub(super) async fn run_guardian_review_session(
         }
     };
     let model_override = turn.model_info.auto_review_model_override.as_deref();
-    let review_model_id =
-        model_override.unwrap_or_else(|| turn.provider.approval_review_preferred_model());
+    let review_model_id = model_override.unwrap_or(turn.model_info.slug.as_str());
     let review_model = available_models
         .iter()
         .find(|preset| preset.model == review_model_id);
