@@ -68,7 +68,11 @@ fn request_maps_tool_use_and_tool_result_to_chat_shape() {
         parallel_tool_calls: true,
         stream: true,
         reasoning: None,
-        metadata: RequestMetadata::default(),
+        metadata: RequestMetadata {
+            service_tier: Some("priority".to_string()),
+            provider: BTreeMap::from([("temperature".to_string(), json!(0.2))]),
+            ..RequestMetadata::default()
+        },
     };
 
     assert_eq!(
@@ -82,7 +86,9 @@ fn request_maps_tool_use_and_tool_result_to_chat_shape() {
             "model": "astral-large",
             "stream": true,
             "max_tokens": 1024,
+            "service_tier": "priority",
             "stream_options": { "include_usage": true },
+            "temperature": 0.2,
             "messages": [
                 { "role": "system", "content": "You are Astral-Code." },
                 {

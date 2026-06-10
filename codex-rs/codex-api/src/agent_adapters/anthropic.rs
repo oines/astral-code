@@ -52,6 +52,7 @@ pub fn to_messages_request(request: &AgentRequest, options: AnthropicMessagesOpt
         "tool_choice".to_string(),
         tool_choice_to_anthropic(&request.tool_choice),
     );
+    apply_provider_body_overrides(&mut body, request);
 
     Value::Object(body)
 }
@@ -194,6 +195,12 @@ fn tool_choice_to_anthropic(tool_choice: &ToolChoice) -> Value {
         ToolChoice::None => json!({ "type": "none" }),
         ToolChoice::Required => json!({ "type": "any" }),
         ToolChoice::Tool { name } => json!({ "type": "tool", "name": name }),
+    }
+}
+
+fn apply_provider_body_overrides(body: &mut Map<String, Value>, request: &AgentRequest) {
+    for (key, value) in &request.metadata.provider {
+        body.insert(key.clone(), value.clone());
     }
 }
 

@@ -31,6 +31,12 @@ pub fn to_chat_completions_request(
     if let Some(max_tokens) = options.max_tokens {
         body.insert("max_tokens".to_string(), Value::from(max_tokens));
     }
+    if let Some(service_tier) = &request.metadata.service_tier {
+        body.insert(
+            "service_tier".to_string(),
+            Value::String(service_tier.clone()),
+        );
+    }
     if request.stream {
         body.insert(
             "stream_options".to_string(),
@@ -65,6 +71,7 @@ pub fn to_chat_completions_request(
         "parallel_tool_calls".to_string(),
         Value::Bool(request.parallel_tool_calls),
     );
+    apply_provider_body_overrides(&mut body, request);
 
     Value::Object(body)
 }
@@ -273,6 +280,12 @@ fn tool_choice_to_chat(tool_choice: &ToolChoice) -> Value {
             "type": "function",
             "function": { "name": name },
         }),
+    }
+}
+
+fn apply_provider_body_overrides(body: &mut Map<String, Value>, request: &AgentRequest) {
+    for (key, value) in &request.metadata.provider {
+        body.insert(key.clone(), value.clone());
     }
 }
 

@@ -79,7 +79,13 @@ fn messages_request_maps_agent_ir_to_anthropic_shape() {
             effort: Some("medium".to_string()),
             summary: None,
         }),
-        metadata: RequestMetadata::default(),
+        metadata: RequestMetadata {
+            provider: BTreeMap::from([
+                ("temperature".to_string(), json!(0.2)),
+                ("top_p".to_string(), json!(0.9)),
+            ]),
+            ..RequestMetadata::default()
+        },
     };
 
     assert_eq!(
@@ -124,7 +130,9 @@ fn messages_request_maps_agent_ir_to_anthropic_shape() {
                     "required": ["command"]
                 }
             }],
-            "tool_choice": { "type": "any" }
+            "tool_choice": { "type": "any" },
+            "temperature": 0.2,
+            "top_p": 0.9
         })
     );
 }
