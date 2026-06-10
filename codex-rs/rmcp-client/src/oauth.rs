@@ -14,7 +14,7 @@
 //! keystore that always encrypts secrets when they are transferred across the bus. If DBus isn't installed the keystore will fall back to the json
 //! file because we don't use the "vendored" feature.
 //!
-//! If the keyring is not available or fails, we fall back to CODEX_HOME/.credentials.json which is consistent with other coding CLI agents.
+//! If the keyring is not available or fails, we fall back to ASTRAL_HOME/.credentials.json.
 
 use anyhow::Context;
 use anyhow::Error;
@@ -48,9 +48,9 @@ use codex_keyring_store::KeyringStore;
 use rmcp::transport::auth::AuthorizationManager;
 use tokio::sync::Mutex;
 
-use codex_utils_home_dir::find_codex_home;
+use codex_utils_home_dir::find_astral_home;
 
-const KEYRING_SERVICE: &str = "Codex MCP Credentials";
+const KEYRING_SERVICE: &str = "Astral MCP Credentials";
 const REFRESH_SKEW_MILLIS: u64 = 30_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -534,7 +534,7 @@ fn compute_store_key(server_name: &str, server_url: &str) -> Result<String> {
 }
 
 fn fallback_file_path() -> Result<PathBuf> {
-    Ok(find_codex_home()?.join(FALLBACK_FILENAME).to_path_buf())
+    Ok(find_astral_home()?.join(FALLBACK_FILENAME).to_path_buf())
 }
 
 fn read_fallback_file() -> Result<Option<FallbackFile>> {
@@ -611,21 +611,21 @@ mod tests {
 
     use codex_keyring_store::tests::MockKeyringStore;
 
-    struct TempCodexHome {
+    struct TempAstralHome {
         _guard: MutexGuard<'static, ()>,
         _dir: tempfile::TempDir,
     }
 
-    impl TempCodexHome {
+    impl TempAstralHome {
         fn new() -> Self {
             static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
             let guard = LOCK
                 .get_or_init(Mutex::default)
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner);
-            let dir = tempdir().expect("create CODEX_HOME temp dir");
+            let dir = tempdir().expect("create ASTRAL_HOME temp dir");
             unsafe {
-                std::env::set_var("CODEX_HOME", dir.path());
+                std::env::set_var("ASTRAL_HOME", dir.path());
             }
             Self {
                 _guard: guard,
@@ -634,17 +634,17 @@ mod tests {
         }
     }
 
-    impl Drop for TempCodexHome {
+    impl Drop for TempAstralHome {
         fn drop(&mut self) {
             unsafe {
-                std::env::remove_var("CODEX_HOME");
+                std::env::remove_var("ASTRAL_HOME");
             }
         }
     }
 
     #[test]
     fn load_oauth_tokens_reads_from_keyring_when_available() -> Result<()> {
-        let _env = TempCodexHome::new();
+        let _env = TempAstralHome::new();
         let store = MockKeyringStore::default();
         let tokens = sample_tokens();
         let expected = tokens.clone();
@@ -661,7 +661,7 @@ mod tests {
 
     #[test]
     fn load_oauth_tokens_falls_back_when_missing_in_keyring() -> Result<()> {
-        let _env = TempCodexHome::new();
+        let _env = TempAstralHome::new();
         let store = MockKeyringStore::default();
         let tokens = sample_tokens();
         let expected = tokens.clone();
@@ -680,7 +680,7 @@ mod tests {
 
     #[test]
     fn load_oauth_tokens_falls_back_when_keyring_errors() -> Result<()> {
-        let _env = TempCodexHome::new();
+        let _env = TempAstralHome::new();
         let store = MockKeyringStore::default();
         let tokens = sample_tokens();
         let expected = tokens.clone();
@@ -701,7 +701,7 @@ mod tests {
 
     #[test]
     fn save_oauth_tokens_prefers_keyring_when_available() -> Result<()> {
-        let _env = TempCodexHome::new();
+        let _env = TempAstralHome::new();
         let store = MockKeyringStore::default();
         let tokens = sample_tokens();
         let key = super::compute_store_key(&tokens.server_name, &tokens.url)?;
@@ -723,7 +723,7 @@ mod tests {
 
     #[test]
     fn save_oauth_tokens_writes_fallback_when_keyring_fails() -> Result<()> {
-        let _env = TempCodexHome::new();
+        let _env = TempAstralHome::new();
         let store = MockKeyringStore::default();
         let tokens = sample_tokens();
         let key = super::compute_store_key(&tokens.server_name, &tokens.url)?;
@@ -753,7 +753,7 @@ mod tests {
 
     #[test]
     fn delete_oauth_tokens_removes_all_storage() -> Result<()> {
-        let _env = TempCodexHome::new();
+        let _env = TempAstralHome::new();
         let store = MockKeyringStore::default();
         let tokens = sample_tokens();
         let serialized = serde_json::to_string(&tokens)?;
@@ -775,7 +775,7 @@ mod tests {
 
     #[test]
     fn delete_oauth_tokens_file_mode_removes_keyring_only_entry() -> Result<()> {
-        let _env = TempCodexHome::new();
+        let _env = TempAstralHome::new();
         let store = MockKeyringStore::default();
         let tokens = sample_tokens();
         let serialized = serde_json::to_string(&tokens)?;
@@ -797,7 +797,7 @@ mod tests {
 
     #[test]
     fn delete_oauth_tokens_propagates_keyring_errors() -> Result<()> {
-        let _env = TempCodexHome::new();
+        let _env = TempAstralHome::new();
         let store = MockKeyringStore::default();
         let tokens = sample_tokens();
         let key = super::compute_store_key(&tokens.server_name, &tokens.url)?;

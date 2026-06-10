@@ -10,11 +10,15 @@ use std::path::PathBuf;
 ///   value will be canonicalized and this function will Err otherwise.
 /// - If `ASTRAL_HOME` is not set, this function does not verify that the
 ///   directory exists.
-pub fn find_codex_home() -> std::io::Result<AbsolutePathBuf> {
+pub fn find_astral_home() -> std::io::Result<AbsolutePathBuf> {
     let astral_home_env = std::env::var("ASTRAL_HOME")
         .ok()
         .filter(|val| !val.is_empty());
     find_astral_home_from_env(astral_home_env.as_deref())
+}
+
+pub fn find_codex_home() -> std::io::Result<AbsolutePathBuf> {
+    find_astral_home()
 }
 
 fn find_astral_home_from_env(astral_home_env: Option<&str>) -> std::io::Result<AbsolutePathBuf> {
