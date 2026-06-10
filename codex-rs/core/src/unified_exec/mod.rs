@@ -118,6 +118,12 @@ pub(crate) struct WriteStdinRequest<'a> {
     pub truncation_policy: TruncationPolicy,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TerminatedProcess {
+    pub(crate) process_id: i32,
+    pub(crate) command: String,
+}
+
 #[derive(Default)]
 pub(crate) struct ProcessStore {
     processes: HashMap<i32, ProcessEntry>,

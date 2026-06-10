@@ -34,6 +34,7 @@ use crate::unified_exec::MIN_EMPTY_YIELD_TIME_MS;
 use crate::unified_exec::MIN_YIELD_TIME_MS;
 use crate::unified_exec::ProcessEntry;
 use crate::unified_exec::ProcessStore;
+use crate::unified_exec::TerminatedProcess;
 use crate::unified_exec::UnifiedExecContext;
 use crate::unified_exec::UnifiedExecError;
 use crate::unified_exec::UnifiedExecProcessManager;
@@ -378,6 +379,25 @@ impl UnifiedExecProcessManager {
         if let Some(entry) = removed {
             unregister_network_approval_for_entry(&entry).await;
         }
+    }
+
+    pub(crate) async fn terminate_process(
+        &self,
+        process_id: i32,
+    ) -> Result<TerminatedProcess, UnifiedExecError> {
+        let entry = {
+            let mut store = self.process_store.lock().await;
+            store
+                .remove(process_id)
+                .ok_or(UnifiedExecError::UnknownProcessId { process_id })?
+        };
+        unregister_network_approval_for_entry(&entry).await;
+        let command = entry.hook_command.clone();
+        entry.process.terminate();
+        Ok(TerminatedProcess {
+            process_id: entry.process_id,
+            command,
+        })
     }
 
     pub(crate) async fn exec_command(

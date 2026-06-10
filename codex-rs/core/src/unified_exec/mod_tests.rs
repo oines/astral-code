@@ -330,6 +330,42 @@ async fn multi_unified_exec_sessions() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn terminate_process_stops_running_session() -> anyhow::Result<()> {
+    skip_if_sandbox!(Ok(()));
+
+    let (session, turn) = test_session_and_turn().await;
+
+    let running = exec_command(
+        &session, &turn, "sleep 30", /*yield_time_ms*/ 250, /*workdir*/ None,
+    )
+    .await?;
+    let process_id = running.process_id.expect("expected process id");
+
+    let stopped = session
+        .services
+        .unified_exec_manager
+        .terminate_process(process_id)
+        .await?;
+    assert_eq!(
+        stopped,
+        TerminatedProcess {
+            process_id,
+            command: "sleep 30".to_string(),
+        }
+    );
+
+    let err = write_stdin(&session, process_id, "", /*yield_time_ms*/ 100)
+        .await
+        .expect_err("terminated process should no longer be pollable");
+    assert!(matches!(
+        err,
+        UnifiedExecError::UnknownProcessId { process_id: id } if id == process_id
+    ));
+
+    Ok(())
+}
+
 #[tokio::test]
 async fn unified_exec_timeouts() -> anyhow::Result<()> {
     skip_if_sandbox!(Ok(()));
