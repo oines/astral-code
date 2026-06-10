@@ -3,10 +3,6 @@ use std::path::Path;
 use std::path::PathBuf;
 use tokio::process::Command;
 
-const CODEX_WINDOWS_INSTALLER_URL: &str =
-    "https://get.microsoft.com/installer/download/9PLM9XGG6VKS?cid=website_cta_psi";
-const CODEX_MICROSOFT_STORE_WEB_URL: &str = "https://apps.microsoft.com/detail/9plm9xgg6vks";
-
 pub async fn run_windows_app_open_or_install(
     workspace: PathBuf,
     download_url_override: Option<String>,
@@ -14,19 +10,19 @@ pub async fn run_windows_app_open_or_install(
     let workspace_path = workspace.display().to_string();
     let display_workspace = display_workspace_path(&workspace);
     if codex_app_is_installed().await? {
-        eprintln!("Opening Codex Desktop workspace {display_workspace}...");
+        eprintln!("Opening Astral-Code Desktop workspace {display_workspace}...");
         open_url(&codex_new_thread_url(&workspace_path)).await?;
         return Ok(());
     }
 
-    eprintln!("Codex Desktop not found; opening Windows installer...");
-    let download_url = download_url_override
-        .as_deref()
-        .unwrap_or(CODEX_WINDOWS_INSTALLER_URL);
-    if open_url(download_url).await.is_err() && download_url_override.is_none() {
-        open_url(CODEX_MICROSOFT_STORE_WEB_URL).await?;
-    }
-    eprintln!("After installing Codex Desktop, open workspace {display_workspace}.");
+    let Some(download_url) = download_url_override.as_deref() else {
+        anyhow::bail!(
+            "Astral-Code Desktop installer is not bundled yet; pass --download-url to test a local installer."
+        );
+    };
+    eprintln!("Astral-Code Desktop not found; opening Windows installer...");
+    open_url(download_url).await?;
+    eprintln!("After installing Astral-Code Desktop, open workspace {display_workspace}.");
     Ok(())
 }
 
@@ -34,7 +30,7 @@ async fn codex_app_is_installed() -> anyhow::Result<bool> {
     let output = Command::new("powershell.exe")
         .arg("-NoProfile")
         .arg("-Command")
-        .arg("Get-StartApps -Name 'Codex' | Select-Object -First 1 -ExpandProperty AppID")
+        .arg("Get-StartApps -Name 'Astral-Code' | Select-Object -First 1 -ExpandProperty AppID")
         .output()
         .await
         .context("failed to invoke `powershell.exe`")?;
@@ -67,7 +63,7 @@ fn codex_new_thread_url(workspace: &str) -> String {
     let mut serializer = url::form_urlencoded::Serializer::new(String::new());
     serializer.append_pair("path", workspace);
     let query = serializer.finish();
-    format!("codex://threads/new?{query}")
+    format!("astral://threads/new?{query}")
 }
 
 fn display_workspace_path(workspace: &Path) -> String {

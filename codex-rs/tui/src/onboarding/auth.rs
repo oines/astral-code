@@ -74,8 +74,7 @@ use super::onboarding_screen::StepState;
 
 mod headless_chatgpt_login;
 
-const CHATGPT_LOGIN_DISABLED_MESSAGE: &str =
-    "ChatGPT login is not available in Astral. Enter a provider API key or set ASTRAL_API_KEY.";
+const CHATGPT_LOGIN_DISABLED_MESSAGE: &str = "Managed account login is not available in Astral. Enter a provider API key or set ASTRAL_API_KEY.";
 
 #[derive(Clone)]
 pub(crate) enum SignInState {
@@ -417,7 +416,7 @@ impl AuthModeWidget {
         };
 
         let chatgpt_description = if !self.is_chatgpt_login_allowed() {
-            "ChatGPT login is disabled"
+            "Managed account login is disabled"
         } else {
             "Usage included with Plus, Pro, Business, and Enterprise plans"
         };
@@ -429,7 +428,7 @@ impl AuthModeWidget {
                     lines.extend(create_mode_item(
                         idx,
                         option,
-                        "Sign in with ChatGPT",
+                        "Sign in with managed account",
                         chatgpt_description,
                     ));
                 }
@@ -525,34 +524,34 @@ impl AuthModeWidget {
 
     fn render_chatgpt_success_message(&self, area: Rect, buf: &mut Buffer) {
         let lines = vec![
-            "✓ Signed in with your ChatGPT account"
+            "✓ Signed in with your managed account"
                 .fg(Color::Green)
                 .into(),
             "".into(),
             "  Before you start:".into(),
             "".into(),
-            "  Decide how much autonomy you want to grant Codex".into(),
+            "  Decide how much autonomy you want to grant Astral".into(),
             Line::from(vec![
                 "  For more details see the ".into(),
                 crate::terminal_hyperlinks::osc8_hyperlink(
-                    "https://developers.openai.com/codex/security",
-                    "Codex docs",
+                    "https://github.com/oines/astral-code",
+                    "Astral-Code docs",
                 )
                 .underlined(),
             ])
             .dim(),
             "".into(),
-            "  Codex can make mistakes".into(),
+            "  Astral can make mistakes".into(),
             "  Review the code it writes and commands it runs"
                 .dim()
                 .into(),
             "".into(),
-            "  Powered by your ChatGPT account".into(),
+            "  Powered by your configured model provider".into(),
             Line::from(vec![
                 "  Uses your plan's rate limits and ".into(),
                 crate::terminal_hyperlinks::osc8_hyperlink(
-                    "https://chatgpt.com/#settings",
-                    "training data preferences",
+                    "https://github.com/oines/astral-code",
+                    "provider setup",
                 )
                 .underlined(),
             ])
@@ -572,7 +571,7 @@ impl AuthModeWidget {
 
     fn render_chatgpt_success(&self, area: Rect, buf: &mut Buffer) {
         let lines = vec![
-            "✓ Signed in with your ChatGPT account"
+            "✓ Signed in with your managed account"
                 .fg(Color::Green)
                 .into(),
         ];
@@ -812,7 +811,7 @@ impl AuthModeWidget {
         self.request_frame.schedule_frame();
     }
 
-    /// Kicks off the ChatGPT auth flow and keeps the UI state consistent with the attempt.
+    /// Kicks off managed-account auth and keeps the UI state consistent with the attempt.
     fn start_chatgpt_login(&mut self) {
         *self.sign_in_state.write().unwrap() = SignInState::PickMode;
         self.set_error(Some(CHATGPT_LOGIN_DISABLED_MESSAGE.to_string()));

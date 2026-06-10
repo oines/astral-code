@@ -4,18 +4,21 @@ use lazy_static::lazy_static;
 use rand::Rng;
 
 const ANNOUNCEMENT_TIP_URL: &str =
-    "https://raw.githubusercontent.com/openai/codex/main/announcement_tip.toml";
+    "https://raw.githubusercontent.com/oines/astral-code/main/announcement_tip.toml";
 
 const IS_MACOS: bool = cfg!(target_os = "macos");
 const IS_WINDOWS: bool = cfg!(target_os = "windows");
 
-const APP_TOOLTIP: &str = "Try the **Codex App**. Run 'codex app' or visit https://chatgpt.com/codex?app-landing-page=true";
+const APP_TOOLTIP: &str =
+    "Try the **Astral-Code app-server**. Run 'astral app-server' to expose the local API.";
 const FAST_TOOLTIP: &str =
     "*New* Use **/fast** to enable our fastest inference with increased plan usage.";
-const OTHER_TOOLTIP: &str = "*New* Build faster with the **Codex App**. Run 'codex app' or visit https://chatgpt.com/codex?app-landing-page=true";
-const OTHER_TOOLTIP_NON_MAC: &str = "*New* Build faster with Codex.";
+const OTHER_TOOLTIP: &str =
+    "*New* Configure ASTRAL_BASE_URL and ASTRAL_API_KEY for your active model provider.";
+const OTHER_TOOLTIP_NON_MAC: &str =
+    "*New* Configure ASTRAL_BASE_URL and ASTRAL_API_KEY for your active model provider.";
 const FREE_GO_TOOLTIP: &str =
-    "*New* For a limited time, Codex is included in your plan for free – let’s build together.";
+    "*New* Astral-Code defaults to provider-local API keys and OpenAI-compatible chat.";
 
 const RAW_TOOLTIPS: &str = include_str!("../tooltips.txt");
 
@@ -27,7 +30,7 @@ lazy_static! {
             if line.is_empty() || line.starts_with('#') {
                 return false;
             }
-            if !IS_MACOS && !IS_WINDOWS && line.contains("codex app") {
+            if !IS_MACOS && !IS_WINDOWS && line.contains("astral app") {
                 return false;
             }
             true

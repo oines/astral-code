@@ -5,7 +5,7 @@
 
 use super::*;
 
-const DESKTOP_THREAD_OPENED_MESSAGE: &str = "Opened this session in Codex Desktop.";
+const DESKTOP_THREAD_OPENED_MESSAGE: &str = "Opened this session in Astral-Code Desktop.";
 
 impl App {
     pub(super) fn open_url_in_browser(&mut self, url: String) {
@@ -20,7 +20,7 @@ impl App {
     }
 
     pub(super) fn open_desktop_thread(&mut self, thread_id: ThreadId) {
-        let url = format!("codex://threads/{thread_id}");
+        let url = format!("astral://threads/{thread_id}");
         if let Err(err) = open_desktop_thread_url(&url) {
             self.chat_widget
                 .add_error_message(desktop_thread_open_error_message(&err));
@@ -119,7 +119,7 @@ impl App {
 
 fn desktop_thread_open_error_message(err: &str) -> String {
     format!(
-        "Failed to open this session in Codex Desktop: {err}. Install or launch Codex Desktop and try again."
+        "Failed to open this session in Astral-Code Desktop: {err}. Install or launch Astral-Code Desktop and try again."
     )
 }
 
@@ -145,7 +145,7 @@ fn open_desktop_thread_url(url: &str) -> Result<(), String> {
         .arg("-Command")
         .arg(&script)
         .output()
-        .map_err(|err| format!("failed to launch Codex Desktop through PowerShell: {err}"))?;
+        .map_err(|err| format!("failed to launch Astral-Code Desktop through PowerShell: {err}"))?;
 
     if output.status.success() {
         return Ok(());
@@ -154,7 +154,7 @@ fn open_desktop_thread_url(url: &str) -> Result<(), String> {
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
     if stderr.is_empty() {
         Err(format!(
-            "failed to launch Codex Desktop through PowerShell with {}",
+            "failed to launch Astral-Code Desktop through PowerShell with {}",
             output.status
         ))
     } else {
@@ -170,21 +170,21 @@ fn windows_desktop_app_launch_script(url: &str) -> String {
 $ErrorActionPreference = 'Stop'
 $url = {url}
 
-$installLocation = (Get-AppxPackage -Name OpenAI.Codex -ErrorAction SilentlyContinue).InstallLocation
+$installLocation = (Get-AppxPackage -Name Astral.Code -ErrorAction SilentlyContinue).InstallLocation
 if ([string]::IsNullOrWhiteSpace($installLocation)) {{
-    Write-Error 'Codex Desktop package is not installed'
+    Write-Error 'Astral-Code Desktop package is not installed'
     exit 1
 }}
 
 $appDir = Join-Path $installLocation 'app'
-$exe = Join-Path $appDir 'Codex.exe'
+$exe = Join-Path $appDir 'Astral.exe'
 $app = Join-Path $appDir 'resources\app.asar'
 if (-not (Test-Path $exe)) {{
-    Write-Error "Codex Desktop executable not found at $exe"
+    Write-Error "Astral-Code Desktop executable not found at $exe"
     exit 1
 }}
 if (-not (Test-Path $app)) {{
-    Write-Error "Codex Desktop app bundle not found at $app"
+    Write-Error "Astral-Code Desktop app bundle not found at $app"
     exit 1
 }}
 
@@ -200,7 +200,7 @@ fn powershell_single_quoted_string(value: &str) -> String {
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn open_desktop_thread_url(_url: &str) -> Result<(), String> {
-    Err("Codex Desktop is only available on macOS and Windows".to_string())
+    Err("Astral-Code Desktop is only available on macOS and Windows".to_string())
 }
 
 #[cfg(test)]

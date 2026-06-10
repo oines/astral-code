@@ -16,7 +16,7 @@ pub struct Cli {
     #[arg(long = "strict-config", default_value_t = false)]
     pub strict_config: bool,
 
-    // Internal controls set by the top-level `codex resume` subcommand.
+    // Internal controls set by the top-level `astral resume` subcommand.
     // These are not exposed as user flags on the base `codex` command.
     #[clap(skip)]
     pub resume_picker: bool,
@@ -25,7 +25,7 @@ pub struct Cli {
     pub resume_last: bool,
 
     /// Internal: resume a specific recorded session by id (UUID). Set by the
-    /// top-level `codex resume <SESSION_ID>` wrapper; not exposed as a public flag.
+    /// top-level `astral resume <SESSION_ID>` wrapper; not exposed as a public flag.
     #[clap(skip)]
     pub resume_session_id: Option<String>,
 

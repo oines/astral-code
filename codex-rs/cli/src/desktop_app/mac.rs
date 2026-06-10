@@ -1,13 +1,8 @@
 use anyhow::Context as _;
-use std::ffi::CString;
 use std::path::Path;
 use std::path::PathBuf;
 use tempfile::Builder;
 use tokio::process::Command;
-
-const CODEX_DMG_URL_ARM64: &str = "https://persistent.oaistatic.com/codex-app-prod/Codex.dmg";
-const CODEX_DMG_URL_X64: &str =
-    "https://persistent.oaistatic.com/codex-app-prod/Codex-latest-x64.dmg";
 
 pub async fn run_mac_app_open_or_install(
     workspace: PathBuf,
@@ -15,52 +10,26 @@ pub async fn run_mac_app_open_or_install(
 ) -> anyhow::Result<()> {
     if let Some(app_path) = find_existing_codex_app_path() {
         eprintln!(
-            "Opening Codex Desktop at {app_path}...",
+            "Opening Astral-Code Desktop at {app_path}...",
             app_path = app_path.display()
         );
         open_codex_app(&app_path, &workspace).await?;
         return Ok(());
     }
-    eprintln!("Codex Desktop not found; downloading installer...");
-    let download_url = download_url_override.unwrap_or_else(|| {
-        let default_url = if is_apple_silicon_mac() {
-            CODEX_DMG_URL_ARM64
-        } else {
-            CODEX_DMG_URL_X64
-        };
-        default_url.to_string()
-    });
+    let Some(download_url) = download_url_override else {
+        anyhow::bail!(
+            "Astral-Code Desktop installer is not bundled yet; pass --download-url to test a local installer."
+        );
+    };
     let installed_app = download_and_install_codex_to_user_applications(&download_url)
         .await
-        .context("failed to download/install Codex Desktop")?;
+        .context("failed to download/install Astral-Code Desktop")?;
     eprintln!(
-        "Launching Codex Desktop from {installed_app}...",
+        "Launching Astral-Code Desktop from {installed_app}...",
         installed_app = installed_app.display()
     );
     open_codex_app(&installed_app, &workspace).await?;
     Ok(())
-}
-
-fn is_apple_silicon_mac() -> bool {
-    fn macos_sysctl_flag(name: &str) -> Option<bool> {
-        let name = CString::new(name).ok()?;
-        let mut value: libc::c_int = 0;
-        let mut size = std::mem::size_of_val(&value);
-        let result = unsafe {
-            libc::sysctlbyname(
-                name.as_ptr(),
-                (&mut value as *mut libc::c_int).cast::<libc::c_void>(),
-                &mut size,
-                std::ptr::null_mut(),
-                0,
-            )
-        };
-        (result == 0).then_some(value != 0)
-    }
-
-    std::env::consts::ARCH == "aarch64"
-        || macos_sysctl_flag("sysctl.proc_translated").unwrap_or(false)
-        || macos_sysctl_flag("hw.optional.arm64").unwrap_or(false)
 }
 
 fn find_existing_codex_app_path() -> Option<PathBuf> {
@@ -70,9 +39,13 @@ fn find_existing_codex_app_path() -> Option<PathBuf> {
 }
 
 fn candidate_codex_app_paths() -> Vec<PathBuf> {
-    let mut paths = vec![PathBuf::from("/Applications/Codex.app")];
+    let mut paths = vec![PathBuf::from("/Applications/Astral-Code.app")];
     if let Some(home) = std::env::var_os("HOME") {
-        paths.push(PathBuf::from(home).join("Applications").join("Codex.app"));
+        paths.push(
+            PathBuf::from(home)
+                .join("Applications")
+                .join("Astral-Code.app"),
+        );
     }
     paths
 }
@@ -107,21 +80,21 @@ fn codex_new_thread_url(workspace: &Path) -> String {
     let mut serializer = url::form_urlencoded::Serializer::new(String::new());
     serializer.append_pair("path", workspace.as_ref());
     let query = serializer.finish();
-    format!("codex://threads/new?{query}")
+    format!("astral://threads/new?{query}")
 }
 
 async fn download_and_install_codex_to_user_applications(dmg_url: &str) -> anyhow::Result<PathBuf> {
     let temp_dir = Builder::new()
-        .prefix("codex-app-installer-")
+        .prefix("astral-code-app-installer-")
         .tempdir()
         .context("failed to create temp dir")?;
     let tmp_root = temp_dir.path().to_path_buf();
     let _temp_dir = temp_dir;
 
-    let dmg_path = tmp_root.join("Codex.dmg");
+    let dmg_path = tmp_root.join("Astral-Code.dmg");
     download_dmg(dmg_url, &dmg_path).await?;
 
-    eprintln!("Mounting Codex Desktop installer...");
+    eprintln!("Mounting Astral-Code Desktop installer...");
     let mount_point = mount_dmg(&dmg_path).await?;
     eprintln!(
         "Installer mounted at {mount_point}.",
@@ -129,7 +102,7 @@ async fn download_and_install_codex_to_user_applications(dmg_url: &str) -> anyho
     );
     let result = async {
         let app_in_volume = find_codex_app_in_mount(&mount_point)
-            .context("failed to locate Codex.app in mounted dmg")?;
+            .context("failed to locate Astral-Code.app in mounted dmg")?;
         install_codex_app_bundle(&app_in_volume).await
     }
     .await;
@@ -148,7 +121,7 @@ async fn download_and_install_codex_to_user_applications(dmg_url: &str) -> anyho
 async fn install_codex_app_bundle(app_in_volume: &Path) -> anyhow::Result<PathBuf> {
     for applications_dir in candidate_applications_dirs()? {
         eprintln!(
-            "Installing Codex Desktop into {applications_dir}...",
+            "Installing Astral-Code Desktop into {applications_dir}...",
             applications_dir = applications_dir.display()
         );
         std::fs::create_dir_all(&applications_dir).with_context(|| {
@@ -158,7 +131,7 @@ async fn install_codex_app_bundle(app_in_volume: &Path) -> anyhow::Result<PathBu
             )
         })?;
 
-        let dest_app = applications_dir.join("Codex.app");
+        let dest_app = applications_dir.join("Astral-Code.app");
         if dest_app.is_dir() {
             return Ok(dest_app);
         }
@@ -167,14 +140,14 @@ async fn install_codex_app_bundle(app_in_volume: &Path) -> anyhow::Result<PathBu
             Ok(()) => return Ok(dest_app),
             Err(err) => {
                 eprintln!(
-                    "warning: failed to install Codex.app to {applications_dir}: {err}",
+                    "warning: failed to install Astral-Code.app to {applications_dir}: {err}",
                     applications_dir = applications_dir.display()
                 );
             }
         }
     }
 
-    anyhow::bail!("failed to install Codex.app to any applications directory");
+    anyhow::bail!("failed to install Astral-Code.app to any applications directory");
 }
 
 fn candidate_applications_dirs() -> anyhow::Result<Vec<PathBuf>> {
@@ -243,7 +216,7 @@ async fn detach_dmg(mount_point: &Path) -> anyhow::Result<()> {
 }
 
 fn find_codex_app_in_mount(mount_point: &Path) -> anyhow::Result<PathBuf> {
-    let direct = mount_point.join("Codex.app");
+    let direct = mount_point.join("Astral-Code.app");
     if direct.is_dir() {
         return Ok(direct);
     }
