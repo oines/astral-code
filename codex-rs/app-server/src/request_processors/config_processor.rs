@@ -50,7 +50,6 @@ const SUPPORTED_EXPERIMENTAL_FEATURE_ENABLEMENT: &[&str] = &[
     "memories",
     "mentions_v2",
     "remote_control",
-    "remote_plugin",
     "tool_suggest",
 ];
 
