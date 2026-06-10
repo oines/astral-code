@@ -12,6 +12,7 @@ use crate::tools::handlers::AstralFileToolKind;
 use crate::tools::handlers::AstralMonitorHandler;
 use crate::tools::handlers::AstralRequestPermissionsHandler;
 use crate::tools::handlers::AstralSendMessageHandler;
+use crate::tools::handlers::AstralTaskStopHandler;
 use crate::tools::handlers::AstralTodoWriteHandler;
 use crate::tools::handlers::AstralToolSearchHandler;
 use crate::tools::handlers::CodeModeExecuteHandler;
@@ -85,7 +86,6 @@ use codex_tools::READ_TOOL_NAME;
 use codex_tools::ResponsesApiNamespace;
 use codex_tools::ResponsesApiNamespaceTool;
 use codex_tools::SEND_MESSAGE_TOOL_NAME;
-use codex_tools::TASK_STOP_TOOL_NAME;
 use codex_tools::TODO_WRITE_TOOL_NAME;
 use codex_tools::TOOL_SEARCH_TOOL_NAME;
 use codex_tools::ToolCall as ExtensionToolCall;
@@ -322,7 +322,6 @@ fn astral_spec_for_model_request(
         "update_plan" => Some(TODO_WRITE_TOOL_NAME),
         "list_mcp_resources" => Some(LIST_MCP_RESOURCES_TOOL_NAME),
         "read_mcp_resource" => Some(READ_MCP_RESOURCE_TOOL_NAME),
-        "interrupt_agent" => Some(TASK_STOP_TOOL_NAME),
         _ => None,
     };
 
@@ -962,9 +961,10 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mu
                 exposure,
             ));
             planned_tools.add_arc(override_tool_exposure(
-                multi_agent_v2_handler(InterruptAgentHandler, tool_namespace),
+                multi_agent_v2_handler(AstralTaskStopHandler::new(), tool_namespace),
                 exposure,
             ));
+            planned_tools.add_with_exposure(InterruptAgentHandler, ToolExposure::Hidden);
             planned_tools.add_arc(override_tool_exposure(
                 multi_agent_v2_handler(ListAgentsHandlerV2, tool_namespace),
                 exposure,

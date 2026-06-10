@@ -9,6 +9,7 @@ use codex_tools::MONITOR_TOOL_NAME;
 use codex_tools::READ_TOOL_NAME;
 use codex_tools::REQUEST_PERMISSIONS_TOOL_NAME;
 use codex_tools::SEND_MESSAGE_TOOL_NAME;
+use codex_tools::TASK_STOP_TOOL_NAME;
 use codex_tools::TODO_WRITE_TOOL_NAME;
 use codex_tools::TOOL_SEARCH_FLAVOR_TOOL_NAME;
 use codex_tools::WRITE_TOOL_NAME;
@@ -312,8 +313,8 @@ fn canonicalizes_multi_agent_tools() -> anyhow::Result<()> {
 
     let (tool_name, arguments) =
         canonicalize_function(TASK_STOP_TOOL_NAME, json!({ "task_id": "agent-1" }))?;
-    assert_eq!(tool_name, ToolName::plain("interrupt_agent"));
-    assert_eq!(arguments, json!({ "target": "agent-1" }));
+    assert_eq!(tool_name, ToolName::plain(TASK_STOP_TOOL_NAME));
+    assert_eq!(arguments, json!({ "task_id": "agent-1" }));
     Ok(())
 }
 
