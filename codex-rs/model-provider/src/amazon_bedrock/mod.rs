@@ -18,7 +18,6 @@ use codex_protocol::error::Result;
 use codex_protocol::openai_models::ModelsResponse;
 
 use crate::provider::ModelProvider;
-use crate::provider::ProviderAccountResult;
 use crate::provider::ProviderAccountState;
 use crate::provider::ProviderCapabilities;
 use auth::resolve_provider_auth;
@@ -71,11 +70,11 @@ impl ModelProvider for AmazonBedrockModelProvider {
         None
     }
 
-    fn account_state(&self) -> ProviderAccountResult {
-        Ok(ProviderAccountState {
+    fn account_state(&self) -> ProviderAccountState {
+        ProviderAccountState {
             account: Some(ProviderAccount::AmazonBedrock),
             requires_openai_auth: false,
-        })
+        }
     }
 
     async fn api_provider(&self) -> Result<Provider> {

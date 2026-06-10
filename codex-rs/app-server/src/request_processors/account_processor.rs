@@ -399,10 +399,7 @@ impl AccountRequestProcessor {
             self.config.model_provider.clone(),
             Some(self.auth_manager.clone()),
         );
-        let account_state = match provider.account_state() {
-            Ok(account_state) => account_state,
-            Err(err) => return Err(invalid_request(err.to_string())),
-        };
+        let account_state = provider.account_state();
         let account = account_state.account.map(Account::from);
 
         Ok(GetAccountResponse {

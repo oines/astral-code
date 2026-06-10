@@ -47,29 +47,6 @@ pub struct ProviderAccountState {
     pub requires_openai_auth: bool,
 }
 
-/// Error returned when a provider cannot construct its app-visible account state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProviderAccountError {
-    MissingChatgptAccountDetails,
-}
-
-impl fmt::Display for ProviderAccountError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::MissingChatgptAccountDetails => {
-                write!(
-                    f,
-                    "email and plan type are required for chatgpt authentication"
-                )
-            }
-        }
-    }
-}
-
-impl std::error::Error for ProviderAccountError {}
-
-pub type ProviderAccountResult = std::result::Result<ProviderAccountState, ProviderAccountError>;
-
 /// Runtime provider abstraction used by model execution.
 ///
 /// Implementations own provider-specific behavior for a model backend. The
@@ -102,7 +79,7 @@ pub trait ModelProvider: fmt::Debug + Send + Sync {
     async fn auth(&self) -> Option<CodexAuth>;
 
     /// Returns the current app-visible account state for this provider.
-    fn account_state(&self) -> ProviderAccountResult;
+    fn account_state(&self) -> ProviderAccountState;
 
     /// Returns provider configuration adapted for the API client.
     async fn api_provider(&self) -> codex_protocol::error::Result<Provider> {
@@ -195,7 +172,7 @@ impl ModelProvider for ConfiguredModelProvider {
         }
     }
 
-    fn account_state(&self) -> ProviderAccountResult {
+    fn account_state(&self) -> ProviderAccountState {
         let account = if self.info.requires_openai_auth {
             self.auth_manager
                 .as_ref()
@@ -206,21 +183,20 @@ impl ModelProvider for ConfiguredModelProvider {
                     }
                     Some(auth)
                 })
-                .and_then(|auth| match &auth {
-                    CodexAuth::ApiKey(_) => Some(Ok(ProviderAccount::ApiKey)),
+                .and_then(|auth| match auth {
+                    CodexAuth::ApiKey(_) => Some(ProviderAccount::ApiKey),
                     CodexAuth::Chatgpt(_)
                     | CodexAuth::AgentIdentity(_)
                     | CodexAuth::PersonalAccessToken(_) => None,
                 })
-                .transpose()?
         } else {
             None
         };
 
-        Ok(ProviderAccountState {
+        ProviderAccountState {
             account,
             requires_openai_auth: self.info.requires_openai_auth,
-        })
+        }
     }
 
     fn models_manager(
@@ -433,10 +409,10 @@ mod tests {
 
         assert_eq!(
             provider.account_state(),
-            Ok(ProviderAccountState {
+            ProviderAccountState {
                 account: None,
                 requires_openai_auth: true,
-            })
+            }
         );
     }
 
@@ -451,10 +427,10 @@ mod tests {
 
         assert_eq!(
             provider.account_state(),
-            Ok(ProviderAccountState {
+            ProviderAccountState {
                 account: Some(ProviderAccount::ApiKey),
                 requires_openai_auth: true,
-            })
+            }
         );
     }
 
@@ -469,10 +445,10 @@ mod tests {
 
         assert_eq!(
             provider.account_state(),
-            Ok(ProviderAccountState {
+            ProviderAccountState {
                 account: None,
                 requires_openai_auth: true,
-            })
+            }
         );
     }
 
@@ -491,10 +467,10 @@ mod tests {
 
         assert_eq!(
             provider.account_state(),
-            Ok(ProviderAccountState {
+            ProviderAccountState {
                 account: None,
                 requires_openai_auth: false,
-            })
+            }
         );
     }
 
@@ -507,10 +483,10 @@ mod tests {
 
         assert_eq!(
             provider.account_state(),
-            Ok(ProviderAccountState {
+            ProviderAccountState {
                 account: Some(ProviderAccount::AmazonBedrock),
                 requires_openai_auth: false,
-            })
+            }
         );
     }
 
