@@ -149,7 +149,7 @@ fn test_create_astral_provider_defaults_to_chat_completions() {
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "http://localhost:8000/v1".to_string());
+        .unwrap_or_else(|| DEFAULT_ASTRAL_BASE_URL.to_string());
 
     assert_eq!(
         ModelProviderInfo::create_astral_provider(),
@@ -319,6 +319,18 @@ fn test_built_in_model_providers_include_astral() {
             .get(ASTRAL_PROVIDER_ID)
             .map(ModelProviderInfo::is_astral),
         Some(true)
+    );
+}
+
+#[test]
+fn test_built_in_model_providers_include_anthropic() {
+    let providers = built_in_model_providers(/*openai_base_url*/ None);
+
+    assert_eq!(
+        providers
+            .get(ANTHROPIC_PROVIDER_ID)
+            .map(|provider| (provider.is_anthropic(), provider.wire_api)),
+        Some((true, WireApi::AnthropicMessages))
     );
 }
 

@@ -38,7 +38,11 @@ const ASTRAL_PROVIDER_NAME: &str = "Astral";
 pub const ASTRAL_PROVIDER_ID: &str = "astral";
 pub const ASTRAL_API_KEY_ENV_VAR: &str = "ASTRAL_API_KEY";
 pub const ASTRAL_BASE_URL_ENV_VAR: &str = "ASTRAL_BASE_URL";
-const DEFAULT_ASTRAL_BASE_URL: &str = "http://localhost:8000/v1";
+const DEFAULT_ASTRAL_BASE_URL: &str = "https://api.deepseek.com/v1";
+const ANTHROPIC_PROVIDER_NAME: &str = "Anthropic";
+pub const ANTHROPIC_PROVIDER_ID: &str = "anthropic";
+pub const ANTHROPIC_API_KEY_ENV_VAR: &str = "ANTHROPIC_API_KEY";
+const ANTHROPIC_DEFAULT_BASE_URL: &str = "https://api.anthropic.com/v1";
 const AMAZON_BEDROCK_PROVIDER_NAME: &str = "Amazon Bedrock";
 pub const AMAZON_BEDROCK_PROVIDER_ID: &str = "amazon-bedrock";
 pub const AMAZON_BEDROCK_GPT_5_5_MODEL_ID: &str = "openai.gpt-5.5";
@@ -406,6 +410,37 @@ impl ModelProviderInfo {
         }
     }
 
+    pub fn create_anthropic_provider() -> ModelProviderInfo {
+        ModelProviderInfo {
+            name: ANTHROPIC_PROVIDER_NAME.into(),
+            base_url: Some(ANTHROPIC_DEFAULT_BASE_URL.into()),
+            env_key: None,
+            env_key_instructions: Some(format!(
+                "Set {ANTHROPIC_API_KEY_ENV_VAR} for the built-in Anthropic model provider."
+            )),
+            experimental_bearer_token: None,
+            auth: None,
+            aws: None,
+            wire_api: WireApi::AnthropicMessages,
+            query_params: None,
+            http_headers: Some(
+                [("version".to_string(), env!("CARGO_PKG_VERSION").to_string())]
+                    .into_iter()
+                    .collect(),
+            ),
+            env_http_headers: Some(HashMap::from([(
+                "x-api-key".to_string(),
+                ANTHROPIC_API_KEY_ENV_VAR.to_string(),
+            )])),
+            request_max_retries: None,
+            stream_max_retries: None,
+            stream_idle_timeout_ms: None,
+            websocket_connect_timeout_ms: None,
+            requires_openai_auth: false,
+            supports_websockets: false,
+        }
+    }
+
     pub fn create_amazon_bedrock_provider(
         aws: Option<ModelProviderAwsAuthInfo>,
     ) -> ModelProviderInfo {
@@ -444,6 +479,10 @@ impl ModelProviderInfo {
         self.name == ASTRAL_PROVIDER_NAME
     }
 
+    pub fn is_anthropic(&self) -> bool {
+        self.name == ANTHROPIC_PROVIDER_NAME
+    }
+
     pub fn is_amazon_bedrock(&self) -> bool {
         self.name == AMAZON_BEDROCK_PROVIDER_NAME
     }
@@ -466,14 +505,16 @@ pub fn built_in_model_providers(
     use ModelProviderInfo as P;
     let astral_provider = P::create_astral_provider();
     let openai_provider = P::create_openai_provider(openai_base_url);
+    let anthropic_provider = P::create_anthropic_provider();
     let amazon_bedrock_provider = P::create_amazon_bedrock_provider(/*aws*/ None);
 
     // Keep the bundled catalog small: Astral's generic provider, explicit legacy
-    // OpenAI, Bedrock, and local OSS providers. Users are encouraged to add
-    // their own entries under `model_providers` in config.toml.
+    // provider adapters, Bedrock, and local OSS providers. Users are encouraged
+    // to add their own entries under `model_providers` in config.toml.
     [
         (ASTRAL_PROVIDER_ID, astral_provider),
         (OPENAI_PROVIDER_ID, openai_provider),
+        (ANTHROPIC_PROVIDER_ID, anthropic_provider),
         (AMAZON_BEDROCK_PROVIDER_ID, amazon_bedrock_provider),
         (
             OLLAMA_OSS_PROVIDER_ID,
