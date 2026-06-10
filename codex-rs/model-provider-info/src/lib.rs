@@ -513,11 +513,8 @@ pub const LMSTUDIO_OSS_PROVIDER_ID: &str = "lmstudio";
 pub const OLLAMA_OSS_PROVIDER_ID: &str = "ollama";
 
 /// Built-in default provider list.
-pub fn built_in_model_providers(
-    openai_base_url: Option<String>,
-) -> HashMap<String, ModelProviderInfo> {
+pub fn built_in_model_providers() -> HashMap<String, ModelProviderInfo> {
     use ModelProviderInfo as P;
-    let _legacy_openai_base_url = openai_base_url;
     let astral_provider = P::create_astral_provider();
     let anthropic_provider = P::create_anthropic_provider();
     let amazon_bedrock_provider = P::create_amazon_bedrock_provider(/*aws*/ None);

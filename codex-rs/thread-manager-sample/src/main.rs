@@ -8,6 +8,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use anyhow::bail;
 use clap::Parser;
+use codex_core_api::ASTRAL_PROVIDER_ID;
 use codex_core_api::AbsolutePathBuf;
 use codex_core_api::AltScreenMode;
 use codex_core_api::ApprovalsReviewer;
@@ -32,7 +33,6 @@ use codex_core_api::MultiAgentV2Config;
 use codex_core_api::NewThread;
 use codex_core_api::Notice;
 use codex_core_api::OAuthCredentialsStoreMode;
-use codex_core_api::OPENAI_PROVIDER_ID;
 use codex_core_api::Op;
 use codex_core_api::OtelConfig;
 use codex_core_api::PermissionProfile;
@@ -154,11 +154,11 @@ async fn run_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
 fn new_config(model: Option<String>, arg0_paths: Arg0DispatchPaths) -> anyhow::Result<Config> {
     let codex_home = find_codex_home().context("find Codex home")?;
     let cwd = AbsolutePathBuf::current_dir().context("resolve current directory")?;
-    let model_provider_id = OPENAI_PROVIDER_ID.to_string();
-    let model_providers = built_in_model_providers(/*openai_base_url*/ None);
+    let model_provider_id = ASTRAL_PROVIDER_ID.to_string();
+    let model_providers = built_in_model_providers();
     let model_provider = model_providers
         .get(&model_provider_id)
-        .context("OpenAI model provider should be available")?
+        .context("Astral model provider should be available")?
         .clone();
 
     let mut config = Config {
