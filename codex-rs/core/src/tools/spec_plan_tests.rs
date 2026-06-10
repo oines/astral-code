@@ -14,7 +14,6 @@ use codex_protocol::openai_models::ApplyPatchToolType;
 use codex_protocol::openai_models::ConfigShellToolType;
 use codex_protocol::openai_models::InputModality;
 use codex_protocol::openai_models::ToolMode;
-use codex_protocol::openai_models::WebSearchToolType;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
 use codex_tools::DiscoverablePluginInfo;
@@ -1257,16 +1256,7 @@ async fn code_mode_only_can_expose_namespaced_multi_agent_v2_as_normal_tools() {
     })
     .await;
 
-    assert_eq!(
-        plan.visible_names,
-        vec![
-            "exec",
-            "wait",
-            "agents",
-            // Hosted Responses tools.
-            "web_search",
-        ]
-    );
+    assert_eq!(plan.visible_names, vec!["exec", "wait", "agents",]);
     assert!(
         !plan
             .namespace_function_names("agents")
@@ -1292,7 +1282,7 @@ async fn code_mode_only_can_expose_namespaced_multi_agent_v2_as_normal_tools() {
 }
 
 #[tokio::test]
-async fn hosted_tools_follow_provider_auth_model_and_config_gates() {
+async fn openai_hosted_tools_are_not_model_visible() {
     let api_key_auth = probe(|turn| {
         set_feature(turn, Feature::ImageGeneration, /*enabled*/ true);
         turn.model_info.input_modalities = vec![InputModality::Image];
@@ -1306,7 +1296,7 @@ async fn hosted_tools_follow_provider_auth_model_and_config_gates() {
         turn.model_info.input_modalities = vec![InputModality::Image];
     })
     .await;
-    image_generation.assert_visible_contains(&["image_generation"]);
+    image_generation.assert_visible_lacks(&["image_generation"]);
 
     let extension_flag_without_imagegen_tool = probe(|turn| {
         use_chatgpt_auth(turn);
@@ -1315,24 +1305,14 @@ async fn hosted_tools_follow_provider_auth_model_and_config_gates() {
         turn.model_info.input_modalities = vec![InputModality::Image];
     })
     .await;
-    extension_flag_without_imagegen_tool.assert_visible_contains(&["image_generation"]);
+    extension_flag_without_imagegen_tool.assert_visible_lacks(&["image_generation"]);
     extension_flag_without_imagegen_tool.assert_visible_lacks(&["image_gen"]);
 
     let live_web_search = probe(|turn| {
         set_web_search_mode(turn, WebSearchMode::Live);
-        turn.model_info.web_search_tool_type = WebSearchToolType::TextAndImage;
     })
     .await;
-    assert_eq!(
-        live_web_search.visible_spec("web_search"),
-        &ToolSpec::WebSearch {
-            external_web_access: Some(true),
-            filters: None,
-            user_location: None,
-            search_context_size: None,
-            search_content_types: Some(vec!["text".to_string(), "image".to_string()]),
-        }
-    );
+    live_web_search.assert_visible_lacks(&["web_search"]);
 
     let code_mode_only = probe(|turn| {
         use_chatgpt_auth(turn);
@@ -1354,9 +1334,6 @@ async fn hosted_tools_follow_provider_auth_model_and_config_gates() {
             "wait_agent",
             "TaskStop",
             "list_agents",
-            // Hosted Responses tools.
-            "web_search",
-            "image_generation",
         ]
     );
 
@@ -1365,7 +1342,7 @@ async fn hosted_tools_follow_provider_auth_model_and_config_gates() {
         set_web_search_mode(turn, WebSearchMode::Live);
     })
     .await;
-    standalone_web_search_without_web_run.assert_visible_contains(&["web_search"]);
+    standalone_web_search_without_web_run.assert_visible_lacks(&["web_search"]);
 
     let standalone_web_search = probe_with(
         |turn| {
@@ -1378,6 +1355,7 @@ async fn hosted_tools_follow_provider_auth_model_and_config_gates() {
         },
     )
     .await;
+    standalone_web_search.assert_visible_lacks(&["web"]);
     standalone_web_search.assert_visible_lacks(&["web_search"]);
 
     let unsupported_provider = probe(|turn| {

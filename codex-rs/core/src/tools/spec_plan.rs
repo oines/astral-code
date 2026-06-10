@@ -55,9 +55,6 @@ use crate::tools::handlers::multi_agents_v2::InterruptAgentHandler;
 use crate::tools::handlers::multi_agents_v2::ListAgentsHandler as ListAgentsHandlerV2;
 use crate::tools::handlers::multi_agents_v2::WaitAgentHandler as WaitAgentHandlerV2;
 use crate::tools::handlers::view_image_spec::ViewImageToolOptions;
-use crate::tools::hosted_spec::WebSearchToolOptions;
-use crate::tools::hosted_spec::create_image_generation_tool;
-use crate::tools::hosted_spec::create_web_search_tool;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::ToolExposure;
 use crate::tools::registry::ToolRegistry;
@@ -65,12 +62,9 @@ use crate::tools::registry::override_tool_exposure;
 use crate::tools::router::ToolRouter;
 use crate::tools::router::ToolRouterParams;
 use codex_features::Feature;
-use codex_login::AuthManager;
 use codex_mcp::ToolInfo;
-use codex_protocol::config_types::WebSearchMode;
 use codex_protocol::dynamic_tools::DynamicToolSpec;
 use codex_protocol::openai_models::ConfigShellToolType;
-use codex_protocol::openai_models::InputModality;
 use codex_protocol::openai_models::ToolMode;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::SessionSource;
@@ -120,7 +114,6 @@ type PlannedRuntime = Arc<dyn CoreToolRuntime>;
 #[derive(Default)]
 struct PlannedTools {
     runtimes: Vec<PlannedRuntime>,
-    hosted_specs: Vec<ToolSpec>,
 }
 
 impl PlannedTools {
@@ -148,10 +141,6 @@ impl PlannedTools {
         T: CoreToolRuntime + 'static,
     {
         self.add_with_exposure(handler, ToolExposure::Hidden);
-    }
-
-    fn add_hosted_spec(&mut self, spec: ToolSpec) {
-        self.hosted_specs.push(spec);
     }
 
     fn runtimes(&self) -> &[PlannedRuntime] {
@@ -213,10 +202,7 @@ fn build_model_visible_specs_and_registry(
     turn_context: &TurnContext,
     planned_tools: PlannedTools,
 ) -> (Vec<ToolSpec>, ToolRegistry) {
-    let PlannedTools {
-        runtimes,
-        hosted_specs,
-    } = planned_tools;
+    let PlannedTools { runtimes } = planned_tools;
     let mut specs = Vec::new();
     let mut seen_tool_names = HashSet::new();
     let registered_tool_names = runtimes
@@ -244,12 +230,6 @@ fn build_model_visible_specs_and_registry(
         &mut specs,
         &mut seen_model_visible_names,
     );
-    for spec in hosted_specs {
-        let tool_name = ToolName::plain(spec.name());
-        let spec = astral_spec_for_model_request(&tool_name, spec, &registered_tool_names);
-        push_model_visible_spec(&mut specs, &mut seen_model_visible_names, spec);
-    }
-
     let registry = ToolRegistry::from_tools(runtimes);
     let model_visible_specs = merge_into_namespaces(specs)
         .into_iter()
@@ -430,43 +410,6 @@ fn spec_for_model_request(
     }
 }
 
-fn hosted_model_tool_specs(context: &CoreToolPlanContext<'_>) -> Vec<ToolSpec> {
-    let turn_context = context.turn_context;
-    // Responses Lite accepts schemas for client-executed tools, not hosted Responses tools.
-    if turn_context.model_info.use_responses_lite {
-        return Vec::new();
-    }
-
-    let mut specs = Vec::new();
-    let standalone_web_search_available = standalone_web_search_enabled(turn_context)
-        && context
-            .extension_tool_executors
-            .iter()
-            .any(|executor| executor.tool_name() == ToolName::namespaced("web", "run"));
-    // `Some(Cached/Live/Disabled)` are the options for mode when standalone search is unavailable
-    // and the provider supports hosted search. `None` prevents emitting a hosted search tool.
-    let web_search_mode = (!standalone_web_search_available
-        && turn_context.provider.capabilities().web_search)
-        .then_some(turn_context.config.web_search_mode.value());
-    let web_search_config = web_search_mode
-        .as_ref()
-        .and(turn_context.config.web_search_config.as_ref());
-    if let Some(hosted_web_search_tool) = create_web_search_tool(WebSearchToolOptions {
-        web_search_mode,
-        web_search_config,
-        web_search_tool_type: turn_context.model_info.web_search_tool_type,
-    }) {
-        specs.push(hosted_web_search_tool);
-    }
-    // TODO: Remove hosted image generation once the standalone extension is ready.
-    if image_generation_tool_enabled(turn_context)
-        && !standalone_image_generation_available(turn_context, context.extension_tool_executors)
-    {
-        specs.push(create_image_generation_tool("png"));
-    }
-    specs
-}
-
 pub(crate) fn search_tool_enabled(turn_context: &TurnContext) -> bool {
     turn_context.model_info.supports_search_tool
 }
@@ -510,46 +453,8 @@ fn agent_jobs_worker_tools_enabled(turn_context: &TurnContext) -> bool {
         )
 }
 
-fn image_generation_tool_enabled(turn_context: &TurnContext) -> bool {
-    image_generation_runtime_enabled(turn_context)
-        && turn_context
-            .features
-            .get()
-            .enabled(Feature::ImageGeneration)
-}
-
-fn image_generation_runtime_enabled(turn_context: &TurnContext) -> bool {
-    turn_context
-        .auth_manager
-        .as_deref()
-        .is_some_and(AuthManager::current_auth_uses_codex_backend)
-        && turn_context.provider.capabilities().image_generation
-        && turn_context
-            .model_info
-            .input_modalities
-            .contains(&InputModality::Image)
-}
-
-fn standalone_image_generation_model_visible(turn_context: &TurnContext) -> bool {
-    if !image_generation_runtime_enabled(turn_context) || !namespace_tools_enabled(turn_context) {
-        return false;
-    }
-
-    if turn_context.model_info.use_responses_lite {
-        return true;
-    }
-
-    turn_context.features.get().enabled(Feature::ImageGenExt)
-}
-
-fn standalone_image_generation_available(
-    turn_context: &TurnContext,
-    extension_tools: &[Arc<dyn ToolExecutor<ExtensionToolCall>>],
-) -> bool {
-    standalone_image_generation_model_visible(turn_context)
-        && extension_tools.iter().any(|executor| {
-            executor.tool_name() == ToolName::namespaced(IMAGE_GEN_NAMESPACE, IMAGEGEN_TOOL_NAME)
-        })
+fn standalone_image_generation_model_visible(_turn_context: &TurnContext) -> bool {
+    false
 }
 
 fn wait_agent_timeout_options(turn_context: &TurnContext) -> WaitAgentTimeoutOptions {
@@ -751,9 +656,6 @@ fn add_tool_sources(context: &CoreToolPlanContext<'_>, planned_tools: &mut Plann
     add_mcp_runtime_tools(context, planned_tools);
     add_extension_tools(context, planned_tools);
     add_dynamic_tools(context, planned_tools);
-    for spec in hosted_model_tool_specs(context) {
-        planned_tools.add_hosted_spec(spec);
-    }
 }
 
 fn add_astral_file_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut PlannedTools) {
@@ -782,13 +684,8 @@ fn add_astral_file_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut 
     }
 }
 
-fn standalone_web_search_enabled(turn_context: &TurnContext) -> bool {
-    namespace_tools_enabled(turn_context)
-        && (turn_context.model_info.use_responses_lite
-            || turn_context
-                .features
-                .get()
-                .enabled(Feature::StandaloneWebSearch))
+fn standalone_web_search_enabled(_turn_context: &TurnContext) -> bool {
+    false
 }
 
 fn add_shell_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut PlannedTools) {
@@ -1121,13 +1018,10 @@ fn append_extension_tool_executors(
     }
 
     let standalone_web_search_enabled = standalone_web_search_enabled(turn_context);
-    let web_search_mode_on = turn_context.config.web_search_mode.value() != WebSearchMode::Disabled;
 
     for executor in executors.iter().cloned() {
         let tool_name = executor.tool_name();
-        if tool_name == ToolName::namespaced("web", "run")
-            && (!standalone_web_search_enabled || !web_search_mode_on)
-        {
+        if tool_name == ToolName::namespaced("web", "run") && !standalone_web_search_enabled {
             continue;
         }
         if tool_name == ToolName::namespaced(IMAGE_GEN_NAMESPACE, IMAGEGEN_TOOL_NAME)
