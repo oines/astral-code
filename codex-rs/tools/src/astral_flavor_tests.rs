@@ -55,7 +55,10 @@ fn file_and_search_tools_expose_expected_required_fields() {
     let grep = astral_core_tool_by_name(GREP_TOOL_NAME).expect("Grep tool exists");
 
     assert_eq!(read.input_schema["required"], json!(["file_path"]));
-    assert_eq!(read.input_schema["properties"]["pages"], json!(null));
+    assert_eq!(
+        read.input_schema["properties"]["pages"]["type"],
+        json!("string")
+    );
     assert_eq!(
         edit.input_schema["required"],
         json!(["file_path", "old_string", "new_string"])
@@ -68,10 +71,14 @@ fn file_and_search_tools_expose_expected_required_fields() {
 }
 
 #[test]
-fn todo_write_uses_legacy_task_list_shape() {
+fn todo_write_uses_claudeish_task_list_shape() {
     let tool = astral_core_tool_by_name(TODO_WRITE_TOOL_NAME).expect("TodoWrite exists");
 
     assert_eq!(tool.input_schema["required"], json!(["todos"]));
+    assert_eq!(
+        tool.input_schema["properties"]["todos"]["items"]["required"],
+        json!(["content", "status", "activeForm"])
+    );
     assert_eq!(
         tool.input_schema["properties"]["todos"]["items"]["properties"]["status"]["enum"],
         json!(["pending", "in_progress", "completed"])

@@ -1,7 +1,9 @@
 use crate::function_tool::FunctionCallError;
+use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
+use crate::tools::context::boxed_tool_output;
 use crate::tools::handlers::PlanHandler;
 use crate::tools::handlers::parse_arguments;
 use crate::tools::registry::CoreToolRuntime;
@@ -14,6 +16,12 @@ use codex_tools::astral_core_tool_by_name;
 use codex_tools::parse_tool_input_schema_without_compaction;
 use serde::Deserialize;
 use serde_json::json;
+
+const TODO_WRITE_SUCCESS_MESSAGE: &str = concat!(
+    "Todos have been modified successfully. ",
+    "Ensure that you continue to use the todo list to track your progress. ",
+    "Please proceed with the current tasks if applicable"
+);
 
 pub struct AstralTodoWriteHandler {
     plan: PlanHandler,
@@ -54,7 +62,11 @@ impl ToolExecutor<ToolInvocation> for AstralTodoWriteHandler {
         &self,
         invocation: ToolInvocation,
     ) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
-        self.plan.handle(to_plan_invocation(invocation)?).await
+        self.plan.handle(to_plan_invocation(invocation)?).await?;
+        Ok(boxed_tool_output(FunctionToolOutput::from_text(
+            TODO_WRITE_SUCCESS_MESSAGE.to_string(),
+            Some(true),
+        )))
     }
 }
 
@@ -109,3 +121,7 @@ fn rewrite_todo_write_arguments(arguments: &str) -> Result<String, FunctionCallE
         ))
     })
 }
+
+#[cfg(test)]
+#[path = "astral_todo_write_tests.rs"]
+mod tests;

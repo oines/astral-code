@@ -89,7 +89,7 @@ mod tests {
                         description: None,
                     },
                 ],
-                /*default_limit*/ 8,
+                /*default_limit*/ 5,
             ),
             ToolSpec::ToolSearch {
                 execution: "client".to_string(),
@@ -98,7 +98,7 @@ mod tests {
                         (
                             "limit".to_string(),
                             JsonSchema::number(Some(
-                                    "Maximum number of tools to return. Defaults to 8."
+                                    "Maximum number of tools to return. Defaults to 5."
                                         .to_string(),
                                 ),),
                         ),

@@ -125,6 +125,10 @@ fn read_tool() -> AgentTool {
                     "limit",
                     "The number of lines to read; only provide for large files",
                 ),
+                string_property(
+                    "pages",
+                    "Page range for PDF files, for example 1-5, 3, or 10-20",
+                ),
             ],
             ["file_path"],
         ),
@@ -222,33 +226,27 @@ fn todo_write_tool() -> AgentTool {
         TODO_WRITE_TOOL_NAME,
         "Update the session task checklist.",
         object(
-            [
-                string_property(
-                    "explanation",
-                    "Optional short explanation for why the checklist changed",
-                ),
-                array_property(
-                    "todos",
-                    "The updated todo list",
-                    json!({
-                        "type": "object",
-                        "properties": {
-                            "content": { "type": "string", "description": "Task description" },
-                            "status": {
-                                "type": "string",
-                                "enum": ["pending", "in_progress", "completed"],
-                                "description": "Task status"
-                            },
-                            "activeForm": {
-                                "type": "string",
-                                "description": "Short present-tense label for the active task"
-                            }
+            [array_property(
+                "todos",
+                "The updated todo list",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "content": { "type": "string", "description": "Task description" },
+                        "status": {
+                            "type": "string",
+                            "enum": ["pending", "in_progress", "completed"],
+                            "description": "Task status"
                         },
-                        "required": ["content", "status"],
-                        "additionalProperties": false
-                    }),
-                ),
-            ],
+                        "activeForm": {
+                            "type": "string",
+                            "description": "Short present-tense label for the active task"
+                        },
+                    },
+                    "required": ["content", "status", "activeForm"],
+                    "additionalProperties": false
+                }),
+            )],
             ["todos"],
         ),
     )
@@ -418,7 +416,7 @@ fn tool_search_tool() -> AgentTool {
                 string_property("query", "Search query for tools"),
                 integer_property(
                     "max_results",
-                    "Maximum number of tools to return; defaults to 8",
+                    "Maximum number of tools to return; defaults to 5",
                 ),
                 integer_property(
                     "limit",
