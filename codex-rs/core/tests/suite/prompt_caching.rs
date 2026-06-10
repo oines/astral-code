@@ -8,7 +8,6 @@ use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::config_types::Settings;
-use codex_protocol::config_types::WebSearchMode;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::permissions::NetworkSandboxPolicy;
@@ -128,11 +127,6 @@ async fn prompt_tools_are_consistent_across_requests() -> anyhow::Result<()> {
                 "be consistent and helpful",
             ));
             config.model = Some("gpt-5.2".to_string());
-            // Keep tool expectations stable when the default web_search mode changes.
-            config
-                .web_search_mode
-                .set(WebSearchMode::Cached)
-                .expect("test web_search_mode should satisfy constraints");
             config
                 .features
                 .enable(Feature::CollaborationModes)
@@ -191,7 +185,6 @@ async fn prompt_tools_are_consistent_across_requests() -> anyhow::Result<()> {
         "apply_patch",
         "view_image",
         "tool_search",
-        "web_search",
     ]);
     let body0 = req1.single_request().body_json();
 
