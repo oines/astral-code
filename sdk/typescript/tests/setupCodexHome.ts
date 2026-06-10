@@ -4,25 +4,25 @@ import path from "node:path";
 
 import { afterEach, beforeEach } from "@jest/globals";
 
-const originalCodexHome = process.env.CODEX_HOME;
-let currentCodexHome: string | undefined;
+const originalAstralHome = process.env.ASTRAL_HOME;
+let currentAstralHome: string | undefined;
 
 beforeEach(async () => {
-  currentCodexHome = await fs.mkdtemp(path.join(os.tmpdir(), "codex-sdk-test-"));
-  process.env.CODEX_HOME = currentCodexHome;
+  currentAstralHome = await fs.mkdtemp(path.join(os.tmpdir(), "astral-sdk-test-"));
+  process.env.ASTRAL_HOME = currentAstralHome;
 });
 
 afterEach(async () => {
-  const codexHomeToDelete = currentCodexHome;
-  currentCodexHome = undefined;
+  const astralHomeToDelete = currentAstralHome;
+  currentAstralHome = undefined;
 
-  if (originalCodexHome === undefined) {
-    delete process.env.CODEX_HOME;
+  if (originalAstralHome === undefined) {
+    delete process.env.ASTRAL_HOME;
   } else {
-    process.env.CODEX_HOME = originalCodexHome;
+    process.env.ASTRAL_HOME = originalAstralHome;
   }
 
-  if (codexHomeToDelete) {
-    await fs.rm(codexHomeToDelete, { recursive: true, force: true });
+  if (astralHomeToDelete) {
+    await fs.rm(astralHomeToDelete, { recursive: true, force: true });
   }
 });

@@ -3,8 +3,8 @@
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 
-import { Codex } from "@openai/codex-sdk";
-import type { ThreadEvent, ThreadItem } from "@openai/codex-sdk";
+import { Codex } from "astral-code-sdk";
+import type { ThreadEvent, ThreadItem } from "astral-code-sdk";
 import { codexPathOverride } from "./helpers.ts";
 
 const codex = new Codex({ codexPathOverride: codexPathOverride() });

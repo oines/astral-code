@@ -119,7 +119,7 @@ impl InitializeRequestProcessor {
                     }
                     SetOriginatorError::AlreadyInitialized => {
                         // No-op. This is expected to happen if the originator is already set via env var.
-                        // TODO(owen): Once we remove support for CODEX_INTERNAL_ORIGINATOR_OVERRIDE,
+                        // TODO(owen): Once we remove support for env-originator overrides,
                         // this will be an unexpected state and we can return a JSON-RPC error indicating
                         // internal server error.
                     }

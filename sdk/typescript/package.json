@@ -1,15 +1,15 @@
 {
-  "name": "@openai/codex-sdk",
+  "name": "astral-code-sdk",
   "version": "0.0.0-dev",
-  "description": "TypeScript SDK for Codex APIs.",
+  "description": "TypeScript SDK for Astral Code APIs.",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/openai/codex.git",
+    "url": "git+https://github.com/oines/astral-code.git",
     "directory": "sdk/typescript"
   },
   "keywords": [
-    "openai",
-    "codex",
+    "astral",
+    "astral-code",
     "sdk",
     "typescript",
     "api"

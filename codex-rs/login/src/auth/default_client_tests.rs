@@ -91,23 +91,23 @@ async fn test_create_client_sets_default_headers() {
 
 #[test]
 fn test_invalid_suffix_is_sanitized() {
-    let prefix = "codex_cli_rs/0.0.0";
+    let prefix = "astral_cli_rs/0.0.0";
     let suffix = "bad\rsuffix";
 
     assert_eq!(
         sanitize_user_agent(format!("{prefix} ({suffix})"), prefix),
-        "codex_cli_rs/0.0.0 (bad_suffix)"
+        "astral_cli_rs/0.0.0 (bad_suffix)"
     );
 }
 
 #[test]
 fn test_invalid_suffix_is_sanitized2() {
-    let prefix = "codex_cli_rs/0.0.0";
+    let prefix = "astral_cli_rs/0.0.0";
     let suffix = "bad\0suffix";
 
     assert_eq!(
         sanitize_user_agent(format!("{prefix} ({suffix})"), prefix),
-        "codex_cli_rs/0.0.0 (bad_suffix)"
+        "astral_cli_rs/0.0.0 (bad_suffix)"
     );
 }
 

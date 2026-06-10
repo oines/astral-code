@@ -85,7 +85,7 @@ async fn initialize_probe_does_not_override_originator() -> Result<()> {
     };
     let InitializeResponse { user_agent, .. } = to_response::<InitializeResponse>(response)?;
 
-    assert!(user_agent.starts_with("codex_cli_rs/"));
+    assert!(user_agent.starts_with("astral_cli_rs/"));
     Ok(())
 }
 
@@ -112,7 +112,7 @@ async fn initialize_codex_backend_does_not_override_originator() -> Result<()> {
     };
     let InitializeResponse { user_agent, .. } = to_response::<InitializeResponse>(response)?;
 
-    assert!(user_agent.starts_with("codex_cli_rs/"));
+    assert!(user_agent.starts_with("astral_cli_rs/"));
     Ok(())
 }
 
@@ -126,8 +126,8 @@ async fn initialize_respects_originator_override_env_var() -> Result<()> {
     let mut mcp = TestAppServer::new_with_env(
         codex_home.path(),
         &[(
-            "CODEX_INTERNAL_ORIGINATOR_OVERRIDE",
-            Some("codex_originator_via_env_var"),
+            "ASTRAL_INTERNAL_ORIGINATOR_OVERRIDE",
+            Some("astral_originator_via_env_var"),
         )],
     )
     .await?;
@@ -152,7 +152,7 @@ async fn initialize_respects_originator_override_env_var() -> Result<()> {
         platform_os,
     } = to_response::<InitializeResponse>(response)?;
 
-    assert!(user_agent.starts_with("codex_originator_via_env_var/"));
+    assert!(user_agent.starts_with("astral_originator_via_env_var/"));
     assert_eq!(response_codex_home, expected_codex_home);
     assert_eq!(platform_family, std::env::consts::FAMILY);
     assert_eq!(platform_os, std::env::consts::OS);
@@ -167,7 +167,10 @@ async fn initialize_rejects_invalid_client_name() -> Result<()> {
     create_config_toml(codex_home.path(), &server.uri(), "never")?;
     let mut mcp = TestAppServer::new_with_env(
         codex_home.path(),
-        &[("CODEX_INTERNAL_ORIGINATOR_OVERRIDE", None)],
+        &[
+            ("ASTRAL_INTERNAL_ORIGINATOR_OVERRIDE", None),
+            ("CODEX_INTERNAL_ORIGINATOR_OVERRIDE", None),
+        ],
     )
     .await?;
 

@@ -78,7 +78,7 @@ PACKAGE_NATIVE_COMPONENTS: dict[str, list[str]] = {
     "astral-code-win32-x64": [CODEX_PACKAGE_COMPONENT],
     "astral-code-win32-arm64": [CODEX_PACKAGE_COMPONENT],
     "codex-responses-api-proxy": ["codex-responses-api-proxy"],
-    "codex-sdk": [],
+    "astral-code-sdk": [],
 }
 
 PACKAGE_TARGET_FILTERS: dict[str, str] = {
@@ -280,9 +280,9 @@ def stage_sources(staging_dir: Path, version: str, package: str) -> None:
             shutil.copy2(readme_src, staging_dir / "README.md")
 
         package_json_path = RESPONSES_API_PROXY_NPM_ROOT / "package.json"
-    elif package == "codex-sdk":
+    elif package == "astral-code-sdk":
         package_json_path = CODEX_SDK_ROOT / "package.json"
-        stage_codex_sdk_sources(staging_dir)
+        stage_astral_code_sdk_sources(staging_dir)
     else:
         raise RuntimeError(f"Unknown package '{package}'.")
 
@@ -302,7 +302,7 @@ def stage_sources(staging_dir: Path, version: str, package: str) -> None:
             if platform_package != "astral-code"
         }
 
-    elif package == "codex-sdk":
+    elif package == "astral-code-sdk":
         scripts = package_json.get("scripts")
         if isinstance(scripts, dict):
             scripts.pop("prepare", None)
@@ -329,7 +329,7 @@ def run_command(cmd: list[str], cwd: Path | None = None) -> None:
     subprocess.run(cmd, cwd=cwd, check=True)
 
 
-def stage_codex_sdk_sources(staging_dir: Path) -> None:
+def stage_astral_code_sdk_sources(staging_dir: Path) -> None:
     package_root = CODEX_SDK_ROOT
 
     run_command(["pnpm", "install", "--frozen-lockfile"], cwd=package_root)
@@ -337,7 +337,7 @@ def stage_codex_sdk_sources(staging_dir: Path) -> None:
 
     dist_src = package_root / "dist"
     if not dist_src.exists():
-        raise RuntimeError("codex-sdk build did not produce a dist directory.")
+        raise RuntimeError("astral-code-sdk build did not produce a dist directory.")
 
     shutil.copytree(dist_src, staging_dir / "dist")
 
