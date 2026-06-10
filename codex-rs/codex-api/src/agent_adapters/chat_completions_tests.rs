@@ -136,7 +136,7 @@ fn stream_chunk_maps_text_tool_calls_finish_reason_and_usage() {
                     "role": "assistant",
                     "content": "hello",
                     "tool_calls": [{
-                        "index": 1,
+                        "index": 0,
                         "id": "call_1",
                         "type": "function",
                         "function": {

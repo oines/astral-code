@@ -14,6 +14,8 @@ use serde_json::Map;
 use serde_json::Value;
 use serde_json::json;
 
+const TOOL_CALL_BLOCK_INDEX_OFFSET: usize = 1;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChatCompletionsOptions {
     pub max_tokens: Option<u64>,
@@ -349,7 +351,9 @@ fn append_tool_call_delta(
         .map(usize::try_from)
         .transpose()
         .map_err(|_| ChatCompletionsStreamError::InvalidField("index"))?
-        .unwrap_or(0);
+        .unwrap_or(0)
+        .checked_add(TOOL_CALL_BLOCK_INDEX_OFFSET)
+        .ok_or(ChatCompletionsStreamError::InvalidField("index"))?;
 
     let function = tool_call.get("function");
     let id = tool_call.get("id").and_then(Value::as_str);
