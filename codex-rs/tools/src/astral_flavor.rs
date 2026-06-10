@@ -113,7 +113,7 @@ fn bash_tool() -> AgentTool {
 fn read_tool() -> AgentTool {
     tool(
         READ_TOOL_NAME,
-        "Read a file, image, PDF, or notebook from the local filesystem.",
+        "Read a text file or local image from the filesystem.",
         object(
             [
                 string_property("file_path", "The absolute path to the file to read"),
@@ -125,7 +125,6 @@ fn read_tool() -> AgentTool {
                     "limit",
                     "The number of lines to read; only provide for large files",
                 ),
-                string_property("pages", "Page range for PDF files, such as 1-5 or 10-20"),
             ],
             ["file_path"],
         ),

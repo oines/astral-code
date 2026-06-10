@@ -610,19 +610,19 @@ async fn environment_count_controls_environment_backed_tools() {
         turn.model_info.apply_patch_tool_type = Some(ApplyPatchToolType::Freeform);
     })
     .await;
-    multiple_environments.assert_visible_contains(&["Bash", "view_image"]);
-    multiple_environments.assert_visible_lacks(&["apply_patch"]);
-    multiple_environments.assert_registered_contains(&["apply_patch"]);
+    multiple_environments.assert_visible_contains(&["Bash", "Read"]);
+    multiple_environments.assert_visible_lacks(&["apply_patch", "view_image"]);
+    multiple_environments.assert_registered_contains(&["apply_patch", "view_image"]);
     assert_eq!(
         multiple_environments.exposure("apply_patch"),
         ToolExposure::Hidden
     );
+    assert_eq!(
+        multiple_environments.exposure("view_image"),
+        ToolExposure::Hidden
+    );
     assert!(has_parameter(
         multiple_environments.visible_spec("Bash"),
-        "environment_id"
-    ));
-    assert!(has_parameter(
-        multiple_environments.visible_spec("view_image"),
         "environment_id"
     ));
 }

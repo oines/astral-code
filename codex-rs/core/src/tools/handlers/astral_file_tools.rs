@@ -6,6 +6,7 @@ use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
 use crate::tools::context::boxed_tool_output;
+use crate::tools::handlers::ViewImageHandler;
 use crate::tools::handlers::parse_arguments;
 use crate::tools::handlers::resolve_tool_environment;
 use crate::tools::registry::CoreToolRuntime;
@@ -25,6 +26,7 @@ use codex_tools::parse_tool_input_schema_without_compaction;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use regex_lite::Regex;
 use serde::Deserialize;
+use serde_json::json;
 
 const DEFAULT_READ_LINE_LIMIT: usize = 2_000;
 const MAX_SCAN_ENTRIES: usize = 10_000;
@@ -86,6 +88,10 @@ impl ToolExecutor<ToolInvocation> for AstralFileToolHandler {
         &self,
         invocation: ToolInvocation,
     ) -> Result<Box<dyn crate::tools::context::ToolOutput>, FunctionCallError> {
+        if self.kind == AstralFileToolKind::Read {
+            return handle_read_invocation(invocation).await;
+        }
+
         let ToolInvocation {
             turn,
             payload,
@@ -115,7 +121,7 @@ impl ToolExecutor<ToolInvocation> for AstralFileToolHandler {
         let sandbox = turn.file_system_sandbox_context(/*additional_permissions*/ None, &cwd);
 
         let text = match self.kind {
-            AstralFileToolKind::Read => read_file(arguments, fs.as_ref(), &sandbox, &cwd).await?,
+            AstralFileToolKind::Read => unreachable!("Read is handled before generic file tools"),
             AstralFileToolKind::Write => {
                 let output = write_file(arguments, fs.as_ref(), &sandbox, &cwd).await?;
                 tracker.lock().await.invalidate();
@@ -167,12 +173,11 @@ struct ReadArgs {
 }
 
 async fn read_file(
-    arguments: String,
+    args: ReadArgs,
     fs: &dyn ExecutorFileSystem,
     sandbox: &FileSystemSandboxContext,
     cwd: &AbsolutePathBuf,
 ) -> Result<String, FunctionCallError> {
-    let args: ReadArgs = parse_arguments(&arguments)?;
     if args.pages.is_some() {
         return Err(FunctionCallError::RespondToModel(
             "Read pages are not supported yet; read PDFs through Bash or a dedicated reader"
@@ -181,6 +186,13 @@ async fn read_file(
     }
 
     let path = resolve_path(cwd, &args.file_path);
+    if is_pdf_path(&path) {
+        return Err(FunctionCallError::RespondToModel(
+            "Read does not support PDFs yet; use Bash with an appropriate PDF extraction tool"
+                .to_string(),
+        ));
+    }
+
     let metadata = fs.get_metadata(&path, Some(sandbox)).await.map_err(|err| {
         FunctionCallError::RespondToModel(format!("unable to read `{}`: {err}", path.display()))
     })?;
@@ -211,6 +223,44 @@ async fn read_file(
     }
 
     Ok(output)
+}
+
+async fn handle_read_invocation(
+    mut invocation: ToolInvocation,
+) -> Result<Box<dyn crate::tools::context::ToolOutput>, FunctionCallError> {
+    let ToolPayload::Function { arguments } = &invocation.payload else {
+        return Err(FunctionCallError::RespondToModel(
+            "Read handler received unsupported payload".to_string(),
+        ));
+    };
+    let args: ReadArgs = parse_arguments(arguments)?;
+
+    if is_image_path(Path::new(&args.file_path)) {
+        invocation.tool_name = ToolName::plain("view_image");
+        invocation.payload = ToolPayload::Function {
+            arguments: json!({ "path": args.file_path }).to_string(),
+        };
+        return ViewImageHandler::default().handle(invocation).await;
+    }
+
+    let Some(turn_environment) =
+        resolve_tool_environment(invocation.turn.as_ref(), /*environment_id*/ None)?
+    else {
+        return Err(FunctionCallError::RespondToModel(
+            "Read is unavailable in this session".to_string(),
+        ));
+    };
+    let cwd = turn_environment.cwd.clone();
+    let fs = turn_environment.environment.get_filesystem();
+    let sandbox = invocation
+        .turn
+        .file_system_sandbox_context(/*additional_permissions*/ None, &cwd);
+
+    let text = read_file(args, fs.as_ref(), &sandbox, &cwd).await?;
+    Ok(boxed_tool_output(FunctionToolOutput::from_text(
+        text,
+        Some(true),
+    )))
 }
 
 #[derive(Deserialize)]
@@ -625,6 +675,23 @@ fn display_path(path: &AbsolutePathBuf, cwd: &AbsolutePathBuf) -> String {
         .unwrap_or_else(|_| PathBuf::from(path.as_path()))
         .to_string_lossy()
         .replace('\\', "/")
+}
+
+fn is_image_path(path: &Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|extension| extension.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Some("png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp")
+    )
+}
+
+fn is_pdf_path(path: &AbsolutePathBuf) -> bool {
+    path.as_path()
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"))
 }
 
 fn join_limited_lines(lines: Vec<String>, limit: usize) -> String {

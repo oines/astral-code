@@ -55,6 +55,7 @@ fn file_and_search_tools_expose_expected_required_fields() {
     let grep = astral_core_tool_by_name(GREP_TOOL_NAME).expect("Grep tool exists");
 
     assert_eq!(read.input_schema["required"], json!(["file_path"]));
+    assert_eq!(read.input_schema["properties"]["pages"], json!(null));
     assert_eq!(
         edit.input_schema["required"],
         json!(["file_path", "old_string", "new_string"])
