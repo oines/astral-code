@@ -1128,7 +1128,6 @@ pub struct AuthManager {
     auth_change_tx: watch::Sender<u64>,
     enable_codex_api_key_env: bool,
     auth_credentials_store_mode: AuthCredentialsStoreMode,
-    forced_chatgpt_workspace_id: RwLock<Option<Vec<String>>>,
     chatgpt_base_url: Option<String>,
     refresh_lock: Semaphore,
     external_auth: RwLock<Option<Arc<dyn ExternalAuth>>>,
@@ -1157,10 +1156,6 @@ impl Debug for AuthManager {
             .field(
                 "auth_credentials_store_mode",
                 &self.auth_credentials_store_mode,
-            )
-            .field(
-                "forced_chatgpt_workspace_id",
-                &self.forced_chatgpt_workspace_id,
             )
             .field("chatgpt_base_url", &self.chatgpt_base_url)
             .field("has_external_auth", &self.has_external_auth())
@@ -1198,7 +1193,6 @@ impl AuthManager {
             auth_change_tx,
             enable_codex_api_key_env,
             auth_credentials_store_mode,
-            forced_chatgpt_workspace_id: RwLock::new(None),
             chatgpt_base_url,
             refresh_lock: Semaphore::new(/*permits*/ 1),
             external_auth: RwLock::new(None),
@@ -1219,7 +1213,6 @@ impl AuthManager {
             auth_change_tx,
             enable_codex_api_key_env: false,
             auth_credentials_store_mode: AuthCredentialsStoreMode::File,
-            forced_chatgpt_workspace_id: RwLock::new(None),
             chatgpt_base_url: None,
             refresh_lock: Semaphore::new(/*permits*/ 1),
             external_auth: RwLock::new(None),
@@ -1239,7 +1232,6 @@ impl AuthManager {
             auth_change_tx,
             enable_codex_api_key_env: false,
             auth_credentials_store_mode: AuthCredentialsStoreMode::File,
-            forced_chatgpt_workspace_id: RwLock::new(None),
             chatgpt_base_url: None,
             refresh_lock: Semaphore::new(/*permits*/ 1),
             external_auth: RwLock::new(None),
@@ -1257,7 +1249,6 @@ impl AuthManager {
             auth_change_tx,
             enable_codex_api_key_env: false,
             auth_credentials_store_mode: AuthCredentialsStoreMode::File,
-            forced_chatgpt_workspace_id: RwLock::new(None),
             chatgpt_base_url: None,
             refresh_lock: Semaphore::new(/*permits*/ 1),
             external_auth: RwLock::new(Some(
@@ -1438,21 +1429,6 @@ impl AuthManager {
         if let Ok(mut guard) = self.external_auth.write() {
             *guard = None;
         }
-    }
-
-    pub fn set_forced_chatgpt_workspace_id(&self, workspace_id: Option<Vec<String>>) {
-        if let Ok(mut guard) = self.forced_chatgpt_workspace_id.write()
-            && *guard != workspace_id
-        {
-            *guard = workspace_id;
-        }
-    }
-
-    pub fn forced_chatgpt_workspace_id(&self) -> Option<Vec<String>> {
-        self.forced_chatgpt_workspace_id
-            .read()
-            .ok()
-            .and_then(|guard| guard.clone())
     }
 
     pub fn has_external_auth(&self) -> bool {
@@ -1713,7 +1689,6 @@ impl AuthManager {
                 "external auth is not configured",
             )));
         };
-        let forced_chatgpt_workspace_id = self.forced_chatgpt_workspace_id();
         let previous_account_id = self
             .auth_cached()
             .as_ref()
@@ -1730,19 +1705,9 @@ impl AuthManager {
         if external_auth.auth_mode() == AuthMode::ApiKey {
             return Ok(());
         }
-        let Some(chatgpt_metadata) = refreshed.chatgpt_metadata() else {
+        if refreshed.chatgpt_metadata().is_none() {
             return Err(RefreshTokenError::Transient(std::io::Error::other(
                 "external auth refresh did not return ChatGPT metadata",
-            )));
-        };
-        if let Some(expected_workspace_ids) = forced_chatgpt_workspace_id.as_deref()
-            && !expected_workspace_ids.contains(&chatgpt_metadata.account_id)
-        {
-            return Err(RefreshTokenError::Transient(std::io::Error::other(
-                format!(
-                    "external auth refresh returned workspace {:?}, expected one of {:?}",
-                    chatgpt_metadata.account_id, expected_workspace_ids,
-                ),
             )));
         }
         let auth_dot_json =
