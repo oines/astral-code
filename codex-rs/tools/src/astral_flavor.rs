@@ -272,6 +272,10 @@ fn agent_tool() -> AgentTool {
             [
                 string_property("description", "A short 3-5 word description of the task"),
                 string_property("prompt", "The task for the agent to perform"),
+                string_property(
+                    "name",
+                    "Optional addressable name for the spawned agent; use with SendMessage",
+                ),
                 string_property("subagent_type", "Optional specialized agent type to use"),
                 string_property("model", "Optional model override for the spawned agent"),
                 string_property(

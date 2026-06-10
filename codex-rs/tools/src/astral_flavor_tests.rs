@@ -1,6 +1,7 @@
 use pretty_assertions::assert_eq;
 use serde_json::json;
 
+use super::AGENT_TOOL_NAME;
 use super::ASTRAL_CORE_TOOL_NAMES;
 use super::BASH_TOOL_NAME;
 use super::EDIT_TOOL_NAME;
@@ -96,6 +97,20 @@ fn todo_write_uses_claudeish_task_list_shape() {
     assert_eq!(
         tool.input_schema["properties"]["todos"]["items"]["properties"]["status"]["enum"],
         json!(["pending", "in_progress", "completed"])
+    );
+}
+
+#[test]
+fn agent_exposes_addressable_name_without_requiring_it() {
+    let tool = astral_core_tool_by_name(AGENT_TOOL_NAME).expect("Agent exists");
+
+    assert_eq!(
+        tool.input_schema["required"],
+        json!(["description", "prompt"])
+    );
+    assert_eq!(
+        tool.input_schema["properties"]["name"]["type"],
+        json!("string")
     );
 }
 

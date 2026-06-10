@@ -3,6 +3,33 @@ use pretty_assertions::assert_eq;
 use serde_json::json;
 
 #[test]
+fn agent_name_overrides_description_for_task_name() -> anyhow::Result<()> {
+    let arguments = rewrite_agent_arguments(
+        &json!({
+            "description": "Research docs",
+            "name": "doc-reader",
+            "prompt": "Read the docs and summarize findings"
+        })
+        .to_string(),
+    )?;
+    let actual: serde_json::Value = serde_json::from_str(&arguments)?;
+
+    assert_eq!(
+        actual,
+        json!({
+            "message": "Read the docs and summarize findings",
+            "task_name": "doc_reader",
+            "agent_type": null,
+            "model": null,
+            "reasoning_effort": null,
+            "service_tier": null,
+            "fork_turns": null,
+        })
+    );
+    Ok(())
+}
+
+#[test]
 fn agent_result_exposes_task_id_for_task_stop() -> anyhow::Result<()> {
     let result = AstralAgentResult::from_spawn_result(json!({
         "task_name": "/root/worker",
