@@ -9,7 +9,9 @@ use crate::tools::handlers::AstralAskUserQuestionHandler;
 use crate::tools::handlers::AstralBashHandler;
 use crate::tools::handlers::AstralFileToolHandler;
 use crate::tools::handlers::AstralFileToolKind;
+use crate::tools::handlers::AstralListMcpResourcesHandler;
 use crate::tools::handlers::AstralMonitorHandler;
+use crate::tools::handlers::AstralReadMcpResourceHandler;
 use crate::tools::handlers::AstralRequestPermissionsHandler;
 use crate::tools::handlers::AstralSendMessageHandler;
 use crate::tools::handlers::AstralTaskStopHandler;
@@ -79,9 +81,7 @@ use codex_tools::DiscoverableTool;
 use codex_tools::EDIT_TOOL_NAME;
 use codex_tools::GLOB_TOOL_NAME;
 use codex_tools::GREP_TOOL_NAME;
-use codex_tools::LIST_MCP_RESOURCES_TOOL_NAME;
 use codex_tools::MONITOR_TOOL_NAME;
-use codex_tools::READ_MCP_RESOURCE_TOOL_NAME;
 use codex_tools::READ_TOOL_NAME;
 use codex_tools::ResponsesApiNamespace;
 use codex_tools::ResponsesApiNamespaceTool;
@@ -320,8 +320,6 @@ fn astral_spec_for_model_request(
             Some(BASH_TOOL_NAME)
         }
         "update_plan" => Some(TODO_WRITE_TOOL_NAME),
-        "list_mcp_resources" => Some(LIST_MCP_RESOURCES_TOOL_NAME),
-        "read_mcp_resource" => Some(READ_MCP_RESOURCE_TOOL_NAME),
         _ => None,
     };
 
@@ -849,9 +847,11 @@ fn unified_exec_should_include_shell_parameter(turn_context: &TurnContext) -> bo
 
 fn add_mcp_resource_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut PlannedTools) {
     if context.mcp_tools.is_some() {
-        planned_tools.add(ListMcpResourcesHandler);
+        planned_tools.add(AstralListMcpResourcesHandler::new());
+        planned_tools.add_dispatch_only(ListMcpResourcesHandler);
         planned_tools.add(ListMcpResourceTemplatesHandler);
-        planned_tools.add(ReadMcpResourceHandler);
+        planned_tools.add(AstralReadMcpResourceHandler::new());
+        planned_tools.add_dispatch_only(ReadMcpResourceHandler);
     }
 }
 
