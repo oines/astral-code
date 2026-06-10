@@ -7,6 +7,7 @@ use codex_tools::GREP_TOOL_NAME;
 use codex_tools::MONITOR_TOOL_NAME;
 use codex_tools::READ_TOOL_NAME;
 use codex_tools::TODO_WRITE_TOOL_NAME;
+use codex_tools::TOOL_SEARCH_FLAVOR_TOOL_NAME;
 use codex_tools::WRITE_TOOL_NAME;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
@@ -252,20 +253,14 @@ fn canonicalizes_request_permissions_from_blocked_input() -> anyhow::Result<()> 
 }
 
 #[test]
-fn canonicalizes_tool_search_to_native_payload() -> anyhow::Result<()> {
-    let (tool_name, payload) = canonicalize_astral_tool_call(
-        ToolName::plain(TOOL_SEARCH_FLAVOR_TOOL_NAME),
-        ToolPayload::Function {
-            arguments: json!({ "query": "gmail", "limit": 3 }).to_string(),
-        },
+fn leaves_tool_search_native_for_astral_handler() -> anyhow::Result<()> {
+    let (tool_name, arguments) = canonicalize_function(
+        TOOL_SEARCH_FLAVOR_TOOL_NAME,
+        json!({ "query": "gmail", "max_results": 3 }),
     )?;
 
-    assert_eq!(tool_name, ToolName::plain(TOOL_SEARCH_TOOL_NAME));
-    let ToolPayload::ToolSearch { arguments } = payload else {
-        panic!("ToolSearch should become native ToolSearch payload");
-    };
-    assert_eq!(arguments.query, "gmail");
-    assert_eq!(arguments.limit, Some(3));
+    assert_eq!(tool_name, ToolName::plain(TOOL_SEARCH_FLAVOR_TOOL_NAME));
+    assert_eq!(arguments, json!({ "query": "gmail", "max_results": 3 }));
     Ok(())
 }
 

@@ -1,14 +1,11 @@
 use crate::function_tool::FunctionCallError;
 use crate::tools::context::ToolPayload;
-use codex_protocol::models::SearchToolCallParams;
 use codex_tools::AGENT_TOOL_NAME;
 use codex_tools::LIST_MCP_RESOURCES_TOOL_NAME;
 use codex_tools::READ_MCP_RESOURCE_TOOL_NAME;
 use codex_tools::REQUEST_PERMISSIONS_TOOL_NAME;
 use codex_tools::SEND_MESSAGE_TOOL_NAME;
 use codex_tools::TASK_STOP_TOOL_NAME;
-use codex_tools::TOOL_SEARCH_FLAVOR_TOOL_NAME;
-use codex_tools::TOOL_SEARCH_TOOL_NAME;
 use codex_tools::ToolName;
 use serde::Deserialize;
 use serde_json::Value;
@@ -36,7 +33,6 @@ pub(crate) fn canonicalize_astral_tool_call(
             REQUEST_PERMISSIONS_TOOL_NAME,
             rewrite_request_permissions_args,
         )?,
-        TOOL_SEARCH_FLAVOR_TOOL_NAME => rewrite_tool_search_payload(payload)?,
         AGENT_TOOL_NAME => rewrite_function_payload(payload, AGENT_TOOL_NAME, rewrite_agent_args)?,
         SEND_MESSAGE_TOOL_NAME => {
             rewrite_function_payload(payload, SEND_MESSAGE_TOOL_NAME, rewrite_send_message_args)?
@@ -58,7 +54,6 @@ fn canonical_astral_plain_name(tool_name: &ToolName) -> Option<&'static str> {
 
     match tool_name.name.as_str() {
         REQUEST_PERMISSIONS_TOOL_NAME => Some("request_permissions"),
-        TOOL_SEARCH_FLAVOR_TOOL_NAME => Some(TOOL_SEARCH_TOOL_NAME),
         LIST_MCP_RESOURCES_TOOL_NAME => Some("list_mcp_resources"),
         READ_MCP_RESOURCE_TOOL_NAME => Some("read_mcp_resource"),
         AGENT_TOOL_NAME => Some("spawn_agent"),
@@ -117,22 +112,6 @@ fn rewrite_request_permissions_args(value: Value) -> Result<Value, FunctionCallE
         "reason": args.reason,
         "permissions": permissions,
     }))
-}
-
-fn rewrite_tool_search_payload(payload: ToolPayload) -> Result<ToolPayload, FunctionCallError> {
-    match payload {
-        ToolPayload::Function { arguments } => {
-            let arguments: SearchToolCallParams =
-                serde_json::from_str(&arguments).map_err(|err| {
-                    FunctionCallError::RespondToModel(format!(
-                        "failed to parse {TOOL_SEARCH_FLAVOR_TOOL_NAME} arguments: {err}"
-                    ))
-                })?;
-            Ok(ToolPayload::ToolSearch { arguments })
-        }
-        ToolPayload::ToolSearch { .. } => Ok(payload),
-        ToolPayload::Custom { .. } => Ok(payload),
-    }
 }
 
 fn rewrite_agent_args(value: Value) -> Result<Value, FunctionCallError> {

@@ -388,7 +388,14 @@ fn tool_search_tool() -> AgentTool {
         object(
             [
                 string_property("query", "Search query for tools"),
-                integer_property("limit", "Maximum number of tools to return"),
+                integer_property(
+                    "max_results",
+                    "Maximum number of tools to return; defaults to 8",
+                ),
+                integer_property(
+                    "limit",
+                    "Compatibility alias for max_results; prefer max_results",
+                ),
             ],
             ["query"],
         ),

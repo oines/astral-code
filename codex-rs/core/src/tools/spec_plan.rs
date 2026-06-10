@@ -10,6 +10,7 @@ use crate::tools::handlers::AstralFileToolHandler;
 use crate::tools::handlers::AstralFileToolKind;
 use crate::tools::handlers::AstralMonitorHandler;
 use crate::tools::handlers::AstralTodoWriteHandler;
+use crate::tools::handlers::AstralToolSearchHandler;
 use crate::tools::handlers::CodeModeExecuteHandler;
 use crate::tools::handlers::CodeModeWaitHandler;
 use crate::tools::handlers::DynamicToolHandler;
@@ -86,7 +87,6 @@ use codex_tools::ResponsesApiNamespaceTool;
 use codex_tools::SEND_MESSAGE_TOOL_NAME;
 use codex_tools::TASK_STOP_TOOL_NAME;
 use codex_tools::TODO_WRITE_TOOL_NAME;
-use codex_tools::TOOL_SEARCH_FLAVOR_TOOL_NAME;
 use codex_tools::TOOL_SEARCH_TOOL_NAME;
 use codex_tools::ToolCall as ExtensionToolCall;
 use codex_tools::ToolEnvironmentMode;
@@ -321,7 +321,6 @@ fn astral_spec_for_model_request(
         }
         "update_plan" => Some(TODO_WRITE_TOOL_NAME),
         "request_permissions" => Some(REQUEST_PERMISSIONS_TOOL_NAME),
-        TOOL_SEARCH_TOOL_NAME => Some(TOOL_SEARCH_FLAVOR_TOOL_NAME),
         "list_mcp_resources" => Some(LIST_MCP_RESOURCES_TOOL_NAME),
         "read_mcp_resource" => Some(READ_MCP_RESOURCE_TOOL_NAME),
         "spawn_agent" => Some(AGENT_TOOL_NAME),
@@ -1079,7 +1078,8 @@ fn append_tool_search_executor(
         return;
     }
 
-    planned_tools.add(ToolSearchHandler::new(search_infos));
+    planned_tools.add(AstralToolSearchHandler::new(search_infos.clone()));
+    planned_tools.add_dispatch_only(ToolSearchHandler::new(search_infos));
 }
 
 fn prepend_code_mode_executors(
