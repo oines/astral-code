@@ -1,8 +1,8 @@
-//! Registry of model providers supported by Codex.
+//! Registry of model providers supported by Astral.
 //!
 //! Providers can be defined in two places:
-//!   1. Built-in defaults compiled into the binary so Codex works out-of-the-box.
-//!   2. User-defined entries inside `~/.codex/config.toml` under the `model_providers`
+//!   1. Built-in defaults compiled into the binary so Astral works out-of-the-box.
+//!   2. User-defined entries inside `~/.astral-code/config.toml` under the `model_providers`
 //!      key. These override or extend the defaults at runtime.
 
 use codex_api::Provider as ApiProvider;
@@ -34,6 +34,10 @@ const MAX_REQUEST_MAX_RETRIES: u64 = 100;
 const OPENAI_PROVIDER_NAME: &str = "OpenAI";
 pub const OPENAI_PROVIDER_ID: &str = "openai";
 pub const CHATGPT_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
+const ASTRAL_PROVIDER_NAME: &str = "Astral";
+pub const ASTRAL_PROVIDER_ID: &str = "astral";
+pub const ASTRAL_BASE_URL_ENV_VAR: &str = "ASTRAL_BASE_URL";
+const DEFAULT_ASTRAL_BASE_URL: &str = "http://localhost:8000/v1";
 const AMAZON_BEDROCK_PROVIDER_NAME: &str = "Amazon Bedrock";
 pub const AMAZON_BEDROCK_PROVIDER_ID: &str = "amazon-bedrock";
 pub const AMAZON_BEDROCK_GPT_5_5_MODEL_ID: &str = "openai.gpt-5.5";
@@ -329,6 +333,39 @@ impl ModelProviderInfo {
             .unwrap_or(Duration::from_millis(DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS))
     }
 
+    pub fn create_astral_provider() -> ModelProviderInfo {
+        let base_url = std::env::var(ASTRAL_BASE_URL_ENV_VAR)
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| DEFAULT_ASTRAL_BASE_URL.to_string());
+
+        ModelProviderInfo {
+            name: ASTRAL_PROVIDER_NAME.into(),
+            base_url: Some(base_url),
+            env_key: None,
+            env_key_instructions: None,
+            experimental_bearer_token: None,
+            auth: None,
+            aws: None,
+            wire_api: WireApi::ChatCompletions,
+            query_params: None,
+            http_headers: Some(
+                [("version".to_string(), env!("CARGO_PKG_VERSION").to_string())]
+                    .into_iter()
+                    .collect(),
+            ),
+            env_http_headers: None,
+            // Use global defaults for retry/timeout unless overridden in config.toml.
+            request_max_retries: None,
+            stream_max_retries: None,
+            stream_idle_timeout_ms: None,
+            websocket_connect_timeout_ms: None,
+            requires_openai_auth: true,
+            supports_websockets: false,
+        }
+    }
+
     pub fn create_openai_provider(base_url: Option<String>) -> ModelProviderInfo {
         ModelProviderInfo {
             name: OPENAI_PROVIDER_NAME.into(),
@@ -400,6 +437,10 @@ impl ModelProviderInfo {
         self.name == OPENAI_PROVIDER_NAME
     }
 
+    pub fn is_astral(&self) -> bool {
+        self.name == ASTRAL_PROVIDER_NAME
+    }
+
     pub fn is_amazon_bedrock(&self) -> bool {
         self.name == AMAZON_BEDROCK_PROVIDER_NAME
     }
@@ -420,14 +461,15 @@ pub fn built_in_model_providers(
     openai_base_url: Option<String>,
 ) -> HashMap<String, ModelProviderInfo> {
     use ModelProviderInfo as P;
+    let astral_provider = P::create_astral_provider();
     let openai_provider = P::create_openai_provider(openai_base_url);
     let amazon_bedrock_provider = P::create_amazon_bedrock_provider(/*aws*/ None);
 
-    // We do not want to be in the business of adjucating which third-party
-    // providers are bundled with Codex CLI, so we only include the OpenAI and
-    // open source ("oss") providers by default. Users are encouraged to add to
-    // `model_providers` in config.toml to add their own providers.
+    // Keep the bundled catalog small: Astral's generic provider, explicit legacy
+    // OpenAI, Bedrock, and local OSS providers. Users are encouraged to add
+    // their own entries under `model_providers` in config.toml.
     [
+        (ASTRAL_PROVIDER_ID, astral_provider),
         (OPENAI_PROVIDER_ID, openai_provider),
         (AMAZON_BEDROCK_PROVIDER_ID, amazon_bedrock_provider),
         (

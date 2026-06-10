@@ -1,5 +1,6 @@
 use crate::config::edit::ConfigEditsBuilder;
 use codex_config::config_toml::ConfigToml;
+use codex_model_provider_info::ASTRAL_PROVIDER_ID;
 use codex_protocol::config_types::Personality;
 use codex_rollout::state_db::StateDbHandle;
 use codex_thread_store::ListThreadsParams;
@@ -40,7 +41,7 @@ pub async fn maybe_migrate_personality(
     let model_provider_id = config_toml
         .model_provider
         .clone()
-        .unwrap_or_else(|| "openai".to_string());
+        .unwrap_or_else(|| ASTRAL_PROVIDER_ID.to_string());
 
     if !has_recorded_sessions(codex_home, model_provider_id.as_str(), state_db).await? {
         create_marker(&marker_path).await?;

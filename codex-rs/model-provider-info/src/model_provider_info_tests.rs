@@ -144,6 +144,40 @@ wire_api = "chat"
 }
 
 #[test]
+fn test_create_astral_provider_defaults_to_chat_completions() {
+    let expected_base_url = std::env::var(ASTRAL_BASE_URL_ENV_VAR)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "http://localhost:8000/v1".to_string());
+
+    assert_eq!(
+        ModelProviderInfo::create_astral_provider(),
+        ModelProviderInfo {
+            name: "Astral".into(),
+            base_url: Some(expected_base_url),
+            env_key: None,
+            env_key_instructions: None,
+            experimental_bearer_token: None,
+            auth: None,
+            aws: None,
+            wire_api: WireApi::ChatCompletions,
+            query_params: None,
+            http_headers: Some(maplit::hashmap! {
+                "version".to_string() => env!("CARGO_PKG_VERSION").to_string(),
+            }),
+            env_http_headers: None,
+            request_max_retries: None,
+            stream_max_retries: None,
+            stream_idle_timeout_ms: None,
+            websocket_connect_timeout_ms: None,
+            requires_openai_auth: true,
+            supports_websockets: false,
+        }
+    );
+}
+
+#[test]
 fn test_deserialize_websocket_connect_timeout() {
     let provider_toml = r#"
 name = "OpenAI"
@@ -270,6 +304,18 @@ fn test_built_in_model_providers_include_amazon_bedrock() {
         providers
             .get(AMAZON_BEDROCK_PROVIDER_ID)
             .map(ModelProviderInfo::is_amazon_bedrock),
+        Some(true)
+    );
+}
+
+#[test]
+fn test_built_in_model_providers_include_astral() {
+    let providers = built_in_model_providers(/*openai_base_url*/ None);
+
+    assert_eq!(
+        providers
+            .get(ASTRAL_PROVIDER_ID)
+            .map(ModelProviderInfo::is_astral),
         Some(true)
     );
 }
