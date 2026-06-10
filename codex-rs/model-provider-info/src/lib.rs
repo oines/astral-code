@@ -36,6 +36,7 @@ pub const OPENAI_PROVIDER_ID: &str = "openai";
 pub const CHATGPT_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
 const ASTRAL_PROVIDER_NAME: &str = "Astral";
 pub const ASTRAL_PROVIDER_ID: &str = "astral";
+pub const ASTRAL_API_KEY_ENV_VAR: &str = "ASTRAL_API_KEY";
 pub const ASTRAL_BASE_URL_ENV_VAR: &str = "ASTRAL_BASE_URL";
 const DEFAULT_ASTRAL_BASE_URL: &str = "http://localhost:8000/v1";
 const AMAZON_BEDROCK_PROVIDER_NAME: &str = "Amazon Bedrock";
@@ -343,8 +344,10 @@ impl ModelProviderInfo {
         ModelProviderInfo {
             name: ASTRAL_PROVIDER_NAME.into(),
             base_url: Some(base_url),
-            env_key: None,
-            env_key_instructions: None,
+            env_key: Some(ASTRAL_API_KEY_ENV_VAR.to_string()),
+            env_key_instructions: Some(format!(
+                "Set {ASTRAL_API_KEY_ENV_VAR} for the active Astral model provider."
+            )),
             experimental_bearer_token: None,
             auth: None,
             aws: None,
@@ -361,7 +364,7 @@ impl ModelProviderInfo {
             stream_max_retries: None,
             stream_idle_timeout_ms: None,
             websocket_connect_timeout_ms: None,
-            requires_openai_auth: true,
+            requires_openai_auth: false,
             supports_websockets: false,
         }
     }

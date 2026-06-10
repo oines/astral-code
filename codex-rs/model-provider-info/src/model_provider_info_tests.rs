@@ -156,8 +156,10 @@ fn test_create_astral_provider_defaults_to_chat_completions() {
         ModelProviderInfo {
             name: "Astral".into(),
             base_url: Some(expected_base_url),
-            env_key: None,
-            env_key_instructions: None,
+            env_key: Some(ASTRAL_API_KEY_ENV_VAR.to_string()),
+            env_key_instructions: Some(format!(
+                "Set {ASTRAL_API_KEY_ENV_VAR} for the active Astral model provider."
+            )),
             experimental_bearer_token: None,
             auth: None,
             aws: None,
@@ -171,7 +173,7 @@ fn test_create_astral_provider_defaults_to_chat_completions() {
             stream_max_retries: None,
             stream_idle_timeout_ms: None,
             websocket_connect_timeout_ms: None,
-            requires_openai_auth: true,
+            requires_openai_auth: false,
             supports_websockets: false,
         }
     );

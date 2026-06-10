@@ -426,6 +426,18 @@ mod tests {
     }
 
     #[test]
+    fn create_model_provider_does_not_use_openai_auth_manager_for_astral_provider() {
+        let provider = create_model_provider(
+            ModelProviderInfo::create_astral_provider(),
+            Some(AuthManager::from_auth_for_testing(CodexAuth::from_api_key(
+                "openai-api-key",
+            ))),
+        );
+
+        assert!(provider.auth_manager().is_none());
+    }
+
+    #[test]
     fn openai_provider_returns_unauthenticated_openai_account_state() {
         let provider = create_model_provider(
             ModelProviderInfo::create_openai_provider(/*base_url*/ None),
