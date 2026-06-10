@@ -1107,14 +1107,6 @@ impl AuthManagerConfig for Config {
     fn cli_auth_credentials_store_mode(&self) -> AuthCredentialsStoreMode {
         self.cli_auth_credentials_store_mode
     }
-
-    fn forced_chatgpt_workspace_id(&self) -> Option<Vec<String>> {
-        self.forced_chatgpt_workspace_id.clone()
-    }
-
-    fn chatgpt_base_url(&self) -> String {
-        self.chatgpt_base_url.clone()
-    }
 }
 
 #[derive(Clone, Default)]

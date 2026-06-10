@@ -1260,12 +1260,6 @@ pub trait AuthManagerConfig {
 
     /// Returns the CLI auth credential storage mode for auth loading.
     fn cli_auth_credentials_store_mode(&self) -> AuthCredentialsStoreMode;
-
-    /// Returns the workspace IDs that ChatGPT auth should be restricted to, if any.
-    fn forced_chatgpt_workspace_id(&self) -> Option<Vec<String>>;
-
-    /// Returns the ChatGPT backend base URL used for first-party backend authorization.
-    fn chatgpt_base_url(&self) -> String;
 }
 
 impl Debug for AuthManager {
@@ -1612,15 +1606,13 @@ impl AuthManager {
         config: &impl AuthManagerConfig,
         enable_codex_api_key_env: bool,
     ) -> Arc<Self> {
-        let auth_manager = Self::shared(
+        Self::shared(
             config.codex_home(),
             enable_codex_api_key_env,
             config.cli_auth_credentials_store_mode(),
-            Some(config.chatgpt_base_url()),
+            /*chatgpt_base_url*/ None,
         )
-        .await;
-        auth_manager.set_forced_chatgpt_workspace_id(config.forced_chatgpt_workspace_id());
-        auth_manager
+        .await
     }
 
     pub fn unauthorized_recovery(self: &Arc<Self>) -> UnauthorizedRecovery {
