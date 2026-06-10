@@ -1,9 +1,7 @@
 name: rusty-v8-release
 
 on:
-  push:
-    tags:
-      - "rusty-v8-v*.*.*"
+  workflow_dispatch:
 
 # Cargo's libgit2 transport has been flaky when fetching git dependencies with
 # nested submodules. Prefer the system git CLI for Cargo smoke tests.
