@@ -68,7 +68,6 @@ mod model_switching;
 mod model_visible_layout;
 mod models_cache_ttl;
 mod models_etag_responses;
-mod openai_file_mcp;
 mod otel;
 mod override_updates;
 mod pending_input;

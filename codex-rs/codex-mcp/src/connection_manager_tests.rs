@@ -6,7 +6,6 @@ use crate::codex_apps::load_startup_cached_codex_apps_tools_snapshot;
 use crate::codex_apps::read_cached_codex_apps_tools;
 use crate::codex_apps::write_cached_codex_apps_tools;
 use crate::codex_apps::write_cached_codex_apps_tools_if_needed;
-use crate::declared_openai_file_input_param_names;
 use crate::elicitation::ElicitationRequestManager;
 use crate::elicitation::elicitation_is_rejected_by_policy;
 use crate::rmcp_client::AsyncManagedClient;
@@ -119,24 +118,7 @@ fn is_code_mode_compatible_tool_name(name: &ToolName) -> bool {
         .all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 #[test]
-fn declared_openai_file_fields_treat_names_literally() {
-    let meta = serde_json::json!({
-        "openai/fileParams": ["file", "input_file", "attachments"]
-    });
-    let meta = meta.as_object().expect("meta object");
-
-    assert_eq!(
-        declared_openai_file_input_param_names(Some(meta)),
-        vec![
-            "file".to_string(),
-            "input_file".to_string(),
-            "attachments".to_string(),
-        ]
-    );
-}
-
-#[test]
-fn tool_with_model_visible_input_schema_masks_file_params() {
+fn tool_with_model_visible_input_schema_ignores_openai_file_params() {
     let mut tool = create_test_tool(CODEX_APPS_MCP_SERVER_NAME, "upload").tool;
     tool.input_schema = Arc::new(
         serde_json::json!({
@@ -173,13 +155,12 @@ fn tool_with_model_visible_input_schema_masks_file_params() {
             "type": "object",
             "properties": {
                 "file": {
-                    "type": "string",
-                    "description": "Original file payload. This parameter expects an absolute local file path. If you want to upload a file, provide the absolute path to that file here."
+                    "type": "object",
+                    "description": "Original file payload."
                 },
                 "files": {
                     "type": "array",
-                    "items": {"type": "string"},
-                    "description": "This parameter expects an absolute local file path. If you want to upload a file, provide the absolute path to that file here."
+                    "items": {"type": "object"}
                 }
             }
         })

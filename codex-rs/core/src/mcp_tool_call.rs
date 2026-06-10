@@ -15,7 +15,6 @@ use crate::guardian::new_guardian_review_id;
 use crate::guardian::review_approval_request;
 use crate::guardian::routes_approval_to_guardian_with_reviewer;
 use crate::hook_runtime::run_permission_request_hooks;
-use crate::mcp_openai_file::rewrite_mcp_tool_arguments_for_openai_files;
 use crate::mcp_tool_approval_templates::RenderedMcpToolApprovalParam;
 use crate::mcp_tool_approval_templates::render_mcp_tool_approval_template;
 use crate::session::session::Session;
@@ -41,7 +40,6 @@ use codex_mcp::McpPermissionPromptAutoApproveContext;
 use codex_mcp::SandboxState;
 use codex_mcp::auth_elicitation_completed_result;
 use codex_mcp::build_auth_elicitation_plan;
-use codex_mcp::declared_openai_file_input_param_names;
 use codex_mcp::mcp_permission_prompt_is_auto_approved;
 use codex_otel::sanitize_metric_tag_value;
 use codex_protocol::items::McpToolCallError;
@@ -325,21 +323,10 @@ async fn handle_approved_mcp_tool_call(
         .map(str::to_string);
 
     let start = Instant::now();
-    let rewrite = rewrite_mcp_tool_arguments_for_openai_files(
-        sess,
-        turn_context,
-        arguments_value.clone(),
-        metadata.and_then(|metadata| metadata.openai_file_input_params.as_deref()),
-    )
-    .await;
-    let tool_input = match &rewrite {
-        Ok(Some(rewritten_arguments)) => rewritten_arguments.clone(),
-        Ok(None) | Err(_) => arguments_value
-            .clone()
-            .unwrap_or_else(|| JsonValue::Object(serde_json::Map::new())),
-    };
+    let tool_input = arguments_value
+        .clone()
+        .unwrap_or_else(|| JsonValue::Object(serde_json::Map::new()));
     let result = async {
-        let rewritten_arguments = rewrite?;
         let request_meta =
             build_mcp_tool_call_request_meta(turn_context, &server, call_id, metadata);
         let result = execute_mcp_tool_call(
@@ -347,7 +334,7 @@ async fn handle_approved_mcp_tool_call(
             turn_context,
             call_id,
             &invocation,
-            rewritten_arguments,
+            arguments_value,
             metadata,
             request_meta,
         )
@@ -976,7 +963,6 @@ pub(crate) struct McpToolApprovalMetadata {
     tool_description: Option<String>,
     mcp_app_resource_uri: Option<String>,
     codex_apps_meta: Option<serde_json::Map<String, serde_json::Value>>,
-    openai_file_input_params: Option<Vec<String>>,
 }
 
 const MCP_TOOL_OPENAI_OUTPUT_TEMPLATE_META_KEY: &str = "openai/outputTemplate";
@@ -1472,21 +1458,7 @@ pub(crate) async fn lookup_mcp_tool_metadata(
             .and_then(|meta| meta.get(MCP_TOOL_CODEX_APPS_META_KEY))
             .and_then(serde_json::Value::as_object)
             .cloned(),
-        // Disallow custom MCPs from uploading files via fileParams.
-        openai_file_input_params: openai_file_input_params_for_server(
-            server,
-            tool_info.tool.meta.as_deref(),
-        ),
     })
-}
-
-fn openai_file_input_params_for_server(
-    server: &str,
-    meta: Option<&serde_json::Map<String, serde_json::Value>>,
-) -> Option<Vec<String>> {
-    (server == CODEX_APPS_MCP_SERVER_NAME)
-        .then_some(declared_openai_file_input_param_names(meta))
-        .filter(|params| !params.is_empty())
 }
 
 fn get_mcp_app_resource_uri(
