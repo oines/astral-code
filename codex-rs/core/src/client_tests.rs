@@ -25,7 +25,6 @@ use codex_otel::SessionTelemetry;
 use codex_protocol::SessionId;
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::ReasoningSummary;
-use codex_protocol::error::CodexErr;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ModelInfo;
@@ -62,6 +61,10 @@ use tracing_subscriber::layer::Context as LayerContext;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
+use wiremock::Mock;
+use wiremock::ResponseTemplate;
+use wiremock::matchers::method;
+use wiremock::matchers::path;
 
 fn test_model_client(session_source: SessionSource) -> ModelClient {
     test_model_client_with_parent(session_source, /*parent_thread_id*/ None)
@@ -217,10 +220,74 @@ fn output_message(id: &str, text: &str) -> ResponseItem {
     }
 }
 
+struct ProviderNeutralStreamCase {
+    wire_api: WireApi,
+    path: &'static str,
+    response_body: String,
+}
+
 #[tokio::test]
-async fn provider_neutral_wire_apis_return_clear_unsupported_stream_error() {
-    for wire_api in [WireApi::AnthropicMessages, WireApi::ChatCompletions] {
-        let provider = create_oss_provider_with_base_url("https://example.com/v1", wire_api);
+async fn provider_neutral_wire_apis_stream_from_mock_server() -> anyhow::Result<()> {
+    let cases = [
+        ProviderNeutralStreamCase {
+            wire_api: WireApi::AnthropicMessages,
+            path: "/v1/messages",
+            response_body: sse_body(vec![
+                json!({
+                    "type": "message_start",
+                    "message": { "id": "msg_1", "model": "claude-test" }
+                }),
+                json!({
+                    "type": "content_block_start",
+                    "index": 0,
+                    "content_block": { "type": "text", "text": "" }
+                }),
+                json!({
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": { "type": "text_delta", "text": "hello from anthropic" }
+                }),
+                json!({ "type": "content_block_stop", "index": 0 }),
+                json!({
+                    "type": "message_delta",
+                    "delta": { "stop_reason": "end_turn" },
+                    "usage": { "input_tokens": 5, "output_tokens": 7 }
+                }),
+            ]),
+        },
+        ProviderNeutralStreamCase {
+            wire_api: WireApi::ChatCompletions,
+            path: "/v1/chat/completions",
+            response_body: sse_body(vec![json!({
+                "id": "chatcmpl_1",
+                "model": "deepseek-test",
+                "choices": [{
+                    "delta": {
+                        "role": "assistant",
+                        "content": "hello from chat"
+                    },
+                    "finish_reason": "stop"
+                }],
+                "usage": { "prompt_tokens": 3, "completion_tokens": 4 }
+            })]),
+        },
+    ];
+
+    for case in cases {
+        let server = wiremock::MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path(case.path))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(case.response_body),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let provider =
+            create_oss_provider_with_base_url(&format!("{}/v1", server.uri()), case.wire_api);
         let model_client = ModelClient::new(
             /*auth_manager*/ None,
             SessionId::new(),
@@ -238,7 +305,7 @@ async fn provider_neutral_wire_apis_return_clear_unsupported_stream_error() {
         let model_info = test_model_info();
         let session_telemetry = test_session_telemetry();
         let inference_trace = InferenceTraceContext::disabled();
-        let result = model_client
+        let mut stream = model_client
             .new_session()
             .stream(
                 &Prompt::default(),
@@ -250,17 +317,52 @@ async fn provider_neutral_wire_apis_return_clear_unsupported_stream_error() {
                 /*turn_metadata_header*/ None,
                 &inference_trace,
             )
-            .await;
+            .await?;
 
-        match result {
-            Ok(_) => panic!("provider-neutral wire api should not be wired yet"),
-            Err(CodexErr::UnsupportedOperation(message)) => assert_eq!(
-                message,
-                format!("wire_api `{wire_api}` is not wired to a streaming client yet")
-            ),
-            Err(other) => panic!("expected unsupported wire api error, got {other:?}"),
+        let mut output_items = Vec::new();
+        let mut completed = None;
+        while let Some(event) = stream.next().await {
+            match event? {
+                ResponseEvent::OutputItemDone(item) => output_items.push(item),
+                ResponseEvent::Completed {
+                    response_id,
+                    token_usage,
+                    end_turn,
+                } => {
+                    completed = Some((response_id, token_usage, end_turn));
+                    break;
+                }
+                _ => {}
+            }
         }
+
+        let Some(ResponseItem::Message { role, content, .. }) = output_items.first() else {
+            panic!("expected assistant output item, got {output_items:?}");
+        };
+        assert_eq!(role, "assistant");
+        assert!(matches!(
+            content.as_slice(),
+            [ContentItem::OutputText { text }] if text.starts_with("hello from")
+        ));
+        let (_response_id, token_usage, end_turn) = completed.expect("completed event");
+        assert_eq!(end_turn, Some(true));
+        assert!(token_usage.is_some());
+
+        let requests = server.received_requests().await.unwrap_or_default();
+        assert_eq!(requests.len(), 1);
+        let request_body: serde_json::Value =
+            serde_json::from_slice(&requests[0].body).expect("request body json");
+        assert_eq!(request_body["model"], "gpt-test");
     }
+
+    Ok(())
+}
+
+fn sse_body(events: Vec<serde_json::Value>) -> String {
+    events
+        .into_iter()
+        .map(|event| format!("data: {event}\n\n"))
+        .collect()
 }
 
 async fn replay_until_cancelled(temp: &TempDir) -> anyhow::Result<RolloutTrace> {

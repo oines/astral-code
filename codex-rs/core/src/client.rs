@@ -31,6 +31,8 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 
+use codex_api::AgentClient as ApiAgentClient;
+use codex_api::AgentOptions as ApiAgentOptions;
 use codex_api::ApiError;
 use codex_api::AuthProvider;
 use codex_api::Compression;
@@ -56,6 +58,8 @@ use codex_api::SharedAuthProvider;
 use codex_api::SseTelemetry;
 use codex_api::TransportError;
 use codex_api::WebsocketTelemetry;
+use codex_api::agent_adapters::anthropic::AnthropicMessagesOptions;
+use codex_api::agent_adapters::chat_completions::ChatCompletionsOptions;
 use codex_api::auth_header_telemetry;
 use codex_api::build_session_headers;
 use codex_api::create_text_param_for_request;
@@ -148,7 +152,10 @@ const RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE: &str = "responses_websockets=20
 const X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE_HEADER: &str =
     "x-openai-internal-codex-responses-lite";
 const RESPONSES_ENDPOINT: &str = "/responses";
+const ANTHROPIC_MESSAGES_ENDPOINT: &str = "/messages";
+const CHAT_COMPLETIONS_ENDPOINT: &str = "/chat/completions";
 const MEMORIES_SUMMARIZE_ENDPOINT: &str = "/memories/trace_summarize";
+const DEFAULT_ANTHROPIC_MAX_TOKENS: u64 = 4096;
 #[cfg(test)]
 pub(crate) const WEBSOCKET_CONNECT_TIMEOUT: Duration =
     Duration::from_millis(DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS);
@@ -1249,6 +1256,144 @@ impl ModelClientSession {
         }
     }
 
+    /// Streams a turn via a provider-neutral wire API.
+    ///
+    /// The request is built as Astral's internal Agent IR, then encoded by the
+    /// codex-api endpoint adapter for the selected provider protocol.
+    #[allow(clippy::too_many_arguments)]
+    #[instrument(
+        name = "model_client.stream_agent_api",
+        level = "info",
+        skip_all,
+        fields(
+            model = %model_info.slug,
+            wire_api = %wire_api,
+            transport = "agent_http",
+            http.method = "POST",
+            turn.has_metadata_header = turn_metadata_header.is_some()
+        )
+    )]
+    async fn stream_agent_api(
+        &self,
+        prompt: &Prompt,
+        model_info: &ModelInfo,
+        session_telemetry: &SessionTelemetry,
+        effort: Option<ReasoningEffortConfig>,
+        summary: ReasoningSummaryConfig,
+        service_tier: Option<String>,
+        turn_metadata_header: Option<&str>,
+        inference_trace: &InferenceTraceContext,
+        wire_api: WireApi,
+    ) -> Result<ResponseStream> {
+        let auth_manager = self.client.state.provider.auth_manager();
+        let mut auth_recovery = auth_manager
+            .as_ref()
+            .map(AuthManager::unauthorized_recovery);
+        let mut pending_retry = PendingUnauthorizedRetry::default();
+        loop {
+            let client_setup = self.client.current_client_setup().await?;
+            let transport = ReqwestTransport::new(build_reqwest_client());
+            let request_auth_context = AuthRequestTelemetryContext::new(
+                client_setup.auth.as_ref().map(CodexAuth::auth_mode),
+                client_setup.api_auth.as_ref(),
+                pending_retry,
+            );
+            let route = match wire_api {
+                WireApi::AnthropicMessages => ANTHROPIC_MESSAGES_ENDPOINT,
+                WireApi::ChatCompletions => CHAT_COMPLETIONS_ENDPOINT,
+                WireApi::Responses => RESPONSES_ENDPOINT,
+            };
+            let (request_telemetry, sse_telemetry) = Self::build_streaming_telemetry(
+                session_telemetry,
+                request_auth_context,
+                RequestRouteTelemetry::for_endpoint(route),
+                self.client.state.auth_env_telemetry.clone(),
+            );
+            let mut options = ApiAgentOptions::default();
+            let request = build_agent_request(AgentRequestBuildParams {
+                prompt,
+                model_info,
+                effort: effort.clone(),
+                summary,
+                service_tier: service_tier.clone(),
+                prompt_cache_key: self.client.prompt_cache_key(),
+            })?;
+            let inference_trace_attempt = inference_trace.start_attempt();
+            inference_trace_attempt.add_request_headers(&mut options.extra_headers);
+            inference_trace_attempt.record_started(&request);
+            let client =
+                ApiAgentClient::new(transport, client_setup.api_provider, client_setup.api_auth)
+                    .with_telemetry(Some(request_telemetry), Some(sse_telemetry));
+            let stream_result = match wire_api {
+                WireApi::AnthropicMessages => {
+                    client
+                        .stream_anthropic_messages(
+                            request,
+                            AnthropicMessagesOptions {
+                                max_tokens: DEFAULT_ANTHROPIC_MAX_TOKENS,
+                            },
+                            options,
+                        )
+                        .await
+                }
+                WireApi::ChatCompletions => {
+                    client
+                        .stream_chat_completions(
+                            request,
+                            ChatCompletionsOptions { max_tokens: None },
+                            options,
+                        )
+                        .await
+                }
+                WireApi::Responses => Err(ApiError::Stream(
+                    "responses wire api cannot use agent streaming client".to_string(),
+                )),
+            };
+
+            match stream_result {
+                Ok(stream) => {
+                    let (stream, _) = map_response_stream(
+                        stream,
+                        session_telemetry.clone(),
+                        inference_trace_attempt,
+                    );
+                    return Ok(stream);
+                }
+                Err(ApiError::Transport(
+                    unauthorized_transport @ TransportError::Http { status, .. },
+                )) if status == StatusCode::UNAUTHORIZED => {
+                    let response_debug_context =
+                        extract_response_debug_context(&unauthorized_transport);
+                    inference_trace_attempt.record_failed(
+                        &unauthorized_transport,
+                        response_debug_context.request_id.as_deref(),
+                        /*output_items*/ &[],
+                    );
+                    pending_retry = PendingUnauthorizedRetry::from_recovery(
+                        handle_unauthorized(
+                            unauthorized_transport,
+                            &mut auth_recovery,
+                            session_telemetry,
+                        )
+                        .await?,
+                    );
+                    continue;
+                }
+                Err(err) => {
+                    let response_debug_context =
+                        extract_response_debug_context_from_api_error(&err);
+                    let err = map_api_error(err);
+                    inference_trace_attempt.record_failed(
+                        &err,
+                        response_debug_context.request_id.as_deref(),
+                        /*output_items*/ &[],
+                    );
+                    return Err(err);
+                }
+            }
+        }
+    }
+
     /// Streams a turn via the Responses API over WebSocket transport.
     #[allow(clippy::too_many_arguments)]
     #[instrument(
@@ -1555,17 +1700,18 @@ impl ModelClientSession {
                 .await
             }
             WireApi::AnthropicMessages | WireApi::ChatCompletions => {
-                let _request = build_agent_request(AgentRequestBuildParams {
+                self.stream_agent_api(
                     prompt,
                     model_info,
+                    session_telemetry,
                     effort,
                     summary,
                     service_tier,
-                    prompt_cache_key: self.client.prompt_cache_key(),
-                })?;
-                Err(CodexErr::UnsupportedOperation(format!(
-                    "wire_api `{wire_api}` is not wired to a streaming client yet"
-                )))
+                    turn_metadata_header,
+                    inference_trace,
+                    wire_api,
+                )
+                .await
             }
         }
     }
