@@ -712,18 +712,6 @@ impl App {
             AppEvent::ClearThreadGoal { thread_id } => {
                 self.clear_thread_goal(app_server, thread_id).await;
             }
-            AppEvent::SendAddCreditsNudgeEmail { credit_type } => {
-                if self
-                    .chat_widget
-                    .start_add_credits_nudge_email_request(credit_type)
-                {
-                    self.send_add_credits_nudge_email(app_server, credit_type);
-                }
-            }
-            AppEvent::AddCreditsNudgeEmailFinished { result } => {
-                self.chat_widget
-                    .finish_add_credits_nudge_email_request(result);
-            }
             AppEvent::RateLimitsLoaded { origin, result } => match result {
                 Ok(snapshots) => {
                     for snapshot in snapshots {
