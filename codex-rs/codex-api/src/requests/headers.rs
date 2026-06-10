@@ -2,6 +2,8 @@ use codex_protocol::protocol::SessionSource;
 use http::HeaderMap;
 use http::HeaderValue;
 
+pub(crate) const ASTRAL_SUBAGENT_HEADER: &str = "x-astral-subagent";
+
 pub fn build_session_headers(session_id: Option<String>, thread_id: Option<String>) -> HeaderMap {
     let mut headers = HeaderMap::new();
     if let Some(id) = session_id {

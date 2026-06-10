@@ -45,7 +45,7 @@ async fn responses_stream_includes_subagent_header_on_review() {
 
     let request_recorder = responses::mount_sse_once_match(
         &server,
-        header("x-openai-subagent", "review"),
+        header("x-astral-subagent", "review"),
         response_body,
     )
     .await;
@@ -147,7 +147,7 @@ async fn responses_stream_includes_subagent_header_on_review() {
     let request = request_recorder.single_request();
     let expected_window_id = format!("{thread_id}:0");
     assert_eq!(
-        request.header("x-openai-subagent").as_deref(),
+        request.header("x-astral-subagent").as_deref(),
         Some("review")
     );
     assert_eq!(
@@ -178,7 +178,7 @@ async fn responses_stream_includes_subagent_header_on_other() {
 
     let request_recorder = responses::mount_sse_once_match(
         &server,
-        header("x-openai-subagent", "my-task"),
+        header("x-astral-subagent", "my-task"),
         response_body,
     )
     .await;
@@ -280,7 +280,7 @@ async fn responses_stream_includes_subagent_header_on_other() {
 
     let request = request_recorder.single_request();
     assert_eq!(
-        request.header("x-openai-subagent").as_deref(),
+        request.header("x-astral-subagent").as_deref(),
         Some("my-task")
     );
 }

@@ -6,6 +6,7 @@ use crate::error::ApiError;
 use crate::provider::Provider;
 use crate::requests::Compression;
 use crate::requests::attach_item_ids;
+use crate::requests::headers::ASTRAL_SUBAGENT_HEADER;
 use crate::requests::headers::build_session_headers;
 use crate::requests::headers::insert_header;
 use crate::requests::headers::subagent_header;
@@ -93,7 +94,7 @@ impl<T: HttpTransport> ResponsesClient<T> {
         }
         headers.extend(build_session_headers(session_id, thread_id));
         if let Some(subagent) = subagent_header(&session_source) {
-            insert_header(&mut headers, "x-openai-subagent", &subagent);
+            insert_header(&mut headers, ASTRAL_SUBAGENT_HEADER, &subagent);
         }
 
         self.stream(body, headers, compression, turn_state).await
