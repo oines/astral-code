@@ -2,16 +2,11 @@ pub mod auth;
 pub mod auth_env_telemetry;
 pub mod token_data;
 
-mod device_code_auth;
 mod pkce;
 mod server;
 
 pub use codex_client::BuildCustomCaTransportError as BuildLoginHttpClientError;
 pub use codex_config::types::AuthCredentialsStoreMode;
-pub use device_code_auth::DeviceCode;
-pub use device_code_auth::complete_device_code_login;
-pub use device_code_auth::request_device_code;
-pub use device_code_auth::run_device_code_login;
 pub use server::LoginServer;
 pub use server::ServerOptions;
 pub use server::ShutdownHandle;
@@ -36,7 +31,6 @@ pub use auth::UnauthorizedRecovery;
 pub use auth::default_client;
 pub use auth::enforce_login_restrictions;
 pub use auth::load_auth_dot_json;
-pub use auth::login_with_access_token;
 pub use auth::login_with_api_key;
 pub use auth::logout;
 pub use auth::logout_with_revoke;
