@@ -99,6 +99,8 @@ const REFRESH_TOKEN_INVALIDATED_MESSAGE: &str = "Your access token could not be 
 const REFRESH_TOKEN_UNKNOWN_MESSAGE: &str =
     "Your access token could not be refreshed. Please log out and sign in again.";
 const REFRESH_TOKEN_ACCOUNT_MISMATCH_MESSAGE: &str = "Your access token could not be refreshed because you have since logged out or signed in to another account. Please sign in again.";
+const UNSUPPORTED_OPENAI_AUTH_MESSAGE: &str =
+    "Stored OpenAI/ChatGPT credentials are not supported by Astral. Use API key auth instead.";
 const DEFAULT_CHATGPT_BACKEND_BASE_URL: &str = "https://chatgpt.com/backend-api";
 const REFRESH_TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
 pub(super) const REVOKE_TOKEN_URL: &str = "https://auth.openai.com/oauth/revoke";
@@ -206,55 +208,27 @@ impl From<RefreshTokenError> for std::io::Error {
 
 impl CodexAuth {
     async fn from_auth_dot_json(
-        codex_home: &Path,
+        _codex_home: &Path,
         auth_dot_json: AuthDotJson,
-        auth_credentials_store_mode: AuthCredentialsStoreMode,
-        chatgpt_base_url: Option<&str>,
+        _auth_credentials_store_mode: AuthCredentialsStoreMode,
+        _chatgpt_base_url: Option<&str>,
     ) -> std::io::Result<Self> {
         let auth_mode = auth_dot_json.resolved_mode();
-        let client = create_client();
         if auth_mode == ApiAuthMode::ApiKey {
             let Some(api_key) = auth_dot_json.openai_api_key.as_deref() else {
                 return Err(std::io::Error::other("API key auth is missing a key."));
             };
             return Ok(Self::from_api_key(api_key));
         }
-        if auth_mode == ApiAuthMode::AgentIdentity {
-            let Some(agent_identity) = auth_dot_json.agent_identity else {
-                return Err(std::io::Error::other(
-                    "agent identity auth is missing an agent identity token.",
-                ));
-            };
-            return Self::from_agent_identity_jwt(&agent_identity, chatgpt_base_url).await;
-        }
-        if auth_mode == ApiAuthMode::PersonalAccessToken {
-            let Some(personal_access_token) = auth_dot_json.personal_access_token.as_deref() else {
-                return Err(std::io::Error::other(
-                    "personal access token auth is missing a personal access token.",
-                ));
-            };
-            return Self::from_personal_access_token(personal_access_token).await;
-        }
-
-        let storage_mode = auth_dot_json.storage_mode(auth_credentials_store_mode);
-        let state = ChatgptAuthState {
-            auth_dot_json: Arc::new(Mutex::new(Some(auth_dot_json))),
-            client,
-        };
 
         match auth_mode {
-            ApiAuthMode::Chatgpt => {
-                let storage = create_auth_storage(codex_home.to_path_buf(), storage_mode);
-                Ok(Self::Chatgpt(ChatgptAuth { state, storage }))
-            }
-            ApiAuthMode::ChatgptAuthTokens => {
-                Ok(Self::ChatgptAuthTokens(ChatgptAuthTokens { state }))
-            }
+            ApiAuthMode::Chatgpt
+            | ApiAuthMode::ChatgptAuthTokens
+            | ApiAuthMode::AgentIdentity
+            | ApiAuthMode::PersonalAccessToken => Err(std::io::Error::other(
+                UNSUPPORTED_OPENAI_AUTH_MESSAGE.to_string(),
+            )),
             ApiAuthMode::ApiKey => unreachable!("api key mode is handled above"),
-            ApiAuthMode::AgentIdentity => unreachable!("agent identity mode is handled above"),
-            ApiAuthMode::PersonalAccessToken => {
-                unreachable!("personal access token mode is handled above")
-            }
         }
     }
 
@@ -1042,17 +1016,6 @@ impl AuthDotJson {
             return ApiAuthMode::ApiKey;
         }
         ApiAuthMode::Chatgpt
-    }
-
-    fn storage_mode(
-        &self,
-        auth_credentials_store_mode: AuthCredentialsStoreMode,
-    ) -> AuthCredentialsStoreMode {
-        if self.resolved_mode() == ApiAuthMode::ChatgptAuthTokens {
-            AuthCredentialsStoreMode::Ephemeral
-        } else {
-            auth_credentials_store_mode
-        }
     }
 }
 
