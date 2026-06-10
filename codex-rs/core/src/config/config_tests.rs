@@ -6445,7 +6445,7 @@ async fn for_config_writes_selected_user_config_file() -> anyhow::Result<()> {
     let codex_home = TempDir::new()?;
     let base_config = codex_home.path().join(CONFIG_TOML_FILE);
     let selected_config = codex_home.path().join("work.config.toml");
-    tokio::fs::write(&base_config, r#"model_provider = "openai""#).await?;
+    tokio::fs::write(&base_config, r#"model_provider = "astral""#).await?;
     tokio::fs::write(&selected_config, r#"model = "gpt-old""#).await?;
 
     let config = ConfigBuilder::without_managed_config_for_tests()
@@ -6469,7 +6469,7 @@ async fn for_config_writes_selected_user_config_file() -> anyhow::Result<()> {
     assert_eq!(selected.model_reasoning_effort, Some(ReasoningEffort::High));
     assert_eq!(
         tokio::fs::read_to_string(&base_config).await?,
-        r#"model_provider = "openai""#
+        r#"model_provider = "astral""#
     );
 
     Ok(())
@@ -7945,7 +7945,7 @@ websocket_connect_timeout_ms = 15000
 
 [profiles.o3]
 model = "o3"
-model_provider = "openai"
+model_provider = "astral"
 approval_policy = "never"
 model_reasoning_effort = "high"
 model_reasoning_summary = "detailed"
@@ -7956,7 +7956,7 @@ model_provider = "openai-custom"
 
 [profiles.zdr]
 model = "o3"
-model_provider = "openai"
+model_provider = "astral"
 approval_policy = "on-failure"
 
 [profiles.zdr.analytics]
@@ -7964,7 +7964,7 @@ enabled = false
 
 [profiles.gpt5]
 model = "gpt-5.4"
-model_provider = "openai"
+model_provider = "astral"
 approval_policy = "on-failure"
 model_reasoning_effort = "high"
 model_reasoning_summary = "detailed"

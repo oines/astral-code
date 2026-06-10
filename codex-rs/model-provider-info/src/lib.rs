@@ -521,17 +521,16 @@ pub fn built_in_model_providers(
     openai_base_url: Option<String>,
 ) -> HashMap<String, ModelProviderInfo> {
     use ModelProviderInfo as P;
+    let _legacy_openai_base_url = openai_base_url;
     let astral_provider = P::create_astral_provider();
-    let openai_provider = P::create_openai_provider(openai_base_url);
     let anthropic_provider = P::create_anthropic_provider();
     let amazon_bedrock_provider = P::create_amazon_bedrock_provider(/*aws*/ None);
 
-    // Keep the bundled catalog small: Astral's generic provider, explicit legacy
-    // provider adapters, Bedrock, and local OSS providers. Users are encouraged
+    // Keep the bundled catalog small: Astral's generic provider, Anthropic,
+    // Bedrock, and local OSS providers. Users are encouraged
     // to add their own entries under `model_providers` in config.toml.
     [
         (ASTRAL_PROVIDER_ID, astral_provider),
-        (OPENAI_PROVIDER_ID, openai_provider),
         (ANTHROPIC_PROVIDER_ID, anthropic_provider),
         (AMAZON_BEDROCK_PROVIDER_ID, amazon_bedrock_provider),
         (
