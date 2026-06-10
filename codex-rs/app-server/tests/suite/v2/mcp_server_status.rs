@@ -148,7 +148,7 @@ async fn mcp_server_status_list_uses_thread_project_local_config() -> Result<()>
     .await??;
     let ThreadStartResponse { thread, .. } = to_response(thread_start_response)?;
 
-    let project_config_dir = workspace.path().join(".codex");
+    let project_config_dir = workspace.path().join(".astral-code");
     std::fs::create_dir_all(&project_config_dir)?;
     std::fs::write(
         project_config_dir.join("config.toml"),

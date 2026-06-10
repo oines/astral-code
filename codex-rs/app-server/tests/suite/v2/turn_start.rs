@@ -958,6 +958,7 @@ async fn turn_start_tracks_turn_event_analytics() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "Astral disables analytics event uploads"]
 async fn turn_profile_tracks_blocking_tool_and_follow_up_sampling() -> Result<()> {
     let responses = vec![
         create_request_user_input_sse_response("call1")?,

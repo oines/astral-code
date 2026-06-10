@@ -88,7 +88,7 @@ description = "Inspect without writes."
 async fn permission_profile_list_resolves_project_profiles_and_paginates() -> Result<()> {
     let codex_home = TempDir::new()?;
     let workspace = TempDir::new()?;
-    let project_config_dir = workspace.path().join(".codex");
+    let project_config_dir = workspace.path().join(".astral-code");
     std::fs::create_dir_all(&project_config_dir)?;
     std::fs::write(
         codex_home.path().join("config.toml"),
@@ -167,7 +167,7 @@ async fn permission_profile_list_discovers_project_profiles_without_default_sele
 {
     let codex_home = TempDir::new()?;
     let workspace = TempDir::new()?;
-    let project_config_dir = workspace.path().join(".codex");
+    let project_config_dir = workspace.path().join(".astral-code");
     std::fs::create_dir_all(&project_config_dir)?;
     std::fs::write(
         project_config_dir.join("config.toml"),

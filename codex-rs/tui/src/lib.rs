@@ -38,7 +38,6 @@ use codex_app_server_protocol::ThreadListCwdFilter;
 use codex_app_server_protocol::ThreadListParams;
 use codex_app_server_protocol::ThreadSortKey as AppServerThreadSortKey;
 use codex_app_server_protocol::ThreadSourceKind;
-use codex_cloud_config::cloud_config_bundle_loader_for_storage;
 use codex_config::CloudConfigBundleLoader;
 use codex_config::ConfigLoadError;
 use codex_config::LoaderOverrides;
@@ -1014,19 +1013,7 @@ pub async fn run_main(
     )
     .await;
 
-    let chatgpt_base_url = bootstrap_config_toml
-        .chatgpt_base_url
-        .clone()
-        .unwrap_or_else(|| "https://chatgpt.com/backend-api/".to_string());
-    let cloud_config_bundle = cloud_config_bundle_loader_for_storage(
-        codex_home.to_path_buf(),
-        /*enable_codex_api_key_env*/ false,
-        bootstrap_config_toml
-            .cli_auth_credentials_store
-            .unwrap_or_default(),
-        chatgpt_base_url,
-    )
-    .await;
+    let cloud_config_bundle = CloudConfigBundleLoader::default();
 
     let cwd_override = if app_server_target.uses_remote_workspace() {
         None
@@ -1483,17 +1470,10 @@ async fn run_ratatui_app(
         {
             trust_decision_was_made = onboarding_result.directory_trust_persisted;
         }
-        // If this onboarding run included the login step, always refresh the cloud config bundle
-        // and rebuild config. This avoids missing newly available cloud-managed policy due to login
-        // status detection edge cases.
+        // Astral does not use the legacy ChatGPT cloud config bundle. Keep the
+        // loader local so onboarding cannot trigger a remote policy fetch.
         if show_login_screen && !uses_remote_workspace {
-            cloud_config_bundle = cloud_config_bundle_loader_for_storage(
-                initial_config.codex_home.to_path_buf(),
-                /*enable_codex_api_key_env*/ false,
-                initial_config.cli_auth_credentials_store_mode,
-                initial_config.chatgpt_base_url.clone(),
-            )
-            .await;
+            cloud_config_bundle = CloudConfigBundleLoader::default();
         }
 
         // If the user made an explicit trust decision, or we showed the login flow, reload config

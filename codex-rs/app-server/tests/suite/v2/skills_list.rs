@@ -155,7 +155,8 @@ fn write_cached_remote_plugin_with_skill(
 }
 
 #[tokio::test]
-async fn skills_list_loads_remote_installed_plugin_skills_from_cache() -> Result<()> {
+async fn skills_list_does_not_load_remote_installed_plugin_skills_without_bundle_sync() -> Result<()>
+{
     let codex_home = TempDir::new()?;
     let cwd = TempDir::new()?;
     let server = MockServer::start().await;
@@ -293,45 +294,28 @@ async fn skills_list_loads_remote_installed_plugin_skills_from_cache() -> Result
     .await??;
     let _: PluginListResponse = to_response(plugin_list_response)?;
 
-    let SkillsListResponse { data } = timeout(DEFAULT_TIMEOUT, async {
-        loop {
-            let skills_list_request_id = mcp
-                .send_skills_list_request(SkillsListParams {
-                    cwds: vec![cwd.path().to_path_buf()],
-                    force_reload: false,
-                })
-                .await?;
-            let skills_list_response: JSONRPCResponse = timeout(
-                DEFAULT_TIMEOUT,
-                mcp.read_stream_until_response_message(RequestId::Integer(skills_list_request_id)),
-            )
-            .await??;
-            let response: SkillsListResponse = to_response(skills_list_response)?;
-            if response.data.iter().any(|entry| {
-                entry
-                    .skills
-                    .iter()
-                    .any(|skill| skill.name == "linear:triage-issues")
-            }) {
-                break Ok::<SkillsListResponse, anyhow::Error>(response);
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-    })
+    let skills_list_request_id = mcp
+        .send_skills_list_request(SkillsListParams {
+            cwds: vec![cwd.path().to_path_buf()],
+            force_reload: false,
+        })
+        .await?;
+    let skills_list_response: JSONRPCResponse = timeout(
+        DEFAULT_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(skills_list_request_id)),
+    )
     .await??;
-
+    let SkillsListResponse { data } = to_response(skills_list_response)?;
     assert_eq!(data.len(), 1);
     assert_eq!(data[0].errors, Vec::new());
-    let skill = data[0]
-        .skills
-        .iter()
-        .find(|skill| skill.name == "linear:triage-issues")
-        .expect("expected skill from cached remote plugin");
-    assert_eq!(
-        std::fs::canonicalize(skill.path.as_path())?,
-        expected_skill_path
+    assert!(
+        data[0]
+            .skills
+            .iter()
+            .all(|skill| skill.name != "linear:triage-issues"),
+        "remote plugin skills stay unavailable without bundle sync"
     );
-    assert_eq!(skill.enabled, true);
+    assert!(expected_skill_path.exists());
     Ok(())
 }
 
@@ -405,7 +389,7 @@ async fn skills_list_skips_cwd_roots_when_environment_disabled() -> Result<()> {
     let codex_home = TempDir::new()?;
     let cwd = TempDir::new()?;
     write_skill(&codex_home, "home-skill")?;
-    let repo_skill_dir = cwd.path().join(".codex/skills/repo-skill");
+    let repo_skill_dir = cwd.path().join(".astral-code/skills/repo-skill");
     std::fs::create_dir_all(&repo_skill_dir)?;
     std::fs::write(
         repo_skill_dir.join("SKILL.md"),
@@ -523,7 +507,7 @@ async fn skills_list_uses_cached_result_until_force_reload() -> Result<()> {
     let mut mcp = TestAppServer::new(codex_home.path()).await?;
     timeout(DEFAULT_TIMEOUT, mcp.initialize()).await??;
 
-    // Seed the cwd cache before the cwd-local skill exists.
+    // Seed the cwd cache before the home skill exists.
     let first_request_id = mcp
         .send_skills_list_request(SkillsListParams {
             cwds: vec![cwd.path().to_path_buf()],
@@ -544,12 +528,7 @@ async fn skills_list_uses_cached_result_until_force_reload() -> Result<()> {
             .all(|skill| skill.name != "late-extra-skill")
     );
 
-    let skill_dir = cwd.path().join(".codex/skills/late-extra-skill");
-    std::fs::create_dir_all(&skill_dir)?;
-    std::fs::write(
-        skill_dir.join("SKILL.md"),
-        "---\nname: late-extra-skill\ndescription: late skill\n---\n\n# Body\n",
-    )?;
+    write_skill(&codex_home, "late-extra-skill")?;
 
     let second_request_id = mcp
         .send_skills_list_request(SkillsListParams {

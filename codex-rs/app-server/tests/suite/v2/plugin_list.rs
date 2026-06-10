@@ -1086,9 +1086,9 @@ enabled = true
   ]
 }"#,
     )?;
-    std::fs::create_dir_all(workspace_enabled.path().join(".codex"))?;
+    std::fs::create_dir_all(workspace_enabled.path().join(".astral-code"))?;
     std::fs::write(
-        workspace_enabled.path().join(".codex/config.toml"),
+        workspace_enabled.path().join(".astral-code/config.toml"),
         r#"[plugins."shared-plugin@codex-curated"]
 enabled = false
 "#,
@@ -1460,7 +1460,7 @@ enabled = true
 }
 
 #[tokio::test]
-async fn app_server_startup_sync_downloads_remote_installed_plugin_bundles() -> Result<()> {
+async fn app_server_startup_does_not_sync_remote_installed_plugin_bundles() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;
     write_remote_plugin_catalog_config(
@@ -1509,18 +1509,13 @@ async fn app_server_startup_sync_downloads_remote_installed_plugin_bundles() -> 
     .await?;
     timeout(DEFAULT_TIMEOUT, mcp.initialize()).await??;
 
-    wait_for_path_exists(&installed_path.join(".codex-plugin/plugin.json")).await?;
-    let installed_plugin_manifest: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(installed_path.join(".codex-plugin/plugin.json"))?,
-    )?;
-    assert_eq!(
-        installed_plugin_manifest["version"],
-        serde_json::json!("1.2.3")
-    );
-    let installed_app_manifest: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(installed_path.join(".app.json"))?)?;
-    assert_eq!(installed_app_manifest, remote_app_manifest);
-    assert!(installed_path.join("skills/plan-work/SKILL.md").is_file());
+    wait_for_remote_plugin_request_count(
+        &server,
+        "/ps/plugins/installed",
+        /*expected_count*/ 0,
+    )
+    .await?;
+    assert!(!installed_path.join(".codex-plugin/plugin.json").exists());
     let config = std::fs::read_to_string(codex_home.path().join("config.toml"))?;
     assert!(!config.contains("linear@openai-curated-remote"));
     Ok(())
@@ -1613,19 +1608,9 @@ async fn plugin_list_sync_upgrades_and_removes_remote_installed_plugin_bundles()
         vec![("linear@openai-curated-remote".to_string(), true, true)]
     );
 
-    wait_for_path_exists(&new_path.join(".codex-plugin/plugin.json")).await?;
-    let installed_plugin_manifest: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(new_path.join(".codex-plugin/plugin.json"))?,
-    )?;
-    assert_eq!(
-        installed_plugin_manifest["version"],
-        serde_json::json!("1.2.3")
-    );
-    let installed_app_manifest: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(new_path.join(".app.json"))?)?;
-    assert_eq!(installed_app_manifest, remote_app_manifest);
-    wait_for_path_missing(&old_path).await?;
-    wait_for_path_missing(&stale_path).await?;
+    assert!(!new_path.join(".codex-plugin/plugin.json").exists());
+    assert!(old_path.exists());
+    assert!(stale_path.exists());
     let config = std::fs::read_to_string(codex_home.path().join("config.toml"))?;
     assert!(!config.contains("linear@openai-curated-remote"));
     Ok(())
@@ -1864,7 +1849,7 @@ async fn plugin_list_includes_remote_marketplaces_when_remote_plugin_enabled() -
 }
 
 #[tokio::test]
-async fn plugin_list_uses_cached_global_remote_catalog_and_refreshes_it() -> Result<()> {
+async fn plugin_list_uses_cached_global_remote_catalog_without_background_refresh() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;
     write_remote_plugin_catalog_config(
@@ -1881,15 +1866,8 @@ async fn plugin_list_uses_cached_global_remote_catalog_and_refreshes_it() -> Res
     )?;
 
     let cached_remote_plugin_id = "plugins~Plugin_00000000000000000000000000000000";
-    let refreshed_remote_plugin_id = "plugins~Plugin_11111111111111111111111111111111";
     let cached_body =
         remote_plugin_list_body(cached_remote_plugin_id, "linear", "Linear", "Plan work");
-    let refreshed_body = remote_plugin_list_body(
-        refreshed_remote_plugin_id,
-        "notion",
-        "Notion",
-        "Capture notes",
-    );
     mount_remote_plugin_list(&server, "GLOBAL", &cached_body).await;
     mount_remote_installed_plugins(&server, "GLOBAL", empty_remote_installed_plugins_body()).await;
     mount_remote_installed_plugins(&server, "WORKSPACE", empty_remote_installed_plugins_body())
@@ -1925,7 +1903,17 @@ async fn plugin_list_uses_cached_global_remote_catalog_and_refreshes_it() -> Res
         .await?;
 
     server.reset().await;
-    mount_remote_plugin_list(&server, "GLOBAL", &refreshed_body).await;
+    mount_remote_plugin_list(
+        &server,
+        "GLOBAL",
+        &remote_plugin_list_body(
+            "plugins~Plugin_11111111111111111111111111111111",
+            "notion",
+            "Notion",
+            "Capture notes",
+        ),
+    )
+    .await;
     mount_remote_installed_plugins(&server, "GLOBAL", empty_remote_installed_plugins_body()).await;
     mount_remote_installed_plugins(&server, "WORKSPACE", empty_remote_installed_plugins_body())
         .await;
@@ -1952,8 +1940,8 @@ async fn plugin_list_uses_cached_global_remote_catalog_and_refreshes_it() -> Res
         remote_marketplace.plugins[0].id,
         "linear@openai-curated-remote"
     );
-    wait_for_remote_plugin_request_count(&server, "/ps/plugins/list", /*expected_count*/ 1).await?;
-    wait_for_cached_remote_catalog_plugin_ids(codex_home.path(), &[refreshed_remote_plugin_id])
+    wait_for_remote_plugin_request_count(&server, "/ps/plugins/list", /*expected_count*/ 0).await?;
+    wait_for_cached_remote_catalog_plugin_ids(codex_home.path(), &[cached_remote_plugin_id])
         .await?;
 
     Ok(())
@@ -2372,7 +2360,7 @@ plugin_sharing = true
 }
 
 #[tokio::test]
-async fn plugin_installed_starts_remote_installed_bundle_sync() -> Result<()> {
+async fn plugin_installed_does_not_start_remote_installed_bundle_sync() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;
     std::fs::write(
@@ -2443,7 +2431,7 @@ plugin_sharing = false
     let installed_path = codex_home
         .path()
         .join("plugins/cache/openai-curated-remote/linear/1.2.3/.codex-plugin/plugin.json");
-    wait_for_path_exists(&installed_path).await?;
+    assert!(!installed_path.exists());
     wait_for_remote_installed_scope_request(&server, "GLOBAL").await?;
     wait_for_remote_installed_scope_request(&server, "WORKSPACE").await?;
     Ok(())
@@ -2727,7 +2715,12 @@ async fn plugin_list_fetches_shared_with_me_kind() -> Result<()> {
         Some(PluginShareDiscoverability::Unlisted)
     );
     wait_for_remote_installed_scope_request(&server, "WORKSPACE").await?;
-    wait_for_remote_installed_scope_request(&server, "GLOBAL").await?;
+    wait_for_remote_plugin_request_count(
+        &server,
+        "/ps/plugins/installed",
+        /*expected_count*/ 1,
+    )
+    .await?;
     wait_for_remote_plugin_request_count(&server, "/ps/plugins/list", /*expected_count*/ 0).await?;
     Ok(())
 }
@@ -2975,7 +2968,7 @@ remote_plugin = true
 }
 
 #[tokio::test]
-async fn plugin_list_fetches_featured_plugin_ids_without_chatgpt_auth() -> Result<()> {
+async fn plugin_list_omits_featured_plugin_ids_without_remote_sync() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;
     write_plugin_sync_config(codex_home.path(), &format!("{}/backend-api/", server.uri()))?;
@@ -3005,15 +2998,13 @@ async fn plugin_list_fetches_featured_plugin_ids_without_chatgpt_auth() -> Resul
     .await??;
     let response: PluginListResponse = to_response(response)?;
 
-    assert_eq!(
-        response.featured_plugin_ids,
-        vec!["linear@openai-curated".to_string()]
-    );
+    assert!(response.featured_plugin_ids.is_empty());
+    wait_for_featured_plugin_request_count(&server, /*expected_count*/ 0).await?;
     Ok(())
 }
 
 #[tokio::test]
-async fn plugin_list_uses_warmed_featured_plugin_ids_cache_on_first_request() -> Result<()> {
+async fn plugin_list_does_not_warm_featured_plugin_ids_cache_on_startup() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;
     write_plugin_sync_config(codex_home.path(), &format!("{}/backend-api/", server.uri()))?;
@@ -3023,13 +3014,12 @@ async fn plugin_list_uses_warmed_featured_plugin_ids_cache_on_first_request() ->
         .and(path("/backend-api/plugins/featured"))
         .and(query_param("platform", "codex"))
         .respond_with(ResponseTemplate::new(200).set_body_string(r#"["linear@openai-curated"]"#))
-        .expect(1)
         .mount(&server)
         .await;
 
     let mut mcp = TestAppServer::new_with_plugin_startup_tasks(codex_home.path()).await?;
     timeout(DEFAULT_TIMEOUT, mcp.initialize()).await??;
-    wait_for_featured_plugin_request_count(&server, /*expected_count*/ 1).await?;
+    wait_for_featured_plugin_request_count(&server, /*expected_count*/ 0).await?;
 
     let request_id = mcp
         .send_plugin_list_request(PluginListParams {
@@ -3045,10 +3035,7 @@ async fn plugin_list_uses_warmed_featured_plugin_ids_cache_on_first_request() ->
     .await??;
     let response: PluginListResponse = to_response(response)?;
 
-    assert_eq!(
-        response.featured_plugin_ids,
-        vec!["linear@openai-curated".to_string()]
-    );
+    assert!(response.featured_plugin_ids.is_empty());
     Ok(())
 }
 
@@ -3165,32 +3152,6 @@ fn cached_remote_catalog_plugin_ids(codex_home: &std::path::Path) -> Result<Vec<
     }
     plugin_ids.sort();
     Ok(plugin_ids)
-}
-
-async fn wait_for_path_exists(path: &std::path::Path) -> Result<()> {
-    timeout(DEFAULT_TIMEOUT, async {
-        loop {
-            if path.exists() {
-                return Ok::<(), anyhow::Error>(());
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await??;
-    Ok(())
-}
-
-async fn wait_for_path_missing(path: &std::path::Path) -> Result<()> {
-    timeout(DEFAULT_TIMEOUT, async {
-        loop {
-            if !path.exists() {
-                return Ok::<(), anyhow::Error>(());
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await??;
-    Ok(())
 }
 
 async fn mount_remote_plugin_list(server: &MockServer, scope: &str, body: &str) {
