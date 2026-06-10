@@ -1359,7 +1359,7 @@ impl Config {
         PluginsConfigInput::new(
             self.config_layer_stack.clone(),
             self.features.enabled(Feature::Plugins),
-            self.features.enabled(Feature::RemotePlugin),
+            /*remote_plugin_enabled*/ false,
             self.chatgpt_base_url.clone(),
         )
     }

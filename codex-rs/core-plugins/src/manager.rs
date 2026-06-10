@@ -42,7 +42,6 @@ use crate::remote::RemotePluginScope;
 use crate::remote::RemotePluginServiceConfig;
 use crate::remote_legacy::RemotePluginFetchError;
 use crate::remote_legacy::RemotePluginMutationError;
-use crate::startup_sync::curated_plugins_repo_path;
 use crate::startup_sync::read_curated_plugins_sha;
 use crate::startup_sync::sync_openai_plugins_repo;
 use crate::store::PluginInstallResult as StorePluginInstallResult;
@@ -1793,19 +1792,11 @@ impl PluginsManager {
         config: &PluginsConfigInput,
         additional_roots: &[AbsolutePathBuf],
     ) -> Vec<AbsolutePathBuf> {
-        // Treat the curated catalog as an extra marketplace root so plugin listing can surface it
-        // without requiring every caller to know where it is stored.
         let mut roots = additional_roots.to_vec();
         roots.extend(installed_marketplace_roots_from_layer_stack(
             &config.config_layer_stack,
             self.codex_home.as_path(),
         ));
-        let curated_repo_root = curated_plugins_repo_path(self.codex_home.as_path());
-        if curated_repo_root.is_dir()
-            && let Ok(curated_repo_root) = AbsolutePathBuf::try_from(curated_repo_root)
-        {
-            roots.push(curated_repo_root);
-        }
         roots.sort_unstable();
         roots.dedup();
         roots
