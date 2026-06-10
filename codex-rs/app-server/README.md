@@ -1777,13 +1777,13 @@ Codex supports these authentication modes. The current mode is surfaced in `acco
 - `account/read` — fetch current account info; optionally refresh tokens.
 - `account/login/start` — begin login (`apiKey`, `chatgpt`, `chatgptDeviceCode`).
 - `account/login/completed` (notify) — emitted when a login attempt finishes (success or error).
-- `account/login/cancel` — cancel a pending managed ChatGPT login by `loginId`.
+- `account/login/cancel` — cancel a pending managed login by `loginId`.
 - `account/logout` — sign out; triggers `account/updated`.
 - `account/updated` (notify) — emitted whenever auth mode changes (`authMode`: `apikey`, `chatgpt`, `personalAccessToken`, or `null`) and includes the current ChatGPT `planType` when available.
-- `account/rateLimits/read` — fetch ChatGPT rate limits and an optional effective monthly credit limit; updates arrive via `account/rateLimits/updated` (notify).
-- `account/usage/read` — fetch ChatGPT account token-activity summary and daily buckets.
-- `account/rateLimits/updated` (notify) — emitted whenever a user's ChatGPT rate limits change. This is a sparse rolling update; merge available values into the most recent `account/rateLimits/read` response or refetch that snapshot.
-- `account/sendAddCreditsNudgeEmail` — ask ChatGPT to email the workspace owner about depleted credits or a reached usage limit.
+- `account/rateLimits/read` — account-backend rate limits are unavailable for Astral-managed providers.
+- `account/usage/read` — account-backend token usage is unavailable for Astral-managed providers.
+- `account/rateLimits/updated` (notify) — sparse rolling rate-limit updates when a provider supplies them.
+- `account/sendAddCreditsNudgeEmail` — account-backend nudge emails are unavailable for Astral-managed providers.
 - `mcpServer/oauthLogin/completed` (notify) — emitted after a `mcpServer/oauth/login` flow finishes for a server; payload includes `{ name, success, error? }`.
 - `mcpServer/startupStatus/updated` (notify) — emitted when a configured MCP server's startup status changes; payload includes `{ threadId, name, status, error }`, where `threadId` is the owning thread when startup is thread-scoped and `null` when it is app-scoped, and `status` is `starting`, `ready`, `failed`, or `cancelled`.
 
@@ -1798,16 +1798,15 @@ Request:
 Response examples:
 
 ```json
-{ "id": 1, "result": { "account": null, "requiresOpenaiAuth": false } } // No OpenAI auth needed (e.g., OSS/local models)
-{ "id": 1, "result": { "account": null, "requiresOpenaiAuth": true } }  // OpenAI auth required (typical for OpenAI-hosted models)
-{ "id": 1, "result": { "account": { "type": "apiKey" }, "requiresOpenaiAuth": true } }
-{ "id": 1, "result": { "account": { "type": "chatgpt", "email": "user@example.com", "planType": "pro" }, "requiresOpenaiAuth": true } }
+{ "id": 1, "result": { "account": null, "requiresAstralAuth": false } } // Provider manages auth externally
+{ "id": 1, "result": { "account": null, "requiresAstralAuth": true } }  // Astral-managed auth required
+{ "id": 1, "result": { "account": { "type": "apiKey" }, "requiresAstralAuth": true } }
 ```
 
 Field notes:
 
 - `refreshToken` (bool): set `true` to force a token refresh.
-- `requiresOpenaiAuth` reflects the active provider; when `false`, Codex can run without OpenAI credentials.
+- `requiresAstralAuth` reflects the active provider; when `false`, Astral can run without credentials in Astral's auth store.
 
 ### 2) Log in with an API key
 

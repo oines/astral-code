@@ -5,39 +5,28 @@ use app_test_support::to_response;
 
 use app_test_support::ChatGptAuthFixture;
 use app_test_support::write_chatgpt_auth;
-use chrono::Duration as ChronoDuration;
-use chrono::Utc;
 use codex_app_server_protocol::Account;
 use codex_app_server_protocol::AuthMode;
 use codex_app_server_protocol::GetAccountParams;
 use codex_app_server_protocol::GetAccountResponse;
-use codex_app_server_protocol::GetAuthStatusParams;
-use codex_app_server_protocol::GetAuthStatusResponse;
 use codex_app_server_protocol::JSONRPCResponse;
 use codex_app_server_protocol::LoginAccountResponse;
 use codex_app_server_protocol::LogoutAccountResponse;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerNotification;
 use codex_config::types::AuthCredentialsStoreMode;
-use codex_login::REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR;
 use codex_login::login_with_api_key;
 use pretty_assertions::assert_eq;
 use std::path::Path;
 use tempfile::TempDir;
 use tokio::time::timeout;
-use wiremock::Mock;
-use wiremock::MockServer;
-use wiremock::ResponseTemplate;
-use wiremock::matchers::method;
-use wiremock::matchers::path;
 
 const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
-const WORKSPACE_ID_STALE: &str = "123e4567-e89b-42d3-a456-426614174014";
 
 // Helper to create a minimal config.toml for the app server
 #[derive(Default)]
 struct CreateConfigTomlParams {
-    requires_openai_auth: Option<bool>,
+    requires_astral_auth: Option<bool>,
     base_url: Option<String>,
     model_provider_id: Option<String>,
     extra_provider_config: Option<String>,
@@ -48,8 +37,8 @@ fn create_config_toml(codex_home: &Path, params: CreateConfigTomlParams) -> std:
     let base_url = params
         .base_url
         .unwrap_or_else(|| "http://127.0.0.1:0/v1".to_string());
-    let requires_line = match params.requires_openai_auth {
-        Some(true) => "requires_openai_auth = true\n".to_string(),
+    let requires_line = match params.requires_astral_auth {
+        Some(true) => "requires_astral_auth = true\n".to_string(),
         Some(false) => String::new(),
         None => String::new(),
     };
@@ -200,7 +189,7 @@ async fn get_account_no_auth() -> Result<()> {
     create_config_toml(
         codex_home.path(),
         CreateConfigTomlParams {
-            requires_openai_auth: Some(true),
+            requires_astral_auth: Some(true),
             ..Default::default()
         },
     )?;
@@ -222,7 +211,7 @@ async fn get_account_no_auth() -> Result<()> {
     let account: GetAccountResponse = to_response(resp)?;
 
     assert_eq!(account.account, None, "expected no account");
-    assert_eq!(account.requires_openai_auth, true);
+    assert_eq!(account.requires_astral_auth, true);
     Ok(())
 }
 
@@ -232,7 +221,7 @@ async fn get_account_with_api_key() -> Result<()> {
     create_config_toml(
         codex_home.path(),
         CreateConfigTomlParams {
-            requires_openai_auth: Some(true),
+            requires_astral_auth: Some(true),
             ..Default::default()
         },
     )?;
@@ -264,7 +253,7 @@ async fn get_account_with_api_key() -> Result<()> {
 
     let expected = GetAccountResponse {
         account: Some(Account::ApiKey {}),
-        requires_openai_auth: true,
+        requires_astral_auth: true,
     };
     assert_eq!(received, expected);
     Ok(())
@@ -276,7 +265,7 @@ async fn get_account_when_auth_not_required() -> Result<()> {
     create_config_toml(
         codex_home.path(),
         CreateConfigTomlParams {
-            requires_openai_auth: Some(false),
+            requires_astral_auth: Some(false),
             ..Default::default()
         },
     )?;
@@ -298,7 +287,7 @@ async fn get_account_when_auth_not_required() -> Result<()> {
 
     let expected = GetAccountResponse {
         account: None,
-        requires_openai_auth: false,
+        requires_astral_auth: false,
     };
     assert_eq!(received, expected);
     Ok(())
@@ -339,19 +328,19 @@ region = "us-west-2"
 
     let expected = GetAccountResponse {
         account: Some(Account::AmazonBedrock {}),
-        requires_openai_auth: false,
+        requires_astral_auth: false,
     };
     assert_eq!(received, expected);
     Ok(())
 }
 
 #[tokio::test]
-async fn get_account_omits_chatgpt_auth() -> Result<()> {
+async fn get_account_omits_managed_auth() -> Result<()> {
     let codex_home = TempDir::new()?;
     create_config_toml(
         codex_home.path(),
         CreateConfigTomlParams {
-            requires_openai_auth: Some(true),
+            requires_astral_auth: Some(true),
             ..Default::default()
         },
     )?;
@@ -381,92 +370,8 @@ async fn get_account_omits_chatgpt_auth() -> Result<()> {
 
     let expected = GetAccountResponse {
         account: None,
-        requires_openai_auth: true,
+        requires_astral_auth: true,
     };
     assert_eq!(received, expected);
-    Ok(())
-}
-
-#[tokio::test]
-async fn get_account_omits_chatgpt_after_permanent_refresh_failure() -> Result<()> {
-    let codex_home = TempDir::new()?;
-    create_config_toml(
-        codex_home.path(),
-        CreateConfigTomlParams {
-            requires_openai_auth: Some(true),
-            ..Default::default()
-        },
-    )?;
-    write_chatgpt_auth(
-        codex_home.path(),
-        ChatGptAuthFixture::new("stale-access-token")
-            .refresh_token("stale-refresh-token")
-            .account_id(WORKSPACE_ID_STALE)
-            .email("user@example.com")
-            .plan_type("pro")
-            .last_refresh(Some(Utc::now() - ChronoDuration::days(9))),
-        AuthCredentialsStoreMode::File,
-    )?;
-
-    let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path("/oauth/token"))
-        .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
-            "error": {
-                "code": "refresh_token_reused"
-            }
-        })))
-        .expect(1..=2)
-        .mount(&server)
-        .await;
-
-    let refresh_url = format!("{}/oauth/token", server.uri());
-    let mut mcp = TestAppServer::new_with_env(
-        codex_home.path(),
-        &[
-            ("ASTRAL_API_KEY", None),
-            (
-                REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR,
-                Some(refresh_url.as_str()),
-            ),
-        ],
-    )
-    .await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
-
-    let auth_status_request_id = mcp
-        .send_get_auth_status_request(GetAuthStatusParams {
-            include_token: Some(true),
-            refresh_token: Some(true),
-        })
-        .await?;
-    let auth_status_resp: JSONRPCResponse = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(auth_status_request_id)),
-    )
-    .await??;
-    let _: GetAuthStatusResponse = to_response(auth_status_resp)?;
-
-    let request_id = mcp
-        .send_get_account_request(GetAccountParams {
-            refresh_token: false,
-        })
-        .await?;
-
-    let resp: JSONRPCResponse = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
-    )
-    .await??;
-    let received: GetAccountResponse = to_response(resp)?;
-
-    assert_eq!(
-        received,
-        GetAccountResponse {
-            account: None,
-            requires_openai_auth: true,
-        }
-    );
-    server.verify().await;
     Ok(())
 }

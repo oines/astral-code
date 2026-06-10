@@ -459,7 +459,7 @@ async fn prefetch_rate_limits_is_gated_on_chatgpt_auth_provider() {
     set_chatgpt_auth(&mut chat);
     assert!(chat.should_prefetch_rate_limits());
 
-    chat.config.model_provider.requires_openai_auth = false;
+    chat.config.model_provider.requires_astral_auth = false;
     assert!(!chat.should_prefetch_rate_limits());
 
     chat.prefetch_rate_limits();

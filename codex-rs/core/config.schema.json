@@ -1514,9 +1514,9 @@
           "minimum": 0.0,
           "type": "integer"
         },
-        "requires_openai_auth": {
+        "requires_astral_auth": {
           "default": false,
-          "description": "Does this provider require an OpenAI API Key or ChatGPT login token? If true, user is presented with login screen on first run, and login preference and token/key are stored in auth.json. If false (which is the default), login screen is skipped, and API key (if needed) comes from the \"env_key\" environment variable.",
+          "description": "Does this provider require Astral-managed credentials? If true, the user is presented with the login screen on first run, and credentials are stored in auth.json. If false (which is the default), the login screen is skipped, and API keys (if needed) come from provider-specific auth such as \"env_key\" or \"auth\".",
           "type": "boolean"
         },
         "stream_idle_timeout_ms": {

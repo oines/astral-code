@@ -819,7 +819,7 @@ impl App {
         let feedback_audience = bootstrap.feedback_audience;
         let auth_mode = bootstrap.auth_mode;
         let has_chatgpt_account = bootstrap.has_chatgpt_account;
-        let requires_openai_auth = bootstrap.requires_openai_auth;
+        let requires_astral_auth = bootstrap.requires_astral_auth;
         let status_account_display = bootstrap.status_account_display.clone();
         let initial_plan_type = bootstrap.plan_type;
         let session_telemetry = SessionTelemetry::new(
@@ -1109,7 +1109,7 @@ See the Codex keymap documentation for supported actions and examples."
         app.refresh_startup_skills(&app_server);
         // Kick off a non-blocking rate-limit prefetch so the first `/status`
         // already has data, without delaying the initial frame render.
-        if requires_openai_auth && has_chatgpt_account {
+        if requires_astral_auth && has_chatgpt_account {
             app.refresh_rate_limits(&app_server, RateLimitRefreshOrigin::StartupPrefetch);
         }
 

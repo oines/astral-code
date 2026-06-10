@@ -1181,7 +1181,7 @@ fn auth_check(config: &Config) -> DoctorCheck {
         ));
     }
     if let Some(check) = provider_specific_auth_check(
-        config.model_provider.requires_openai_auth,
+        config.model_provider.requires_astral_auth,
         config.model_provider.env_key.as_deref(),
         config.model_provider.env_key_instructions.as_deref(),
         details.clone(),
@@ -1257,16 +1257,16 @@ fn auth_check(config: &Config) -> DoctorCheck {
 }
 
 fn provider_specific_auth_check(
-    requires_openai_auth: bool,
+    requires_astral_auth: bool,
     provider_env_key: Option<&str>,
     provider_env_key_instructions: Option<&str>,
     mut details: Vec<String>,
     env_var_present: impl Fn(&str) -> bool,
 ) -> Option<DoctorCheck> {
     details.push(format!(
-        "model provider uses Astral auth manager: {requires_openai_auth}"
+        "model provider uses Astral auth manager: {requires_astral_auth}"
     ));
-    if requires_openai_auth {
+    if requires_astral_auth {
         return None;
     }
 
@@ -2497,7 +2497,7 @@ fn provider_reachability_plan(config: &Config) -> ReachabilityPlan {
             .ok()
             .flatten();
     let mode = provider_auth_reachability_mode_from_auth(
-        config.model_provider.requires_openai_auth,
+        config.model_provider.requires_astral_auth,
         env_var_present,
         stored_auth.as_ref(),
     );
@@ -2523,11 +2523,11 @@ fn default_reachability_plan() -> ReachabilityPlan {
 }
 
 fn provider_auth_reachability_mode_from_auth(
-    requires_openai_auth: bool,
+    requires_astral_auth: bool,
     env_var_present: impl Fn(&str) -> bool,
     stored_auth: Option<&AuthDotJson>,
 ) -> ProviderAuthReachabilityMode {
-    if !requires_openai_auth {
+    if !requires_astral_auth {
         return ProviderAuthReachabilityMode::NotRequired;
     }
     if env_var_present(ASTRAL_API_KEY_ENV_VAR) {
@@ -3385,7 +3385,7 @@ mod tests {
     #[test]
     fn provider_specific_auth_allows_non_openai_provider_without_env_key() {
         let check = provider_specific_auth_check(
-            /*requires_openai_auth*/ false,
+            /*requires_astral_auth*/ false,
             /*provider_env_key*/ None,
             /*provider_env_key_instructions*/ None,
             Vec::new(),
@@ -3403,7 +3403,7 @@ mod tests {
     #[test]
     fn provider_specific_auth_fails_when_provider_env_key_is_missing() {
         let check = provider_specific_auth_check(
-            /*requires_openai_auth*/ false,
+            /*requires_astral_auth*/ false,
             Some("PROVIDER_API_KEY"),
             Some("Set PROVIDER_API_KEY before running Codex."),
             Vec::new(),
@@ -3495,7 +3495,7 @@ mod tests {
 
         assert_eq!(
             provider_auth_reachability_mode_from_auth(
-                /*requires_openai_auth*/ true,
+                /*requires_astral_auth*/ true,
                 |_| false,
                 Some(&api_key_auth),
             ),
@@ -3503,7 +3503,7 @@ mod tests {
         );
         assert_eq!(
             provider_auth_reachability_mode_from_auth(
-                /*requires_openai_auth*/ true,
+                /*requires_astral_auth*/ true,
                 |name| name == ASTRAL_API_KEY_ENV_VAR,
                 /*stored_auth*/ None,
             ),
@@ -3511,7 +3511,7 @@ mod tests {
         );
         assert_eq!(
             provider_auth_reachability_mode_from_auth(
-                /*requires_openai_auth*/ true,
+                /*requires_astral_auth*/ true,
                 |_| false,
                 /*stored_auth*/ None,
             ),

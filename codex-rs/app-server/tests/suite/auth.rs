@@ -29,11 +29,11 @@ const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 
 fn create_config_toml_custom_provider(
     codex_home: &Path,
-    requires_openai_auth: bool,
+    requires_astral_auth: bool,
 ) -> std::io::Result<()> {
     let config_toml = codex_home.join("config.toml");
-    let requires_line = if requires_openai_auth {
-        "requires_openai_auth = true\n"
+    let requires_line = if requires_astral_auth {
+        "requires_astral_auth = true\n"
     } else {
         ""
     };
@@ -146,7 +146,7 @@ async fn get_auth_status_with_api_key() -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn get_auth_status_with_api_key_when_auth_not_required() -> Result<()> {
     let codex_home = TempDir::new()?;
-    create_config_toml_custom_provider(codex_home.path(), /*requires_openai_auth*/ false)?;
+    create_config_toml_custom_provider(codex_home.path(), /*requires_astral_auth*/ false)?;
 
     let mut mcp = TestAppServer::new(codex_home.path()).await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
@@ -169,9 +169,9 @@ async fn get_auth_status_with_api_key_when_auth_not_required() -> Result<()> {
     assert_eq!(status.auth_method, None, "expected no auth method");
     assert_eq!(status.auth_token, None, "expected no token");
     assert_eq!(
-        status.requires_openai_auth,
+        status.requires_astral_auth,
         Some(false),
-        "requires_openai_auth should be false",
+        "requires_astral_auth should be false",
     );
     Ok(())
 }
@@ -232,7 +232,7 @@ async fn get_auth_status_with_api_key_refresh_requested() -> Result<()> {
         GetAuthStatusResponse {
             auth_method: Some(AuthMode::ApiKey),
             auth_token: Some("sk-test-key".to_string()),
-            requires_openai_auth: Some(true),
+            requires_astral_auth: Some(true),
         }
     );
     Ok(())
@@ -296,7 +296,7 @@ async fn get_auth_status_omits_token_after_permanent_refresh_failure() -> Result
         GetAuthStatusResponse {
             auth_method: Some(AuthMode::Chatgpt),
             auth_token: None,
-            requires_openai_auth: Some(true),
+            requires_astral_auth: Some(true),
         }
     );
 
@@ -378,7 +378,7 @@ async fn get_auth_status_omits_token_after_proactive_refresh_failure() -> Result
         GetAuthStatusResponse {
             auth_method: Some(AuthMode::Chatgpt),
             auth_token: None,
-            requires_openai_auth: Some(true),
+            requires_astral_auth: Some(true),
         }
     );
 
@@ -445,7 +445,7 @@ async fn get_auth_status_returns_token_after_proactive_refresh_recovery() -> Res
         GetAuthStatusResponse {
             auth_method: Some(AuthMode::Chatgpt),
             auth_token: None,
-            requires_openai_auth: Some(true),
+            requires_astral_auth: Some(true),
         }
     );
 
@@ -478,7 +478,7 @@ async fn get_auth_status_returns_token_after_proactive_refresh_recovery() -> Res
         GetAuthStatusResponse {
             auth_method: Some(AuthMode::Chatgpt),
             auth_token: Some("recovered-access-token".to_string()),
-            requires_openai_auth: Some(true),
+            requires_astral_auth: Some(true),
         }
     );
 

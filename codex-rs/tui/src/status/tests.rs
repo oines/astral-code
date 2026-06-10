@@ -689,7 +689,7 @@ async fn status_model_provider_uses_bedrock_runtime_base_url_and_hides_chatgpt_u
     config.model_provider = ModelProviderInfo {
         name: "OpenAI Proxy".to_string(),
         base_url: Some("https://openai-proxy.example/v1".to_string()),
-        requires_openai_auth: true,
+        requires_astral_auth: true,
         ..ModelProviderInfo::default()
     };
     let (composite, _handle) = new_status_output_with_rate_limits_handle(

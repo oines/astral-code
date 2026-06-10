@@ -322,15 +322,15 @@ impl AccountRequestProcessor {
         self.refresh_token_if_requested(do_refresh).await;
 
         // Determine whether auth is required based on the active model provider.
-        // If a custom provider is configured with `requires_openai_auth == false`,
+        // If a custom provider is configured with `requires_astral_auth == false`,
         // then no auth step is required; otherwise, default to requiring auth.
-        let requires_openai_auth = self.config.model_provider.requires_openai_auth;
+        let requires_astral_auth = self.config.model_provider.requires_astral_auth;
 
-        let response = if !requires_openai_auth {
+        let response = if !requires_astral_auth {
             GetAuthStatusResponse {
                 auth_method: None,
                 auth_token: None,
-                requires_openai_auth: Some(false),
+                requires_astral_auth: Some(false),
             }
         } else {
             let auth = if do_refresh {
@@ -342,7 +342,7 @@ impl AccountRequestProcessor {
                 Some(auth) if auth.uses_codex_backend() => GetAuthStatusResponse {
                     auth_method: None,
                     auth_token: None,
-                    requires_openai_auth: Some(true),
+                    requires_astral_auth: Some(true),
                 },
                 Some(auth) => {
                     let permanent_refresh_failure =
@@ -373,13 +373,13 @@ impl AccountRequestProcessor {
                     GetAuthStatusResponse {
                         auth_method: reported_auth_method,
                         auth_token: token_opt,
-                        requires_openai_auth: Some(true),
+                        requires_astral_auth: Some(true),
                     }
                 }
                 None => GetAuthStatusResponse {
                     auth_method: None,
                     auth_token: None,
-                    requires_openai_auth: Some(true),
+                    requires_astral_auth: Some(true),
                 },
             }
         };
@@ -404,7 +404,7 @@ impl AccountRequestProcessor {
 
         Ok(GetAccountResponse {
             account,
-            requires_openai_auth: account_state.requires_openai_auth,
+            requires_astral_auth: account_state.requires_astral_auth,
         })
     }
 

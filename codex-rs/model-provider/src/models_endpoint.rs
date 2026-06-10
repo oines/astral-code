@@ -218,7 +218,7 @@ mod tests {
                     .try_into()
                     .expect("current dir should be absolute"),
             }),
-            requires_openai_auth: false,
+            requires_astral_auth: false,
             ..ModelProviderInfo::create_openai_provider(/*base_url*/ None)
         }
     }

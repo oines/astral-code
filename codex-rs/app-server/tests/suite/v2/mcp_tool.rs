@@ -79,7 +79,7 @@ async fn mcp_server_tool_call_returns_tool_result() -> Result<()> {
         &responses_server.uri(),
         &BTreeMap::new(),
         /*auto_compact_limit*/ 1024,
-        /*requires_openai_auth*/ None,
+        /*requires_astral_auth*/ None,
         "mock_provider",
         "compact",
     )?;
@@ -197,7 +197,7 @@ async fn mcp_server_tool_call_round_trips_elicitation() -> Result<()> {
         &responses_server.uri(),
         &BTreeMap::new(),
         /*auto_compact_limit*/ 1024,
-        /*requires_openai_auth*/ None,
+        /*requires_astral_auth*/ None,
         "mock_provider",
         "compact",
     )?;
@@ -307,7 +307,7 @@ async fn mcp_server_tool_call_forwards_url_elicitation() -> Result<()> {
         &responses_server.uri(),
         &BTreeMap::new(),
         /*auto_compact_limit*/ 1024,
-        /*requires_openai_auth*/ None,
+        /*requires_astral_auth*/ None,
         "mock_provider",
         "compact",
     )?;
@@ -427,7 +427,7 @@ async fn mcp_tool_call_completion_notification_contains_truncated_large_result()
         &responses_server.uri(),
         &BTreeMap::new(),
         /*auto_compact_limit*/ 1_000_000,
-        /*requires_openai_auth*/ None,
+        /*requires_astral_auth*/ None,
         "mock_provider",
         "compact",
     )?;

@@ -46,7 +46,7 @@ impl AuthProvider for AgentIdentityAuthProvider {
 }
 
 // Some providers are meant to send no auth headers. Examples include local OSS
-// providers and custom test providers with `requires_openai_auth = false`.
+// providers and custom test providers with `requires_astral_auth = false`.
 #[derive(Clone, Debug)]
 struct UnauthenticatedAuthProvider;
 
@@ -68,7 +68,7 @@ pub(crate) fn auth_manager_for_provider(
 ) -> Option<Arc<AuthManager>> {
     match provider.auth.clone() {
         Some(config) => Some(AuthManager::external_bearer_only(config)),
-        None if provider.requires_openai_auth => auth_manager,
+        None if provider.requires_astral_auth => auth_manager,
         None => None,
     }
 }

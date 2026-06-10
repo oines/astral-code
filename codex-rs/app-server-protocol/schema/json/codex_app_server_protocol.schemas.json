@@ -9558,12 +9558,12 @@
               }
             ]
           },
-          "requiresOpenaiAuth": {
+          "requiresAstralAuth": {
             "type": "boolean"
           }
         },
         "required": [
-          "requiresOpenaiAuth"
+          "requiresAstralAuth"
         ],
         "title": "GetAccountResponse",
         "type": "object"

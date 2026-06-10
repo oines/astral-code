@@ -191,7 +191,7 @@ pub struct ExecOneOffCommandParams {
 pub struct GetAuthStatusResponse {
     pub auth_method: Option<AuthMode>,
     pub auth_token: Option<String>,
-    pub requires_openai_auth: Option<bool>,
+    pub requires_astral_auth: Option<bool>,
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq, Serialize, JsonSchema, TS)]

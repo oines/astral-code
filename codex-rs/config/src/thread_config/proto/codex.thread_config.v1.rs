@@ -72,7 +72,7 @@ pub struct ModelProvider {
     #[prost(uint64, optional, tag = "15")]
     pub websocket_connect_timeout_ms: ::core::option::Option<u64>,
     #[prost(bool, tag = "16")]
-    pub requires_openai_auth: bool,
+    pub requires_astral_auth: bool,
     #[prost(bool, tag = "17")]
     pub supports_websockets: bool,
 }
@@ -100,6 +100,8 @@ pub struct ModelProviderAuthInfo {
 pub enum WireApi {
     Unspecified = 0,
     Responses = 1,
+    AnthropicMessages = 2,
+    ChatCompletions = 3,
 }
 impl WireApi {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -110,6 +112,8 @@ impl WireApi {
         match self {
             Self::Unspecified => "WIRE_API_UNSPECIFIED",
             Self::Responses => "WIRE_API_RESPONSES",
+            Self::AnthropicMessages => "WIRE_API_ANTHROPIC_MESSAGES",
+            Self::ChatCompletions => "WIRE_API_CHAT_COMPLETIONS",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -117,6 +121,8 @@ impl WireApi {
         match value {
             "WIRE_API_UNSPECIFIED" => Some(Self::Unspecified),
             "WIRE_API_RESPONSES" => Some(Self::Responses),
+            "WIRE_API_ANTHROPIC_MESSAGES" => Some(Self::AnthropicMessages),
+            "WIRE_API_CHAT_COMPLETIONS" => Some(Self::ChatCompletions),
             _ => None,
         }
     }

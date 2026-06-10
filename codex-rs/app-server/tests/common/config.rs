@@ -8,7 +8,7 @@ pub fn write_mock_responses_config_toml(
     server_uri: &str,
     feature_flags: &BTreeMap<Feature, bool>,
     auto_compact_limit: i64,
-    requires_openai_auth: Option<bool>,
+    requires_astral_auth: Option<bool>,
     model_provider_id: &str,
     compact_prompt: &str,
 ) -> std::io::Result<()> {
@@ -30,11 +30,11 @@ pub fn write_mock_responses_config_toml(
         .collect::<Vec<_>>()
         .join("\n");
     // Phase 2: build provider-specific config bits.
-    let requires_line = match requires_openai_auth {
-        Some(true) => "requires_openai_auth = true\n".to_string(),
+    let requires_line = match requires_astral_auth {
+        Some(true) => "requires_astral_auth = true\n".to_string(),
         Some(false) | None => String::new(),
     };
-    let provider_name = if matches!(requires_openai_auth, Some(true)) {
+    let provider_name = if matches!(requires_astral_auth, Some(true)) {
         "OpenAI"
     } else {
         "Mock provider for test"

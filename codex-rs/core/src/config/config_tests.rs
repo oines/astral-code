@@ -626,7 +626,7 @@ model_provider = "amazon-bedrock"
 [model_providers.amazon-bedrock]
 name = "Custom Bedrock"
 base_url = "https://bedrock.example.com/v1"
-requires_openai_auth = true
+requires_astral_auth = true
 supports_websockets = true
 
 [model_providers.amazon-bedrock.aws]

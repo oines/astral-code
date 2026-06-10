@@ -161,7 +161,7 @@ pub(crate) struct AppServerBootstrap {
     /// Whether the configured model provider needs OpenAI-style auth. Combined
     /// with `has_chatgpt_account` to decide if a startup rate-limit prefetch
     /// should be fired.
-    pub(crate) requires_openai_auth: bool,
+    pub(crate) requires_astral_auth: bool,
     pub(crate) default_model: String,
     pub(crate) feedback_audience: FeedbackAudience,
     pub(crate) has_chatgpt_account: bool,
@@ -306,7 +306,7 @@ impl AppServerSession {
             auth_mode,
             status_account_display,
             plan_type,
-            requires_openai_auth: account.requires_openai_auth,
+            requires_astral_auth: account.requires_astral_auth,
             default_model,
             feedback_audience,
             has_chatgpt_account,

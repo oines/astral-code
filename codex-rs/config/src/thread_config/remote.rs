@@ -153,6 +153,8 @@ fn model_provider_from_proto(
     let id = provider.id;
     let wire_api = match proto::WireApi::try_from(provider.wire_api) {
         Ok(proto::WireApi::Responses) => WireApi::Responses,
+        Ok(proto::WireApi::AnthropicMessages) => WireApi::AnthropicMessages,
+        Ok(proto::WireApi::ChatCompletions) => WireApi::ChatCompletions,
         Ok(proto::WireApi::Unspecified) => {
             return Err(parse_error("remote thread config omitted wire_api"));
         }
@@ -183,7 +185,7 @@ fn model_provider_from_proto(
         stream_max_retries: provider.stream_max_retries,
         stream_idle_timeout_ms: provider.stream_idle_timeout_ms,
         websocket_connect_timeout_ms: provider.websocket_connect_timeout_ms,
-        requires_openai_auth: provider.requires_openai_auth,
+        requires_astral_auth: provider.requires_astral_auth,
         supports_websockets: provider.supports_websockets,
     };
     Ok((id, info))
@@ -211,7 +213,7 @@ fn model_provider_to_proto(
         stream_max_retries,
         stream_idle_timeout_ms,
         websocket_connect_timeout_ms,
-        requires_openai_auth,
+        requires_astral_auth,
         supports_websockets,
     } = provider;
 
@@ -231,7 +233,7 @@ fn model_provider_to_proto(
         stream_max_retries,
         stream_idle_timeout_ms,
         websocket_connect_timeout_ms,
-        requires_openai_auth,
+        requires_astral_auth,
         supports_websockets,
     }
 }
@@ -285,6 +287,8 @@ fn proto_string_map(values: HashMap<String, String>) -> proto::StringMap {
 fn proto_wire_api(wire_api: WireApi) -> proto::WireApi {
     match wire_api {
         WireApi::Responses => proto::WireApi::Responses,
+        WireApi::AnthropicMessages => proto::WireApi::AnthropicMessages,
+        WireApi::ChatCompletions => proto::WireApi::ChatCompletions,
     }
 }
 
@@ -396,12 +400,21 @@ mod tests {
 
     #[test]
     fn model_provider_proto_roundtrips_through_domain_type() {
-        let expected = expected_provider();
-        let proto = model_provider_to_proto("local", expected.clone());
-        let (id, actual) = model_provider_from_proto(proto).expect("model provider from proto");
+        for wire_api in [
+            WireApi::Responses,
+            WireApi::AnthropicMessages,
+            WireApi::ChatCompletions,
+        ] {
+            let expected = ModelProviderInfo {
+                wire_api,
+                ..expected_provider()
+            };
+            let proto = model_provider_to_proto("local", expected.clone());
+            let (id, actual) = model_provider_from_proto(proto).expect("model provider from proto");
 
-        assert_eq!(id, "local");
-        assert_eq!(actual, expected);
+            assert_eq!(id, "local");
+            assert_eq!(actual, expected);
+        }
     }
 
     fn proto_sources() -> Vec<proto::ThreadConfigSource> {
@@ -448,7 +461,7 @@ mod tests {
                             stream_max_retries: Some(8),
                             stream_idle_timeout_ms: Some(9_000),
                             websocket_connect_timeout_ms: Some(10_000),
-                            requires_openai_auth: false,
+                            requires_astral_auth: false,
                             supports_websockets: true,
                         }],
                         features: HashMap::from([
@@ -512,7 +525,7 @@ mod tests {
             stream_max_retries: Some(8),
             stream_idle_timeout_ms: Some(9_000),
             websocket_connect_timeout_ms: Some(10_000),
-            requires_openai_auth: false,
+            requires_astral_auth: false,
             supports_websockets: true,
             aws: None,
         }

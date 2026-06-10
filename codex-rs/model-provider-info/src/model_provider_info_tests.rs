@@ -30,7 +30,7 @@ base_url = "http://localhost:11434/v1"
         stream_max_retries: None,
         stream_idle_timeout_ms: None,
         websocket_connect_timeout_ms: None,
-        requires_openai_auth: false,
+        requires_astral_auth: false,
         supports_websockets: false,
     };
 
@@ -65,7 +65,7 @@ query_params = { api-version = "2025-04-01-preview" }
         stream_max_retries: None,
         stream_idle_timeout_ms: None,
         websocket_connect_timeout_ms: None,
-        requires_openai_auth: false,
+        requires_astral_auth: false,
         supports_websockets: false,
     };
 
@@ -103,7 +103,7 @@ env_http_headers = { "X-Example-Env-Header" = "EXAMPLE_ENV_VAR" }
         stream_max_retries: None,
         stream_idle_timeout_ms: None,
         websocket_connect_timeout_ms: None,
-        requires_openai_auth: false,
+        requires_astral_auth: false,
         supports_websockets: false,
     };
 
@@ -205,7 +205,7 @@ fn test_create_astral_provider_defaults_to_chat_completions() {
             stream_max_retries: None,
             stream_idle_timeout_ms: None,
             websocket_connect_timeout_ms: None,
-            requires_openai_auth: false,
+            requires_astral_auth: false,
             supports_websockets: false,
         }
     );
@@ -332,7 +332,7 @@ fn test_create_amazon_bedrock_provider() {
             stream_max_retries: None,
             stream_idle_timeout_ms: None,
             websocket_connect_timeout_ms: None,
-            requires_openai_auth: false,
+            requires_astral_auth: false,
             supports_websockets: false,
         }
     );
@@ -522,7 +522,7 @@ fn test_validate_provider_aws_rejects_conflicting_auth() {
 
     assert_eq!(
         provider.validate(),
-        Err("provider aws cannot be combined with env_key, requires_openai_auth".to_string())
+        Err("provider aws cannot be combined with env_key, requires_astral_auth".to_string())
     );
 }
 
@@ -533,7 +533,7 @@ fn test_validate_provider_aws_rejects_websockets() {
             profile: None,
             region: None,
         }),
-        requires_openai_auth: false,
+        requires_astral_auth: false,
         supports_websockets: true,
         ..ModelProviderInfo::create_openai_provider(/*base_url*/ None)
     };

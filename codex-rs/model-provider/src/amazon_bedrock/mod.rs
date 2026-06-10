@@ -73,7 +73,7 @@ impl ModelProvider for AmazonBedrockModelProvider {
     fn account_state(&self) -> ProviderAccountState {
         ProviderAccountState {
             account: Some(ProviderAccount::AmazonBedrock),
-            requires_openai_auth: false,
+            requires_astral_auth: false,
         }
     }
 

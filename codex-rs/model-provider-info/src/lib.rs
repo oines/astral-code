@@ -152,12 +152,13 @@ pub struct ModelProviderInfo {
     /// Maximum time (in milliseconds) to wait for a websocket connection attempt before treating
     /// it as failed.
     pub websocket_connect_timeout_ms: Option<u64>,
-    /// Does this provider require an OpenAI API Key or ChatGPT login token? If true,
-    /// user is presented with login screen on first run, and login preference and token/key
-    /// are stored in auth.json. If false (which is the default), login screen is skipped,
-    /// and API key (if needed) comes from the "env_key" environment variable.
+    /// Does this provider require Astral-managed credentials? If true, the user
+    /// is presented with the login screen on first run, and credentials are
+    /// stored in auth.json. If false (which is the default), the login screen is
+    /// skipped, and API keys (if needed) come from provider-specific auth such
+    /// as "env_key" or "auth".
     #[serde(default)]
-    pub requires_openai_auth: bool,
+    pub requires_astral_auth: bool,
     /// Whether this provider supports the Responses API WebSocket transport.
     #[serde(default)]
     pub supports_websockets: bool,
@@ -193,8 +194,8 @@ impl ModelProviderInfo {
             if self.auth.is_some() {
                 conflicts.push("auth");
             }
-            if self.requires_openai_auth {
-                conflicts.push("requires_openai_auth");
+            if self.requires_astral_auth {
+                conflicts.push("requires_astral_auth");
             }
 
             if !conflicts.is_empty() {
@@ -220,8 +221,8 @@ impl ModelProviderInfo {
         if self.experimental_bearer_token.is_some() {
             conflicts.push("experimental_bearer_token");
         }
-        if self.requires_openai_auth {
-            conflicts.push("requires_openai_auth");
+        if self.requires_astral_auth {
+            conflicts.push("requires_astral_auth");
         }
 
         if conflicts.is_empty() {
@@ -378,7 +379,7 @@ impl ModelProviderInfo {
             stream_max_retries: None,
             stream_idle_timeout_ms: None,
             websocket_connect_timeout_ms: None,
-            requires_openai_auth: false,
+            requires_astral_auth: false,
             supports_websockets: false,
         }
     }
@@ -416,7 +417,7 @@ impl ModelProviderInfo {
             stream_max_retries: None,
             stream_idle_timeout_ms: None,
             websocket_connect_timeout_ms: None,
-            requires_openai_auth: true,
+            requires_astral_auth: true,
             supports_websockets: true,
         }
     }
@@ -448,7 +449,7 @@ impl ModelProviderInfo {
             stream_max_retries: None,
             stream_idle_timeout_ms: None,
             websocket_connect_timeout_ms: None,
-            requires_openai_auth: false,
+            requires_astral_auth: false,
             supports_websockets: false,
         }
     }
@@ -479,7 +480,7 @@ impl ModelProviderInfo {
             stream_max_retries: None,
             stream_idle_timeout_ms: None,
             websocket_connect_timeout_ms: None,
-            requires_openai_auth: false,
+            requires_astral_auth: false,
             supports_websockets: false,
         }
     }
@@ -617,7 +618,7 @@ pub fn create_oss_provider_with_base_url(base_url: &str, wire_api: WireApi) -> M
         stream_max_retries: None,
         stream_idle_timeout_ms: None,
         websocket_connect_timeout_ms: None,
-        requires_openai_auth: false,
+        requires_astral_auth: false,
         supports_websockets: false,
     }
 }
