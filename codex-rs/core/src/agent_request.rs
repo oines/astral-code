@@ -54,7 +54,9 @@ pub(crate) fn build_agent_request(params: AgentRequestBuildParams<'_>) -> Result
         stream: true,
         reasoning: build_reasoning_config(params.model_info, params.effort, params.summary),
         metadata: RequestMetadata {
-            service_tier: params.service_tier,
+            service_tier: params
+                .model_info
+                .service_tier_for_request(params.service_tier),
             prompt_cache_key: Some(params.prompt_cache_key),
             provider: Default::default(),
         },

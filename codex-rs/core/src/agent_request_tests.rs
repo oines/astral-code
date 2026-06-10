@@ -39,6 +39,11 @@ fn test_model_info(supports_reasoning_summaries: bool) -> ModelInfo {
         "supports_image_detail_original": false,
         "context_window": 272000,
         "auto_compact_token_limit": null,
+        "service_tiers": [{
+            "id": "priority",
+            "name": "Priority",
+            "description": "Priority routing"
+        }],
         "experimental_supported_tools": []
     }))
     .expect("deserialize test model info")
