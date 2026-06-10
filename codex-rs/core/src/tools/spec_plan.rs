@@ -9,6 +9,7 @@ use crate::tools::handlers::AstralBashHandler;
 use crate::tools::handlers::AstralFileToolHandler;
 use crate::tools::handlers::AstralFileToolKind;
 use crate::tools::handlers::AstralMonitorHandler;
+use crate::tools::handlers::AstralRequestPermissionsHandler;
 use crate::tools::handlers::AstralTodoWriteHandler;
 use crate::tools::handlers::AstralToolSearchHandler;
 use crate::tools::handlers::CodeModeExecuteHandler;
@@ -81,7 +82,6 @@ use codex_tools::LIST_MCP_RESOURCES_TOOL_NAME;
 use codex_tools::MONITOR_TOOL_NAME;
 use codex_tools::READ_MCP_RESOURCE_TOOL_NAME;
 use codex_tools::READ_TOOL_NAME;
-use codex_tools::REQUEST_PERMISSIONS_TOOL_NAME;
 use codex_tools::ResponsesApiNamespace;
 use codex_tools::ResponsesApiNamespaceTool;
 use codex_tools::SEND_MESSAGE_TOOL_NAME;
@@ -320,7 +320,6 @@ fn astral_spec_for_model_request(
             Some(BASH_TOOL_NAME)
         }
         "update_plan" => Some(TODO_WRITE_TOOL_NAME),
-        "request_permissions" => Some(REQUEST_PERMISSIONS_TOOL_NAME),
         "list_mcp_resources" => Some(LIST_MCP_RESOURCES_TOOL_NAME),
         "read_mcp_resource" => Some(READ_MCP_RESOURCE_TOOL_NAME),
         "spawn_agent" => Some(AGENT_TOOL_NAME),
@@ -874,7 +873,8 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut
     }
 
     if features.enabled(Feature::RequestPermissionsTool) {
-        planned_tools.add(RequestPermissionsHandler);
+        planned_tools.add(AstralRequestPermissionsHandler::new());
+        planned_tools.add_dispatch_only(RequestPermissionsHandler);
     }
 
     if tool_suggest_enabled(turn_context)

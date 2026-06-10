@@ -374,9 +374,17 @@ fn request_permissions_tool() -> AgentTool {
             [
                 string_property("tool_name", "The tool requiring permission"),
                 json_property("input", "The original tool input that was blocked"),
+                json_property(
+                    "permissions",
+                    "Permission profile to request directly when no blocked tool input is available",
+                ),
+                string_property(
+                    "environment_id",
+                    "Optional target execution environment id when multiple environments exist",
+                ),
                 string_property("reason", "Brief reason permission is needed"),
             ],
-            ["tool_name", "input", "reason"],
+            ["reason"],
         ),
     )
 }

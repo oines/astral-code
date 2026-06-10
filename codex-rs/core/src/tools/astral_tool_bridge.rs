@@ -3,7 +3,6 @@ use crate::tools::context::ToolPayload;
 use codex_tools::AGENT_TOOL_NAME;
 use codex_tools::LIST_MCP_RESOURCES_TOOL_NAME;
 use codex_tools::READ_MCP_RESOURCE_TOOL_NAME;
-use codex_tools::REQUEST_PERMISSIONS_TOOL_NAME;
 use codex_tools::SEND_MESSAGE_TOOL_NAME;
 use codex_tools::TASK_STOP_TOOL_NAME;
 use codex_tools::ToolName;
@@ -28,11 +27,6 @@ pub(crate) fn canonicalize_astral_tool_call(
     };
 
     let payload = match tool_name.name.as_str() {
-        REQUEST_PERMISSIONS_TOOL_NAME => rewrite_function_payload(
-            payload,
-            REQUEST_PERMISSIONS_TOOL_NAME,
-            rewrite_request_permissions_args,
-        )?,
         AGENT_TOOL_NAME => rewrite_function_payload(payload, AGENT_TOOL_NAME, rewrite_agent_args)?,
         SEND_MESSAGE_TOOL_NAME => {
             rewrite_function_payload(payload, SEND_MESSAGE_TOOL_NAME, rewrite_send_message_args)?
@@ -53,7 +47,6 @@ fn canonical_astral_plain_name(tool_name: &ToolName) -> Option<&'static str> {
     }
 
     match tool_name.name.as_str() {
-        REQUEST_PERMISSIONS_TOOL_NAME => Some("request_permissions"),
         LIST_MCP_RESOURCES_TOOL_NAME => Some("list_mcp_resources"),
         READ_MCP_RESOURCE_TOOL_NAME => Some("read_mcp_resource"),
         AGENT_TOOL_NAME => Some("spawn_agent"),
@@ -91,27 +84,6 @@ fn serialize_json_arguments(tool_name: &str, value: Value) -> Result<String, Fun
             "failed to serialize canonical {tool_name} arguments: {err}"
         ))
     })
-}
-
-fn rewrite_request_permissions_args(value: Value) -> Result<Value, FunctionCallError> {
-    let args: AstralRequestPermissionsArgs = serde_json::from_value(value).map_err(|err| {
-        FunctionCallError::RespondToModel(format!(
-            "failed to parse {REQUEST_PERMISSIONS_TOOL_NAME} arguments: {err}"
-        ))
-    })?;
-    let permissions = args
-        .input
-        .get("additional_permissions")
-        .or_else(|| args.input.get("additionalPermissions"))
-        .or_else(|| args.input.get("permissions"))
-        .cloned()
-        .unwrap_or_else(|| json!({}));
-
-    Ok(json!({
-        "environment_id": args.environment_id,
-        "reason": args.reason,
-        "permissions": permissions,
-    }))
 }
 
 fn rewrite_agent_args(value: Value) -> Result<Value, FunctionCallError> {
@@ -162,14 +134,6 @@ fn rewrite_task_stop_args(value: Value) -> Result<Value, FunctionCallError> {
     })?;
 
     Ok(json!({ "target": target }))
-}
-
-#[derive(Deserialize)]
-struct AstralRequestPermissionsArgs {
-    reason: String,
-    input: Value,
-    #[serde(default, rename = "environment_id", alias = "environmentId")]
-    environment_id: Option<String>,
 }
 
 #[derive(Deserialize)]

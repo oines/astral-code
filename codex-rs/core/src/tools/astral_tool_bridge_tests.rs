@@ -6,6 +6,7 @@ use codex_tools::GLOB_TOOL_NAME;
 use codex_tools::GREP_TOOL_NAME;
 use codex_tools::MONITOR_TOOL_NAME;
 use codex_tools::READ_TOOL_NAME;
+use codex_tools::REQUEST_PERMISSIONS_TOOL_NAME;
 use codex_tools::TODO_WRITE_TOOL_NAME;
 use codex_tools::TOOL_SEARCH_FLAVOR_TOOL_NAME;
 use codex_tools::WRITE_TOOL_NAME;
@@ -223,7 +224,7 @@ fn leaves_ask_user_question_native_for_astral_handler() -> anyhow::Result<()> {
 }
 
 #[test]
-fn canonicalizes_request_permissions_from_blocked_input() -> anyhow::Result<()> {
+fn leaves_request_permissions_native_for_astral_handler() -> anyhow::Result<()> {
     let (tool_name, arguments) = canonicalize_function(
         REQUEST_PERMISSIONS_TOOL_NAME,
         json!({
@@ -238,14 +239,17 @@ fn canonicalizes_request_permissions_from_blocked_input() -> anyhow::Result<()> 
         }),
     )?;
 
-    assert_eq!(tool_name, ToolName::plain("request_permissions"));
+    assert_eq!(tool_name, ToolName::plain(REQUEST_PERMISSIONS_TOOL_NAME));
     assert_eq!(
         arguments,
         json!({
-            "environment_id": null,
             "reason": "Need network for dependency download",
-            "permissions": {
-                "network": { "enabled": true }
+            "tool_name": "Bash",
+            "input": {
+                "command": "npm install",
+                "additional_permissions": {
+                    "network": { "enabled": true }
+                }
             }
         })
     );
