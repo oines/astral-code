@@ -24,8 +24,6 @@ use codex_app_server_protocol::AuthMode as ApiAuthMode;
 use codex_protocol::config_types::ForcedLoginMethod;
 use codex_protocol::config_types::ModelProviderAuthInfo;
 
-use super::access_token::CodexAccessToken;
-use super::access_token::classify_codex_access_token;
 use super::external_bearer::BearerTokenRefresher;
 use super::revoke::revoke_auth_tokens;
 pub use crate::auth::agent_identity::AgentIdentityAuth;
@@ -550,46 +548,6 @@ pub fn login_with_api_key(
         last_refresh: None,
         agent_identity: None,
         personal_access_token: None,
-    };
-    save_auth(codex_home, &auth_dot_json, auth_credentials_store_mode)
-}
-
-/// Writes an `auth.json` that contains only the access token.
-pub async fn login_with_access_token(
-    codex_home: &Path,
-    access_token: &str,
-    auth_credentials_store_mode: AuthCredentialsStoreMode,
-    chatgpt_base_url: Option<&str>,
-) -> std::io::Result<()> {
-    let auth_dot_json = match classify_codex_access_token(access_token) {
-        CodexAccessToken::PersonalAccessToken(access_token) => {
-            PersonalAccessTokenAuth::load(access_token).await?;
-            AuthDotJson {
-                // Infer PAT auth from the credential field so older Codex builds can still
-                // deserialize auth.json after a rollback.
-                auth_mode: None,
-                openai_api_key: None,
-                tokens: None,
-                last_refresh: None,
-                agent_identity: None,
-                personal_access_token: Some(access_token.to_string()),
-            }
-        }
-        CodexAccessToken::AgentIdentityJwt(jwt) => {
-            let base_url = chatgpt_base_url
-                .unwrap_or(DEFAULT_CHATGPT_BACKEND_BASE_URL)
-                .trim_end_matches('/')
-                .to_string();
-            verified_agent_identity_record(jwt, &base_url).await?;
-            AuthDotJson {
-                auth_mode: Some(ApiAuthMode::AgentIdentity),
-                openai_api_key: None,
-                tokens: None,
-                last_refresh: None,
-                agent_identity: Some(jwt.to_string()),
-                personal_access_token: None,
-            }
-        }
     };
     save_auth(codex_home, &auth_dot_json, auth_credentials_store_mode)
 }
