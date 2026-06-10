@@ -4,6 +4,8 @@ use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
 use crate::tools::handlers::ExecCommandHandler;
 use crate::tools::handlers::ExecCommandHandlerOptions;
+use crate::tools::handlers::ShellCommandHandler;
+use crate::tools::handlers::ShellCommandHandlerOptions;
 use crate::tools::handlers::parse_arguments;
 use crate::tools::handlers::rewrite_function_string_argument;
 use crate::tools::handlers::updated_hook_command;
@@ -23,13 +25,24 @@ use serde_json::Map;
 use serde_json::Value;
 
 pub struct AstralBashHandler {
-    exec: ExecCommandHandler,
+    backend: AstralBashBackend,
+}
+
+enum AstralBashBackend {
+    UnifiedExec(ExecCommandHandler),
+    ShellCommand(ShellCommandHandler),
 }
 
 impl AstralBashHandler {
     pub(crate) fn new(options: ExecCommandHandlerOptions) -> Self {
         Self {
-            exec: ExecCommandHandler::new(options),
+            backend: AstralBashBackend::UnifiedExec(ExecCommandHandler::new(options)),
+        }
+    }
+
+    pub(crate) fn new_shell_command(options: ShellCommandHandlerOptions) -> Self {
+        Self {
+            backend: AstralBashBackend::ShellCommand(ShellCommandHandler::new(options)),
         }
     }
 }
@@ -67,13 +80,24 @@ impl ToolExecutor<ToolInvocation> for AstralBashHandler {
         &self,
         invocation: ToolInvocation,
     ) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
-        self.exec.handle(to_exec_invocation(invocation)?).await
+        match &self.backend {
+            AstralBashBackend::UnifiedExec(exec) => {
+                exec.handle(to_exec_invocation(invocation)?).await
+            }
+            AstralBashBackend::ShellCommand(shell) => {
+                shell.handle(to_shell_command_invocation(invocation)?).await
+            }
+        }
     }
 }
 
 impl CoreToolRuntime for AstralBashHandler {
     fn matches_kind(&self, payload: &ToolPayload) -> bool {
         matches!(payload, ToolPayload::Function { .. })
+    }
+
+    fn waits_for_runtime_cancellation(&self) -> bool {
+        matches!(&self.backend, AstralBashBackend::ShellCommand(_))
     }
 
     fn pre_tool_use_payload(&self, invocation: &ToolInvocation) -> Option<PreToolUsePayload> {
@@ -116,10 +140,13 @@ impl CoreToolRuntime for AstralBashHandler {
         result: &dyn ToolOutput,
     ) -> Option<PostToolUsePayload> {
         let tool_use_id = result.post_tool_use_id(&invocation.call_id);
+        let tool_input = result
+            .post_tool_use_input(&invocation.payload)
+            .or_else(|| bash_tool_input(&invocation.payload))?;
         Some(PostToolUsePayload {
             tool_name: HookToolName::bash(),
             tool_use_id: tool_use_id.clone(),
-            tool_input: result.post_tool_use_input(&invocation.payload)?,
+            tool_input,
             tool_response: result.post_tool_use_response(&tool_use_id, &invocation.payload)?,
         })
     }
@@ -144,6 +171,22 @@ fn to_exec_invocation(mut invocation: ToolInvocation) -> Result<ToolInvocation, 
     Ok(invocation)
 }
 
+fn to_shell_command_invocation(
+    mut invocation: ToolInvocation,
+) -> Result<ToolInvocation, FunctionCallError> {
+    let ToolPayload::Function { arguments } = invocation.payload else {
+        return Err(FunctionCallError::RespondToModel(
+            "Bash handler received unsupported payload".to_string(),
+        ));
+    };
+
+    invocation.tool_name = ToolName::plain("shell_command");
+    invocation.payload = ToolPayload::Function {
+        arguments: rewrite_bash_arguments_for_shell_command(&arguments)?,
+    };
+    Ok(invocation)
+}
+
 fn rewrite_bash_arguments(arguments: &str) -> Result<String, FunctionCallError> {
     let value: Value = parse_arguments(arguments)?;
     let Value::Object(mut object) = value else {
@@ -164,6 +207,25 @@ fn rewrite_bash_arguments(arguments: &str) -> Result<String, FunctionCallError> 
     })
 }
 
+fn rewrite_bash_arguments_for_shell_command(arguments: &str) -> Result<String, FunctionCallError> {
+    let value: Value = parse_arguments(arguments)?;
+    let Value::Object(mut object) = value else {
+        return Err(FunctionCallError::RespondToModel(
+            "Bash arguments must be an object".to_string(),
+        ));
+    };
+
+    move_field_if_absent(&mut object, "cwd", "workdir");
+    move_field_if_absent(&mut object, "timeout", "timeout_ms");
+    object.remove("run_in_background");
+
+    serde_json::to_string(&object).map_err(|err| {
+        FunctionCallError::RespondToModel(format!(
+            "failed to serialize rewritten Bash arguments: {err}"
+        ))
+    })
+}
+
 fn move_field_if_absent(object: &mut Map<String, Value>, from: &str, to: &str) {
     if object.contains_key(to) {
         return;
@@ -171,4 +233,14 @@ fn move_field_if_absent(object: &mut Map<String, Value>, from: &str, to: &str) {
     if let Some(value) = object.remove(from) {
         object.insert(to.to_string(), value);
     }
+}
+
+fn bash_tool_input(payload: &ToolPayload) -> Option<Value> {
+    let ToolPayload::Function { arguments } = payload else {
+        return None;
+    };
+
+    parse_arguments::<AstralBashArgs>(arguments)
+        .ok()
+        .map(|args| serde_json::json!({ "command": args.command }))
 }

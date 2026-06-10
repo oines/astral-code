@@ -472,7 +472,7 @@ async fn shell_family_registers_visible_unified_exec_and_hidden_legacy_shell() {
 }
 
 #[tokio::test]
-async fn shell_zsh_fork_stays_standalone_until_unified_exec_composition_is_enabled() {
+async fn shell_zsh_fork_standalone_backend_keeps_bash_model_visible() {
     let standalone = probe(|turn| {
         set_features(turn, &[Feature::ShellTool, Feature::UnifiedExec]);
         set_feature(turn, Feature::ShellZshFork, /*enabled*/ true);
@@ -481,10 +481,11 @@ async fn shell_zsh_fork_stays_standalone_until_unified_exec_composition_is_enabl
     })
     .await;
 
-    standalone.assert_visible_contains(&["shell_command"]);
-    standalone.assert_visible_lacks(&["exec_command", "write_stdin"]);
-    standalone.assert_registered_contains(&["shell_command"]);
+    standalone.assert_visible_contains(&["Bash"]);
+    standalone.assert_visible_lacks(&["shell_command", "exec_command", "write_stdin", "Monitor"]);
+    standalone.assert_registered_contains(&["Bash", "shell_command"]);
     standalone.assert_registered_lacks(&["exec_command", "write_stdin"]);
+    assert_eq!(standalone.exposure("shell_command"), ToolExposure::Hidden);
 
     let composed = probe(|turn| {
         set_features(

@@ -726,7 +726,8 @@ fn add_shell_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut Planne
         ConfigShellToolType::Default
         | ConfigShellToolType::Local
         | ConfigShellToolType::ShellCommand => {
-            planned_tools.add(ShellCommandHandler::new(shell_command_options));
+            planned_tools.add(AstralBashHandler::new_shell_command(shell_command_options));
+            planned_tools.add_dispatch_only(ShellCommandHandler::new(shell_command_options));
         }
     }
 }
