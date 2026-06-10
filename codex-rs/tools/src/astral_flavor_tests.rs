@@ -68,6 +68,16 @@ fn file_and_search_tools_expose_expected_required_fields() {
         grep.input_schema["properties"]["output_mode"]["enum"],
         json!(["content", "files_with_matches", "count"])
     );
+    assert_eq!(
+        grep.input_schema["properties"]["-n"]["description"],
+        json!("Show line numbers in content output; defaults to true in content mode")
+    );
+    assert_eq!(
+        grep.input_schema["properties"]["head_limit"]["description"],
+        json!(
+            "Limit output to first N lines or entries; defaults to 250, pass 0 for the maximum bounded output"
+        )
+    );
 }
 
 #[test]

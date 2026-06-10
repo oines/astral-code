@@ -209,10 +209,16 @@ fn grep_tool() -> AgentTool {
                 integer_property("-A", "Number of lines to show after each match"),
                 integer_property("-C", "Number of context lines before and after each match"),
                 integer_property("context", "Alias for -C context lines"),
-                bool_property("-n", "Show line numbers in content output"),
+                bool_property(
+                    "-n",
+                    "Show line numbers in content output; defaults to true in content mode",
+                ),
                 bool_property("-i", "Case-insensitive search"),
                 string_property("type", "File type to search, such as rust, py, js, go"),
-                integer_property("head_limit", "Limit output to first N lines or entries"),
+                integer_property(
+                    "head_limit",
+                    "Limit output to first N lines or entries; defaults to 250, pass 0 for the maximum bounded output",
+                ),
                 integer_property("offset", "Skip first N lines or entries before limiting"),
                 bool_property("multiline", "Enable multiline mode"),
             ],

@@ -29,6 +29,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 const DEFAULT_READ_LINE_LIMIT: usize = 2_000;
+const DEFAULT_GREP_HEAD_LIMIT: usize = 250;
 const MAX_SCAN_ENTRIES: usize = 10_000;
 const MAX_RESULT_LINES: usize = 1_000;
 
@@ -418,7 +419,7 @@ struct GrepArgs {
     #[serde(default, rename = "-C", alias = "context")]
     context: Option<usize>,
     #[serde(default, rename = "-n", alias = "line_numbers")]
-    line_numbers: bool,
+    line_numbers: Option<bool>,
     #[serde(default, rename = "-i", alias = "ignore_case")]
     ignore_case: bool,
     #[serde(default, rename = "type", alias = "file_type")]
@@ -445,6 +446,7 @@ async fn grep_files(
     let output_mode = args.output_mode.as_deref().unwrap_or("files_with_matches");
     let context_before = args.context.or(args.before).unwrap_or(0);
     let context_after = args.context.or(args.after).unwrap_or(0);
+    let line_numbers = args.line_numbers.unwrap_or(output_mode == "content");
     let mut output = Vec::new();
 
     for path in files {
@@ -478,7 +480,7 @@ async fn grep_files(
                 &display,
                 &lines,
                 &matched_lines,
-                args.line_numbers,
+                line_numbers,
                 context_before,
                 context_after,
             ),
@@ -491,10 +493,11 @@ async fn grep_files(
     }
 
     let offset = args.offset.unwrap_or(0).min(output.len());
-    let limit = args
-        .head_limit
-        .unwrap_or(MAX_RESULT_LINES)
-        .min(MAX_RESULT_LINES);
+    let limit = match args.head_limit {
+        Some(0) => MAX_RESULT_LINES,
+        Some(limit) => limit.min(MAX_RESULT_LINES),
+        None => DEFAULT_GREP_HEAD_LIMIT,
+    };
     Ok(join_limited_lines(output[offset..].to_vec(), limit))
 }
 
