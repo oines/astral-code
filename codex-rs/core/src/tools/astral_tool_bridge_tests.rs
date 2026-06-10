@@ -265,7 +265,10 @@ fn canonicalizes_multi_agent_tools() -> anyhow::Result<()> {
             "message": "Inspect provider adapters and report gaps",
             "task_name": "audit adapters",
             "agent_type": "reviewer",
-            "model": "astral-fast"
+            "model": "astral-fast",
+            "reasoning_effort": null,
+            "service_tier": null,
+            "fork_turns": null
         })
     );
 

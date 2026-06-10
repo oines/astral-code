@@ -339,6 +339,9 @@ fn rewrite_agent_args(value: Value) -> Result<Value, FunctionCallError> {
         "task_name": args.description,
         "agent_type": args.subagent_type,
         "model": args.model,
+        "reasoning_effort": args.reasoning_effort,
+        "service_tier": args.service_tier,
+        "fork_turns": args.fork_turns,
     }))
 }
 
@@ -586,6 +589,12 @@ struct AstralAgentArgs {
     subagent_type: Option<String>,
     #[serde(default)]
     model: Option<String>,
+    #[serde(default)]
+    reasoning_effort: Option<String>,
+    #[serde(default)]
+    service_tier: Option<String>,
+    #[serde(default)]
+    fork_turns: Option<String>,
 }
 
 #[derive(Deserialize)]

@@ -35,8 +35,10 @@ fn bash_schema_uses_claudeish_command_shape() {
                 "command": { "type": "string", "description": "The command to execute" },
                 "timeout": { "type": "number", "description": "Optional maximum command runtime in milliseconds" },
                 "description": { "type": "string", "description": "Clear, concise description of what this command does in active voice" },
-                "environment_id": { "type": "string", "description": "Optional target execution environment id when multiple environments exist" },
-                "run_in_background": { "type": "boolean", "description": "Set to true to run this command in the background and read output later" }
+                "cwd": { "type": "string", "description": "Working directory for the command; omit to use the turn cwd" },
+                "yield_time_ms": { "type": "integer", "description": "Milliseconds to wait for initial output before returning" },
+                "max_output_tokens": { "type": "integer", "description": "Maximum output tokens to return" },
+                "environment_id": { "type": "string", "description": "Optional target execution environment id when multiple environments exist" }
             },
             "required": ["command"],
             "additionalProperties": false
@@ -77,9 +79,13 @@ fn todo_write_uses_legacy_task_list_shape() {
 fn monitor_uses_running_session_shape() {
     let tool = astral_core_tool_by_name(MONITOR_TOOL_NAME).expect("Monitor exists");
 
-    assert_eq!(tool.input_schema["required"], json!(["session_id"]));
+    assert_eq!(tool.input_schema["required"], json!([]));
     assert_eq!(
         tool.input_schema["properties"]["session_id"]["type"],
+        json!("integer")
+    );
+    assert_eq!(
+        tool.input_schema["properties"]["shell_id"]["type"],
         json!("integer")
     );
 }

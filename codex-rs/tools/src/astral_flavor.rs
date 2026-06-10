@@ -88,12 +88,17 @@ fn bash_tool() -> AgentTool {
                     "Clear, concise description of what this command does in active voice",
                 ),
                 string_property(
+                    "cwd",
+                    "Working directory for the command; omit to use the turn cwd",
+                ),
+                integer_property(
+                    "yield_time_ms",
+                    "Milliseconds to wait for initial output before returning",
+                ),
+                integer_property("max_output_tokens", "Maximum output tokens to return"),
+                string_property(
                     "environment_id",
                     "Optional target execution environment id when multiple environments exist",
-                ),
-                bool_property(
-                    "run_in_background",
-                    "Set to true to run this command in the background and read output later",
                 ),
             ],
             ["command"],
@@ -214,27 +219,33 @@ fn todo_write_tool() -> AgentTool {
         TODO_WRITE_TOOL_NAME,
         "Update the session task checklist.",
         object(
-            [array_property(
-                "todos",
-                "The updated todo list",
-                json!({
-                    "type": "object",
-                    "properties": {
-                        "content": { "type": "string", "description": "Task description" },
-                        "status": {
-                            "type": "string",
-                            "enum": ["pending", "in_progress", "completed"],
-                            "description": "Task status"
+            [
+                string_property(
+                    "explanation",
+                    "Optional short explanation for why the checklist changed",
+                ),
+                array_property(
+                    "todos",
+                    "The updated todo list",
+                    json!({
+                        "type": "object",
+                        "properties": {
+                            "content": { "type": "string", "description": "Task description" },
+                            "status": {
+                                "type": "string",
+                                "enum": ["pending", "in_progress", "completed"],
+                                "description": "Task status"
+                            },
+                            "activeForm": {
+                                "type": "string",
+                                "description": "Short present-tense label for the active task"
+                            }
                         },
-                        "activeForm": {
-                            "type": "string",
-                            "description": "Short present-tense label for the active task"
-                        }
-                    },
-                    "required": ["content", "status"],
-                    "additionalProperties": false
-                }),
-            )],
+                        "required": ["content", "status"],
+                        "additionalProperties": false
+                    }),
+                ),
+            ],
             ["todos"],
         ),
     )
@@ -250,9 +261,18 @@ fn agent_tool() -> AgentTool {
                 string_property("prompt", "The task for the agent to perform"),
                 string_property("subagent_type", "Optional specialized agent type to use"),
                 string_property("model", "Optional model override for the spawned agent"),
-                bool_property("run_in_background", "Run the agent in the background"),
-                string_property("name", "Optional addressable name for SendMessage"),
-                string_property("cwd", "Absolute working directory for the spawned agent"),
+                string_property(
+                    "reasoning_effort",
+                    "Optional reasoning effort override for the spawned agent",
+                ),
+                string_property(
+                    "service_tier",
+                    "Optional service tier override for the spawned agent",
+                ),
+                string_property(
+                    "fork_turns",
+                    "Context fork mode: none, all, or a positive integer string",
+                ),
             ],
             ["description", "prompt"],
         ),
@@ -295,6 +315,8 @@ fn monitor_tool() -> AgentTool {
         object(
             [
                 integer_property("session_id", "The running Bash session id"),
+                integer_property("task_id", "Alias for session_id when using task-style ids"),
+                integer_property("shell_id", "Deprecated alias for session_id"),
                 string_property("chars", "Optional stdin bytes to write before polling"),
                 integer_property(
                     "yield_time_ms",
@@ -302,7 +324,7 @@ fn monitor_tool() -> AgentTool {
                 ),
                 integer_property("max_output_tokens", "Maximum output tokens to return"),
             ],
-            ["session_id"],
+            [],
         ),
     )
 }
