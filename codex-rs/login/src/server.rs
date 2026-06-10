@@ -69,7 +69,6 @@ pub struct ServerOptions {
     pub port: u16,
     pub open_browser: bool,
     pub force_state: Option<String>,
-    pub forced_chatgpt_workspace_id: Option<Vec<String>>,
     pub codex_streamlined_login: bool,
     pub cli_auth_credentials_store_mode: AuthCredentialsStoreMode,
 }
@@ -79,7 +78,6 @@ impl ServerOptions {
     pub fn new(
         codex_home: PathBuf,
         client_id: String,
-        forced_chatgpt_workspace_id: Option<Vec<String>>,
         cli_auth_credentials_store_mode: AuthCredentialsStoreMode,
     ) -> Self {
         Self {
@@ -89,7 +87,6 @@ impl ServerOptions {
             port: DEFAULT_PORT,
             open_browser: true,
             force_state: None,
-            forced_chatgpt_workspace_id,
             codex_streamlined_login: false,
             cli_auth_credentials_store_mode,
         }
@@ -154,14 +151,7 @@ pub fn run_login_server(opts: ServerOptions) -> io::Result<LoginServer> {
     let server = Arc::new(server);
 
     let redirect_uri = format!("http://localhost:{actual_port}/auth/callback");
-    let auth_url = build_authorize_url(
-        &opts.issuer,
-        &opts.client_id,
-        &redirect_uri,
-        &pkce,
-        &state,
-        opts.forced_chatgpt_workspace_id.as_deref(),
-    );
+    let auth_url = build_authorize_url(&opts.issuer, &opts.client_id, &redirect_uri, &pkce, &state);
 
     if opts.open_browser {
         let _ = webbrowser::open(&auth_url);
@@ -339,18 +329,6 @@ async fn process_request(
                 .await
             {
                 Ok(tokens) => {
-                    if let Err(message) = ensure_workspace_allowed(
-                        opts.forced_chatgpt_workspace_id.as_deref(),
-                        &tokens.id_token,
-                    ) {
-                        eprintln!("Workspace restriction error: {message}");
-                        return login_error_response(
-                            &message,
-                            io::ErrorKind::PermissionDenied,
-                            Some("workspace_restriction"),
-                            /*error_description*/ None,
-                        );
-                    }
                     // Obtain API key via token-exchange and persist
                     let api_key = obtain_api_key(&opts.issuer, &opts.client_id, &tokens.id_token)
                         .await
@@ -486,9 +464,8 @@ fn build_authorize_url(
     redirect_uri: &str,
     pkce: &PkceCodes,
     state: &str,
-    forced_chatgpt_workspace_ids: Option<&[String]>,
 ) -> String {
-    let mut query = vec![
+    let query = vec![
         ("response_type".to_string(), "code".to_string()),
         ("client_id".to_string(), client_id.to_string()),
         ("redirect_uri".to_string(), redirect_uri.to_string()),
@@ -507,9 +484,6 @@ fn build_authorize_url(
         ("state".to_string(), state.to_string()),
         ("originator".to_string(), originator().value),
     ];
-    if let Some(workspace_ids) = forced_chatgpt_workspace_ids {
-        query.push(("allowed_workspace_id".to_string(), workspace_ids.join(",")));
-    }
     let qs = query
         .into_iter()
         .map(|(k, v)| format!("{k}={}", urlencoding::encode(&v)))
@@ -925,44 +899,6 @@ fn jwt_auth_claims(jwt: &str) -> serde_json::Map<String, serde_json::Value> {
         }
     }
     serde_json::Map::new()
-}
-
-/// Validates the ID token against an optional workspace restriction.
-pub(crate) fn ensure_workspace_allowed(
-    expected: Option<&[String]>,
-    id_token: &str,
-) -> Result<(), String> {
-    let Some(expected) = expected else {
-        return Ok(());
-    };
-
-    let claims = jwt_auth_claims(id_token);
-    let Some(actual) = claims.get("chatgpt_account_id").and_then(JsonValue::as_str) else {
-        return Err("Login is restricted to a specific workspace, but the token did not include an chatgpt_account_id claim.".to_string());
-    };
-
-    ensure_workspace_account_allowed(Some(expected), actual)
-}
-
-/// Validates an already known ChatGPT account ID against an optional workspace restriction.
-///
-/// PAT login calls this directly because `/whoami` supplies the account ID without an ID token.
-pub(crate) fn ensure_workspace_account_allowed(
-    expected: Option<&[String]>,
-    actual: &str,
-) -> Result<(), String> {
-    let Some(expected) = expected else {
-        return Ok(());
-    };
-
-    if expected.iter().any(|workspace_id| workspace_id == actual) {
-        Ok(())
-    } else {
-        Err(format!(
-            "Login is restricted to workspace id(s) {}.",
-            expected.join(", ")
-        ))
-    }
 }
 
 /// Builds a terminal callback response for login failures.
