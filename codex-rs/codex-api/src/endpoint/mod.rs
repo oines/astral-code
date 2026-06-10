@@ -1,3 +1,4 @@
+pub(crate) mod agent;
 pub(crate) mod images;
 pub(crate) mod memories;
 pub(crate) mod models;
@@ -8,6 +9,8 @@ pub(crate) mod responses_websocket;
 pub(crate) mod search;
 mod session;
 
+pub use agent::AgentClient;
+pub use agent::AgentOptions;
 pub use images::ImagesClient;
 pub use memories::MemoriesClient;
 pub use models::ModelsClient;
