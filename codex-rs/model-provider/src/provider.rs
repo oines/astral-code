@@ -168,6 +168,18 @@ impl ModelProvider for ConfiguredModelProvider {
         &self.info
     }
 
+    fn capabilities(&self) -> ProviderCapabilities {
+        if self.info.is_openai() {
+            ProviderCapabilities::default()
+        } else {
+            ProviderCapabilities {
+                namespace_tools: true,
+                image_generation: false,
+                web_search: false,
+            }
+        }
+    }
+
     fn auth_manager(&self) -> Option<Arc<AuthManager>> {
         self.auth_manager.clone()
     }
@@ -349,6 +361,23 @@ mod tests {
         );
 
         assert_eq!(provider.capabilities(), ProviderCapabilities::default());
+    }
+
+    #[test]
+    fn non_openai_provider_disables_hosted_provider_capabilities() {
+        let provider = create_model_provider(
+            ModelProviderInfo::create_astral_provider(),
+            /*auth_manager*/ None,
+        );
+
+        assert_eq!(
+            provider.capabilities(),
+            ProviderCapabilities {
+                namespace_tools: true,
+                image_generation: false,
+                web_search: false,
+            }
+        );
     }
 
     #[tokio::test]
