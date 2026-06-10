@@ -36,8 +36,6 @@ use codex_api::AgentOptions as ApiAgentOptions;
 use codex_api::ApiError;
 use codex_api::AuthProvider;
 use codex_api::Compression;
-use codex_api::MemoriesClient as ApiMemoriesClient;
-use codex_api::MemorySummarizeInput as ApiMemorySummarizeInput;
 use codex_api::MemorySummarizeOutput as ApiMemorySummarizeOutput;
 use codex_api::Provider as ApiProvider;
 use codex_api::RawMemory as ApiRawMemory;
@@ -79,9 +77,7 @@ use codex_protocol::config_types::Verbosity as VerbosityConfig;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
-use codex_protocol::protocol::InternalSessionSource;
 use codex_protocol::protocol::SessionSource;
-use codex_protocol::protocol::SubAgentSource;
 use codex_protocol::protocol::W3cTraceContext;
 use codex_rollout_trace::InferenceTraceAttempt;
 use codex_rollout_trace::InferenceTraceContext;
@@ -139,8 +135,6 @@ pub const X_CODEX_TURN_STATE_HEADER: &str = "x-codex-turn-state";
 pub const X_CODEX_TURN_METADATA_HEADER: &str = "x-codex-turn-metadata";
 pub const X_CODEX_PARENT_THREAD_ID_HEADER: &str = "x-codex-parent-thread-id";
 pub const X_CODEX_WINDOW_ID_HEADER: &str = "x-codex-window-id";
-pub const X_OPENAI_MEMGEN_REQUEST_HEADER: &str = "x-openai-memgen-request";
-pub const X_OPENAI_SUBAGENT_HEADER: &str = "x-openai-subagent";
 pub const X_RESPONSESAPI_INCLUDE_TIMING_METRICS_HEADER: &str =
     "x-responsesapi-include-timing-metrics";
 const X_CODEX_WS_STREAM_REQUEST_START_MS_CLIENT_METADATA_KEY: &str =
@@ -149,7 +143,6 @@ const RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE: &str = "responses_websockets=20
 const RESPONSES_ENDPOINT: &str = "/responses";
 const ANTHROPIC_MESSAGES_ENDPOINT: &str = "/messages";
 const CHAT_COMPLETIONS_ENDPOINT: &str = "/chat/completions";
-const MEMORIES_SUMMARIZE_ENDPOINT: &str = "/memories/trace_summarize";
 const DEFAULT_ANTHROPIC_MAX_TOKENS: u64 = 4096;
 #[cfg(test)]
 pub(crate) const WEBSOCKET_CONNECT_TIMEOUT: Duration =
@@ -472,74 +465,21 @@ impl ModelClient {
 
     /// Builds memory summaries for each provided normalized raw memory.
     ///
-    /// This is a unary call (no streaming) to `/v1/memories/trace_summarize`.
-    ///
-    /// The model selection, reasoning effort, and telemetry context are passed explicitly to keep
-    /// `ModelClient` session-scoped.
+    /// Astral does not call OpenAI's `/memories/trace_summarize` sideband endpoint; callers receive
+    /// no remote memory summaries until a provider-neutral memory summarizer exists.
     pub async fn summarize_memories(
         &self,
         raw_memories: Vec<ApiRawMemory>,
-        model_info: &ModelInfo,
-        effort: Option<ReasoningEffortConfig>,
-        session_telemetry: &SessionTelemetry,
+        _model_info: &ModelInfo,
+        _effort: Option<ReasoningEffortConfig>,
+        _session_telemetry: &SessionTelemetry,
     ) -> Result<Vec<ApiMemorySummarizeOutput>> {
-        if raw_memories.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let client_setup = self.current_client_setup().await?;
-        let transport = ReqwestTransport::new(build_reqwest_client());
-        let request_telemetry = Self::build_request_telemetry(
-            session_telemetry,
-            AuthRequestTelemetryContext::new(
-                client_setup.auth.as_ref().map(CodexAuth::auth_mode),
-                client_setup.api_auth.as_ref(),
-                PendingUnauthorizedRetry::default(),
-            ),
-            RequestRouteTelemetry::for_endpoint(MEMORIES_SUMMARIZE_ENDPOINT),
-            self.state.auth_env_telemetry.clone(),
-        );
-        let client =
-            ApiMemoriesClient::new(transport, client_setup.api_provider, client_setup.api_auth)
-                .with_telemetry(Some(request_telemetry));
-
-        let payload = ApiMemorySummarizeInput {
-            model: model_info.slug.clone(),
-            raw_memories,
-            reasoning: effort.map(|effort| Reasoning {
-                effort: Some(effort),
-                summary: None,
-                context: None,
-            }),
-        };
-
-        client
-            .summarize_input(&payload, self.build_subagent_headers())
-            .await
-            .map_err(map_api_error)
-    }
-
-    fn build_subagent_headers(&self) -> ApiHeaderMap {
-        let mut extra_headers = ApiHeaderMap::new();
-        if let Some(subagent) = subagent_header_value(&self.state.session_source)
-            && let Ok(val) = HeaderValue::from_str(&subagent)
-        {
-            extra_headers.insert(X_OPENAI_SUBAGENT_HEADER, val);
-        }
-        if matches!(
-            self.state.session_source,
-            SessionSource::Internal(InternalSessionSource::MemoryConsolidation)
-        ) {
-            extra_headers.insert(
-                X_OPENAI_MEMGEN_REQUEST_HEADER,
-                HeaderValue::from_static("true"),
-            );
-        }
-        extra_headers
+        let _ = raw_memories;
+        Ok(Vec::new())
     }
 
     fn build_responses_identity_headers(&self) -> ApiHeaderMap {
-        let mut extra_headers = self.build_subagent_headers();
+        let mut extra_headers = ApiHeaderMap::new();
         if let Some(parent_thread_id) = parent_thread_id_header_value(self.state.parent_thread_id)
             && let Ok(val) = HeaderValue::from_str(&parent_thread_id)
         {
@@ -564,9 +504,6 @@ impl ModelClient {
             X_CODEX_WINDOW_ID_HEADER.to_string(),
             self.current_window_id(),
         );
-        if let Some(subagent) = subagent_header_value(&self.state.session_source) {
-            client_metadata.insert(X_OPENAI_SUBAGENT_HEADER.to_string(), subagent);
-        }
         if let Some(parent_thread_id) = parent_thread_id_header_value(self.state.parent_thread_id) {
             client_metadata.insert(
                 X_CODEX_PARENT_THREAD_ID_HEADER.to_string(),
@@ -596,23 +533,6 @@ impl ModelClient {
                 thread_id: self.state.thread_id,
             })
             .await
-    }
-
-    /// Builds request telemetry for unary API calls such as memory summarization.
-    fn build_request_telemetry(
-        session_telemetry: &SessionTelemetry,
-        auth_context: AuthRequestTelemetryContext,
-        request_route_telemetry: RequestRouteTelemetry,
-        auth_env_telemetry: AuthEnvTelemetry,
-    ) -> Arc<dyn RequestTelemetry> {
-        let telemetry = Arc::new(ApiTelemetry::new(
-            session_telemetry.clone(),
-            auth_context,
-            request_route_telemetry,
-            auth_env_telemetry,
-        ));
-        let request_telemetry: Arc<dyn RequestTelemetry> = telemetry;
-        request_telemetry
     }
 
     fn build_reasoning(
@@ -1758,27 +1678,6 @@ fn build_responses_headers(
         headers.insert(X_CODEX_TURN_METADATA_HEADER, header_value.clone());
     }
     headers
-}
-
-fn subagent_header_value(session_source: &SessionSource) -> Option<String> {
-    match session_source {
-        SessionSource::SubAgent(subagent_source) => match subagent_source {
-            SubAgentSource::Review => Some("review".to_string()),
-            SubAgentSource::Compact => Some("compact".to_string()),
-            SubAgentSource::MemoryConsolidation => Some("memory_consolidation".to_string()),
-            SubAgentSource::ThreadSpawn { .. } => Some("collab_spawn".to_string()),
-            SubAgentSource::Other(label) => Some(label.clone()),
-        },
-        SessionSource::Internal(InternalSessionSource::MemoryConsolidation) => {
-            Some("memory_consolidation".to_string())
-        }
-        SessionSource::Cli
-        | SessionSource::VSCode
-        | SessionSource::Exec
-        | SessionSource::Mcp
-        | SessionSource::Custom(_)
-        | SessionSource::Unknown => None,
-    }
 }
 
 fn parent_thread_id_header_value(parent_thread_id: Option<ThreadId>) -> Option<String> {

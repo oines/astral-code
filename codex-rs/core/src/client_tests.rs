@@ -6,7 +6,6 @@ use super::X_CODEX_INSTALLATION_ID_HEADER;
 use super::X_CODEX_PARENT_THREAD_ID_HEADER;
 use super::X_CODEX_TURN_METADATA_HEADER;
 use super::X_CODEX_WINDOW_ID_HEADER;
-use super::X_OPENAI_SUBAGENT_HEADER;
 use crate::AttestationContext;
 use crate::AttestationProvider;
 use crate::GenerateAttestationFuture;
@@ -28,7 +27,6 @@ use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ModelInfo;
-use codex_protocol::protocol::InternalSessionSource;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
 use codex_rollout_trace::ExecutionStatus;
@@ -405,30 +403,6 @@ impl futures::Stream for NotifyAfterEventStream {
 }
 
 #[test]
-fn build_subagent_headers_sets_other_subagent_label() {
-    let client = test_model_client(SessionSource::SubAgent(SubAgentSource::Other(
-        "memory_consolidation".to_string(),
-    )));
-    let headers = client.build_subagent_headers();
-    let value = headers
-        .get(X_OPENAI_SUBAGENT_HEADER)
-        .and_then(|value| value.to_str().ok());
-    assert_eq!(value, Some("memory_consolidation"));
-}
-
-#[test]
-fn build_subagent_headers_sets_internal_memory_consolidation_label() {
-    let client = test_model_client(SessionSource::Internal(
-        InternalSessionSource::MemoryConsolidation,
-    ));
-    let headers = client.build_subagent_headers();
-    let value = headers
-        .get(X_OPENAI_SUBAGENT_HEADER)
-        .and_then(|value| value.to_str().ok());
-    assert_eq!(value, Some("memory_consolidation"));
-}
-
-#[test]
 fn build_ws_client_metadata_includes_window_lineage_and_turn_metadata() {
     let parent_thread_id = ThreadId::new();
     let client = test_model_client_with_parent(
@@ -456,10 +430,6 @@ fn build_ws_client_metadata_includes_window_lineage_and_turn_metadata() {
             (
                 X_CODEX_WINDOW_ID_HEADER.to_string(),
                 format!("{thread_id}:1"),
-            ),
-            (
-                X_OPENAI_SUBAGENT_HEADER.to_string(),
-                "collab_spawn".to_string(),
             ),
             (
                 X_CODEX_PARENT_THREAD_ID_HEADER.to_string(),
