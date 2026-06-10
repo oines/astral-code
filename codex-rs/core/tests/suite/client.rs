@@ -1867,8 +1867,7 @@ async fn configured_reasoning_summary_is_sent() -> anyhow::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn responses_lite_sets_all_turns_context_and_disables_parallel_tool_calls()
--> anyhow::Result<()> {
+async fn responses_lite_flag_does_not_change_request_shape() -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
     let server = MockServer::start().await;
 
@@ -1907,9 +1906,9 @@ async fn responses_lite_sets_all_turns_context_and_disables_parallel_tool_calls(
             .get("reasoning")
             .and_then(|reasoning| reasoning.get("context"))
             .and_then(|value| value.as_str()),
-        Some("all_turns")
+        None
     );
-    pretty_assertions::assert_eq!(request_body.get("parallel_tool_calls"), Some(&json!(false)));
+    pretty_assertions::assert_eq!(request_body.get("parallel_tool_calls"), Some(&json!(true)));
 
     Ok(())
 }
