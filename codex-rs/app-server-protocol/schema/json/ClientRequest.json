@@ -1286,41 +1286,6 @@
           ],
           "title": "ApiKeyLoginAccountParams",
           "type": "object"
-        },
-        {
-          "properties": {
-            "codexStreamlinedLogin": {
-              "type": "boolean"
-            },
-            "type": {
-              "enum": [
-                "chatgpt"
-              ],
-              "title": "ChatgptLoginAccountParamsType",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "title": "ChatgptLoginAccountParams",
-          "type": "object"
-        },
-        {
-          "properties": {
-            "type": {
-              "enum": [
-                "chatgptDeviceCode"
-              ],
-              "title": "ChatgptDeviceCodeLoginAccountParamsType",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "title": "ChatgptDeviceCodeLoginAccountParams",
-          "type": "object"
         }
       ]
     },

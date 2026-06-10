@@ -7241,41 +7241,6 @@
           ],
           "title": "ApiKeyv2::LoginAccountParams",
           "type": "object"
-        },
-        {
-          "properties": {
-            "codexStreamlinedLogin": {
-              "type": "boolean"
-            },
-            "type": {
-              "enum": [
-                "chatgpt"
-              ],
-              "title": "Chatgptv2::LoginAccountParamsType",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "title": "Chatgptv2::LoginAccountParams",
-          "type": "object"
-        },
-        {
-          "properties": {
-            "type": {
-              "enum": [
-                "chatgptDeviceCode"
-              ],
-              "title": "ChatgptDeviceCodev2::LoginAccountParamsType",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "title": "ChatgptDeviceCodev2::LoginAccountParams",
-          "type": "object"
         }
       ],
       "title": "LoginAccountParams"
@@ -7297,61 +7262,6 @@
             "type"
           ],
           "title": "ApiKeyv2::LoginAccountResponse",
-          "type": "object"
-        },
-        {
-          "properties": {
-            "authUrl": {
-              "description": "URL the client should open in a browser to initiate the OAuth flow.",
-              "type": "string"
-            },
-            "loginId": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "chatgpt"
-              ],
-              "title": "Chatgptv2::LoginAccountResponseType",
-              "type": "string"
-            }
-          },
-          "required": [
-            "authUrl",
-            "loginId",
-            "type"
-          ],
-          "title": "Chatgptv2::LoginAccountResponse",
-          "type": "object"
-        },
-        {
-          "properties": {
-            "loginId": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "chatgptDeviceCode"
-              ],
-              "title": "ChatgptDeviceCodev2::LoginAccountResponseType",
-              "type": "string"
-            },
-            "userCode": {
-              "description": "One-time code the user must enter after signing in.",
-              "type": "string"
-            },
-            "verificationUrl": {
-              "description": "URL the client should open in a browser to complete device code authorization.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "loginId",
-            "type",
-            "userCode",
-            "verificationUrl"
-          ],
-          "title": "ChatgptDeviceCodev2::LoginAccountResponse",
           "type": "object"
         }
       ],

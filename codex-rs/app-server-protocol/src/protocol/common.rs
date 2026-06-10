@@ -2525,68 +2525,6 @@ mod tests {
     }
 
     #[test]
-    fn serialize_account_login_chatgpt() -> Result<()> {
-        let request = ClientRequest::LoginAccount {
-            request_id: RequestId::Integer(3),
-            params: v2::LoginAccountParams::Chatgpt {
-                codex_streamlined_login: false,
-            },
-        };
-        assert_eq!(
-            json!({
-                "method": "account/login/start",
-                "id": 3,
-                "params": {
-                    "type": "chatgpt"
-                }
-            }),
-            serde_json::to_value(&request)?,
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn serialize_account_login_chatgpt_streamlined() -> Result<()> {
-        let request = ClientRequest::LoginAccount {
-            request_id: RequestId::Integer(3),
-            params: v2::LoginAccountParams::Chatgpt {
-                codex_streamlined_login: true,
-            },
-        };
-        assert_eq!(
-            json!({
-                "method": "account/login/start",
-                "id": 3,
-                "params": {
-                    "type": "chatgpt",
-                    "codexStreamlinedLogin": true
-                }
-            }),
-            serde_json::to_value(&request)?,
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn serialize_account_login_chatgpt_device_code() -> Result<()> {
-        let request = ClientRequest::LoginAccount {
-            request_id: RequestId::Integer(4),
-            params: v2::LoginAccountParams::ChatgptDeviceCode,
-        };
-        assert_eq!(
-            json!({
-                "method": "account/login/start",
-                "id": 4,
-                "params": {
-                    "type": "chatgptDeviceCode"
-                }
-            }),
-            serde_json::to_value(&request)?,
-        );
-        Ok(())
-    }
-
-    #[test]
     fn serialize_account_logout() -> Result<()> {
         let request = ClientRequest::LogoutAccount {
             request_id: RequestId::Integer(5),
