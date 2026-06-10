@@ -35,7 +35,6 @@ pub const ASTRAL_CORE_TOOL_NAMES: &[&str] = &[
     READ_TOOL_NAME,
     REQUEST_PERMISSIONS_TOOL_NAME,
     SEND_MESSAGE_TOOL_NAME,
-    SKILL_TOOL_NAME,
     TASK_STOP_TOOL_NAME,
     TODO_WRITE_TOOL_NAME,
     TOOL_SEARCH_FLAVOR_TOOL_NAME,
@@ -63,7 +62,6 @@ pub fn astral_core_tool_by_name(name: &str) -> Option<AgentTool> {
         READ_TOOL_NAME => Some(read_tool()),
         REQUEST_PERMISSIONS_TOOL_NAME => Some(request_permissions_tool()),
         SEND_MESSAGE_TOOL_NAME => Some(send_message_tool()),
-        SKILL_TOOL_NAME => Some(skill_tool()),
         TASK_STOP_TOOL_NAME => Some(task_stop_tool()),
         TODO_WRITE_TOOL_NAME => Some(todo_write_tool()),
         TOOL_SEARCH_FLAVOR_TOOL_NAME => Some(tool_search_tool()),
@@ -406,20 +404,6 @@ fn tool_search_tool() -> AgentTool {
                 ),
             ],
             ["query"],
-        ),
-    )
-}
-
-fn skill_tool() -> AgentTool {
-    tool(
-        SKILL_TOOL_NAME,
-        "Run or load a named skill.",
-        object(
-            [
-                string_property("name", "Skill name"),
-                json_property("input", "Skill-specific input"),
-            ],
-            ["name"],
         ),
     )
 }

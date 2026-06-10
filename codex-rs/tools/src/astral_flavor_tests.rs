@@ -7,6 +7,7 @@ use super::EDIT_TOOL_NAME;
 use super::GREP_TOOL_NAME;
 use super::MONITOR_TOOL_NAME;
 use super::READ_TOOL_NAME;
+use super::SKILL_TOOL_NAME;
 use super::TODO_WRITE_TOOL_NAME;
 use super::astral_core_tool_by_name;
 use super::astral_core_tools;
@@ -93,4 +94,9 @@ fn monitor_uses_running_session_shape() {
 #[test]
 fn unknown_tool_name_is_not_exposed() {
     assert_eq!(astral_core_tool_by_name("CronCreate"), None);
+}
+
+#[test]
+fn skill_is_hidden_until_a_runtime_handler_exists() {
+    assert_eq!(astral_core_tool_by_name(SKILL_TOOL_NAME), None);
 }
