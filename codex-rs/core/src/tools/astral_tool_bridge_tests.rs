@@ -1,4 +1,5 @@
 use super::*;
+use codex_tools::BASH_TOOL_NAME;
 use codex_tools::EDIT_TOOL_NAME;
 use codex_tools::GLOB_TOOL_NAME;
 use codex_tools::GREP_TOOL_NAME;
@@ -22,7 +23,7 @@ fn canonicalize_function(name: &str, arguments: Value) -> anyhow::Result<(ToolNa
 }
 
 #[test]
-fn canonicalizes_bash_to_unified_exec() -> anyhow::Result<()> {
+fn leaves_bash_native_for_astral_handler() -> anyhow::Result<()> {
     let (tool_name, arguments) = canonicalize_function(
         BASH_TOOL_NAME,
         json!({
@@ -33,13 +34,13 @@ fn canonicalizes_bash_to_unified_exec() -> anyhow::Result<()> {
         }),
     )?;
 
-    assert_eq!(tool_name, ToolName::plain("exec_command"));
+    assert_eq!(tool_name, ToolName::plain(BASH_TOOL_NAME));
     assert_eq!(
         arguments,
         json!({
-            "cmd": "npm test",
-            "workdir": "/workspace/app",
-            "timeout_ms": 120000,
+            "command": "npm test",
+            "cwd": "/workspace/app",
+            "timeout": 120000,
             "description": "Run tests"
         })
     );

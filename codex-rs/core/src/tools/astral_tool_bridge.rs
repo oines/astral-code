@@ -3,7 +3,6 @@ use crate::tools::context::ToolPayload;
 use codex_protocol::models::SearchToolCallParams;
 use codex_tools::AGENT_TOOL_NAME;
 use codex_tools::ASK_USER_QUESTION_TOOL_NAME;
-use codex_tools::BASH_TOOL_NAME;
 use codex_tools::LIST_MCP_RESOURCES_TOOL_NAME;
 use codex_tools::MONITOR_TOOL_NAME;
 use codex_tools::READ_MCP_RESOURCE_TOOL_NAME;
@@ -36,7 +35,6 @@ pub(crate) fn canonicalize_astral_tool_call(
     };
 
     let payload = match tool_name.name.as_str() {
-        BASH_TOOL_NAME => rewrite_function_payload(payload, BASH_TOOL_NAME, rewrite_bash_args)?,
         MONITOR_TOOL_NAME => {
             rewrite_function_payload(payload, MONITOR_TOOL_NAME, rewrite_monitor_args)?
         }
@@ -74,7 +72,6 @@ fn canonical_astral_plain_name(tool_name: &ToolName) -> Option<&'static str> {
     }
 
     match tool_name.name.as_str() {
-        BASH_TOOL_NAME => Some("exec_command"),
         MONITOR_TOOL_NAME => Some("write_stdin"),
         TODO_WRITE_TOOL_NAME => Some("update_plan"),
         ASK_USER_QUESTION_TOOL_NAME => Some("request_user_input"),
@@ -117,15 +114,6 @@ fn serialize_json_arguments(tool_name: &str, value: Value) -> Result<String, Fun
             "failed to serialize canonical {tool_name} arguments: {err}"
         ))
     })
-}
-
-fn rewrite_bash_args(value: Value) -> Result<Value, FunctionCallError> {
-    let mut object = expect_object(BASH_TOOL_NAME, value)?;
-    move_field_if_absent(&mut object, "command", "cmd");
-    move_field_if_absent(&mut object, "cwd", "workdir");
-    move_field_if_absent(&mut object, "timeout", "timeout_ms");
-    object.remove("run_in_background");
-    Ok(Value::Object(object))
 }
 
 fn rewrite_monitor_args(value: Value) -> Result<Value, FunctionCallError> {

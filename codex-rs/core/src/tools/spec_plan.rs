@@ -4,6 +4,7 @@ use crate::session::turn_context::TurnContext;
 use crate::tools::code_mode::execute_spec::create_code_mode_tool;
 use crate::tools::context::ToolInvocation;
 use crate::tools::handlers::ApplyPatchHandler;
+use crate::tools::handlers::AstralBashHandler;
 use crate::tools::handlers::AstralFileToolHandler;
 use crate::tools::handlers::AstralFileToolKind;
 use crate::tools::handlers::CodeModeExecuteHandler;
@@ -815,13 +816,15 @@ fn add_shell_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut Planne
 
     match shell_type_for_model_and_features(&turn_context.model_info, features) {
         ConfigShellToolType::UnifiedExec => {
-            planned_tools.add(ExecCommandHandler::new(ExecCommandHandlerOptions {
+            let exec_options = ExecCommandHandlerOptions {
                 allow_login_shell,
                 exec_permission_approvals_enabled,
                 include_environment_id,
                 include_shell_parameter: unified_exec_should_include_shell_parameter(turn_context),
-            }));
+            };
+            planned_tools.add(AstralBashHandler::new(exec_options));
             planned_tools.add(WriteStdinHandler);
+            planned_tools.add_dispatch_only(ExecCommandHandler::new(exec_options));
 
             // Keep the legacy shell tool registered while unified exec is
             // model-visible.
