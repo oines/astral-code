@@ -82,7 +82,6 @@ use codex_model_provider_info::merge_configured_model_providers;
 use codex_models_manager::ModelsManagerConfig;
 use codex_protocol::config_types::AltScreenMode;
 use codex_protocol::config_types::AutoCompactTokenLimitScope;
-use codex_protocol::config_types::ForcedLoginMethod;
 use codex_protocol::config_types::Personality;
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
@@ -970,11 +969,6 @@ pub struct Config {
 
     /// Experimental / do not use. Selects the thread persistence backend.
     pub experimental_thread_store: ThreadStoreConfig,
-    /// When set, restricts ChatGPT login to one or more workspace identifiers.
-    pub forced_chatgpt_workspace_id: Option<Vec<String>>,
-
-    /// When set, restricts the login mechanism users may use.
-    pub forced_login_method: Option<ForcedLoginMethod>,
 
     /// Explicit or feature-derived web search mode.
     pub web_search_mode: Constrained<WebSearchMode>,
@@ -3189,21 +3183,6 @@ impl Config {
 
         let use_experimental_unified_exec_tool = features.enabled(Feature::UnifiedExec);
 
-        let forced_chatgpt_workspace_id = cfg
-            .forced_chatgpt_workspace_id
-            .clone()
-            .map(codex_config::config_toml::ForcedChatgptWorkspaceIds::into_vec)
-            .map(|values| {
-                values
-                    .into_iter()
-                    .map(|value| value.trim().to_string())
-                    .filter(|value| !value.is_empty())
-                    .collect::<Vec<_>>()
-            })
-            .filter(|values| !values.is_empty());
-
-        let forced_login_method = cfg.forced_login_method;
-
         let model = model.or(cfg.model);
         let notices = cfg.notice.unwrap_or_default();
         let service_tier = match service_tier_override {
@@ -3571,8 +3550,6 @@ impl Config {
             experimental_realtime_start_instructions: cfg.experimental_realtime_start_instructions,
             experimental_thread_config_endpoint: cfg.experimental_thread_config_endpoint,
             experimental_thread_store: thread_store_config(cfg.experimental_thread_store),
-            forced_chatgpt_workspace_id,
-            forced_login_method,
             web_search_mode: constrained_web_search_mode.value,
             web_search_config,
             experimental_request_user_input_enabled,

@@ -48,16 +48,11 @@ fn login_with_api_key_reads_stdin_and_writes_auth_json() -> Result<()> {
     write_file_auth_config(codex_home.path())?;
 
     let mut cmd = codex_command(codex_home.path())?;
-    cmd.args([
-        "-c",
-        "forced_login_method=\"api\"",
-        "login",
-        "--with-api-key",
-    ])
-    .write_stdin("sk-test\n")
-    .assert()
-    .success()
-    .stderr(contains("Successfully logged in"));
+    cmd.args(["login", "--with-api-key"])
+        .write_stdin("sk-test\n")
+        .assert()
+        .success()
+        .stderr(contains("Successfully logged in"));
 
     let auth = read_auth_json(codex_home.path())?;
     assert_eq!(auth["ASTRAL_API_KEY"], "sk-test");

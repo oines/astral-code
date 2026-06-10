@@ -36,7 +36,6 @@ use codex_model_provider_info::OLLAMA_CHAT_PROVIDER_REMOVED_ERROR;
 use codex_model_provider_info::OLLAMA_OSS_PROVIDER_ID;
 use codex_model_provider_info::OPENAI_PROVIDER_ID;
 use codex_protocol::config_types::AutoCompactTokenLimitScope;
-use codex_protocol::config_types::ForcedLoginMethod;
 use codex_protocol::config_types::Personality;
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::config_types::SandboxMode;
@@ -55,7 +54,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
-use serde::de::Error as SerdeError;
 use serde_json::Value as JsonValue;
 
 const RESERVED_MODEL_PROVIDER_IDS: [&str; 4] = [
@@ -89,48 +87,6 @@ const fn default_hide_agent_reasoning() -> Option<bool> {
 
 const fn default_true() -> bool {
     true
-}
-
-/// Backward-compatible shape for ChatGPT workspace login restrictions in config.toml.
-#[derive(Serialize, Debug, Clone, PartialEq, JsonSchema)]
-#[serde(untagged)]
-pub enum ForcedChatgptWorkspaceIds {
-    Single(String),
-    Multiple(Vec<String>),
-}
-
-impl ForcedChatgptWorkspaceIds {
-    pub fn into_vec(self) -> Vec<String> {
-        match self {
-            Self::Single(value) => vec![value],
-            Self::Multiple(values) => values,
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for ForcedChatgptWorkspaceIds {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        #[serde(untagged)]
-        enum Repr {
-            Single(String),
-            Multiple(Vec<String>),
-        }
-
-        match Repr::deserialize(deserializer)? {
-            Repr::Single(value) if value.contains(',') => Err(D::Error::custom(
-                "forced_chatgpt_workspace_id must be a single workspace ID string or a TOML list \
-of strings; comma-separated strings are not supported. Use \
-`forced_chatgpt_workspace_id = [\"123e4567-e89b-42d3-a456-426614174000\", \
-\"123e4567-e89b-42d3-a456-426614174001\"]` instead.",
-            )),
-            Repr::Single(value) => Ok(Self::Single(value)),
-            Repr::Multiple(values) => Ok(Self::Multiple(values)),
-        }
-    }
 }
 
 /// Base config deserialized from ~/.astral-code/config.toml.
@@ -227,14 +183,6 @@ pub struct ConfigToml {
 
     /// Compact prompt used for history compaction.
     pub compact_prompt: Option<String>,
-
-    /// When set, restricts ChatGPT login to one or more workspace identifiers.
-    #[serde(default)]
-    pub forced_chatgpt_workspace_id: Option<ForcedChatgptWorkspaceIds>,
-
-    /// When set, restricts the login mechanism users may use.
-    #[serde(default)]
-    pub forced_login_method: Option<ForcedLoginMethod>,
 
     /// Preferred backend for storing CLI auth credentials.
     /// file (default): Use a file in the Astral home directory.
@@ -942,58 +890,5 @@ pub fn validate_oss_provider(provider: &str) -> std::io::Result<()> {
                 "Invalid OSS provider '{provider}'. Must be one of: {LMSTUDIO_OSS_PROVIDER_ID}, {OLLAMA_OSS_PROVIDER_ID}"
             ),
         )),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use pretty_assertions::assert_eq;
-
-    const WORKSPACE_ID_A: &str = "123e4567-e89b-42d3-a456-426614174000";
-    const WORKSPACE_ID_B: &str = "123e4567-e89b-42d3-a456-426614174001";
-
-    #[test]
-    fn forced_chatgpt_workspace_id_accepts_single_string() {
-        let config: ConfigToml = toml::from_str(&format!(
-            r#"forced_chatgpt_workspace_id = "{WORKSPACE_ID_A}""#
-        ))
-        .expect("single workspace id should deserialize");
-
-        assert_eq!(
-            config
-                .forced_chatgpt_workspace_id
-                .expect("workspace id should be set")
-                .into_vec(),
-            vec![WORKSPACE_ID_A.to_string()]
-        );
-    }
-
-    #[test]
-    fn forced_chatgpt_workspace_id_accepts_string_list() {
-        let config: ConfigToml = toml::from_str(&format!(
-            r#"forced_chatgpt_workspace_id = ["{WORKSPACE_ID_A}", "{WORKSPACE_ID_B}"]"#
-        ))
-        .expect("workspace id list should deserialize");
-
-        assert_eq!(
-            config
-                .forced_chatgpt_workspace_id
-                .expect("workspace ids should be set")
-                .into_vec(),
-            vec![WORKSPACE_ID_A.to_string(), WORKSPACE_ID_B.to_string()]
-        );
-    }
-
-    #[test]
-    fn forced_chatgpt_workspace_id_rejects_comma_separated_string() {
-        let err = toml::from_str::<ConfigToml>(&format!(
-            r#"forced_chatgpt_workspace_id = "{WORKSPACE_ID_A},{WORKSPACE_ID_B}""#
-        ))
-        .expect_err("comma-separated string should be rejected");
-
-        let message = err.to_string();
-        assert!(message.contains("TOML list of strings"));
-        assert!(message.contains("comma-separated strings are not supported"));
     }
 }

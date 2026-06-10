@@ -3868,26 +3868,6 @@
             "null"
           ]
         },
-        "forced_chatgpt_workspace_id": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/ForcedChatgptWorkspaceIds"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "forced_login_method": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/ForcedLoginMethod"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "instructions": {
           "type": [
             "string",
@@ -5512,27 +5492,6 @@
         "path"
       ],
       "type": "object"
-    },
-    "ForcedChatgptWorkspaceIds": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        }
-      ],
-      "description": "Backward-compatible API shape for ChatGPT workspace login restrictions."
-    },
-    "ForcedLoginMethod": {
-      "enum": [
-        "chatgpt",
-        "api"
-      ],
-      "type": "string"
     },
     "FsChangedNotification": {
       "$schema": "http://json-schema.org/draft-07/schema#",

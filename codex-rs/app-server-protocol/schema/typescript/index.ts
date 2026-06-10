@@ -18,7 +18,6 @@ export type { ExecCommandApprovalParams } from "./ExecCommandApprovalParams";
 export type { ExecCommandApprovalResponse } from "./ExecCommandApprovalResponse";
 export type { ExecPolicyAmendment } from "./ExecPolicyAmendment";
 export type { FileChange } from "./FileChange";
-export type { ForcedLoginMethod } from "./ForcedLoginMethod";
 export type { FunctionCallOutputBody } from "./FunctionCallOutputBody";
 export type { FunctionCallOutputContentItem } from "./FunctionCallOutputContentItem";
 export type { FuzzyFileSearchMatchType } from "./FuzzyFileSearchMatchType";

@@ -926,27 +926,6 @@
       },
       "type": "object"
     },
-    "ForcedChatgptWorkspaceIds": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        }
-      ],
-      "description": "Backward-compatible shape for ChatGPT workspace login restrictions in config.toml."
-    },
-    "ForcedLoginMethod": {
-      "enum": [
-        "chatgpt",
-        "api"
-      ],
-      "type": "string"
-    },
     "GhostSnapshotToml": {
       "additionalProperties": false,
       "properties": {
@@ -4822,24 +4801,6 @@
         }
       ],
       "description": "Optional URI-based file opener. If set, citations to files in the model output will be hyperlinked using the specified URI scheme."
-    },
-    "forced_chatgpt_workspace_id": {
-      "allOf": [
-        {
-          "$ref": "#/definitions/ForcedChatgptWorkspaceIds"
-        }
-      ],
-      "default": null,
-      "description": "When set, restricts ChatGPT login to one or more workspace identifiers."
-    },
-    "forced_login_method": {
-      "allOf": [
-        {
-          "$ref": "#/definitions/ForcedLoginMethod"
-        }
-      ],
-      "default": null,
-      "description": "When set, restricts the login mechanism users may use."
     },
     "ghost_snapshot": {
       "allOf": [

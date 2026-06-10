@@ -8,7 +8,6 @@ use chrono::Utc;
 use codex_app_server_protocol::AuthMode;
 use codex_app_server_protocol::GetAuthStatusParams;
 use codex_app_server_protocol::GetAuthStatusResponse;
-use codex_app_server_protocol::JSONRPCError;
 use codex_app_server_protocol::JSONRPCResponse;
 use codex_app_server_protocol::LoginAccountResponse;
 use codex_app_server_protocol::RequestId;
@@ -74,22 +73,6 @@ sandbox_mode = "danger-full-access"
 shell_snapshot = false
 "#,
     )
-}
-
-fn create_config_toml_forced_login(codex_home: &Path, forced_method: &str) -> std::io::Result<()> {
-    let config_toml = codex_home.join("config.toml");
-    let contents = format!(
-        r#"
-model = "mock-model"
-approval_policy = "never"
-sandbox_mode = "danger-full-access"
-forced_login_method = "{forced_method}"
-
-[features]
-shell_snapshot = false
-"#
-    );
-    std::fs::write(config_toml, contents)
 }
 
 async fn login_with_api_key_via_request(mcp: &mut TestAppServer, api_key: &str) -> Result<()> {
@@ -500,30 +483,5 @@ async fn get_auth_status_returns_token_after_proactive_refresh_recovery() -> Res
     );
 
     server.verify().await;
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn login_api_key_rejected_when_forced_chatgpt() -> Result<()> {
-    let codex_home = TempDir::new()?;
-    create_config_toml_forced_login(codex_home.path(), "chatgpt")?;
-
-    let mut mcp = TestAppServer::new(codex_home.path()).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
-
-    let request_id = mcp
-        .send_login_account_api_key_request("sk-test-key")
-        .await?;
-
-    let err: JSONRPCError = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_error_message(RequestId::Integer(request_id)),
-    )
-    .await??;
-
-    assert_eq!(
-        err.error.message,
-        "API key login is disabled. Use ChatGPT login instead."
-    );
     Ok(())
 }

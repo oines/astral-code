@@ -262,8 +262,6 @@ fn new_config(model: Option<String>, arg0_paths: Arg0DispatchPaths) -> anyhow::R
         experimental_realtime_start_instructions: None,
         experimental_thread_config_endpoint: None,
         experimental_thread_store: ThreadStoreConfig::Local,
-        forced_chatgpt_workspace_id: None,
-        forced_login_method: None,
         web_search_mode: Constrained::allow_any(WebSearchMode::Disabled),
         web_search_config: None,
         experimental_request_user_input_enabled: true,
