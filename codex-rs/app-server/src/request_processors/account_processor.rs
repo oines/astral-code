@@ -18,9 +18,9 @@ pub(crate) struct AccountRequestProcessor {
 }
 
 const CHATGPT_LOGIN_DISABLED_MESSAGE: &str =
-    "ChatGPT login is disabled in astral-code. Use API key login instead.";
-const CHATGPT_AUTH_TOKENS_DISABLED_MESSAGE: &str =
-    "External ChatGPT auth tokens are disabled in astral-code. Use API key login instead.";
+    "ChatGPT login is disabled in astral-code. Set ASTRAL_API_KEY for the active model provider.";
+const CHATGPT_AUTH_TOKENS_DISABLED_MESSAGE: &str = "External ChatGPT auth tokens are disabled in astral-code. Set ASTRAL_API_KEY for the active model provider.";
+const ACCOUNT_BACKEND_DISABLED_MESSAGE: &str = "Astral-managed account usage and rate-limit APIs are unavailable for the active model provider.";
 
 impl AccountRequestProcessor {
     pub(crate) fn new(
@@ -218,7 +218,7 @@ impl AccountRequestProcessor {
             Some(ForcedLoginMethod::Chatgpt)
         ) {
             return Err(invalid_request(
-                "API key login is disabled. Use ChatGPT login instead.",
+                "API key login is disabled by configuration.",
             ));
         }
 
@@ -445,6 +445,7 @@ impl AccountRequestProcessor {
     async fn get_account_rate_limits_response(
         &self,
     ) -> Result<GetAccountRateLimitsResponse, JSONRPCErrorError> {
+        self.ensure_account_backend_available()?;
         self.fetch_account_rate_limits()
             .await
             .map(
@@ -463,15 +464,16 @@ impl AccountRequestProcessor {
     async fn get_account_token_usage_response(
         &self,
     ) -> Result<GetAccountTokenUsageResponse, JSONRPCErrorError> {
+        self.ensure_account_backend_available()?;
         let Some(auth) = self.auth_manager.auth().await else {
             return Err(invalid_request(
-                "codex account authentication required to read token usage",
+                "Astral-managed account authentication required to read token usage",
             ));
         };
 
         if !auth.uses_codex_backend() {
             return Err(invalid_request(
-                "chatgpt authentication required to read token usage",
+                "Astral-managed account authentication required to read token usage",
             ));
         }
 
@@ -522,15 +524,16 @@ impl AccountRequestProcessor {
         &self,
         params: SendAddCreditsNudgeEmailParams,
     ) -> Result<AddCreditsNudgeEmailStatus, JSONRPCErrorError> {
+        self.ensure_account_backend_available()?;
         let Some(auth) = self.auth_manager.auth().await else {
             return Err(invalid_request(
-                "codex account authentication required to notify workspace owner",
+                "Astral-managed account authentication required to notify workspace owner",
             ));
         };
 
         if !auth.uses_codex_backend() {
             return Err(invalid_request(
-                "chatgpt authentication required to notify workspace owner",
+                "Astral-managed account authentication required to notify workspace owner",
             ));
         }
 
@@ -567,15 +570,16 @@ impl AccountRequestProcessor {
         ),
         JSONRPCErrorError,
     > {
+        self.ensure_account_backend_available()?;
         let Some(auth) = self.auth_manager.auth().await else {
             return Err(invalid_request(
-                "codex account authentication required to read rate limits",
+                "Astral-managed account authentication required to read rate limits",
             ));
         };
 
         if !auth.uses_codex_backend() {
             return Err(invalid_request(
-                "chatgpt authentication required to read rate limits",
+                "Astral-managed account authentication required to read rate limits",
             ));
         }
 
@@ -611,6 +615,14 @@ impl AccountRequestProcessor {
             .unwrap_or_else(|| snapshots[0].clone());
 
         Ok((primary, rate_limits_by_limit_id))
+    }
+
+    fn ensure_account_backend_available(&self) -> Result<(), JSONRPCErrorError> {
+        if self.config.model_provider.requires_openai_auth {
+            Ok(())
+        } else {
+            Err(invalid_request(ACCOUNT_BACKEND_DISABLED_MESSAGE))
+        }
     }
 }
 

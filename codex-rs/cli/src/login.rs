@@ -24,11 +24,11 @@ use tracing_subscriber::Layer;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
-const CHATGPT_LOGIN_DISABLED_MESSAGE: &str = "Browser/device ChatGPT login is not available in Astral. Use `astral login --with-api-key` or set ASTRAL_API_KEY.";
+const CHATGPT_LOGIN_DISABLED_MESSAGE: &str = "Browser/device ChatGPT login is not available in Astral. Set ASTRAL_API_KEY for the active model provider.";
 const API_KEY_LOGIN_DISABLED_MESSAGE: &str = "API key login is disabled by configuration.";
-const ACCESS_TOKEN_LOGIN_DISABLED_MESSAGE: &str = "Access token login is not available in Astral. Use `astral login --with-api-key` or set ASTRAL_API_KEY.";
+const ACCESS_TOKEN_LOGIN_DISABLED_MESSAGE: &str = "Access token login is not available in Astral. Set ASTRAL_API_KEY for the active model provider.";
 const LOGIN_SUCCESS_MESSAGE: &str = "Successfully logged in";
-const UNSUPPORTED_STORED_AUTH_MESSAGE: &str = "Stored OpenAI/ChatGPT credentials are not supported by Astral. Run `astral logout`, then use `astral login --with-api-key` or set ASTRAL_API_KEY.";
+const UNSUPPORTED_STORED_AUTH_MESSAGE: &str = "Stored OpenAI/ChatGPT credentials are not supported by Astral. Run `astral logout`, then set ASTRAL_API_KEY.";
 
 /// Installs a small file-backed tracing layer for direct `astral login` flows.
 ///
@@ -142,7 +142,7 @@ pub async fn run_login_with_access_token(
 
 pub fn read_api_key_from_stdin() -> String {
     read_stdin_secret(
-        "--with-api-key expects the API key on stdin. Try piping it, e.g. `printenv ASTRAL_API_KEY | astral login --with-api-key`.",
+        "--with-api-key expects the API key on stdin. The default Astral model provider reads ASTRAL_API_KEY directly.",
         "Reading API key from stdin...",
         "No API key provided via stdin.",
     )

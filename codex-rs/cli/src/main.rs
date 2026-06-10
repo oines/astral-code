@@ -444,7 +444,7 @@ struct LoginCommand {
 
     #[arg(
         long = "with-api-key",
-        help = "Read the API key from stdin (e.g. `printenv ASTRAL_API_KEY | astral login --with-api-key`)"
+        help = "Store an API key for Astral-managed auth. The default model provider reads ASTRAL_API_KEY directly."
     )]
     with_api_key: bool,
 
@@ -1300,7 +1300,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                         .await;
                     } else if login_cli.api_key.is_some() {
                         eprintln!(
-                            "The --api-key flag is no longer supported. Pipe the key instead, e.g. `printenv ASTRAL_API_KEY | astral login --with-api-key`."
+                            "The --api-key flag is no longer supported. Set ASTRAL_API_KEY for the default model provider."
                         );
                         std::process::exit(1);
                     } else if login_cli.with_api_key {
@@ -1664,7 +1664,7 @@ async fn load_exec_server_remote_auth_provider(
 
     let auth = load_exec_server_remote_auth(
         config,
-        "remote exec-server registration requires API-key authentication; run `astral login --with-api-key` or set ASTRAL_API_KEY",
+        "remote exec-server registration requires API-key authentication; set ASTRAL_API_KEY or run `astral login --with-api-key` for Astral-managed auth",
     )
     .await?;
 
