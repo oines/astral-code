@@ -82,7 +82,6 @@ fn find_span_event_by_name_attr<'a>(
 
 fn auth_env_metadata() -> AuthEnvTelemetryMetadata {
     AuthEnvTelemetryMetadata {
-        openai_api_key_env_present: true,
         codex_api_key_env_present: false,
         codex_api_key_env_enabled: true,
         provider_env_key_name: Some("configured".to_string()),
@@ -537,12 +536,6 @@ fn otel_export_routing_policy_routes_api_request_auth_observability() {
     let conversation_log_attrs = log_attributes(&conversation_log.record);
     assert_eq!(
         conversation_log_attrs
-            .get("auth.env_openai_api_key_present")
-            .map(String::as_str),
-        Some("true")
-    );
-    assert_eq!(
-        conversation_log_attrs
             .get("auth.env_provider_key_name")
             .map(String::as_str),
         Some("configured")
@@ -634,12 +627,6 @@ fn otel_export_routing_policy_routes_api_request_auth_observability() {
     assert_eq!(
         request_trace_attrs.get("endpoint").map(String::as_str),
         Some("/responses")
-    );
-    assert_eq!(
-        request_trace_attrs
-            .get("auth.env_openai_api_key_present")
-            .map(String::as_str),
-        Some("true")
     );
 }
 
@@ -825,13 +812,6 @@ fn otel_export_routing_policy_routes_websocket_request_transport_observability()
         request_log_attrs.get("error.message").map(String::as_str),
         Some("stream error")
     );
-    assert_eq!(
-        request_log_attrs
-            .get("auth.env_openai_api_key_present")
-            .map(String::as_str),
-        Some("true")
-    );
-
     let spans = span_exporter.get_finished_spans().expect("span export");
     let request_trace_event =
         find_span_event_by_name_attr(&spans[0].events.events, "codex.websocket_request");

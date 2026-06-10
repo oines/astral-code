@@ -140,7 +140,6 @@ pub fn emit_feedback_request_tags_with_auth_env(
         auth_error_code = tracing::field::debug(snapshot.auth_error_code),
         auth_recovery_followup_success = tracing::field::debug(&snapshot.auth_recovery_followup_success),
         auth_recovery_followup_status = tracing::field::debug(&snapshot.auth_recovery_followup_status),
-        auth_env_openai_api_key_present = tracing::field::debug(auth_env.openai_api_key_env_present),
         auth_env_codex_api_key_present = tracing::field::debug(auth_env.codex_api_key_env_present),
         auth_env_codex_api_key_enabled = tracing::field::debug(auth_env.codex_api_key_env_enabled),
         // Custom provider `env_key` is arbitrary config text, so emit only a safe bucket.

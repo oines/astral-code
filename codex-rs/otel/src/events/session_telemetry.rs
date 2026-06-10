@@ -74,7 +74,6 @@ fn trace_field_value<'a>(fields: &'a [(&str, &str)], key: &str) -> Option<&'a st
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AuthEnvTelemetryMetadata {
-    pub openai_api_key_env_present: bool,
     pub codex_api_key_env_present: bool,
     pub codex_api_key_env_enabled: bool,
     pub provider_env_key_name: Option<String>,
@@ -452,7 +451,6 @@ impl SessionTelemetry {
             common: {
                 event.name = "codex.conversation_starts",
                 provider_name = %provider_name,
-                auth.env_openai_api_key_present = self.metadata.auth_env.openai_api_key_env_present,
                 auth.env_codex_api_key_present = self.metadata.auth_env.codex_api_key_env_present,
                 auth.env_codex_api_key_enabled = self.metadata.auth_env.codex_api_key_env_enabled,
                 auth.env_provider_key_name = self.metadata.auth_env.provider_env_key_name.as_deref(),
@@ -554,7 +552,6 @@ impl SessionTelemetry {
                 auth.recovery_mode = recovery_mode,
                 auth.recovery_phase = recovery_phase,
                 endpoint = endpoint,
-                auth.env_openai_api_key_present = self.metadata.auth_env.openai_api_key_env_present,
                 auth.env_codex_api_key_present = self.metadata.auth_env.codex_api_key_env_present,
                 auth.env_codex_api_key_enabled = self.metadata.auth_env.codex_api_key_env_enabled,
                 auth.env_provider_key_name = self.metadata.auth_env.provider_env_key_name.as_deref(),
@@ -607,7 +604,6 @@ impl SessionTelemetry {
                 auth.recovery_mode = recovery_mode,
                 auth.recovery_phase = recovery_phase,
                 endpoint = endpoint,
-                auth.env_openai_api_key_present = self.metadata.auth_env.openai_api_key_env_present,
                 auth.env_codex_api_key_present = self.metadata.auth_env.codex_api_key_env_present,
                 auth.env_codex_api_key_enabled = self.metadata.auth_env.codex_api_key_env_enabled,
                 auth.env_provider_key_name = self.metadata.auth_env.provider_env_key_name.as_deref(),
@@ -648,7 +644,6 @@ impl SessionTelemetry {
                 duration_ms = %duration.as_millis(),
                 success = success_str,
                 error.message = error,
-                auth.env_openai_api_key_present = self.metadata.auth_env.openai_api_key_env_present,
                 auth.env_codex_api_key_present = self.metadata.auth_env.codex_api_key_env_present,
                 auth.env_codex_api_key_enabled = self.metadata.auth_env.codex_api_key_env_enabled,
                 auth.env_provider_key_name = self.metadata.auth_env.provider_env_key_name.as_deref(),

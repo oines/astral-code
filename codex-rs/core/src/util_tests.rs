@@ -78,7 +78,6 @@ fn emit_feedback_request_tags_records_sentry_feedback_fields() {
         .set_default();
 
     let auth_env = AuthEnvTelemetry {
-        openai_api_key_env_present: true,
         codex_api_key_env_present: false,
         codex_api_key_env_enabled: true,
         provider_env_key_name: Some("configured".to_string()),
@@ -118,11 +117,6 @@ fn emit_feedback_request_tags_records_sentry_feedback_fields() {
     assert_eq!(
         tags.get("auth_header_name").map(String::as_str),
         Some("\"authorization\"")
-    );
-    assert_eq!(
-        tags.get("auth_env_openai_api_key_present")
-            .map(String::as_str),
-        Some("true")
     );
     assert_eq!(
         tags.get("auth_env_codex_api_key_present")
@@ -322,7 +316,6 @@ fn emit_feedback_request_tags_preserves_auth_env_fields_for_legacy_emitters() {
         .set_default();
 
     let auth_env = AuthEnvTelemetry {
-        openai_api_key_env_present: true,
         codex_api_key_env_present: true,
         codex_api_key_env_enabled: true,
         provider_env_key_name: Some("configured".to_string()),
@@ -381,11 +374,6 @@ fn emit_feedback_request_tags_preserves_auth_env_fields_for_legacy_emitters() {
     assert_eq!(
         tags.get("auth_error_code").map(String::as_str),
         Some("\"\"")
-    );
-    assert_eq!(
-        tags.get("auth_env_openai_api_key_present")
-            .map(String::as_str),
-        Some("true")
     );
     assert_eq!(
         tags.get("auth_env_codex_api_key_present")

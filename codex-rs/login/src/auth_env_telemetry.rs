@@ -6,7 +6,6 @@ use crate::REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AuthEnvTelemetry {
-    pub openai_api_key_env_present: bool,
     pub codex_api_key_env_present: bool,
     pub codex_api_key_env_enabled: bool,
     pub provider_env_key_name: Option<String>,
@@ -17,7 +16,6 @@ pub struct AuthEnvTelemetry {
 impl AuthEnvTelemetry {
     pub fn to_otel_metadata(&self) -> AuthEnvTelemetryMetadata {
         AuthEnvTelemetryMetadata {
-            openai_api_key_env_present: self.openai_api_key_env_present,
             codex_api_key_env_present: self.codex_api_key_env_present,
             codex_api_key_env_enabled: self.codex_api_key_env_enabled,
             provider_env_key_name: self.provider_env_key_name.clone(),
@@ -32,7 +30,6 @@ pub fn collect_auth_env_telemetry(
     codex_api_key_env_enabled: bool,
 ) -> AuthEnvTelemetry {
     AuthEnvTelemetry {
-        openai_api_key_env_present: false,
         codex_api_key_env_present: env_var_present(ASTRAL_API_KEY_ENV_VAR),
         codex_api_key_env_enabled,
         provider_env_key_name: provider.env_key.as_ref().map(|_| "configured".to_string()),
