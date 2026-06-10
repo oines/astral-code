@@ -1,3 +1,8 @@
+#![allow(dead_code)]
+
+// astral-code keeps the existing analytics API/type surface compiled while the
+// runtime upload path is disabled. The reducer/event payload code can be trimmed
+// in a later dedicated cleanup.
 mod accepted_lines;
 mod client;
 mod events;

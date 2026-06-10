@@ -1,8 +1,8 @@
 use crate::events::AppServerRpcTransport;
 use crate::events::GuardianReviewAnalyticsResult;
 use crate::events::GuardianReviewTrackContext;
+#[cfg(test)]
 use crate::events::TrackEventRequest;
-use crate::events::TrackEventsRequest;
 use crate::events::current_runtime_metadata;
 use crate::facts::AnalyticsFact;
 use crate::facts::AnalyticsJsonRpcError;
@@ -22,7 +22,6 @@ use crate::facts::TurnCodexErrorFact;
 use crate::facts::TurnProfileFact;
 use crate::facts::TurnResolvedConfigFact;
 use crate::facts::TurnTokenUsageFact;
-use crate::reducer::AnalyticsReducer;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::ClientResponsePayload;
 use codex_app_server_protocol::InitializeParams;
@@ -32,18 +31,13 @@ use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ServerRequest;
 use codex_app_server_protocol::ServerResponse;
 use codex_login::AuthManager;
-use codex_login::CodexAuth;
-use codex_login::default_client::create_client;
 use codex_plugin::PluginTelemetryMetadata;
 use codex_protocol::request_permissions::RequestPermissionsResponse;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::time::Duration;
 use tokio::sync::mpsc;
 
-const ANALYTICS_EVENTS_QUEUE_SIZE: usize = 256;
-const ANALYTICS_EVENTS_TIMEOUT: Duration = Duration::from_secs(10);
 const ANALYTICS_EVENT_DEDUPE_MAX_KEYS: usize = 4096;
 
 #[derive(Clone)]
@@ -59,23 +53,6 @@ pub struct AnalyticsEventsClient {
 }
 
 impl AnalyticsEventsQueue {
-    pub(crate) fn new(auth_manager: Arc<AuthManager>, base_url: String) -> Self {
-        let (sender, mut receiver) = mpsc::channel(ANALYTICS_EVENTS_QUEUE_SIZE);
-        tokio::spawn(async move {
-            let mut reducer = AnalyticsReducer::default();
-            while let Some(input) = receiver.recv().await {
-                let mut events = Vec::new();
-                reducer.ingest(input, &mut events).await;
-                send_track_events(&auth_manager, &base_url, events).await;
-            }
-        });
-        Self {
-            sender,
-            app_used_emitted_keys: Arc::new(Mutex::new(HashSet::new())),
-            plugin_used_emitted_keys: Arc::new(Mutex::new(HashSet::new())),
-        }
-    }
-
     fn try_send(&self, input: AnalyticsFact) {
         if self.sender.try_send(input).is_err() {
             //TODO: add a metric for this
@@ -119,14 +96,11 @@ impl AnalyticsEventsQueue {
 
 impl AnalyticsEventsClient {
     pub fn new(
-        auth_manager: Arc<AuthManager>,
-        base_url: String,
-        analytics_enabled: Option<bool>,
+        _auth_manager: Arc<AuthManager>,
+        _base_url: String,
+        _analytics_enabled: Option<bool>,
     ) -> Self {
-        Self {
-            queue: (analytics_enabled == Some(true))
-                .then(|| AnalyticsEventsQueue::new(Arc::clone(&auth_manager), base_url)),
-        }
+        Self::disabled()
     }
 
     pub fn disabled() -> Self {
@@ -401,29 +375,7 @@ impl AnalyticsEventsClient {
     }
 }
 
-async fn send_track_events(
-    auth_manager: &AuthManager,
-    base_url: &str,
-    events: Vec<TrackEventRequest>,
-) {
-    if events.is_empty() {
-        return;
-    }
-
-    let Some(auth) = auth_manager.auth().await else {
-        return;
-    };
-    if !auth.uses_codex_backend() {
-        return;
-    }
-
-    let base_url = base_url.trim_end_matches('/');
-    let url = format!("{base_url}/codex/analytics-events/events");
-    for events in track_event_request_batches(events) {
-        send_track_events_request(&auth, &url, events).await;
-    }
-}
-
+#[cfg(test)]
 fn track_event_request_batches(events: Vec<TrackEventRequest>) -> Vec<Vec<TrackEventRequest>> {
     let mut batches = Vec::new();
     let mut current_batch = Vec::new();
@@ -445,35 +397,6 @@ fn track_event_request_batches(events: Vec<TrackEventRequest>) -> Vec<Vec<TrackE
     }
 
     batches
-}
-
-async fn send_track_events_request(auth: &CodexAuth, url: &str, events: Vec<TrackEventRequest>) {
-    if events.is_empty() {
-        return;
-    }
-
-    let payload = TrackEventsRequest { events };
-
-    let response = create_client()
-        .post(url)
-        .timeout(ANALYTICS_EVENTS_TIMEOUT)
-        .headers(codex_model_provider::auth_provider_from_auth(auth).to_auth_headers())
-        .header("Content-Type", "application/json")
-        .json(&payload)
-        .send()
-        .await;
-
-    match response {
-        Ok(response) if response.status().is_success() => {}
-        Ok(response) => {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            tracing::warn!("events failed with status {status}: {body}");
-        }
-        Err(err) => {
-            tracing::warn!("failed to send events request: {err}");
-        }
-    }
 }
 
 #[cfg(test)]
