@@ -93,6 +93,10 @@ fn marketplace_plugin_source_to_info(source: MarketplacePluginSource) -> PluginS
     }
 }
 
+fn remote_plugin_control_plane_enabled() -> bool {
+    false
+}
+
 fn load_shared_plugin_ids_by_local_path(
     config: &Config,
 ) -> Result<std::collections::BTreeMap<AbsolutePathBuf, String>, JSONRPCErrorError> {
@@ -150,6 +154,10 @@ fn convert_configured_marketplace_plugin_to_plugin_summary(
 }
 
 fn remote_installed_plugin_visible_scopes(config: &Config) -> Vec<RemotePluginScope> {
+    if !remote_plugin_control_plane_enabled() {
+        return Vec::new();
+    }
+
     let mut scopes = Vec::new();
     if config.features.enabled(Feature::RemotePlugin) {
         scopes.push(RemotePluginScope::Global);
@@ -525,7 +533,8 @@ impl PluginRequestProcessor {
         let marketplace_kinds =
             marketplace_kinds.unwrap_or_else(|| vec![PluginListMarketplaceKind::Local]);
         let include_local = marketplace_kinds.contains(&PluginListMarketplaceKind::Local);
-        let include_vertical = marketplace_kinds.contains(&PluginListMarketplaceKind::Vertical);
+        let include_vertical = remote_plugin_control_plane_enabled()
+            && marketplace_kinds.contains(&PluginListMarketplaceKind::Vertical);
 
         let config = self.load_latest_config(/*fallback_cwd*/ None).await?;
         let empty_response = || PluginListResponse {
@@ -544,10 +553,11 @@ impl PluginRequestProcessor {
             return Ok(empty_response());
         }
         let plugins_input = config.plugins_config_input();
-        let include_shared_with_me =
-            marketplace_kinds.contains(&PluginListMarketplaceKind::SharedWithMe);
-        let include_global_remote =
-            !explicit_marketplace_kinds && config.features.enabled(Feature::RemotePlugin);
+        let include_shared_with_me = remote_plugin_control_plane_enabled()
+            && marketplace_kinds.contains(&PluginListMarketplaceKind::SharedWithMe);
+        let include_global_remote = remote_plugin_control_plane_enabled()
+            && !explicit_marketplace_kinds
+            && config.features.enabled(Feature::RemotePlugin);
         let remote_plugin_service_config = RemotePluginServiceConfig {
             chatgpt_base_url: config.chatgpt_base_url.clone(),
         };
@@ -654,7 +664,9 @@ impl PluginRequestProcessor {
         if include_global_remote {
             remote_sources.push(RemoteMarketplaceSource::Global);
         }
-        if marketplace_kinds.contains(&PluginListMarketplaceKind::WorkspaceDirectory) {
+        if remote_plugin_control_plane_enabled()
+            && marketplace_kinds.contains(&PluginListMarketplaceKind::WorkspaceDirectory)
+        {
             remote_sources.push(RemoteMarketplaceSource::WorkspaceDirectory);
         }
         if include_shared_with_me && config.features.enabled(Feature::PluginSharing) {
@@ -977,8 +989,10 @@ impl PluginRequestProcessor {
                     &outcome.plugin.source,
                     &shared_plugin_ids_by_local_path,
                 );
-                let share_context = match share_context {
-                    Some(context) => {
+                let share_context = match (remote_plugin_control_plane_enabled(), share_context) {
+                    (false, share_context) => share_context,
+                    (true, None) => None,
+                    (true, Some(context)) => {
                         let auth = self.auth_manager.auth().await;
                         let remote_plugin_service_config = RemotePluginServiceConfig {
                             chatgpt_base_url: config.chatgpt_base_url.clone(),
@@ -1023,7 +1037,6 @@ impl PluginRequestProcessor {
                             }
                         }
                     }
-                    None => None,
                 };
                 let environment_manager = self.thread_manager.environment_manager();
                 let app_summaries = load_plugin_app_summaries(
@@ -1081,7 +1094,9 @@ impl PluginRequestProcessor {
                 }
             }
             Err(remote_marketplace_name) => {
-                if !config.features.enabled(Feature::Plugins) {
+                if !remote_plugin_control_plane_enabled()
+                    || !config.features.enabled(Feature::Plugins)
+                {
                     return Err(invalid_request(format!(
                         "remote plugin read is not enabled for marketplace {remote_marketplace_name}"
                     )));
@@ -1132,7 +1147,7 @@ impl PluginRequestProcessor {
         } = params;
 
         let config = self.load_latest_config(/*fallback_cwd*/ None).await?;
-        if !config.features.enabled(Feature::Plugins) {
+        if !remote_plugin_control_plane_enabled() || !config.features.enabled(Feature::Plugins) {
             return Err(invalid_request(format!(
                 "remote plugin skill read is not enabled for marketplace {remote_marketplace_name}"
             )));
@@ -1170,7 +1185,9 @@ impl PluginRequestProcessor {
         params: PluginShareSaveParams,
     ) -> Result<PluginShareSaveResponse, JSONRPCErrorError> {
         let (config, auth) = self.load_plugin_share_config_and_auth().await?;
-        if !config.features.enabled(Feature::PluginSharing) {
+        if !remote_plugin_control_plane_enabled()
+            || !config.features.enabled(Feature::PluginSharing)
+        {
             return Err(invalid_request("plugin sharing is disabled"));
         }
         let PluginShareSaveParams {
@@ -1228,7 +1245,9 @@ impl PluginRequestProcessor {
         params: PluginShareUpdateTargetsParams,
     ) -> Result<PluginShareUpdateTargetsResponse, JSONRPCErrorError> {
         let (config, auth) = self.load_plugin_share_config_and_auth().await?;
-        if !config.features.enabled(Feature::PluginSharing) {
+        if !remote_plugin_control_plane_enabled()
+            || !config.features.enabled(Feature::PluginSharing)
+        {
             return Err(invalid_request("plugin sharing is disabled"));
         }
         let PluginShareUpdateTargetsParams {
@@ -1270,6 +1289,9 @@ impl PluginRequestProcessor {
         &self,
         _params: PluginShareListParams,
     ) -> Result<PluginShareListResponse, JSONRPCErrorError> {
+        if !remote_plugin_control_plane_enabled() {
+            return Ok(PluginShareListResponse { data: Vec::new() });
+        }
         let (config, auth) = self.load_plugin_share_config_and_auth().await?;
         let remote_plugin_service_config = RemotePluginServiceConfig {
             chatgpt_base_url: config.chatgpt_base_url.clone(),
@@ -1302,7 +1324,9 @@ impl PluginRequestProcessor {
         params: PluginShareCheckoutParams,
     ) -> Result<PluginShareCheckoutResponse, JSONRPCErrorError> {
         let (config, auth) = self.load_plugin_share_config_and_auth().await?;
-        if !config.features.enabled(Feature::PluginSharing) {
+        if !remote_plugin_control_plane_enabled()
+            || !config.features.enabled(Feature::PluginSharing)
+        {
             return Err(invalid_request("plugin sharing is disabled"));
         }
         let PluginShareCheckoutParams { remote_plugin_id } = params;
@@ -1337,6 +1361,9 @@ impl PluginRequestProcessor {
         &self,
         params: PluginShareDeleteParams,
     ) -> Result<PluginShareDeleteResponse, JSONRPCErrorError> {
+        if !remote_plugin_control_plane_enabled() {
+            return Err(invalid_request("plugin sharing is disabled"));
+        }
         let (config, auth) = self.load_plugin_share_config_and_auth().await?;
         let PluginShareDeleteParams { remote_plugin_id } = params;
         if remote_plugin_id.is_empty() || !is_valid_remote_plugin_id(&remote_plugin_id) {
@@ -1455,7 +1482,7 @@ impl PluginRequestProcessor {
         remote_plugin_id: String,
     ) -> Result<PluginInstallResponse, JSONRPCErrorError> {
         let config = self.load_latest_config(/*fallback_cwd*/ None).await?;
-        if !config.features.enabled(Feature::Plugins) {
+        if !remote_plugin_control_plane_enabled() || !config.features.enabled(Feature::Plugins) {
             return Err(invalid_request(format!(
                 "remote plugin install is not enabled for marketplace {remote_marketplace_name}"
             )));
@@ -1714,12 +1741,11 @@ impl PluginRequestProcessor {
         params: PluginUninstallParams,
     ) -> Result<PluginUninstallResponse, JSONRPCErrorError> {
         let PluginUninstallParams { plugin_id } = params;
-        if codex_plugin::PluginId::parse(&plugin_id).is_err()
-            && !is_valid_remote_plugin_id(&plugin_id)
-        {
-            return Err(invalid_request("invalid remote plugin id"));
-        }
-        if is_valid_remote_plugin_id(&plugin_id) {
+        let parsed_plugin_id = codex_plugin::PluginId::parse(&plugin_id);
+        if parsed_plugin_id.is_err() {
+            if !is_valid_remote_plugin_id(&plugin_id) {
+                return Err(invalid_request("invalid remote plugin id"));
+            }
             return self.remote_plugin_uninstall_response(plugin_id).await;
         }
         let plugins_manager = self.thread_manager.plugins_manager();
@@ -1805,7 +1831,7 @@ impl PluginRequestProcessor {
         plugin_id: String,
     ) -> Result<PluginUninstallResponse, JSONRPCErrorError> {
         let config = self.load_latest_config(/*fallback_cwd*/ None).await?;
-        if !config.features.enabled(Feature::Plugins) {
+        if !remote_plugin_control_plane_enabled() || !config.features.enabled(Feature::Plugins) {
             return Err(invalid_request("remote plugin uninstall is not enabled"));
         }
         validate_remote_plugin_id(&plugin_id)?;
