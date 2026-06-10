@@ -6,8 +6,6 @@ use anyhow::Result;
 use codex_core::config::Config;
 use codex_core::config::Constrained;
 use codex_features::Feature;
-use codex_model_provider_info::ModelProviderInfo;
-use codex_model_provider_info::built_in_model_providers;
 use codex_plugin::PluginHookSource;
 use codex_plugin::PluginId;
 use codex_protocol::items::parse_hook_prompt_fragment;
@@ -42,6 +40,7 @@ use core_test_support::skip_if_no_network;
 use core_test_support::skip_if_windows;
 use core_test_support::streaming_sse::StreamingSseChunk;
 use core_test_support::streaming_sse::start_streaming_sse_server;
+use core_test_support::test_codex::responses_mock_model_provider;
 use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
 use pretty_assertions::assert_eq;
@@ -75,15 +74,6 @@ fn network_workspace_write_profile() -> PermissionProfile {
         /*exclude_tmpdir_env_var*/ false,
         /*exclude_slash_tmp*/ false,
     )
-}
-
-fn non_openai_model_provider(server: &wiremock::MockServer) -> ModelProviderInfo {
-    let mut provider =
-        built_in_model_providers(/* openai_base_url */ /*openai_base_url*/ None)["openai"].clone();
-    provider.name = "OpenAI (test)".into();
-    provider.base_url = Some(format!("{}/v1", server.uri()));
-    provider.supports_websockets = false;
-    provider
 }
 
 fn trust_plugin_hooks(config: &mut Config, plugin_hook_sources: Vec<PluginHookSource>) {
@@ -1379,7 +1369,7 @@ async fn compact_session_start_hook_records_additional_context_for_next_turn() -
     )
     .await;
     let additional_context = "remember the compacted reef";
-    let model_provider = non_openai_model_provider(&server);
+    let model_provider = responses_mock_model_provider(format!("{}/v1", server.uri()));
 
     let mut builder = test_codex()
         .with_pre_build_hook(move |home| {

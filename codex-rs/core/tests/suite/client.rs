@@ -15,7 +15,6 @@ use codex_login::CodexAuth;
 use codex_login::default_client::originator;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::WireApi;
-use codex_model_provider_info::built_in_model_providers;
 use codex_models_manager::bundled_models_response;
 use codex_otel::SessionTelemetry;
 use codex_otel::TelemetryAuthMode;
@@ -67,6 +66,7 @@ use core_test_support::responses::sse_failed;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::TestCodex;
 use core_test_support::test_codex::local_selections;
+use core_test_support::test_codex::responses_mock_model_provider;
 use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
 use dunce::canonicalize as normalize_path;
@@ -994,7 +994,7 @@ async fn includes_base_instructions_override_in_request() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn chatgpt_auth_sends_correct_request() {
+async fn managed_auth_sends_authorized_responses_request() {
     skip_if_no_network!();
 
     // Mock server
@@ -1007,8 +1007,7 @@ async fn chatgpt_auth_sends_correct_request() {
     .await;
 
     let mut model_provider =
-        built_in_model_providers(/* openai_base_url */ /*openai_base_url*/ None)["openai"].clone();
-    model_provider.base_url = Some(format!("{}/api/codex", server.uri()));
+        ModelProviderInfo::create_openai_provider(Some(format!("{}/api/codex", server.uri())));
     model_provider.supports_websockets = false;
     let mut builder = test_codex()
         .with_auth(create_dummy_codex_auth())
@@ -1045,9 +1044,6 @@ async fn chatgpt_auth_sends_correct_request() {
         .header("authorization")
         .expect("authorization header");
     let request_originator = request.header("originator").expect("originator header");
-    let request_chatgpt_account_id = request
-        .header("chatgpt-account-id")
-        .expect("chatgpt-account-id header");
     let request_body = request.body_json();
 
     let request_session_id = request.header("session-id").expect("session-id header");
@@ -1060,16 +1056,12 @@ async fn chatgpt_auth_sends_correct_request() {
 
     assert_eq!(request_originator, originator().value);
     assert_eq!(request_authorization, "Bearer Access Token");
-    assert_eq!(request_chatgpt_account_id, "account_id");
+    assert_eq!(request.header("chatgpt-account-id"), None);
     assert_eq!(
         request_body["client_metadata"]["x-codex-installation-id"].as_str(),
         Some(installation_id.as_str())
     );
     assert!(request_body["stream"].as_bool().unwrap());
-    assert_eq!(
-        request_body["include"][0].as_str().unwrap(),
-        "reasoning.encrypted_content"
-    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1095,11 +1087,9 @@ async fn prefers_apikey_when_config_prefers_apikey_even_with_chatgpt_tokens() {
         .mount(&server)
         .await;
 
-    let model_provider = ModelProviderInfo {
-        base_url: Some(format!("{}/v1", server.uri())),
-        supports_websockets: false,
-        ..built_in_model_providers(/* openai_base_url */ /*openai_base_url*/ None)["openai"].clone()
-    };
+    let mut model_provider =
+        ModelProviderInfo::create_openai_provider(Some(format!("{}/v1", server.uri())));
+    model_provider.supports_websockets = false;
 
     // Init session
     let codex_home = TempDir::new().unwrap();
@@ -2536,10 +2526,7 @@ async fn token_count_includes_rate_limits_snapshot() {
         .mount(&server)
         .await;
 
-    let mut provider =
-        built_in_model_providers(/* openai_base_url */ /*openai_base_url*/ None)["openai"].clone();
-    provider.base_url = Some(format!("{}/v1", server.uri()));
-    provider.supports_websockets = false;
+    let provider = responses_mock_model_provider(format!("{}/v1", server.uri()));
 
     let mut builder = test_codex()
         .with_auth(CodexAuth::from_api_key("test"))

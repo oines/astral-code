@@ -56,6 +56,7 @@ use codex_protocol::protocol::TurnCompleteEvent;
 use codex_protocol::user_input::UserInput;
 use codex_state::DirectionalThreadSpawnEdgeStatus;
 use core_test_support::TempDirExt;
+use core_test_support::test_codex::responses_mock_model_provider;
 use pretty_assertions::assert_eq;
 use serde::Deserialize;
 use serde_json::json;
@@ -98,7 +99,7 @@ fn parse_agent_id(id: &str) -> ThreadId {
 fn thread_manager() -> ThreadManager {
     ThreadManager::with_models_provider_for_tests(
         CodexAuth::from_api_key("dummy"),
-        built_in_model_providers(/* openai_base_url */ /*openai_base_url*/ None)["openai"].clone(),
+        responses_mock_model_provider("http://127.0.0.1:9/v1"),
     )
 }
 

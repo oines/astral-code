@@ -78,6 +78,16 @@ pub fn local(cwd: AbsolutePathBuf) -> TurnEnvironmentSelection {
     }
 }
 
+pub fn responses_mock_model_provider(base_url: impl Into<String>) -> ModelProviderInfo {
+    ModelProviderInfo {
+        name: "Responses mock".to_string(),
+        base_url: Some(base_url.into()),
+        wire_api: WireApi::Responses,
+        supports_websockets: false,
+        ..ModelProviderInfo::default()
+    }
+}
+
 pub fn local_selections(cwd: AbsolutePathBuf) -> TurnEnvironmentSelections {
     TurnEnvironmentSelections::new(cwd.clone(), vec![local(cwd)])
 }
@@ -577,15 +587,7 @@ impl TestCodexBuilder {
         home: &TempDir,
         cwd_override: AbsolutePathBuf,
     ) -> anyhow::Result<(Config, Arc<TempDir>)> {
-        let model_provider = ModelProviderInfo {
-            name: "Responses mock".to_string(),
-            base_url: Some(base_url),
-            wire_api: WireApi::Responses,
-            // Most core tests use SSE-only mock servers, so keep websocket transport off unless
-            // a test explicitly opts into websocket coverage.
-            supports_websockets: false,
-            ..ModelProviderInfo::default()
-        };
+        let model_provider = responses_mock_model_provider(base_url);
         let cwd = Arc::new(TempDir::new()?);
         for hook in self.pre_build_hooks.drain(..) {
             hook(home.path());
