@@ -87,8 +87,13 @@ fn todo_write_uses_claudeish_task_list_shape() {
 
     assert_eq!(tool.input_schema["required"], json!(["todos"]));
     assert_eq!(
-        tool.input_schema["properties"]["explanation"]["type"],
-        json!("string")
+        tool.input_schema["properties"]
+            .as_object()
+            .expect("TodoWrite properties should be an object")
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>(),
+        vec!["todos".to_string()]
     );
     assert_eq!(
         tool.input_schema["properties"]["todos"]["items"]["required"],

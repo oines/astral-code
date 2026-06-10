@@ -232,33 +232,27 @@ fn todo_write_tool() -> AgentTool {
         TODO_WRITE_TOOL_NAME,
         "Update the session task checklist.",
         object(
-            [
-                string_property(
-                    "explanation",
-                    "Optional short explanation for why the checklist changed",
-                ),
-                array_property(
-                    "todos",
-                    "The updated todo list",
-                    json!({
-                        "type": "object",
-                        "properties": {
-                            "content": { "type": "string", "description": "Task description" },
-                            "status": {
-                                "type": "string",
-                                "enum": ["pending", "in_progress", "completed"],
-                                "description": "Task status"
-                            },
-                            "activeForm": {
-                                "type": "string",
-                                "description": "Short present-tense label for the active task"
-                            },
+            [array_property(
+                "todos",
+                "The updated todo list",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "content": { "type": "string", "description": "Task description" },
+                        "status": {
+                            "type": "string",
+                            "enum": ["pending", "in_progress", "completed"],
+                            "description": "Task status"
                         },
-                        "required": ["content", "status", "activeForm"],
-                        "additionalProperties": false
-                    }),
-                ),
-            ],
+                        "activeForm": {
+                            "type": "string",
+                            "description": "Short present-tense label for the active task"
+                        },
+                    },
+                    "required": ["content", "status", "activeForm"],
+                    "additionalProperties": false
+                }),
+            )],
             ["todos"],
         ),
     )
