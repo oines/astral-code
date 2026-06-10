@@ -86,6 +86,10 @@ fn todo_write_uses_claudeish_task_list_shape() {
 
     assert_eq!(tool.input_schema["required"], json!(["todos"]));
     assert_eq!(
+        tool.input_schema["properties"]["explanation"]["type"],
+        json!("string")
+    );
+    assert_eq!(
         tool.input_schema["properties"]["todos"]["items"]["required"],
         json!(["content", "status", "activeForm"])
     );
