@@ -39,6 +39,7 @@ fn bash_schema_uses_claudeish_command_shape() {
                 "cwd": { "type": "string", "description": "Working directory for the command; omit to use the turn cwd" },
                 "yield_time_ms": { "type": "integer", "description": "Milliseconds to wait for initial output before returning" },
                 "max_output_tokens": { "type": "integer", "description": "Maximum output tokens to return" },
+                "run_in_background": { "type": "boolean", "description": "Set true for long-running commands that should keep running while you monitor output separately" },
                 "environment_id": { "type": "string", "description": "Optional target execution environment id when multiple environments exist" }
             },
             "required": ["command"],

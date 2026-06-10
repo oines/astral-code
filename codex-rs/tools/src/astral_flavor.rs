@@ -94,6 +94,10 @@ fn bash_tool() -> AgentTool {
                     "Milliseconds to wait for initial output before returning",
                 ),
                 integer_property("max_output_tokens", "Maximum output tokens to return"),
+                bool_property(
+                    "run_in_background",
+                    "Set true for long-running commands that should keep running while you monitor output separately",
+                ),
                 string_property(
                     "environment_id",
                     "Optional target execution environment id when multiple environments exist",
