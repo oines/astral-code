@@ -1,8 +1,14 @@
 use pretty_assertions::assert_eq;
 use serde_json::json;
 
+use codex_exec_server::FileSystemSandboxContext;
+use codex_exec_server::LOCAL_FS;
+use codex_protocol::models::PermissionProfile;
+use core_test_support::PathExt;
+
 use super::GrepArgs;
 use super::add_line_numbers;
+use super::edit_file;
 use super::push_content_matches;
 use super::split_lines_preserving_newline;
 
@@ -42,4 +48,30 @@ fn grep_content_output_can_include_line_numbers() {
     );
 
     assert_eq!(output, vec!["src/lib.rs:2:needle"]);
+}
+
+#[tokio::test]
+async fn edit_empty_old_string_creates_missing_file() {
+    let temp_dir = tempfile::TempDir::new().expect("temp dir");
+    let cwd = temp_dir.path().abs();
+    let sandbox = FileSystemSandboxContext::from_permission_profile(PermissionProfile::Disabled);
+    let arguments = json!({
+        "file_path": "created.txt",
+        "old_string": "",
+        "new_string": "created content\n"
+    })
+    .to_string();
+
+    let output = edit_file(arguments, LOCAL_FS.as_ref(), &sandbox, &cwd)
+        .await
+        .expect("edit succeeds");
+
+    assert_eq!(
+        output,
+        "The file created.txt has been updated successfully."
+    );
+    assert_eq!(
+        std::fs::read_to_string(temp_dir.path().join("created.txt")).expect("created file"),
+        "created content\n"
+    );
 }

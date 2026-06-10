@@ -1,3 +1,4 @@
+use std::io::ErrorKind;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -281,14 +282,7 @@ async fn write_file(
 ) -> Result<String, FunctionCallError> {
     let args: WriteArgs = parse_arguments(&arguments)?;
     let path = resolve_path(cwd, &args.file_path);
-    fs.write_file(&path, args.content.into_bytes(), Some(sandbox))
-        .await
-        .map_err(|err| {
-            FunctionCallError::RespondToModel(format!(
-                "unable to write `{}`: {err}",
-                path.display()
-            ))
-        })?;
+    write_file_contents(fs, sandbox, &path, args.content.into_bytes()).await?;
     Ok(format!("Wrote {}", display_path(&path, cwd)))
 }
 
@@ -308,11 +302,6 @@ async fn edit_file(
     cwd: &AbsolutePathBuf,
 ) -> Result<String, FunctionCallError> {
     let args: EditArgs = parse_arguments(&arguments)?;
-    if args.old_string.is_empty() {
-        return Err(FunctionCallError::RespondToModel(
-            "old_string must not be empty".to_string(),
-        ));
-    }
     if args.old_string == args.new_string {
         return Err(FunctionCallError::RespondToModel(
             "new_string must be different from old_string".to_string(),
@@ -320,6 +309,10 @@ async fn edit_file(
     }
 
     let path = resolve_path(cwd, &args.file_path);
+    if args.old_string.is_empty() {
+        return edit_empty_old_string(args, fs, sandbox, cwd, &path).await;
+    }
+
     let bytes = fs.read_file(&path, Some(sandbox)).await.map_err(|err| {
         FunctionCallError::RespondToModel(format!("unable to read `{}`: {err}", path.display()))
     })?;
@@ -346,14 +339,7 @@ async fn edit_file(
     } else {
         text.replacen(&args.old_string, &args.new_string, 1)
     };
-    fs.write_file(&path, updated.into_bytes(), Some(sandbox))
-        .await
-        .map_err(|err| {
-            FunctionCallError::RespondToModel(format!(
-                "unable to write `{}`: {err}",
-                path.display()
-            ))
-        })?;
+    write_file_contents(fs, sandbox, &path, updated.into_bytes()).await?;
 
     Ok(format!(
         "Updated {} ({} replacement{})",
@@ -365,6 +351,52 @@ async fn edit_file(
             ""
         }
     ))
+}
+
+async fn edit_empty_old_string(
+    args: EditArgs,
+    fs: &dyn ExecutorFileSystem,
+    sandbox: &FileSystemSandboxContext,
+    cwd: &AbsolutePathBuf,
+    path: &AbsolutePathBuf,
+) -> Result<String, FunctionCallError> {
+    match fs.read_file(path, Some(sandbox)).await {
+        Ok(bytes) if !bytes.is_empty() => {
+            return Err(FunctionCallError::RespondToModel(
+                "Cannot create new file - file already exists.".to_string(),
+            ));
+        }
+        Ok(_) => {}
+        Err(err) if err.kind() == ErrorKind::NotFound => {}
+        Err(err) => {
+            return Err(FunctionCallError::RespondToModel(format!(
+                "unable to read `{}`: {err}",
+                path.display()
+            )));
+        }
+    }
+
+    write_file_contents(fs, sandbox, path, args.new_string.into_bytes()).await?;
+    Ok(format!(
+        "The file {} has been updated successfully.",
+        display_path(path, cwd)
+    ))
+}
+
+async fn write_file_contents(
+    fs: &dyn ExecutorFileSystem,
+    sandbox: &FileSystemSandboxContext,
+    path: &AbsolutePathBuf,
+    contents: Vec<u8>,
+) -> Result<(), FunctionCallError> {
+    fs.write_file(path, contents, Some(sandbox))
+        .await
+        .map_err(|err| {
+            FunctionCallError::RespondToModel(format!(
+                "unable to write `{}`: {err}",
+                path.display()
+            ))
+        })
 }
 
 #[derive(Deserialize)]
