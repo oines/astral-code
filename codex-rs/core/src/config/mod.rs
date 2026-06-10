@@ -1028,8 +1028,8 @@ pub struct Config {
     /// Voluntarily left as Optional because the default value might depend on the client.
     pub analytics_enabled: Option<bool>,
 
-    /// When `false`, disables feedback collection across Codex product surfaces.
-    /// Defaults to `true`.
+    /// When `true`, enables feedback collection across Astral product surfaces.
+    /// Defaults to `false`.
     pub feedback_enabled: bool,
 
     /// Configured discoverable tools for tool suggestions.
@@ -3601,7 +3601,7 @@ impl Config {
                 .feedback
                 .as_ref()
                 .and_then(|feedback| feedback.enabled)
-                .unwrap_or(true),
+                .unwrap_or(false),
             tool_suggest,
             tui_notifications: cfg
                 .tui

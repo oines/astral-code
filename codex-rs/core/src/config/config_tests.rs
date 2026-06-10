@@ -4930,7 +4930,7 @@ fn local_dev_builds_force_file_mcp_oauth_store_modes() {
 }
 
 #[tokio::test]
-async fn feedback_enabled_defaults_to_true() -> std::io::Result<()> {
+async fn feedback_enabled_defaults_to_false() -> std::io::Result<()> {
     let codex_home = TempDir::new()?;
     let cfg = ConfigToml {
         feedback: Some(FeedbackConfigToml::default()),
@@ -4944,7 +4944,7 @@ async fn feedback_enabled_defaults_to_true() -> std::io::Result<()> {
     )
     .await?;
 
-    assert_eq!(config.feedback_enabled, true);
+    assert_eq!(config.feedback_enabled, false);
 
     Ok(())
 }
