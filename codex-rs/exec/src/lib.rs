@@ -70,10 +70,8 @@ use codex_core::format_exec_policy_error_with_source;
 use codex_core::path_utils;
 use codex_feedback::CodexFeedback;
 use codex_git_utils::get_git_repo_root;
-use codex_login::AuthConfig;
 use codex_login::default_client::set_default_client_residency_requirement;
 use codex_login::default_client::set_default_originator;
-use codex_login::enforce_login_restrictions;
 use codex_model_provider_info::LMSTUDIO_OSS_PROVIDER_ID;
 use codex_model_provider_info::OLLAMA_OSS_PROVIDER_ID;
 use codex_otel::set_parent_from_context;
@@ -449,19 +447,6 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
     }
 
     set_default_client_residency_requirement(config.enforce_residency.value());
-
-    if let Err(err) = enforce_login_restrictions(&AuthConfig {
-        codex_home: config.codex_home.to_path_buf(),
-        auth_credentials_store_mode: config.cli_auth_credentials_store_mode,
-        forced_login_method: config.forced_login_method,
-        forced_chatgpt_workspace_id: config.forced_chatgpt_workspace_id.clone(),
-        chatgpt_base_url: Some(config.chatgpt_base_url.clone()),
-    })
-    .await
-    {
-        eprintln!("{err}");
-        std::process::exit(1);
-    }
 
     let otel = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         codex_core::otel_init::build_provider(
