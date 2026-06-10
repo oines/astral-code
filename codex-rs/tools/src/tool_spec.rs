@@ -2,13 +2,18 @@ use crate::FreeformTool;
 use crate::JsonSchema;
 use crate::LoadableToolSpec;
 use crate::ResponsesApiNamespace;
+use crate::ResponsesApiNamespaceTool;
 use crate::ResponsesApiTool;
+use codex_agent_protocol::AgentTool;
 use codex_protocol::config_types::WebSearchContextSize;
 use codex_protocol::config_types::WebSearchFilters as ConfigWebSearchFilters;
 use codex_protocol::config_types::WebSearchUserLocation as ConfigWebSearchUserLocation;
 use codex_protocol::config_types::WebSearchUserLocationType;
 use serde::Serialize;
 use serde_json::Value;
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use thiserror::Error;
 
 /// When serialized as JSON, this produces a valid "Tool" in the OpenAI
 /// Responses API.
@@ -86,6 +91,127 @@ pub fn create_tools_json_for_responses_api(
     }
 
     Ok(tools_json)
+}
+
+#[derive(Debug, Clone, Error, PartialEq, Eq)]
+pub enum AgentToolSpecError {
+    #[error("tool {tool_name} input schema could not be serialized: {message}")]
+    SchemaSerialization { tool_name: String, message: String },
+    #[error("provider-neutral tools require unique names; {name} was declared more than once")]
+    DuplicateToolName { name: String },
+    #[error("{name} cannot be converted to a provider-neutral function tool")]
+    UnsupportedTool { name: String },
+}
+
+/// Converts first-party tool specifications into provider-neutral function
+/// tools for model adapters that do not understand Responses hosted tools.
+pub fn create_agent_tools_for_provider_neutral_request(
+    tools: &[ToolSpec],
+) -> Result<Vec<AgentTool>, AgentToolSpecError> {
+    let mut agent_tools = Vec::new();
+    let mut seen_names = BTreeSet::new();
+
+    for spec in tools {
+        match spec {
+            ToolSpec::Function(tool) => {
+                push_agent_tool(
+                    &mut agent_tools,
+                    &mut seen_names,
+                    responses_api_tool_to_agent_tool(tool, BTreeMap::new())?,
+                )?;
+            }
+            ToolSpec::Namespace(namespace) => {
+                for tool in &namespace.tools {
+                    match tool {
+                        ResponsesApiNamespaceTool::Function(tool) => {
+                            let metadata = BTreeMap::from([
+                                (
+                                    "namespace".to_string(),
+                                    Value::String(namespace.name.clone()),
+                                ),
+                                (
+                                    "namespaceDescription".to_string(),
+                                    Value::String(namespace.description.clone()),
+                                ),
+                            ]);
+                            push_agent_tool(
+                                &mut agent_tools,
+                                &mut seen_names,
+                                responses_api_tool_to_agent_tool(tool, metadata)?,
+                            )?;
+                        }
+                    }
+                }
+            }
+            ToolSpec::ToolSearch {
+                execution,
+                description,
+                parameters,
+            } => {
+                let agent_tool = AgentTool {
+                    name: spec.name().to_string(),
+                    description: description.clone(),
+                    input_schema: schema_to_value(spec.name(), parameters)?,
+                    metadata: BTreeMap::from([(
+                        "execution".to_string(),
+                        Value::String(execution.clone()),
+                    )]),
+                };
+                push_agent_tool(&mut agent_tools, &mut seen_names, agent_tool)?;
+            }
+            ToolSpec::ImageGeneration { .. }
+            | ToolSpec::WebSearch { .. }
+            | ToolSpec::Freeform(_) => {
+                return Err(AgentToolSpecError::UnsupportedTool {
+                    name: spec.name().to_string(),
+                });
+            }
+        }
+    }
+
+    Ok(agent_tools)
+}
+
+fn responses_api_tool_to_agent_tool(
+    tool: &ResponsesApiTool,
+    mut metadata: BTreeMap<String, Value>,
+) -> Result<AgentTool, AgentToolSpecError> {
+    if tool.strict {
+        metadata.insert("strict".to_string(), Value::Bool(true));
+    }
+    if let Some(defer_loading) = tool.defer_loading {
+        metadata.insert("deferLoading".to_string(), Value::Bool(defer_loading));
+    }
+    if let Some(output_schema) = &tool.output_schema {
+        metadata.insert("outputSchema".to_string(), output_schema.clone());
+    }
+
+    Ok(AgentTool {
+        name: tool.name.clone(),
+        description: tool.description.clone(),
+        input_schema: schema_to_value(&tool.name, &tool.parameters)?,
+        metadata,
+    })
+}
+
+fn schema_to_value(tool_name: &str, parameters: &JsonSchema) -> Result<Value, AgentToolSpecError> {
+    serde_json::to_value(parameters).map_err(|err| AgentToolSpecError::SchemaSerialization {
+        tool_name: tool_name.to_string(),
+        message: err.to_string(),
+    })
+}
+
+fn push_agent_tool(
+    agent_tools: &mut Vec<AgentTool>,
+    seen_names: &mut BTreeSet<String>,
+    tool: AgentTool,
+) -> Result<(), AgentToolSpecError> {
+    if !seen_names.insert(tool.name.clone()) {
+        return Err(AgentToolSpecError::DuplicateToolName { name: tool.name });
+    }
+
+    agent_tools.push(tool);
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
