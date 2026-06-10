@@ -88,6 +88,7 @@ use title::terminal_title_check;
 use updates::updates_check;
 
 const OPENAI_BETA_HEADER: &str = "OpenAI-Beta";
+const DEFAULT_ASTRAL_PROVIDER_BASE_URL: &str = "http://localhost:8000/v1";
 const RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE: &str = "responses_websockets=2026-02-06";
 const WEBSOCKET_IMMEDIATE_CLOSE_GRACE: Duration = Duration::from_millis(250);
 const SLOW_CHECK_PROGRESS_THRESHOLD: Duration = Duration::from_secs(2);
@@ -1241,7 +1242,7 @@ fn auth_check(config: &Config) -> DoctorCheck {
             "auth.credentials",
             "auth",
             CheckStatus::Fail,
-            "no Codex credentials were found",
+            "no Astral credentials were found",
         )
         .details(details)
         .remediation("Run astral login or provide an API key through a supported auth env var."),
@@ -1264,7 +1265,7 @@ fn provider_specific_auth_check(
     env_var_present: impl Fn(&str) -> bool,
 ) -> Option<DoctorCheck> {
     details.push(format!(
-        "model provider requires OpenAI auth: {requires_openai_auth}"
+        "model provider uses Astral auth manager: {requires_openai_auth}"
     ));
     if requires_openai_auth {
         return None;
@@ -1304,7 +1305,7 @@ fn provider_specific_auth_check(
                 "auth.credentials",
                 "auth",
                 CheckStatus::Ok,
-                "OpenAI auth is not required for the active model provider",
+                "Astral-managed auth is not required for the active model provider",
             )
             .details(details),
         ),
@@ -2498,7 +2499,6 @@ struct ReachabilityEndpoint {
 enum ProviderAuthReachabilityMode {
     NotRequired,
     ApiKey,
-    Chatgpt,
 }
 
 impl ProviderAuthReachabilityMode {
@@ -2506,7 +2506,6 @@ impl ProviderAuthReachabilityMode {
         match self {
             Self::NotRequired => "provider auth",
             Self::ApiKey => "API key auth",
-            Self::Chatgpt => "ChatGPT auth",
         }
     }
 }
@@ -2528,19 +2527,17 @@ fn provider_reachability_plan(config: &Config) -> ReachabilityPlan {
         config.model_provider.base_url.as_deref(),
         config.model_provider.query_params.as_ref(),
         config.model_provider.is_amazon_bedrock(),
-        &config.chatgpt_base_url,
     )
 }
 
 fn default_reachability_plan() -> ReachabilityPlan {
     provider_reachability_plan_from_parts(
-        ProviderAuthReachabilityMode::Chatgpt,
-        "openai",
-        "OpenAI",
-        /*provider_base_url*/ None,
+        ProviderAuthReachabilityMode::ApiKey,
+        "astral",
+        "Astral",
+        Some(DEFAULT_ASTRAL_PROVIDER_BASE_URL),
         /*provider_query_params*/ None,
         /*is_amazon_bedrock*/ false,
-        "https://chatgpt.com/backend-api/",
     )
 }
 
@@ -2563,7 +2560,7 @@ fn provider_auth_reachability_mode_from_auth(
             | codex_app_server_protocol::AuthMode::AgentIdentity
             | codex_app_server_protocol::AuthMode::PersonalAccessToken,
         )
-        | None => ProviderAuthReachabilityMode::Chatgpt,
+        | None => ProviderAuthReachabilityMode::ApiKey,
     }
 }
 
@@ -2574,7 +2571,6 @@ fn provider_reachability_plan_from_parts(
     provider_base_url: Option<&str>,
     provider_query_params: Option<&HashMap<String, String>>,
     is_amazon_bedrock: bool,
-    chatgpt_base_url: &str,
 ) -> ReachabilityPlan {
     let provider_route_probe_url = provider_base_url
         .or_else(|| {
@@ -2592,12 +2588,6 @@ fn provider_reachability_plan_from_parts(
                 .to_string(),
             required: true,
             route_probe_url: provider_route_probe_url,
-        }],
-        ProviderAuthReachabilityMode::Chatgpt => vec![ReachabilityEndpoint {
-            label: "ChatGPT".to_string(),
-            url: chatgpt_base_url.to_string(),
-            required: true,
-            route_probe_url: None,
         }],
         ProviderAuthReachabilityMode::NotRequired => provider_base_url
             .map(|url| {
@@ -3426,7 +3416,7 @@ mod tests {
         assert_eq!(check.status, CheckStatus::Ok);
         assert_eq!(
             check.summary,
-            "OpenAI auth is not required for the active model provider"
+            "Astral-managed auth is not required for the active model provider"
         );
     }
 
@@ -3539,6 +3529,14 @@ mod tests {
             ),
             ProviderAuthReachabilityMode::ApiKey
         );
+        assert_eq!(
+            provider_auth_reachability_mode_from_auth(
+                /*requires_openai_auth*/ true,
+                |_| false,
+                /*stored_auth*/ None,
+            ),
+            ProviderAuthReachabilityMode::ApiKey
+        );
     }
 
     #[test]
@@ -3551,7 +3549,6 @@ mod tests {
                 Some("https://example.openai.azure.com/openai/v1"),
                 /*provider_query_params*/ None,
                 /*is_amazon_bedrock*/ false,
-                "https://chatgpt.com/backend-api/",
             ),
             ReachabilityPlan {
                 description: "provider auth".to_string(),
@@ -3577,7 +3574,6 @@ mod tests {
                 Some("https://example.com/openai/v1/"),
                 Some(&query_params),
                 /*is_amazon_bedrock*/ false,
-                "https://chatgpt.com/backend-api/",
             ),
             ReachabilityPlan {
                 description: "provider auth".to_string(),
@@ -3602,7 +3598,6 @@ mod tests {
             Some("https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1"),
             /*provider_query_params*/ None,
             /*is_amazon_bedrock*/ true,
-            "https://chatgpt.com/backend-api/",
         );
 
         assert_eq!(plan.endpoints[0].route_probe_url, None);
@@ -3617,7 +3612,6 @@ mod tests {
             /*provider_base_url*/ None,
             /*provider_query_params*/ None,
             /*is_amazon_bedrock*/ false,
-            "https://chatgpt.com/backend-api/",
         );
 
         assert_eq!(
@@ -3670,7 +3664,6 @@ mod tests {
             Some(&format!("http://{addr}/xxxx")),
             /*provider_query_params*/ None,
             /*is_amazon_bedrock*/ false,
-            "https://chatgpt.com/backend-api/",
         );
 
         let check = provider_reachability_check(plan).await;
@@ -3711,7 +3704,6 @@ mod tests {
             Some(&format!("http://{addr}/v1")),
             /*provider_query_params*/ None,
             /*is_amazon_bedrock*/ false,
-            "https://chatgpt.com/backend-api/",
         );
 
         let check = provider_reachability_check(plan).await;
