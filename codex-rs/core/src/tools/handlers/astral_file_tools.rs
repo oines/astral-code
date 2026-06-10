@@ -33,6 +33,20 @@ const DEFAULT_READ_LINE_LIMIT: usize = 2_000;
 const DEFAULT_GREP_HEAD_LIMIT: usize = 250;
 const MAX_SCAN_ENTRIES: usize = 10_000;
 const MAX_RESULT_LINES: usize = 1_000;
+const BLOCKED_DEVICE_PATHS: &[&str] = &[
+    "/dev/zero",
+    "/dev/random",
+    "/dev/urandom",
+    "/dev/full",
+    "/dev/stdin",
+    "/dev/tty",
+    "/dev/console",
+    "/dev/stdout",
+    "/dev/stderr",
+    "/dev/fd/0",
+    "/dev/fd/1",
+    "/dev/fd/2",
+];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum AstralFileToolKind {
@@ -188,6 +202,12 @@ async fn read_file(
     }
 
     let path = resolve_path(cwd, &args.file_path);
+    if is_blocked_device_path(&path) {
+        return Err(FunctionCallError::RespondToModel(format!(
+            "Cannot read '{}': this device file would block or produce infinite output.",
+            args.file_path
+        )));
+    }
     if is_pdf_path(&path) {
         return Err(FunctionCallError::RespondToModel(
             "Read does not support PDFs yet; use Bash with an appropriate PDF extraction tool"
@@ -228,6 +248,16 @@ async fn read_file(
     }
 
     Ok(output)
+}
+
+fn is_blocked_device_path(path: &Path) -> bool {
+    let path = path.to_string_lossy();
+    if BLOCKED_DEVICE_PATHS.contains(&path.as_ref()) {
+        return true;
+    }
+
+    path.starts_with("/proc/")
+        && (path.ends_with("/fd/0") || path.ends_with("/fd/1") || path.ends_with("/fd/2"))
 }
 
 async fn handle_read_invocation(

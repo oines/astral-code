@@ -9,6 +9,7 @@ use core_test_support::PathExt;
 use super::GrepArgs;
 use super::add_line_numbers;
 use super::edit_file;
+use super::is_blocked_device_path;
 use super::push_content_matches;
 use super::split_lines_preserving_newline;
 
@@ -48,6 +49,15 @@ fn grep_content_output_can_include_line_numbers() {
     );
 
     assert_eq!(output, vec!["src/lib.rs:2:needle"]);
+}
+
+#[test]
+fn read_blocks_device_paths_that_can_hang() {
+    assert!(is_blocked_device_path(std::path::Path::new("/dev/random")));
+    assert!(is_blocked_device_path(std::path::Path::new(
+        "/proc/self/fd/0"
+    )));
+    assert!(!is_blocked_device_path(std::path::Path::new("/dev/null")));
 }
 
 #[tokio::test]
