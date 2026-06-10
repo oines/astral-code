@@ -2,11 +2,16 @@ use crate::function_tool::FunctionCallError;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
+use crate::tools::context::boxed_tool_output;
+use crate::tools::handlers::multi_agents_common::tool_output_code_mode_result;
+use crate::tools::handlers::multi_agents_common::tool_output_json_text;
+use crate::tools::handlers::multi_agents_common::tool_output_response_item;
 use crate::tools::handlers::multi_agents_spec::SpawnAgentToolOptions;
 use crate::tools::handlers::multi_agents_v2::SpawnAgentHandler;
 use crate::tools::handlers::parse_arguments;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::ToolExecutor;
+use codex_protocol::models::ResponseInputItem;
 use codex_tools::AGENT_TOOL_NAME;
 use codex_tools::ResponsesApiTool;
 use codex_tools::ToolName;
@@ -14,6 +19,8 @@ use codex_tools::ToolSpec;
 use codex_tools::astral_core_tool_by_name;
 use codex_tools::parse_tool_input_schema_without_compaction;
 use serde::Deserialize;
+use serde::Serialize;
+use serde_json::Value as JsonValue;
 use serde_json::Value;
 use serde_json::json;
 
@@ -67,9 +74,12 @@ impl ToolExecutor<ToolInvocation> for AstralAgentHandler {
         &self,
         invocation: ToolInvocation,
     ) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
-        self.spawn_agent
-            .handle(to_spawn_agent_invocation(invocation)?)
-            .await
+        let spawn_invocation = to_spawn_agent_invocation(invocation)?;
+        let spawn_payload = spawn_invocation.payload.clone();
+        let spawn_output = self.spawn_agent.handle(spawn_invocation).await?;
+        Ok(boxed_tool_output(AstralAgentResult::from_spawn_result(
+            spawn_output.code_mode_result(&spawn_payload),
+        )?))
     }
 }
 
@@ -95,6 +105,62 @@ struct AstralAgentArgs {
     service_tier: Option<String>,
     #[serde(default)]
     fork_turns: Option<String>,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+struct AstralAgentResult {
+    task_id: String,
+    task_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    nickname: Option<String>,
+}
+
+impl AstralAgentResult {
+    fn from_spawn_result(value: JsonValue) -> Result<Self, FunctionCallError> {
+        let object = value.as_object().ok_or_else(|| {
+            FunctionCallError::RespondToModel(
+                "Agent failed to parse spawn_agent result object".to_string(),
+            )
+        })?;
+        let task_name = object
+            .get("task_name")
+            .or_else(|| object.get("task_id"))
+            .or_else(|| object.get("agentId"))
+            .and_then(JsonValue::as_str)
+            .ok_or_else(|| {
+                FunctionCallError::RespondToModel(
+                    "Agent result is missing task_name/task_id".to_string(),
+                )
+            })?
+            .to_string();
+        let nickname = object
+            .get("nickname")
+            .and_then(JsonValue::as_str)
+            .map(str::to_string);
+        Ok(Self {
+            task_id: task_name.clone(),
+            task_name,
+            nickname,
+        })
+    }
+}
+
+impl ToolOutput for AstralAgentResult {
+    fn log_preview(&self) -> String {
+        tool_output_json_text(self, AGENT_TOOL_NAME)
+    }
+
+    fn success_for_logging(&self) -> bool {
+        true
+    }
+
+    fn to_response_item(&self, call_id: &str, payload: &ToolPayload) -> ResponseInputItem {
+        tool_output_response_item(call_id, payload, self, Some(true), AGENT_TOOL_NAME)
+    }
+
+    fn code_mode_result(&self, _payload: &ToolPayload) -> JsonValue {
+        tool_output_code_mode_result(self, AGENT_TOOL_NAME)
+    }
 }
 
 fn to_spawn_agent_invocation(
@@ -154,3 +220,7 @@ fn task_name(source: &str) -> String {
         task_name
     }
 }
+
+#[cfg(test)]
+#[path = "astral_agent_tests.rs"]
+mod tests;
