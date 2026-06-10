@@ -4347,6 +4347,20 @@
             "responses"
           ],
           "type": "string"
+        },
+        {
+          "description": "Anthropic Messages API exposed at `/v1/messages`.",
+          "enum": [
+            "anthropic_messages"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "OpenAI-compatible Chat Completions API exposed at `/v1/chat/completions`.",
+          "enum": [
+            "chat_completions"
+          ],
+          "type": "string"
         }
       ]
     },

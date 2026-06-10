@@ -107,6 +107,30 @@ env_http_headers = { "X-Example-Env-Header" = "EXAMPLE_ENV_VAR" }
 }
 
 #[test]
+fn test_deserialize_provider_neutral_wire_apis() {
+    let anthropic_provider_toml = r#"
+name = "Anthropic"
+base_url = "https://api.anthropic.com/v1"
+env_key = "ANTHROPIC_API_KEY"
+wire_api = "anthropic_messages"
+        "#;
+    let chat_provider_toml = r#"
+name = "OpenAI-compatible chat"
+base_url = "https://example.com/v1"
+env_key = "EXAMPLE_API_KEY"
+wire_api = "chat_completions"
+        "#;
+
+    let anthropic_provider: ModelProviderInfo = toml::from_str(anthropic_provider_toml).unwrap();
+    let chat_provider: ModelProviderInfo = toml::from_str(chat_provider_toml).unwrap();
+
+    assert_eq!(anthropic_provider.wire_api, WireApi::AnthropicMessages);
+    assert_eq!(chat_provider.wire_api, WireApi::ChatCompletions);
+    assert_eq!(WireApi::AnthropicMessages.to_string(), "anthropic_messages");
+    assert_eq!(WireApi::ChatCompletions.to_string(), "chat_completions");
+}
+
+#[test]
 fn test_deserialize_chat_wire_api_shows_helpful_error() {
     let provider_toml = r#"
 name = "OpenAI using Chat Completions"

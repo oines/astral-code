@@ -10,6 +10,7 @@ use super::X_OPENAI_SUBAGENT_HEADER;
 use crate::AttestationContext;
 use crate::AttestationProvider;
 use crate::GenerateAttestationFuture;
+use crate::client_common::Prompt;
 use codex_api::ApiError;
 use codex_api::ResponseEvent;
 use codex_app_server_protocol::AuthMode;
@@ -23,6 +24,8 @@ use codex_model_provider_info::create_oss_provider_with_base_url;
 use codex_otel::SessionTelemetry;
 use codex_protocol::SessionId;
 use codex_protocol::ThreadId;
+use codex_protocol::config_types::ReasoningSummary;
+use codex_protocol::error::CodexErr;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ModelInfo;
@@ -211,6 +214,52 @@ fn output_message(id: &str, text: &str) -> ResponseItem {
             text: text.to_string(),
         }],
         phase: None,
+    }
+}
+
+#[tokio::test]
+async fn provider_neutral_wire_apis_return_clear_unsupported_stream_error() {
+    for wire_api in [WireApi::AnthropicMessages, WireApi::ChatCompletions] {
+        let provider = create_oss_provider_with_base_url("https://example.com/v1", wire_api);
+        let model_client = ModelClient::new(
+            /*auth_manager*/ None,
+            SessionId::new(),
+            ThreadId::new(),
+            /*installation_id*/ "11111111-1111-4111-8111-111111111111".to_string(),
+            provider,
+            SessionSource::Cli,
+            /*parent_thread_id*/ None,
+            /*model_verbosity*/ None,
+            /*enable_request_compression*/ false,
+            /*include_timing_metrics*/ false,
+            /*beta_features_header*/ None,
+            /*attestation_provider*/ None,
+        );
+        let model_info = test_model_info();
+        let session_telemetry = test_session_telemetry();
+        let inference_trace = InferenceTraceContext::disabled();
+        let result = model_client
+            .new_session()
+            .stream(
+                &Prompt::default(),
+                &model_info,
+                &session_telemetry,
+                /*effort*/ None,
+                ReasoningSummary::None,
+                /*service_tier*/ None,
+                /*turn_metadata_header*/ None,
+                &inference_trace,
+            )
+            .await;
+
+        match result {
+            Ok(_) => panic!("provider-neutral wire api should not be wired yet"),
+            Err(CodexErr::UnsupportedOperation(message)) => assert_eq!(
+                message,
+                format!("wire_api `{wire_api}` is not wired to a streaming client yet")
+            ),
+            Err(other) => panic!("expected unsupported wire api error, got {other:?}"),
+        }
     }
 }
 

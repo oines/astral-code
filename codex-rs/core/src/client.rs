@@ -1552,6 +1552,11 @@ impl ModelClientSession {
                 )
                 .await
             }
+            WireApi::AnthropicMessages | WireApi::ChatCompletions => {
+                Err(CodexErr::UnsupportedOperation(format!(
+                    "wire_api `{wire_api}` is not wired to a streaming client yet"
+                )))
+            }
         }
     }
 
