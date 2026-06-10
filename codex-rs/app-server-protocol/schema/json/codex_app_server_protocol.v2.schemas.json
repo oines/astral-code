@@ -25,30 +25,6 @@
         },
         {
           "properties": {
-            "email": {
-              "type": "string"
-            },
-            "planType": {
-              "$ref": "#/definitions/PlanType"
-            },
-            "type": {
-              "enum": [
-                "chatgpt"
-              ],
-              "title": "ChatgptAccountType",
-              "type": "string"
-            }
-          },
-          "required": [
-            "email",
-            "planType",
-            "type"
-          ],
-          "title": "ChatgptAccount",
-          "type": "object"
-        },
-        {
-          "properties": {
             "type": {
               "enum": [
                 "amazonBedrock"

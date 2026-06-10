@@ -21,7 +21,6 @@ use codex_app_server_protocol::ServerNotification;
 use codex_config::types::AuthCredentialsStoreMode;
 use codex_login::REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR;
 use codex_login::login_with_api_key;
-use codex_protocol::account::PlanType as AccountPlanType;
 use pretty_assertions::assert_eq;
 use std::path::Path;
 use tempfile::TempDir;
@@ -347,7 +346,7 @@ region = "us-west-2"
 }
 
 #[tokio::test]
-async fn get_account_with_chatgpt() -> Result<()> {
+async fn get_account_omits_chatgpt_auth() -> Result<()> {
     let codex_home = TempDir::new()?;
     create_config_toml(
         codex_home.path(),
@@ -381,10 +380,7 @@ async fn get_account_with_chatgpt() -> Result<()> {
     let received: GetAccountResponse = to_response(resp)?;
 
     let expected = GetAccountResponse {
-        account: Some(Account::Chatgpt {
-            email: "user@example.com".to_string(),
-            plan_type: AccountPlanType::Pro,
-        }),
+        account: None,
         requires_openai_auth: true,
     };
     assert_eq!(received, expected);
@@ -472,48 +468,5 @@ async fn get_account_omits_chatgpt_after_permanent_refresh_failure() -> Result<(
         }
     );
     server.verify().await;
-    Ok(())
-}
-
-#[tokio::test]
-async fn get_account_with_chatgpt_missing_plan_claim_returns_unknown() -> Result<()> {
-    let codex_home = TempDir::new()?;
-    create_config_toml(
-        codex_home.path(),
-        CreateConfigTomlParams {
-            requires_openai_auth: Some(true),
-            ..Default::default()
-        },
-    )?;
-    write_chatgpt_auth(
-        codex_home.path(),
-        ChatGptAuthFixture::new("access-chatgpt").email("user@example.com"),
-        AuthCredentialsStoreMode::File,
-    )?;
-
-    let mut mcp =
-        TestAppServer::new_with_env(codex_home.path(), &[("ASTRAL_API_KEY", None)]).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
-
-    let params = GetAccountParams {
-        refresh_token: false,
-    };
-    let request_id = mcp.send_get_account_request(params).await?;
-
-    let resp: JSONRPCResponse = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
-    )
-    .await??;
-    let received: GetAccountResponse = to_response(resp)?;
-
-    let expected = GetAccountResponse {
-        account: Some(Account::Chatgpt {
-            email: "user@example.com".to_string(),
-            plan_type: AccountPlanType::Unknown,
-        }),
-        requires_openai_auth: true,
-    };
-    assert_eq!(received, expected);
     Ok(())
 }

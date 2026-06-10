@@ -1607,7 +1607,6 @@ mod tests {
     use super::*;
     use anyhow::Result;
     use codex_protocol::ThreadId;
-    use codex_protocol::account::PlanType;
     use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_READ_ONLY;
     use codex_protocol::parse_command::ParsedCommand;
     use codex_protocol::protocol::RealtimeConversationVersion;
@@ -2583,19 +2582,6 @@ mod tests {
                 "type": "apiKey",
             }),
             serde_json::to_value(&api_key)?,
-        );
-
-        let chatgpt = v2::Account::Chatgpt {
-            email: "user@example.com".to_string(),
-            plan_type: PlanType::Plus,
-        };
-        assert_eq!(
-            json!({
-                "type": "chatgpt",
-                "email": "user@example.com",
-                "planType": "plus",
-            }),
-            serde_json::to_value(&chatgpt)?,
         );
 
         Ok(())

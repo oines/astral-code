@@ -295,24 +295,6 @@ impl AppServerSession {
                 FeedbackAudience::External,
                 false,
             ),
-            Some(Account::Chatgpt { email, plan_type }) => {
-                let feedback_audience = if email.ends_with("@openai.com") {
-                    FeedbackAudience::OpenAiEmployee
-                } else {
-                    FeedbackAudience::External
-                };
-                (
-                    Some(email.clone()),
-                    Some(TelemetryAuthMode::Chatgpt),
-                    Some(StatusAccountDisplay::ChatGpt {
-                        email: Some(email),
-                        plan: Some(plan_type_display_name(plan_type)),
-                    }),
-                    Some(plan_type),
-                    feedback_audience,
-                    true,
-                )
-            }
             Some(Account::AmazonBedrock {}) => {
                 (None, None, None, None, FeedbackAudience::External, false)
             }

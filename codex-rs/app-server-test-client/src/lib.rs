@@ -25,7 +25,6 @@ use anyhow::bail;
 use clap::ArgAction;
 use clap::Parser;
 use clap::Subcommand;
-use codex_app_server_protocol::AccountLoginCompletedNotification;
 use codex_app_server_protocol::AskForApproval;
 use codex_app_server_protocol::ClientInfo;
 use codex_app_server_protocol::ClientRequest;
@@ -45,7 +44,6 @@ use codex_app_server_protocol::JSONRPCMessage;
 use codex_app_server_protocol::JSONRPCNotification;
 use codex_app_server_protocol::JSONRPCRequest;
 use codex_app_server_protocol::JSONRPCResponse;
-use codex_app_server_protocol::LoginAccountResponse;
 use codex_app_server_protocol::ModelListParams;
 use codex_app_server_protocol::ModelListResponse;
 use codex_app_server_protocol::RequestId;
@@ -223,12 +221,6 @@ enum CliCommand {
         #[arg(long)]
         abort_on: Option<usize>,
     },
-    /// Trigger the ChatGPT login flow and wait for completion.
-    TestLogin {
-        /// Use the device-code login flow instead of the browser callback flow.
-        #[arg(long, default_value_t = false)]
-        device_code: bool,
-    },
     /// Fetch the current account rate limits from the Codex app-server.
     GetAccountRateLimits,
     /// List the available models from the Codex app-server.
@@ -374,11 +366,6 @@ pub async fn run() -> Result<()> {
                 &dynamic_tools,
             )
             .await
-        }
-        CliCommand::TestLogin { device_code } => {
-            ensure_dynamic_tools_unused(&dynamic_tools, "test-login")?;
-            let endpoint = resolve_endpoint(codex_bin, url)?;
-            test_login(&endpoint, &config_overrides, device_code).await
         }
         CliCommand::GetAccountRateLimits => {
             ensure_dynamic_tools_unused(&dynamic_tools, "get-account-rate-limits")?;
@@ -1033,58 +1020,6 @@ async fn send_follow_up_v2(
     .await
 }
 
-async fn test_login(
-    endpoint: &Endpoint,
-    config_overrides: &[String],
-    device_code: bool,
-) -> Result<()> {
-    with_client("test-login", endpoint, config_overrides, |client| {
-        let initialize = client.initialize()?;
-        println!("< initialize response: {initialize:?}");
-
-        let login_response = if device_code {
-            client.login_account_chatgpt_device_code()?
-        } else {
-            client.login_account_chatgpt()?
-        };
-        println!("< account/login/start response: {login_response:?}");
-        let login_id = match login_response {
-            LoginAccountResponse::Chatgpt { login_id, auth_url } => {
-                println!("Open the following URL in your browser to continue:\n{auth_url}");
-                login_id
-            }
-            LoginAccountResponse::ChatgptDeviceCode {
-                login_id,
-                verification_url,
-                user_code,
-            } => {
-                println!(
-                    "Open the following URL and enter the code to continue:\n{verification_url}\n\nCode: {user_code}"
-                );
-                login_id
-            }
-            _ => bail!("expected chatgpt login response"),
-        };
-
-        let completion = client.wait_for_account_login_completion(&login_id)?;
-        println!("< account/login/completed notification: {completion:?}");
-
-        if completion.success {
-            println!("Login succeeded.");
-            Ok(())
-        } else {
-            bail!(
-                "login failed: {}",
-                completion
-                    .error
-                    .as_deref()
-                    .unwrap_or("unknown error from account/login/completed")
-            );
-        }
-    })
-    .await
-}
-
 async fn get_account_rate_limits(endpoint: &Endpoint, config_overrides: &[String]) -> Result<()> {
     with_client(
         "get-account-rate-limits",
@@ -1610,28 +1545,6 @@ impl CodexClient {
         self.send_request(request, request_id, "turn/start")
     }
 
-    fn login_account_chatgpt(&mut self) -> Result<LoginAccountResponse> {
-        let request_id = self.request_id();
-        let request = ClientRequest::LoginAccount {
-            request_id: request_id.clone(),
-            params: codex_app_server_protocol::LoginAccountParams::Chatgpt {
-                codex_streamlined_login: false,
-            },
-        };
-
-        self.send_request(request, request_id, "account/login/start")
-    }
-
-    fn login_account_chatgpt_device_code(&mut self) -> Result<LoginAccountResponse> {
-        let request_id = self.request_id();
-        let request = ClientRequest::LoginAccount {
-            request_id: request_id.clone(),
-            params: codex_app_server_protocol::LoginAccountParams::ChatgptDeviceCode,
-        };
-
-        self.send_request(request, request_id, "account/login/start")
-    }
-
     fn get_account_rate_limits(&mut self) -> Result<GetAccountRateLimitsResponse> {
         let request_id = self.request_id();
         let request = ClientRequest::GetAccountRateLimits {
@@ -1686,34 +1599,6 @@ impl CodexClient {
         };
 
         self.send_request(request, request_id, "thread/decrement_elicitation")
-    }
-
-    fn wait_for_account_login_completion(
-        &mut self,
-        expected_login_id: &str,
-    ) -> Result<AccountLoginCompletedNotification> {
-        loop {
-            let notification = self.next_notification()?;
-
-            if let Ok(server_notification) = ServerNotification::try_from(notification) {
-                match server_notification {
-                    ServerNotification::AccountLoginCompleted(completion) => {
-                        if completion.login_id.as_deref() == Some(expected_login_id) {
-                            return Ok(completion);
-                        }
-
-                        println!(
-                            "[ignoring account/login/completed for unexpected login_id: {:?}]",
-                            completion.login_id
-                        );
-                    }
-                    ServerNotification::AccountRateLimitsUpdated(snapshot) => {
-                        println!("< accountRateLimitsUpdated notification: {snapshot:?}");
-                    }
-                    _ => {}
-                }
-            }
-        }
     }
 
     fn stream_turn(&mut self, thread_id: &str, turn_id: &str) -> Result<()> {
