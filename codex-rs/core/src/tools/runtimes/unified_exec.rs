@@ -64,6 +64,7 @@ pub struct UnifiedExecRequest {
     pub shell_type: ShellType,
     pub hook_command: String,
     pub process_id: i32,
+    pub timeout_ms: Option<u64>,
     pub cwd: AbsolutePathBuf,
     pub sandbox_cwd: AbsolutePathBuf,
     pub environment: Arc<Environment>,
@@ -99,9 +100,10 @@ pub struct UnifiedExecRuntime<'a> {
 }
 
 fn unified_exec_options(
+    timeout_ms: Option<u64>,
     network_denial_cancellation_token: Option<CancellationToken>,
 ) -> ExecOptions {
-    let mut expiration = ExecExpiration::DefaultTimeout;
+    let mut expiration: ExecExpiration = timeout_ms.into();
     if let Some(cancellation) = network_denial_cancellation_token {
         expiration = expiration.with_cancellation(cancellation);
     }
@@ -327,7 +329,10 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
             let command =
                 build_sandbox_command(&command, &req.cwd, &env, req.additional_permissions.clone())
                     .map_err(|_| ToolError::Rejected("missing command line for PTY".to_string()))?;
-            let options = unified_exec_options(attempt.network_denial_cancellation_token.clone());
+            let options = unified_exec_options(
+                req.timeout_ms,
+                attempt.network_denial_cancellation_token.clone(),
+            );
             let mut exec_env = attempt
                 .env_for(command, options, managed_network)
                 .map_err(|err| ToolError::Codex(err.into()))?;
@@ -378,7 +383,10 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
         let command =
             build_sandbox_command(&command, &req.cwd, &env, req.additional_permissions.clone())
                 .map_err(|_| ToolError::Rejected("missing command line for PTY".to_string()))?;
-        let options = unified_exec_options(attempt.network_denial_cancellation_token.clone());
+        let options = unified_exec_options(
+            req.timeout_ms,
+            attempt.network_denial_cancellation_token.clone(),
+        );
         let mut exec_env = attempt
             .env_for(command, options, managed_network)
             .map_err(|err| ToolError::Codex(err.into()))?;
@@ -417,7 +425,7 @@ mod tests {
     #[test]
     fn unified_exec_options_combines_default_timeout_with_network_denial_cancellation() {
         let cancellation = CancellationToken::new();
-        let options = unified_exec_options(Some(cancellation.clone()));
+        let options = unified_exec_options(None, Some(cancellation.clone()));
 
         assert_eq!(options.capture_policy, ExecCapturePolicy::ShellTool);
         match options.expiration {
@@ -436,6 +444,19 @@ mod tests {
         }
     }
 
+    #[test]
+    fn unified_exec_options_preserves_custom_timeout() {
+        let options = unified_exec_options(Some(120_000), None);
+
+        assert_eq!(options.capture_policy, ExecCapturePolicy::ShellTool);
+        match options.expiration {
+            ExecExpiration::Timeout(timeout) => {
+                assert_eq!(timeout, Duration::from_millis(120_000));
+            }
+            other => panic!("expected timeout expiration, got {other:?}"),
+        }
+    }
+
     #[tokio::test]
     async fn unified_exec_uses_the_trusted_sandbox_cwd() {
         let cwd_dir = tempdir().expect("create process temp dir");
@@ -451,6 +472,7 @@ mod tests {
             shell_type: ShellType::Sh,
             hook_command: "pwd".to_string(),
             process_id: 1000,
+            timeout_ms: None,
             cwd,
             sandbox_cwd: sandbox_cwd.clone(),
             environment: Arc::new(Environment::default_for_tests()),
@@ -550,6 +572,7 @@ mod tests {
             shell_type: ShellType::Zsh,
             hook_command: "echo hi".to_string(),
             process_id: 1000,
+            timeout_ms: None,
             cwd: cwd.clone(),
             sandbox_cwd: cwd,
             environment: Arc::new(Environment::default_for_tests()),

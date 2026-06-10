@@ -79,7 +79,10 @@ fn bash_tool() -> AgentTool {
         object(
             [
                 string_property("command", "The command to execute"),
-                number_property("timeout", "Optional timeout in milliseconds"),
+                number_property(
+                    "timeout",
+                    "Optional maximum command runtime in milliseconds",
+                ),
                 string_property(
                     "description",
                     "Clear, concise description of what this command does in active voice",

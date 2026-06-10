@@ -33,7 +33,7 @@ fn bash_schema_uses_claudeish_command_shape() {
             "type": "object",
             "properties": {
                 "command": { "type": "string", "description": "The command to execute" },
-                "timeout": { "type": "number", "description": "Optional timeout in milliseconds" },
+                "timeout": { "type": "number", "description": "Optional maximum command runtime in milliseconds" },
                 "description": { "type": "string", "description": "Clear, concise description of what this command does in active voice" },
                 "environment_id": { "type": "string", "description": "Optional target execution environment id when multiple environments exist" },
                 "run_in_background": { "type": "boolean", "description": "Set to true to run this command in the background and read output later" }

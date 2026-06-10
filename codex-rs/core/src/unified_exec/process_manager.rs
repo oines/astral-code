@@ -328,6 +328,20 @@ fn terminate_process_on_network_denial(
     });
 }
 
+fn terminate_process_after_timeout(process: Arc<UnifiedExecProcess>, timeout_ms: u64) {
+    let cancellation_token = process.cancellation_token();
+    tokio::spawn(async move {
+        tokio::select! {
+            _ = tokio::time::sleep(Duration::from_millis(timeout_ms)) => {
+                if !process.has_exited() {
+                    process.fail_and_terminate(format!("Process timed out after {timeout_ms} ms"));
+                }
+            }
+            _ = cancellation_token.cancelled() => {}
+        }
+    });
+}
+
 impl UnifiedExecProcessManager {
     pub(crate) async fn allocate_process_id(&self) -> i32 {
         loop {
@@ -391,6 +405,9 @@ impl UnifiedExecProcessManager {
                 Arc::downgrade(&context.session),
                 deferred.clone(),
             );
+        }
+        if let Some(timeout_ms) = request.timeout_ms {
+            terminate_process_after_timeout(Arc::clone(&process), timeout_ms);
         }
 
         let transcript = Arc::new(tokio::sync::Mutex::new(HeadTailBuffer::default()));
@@ -1033,6 +1050,7 @@ impl UnifiedExecProcessManager {
             shell_type: request.shell_type,
             hook_command: request.hook_command.clone(),
             process_id: request.process_id,
+            timeout_ms: request.timeout_ms,
             cwd,
             sandbox_cwd: request.sandbox_cwd.clone(),
             environment: Arc::clone(&request.environment),

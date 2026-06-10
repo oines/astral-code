@@ -62,6 +62,17 @@ fn test_get_command_uses_default_shell_when_unspecified() -> anyhow::Result<()> 
 }
 
 #[test]
+fn exec_command_args_parse_timeout_ms_without_affecting_yield_time() -> anyhow::Result<()> {
+    let json = r#"{"cmd": "npm test", "timeout_ms": 120000}"#;
+
+    let args: ExecCommandArgs = parse_arguments(json)?;
+
+    assert_eq!(args.timeout_ms, Some(120_000));
+    assert_eq!(args.yield_time_ms, default_exec_yield_time_ms());
+    Ok(())
+}
+
+#[test]
 fn test_get_command_respects_explicit_bash_shell() -> anyhow::Result<()> {
     let json = r#"{"cmd": "echo hello", "shell": "/bin/bash"}"#;
 

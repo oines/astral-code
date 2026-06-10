@@ -49,6 +49,12 @@ pub(crate) fn create_exec_command_tool_with_environment_id(
             )),
         ),
         (
+            "timeout_ms".to_string(),
+            JsonSchema::number(Some(
+                "Maximum command runtime. Defaults to 10000 ms.".to_string(),
+            )),
+        ),
+        (
             "max_output_tokens".to_string(),
             JsonSchema::number(Some(
                 "Output token budget. Defaults to 10000 tokens; larger requests may be capped by policy.".to_string(),

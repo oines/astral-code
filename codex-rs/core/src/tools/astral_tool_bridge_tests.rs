@@ -34,7 +34,7 @@ fn canonicalizes_bash_to_unified_exec() -> anyhow::Result<()> {
         json!({
             "cmd": "npm test",
             "workdir": "/workspace/app",
-            "yield_time_ms": 120000,
+            "timeout_ms": 120000,
             "description": "Run tests"
         })
     );

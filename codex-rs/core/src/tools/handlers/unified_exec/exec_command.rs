@@ -160,6 +160,7 @@ impl ToolExecutor<ToolInvocation> for ExecCommandHandler {
         let ExecCommandArgs {
             tty,
             yield_time_ms,
+            timeout_ms,
             max_output_tokens,
             sandbox_permissions,
             additional_permissions,
@@ -263,6 +264,7 @@ impl ToolExecutor<ToolInvocation> for ExecCommandHandler {
                     hook_command: hook_command.clone(),
                     process_id,
                     yield_time_ms,
+                    timeout_ms,
                     max_output_tokens,
                     cwd,
                     sandbox_cwd: turn_environment.cwd.clone(),

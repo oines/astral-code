@@ -2597,6 +2597,83 @@ async fn unified_exec_timeout_and_followup_poll() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn unified_exec_timeout_ms_terminates_process() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    skip_if_sandbox!(Ok(()));
+    skip_if_windows!(Ok(()));
+
+    let server = start_mock_server().await;
+
+    let mut builder = test_codex().with_config(|config| {
+        config
+            .features
+            .enable(Feature::UnifiedExec)
+            .expect("test config should allow feature update");
+    });
+    let test = builder.build(&server).await?;
+
+    let call_id = "uexec-runtime-timeout";
+    let args = serde_json::json!({
+        "cmd": "sleep 2",
+        "timeout_ms": 100,
+        "yield_time_ms": 1000,
+    });
+
+    let responses = vec![
+        sse(vec![
+            ev_response_created("resp-1"),
+            ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
+            ev_completed("resp-1"),
+        ]),
+        sse(vec![
+            ev_assistant_message("msg-1", "done"),
+            ev_completed("resp-2"),
+        ]),
+    ];
+    let request_log = mount_sse_sequence(&server, responses).await;
+
+    submit_unified_exec_turn(
+        &test,
+        "run command with runtime timeout",
+        PermissionProfile::Disabled,
+    )
+    .await?;
+
+    wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+
+    let output_text = request_log
+        .requests()
+        .into_iter()
+        .flat_map(|request| {
+            request
+                .body_json()
+                .get("input")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default()
+        })
+        .find_map(|item| {
+            let output_call_id = item.get("call_id").and_then(Value::as_str)?;
+            if output_call_id == call_id {
+                extract_output_text(&item).map(str::to_string)
+            } else {
+                None
+            }
+        })
+        .expect("missing timeout tool output");
+
+    assert!(
+        output_text.contains("Process timed out after 100 ms"),
+        "expected timeout message in tool output, got {output_text:?}"
+    );
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 // Skipped on arm because the ctor logic to handle arg0 doesn't work on ARM
 #[cfg(not(target_arch = "arm"))]
 async fn unified_exec_formats_large_output_summary() -> Result<()> {

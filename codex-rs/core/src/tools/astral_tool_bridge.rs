@@ -134,7 +134,7 @@ fn rewrite_bash_args(value: Value) -> Result<Value, FunctionCallError> {
     let mut object = expect_object(BASH_TOOL_NAME, value)?;
     move_field_if_absent(&mut object, "command", "cmd");
     move_field_if_absent(&mut object, "cwd", "workdir");
-    move_field_if_absent(&mut object, "timeout", "yield_time_ms");
+    move_field_if_absent(&mut object, "timeout", "timeout_ms");
     object.remove("run_in_background");
     Ok(Value::Object(object))
 }
