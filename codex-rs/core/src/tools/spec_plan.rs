@@ -8,6 +8,7 @@ use crate::tools::handlers::AstralBashHandler;
 use crate::tools::handlers::AstralFileToolHandler;
 use crate::tools::handlers::AstralFileToolKind;
 use crate::tools::handlers::AstralMonitorHandler;
+use crate::tools::handlers::AstralTodoWriteHandler;
 use crate::tools::handlers::CodeModeExecuteHandler;
 use crate::tools::handlers::CodeModeWaitHandler;
 use crate::tools::handlers::DynamicToolHandler;
@@ -865,7 +866,8 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut
     let features = turn_context.features.get();
     let environment_mode = turn_context.tool_environment_mode();
 
-    planned_tools.add(PlanHandler);
+    planned_tools.add(AstralTodoWriteHandler::new());
+    planned_tools.add_dispatch_only(PlanHandler);
 
     if turn_context.config.experimental_request_user_input_enabled {
         planned_tools.add(RequestUserInputHandler {

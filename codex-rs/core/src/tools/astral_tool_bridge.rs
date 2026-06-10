@@ -8,7 +8,6 @@ use codex_tools::READ_MCP_RESOURCE_TOOL_NAME;
 use codex_tools::REQUEST_PERMISSIONS_TOOL_NAME;
 use codex_tools::SEND_MESSAGE_TOOL_NAME;
 use codex_tools::TASK_STOP_TOOL_NAME;
-use codex_tools::TODO_WRITE_TOOL_NAME;
 use codex_tools::TOOL_SEARCH_FLAVOR_TOOL_NAME;
 use codex_tools::TOOL_SEARCH_TOOL_NAME;
 use codex_tools::ToolName;
@@ -33,9 +32,6 @@ pub(crate) fn canonicalize_astral_tool_call(
     };
 
     let payload = match tool_name.name.as_str() {
-        TODO_WRITE_TOOL_NAME => {
-            rewrite_function_payload(payload, TODO_WRITE_TOOL_NAME, rewrite_todo_write_args)?
-        }
         ASK_USER_QUESTION_TOOL_NAME => rewrite_function_payload(
             payload,
             ASK_USER_QUESTION_TOOL_NAME,
@@ -67,7 +63,6 @@ fn canonical_astral_plain_name(tool_name: &ToolName) -> Option<&'static str> {
     }
 
     match tool_name.name.as_str() {
-        TODO_WRITE_TOOL_NAME => Some("update_plan"),
         ASK_USER_QUESTION_TOOL_NAME => Some("request_user_input"),
         REQUEST_PERMISSIONS_TOOL_NAME => Some("request_permissions"),
         TOOL_SEARCH_FLAVOR_TOOL_NAME => Some(TOOL_SEARCH_TOOL_NAME),
@@ -108,24 +103,6 @@ fn serialize_json_arguments(tool_name: &str, value: Value) -> Result<String, Fun
             "failed to serialize canonical {tool_name} arguments: {err}"
         ))
     })
-}
-
-fn rewrite_todo_write_args(value: Value) -> Result<Value, FunctionCallError> {
-    let args: AstralTodoWriteArgs = serde_json::from_value(value).map_err(|err| {
-        FunctionCallError::RespondToModel(format!(
-            "failed to parse {TODO_WRITE_TOOL_NAME} arguments: {err}"
-        ))
-    })?;
-    let plan = args
-        .todos
-        .into_iter()
-        .map(|todo| json!({ "step": todo.content, "status": todo.status }))
-        .collect::<Vec<_>>();
-
-    Ok(json!({
-        "explanation": args.explanation,
-        "plan": plan,
-    }))
 }
 
 fn rewrite_ask_user_question_args(value: Value) -> Result<Value, FunctionCallError> {
@@ -237,19 +214,6 @@ fn rewrite_task_stop_args(value: Value) -> Result<Value, FunctionCallError> {
     })?;
 
     Ok(json!({ "target": target }))
-}
-
-#[derive(Deserialize)]
-struct AstralTodoWriteArgs {
-    todos: Vec<AstralTodoItem>,
-    #[serde(default)]
-    explanation: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct AstralTodoItem {
-    content: String,
-    status: String,
 }
 
 #[derive(Deserialize)]

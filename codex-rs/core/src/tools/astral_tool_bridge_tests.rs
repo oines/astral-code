@@ -5,6 +5,7 @@ use codex_tools::GLOB_TOOL_NAME;
 use codex_tools::GREP_TOOL_NAME;
 use codex_tools::MONITOR_TOOL_NAME;
 use codex_tools::READ_TOOL_NAME;
+use codex_tools::TODO_WRITE_TOOL_NAME;
 use codex_tools::WRITE_TOOL_NAME;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
@@ -158,7 +159,7 @@ fn leaves_search_tools_native_for_astral_handlers() -> anyhow::Result<()> {
 }
 
 #[test]
-fn canonicalizes_todo_write_to_update_plan() -> anyhow::Result<()> {
+fn leaves_todo_write_native_for_astral_handler() -> anyhow::Result<()> {
     let (tool_name, arguments) = canonicalize_function(
         TODO_WRITE_TOOL_NAME,
         json!({
@@ -170,14 +171,14 @@ fn canonicalizes_todo_write_to_update_plan() -> anyhow::Result<()> {
         }),
     )?;
 
-    assert_eq!(tool_name, ToolName::plain("update_plan"));
+    assert_eq!(tool_name, ToolName::plain(TODO_WRITE_TOOL_NAME));
     assert_eq!(
         arguments,
         json!({
             "explanation": "Switch to runtime mapping",
-            "plan": [
-                { "step": "Add bridge", "status": "in_progress" },
-                { "step": "Run tests", "status": "pending" }
+            "todos": [
+                { "content": "Add bridge", "status": "in_progress", "activeForm": "Adding bridge" },
+                { "content": "Run tests", "status": "pending" }
             ]
         })
     );
