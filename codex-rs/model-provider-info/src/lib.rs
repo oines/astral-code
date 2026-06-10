@@ -33,11 +33,14 @@ const MAX_REQUEST_MAX_RETRIES: u64 = 100;
 
 const OPENAI_PROVIDER_NAME: &str = "OpenAI";
 pub const OPENAI_PROVIDER_ID: &str = "openai";
+const OPENAI_DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 pub const CHATGPT_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
 const ASTRAL_PROVIDER_NAME: &str = "Astral";
 pub const ASTRAL_PROVIDER_ID: &str = "astral";
 pub const ASTRAL_API_KEY_ENV_VAR: &str = "ASTRAL_API_KEY";
 pub const ASTRAL_BASE_URL_ENV_VAR: &str = "ASTRAL_BASE_URL";
+const ASTRAL_OSS_BASE_URL_ENV_VAR: &str = "ASTRAL_OSS_BASE_URL";
+const ASTRAL_OSS_PORT_ENV_VAR: &str = "ASTRAL_OSS_PORT";
 const DEFAULT_ASTRAL_BASE_URL: &str = "https://api.deepseek.com/v1";
 const ANTHROPIC_PROVIDER_NAME: &str = "Anthropic";
 pub const ANTHROPIC_PROVIDER_ID: &str = "anthropic";
@@ -61,11 +64,11 @@ pub const OLLAMA_CHAT_PROVIDER_REMOVED_ERROR: &str = "`ollama-chat` is no longer
 #[serde(rename_all = "snake_case")]
 pub enum WireApi {
     /// The Responses API exposed by OpenAI at `/v1/responses`.
-    #[default]
     Responses,
     /// Anthropic Messages API exposed at `/v1/messages`.
     AnthropicMessages,
     /// OpenAI-compatible Chat Completions API exposed at `/v1/chat/completions`.
+    #[default]
     ChatCompletions,
 }
 
@@ -103,7 +106,7 @@ pub struct ModelProviderInfo {
     /// Friendly display name.
     #[serde(default)]
     pub name: String,
-    /// Base URL for the provider's OpenAI-compatible API.
+    /// Base URL for the provider's HTTP API.
     pub base_url: Option<String>,
     /// Environment variable that stores the user's API key for this provider.
     pub env_key: Option<String>,
@@ -252,18 +255,22 @@ impl ModelProviderInfo {
     }
 
     pub fn to_api_provider(&self, auth_mode: Option<AuthMode>) -> CodexResult<ApiProvider> {
-        let default_base_url = if matches!(
-            auth_mode,
-            Some(
-                AuthMode::Chatgpt
-                    | AuthMode::ChatgptAuthTokens
-                    | AuthMode::AgentIdentity
-                    | AuthMode::PersonalAccessToken
-            )
-        ) {
+        let openai_auth_mode = self.is_openai()
+            && matches!(
+                auth_mode,
+                Some(
+                    AuthMode::Chatgpt
+                        | AuthMode::ChatgptAuthTokens
+                        | AuthMode::AgentIdentity
+                        | AuthMode::PersonalAccessToken
+                )
+            );
+        let default_base_url = if openai_auth_mode {
             CHATGPT_CODEX_BASE_URL
+        } else if self.is_openai() {
+            OPENAI_DEFAULT_BASE_URL
         } else {
-            "https://api.openai.com/v1"
+            DEFAULT_ASTRAL_BASE_URL
         };
         let base_url = self
             .base_url
@@ -518,11 +525,11 @@ pub fn built_in_model_providers(
         (AMAZON_BEDROCK_PROVIDER_ID, amazon_bedrock_provider),
         (
             OLLAMA_OSS_PROVIDER_ID,
-            create_oss_provider(DEFAULT_OLLAMA_PORT, WireApi::Responses),
+            create_oss_provider(DEFAULT_OLLAMA_PORT, WireApi::ChatCompletions),
         ),
         (
             LMSTUDIO_OSS_PROVIDER_ID,
-            create_oss_provider(DEFAULT_LMSTUDIO_PORT, WireApi::Responses),
+            create_oss_provider(DEFAULT_LMSTUDIO_PORT, WireApi::ChatCompletions),
         ),
     ]
     .into_iter()
@@ -569,22 +576,22 @@ pub fn merge_configured_model_providers(
 }
 
 pub fn create_oss_provider(default_provider_port: u16, wire_api: WireApi) -> ModelProviderInfo {
-    // These CODEX_OSS_ environment variables are experimental: we may
+    // These ASTRAL_OSS_ environment variables are experimental: we may
     // switch to reading values from config.toml instead.
-    let default_codex_oss_base_url = format!(
-        "http://localhost:{codex_oss_port}/v1",
-        codex_oss_port = std::env::var("CODEX_OSS_PORT")
+    let default_astral_oss_base_url = format!(
+        "http://localhost:{astral_oss_port}/v1",
+        astral_oss_port = std::env::var(ASTRAL_OSS_PORT_ENV_VAR)
             .ok()
             .filter(|value| !value.trim().is_empty())
             .and_then(|value| value.parse::<u16>().ok())
             .unwrap_or(default_provider_port)
     );
 
-    let codex_oss_base_url = std::env::var("CODEX_OSS_BASE_URL")
+    let astral_oss_base_url = std::env::var(ASTRAL_OSS_BASE_URL_ENV_VAR)
         .ok()
         .filter(|v| !v.trim().is_empty())
-        .unwrap_or(default_codex_oss_base_url);
-    create_oss_provider_with_base_url(&codex_oss_base_url, wire_api)
+        .unwrap_or(default_astral_oss_base_url);
+    create_oss_provider_with_base_url(&astral_oss_base_url, wire_api)
 }
 
 pub fn create_oss_provider_with_base_url(base_url: &str, wire_api: WireApi) -> ModelProviderInfo {

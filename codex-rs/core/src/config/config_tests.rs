@@ -5146,7 +5146,7 @@ async fn responses_websocket_features_do_not_change_wire_api() -> std::io::Resul
         )
         .await?;
 
-        assert_eq!(config.model_provider.wire_api, WireApi::Responses);
+        assert_eq!(config.model_provider.wire_api, WireApi::ChatCompletions);
     }
 
     Ok(())

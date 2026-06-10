@@ -19,7 +19,7 @@ base_url = "http://localhost:11434/v1"
         experimental_bearer_token: None,
         auth: None,
         aws: None,
-        wire_api: WireApi::Responses,
+        wire_api: WireApi::ChatCompletions,
         query_params: None,
         http_headers: None,
         env_http_headers: None,
@@ -51,7 +51,7 @@ query_params = { api-version = "2025-04-01-preview" }
         experimental_bearer_token: None,
         auth: None,
         aws: None,
-        wire_api: WireApi::Responses,
+        wire_api: WireApi::ChatCompletions,
         query_params: Some(maplit::hashmap! {
             "api-version".to_string() => "2025-04-01-preview".to_string(),
         }),
@@ -86,7 +86,7 @@ env_http_headers = { "X-Example-Env-Header" = "EXAMPLE_ENV_VAR" }
         experimental_bearer_token: None,
         auth: None,
         aws: None,
-        wire_api: WireApi::Responses,
+        wire_api: WireApi::ChatCompletions,
         query_params: None,
         http_headers: Some(maplit::hashmap! {
             "X-Example-Header".to_string() => "example-value".to_string(),
@@ -199,6 +199,28 @@ fn test_personal_access_token_uses_chatgpt_codex_base_url() {
         .expect("OpenAI provider should build API provider");
 
     assert_eq!(api_provider.base_url, CHATGPT_CODEX_BASE_URL);
+}
+
+#[test]
+fn test_openai_provider_without_auth_uses_openai_base_url() {
+    let api_provider = ModelProviderInfo::create_openai_provider(/*base_url*/ None)
+        .to_api_provider(/*auth_mode*/ None)
+        .expect("OpenAI provider should build API provider");
+
+    assert_eq!(api_provider.base_url, OPENAI_DEFAULT_BASE_URL);
+}
+
+#[test]
+fn test_custom_provider_without_base_url_uses_astral_base_url() {
+    let api_provider = ModelProviderInfo {
+        name: "Custom".to_string(),
+        base_url: None,
+        ..ModelProviderInfo::default()
+    }
+    .to_api_provider(/*auth_mode*/ None)
+    .expect("custom provider should build API provider");
+
+    assert_eq!(api_provider.base_url, DEFAULT_ASTRAL_BASE_URL);
 }
 
 #[test]
@@ -335,6 +357,24 @@ fn test_built_in_model_providers_include_anthropic() {
 }
 
 #[test]
+fn test_built_in_oss_providers_default_to_chat_completions() {
+    let providers = built_in_model_providers(/*openai_base_url*/ None);
+
+    assert_eq!(
+        providers
+            .get(OLLAMA_OSS_PROVIDER_ID)
+            .map(|provider| provider.wire_api),
+        Some(WireApi::ChatCompletions)
+    );
+    assert_eq!(
+        providers
+            .get(LMSTUDIO_OSS_PROVIDER_ID)
+            .map(|provider| provider.wire_api),
+        Some(WireApi::ChatCompletions)
+    );
+}
+
+#[test]
 fn test_merge_configured_model_providers_adds_custom_provider() {
     let custom_provider = ModelProviderInfo {
         name: "Custom".to_string(),
@@ -422,7 +462,6 @@ fn test_merge_configured_model_providers_allows_amazon_bedrock_default_fields() 
                 profile: None,
                 region: None,
             }),
-            wire_api: WireApi::Responses,
             ..ModelProviderInfo::default()
         },
     )]);
