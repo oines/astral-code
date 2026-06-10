@@ -18,6 +18,8 @@ use http::header::HeaderValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json::Value;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt;
 use std::time::Duration;
@@ -127,6 +129,11 @@ pub struct ModelProviderInfo {
     pub wire_api: WireApi,
     /// Optional query parameters to append to the base URL.
     pub query_params: Option<HashMap<String, String>>,
+    /// Additional JSON body fields to merge into provider-neutral agent requests.
+    ///
+    /// This is intentionally provider-scoped so OpenAI-compatible providers
+    /// can opt into vendor-specific fields without changing Astral's core IR.
+    pub request_body: Option<BTreeMap<String, Value>>,
     /// Additional HTTP headers to include in requests to this provider where
     /// the (key, value) pairs are the header name and value.
     pub http_headers: Option<HashMap<String, String>>,
@@ -364,6 +371,7 @@ impl ModelProviderInfo {
             aws: None,
             wire_api: WireApi::ChatCompletions,
             query_params: None,
+            request_body: None,
             http_headers: Some(
                 [("version".to_string(), env!("CARGO_PKG_VERSION").to_string())]
                     .into_iter()
@@ -391,6 +399,7 @@ impl ModelProviderInfo {
             aws: None,
             wire_api: WireApi::Responses,
             query_params: None,
+            request_body: None,
             http_headers: Some(
                 [("version".to_string(), env!("CARGO_PKG_VERSION").to_string())]
                     .into_iter()
@@ -430,6 +439,7 @@ impl ModelProviderInfo {
             aws: None,
             wire_api: WireApi::AnthropicMessages,
             query_params: None,
+            request_body: None,
             http_headers: Some(
                 [("version".to_string(), env!("CARGO_PKG_VERSION").to_string())]
                     .into_iter()
@@ -464,6 +474,7 @@ impl ModelProviderInfo {
             })),
             wire_api: WireApi::Responses,
             query_params: None,
+            request_body: None,
             http_headers: Some(HashMap::from([(
                 AMAZON_BEDROCK_MANTLE_CLIENT_AGENT_HEADER.to_string(),
                 AMAZON_BEDROCK_MANTLE_CLIENT_AGENT_VALUE.to_string(),
@@ -605,6 +616,7 @@ pub fn create_oss_provider_with_base_url(base_url: &str, wire_api: WireApi) -> M
         aws: None,
         wire_api,
         query_params: None,
+        request_body: None,
         http_headers: None,
         env_http_headers: None,
         request_max_retries: None,

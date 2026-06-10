@@ -127,6 +127,7 @@ fn build_agent_request_maps_prompt_history_tools_and_metadata() {
         summary: ReasoningSummaryConfig::Concise,
         service_tier: Some("priority".to_string()),
         prompt_cache_key: "thread-1".to_string(),
+        provider_request_body: Some(BTreeMap::from([("temperature".to_string(), json!(0.2))])),
     })
     .expect("build agent request");
 
@@ -205,7 +206,7 @@ fn build_agent_request_maps_prompt_history_tools_and_metadata() {
             metadata: RequestMetadata {
                 service_tier: Some("priority".to_string()),
                 prompt_cache_key: Some("thread-1".to_string()),
-                provider: BTreeMap::new(),
+                provider: BTreeMap::from([("temperature".to_string(), json!(0.2))]),
             },
         }
     );
@@ -231,6 +232,7 @@ fn build_agent_request_rejects_responses_only_hosted_tools() {
         summary: ReasoningSummaryConfig::None,
         service_tier: None,
         prompt_cache_key: "thread-1".to_string(),
+        provider_request_body: None,
     })
     .expect_err("hosted tools should not convert to provider-neutral tools");
 

@@ -603,6 +603,7 @@ mod thread_processor_behavior_tests {
             aws: None,
             wire_api: WireApi::Responses,
             query_params: None,
+            request_body: None,
             http_headers: None,
             env_http_headers: None,
             request_max_retries: None,

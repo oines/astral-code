@@ -2,6 +2,8 @@ use super::*;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_absolute_path::AbsolutePathBufGuard;
 use pretty_assertions::assert_eq;
+use serde_json::json;
+use std::collections::BTreeMap;
 use std::num::NonZeroU64;
 use tempfile::tempdir;
 
@@ -21,6 +23,7 @@ base_url = "http://localhost:11434/v1"
         aws: None,
         wire_api: WireApi::ChatCompletions,
         query_params: None,
+        request_body: None,
         http_headers: None,
         env_http_headers: None,
         request_max_retries: None,
@@ -55,6 +58,7 @@ query_params = { api-version = "2025-04-01-preview" }
         query_params: Some(maplit::hashmap! {
             "api-version".to_string() => "2025-04-01-preview".to_string(),
         }),
+        request_body: None,
         http_headers: None,
         env_http_headers: None,
         request_max_retries: None,
@@ -88,6 +92,7 @@ env_http_headers = { "X-Example-Env-Header" = "EXAMPLE_ENV_VAR" }
         aws: None,
         wire_api: WireApi::ChatCompletions,
         query_params: None,
+        request_body: None,
         http_headers: Some(maplit::hashmap! {
             "X-Example-Header".to_string() => "example-value".to_string(),
         }),
@@ -104,6 +109,32 @@ env_http_headers = { "X-Example-Env-Header" = "EXAMPLE_ENV_VAR" }
 
     let provider: ModelProviderInfo = toml::from_str(azure_provider_toml).unwrap();
     assert_eq!(expected_provider, provider);
+}
+
+#[test]
+fn test_deserialize_provider_request_body_config() {
+    let provider_toml = r#"
+name = "DeepSeek"
+base_url = "https://api.deepseek.com/v1"
+env_key = "DEEPSEEK_API_KEY"
+
+[request_body]
+temperature = 0.2
+top_p = 0.9
+enable_thinking = true
+metadata = { app = "astral-code" }
+        "#;
+    let provider: ModelProviderInfo = toml::from_str(provider_toml).unwrap();
+
+    assert_eq!(
+        provider.request_body,
+        Some(BTreeMap::from([
+            ("enable_thinking".to_string(), json!(true)),
+            ("metadata".to_string(), json!({ "app": "astral-code" })),
+            ("temperature".to_string(), json!(0.2)),
+            ("top_p".to_string(), json!(0.9)),
+        ]))
+    );
 }
 
 #[test]
@@ -165,6 +196,7 @@ fn test_create_astral_provider_defaults_to_chat_completions() {
             aws: None,
             wire_api: WireApi::ChatCompletions,
             query_params: None,
+            request_body: None,
             http_headers: Some(maplit::hashmap! {
                 "version".to_string() => env!("CARGO_PKG_VERSION").to_string(),
             }),
@@ -290,6 +322,7 @@ fn test_create_amazon_bedrock_provider() {
             }),
             wire_api: WireApi::Responses,
             query_params: None,
+            request_body: None,
             http_headers: Some(maplit::hashmap! {
                 AMAZON_BEDROCK_MANTLE_CLIENT_AGENT_HEADER.to_string() =>
                     AMAZON_BEDROCK_MANTLE_CLIENT_AGENT_VALUE.to_string(),

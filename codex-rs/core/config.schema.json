@@ -1483,7 +1483,7 @@
           "description": "AWS SigV4 auth configuration for this provider."
         },
         "base_url": {
-          "description": "Base URL for the provider's OpenAI-compatible API.",
+          "description": "Base URL for the provider's HTTP API.",
           "type": "string"
         },
         "env_http_headers": {
@@ -1522,6 +1522,11 @@
             "type": "string"
           },
           "description": "Optional query parameters to append to the base URL.",
+          "type": "object"
+        },
+        "request_body": {
+          "additionalProperties": true,
+          "description": "Additional JSON body fields to merge into provider-neutral agent requests.\n\nThis is intentionally provider-scoped so OpenAI-compatible providers can opt into vendor-specific fields without changing Astral's core IR.",
           "type": "object"
         },
         "request_max_retries": {
@@ -1564,7 +1569,7 @@
               "$ref": "#/definitions/WireApi"
             }
           ],
-          "default": "responses",
+          "default": "chat_completions",
           "description": "Which wire protocol this provider expects."
         }
       },

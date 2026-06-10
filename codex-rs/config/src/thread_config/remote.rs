@@ -176,6 +176,7 @@ fn model_provider_from_proto(
         aws: None,
         wire_api,
         query_params: provider.query_params.map(|map| map.values),
+        request_body: None,
         http_headers: provider.http_headers.map(|map| map.values),
         env_http_headers: provider.env_http_headers.map(|map| map.values),
         request_max_retries: provider.request_max_retries,
@@ -203,6 +204,7 @@ fn model_provider_to_proto(
         aws: _,
         wire_api,
         query_params,
+        request_body: _,
         http_headers,
         env_http_headers,
         request_max_retries,
@@ -497,6 +499,7 @@ mod tests {
                 "api-version".to_string(),
                 "2026-04-16".to_string(),
             )])),
+            request_body: None,
             http_headers: Some(HashMap::from([(
                 "X-Test".to_string(),
                 "enabled".to_string(),

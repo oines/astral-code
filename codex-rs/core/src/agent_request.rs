@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use codex_api::agent_protocol::AgentMessage;
 use codex_api::agent_protocol::AgentRequest;
 use codex_api::agent_protocol::ContentBlock;
@@ -30,6 +32,7 @@ pub(crate) struct AgentRequestBuildParams<'a> {
     pub(crate) summary: ReasoningSummaryConfig,
     pub(crate) service_tier: Option<String>,
     pub(crate) prompt_cache_key: String,
+    pub(crate) provider_request_body: Option<BTreeMap<String, Value>>,
 }
 
 pub(crate) fn build_agent_request(params: AgentRequestBuildParams<'_>) -> Result<AgentRequest> {
@@ -58,7 +61,7 @@ pub(crate) fn build_agent_request(params: AgentRequestBuildParams<'_>) -> Result
                 .model_info
                 .service_tier_for_request(params.service_tier),
             prompt_cache_key: Some(params.prompt_cache_key),
-            provider: Default::default(),
+            provider: params.provider_request_body.unwrap_or_default(),
         },
     })
 }
