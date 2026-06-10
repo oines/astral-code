@@ -2,7 +2,7 @@ use codex_api::AuthProvider;
 use http::HeaderMap;
 use http::HeaderValue;
 
-/// Bearer-token auth provider for OpenAI-compatible model-provider requests.
+/// Bearer-token auth provider for provider-neutral model-provider requests.
 #[derive(Clone, Default)]
 pub struct BearerAuthProvider {
     pub token: Option<String>,
@@ -35,14 +35,6 @@ impl AuthProvider for BearerAuthProvider {
         {
             let _ = headers.insert(http::header::AUTHORIZATION, header);
         }
-        if let Some(account_id) = self.account_id.as_ref()
-            && let Ok(header) = HeaderValue::from_str(account_id)
-        {
-            let _ = headers.insert("ChatGPT-Account-ID", header);
-        }
-        if self.is_fedramp_account {
-            let _ = headers.insert("X-OpenAI-Fedramp", HeaderValue::from_static("true"));
-        }
     }
 }
 
@@ -69,7 +61,7 @@ mod tests {
     }
 
     #[test]
-    fn bearer_auth_provider_adds_auth_headers() {
+    fn bearer_auth_provider_adds_authorization_header() {
         let auth = BearerAuthProvider::for_test(Some("access-token"), Some("workspace-123"));
         let mut headers = HeaderMap::new();
 
@@ -80,31 +72,6 @@ mod tests {
                 .get(http::header::AUTHORIZATION)
                 .and_then(|value| value.to_str().ok()),
             Some("Bearer access-token")
-        );
-        assert_eq!(
-            headers
-                .get("ChatGPT-Account-ID")
-                .and_then(|value| value.to_str().ok()),
-            Some("workspace-123")
-        );
-    }
-
-    #[test]
-    fn bearer_auth_provider_adds_fedramp_routing_header_for_fedramp_accounts() {
-        let auth = BearerAuthProvider {
-            token: Some("access-token".to_string()),
-            account_id: Some("workspace-123".to_string()),
-            is_fedramp_account: true,
-        };
-        let mut headers = HeaderMap::new();
-
-        auth.add_auth_headers(&mut headers);
-
-        assert_eq!(
-            headers
-                .get("X-OpenAI-Fedramp")
-                .and_then(|value| value.to_str().ok()),
-            Some("true")
         );
     }
 }

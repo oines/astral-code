@@ -39,13 +39,9 @@ impl AuthProvider for AgentIdentityAuthProvider {
             let _ = headers.insert(http::header::AUTHORIZATION, header);
         }
 
-        if let Ok(header) = HeaderValue::from_str(self.auth.account_id()) {
-            let _ = headers.insert("ChatGPT-Account-ID", header);
-        }
-
-        if self.auth.is_fedramp_account() {
-            let _ = headers.insert("X-OpenAI-Fedramp", HeaderValue::from_static("true"));
-        }
+        // Astral request auth is provider-neutral. Agent identity still signs the
+        // request, but ChatGPT workspace/routing headers are intentionally not
+        // emitted on model-provider traffic.
     }
 }
 
