@@ -102,6 +102,8 @@ use tracing::instrument;
 use tracing::trace;
 use tracing::warn;
 
+use crate::agent_request::AgentRequestBuildParams;
+use crate::agent_request::build_agent_request;
 use crate::attestation::AttestationContext;
 use crate::attestation::AttestationProvider;
 use crate::attestation::X_OAI_ATTESTATION_HEADER;
@@ -1553,6 +1555,14 @@ impl ModelClientSession {
                 .await
             }
             WireApi::AnthropicMessages | WireApi::ChatCompletions => {
+                let _request = build_agent_request(AgentRequestBuildParams {
+                    prompt,
+                    model_info,
+                    effort,
+                    summary,
+                    service_tier,
+                    prompt_cache_key: self.client.prompt_cache_key(),
+                })?;
                 Err(CodexErr::UnsupportedOperation(format!(
                     "wire_api `{wire_api}` is not wired to a streaming client yet"
                 )))
