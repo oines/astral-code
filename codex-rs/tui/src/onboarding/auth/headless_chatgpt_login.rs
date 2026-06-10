@@ -1,6 +1,3 @@
-use codex_app_server_protocol::ClientRequest;
-use codex_app_server_protocol::LoginAccountParams;
-use codex_app_server_protocol::LoginAccountResponse;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::prelude::Widget;
@@ -8,79 +5,15 @@ use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Wrap;
-use uuid::Uuid;
 
 use crate::motion::MotionMode;
 use crate::motion::shimmer_text;
 
 use super::AuthModeWidget;
 use super::ContinueWithDeviceCodeState;
+#[cfg(test)]
 use super::SignInState;
-use super::cancel_login_attempt;
 use super::mark_url_hyperlink;
-use super::onboarding_request_id;
-
-pub(super) fn start_headless_chatgpt_login(widget: &mut AuthModeWidget) {
-    let request_id = Uuid::new_v4().to_string();
-    *widget.sign_in_state.write().unwrap() =
-        SignInState::ChatGptDeviceCode(ContinueWithDeviceCodeState::pending(request_id.clone()));
-    widget.request_frame.schedule_frame();
-
-    let request_handle = widget.app_server_request_handle.clone();
-    let sign_in_state = widget.sign_in_state.clone();
-    let request_frame = widget.request_frame.clone();
-    let error = widget.error.clone();
-    tokio::spawn(async move {
-        match request_handle
-            .request_typed::<LoginAccountResponse>(ClientRequest::LoginAccount {
-                request_id: onboarding_request_id(),
-                params: LoginAccountParams::ChatgptDeviceCode,
-            })
-            .await
-        {
-            Ok(LoginAccountResponse::ChatgptDeviceCode {
-                login_id,
-                verification_url,
-                user_code,
-            }) => {
-                let updated = set_device_code_state_for_active_attempt(
-                    &sign_in_state,
-                    &request_frame,
-                    &request_id,
-                    ContinueWithDeviceCodeState::ready(
-                        request_id.clone(),
-                        login_id.clone(),
-                        verification_url,
-                        user_code,
-                    ),
-                );
-                if updated {
-                    *error.write().unwrap() = None;
-                } else {
-                    cancel_login_attempt(&request_handle, login_id).await;
-                }
-            }
-            Ok(other) => {
-                let _updated = set_device_code_error_for_active_attempt(
-                    &sign_in_state,
-                    &request_frame,
-                    &error,
-                    &request_id,
-                    format!("Unexpected account/login/start response: {other:?}"),
-                );
-            }
-            Err(err) => {
-                let _updated = set_device_code_error_for_active_attempt(
-                    &sign_in_state,
-                    &request_frame,
-                    &error,
-                    &request_id,
-                    err.to_string(),
-                );
-            }
-        }
-    });
-}
 
 pub(super) fn render_device_code_login(
     widget: &AuthModeWidget,
@@ -152,6 +85,7 @@ pub(super) fn render_device_code_login(
     }
 }
 
+#[cfg(test)]
 fn device_code_attempt_matches(state: &SignInState, request_id: &str) -> bool {
     matches!(
         state,
@@ -159,6 +93,7 @@ fn device_code_attempt_matches(state: &SignInState, request_id: &str) -> bool {
     )
 }
 
+#[cfg(test)]
 fn set_device_code_state_for_active_attempt(
     sign_in_state: &std::sync::Arc<std::sync::RwLock<SignInState>>,
     request_frame: &crate::tui::FrameRequester,
@@ -176,6 +111,7 @@ fn set_device_code_state_for_active_attempt(
     true
 }
 
+#[cfg(test)]
 fn set_device_code_error_for_active_attempt(
     sign_in_state: &std::sync::Arc<std::sync::RwLock<SignInState>>,
     request_frame: &crate::tui::FrameRequester,
