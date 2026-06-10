@@ -102,14 +102,15 @@ fn login_status_rejects_chatgpt_auth() -> Result<()> {
 }
 
 #[test]
-fn login_without_flags_rejects_chatgpt_flow() -> Result<()> {
+fn login_without_flags_requires_explicit_credential_source() -> Result<()> {
     let codex_home = TempDir::new()?;
     write_file_auth_config(codex_home.path())?;
 
     let mut cmd = codex_command(codex_home.path())?;
-    cmd.arg("login").assert().failure().stderr(contains(
-        "Browser/device ChatGPT login is not available in Astral",
-    ));
+    cmd.arg("login")
+        .assert()
+        .failure()
+        .stderr(contains("Astral login needs an explicit credential source"));
 
     Ok(())
 }

@@ -19,7 +19,6 @@ use codex_exec::Cli as ExecCli;
 use codex_exec::Command as ExecCommand;
 use codex_exec::ReviewArgs;
 use codex_execpolicy::ExecPolicyCheckCommand;
-use codex_responses_api_proxy::Args as ResponsesApiProxyArgs;
 use codex_rollout_trace::REDUCED_STATE_FILE_NAME;
 use codex_rollout_trace::replay_bundle;
 use codex_state::StateRuntime;
@@ -174,10 +173,6 @@ enum Subcommand {
 
     /// Fork a previous interactive session (picker by default; use --last to fork the most recent).
     Fork(ForkCommand),
-
-    /// Internal: run the responses API proxy.
-    #[clap(hide = true)]
-    ResponsesApiProxy(ResponsesApiProxyArgs),
 
     /// Internal: relay stdio to a Unix domain socket.
     #[clap(hide = true, name = "stdio-to-uds")]
@@ -1451,14 +1446,6 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                 run_execpolicycheck(cmd)?
             }
         },
-        Some(Subcommand::ResponsesApiProxy(_args)) => {
-            reject_remote_mode_for_subcommand(
-                root_remote.as_deref(),
-                root_remote_auth_token_env.as_deref(),
-                "responses-api-proxy",
-            )?;
-            anyhow::bail!("responses-api-proxy is disabled in astral-code");
-        }
         Some(Subcommand::StdioToUds(cmd)) => {
             reject_remote_mode_for_subcommand(
                 root_remote.as_deref(),
@@ -1990,7 +1977,6 @@ fn unsupported_subcommand_name_for_strict_config(
         Some(Subcommand::Sandbox(_)) => Some("sandbox"),
         Some(Subcommand::Debug(_)) => Some("debug"),
         Some(Subcommand::Execpolicy(_)) => Some("execpolicy"),
-        Some(Subcommand::ResponsesApiProxy(_)) => Some("responses-api-proxy"),
         Some(Subcommand::StdioToUds(_)) => Some("stdio-to-uds"),
         Some(Subcommand::Features(_)) => Some("features"),
     }
@@ -2674,11 +2660,12 @@ mod tests {
     #[test]
     fn responses_subcommand_is_not_registered() {
         let command = MultitoolCli::command();
-        assert!(
-            command
-                .get_subcommands()
-                .all(|subcommand| subcommand.get_name() != "responses")
-        );
+        let subcommands = command
+            .get_subcommands()
+            .map(clap::Command::get_name)
+            .collect::<Vec<_>>();
+        assert!(!subcommands.contains(&"responses"));
+        assert!(!subcommands.contains(&"responses-api-proxy"));
     }
 
     fn help_from_args(args: &[&str]) -> String {

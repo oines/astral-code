@@ -222,7 +222,7 @@ mod tests {
                 method: InstallMethod::Npm,
                 package_layout: None,
             }),
-            "npm install -g @openai/codex"
+            "npm install -g astral-code"
         );
         assert_eq!(
             update_action_label(&InstallContext {
