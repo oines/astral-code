@@ -30,7 +30,6 @@ use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ServerRequest;
 use codex_app_server_protocol::ServerResponse;
-use codex_login::AuthManager;
 use codex_plugin::PluginTelemetryMetadata;
 use codex_protocol::request_permissions::RequestPermissionsResponse;
 use std::collections::HashSet;
@@ -95,14 +94,6 @@ impl AnalyticsEventsQueue {
 }
 
 impl AnalyticsEventsClient {
-    pub fn new(
-        _auth_manager: Arc<AuthManager>,
-        _base_url: String,
-        _analytics_enabled: Option<bool>,
-    ) -> Self {
-        Self::disabled()
-    }
-
     pub fn disabled() -> Self {
         Self { queue: None }
     }
