@@ -28,6 +28,7 @@ const CHATGPT_LOGIN_DISABLED_MESSAGE: &str = "Browser/device ChatGPT login is no
 const API_KEY_LOGIN_DISABLED_MESSAGE: &str = "API key login is disabled by configuration.";
 const ACCESS_TOKEN_LOGIN_DISABLED_MESSAGE: &str = "Access token login is not available in Astral. Use `astral login --with-api-key` or set ASTRAL_API_KEY.";
 const LOGIN_SUCCESS_MESSAGE: &str = "Successfully logged in";
+const UNSUPPORTED_STORED_AUTH_MESSAGE: &str = "Stored OpenAI/ChatGPT credentials are not supported by Astral. Run `astral logout`, then use `astral login --with-api-key` or set ASTRAL_API_KEY.";
 
 /// Installs a small file-backed tracing layer for direct `astral login` flows.
 ///
@@ -210,7 +211,7 @@ pub async fn run_login_status(cli_config_overrides: CliConfigOverrides) -> ! {
     )
     .await
     {
-        Ok(Some(auth)) => match auth.auth_mode() {
+        Ok(Some(auth)) => match auth.api_auth_mode() {
             AuthMode::ApiKey => match auth.get_token() {
                 Ok(api_key) => {
                     eprintln!("Logged in using an API key - {}", safe_format_key(&api_key));
@@ -221,17 +222,12 @@ pub async fn run_login_status(cli_config_overrides: CliConfigOverrides) -> ! {
                     std::process::exit(1);
                 }
             },
-            AuthMode::Chatgpt | AuthMode::ChatgptAuthTokens => {
-                eprintln!("Logged in using ChatGPT");
-                std::process::exit(0);
-            }
-            AuthMode::AgentIdentity => {
-                eprintln!("Logged in using access token");
-                std::process::exit(0);
-            }
-            AuthMode::PersonalAccessToken => {
-                eprintln!("Logged in using personal access token");
-                std::process::exit(0);
+            AuthMode::Chatgpt
+            | AuthMode::ChatgptAuthTokens
+            | AuthMode::AgentIdentity
+            | AuthMode::PersonalAccessToken => {
+                eprintln!("{UNSUPPORTED_STORED_AUTH_MESSAGE}");
+                std::process::exit(1);
             }
         },
         Ok(None) => {
