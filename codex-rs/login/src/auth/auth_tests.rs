@@ -8,7 +8,6 @@ use codex_protocol::auth::KnownPlan as InternalKnownPlan;
 use codex_protocol::auth::PlanType as InternalPlanType;
 
 use base64::Engine;
-use codex_protocol::config_types::ForcedLoginMethod;
 use codex_protocol::config_types::ModelProviderAuthInfo;
 use pretty_assertions::assert_eq;
 use serde::Serialize;
@@ -23,8 +22,6 @@ use wiremock::matchers::method;
 use wiremock::matchers::path;
 
 const WORKSPACE_ID_ALLOWED: &str = "123e4567-e89b-42d3-a456-426614174000";
-const WORKSPACE_ID_SECOND_ALLOWED: &str = "123e4567-e89b-42d3-a456-426614174001";
-const WORKSPACE_ID_DISALLOWED: &str = "123e4567-e89b-42d3-a456-426614174002";
 
 #[tokio::test]
 async fn refresh_without_id_token() {
@@ -564,20 +561,6 @@ fn fake_jwt_for_auth_file_params(params: &AuthFileParams) -> std::io::Result<Str
     Ok(format!("{header_b64}.{payload_b64}.{signature_b64}"))
 }
 
-async fn build_config(
-    codex_home: &Path,
-    forced_login_method: Option<ForcedLoginMethod>,
-    forced_chatgpt_workspace_id: Option<Vec<String>>,
-) -> AuthConfig {
-    AuthConfig {
-        codex_home: codex_home.to_path_buf(),
-        auth_credentials_store_mode: AuthCredentialsStoreMode::File,
-        forced_login_method,
-        forced_chatgpt_workspace_id,
-        chatgpt_base_url: None,
-    }
-}
-
 /// Use sparingly.
 /// TODO (gpeal): replace this with an injectable env var provider.
 #[cfg(test)]
@@ -656,228 +639,6 @@ async fn load_auth_keeps_astral_api_key_env_precedence() {
     .expect("env auth should be present");
 
     assert_eq!(auth.api_key(), Some("sk-env"));
-}
-
-#[tokio::test]
-#[serial(codex_auth_env)]
-async fn enforce_login_restrictions_logs_out_for_method_mismatch() {
-    let codex_home = tempdir().unwrap();
-    login_with_api_key(codex_home.path(), "sk-test", AuthCredentialsStoreMode::File)
-        .expect("seed api key");
-
-    let config = build_config(
-        codex_home.path(),
-        Some(ForcedLoginMethod::Chatgpt),
-        /*forced_chatgpt_workspace_id*/ None,
-    )
-    .await;
-
-    let err = super::enforce_login_restrictions(&config)
-        .await
-        .expect_err("expected method mismatch to error");
-    assert!(err.to_string().contains("ChatGPT login is required"));
-    assert!(
-        !codex_home.path().join("auth.json").exists(),
-        "auth.json should be removed on mismatch"
-    );
-}
-
-#[tokio::test]
-#[serial(codex_auth_env)]
-async fn enforce_login_restrictions_logs_out_for_workspace_mismatch() {
-    let codex_home = tempdir().unwrap();
-    let _jwt = write_auth_file(
-        AuthFileParams {
-            openai_api_key: None,
-            chatgpt_plan_type: Some("pro".to_string()),
-            chatgpt_account_id: Some(WORKSPACE_ID_DISALLOWED.to_string()),
-        },
-        codex_home.path(),
-    )
-    .expect("failed to write auth file");
-
-    let config = build_config(
-        codex_home.path(),
-        /*forced_login_method*/ None,
-        Some(vec![WORKSPACE_ID_ALLOWED.to_string()]),
-    )
-    .await;
-
-    let err = super::enforce_login_restrictions(&config)
-        .await
-        .expect_err("expected workspace mismatch to error");
-    assert!(
-        err.to_string()
-            .contains(&format!("workspace(s) {WORKSPACE_ID_ALLOWED}"))
-    );
-    assert!(
-        !codex_home.path().join("auth.json").exists(),
-        "auth.json should be removed on mismatch"
-    );
-}
-
-#[tokio::test]
-#[serial(codex_auth_env)]
-async fn enforce_login_restrictions_allows_matching_workspace() {
-    let codex_home = tempdir().unwrap();
-    let _jwt = write_auth_file(
-        AuthFileParams {
-            openai_api_key: None,
-            chatgpt_plan_type: Some("pro".to_string()),
-            chatgpt_account_id: Some(WORKSPACE_ID_ALLOWED.to_string()),
-        },
-        codex_home.path(),
-    )
-    .expect("failed to write auth file");
-
-    let config = build_config(
-        codex_home.path(),
-        /*forced_login_method*/ None,
-        Some(vec![WORKSPACE_ID_ALLOWED.to_string()]),
-    )
-    .await;
-
-    super::enforce_login_restrictions(&config)
-        .await
-        .expect("matching workspace should succeed");
-    assert!(
-        codex_home.path().join("auth.json").exists(),
-        "auth.json should remain when restrictions pass"
-    );
-}
-
-#[tokio::test]
-#[serial(codex_auth_env)]
-async fn enforce_login_restrictions_allows_any_matching_workspace_in_list() {
-    let codex_home = tempdir().unwrap();
-    let _jwt = write_auth_file(
-        AuthFileParams {
-            openai_api_key: None,
-            chatgpt_plan_type: Some("pro".to_string()),
-            chatgpt_account_id: Some(WORKSPACE_ID_ALLOWED.to_string()),
-        },
-        codex_home.path(),
-    )
-    .expect("failed to write auth file");
-
-    let config = build_config(
-        codex_home.path(),
-        /*forced_login_method*/ None,
-        Some(vec![
-            WORKSPACE_ID_SECOND_ALLOWED.to_string(),
-            WORKSPACE_ID_ALLOWED.to_string(),
-        ]),
-    )
-    .await;
-
-    super::enforce_login_restrictions(&config)
-        .await
-        .expect("any matching workspace in the allowed list should succeed");
-}
-
-#[tokio::test]
-#[serial(codex_auth_env)]
-async fn enforce_login_restrictions_logs_out_for_agent_identity_workspace_mismatch() {
-    let codex_home = tempdir().unwrap();
-    let record = agent_identity_record(WORKSPACE_ID_DISALLOWED);
-    let agent_identity =
-        signed_agent_identity_jwt(&record, json!(record.plan_type)).expect("signed agent identity");
-    let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/backend-api/wham/agent-identities/jwks"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(test_jwks_body()))
-        .expect(1)
-        .mount(&server)
-        .await;
-    Mock::given(method("POST"))
-        .and(path("/backend-api/v1/agent/agent-runtime-id/task/register"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "task_id": "task-123",
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
-    let chatgpt_base_url = format!("{}/backend-api", server.uri());
-    let _authapi_guard =
-        EnvVarGuard::set("CODEX_AGENT_IDENTITY_AUTHAPI_BASE_URL", &chatgpt_base_url);
-    save_auth(
-        codex_home.path(),
-        &AuthDotJson {
-            auth_mode: Some(ApiAuthMode::AgentIdentity),
-            openai_api_key: None,
-            tokens: None,
-            last_refresh: None,
-            agent_identity: Some(agent_identity),
-            personal_access_token: None,
-        },
-        AuthCredentialsStoreMode::File,
-    )
-    .expect("seed agent identity auth");
-
-    let config = AuthConfig {
-        codex_home: codex_home.path().to_path_buf(),
-        auth_credentials_store_mode: AuthCredentialsStoreMode::File,
-        forced_login_method: None,
-        forced_chatgpt_workspace_id: Some(vec![WORKSPACE_ID_ALLOWED.to_string()]),
-        chatgpt_base_url: Some(chatgpt_base_url),
-    };
-
-    let err = super::enforce_login_restrictions(&config)
-        .await
-        .expect_err("expected workspace mismatch to error");
-    assert!(err.to_string().contains(&format!(
-        "current credentials belong to {WORKSPACE_ID_DISALLOWED}"
-    )));
-    assert!(
-        !codex_home.path().join("auth.json").exists(),
-        "auth.json should be removed on mismatch"
-    );
-    server.verify().await;
-}
-
-#[tokio::test]
-async fn enforce_login_restrictions_allows_api_key_if_login_method_not_set_but_forced_chatgpt_workspace_id_is_set()
- {
-    let codex_home = tempdir().unwrap();
-    login_with_api_key(codex_home.path(), "sk-test", AuthCredentialsStoreMode::File)
-        .expect("seed api key");
-
-    let config = build_config(
-        codex_home.path(),
-        /*forced_login_method*/ None,
-        Some(vec![WORKSPACE_ID_ALLOWED.to_string()]),
-    )
-    .await;
-
-    super::enforce_login_restrictions(&config)
-        .await
-        .expect("matching workspace should succeed");
-    assert!(
-        codex_home.path().join("auth.json").exists(),
-        "auth.json should remain when restrictions pass"
-    );
-}
-
-#[tokio::test]
-#[serial(codex_auth_env)]
-async fn enforce_login_restrictions_blocks_env_api_key_when_chatgpt_required() {
-    let _guard = EnvVarGuard::set(ASTRAL_API_KEY_ENV_VAR, "sk-env");
-    let codex_home = tempdir().unwrap();
-
-    let config = build_config(
-        codex_home.path(),
-        Some(ForcedLoginMethod::Chatgpt),
-        /*forced_chatgpt_workspace_id*/ None,
-    )
-    .await;
-
-    let err = super::enforce_login_restrictions(&config)
-        .await
-        .expect_err("environment API key should not satisfy forced ChatGPT login");
-    assert!(
-        err.to_string()
-            .contains("ChatGPT login is required, but an API key is currently being used.")
-    );
 }
 
 fn agent_identity_record(account_id: &str) -> AgentIdentityAuthRecord {

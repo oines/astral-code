@@ -13,7 +13,6 @@ pub use server::ShutdownHandle;
 pub use server::run_login_server;
 
 pub use auth::ASTRAL_API_KEY_ENV_VAR;
-pub use auth::AuthConfig;
 pub use auth::AuthDotJson;
 pub use auth::AuthManager;
 pub use auth::AuthManagerConfig;
@@ -29,7 +28,6 @@ pub use auth::REVOKE_TOKEN_URL_OVERRIDE_ENV_VAR;
 pub use auth::RefreshTokenError;
 pub use auth::UnauthorizedRecovery;
 pub use auth::default_client;
-pub use auth::enforce_login_restrictions;
 pub use auth::load_auth_dot_json;
 pub use auth::login_with_api_key;
 pub use auth::logout;

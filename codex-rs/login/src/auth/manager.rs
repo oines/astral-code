@@ -21,7 +21,6 @@ use codex_agent_identity::decode_agent_identity_jwt;
 use codex_agent_identity::fetch_agent_identity_jwks;
 use codex_app_server_protocol::AuthMode;
 use codex_app_server_protocol::AuthMode as ApiAuthMode;
-use codex_protocol::config_types::ForcedLoginMethod;
 use codex_protocol::config_types::ModelProviderAuthInfo;
 
 use super::external_bearer::BearerTokenRefresher;
@@ -592,119 +591,6 @@ pub fn load_auth_dot_json(
 ) -> std::io::Result<Option<AuthDotJson>> {
     let storage = create_auth_storage(codex_home.to_path_buf(), auth_credentials_store_mode);
     storage.load()
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AuthConfig {
-    pub codex_home: PathBuf,
-    pub auth_credentials_store_mode: AuthCredentialsStoreMode,
-    pub forced_login_method: Option<ForcedLoginMethod>,
-    pub chatgpt_base_url: Option<String>,
-    pub forced_chatgpt_workspace_id: Option<Vec<String>>,
-}
-
-pub async fn enforce_login_restrictions(config: &AuthConfig) -> std::io::Result<()> {
-    let Some(auth) = load_auth(
-        &config.codex_home,
-        /*enable_codex_api_key_env*/ true,
-        config.auth_credentials_store_mode,
-        config.chatgpt_base_url.as_deref(),
-    )
-    .await?
-    else {
-        return Ok(());
-    };
-
-    if let Some(required_method) = config.forced_login_method {
-        let method_violation = match (required_method, auth.auth_mode()) {
-            (ForcedLoginMethod::Api, AuthMode::ApiKey) => None,
-            (ForcedLoginMethod::Chatgpt, AuthMode::Chatgpt)
-            | (ForcedLoginMethod::Chatgpt, AuthMode::ChatgptAuthTokens)
-            | (ForcedLoginMethod::Chatgpt, AuthMode::AgentIdentity)
-            | (ForcedLoginMethod::Chatgpt, AuthMode::PersonalAccessToken) => None,
-            (ForcedLoginMethod::Api, AuthMode::Chatgpt)
-            | (ForcedLoginMethod::Api, AuthMode::ChatgptAuthTokens)
-            | (ForcedLoginMethod::Api, AuthMode::AgentIdentity)
-            | (ForcedLoginMethod::Api, AuthMode::PersonalAccessToken) => Some(
-                "API key login is required, but ChatGPT is currently being used. Logging out."
-                    .to_string(),
-            ),
-            (ForcedLoginMethod::Chatgpt, AuthMode::ApiKey) => Some(
-                "ChatGPT login is required, but an API key is currently being used. Logging out."
-                    .to_string(),
-            ),
-        };
-
-        if let Some(message) = method_violation {
-            return logout_with_message(
-                &config.codex_home,
-                message,
-                config.auth_credentials_store_mode,
-            );
-        }
-    }
-
-    if let Some(expected_account_ids) = config.forced_chatgpt_workspace_id.as_deref() {
-        let chatgpt_account_id = match &auth {
-            CodexAuth::ApiKey(_) | CodexAuth::PersonalAccessToken(_) => return Ok(()),
-            CodexAuth::AgentIdentity(_) => auth.get_account_id(),
-            CodexAuth::Chatgpt(_) | CodexAuth::ChatgptAuthTokens(_) => {
-                let token_data = match auth.get_token_data() {
-                    Ok(data) => data,
-                    Err(err) => {
-                        return logout_with_message(
-                            &config.codex_home,
-                            format!(
-                                "Failed to load ChatGPT credentials while enforcing workspace restrictions: {err}. Logging out."
-                            ),
-                            config.auth_credentials_store_mode,
-                        );
-                    }
-                };
-                token_data.id_token.chatgpt_account_id
-            }
-        };
-
-        // workspace is the external identifier for account id.
-        let chatgpt_account_id = chatgpt_account_id.as_deref();
-        if !chatgpt_account_id.is_some_and(|actual| {
-            expected_account_ids
-                .iter()
-                .any(|expected| expected == actual)
-        }) {
-            let expected_workspaces = expected_account_ids.join(", ");
-            let message = match chatgpt_account_id {
-                Some(actual) => format!(
-                    "Login is restricted to workspace(s) {expected_workspaces}, but current credentials belong to {actual}. Logging out."
-                ),
-                None => format!(
-                    "Login is restricted to workspace(s) {expected_workspaces}, but current credentials lack a workspace identifier. Logging out."
-                ),
-            };
-            return logout_with_message(
-                &config.codex_home,
-                message,
-                config.auth_credentials_store_mode,
-            );
-        }
-    }
-
-    Ok(())
-}
-
-fn logout_with_message(
-    codex_home: &Path,
-    message: String,
-    auth_credentials_store_mode: AuthCredentialsStoreMode,
-) -> std::io::Result<()> {
-    // External auth tokens live in the ephemeral store, but persistent auth may still exist
-    // from earlier logins. Clear both so a forced logout truly removes all active auth.
-    let removal_result = logout_all_stores(codex_home, auth_credentials_store_mode);
-    let error_message = match removal_result {
-        Ok(_) => message,
-        Err(err) => format!("{message}. Failed to remove auth.json: {err}"),
-    };
-    Err(std::io::Error::other(error_message))
 }
 
 fn logout_all_stores(
