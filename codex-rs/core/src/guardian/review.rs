@@ -678,11 +678,6 @@ pub(super) async fn run_guardian_review_session(
         },
         None => None,
     };
-    let available_models = session
-        .services
-        .models_manager
-        .list_models(codex_models_manager::manager::RefreshStrategy::Offline)
-        .await;
     let preferred_reasoning_effort = |supports_low: bool, fallback| {
         if supports_low {
             Some(codex_protocol::openai_models::ReasoningEffort::Low)
@@ -690,37 +685,16 @@ pub(super) async fn run_guardian_review_session(
             fallback
         }
     };
-    let model_override = turn.model_info.auto_review_model_override.as_deref();
-    let review_model_id = model_override.unwrap_or(turn.model_info.slug.as_str());
-    let review_model = available_models
-        .iter()
-        .find(|preset| preset.model == review_model_id);
-    let (guardian_model, guardian_reasoning_effort) = if let Some(preset) = review_model {
-        let reasoning_effort = preferred_reasoning_effort(
-            preset
-                .supported_reasoning_efforts
-                .iter()
-                .any(|effort| effort.effort == codex_protocol::openai_models::ReasoningEffort::Low),
-            Some(preset.default_reasoning_effort.clone()),
-        );
-        (review_model_id.to_string(), reasoning_effort)
-    } else {
-        let reasoning_effort = preferred_reasoning_effort(
-            turn.model_info
-                .supported_reasoning_levels
-                .iter()
-                .any(|preset| preset.effort == codex_protocol::openai_models::ReasoningEffort::Low),
-            turn.reasoning_effort
-                .clone()
-                .or_else(|| turn.model_info.default_reasoning_level.clone()),
-        );
-        (
-            model_override
-                .unwrap_or(turn.model_info.slug.as_str())
-                .to_string(),
-            reasoning_effort,
-        )
-    };
+    let guardian_model = turn.model_info.slug.clone();
+    let guardian_reasoning_effort = preferred_reasoning_effort(
+        turn.model_info
+            .supported_reasoning_levels
+            .iter()
+            .any(|preset| preset.effort == codex_protocol::openai_models::ReasoningEffort::Low),
+        turn.reasoning_effort
+            .clone()
+            .or_else(|| turn.model_info.default_reasoning_level.clone()),
+    );
     let guardian_config = build_guardian_review_session_config(
         turn.config.as_ref(),
         live_network_config.clone(),

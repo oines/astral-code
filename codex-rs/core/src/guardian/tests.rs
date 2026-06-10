@@ -1360,15 +1360,15 @@ async fn guardian_request_model_for_auto_review_override(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn guardian_review_uses_model_catalog_override() -> anyhow::Result<()> {
+async fn guardian_review_ignores_model_catalog_override() -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
 
     let override_model = "guardian-review-model-override".to_string();
     let (request_model, parent_model) =
         guardian_request_model_for_auto_review_override(Some(override_model.clone())).await?;
 
-    assert_eq!(request_model, override_model);
-    assert_ne!(request_model, parent_model);
+    assert_eq!(request_model, parent_model);
+    assert_ne!(request_model, override_model);
 
     Ok(())
 }
