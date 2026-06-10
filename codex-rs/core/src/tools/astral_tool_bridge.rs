@@ -4,7 +4,6 @@ use codex_protocol::models::SearchToolCallParams;
 use codex_tools::AGENT_TOOL_NAME;
 use codex_tools::ASK_USER_QUESTION_TOOL_NAME;
 use codex_tools::LIST_MCP_RESOURCES_TOOL_NAME;
-use codex_tools::MONITOR_TOOL_NAME;
 use codex_tools::READ_MCP_RESOURCE_TOOL_NAME;
 use codex_tools::REQUEST_PERMISSIONS_TOOL_NAME;
 use codex_tools::SEND_MESSAGE_TOOL_NAME;
@@ -14,7 +13,6 @@ use codex_tools::TOOL_SEARCH_FLAVOR_TOOL_NAME;
 use codex_tools::TOOL_SEARCH_TOOL_NAME;
 use codex_tools::ToolName;
 use serde::Deserialize;
-use serde_json::Map;
 use serde_json::Value;
 use serde_json::json;
 
@@ -35,9 +33,6 @@ pub(crate) fn canonicalize_astral_tool_call(
     };
 
     let payload = match tool_name.name.as_str() {
-        MONITOR_TOOL_NAME => {
-            rewrite_function_payload(payload, MONITOR_TOOL_NAME, rewrite_monitor_args)?
-        }
         TODO_WRITE_TOOL_NAME => {
             rewrite_function_payload(payload, TODO_WRITE_TOOL_NAME, rewrite_todo_write_args)?
         }
@@ -72,7 +67,6 @@ fn canonical_astral_plain_name(tool_name: &ToolName) -> Option<&'static str> {
     }
 
     match tool_name.name.as_str() {
-        MONITOR_TOOL_NAME => Some("write_stdin"),
         TODO_WRITE_TOOL_NAME => Some("update_plan"),
         ASK_USER_QUESTION_TOOL_NAME => Some("request_user_input"),
         REQUEST_PERMISSIONS_TOOL_NAME => Some("request_permissions"),
@@ -114,13 +108,6 @@ fn serialize_json_arguments(tool_name: &str, value: Value) -> Result<String, Fun
             "failed to serialize canonical {tool_name} arguments: {err}"
         ))
     })
-}
-
-fn rewrite_monitor_args(value: Value) -> Result<Value, FunctionCallError> {
-    let mut object = expect_object(MONITOR_TOOL_NAME, value)?;
-    move_field_if_absent(&mut object, "task_id", "session_id");
-    move_field_if_absent(&mut object, "shell_id", "session_id");
-    Ok(Value::Object(object))
 }
 
 fn rewrite_todo_write_args(value: Value) -> Result<Value, FunctionCallError> {
@@ -250,23 +237,6 @@ fn rewrite_task_stop_args(value: Value) -> Result<Value, FunctionCallError> {
     })?;
 
     Ok(json!({ "target": target }))
-}
-
-fn expect_object(tool_name: &str, value: Value) -> Result<Map<String, Value>, FunctionCallError> {
-    match value {
-        Value::Object(object) => Ok(object),
-        _ => Err(FunctionCallError::RespondToModel(format!(
-            "{tool_name} arguments must be a JSON object"
-        ))),
-    }
-}
-
-fn move_field_if_absent(object: &mut Map<String, Value>, from: &str, to: &str) {
-    if !object.contains_key(to)
-        && let Some(value) = object.remove(from)
-    {
-        object.insert(to.to_string(), value);
-    }
 }
 
 #[derive(Deserialize)]

@@ -3,6 +3,7 @@ use codex_tools::BASH_TOOL_NAME;
 use codex_tools::EDIT_TOOL_NAME;
 use codex_tools::GLOB_TOOL_NAME;
 use codex_tools::GREP_TOOL_NAME;
+use codex_tools::MONITOR_TOOL_NAME;
 use codex_tools::READ_TOOL_NAME;
 use codex_tools::WRITE_TOOL_NAME;
 use pretty_assertions::assert_eq;
@@ -48,7 +49,7 @@ fn leaves_bash_native_for_astral_handler() -> anyhow::Result<()> {
 }
 
 #[test]
-fn canonicalizes_monitor_to_write_stdin() -> anyhow::Result<()> {
+fn leaves_monitor_native_for_astral_handler() -> anyhow::Result<()> {
     let (tool_name, arguments) = canonicalize_function(
         MONITOR_TOOL_NAME,
         json!({
@@ -59,11 +60,11 @@ fn canonicalizes_monitor_to_write_stdin() -> anyhow::Result<()> {
         }),
     )?;
 
-    assert_eq!(tool_name, ToolName::plain("write_stdin"));
+    assert_eq!(tool_name, ToolName::plain(MONITOR_TOOL_NAME));
     assert_eq!(
         arguments,
         json!({
-            "session_id": 42,
+            "shell_id": 42,
             "chars": "y\n",
             "yield_time_ms": 30000,
             "max_output_tokens": 2000

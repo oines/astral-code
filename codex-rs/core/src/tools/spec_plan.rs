@@ -7,6 +7,7 @@ use crate::tools::handlers::ApplyPatchHandler;
 use crate::tools::handlers::AstralBashHandler;
 use crate::tools::handlers::AstralFileToolHandler;
 use crate::tools::handlers::AstralFileToolKind;
+use crate::tools::handlers::AstralMonitorHandler;
 use crate::tools::handlers::CodeModeExecuteHandler;
 use crate::tools::handlers::CodeModeWaitHandler;
 use crate::tools::handlers::DynamicToolHandler;
@@ -823,8 +824,9 @@ fn add_shell_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut Planne
                 include_shell_parameter: unified_exec_should_include_shell_parameter(turn_context),
             };
             planned_tools.add(AstralBashHandler::new(exec_options));
-            planned_tools.add(WriteStdinHandler);
+            planned_tools.add(AstralMonitorHandler::new());
             planned_tools.add_dispatch_only(ExecCommandHandler::new(exec_options));
+            planned_tools.add_dispatch_only(WriteStdinHandler);
 
             // Keep the legacy shell tool registered while unified exec is
             // model-visible.
