@@ -8,16 +8,13 @@ use codex_app_server_daemon::LifecycleCommand as AppServerLifecycleCommand;
 use codex_app_server_daemon::RemoteControlMode as AppServerRemoteControlMode;
 use codex_arg0::Arg0DispatchPaths;
 use codex_arg0::arg0_dispatch_or_else;
-use codex_chatgpt::apply_command::ApplyCommand;
-use codex_chatgpt::apply_command::run_apply_command;
 use codex_cli::read_api_key_from_stdin;
 use codex_cli::run_login_status;
 use codex_cli::run_login_with_access_token;
 use codex_cli::run_login_with_api_key;
-use codex_cli::run_login_with_chatgpt;
 use codex_cli::run_login_with_device_code;
+use codex_cli::run_login_without_credentials;
 use codex_cli::run_logout;
-use codex_cloud_tasks::Cli as CloudTasksCli;
 use codex_exec::Cli as ExecCli;
 use codex_exec::Command as ExecCommand;
 use codex_exec::ReviewArgs;
@@ -166,10 +163,6 @@ enum Subcommand {
     #[clap(hide = true)]
     Execpolicy(ExecpolicyCommand),
 
-    /// Apply the latest diff produced by Astral agent as a `git apply` to your local working tree.
-    #[clap(visible_alias = "a")]
-    Apply(ApplyCommand),
-
     /// Resume a previous interactive session (picker by default; use --last to continue the most recent).
     Resume(ResumeCommand),
 
@@ -181,10 +174,6 @@ enum Subcommand {
 
     /// Fork a previous interactive session (picker by default; use --last to fork the most recent).
     Fork(ForkCommand),
-
-    /// Legacy ChatGPT cloud task surface.
-    #[clap(name = "cloud", alias = "cloud-tasks", hide = true)]
-    Cloud(CloudTasksCli),
 
     /// Internal: run the responses API proxy.
     #[clap(hide = true)]
@@ -785,10 +774,6 @@ fn run_update_command() -> anyhow::Result<()> {
     }
 }
 
-fn reject_legacy_cloud_tasks_command() -> anyhow::Result<()> {
-    anyhow::bail!("legacy ChatGPT cloud tasks are disabled in astral-code");
-}
-
 fn run_execpolicycheck(cmd: ExecPolicyCheckCommand) -> anyhow::Result<()> {
     cmd.run()
 }
@@ -1309,7 +1294,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                         run_login_with_access_token(login_cli.config_overrides, String::new())
                             .await;
                     } else {
-                        run_login_with_chatgpt(login_cli.config_overrides).await;
+                        run_login_without_credentials(login_cli.config_overrides).await;
                     }
                 }
             }
@@ -1355,14 +1340,6 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                 &arg0_paths,
             )
             .await?;
-        }
-        Some(Subcommand::Cloud(_cloud_cli)) => {
-            reject_remote_mode_for_subcommand(
-                root_remote.as_deref(),
-                root_remote_auth_token_env.as_deref(),
-                "cloud",
-            )?;
-            reject_legacy_cloud_tasks_command()?;
         }
         Some(Subcommand::Sandbox(mut sandbox_cli)) => {
             #[cfg(target_os = "windows")]
@@ -1474,18 +1451,6 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                 run_execpolicycheck(cmd)?
             }
         },
-        Some(Subcommand::Apply(mut apply_cli)) => {
-            reject_remote_mode_for_subcommand(
-                root_remote.as_deref(),
-                root_remote_auth_token_env.as_deref(),
-                "apply",
-            )?;
-            prepend_config_flags(
-                &mut apply_cli.config_overrides,
-                root_config_overrides.clone(),
-            );
-            run_apply_command(apply_cli, /*cwd*/ None).await?;
-        }
         Some(Subcommand::ResponsesApiProxy(_args)) => {
             reject_remote_mode_for_subcommand(
                 root_remote.as_deref(),
@@ -2022,11 +1987,9 @@ fn unsupported_subcommand_name_for_strict_config(
         Some(Subcommand::Logout(_)) => Some("logout"),
         Some(Subcommand::Completion(_)) => Some("completion"),
         Some(Subcommand::Update) => Some("update"),
-        Some(Subcommand::Cloud(_)) => Some("cloud"),
         Some(Subcommand::Sandbox(_)) => Some("sandbox"),
         Some(Subcommand::Debug(_)) => Some("debug"),
         Some(Subcommand::Execpolicy(_)) => Some("execpolicy"),
-        Some(Subcommand::Apply(_)) => Some("apply"),
         Some(Subcommand::ResponsesApiProxy(_)) => Some("responses-api-proxy"),
         Some(Subcommand::StdioToUds(_)) => Some("stdio-to-uds"),
         Some(Subcommand::Features(_)) => Some("features"),
@@ -3286,25 +3249,6 @@ mod tests {
         let app_server =
             app_server_from_args(["astral", "app-server", "--analytics-default-enabled"].as_ref());
         assert!(app_server.analytics_default_enabled);
-    }
-
-    #[test]
-    fn cloud_tasks_command_is_hidden_from_help() {
-        let help = MultitoolCli::command().render_help().to_string();
-
-        assert!(!help.contains("cloud-tasks"));
-        assert!(!help.contains("Legacy ChatGPT cloud task surface"));
-    }
-
-    #[test]
-    fn cloud_tasks_command_is_disabled() {
-        let error =
-            reject_legacy_cloud_tasks_command().expect_err("legacy cloud command should fail");
-
-        assert_eq!(
-            error.to_string(),
-            "legacy ChatGPT cloud tasks are disabled in astral-code"
-        );
     }
 
     #[test]

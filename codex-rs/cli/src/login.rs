@@ -98,8 +98,10 @@ fn init_login_file_logging(config: &Config) -> Option<WorkerGuard> {
     Some(guard)
 }
 
-pub async fn run_login_with_chatgpt(_cli_config_overrides: CliConfigOverrides) -> ! {
-    eprintln!("{CHATGPT_LOGIN_DISABLED_MESSAGE}");
+pub async fn run_login_without_credentials(_cli_config_overrides: CliConfigOverrides) -> ! {
+    eprintln!(
+        "Astral login needs an explicit credential source. Pipe an API key to `astral login --with-api-key`, or set ASTRAL_API_KEY for the active model provider."
+    );
     std::process::exit(1);
 }
 
