@@ -8,11 +8,11 @@ from .client import CodexClient
 from .generated.v2_all import (
     AccountLoginCompletedNotification,
     CancelLoginAccountResponse,
-    ChatgptDeviceCodeLoginAccountParams,
-    ChatgptDeviceCodeLoginAccountResponse,
-    ChatgptLoginAccountParams,
-    ChatgptLoginAccountResponse,
-    LoginAccountParams,
+)
+
+_ASTRAL_CHATGPT_LOGIN_DISABLED = (
+    "ChatGPT login is not available in astral-code. Configure a provider-neutral "
+    "API key and base URL instead, for example ASTRAL_API_KEY and ASTRAL_BASE_URL."
 )
 
 
@@ -27,75 +27,25 @@ class _AsyncLoginOwner(Protocol):
 
 
 def start_chatgpt_login(client: CodexClient) -> ChatgptLoginHandle:
-    """Start browser ChatGPT login and return the handle for that attempt."""
-    response = client.account_login_start(
-        LoginAccountParams(
-            root=ChatgptLoginAccountParams(type="chatgpt"),
-        )
-    )
-    response_root = response.root
-    if not isinstance(response_root, ChatgptLoginAccountResponse):
-        raise RuntimeError(f"unexpected ChatGPT login response: {response_root!r}")
-    return ChatgptLoginHandle(
-        client,
-        response_root.login_id,
-        response_root.auth_url,
-    )
+    """ChatGPT browser login is disabled in astral-code."""
+    raise RuntimeError(_ASTRAL_CHATGPT_LOGIN_DISABLED)
 
 
 async def async_start_chatgpt_login(owner: _AsyncLoginOwner) -> AsyncChatgptLoginHandle:
-    """Start async browser ChatGPT login and return that attempt's handle."""
-    response = await owner._client.account_login_start(
-        LoginAccountParams(
-            root=ChatgptLoginAccountParams(type="chatgpt"),
-        )
-    )
-    response_root = response.root
-    if not isinstance(response_root, ChatgptLoginAccountResponse):
-        raise RuntimeError(f"unexpected ChatGPT login response: {response_root!r}")
-    return AsyncChatgptLoginHandle(
-        owner,
-        response_root.login_id,
-        response_root.auth_url,
-    )
+    """ChatGPT browser login is disabled in astral-code."""
+    raise RuntimeError(_ASTRAL_CHATGPT_LOGIN_DISABLED)
 
 
 def start_device_code_login(client: CodexClient) -> DeviceCodeLoginHandle:
-    """Start device-code ChatGPT login and return the handle for that attempt."""
-    response = client.account_login_start(
-        LoginAccountParams(
-            root=ChatgptDeviceCodeLoginAccountParams(type="chatgptDeviceCode"),
-        )
-    )
-    response_root = response.root
-    if not isinstance(response_root, ChatgptDeviceCodeLoginAccountResponse):
-        raise RuntimeError(f"unexpected device-code login response: {response_root!r}")
-    return DeviceCodeLoginHandle(
-        client,
-        response_root.login_id,
-        response_root.verification_url,
-        response_root.user_code,
-    )
+    """ChatGPT device-code login is disabled in astral-code."""
+    raise RuntimeError(_ASTRAL_CHATGPT_LOGIN_DISABLED)
 
 
 async def async_start_device_code_login(
     owner: _AsyncLoginOwner,
 ) -> AsyncDeviceCodeLoginHandle:
-    """Start async device-code ChatGPT login and return that attempt's handle."""
-    response = await owner._client.account_login_start(
-        LoginAccountParams(
-            root=ChatgptDeviceCodeLoginAccountParams(type="chatgptDeviceCode"),
-        )
-    )
-    response_root = response.root
-    if not isinstance(response_root, ChatgptDeviceCodeLoginAccountResponse):
-        raise RuntimeError(f"unexpected device-code login response: {response_root!r}")
-    return AsyncDeviceCodeLoginHandle(
-        owner,
-        response_root.login_id,
-        response_root.verification_url,
-        response_root.user_code,
-    )
+    """ChatGPT device-code login is disabled in astral-code."""
+    raise RuntimeError(_ASTRAL_CHATGPT_LOGIN_DISABLED)
 
 
 @dataclass(slots=True)
