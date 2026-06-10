@@ -653,7 +653,7 @@ fn turn_metadata_state_overlays_compaction_only_on_compaction_requests() {
             CompactionTurnMetadata::new(
                 CompactionTrigger::Auto,
                 CompactionReason::ContextLimit,
-                CompactionImplementation::ResponsesCompactionV2,
+                CompactionImplementation::LocalModel,
                 CompactionPhase::MidTurn,
             ),
         )
@@ -667,7 +667,7 @@ fn turn_metadata_state_overlays_compaction_only_on_compaction_requests() {
         serde_json::json!({
             "trigger": "auto",
             "reason": "context_limit",
-            "implementation": "responses_compaction_v2",
+            "implementation": "local_model",
             "phase": "mid_turn",
             "strategy": "memento",
         })

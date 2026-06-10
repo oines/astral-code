@@ -1246,7 +1246,7 @@ fn compaction_event_serializes_expected_shape() {
                 turn_id: "turn-1".to_string(),
                 trigger: CompactionTrigger::Auto,
                 reason: CompactionReason::ContextLimit,
-                implementation: CompactionImplementation::ResponsesCompact,
+                implementation: CompactionImplementation::LocalModel,
                 phase: CompactionPhase::MidTurn,
                 strategy: CompactionStrategy::Memento,
                 status: CompactionStatus::Completed,
@@ -1296,7 +1296,7 @@ fn compaction_event_serializes_expected_shape() {
                 "parent_thread_id": null,
                 "trigger": "auto",
                 "reason": "context_limit",
-                "implementation": "responses_compact",
+                "implementation": "local_model",
                 "phase": "mid_turn",
                 "strategy": "memento",
                 "status": "completed",
@@ -1311,14 +1311,6 @@ fn compaction_event_serializes_expected_shape() {
             }
         })
     );
-}
-
-#[test]
-fn compaction_implementation_serializes_remote_v2() {
-    let payload = serde_json::to_value(CompactionImplementation::ResponsesCompactionV2)
-        .expect("serialize compaction implementation");
-
-    assert_eq!(payload, json!("responses_compaction_v2"));
 }
 
 #[test]
