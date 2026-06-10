@@ -113,7 +113,7 @@ fn bash_tool() -> AgentTool {
 fn read_tool() -> AgentTool {
     tool(
         READ_TOOL_NAME,
-        "Read a text file or local image from the filesystem.",
+        "Read a text file or local image from the filesystem. Text output uses cat -n style line numbers.",
         object(
             [
                 string_property("file_path", "The absolute path to the file to read"),

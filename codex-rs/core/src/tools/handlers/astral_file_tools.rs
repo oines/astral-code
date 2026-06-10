@@ -211,11 +211,14 @@ async fn read_file(
     let start = args.offset.unwrap_or(1).saturating_sub(1).min(lines.len());
     let requested_limit = args.limit.unwrap_or(DEFAULT_READ_LINE_LIMIT);
     let end = start.saturating_add(requested_limit).min(lines.len());
-    let mut output = lines[start..end].concat();
+    let mut output = add_line_numbers(&lines[start..end], start + 1);
 
     if end < lines.len() {
+        if !output.ends_with('\n') {
+            output.push('\n');
+        }
         output.push_str(&format!(
-            "\n[Showing lines {}-{} of {}; pass offset/limit to read more]\n",
+            "[Showing lines {}-{} of {}; pass offset/limit to read more]\n",
             start + 1,
             end,
             lines.len()
@@ -571,6 +574,14 @@ fn split_lines_preserving_newline(text: &str) -> Vec<&str> {
     text.split_inclusive('\n').collect()
 }
 
+fn add_line_numbers(lines: &[&str], start_line: usize) -> String {
+    let mut output = String::new();
+    for (index, line) in lines.iter().enumerate() {
+        output.push_str(&format!("{}\t{}", start_line + index, line));
+    }
+    output
+}
+
 fn matching_line_indexes(
     regex: &Regex,
     lines: &[&str],
@@ -740,3 +751,7 @@ fn type_filter_matches(path: &AbsolutePathBuf, file_type: Option<&str>) -> bool 
     };
     extension == expected
 }
+
+#[cfg(test)]
+#[path = "astral_file_tools_tests.rs"]
+mod tests;
