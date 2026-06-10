@@ -124,13 +124,13 @@ async fn run_compact_task_inner(
     phase: CompactionPhase,
 ) -> CodexResult<()> {
     let compaction_metadata =
-        CompactionTurnMetadata::new(trigger, reason, CompactionImplementation::Responses, phase);
+        CompactionTurnMetadata::new(trigger, reason, CompactionImplementation::LocalModel, phase);
     let attempt = CompactionAnalyticsAttempt::begin(
         sess.as_ref(),
         turn_context.as_ref(),
         trigger,
         reason,
-        CompactionImplementation::Responses,
+        CompactionImplementation::LocalModel,
         phase,
     )
     .await;

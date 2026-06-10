@@ -27,7 +27,7 @@ use codex_extension_api::ExtensionRegistry;
 use codex_extension_api::empty_extension_registry;
 use codex_login::CodexAuth;
 use codex_model_provider_info::ModelProviderInfo;
-use codex_model_provider_info::built_in_model_providers;
+use codex_model_provider_info::WireApi;
 use codex_models_manager::bundled_models_response;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::openai_models::ModelInfo;
@@ -578,11 +578,13 @@ impl TestCodexBuilder {
         cwd_override: AbsolutePathBuf,
     ) -> anyhow::Result<(Config, Arc<TempDir>)> {
         let model_provider = ModelProviderInfo {
+            name: "Responses mock".to_string(),
             base_url: Some(base_url),
+            wire_api: WireApi::Responses,
             // Most core tests use SSE-only mock servers, so keep websocket transport off unless
             // a test explicitly opts into websocket coverage.
             supports_websockets: false,
-            ..built_in_model_providers(/*openai_base_url*/ None)["openai"].clone()
+            ..ModelProviderInfo::default()
         };
         let cwd = Arc::new(TempDir::new()?);
         for hook in self.pre_build_hooks.drain(..) {

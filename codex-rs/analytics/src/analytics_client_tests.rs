@@ -1818,7 +1818,7 @@ async fn compaction_event_ingests_custom_fact() {
                     turn_id: "turn-compact".to_string(),
                     trigger: CompactionTrigger::Manual,
                     reason: CompactionReason::UserRequested,
-                    implementation: CompactionImplementation::Responses,
+                    implementation: CompactionImplementation::LocalModel,
                     phase: CompactionPhase::StandaloneTurn,
                     strategy: CompactionStrategy::Memento,
                     status: CompactionStatus::Failed,
@@ -1869,7 +1869,7 @@ async fn compaction_event_ingests_custom_fact() {
     );
     assert_eq!(payload[0]["event_params"]["trigger"], "manual");
     assert_eq!(payload[0]["event_params"]["reason"], "user_requested");
-    assert_eq!(payload[0]["event_params"]["implementation"], "responses");
+    assert_eq!(payload[0]["event_params"]["implementation"], "local_model");
     assert_eq!(payload[0]["event_params"]["phase"], "standalone_turn");
     assert_eq!(payload[0]["event_params"]["strategy"], "memento");
     assert_eq!(payload[0]["event_params"]["status"], "failed");
@@ -2742,7 +2742,7 @@ async fn subagent_thread_started_inherits_parent_connection_for_new_thread() {
                     turn_id: "turn-compact".to_string(),
                     trigger: CompactionTrigger::Manual,
                     reason: CompactionReason::UserRequested,
-                    implementation: CompactionImplementation::Responses,
+                    implementation: CompactionImplementation::LocalModel,
                     phase: CompactionPhase::StandaloneTurn,
                     strategy: CompactionStrategy::Memento,
                     status: CompactionStatus::Completed,
