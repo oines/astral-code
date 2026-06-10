@@ -1,6 +1,5 @@
 use crate::function_tool::FunctionCallError;
 use crate::tools::context::ToolPayload;
-use codex_tools::AGENT_TOOL_NAME;
 use codex_tools::LIST_MCP_RESOURCES_TOOL_NAME;
 use codex_tools::READ_MCP_RESOURCE_TOOL_NAME;
 use codex_tools::SEND_MESSAGE_TOOL_NAME;
@@ -27,7 +26,6 @@ pub(crate) fn canonicalize_astral_tool_call(
     };
 
     let payload = match tool_name.name.as_str() {
-        AGENT_TOOL_NAME => rewrite_function_payload(payload, AGENT_TOOL_NAME, rewrite_agent_args)?,
         SEND_MESSAGE_TOOL_NAME => {
             rewrite_function_payload(payload, SEND_MESSAGE_TOOL_NAME, rewrite_send_message_args)?
         }
@@ -49,7 +47,6 @@ fn canonical_astral_plain_name(tool_name: &ToolName) -> Option<&'static str> {
     match tool_name.name.as_str() {
         LIST_MCP_RESOURCES_TOOL_NAME => Some("list_mcp_resources"),
         READ_MCP_RESOURCE_TOOL_NAME => Some("read_mcp_resource"),
-        AGENT_TOOL_NAME => Some("spawn_agent"),
         SEND_MESSAGE_TOOL_NAME => Some("send_message"),
         TASK_STOP_TOOL_NAME => Some("interrupt_agent"),
         _ => None,
@@ -86,24 +83,6 @@ fn serialize_json_arguments(tool_name: &str, value: Value) -> Result<String, Fun
     })
 }
 
-fn rewrite_agent_args(value: Value) -> Result<Value, FunctionCallError> {
-    let args: AstralAgentArgs = serde_json::from_value(value).map_err(|err| {
-        FunctionCallError::RespondToModel(format!(
-            "failed to parse {AGENT_TOOL_NAME} arguments: {err}"
-        ))
-    })?;
-
-    Ok(json!({
-        "message": args.prompt,
-        "task_name": args.description,
-        "agent_type": args.subagent_type,
-        "model": args.model,
-        "reasoning_effort": args.reasoning_effort,
-        "service_tier": args.service_tier,
-        "fork_turns": args.fork_turns,
-    }))
-}
-
 fn rewrite_send_message_args(value: Value) -> Result<Value, FunctionCallError> {
     let args: AstralSendMessageArgs = serde_json::from_value(value).map_err(|err| {
         FunctionCallError::RespondToModel(format!(
@@ -134,22 +113,6 @@ fn rewrite_task_stop_args(value: Value) -> Result<Value, FunctionCallError> {
     })?;
 
     Ok(json!({ "target": target }))
-}
-
-#[derive(Deserialize)]
-struct AstralAgentArgs {
-    description: String,
-    prompt: String,
-    #[serde(default)]
-    subagent_type: Option<String>,
-    #[serde(default)]
-    model: Option<String>,
-    #[serde(default)]
-    reasoning_effort: Option<String>,
-    #[serde(default)]
-    service_tier: Option<String>,
-    #[serde(default)]
-    fork_turns: Option<String>,
 }
 
 #[derive(Deserialize)]

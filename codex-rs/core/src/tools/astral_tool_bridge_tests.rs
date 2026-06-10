@@ -1,4 +1,5 @@
 use super::*;
+use codex_tools::AGENT_TOOL_NAME;
 use codex_tools::ASK_USER_QUESTION_TOOL_NAME;
 use codex_tools::BASH_TOOL_NAME;
 use codex_tools::EDIT_TOOL_NAME;
@@ -279,17 +280,14 @@ fn canonicalizes_multi_agent_tools() -> anyhow::Result<()> {
             "model": "astral-fast"
         }),
     )?;
-    assert_eq!(tool_name, ToolName::plain("spawn_agent"));
+    assert_eq!(tool_name, ToolName::plain(AGENT_TOOL_NAME));
     assert_eq!(
         arguments,
         json!({
-            "message": "Inspect provider adapters and report gaps",
-            "task_name": "audit adapters",
-            "agent_type": "reviewer",
+            "description": "audit adapters",
+            "prompt": "Inspect provider adapters and report gaps",
+            "subagent_type": "reviewer",
             "model": "astral-fast",
-            "reasoning_effort": null,
-            "service_tier": null,
-            "fork_turns": null
         })
     );
 

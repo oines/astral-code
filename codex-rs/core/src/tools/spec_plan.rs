@@ -4,6 +4,7 @@ use crate::session::turn_context::TurnContext;
 use crate::tools::code_mode::execute_spec::create_code_mode_tool;
 use crate::tools::context::ToolInvocation;
 use crate::tools::handlers::ApplyPatchHandler;
+use crate::tools::handlers::AstralAgentHandler;
 use crate::tools::handlers::AstralAskUserQuestionHandler;
 use crate::tools::handlers::AstralBashHandler;
 use crate::tools::handlers::AstralFileToolHandler;
@@ -49,7 +50,6 @@ use crate::tools::handlers::multi_agents_v2::FollowupTaskHandler as FollowupTask
 use crate::tools::handlers::multi_agents_v2::InterruptAgentHandler;
 use crate::tools::handlers::multi_agents_v2::ListAgentsHandler as ListAgentsHandlerV2;
 use crate::tools::handlers::multi_agents_v2::SendMessageHandler as SendMessageHandlerV2;
-use crate::tools::handlers::multi_agents_v2::SpawnAgentHandler as SpawnAgentHandlerV2;
 use crate::tools::handlers::multi_agents_v2::WaitAgentHandler as WaitAgentHandlerV2;
 use crate::tools::handlers::view_image_spec::ViewImageToolOptions;
 use crate::tools::hosted_spec::WebSearchToolOptions;
@@ -322,7 +322,6 @@ fn astral_spec_for_model_request(
         "update_plan" => Some(TODO_WRITE_TOOL_NAME),
         "list_mcp_resources" => Some(LIST_MCP_RESOURCES_TOOL_NAME),
         "read_mcp_resource" => Some(READ_MCP_RESOURCE_TOOL_NAME),
-        "spawn_agent" => Some(AGENT_TOOL_NAME),
         "send_message" => Some(SEND_MESSAGE_TOOL_NAME),
         "interrupt_agent" => Some(TASK_STOP_TOOL_NAME),
         _ => None,
@@ -931,7 +930,7 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mu
                 agent_type_description(turn_context, context.default_agent_type_description);
             planned_tools.add_arc(override_tool_exposure(
                 multi_agent_v2_handler(
-                    SpawnAgentHandlerV2::new(SpawnAgentToolOptions {
+                    AstralAgentHandler::new(SpawnAgentToolOptions {
                         available_models: turn_context.available_models.clone(),
                         agent_type_description,
                         hide_agent_type_model_reasoning: turn_context
