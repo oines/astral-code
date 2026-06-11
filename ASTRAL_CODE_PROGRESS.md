@@ -1,6 +1,6 @@
 # Astral-Code 项目总控记录
 
-最后更新：2026-06-11 20:22 CST
+最后更新：2026-06-11 20:33 CST
 
 这份文档是 Astral-Code 长线改造的中文 handoff。它的用途不是对外宣传，而是让后续任何一次
 compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道：我们到底要做什么、为什么这么做、
@@ -74,6 +74,10 @@ plugin apps、MCP apps 和 app-server `apps/list` 在 Astral API-key/provider-ne
 headers，不再要求 `uses_codex_backend()`，也不再打印 `ChatGPT-Account-Id` 相关日志。`normalize_base_url`
 也不再把 `https://chatgpt.com` 自动补成 `/backend-api`；只有用户显式配置带 `/backend-api` 的 backend 时才走
 旧 path style。
+
+最新补充 7：core-plugins curated startup sync 删除了 ChatGPT backend export archive fallback。git sync 失败后仍可
+尝试 GitHub API zipball fallback，但如果 GitHub HTTP 也失败，将直接失败并保留已有本地 curated snapshot，不再访问
+`https://chatgpt.com/backend-api/plugins/export/curated`，也不再维护 backup archive zip / git ref 解析代码。
 
 下一步优先继续处理 `chatgpt_base_url` 配置字段、Agent Identity auth/storage 残留、connectors/apps 和其他
 ChatGPT hosted 残留；provider adapter 方向则继续补 Anthropic/chat-completions fixture 和国内模型兼容选项。
@@ -930,6 +934,39 @@ account 或 OpenAI-only plugin 分发的代码，都需要删除、禁用或隔�
 - remote plugin 类型、测试 fixture 和部分 manager 调度结构仍存在，用于当前编译边界。
 - 更洁癖的下一步可以把 legacy remote plugin 实现拆成非默认 feature 或删除对应类型面，但要避免一次性
   引爆 plugin manager、app-server protocol 和测试 fixture 的大范围 diff。
+
+## 最近完成的 curated plugin startup archive fallback slice
+
+本轮完成的代码 slice：
+
+> core-plugins curated startup sync 不再回退到 ChatGPT hosted export archive。
+
+已编辑文件：
+
+- `codex-rs/core-plugins/src/startup_sync.rs`
+- `codex-rs/core-plugins/src/startup_sync_tests.rs`
+- `ASTRAL_CODE_PROGRESS.md`
+
+改动内容：
+
+- 删除硬编码 `https://chatgpt.com/backend-api/plugins/export/curated`。
+- `sync_openai_plugins_repo_with_transport_overrides(...)` 不再接收 backup archive URL。
+- Git sync 失败后仍可尝试 GitHub API zipball fallback；GitHub HTTP 也失败时直接返回错误。
+- 如果本地已有 curated snapshot，失败时只保留本地 snapshot，不再尝试 hosted archive bootstrap。
+- 删除 backup archive zip 下载、export metadata 解析、archive 内 `.git/HEAD` ref 解析和对应测试。
+
+为什么要做：
+
+- 这是一个明确的 ChatGPT hosted backend fallback，属于 OpenAI 专有控制面残留。
+- Astral 不能在本地 plugin startup sync 失败时悄悄去 `chatgpt.com/backend-api` 拉兜底 archive。
+- 这一步只拆 ChatGPT backend fallback，不扩大到完整删除 curated GitHub sync；后者会影响 openai-curated
+  marketplace 的本地缓存/安装语义，适合单独评估和分阶段迁移到 Astral marketplace。
+
+验证：
+
+- `just fmt`
+- `CARGO_INCREMENTAL=0 cargo check --tests -p codex-core-plugins`
+- `just test -p codex-core-plugins sync_openai_plugins_repo_keeps_snapshot_when_github_http_fails`
 
 ## 最近完成的 app-server remote-control URL cleanup slice
 
