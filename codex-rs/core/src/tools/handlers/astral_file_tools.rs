@@ -33,6 +33,20 @@ const DEFAULT_READ_LINE_LIMIT: usize = 2_000;
 const DEFAULT_GREP_HEAD_LIMIT: usize = 250;
 const MAX_SCAN_ENTRIES: usize = 10_000;
 const MAX_RESULT_LINES: usize = 1_000;
+const SEARCH_PRUNED_DIRECTORY_NAMES: &[&str] = &[
+    ".git",
+    ".svn",
+    ".hg",
+    ".bzr",
+    ".jj",
+    ".cache",
+    ".next",
+    ".turbo",
+    "build",
+    "dist",
+    "node_modules",
+    "target",
+];
 const BLOCKED_DEVICE_PATHS: &[&str] = &[
     "/dev/zero",
     "/dev/random",
@@ -594,6 +608,11 @@ async fn collect_files(
                 ))
             })?;
         for entry in entries {
+            if entry.is_directory
+                && SEARCH_PRUNED_DIRECTORY_NAMES.contains(&entry.file_name.as_str())
+            {
+                continue;
+            }
             let path = fs
                 .join(&dir, Path::new(&entry.file_name))
                 .await

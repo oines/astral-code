@@ -8,6 +8,7 @@ use core_test_support::PathExt;
 
 use super::GrepArgs;
 use super::add_line_numbers;
+use super::collect_files;
 use super::edit_file;
 use super::is_blocked_device_path;
 use super::push_content_matches;
@@ -84,4 +85,38 @@ async fn edit_empty_old_string_creates_missing_file() {
         std::fs::read_to_string(temp_dir.path().join("created.txt")).expect("created file"),
         "created content\n"
     );
+}
+
+#[tokio::test]
+async fn file_search_prunes_generated_and_vcs_directories() {
+    let temp_dir = tempfile::TempDir::new().expect("temp dir");
+    let cwd = temp_dir.path().abs();
+    std::fs::create_dir_all(temp_dir.path().join("src")).expect("create src");
+    std::fs::create_dir_all(temp_dir.path().join(".git")).expect("create git dir");
+    std::fs::create_dir_all(temp_dir.path().join("target/debug")).expect("create target dir");
+    std::fs::write(temp_dir.path().join("src/lib.rs"), "pub fn live() {}\n").expect("write source");
+    std::fs::write(temp_dir.path().join(".git/config"), "[core]\n").expect("write git config");
+    std::fs::write(
+        temp_dir.path().join("target/debug/generated.rs"),
+        "pub fn generated() {}\n",
+    )
+    .expect("write generated");
+    let sandbox = FileSystemSandboxContext::from_permission_profile(PermissionProfile::Disabled);
+
+    let files = collect_files(LOCAL_FS.as_ref(), &sandbox, &cwd)
+        .await
+        .expect("collect files");
+    let mut display_paths = files
+        .iter()
+        .map(|path| {
+            path.as_path()
+                .strip_prefix(temp_dir.path())
+                .expect("path under temp dir")
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect::<Vec<_>>();
+    display_paths.sort();
+
+    assert_eq!(display_paths, vec!["src/lib.rs"]);
 }
