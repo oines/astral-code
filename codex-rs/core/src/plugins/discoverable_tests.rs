@@ -323,7 +323,7 @@ remote_plugin = true
     fetch_and_cache_global_remote_plugin_catalog(
         codex_home.path(),
         &RemotePluginServiceConfig {
-            chatgpt_base_url: config.chatgpt_base_url.clone(),
+            hosted_base_url: config.chatgpt_base_url.clone(),
         },
         Some(&auth),
     )

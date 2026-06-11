@@ -12,7 +12,7 @@ const REMOTE_PLUGIN_CATALOG_DISK_CACHE_DIR: &str = "cache/remote_plugin_catalog"
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 struct RemotePluginCatalogCacheKey {
-    chatgpt_base_url: String,
+    hosted_base_url: String,
     account_id: Option<String>,
     chatgpt_user_id: Option<String>,
     is_workspace_account: bool,
@@ -21,7 +21,7 @@ struct RemotePluginCatalogCacheKey {
 impl RemotePluginCatalogCacheKey {
     fn global(config: &RemotePluginServiceConfig, auth: &CodexAuth) -> Self {
         Self {
-            chatgpt_base_url: config.chatgpt_base_url.clone(),
+            hosted_base_url: config.hosted_base_url.clone(),
             account_id: auth.get_account_id(),
             chatgpt_user_id: auth.get_chatgpt_user_id(),
             is_workspace_account: auth.is_workspace_account(),

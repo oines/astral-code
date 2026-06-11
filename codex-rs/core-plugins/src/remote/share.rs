@@ -289,7 +289,7 @@ pub async fn delete_remote_plugin_share(
     }
 
     let auth = ensure_chatgpt_auth(auth)?;
-    let base_url = config.chatgpt_base_url.trim_end_matches('/');
+    let base_url = config.hosted_base_url.trim_end_matches('/');
     let url = format!("{base_url}/public/plugins/workspace/{remote_plugin_id}");
     let client = build_reqwest_client();
     let request = authenticated_request(client.delete(&url), auth)?;
@@ -326,7 +326,7 @@ pub async fn update_remote_plugin_share_targets(
     let targets =
         ensure_unlisted_workspace_target(auth, Some(target_discoverability), Some(targets))?
             .unwrap_or_default();
-    let base_url = config.chatgpt_base_url.trim_end_matches('/');
+    let base_url = config.hosted_base_url.trim_end_matches('/');
     let url = format!("{base_url}/ps/plugins/{remote_plugin_id}/shares");
     let client = build_reqwest_client();
     let request = authenticated_request(client.put(&url), auth)?.json(
@@ -392,7 +392,7 @@ async fn get_created_workspace_plugins_page(
     auth: &CodexAuth,
     page_token: Option<&str>,
 ) -> Result<RemotePluginListResponse, RemotePluginCatalogError> {
-    let base_url = config.chatgpt_base_url.trim_end_matches('/');
+    let base_url = config.hosted_base_url.trim_end_matches('/');
     let url = format!("{base_url}/ps/plugins/workspace/created");
     let client = build_reqwest_client();
     let mut request = authenticated_request(client.get(&url), auth)?;
@@ -410,7 +410,7 @@ async fn create_workspace_plugin_upload(
     size_bytes: usize,
     remote_plugin_id: Option<&str>,
 ) -> Result<RemoteWorkspacePluginUploadUrlResponse, RemotePluginCatalogError> {
-    let base_url = config.chatgpt_base_url.trim_end_matches('/');
+    let base_url = config.hosted_base_url.trim_end_matches('/');
     let url = format!("{base_url}/public/plugins/workspace/upload-url");
     let client = build_reqwest_client();
     let request = authenticated_request(client.post(&url), auth)?.json(
@@ -460,7 +460,7 @@ async fn finalize_workspace_plugin_upload(
     remote_plugin_id: Option<&str>,
     body: RemoteWorkspacePluginCreateRequest,
 ) -> Result<RemoteWorkspacePluginCreateResponse, RemotePluginCatalogError> {
-    let base_url = config.chatgpt_base_url.trim_end_matches('/');
+    let base_url = config.hosted_base_url.trim_end_matches('/');
     let url = if let Some(remote_plugin_id) = remote_plugin_id {
         format!("{base_url}/public/plugins/workspace/{remote_plugin_id}")
     } else {

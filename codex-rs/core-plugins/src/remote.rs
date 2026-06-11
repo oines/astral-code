@@ -108,7 +108,7 @@ fn remote_plugin_control_plane_disabled_error() -> RemotePluginCatalogError {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemotePluginServiceConfig {
-    pub chatgpt_base_url: String,
+    pub hosted_base_url: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1131,7 +1131,7 @@ pub async fn install_remote_plugin(
     // Remote plugin IDs uniquely identify remote plugins, so the caller-provided
     // marketplace name is not validated before sending the install mutation.
 
-    let base_url = config.chatgpt_base_url.trim_end_matches('/');
+    let base_url = config.hosted_base_url.trim_end_matches('/');
     let url = format!("{base_url}/ps/plugins/{plugin_id}/install");
     let client = build_reqwest_client();
     let request = authenticated_request(client.post(&url), auth)?;
@@ -1171,7 +1171,7 @@ pub async fn uninstall_remote_plugin(
     let marketplace_name = remote_plugin_canonical_marketplace_name(&plugin)?.to_string();
     let plugin_name = plugin.name;
 
-    let base_url = config.chatgpt_base_url.trim_end_matches('/');
+    let base_url = config.hosted_base_url.trim_end_matches('/');
     let url = format!("{base_url}/plugins/{plugin_id}/uninstall");
     let client = build_reqwest_client();
     let request = authenticated_request(client.post(&url), auth)?;
@@ -1577,7 +1577,7 @@ async fn get_remote_plugin_list_page(
     page_token: Option<&str>,
     collection: Option<&str>,
 ) -> Result<RemotePluginListResponse, RemotePluginCatalogError> {
-    let base_url = config.chatgpt_base_url.trim_end_matches('/');
+    let base_url = config.hosted_base_url.trim_end_matches('/');
     let url = format!("{base_url}/ps/plugins/list");
     let client = build_reqwest_client();
     let mut request = authenticated_request(client.get(&url), auth)?;
@@ -1597,7 +1597,7 @@ async fn get_remote_shared_workspace_plugins_page(
     auth: &CodexAuth,
     page_token: Option<&str>,
 ) -> Result<RemotePluginListResponse, RemotePluginCatalogError> {
-    let base_url = config.chatgpt_base_url.trim_end_matches('/');
+    let base_url = config.hosted_base_url.trim_end_matches('/');
     let url = format!("{base_url}/ps/plugins/workspace/shared");
     let client = build_reqwest_client();
     let mut request = authenticated_request(client.get(&url), auth)?;
@@ -1615,7 +1615,7 @@ async fn get_remote_plugin_installed_page(
     page_token: Option<&str>,
     include_download_urls: bool,
 ) -> Result<RemotePluginInstalledResponse, RemotePluginCatalogError> {
-    let base_url = config.chatgpt_base_url.trim_end_matches('/');
+    let base_url = config.hosted_base_url.trim_end_matches('/');
     let url = format!("{base_url}/ps/plugins/installed");
     let client = build_reqwest_client();
     let mut request = authenticated_request(client.get(&url), auth)?;
@@ -1635,7 +1635,7 @@ async fn fetch_plugin_detail(
     plugin_id: &str,
     include_download_urls: bool,
 ) -> Result<RemotePluginDirectoryItem, RemotePluginCatalogError> {
-    let base_url = config.chatgpt_base_url.trim_end_matches('/');
+    let base_url = config.hosted_base_url.trim_end_matches('/');
     let url = format!("{base_url}/ps/plugins/{plugin_id}");
     let client = build_reqwest_client();
     let mut request = authenticated_request(client.get(&url), auth)?;
@@ -1650,7 +1650,7 @@ fn remote_plugin_skill_detail_url(
     plugin_id: &str,
     skill_name: &str,
 ) -> Result<String, RemotePluginCatalogError> {
-    let mut url = Url::parse(config.chatgpt_base_url.trim_end_matches('/'))
+    let mut url = Url::parse(config.hosted_base_url.trim_end_matches('/'))
         .map_err(RemotePluginCatalogError::InvalidBaseUrl)?;
     {
         let mut segments = url

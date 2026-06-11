@@ -13,7 +13,7 @@ use super::sync_remote_installed_plugin_bundles_once;
 
 fn service_config() -> RemotePluginServiceConfig {
     RemotePluginServiceConfig {
-        chatgpt_base_url: "https://chatgpt.example/backend-api".to_string(),
+        hosted_base_url: "https://chatgpt.example/backend-api".to_string(),
     }
 }
 

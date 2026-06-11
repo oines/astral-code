@@ -43,8 +43,14 @@ metrics exporter 现在是 `none`，旧配置里显式写 `statsig` 也会在 `c
 当前补充 slice：`feedback/upload` 真实上传链路此前已经硬禁用；本轮继续清理残留的 `/feedback`
 用户引导文案，避免 Astral 在错误消息、slash 描述或启动 tips 里暗示还能把日志上传给维护者。
 
-下一步优先继续处理底层 `app-server-transport` remote-control 旧模块、`chatgpt_base_url` 配置字段和其他
-ChatGPT hosted 残留；provider adapter 方向则继续补 Anthropic/chat-completions fixture 和国内模型兼容选项。
+当前继续推进的 slice：`RemotePluginServiceConfig` 内部字段已从 `chatgpt_base_url` 收敛为
+`hosted_base_url`。这一步只改 remote plugin 服务内部的 hosted backend 概念，不迁移外层
+`Config.chatgpt_base_url` 和 schema；后者涉及插件、apps、测试 fixture 和旧 hosted backend 命名，需要后续
+单独分阶段拆。
+
+下一步优先继续处理 `chatgpt_base_url` 配置字段、Agent Identity、connectors/apps 和其他 ChatGPT hosted
+残留；provider adapter 方向则继续补 Anthropic/chat-completions fixture 和国内模型兼容选项。remote-control
+主入口已经禁用，不再作为最高优先级，除非后续要把底层 `app-server-transport` 旧模块降级成独立 stub 或删除。
 当前明确口径：标准 OpenAI API 指 `/v1/chat/completions`，不是旧 `/v1/completions`；Anthropic 路线是
 Messages API，`base_url` 可以承载 `/v1` 或 `/anthropic/v1` 这类网关前缀。
 

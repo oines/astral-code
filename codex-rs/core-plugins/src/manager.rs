@@ -108,7 +108,7 @@ impl PluginsConfigInput {
 
 #[derive(Clone, PartialEq, Eq)]
 struct FeaturedPluginIdsCacheKey {
-    chatgpt_base_url: String,
+    hosted_base_url: String,
     account_id: Option<String>,
     chatgpt_user_id: Option<String>,
     is_workspace_account: bool,
@@ -187,7 +187,7 @@ struct ConfiguredMarketplaceUpgradeState {
 
 fn remote_plugin_service_config(config: &PluginsConfigInput) -> RemotePluginServiceConfig {
     RemotePluginServiceConfig {
-        chatgpt_base_url: config.chatgpt_base_url.clone(),
+        hosted_base_url: config.chatgpt_base_url.clone(),
     }
 }
 
@@ -196,7 +196,7 @@ fn featured_plugin_ids_cache_key(
     auth: Option<&CodexAuth>,
 ) -> FeaturedPluginIdsCacheKey {
     FeaturedPluginIdsCacheKey {
-        chatgpt_base_url: config.chatgpt_base_url.clone(),
+        hosted_base_url: config.chatgpt_base_url.clone(),
         account_id: auth.and_then(CodexAuth::get_account_id),
         chatgpt_user_id: auth.and_then(CodexAuth::get_chatgpt_user_id),
         is_workspace_account: auth.is_some_and(CodexAuth::is_workspace_account),

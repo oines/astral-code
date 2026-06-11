@@ -29,10 +29,10 @@ pub enum RemotePluginMutationError {
     #[error("failed to read auth token for remote plugin mutation: {0}")]
     AuthToken(#[source] std::io::Error),
 
-    #[error("invalid chatgpt base url for remote plugin mutation: {0}")]
+    #[error("invalid hosted base url for remote plugin mutation: {0}")]
     InvalidBaseUrl(#[source] url::ParseError),
 
-    #[error("chatgpt base url cannot be used for plugin mutation")]
+    #[error("hosted base url cannot be used for plugin mutation")]
     InvalidBaseUrlPath,
 
     #[error("failed to send remote plugin mutation request to {url}: {source}")]
@@ -100,7 +100,7 @@ pub async fn fetch_remote_featured_plugin_ids(
     auth: Option<&CodexAuth>,
     product: Option<Product>,
 ) -> Result<Vec<String>, RemotePluginFetchError> {
-    let base_url = config.chatgpt_base_url.trim_end_matches('/');
+    let base_url = config.hosted_base_url.trim_end_matches('/');
     let url = format!("{base_url}/plugins/featured");
     let client = build_reqwest_client();
     let mut request = client
@@ -220,7 +220,7 @@ fn remote_plugin_mutation_url(
     plugin_id: &str,
     action: &str,
 ) -> Result<String, RemotePluginMutationError> {
-    let mut url = Url::parse(config.chatgpt_base_url.trim_end_matches('/'))
+    let mut url = Url::parse(config.hosted_base_url.trim_end_matches('/'))
         .map_err(RemotePluginMutationError::InvalidBaseUrl)?;
     {
         let mut segments = url
