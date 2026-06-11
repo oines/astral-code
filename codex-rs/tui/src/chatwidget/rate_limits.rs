@@ -3,9 +3,6 @@
 use super::*;
 use codex_app_server_protocol::CodexErrorInfo as AppServerCodexErrorInfo;
 
-pub(super) const NUDGE_MODEL_SLUG: &str = "gpt-5.4-mini";
-pub(super) const RATE_LIMIT_SWITCH_PROMPT_THRESHOLD: f64 = 90.0;
-
 const RATE_LIMIT_WARNING_THRESHOLDS: [f64; 3] = [75.0, 90.0, 95.0];
 const PRIMARY_LIMIT_FALLBACK_LABEL: &str = "usage";
 const SECONDARY_LIMIT_FALLBACK_LABEL: &str = "secondary usage";
@@ -118,14 +115,6 @@ fn is_approximate_window(minutes: i64, expected_minutes: i64) -> bool {
     minutes >= expected_minutes * 0.95 && minutes <= expected_minutes * 1.05
 }
 
-#[derive(Default)]
-pub(super) enum RateLimitSwitchPromptState {
-    #[default]
-    Idle,
-    Pending,
-    Shown,
-}
-
 #[derive(Debug)]
 pub(super) enum RateLimitErrorKind {
     ServerOverloaded,
@@ -232,36 +221,6 @@ impl ChatWidget {
                 vec![]
             };
 
-            let high_usage = is_codex_limit
-                && (snapshot
-                    .secondary
-                    .as_ref()
-                    .map(|w| f64::from(w.used_percent) >= RATE_LIMIT_SWITCH_PROMPT_THRESHOLD)
-                    .unwrap_or(false)
-                    || snapshot
-                        .primary
-                        .as_ref()
-                        .map(|w| f64::from(w.used_percent) >= RATE_LIMIT_SWITCH_PROMPT_THRESHOLD)
-                        .unwrap_or(false));
-
-            let has_workspace_credits = snapshot
-                .credits
-                .as_ref()
-                .map(|credits| credits.has_credits)
-                .unwrap_or(false);
-
-            if high_usage
-                && !has_workspace_credits
-                && !self.rate_limit_switch_prompt_hidden()
-                && self.current_model() != NUDGE_MODEL_SLUG
-                && !matches!(
-                    self.rate_limit_switch_prompt,
-                    RateLimitSwitchPromptState::Shown
-                )
-            {
-                self.rate_limit_switch_prompt = RateLimitSwitchPromptState::Pending;
-            }
-
             let mut display =
                 rate_limit_snapshot_display_for_limit(&snapshot, limit_label, Local::now());
             if display.individual_limit.is_none() {
@@ -293,124 +252,5 @@ impl ChatWidget {
     #[cfg_attr(not(test), allow(dead_code))]
     pub(super) fn should_prefetch_rate_limits(&self) -> bool {
         self.config.model_provider.requires_astral_auth && self.has_chatgpt_account
-    }
-
-    fn lower_cost_preset(&self) -> Option<ModelPreset> {
-        let models = self.model_catalog.try_list_models().ok()?;
-        models
-            .iter()
-            .find(|preset| preset.show_in_picker && preset.model == NUDGE_MODEL_SLUG)
-            .cloned()
-    }
-
-    fn rate_limit_switch_prompt_hidden(&self) -> bool {
-        self.config
-            .notices
-            .hide_rate_limit_model_nudge
-            .unwrap_or(false)
-    }
-
-    pub(super) fn maybe_show_pending_rate_limit_prompt(&mut self) {
-        if self.rate_limit_switch_prompt_hidden() {
-            self.rate_limit_switch_prompt = RateLimitSwitchPromptState::Idle;
-            return;
-        }
-        if !matches!(
-            self.rate_limit_switch_prompt,
-            RateLimitSwitchPromptState::Pending
-        ) {
-            return;
-        }
-        if let Some(preset) = self.lower_cost_preset() {
-            self.open_rate_limit_switch_prompt(preset);
-            self.rate_limit_switch_prompt = RateLimitSwitchPromptState::Shown;
-        } else {
-            self.rate_limit_switch_prompt = RateLimitSwitchPromptState::Idle;
-        }
-    }
-
-    fn open_rate_limit_switch_prompt(&mut self, preset: ModelPreset) {
-        let switch_model = preset.model;
-        let switch_model_for_events = switch_model.clone();
-        let default_effort: ReasoningEffortConfig = preset.default_reasoning_effort;
-
-        let switch_actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
-            tx.send(AppEvent::CodexOp(AppCommand::override_turn_context(
-                /*cwd*/ None,
-                /*approval_policy*/ None,
-                /*approvals_reviewer*/ None,
-                /*permission_profile*/ None,
-                /*active_permission_profile*/ None,
-                /*windows_sandbox_level*/ None,
-                Some(switch_model_for_events.clone()),
-                Some(Some(default_effort.clone())),
-                /*summary*/ None,
-                /*service_tier*/ None,
-                /*collaboration_mode*/ None,
-                /*personality*/ None,
-            )));
-            tx.send(AppEvent::UpdateModel(switch_model_for_events.clone()));
-            tx.send(AppEvent::UpdateReasoningEffort(Some(
-                default_effort.clone(),
-            )));
-        })];
-
-        let keep_actions: Vec<SelectionAction> = Vec::new();
-        let never_actions: Vec<SelectionAction> = vec![Box::new(|tx| {
-            tx.send(AppEvent::UpdateRateLimitSwitchPromptHidden(true));
-            tx.send(AppEvent::PersistRateLimitSwitchPromptHidden);
-        })];
-        let description = if preset.description.is_empty() {
-            Some("Uses fewer credits for upcoming turns.".to_string())
-        } else {
-            Some(preset.description)
-        };
-
-        let items = vec![
-            SelectionItem {
-                name: format!("Switch to {switch_model}"),
-                description,
-                selected_description: None,
-                is_current: false,
-                actions: switch_actions,
-                dismiss_on_select: true,
-                ..Default::default()
-            },
-            SelectionItem {
-                name: "Keep current model".to_string(),
-                description: None,
-                selected_description: None,
-                is_current: false,
-                actions: keep_actions,
-                dismiss_on_select: true,
-                ..Default::default()
-            },
-            SelectionItem {
-                name: "Keep current model (never show again)".to_string(),
-                description: Some(
-                    "Hide future rate limit reminders about switching models.".to_string(),
-                ),
-                selected_description: None,
-                is_current: false,
-                actions: never_actions,
-                dismiss_on_select: true,
-                ..Default::default()
-            },
-        ];
-
-        self.bottom_pane.show_selection_view(SelectionViewParams {
-            title: Some("Approaching rate limits".to_string()),
-            subtitle: Some(format!("Switch to {switch_model} for lower credit usage?")),
-            footer_hint: Some(standard_popup_hint_line()),
-            items,
-            ..Default::default()
-        });
-    }
-
-    pub(crate) fn set_rate_limit_switch_prompt_hidden(&mut self, hidden: bool) {
-        self.config.notices.hide_rate_limit_model_nudge = Some(hidden);
-        if hidden {
-            self.rate_limit_switch_prompt = RateLimitSwitchPromptState::Idle;
-        }
     }
 }

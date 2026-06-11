@@ -200,8 +200,6 @@ impl ChatWidget {
                 response: notification_response,
             });
         }
-
-        self.maybe_show_pending_rate_limit_prompt();
     }
 
     pub(super) fn maybe_prompt_plan_implementation(&mut self) {
@@ -218,13 +216,6 @@ impl ChatWidget {
             return;
         }
         if !self.bottom_pane.no_modal_or_popup_active() {
-            return;
-        }
-
-        if matches!(
-            self.rate_limit_switch_prompt,
-            RateLimitSwitchPromptState::Pending
-        ) {
             return;
         }
 
@@ -320,7 +311,6 @@ impl ChatWidget {
         self.clear_cancel_edit();
         self.request_status_line_branch_refresh();
         self.request_status_line_git_summary_refresh();
-        self.maybe_show_pending_rate_limit_prompt();
     }
 
     pub(super) fn on_server_overloaded_error(&mut self, message: String) {

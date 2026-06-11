@@ -1064,39 +1064,6 @@ async fn plan_implementation_popup_shows_after_new_plan_follows_steer() {
 }
 
 #[tokio::test]
-async fn plan_implementation_popup_skips_when_rate_limit_prompt_pending() {
-    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5")).await;
-    chat.has_chatgpt_account = true;
-    chat.set_feature_enabled(Feature::CollaborationModes, /*enabled*/ true);
-    let plan_mask = collaboration_modes::mask_for_kind(chat.model_catalog.as_ref(), ModeKind::Plan)
-        .expect("expected plan collaboration mask");
-    chat.set_collaboration_mask(plan_mask);
-
-    chat.on_task_started();
-    chat.on_plan_update(UpdatePlanArgs {
-        explanation: None,
-        plan: vec![PlanItemArg {
-            step: "First".to_string(),
-            status: StepStatus::Pending,
-        }],
-    });
-    chat.on_rate_limit_snapshot(Some(snapshot(/*percent*/ 92.0)));
-    chat.on_task_complete(
-        /*last_agent_message*/ None, /*duration_ms*/ None, /*from_replay*/ false,
-    );
-
-    let popup = render_bottom_popup(&chat, /*width*/ 80);
-    assert!(
-        popup.contains("Approaching rate limits"),
-        "expected rate limit popup, got {popup:?}"
-    );
-    assert!(
-        !popup.contains(PLAN_IMPLEMENTATION_TITLE),
-        "expected plan popup to be skipped, got {popup:?}"
-    );
-}
-
-#[tokio::test]
 async fn plan_completion_restores_status_indicator_after_streaming_plan_output() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.set_feature_enabled(Feature::CollaborationModes, /*enabled*/ true);

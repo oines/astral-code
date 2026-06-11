@@ -1896,10 +1896,6 @@
           "description": "Tracks whether the user has seen the model migration prompt",
           "type": "boolean"
         },
-        "hide_rate_limit_model_nudge": {
-          "description": "Tracks whether the user opted out of the rate limit model switch reminder.",
-          "type": "boolean"
-        },
         "hide_world_writable_warning": {
           "description": "Tracks whether the user has acknowledged the Windows world-writable directories warning.",
           "type": "boolean"

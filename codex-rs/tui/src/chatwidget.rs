@@ -380,7 +380,6 @@ mod protocol;
 mod protocol_requests;
 mod rate_limits;
 use self::rate_limits::RateLimitErrorKind;
-use self::rate_limits::RateLimitSwitchPromptState;
 use self::rate_limits::RateLimitWarningState;
 use self::rate_limits::app_server_rate_limit_error_kind;
 pub(crate) use self::rate_limits::fallback_limit_label;
@@ -551,7 +550,6 @@ pub(crate) struct ChatWidget {
     codex_rate_limit_reached_type: Option<RateLimitReachedType>,
     rate_limit_warnings: RateLimitWarningState,
     warning_display_state: WarningDisplayState,
-    rate_limit_switch_prompt: RateLimitSwitchPromptState,
     adaptive_chunking: AdaptiveChunkingPolicy,
     // Stream lifecycle controller
     stream_controller: Option<StreamController>,

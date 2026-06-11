@@ -128,7 +128,6 @@ impl ChatWidget {
             codex_rate_limit_reached_type: None,
             rate_limit_warnings: RateLimitWarningState::default(),
             warning_display_state: WarningDisplayState::default(),
-            rate_limit_switch_prompt: RateLimitSwitchPromptState::default(),
             adaptive_chunking: AdaptiveChunkingPolicy::default(),
             stream_controller: None,
             plan_stream_controller: None,
