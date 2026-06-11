@@ -464,6 +464,6 @@ impl ChatWidget {
             return "Goal budget reached - the turn was stopped.".to_string();
         }
 
-        "Conversation interrupted - tell the model what to do differently. Something went wrong? Hit `/feedback` to report the issue.".to_string()
+        "Conversation interrupted - tell the model what to do differently.".to_string()
     }
 }

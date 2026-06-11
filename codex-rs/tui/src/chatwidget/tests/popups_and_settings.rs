@@ -2644,14 +2644,13 @@ async fn single_reasoning_option_skips_selection() {
 }
 
 #[tokio::test]
-async fn feedback_selection_popup_snapshot() {
+async fn feedback_disabled_popup_snapshot() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 
-    // Open the feedback category selection popup via slash command.
     chat.dispatch_command(SlashCommand::Feedback);
 
     let popup = render_bottom_popup(&chat, /*width*/ 80);
-    assert_chatwidget_snapshot!("feedback_selection_popup", popup);
+    assert_chatwidget_snapshot!("feedback_disabled_popup", popup);
 }
 
 #[tokio::test]

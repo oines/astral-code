@@ -1183,7 +1183,7 @@ async fn interrupt_exec_marks_failed_snapshot() {
 }
 
 // Snapshot test: after an interrupted turn, a gentle error message is inserted
-// suggesting the user to tell the model what to do differently and to use /feedback.
+// suggesting the user tell the model what to do differently.
 #[tokio::test]
 async fn interrupted_turn_error_message_snapshot() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;

@@ -809,9 +809,6 @@ impl App {
             } => {
                 self.chat_widget.open_feedback_note(category, include_logs);
             }
-            AppEvent::OpenFeedbackConsent { category } => {
-                self.chat_widget.open_feedback_consent(category);
-            }
             AppEvent::SubmitFeedback {
                 category,
                 reason,

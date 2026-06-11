@@ -659,8 +659,6 @@ pub(crate) struct ChatWidget {
     // Runtime metrics accumulated across delta snapshots for the active turn.
     turn_runtime_metrics: RuntimeMetricsSummary,
     last_rendered_width: std::cell::Cell<Option<usize>>,
-    // Feedback sink for /feedback
-    feedback: codex_feedback::CodexFeedback,
     // Current session rollout path (if known)
     current_rollout_path: Option<PathBuf>,
     // Current working directory (if known)
@@ -984,27 +982,6 @@ impl ChatWidget {
         if removed_deferred || removed_visible {
             self.request_redraw();
         }
-    }
-
-    pub(crate) fn open_feedback_consent(&mut self, category: crate::app_event::FeedbackCategory) {
-        let snapshot = self.feedback.snapshot(self.thread_id);
-        #[cfg(target_os = "windows")]
-        let include_windows_sandbox_log =
-            codex_windows_sandbox::current_log_file_path_for_codex_home(&self.config.codex_home)
-                .is_file();
-        #[cfg(not(target_os = "windows"))]
-        let include_windows_sandbox_log = false;
-        let params = crate::bottom_pane::feedback_upload_consent_params(
-            self.app_event_tx.clone(),
-            category,
-            self.current_rollout_path.clone(),
-            self.thread_id
-                .map(|thread_id| format!("auto-review-rollout-{thread_id}.jsonl")),
-            include_windows_sandbox_log,
-            snapshot.feedback_diagnostics(),
-        );
-        self.bottom_pane.show_selection_view(params);
-        self.request_redraw();
     }
 
     pub(crate) fn open_multi_agent_enable_prompt(&mut self) {
