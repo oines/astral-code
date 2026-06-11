@@ -145,6 +145,21 @@ Astral 不应该是一个薄反代，也不应该靠末端 hook 偷换协议。
 
 近期关键进展：
 
+- 本轮已完成：删除 `codex-login` 的 ChatGPT refresh-token authority flow
+  - 删除 `https://auth.openai.com/oauth/token` refresh 请求实现和 `CODEX_REFRESH_TOKEN_URL_OVERRIDE`
+    / `REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR` 导出。
+  - 删除 `CLIENT_ID` OAuth refresh re-export、refresh request/response 结构、refresh failure classifier、
+    token persistence helper 和 ChatGPT proactive refresh 判断。
+  - `AuthManager::auth()` 不再主动刷新 ChatGPT token。
+  - `AuthManager::refresh_token()` 只保留 external bearer provider refresh；没有 external API-key
+    provider 时安全 no-op。
+  - `UnauthorizedRecovery` 不再包含 `RefreshToken` step；managed ChatGPT/OAuth recovery 在 Astral
+    中不可用。
+  - `auth_env_telemetry.refresh_token_url_override_present` wire 字段暂时保留，但固定为 `false`，
+    不再读取旧 env var。
+  - 删除 `codex-rs/login/tests/suite/auth_refresh.rs` 和 app-server auth suite 中依赖
+    `/oauth/token` mock 的旧 refresh 测试。
+
 - 本轮已完成：删除 `codex-login` 的旧 OAuth callback/revoke 控制面
   - 删除 `LoginServer`、`ServerOptions`、`ShutdownHandle`、`run_login_server` 公共导出。
   - 删除 `codex-rs/login/src/server.rs`、`pkce.rs`、OAuth callback HTML assets。
@@ -215,55 +230,24 @@ Astral 不应该是一个薄反代，也不应该靠末端 hook 偷换协议。
 
 ## 最新暂停点
 
-当前工作区不是完全干净状态。除本文档外，正在进行中的代码 slice 只涉及：
+当前进行中的代码 slice 是：
 
-- `codex-rs/login/src/auth/manager.rs`
+- 删除 `codex-login` 的 ChatGPT refresh-token authority flow
 
-这个文件处于“删除 ChatGPT token refresh 路径”的中间状态，尚未完成、尚未格式化、
-尚未测试、尚未提交。后续接手时不要把它误认为已完成实现，也不要为了让编译通过而重新恢复
-ChatGPT/OAuth refresh。
+当前实现状态：
 
-最新完成的代码 slice 是：
-
-- 本轮已完成：删除 `codex-login` 的旧 OAuth callback/revoke 控制面
+- 代码修改已完成，focused checks 已通过，正在等待提交。
+- 窄范围搜索 `codex-rs/login` 与 app-server auth 测试中不再命中
+  `REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR`、`CODEX_REFRESH_TOKEN_URL_OVERRIDE`、
+  `refresh_token_from_authority`、`request_chatgpt_token_refresh`、`auth_refresh` 或 `/oauth/token`。
+- 全仓仍有 `/oauth/token` 命中，但属于 MCP OAuth、codex-client CA 测试等非 ChatGPT login
+  路径，不属于本 slice。
 
 意图：
 
-- Astral 不提供 ChatGPT/OAuth browser login，所以 `codex-login` 不应该继续暴露本地 callback
-  server API。
-- 删除旧 browser login 的 PKCE、HTML success/error pages、token exchange e2e 测试。
-- 删除已经无调用点的 OpenAI OAuth revoke helper。
-
-该 slice 已运行验证：
-
-- `just fmt`
-- `just test -p codex-login logout`
-  - 结果：4 个测试通过，66 个测试跳过。
-
-当前未完成 slice 的目标：
-
-- 删除 `codex-login` 中剩余的 ChatGPT refresh-token authority flow。
-- 删除 `CODEX_REFRESH_TOKEN_URL_OVERRIDE` / `REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR` 导出和使用。
-- 删除 `codex-rs/login/tests/suite/auth_refresh.rs` 以及 suite module 注册。
-- 删除或重写 app-server auth 测试里依赖 `/oauth/token` mock 的旧 refresh 行为。
-- `AuthManager::refresh_token()` 只保留 external bearer provider refresh 语义；没有 external
-  provider 时应成为安全 no-op 或返回 provider-neutral 错误，不能再访问 OpenAI OAuth endpoint。
-- `UnauthorizedRecovery` 不再进入 `RefreshToken` step；ChatGPT/legacy stored auth 在 Astral 里
-  应被视为 unsupported legacy auth。
-- `auth_env_telemetry` 可以保留 wire 字段 `refresh_token_url_override_present` 以减少 schema
-  churn，但 Astral 中应固定为 `false`，不再读取旧 env var。
-
-后续接手这个 slice 时，优先处理这些残留符号：
-
-- `UnauthorizedRecoveryStep::RefreshToken`
-- `refresh_token_from_authority`
-- `refresh_token_from_authority_impl`
-- `should_refresh_proactively`
-- `refresh_and_persist_chatgpt_token`
-- `REFRESH_TOKEN_ACCOUNT_MISMATCH_MESSAGE`
-- `REFRESH_TOKEN_UNKNOWN_MESSAGE`
-- `REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR`
-- `auth_refresh`
+- Astral 可以继续支持 provider-supplied external bearer refresh，但不能再用旧 OpenAI/ChatGPT
+  refresh token authority。
+- 这一步不触碰 sandbox、exec-server、PTY、app-server 协议或 provider-neutral tool runtime。
 
 ## 已运行验证
 
@@ -279,6 +263,10 @@ ChatGPT/OAuth refresh。
 - `just test -p codex-cli login`
 - `just test -p codex-cli doctor`
 - `just test -p codex-login logout`
+- `just test -p codex-login unauthorized_recovery`
+- `just test -p codex-login auth_env_telemetry`
+- `just test -p codex-app-server suite::auth::get_auth_status_with_api_key`
+- 窄范围旧 ChatGPT refresh 符号搜索：`codex-rs/login` 与 app-server auth 测试无命中
 - `git diff --check`
 
 已观察到的无关或既有问题：
@@ -286,13 +274,16 @@ ChatGPT/OAuth refresh。
 - `just test -p codex-model-provider` 全量仍有 Bedrock catalog 失败，原因是 bundled
   `models.json` 缺少 `gpt-5.5`。除非正在处理 Bedrock catalog，否则把它视为与 provider-neutral
   cleanup 无关。
+- `just test -p codex-app-server auth` 会额外匹配 plugin install/read 里的 `needsAuth` 测试；
+  这些测试当前仍按旧 ChatGPT app auth 语义期待返回 `chatgpt.com/apps/...` 认证项，和本 slice
+  的 `codex-login` refresh-token 删除无关。针对本文件已改用更窄的
+  `suite::auth::get_auth_status_with_api_key` 过滤并通过。
 
 ## 剩余高优先级工作
 
 1. 审计并移除剩余 OpenAI/ChatGPT auth/config 面：
    - core config 里的 `chatgpt_base_url`
    - app-server 的 `account/login/start` 行为
-   - 仍在 `codex-login` 内部存在的 ChatGPT token refresh 路径：当前正在拆除，但尚未完成提交
 
 2. 审计 cloud/remote control-plane crates：
    - `codex-rs/backend-client`
