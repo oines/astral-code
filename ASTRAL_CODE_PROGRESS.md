@@ -1,6 +1,6 @@
 # Astral-Code 项目总控记录
 
-最后更新：2026-06-11 20:49 CST
+最后更新：2026-06-11 20:54 CST
 
 这份文档是 Astral-Code 长线改造的中文 handoff。它的用途不是对外宣传，而是让后续任何一次
 compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道：我们到底要做什么、为什么这么做、
@@ -86,6 +86,10 @@ auth 检查、download zip 校验或解压逻辑；本地 skills runtime 不受�
 最新补充 9：core-plugins legacy remote featured/mutation client 也已收敛成 disabled stub。旧
 `/plugins/featured`、`/plugins/{id}/enable`、`/plugins/{id}/uninstall` HTTP 实现和 ChatGPT auth 检查被删除；
 即使 manager featured ids 入口未来被误触发，也只会返回 Astral disabled，不会访问 hosted plugin service。
+
+最新补充 10：app-server API 文档的 auth/account 段已同步到 Astral 行为。README 不再宣称支持 ChatGPT
+browser/device-code login、ChatGPT plan/rate-limit 示例或 OpenAI quota 窗口；`account/login/start` 文档现在只
+描述 `apiKey`，rate limits / usage 明确为当前 provider-neutral 模式不可用。
 
 下一步优先继续处理 `chatgpt_base_url` 配置字段、Agent Identity auth/storage 残留、connectors/apps 和其他
 ChatGPT hosted 残留；provider adapter 方向则继续补 Anthropic/chat-completions fixture 和国内模型兼容选项。
@@ -933,6 +937,38 @@ account 或 OpenAI-only plugin 分发的代码，都需要删除、禁用或隔�
 - `remote_legacy` 模块名和 manager 里的 featured ids cache 结构仍存在，后续可以继续删调用链和 cache 类型。
 - remote plugin catalog/share/detail 的新模块里仍有大量旧类型和测试 fixture，虽然当前入口已 disabled；
   完全删除需要单独切片，避免一次性打爆 app-server protocol 和 plugin list/read 测试。
+
+## 最近完成的 app-server auth README cleanup slice
+
+本轮完成的代码 slice：
+
+> app-server README 的 auth/account 文档同步到 Astral 当前真实行为，不再把旧 ChatGPT login/control-plane
+> 描述成可用 API。
+
+已编辑文件：
+
+- `codex-rs/app-server/README.md`
+- `ASTRAL_CODE_PROGRESS.md`
+
+改动内容：
+
+- Auth endpoints 介绍从 Codex/ChatGPT account surface 改为 Astral auth surface。
+- Authentication modes 只保留 `apiKey` 作为 Astral active supported mode。
+- 删除 ChatGPT browser login、ChatGPT device-code login、ChatGPT login cancel flow 示例。
+- `account/login/start` 文档改为只支持 `apiKey`。
+- `account/updated` 文档改为只承诺 `apikey` 或 `null`。
+- Rate limits / token usage 文档改为当前返回 `invalid_request`，不再展示 OpenAI quota window 示例。
+
+为什么要做：
+
+- protocol 里的 `LoginAccountParams` 实际已经只有 `ApiKey`，README 仍保留旧 ChatGPT login 文档会误导
+  app-server 客户端继续调用已删除的 OpenAI auth 控制面。
+- Astral 是 provider-neutral 项目，不能在公开 API 文档里把 ChatGPT OAuth 和 OpenAI quota 描述成主路径。
+
+后续风险：
+
+- app-server README 其他段落仍有 remote plugin、attestation、ChatGPT install URL 等旧例子，后续继续分段清理。
+- schema 里 `AuthMode` 仍保留 legacy variants 用于识别/拒绝旧 payload，不代表 Astral 支持这些登录方式。
 
 ## 最近完成的 core-plugins remote guard slice
 

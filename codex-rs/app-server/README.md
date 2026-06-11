@@ -1762,27 +1762,26 @@ $demo-app Pull the latest updates from the team.
 
 ## Auth endpoints
 
-The JSON-RPC auth/account surface exposes request/response methods plus server-initiated notifications (no `id`). Use these to determine auth state, start or cancel logins, logout, and inspect ChatGPT rate limits.
+The JSON-RPC auth/account surface exposes request/response methods plus server-initiated notifications (no `id`). Use these to determine Astral auth state, store an API key, cancel a pending login request, or logout.
 
 ### Authentication modes
 
-Codex supports these authentication modes. The current mode is surfaced in `account/updated` (`authMode`), which also includes the current ChatGPT `planType` when available, and can be inferred from `account/read`.
+Astral actively supports API-key auth for provider-managed credentials. The current mode is surfaced in `account/updated` (`authMode`) and can be inferred from `account/read`.
 
-- **API key (`apiKey`)**: Caller supplies an OpenAI API key via `account/login/start` with `type: "apiKey"`. The API key is saved and used for API requests.
-- **ChatGPT managed (`chatgpt`)** (recommended): Codex owns the ChatGPT OAuth flow and refresh tokens. Start via `account/login/start` with `type: "chatgpt"` for the browser flow or `type: "chatgptDeviceCode"` for device code; Codex persists tokens to disk and refreshes them automatically.
-- **Personal access token (`personalAccessToken`)**: Legacy ChatGPT-backed personal access token mode retained in the protocol while Astral removes user-facing access-token login and environment fallback paths.
+- **API key (`apiKey`)**: Caller supplies a provider API key via `account/login/start` with `type: "apiKey"`. The API key is saved locally and used for API requests when the active provider requires Astral-managed auth.
+- Legacy ChatGPT OAuth, ChatGPT device-code login, Agent Identity, and personal-access-token modes are not accepted by Astral.
 
 ### API Overview
 
 - `account/read` — fetch current account info; optionally refresh tokens.
-- `account/login/start` — begin login (`apiKey`, `chatgpt`, `chatgptDeviceCode`).
+- `account/login/start` — store an API key (`apiKey`).
 - `account/login/completed` (notify) — emitted when a login attempt finishes (success or error).
-- `account/login/cancel` — cancel a pending managed login by `loginId`.
+- `account/login/cancel` — cancel a pending login by `loginId`; API-key login completes synchronously, so unknown IDs return `notFound`.
 - `account/logout` — sign out; triggers `account/updated`.
-- `account/updated` (notify) — emitted whenever auth mode changes (`authMode`: `apikey`, `chatgpt`, `personalAccessToken`, or `null`) and includes the current ChatGPT `planType` when available.
+- `account/updated` (notify) — emitted whenever auth mode changes (`authMode`: `apikey` or `null`).
 - `account/rateLimits/read` — account-backend rate limits are unavailable for Astral-managed providers.
 - `account/usage/read` — account-backend token usage is unavailable for Astral-managed providers.
-- `account/rateLimits/updated` (notify) — sparse rolling rate-limit updates when a provider supplies them.
+- `account/rateLimits/updated` (notify) — sparse rolling rate-limit updates only when a provider supplies them.
 - `mcpServer/oauthLogin/completed` (notify) — emitted after a `mcpServer/oauth/login` flow finishes for a server; payload includes `{ name, success, error? }`.
 - `mcpServer/startupStatus/updated` (notify) — emitted when a configured MCP server's startup status changes; payload includes `{ threadId, name, status, error }`, where `threadId` is the owning thread when startup is thread-scoped and `null` when it is app-scoped, and `status` is `starting`, `ready`, `failed`, or `cancelled`.
 
@@ -1827,42 +1826,14 @@ Field notes:
    { "method": "account/updated", "params": { "authMode": "apikey", "planType": null } }
    ```
 
-### 3) Log in with ChatGPT (browser flow)
-
-1. Start:
-   ```json
-   { "method": "account/login/start", "id": 3, "params": { "type": "chatgpt" } }
-   { "id": 3, "result": { "type": "chatgpt", "loginId": "<uuid>", "authUrl": "https://chatgpt.com/…&redirect_uri=http%3A%2F%2Flocalhost%3A<port>%2Fauth%2Fcallback" } }
-   ```
-2. Open `authUrl` in a browser; the app-server hosts the local callback.
-3. Wait for notifications:
-   ```json
-   { "method": "account/login/completed", "params": { "loginId": "<uuid>", "success": true, "error": null } }
-   { "method": "account/updated", "params": { "authMode": "chatgpt", "planType": "plus" } }
-   ```
-
-### 4) Log in with ChatGPT (device code flow)
-
-1. Start:
-   ```json
-   { "method": "account/login/start", "id": 4, "params": { "type": "chatgptDeviceCode" } }
-   { "id": 4, "result": { "type": "chatgptDeviceCode", "loginId": "<uuid>", "verificationUrl": "https://auth.openai.com/codex/device", "userCode": "ABCD-1234" } }
-   ```
-2. Show `verificationUrl` and `userCode` to the user; the frontend owns the UX.
-3. Wait for notifications:
-   ```json
-   { "method": "account/login/completed", "params": { "loginId": "<uuid>", "success": true, "error": null } }
-   { "method": "account/updated", "params": { "authMode": "chatgpt", "planType": "plus" } }
-   ```
-
-### 5) Cancel a ChatGPT login
+### 3) Cancel a login
 
 ```json
 { "method": "account/login/cancel", "id": 5, "params": { "loginId": "<uuid>" } }
-{ "method": "account/login/completed", "params": { "loginId": "<uuid>", "success": false, "error": "…" } }
+{ "id": 5, "result": { "status": "notFound" } }
 ```
 
-### 6) Logout
+### 4) Logout
 
 ```json
 { "method": "account/logout", "id": 6 }
@@ -1870,19 +1841,14 @@ Field notes:
 { "method": "account/updated", "params": { "authMode": null, "planType": null } }
 ```
 
-### 7) Rate limits (ChatGPT)
+### 5) Rate limits and token usage
 
 ```json
 { "method": "account/rateLimits/read", "id": 7 }
-{ "id": 7, "result": { "rateLimits": { "primary": { "usedPercent": 25, "windowDurationMins": 15, "resetsAt": 1730947200 }, "secondary": null, "rateLimitReachedType": null } } }
-{ "method": "account/rateLimits/updated", "params": { "rateLimits": { … } } }
+{ "id": 7, "error": { "code": -32600, "message": "Astral-managed account usage and rate-limit APIs are unavailable for the active model provider." } }
 ```
 
-Field notes:
-
-- `usedPercent` is current usage within the OpenAI quota window.
-- `windowDurationMins` is the quota window length.
-- `resetsAt` is a Unix timestamp (seconds) for the next reset.
+`account/usage/read` returns the same `invalid_request` error unless a future provider-neutral account backend supplies usage data.
 - `rateLimitReachedType` identifies the backend-classified limit state when one has been reached.
 - `individualLimit` describes the effective monthly credit limit when available. In an `account/rateLimits/read` response, `null` means no monthly limit is available. In a sparse `account/rateLimits/updated` notification, nullable account metadata may be unavailable and does not clear a previously observed value.
 
