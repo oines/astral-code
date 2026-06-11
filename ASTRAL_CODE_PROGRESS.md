@@ -1,6 +1,6 @@
 # Astral-Code 项目总控记录
 
-最后更新：2026-06-11 20:57 CST
+最后更新：2026-06-11 21:22 CST
 
 这份文档是 Astral-Code 长线改造的中文 handoff。它的用途不是对外宣传，而是让后续任何一次
 compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道：我们到底要做什么、为什么这么做、
@@ -94,6 +94,11 @@ browser/device-code login、ChatGPT plan/rate-limit 示例或 OpenAI quota 窗�
 最新补充 11：provider request body override 支持 JSON null 删除默认字段。Anthropic Messages 和
 OpenAI-compatible chat-completions adapter 现在都会把 `metadata.provider["field"] = null` 解释为从请求体移除
 `field`，用于适配不接受 `stream_options`、`stream` 等默认字段的 strict 国内网关。
+
+最新补充 12：model provider 配置新增 `request_body_remove`。TOML 里可以写
+`request_body_remove = ["stream_options", "parallel_tool_calls"]`，core 构建 `AgentRequest` 时会把这些字段映射成
+provider metadata 里的 JSON null，从而复用 adapter 的删除语义。这样 strict 国内 OpenAI-compatible 网关不需要
+vendor-specific 分支，也不需要用户在不可表达 null 的 TOML 里写绕路配置。
 
 下一步优先继续处理 `chatgpt_base_url` 配置字段、Agent Identity auth/storage 残留、connectors/apps 和其他
 ChatGPT hosted 残留；provider adapter 方向则继续补 Anthropic/chat-completions fixture 和国内模型兼容选项。

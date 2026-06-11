@@ -131,6 +131,14 @@ pub struct ModelProviderInfo {
     /// This is intentionally provider-scoped so OpenAI-compatible providers
     /// can opt into vendor-specific fields without changing Astral's core IR.
     pub request_body: Option<BTreeMap<String, Value>>,
+    /// Request body field names to remove after Astral applies adapter defaults
+    /// and `request_body` overrides.
+    ///
+    /// This lets strict provider-compatible gateways opt out of fields they do
+    /// not support, such as `stream_options`, without adding vendor-specific
+    /// branches to Astral's provider-neutral adapters.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub request_body_remove: Vec<String>,
     /// Additional HTTP headers to include in requests to this provider where
     /// the (key, value) pairs are the header name and value.
     pub http_headers: Option<HashMap<String, String>>,
@@ -356,6 +364,7 @@ impl ModelProviderInfo {
             wire_api: WireApi::ChatCompletions,
             query_params: None,
             request_body: None,
+            request_body_remove: Vec::new(),
             http_headers: Some(
                 [("version".to_string(), env!("CARGO_PKG_VERSION").to_string())]
                     .into_iter()
@@ -384,6 +393,7 @@ impl ModelProviderInfo {
             wire_api: WireApi::Responses,
             query_params: None,
             request_body: None,
+            request_body_remove: Vec::new(),
             http_headers: Some(
                 [("version".to_string(), env!("CARGO_PKG_VERSION").to_string())]
                     .into_iter()
@@ -414,6 +424,7 @@ impl ModelProviderInfo {
             wire_api: WireApi::AnthropicMessages,
             query_params: None,
             request_body: None,
+            request_body_remove: Vec::new(),
             http_headers: Some(
                 [("version".to_string(), env!("CARGO_PKG_VERSION").to_string())]
                     .into_iter()
@@ -449,6 +460,7 @@ impl ModelProviderInfo {
             wire_api: WireApi::Responses,
             query_params: None,
             request_body: None,
+            request_body_remove: Vec::new(),
             http_headers: Some(HashMap::from([(
                 AMAZON_BEDROCK_MANTLE_CLIENT_AGENT_HEADER.to_string(),
                 AMAZON_BEDROCK_MANTLE_CLIENT_AGENT_VALUE.to_string(),
@@ -587,6 +599,7 @@ pub fn create_oss_provider_with_base_url(base_url: &str, wire_api: WireApi) -> M
         wire_api,
         query_params: None,
         request_body: None,
+        request_body_remove: Vec::new(),
         http_headers: None,
         env_http_headers: None,
         request_max_retries: None,

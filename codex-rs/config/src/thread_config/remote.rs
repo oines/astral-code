@@ -179,6 +179,7 @@ fn model_provider_from_proto(
         wire_api,
         query_params: provider.query_params.map(|map| map.values),
         request_body: None,
+        request_body_remove: Vec::new(),
         http_headers: provider.http_headers.map(|map| map.values),
         env_http_headers: provider.env_http_headers.map(|map| map.values),
         request_max_retries: provider.request_max_retries,
@@ -513,6 +514,7 @@ mod tests {
                 "2026-04-16".to_string(),
             )])),
             request_body: None,
+            request_body_remove: Vec::new(),
             http_headers: Some(HashMap::from([(
                 "X-Test".to_string(),
                 "enabled".to_string(),

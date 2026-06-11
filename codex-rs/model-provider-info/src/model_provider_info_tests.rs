@@ -24,6 +24,7 @@ base_url = "http://localhost:11434/v1"
         wire_api: WireApi::ChatCompletions,
         query_params: None,
         request_body: None,
+        request_body_remove: Vec::new(),
         http_headers: None,
         env_http_headers: None,
         request_max_retries: None,
@@ -59,6 +60,7 @@ query_params = { api-version = "2025-04-01-preview" }
             "api-version".to_string() => "2025-04-01-preview".to_string(),
         }),
         request_body: None,
+        request_body_remove: Vec::new(),
         http_headers: None,
         env_http_headers: None,
         request_max_retries: None,
@@ -93,6 +95,7 @@ env_http_headers = { "X-Example-Env-Header" = "EXAMPLE_ENV_VAR" }
         wire_api: WireApi::ChatCompletions,
         query_params: None,
         request_body: None,
+        request_body_remove: Vec::new(),
         http_headers: Some(maplit::hashmap! {
             "X-Example-Header".to_string() => "example-value".to_string(),
         }),
@@ -117,6 +120,7 @@ fn test_deserialize_provider_request_body_config() {
 name = "DeepSeek"
 base_url = "https://api.deepseek.com/v1"
 env_key = "DEEPSEEK_API_KEY"
+request_body_remove = ["stream_options", "parallel_tool_calls"]
 
 [request_body]
 temperature = 0.2
@@ -134,6 +138,13 @@ metadata = { app = "astral-code" }
             ("temperature".to_string(), json!(0.2)),
             ("top_p".to_string(), json!(0.9)),
         ]))
+    );
+    assert_eq!(
+        provider.request_body_remove,
+        vec![
+            "stream_options".to_string(),
+            "parallel_tool_calls".to_string()
+        ]
     );
 }
 
@@ -197,6 +208,7 @@ fn test_create_astral_provider_defaults_to_chat_completions() {
             wire_api: WireApi::ChatCompletions,
             query_params: None,
             request_body: None,
+            request_body_remove: Vec::new(),
             http_headers: Some(maplit::hashmap! {
                 "version".to_string() => env!("CARGO_PKG_VERSION").to_string(),
             }),
@@ -316,6 +328,7 @@ fn test_create_amazon_bedrock_provider() {
             wire_api: WireApi::Responses,
             query_params: None,
             request_body: None,
+            request_body_remove: Vec::new(),
             http_headers: Some(maplit::hashmap! {
                 AMAZON_BEDROCK_MANTLE_CLIENT_AGENT_HEADER.to_string() =>
                     AMAZON_BEDROCK_MANTLE_CLIENT_AGENT_VALUE.to_string(),

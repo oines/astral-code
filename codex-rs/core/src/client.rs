@@ -1216,6 +1216,13 @@ impl ModelClientSession {
                 service_tier: service_tier.clone(),
                 prompt_cache_key: self.client.prompt_cache_key(),
                 provider_request_body: self.client.state.provider.info().request_body.clone(),
+                provider_request_body_remove: self
+                    .client
+                    .state
+                    .provider
+                    .info()
+                    .request_body_remove
+                    .clone(),
             })?;
             let inference_trace_attempt = inference_trace.start_attempt();
             inference_trace_attempt.add_request_headers(&mut options.extra_headers);

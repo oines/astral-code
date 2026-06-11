@@ -33,6 +33,7 @@ pub(crate) struct AgentRequestBuildParams<'a> {
     pub(crate) service_tier: Option<String>,
     pub(crate) prompt_cache_key: String,
     pub(crate) provider_request_body: Option<BTreeMap<String, Value>>,
+    pub(crate) provider_request_body_remove: Vec<String>,
 }
 
 pub(crate) fn build_agent_request(params: AgentRequestBuildParams<'_>) -> Result<AgentRequest> {
@@ -44,6 +45,11 @@ pub(crate) fn build_agent_request(params: AgentRequestBuildParams<'_>) -> Result
         .iter()
         .filter_map(response_item_to_agent_message)
         .collect();
+
+    let mut provider = params.provider_request_body.unwrap_or_default();
+    for key in params.provider_request_body_remove {
+        provider.insert(key, Value::Null);
+    }
 
     Ok(AgentRequest {
         model: params.model_info.slug.clone(),
@@ -61,7 +67,7 @@ pub(crate) fn build_agent_request(params: AgentRequestBuildParams<'_>) -> Result
                 .model_info
                 .service_tier_for_request(params.service_tier),
             prompt_cache_key: Some(params.prompt_cache_key),
-            provider: params.provider_request_body.unwrap_or_default(),
+            provider,
         },
     })
 }

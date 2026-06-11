@@ -1508,6 +1508,13 @@
           "description": "Additional JSON body fields to merge into provider-neutral agent requests.\n\nThis is intentionally provider-scoped so OpenAI-compatible providers can opt into vendor-specific fields without changing Astral's core IR.",
           "type": "object"
         },
+        "request_body_remove": {
+          "description": "Request body field names to remove after Astral applies adapter defaults and `request_body` overrides.\n\nThis lets strict provider-compatible gateways opt out of fields they do not support, such as `stream_options`, without adding vendor-specific branches to Astral's provider-neutral adapters.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "request_max_retries": {
           "description": "Maximum number of times to retry a failed HTTP request to this provider.",
           "format": "uint64",
