@@ -1,6 +1,6 @@
 # Astral-Code 项目总控记录
 
-最后更新：2026-06-11 17:54 CST
+最后更新：2026-06-11 17:58 CST
 
 这份文档是 Astral-Code 长线改造的中文 handoff。它的用途不是对外宣传，而是让后续任何一次
 compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道：我们到底要做什么、为什么这么做、
@@ -35,9 +35,9 @@ provider 去 OpenAI 默认路由、登录态清理、cloud-config/cloud-tasks �
   国产模型兼容细节、fixture 和端到端测试。
 - 全量 CI：当前不追求全绿，用户明确要求先推进实现，最后集中测试集中修。
 
-当前最新 slice：`core-skills/src/remote.rs` hosted remote skill client 已经在库层禁用；直接调用
-remote skill list/export 时，也会在 ChatGPT auth、network request、zip download/extract 之前返回 Astral
-disabled。
+当前最新 slice：`codex-agent-identity` 的 hosted 网络控制面已禁用；`fetch_agent_identity_jwks(...)` 和
+`register_agent_task(...)` 会在访问 ChatGPT JWKS/task registration 前返回 Astral disabled。本地
+JWT decode、key generation、AgentAssertion 签名工具仍保留。
 
 下一步优先继续处理底层 `app-server-transport` remote-control 旧模块、`chatgpt_base_url` 配置字段和其他
 ChatGPT hosted 残留；provider adapter 方向则继续补 Anthropic/chat-completions fixture 和兼容选项。
@@ -623,6 +623,39 @@ account 或 OpenAI-only plugin 分发的代码，都需要删除、禁用或隔�
   remote control。底层 `app-server-transport` 里的旧 remote-control 模块仍存在，但默认和 app-server
   暴露路径已经切断。
 
+## 最近完成的 agent identity guard slice
+
+本轮完成的代码 slice：
+
+> 禁用 `codex-agent-identity` 中会访问 ChatGPT hosted agent identity 服务的网络入口。
+
+已编辑文件：
+
+- `codex-rs/agent-identity/src/lib.rs`
+- `ASTRAL_CODE_PROGRESS.md`
+
+改动内容：
+
+- 新增 hosted agent identity control-plane disabled guard。
+- `fetch_agent_identity_jwks(...)` 在构造/请求 ChatGPT JWKS URL 前直接返回 Astral disabled。
+- `register_agent_task(...)` 在 task registration 签名和 HTTP request 前直接返回 Astral disabled。
+- 保留本地能力：JWT payload/verified decode、key generation、AgentAssertion signing、task id decrypt
+  等纯本地工具函数不动。
+
+为什么要做：
+
+- Agent Identity 是 OpenAI/ChatGPT hosted 控制面，依赖 `chatgpt_base_url`、JWKS、agent runtime id 和
+  task registration。
+- Astral 当前只支持 provider-neutral/API-key 模式，不应该允许隐藏路径去访问 ChatGPT agent identity 服务。
+- 这一步继续收窄 OpenAI 专有 auth/control-plane，同时不破坏本地加密/签名工具和现有类型边界。
+
+后续风险：
+
+- `login` storage 里仍保留 AgentIdentity auth record 的解析/roundtrip 类型，但 `CodexAuth` 主路径已拒绝
+  AgentIdentity。
+- 如果后续完全删除 AgentIdentity auth 类型，需要联动 app-server account/auth status、storage fixture 和
+  config/schema 测试，适合作为单独机械清理。
+
 ## 最近完成的 core-skills remote guard slice
 
 本轮完成的代码 slice：
@@ -1042,6 +1075,8 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
 - `CARGO_INCREMENTAL=0 just test -p codex-api chat_stream_merges_finish_reason_with_empty_choices_usage_chunk`
 - `CARGO_INCREMENTAL=0 cargo check --tests -p codex-core-skills`
 - `CARGO_INCREMENTAL=0 just test -p codex-core-skills remote_skill`
+- `CARGO_INCREMENTAL=0 cargo check --tests -p codex-agent-identity`
+- `CARGO_INCREMENTAL=0 just test -p codex-agent-identity hosted_agent_identity_control_plane_is_disabled`
 - 旧 ChatGPT refresh 符号窄范围搜索：`codex-rs/login` 与 app-server auth 测试无命中。
 - `git diff --check`
 

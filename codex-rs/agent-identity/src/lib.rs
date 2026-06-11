@@ -35,6 +35,21 @@ const AGENT_IDENTITY_JWKS_TIMEOUT: Duration = Duration::from_secs(10);
 const AGENT_IDENTITY_JWT_AUDIENCE: &str = "codex-app-server";
 const AGENT_IDENTITY_JWT_ISSUER: &str = "https://chatgpt.com/codex-backend/agent-identity";
 
+fn hosted_agent_identity_control_plane_disabled() -> bool {
+    true
+}
+
+fn hosted_agent_identity_control_plane_disabled_error() -> anyhow::Error {
+    anyhow::anyhow!("legacy hosted agent identity control-plane is disabled in Astral")
+}
+
+fn ensure_hosted_agent_identity_control_plane_enabled() -> Result<()> {
+    if hosted_agent_identity_control_plane_disabled() {
+        return Err(hosted_agent_identity_control_plane_disabled_error());
+    }
+    Ok(())
+}
+
 /// Stored key material for a registered agent identity.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AgentIdentityKey<'a> {
@@ -129,6 +144,8 @@ pub async fn fetch_agent_identity_jwks(
     client: &reqwest::Client,
     chatgpt_base_url: &str,
 ) -> Result<JwkSet> {
+    ensure_hosted_agent_identity_control_plane_enabled()?;
+
     let response = client
         .get(agent_identity_jwks_url(chatgpt_base_url))
         .timeout(AGENT_IDENTITY_JWKS_TIMEOUT)
@@ -198,6 +215,8 @@ pub async fn register_agent_task(
     chatgpt_base_url: &str,
     key: AgentIdentityKey<'_>,
 ) -> Result<String> {
+    ensure_hosted_agent_identity_control_plane_enabled()?;
+
     let timestamp = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
     let request = RegisterTaskRequest {
         signature: sign_task_registration_payload(key, &timestamp)?,
@@ -647,6 +666,17 @@ mod tests {
         .expect("JWT should encode");
 
         decode_agent_identity_jwt(&jwt, Some(&jwks)).expect_err("JWT should not verify");
+    }
+
+    #[test]
+    fn hosted_agent_identity_control_plane_is_disabled() {
+        let err = ensure_hosted_agent_identity_control_plane_enabled()
+            .expect_err("hosted agent identity control-plane should be disabled");
+
+        assert_eq!(
+            err.to_string(),
+            "legacy hosted agent identity control-plane is disabled in Astral"
+        );
     }
 
     fn test_jwt_header(kid: &str) -> Header {
