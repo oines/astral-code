@@ -22,7 +22,6 @@ use codex_app_server_protocol::AuthMode as ApiAuthMode;
 use codex_protocol::config_types::ModelProviderAuthInfo;
 
 use super::external_bearer::BearerTokenRefresher;
-use super::revoke::revoke_auth_tokens;
 pub use crate::auth::agent_identity::AgentIdentityAuth;
 pub use crate::auth::personal_access_token::PersonalAccessTokenAuth;
 pub use crate::auth::storage::AgentIdentityAuthRecord;
@@ -465,7 +464,7 @@ pub async fn logout_with_revoke(
         /*chatgpt_base_url*/ None,
     )
     .await
-    .logout_with_revoke()
+    .logout()
     .await
 }
 
@@ -1456,17 +1455,11 @@ impl AuthManager {
         Ok(removed)
     }
 
+    /// Compatibility wrapper for older logout call sites. Astral does not
+    /// support token-backed hosted auth, so logout is local-only and never
+    /// contacts a legacy OAuth revoke endpoint.
     pub async fn logout_with_revoke(&self) -> std::io::Result<bool> {
-        let auth_dot_json = self
-            .auth_cached()
-            .and_then(|auth| auth.get_current_auth_json());
-        if let Err(err) = revoke_auth_tokens(auth_dot_json.as_ref()).await {
-            tracing::warn!("failed to revoke auth tokens during logout: {err}");
-        }
-        let result = logout_all_stores(&self.codex_home, self.auth_credentials_store_mode)?;
-        // Always reload to clear any cached auth (even if file absent).
-        self.reload().await;
-        Ok(result)
+        self.logout().await
     }
 
     pub fn get_api_auth_mode(&self) -> Option<ApiAuthMode> {

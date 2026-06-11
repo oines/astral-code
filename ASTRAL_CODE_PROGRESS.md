@@ -145,6 +145,13 @@ Astral 不应该是一个薄反代，也不应该靠末端 hook 偷换协议。
 
 近期关键进展：
 
+- 本轮已完成：让 logout 不再调用旧 OpenAI OAuth revoke
+  - `codex_login::logout_with_revoke` 保留为兼容 wrapper，但行为改为本地删除 auth。
+  - `AuthManager::logout_with_revoke` 不再读取 cached ChatGPT token，也不再访问
+    `https://auth.openai.com/oauth/revoke`。
+  - CLI logout 和 app-server logout 仍沿用原调用点，但实际只清理本地 auth storage 并刷新 cache。
+  - logout 测试改为无网络验证，删除 wiremock `/oauth/revoke` 断言。
+
 - 本轮已完成：清理 `astral doctor` 的旧 ChatGPT/token-backed auth 诊断
   - `doctor` 不再把旧 ChatGPT/PAT/Agent Identity 凭据当成可细诊断或可用的 Astral 登录态。
   - 旧 token-backed auth 统一显示为 unsupported legacy credentials。
@@ -203,19 +210,20 @@ Astral 不应该是一个薄反代，也不应该靠末端 hook 偷换协议。
 
 最新完成的代码 slice 是：
 
-- 本轮已完成：清理 `astral doctor` 的旧 ChatGPT/token-backed auth 诊断
+- 本轮已完成：让 logout 不再调用旧 OpenAI OAuth revoke
 
 意图：
 
-- 让 `doctor` 遵守 Astral 的新项目边界：只支持 API key / provider env auth。
-- 旧 Codex/ChatGPT token-backed auth 只作为 unsupported legacy residue 报告。
-- 不再提示用户修复 ChatGPT token 或 refresh metadata。
+- Astral 不支持旧 token-backed hosted auth，所以 logout 不应该向 OpenAI OAuth revoke endpoint
+  发请求。
+- 保留现有 CLI/app-server 调用边界，不破坏 auth manager cache refresh 行为。
+- 旧函数名 `logout_with_revoke` 暂时保留，避免在同一 slice 里引入大面积 API rename。
 
 该 slice 已运行验证：
 
 - `just fmt`
-- `just test -p codex-cli doctor`
-  - 结果：84 个测试通过，197 个测试跳过。
+- `just test -p codex-login logout`
+  - 结果：4 个测试通过，87 个测试跳过。
 
 ## 已运行验证
 
@@ -230,6 +238,7 @@ Astral 不应该是一个薄反代，也不应该靠末端 hook 偷换协议。
 - `just test -p codex-models-manager refresh_available_models_fetches_with_provider_auth`
 - `just test -p codex-cli login`
 - `just test -p codex-cli doctor`
+- `just test -p codex-login logout`
 - `git diff --check`
 
 已观察到的无关或既有问题：
