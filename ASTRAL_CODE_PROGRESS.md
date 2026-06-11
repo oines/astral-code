@@ -1,6 +1,6 @@
 # Astral-Code 项目总控记录
 
-最后更新：2026-06-11 19:20 CST
+最后更新：2026-06-11 19:56 CST
 
 这份文档是 Astral-Code 长线改造的中文 handoff。它的用途不是对外宣传，而是让后续任何一次
 compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道：我们到底要做什么、为什么这么做、
@@ -59,6 +59,11 @@ exec-server 注册继续只允许 API-key auth，Agent Identity / ChatGPT / PAT 
 同时删除了缺省 `https://chatgpt.com/apps/...` 安装链接 fallback。Astral 现在只保留 connector 自带的显式
 `install_url`，没有 provider-neutral app directory 时不会自动生成 ChatGPT 安装链接，也不会触发 ChatGPT
 auth elicitation 安装引导。
+
+最新补充 4：apps/connectors 总开关已从 ChatGPT auth gating 中解耦。`Feature::Apps` 现在直接决定
+provider-neutral apps 是否开启，不再要求 `CodexAuth::uses_codex_backend()` 或 `is_chatgpt_auth()`。这会让本地
+plugin apps、MCP apps 和 app-server `apps/list` 在 Astral API-key/provider-neutral 模式下按 feature flag 工作，
+而不是因为没有 ChatGPT 登录态被静默置空。
 
 下一步优先继续处理 `chatgpt_base_url` 配置字段、Agent Identity auth/storage 残留、connectors/apps 和其他
 ChatGPT hosted 残留；provider adapter 方向则继续补 Anthropic/chat-completions fixture 和国内模型兼容选项。
@@ -490,6 +495,47 @@ account 或 OpenAI-only plugin 分发的代码，都需要删除、禁用或隔�
 - app-server plugin remote share/install/read 路径仍保留大量 remote plugin 类型和 ChatGPT 语义，但多数入口已有
   `remote_plugin_control_plane_enabled() == false` gate。
 - core config 里的 `chatgpt_base_url` 字段仍未移除。
+
+## 最近完成的 apps feature gate slice
+
+本轮完成的代码 slice：
+
+> apps/connectors 的总开关不再依赖 ChatGPT/Codex backend auth。
+
+已编辑文件：
+
+- `codex-rs/features/src/lib.rs`
+- `codex-rs/features/src/tests.rs`
+- `codex-rs/chatgpt/src/connectors.rs`
+- `codex-rs/core/src/connectors.rs`
+- `codex-rs/core/src/session/turn_context.rs`
+- `codex-rs/app-server/src/request_processors/apps_processor.rs`
+- `codex-rs/app-server/src/request_processors/plugins.rs`
+
+改动内容：
+
+- 删除 `Features::apps_enabled_for_auth(has_chatgpt_auth)`，替换为 provider-neutral
+  `Features::apps_enabled()`。
+- `TurnContext::apps_enabled()` 不再读取 `AuthManager::current_auth_uses_codex_backend()`。
+- `apps/list` 和 core connector discovery 先按 `Feature::Apps` 判断是否启用，再在确实需要时读取 auth
+  用于 workspace/plugin/MCP 细节。
+- plugin install 后的 app auth summary 不再要求当前登录态是 ChatGPT auth。
+- `codex-chatgpt` 里的 local connector listing 继续只列 plugin apps / MCP accessible connectors，但不再用
+  “假装有 ChatGPT auth”的方式绕过旧 gating。
+
+为什么要做：
+
+- Astral 是 provider-neutral/API-key 项目，本地 plugin apps 和 MCP apps 不应该因为没有 ChatGPT 登录态而
+  被静默置空。
+- 旧 gating 会让 `Feature::Apps` 默认开启也无法生效，只有 ChatGPT/Codex backend auth 才能真正看到 apps。
+- 这一步不重新启用 hosted connector directory，也不绕过 workspace/plugin/MCP 的已有安全边界；只是把
+  apps 总开关从 OpenAI/ChatGPT auth 概念中解耦。
+
+验证：
+
+- `just fmt`
+- `CARGO_INCREMENTAL=0 cargo check --tests -p codex-features -p codex-chatgpt -p codex-core -p codex-app-server`
+- `just test -p codex-features apps_follow_feature_flag`
 
 ## 最近完成的 cloud-config slice
 

@@ -16,14 +16,12 @@ use codex_core_plugins::PluginsManager;
 use codex_login::default_client::originator;
 use codex_plugin::AppConnectorId;
 
-async fn apps_enabled(config: &Config) -> bool {
-    config
-        .features
-        .apps_enabled_for_auth(/*has_chatgpt_auth*/ true)
+fn apps_enabled(config: &Config) -> bool {
+    config.features.apps_enabled()
 }
 
 pub async fn list_connectors(config: &Config) -> anyhow::Result<Vec<AppInfo>> {
-    if !apps_enabled(config).await {
+    if !apps_enabled(config) {
         return Ok(Vec::new());
     }
     let (connectors_result, accessible_result) = tokio::join!(
@@ -45,7 +43,7 @@ pub async fn list_all_connectors(config: &Config) -> anyhow::Result<Vec<AppInfo>
 }
 
 pub async fn list_cached_all_connectors(config: &Config) -> Option<Vec<AppInfo>> {
-    if !apps_enabled(config).await {
+    if !apps_enabled(config) {
         return Some(Vec::new());
     }
 
@@ -66,7 +64,7 @@ pub async fn list_all_connectors_with_options(
     config: &Config,
     _force_refetch: bool,
 ) -> anyhow::Result<Vec<AppInfo>> {
-    if !apps_enabled(config).await {
+    if !apps_enabled(config) {
         return Ok(Vec::new());
     }
     let connectors = merge_plugin_connectors(

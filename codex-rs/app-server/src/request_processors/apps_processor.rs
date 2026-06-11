@@ -64,17 +64,14 @@ impl AppsRequestProcessor {
                 .set_enabled(Feature::Apps, thread.enabled(Feature::Apps));
         }
 
-        let auth = self.auth_manager.auth().await;
-        if !config
-            .features
-            .apps_enabled_for_auth(auth.as_ref().is_some_and(CodexAuth::uses_codex_backend))
-        {
+        if !config.features.apps_enabled() {
             return Ok(Some(AppsListResponse {
                 data: Vec::new(),
                 next_cursor: None,
             }));
         }
 
+        let auth = self.auth_manager.auth().await;
         if !self
             .workspace_codex_plugins_enabled(&config, auth.as_ref())
             .await

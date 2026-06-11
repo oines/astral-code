@@ -342,8 +342,8 @@ impl Features {
         self.enabled.contains(&f)
     }
 
-    pub fn apps_enabled_for_auth(&self, has_chatgpt_auth: bool) -> bool {
-        self.enabled(Feature::Apps) && has_chatgpt_auth
+    pub fn apps_enabled(&self) -> bool {
+        self.enabled(Feature::Apps)
     }
 
     pub fn use_legacy_landlock(&self) -> bool {

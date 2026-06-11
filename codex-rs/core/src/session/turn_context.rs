@@ -158,11 +158,7 @@ impl TurnContext {
     }
 
     pub(crate) fn apps_enabled(&self) -> bool {
-        let uses_codex_backend = self
-            .auth_manager
-            .as_deref()
-            .is_some_and(AuthManager::current_auth_uses_codex_backend);
-        self.features.apps_enabled_for_auth(uses_codex_backend)
+        self.features.apps_enabled()
     }
 
     pub(crate) fn tool_environment_mode(&self) -> ToolEnvironmentMode {

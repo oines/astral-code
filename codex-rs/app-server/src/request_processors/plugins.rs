@@ -1485,14 +1485,8 @@ impl PluginRequestProcessor {
         }
 
         let plugin_apps = load_plugin_apps(result.installed_path.as_path()).await;
-        let auth = self.auth_manager.auth().await;
         let apps_needing_auth = self
-            .plugin_apps_needing_auth_for_install(
-                &config,
-                auth.as_ref().is_some_and(CodexAuth::is_chatgpt_auth),
-                &result.plugin_id.as_key(),
-                &plugin_apps,
-            )
+            .plugin_apps_needing_auth_for_install(&config, &result.plugin_id.as_key(), &plugin_apps)
             .await;
 
         Ok(PluginInstallResponse {
@@ -1607,12 +1601,7 @@ impl PluginRequestProcessor {
 
         let plugin_apps = load_plugin_apps(result.installed_path.as_path()).await;
         let apps_needing_auth = self
-            .plugin_apps_needing_auth_for_install(
-                &config,
-                auth.as_ref().is_some_and(CodexAuth::is_chatgpt_auth),
-                &result.plugin_id.as_key(),
-                &plugin_apps,
-            )
+            .plugin_apps_needing_auth_for_install(&config, &result.plugin_id.as_key(), &plugin_apps)
             .await;
 
         Ok(PluginInstallResponse {
@@ -1624,11 +1613,10 @@ impl PluginRequestProcessor {
     async fn plugin_apps_needing_auth_for_install(
         &self,
         config: &Config,
-        is_chatgpt_auth: bool,
         plugin_id: &str,
         plugin_apps: &[codex_plugin::AppConnectorId],
     ) -> Vec<AppSummary> {
-        if plugin_apps.is_empty() || !config.features.apps_enabled_for_auth(is_chatgpt_auth) {
+        if plugin_apps.is_empty() || !config.features.apps_enabled() {
             return Vec::new();
         }
 
