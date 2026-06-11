@@ -1,6 +1,6 @@
 # Astral-Code 项目状态
 
-最后更新：2026-06-11
+最后更新：2026-06-11 12:55 CST
 
 这份文档是 Astral-Code 长线改造的“航标”。每次暂停、重大提交后，或者担心上下文被 compact 丢失前，都应该更新它。
 
@@ -215,6 +215,14 @@ Astral 不应该是一个薄反代，也不应该靠末端 hook 偷换协议。
 
 ## 最新暂停点
 
+当前工作区不是完全干净状态。除本文档外，正在进行中的代码 slice 只涉及：
+
+- `codex-rs/login/src/auth/manager.rs`
+
+这个文件处于“删除 ChatGPT token refresh 路径”的中间状态，尚未完成、尚未格式化、
+尚未测试、尚未提交。后续接手时不要把它误认为已完成实现，也不要为了让编译通过而重新恢复
+ChatGPT/OAuth refresh。
+
 最新完成的代码 slice 是：
 
 - 本轮已完成：删除 `codex-login` 的旧 OAuth callback/revoke 控制面
@@ -231,6 +239,31 @@ Astral 不应该是一个薄反代，也不应该靠末端 hook 偷换协议。
 - `just fmt`
 - `just test -p codex-login logout`
   - 结果：4 个测试通过，66 个测试跳过。
+
+当前未完成 slice 的目标：
+
+- 删除 `codex-login` 中剩余的 ChatGPT refresh-token authority flow。
+- 删除 `CODEX_REFRESH_TOKEN_URL_OVERRIDE` / `REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR` 导出和使用。
+- 删除 `codex-rs/login/tests/suite/auth_refresh.rs` 以及 suite module 注册。
+- 删除或重写 app-server auth 测试里依赖 `/oauth/token` mock 的旧 refresh 行为。
+- `AuthManager::refresh_token()` 只保留 external bearer provider refresh 语义；没有 external
+  provider 时应成为安全 no-op 或返回 provider-neutral 错误，不能再访问 OpenAI OAuth endpoint。
+- `UnauthorizedRecovery` 不再进入 `RefreshToken` step；ChatGPT/legacy stored auth 在 Astral 里
+  应被视为 unsupported legacy auth。
+- `auth_env_telemetry` 可以保留 wire 字段 `refresh_token_url_override_present` 以减少 schema
+  churn，但 Astral 中应固定为 `false`，不再读取旧 env var。
+
+后续接手这个 slice 时，优先处理这些残留符号：
+
+- `UnauthorizedRecoveryStep::RefreshToken`
+- `refresh_token_from_authority`
+- `refresh_token_from_authority_impl`
+- `should_refresh_proactively`
+- `refresh_and_persist_chatgpt_token`
+- `REFRESH_TOKEN_ACCOUNT_MISMATCH_MESSAGE`
+- `REFRESH_TOKEN_UNKNOWN_MESSAGE`
+- `REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR`
+- `auth_refresh`
 
 ## 已运行验证
 
@@ -259,7 +292,7 @@ Astral 不应该是一个薄反代，也不应该靠末端 hook 偷换协议。
 1. 审计并移除剩余 OpenAI/ChatGPT auth/config 面：
    - core config 里的 `chatgpt_base_url`
    - app-server 的 `account/login/start` 行为
-   - 仍在 `codex-login` 内部存在的 ChatGPT token refresh 路径
+   - 仍在 `codex-login` 内部存在的 ChatGPT token refresh 路径：当前正在拆除，但尚未完成提交
 
 2. 审计 cloud/remote control-plane crates：
    - `codex-rs/backend-client`
