@@ -145,7 +145,7 @@ impl CodexAuth {
     ) -> std::io::Result<Self> {
         let auth_mode = auth_dot_json.resolved_mode();
         if auth_mode == ApiAuthMode::ApiKey {
-            let Some(api_key) = auth_dot_json.openai_api_key.as_deref() else {
+            let Some(api_key) = auth_dot_json.api_key.as_deref() else {
                 return Err(std::io::Error::other("API key auth is missing a key."));
             };
             return Ok(Self::from_api_key(api_key));
@@ -341,7 +341,7 @@ impl CodexAuth {
     pub fn create_dummy_chatgpt_auth_for_testing() -> Self {
         let auth_dot_json = AuthDotJson {
             auth_mode: Some(ApiAuthMode::Chatgpt),
-            openai_api_key: None,
+            api_key: None,
             tokens: Some(TokenData {
                 id_token: Default::default(),
                 access_token: "Access Token".to_string(),
@@ -411,7 +411,7 @@ pub fn login_with_api_key(
 ) -> std::io::Result<()> {
     let auth_dot_json = AuthDotJson {
         auth_mode: Some(ApiAuthMode::ApiKey),
-        openai_api_key: Some(api_key.to_string()),
+        api_key: Some(api_key.to_string()),
         tokens: None,
         last_refresh: None,
         agent_identity: None,
@@ -488,7 +488,7 @@ impl AuthDotJson {
         if let Some(mode) = self.auth_mode {
             return mode;
         }
-        if self.openai_api_key.is_some() {
+        if self.api_key.is_some() {
             return ApiAuthMode::ApiKey;
         }
         if self.personal_access_token.is_some() {

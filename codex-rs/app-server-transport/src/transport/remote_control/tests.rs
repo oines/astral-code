@@ -106,7 +106,7 @@ fn remote_control_auth_dot_json(account_id: Option<&str>) -> AuthDotJson {
 
     AuthDotJson {
         auth_mode: Some(AuthMode::Chatgpt),
-        openai_api_key: None,
+        api_key: None,
         tokens: Some(TokenData {
             id_token: parse_chatgpt_jwt_claims(&fake_jwt).expect("fake jwt should parse"),
             access_token: "Access Token".to_string(),

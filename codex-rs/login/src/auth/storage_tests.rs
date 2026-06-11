@@ -15,7 +15,7 @@ async fn file_storage_load_returns_auth_dot_json() -> anyhow::Result<()> {
     let storage = FileAuthStorage::new(codex_home.path().to_path_buf());
     let auth_dot_json = AuthDotJson {
         auth_mode: Some(AuthMode::ApiKey),
-        openai_api_key: Some("test-key".to_string()),
+        api_key: Some("test-key".to_string()),
         tokens: None,
         last_refresh: Some(Utc::now()),
         agent_identity: None,
@@ -37,7 +37,7 @@ async fn file_storage_save_persists_auth_dot_json() -> anyhow::Result<()> {
     let storage = FileAuthStorage::new(codex_home.path().to_path_buf());
     let auth_dot_json = AuthDotJson {
         auth_mode: Some(AuthMode::ApiKey),
-        openai_api_key: Some("test-key".to_string()),
+        api_key: Some("test-key".to_string()),
         tokens: None,
         last_refresh: Some(Utc::now()),
         agent_identity: None,
@@ -71,7 +71,7 @@ async fn file_storage_round_trips_agent_identity_auth() -> anyhow::Result<()> {
     }));
     let auth_dot_json = AuthDotJson {
         auth_mode: Some(AuthMode::AgentIdentity),
-        openai_api_key: None,
+        api_key: None,
         tokens: None,
         last_refresh: None,
         agent_identity: Some(agent_identity),
@@ -91,7 +91,7 @@ async fn file_storage_round_trips_personal_access_token_auth() -> anyhow::Result
     let storage = FileAuthStorage::new(codex_home.path().to_path_buf());
     let auth_dot_json = AuthDotJson {
         auth_mode: Some(AuthMode::PersonalAccessToken),
-        openai_api_key: None,
+        api_key: None,
         tokens: None,
         last_refresh: None,
         agent_identity: None,
@@ -141,7 +141,7 @@ fn file_storage_delete_removes_auth_file() -> anyhow::Result<()> {
     let dir = tempdir()?;
     let auth_dot_json = AuthDotJson {
         auth_mode: Some(AuthMode::ApiKey),
-        openai_api_key: Some("sk-test-key".to_string()),
+        api_key: Some("sk-test-key".to_string()),
         tokens: None,
         last_refresh: None,
         agent_identity: None,
@@ -166,7 +166,7 @@ fn ephemeral_storage_save_load_delete_is_in_memory_only() -> anyhow::Result<()> 
     );
     let auth_dot_json = AuthDotJson {
         auth_mode: Some(AuthMode::ApiKey),
-        openai_api_key: Some("sk-ephemeral".to_string()),
+        api_key: Some("sk-ephemeral".to_string()),
         tokens: None,
         last_refresh: Some(Utc::now()),
         agent_identity: None,
@@ -261,7 +261,7 @@ fn id_token_with_prefix(prefix: &str) -> IdTokenInfo {
 fn auth_with_prefix(prefix: &str) -> AuthDotJson {
     AuthDotJson {
         auth_mode: Some(AuthMode::ApiKey),
-        openai_api_key: Some(format!("{prefix}-api-key")),
+        api_key: Some(format!("{prefix}-api-key")),
         tokens: Some(TokenData {
             id_token: id_token_with_prefix(prefix),
             access_token: format!("{prefix}-access"),
@@ -292,7 +292,7 @@ fn keyring_auth_storage_load_returns_deserialized_auth() -> anyhow::Result<()> {
     );
     let expected = AuthDotJson {
         auth_mode: Some(AuthMode::ApiKey),
-        openai_api_key: Some("sk-test".to_string()),
+        api_key: Some("sk-test".to_string()),
         tokens: None,
         last_refresh: None,
         agent_identity: None,
@@ -331,7 +331,7 @@ fn keyring_auth_storage_save_persists_and_removes_fallback_file() -> anyhow::Res
     std::fs::write(&auth_file, "stale")?;
     let auth = AuthDotJson {
         auth_mode: Some(AuthMode::Chatgpt),
-        openai_api_key: None,
+        api_key: None,
         tokens: Some(TokenData {
             id_token: Default::default(),
             access_token: "access".to_string(),

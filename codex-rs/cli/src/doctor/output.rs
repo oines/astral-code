@@ -846,7 +846,7 @@ pub(super) fn redact_detail(detail: &str) -> String {
     }
 
     let secret_keys = [
-        "openai_api_key",
+        "api_key",
         "codex_api_key",
         "codex_access_token",
         "authorization",

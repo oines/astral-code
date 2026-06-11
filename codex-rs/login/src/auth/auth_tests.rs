@@ -37,7 +37,7 @@ fn login_with_api_key_overwrites_existing_auth_json() {
     let auth = storage
         .try_read_auth_json(&auth_path)
         .expect("auth.json should parse");
-    assert_eq!(auth.openai_api_key.as_deref(), Some("sk-new"));
+    assert_eq!(auth.api_key.as_deref(), Some("sk-new"));
     assert!(auth.tokens.is_none(), "tokens should be cleared");
 }
 
@@ -57,7 +57,7 @@ async fn stored_chatgpt_auth_without_api_key_is_rejected() {
     let codex_home = tempdir().unwrap();
     write_auth_file(
         AuthFileParams {
-            openai_api_key: None,
+            api_key: None,
             chatgpt_plan_type: Some("pro".to_string()),
             chatgpt_account_id: None,
         },
@@ -106,7 +106,7 @@ fn logout_removes_auth_file() -> Result<(), std::io::Error> {
     let dir = tempdir()?;
     let auth_dot_json = AuthDotJson {
         auth_mode: Some(ApiAuthMode::ApiKey),
-        openai_api_key: Some("sk-test-key".to_string()),
+        api_key: Some("sk-test-key".to_string()),
         tokens: None,
         last_refresh: None,
         agent_identity: None,
@@ -349,7 +349,7 @@ exit 1
 }
 
 struct AuthFileParams {
-    openai_api_key: Option<String>,
+    api_key: Option<String>,
     chatgpt_plan_type: Option<String>,
     chatgpt_account_id: Option<String>,
 }
@@ -358,7 +358,7 @@ fn write_auth_file(params: AuthFileParams, codex_home: &Path) -> std::io::Result
     let fake_jwt = fake_jwt_for_auth_file_params(&params)?;
     let auth_file = get_auth_file(codex_home);
     let auth_json_data = json!({
-        "ASTRAL_API_KEY": params.openai_api_key,
+        "ASTRAL_API_KEY": params.api_key,
         "tokens": {
             "id_token": fake_jwt,
             "access_token": "test-access-token",

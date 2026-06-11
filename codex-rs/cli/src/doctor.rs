@@ -1193,7 +1193,7 @@ fn auth_check(config: &Config) -> DoctorCheck {
     match load_auth_dot_json(&config.codex_home, config.cli_auth_credentials_store_mode) {
         Ok(Some(auth)) => {
             details.push(format!("stored auth mode: {}", stored_auth_mode(&auth)));
-            details.push(format!("stored API key: {}", auth.openai_api_key.is_some()));
+            details.push(format!("stored API key: {}", auth.api_key.is_some()));
             details.push(format!(
                 "stored legacy credential material: {}",
                 stored_legacy_credential_material_present(&auth)
@@ -1335,7 +1335,7 @@ fn stored_auth_mode_value(auth: &AuthDotJson) -> codex_app_server_protocol::Auth
     if let Some(mode) = auth.auth_mode {
         return mode;
     }
-    if auth.openai_api_key.is_some() {
+    if auth.api_key.is_some() {
         codex_app_server_protocol::AuthMode::ApiKey
     } else if auth.personal_access_token.is_some() {
         codex_app_server_protocol::AuthMode::PersonalAccessToken
@@ -1352,7 +1352,7 @@ fn stored_auth_issues(
     match stored_auth_mode_value(auth) {
         codex_app_server_protocol::AuthMode::ApiKey => {
             let stored_key_present = auth
-                .openai_api_key
+                .api_key
                 .as_deref()
                 .is_some_and(|key| !key.trim().is_empty());
             let env_key_present = env_var_present(ASTRAL_API_KEY_ENV_VAR);
@@ -3412,7 +3412,7 @@ mod tests {
     fn stored_auth_validation_rejects_missing_api_key() {
         let auth = AuthDotJson {
             auth_mode: Some(codex_app_server_protocol::AuthMode::ApiKey),
-            openai_api_key: None,
+            api_key: None,
             tokens: None,
             last_refresh: None,
             agent_identity: None,
@@ -3430,7 +3430,7 @@ mod tests {
     fn stored_auth_validation_rejects_legacy_credentials() {
         let auth = AuthDotJson {
             auth_mode: None,
-            openai_api_key: None,
+            api_key: None,
             tokens: None,
             last_refresh: None,
             agent_identity: None,
@@ -3449,7 +3449,7 @@ mod tests {
     fn stored_auth_validation_rejects_personal_access_token() {
         let mut auth = AuthDotJson {
             auth_mode: None,
-            openai_api_key: None,
+            api_key: None,
             tokens: None,
             last_refresh: None,
             agent_identity: None,
@@ -3475,7 +3475,7 @@ mod tests {
     fn provider_reachability_mode_uses_api_key_auth() {
         let api_key_auth = AuthDotJson {
             auth_mode: Some(codex_app_server_protocol::AuthMode::ApiKey),
-            openai_api_key: Some("sk-test".to_string()),
+            api_key: Some("sk-test".to_string()),
             tokens: None,
             last_refresh: None,
             agent_identity: None,
