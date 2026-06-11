@@ -794,11 +794,13 @@ impl PluginRequestProcessor {
         let plugins_input = config.plugins_config_input();
         let remote_installed_plugin_visible_scopes =
             remote_installed_plugin_visible_scopes(&config);
-        plugins_manager.maybe_start_remote_installed_plugin_bundle_sync(
-            &plugins_input,
-            auth.clone(),
-            Some(self.effective_plugins_changed_callback()),
-        );
+        if !remote_installed_plugin_visible_scopes.is_empty() {
+            plugins_manager.maybe_start_remote_installed_plugin_bundle_sync(
+                &plugins_input,
+                auth.clone(),
+                Some(self.effective_plugins_changed_callback()),
+            );
+        }
 
         let (mut data, marketplace_load_errors) = self
             .load_local_installed_and_suggested_plugins(
@@ -917,6 +919,10 @@ impl PluginRequestProcessor {
         visible_scopes: &[RemotePluginScope],
         auth: Option<&CodexAuth>,
     ) -> Vec<PluginMarketplaceEntry> {
+        if visible_scopes.is_empty() {
+            return Vec::new();
+        }
+
         let remote_marketplaces = if let Some(remote_marketplaces) =
             plugins_manager.build_remote_installed_plugin_marketplaces_from_cache(visible_scopes)
         {

@@ -1,6 +1,6 @@
 # Astral-Code 项目总控记录
 
-最后更新：2026-06-11 17:13 CST
+最后更新：2026-06-11 17:17 CST
 
 这份文档是 Astral-Code 长线改造的中文 handoff。它的用途不是对外宣传，而是让后续任何一次
 compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道：我们到底要做什么、为什么这么做、
@@ -34,10 +34,10 @@ provider 去 OpenAI 默认路由、登录态清理、cloud-config/cloud-tasks �
 - Provider-neutral Agent IR / Anthropic Messages / chat completions：仍是后续核心大块工作。
 - 全量 CI：当前不追求全绿，用户明确要求先推进实现，最后集中测试集中修。
 
-当前最新 slice：app-server remote plugin/share/read/install/uninstall 入口在 hosted control-plane 禁用时会先短路，
-不再为了返回 disabled 而读取旧 config/auth；本地旧 `localPluginPathsByRemotePluginId` share 映射也不会展示。
-下一步优先继续处理 `core-plugins/src/remote/*` 旧实现、底层 app-server-transport remote-control 旧模块和其他
-ChatGPT hosted 残留。
+当前最新 slice：`plugin/installed` 在 remote plugin control-plane 禁用时不再触发 remote installed catalog
+fetch 或 bundle sync；remote plugin/share/read/install/uninstall disabled 路径也会先短路，不再为了返回
+disabled 而读取旧 config/auth。下一步优先继续处理 `core-plugins/src/remote/*` 旧实现、底层
+app-server-transport remote-control 旧模块和其他 ChatGPT hosted 残留。
 
 ## 项目身份
 
@@ -616,6 +616,41 @@ account 或 OpenAI-only plugin 分发的代码，都需要删除、禁用或隔�
   remote control。底层 `app-server-transport` 里的旧 remote-control 模块仍存在，但默认和 app-server
   暴露路径已经切断。
 
+## 最近完成的 app-server remote installed plugin slice
+
+本轮完成的代码 slice：
+
+> `plugin/installed` 在 remote plugin control-plane 禁用时，不再触发 remote installed catalog fetch 或
+> bundle sync。
+
+已编辑文件：
+
+- `codex-rs/app-server/src/request_processors/plugins.rs`
+- `codex-rs/app-server/tests/suite/v2/plugin_list.rs`
+- `ASTRAL_CODE_PROGRESS.md`
+
+改动内容：
+
+- `plugin_installed_response(...)` 只有在 `remote_installed_plugin_visible_scopes` 非空时，才启动
+  `maybe_start_remote_installed_plugin_bundle_sync(...)`。
+- `load_remote_installed_plugins(...)` 收到空 `visible_scopes` 时直接返回空列表，不再先调用
+  `build_and_cache_remote_installed_plugin_marketplaces(...)`。
+- 更新测试，断言 remote plugin control-plane disabled 时 `plugin/installed` 不会请求
+  `/ps/plugins/installed`，也不会下载或写入 remote plugin bundle cache。
+
+为什么要做：
+
+- 原代码虽然把可见 remote scope 置空，但仍可能先 fetch remote installed plugin catalog，再把结果按空
+  scope 丢掉。
+- 这属于隐蔽 hosted 外联口：用户只是读取 installed plugin 列表，Astral 不应暗中访问 ChatGPT plugin
+  service。
+- 这一步仍保留本地 installed plugin、suggested plugin、本地 marketplace 行为。
+
+后续风险：
+
+- `PluginsManager` 和 `core-plugins/src/remote/remote_installed_plugin_sync.rs` 仍包含远程同步实现；app-server
+  默认路径已切断，后续可以继续将底层实现降级为 legacy feature 或 Astral disabled stub。
+
 ## 最近完成的 app-server remote plugin disabled short-circuit slice
 
 本轮完成的代码 slice：
@@ -843,6 +878,7 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
 - `CARGO_INCREMENTAL=0 just test -p codex-app-server plugin_uninstall_rejects_remote_plugin_when_plugins_are_disabled`
 - `CARGO_INCREMENTAL=0 just test -p codex-app-server plugin_share_save_rejects_when_plugin_sharing_disabled`
 - `CARGO_INCREMENTAL=0 just test -p codex-app-server plugin_read_rejects_remote_marketplace_when_plugins_are_disabled`
+- `CARGO_INCREMENTAL=0 just test -p codex-app-server plugin_installed_skips_remote_fetch_when_control_plane_disabled`
 - 旧 ChatGPT refresh 符号窄范围搜索：`codex-rs/login` 与 app-server auth 测试无命中。
 - `git diff --check`
 

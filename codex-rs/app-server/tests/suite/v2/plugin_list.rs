@@ -2351,7 +2351,7 @@ plugin_sharing = true
 }
 
 #[tokio::test]
-async fn plugin_installed_does_not_start_remote_installed_bundle_sync() -> Result<()> {
+async fn plugin_installed_skips_remote_fetch_when_control_plane_disabled() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;
     std::fs::write(
@@ -2409,22 +2409,17 @@ plugin_sharing = false
         .await??,
     )?;
 
-    assert_eq!(response.marketplaces.len(), 1);
-    assert_eq!(response.marketplaces[0].name, "openai-curated-remote");
-    assert_eq!(
-        response.marketplaces[0]
-            .plugins
-            .iter()
-            .map(|plugin| (plugin.id.clone(), plugin.installed, plugin.enabled))
-            .collect::<Vec<_>>(),
-        vec![("linear@openai-curated-remote".to_string(), true, true)]
-    );
+    assert!(response.marketplaces.is_empty());
     let installed_path = codex_home
         .path()
         .join("plugins/cache/openai-curated-remote/linear/1.2.3/.codex-plugin/plugin.json");
     assert!(!installed_path.exists());
-    wait_for_remote_installed_scope_request(&server, "GLOBAL").await?;
-    wait_for_remote_installed_scope_request(&server, "WORKSPACE").await?;
+    wait_for_remote_plugin_request_count(
+        &server,
+        "/ps/plugins/installed",
+        /*expected_count*/ 0,
+    )
+    .await?;
     Ok(())
 }
 
