@@ -9,10 +9,8 @@ enum RefreshTokenRequestOutcome {
 #[derive(Clone)]
 pub(crate) struct AccountRequestProcessor {
     auth_manager: Arc<AuthManager>,
-    thread_manager: Arc<ThreadManager>,
     outgoing: Arc<OutgoingMessageSender>,
     config: Arc<Config>,
-    config_manager: ConfigManager,
 }
 
 const ACCOUNT_BACKEND_DISABLED_MESSAGE: &str = "Astral-managed account usage and rate-limit APIs are unavailable for the active model provider.";
@@ -20,17 +18,13 @@ const ACCOUNT_BACKEND_DISABLED_MESSAGE: &str = "Astral-managed account usage and
 impl AccountRequestProcessor {
     pub(crate) fn new(
         auth_manager: Arc<AuthManager>,
-        thread_manager: Arc<ThreadManager>,
         outgoing: Arc<OutgoingMessageSender>,
         config: Arc<Config>,
-        config_manager: ConfigManager,
     ) -> Self {
         Self {
             auth_manager,
-            thread_manager,
             outgoing,
             config,
-            config_manager,
         }
     }
 
@@ -107,53 +101,6 @@ impl AccountRequestProcessor {
         }
     }
 
-    async fn maybe_refresh_remote_installed_plugins_cache_for_current_config(
-        config_manager: &ConfigManager,
-        thread_manager: &Arc<ThreadManager>,
-        auth: Option<CodexAuth>,
-    ) {
-        match config_manager
-            .load_latest_config(/*fallback_cwd*/ None)
-            .await
-        {
-            Ok(config) => {
-                let refresh_thread_manager = Arc::clone(thread_manager);
-                let refresh_config_manager = config_manager.clone();
-                thread_manager
-                    .plugins_manager()
-                    .maybe_start_remote_installed_plugins_cache_refresh(
-                        &config.plugins_config_input(),
-                        auth,
-                        Some(Arc::new(move || {
-                            Self::spawn_effective_plugins_changed_task(
-                                Arc::clone(&refresh_thread_manager),
-                                refresh_config_manager.clone(),
-                            );
-                        })),
-                    );
-            }
-            Err(err) => {
-                warn!(
-                    "failed to reload config after account changed, skipping remote installed plugins cache refresh: {err}"
-                );
-            }
-        }
-    }
-
-    fn spawn_effective_plugins_changed_task(
-        thread_manager: Arc<ThreadManager>,
-        config_manager: ConfigManager,
-    ) {
-        tokio::spawn(async move {
-            thread_manager.plugins_manager().clear_cache();
-            thread_manager.skills_manager().clear_cache();
-            if thread_manager.list_thread_ids().await.is_empty() {
-                return;
-            }
-            crate::mcp_refresh::queue_best_effort_refresh(&thread_manager, &config_manager).await;
-        });
-    }
-
     async fn login_v2(
         &self,
         request_id: ConnectionRequestId,
@@ -212,13 +159,6 @@ impl AccountRequestProcessor {
     }
 
     async fn send_login_success_notifications(&self, login_id: Option<Uuid>) {
-        Self::maybe_refresh_remote_installed_plugins_cache_for_current_config(
-            &self.config_manager,
-            &self.thread_manager,
-            self.auth_manager.auth_cached(),
-        )
-        .await;
-
         let payload_login_completed = AccountLoginCompletedNotification {
             login_id: login_id.map(|id| id.to_string()),
             success: true,
@@ -244,13 +184,6 @@ impl AccountRequestProcessor {
                 return Err(internal_error(format!("logout failed: {err}")));
             }
         }
-
-        Self::maybe_refresh_remote_installed_plugins_cache_for_current_config(
-            &self.config_manager,
-            &self.thread_manager,
-            self.auth_manager.auth_cached(),
-        )
-        .await;
 
         // Reflect the current auth method after logout (likely None).
         Ok(self

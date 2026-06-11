@@ -264,10 +264,8 @@ impl MessageProcessor {
         let app_list_shutdown_token = CancellationToken::new();
         let account_processor = AccountRequestProcessor::new(
             auth_manager.clone(),
-            Arc::clone(&thread_manager),
             outgoing.clone(),
             Arc::clone(&config),
-            config_manager.clone(),
         );
         let apps_processor = AppsRequestProcessor::new(
             auth_manager.clone(),
