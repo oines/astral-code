@@ -133,16 +133,10 @@ impl fmt::Debug for Client {
 impl Client {
     pub fn new(base_url: impl Into<String>) -> Result<Self> {
         let mut base_url = base_url.into();
-        // Normalize common ChatGPT hostnames to include /backend-api so we hit the WHAM paths.
-        // Also trim trailing slashes for consistent URL building.
+        // Trim trailing slashes for consistent URL building. Astral does not
+        // implicitly rewrite ChatGPT hosts into hosted backend-api URLs.
         while base_url.ends_with('/') {
             base_url.pop();
-        }
-        if (base_url.starts_with("https://chatgpt.com")
-            || base_url.starts_with("https://chat.openai.com"))
-            && !base_url.contains("/backend-api")
-        {
-            base_url = format!("{base_url}/backend-api");
         }
         let http = build_reqwest_client_with_custom_ca(with_chatgpt_cloudflare_cookie_store(
             reqwest::Client::builder(),

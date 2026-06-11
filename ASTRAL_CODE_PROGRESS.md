@@ -1,6 +1,6 @@
 # Astral-Code 项目总控记录
 
-最后更新：2026-06-11 18:06 CST
+最后更新：2026-06-11 18:10 CST
 
 这份文档是 Astral-Code 长线改造的中文 handoff。它的用途不是对外宣传，而是让后续任何一次
 compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道：我们到底要做什么、为什么这么做、
@@ -35,9 +35,9 @@ provider 去 OpenAI 默认路由、登录态清理、cloud-config/cloud-tasks �
   国产模型兼容细节、fixture 和端到端测试。
 - 全量 CI：当前不追求全绿，用户明确要求先推进实现，最后集中测试集中修。
 
-当前最新 slice：`codex-client` 的 ChatGPT Cloudflare 全局 cookie store 已降级为 no-op shim。
-`with_chatgpt_cloudflare_cookie_store(...)` 仍保留为兼容函数，但不再安装 process-global cookie jar，也不会缓存
-ChatGPT/Cloudflare cookie。`login` fallback 日志里的 ChatGPT Cloudflare 文案也已移除。
+当前最新 slice：`codex-backend-client` 不再把 `https://chatgpt.com` / `https://chat.openai.com`
+自动改写成 `/backend-api`。只有调用方显式传入带 `/backend-api` 的 URL 时，旧 WHAM path style 才会启用。
+这避免 Astral 在配置或调用误填 ChatGPT host 时静默进入 hosted backend。
 
 下一步优先继续处理底层 `app-server-transport` remote-control 旧模块、`chatgpt_base_url` 配置字段和其他
 ChatGPT hosted 残留；provider adapter 方向则继续补 Anthropic/chat-completions fixture 和国内模型兼容选项。
@@ -290,6 +290,12 @@ Remote / cloud control-plane 风险区：
 account 或 OpenAI-only plugin 分发的代码，都需要删除、禁用或隔离到显式非默认 feature。
 
 ## 已完成的重要提交
+
+- 本轮已完成：backend-client 不再隐式改写 ChatGPT host
+  - `Client::new(...)` 只裁剪尾部 `/`，不再把 `https://chatgpt.com` 或
+    `https://chat.openai.com` 自动补成 `/backend-api`。
+  - `PathStyle::ChatGptApi` 暂时保留，只有调用方显式传入带 `/backend-api` 的 URL 时才使用。
+  - 目的：避免 Astral 默认路径因为一个 ChatGPT host 字符串而静默进入 OpenAI hosted WHAM backend。
 
 - 本轮已完成：ChatGPT Cloudflare 全局 cookie store 禁用
   - `codex-rs/codex-client/src/chatgpt_cloudflare_cookies.rs` 保留
@@ -1088,6 +1094,8 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
 - `CARGO_INCREMENTAL=0 just test -p codex-agent-identity hosted_agent_identity_control_plane_is_disabled`
 - `just fmt`
 - `CARGO_INCREMENTAL=0 cargo check --tests -p codex-client -p codex-login -p codex-backend-client`
+- `just fmt`
+- `CARGO_INCREMENTAL=0 cargo check --tests -p codex-backend-client`
 - 旧 ChatGPT refresh 符号窄范围搜索：`codex-rs/login` 与 app-server auth 测试无命中。
 - `git diff --check`
 
