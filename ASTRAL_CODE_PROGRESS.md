@@ -1,6 +1,6 @@
 # Astral-Code 项目总控记录
 
-最后更新：2026-06-11 17:49 CST
+最后更新：2026-06-11 17:54 CST
 
 这份文档是 Astral-Code 长线改造的中文 handoff。它的用途不是对外宣传，而是让后续任何一次
 compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道：我们到底要做什么、为什么这么做、
@@ -35,9 +35,9 @@ provider 去 OpenAI 默认路由、登录态清理、cloud-config/cloud-tasks �
   国产模型兼容细节、fixture 和端到端测试。
 - 全量 CI：当前不追求全绿，用户明确要求先推进实现，最后集中测试集中修。
 
-当前最新 slice：OpenAI-compatible `/v1/chat/completions` stream adapter 支持标准空 `choices` usage chunk，
-并在 SSE 层把 finish_reason chunk 与后续 usage chunk 合并成一次 `Completed`，避免国内模型网关常见
-`stream_options.include_usage` 输出形状导致 token usage / cache usage 丢失。
+当前最新 slice：`core-skills/src/remote.rs` hosted remote skill client 已经在库层禁用；直接调用
+remote skill list/export 时，也会在 ChatGPT auth、network request、zip download/extract 之前返回 Astral
+disabled。
 
 下一步优先继续处理底层 `app-server-transport` remote-control 旧模块、`chatgpt_base_url` 配置字段和其他
 ChatGPT hosted 残留；provider adapter 方向则继续补 Anthropic/chat-completions fixture 和兼容选项。
@@ -623,6 +623,39 @@ account 或 OpenAI-only plugin 分发的代码，都需要删除、禁用或隔�
   remote control。底层 `app-server-transport` 里的旧 remote-control 模块仍存在，但默认和 app-server
   暴露路径已经切断。
 
+## 最近完成的 core-skills remote guard slice
+
+本轮完成的代码 slice：
+
+> `core-skills/src/remote.rs` hosted remote skill API 在库层直接禁用，避免未来入口误接上
+> ChatGPT `/hazelnuts` skill service。
+
+已编辑文件：
+
+- `codex-rs/core-skills/src/remote.rs`
+- `codex-rs/core-skills/src/remote_tests.rs`
+- `ASTRAL_CODE_PROGRESS.md`
+
+改动内容：
+
+- 新增 remote skill control-plane disabled guard。
+- `list_remote_skills(...)` 在处理 `chatgpt_base_url` 和 ChatGPT auth 前直接返回 Astral disabled。
+- `export_remote_skill(...)` 在 ChatGPT auth、download request、zip payload 校验和 extract 前直接返回
+  Astral disabled。
+- 新增两条测试，确认 list/export 都在缺少 auth 时返回 disabled，而不是进入旧 ChatGPT auth 错误或网络路径。
+
+为什么要做：
+
+- remote skill client 当前注释为“future wiring”，但代码已经是完整 ChatGPT hosted `/hazelnuts` API 客户端。
+- Astral 的 skill runtime 要保留，但 hosted skill marketplace/export 控制面不能默认保留旧 ChatGPT 后端语义。
+- 这一步和 remote plugin guard 保持同一原则：本地 skills/plugins/MCP 不动，OpenAI hosted 分发面默认切断。
+
+后续风险：
+
+- `RemoteSkillScope` / `RemoteSkillProductSurface` 等类型仍存在，用于当前编译边界。
+- 如果后续要做 provider-neutral skill registry，应新建 Astral 自己的服务协议，不复用 `chatgpt_base_url` 和
+  `/hazelnuts` 语义。
+
 ## 最近完成的 chat-completions usage stream slice
 
 本轮完成的代码 slice：
@@ -1007,6 +1040,8 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
 - `CARGO_INCREMENTAL=0 cargo check --tests -p codex-api`
 - `CARGO_INCREMENTAL=0 just test -p codex-api chat_completions`
 - `CARGO_INCREMENTAL=0 just test -p codex-api chat_stream_merges_finish_reason_with_empty_choices_usage_chunk`
+- `CARGO_INCREMENTAL=0 cargo check --tests -p codex-core-skills`
+- `CARGO_INCREMENTAL=0 just test -p codex-core-skills remote_skill`
 - 旧 ChatGPT refresh 符号窄范围搜索：`codex-rs/login` 与 app-server auth 测试无命中。
 - `git diff --check`
 

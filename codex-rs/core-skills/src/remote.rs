@@ -14,6 +14,14 @@ const REMOTE_SKILLS_API_TIMEOUT: Duration = Duration::from_secs(30);
 // Low-level client for the remote skill API. This is intentionally kept around for
 // future wiring, but it is not used yet by any active product surface.
 
+fn remote_skill_control_plane_disabled() -> bool {
+    true
+}
+
+fn remote_skill_control_plane_disabled_error() -> anyhow::Error {
+    anyhow::anyhow!("legacy hosted remote skill control-plane is disabled in Astral")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RemoteSkillScope {
     WorkspaceShared,
@@ -93,6 +101,10 @@ pub async fn list_remote_skills(
     product_surface: RemoteSkillProductSurface,
     enabled: Option<bool>,
 ) -> Result<Vec<RemoteSkillSummary>> {
+    if remote_skill_control_plane_disabled() {
+        return Err(remote_skill_control_plane_disabled_error());
+    }
+
     let base_url = chatgpt_base_url.trim_end_matches('/');
     let auth = ensure_codex_backend_auth(auth)?;
 
@@ -144,6 +156,10 @@ pub async fn export_remote_skill(
     auth: Option<&CodexAuth>,
     skill_id: &str,
 ) -> Result<RemoteSkillDownloadResult> {
+    if remote_skill_control_plane_disabled() {
+        return Err(remote_skill_control_plane_disabled_error());
+    }
+
     let auth = ensure_codex_backend_auth(auth)?;
 
     let client = build_reqwest_client();
@@ -257,3 +273,7 @@ fn normalize_zip_name(name: &str, prefix_candidates: &[String]) -> Option<String
         Some(trimmed.to_string())
     }
 }
+
+#[cfg(test)]
+#[path = "remote_tests.rs"]
+mod tests;
