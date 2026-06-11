@@ -377,6 +377,7 @@ pub async fn process_sse(
 ) {
     let mut stream = stream.eventsource();
     let mut mapper = AgentStreamMapper::default();
+    let mut pending_chat_stop_reason: Option<StopReason> = None;
 
     loop {
         let start = Instant::now();
@@ -409,7 +410,22 @@ pub async fn process_sse(
 
         trace!("SSE event: {}", &sse.data);
         if matches!(format, AgentStreamFormat::ChatCompletions) && sse.data.trim() == "[DONE]" {
-            continue;
+            let stop_reason = pending_chat_stop_reason
+                .take()
+                .unwrap_or(StopReason::EndTurn);
+            let should_continue = send_agent_stream_event(
+                &mut mapper,
+                AgentStreamEvent::MessageStop {
+                    stop_reason: Some(stop_reason),
+                    usage: None,
+                },
+                &tx_event,
+            )
+            .await;
+            if should_continue {
+                continue;
+            }
+            return;
         }
 
         let value: Value = match serde_json::from_str(&sse.data) {
@@ -446,24 +462,56 @@ pub async fn process_sse(
         };
 
         for event in agent_events {
-            let response_events = match mapper.process_event(event) {
-                Ok(events) => events,
-                Err(error) => {
-                    let _ = tx_event.send(Err(error)).await;
-                    return;
+            let event = if matches!(format, AgentStreamFormat::ChatCompletions) {
+                match event {
+                    AgentStreamEvent::MessageStop {
+                        stop_reason: Some(stop_reason),
+                        usage: None,
+                    } => {
+                        pending_chat_stop_reason = Some(stop_reason);
+                        continue;
+                    }
+                    AgentStreamEvent::MessageStop {
+                        stop_reason: None,
+                        usage: Some(usage),
+                    } => AgentStreamEvent::MessageStop {
+                        stop_reason: pending_chat_stop_reason.take(),
+                        usage: Some(usage),
+                    },
+                    event => event,
                 }
+            } else {
+                event
             };
-            for event in response_events {
-                let is_completed = matches!(event, ResponseEvent::Completed { .. });
-                if tx_event.send(Ok(event)).await.is_err() {
-                    return;
-                }
-                if is_completed {
-                    return;
-                }
+            if !send_agent_stream_event(&mut mapper, event, &tx_event).await {
+                return;
             }
         }
     }
+}
+
+async fn send_agent_stream_event(
+    mapper: &mut AgentStreamMapper,
+    event: AgentStreamEvent,
+    tx_event: &mpsc::Sender<Result<ResponseEvent, ApiError>>,
+) -> bool {
+    let response_events = match mapper.process_event(event) {
+        Ok(events) => events,
+        Err(error) => {
+            let _ = tx_event.send(Err(error)).await;
+            return false;
+        }
+    };
+    for event in response_events {
+        let is_completed = matches!(event, ResponseEvent::Completed { .. });
+        if tx_event.send(Ok(event)).await.is_err() {
+            return false;
+        }
+        if is_completed {
+            return false;
+        }
+    }
+    true
 }
 
 #[cfg(test)]

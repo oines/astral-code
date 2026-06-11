@@ -81,7 +81,18 @@ pub fn parse_stream_chunk(
 ) -> Result<Vec<AgentStreamEvent>, ChatCompletionsStreamError> {
     let mut events = Vec::new();
 
-    for choice in required_array(&value, "choices")? {
+    let choices = required_array(&value, "choices")?;
+    if choices.is_empty() {
+        if let Some(usage) = usage_from_chat(value.get("usage")) {
+            events.push(AgentStreamEvent::MessageStop {
+                stop_reason: None,
+                usage: Some(usage),
+            });
+        }
+        return Ok(events);
+    }
+
+    for choice in choices {
         let delta = choice
             .get("delta")
             .ok_or(ChatCompletionsStreamError::MissingField("delta"))?;

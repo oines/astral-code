@@ -5,10 +5,16 @@ use codex_agent_protocol::StopReason;
 use codex_agent_protocol::TokenUsage as AgentTokenUsage;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
+use futures::StreamExt;
 use pretty_assertions::assert_eq;
 use serde_json::json;
+use tokio::sync::mpsc;
+use tokio::time::Duration;
 
+use super::AgentStreamFormat;
 use super::AgentStreamMapper;
+use super::ResponseEvent;
+use super::process_sse;
 
 #[test]
 fn mapper_streams_text_with_lazy_content_block_start() {
@@ -185,4 +191,81 @@ fn mapper_turns_provider_error_stop_into_stream_error() {
         .expect_err("error stop should fail stream");
 
     assert_eq!(error.to_string(), "stream error: rate limited");
+}
+
+#[tokio::test]
+async fn chat_stream_merges_finish_reason_with_empty_choices_usage_chunk() {
+    let chunks = vec![
+        Ok(bytes::Bytes::from(format!(
+            "data: {}\n\n",
+            json!({
+                "id": "chatcmpl_1",
+                "model": "astral-fast",
+                "choices": [{
+                    "delta": { "role": "assistant", "content": "hello" }
+                }]
+            })
+        ))),
+        Ok(bytes::Bytes::from(format!(
+            "data: {}\n\n",
+            json!({
+                "choices": [{
+                    "delta": {},
+                    "finish_reason": "stop"
+                }]
+            })
+        ))),
+        Ok(bytes::Bytes::from(format!(
+            "data: {}\n\n",
+            json!({
+                "choices": [],
+                "usage": {
+                    "prompt_tokens": 13,
+                    "completion_tokens": 5,
+                    "prompt_tokens_details": { "cached_tokens": 8 }
+                }
+            })
+        ))),
+        Ok(bytes::Bytes::from("data: [DONE]\n\n")),
+    ];
+    let stream = futures::stream::iter(chunks).boxed() as codex_client::ByteStream;
+    let (tx_event, mut rx_event) = mpsc::channel(16);
+
+    process_sse(
+        stream,
+        tx_event,
+        Duration::from_secs(5),
+        None,
+        AgentStreamFormat::ChatCompletions,
+    )
+    .await;
+
+    let mut events = Vec::new();
+    while let Some(event) = rx_event.recv().await {
+        events.push(event.expect("event should map"));
+    }
+
+    let completed = events
+        .iter()
+        .find_map(|event| match event {
+            ResponseEvent::Completed {
+                token_usage,
+                end_turn,
+                ..
+            } => Some((token_usage.as_ref().expect("usage present"), end_turn)),
+            _ => None,
+        })
+        .expect("completed event");
+
+    assert_eq!(completed.0.input_tokens, 13);
+    assert_eq!(completed.0.cached_input_tokens, 8);
+    assert_eq!(completed.0.output_tokens, 5);
+    assert_eq!(*completed.1, Some(true));
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event, ResponseEvent::Completed { .. }))
+            .count(),
+        1
+    );
 }

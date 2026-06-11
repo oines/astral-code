@@ -217,3 +217,27 @@ fn stream_chunk_maps_usage_only_chunk() {
         }]
     );
 }
+
+#[test]
+fn stream_chunk_maps_openai_compatible_empty_choices_usage_chunk() {
+    assert_eq!(
+        parse_stream_chunk(json!({
+            "choices": [],
+            "usage": {
+                "prompt_tokens": 13,
+                "completion_tokens": 5,
+                "prompt_tokens_details": { "cached_tokens": 8 }
+            }
+        }))
+        .expect("parse stream chunk"),
+        vec![AgentStreamEvent::MessageStop {
+            stop_reason: None,
+            usage: Some(TokenUsage {
+                input_tokens: Some(13),
+                output_tokens: Some(5),
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: Some(8),
+            }),
+        }]
+    );
+}

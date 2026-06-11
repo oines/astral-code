@@ -1,6 +1,6 @@
 # Astral-Code 项目总控记录
 
-最后更新：2026-06-11 17:41 CST
+最后更新：2026-06-11 17:49 CST
 
 这份文档是 Astral-Code 长线改造的中文 handoff。它的用途不是对外宣传，而是让后续任何一次
 compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道：我们到底要做什么、为什么这么做、
@@ -31,16 +31,16 @@ provider 去 OpenAI 默认路由、登录态清理、cloud-config/cloud-tasks �
 - Plan Mode / Goal Mode / local compact：决定保留 Codex 方案，当前不作为重构主战场。
 - OpenAI 登录态和 ChatGPT OAuth：主路径已删除或禁用。
 - OpenAI/ChatGPT hosted control-plane：已经拆掉多处默认外联，但仍是最高优先级扫尾区域。
-- Provider-neutral Agent IR / Anthropic Messages / OpenAI-compatible chat completions：仍是后续核心大块工作。
+- Provider-neutral Agent IR / Anthropic Messages / OpenAI-compatible chat completions：主干已存在，仍需继续补齐
+  国产模型兼容细节、fixture 和端到端测试。
 - 全量 CI：当前不追求全绿，用户明确要求先推进实现，最后集中测试集中修。
 
-当前最新 slice：`core-plugins/src/remote/*` hosted remote plugin 控制面已经在库层短路为
-`ControlPlaneDisabled`，直接调用 remote marketplace、remote share、remote installed sync、remote
-install/uninstall/read/skill detail 等函数时，也会在 auth、network、archive/cache 之前返回 Astral
-disabled；app-server 将该错误映射为 `invalid_request`。
+当前最新 slice：OpenAI-compatible `/v1/chat/completions` stream adapter 支持标准空 `choices` usage chunk，
+并在 SSE 层把 finish_reason chunk 与后续 usage chunk 合并成一次 `Completed`，避免国内模型网关常见
+`stream_options.include_usage` 输出形状导致 token usage / cache usage 丢失。
 
 下一步优先继续处理底层 `app-server-transport` remote-control 旧模块、`chatgpt_base_url` 配置字段和其他
-ChatGPT hosted 残留。
+ChatGPT hosted 残留；provider adapter 方向则继续补 Anthropic/chat-completions fixture 和兼容选项。
 
 ## 项目身份
 
@@ -623,6 +623,46 @@ account 或 OpenAI-only plugin 分发的代码，都需要删除、禁用或隔�
   remote control。底层 `app-server-transport` 里的旧 remote-control 模块仍存在，但默认和 app-server
   暴露路径已经切断。
 
+## 最近完成的 chat-completions usage stream slice
+
+本轮完成的代码 slice：
+
+> 补强 OpenAI-compatible `/v1/chat/completions` 流式 adapter，支持国内模型常见的空 `choices` usage
+> chunk，并保留一次性 `Completed` 事件语义。
+
+已编辑文件：
+
+- `codex-rs/codex-api/src/agent_adapters/chat_completions.rs`
+- `codex-rs/codex-api/src/agent_adapters/chat_completions_tests.rs`
+- `codex-rs/codex-api/src/sse/agent.rs`
+- `codex-rs/codex-api/src/sse/agent_tests.rs`
+- `ASTRAL_CODE_PROGRESS.md`
+
+改动内容：
+
+- `parse_stream_chunk(...)` 现在识别 `choices: []` 且带 `usage` 的标准 OpenAI-compatible final usage
+  chunk。
+- chat-completions SSE 处理器会暂存 `finish_reason`，等后续 usage chunk 到达时合并成一次
+  `ResponseEvent::Completed`。
+- 如果 provider 只发送 finish_reason 后直接 `[DONE]`，SSE 处理器仍会用暂存 stop reason 完成这一轮。
+- 新增测试覆盖 empty choices usage chunk，以及 finish_reason chunk + usage chunk 合并后只产生一次
+  `Completed`，并保留 input/output/cached token usage。
+
+为什么要做：
+
+- 很多国内 OpenAI-compatible 网关在 `stream_options.include_usage = true` 时会用
+  `choices: []` 的最终 chunk 返回 usage。
+- 旧实现会在 finish_reason chunk 先完成 stream，然后直接丢掉后续 usage chunk，导致 token 统计和缓存命中
+  统计不准。
+- 用户明确关心国产模型成本和缓存命中率，这类 usage 映射属于 provider adapter 的基础可靠性。
+
+后续风险：
+
+- 还需要继续抓/整理真实 DeepSeek、Anthropic-compatible、OpenAI-compatible fixture，校准 tool call
+  delta、reasoning/thinking、provider-specific request body 字段和错误恢复。
+- 需要评估是否增加显式 provider config，用于 omit 某些国内网关不兼容的 chat-completions 字段，例如
+  `parallel_tool_calls` 或 `stream_options`。
+
 ## 最近完成的 core-plugins remote guard slice
 
 本轮完成的代码 slice：
@@ -964,6 +1004,9 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
 - `CARGO_INCREMENTAL=0 cargo check --tests -p codex-core-plugins -p codex-app-server`
 - `CARGO_INCREMENTAL=0 just test -p codex-core-plugins control_plane_disabled`
 - `CARGO_INCREMENTAL=0 just test -p codex-app-server plugin_read_rejects_remote_marketplace_when_plugins_are_disabled`
+- `CARGO_INCREMENTAL=0 cargo check --tests -p codex-api`
+- `CARGO_INCREMENTAL=0 just test -p codex-api chat_completions`
+- `CARGO_INCREMENTAL=0 just test -p codex-api chat_stream_merges_finish_reason_with_empty_choices_usage_chunk`
 - 旧 ChatGPT refresh 符号窄范围搜索：`codex-rs/login` 与 app-server auth 测试无命中。
 - `git diff --check`
 
