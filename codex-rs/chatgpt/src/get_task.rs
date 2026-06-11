@@ -1,7 +1,4 @@
-use codex_core::config::Config;
 use serde::Deserialize;
-
-use crate::chatgpt_client::chatgpt_get_request;
 
 #[derive(Debug, Deserialize)]
 pub struct GetTaskResponse {
@@ -32,9 +29,4 @@ pub struct PrOutputItem {
 #[derive(Debug, Deserialize)]
 pub struct OutputDiff {
     pub diff: String,
-}
-
-pub(crate) async fn get_task(config: &Config, task_id: String) -> anyhow::Result<GetTaskResponse> {
-    let path = format!("/wham/tasks/{task_id}");
-    chatgpt_get_request(config, path).await
 }

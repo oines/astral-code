@@ -2289,7 +2289,6 @@ dependencies = [
  "codex-core-plugins",
  "codex-git-utils",
  "codex-login",
- "codex-model-provider",
  "codex-plugin",
  "codex-utils-cargo-bin",
  "codex-utils-cli",

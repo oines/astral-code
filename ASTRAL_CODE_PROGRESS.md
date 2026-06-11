@@ -1,6 +1,6 @@
 # Astral-Code 项目总控记录
 
-最后更新：2026-06-11 15:48 CST
+最后更新：2026-06-11 16:05 CST
 
 这份文档是 Astral-Code 长线改造的中文 handoff。它的用途不是对外宣传，而是让后续任何一次
 compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道：我们到底要做什么、为什么这么做、
@@ -34,9 +34,9 @@ provider 去 OpenAI 默认路由、登录态清理、cloud-config/cloud-tasks �
 - Provider-neutral Agent IR / Anthropic Messages / chat completions：仍是后续核心大块工作。
 - 全量 CI：当前不追求全绿，用户明确要求先推进实现，最后集中测试集中修。
 
-当前最新 slice：`codex-rs/memories/write` 不再通过 ChatGPT/Codex hosted backend 查询 startup
-rate limit，也不再直接依赖 `codex-backend-client`。下一步继续清理 `chatgpt_client/get_task` 或
-app-server/core-plugins remote plugin 控制面。
+当前最新 slice：`codex-rs/chatgpt` 不再包含 legacy ChatGPT task HTTP client；旧 `apply` 入口会明确
+返回 unsupported，本地 diff apply helper 仍保留给 fixture/解析测试。下一步继续清理
+app-server/core-plugins remote plugin 控制面或 core config 中残留的 `chatgpt_base_url`。
 
 ## 项目身份
 
@@ -536,6 +536,45 @@ account 或 OpenAI-only plugin 分发的代码，都需要删除、禁用或隔�
 - `just bazel-lock-check` 当前在本机失败，原因是 Unix 包装脚本
   `.github/scripts/run_bazel_with_buildbuddy.py` 使用了 Python 3.10+ 的 `type | None` 语法，但系统
   `python3` 是 3.9.6。直接运行核心 Bazel lock 校验命令已通过，`MODULE.bazel.lock` 没有 diff。
+
+## 最近完成的 ChatGPT task fetch slice
+
+本轮完成的代码 slice：
+
+> 删除 `codex-chatgpt` 里 legacy ChatGPT task fetch 的 authenticated HTTP client。
+
+已编辑文件：
+
+- `codex-rs/chatgpt/src/chatgpt_client.rs`
+- `codex-rs/chatgpt/src/lib.rs`
+- `codex-rs/chatgpt/src/get_task.rs`
+- `codex-rs/chatgpt/src/apply_command.rs`
+- `codex-rs/chatgpt/Cargo.toml`
+- `codex-rs/Cargo.lock`
+
+改动内容：
+
+- 删除 `chatgpt_client` 模块。
+- 删除 `chatgpt_get_request(...)` / `chatgpt_get_request_with_timeout(...)`。
+- `get_task.rs` 只保留 task response/diff 解析类型，不再构造 `/wham/tasks/{task_id}` 请求。
+- `run_apply_command(...)` 对 legacy ChatGPT task apply 明确返回 unsupported。
+- `apply_diff_from_task(...)` 保留，用于本地 fixture 和后续可能的 provider-neutral task/diff 数据输入。
+- 从 `codex-chatgpt` 直接依赖中移除 `codex-model-provider`，因为它只服务于旧 ChatGPT auth header。
+
+为什么要做：
+
+- Astral 不再支持通过 ChatGPT hosted `/wham/tasks/...` 拉取 Codex task。
+- 旧路径依赖 ChatGPT backend auth、`OAI-Product-Sku` 和 OpenAI provider auth header，不适合
+  provider-neutral 项目。
+- 保留本地 diff apply helper 可以避免把有用的 patch 应用逻辑和旧网络控制面绑死。
+
+验证：
+
+- `just fmt`
+- `cargo check --tests -p codex-chatgpt`
+- `just test -p codex-chatgpt`：6 passed / 0 skipped
+- `just bazel-lock-update`
+- `bazel mod deps --lockfile_mode=error`
 
 ## 最近完成的 account slice
 
