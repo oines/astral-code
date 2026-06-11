@@ -68,7 +68,6 @@ fn is_connector_id_allowed(connector_id: &str, first_party_chat_originator: bool
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::metadata::connector_install_url;
     use pretty_assertions::assert_eq;
 
     fn app(id: &str) -> AppInfo {
@@ -93,7 +92,6 @@ mod tests {
         AppInfo {
             id: id.to_string(),
             name: name.to_string(),
-            install_url: Some(connector_install_url(name, id)),
             ..app(id)
         }
     }

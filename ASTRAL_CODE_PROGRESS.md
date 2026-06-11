@@ -55,6 +55,11 @@ metrics exporter 现在是 `none`，旧配置里显式写 `statsig` 也会在 `c
 最新补充 2：`astral exec-server --remote` 不再暴露旧的 `--use-agent-identity-auth` flag。远程
 exec-server 注册继续只允许 API-key auth，Agent Identity / ChatGPT / PAT 路径保持禁用。
 
+最新补充 3：connectors/apps 的内部 cache key 已从 `chatgpt_base_url` 收敛为 `hosted_base_url`；
+同时删除了缺省 `https://chatgpt.com/apps/...` 安装链接 fallback。Astral 现在只保留 connector 自带的显式
+`install_url`，没有 provider-neutral app directory 时不会自动生成 ChatGPT 安装链接，也不会触发 ChatGPT
+auth elicitation 安装引导。
+
 下一步优先继续处理 `chatgpt_base_url` 配置字段、Agent Identity auth/storage 残留、connectors/apps 和其他
 ChatGPT hosted 残留；provider adapter 方向则继续补 Anthropic/chat-completions fixture 和国内模型兼容选项。
 remote-control 主入口已经禁用，不再作为最高优先级，除非后续要把底层 `app-server-transport` 旧模块降级成独立
@@ -1145,8 +1150,8 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
 
 - `just test -p codex-model-provider` 全量仍有 Bedrock catalog 失败，因为 bundled `models.json`
   缺少 `gpt-5.5`。这和当前 Astral provider-neutral cleanup 无关。
-- `just test -p codex-app-server auth` 会额外匹配 plugin install/read 的 `needsAuth` 测试，这些测试仍按
-  旧 ChatGPT app auth 语义期待 `chatgpt.com/apps/...` 认证项。处理 plugin remote/control-plane 时再改。
+- 旧 ChatGPT app install URL fallback 已在 connectors/apps slice 中删除；如果后续
+  `just test -p codex-app-server auth` 仍失败，需要按当前 Astral disabled/local-only 语义重新审查具体断言。
 - 本机 `just bazel-lock-check` 的 Unix 包装脚本会调用
   `.github/scripts/run_bazel_with_buildbuddy.py`，该脚本使用 Python 3.10+ 的 `type | None` 注解语法；
   当前 `/usr/bin/python3` 是 3.9.6，会在真正执行 Bazel 前 TypeError。直接执行

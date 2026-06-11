@@ -617,14 +617,8 @@ async fn maybe_request_codex_apps_auth_elicitation(
 
     let connector_id = metadata.and_then(|metadata| metadata.connector_id.as_deref());
     let connector_name = metadata.and_then(|metadata| metadata.connector_name.as_deref());
-    let install_url = connector_id.map(|connector_id| {
-        codex_connectors::metadata::connector_install_url(
-            connector_name.unwrap_or(connector_id),
-            connector_id,
-        )
-    });
     let Some(plan) =
-        build_auth_elicitation_plan(call_id, &result, connector_id, connector_name, install_url)
+        build_auth_elicitation_plan(call_id, &result, connector_id, connector_name, None)
     else {
         return result;
     };

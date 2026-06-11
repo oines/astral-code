@@ -23,7 +23,7 @@ pub const CONNECTORS_CACHE_TTL: Duration = Duration::from_secs(3600);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConnectorDirectoryCacheKey {
-    chatgpt_base_url: String,
+    hosted_base_url: String,
     account_id: Option<String>,
     chatgpt_user_id: Option<String>,
     is_workspace_account: bool,
@@ -31,13 +31,13 @@ pub struct ConnectorDirectoryCacheKey {
 
 impl ConnectorDirectoryCacheKey {
     pub fn new(
-        chatgpt_base_url: String,
+        hosted_base_url: String,
         account_id: Option<String>,
         chatgpt_user_id: Option<String>,
         is_workspace_account: bool,
     ) -> Self {
         Self {
-            chatgpt_base_url,
+            hosted_base_url,
             account_id,
             chatgpt_user_id,
             is_workspace_account,
@@ -153,13 +153,8 @@ where
         .map(directory_app_to_app_info)
         .collect::<Vec<_>>();
     for connector in &mut connectors {
-        let install_url = match connector.install_url.take() {
-            Some(install_url) => install_url,
-            None => connector_install_url(&connector.name, &connector.id),
-        };
         connector.name = normalize_connector_name(&connector.name, &connector.id);
         connector.description = normalize_connector_value(connector.description.as_deref());
-        connector.install_url = Some(install_url);
         connector.is_accessible = false;
     }
     connectors.sort_by(|left, right| {
@@ -422,28 +417,6 @@ fn directory_app_to_app_info(app: DirectoryApp) -> AppInfo {
     }
 }
 
-fn connector_install_url(name: &str, connector_id: &str) -> String {
-    let slug = connector_name_slug(name);
-    format!("https://chatgpt.com/apps/{slug}/{connector_id}")
-}
-
-fn connector_name_slug(name: &str) -> String {
-    let mut normalized = String::with_capacity(name.len());
-    for character in name.chars() {
-        if character.is_ascii_alphanumeric() {
-            normalized.push(character.to_ascii_lowercase());
-        } else {
-            normalized.push('-');
-        }
-    }
-    let normalized = normalized.trim_matches('-');
-    if normalized.is_empty() {
-        "app".to_string()
-    } else {
-        normalized.to_string()
-    }
-}
-
 fn normalize_connector_name(name: &str, connector_id: &str) -> String {
     let trimmed = name.trim();
     if trimmed.is_empty() {
@@ -615,10 +588,7 @@ mod tests {
             connectors[0].description.as_deref(),
             Some("Merged description")
         );
-        assert_eq!(
-            connectors[0].install_url.as_deref(),
-            Some("https://chatgpt.com/apps/alpha/alpha")
-        );
+        assert_eq!(connectors[0].install_url.as_deref(), None);
         assert_eq!(
             connectors[0]
                 .branding
@@ -702,11 +672,7 @@ mod tests {
         .await?;
 
         clear_directory_memory_cache();
-        let mut cached_expected = directory_app_to_app_info(app("alpha", "Alpha"));
-        cached_expected.install_url = Some(connector_install_url(
-            &cached_expected.name,
-            &cached_expected.id,
-        ));
+        let cached_expected = directory_app_to_app_info(app("alpha", "Alpha"));
         assert_eq!(
             cached_directory_connectors(&cache_context),
             Some(vec![cached_expected])
@@ -730,8 +696,7 @@ mod tests {
         )
         .await?;
 
-        let mut expected = directory_app_to_app_info(app("beta", "Beta"));
-        expected.install_url = Some(connector_install_url(&expected.name, &expected.id));
+        let expected = directory_app_to_app_info(app("beta", "Beta"));
         assert_eq!(calls.load(Ordering::SeqCst), 2);
         assert_eq!(refreshed, vec![expected]);
         Ok(())
