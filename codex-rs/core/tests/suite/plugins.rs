@@ -103,13 +103,13 @@ async fn build_analytics_plugin_test_codex(
     server: &MockServer,
     codex_home: Arc<TempDir>,
 ) -> Result<TestCodex> {
-    let chatgpt_base_url = server.uri();
+    let hosted_base_url = server.uri();
     let mut builder = test_codex()
         .with_home(codex_home)
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_model("gpt-5.2")
         .with_config(move |config| {
-            config.chatgpt_base_url = chatgpt_base_url;
+            config.hosted_base_url = hosted_base_url;
         });
     Ok(builder
         .build(server)
@@ -120,7 +120,7 @@ async fn build_analytics_plugin_test_codex(
 async fn build_apps_enabled_plugin_test_codex(
     server: &MockServer,
     codex_home: Arc<TempDir>,
-    chatgpt_base_url: String,
+    hosted_base_url: String,
 ) -> Result<TestCodex> {
     let mut builder = test_codex()
         .with_home(codex_home)
@@ -130,7 +130,7 @@ async fn build_apps_enabled_plugin_test_codex(
                 .features
                 .enable(Feature::Apps)
                 .expect("test config should allow feature update");
-            config.chatgpt_base_url = chatgpt_base_url;
+            config.hosted_base_url = hosted_base_url;
         });
     Ok(builder
         .build(server)
@@ -173,7 +173,7 @@ async fn capability_sections_render_in_developer_message_in_order() -> Result<()
     let test_codex = build_apps_enabled_plugin_test_codex(
         &server,
         Arc::clone(&codex_home),
-        apps_server.chatgpt_base_url,
+        apps_server.hosted_base_url,
     )
     .await?;
     let codex = Arc::clone(&test_codex.codex);
@@ -253,7 +253,7 @@ async fn explicit_plugin_mentions_inject_plugin_guidance() -> Result<()> {
     write_plugin_app_plugin(codex_home.as_ref());
 
     let test_codex =
-        build_apps_enabled_plugin_test_codex(&server, codex_home, apps_server.chatgpt_base_url)
+        build_apps_enabled_plugin_test_codex(&server, codex_home, apps_server.hosted_base_url)
             .await?;
     let codex = Arc::clone(&test_codex.codex);
     wait_for_mcp_server(&codex, "sample").await?;

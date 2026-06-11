@@ -563,7 +563,7 @@ impl PluginRequestProcessor {
             && !explicit_marketplace_kinds
             && config.features.enabled(Feature::RemotePlugin);
         let remote_plugin_service_config = RemotePluginServiceConfig {
-            hosted_base_url: config.chatgpt_base_url.clone(),
+            hosted_base_url: config.hosted_base_url.clone(),
         };
         let refresh_global_remote_catalog_cache = include_global_remote
             && codex_core_plugins::remote::has_cached_global_remote_plugin_catalog(
@@ -1012,7 +1012,7 @@ impl PluginRequestProcessor {
                     (true, Some(context)) => {
                         let auth = self.auth_manager.auth().await;
                         let remote_plugin_service_config = RemotePluginServiceConfig {
-                            hosted_base_url: config.chatgpt_base_url.clone(),
+                            hosted_base_url: config.hosted_base_url.clone(),
                         };
                         match codex_core_plugins::remote::fetch_remote_plugin_share_context(
                             &remote_plugin_service_config,
@@ -1120,7 +1120,7 @@ impl PluginRequestProcessor {
                 }
                 let auth = self.auth_manager.auth().await;
                 let remote_plugin_service_config = RemotePluginServiceConfig {
-                    hosted_base_url: config.chatgpt_base_url.clone(),
+                    hosted_base_url: config.hosted_base_url.clone(),
                 };
                 validate_remote_plugin_id(&plugin_name)?;
                 let remote_detail = codex_core_plugins::remote::fetch_remote_plugin_detail(
@@ -1183,7 +1183,7 @@ impl PluginRequestProcessor {
 
         let auth = self.auth_manager.auth().await;
         let remote_plugin_service_config = RemotePluginServiceConfig {
-            hosted_base_url: config.chatgpt_base_url.clone(),
+            hosted_base_url: config.hosted_base_url.clone(),
         };
         let remote_skill_detail = codex_core_plugins::remote::fetch_remote_plugin_skill_detail(
             &remote_plugin_service_config,
@@ -1239,7 +1239,7 @@ impl PluginRequestProcessor {
         }
 
         let remote_plugin_service_config = RemotePluginServiceConfig {
-            hosted_base_url: config.chatgpt_base_url.clone(),
+            hosted_base_url: config.hosted_base_url.clone(),
         };
         let access_policy = codex_core_plugins::remote::RemotePluginShareAccessPolicy {
             discoverability: discoverability.map(remote_plugin_share_discoverability),
@@ -1285,7 +1285,7 @@ impl PluginRequestProcessor {
         validate_client_plugin_share_targets(&share_targets)?;
 
         let remote_plugin_service_config = RemotePluginServiceConfig {
-            hosted_base_url: config.chatgpt_base_url.clone(),
+            hosted_base_url: config.hosted_base_url.clone(),
         };
         let result = codex_core_plugins::remote::update_remote_plugin_share_targets(
             &remote_plugin_service_config,
@@ -1318,7 +1318,7 @@ impl PluginRequestProcessor {
         }
         let (config, auth) = self.load_plugin_share_config_and_auth().await?;
         let remote_plugin_service_config = RemotePluginServiceConfig {
-            hosted_base_url: config.chatgpt_base_url.clone(),
+            hosted_base_url: config.hosted_base_url.clone(),
         };
         let data = codex_core_plugins::remote::list_remote_plugin_shares(
             &remote_plugin_service_config,
@@ -1360,7 +1360,7 @@ impl PluginRequestProcessor {
         }
 
         let remote_plugin_service_config = RemotePluginServiceConfig {
-            hosted_base_url: config.chatgpt_base_url.clone(),
+            hosted_base_url: config.hosted_base_url.clone(),
         };
         let result = codex_core_plugins::remote::checkout_remote_plugin_share(
             &remote_plugin_service_config,
@@ -1396,7 +1396,7 @@ impl PluginRequestProcessor {
         }
 
         let remote_plugin_service_config = RemotePluginServiceConfig {
-            hosted_base_url: config.chatgpt_base_url.clone(),
+            hosted_base_url: config.hosted_base_url.clone(),
         };
         codex_core_plugins::remote::delete_remote_plugin_share(
             &remote_plugin_service_config,
@@ -1515,7 +1515,7 @@ impl PluginRequestProcessor {
 
         let auth = self.auth_manager.auth().await;
         let remote_plugin_service_config = RemotePluginServiceConfig {
-            hosted_base_url: config.chatgpt_base_url.clone(),
+            hosted_base_url: config.hosted_base_url.clone(),
         };
         let remote_detail =
             codex_core_plugins::remote::fetch_remote_plugin_detail_with_download_urls(
@@ -1859,7 +1859,7 @@ impl PluginRequestProcessor {
 
         let auth = self.auth_manager.auth().await;
         let remote_plugin_service_config = RemotePluginServiceConfig {
-            hosted_base_url: config.chatgpt_base_url.clone(),
+            hosted_base_url: config.hosted_base_url.clone(),
         };
         let uninstall_result = codex_core_plugins::remote::uninstall_remote_plugin(
             &remote_plugin_service_config,

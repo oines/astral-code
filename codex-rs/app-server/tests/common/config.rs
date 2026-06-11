@@ -79,10 +79,10 @@ model_provider = "{model_provider_id}"
     )
 }
 
-pub fn write_mock_responses_config_toml_with_chatgpt_base_url(
+pub fn write_mock_responses_config_toml_with_hosted_base_url(
     codex_home: &Path,
     server_uri: &str,
-    chatgpt_base_url: &str,
+    hosted_base_url: &str,
 ) -> std::io::Result<()> {
     let config_toml = codex_home.join("config.toml");
     std::fs::write(
@@ -92,7 +92,7 @@ pub fn write_mock_responses_config_toml_with_chatgpt_base_url(
 model = "mock-model"
 approval_policy = "never"
 sandbox_mode = "read-only"
-chatgpt_base_url = "{chatgpt_base_url}"
+hosted_base_url = "{hosted_base_url}"
 
 model_provider = "mock_provider"
 

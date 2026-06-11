@@ -384,9 +384,6 @@
         "approvals_reviewer": {
           "$ref": "#/definitions/ApprovalsReviewer"
         },
-        "chatgpt_base_url": {
-          "type": "string"
-        },
         "experimental_compact_prompt_file": {
           "$ref": "#/definitions/AbsolutePathBuf"
         },
@@ -664,6 +661,9 @@
             }
           },
           "type": "object"
+        },
+        "hosted_base_url": {
+          "type": "string"
         },
         "include_apps_instructions": {
           "type": "boolean"
@@ -4431,10 +4431,6 @@
       "minimum": 0.0,
       "type": "integer"
     },
-    "chatgpt_base_url": {
-      "description": "Base URL for requests to ChatGPT (as opposed to the OpenAI API).",
-      "type": "string"
-    },
     "check_for_update_on_startup": {
       "description": "When `true`, checks for Codex updates on startup and surfaces update prompts. Set to `false` only if your Codex updates are centrally managed. Defaults to `true`.",
       "type": "boolean"
@@ -4838,6 +4834,10 @@
         }
       ],
       "description": "Lifecycle hooks configured inline in TOML plus user-level overrides."
+    },
+    "hosted_base_url": {
+      "description": "Base URL for hosted Astral apps/plugins control-plane requests.",
+      "type": "string"
     },
     "include_apps_instructions": {
       "description": "Whether to inject the `<apps_instructions>` developer block.",

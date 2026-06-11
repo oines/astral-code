@@ -59,7 +59,7 @@ fn write_plugins_enabled_config_with_base_url(
     std::fs::write(
         codex_home.join("config.toml"),
         format!(
-            r#"chatgpt_base_url = "{base_url}"
+            r#"hosted_base_url = "{base_url}"
 
 [features]
 plugins = true
@@ -190,7 +190,7 @@ async fn plugin_installed_prefers_remote_curated_conflicts_when_remote_plugin_en
     std::fs::write(
         codex_home.path().join("config.toml"),
         format!(
-            r#"chatgpt_base_url = "{}/backend-api/"
+            r#"hosted_base_url = "{}/backend-api/"
 
 [features]
 plugins = true
@@ -2256,7 +2256,7 @@ async fn plugin_installed_includes_remote_shared_with_me_plugins() -> Result<()>
     std::fs::write(
         codex_home.path().join("config.toml"),
         format!(
-            r#"chatgpt_base_url = "{}/backend-api/"
+            r#"hosted_base_url = "{}/backend-api/"
 
 [features]
 plugins = true
@@ -2357,7 +2357,7 @@ async fn plugin_installed_skips_remote_fetch_when_control_plane_disabled() -> Re
     std::fs::write(
         codex_home.path().join("config.toml"),
         format!(
-            r#"chatgpt_base_url = "{}/backend-api/"
+            r#"hosted_base_url = "{}/backend-api/"
 
 [features]
 plugins = true
@@ -2718,7 +2718,7 @@ async fn plugin_list_omits_shared_with_me_kind_when_plugin_sharing_disabled() ->
     std::fs::write(
         codex_home.path().join("config.toml"),
         format!(
-            r#"chatgpt_base_url = "{}/backend-api/"
+            r#"hosted_base_url = "{}/backend-api/"
 
 [features]
 plugins = true
@@ -2913,7 +2913,7 @@ async fn plugin_list_does_not_fetch_remote_marketplaces_when_plugins_disabled() 
         codex_home.path().join("config.toml"),
         format!(
             r#"
-chatgpt_base_url = "{}/backend-api/"
+hosted_base_url = "{}/backend-api/"
 
 [features]
 plugins = false
@@ -3435,7 +3435,7 @@ fn write_plugin_sync_config(codex_home: &std::path::Path, base_url: &str) -> std
         codex_home.join("config.toml"),
         format!(
             r#"
-chatgpt_base_url = "{base_url}"
+hosted_base_url = "{base_url}"
 
 [features]
 plugins = true
@@ -3461,7 +3461,7 @@ fn write_remote_plugin_catalog_config(
         codex_home.join("config.toml"),
         format!(
             r#"
-chatgpt_base_url = "{base_url}"
+hosted_base_url = "{base_url}"
 
 [features]
 plugins = true

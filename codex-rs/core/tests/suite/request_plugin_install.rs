@@ -79,7 +79,7 @@ fn configure_apps_without_search_tool(config: &mut Config, apps_base_url: &str) 
         .iter_mut()
         .find(|model| model.slug == "gpt-5.4")
         .expect("gpt-5.4 exists in bundled models.json");
-    config.chatgpt_base_url = apps_base_url.to_string();
+    config.hosted_base_url = apps_base_url.to_string();
     config.model = Some("gpt-5.4".to_string());
     config.tool_suggest.discoverables = vec![ToolSuggestDiscoverable {
         kind: ToolSuggestDiscoverableType::Connector,
@@ -109,7 +109,7 @@ async fn request_plugin_install_is_available_without_search_tool_after_discovery
     let mut builder = test_codex()
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(move |config| {
-            configure_apps_without_search_tool(config, apps_server.chatgpt_base_url.as_str())
+            configure_apps_without_search_tool(config, apps_server.hosted_base_url.as_str())
         });
     let test = builder.build(&server).await?;
 

@@ -1,6 +1,6 @@
 # Astral-Code 项目总控记录
 
-最后更新：2026-06-11 21:22 CST
+最后更新：2026-06-11 21:37 CST
 
 这份文档是 Astral-Code 长线改造的中文 handoff。它的用途不是对外宣传，而是让后续任何一次
 compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道：我们到底要做什么、为什么这么做、
@@ -43,10 +43,9 @@ metrics exporter 现在是 `none`，旧配置里显式写 `statsig` 也会在 `c
 当前补充 slice：`feedback/upload` 真实上传链路此前已经硬禁用；本轮继续清理残留的 `/feedback`
 用户引导文案，避免 Astral 在错误消息、slash 描述或启动 tips 里暗示还能把日志上传给维护者。
 
-当前继续推进的 slice：`RemotePluginServiceConfig` 内部字段已从 `chatgpt_base_url` 收敛为
-`hosted_base_url`。这一步只改 remote plugin 服务内部的 hosted backend 概念，不迁移外层
-`Config.chatgpt_base_url` 和 schema；后者涉及插件、apps、测试 fixture 和旧 hosted backend 命名，需要后续
-单独分阶段拆。
+已完成的配置命名 slice：`chatgpt_base_url` 已从 Astral 用户可见配置、profile、schema、MCP config、
+plugin manager input、app-server 测试 helper 和 core 测试 fixture 中移除，统一收敛为 `hosted_base_url`。
+这是新项目语义，不提供旧 Codex 配置字段兼容。
 
 最新补充：Agent Identity 的 hosted 控制面此前已经硬禁用；本轮只把公开函数参数从
 `chatgpt_base_url` 改成 `hosted_base_url`，不改 JWT claim 里的 `chatgpt_user_id` /
@@ -100,8 +99,14 @@ OpenAI-compatible chat-completions adapter 现在都会把 `metadata.provider["f
 provider metadata 里的 JSON null，从而复用 adapter 的删除语义。这样 strict 国内 OpenAI-compatible 网关不需要
 vendor-specific 分支，也不需要用户在不可表达 null 的 TOML 里写绕路配置。
 
-下一步优先继续处理 `chatgpt_base_url` 配置字段、Agent Identity auth/storage 残留、connectors/apps 和其他
-ChatGPT hosted 残留；provider adapter 方向则继续补 Anthropic/chat-completions fixture 和国内模型兼容选项。
+最新补充 13：`codex-mcp` 的 hosted apps MCP URL 构造不再内置 ChatGPT 域名特例。Astral 不会再把
+`https://chatgpt.com` 或 `https://chat.openai.com` 自动补成 `/backend-api`；只有用户显式配置包含
+`/backend-api` 的 hosted backend 时才走旧 `wham/apps` path style。普通 hosted URL 默认走
+`/api/codex/apps`。
+
+下一步优先继续处理 Agent Identity auth/storage 残留、connectors/apps 里其他 ChatGPT hosted 残留和
+`codex-chatgpt` 相关 crate 边界；provider adapter 方向则继续补 Anthropic/chat-completions fixture 和国内模型
+兼容选项。
 remote-control 主入口已经禁用，不再作为最高优先级，除非后续要把底层 `app-server-transport` 旧模块降级成独立
 stub 或删除。
 当前明确口径：标准 OpenAI API 指 `/v1/chat/completions`，不是旧 `/v1/completions`；Anthropic 路线是

@@ -215,7 +215,7 @@ async fn load_config_does_not_default_to_chatgpt_backend() -> std::io::Result<()
     )
     .await?;
 
-    assert_eq!(config.chatgpt_base_url, "");
+    assert_eq!(config.hosted_base_url, "");
     Ok(())
 }
 

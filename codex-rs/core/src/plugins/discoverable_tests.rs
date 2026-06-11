@@ -318,12 +318,12 @@ remote_plugin = true
 
     let auth = CodexAuth::create_dummy_chatgpt_auth_for_testing();
     let mut config = load_plugins_config(codex_home.path()).await;
-    config.chatgpt_base_url = format!("{}/backend-api", server.uri());
+    config.hosted_base_url = format!("{}/backend-api", server.uri());
     let plugins_manager = PluginsManager::new(config.codex_home.to_path_buf());
     fetch_and_cache_global_remote_plugin_catalog(
         codex_home.path(),
         &RemotePluginServiceConfig {
-            hosted_base_url: config.chatgpt_base_url.clone(),
+            hosted_base_url: config.hosted_base_url.clone(),
         },
         Some(&auth),
     )
@@ -414,7 +414,7 @@ disabled_tools = [
 "#,
     );
     let mut config_with_disabled_remote_plugin = load_plugins_config(codex_home.path()).await;
-    config_with_disabled_remote_plugin.chatgpt_base_url = config.chatgpt_base_url.clone();
+    config_with_disabled_remote_plugin.hosted_base_url = config.hosted_base_url.clone();
     let discoverable_plugins = list_discoverable_plugins_with_manager_and_auth(
         &config_with_disabled_remote_plugin,
         &plugins_manager,

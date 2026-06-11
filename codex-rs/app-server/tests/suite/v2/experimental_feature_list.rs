@@ -108,7 +108,7 @@ async fn experimental_feature_list_ignores_openai_workspace_plugin_policy() -> R
     std::fs::write(
         codex_home.path().join("config.toml"),
         format!(
-            r#"chatgpt_base_url = "{}/backend-api/"
+            r#"hosted_base_url = "{}/backend-api/"
 "#,
             server.uri()
         ),

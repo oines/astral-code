@@ -208,6 +208,7 @@ fn model_provider_to_proto(
         wire_api,
         query_params,
         request_body: _,
+        request_body_remove: _,
         http_headers,
         env_http_headers,
         request_max_retries,

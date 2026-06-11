@@ -14,7 +14,7 @@ use std::path::PathBuf;
 
 fn test_mcp_config(codex_home: PathBuf) -> McpConfig {
     McpConfig {
-        chatgpt_base_url: "https://chatgpt.com".to_string(),
+        hosted_base_url: "https://hosted.example".to_string(),
         apps_mcp_path_override: None,
         apps_mcp_product_sku: None,
         codex_home,
@@ -177,17 +177,17 @@ fn tool_plugin_provenance_collects_app_and_mcp_sources() {
 fn codex_apps_mcp_url_for_base_url_keeps_existing_paths() {
     assert_eq!(
         codex_apps_mcp_url_for_base_url(
-            "https://chatgpt.com/backend-api",
+            "https://hosted.example/backend-api",
             /*apps_mcp_path_override*/ None,
         ),
-        "https://chatgpt.com/backend-api/wham/apps"
+        "https://hosted.example/backend-api/wham/apps"
     );
     assert_eq!(
         codex_apps_mcp_url_for_base_url(
-            "https://chat.openai.com",
+            "https://hosted.example",
             /*apps_mcp_path_override*/ None,
         ),
-        "https://chat.openai.com/backend-api/wham/apps"
+        "https://hosted.example/api/codex/apps"
     );
     assert_eq!(
         codex_apps_mcp_url_for_base_url(

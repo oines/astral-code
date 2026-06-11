@@ -132,8 +132,8 @@ async fn approved_mcp_tool_call_metadata_records_prior_user_input_request() -> R
     )
     .await;
 
-    let mut builder = search_capable_apps_builder(apps_server.chatgpt_base_url.clone())
-        .with_config(|config| {
+    let mut builder =
+        search_capable_apps_builder(apps_server.hosted_base_url.clone()).with_config(|config| {
             config
                 .features
                 .enable(Feature::ToolCallMcpElicitation)
@@ -252,8 +252,8 @@ async fn mcp_tool_call_metadata_records_prior_request_user_input_tool() -> Resul
     )
     .await;
 
-    let mut builder = search_capable_apps_builder(apps_server.chatgpt_base_url.clone())
-        .with_config(|config| {
+    let mut builder =
+        search_capable_apps_builder(apps_server.hosted_base_url.clone()).with_config(|config| {
             set_calendar_approval_mode(config, AppToolApproval::Approve);
         });
     let test = builder.build(&server).await?;

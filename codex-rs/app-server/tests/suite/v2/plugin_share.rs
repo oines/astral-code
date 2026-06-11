@@ -340,7 +340,7 @@ async fn plugin_share_save_rejects_when_plugin_sharing_disabled() -> Result<()> 
         codex_home.path().join("config.toml"),
         format!(
             r#"
-chatgpt_base_url = "{}/backend-api"
+hosted_base_url = "{}/backend-api"
 
 [features]
 plugins = true
@@ -1046,7 +1046,7 @@ async fn plugin_share_update_targets_rejects_when_plugin_sharing_disabled() -> R
         codex_home.path().join("config.toml"),
         format!(
             r#"
-chatgpt_base_url = "{}/backend-api"
+hosted_base_url = "{}/backend-api"
 
 [features]
 plugins = true
@@ -1200,7 +1200,7 @@ fn write_remote_plugin_config(codex_home: &Path, base_url: &str) -> std::io::Res
         codex_home.join("config.toml"),
         format!(
             r#"
-chatgpt_base_url = "{base_url}"
+hosted_base_url = "{base_url}"
 
 [features]
 plugins = true

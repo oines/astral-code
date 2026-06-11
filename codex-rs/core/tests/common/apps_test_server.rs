@@ -49,7 +49,7 @@ pub const DOCUMENT_EXTRACT_TEXT_RESOURCE_URI: &str =
 
 #[derive(Clone)]
 pub struct AppsTestServer {
-    pub chatgpt_base_url: String,
+    pub hosted_base_url: String,
 }
 
 #[derive(Clone, Copy)]
@@ -75,7 +75,7 @@ impl AppsTestServer {
         )
         .await;
         Ok(Self {
-            chatgpt_base_url: server.uri(),
+            hosted_base_url: server.uri(),
         })
     }
 
@@ -94,7 +94,7 @@ impl AppsTestServer {
         )
         .await;
         Ok(Self {
-            chatgpt_base_url: server.uri(),
+            hosted_base_url: server.uri(),
         })
     }
 
@@ -113,7 +113,7 @@ impl AppsTestServer {
         )
         .await;
         Ok(Self {
-            chatgpt_base_url: server.uri(),
+            hosted_base_url: server.uri(),
         })
     }
 }
@@ -136,7 +136,7 @@ fn configure_apps(config: &mut Config, apps_base_url: &str) {
         .features
         .enable(Feature::Apps)
         .expect("test config should allow feature update");
-    config.chatgpt_base_url = apps_base_url.to_string();
+    config.hosted_base_url = apps_base_url.to_string();
 }
 
 pub fn configure_search_capable_apps(config: &mut Config, apps_base_url: &str) {

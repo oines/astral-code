@@ -2801,7 +2801,7 @@ async fn approve_mode_skips_guardian_in_every_permission_mode() {
             .set(approval_policy)
             .expect("test setup should allow updating approval policy");
         let mut config = (*turn_context.config).clone();
-        config.chatgpt_base_url = server.uri();
+        config.hosted_base_url = server.uri();
         config.model_provider.base_url = Some(format!("{}/v1", server.uri()));
         config.approvals_reviewer = ApprovalsReviewer::User;
         let config = Arc::new(config);

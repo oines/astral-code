@@ -928,8 +928,8 @@ pub struct Config {
     /// Optional verbosity control for GPT-5 models (Responses API `text.verbosity`).
     pub model_verbosity: Option<Verbosity>,
 
-    /// Deprecated legacy base URL for ChatGPT-hosted control-plane requests.
-    pub chatgpt_base_url: String,
+    /// Base URL for hosted Astral apps/plugins control-plane requests.
+    pub hosted_base_url: String,
 
     /// Optional path override for the host-owned apps MCP server.
     pub apps_mcp_path_override: Option<String>,
@@ -1360,7 +1360,7 @@ impl Config {
             self.config_layer_stack.clone(),
             self.features.enabled(Feature::Plugins),
             /*remote_plugin_enabled*/ false,
-            self.chatgpt_base_url.clone(),
+            self.hosted_base_url.clone(),
         )
     }
 
@@ -1401,7 +1401,7 @@ impl Config {
             .retain(|server_name, _| configured_mcp_servers.contains_key(server_name));
 
         McpConfig {
-            chatgpt_base_url: self.chatgpt_base_url.clone(),
+            hosted_base_url: self.hosted_base_url.clone(),
             apps_mcp_path_override: self.apps_mcp_path_override.clone(),
             apps_mcp_product_sku: self.apps_mcp_product_sku.clone(),
             codex_home: self.codex_home.to_path_buf(),
@@ -3516,7 +3516,7 @@ impl Config {
             model_supports_reasoning_summaries: cfg.model_supports_reasoning_summaries,
             model_catalog,
             model_verbosity: cfg.model_verbosity,
-            chatgpt_base_url: cfg.chatgpt_base_url.unwrap_or_default(),
+            hosted_base_url: cfg.hosted_base_url.unwrap_or_default(),
             apps_mcp_path_override,
             apps_mcp_product_sku: cfg.apps_mcp_product_sku.clone(),
             realtime_audio: cfg

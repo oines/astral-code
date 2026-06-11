@@ -361,7 +361,7 @@ fn accessible_connectors_cache_key(
     let chatgpt_user_id = auth.and_then(CodexAuth::get_chatgpt_user_id);
     let is_workspace_account = auth.is_some_and(CodexAuth::is_workspace_account);
     AccessibleConnectorsCacheKey {
-        hosted_base_url: config.chatgpt_base_url.clone(),
+        hosted_base_url: config.hosted_base_url.clone(),
         account_id,
         chatgpt_user_id,
         is_workspace_account,

@@ -441,7 +441,7 @@ async fn thread_start_tracks_thread_initialized_analytics() -> Result<()> {
     let server = create_mock_responses_server_repeating_assistant("Done").await;
 
     let codex_home = TempDir::new()?;
-    create_config_toml_with_chatgpt_base_url(codex_home.path(), &server.uri(), &server.uri())?;
+    create_config_toml_with_hosted_base_url(codex_home.path(), &server.uri(), &server.uri())?;
     mount_analytics_capture(&server, codex_home.path()).await?;
 
     let mut mcp = TestAppServer::new_without_managed_config(codex_home.path()).await?;
@@ -1083,10 +1083,10 @@ stream_max_retries = 0
     )
 }
 
-fn create_config_toml_with_chatgpt_base_url(
+fn create_config_toml_with_hosted_base_url(
     codex_home: &Path,
     server_uri: &str,
-    chatgpt_base_url: &str,
+    hosted_base_url: &str,
 ) -> std::io::Result<()> {
     let config_toml = codex_home.join("config.toml");
     std::fs::write(
@@ -1096,7 +1096,7 @@ fn create_config_toml_with_chatgpt_base_url(
 model = "mock-model"
 approval_policy = "never"
 sandbox_mode = "read-only"
-chatgpt_base_url = "{chatgpt_base_url}"
+hosted_base_url = "{hosted_base_url}"
 
 model_provider = "mock_provider"
 

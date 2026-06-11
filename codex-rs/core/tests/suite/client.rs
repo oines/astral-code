@@ -1238,7 +1238,7 @@ async fn includes_apps_guidance_as_developer_message_for_chatgpt_auth() {
     let apps_server = AppsTestServer::mount(&server)
         .await
         .expect("mount apps MCP mock");
-    let apps_base_url = apps_server.chatgpt_base_url.clone();
+    let apps_base_url = apps_server.hosted_base_url.clone();
 
     let resp_mock = mount_sse_once(
         &server,
@@ -1253,7 +1253,7 @@ async fn includes_apps_guidance_as_developer_message_for_chatgpt_auth() {
                 .features
                 .enable(Feature::Apps)
                 .expect("test config should allow feature update");
-            config.chatgpt_base_url = apps_base_url;
+            config.hosted_base_url = apps_base_url;
         });
     let codex = builder
         .build(&server)
@@ -1301,7 +1301,7 @@ async fn omits_apps_guidance_for_api_key_auth_even_when_feature_enabled() {
     let apps_server = AppsTestServer::mount(&server)
         .await
         .expect("mount apps MCP mock");
-    let apps_base_url = apps_server.chatgpt_base_url.clone();
+    let apps_base_url = apps_server.hosted_base_url.clone();
 
     let resp_mock = mount_sse_once(
         &server,
@@ -1316,7 +1316,7 @@ async fn omits_apps_guidance_for_api_key_auth_even_when_feature_enabled() {
                 .features
                 .enable(Feature::Apps)
                 .expect("test config should allow feature update");
-            config.chatgpt_base_url = apps_base_url;
+            config.hosted_base_url = apps_base_url;
         });
     let codex = builder
         .build(&server)
@@ -1359,7 +1359,7 @@ async fn omits_apps_guidance_when_configured_off() {
     let apps_server = AppsTestServer::mount(&server)
         .await
         .expect("mount apps MCP mock");
-    let apps_base_url = apps_server.chatgpt_base_url.clone();
+    let apps_base_url = apps_server.hosted_base_url.clone();
 
     let resp_mock = mount_sse_once(
         &server,
@@ -1374,7 +1374,7 @@ async fn omits_apps_guidance_when_configured_off() {
                 .features
                 .enable(Feature::Apps)
                 .expect("test config should allow feature update");
-            config.chatgpt_base_url = apps_base_url;
+            config.hosted_base_url = apps_base_url;
             config.include_apps_instructions = false;
         });
     let codex = builder

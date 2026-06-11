@@ -471,7 +471,7 @@ approval_policy = "untrusted"
 sandbox_mode = "read-only"
 
 model_provider = "mock_provider"
-chatgpt_base_url = "{apps_server_url}"
+hosted_base_url = "{apps_server_url}"
 mcp_oauth_credentials_store = "file"
 
 [features]

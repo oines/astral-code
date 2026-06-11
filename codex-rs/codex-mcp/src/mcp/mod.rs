@@ -104,8 +104,8 @@ pub struct McpPermissionPromptAutoApproveContext {
 /// do not go stale when auth changes.
 #[derive(Debug, Clone)]
 pub struct McpConfig {
-    /// Base URL for ChatGPT-hosted app MCP servers, copied from the root config.
-    pub chatgpt_base_url: String,
+    /// Base URL for hosted app MCP servers, copied from the root config.
+    pub hosted_base_url: String,
     /// Optional path override for the host-owned apps MCP server.
     pub apps_mcp_path_override: Option<String>,
     /// Optional product SKU forwarded to the host-owned apps MCP server.
@@ -383,7 +383,7 @@ pub async fn collect_mcp_server_status_snapshot_with_detail(
 
 pub(crate) fn codex_apps_mcp_url(config: &McpConfig) -> String {
     codex_apps_mcp_url_for_base_url(
-        &config.chatgpt_base_url,
+        &config.hosted_base_url,
         config.apps_mcp_path_override.as_deref(),
     )
 }
@@ -417,19 +417,8 @@ fn codex_apps_mcp_bearer_token_env_var() -> Option<String> {
     }
 }
 
-fn normalize_codex_apps_base_url(base_url: &str) -> String {
-    let mut base_url = base_url.trim_end_matches('/').to_string();
-    if (base_url.starts_with("https://chatgpt.com")
-        || base_url.starts_with("https://chat.openai.com"))
-        && !base_url.contains("/backend-api")
-    {
-        base_url = format!("{base_url}/backend-api");
-    }
-    base_url
-}
-
 fn codex_apps_mcp_url_for_base_url(base_url: &str, apps_mcp_path_override: Option<&str>) -> String {
-    let base_url = normalize_codex_apps_base_url(base_url);
+    let base_url = base_url.trim_end_matches('/').to_string();
     let (base_url, default_path) = if base_url.contains("/backend-api") {
         (base_url, "wham/apps")
     } else if base_url.contains("/api/codex") {

@@ -7,7 +7,7 @@ use app_test_support::TestAppServer;
 use app_test_support::create_mock_responses_server_repeating_assistant;
 use app_test_support::to_response;
 use app_test_support::write_chatgpt_auth;
-use app_test_support::write_mock_responses_config_toml_with_chatgpt_base_url;
+use app_test_support::write_mock_responses_config_toml_with_hosted_base_url;
 use codex_app_server_protocol::JSONRPCResponse;
 use codex_app_server_protocol::PluginListParams;
 use codex_app_server_protocol::PluginListResponse;
@@ -67,7 +67,7 @@ fn write_plugins_enabled_config_with_base_url(
     std::fs::write(
         codex_home.join("config.toml"),
         format!(
-            r#"chatgpt_base_url = "{base_url}"
+            r#"hosted_base_url = "{base_url}"
 
 [features]
 plugins = true
@@ -83,7 +83,7 @@ fn write_remote_plugins_enabled_config_with_base_url(
     std::fs::write(
         codex_home.join("config.toml"),
         format!(
-            r#"chatgpt_base_url = "{base_url}"
+            r#"hosted_base_url = "{base_url}"
 
 [features]
 plugins = true
@@ -720,7 +720,7 @@ async fn skills_extra_roots_set_updates_process_runtime_roots() -> Result<()> {
 async fn skills_changed_notification_is_emitted_after_skill_change() -> Result<()> {
     let server = create_mock_responses_server_repeating_assistant("Done").await;
     let codex_home = TempDir::new()?;
-    write_mock_responses_config_toml_with_chatgpt_base_url(
+    write_mock_responses_config_toml_with_hosted_base_url(
         codex_home.path(),
         &server.uri(),
         &server.uri(),

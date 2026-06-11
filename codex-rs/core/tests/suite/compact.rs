@@ -3428,12 +3428,12 @@ async fn auto_compact_counts_encrypted_reasoning_before_last_user() {
         ],
     )
     .await;
-    let chatgpt_base_url = format!("{}/backend-api", server.uri());
+    let hosted_base_url = format!("{}/backend-api", server.uri());
 
     let codex = test_codex()
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(move |config| {
-            config.chatgpt_base_url = chatgpt_base_url;
+            config.hosted_base_url = hosted_base_url;
             set_test_compact_prompt(config);
             config.model_auto_compact_token_limit = Some(300);
         })

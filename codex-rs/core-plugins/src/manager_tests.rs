@@ -2912,7 +2912,7 @@ plugins = true
 
     let server = MockServer::start().await;
     let mut config = load_config(tmp.path(), tmp.path()).await;
-    config.chatgpt_base_url = format!("{}/backend-api/", server.uri());
+    config.hosted_base_url = format!("{}/backend-api/", server.uri());
     let manager = PluginsManager::new_with_restriction_product(
         tmp.path().to_path_buf(),
         Some(Product::Chatgpt),
