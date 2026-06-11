@@ -928,7 +928,7 @@ pub struct Config {
     /// Optional verbosity control for GPT-5 models (Responses API `text.verbosity`).
     pub model_verbosity: Option<Verbosity>,
 
-    /// Base URL for requests to ChatGPT (as opposed to the OpenAI API).
+    /// Deprecated legacy base URL for ChatGPT-hosted control-plane requests.
     pub chatgpt_base_url: String,
 
     /// Optional path override for the host-owned apps MCP server.
@@ -3516,9 +3516,7 @@ impl Config {
             model_supports_reasoning_summaries: cfg.model_supports_reasoning_summaries,
             model_catalog,
             model_verbosity: cfg.model_verbosity,
-            chatgpt_base_url: cfg
-                .chatgpt_base_url
-                .unwrap_or("https://chatgpt.com/backend-api/".to_string()),
+            chatgpt_base_url: cfg.chatgpt_base_url.unwrap_or_default(),
             apps_mcp_path_override,
             apps_mcp_product_sku: cfg.apps_mcp_product_sku.clone(),
             realtime_audio: cfg

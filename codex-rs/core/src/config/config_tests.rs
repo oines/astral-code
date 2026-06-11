@@ -206,6 +206,20 @@ async fn load_config_normalizes_relative_cwd_override() -> std::io::Result<()> {
 }
 
 #[tokio::test]
+async fn load_config_does_not_default_to_chatgpt_backend() -> std::io::Result<()> {
+    let codex_home = tempdir()?;
+    let config = Config::load_from_base_config_with_overrides(
+        ConfigToml::default(),
+        ConfigOverrides::default(),
+        codex_home.abs(),
+    )
+    .await?;
+
+    assert_eq!(config.chatgpt_base_url, "");
+    Ok(())
+}
+
+#[tokio::test]
 async fn load_config_loads_global_agents_instructions() -> std::io::Result<()> {
     let codex_home = tempdir()?;
     let global_agents_path = codex_home.abs().join(DEFAULT_AGENTS_MD_FILENAME);

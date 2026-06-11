@@ -1,6 +1,6 @@
 # Astral-Code 项目总控记录
 
-最后更新：2026-06-11 16:05 CST
+最后更新：2026-06-11 16:16 CST
 
 这份文档是 Astral-Code 长线改造的中文 handoff。它的用途不是对外宣传，而是让后续任何一次
 compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道：我们到底要做什么、为什么这么做、
@@ -34,9 +34,9 @@ provider 去 OpenAI 默认路由、登录态清理、cloud-config/cloud-tasks �
 - Provider-neutral Agent IR / Anthropic Messages / chat completions：仍是后续核心大块工作。
 - 全量 CI：当前不追求全绿，用户明确要求先推进实现，最后集中测试集中修。
 
-当前最新 slice：`codex-rs/chatgpt` 不再包含 legacy ChatGPT task HTTP client；旧 `apply` 入口会明确
-返回 unsupported，本地 diff apply helper 仍保留给 fixture/解析测试。下一步继续清理
-app-server/core-plugins remote plugin 控制面或 core config 中残留的 `chatgpt_base_url`。
+当前最新 slice：effective `Config` 不再默认填入 `https://chatgpt.com/backend-api/`，app-server
+remote control 在没有显式 backend URL 时会直接报错。下一步优先处理 remote control 仍要求
+ChatGPT authentication 的旧控制面。
 
 ## 项目身份
 
@@ -576,6 +576,45 @@ account 或 OpenAI-only plugin 分发的代码，都需要删除、禁用或隔�
 - `just bazel-lock-update`
 - `bazel mod deps --lockfile_mode=error`
 
+## 最近完成的 ChatGPT base URL default slice
+
+本轮完成的代码 slice：
+
+> Astral effective config 不再默认携带 ChatGPT hosted backend URL。
+
+已编辑文件：
+
+- `codex-rs/core/src/config/mod.rs`
+- `codex-rs/core/src/config/config_tests.rs`
+- `codex-rs/app-server/src/lib.rs`
+
+改动内容：
+
+- `Config::load_from_base_config_with_overrides(...)` 中的 `chatgpt_base_url` 默认值从
+  `https://chatgpt.com/backend-api/` 改为空字符串。
+- `Config` 字段注释改为 deprecated legacy ChatGPT-hosted control-plane URL。
+- 新增测试 `load_config_does_not_default_to_chatgpt_backend`，防止默认 ChatGPT URL 回流。
+- app-server 启用 remote control 但没有显式 backend URL 时，直接返回清晰错误。
+
+为什么要做：
+
+- 旧默认值会让任何仍持有 `config.chatgpt_base_url` 的旧控制面对象默认指向 OpenAI/ChatGPT。
+- Astral 默认路径不能暗中访问或携带 `chatgpt.com/backend-api`。
+- 这一步还没有删除字段本身；字段仍作为 legacy explicit override 存在，方便后续拆 remote control、
+  remote plugin 和旧测试时分阶段收敛。
+
+验证：
+
+- `just fmt`
+- `cargo check --tests -p codex-core -p codex-app-server`
+- `just test -p codex-core load_config_does_not_default_to_chatgpt_backend`：1 passed / 2639 skipped
+
+已暴露的后续风险：
+
+- `just test -p codex-app-server remote_control` 当前结果是 12 passed / 4 failed。失败点集中在
+  remote control 仍要求 `ChatGPT authentication`，以及 pairing/enrollment 仍按旧 hosted 控制面工作。
+  这不是本 slice 新增的默认 URL 回流，而是下一块必须清理的 OpenAI 专有 remote control 语义。
+
 ## 最近完成的 account slice
 
 本轮完成的代码 slice：
@@ -637,6 +676,8 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
 - `just test -p codex-memories-write`
 - `just bazel-lock-update`
 - `bazel mod deps --lockfile_mode=error`
+- `cargo check --tests -p codex-core -p codex-app-server`
+- `just test -p codex-core load_config_does_not_default_to_chatgpt_backend`
 - 旧 ChatGPT refresh 符号窄范围搜索：`codex-rs/login` 与 app-server auth 测试无命中。
 - `git diff --check`
 
@@ -650,6 +691,9 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
   `.github/scripts/run_bazel_with_buildbuddy.py`，该脚本使用 Python 3.10+ 的 `type | None` 注解语法；
   当前 `/usr/bin/python3` 是 3.9.6，会在真正执行 Bazel 前 TypeError。直接执行
   `bazel mod deps --lockfile_mode=error` 可以完成 lockfile 校验。
+- `just test -p codex-app-server remote_control` 当前失败 4 个测试，失败信息集中为
+  `remote control requires ChatGPT authentication` 或旧 pairing/enrollment 不可用。这说明 remote control
+  仍是 OpenAI/ChatGPT hosted 控制面残留，后续需要禁用、删除或重做为 provider-neutral 实现。
 
 ## 剩余高优先级工作
 
@@ -665,7 +709,8 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
    - `core-plugins/src/remote*`
    - `memories/write`
    - 目标：默认路径不能静默访问 `chatgpt.com/backend-api`。
-   - 下一刀建议优先处理 `chatgpt_client` / `get_task` 或 app-server plugin remote share/install/read 的旧语义。
+   - 下一刀建议优先处理 app-server remote control 的 ChatGPT authentication 旧语义，或 app-server /
+     core-plugins remote plugin share/install/read 的旧语义。
 
 3. 推进 provider-neutral protocol
    - Anthropic Messages stream/tool_use/tool_result。

@@ -705,6 +705,12 @@ pub async fn run_main_with_transport_options(
     if remote_control_requested && state_db.is_none() {
         error!("remote control disabled because sqlite state db is unavailable");
     }
+    if remote_control_enabled && config.chatgpt_base_url.trim().is_empty() {
+        return Err(std::io::Error::new(
+            ErrorKind::InvalidInput,
+            "remote control requires an explicit remote control backend URL",
+        ));
+    }
     if transport_accept_handles.is_empty() && !remote_control_enabled {
         return Err(std::io::Error::new(
             ErrorKind::InvalidInput,
