@@ -36,10 +36,8 @@ use core_test_support::codex_linux_sandbox_exe_or_skip;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_response_created;
-use core_test_support::responses::mount_response_once;
 use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::sse;
-use core_test_support::responses::sse_response;
 use core_test_support::responses::start_mock_server;
 use pretty_assertions::assert_eq;
 use std::fs;
@@ -69,29 +67,10 @@ where
 }
 
 #[tokio::test]
-async fn request_permissions_routes_to_guardian_when_reviewer_is_enabled() {
-    let server = start_mock_server().await;
-    let guardian_request_log = mount_sse_once(
-        &server,
-        sse(vec![
-            ev_response_created("resp-guardian"),
-            ev_assistant_message(
-                "msg-guardian",
-                &serde_json::json!({
-                    "risk_level": "low",
-                    "user_authorization": "high",
-                    "outcome": "allow",
-                    "rationale": "The request grants narrowly scoped network access for this turn.",
-                })
-                .to_string(),
-            ),
-            ev_completed("resp-guardian"),
-        ]),
-    )
-    .await;
-
-    let (mut session, mut turn_context_raw) = make_session_and_context().await;
+async fn request_permissions_uses_user_approval_when_auto_review_is_configured() {
+    let (session, mut turn_context, rx_event) = make_session_and_context_with_rx().await;
     *session.active_turn.lock().await = Some(ActiveTurn::default());
+    let turn_context_raw = Arc::get_mut(&mut turn_context).expect("single turn context ref");
     turn_context_raw
         .approval_policy
         .set(AskForApproval::OnRequest)
@@ -102,21 +81,7 @@ async fn request_permissions_routes_to_guardian_when_reviewer_is_enabled() {
         .expect("test setup should allow enabling guardian approvals");
     let mut config = (*turn_context_raw.config).clone();
     config.approvals_reviewer = ApprovalsReviewer::AutoReview;
-    config.model_provider.base_url = Some(format!("{}/v1", server.uri()));
-    let config = Arc::new(config);
-    let models_manager = models_manager_with_provider(
-        config.codex_home.to_path_buf(),
-        Arc::clone(&session.services.auth_manager),
-        config.model_provider.clone(),
-    );
-    session.services.models_manager = models_manager;
-    turn_context_raw.config = Arc::clone(&config);
-    turn_context_raw.provider = create_model_provider(
-        config.model_provider.clone(),
-        turn_context_raw.auth_manager.clone(),
-    );
-    let session = Arc::new(session);
-    let turn_context = Arc::new(turn_context_raw);
+    turn_context_raw.config = Arc::new(config);
 
     let requested_permissions = RequestPermissionProfile {
         network: Some(NetworkPermissions {
@@ -129,22 +94,51 @@ async fn request_permissions_routes_to_guardian_when_reviewer_is_enabled() {
         .primary()
         .expect("primary environment")
         .selection();
-    let response = tokio::time::timeout(
-        Duration::from_secs(45),
-        session.request_permissions_for_environment(
-            &turn_context,
-            "perm-call-1".to_string(),
-            RequestPermissionsArgs {
-                environment_id: None,
-                reason: Some("need network".to_string()),
+    let request_handle = tokio::spawn({
+        let session = Arc::clone(&session);
+        let turn_context = Arc::clone(&turn_context);
+        let requested_permissions = requested_permissions.clone();
+        async move {
+            session
+                .request_permissions_for_environment(
+                    &turn_context,
+                    "perm-call-1".to_string(),
+                    RequestPermissionsArgs {
+                        environment_id: None,
+                        reason: Some("need network".to_string()),
+                        permissions: requested_permissions,
+                    },
+                    environment,
+                    CancellationToken::new(),
+                )
+                .await
+        }
+    });
+
+    let event = timeout(Duration::from_secs(5), rx_event.recv())
+        .await
+        .expect("request_permissions should emit a user approval event")
+        .expect("event channel should be open");
+    assert!(matches!(
+        event.msg,
+        codex_protocol::protocol::EventMsg::RequestPermissions(_)
+    ));
+
+    session
+        .notify_request_permissions_response(
+            "perm-call-1",
+            RequestPermissionsResponse {
                 permissions: requested_permissions.clone(),
+                scope: PermissionGrantScope::Turn,
+                strict_auto_review: true,
             },
-            environment,
-            CancellationToken::new(),
-        ),
-    )
-    .await
-    .expect("request_permissions should not wait for a client approval");
+        )
+        .await;
+
+    let response = timeout(Duration::from_secs(5), request_handle)
+        .await
+        .expect("request_permissions should finish after user approval")
+        .expect("request_permissions task should not panic");
 
     assert_eq!(
         response,
@@ -160,24 +154,21 @@ async fn request_permissions_routes_to_guardian_when_reviewer_is_enabled() {
             .await,
         Some(requested_permissions.into())
     );
-
-    let guardian_request = guardian_request_log.single_request();
-    assert_eq!(guardian_request.path(), "/v1/responses");
-    assert!(guardian_request.body_contains_text("request_permissions"));
-    assert!(guardian_request.body_contains_text("need network"));
+    let turn_state = {
+        let active_turn = session.active_turn.lock().await;
+        Arc::clone(
+            &active_turn
+                .as_ref()
+                .expect("active turn should still exist")
+                .turn_state,
+        )
+    };
+    assert!(!turn_state.lock().await.strict_auto_review_enabled());
 }
 
 #[tokio::test]
-async fn request_permissions_guardian_review_stops_when_cancelled() {
-    let server = start_mock_server().await;
-    let _guardian_request_log = mount_response_once(
-        &server,
-        sse_response(sse(vec![ev_response_created("resp-guardian-delayed")]))
-            .set_delay(Duration::from_secs(60)),
-    )
-    .await;
-
-    let (mut session, mut turn_context, rx_event) = make_session_and_context_with_rx().await;
+async fn request_permissions_user_approval_wait_stops_when_cancelled() {
+    let (session, mut turn_context, rx_event) = make_session_and_context_with_rx().await;
     *session.active_turn.lock().await = Some(ActiveTurn::default());
     let turn_context_raw = Arc::get_mut(&mut turn_context).expect("single turn context ref");
     turn_context_raw
@@ -190,22 +181,7 @@ async fn request_permissions_guardian_review_stops_when_cancelled() {
         .expect("test setup should allow enabling guardian approvals");
     let mut config = (*turn_context_raw.config).clone();
     config.approvals_reviewer = ApprovalsReviewer::AutoReview;
-    config.model_provider.base_url = Some(format!("{}/v1", server.uri()));
-    let config = Arc::new(config);
-    let models_manager = models_manager_with_provider(
-        config.codex_home.to_path_buf(),
-        Arc::clone(&session.services.auth_manager),
-        config.model_provider.clone(),
-    );
-    Arc::get_mut(&mut session)
-        .expect("single session ref")
-        .services
-        .models_manager = models_manager;
-    turn_context_raw.config = Arc::clone(&config);
-    turn_context_raw.provider = create_model_provider(
-        config.model_provider.clone(),
-        turn_context_raw.auth_manager.clone(),
-    );
+    turn_context_raw.config = Arc::new(config);
 
     let requested_permissions = RequestPermissionProfile {
         network: Some(NetworkPermissions {
@@ -246,14 +222,14 @@ async fn request_permissions_guardian_review_stops_when_cancelled() {
             let event = rx_event.recv().await.expect("event channel should be open");
             if matches!(
                 event.msg,
-                codex_protocol::protocol::EventMsg::GuardianAssessment(_)
+                codex_protocol::protocol::EventMsg::RequestPermissions(_)
             ) {
                 break;
             }
         }
     })
     .await
-    .expect("guardian review should start before cancellation");
+    .expect("request_permissions should emit a user approval event before cancellation");
 
     cancellation_token.cancel();
 
@@ -364,28 +340,8 @@ async fn guardian_allows_shell_command_additional_permissions_requests_past_poli
 }
 
 #[tokio::test]
-async fn strict_auto_review_turn_grant_forces_guardian_for_shell_command_policy_skip() {
-    let server = start_mock_server().await;
-    let guardian_request_log = mount_sse_once(
-        &server,
-        sse(vec![
-            ev_response_created("resp-guardian"),
-            ev_assistant_message(
-                "msg-guardian",
-                &serde_json::json!({
-                    "risk_level": "low",
-                    "user_authorization": "high",
-                    "outcome": "allow",
-                    "rationale": "The command stays within the strict turn permission grant.",
-                })
-                .to_string(),
-            ),
-            ev_completed("resp-guardian"),
-        ]),
-    )
-    .await;
-
-    let (mut session, mut turn_context_raw) = make_session_and_context().await;
+async fn strict_auto_review_turn_grant_does_not_force_guardian_for_shell_command_policy_skip() {
+    let (session, mut turn_context_raw) = make_session_and_context().await;
     let active_turn = crate::state::ActiveTurn::default();
     let originating_turn_state = Arc::clone(&active_turn.turn_state);
     *session.active_turn.lock().await = Some(active_turn);
@@ -413,14 +369,7 @@ async fn strict_auto_review_turn_grant_forces_guardian_for_shell_command_policy_
     turn_context_raw.permission_profile = codex_protocol::models::PermissionProfile::Disabled;
     let mut config = (*turn_context_raw.config).clone();
     config.approvals_reviewer = ApprovalsReviewer::User;
-    config.model_provider.base_url = Some(format!("{}/v1", server.uri()));
     let config = Arc::new(config);
-    let models_manager = models_manager_with_provider(
-        config.codex_home.to_path_buf(),
-        Arc::clone(&session.services.auth_manager),
-        config.model_provider.clone(),
-    );
-    session.services.models_manager = models_manager;
     turn_context_raw.config = Arc::clone(&config);
     turn_context_raw.provider = create_model_provider(
         config.model_provider.clone(),
@@ -457,8 +406,6 @@ async fn strict_auto_review_turn_grant_forces_guardian_for_shell_command_policy_
 
     let output = expect_text_output(&resp.expect("expected Ok result"));
     assert!(output.contains("hi"));
-    let guardian_request = guardian_request_log.single_request();
-    assert!(guardian_request.body_contains_text("echo hi"));
 }
 
 #[tokio::test]

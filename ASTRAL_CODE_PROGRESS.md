@@ -1,6 +1,6 @@
 # Astral-Code 项目总控记录
 
-最后更新：2026-06-11 22:50 CST
+最后更新：2026-06-11 23:12 CST
 
 这份文档是 Astral-Code 长线改造的中文 handoff。它的用途不是对外宣传，而是让后续任何一次
 compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道：我们到底要做什么、为什么这么做、
@@ -118,6 +118,11 @@ provider-neutral 的 `api_key`；磁盘 JSON 字段仍是 Astral 自己的 `ASTR
 remote-control 测试/自测路径。remote-control 请求头也从 `chatgpt-account-id` /
 `x-codex-installation-id` 收敛为 `x-astral-account-id` / `x-astral-installation-id`，
 错误文案改为中性的 hosted account authentication。
+
+最新补充 17：OpenAI Guardian / auto_review 审批控制面已从主审批路由中短路。即使配置
+`approvals_reviewer = "auto_review"` 或 MCP/app override 请求 AutoReview，Astral 也不会启动 Guardian
+review subagent，权限请求回到普通用户审批事件与现有 sandbox/approval 链路。`strict_auto_review`
+响应也会被归一化为 `false`，不再强制后续工具调用进入 Guardian。
 
 本轮依赖检查备注：`just bazel-lock-update` 已执行成功；`just bazel-lock-check` 在本机因 `/usr/bin/python3`
 是 3.9.6、不支持 `.github/scripts/run_bazel_with_buildbuddy.py` 里的 `str | None` 类型语法而失败。当前

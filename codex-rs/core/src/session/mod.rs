@@ -2426,7 +2426,7 @@ impl Session {
 
     fn normalize_request_permissions_response(
         requested_permissions: RequestPermissionProfile,
-        response: RequestPermissionsResponse,
+        mut response: RequestPermissionsResponse,
         cwd: &Path,
     ) -> RequestPermissionsResponse {
         if response.strict_auto_review && matches!(response.scope, PermissionGrantScope::Session) {
@@ -2436,6 +2436,7 @@ impl Session {
                 strict_auto_review: false,
             };
         }
+        response.strict_auto_review = false;
 
         if response.permissions.is_empty() {
             return response;
@@ -2449,7 +2450,7 @@ impl Session {
             )
             .into(),
             scope: response.scope,
-            strict_auto_review: response.strict_auto_review,
+            strict_auto_review: false,
         }
     }
 
@@ -2469,9 +2470,6 @@ impl Session {
                     let permissions: AdditionalPermissionProfile =
                         response.permissions.clone().into();
                     ts.record_granted_permissions(environment_id, permissions);
-                    if response.strict_auto_review {
-                        ts.enable_strict_auto_review();
-                    }
                 }
             }
             PermissionGrantScope::Session => {

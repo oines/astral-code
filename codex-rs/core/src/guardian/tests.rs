@@ -1085,7 +1085,7 @@ fn guardian_timeout_message_distinguishes_timeout_from_policy_denial() {
 }
 
 #[tokio::test]
-async fn routes_approval_to_guardian_requires_guardian_reviewer() {
+async fn routes_approval_to_guardian_is_disabled_for_astral() {
     let (_session, mut turn) = crate::session::tests::make_session_and_context().await;
     let mut config = (*turn.config).clone();
     config.approvals_reviewer = ApprovalsReviewer::User;
@@ -1096,25 +1096,25 @@ async fn routes_approval_to_guardian_requires_guardian_reviewer() {
     config.approvals_reviewer = ApprovalsReviewer::AutoReview;
     turn.config = Arc::new(config);
 
-    assert!(routes_approval_to_guardian(&turn));
+    assert!(!routes_approval_to_guardian(&turn));
 }
 
 #[tokio::test]
-async fn routes_approval_to_guardian_can_use_app_reviewer_override() {
+async fn routes_approval_to_guardian_ignores_app_reviewer_override() {
     let (_session, turn) = crate::session::tests::make_session_and_context().await;
 
     assert!(!routes_approval_to_guardian_with_reviewer(
         &turn,
         ApprovalsReviewer::User
     ));
-    assert!(routes_approval_to_guardian_with_reviewer(
+    assert!(!routes_approval_to_guardian_with_reviewer(
         &turn,
         ApprovalsReviewer::AutoReview
     ));
 }
 
 #[tokio::test]
-async fn routes_approval_to_guardian_allows_granular_review_policy() {
+async fn routes_approval_to_guardian_rejects_granular_review_policy() {
     let (_session, mut turn) = crate::session::tests::make_session_and_context().await;
     let mut config = (*turn.config).clone();
     config.approvals_reviewer = ApprovalsReviewer::AutoReview;
@@ -1129,7 +1129,7 @@ async fn routes_approval_to_guardian_allows_granular_review_policy() {
         }))
         .expect("test setup should allow updating approval policy");
 
-    assert!(routes_approval_to_guardian(&turn));
+    assert!(!routes_approval_to_guardian(&turn));
 }
 
 #[test]
