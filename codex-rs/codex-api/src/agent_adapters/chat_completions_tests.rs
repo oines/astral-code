@@ -132,6 +132,105 @@ fn request_maps_tool_use_and_tool_result_to_chat_shape() {
 }
 
 #[test]
+fn request_collapses_system_and_developer_messages_to_head_system_message() {
+    let request = AgentRequest {
+        model: "astral-large".to_string(),
+        instructions: vec![ContentBlock::Text {
+            text: "Base instructions.".to_string(),
+        }],
+        messages: vec![
+            AgentMessage {
+                role: MessageRole::User,
+                content: vec![ContentBlock::Text {
+                    text: "hello".to_string(),
+                }],
+                id: None,
+            },
+            AgentMessage {
+                role: MessageRole::Developer,
+                content: vec![ContentBlock::Text {
+                    text: "Developer instruction.".to_string(),
+                }],
+                id: None,
+            },
+            AgentMessage {
+                role: MessageRole::System,
+                content: vec![ContentBlock::Text {
+                    text: "System reminder.".to_string(),
+                }],
+                id: None,
+            },
+        ],
+        tools: Vec::new(),
+        tool_choice: ToolChoice::Auto,
+        parallel_tool_calls: true,
+        stream: false,
+        reasoning: None,
+        metadata: RequestMetadata::default(),
+    };
+
+    assert_eq!(
+        to_chat_completions_request(&request, ChatCompletionsOptions { max_tokens: None }),
+        json!({
+            "model": "astral-large",
+            "stream": false,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "Base instructions.\n\nDeveloper instruction.\n\nSystem reminder."
+                },
+                {
+                    "role": "user",
+                    "content": [{ "type": "text", "text": "hello" }]
+                }
+            ]
+        })
+    );
+}
+
+#[test]
+fn request_drops_tool_control_fields_when_provider_override_clears_tools() {
+    let request = AgentRequest {
+        model: "astral-large".to_string(),
+        instructions: Vec::new(),
+        messages: vec![AgentMessage {
+            role: MessageRole::User,
+            content: vec![ContentBlock::Text {
+                text: "hello".to_string(),
+            }],
+            id: None,
+        }],
+        tools: vec![AgentTool {
+            name: "Bash".to_string(),
+            description: "Run a shell command".to_string(),
+            input_schema: json!({ "type": "object" }),
+            metadata: BTreeMap::new(),
+        }],
+        tool_choice: ToolChoice::Auto,
+        parallel_tool_calls: true,
+        stream: false,
+        reasoning: None,
+        metadata: RequestMetadata {
+            provider: BTreeMap::from([("tools".to_string(), json!([]))]),
+            ..RequestMetadata::default()
+        },
+    };
+
+    assert_eq!(
+        to_chat_completions_request(&request, ChatCompletionsOptions { max_tokens: None }),
+        json!({
+            "model": "astral-large",
+            "stream": false,
+            "messages": [{
+                "role": "user",
+                "content": [{ "type": "text", "text": "hello" }]
+            }],
+            "tools": []
+        })
+    );
+}
+
+#[test]
 fn stream_chunk_maps_text_tool_calls_finish_reason_and_usage() {
     assert_eq!(
         parse_stream_chunk(json!({

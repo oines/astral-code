@@ -44,34 +44,31 @@ pub fn to_chat_completions_request(
         );
     }
 
-    body.insert(
-        "messages".to_string(),
-        Value::Array(
-            request
-                .instructions
-                .iter()
-                .map(instruction_to_chat_message)
-                .chain(request.messages.iter().flat_map(message_to_chat_messages))
-                .collect(),
-        ),
-    );
+    let mut messages = request
+        .instructions
+        .iter()
+        .map(instruction_to_chat_message)
+        .chain(request.messages.iter().flat_map(message_to_chat_messages))
+        .collect::<Vec<_>>();
+    normalize_system_messages(&mut messages);
+    body.insert("messages".to_string(), Value::Array(messages));
 
     if !request.tools.is_empty() {
         body.insert(
             "tools".to_string(),
             Value::Array(request.tools.iter().map(tool_to_chat).collect()),
         );
+        body.insert(
+            "tool_choice".to_string(),
+            tool_choice_to_chat(&request.tool_choice),
+        );
+        body.insert(
+            "parallel_tool_calls".to_string(),
+            Value::Bool(request.parallel_tool_calls),
+        );
     }
-
-    body.insert(
-        "tool_choice".to_string(),
-        tool_choice_to_chat(&request.tool_choice),
-    );
-    body.insert(
-        "parallel_tool_calls".to_string(),
-        Value::Bool(request.parallel_tool_calls),
-    );
     apply_provider_body_overrides(&mut body, request);
+    remove_tool_control_fields_without_tools(&mut body);
 
     Value::Object(body)
 }
@@ -167,16 +164,72 @@ fn instruction_to_chat_message(block: &ContentBlock) -> Value {
 
 fn message_to_chat_messages(message: &AgentMessage) -> Vec<Value> {
     match message.role {
-        MessageRole::System => vec![json!({
+        MessageRole::System | MessageRole::Developer => vec![json!({
             "role": "system",
-            "content": content_blocks_text(&message.content),
-        })],
-        MessageRole::Developer => vec![json!({
-            "role": "developer",
             "content": content_blocks_text(&message.content),
         })],
         MessageRole::User => user_message_to_chat_messages(message),
         MessageRole::Assistant => vec![assistant_message_to_chat(message)],
+    }
+}
+
+fn normalize_system_messages(messages: &mut Vec<Value>) {
+    let system_count = messages
+        .iter()
+        .filter(|message| is_system_message(message))
+        .count();
+    if system_count == 0 {
+        return;
+    }
+
+    if system_count == 1 {
+        if let Some(index) = messages.iter().position(is_system_message)
+            && index > 0
+        {
+            let message = messages.remove(index);
+            messages.insert(0, message);
+        }
+        return;
+    }
+
+    let mut system_chunks = Vec::new();
+    let mut rest = Vec::with_capacity(messages.len());
+    for message in std::mem::take(messages) {
+        if is_system_message(&message) {
+            if let Some(text) = chat_message_text(&message) {
+                system_chunks.push(text);
+            }
+        } else {
+            rest.push(message);
+        }
+    }
+
+    if !system_chunks.is_empty() {
+        messages.push(json!({
+            "role": "system",
+            "content": system_chunks.join("\n\n"),
+        }));
+    }
+    messages.extend(rest);
+}
+
+fn is_system_message(message: &Value) -> bool {
+    message.get("role").and_then(Value::as_str) == Some("system")
+}
+
+fn chat_message_text(message: &Value) -> Option<String> {
+    match message.get("content") {
+        Some(Value::String(text)) if !text.trim().is_empty() => Some(text.clone()),
+        Some(Value::Array(parts)) => {
+            let text = parts
+                .iter()
+                .filter_map(|part| part.get("text").and_then(Value::as_str))
+                .filter(|text| !text.trim().is_empty())
+                .collect::<Vec<_>>()
+                .join("\n");
+            (!text.is_empty()).then_some(text)
+        }
+        _ => None,
     }
 }
 
@@ -298,6 +351,19 @@ fn apply_provider_body_overrides(body: &mut Map<String, Value>, request: &AgentR
     for (key, value) in &request.metadata.provider {
         body.insert(key.clone(), value.clone());
     }
+}
+
+fn remove_tool_control_fields_without_tools(body: &mut Map<String, Value>) {
+    let has_tools = body
+        .get("tools")
+        .and_then(Value::as_array)
+        .is_some_and(|tools| !tools.is_empty());
+    if has_tools {
+        return;
+    }
+
+    body.remove("tool_choice");
+    body.remove("parallel_tool_calls");
 }
 
 fn content_block_to_user_content(block: &ContentBlock) -> Value {

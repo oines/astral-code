@@ -1,6 +1,6 @@
 # Astral-Code 项目总控记录
 
-最后更新：2026-06-11 18:10 CST
+最后更新：2026-06-11 18:45 CST
 
 这份文档是 Astral-Code 长线改造的中文 handoff。它的用途不是对外宣传，而是让后续任何一次
 compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道：我们到底要做什么、为什么这么做、
@@ -35,9 +35,11 @@ provider 去 OpenAI 默认路由、登录态清理、cloud-config/cloud-tasks �
   国产模型兼容细节、fixture 和端到端测试。
 - 全量 CI：当前不追求全绿，用户明确要求先推进实现，最后集中测试集中修。
 
-当前最新 slice：`codex-backend-client` 不再把 `https://chatgpt.com` / `https://chat.openai.com`
-自动改写成 `/backend-api`。只有调用方显式传入带 `/backend-api` 的 URL 时，旧 WHAM path style 才会启用。
-这避免 Astral 在配置或调用误填 ChatGPT host 时静默进入 hosted backend。
+当前最新 slice：参考本机 `/Users/oines/project/cc-switch` 的 provider/proxy 兼容逻辑后，收敛了
+Astral 原生 Chat Completions adapter 的请求形状：`developer` 消息不再发给上游，而是与其他
+`system` 消息合并成首条 `system`；当最终请求没有非空 `tools` 时，会移除 `tool_choice` 和
+`parallel_tool_calls`。这样更贴近国内 OpenAI-compatible 网关的保守兼容面，同时保持这是 Astral
+原生 adapter 逻辑，不是外挂反代。
 
 下一步优先继续处理底层 `app-server-transport` remote-control 旧模块、`chatgpt_base_url` 配置字段和其他
 ChatGPT hosted 残留；provider adapter 方向则继续补 Anthropic/chat-completions fixture 和国内模型兼容选项。
@@ -129,6 +131,30 @@ Astral 的内部方向是“深度重构”，不是“尾端 adapter 改名”�
    - 老式 `/v1/completions` 文本补全不是主路径；如果未来确实需要，只能作为极薄降级 adapter，不能反过来
      约束 agent/tool 协议设计。
    - OpenAI Responses 降级为 legacy/optional adapter。
+
+### `cc-switch` 参考结论
+
+已阅读本机 `/Users/oines/project/cc-switch` 的关键代码，尤其是：
+
+- `src-tauri/src/services/model_fetch.rs`
+- `src-tauri/src/proxy/providers/transform.rs`
+- `src-tauri/src/proxy/providers/transform_codex_chat.rs`
+- `src-tauri/src/proxy/providers/streaming_codex_chat.rs`
+- `src-tauri/src/proxy/providers/claude.rs`
+- `src/config/codexProviderPresets.ts`
+
+可借鉴但不照搬的点：
+
+- `cc-switch` 的路线是“客户端仍说 Claude/Codex 原协议，本地代理再转上游”。Astral 不走这个形态，
+  但可以吸收它沉淀出的国内 provider 兼容规则，放进原生 provider adapter。
+- OpenAI-compatible Chat Completions 对 strict 网关应尽量朴素：多个 `system` 合并到首条，避免中间
+  `system`/`developer`；没有工具时不要发送 `tool_choice` 或 `parallel_tool_calls`；stream 时要显式
+  `stream_options.include_usage = true` 才能拿到 usage 尾包。
+- 国内 reasoning/thinking 差异需要后续单独建 provider capability：DeepSeek/Kimi/Moonshot/智谱/百炼等
+  可能需要不同的 `thinking`、`enable_thinking`、`reasoning_effort`、`reasoning_content` 处理。
+- 模型列表发现不能只做 `{base}/models`：`cc-switch` 会根据 `/v1`、`/v4`、`/api/anthropic`、
+  `/claudecode`、`/coding` 等兼容路径构造候选 URL。Astral 后续如果做 provider model discovery，可参考
+  这个候选生成逻辑。
 
 3. Astral-native tool flavor
    - 模型侧暴露 Claude Code-like 工具名和 schema。
