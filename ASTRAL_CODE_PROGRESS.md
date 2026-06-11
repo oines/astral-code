@@ -52,6 +52,9 @@ metrics exporter 现在是 `none`，旧配置里显式写 `statsig` 也会在 `c
 `chatgpt_base_url` 改成 `hosted_base_url`，不改 JWT claim 里的 `chatgpt_user_id` /
 `chatgpt_account_is_fedramp`，因为那是历史 token payload 形状。
 
+最新补充 2：`astral exec-server --remote` 不再暴露旧的 `--use-agent-identity-auth` flag。远程
+exec-server 注册继续只允许 API-key auth，Agent Identity / ChatGPT / PAT 路径保持禁用。
+
 下一步优先继续处理 `chatgpt_base_url` 配置字段、Agent Identity auth/storage 残留、connectors/apps 和其他
 ChatGPT hosted 残留；provider adapter 方向则继续补 Anthropic/chat-completions fixture 和国内模型兼容选项。
 remote-control 主入口已经禁用，不再作为最高优先级，除非后续要把底层 `app-server-transport` 旧模块降级成独立

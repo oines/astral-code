@@ -525,10 +525,6 @@ struct ExecServerCommand {
     /// Human-readable environment name.
     #[arg(long = "name", value_name = "NAME")]
     name: Option<String>,
-
-    /// Deprecated: Agent Identity auth is disabled in Astral.
-    #[arg(long = "use-agent-identity-auth", requires = "remote")]
-    use_agent_identity_auth: bool,
 }
 
 #[derive(Debug, clap::Subcommand)]
@@ -1551,9 +1547,7 @@ async fn run_exec_server_command(
             .environment_id
             .ok_or_else(|| anyhow::anyhow!("--environment-id is required when --remote is set"))?;
         let config = load_exec_server_config(root_config_overrides, strict_config).await?;
-        let auth_provider =
-            load_exec_server_remote_auth_provider(&config, &base_url, cmd.use_agent_identity_auth)
-                .await?;
+        let auth_provider = load_exec_server_remote_auth_provider(&config, &base_url).await?;
         let mut remote_config = codex_exec_server::RemoteEnvironmentConfig::new(
             base_url,
             environment_id,
@@ -1584,14 +1578,7 @@ async fn run_exec_server_command(
 async fn load_exec_server_remote_auth_provider(
     config: &codex_core::config::Config,
     base_url: &str,
-    use_agent_identity_auth: bool,
 ) -> anyhow::Result<codex_api::SharedAuthProvider> {
-    if use_agent_identity_auth {
-        anyhow::bail!(
-            "Agent Identity auth is not available in Astral; use API-key auth with ASTRAL_API_KEY"
-        );
-    }
-
     let auth = load_exec_server_remote_auth(
         config,
         "remote exec-server registration requires API-key authentication; set ASTRAL_API_KEY or run `astral login --with-api-key` for Astral-managed auth",
