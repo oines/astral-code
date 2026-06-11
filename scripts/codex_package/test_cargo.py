@@ -18,7 +18,7 @@ class SourceBinariesForTargetTest(unittest.TestCase):
         self.assertEqual(
             source_binaries_for_target(
                 TARGET_SPECS["aarch64-apple-darwin"],
-                PACKAGE_VARIANTS["codex"],
+                PACKAGE_VARIANTS["astral"],
                 build_entrypoint=False,
                 build_bwrap=False,
                 build_codex_command_runner=False,
@@ -33,7 +33,7 @@ class SourceBinariesForTargetTest(unittest.TestCase):
         self.assertEqual(
             source_binaries_for_target(
                 TARGET_SPECS["x86_64-unknown-linux-musl"],
-                PACKAGE_VARIANTS["codex"],
+                PACKAGE_VARIANTS["astral"],
                 build_entrypoint=False,
                 build_bwrap=False,
                 build_codex_command_runner=False,
@@ -48,7 +48,7 @@ class SourceBinariesForTargetTest(unittest.TestCase):
         self.assertEqual(
             source_binaries_for_target(
                 TARGET_SPECS["x86_64-pc-windows-msvc"],
-                PACKAGE_VARIANTS["codex"],
+                PACKAGE_VARIANTS["astral"],
                 build_entrypoint=False,
                 build_bwrap=False,
                 build_codex_command_runner=False,
@@ -57,11 +57,24 @@ class SourceBinariesForTargetTest(unittest.TestCase):
             [],
         )
 
+    def test_astral_entrypoint_is_built_when_missing(self) -> None:
+        self.assertEqual(
+            source_binaries_for_target(
+                TARGET_SPECS["aarch64-apple-darwin"],
+                PACKAGE_VARIANTS["astral"],
+                build_entrypoint=True,
+                build_bwrap=False,
+                build_codex_command_runner=False,
+                build_codex_windows_sandbox_setup=False,
+            ),
+            ["astral"],
+        )
+
     def test_missing_windows_helpers_are_built(self) -> None:
         self.assertEqual(
             source_binaries_for_target(
                 TARGET_SPECS["x86_64-pc-windows-msvc"],
-                PACKAGE_VARIANTS["codex"],
+                PACKAGE_VARIANTS["astral"],
                 build_entrypoint=False,
                 build_bwrap=False,
                 build_codex_command_runner=True,
@@ -73,13 +86,13 @@ class SourceBinariesForTargetTest(unittest.TestCase):
     def test_build_uses_prebuilt_windows_helpers_without_running_cargo(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            entrypoint = touch_file(root / "codex.exe")
+            entrypoint = touch_file(root / "astral.exe")
             command_runner = touch_file(root / "codex-command-runner.exe")
             sandbox_setup = touch_file(root / "codex-windows-sandbox-setup.exe")
 
             outputs = build_source_binaries(
                 TARGET_SPECS["x86_64-pc-windows-msvc"],
-                PACKAGE_VARIANTS["codex"],
+                PACKAGE_VARIANTS["astral"],
                 cargo=str(root / "cargo-that-should-not-run"),
                 profile="release",
                 entrypoint_bin=entrypoint,

@@ -1,10 +1,10 @@
-# Codex package builder
+# Astral package builder
 
 This package contains the implementation behind `scripts/build_codex_package.py`.
 The top-level script is the stable executable entry point; these modules keep the
 package-building logic split by responsibility.
 
-The builder creates a canonical Codex package directory:
+The builder creates a canonical Astral package directory:
 
 ```text
 .
@@ -30,7 +30,7 @@ artifacts; pass a GNU Linux target explicitly for native glibc local builds. If
 prints its path after the package is built.
 
 The `--variant` flag selects the package entrypoint. Supported variants are
-`codex` and `codex-app-server`. The `version` field in `codex-package.json` is
+`astral` and `codex-app-server`. The `version` field in `codex-package.json` is
 read from `[workspace.package].version` in `codex-rs/Cargo.toml`.
 
 ## Source-built artifacts
