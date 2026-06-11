@@ -1,6 +1,6 @@
 # Astral-Code 项目总控记录
 
-最后更新：2026-06-11 14:15 CST
+最后更新：2026-06-11 14:33 CST
 
 这份文档是 Astral-Code 长线改造的中文 handoff。它的用途不是对外宣传，而是让后续任何一次
 compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道：我们到底要做什么、哪些边界不能碰、
@@ -217,6 +217,14 @@ account 或 OpenAI-only plugin 分发的代码，都需要删除、禁用或隔�
 
 ## 已完成的重要提交
 
+- 本轮已完成：cloud-tasks 不再默认访问 ChatGPT hosted backend
+  - 删除 `codex-rs/cloud-tasks` 中对 `CODEX_CLOUD_TASKS_BASE_URL` 的读取。
+  - 新增 `ASTRAL_CLOUD_TASKS_BASE_URL` 作为 cloud tasks 的显式后端配置入口。
+  - `init_backend(...)`、TUI environment list、environment autodetect 都改为走统一 helper。
+  - 缺少 `ASTRAL_CLOUD_TASKS_BASE_URL` 时返回本地错误，不再 fallback 到
+    `https://chatgpt.com/backend-api`。
+  - debug mock 模式仍可无后端运行，但只使用 `http://localhost/backend-api` 作为本地占位 URL。
+
 - 本轮已完成：拆除 AuthManager 对 `chatgpt_base_url` 的依赖
   - `CodexAuth::from_auth_storage(...)` 不再接收 ChatGPT base URL。
   - `AuthManager::new(...)` / `AuthManager::shared(...)` 不再保存或转发 ChatGPT base URL。
@@ -296,6 +304,42 @@ account 或 OpenAI-only plugin 分发的代码，都需要删除、禁用或隔�
 - `b756262d8e Remove add-credits nudge backend client`
   - 删除 OpenAI add-credits / rate-limit upsell 路径。
 
+## 最近完成的 cloud-tasks slice
+
+本轮完成的代码 slice：
+
+> 让 `codex-rs/cloud-tasks` 不再在缺省配置下静默访问 ChatGPT hosted backend。
+
+已编辑文件：
+
+- `codex-rs/cloud-tasks/src/lib.rs`
+- `codex-rs/cloud-tasks/src/util.rs`
+
+改动内容：
+
+- 新增 `util::ASTRAL_CLOUD_TASKS_BASE_URL_ENV_VAR`。
+- 新增 `util::cloud_tasks_base_url_from_env()`，统一读取并 normalize
+  `ASTRAL_CLOUD_TASKS_BASE_URL`。
+- `init_backend(...)` 不再读取 `CODEX_CLOUD_TASKS_BASE_URL`。
+- cloud task TUI 的 environment list/autodetect 不再复制 getenv + ChatGPT 默认值逻辑。
+- 新增 `list_environments_from_configured_backend()` 和
+  `autodetect_environment_from_configured_backend(...)`，收拢环境加载路径。
+- debug mock 模式保留可运行性，但默认只使用本地占位 URL，不触碰 OpenAI/ChatGPT。
+
+为什么要做：
+
+- cloud-tasks 是 remote/cloud control-plane 风险区。
+- 旧实现缺少 env 时会直接 fallback 到 `https://chatgpt.com/backend-api`。
+- Astral 不应该把 OpenAI hosted backend 当成默认控制面。
+- 这一步先拔掉默认外联风险，不重写 cloud task backend 协议。
+
+仍需后续处理：
+
+- `build_chatgpt_headers(...)`、`AuthMode::ChatGPT`、`ChatGPT-Account-Id` 仍是旧 cloud task
+  auth 语义，需要在 remote/cloud control-plane 总清理时一起处理。
+- URL parser 和 task URL formatter 测试仍保留 `chatgpt.com` fixture，用于覆盖旧 URL 解析行为；
+  是否删除这些 fixture 等 cloud tasks 去 legacy 化时再决定。
+
 ## 最近完成的 account slice
 
 本轮完成的代码 slice：
@@ -348,6 +392,7 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
 - `just test -p codex-app-server suite::v2::account::logout_account_removes_auth_and_notifies`
 - `just test -p codex-login auth`
 - `cargo check --tests -p codex-cli -p codex-cloud-config -p codex-cloud-tasks -p codex-app-server-transport -p codex-core`
+- `cargo check --tests -p codex-cloud-tasks`
 - 旧 ChatGPT refresh 符号窄范围搜索：`codex-rs/login` 与 app-server auth 测试无命中。
 - `git diff --check`
 
@@ -357,9 +402,6 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
   缺少 `gpt-5.5`。这和当前 Astral provider-neutral cleanup 无关。
 - `just test -p codex-app-server auth` 会额外匹配 plugin install/read 的 `needsAuth` 测试，这些测试仍按
   旧 ChatGPT app auth 语义期待 `chatgpt.com/apps/...` 认证项。处理 plugin remote/control-plane 时再改。
-- `codex-rs/cloud-tasks` 仍有多处 `CODEX_CLOUD_TASKS_BASE_URL` 缺失时 fallback 到
-  `https://chatgpt.com/backend-api`。这不是一行小改：TUI、env detection 和 backend 初始化都需要一起改成
-  Astral 显式配置或默认禁用，避免静默访问 OpenAI hosted backend。
 
 ## 剩余高优先级工作
 
@@ -371,12 +413,11 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
 2. 审计 remote/cloud control-plane
    - `backend-client`
    - `cloud-config`
-   - `cloud-tasks`
+   - `cloud-tasks` 旧 auth/header 语义
    - `core-plugins/src/remote*`
    - `memories/write`
    - 目标：默认路径不能静默访问 `chatgpt.com/backend-api`。
-   - 下一刀建议优先处理 `cloud-tasks`：把 `CODEX_CLOUD_TASKS_BASE_URL` 默认
-     `https://chatgpt.com/backend-api` 改为 Astral 显式配置或默认不可用。
+   - 下一刀建议优先处理 `core-plugins/src/remote*` 或 `cloud-config`，继续拔掉 hosted control-plane 默认路径。
 
 3. 推进 provider-neutral protocol
    - Anthropic Messages stream/tool_use/tool_result。
@@ -428,7 +469,7 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
 3. 查看当前工作树：
    - `git status --short`
    - `git diff --stat`
-   - `git diff -- codex-rs/app-server/src/request_processors/account_processor.rs codex-rs/app-server/src/message_processor.rs`
+   - `git diff -- codex-rs/cloud-tasks/src/lib.rs codex-rs/cloud-tasks/src/util.rs`
 
 4. 选择下一块时优先看：
    - `chatgpt_base_url`

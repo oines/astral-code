@@ -6,6 +6,8 @@ use reqwest::header::HeaderMap;
 use codex_core::config::Config;
 use codex_login::AuthManager;
 
+pub const ASTRAL_CLOUD_TASKS_BASE_URL_ENV_VAR: &str = "ASTRAL_CLOUD_TASKS_BASE_URL";
+
 pub fn set_user_agent_suffix(suffix: &str) {
     if let Ok(mut guard) = codex_login::default_client::USER_AGENT_SUFFIX.lock() {
         guard.replace(suffix.to_string());
@@ -39,6 +41,19 @@ pub fn normalize_base_url(input: &str) -> String {
         base_url = format!("{base_url}/backend-api");
     }
     base_url
+}
+
+pub fn cloud_tasks_base_url_from_env() -> anyhow::Result<String> {
+    let value = std::env::var(ASTRAL_CLOUD_TASKS_BASE_URL_ENV_VAR).map_err(|_| {
+        anyhow::anyhow!(
+            "{ASTRAL_CLOUD_TASKS_BASE_URL_ENV_VAR} must be set to use Astral cloud tasks"
+        )
+    })?;
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("{ASTRAL_CLOUD_TASKS_BASE_URL_ENV_VAR} must not be empty");
+    }
+    Ok(normalize_base_url(trimmed))
 }
 
 pub async fn load_auth_manager() -> Option<AuthManager> {

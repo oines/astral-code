@@ -46,8 +46,19 @@ async fn init_backend(user_agent_suffix: &str) -> anyhow::Result<BackendContext>
         std::env::var("CODEX_CLOUD_TASKS_MODE").ok().as_deref(),
         Some("mock") | Some("MOCK")
     );
-    let base_url = std::env::var("CODEX_CLOUD_TASKS_BASE_URL")
-        .unwrap_or_else(|_| "https://chatgpt.com/backend-api".to_string());
+
+    #[cfg(debug_assertions)]
+    let base_url = if use_mock {
+        std::env::var(util::ASTRAL_CLOUD_TASKS_BASE_URL_ENV_VAR)
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .map(|value| util::normalize_base_url(value.trim()))
+            .unwrap_or_else(|| "http://localhost/backend-api".to_string())
+    } else {
+        util::cloud_tasks_base_url_from_env()?
+    };
+    #[cfg(not(debug_assertions))]
+    let base_url = util::cloud_tasks_base_url_from_env()?;
 
     set_user_agent_suffix(user_agent_suffix);
 
@@ -104,6 +115,20 @@ async fn init_backend(user_agent_suffix: &str) -> anyhow::Result<BackendContext>
         backend: Arc::new(http),
         base_url,
     })
+}
+
+async fn list_environments_from_configured_backend() -> anyhow::Result<Vec<app::EnvironmentRow>> {
+    let base_url = util::cloud_tasks_base_url_from_env()?;
+    let headers = util::build_chatgpt_headers().await;
+    crate::env_detect::list_environments(&base_url, &headers).await
+}
+
+async fn autodetect_environment_from_configured_backend(
+    desired_label: Option<String>,
+) -> anyhow::Result<crate::env_detect::AutodetectSelection> {
+    let base_url = util::cloud_tasks_base_url_from_env()?;
+    let headers = util::build_chatgpt_headers().await;
+    crate::env_detect::autodetect_environment_id(&base_url, &headers, desired_label).await
 }
 
 #[async_trait::async_trait]
@@ -837,12 +862,7 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
     {
         let tx = tx.clone();
         tokio::spawn(async move {
-            let base_url = util::normalize_base_url(
-                &std::env::var("CODEX_CLOUD_TASKS_BASE_URL")
-                    .unwrap_or_else(|_| "https://chatgpt.com/backend-api".to_string()),
-            );
-            let headers = util::build_chatgpt_headers().await;
-            let res = crate::env_detect::list_environments(&base_url, &headers).await;
+            let res = list_environments_from_configured_backend().await;
             let _ = tx.send(app::AppEvent::EnvironmentsLoaded(res));
         });
     }
@@ -852,18 +872,8 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
     {
         let tx = tx.clone();
         tokio::spawn(async move {
-            let base_url = util::normalize_base_url(
-                &std::env::var("CODEX_CLOUD_TASKS_BASE_URL")
-                    .unwrap_or_else(|_| "https://chatgpt.com/backend-api".to_string()),
-            );
-            // Build headers: UA + ChatGPT auth if available
-            let headers = util::build_chatgpt_headers().await;
-
             // Run autodetect. If it fails, we keep using "All".
-            let res = crate::env_detect::autodetect_environment_id(
-                &base_url, &headers, /*desired_label*/ None,
-            )
-            .await;
+            let res = autodetect_environment_from_configured_backend(/*desired_label*/ None).await;
             let _ = tx.send(app::AppEvent::EnvironmentAutodetected(res));
         });
     }
@@ -1078,12 +1088,7 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
                                     {
                                         let tx = tx.clone();
                                         tokio::spawn(async move {
-                                            let base_url = crate::util::normalize_base_url(
-                                                &std::env::var("CODEX_CLOUD_TASKS_BASE_URL")
-                                                    .unwrap_or_else(|_| "https://chatgpt.com/backend-api".to_string()),
-                                            );
-                                            let headers = crate::util::build_chatgpt_headers().await;
-                                            let res = crate::env_detect::list_environments(&base_url, &headers).await;
+                                            let res = list_environments_from_configured_backend().await;
                                             let _ = tx.send(app::AppEvent::EnvironmentsLoaded(res));
                                         });
                                     }
@@ -1464,9 +1469,7 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
                             if should_fetch {
                                     let tx = tx.clone();
                                     tokio::spawn(async move {
-            let base_url = crate::util::normalize_base_url(&std::env::var("CODEX_CLOUD_TASKS_BASE_URL").unwrap_or_else(|_| "https://chatgpt.com/backend-api".to_string()));
-            let headers = crate::util::build_chatgpt_headers().await;
-                                        let res = crate::env_detect::list_environments(&base_url, &headers).await;
+                                        let res = list_environments_from_configured_backend().await;
                                         let _ = tx.send(app::AppEvent::EnvironmentsLoaded(res));
                                     });
                             }
@@ -1650,12 +1653,7 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
                                     if app.environments.is_empty() {
                                         let tx = tx.clone();
                                         tokio::spawn(async move {
-                                            let base_url = crate::util::normalize_base_url(
-                                                &std::env::var("CODEX_CLOUD_TASKS_BASE_URL")
-                                                    .unwrap_or_else(|_| "https://chatgpt.com/backend-api".to_string()),
-                                            );
-                                            let headers = crate::util::build_chatgpt_headers().await;
-                                            let res = crate::env_detect::list_environments(&base_url, &headers).await;
+                                            let res = list_environments_from_configured_backend().await;
                                             let _ = tx.send(app::AppEvent::EnvironmentsLoaded(res));
                                         });
                                     }
@@ -1829,9 +1827,7 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
                                     if should_fetch {
                                     let tx = tx.clone();
                                     tokio::spawn(async move {
-                                        let base_url = crate::util::normalize_base_url(&std::env::var("CODEX_CLOUD_TASKS_BASE_URL").unwrap_or_else(|_| "https://chatgpt.com/backend-api".to_string()));
-                                        let headers = crate::util::build_chatgpt_headers().await;
-                                        let res = crate::env_detect::list_environments(&base_url, &headers).await;
+                                        let res = list_environments_from_configured_backend().await;
                                         let _ = tx.send(app::AppEvent::EnvironmentsLoaded(res));
                                     });
                                     }
