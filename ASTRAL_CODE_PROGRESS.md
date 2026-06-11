@@ -1,6 +1,6 @@
 # Astral-Code 项目总控记录
 
-最后更新：2026-06-11 18:45 CST
+最后更新：2026-06-11 19:20 CST
 
 这份文档是 Astral-Code 长线改造的中文 handoff。它的用途不是对外宣传，而是让后续任何一次
 compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道：我们到底要做什么、为什么这么做、
@@ -35,11 +35,10 @@ provider 去 OpenAI 默认路由、登录态清理、cloud-config/cloud-tasks �
   国产模型兼容细节、fixture 和端到端测试。
 - 全量 CI：当前不追求全绿，用户明确要求先推进实现，最后集中测试集中修。
 
-当前最新 slice：参考本机 `/Users/oines/project/cc-switch` 的 provider/proxy 兼容逻辑后，收敛了
-Astral 原生 Chat Completions adapter 的请求形状：`developer` 消息不再发给上游，而是与其他
-`system` 消息合并成首条 `system`；当最终请求没有非空 `tools` 时，会移除 `tool_choice` 和
-`parallel_tool_calls`。这样更贴近国内 OpenAI-compatible 网关的保守兼容面，同时保持这是 Astral
-原生 adapter 逻辑，不是外挂反代。
+当前最新 slice：禁用了 Codex/OpenAI 内置 Statsig 遥测默认外联。Astral 的 OTEL 默认 metrics exporter
+现在是 `none`，旧配置里显式写 `statsig` 也会在 `codex-otel` 层解析为 `None`，源码中不再携带
+`https://ab.chatgpt.com/otlp/v1/metrics` 和内置 Statsig key。用户仍可显式配置自己的 `otlp-http` /
+`otlp-grpc` endpoint，这是 provider-neutral 自管遥测，不属于 OpenAI 专有控制面。
 
 下一步优先继续处理底层 `app-server-transport` remote-control 旧模块、`chatgpt_base_url` 配置字段和其他
 ChatGPT hosted 残留；provider adapter 方向则继续补 Anthropic/chat-completions fixture 和国内模型兼容选项。
