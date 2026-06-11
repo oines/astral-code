@@ -136,7 +136,6 @@ pub fn merge_connectors_with_accessible(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codex_connectors::metadata::connector_install_url;
     use codex_plugin::AppConnectorId;
     use pretty_assertions::assert_eq;
 
@@ -169,7 +168,7 @@ mod tests {
             branding: None,
             app_metadata: None,
             labels: None,
-            install_url: Some(connector_install_url(id, id)),
+            install_url: None,
             is_accessible,
             is_enabled: true,
             plugin_display_names: Vec::new(),
