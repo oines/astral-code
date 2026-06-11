@@ -34,9 +34,9 @@ provider 去 OpenAI 默认路由、登录态清理、cloud-config/cloud-tasks �
 - Provider-neutral Agent IR / Anthropic Messages / chat completions：仍是后续核心大块工作。
 - 全量 CI：当前不追求全绿，用户明确要求先推进实现，最后集中测试集中修。
 
-当前最新 slice：effective `Config` 不再默认填入 `https://chatgpt.com/backend-api/`，app-server
-remote control 在没有显式 backend URL 时会直接报错。下一步优先处理 remote control 仍要求
-ChatGPT authentication 的旧控制面。
+当前最新 slice：app-server 的 legacy hosted remote control 暴露入口已禁用；请求启动 remote control
+或通过 RPC enable/pairing/client-management 都会返回 Astral disabled 错误。下一步优先继续处理 remote
+plugin share/install/read、底层 app-server-transport remote-control 旧模块和其他 ChatGPT hosted 残留。
 
 ## 项目身份
 
@@ -611,9 +611,48 @@ account 或 OpenAI-only plugin 分发的代码，都需要删除、禁用或隔�
 
 已暴露的后续风险：
 
-- `just test -p codex-app-server remote_control` 当前结果是 12 passed / 4 failed。失败点集中在
-  remote control 仍要求 `ChatGPT authentication`，以及 pairing/enrollment 仍按旧 hosted 控制面工作。
-  这不是本 slice 新增的默认 URL 回流，而是下一块必须清理的 OpenAI 专有 remote control 语义。
+- 已由下一节 remote control slice 处理：app-server 不再允许启动或通过 RPC 启用 legacy hosted
+  remote control。底层 `app-server-transport` 里的旧 remote-control 模块仍存在，但默认和 app-server
+  暴露路径已经切断。
+
+## 最近完成的 app-server remote control slice
+
+本轮完成的代码 slice：
+
+> 禁用 app-server 的 legacy hosted remote control 入口，避免 Astral 继续暴露 ChatGPT WHAM 控制面。
+
+已编辑文件：
+
+- `codex-rs/app-server/src/lib.rs`
+- `codex-rs/app-server/src/request_processors/remote_control_processor.rs`
+- `codex-rs/app-server/src/request_processors/remote_control_processor/remote_control_processor_tests.rs`
+- `codex-rs/app-server/tests/suite/v2/remote_control.rs`
+
+改动内容：
+
+- `AppServerRuntimeOptions.remote_control_enabled` 被请求时，启动直接返回错误：
+  `legacy hosted remote control is disabled in Astral until a provider-neutral control plane exists`。
+- app-server RPC 层的 `remoteControl/enable`、pairing start/status、client list/revoke 全部返回同一
+  Astral disabled 错误。
+- `remoteControl/status/read` 和 `remoteControl/disable` 保留 disabled 状态行为，避免破坏普通
+  app-server 生命周期和 UI 状态读取。
+- 删除 app-server remote-control 测试中 mock ChatGPT backend、ChatGPT auth fixture 和
+  `/backend-api/wham/remote/control/...` 成功路径断言，改为验证 Astral 禁用语义。
+
+为什么要做：
+
+- Codex 原 remote control 是 OpenAI/ChatGPT hosted 控制面：需要 ChatGPT authentication、account id、
+  enrollment、server token、pairing 和 client management。
+- Astral 还没有 provider-neutral remote control 服务端协议，不能把旧 WHAM 控制面通过换 base URL 的方式保留。
+- 这一步尊重 Codex 的 C/S 骨架：app-server、transport 类型、status disabled 状态仍保留；只是切断会访问
+  ChatGPT hosted control-plane 的启用入口。
+
+后续风险：
+
+- `codex-rs/app-server-transport/src/transport/remote_control/*` 里仍保留旧实现和测试，用于当前编译边界。
+  后续如果要更洁癖，可以把它降级为 stub 或拆成非默认 legacy feature。
+- CLI `remote-control` 子命令仍存在，但进入 app-server 后会得到 Astral disabled 错误。后续可以把 CLI
+  文案也改成 provider-neutral remote control 未实现。
 
 ## 最近完成的 account slice
 
@@ -678,6 +717,8 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
 - `bazel mod deps --lockfile_mode=error`
 - `cargo check --tests -p codex-core -p codex-app-server`
 - `just test -p codex-core load_config_does_not_default_to_chatgpt_backend`
+- `cargo check --tests -p codex-app-server`
+- `just test -p codex-app-server remote_control`
 - 旧 ChatGPT refresh 符号窄范围搜索：`codex-rs/login` 与 app-server auth 测试无命中。
 - `git diff --check`
 
@@ -691,9 +732,8 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
   `.github/scripts/run_bazel_with_buildbuddy.py`，该脚本使用 Python 3.10+ 的 `type | None` 注解语法；
   当前 `/usr/bin/python3` 是 3.9.6，会在真正执行 Bazel 前 TypeError。直接执行
   `bazel mod deps --lockfile_mode=error` 可以完成 lockfile 校验。
-- `just test -p codex-app-server remote_control` 当前失败 4 个测试，失败信息集中为
-  `remote control requires ChatGPT authentication` 或旧 pairing/enrollment 不可用。这说明 remote control
-  仍是 OpenAI/ChatGPT hosted 控制面残留，后续需要禁用、删除或重做为 provider-neutral 实现。
+- `just test -p codex-app-server remote_control` 的旧失败来源已在 app-server 暴露层处理：测试改为验证
+  Astral disabled 语义。底层 `app-server-transport` remote-control 旧模块仍待后续降级或删除。
 
 ## 剩余高优先级工作
 
@@ -709,8 +749,8 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
    - `core-plugins/src/remote*`
    - `memories/write`
    - 目标：默认路径不能静默访问 `chatgpt.com/backend-api`。
-   - 下一刀建议优先处理 app-server remote control 的 ChatGPT authentication 旧语义，或 app-server /
-     core-plugins remote plugin share/install/read 的旧语义。
+  - app-server remote control 暴露入口已禁用；下一刀建议优先处理 app-server / core-plugins remote
+     plugin share/install/read 的旧语义，或把 app-server-transport remote-control 旧模块降级为 stub。
 
 3. 推进 provider-neutral protocol
    - Anthropic Messages stream/tool_use/tool_result。

@@ -701,24 +701,17 @@ pub async fn run_main_with_transport_options(
         AuthManager::shared_from_config(&config, /*enable_codex_api_key_env*/ false).await;
 
     let remote_control_requested = runtime_options.remote_control_enabled;
-    let remote_control_enabled = remote_control_requested && state_db.is_some();
-    if remote_control_requested && state_db.is_none() {
-        error!("remote control disabled because sqlite state db is unavailable");
-    }
-    if remote_control_enabled && config.chatgpt_base_url.trim().is_empty() {
+    if remote_control_requested {
         return Err(std::io::Error::new(
             ErrorKind::InvalidInput,
-            "remote control requires an explicit remote control backend URL",
+            "legacy hosted remote control is disabled in Astral until a provider-neutral control plane exists",
         ));
     }
-    if transport_accept_handles.is_empty() && !remote_control_enabled {
+    let remote_control_enabled = false;
+    if transport_accept_handles.is_empty() {
         return Err(std::io::Error::new(
             ErrorKind::InvalidInput,
-            if remote_control_requested && state_db.is_none() {
-                "no transport configured; remote control disabled because sqlite state db is unavailable"
-            } else {
-                "no transport configured; use --listen or enable remote control"
-            },
+            "no transport configured; use --listen",
         ));
     }
 
