@@ -138,6 +138,72 @@ fn messages_request_maps_agent_ir_to_anthropic_shape() {
 }
 
 #[test]
+fn messages_request_adds_cache_control_when_prompt_cache_key_is_set() {
+    let request = AgentRequest {
+        model: "astral-large".to_string(),
+        instructions: vec![ContentBlock::Text {
+            text: "You are Astral-Code.".to_string(),
+        }],
+        messages: vec![AgentMessage {
+            role: MessageRole::User,
+            content: vec![ContentBlock::Text {
+                text: "inspect the repo".to_string(),
+            }],
+            id: None,
+        }],
+        tools: vec![AgentTool {
+            name: "Bash".to_string(),
+            description: "Run a shell command".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": { "command": { "type": "string" } },
+                "required": ["command"]
+            }),
+            metadata: BTreeMap::new(),
+        }],
+        metadata: RequestMetadata {
+            prompt_cache_key: Some("astral:test".to_string()),
+            ..RequestMetadata::default()
+        },
+        stream: true,
+        ..AgentRequest::default()
+    };
+
+    assert_eq!(
+        to_messages_request(&request, AnthropicMessagesOptions { max_tokens: 1024 }),
+        json!({
+            "model": "astral-large",
+            "max_tokens": 1024,
+            "stream": true,
+            "system": [{
+                "type": "text",
+                "text": "You are Astral-Code.",
+                "cache_control": { "type": "ephemeral" }
+            }],
+            "messages": [{
+                "role": "user",
+                "content": [{
+                    "type": "text",
+                    "text": "inspect the repo",
+                    "cache_control": { "type": "ephemeral" }
+                }]
+            }],
+            "tools": [{
+                "name": "Bash",
+                "description": "Run a shell command",
+                "input_schema": {
+                    "type": "object",
+                    "properties": { "command": { "type": "string" } },
+                    "required": ["command"]
+                },
+                "cache_control": { "type": "ephemeral" }
+            }],
+            "tool_choice": { "type": "auto" }
+        })
+    );
+}
+
+#[test]
 fn stream_parser_maps_anthropic_events_to_agent_ir() {
     assert_eq!(
         parse_stream_event(json!({

@@ -25,27 +25,33 @@ pub fn to_messages_request(request: &AgentRequest, options: AnthropicMessagesOpt
     body.insert("max_tokens".to_string(), Value::from(options.max_tokens));
     body.insert("stream".to_string(), Value::Bool(request.stream));
 
-    let system = system_blocks(request);
+    let cache_control_enabled = request.metadata.prompt_cache_key.is_some();
+
+    let system = system_blocks(request, cache_control_enabled);
     if !system.is_empty() {
         body.insert("system".to_string(), Value::Array(system));
     }
 
-    body.insert(
-        "messages".to_string(),
-        Value::Array(
-            request
-                .messages
-                .iter()
-                .filter_map(message_to_anthropic)
-                .collect(),
-        ),
-    );
+    let mut messages = request
+        .messages
+        .iter()
+        .filter_map(message_to_anthropic)
+        .collect::<Vec<_>>();
+    if cache_control_enabled {
+        add_cache_control_to_last_message_block(&mut messages);
+    }
+    body.insert("messages".to_string(), Value::Array(messages));
 
     if !request.tools.is_empty() {
-        body.insert(
-            "tools".to_string(),
-            Value::Array(request.tools.iter().map(tool_to_anthropic).collect()),
-        );
+        let mut tools = request
+            .tools
+            .iter()
+            .map(tool_to_anthropic)
+            .collect::<Vec<_>>();
+        if cache_control_enabled {
+            add_cache_control_to_last_object(&mut tools);
+        }
+        body.insert("tools".to_string(), Value::Array(tools));
     }
 
     body.insert(
@@ -142,19 +148,23 @@ impl std::fmt::Display for AnthropicStreamError {
 
 impl std::error::Error for AnthropicStreamError {}
 
-fn system_blocks(request: &AgentRequest) -> Vec<Value> {
+fn system_blocks(request: &AgentRequest, cache_control_enabled: bool) -> Vec<Value> {
     let message_blocks = request
         .messages
         .iter()
         .filter(|message| is_system_role(&message.role))
         .flat_map(|message| message.content.iter());
 
-    request
+    let mut blocks = request
         .instructions
         .iter()
         .chain(message_blocks)
         .map(content_block_to_anthropic)
-        .collect()
+        .collect::<Vec<_>>();
+    if cache_control_enabled {
+        add_cache_control_to_last_object(&mut blocks);
+    }
+    blocks
 }
 
 fn is_system_role(role: &MessageRole) -> bool {
@@ -182,11 +192,17 @@ fn message_to_anthropic(message: &AgentMessage) -> Option<Value> {
 }
 
 fn tool_to_anthropic(tool: &AgentTool) -> Value {
-    json!({
-        "name": tool.name,
-        "description": tool.description,
-        "input_schema": tool.input_schema,
-    })
+    let mut value = Map::new();
+    value.insert("name".to_string(), Value::String(tool.name.clone()));
+    value.insert(
+        "description".to_string(),
+        Value::String(tool.description.clone()),
+    );
+    value.insert("input_schema".to_string(), tool.input_schema.clone());
+    if let Some(cache_control) = tool.metadata.get("cache_control") {
+        value.insert("cache_control".to_string(), cache_control.clone());
+    }
+    Value::Object(value)
 }
 
 fn tool_choice_to_anthropic(tool_choice: &ToolChoice) -> Value {
@@ -202,6 +218,38 @@ fn apply_provider_body_overrides(body: &mut Map<String, Value>, request: &AgentR
     for (key, value) in &request.metadata.provider {
         body.insert(key.clone(), value.clone());
     }
+}
+
+fn add_cache_control_to_last_object(values: &mut [Value]) {
+    if let Some(object) = values.iter_mut().rev().find_map(Value::as_object_mut) {
+        object
+            .entry("cache_control".to_string())
+            .or_insert_with(ephemeral_cache_control);
+    }
+}
+
+fn add_cache_control_to_last_message_block(messages: &mut [Value]) {
+    for message in messages.iter_mut().rev() {
+        let Some(content) = message.get_mut("content").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        for block in content.iter_mut().rev() {
+            let Some(object) = block.as_object_mut() else {
+                continue;
+            };
+            if object.get("type").and_then(Value::as_str) == Some("thinking") {
+                continue;
+            }
+            object
+                .entry("cache_control".to_string())
+                .or_insert_with(ephemeral_cache_control);
+            return;
+        }
+    }
+}
+
+fn ephemeral_cache_control() -> Value {
+    json!({ "type": "ephemeral" })
 }
 
 fn content_block_to_anthropic(block: &ContentBlock) -> Value {
