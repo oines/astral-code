@@ -28,17 +28,10 @@ pub fn append_error_log(message: impl AsRef<str>) {
 
 /// Normalize the configured base URL to a canonical form used by the backend client.
 /// - trims trailing '/'
-/// - appends '/backend-api' for ChatGPT hosts when missing
 pub fn normalize_base_url(input: &str) -> String {
     let mut base_url = input.to_string();
     while base_url.ends_with('/') {
         base_url.pop();
-    }
-    if (base_url.starts_with("https://chatgpt.com")
-        || base_url.starts_with("https://chat.openai.com"))
-        && !base_url.contains("/backend-api")
-    {
-        base_url = format!("{base_url}/backend-api");
     }
     base_url
 }
@@ -69,9 +62,8 @@ pub async fn load_auth_manager() -> Option<AuthManager> {
     )
 }
 
-/// Build headers for ChatGPT-backed requests: `User-Agent`, optional `Authorization`,
-/// and optional `ChatGPT-Account-Id`.
-pub async fn build_chatgpt_headers() -> HeaderMap {
+/// Build headers for Astral cloud task requests.
+pub async fn build_astral_auth_headers() -> HeaderMap {
     use reqwest::header::HeaderValue;
     use reqwest::header::USER_AGENT;
 
@@ -84,7 +76,6 @@ pub async fn build_chatgpt_headers() -> HeaderMap {
     );
     if let Some(am) = load_auth_manager().await
         && let Some(auth) = am.auth().await
-        && auth.uses_codex_backend()
     {
         headers.extend(codex_model_provider::auth_provider_from_auth(&auth).to_auth_headers());
     }

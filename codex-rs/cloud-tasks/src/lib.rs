@@ -88,28 +88,16 @@ async fn init_backend(user_agent_suffix: &str) -> anyhow::Result<BackendContext>
         Some(auth) => auth,
         None => {
             eprintln!(
-                "Not signed in. Please run 'codex login' to sign in with ChatGPT, then re-run 'codex cloud'."
+                "Not signed in. Please run 'astral login --with-api-key', then re-run 'astral cloud'."
             );
             std::process::exit(1);
         }
     };
 
-    if let Some(acc) = auth.get_account_id() {
-        append_error_log(format!("auth: mode=ChatGPT account_id={acc}"));
-    }
-
-    if !auth.uses_codex_backend() {
-        eprintln!(
-            "Not signed in. Please run 'codex login' to sign in with ChatGPT, then re-run 'codex cloud'."
-        );
-        std::process::exit(1);
-    }
+    append_error_log(format!("auth: mode={}", auth.auth_mode()));
 
     let auth_provider = codex_model_provider::auth_provider_from_auth(&auth);
     http = http.with_auth_provider(auth_provider);
-    if let Some(acc) = auth.get_account_id() {
-        append_error_log(format!("auth: set ChatGPT-Account-Id header: {acc}"));
-    }
 
     Ok(BackendContext {
         backend: Arc::new(http),
@@ -119,7 +107,7 @@ async fn init_backend(user_agent_suffix: &str) -> anyhow::Result<BackendContext>
 
 async fn list_environments_from_configured_backend() -> anyhow::Result<Vec<app::EnvironmentRow>> {
     let base_url = util::cloud_tasks_base_url_from_env()?;
-    let headers = util::build_chatgpt_headers().await;
+    let headers = util::build_astral_auth_headers().await;
     crate::env_detect::list_environments(&base_url, &headers).await
 }
 
@@ -127,7 +115,7 @@ async fn autodetect_environment_from_configured_backend(
     desired_label: Option<String>,
 ) -> anyhow::Result<crate::env_detect::AutodetectSelection> {
     let base_url = util::cloud_tasks_base_url_from_env()?;
-    let headers = util::build_chatgpt_headers().await;
+    let headers = util::build_astral_auth_headers().await;
     crate::env_detect::autodetect_environment_id(&base_url, &headers, desired_label).await
 }
 
@@ -210,7 +198,7 @@ async fn resolve_environment_id(ctx: &BackendContext, requested: &str) -> anyhow
         return Err(anyhow!("environment id must not be empty"));
     }
     let normalized = util::normalize_base_url(&ctx.base_url);
-    let headers = util::build_chatgpt_headers().await;
+    let headers = util::build_astral_auth_headers().await;
     let environments = crate::env_detect::list_environments(&normalized, &headers).await?;
     if environments.is_empty() {
         return Err(anyhow!(
@@ -2161,6 +2149,22 @@ mod tests {
         async fn current_branch_name(&self, _path: &std::path::Path) -> Option<String> {
             self.current_branch.clone()
         }
+    }
+
+    #[test]
+    fn normalize_base_url_trims_without_chatgpt_backend_rewrite() {
+        assert_eq!(
+            util::normalize_base_url("https://chatgpt.com/"),
+            "https://chatgpt.com"
+        );
+        assert_eq!(
+            util::normalize_base_url("https://chatgpt.com/backend-api/"),
+            "https://chatgpt.com/backend-api"
+        );
+        assert_eq!(
+            util::normalize_base_url("https://tasks.example.com/api/codex/"),
+            "https://tasks.example.com/api/codex"
+        );
     }
 
     #[tokio::test]

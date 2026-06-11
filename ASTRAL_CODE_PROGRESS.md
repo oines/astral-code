@@ -1,6 +1,6 @@
 # Astral-Code 项目总控记录
 
-最后更新：2026-06-11 20:10 CST
+最后更新：2026-06-11 20:22 CST
 
 这份文档是 Astral-Code 长线改造的中文 handoff。它的用途不是对外宣传，而是让后续任何一次
 compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道：我们到底要做什么、为什么这么做、
@@ -68,6 +68,12 @@ plugin apps、MCP apps 和 app-server `apps/list` 在 Astral API-key/provider-ne
 最新补充 5：tool suggest 的 connector 候选不再读取 legacy ChatGPT connector directory cache。Astral 现在只从
 本地 plugin app connector ids 和显式配置的 connector discoverables 构造候选，再和 MCP/accessibility 状态合并；
 不会因为 tool suggest 去读取旧 hosted directory cache、`chatgpt_base_url` 或 ChatGPT account/user id。
+
+最新补充 6：cloud-tasks 的 auth/header 主路径已从 ChatGPT-only 改为 Astral API-key/provider-neutral。
+`astral cloud` 缺 auth 时提示 `astral login --with-api-key`；已登录时直接用 Astral 支持的本地 auth 生成请求
+headers，不再要求 `uses_codex_backend()`，也不再打印 `ChatGPT-Account-Id` 相关日志。`normalize_base_url`
+也不再把 `https://chatgpt.com` 自动补成 `/backend-api`；只有用户显式配置带 `/backend-api` 的 backend 时才走
+旧 path style。
 
 下一步优先继续处理 `chatgpt_base_url` 配置字段、Agent Identity auth/storage 残留、connectors/apps 和其他
 ChatGPT hosted 残留；provider adapter 方向则继续补 Anthropic/chat-completions fixture 和国内模型兼容选项。
@@ -634,6 +640,13 @@ account 或 OpenAI-only plugin 分发的代码，都需要删除、禁用或隔�
 - 新增 `list_environments_from_configured_backend()` 和
   `autodetect_environment_from_configured_backend(...)`，收拢环境加载路径。
 - debug mock 模式保留可运行性，但默认只使用本地占位 URL，不触碰 OpenAI/ChatGPT。
+- 后续补充：`build_chatgpt_headers(...)` 已重命名为 `build_astral_auth_headers(...)`。
+- 后续补充：cloud task auth 不再要求 `auth.uses_codex_backend()`，已登录的 Astral API-key auth 也会生成
+  请求 headers。
+- 后续补充：缺 auth 文案改为 `astral login --with-api-key`；error log 不再打印
+  `ChatGPT-Account-Id`。
+- 后续补充：`normalize_base_url(...)` 不再对 `https://chatgpt.com` / `https://chat.openai.com`
+  自动追加 `/backend-api`。
 
 为什么要做：
 
@@ -644,9 +657,7 @@ account 或 OpenAI-only plugin 分发的代码，都需要删除、禁用或隔�
 
 仍需后续处理：
 
-- `build_chatgpt_headers(...)`、`AuthMode::ChatGPT`、`ChatGPT-Account-Id` 仍是旧 cloud task
-  auth 语义，需要在 remote/cloud control-plane 总清理时一起处理。
-- URL parser 和 task URL formatter 测试仍保留 `chatgpt.com` fixture，用于覆盖旧 URL 解析行为；
+- cloud tasks 的 URL parser 和部分 formatter 测试仍保留 `chatgpt.com` fixture，用于覆盖旧 URL 解析行为；
   是否删除这些 fixture 等 cloud tasks 去 legacy 化时再决定。
 
 ## 最近完成的 memories guard slice
