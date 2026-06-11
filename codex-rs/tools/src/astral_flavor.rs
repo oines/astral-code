@@ -117,6 +117,7 @@ fn read_tool() -> AgentTool {
         object(
             [
                 string_property("file_path", "The absolute path to the file to read"),
+                environment_id_property(),
                 integer_property(
                     "offset",
                     "The line number to start reading from; only provide for large files",
@@ -145,6 +146,7 @@ fn write_tool() -> AgentTool {
                     "file_path",
                     "The absolute path to the file to write; must be absolute",
                 ),
+                environment_id_property(),
                 string_property("content", "The content to write to the file"),
             ],
             ["file_path", "content"],
@@ -159,6 +161,7 @@ fn edit_tool() -> AgentTool {
         object(
             [
                 string_property("file_path", "The absolute path to the file to modify"),
+                environment_id_property(),
                 string_property("old_string", "The text to replace"),
                 string_property(
                     "new_string",
@@ -185,6 +188,7 @@ fn glob_tool() -> AgentTool {
                     "path",
                     "Directory to search in; omit to use the current working directory",
                 ),
+                environment_id_property(),
             ],
             ["pattern"],
         ),
@@ -199,6 +203,7 @@ fn grep_tool() -> AgentTool {
             [
                 string_property("pattern", "The regular expression pattern to search for"),
                 string_property("path", "File or directory to search in; defaults to cwd"),
+                environment_id_property(),
                 string_property("glob", "Glob pattern to filter files"),
                 enum_property(
                     "output_mode",
@@ -493,6 +498,13 @@ fn string_property(name: &'static str, description: &'static str) -> (&'static s
     (
         name,
         json!({ "type": "string", "description": description }),
+    )
+}
+
+fn environment_id_property() -> (&'static str, Value) {
+    string_property(
+        "environment_id",
+        "Optional target execution environment id when multiple environments exist",
     )
 }
 

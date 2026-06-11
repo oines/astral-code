@@ -10,6 +10,7 @@ use super::GrepArgs;
 use super::add_line_numbers;
 use super::collect_files;
 use super::edit_file;
+use super::file_environment_id;
 use super::is_blocked_device_path;
 use super::push_content_matches;
 use super::split_lines_preserving_newline;
@@ -31,6 +32,20 @@ fn grep_line_numbers_flag_is_optional() {
         serde_json::from_value(json!({ "pattern": "needle" })).expect("valid Grep args");
 
     assert_eq!(args.line_numbers, None);
+}
+
+#[test]
+fn file_tools_accept_snake_and_camel_environment_ids() -> anyhow::Result<()> {
+    assert_eq!(
+        file_environment_id(&json!({ "environment_id": "remote" }).to_string())?,
+        Some("remote".to_string())
+    );
+    assert_eq!(
+        file_environment_id(&json!({ "environmentId": "secondary" }).to_string())?,
+        Some("secondary".to_string())
+    );
+    assert_eq!(file_environment_id(&json!({}).to_string())?, None);
+    Ok(())
 }
 
 #[test]

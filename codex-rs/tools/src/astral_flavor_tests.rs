@@ -61,10 +61,22 @@ fn file_and_search_tools_expose_expected_required_fields() {
         json!("string")
     );
     assert_eq!(
+        read.input_schema["properties"]["environment_id"]["type"],
+        json!("string")
+    );
+    assert_eq!(
+        edit.input_schema["properties"]["environment_id"]["type"],
+        json!("string")
+    );
+    assert_eq!(
         edit.input_schema["required"],
         json!(["file_path", "old_string", "new_string"])
     );
     assert_eq!(grep.input_schema["required"], json!(["pattern"]));
+    assert_eq!(
+        grep.input_schema["properties"]["environment_id"]["type"],
+        json!("string")
+    );
     assert_eq!(
         grep.input_schema["properties"]["output_mode"]["enum"],
         json!(["content", "files_with_matches", "count"])

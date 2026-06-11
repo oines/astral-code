@@ -138,8 +138,9 @@ impl ToolExecutor<ToolInvocation> for AstralFileToolHandler {
             }
         };
 
+        let environment_id = file_environment_id(&arguments)?;
         let Some(turn_environment) =
-            resolve_tool_environment(turn.as_ref(), /*environment_id*/ None)?
+            resolve_tool_environment(turn.as_ref(), environment_id.as_deref())?
         else {
             return Err(FunctionCallError::RespondToModel(format!(
                 "{} is unavailable in this session",
@@ -194,6 +195,8 @@ fn astral_file_tool_spec(name: &str) -> ToolSpec {
 #[derive(Deserialize)]
 struct ReadArgs {
     file_path: String,
+    #[serde(default, rename = "environment_id", alias = "environmentId")]
+    environment_id: Option<String>,
     #[serde(default)]
     offset: Option<usize>,
     #[serde(default)]
@@ -287,13 +290,17 @@ async fn handle_read_invocation(
     if is_image_path(Path::new(&args.file_path)) {
         invocation.tool_name = ToolName::plain("view_image");
         invocation.payload = ToolPayload::Function {
-            arguments: json!({ "path": args.file_path }).to_string(),
+            arguments: json!({
+                "path": args.file_path,
+                "environment_id": args.environment_id,
+            })
+            .to_string(),
         };
         return ViewImageHandler::default().handle(invocation).await;
     }
 
     let Some(turn_environment) =
-        resolve_tool_environment(invocation.turn.as_ref(), /*environment_id*/ None)?
+        resolve_tool_environment(invocation.turn.as_ref(), args.environment_id.as_deref())?
     else {
         return Err(FunctionCallError::RespondToModel(
             "Read is unavailable in this session".to_string(),
@@ -310,6 +317,17 @@ async fn handle_read_invocation(
         text,
         Some(true),
     )))
+}
+
+#[derive(Deserialize)]
+struct FileEnvironmentArgs {
+    #[serde(default, rename = "environment_id", alias = "environmentId")]
+    environment_id: Option<String>,
+}
+
+fn file_environment_id(arguments: &str) -> Result<Option<String>, FunctionCallError> {
+    let args: FileEnvironmentArgs = parse_arguments(arguments)?;
+    Ok(args.environment_id)
 }
 
 #[derive(Deserialize)]
