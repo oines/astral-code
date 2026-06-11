@@ -1,6 +1,6 @@
 # Astral-Code 项目总控记录
 
-最后更新：2026-06-11 15:25 CST
+最后更新：2026-06-11 15:48 CST
 
 这份文档是 Astral-Code 长线改造的中文 handoff。它的用途不是对外宣传，而是让后续任何一次
 compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道：我们到底要做什么、为什么这么做、
@@ -34,8 +34,9 @@ provider 去 OpenAI 默认路由、登录态清理、cloud-config/cloud-tasks �
 - Provider-neutral Agent IR / Anthropic Messages / chat completions：仍是后续核心大块工作。
 - 全量 CI：当前不追求全绿，用户明确要求先推进实现，最后集中测试集中修。
 
-当前暂停点：用户要求暂停编码，把项目整体目标和进度写入详细中文 Markdown，防止长时间执行和多次
-compact 后做歪。完成本文档更新后，再继续下一块代码 slice。
+当前最新 slice：`codex-rs/memories/write` 不再通过 ChatGPT/Codex hosted backend 查询 startup
+rate limit，也不再直接依赖 `codex-backend-client`。下一步继续清理 `chatgpt_client/get_task` 或
+app-server/core-plugins remote plugin 控制面。
 
 ## 项目身份
 
@@ -493,6 +494,49 @@ account 或 OpenAI-only plugin 分发的代码，都需要删除、禁用或隔�
 - URL parser 和 task URL formatter 测试仍保留 `chatgpt.com` fixture，用于覆盖旧 URL 解析行为；
   是否删除这些 fixture 等 cloud tasks 去 legacy 化时再决定。
 
+## 最近完成的 memories guard slice
+
+本轮完成的代码 slice：
+
+> 让 memories startup 不再访问 ChatGPT/Codex hosted backend 查询 rate limit。
+
+已编辑文件：
+
+- `codex-rs/memories/write/src/guard.rs`
+- `codex-rs/memories/write/src/lib.rs`
+- `codex-rs/memories/write/src/guard_tests.rs`
+- `codex-rs/memories/write/Cargo.toml`
+- `codex-rs/Cargo.lock`
+
+改动内容：
+
+- `guard::rate_limits_ok(...)` 改为本地 allow，并记录 debug 日志。
+- 删除旧 `rate_limits_check(...)`，不再调用 `AuthManager::auth()`、`uses_codex_backend()`、
+  `BackendClient::from_auth(...)` 或 `get_rate_limits_many()`。
+- 删除旧 rate-limit snapshot helper 和测试。
+- 删除 `guard_limits::CODEX_LIMIT_ID`。
+- 从 `codex-memories-write` 直接依赖中移除 `codex-backend-client`。
+
+为什么要做：
+
+- Astral 不应该为了本地 memories startup 去访问 ChatGPT hosted backend。
+- memories 是本地/agent 体验能力，不应被 OpenAI rate-limit guard 绑定。
+- 删除 direct dependency 后，`codex-memories-write` 不再把 hosted backend client 作为自身依赖带入。
+
+验证：
+
+- `just fmt`
+- `cargo check --tests -p codex-memories-write`
+- `just test -p codex-memories-write`：27 passed / 0 skipped
+- `just bazel-lock-update`
+- `bazel mod deps --lockfile_mode=error`
+
+注意：
+
+- `just bazel-lock-check` 当前在本机失败，原因是 Unix 包装脚本
+  `.github/scripts/run_bazel_with_buildbuddy.py` 使用了 Python 3.10+ 的 `type | None` 语法，但系统
+  `python3` 是 3.9.6。直接运行核心 Bazel lock 校验命令已通过，`MODULE.bazel.lock` 没有 diff。
+
 ## 最近完成的 account slice
 
 本轮完成的代码 slice：
@@ -550,6 +594,10 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
 - `just test -p codex-cloud-config`
 - `cargo check --tests -p codex-chatgpt`
 - `just test -p codex-chatgpt`
+- `cargo check --tests -p codex-memories-write`
+- `just test -p codex-memories-write`
+- `just bazel-lock-update`
+- `bazel mod deps --lockfile_mode=error`
 - 旧 ChatGPT refresh 符号窄范围搜索：`codex-rs/login` 与 app-server auth 测试无命中。
 - `git diff --check`
 
@@ -559,6 +607,10 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
   缺少 `gpt-5.5`。这和当前 Astral provider-neutral cleanup 无关。
 - `just test -p codex-app-server auth` 会额外匹配 plugin install/read 的 `needsAuth` 测试，这些测试仍按
   旧 ChatGPT app auth 语义期待 `chatgpt.com/apps/...` 认证项。处理 plugin remote/control-plane 时再改。
+- 本机 `just bazel-lock-check` 的 Unix 包装脚本会调用
+  `.github/scripts/run_bazel_with_buildbuddy.py`，该脚本使用 Python 3.10+ 的 `type | None` 注解语法；
+  当前 `/usr/bin/python3` 是 3.9.6，会在真正执行 Bazel 前 TypeError。直接执行
+  `bazel mod deps --lockfile_mode=error` 可以完成 lockfile 校验。
 
 ## 剩余高优先级工作
 

@@ -43,10 +43,6 @@ mod extension_resources {
     pub(super) const RETENTION_DAYS: i64 = 7;
 }
 
-mod guard_limits {
-    pub(super) const CODEX_LIMIT_ID: &str = "codex";
-}
-
 mod prompt_blocks {
     pub(super) const EXTENSIONS_FOLDER_STRUCTURE: &str = r#"
 Memory extensions (under {{ memory_extensions_root }}/):
