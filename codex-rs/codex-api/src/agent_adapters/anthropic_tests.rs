@@ -204,6 +204,43 @@ fn messages_request_adds_cache_control_when_prompt_cache_key_is_set() {
 }
 
 #[test]
+fn messages_request_provider_null_override_removes_default_field() {
+    let request = AgentRequest {
+        model: "anthropic-compatible".to_string(),
+        messages: vec![AgentMessage {
+            role: MessageRole::User,
+            content: vec![ContentBlock::Text {
+                text: "hello".to_string(),
+            }],
+            id: None,
+        }],
+        stream: true,
+        metadata: RequestMetadata {
+            provider: BTreeMap::from([
+                ("stream".to_string(), json!(null)),
+                ("temperature".to_string(), json!(0.1)),
+            ]),
+            ..RequestMetadata::default()
+        },
+        ..AgentRequest::default()
+    };
+
+    assert_eq!(
+        to_messages_request(&request, AnthropicMessagesOptions { max_tokens: 1024 }),
+        json!({
+            "model": "anthropic-compatible",
+            "max_tokens": 1024,
+            "temperature": 0.1,
+            "messages": [{
+                "role": "user",
+                "content": [{ "type": "text", "text": "hello" }]
+            }],
+            "tool_choice": { "type": "auto" }
+        })
+    );
+}
+
+#[test]
 fn stream_parser_maps_anthropic_events_to_agent_ir() {
     assert_eq!(
         parse_stream_event(json!({

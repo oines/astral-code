@@ -216,7 +216,11 @@ fn tool_choice_to_anthropic(tool_choice: &ToolChoice) -> Value {
 
 fn apply_provider_body_overrides(body: &mut Map<String, Value>, request: &AgentRequest) {
     for (key, value) in &request.metadata.provider {
-        body.insert(key.clone(), value.clone());
+        if value.is_null() {
+            body.remove(key);
+        } else {
+            body.insert(key.clone(), value.clone());
+        }
     }
 }
 

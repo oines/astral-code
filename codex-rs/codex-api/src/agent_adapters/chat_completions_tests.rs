@@ -231,6 +231,42 @@ fn request_drops_tool_control_fields_when_provider_override_clears_tools() {
 }
 
 #[test]
+fn request_provider_null_override_removes_default_field() {
+    let request = AgentRequest {
+        model: "strict-compatible".to_string(),
+        messages: vec![AgentMessage {
+            role: MessageRole::User,
+            content: vec![ContentBlock::Text {
+                text: "hello".to_string(),
+            }],
+            id: None,
+        }],
+        stream: true,
+        metadata: RequestMetadata {
+            provider: BTreeMap::from([
+                ("stream_options".to_string(), json!(null)),
+                ("temperature".to_string(), json!(0.1)),
+            ]),
+            ..RequestMetadata::default()
+        },
+        ..AgentRequest::default()
+    };
+
+    assert_eq!(
+        to_chat_completions_request(&request, ChatCompletionsOptions { max_tokens: None }),
+        json!({
+            "model": "strict-compatible",
+            "stream": true,
+            "temperature": 0.1,
+            "messages": [{
+                "role": "user",
+                "content": [{ "type": "text", "text": "hello" }]
+            }]
+        })
+    );
+}
+
+#[test]
 fn stream_chunk_maps_text_tool_calls_finish_reason_and_usage() {
     assert_eq!(
         parse_stream_chunk(json!({

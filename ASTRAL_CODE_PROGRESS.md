@@ -1,6 +1,6 @@
 # Astral-Code 项目总控记录
 
-最后更新：2026-06-11 20:54 CST
+最后更新：2026-06-11 20:57 CST
 
 这份文档是 Astral-Code 长线改造的中文 handoff。它的用途不是对外宣传，而是让后续任何一次
 compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道：我们到底要做什么、为什么这么做、
@@ -90,6 +90,10 @@ auth 检查、download zip 校验或解压逻辑；本地 skills runtime 不受�
 最新补充 10：app-server API 文档的 auth/account 段已同步到 Astral 行为。README 不再宣称支持 ChatGPT
 browser/device-code login、ChatGPT plan/rate-limit 示例或 OpenAI quota 窗口；`account/login/start` 文档现在只
 描述 `apiKey`，rate limits / usage 明确为当前 provider-neutral 模式不可用。
+
+最新补充 11：provider request body override 支持 JSON null 删除默认字段。Anthropic Messages 和
+OpenAI-compatible chat-completions adapter 现在都会把 `metadata.provider["field"] = null` 解释为从请求体移除
+`field`，用于适配不接受 `stream_options`、`stream` 等默认字段的 strict 国内网关。
 
 下一步优先继续处理 `chatgpt_base_url` 配置字段、Agent Identity auth/storage 残留、connectors/apps 和其他
 ChatGPT hosted 残留；provider adapter 方向则继续补 Anthropic/chat-completions fixture 和国内模型兼容选项。
@@ -969,6 +973,39 @@ account 或 OpenAI-only plugin 分发的代码，都需要删除、禁用或隔�
 
 - app-server README 其他段落仍有 remote plugin、attestation、ChatGPT install URL 等旧例子，后续继续分段清理。
 - schema 里 `AuthMode` 仍保留 legacy variants 用于识别/拒绝旧 payload，不代表 Astral 支持这些登录方式。
+
+## 最近完成的 provider body override removal slice
+
+本轮完成的代码 slice：
+
+> provider-specific request body override 支持用 JSON null 删除 adapter 默认字段，增强国内 OpenAI-compatible
+> / Anthropic-compatible 网关兼容性。
+
+已编辑文件：
+
+- `codex-rs/codex-api/src/agent_adapters/chat_completions.rs`
+- `codex-rs/codex-api/src/agent_adapters/chat_completions_tests.rs`
+- `codex-rs/codex-api/src/agent_adapters/anthropic.rs`
+- `codex-rs/codex-api/src/agent_adapters/anthropic_tests.rs`
+- `ASTRAL_CODE_PROGRESS.md`
+
+改动内容：
+
+- `apply_provider_body_overrides(...)` 从单纯 insert 改为：value 是 JSON null 时删除对应字段，否则覆盖/新增。
+- chat-completions 测试覆盖删除默认 `stream_options`，同时保留新增 `temperature`。
+- Anthropic Messages 测试覆盖删除默认 `stream`，同时保留新增 `temperature`。
+
+为什么要做：
+
+- 国内 OpenAI-compatible 网关常见问题是对 OpenAI 细字段支持不完整，例如不接受 `stream_options` 或某些
+  Anthropic request body 字段。
+- 继续保持 Astral 的 provider-neutral IR，不为某个厂商硬编码分支；由 provider 配置选择保留、覆盖或删除字段。
+
+后续风险：
+
+- TOML 原生不方便表达 null；如果用户配置层无法写出 JSON null，后续可以增加显式 remove list，例如
+  `request_body_remove = ["stream_options"]`，再映射成 `Value::Null`。
+- 仍需真实 DeepSeek / Anthropic-compatible gateway fixture 验证哪些字段默认应该保留、哪些应该可选。
 
 ## 最近完成的 core-plugins remote guard slice
 
