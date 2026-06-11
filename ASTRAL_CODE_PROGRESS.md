@@ -1,88 +1,84 @@
-# Astral-Code Project State
+# Astral-Code 项目状态
 
-Last updated: 2026-06-11
+最后更新：2026-06-11
 
-This document is the continuity anchor for long-running Astral-Code work. Keep it current before
-pausing, after major commits, and before any context compaction risk.
+这份文档是 Astral-Code 长线改造的“航标”。每次暂停、重大提交后，或者担心上下文被 compact 丢失前，都应该更新它。
 
-## Core Objective
+## 核心目标
 
-Build `astral-code` as a deep fork, not a Codex compatibility mode.
+把 `astral-code` 做成一个深度 fork，而不是 Codex 的兼容模式或换皮模式。
 
-The product shape is:
+产品形态：
 
-- Public repository: `oines/astral-code`
-- CLI command: `astral`
-- User-facing project name: `astral-code`
-- State/config namespace: `ASTRAL_HOME`, `~/.astral-code`, `ASTRAL_API_KEY`,
-  `ASTRAL_BASE_URL`, `ASTRAL_EXEC_SERVER_URL`
+- 公开仓库：`oines/astral-code`
+- CLI 命令：`astral`
+- 用户可见项目名：`astral-code`
+- 状态与配置命名空间：`ASTRAL_HOME`、`~/.astral-code`、`ASTRAL_API_KEY`、
+  `ASTRAL_BASE_URL`、`ASTRAL_EXEC_SERVER_URL`
 
-The architectural intent is to inherit Codex's strong runtime body while replacing the model-facing
-protocol and tool flavor:
+架构意图：
 
-- Keep Codex's C/S architecture, daemon/app-server, exec-server, PTY buffering, UnifiedExec,
-  sandbox, approval, environments, MCP, skills/plugins, Plan Mode, Goal Mode, local compact, and
-  subagent runtime.
-- Replace OpenAI/Responses-first assumptions with provider-neutral model plumbing.
-- Expose Claude Code-like core tools to the model so domestic or OpenAI-compatible coding models
-  see a familiar agentic trajectory.
-- Remove or isolate OpenAI proprietary control plane: ChatGPT login, OpenAI hosted auth/routing,
-  add-credits/rate-limit nudges, feedback upload, remote compact, OpenAI-only web/search gates, and
-  ChatGPT backend defaults.
+- 继承 Codex 的优秀运行时骨架：C/S 架构、daemon/app-server、exec-server、PTY 缓冲、
+  UnifiedExec、sandbox、approval、environment、MCP、skills/plugins、Plan Mode、Goal Mode、
+  local compact 和 subagent runtime。
+- 把 OpenAI/Responses-first 的模型协议假设替换成 provider-neutral 的模型管线。
+- 给模型暴露 Claude Code-like 的核心工具，让国产模型或 OpenAI-compatible coding model
+  看到更熟悉的 agentic SFT 轨迹。
+- 删除或隔离 OpenAI 专有控制面：ChatGPT 登录、OpenAI hosted auth/routing、充值/限流提示、
+  feedback upload、remote compact、OpenAI-only web/search gating、ChatGPT backend 默认路由。
 
-## Non-Negotiable Decisions
+## 不可动摇的决策
 
-- No Codex user-data compatibility. Do not read, migrate, or fallback to `~/.codex`, `CODEX_HOME`,
-  old sessions, old auth, old plugins, or old config.
-- Astral naming only for user-visible new surfaces. Internal crate names may still be `codex-*`
-  until a later mechanical rename.
-- Do not degrade sandbox behavior. Seatbelt/Bwrap/Windows sandbox, approval, and denied-action retry
-  paths are part of the inherited runtime boundary.
-- Do not replace app-server, exec-server, UnifiedExec, PTY, or Environment/ExecBackend as part of
-  the tool flavor work.
-- Keep MCP and local skills/plugins. Remote OpenAI/ChatGPT plugin distribution is suspect and should
-  be audited separately.
-- Keep Codex local compact unless there is clear evidence it damages model-native tool streaming.
-  OpenAI remote compact should not remain a dependency.
-- Do not store real provider secrets in the repository. A user mentioned DeepSeek model names for
-  future manual testing; never persist API keys in docs, fixtures, or commits.
+- 不兼容旧 Codex 用户数据。不要读取、迁移或 fallback 到 `~/.codex`、`CODEX_HOME`、旧
+  session、旧 auth、旧 plugin 或旧 config。
+- 新增用户可见面只使用 Astral 命名。内部 crate 名可以暂时继续是 `codex-*`，后续可以做
+  机械重命名。
+- 不削弱 sandbox 行为。Seatbelt/Bwrap/Windows sandbox、approval、denied-action retry 都是
+  必须继承的运行时边界。
+- 做 tool flavor 时不要替换 app-server、exec-server、UnifiedExec、PTY 或
+  Environment/ExecBackend。
+- 保留 MCP 和本地 skills/plugins。OpenAI/ChatGPT 远程 plugin 分发要单独审计，不能默认信任。
+- 保留 Codex local compact，除非有明确证据证明它破坏模型原生 tool streaming。OpenAI remote
+  compact 不应该作为依赖保留。
+- 不要把真实 provider secret 写进仓库。用户曾提供过 DeepSeek 模型名用于未来手工测试，但
+  API key 不能写入文档、fixture 或 commit。
 
-## Current Implementation Strategy
+## 当前实现路线
 
-Astral should not be a thin reverse proxy or endpoint hook.
+Astral 不应该是一个薄反代，也不应该靠末端 hook 偷换协议。
 
-The preferred architecture is:
+首选架构：
 
-1. A provider-neutral internal agent IR for messages, tool use, tool results, stream deltas, usage,
-   stop reasons, and errors.
-2. Provider adapters for Anthropic Messages and OpenAI-compatible `/v1/chat/completions`.
-3. A legacy/optional Responses adapter only where needed during transition.
-4. Astral-native tool schemas and handlers that are model-facing Claude-ish, while reusing Codex
-   runtime primitives internally.
+1. 内部使用 provider-neutral Agent IR，承载 messages、tool use、tool result、stream delta、
+   usage、stop reason 和错误。
+2. 实现 Anthropic Messages adapter 和 OpenAI-compatible `/v1/chat/completions` adapter。
+3. Responses 只作为过渡期 legacy/optional provider adapter，不再作为核心真相。
+4. 工具层使用 Astral-native schema 和 handler：模型侧 Claude-ish，运行时侧复用 Codex 的
+   primitives。
 
-The tool layer should be "native at the planning boundary": model-visible names and schemas are
-selected in the core tool plan, not only renamed at the final HTTP edge.
+工具层必须在 planning boundary 就原生化：模型可见的名字和 schema 应该在 core tool plan
+里被选择，而不是只在最终 HTTP 边缘改名。
 
-## Inherited Runtime Boundaries
+## 必须继承的运行时边界
 
-Keep these Codex systems unless there is a strong, explicit reason:
+除非有强理由，不要动这些 Codex 系统：
 
-- `app-server` and `app-server-protocol`
+- `app-server` 和 `app-server-protocol`
 - `exec-server`
 - `Environment` / `ExecBackend`
 - `UnifiedExecProcessManager`
-- PTY/stdin/terminate/output streaming behavior
-- sandbox and approval engine
-- permission request lifecycle
-- Plan Mode and Goal Mode host behavior
-- local compact/history reconstruction
-- MCP runtime and MCP resources
+- PTY、stdin、terminate、output streaming 行为
+- sandbox 和 approval engine
+- permission request 生命周期
+- Plan Mode 和 Goal Mode 的宿主行为
+- local compact 和 history reconstruction
+- MCP runtime 和 MCP resources
 - skills/plugins runtime
 - multi-agent v2 runtime
 
-## Claude-Ish Tool Flavor Status
+## Claude-ish Tool Flavor 状态
 
-Core model-facing tools currently present in `codex-rs/tools/src/astral_flavor.rs`:
+当前 `codex-rs/tools/src/astral_flavor.rs` 里已有的模型可见核心工具：
 
 - `Bash`
 - `Monitor`
@@ -102,20 +98,20 @@ Core model-facing tools currently present in `codex-rs/tools/src/astral_flavor.r
 - `ListMcpResourcesTool`
 - `ReadMcpResourceTool`
 
-Runtime mappings already in tree:
+当前已经落地的运行时映射：
 
-- `Bash` maps to Codex `exec_command` / `shell_command` via `AstralBashHandler`.
-- `Monitor` maps to `write_stdin` via `AstralMonitorHandler`.
-- `TaskStop` can terminate UnifiedExec shell tasks or interrupt multi-agent tasks.
-- `Read/Write/Edit/Glob/Grep` have Astral-native file handlers using Codex filesystem and sandbox
-  context. They support `environment_id`.
-- `TodoWrite` maps to Codex `update_plan`.
-- `Agent` maps to `spawn_agent`.
-- `SendMessage` maps to multi-agent v2 `send_message`.
-- `RequestPermissions` maps to the existing approval/permission channel.
-- MCP resource tools, `ToolSearch`, and `Skill` reuse the existing extension/runtime machinery.
+- `Bash` 通过 `AstralBashHandler` 映射到 Codex `exec_command` / `shell_command`。
+- `Monitor` 通过 `AstralMonitorHandler` 映射到 `write_stdin`。
+- `TaskStop` 可以终止 UnifiedExec shell task，也可以 interrupt multi-agent task。
+- `Read/Write/Edit/Glob/Grep` 已有 Astral-native file handler，使用 Codex filesystem 和
+  sandbox context，并支持 `environment_id`。
+- `TodoWrite` 映射到 Codex `update_plan`。
+- `Agent` 映射到 `spawn_agent`。
+- `SendMessage` 映射到 multi-agent v2 `send_message`。
+- `RequestPermissions` 映射到现有 approval/permission channel。
+- MCP resource tools、`ToolSearch`、`Skill` 复用已有 extension/runtime 机制。
 
-Important implementation files:
+关键实现文件：
 
 - `codex-rs/tools/src/astral_flavor.rs`
 - `codex-rs/core/src/tools/spec_plan.rs`
@@ -128,7 +124,7 @@ Important implementation files:
 - `codex-rs/core/src/tools/handlers/astral_task_stop.rs`
 - `codex-rs/core/src/tools/handlers/astral_request_permissions.rs`
 
-Deferred tools by decision:
+按决策暂缓的工具：
 
 - `LSP`
 - `Cron`
@@ -143,81 +139,82 @@ Deferred tools by decision:
 - `PushNotification`
 - provider-neutral `WebSearch` / `WebFetch`
 
-These can be added later only if Codex already has a strong runtime primitive or if the feature is
-clearly worth implementing natively.
+这些工具以后只有在 Codex 已经有可靠 runtime primitive，或者功能价值明确时，才应该原生实现。
 
-## Completed Progress
+## 已完成进度
 
-Recent commits that matter:
+近期关键提交：
+
+- `d5f51c86b9 Document Astral fork progress`
+  - 添加项目状态文档，用于长时间开发和上下文 compact 后接力。
 
 - `7099420969 Remove ChatGPT login entrypoints from CLI`
-  - Removed hidden CLI flags for `--with-access-token`, `--device-auth`,
-    `--experimental_issuer`, and `--experimental_client-id`.
-  - Removed disabled OAuth/access-token login stubs and exports from the CLI crate.
-  - Kept `astral login --with-api-key`, `astral login status`, and `astral logout`.
-  - Verified that removed ChatGPT login flags now fail at CLI parsing instead of entering a hidden
-    disabled flow.
+  - 删除 CLI 里的隐藏参数：`--with-access-token`、`--device-auth`、`--experimental_issuer`、
+    `--experimental_client-id`。
+  - 删除 CLI crate 里已经禁用的 OAuth/access-token login stub 和 export。
+  - 保留 `astral login --with-api-key`、`astral login status` 和 `astral logout`。
+  - 验证被删除的 ChatGPT login 参数现在会在 CLI parsing 层失败，不会进入隐藏的 disabled flow。
 
 - `7f1e959c0f Remove OpenAI backend routing from providers`
-  - Removed OpenAI/ChatGPT default base URL routing from provider conversion.
-  - Removed OpenAI org/project env headers from the legacy Responses provider.
-  - Disabled legacy Responses provider Astral-managed auth and websocket special casing.
-  - Made default provider capabilities provider-neutral: no hosted image generation or web search
-    unless explicitly implemented.
-  - Fixed provider-local bearer token model refresh so `/models` can work without ChatGPT backend
-    auth.
+  - 删除 provider conversion 里的 OpenAI/ChatGPT 默认 base URL 路由。
+  - 删除 legacy Responses provider 的 OpenAI org/project env headers。
+  - 禁用 legacy Responses provider 的 Astral-managed auth 和 websocket 特权。
+  - 把默认 provider capabilities 改为 provider-neutral：默认不暴露 hosted image generation 或
+    web search。
+  - 修复 provider-local bearer token 的 model refresh，使 `/models` 不依赖 ChatGPT backend
+    auth。
 
 - `55c446e0c9 Switch Windows installer to Astral`
-  - Switched Windows installer user-facing envs/paths/package names to Astral.
+  - Windows installer 用户可见 env、path、package name 切换到 Astral。
 
 - `5d511f6440 Let Astral file tools target environments`
-  - Added `environment_id` support to `Read/Write/Edit/Glob/Grep`.
-  - Routed file tools through Codex environment resolution and sandbox context.
+  - 给 `Read/Write/Edit/Glob/Grep` 增加 `environment_id` 支持。
+  - 文件工具通过 Codex environment resolution 和 sandbox context 路由。
 
 - `28382b9678 Switch package entrypoint and installer to Astral`
-  - Switched package entrypoint and Unix installer to `astral`, `ASTRAL_*`, and `~/.astral-code`.
+  - package entrypoint 和 Unix installer 切到 `astral`、`ASTRAL_*`、`~/.astral-code`。
 
 - `f8bd6937b1 Guard Astral tool names in provider-neutral plans`
-  - Ensured Astral tool names are preserved in provider-neutral tool planning.
+  - 确保 provider-neutral tool planning 里保留 Astral tool name。
 
 - `bf5b06b874 Add Anthropic prompt cache markers`
-  - Added Anthropic prompt-cache support scaffolding.
+  - 增加 Anthropic prompt-cache 支持脚手架。
 
 - `c82843b174 Prune noisy directories in Astral file search`
-  - Pruned noisy directories for Astral file search behavior.
+  - 为 Astral file search 剪掉 noisy directories。
 
 - `e53f7253e6 Disable TUI feedback upload flow`
-  - Disabled feedback upload from TUI surface.
+  - 禁用 TUI feedback upload。
 
 - `42e5f7f83e Remove OpenAI rate-limit model nudge`
 - `0fd4f2e703 Remove add-credits nudge app-server API`
 - `5a9ddcf8d4 Remove add-credits nudge from TUI`
 - `b756262d8e Remove add-credits nudge backend client`
-  - Removed OpenAI add-credits/rate-limit upsell paths.
+  - 删除 OpenAI add-credits / rate-limit upsell 路径。
 
-## Latest Pause-Point Work
+## 最新暂停点
 
-At the time this document was created, the latest completed slice is:
+创建本文档时，最新完成的代码 slice 是：
 
 - `7099420969 Remove ChatGPT login entrypoints from CLI`
 
-Intent:
+意图：
 
-- Remove hidden CLI entrypoints for `--with-access-token`, `--device-auth`,
-  `--experimental_issuer`, and `--experimental_client-id`.
-- Remove disabled OAuth/access-token login stubs and exports.
-- Keep `astral login --with-api-key`, `astral login status`, `astral logout`, and the explicit
-  "no credentials" guidance.
+- 删除 `--with-access-token`、`--device-auth`、`--experimental_issuer`、
+  `--experimental_client-id` 这些隐藏 CLI 入口。
+- 删除已经禁用的 OAuth/access-token login stub 和 export。
+- 保留 `astral login --with-api-key`、`astral login status`、`astral logout`，以及无 credential
+  时的明确引导。
 
-Validation already run for this latest slice:
+该 slice 已运行验证：
 
 - `just fmt`
 - `just test -p codex-cli login`
-  - Result: 8 tests passed, 273 skipped.
+  - 结果：8 个测试通过，273 个测试跳过。
 
-## Validation Already Performed
+## 已运行验证
 
-Recent focused checks:
+近期 focused checks：
 
 - `just fmt`
 - `just test -p codex-tools astral_flavor`
@@ -229,75 +226,74 @@ Recent focused checks:
 - `just test -p codex-cli login`
 - `git diff --check`
 
-Known unrelated or pre-existing issue observed:
+已观察到的无关或既有问题：
 
-- Full `just test -p codex-model-provider` still has Bedrock catalog failures around bundled
-  `models.json` missing `gpt-5.5`. Treat this as unrelated to the provider-neutral cleanup unless
-  actively working on Bedrock catalog.
+- `just test -p codex-model-provider` 全量仍有 Bedrock catalog 失败，原因是 bundled
+  `models.json` 缺少 `gpt-5.5`。除非正在处理 Bedrock catalog，否则把它视为与 provider-neutral
+  cleanup 无关。
 
-## Remaining High-Priority Work
+## 剩余高优先级工作
 
-1. Audit and remove remaining OpenAI/ChatGPT auth/config surfaces:
-   - `chatgpt_base_url` in core config.
-   - app-server `account/login/start` behavior.
-   - `codex-rs/login/src/server.rs` OAuth callback server.
-   - revoke/token code paths that only exist for ChatGPT OAuth.
-   - doctor output that reports ChatGPT login details.
+1. 审计并移除剩余 OpenAI/ChatGPT auth/config 面：
+   - core config 里的 `chatgpt_base_url`
+   - app-server 的 `account/login/start` 行为
+   - `codex-rs/login/src/server.rs` OAuth callback server
+   - 只服务 ChatGPT OAuth 的 revoke/token 路径
+   - doctor output 里报告 ChatGPT login details 的路径
 
-2. Audit cloud/remote control-plane crates:
+2. 审计 cloud/remote control-plane crates：
    - `codex-rs/backend-client`
    - `codex-rs/cloud-config`
    - `codex-rs/cloud-tasks`
    - `codex-rs/core-plugins/src/remote*`
    - `codex-rs/memories/write`
 
-   Decide whether to remove, compile-disable, or isolate these behind explicit non-default
-   features. Do not let them silently talk to `chatgpt.com/backend-api`.
+   需要决定这些模块是删除、compile-disable，还是隔离到显式非默认 feature 后面。不能让它们默认或静默访问
+   `chatgpt.com/backend-api`。
 
-3. Continue provider-neutral protocol work:
-   - Make Anthropic Messages stream/tool_use/tool_result path first-class.
-   - Make OpenAI-compatible chat-completions stream/tool_calls path first-class.
-   - Keep Responses as legacy, not the core truth.
-   - Ensure usage and stop-reason mappings are stable.
+3. 继续 provider-neutral protocol 工作：
+   - 让 Anthropic Messages 的 stream/tool_use/tool_result 路径成为 first-class。
+   - 让 OpenAI-compatible chat-completions 的 stream/tool_calls 路径成为 first-class。
+   - Responses 继续降级为 legacy，而不是核心真相。
+   - 稳定 usage 和 stop-reason 映射。
 
-4. Harden tool result shapes:
-   - Compare Astral `tool_result` payloads against Claude Code fixtures where useful.
-   - Especially verify `Bash`, `Monitor`, `TaskStop`, `Read`, `Edit`, `TodoWrite`, `Agent`, and
-     permission-denied/retry flows.
-   - Avoid changing the Codex runtime behavior just to imitate names.
+4. 硬化 tool result 形状：
+   - 必要时对照 Claude Code fixture 检查 Astral `tool_result` payload。
+   - 尤其验证 `Bash`、`Monitor`、`TaskStop`、`Read`、`Edit`、`TodoWrite`、`Agent` 和
+     permission-denied/retry flow。
+   - 不要为了模仿名字而改坏 Codex runtime 行为。
 
-5. Verify long-running terminal experience:
-   - `Bash(run_in_background=true)` returns a monitorable id.
-   - `Monitor` can poll output and write stdin for y/n prompts.
-   - `TaskStop` terminates shell tasks.
-   - Existing PTY progress streaming remains intact.
+5. 验证长任务 terminal 体验：
+   - `Bash(run_in_background=true)` 返回可 monitor 的 id。
+   - `Monitor` 可以 poll output，也可以给 y/n prompt 写 stdin。
+   - `TaskStop` 可以终止 shell task。
+   - 保持现有 PTY progress streaming 体验。
 
-6. Keep local compact unless later evidence contradicts it:
-   - Do not rewrite compact just for aesthetic parity.
-   - Remove or disable any OpenAI remote compact dependency if found.
-   - Preserve tool streaming/history shape.
+6. 继续保留 local compact，除非后续证据推翻：
+   - 不要为了形式相似重写 compact。
+   - 如果发现 OpenAI remote compact 依赖，要删除或禁用。
+   - 保持 tool streaming/history shape。
 
-7. Rename user-facing leftovers:
-   - Docs/comments/tests can still mention OpenAI-compatible protocols where technically accurate.
-   - User-facing product strings should say Astral/Astral-Code.
-   - Internal crate names can remain `codex-*` until a later mechanical stage.
+7. 清理用户可见命名残留：
+   - 技术上准确时，文档、注释、测试可以继续说 OpenAI-compatible protocol。
+   - 用户可见产品字符串应该使用 Astral/Astral-Code。
+   - 内部 crate 名可以留到后续机械阶段再处理。
 
-## Testing Policy During This Fork
+## 当前测试策略
 
-The current working policy is speed-first:
+当前开发策略是优先推进：
 
-- Run `just fmt` after Rust edits.
-- Run focused tests for changed crates or changed behavior.
-- Do not burn time or disk on broad workspace tests after every slice.
-- Save full-suite testing and broad CI repair for a later stabilization pass.
-- If a focused test triggers heavy compilation, let it finish; do not kill Rust processes.
+- Rust 编辑后运行 `just fmt`。
+- 对变更 crate 或变更行为运行 focused tests。
+- 不要每个 slice 都消耗时间和磁盘跑大范围 workspace tests。
+- full-suite testing 和大范围 CI 修复留到后续稳定阶段。
+- 如果 focused test 触发重编译，等它自然结束，不要 kill Rust 进程。
 
-## Important Safety Notes
+## 重要安全注意事项
 
-- Do not edit code related to `CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR` or `CODEX_SANDBOX_ENV_VAR`.
-- Do not weaken sandbox, approval, or exec-server behavior.
-- Do not introduce proxy-only hacks as the main architecture.
-- Do not write real API keys into files.
-- Do not re-enable OpenAI/ChatGPT login to make old tests pass.
-- Do not mark the goal complete until provider-neutral protocols, Claude-ish tools, and OpenAI
-  control-plane removal are actually verified against the current tree.
+- 不要编辑 `CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR` 或 `CODEX_SANDBOX_ENV_VAR` 相关代码。
+- 不要削弱 sandbox、approval 或 exec-server 行为。
+- 不要把 proxy-only hack 作为主架构。
+- 不要把真实 API key 写进文件。
+- 不要为了让旧测试通过而重新启用 OpenAI/ChatGPT login。
+- 在 provider-neutral protocols、Claude-ish tools、OpenAI control-plane removal 都被当前仓库状态证明完成前，不要把 goal 标记为 complete。
