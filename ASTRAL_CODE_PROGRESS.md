@@ -1,6 +1,6 @@
 # Astral-Code 项目总控记录
 
-最后更新：2026-06-11 14:13 CST
+最后更新：2026-06-11 14:15 CST
 
 这份文档是 Astral-Code 长线改造的中文 handoff。它的用途不是对外宣传，而是让后续任何一次
 compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道：我们到底要做什么、哪些边界不能碰、
@@ -357,6 +357,9 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
   缺少 `gpt-5.5`。这和当前 Astral provider-neutral cleanup 无关。
 - `just test -p codex-app-server auth` 会额外匹配 plugin install/read 的 `needsAuth` 测试，这些测试仍按
   旧 ChatGPT app auth 语义期待 `chatgpt.com/apps/...` 认证项。处理 plugin remote/control-plane 时再改。
+- `codex-rs/cloud-tasks` 仍有多处 `CODEX_CLOUD_TASKS_BASE_URL` 缺失时 fallback 到
+  `https://chatgpt.com/backend-api`。这不是一行小改：TUI、env detection 和 backend 初始化都需要一起改成
+  Astral 显式配置或默认禁用，避免静默访问 OpenAI hosted backend。
 
 ## 剩余高优先级工作
 
@@ -372,6 +375,8 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
    - `core-plugins/src/remote*`
    - `memories/write`
    - 目标：默认路径不能静默访问 `chatgpt.com/backend-api`。
+   - 下一刀建议优先处理 `cloud-tasks`：把 `CODEX_CLOUD_TASKS_BASE_URL` 默认
+     `https://chatgpt.com/backend-api` 改为 Astral 显式配置或默认不可用。
 
 3. 推进 provider-neutral protocol
    - Anthropic Messages stream/tool_use/tool_result。
