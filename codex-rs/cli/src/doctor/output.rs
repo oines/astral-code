@@ -604,11 +604,14 @@ fn auth_reachability_note(report: &DoctorReport) -> Option<DoctorNote> {
     let reachability_mode = detail::detail_value(reachability, "reachability mode")?;
     let auth_mode_lower = auth_mode.to_ascii_lowercase();
     let reachability_mode_lower = reachability_mode.to_ascii_lowercase();
-    if auth_mode_lower.contains("chatgpt") && reachability_mode_lower.contains("api key") {
+    let legacy_auth_mode = ["chatgpt", "agent_identity", "personal_access_token"]
+        .iter()
+        .any(|mode| auth_mode_lower.contains(mode));
+    if legacy_auth_mode && reachability_mode_lower.contains("api key") {
         return Some(DoctorNote {
             status: DisplayStatus::Warning,
             name: "auth".to_string(),
-            summary: "mixed auth signals: ChatGPT login plus API key env var; HTTP reachability uses API-key mode".to_string(),
+            summary: "mixed auth signals: legacy stored credentials plus API key env var; HTTP reachability uses API-key mode".to_string(),
         });
     }
     None
@@ -1587,7 +1590,7 @@ Run codex doctor without --summary for detailed diagnostics.
         assert!(rendered.contains("⚠ sandbox"));
         assert!(rendered.contains("⚠ mcp"));
         assert!(rendered.contains(
-            "⚠ auth         mixed auth signals: ChatGPT login plus API key env var; HTTP reachability uses API-key mode"
+            "⚠ auth         mixed auth signals: legacy stored credentials plus API key env var; HTTP reachability uses API-key mode"
         ));
         assert!(rendered.contains("○ app-server   not running (ephemeral mode)"));
         assert!(rendered.contains("5 ok · 1 idle · 5 notes · 1 warn · 0 fail degraded"));
@@ -1680,12 +1683,12 @@ Run codex doctor without --summary for detailed diagnostics.
     #[test]
     fn redact_detail_preserves_secret_presence_booleans() {
         assert_eq!(
-            redact_detail("stored ChatGPT tokens: true"),
-            "stored ChatGPT tokens: true"
+            redact_detail("stored legacy credential material: true"),
+            "stored legacy credential material: true"
         );
         assert_eq!(
-            redact_detail("stored ChatGPT tokens: false"),
-            "stored ChatGPT tokens: false"
+            redact_detail("stored legacy credential material: false"),
+            "stored legacy credential material: false"
         );
     }
 

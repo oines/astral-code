@@ -143,7 +143,14 @@ Astral 不应该是一个薄反代，也不应该靠末端 hook 偷换协议。
 
 ## 已完成进度
 
-近期关键提交：
+近期关键进展：
+
+- 本轮已完成：清理 `astral doctor` 的旧 ChatGPT/token-backed auth 诊断
+  - `doctor` 不再把旧 ChatGPT/PAT/Agent Identity 凭据当成可细诊断或可用的 Astral 登录态。
+  - 旧 token-backed auth 统一显示为 unsupported legacy credentials。
+  - 不再输出 `stored ChatGPT tokens`、`ChatGPT auth is missing ...` 或
+    `ChatGPT login plus API key` 这类用户可见诊断。
+  - API key 本地凭据和 provider-specific env var 诊断保持不变。
 
 - `d5f51c86b9 Document Astral fork progress`
   - 添加项目状态文档，用于长时间开发和上下文 compact 后接力。
@@ -194,23 +201,21 @@ Astral 不应该是一个薄反代，也不应该靠末端 hook 偷换协议。
 
 ## 最新暂停点
 
-创建本文档时，最新完成的代码 slice 是：
+最新完成的代码 slice 是：
 
-- `7099420969 Remove ChatGPT login entrypoints from CLI`
+- 本轮已完成：清理 `astral doctor` 的旧 ChatGPT/token-backed auth 诊断
 
 意图：
 
-- 删除 `--with-access-token`、`--device-auth`、`--experimental_issuer`、
-  `--experimental_client-id` 这些隐藏 CLI 入口。
-- 删除已经禁用的 OAuth/access-token login stub 和 export。
-- 保留 `astral login --with-api-key`、`astral login status`、`astral logout`，以及无 credential
-  时的明确引导。
+- 让 `doctor` 遵守 Astral 的新项目边界：只支持 API key / provider env auth。
+- 旧 Codex/ChatGPT token-backed auth 只作为 unsupported legacy residue 报告。
+- 不再提示用户修复 ChatGPT token 或 refresh metadata。
 
 该 slice 已运行验证：
 
 - `just fmt`
-- `just test -p codex-cli login`
-  - 结果：8 个测试通过，273 个测试跳过。
+- `just test -p codex-cli doctor`
+  - 结果：84 个测试通过，197 个测试跳过。
 
 ## 已运行验证
 
@@ -224,6 +229,7 @@ Astral 不应该是一个薄反代，也不应该靠末端 hook 偷换协议。
 - `just test -p codex-model-provider configured_provider_models_manager_uses_provider_bearer_token`
 - `just test -p codex-models-manager refresh_available_models_fetches_with_provider_auth`
 - `just test -p codex-cli login`
+- `just test -p codex-cli doctor`
 - `git diff --check`
 
 已观察到的无关或既有问题：
@@ -239,7 +245,6 @@ Astral 不应该是一个薄反代，也不应该靠末端 hook 偷换协议。
    - app-server 的 `account/login/start` 行为
    - `codex-rs/login/src/server.rs` OAuth callback server
    - 只服务 ChatGPT OAuth 的 revoke/token 路径
-   - doctor output 里报告 ChatGPT login details 的路径
 
 2. 审计 cloud/remote control-plane crates：
    - `codex-rs/backend-client`

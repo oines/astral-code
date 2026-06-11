@@ -1194,12 +1194,13 @@ fn auth_check(config: &Config) -> DoctorCheck {
         Ok(Some(auth)) => {
             details.push(format!("stored auth mode: {}", stored_auth_mode(&auth)));
             details.push(format!("stored API key: {}", auth.openai_api_key.is_some()));
-            details.push(format!("stored ChatGPT tokens: {}", auth.tokens.is_some()));
             details.push(format!(
-                "stored agent identity: {}",
-                auth.agent_identity.is_some()
+                "stored legacy credential material: {}",
+                stored_legacy_credential_material_present(&auth)
             ));
             let auth_issues = stored_auth_issues(&auth, env_var_present);
+            let legacy_auth =
+                stored_auth_mode_value(&auth) != codex_app_server_protocol::AuthMode::ApiKey;
             details.extend(
                 auth_issues
                     .iter()
@@ -1214,19 +1215,29 @@ fn auth_check(config: &Config) -> DoctorCheck {
             };
             let summary = match status {
                 CheckStatus::Ok => "auth is configured",
+                CheckStatus::Warning if legacy_auth => {
+                    "auth is provided by environment, but stored credentials are unsupported"
+                }
                 CheckStatus::Warning if !auth_issues.is_empty() => {
                     "auth is provided by environment, but stored credentials are incomplete"
                 }
                 CheckStatus::Warning => {
                     "auth is configured, but multiple auth env vars are present"
                 }
+                CheckStatus::Fail if legacy_auth => {
+                    "stored credentials use an unsupported legacy auth mode"
+                }
                 CheckStatus::Fail => "stored credentials are incomplete",
             };
             let mut check =
                 DoctorCheck::new("auth.credentials", "auth", status, summary).details(details);
             if status == CheckStatus::Fail {
-                check = check
-                    .remediation("Run astral login again or provide a supported auth env var.");
+                let remediation = if legacy_auth {
+                    "Run astral logout, then configure ASTRAL_API_KEY or a provider-specific auth env var."
+                } else {
+                    "Run astral login again or provide a supported auth env var."
+                };
+                check = check.remediation(remediation);
             }
             check
         }
@@ -1314,9 +1325,9 @@ fn provider_specific_auth_check(
 fn stored_auth_mode(auth: &codex_login::AuthDotJson) -> &'static str {
     match stored_auth_mode_value(auth) {
         codex_app_server_protocol::AuthMode::ApiKey => "api_key",
-        codex_app_server_protocol::AuthMode::Chatgpt => "chatgpt",
-        codex_app_server_protocol::AuthMode::AgentIdentity => "agent_identity",
-        codex_app_server_protocol::AuthMode::PersonalAccessToken => "personal_access_token",
+        codex_app_server_protocol::AuthMode::Chatgpt
+        | codex_app_server_protocol::AuthMode::AgentIdentity
+        | codex_app_server_protocol::AuthMode::PersonalAccessToken => "unsupported_legacy",
     }
 }
 
@@ -1349,42 +1360,17 @@ fn stored_auth_issues(
                 issues.push("API key auth is missing an API key");
             }
         }
-        codex_app_server_protocol::AuthMode::Chatgpt => {
-            match auth.tokens.as_ref() {
-                Some(tokens) => {
-                    if tokens.access_token.trim().is_empty() {
-                        issues.push("ChatGPT auth is missing an access token");
-                    }
-                    if tokens.refresh_token.trim().is_empty() {
-                        issues.push("ChatGPT auth is missing a refresh token");
-                    }
-                }
-                None => issues.push("ChatGPT auth is missing token data"),
-            }
-            if auth.last_refresh.is_none() {
-                issues.push("ChatGPT auth is missing refresh metadata");
-            }
-        }
-        codex_app_server_protocol::AuthMode::AgentIdentity => {
-            if auth
-                .agent_identity
-                .as_deref()
-                .is_none_or(|token| token.trim().is_empty())
-            {
-                issues.push("agent identity auth is missing an agent identity token");
-            }
-        }
-        codex_app_server_protocol::AuthMode::PersonalAccessToken => {
-            if auth
-                .personal_access_token
-                .as_deref()
-                .is_none_or(|token| token.trim().is_empty())
-            {
-                issues.push("personal access token auth is missing a personal access token");
-            }
+        codex_app_server_protocol::AuthMode::Chatgpt
+        | codex_app_server_protocol::AuthMode::AgentIdentity
+        | codex_app_server_protocol::AuthMode::PersonalAccessToken => {
+            issues.push("stored legacy credentials are not supported by Astral");
         }
     }
     issues
+}
+
+fn stored_legacy_credential_material_present(auth: &AuthDotJson) -> bool {
+    auth.tokens.is_some() || auth.agent_identity.is_some() || auth.personal_access_token.is_some()
 }
 
 fn network_check() -> DoctorCheck {
@@ -3441,7 +3427,7 @@ mod tests {
     }
 
     #[test]
-    fn stored_auth_validation_rejects_missing_chatgpt_tokens() {
+    fn stored_auth_validation_rejects_legacy_credentials() {
         let auth = AuthDotJson {
             auth_mode: None,
             openai_api_key: None,
@@ -3453,15 +3439,14 @@ mod tests {
 
         assert_eq!(
             stored_auth_issues(&auth, |_| false),
-            vec![
-                "ChatGPT auth is missing token data",
-                "ChatGPT auth is missing refresh metadata",
-            ]
+            vec!["stored legacy credentials are not supported by Astral"]
         );
+        assert_eq!(stored_auth_mode(&auth), "unsupported_legacy");
+        assert!(!stored_legacy_credential_material_present(&auth));
     }
 
     #[test]
-    fn stored_auth_validation_handles_personal_access_token() {
+    fn stored_auth_validation_rejects_personal_access_token() {
         let mut auth = AuthDotJson {
             auth_mode: None,
             openai_api_key: None,
@@ -3471,14 +3456,18 @@ mod tests {
             personal_access_token: Some("at-test".to_string()),
         };
 
-        assert_eq!(stored_auth_mode(&auth), "personal_access_token");
-        assert!(stored_auth_issues(&auth, |_| false).is_empty());
+        assert_eq!(stored_auth_mode(&auth), "unsupported_legacy");
+        assert_eq!(
+            stored_auth_issues(&auth, |_| false),
+            vec!["stored legacy credentials are not supported by Astral"]
+        );
+        assert!(stored_legacy_credential_material_present(&auth));
 
         auth.auth_mode = Some(codex_app_server_protocol::AuthMode::PersonalAccessToken);
         auth.personal_access_token = None;
         assert_eq!(
             stored_auth_issues(&auth, |_| false),
-            vec!["personal access token auth is missing a personal access token"]
+            vec!["stored legacy credentials are not supported by Astral"]
         );
     }
 
