@@ -34,9 +34,10 @@ provider 去 OpenAI 默认路由、登录态清理、cloud-config/cloud-tasks �
 - Provider-neutral Agent IR / Anthropic Messages / chat completions：仍是后续核心大块工作。
 - 全量 CI：当前不追求全绿，用户明确要求先推进实现，最后集中测试集中修。
 
-当前最新 slice：app-server 的 legacy hosted remote control 暴露入口已禁用；请求启动 remote control
-或通过 RPC enable/pairing/client-management 都会返回 Astral disabled 错误。下一步优先继续处理 remote
-plugin share/install/read、底层 app-server-transport remote-control 旧模块和其他 ChatGPT hosted 残留。
+当前最新 slice：legacy hosted remote control 的显式启用入口已禁用；app-server 启动/RPC、顶层
+`astral remote-control`、`app-server daemon enable-remote-control`、`bootstrap --remote-control` 都会返回
+Astral disabled 错误。下一步优先继续处理 remote plugin share/install/read、底层 app-server-transport
+remote-control 旧模块和其他 ChatGPT hosted 残留。
 
 ## 项目身份
 
@@ -651,8 +652,47 @@ account 或 OpenAI-only plugin 分发的代码，都需要删除、禁用或隔�
 
 - `codex-rs/app-server-transport/src/transport/remote_control/*` 里仍保留旧实现和测试，用于当前编译边界。
   后续如果要更洁癖，可以把它降级为 stub 或拆成非默认 legacy feature。
-- CLI `remote-control` 子命令仍存在，但进入 app-server 后会得到 Astral disabled 错误。后续可以把 CLI
-  文案也改成 provider-neutral remote control 未实现。
+
+## 最近完成的 CLI / daemon remote control slice
+
+本轮完成的代码 slice：
+
+> 禁用 CLI 和 app-server daemon 层的 legacy hosted remote control 启用入口。
+
+已编辑文件：
+
+- `codex-rs/cli/src/remote_control_cmd.rs`
+- `codex-rs/cli/src/main.rs`
+- `codex-rs/app-server-daemon/src/lib.rs`
+- `codex-rs/app-server-daemon/src/remote_control_client.rs`
+- `ASTRAL_CODE_PROGRESS.md`
+
+改动内容：
+
+- 顶层 `astral remote-control` / `astral remote-control start` / `astral remote-control stop`
+  不再启动 foreground app-server 或 managed daemon，直接返回 Astral disabled 错误。
+- `app-server --remote-control`、`app-server daemon bootstrap --remote-control`、
+  `app-server daemon enable-remote-control` 在 CLI 层直接拒绝。
+- `codex_app_server_daemon::bootstrap(...)` 在 `remote_control_enabled = true` 时拒绝。
+- `ensure_remote_control_started(...)`、`ensure_remote_control_ready(...)`、
+  `enable_remote_control_on_socket(...)` 直接拒绝。
+- `set_remote_control(RemoteControlMode::Enabled)` 直接拒绝；`Disabled` 保留，作为无害清理动作。
+- 删除 daemon 内部旧 `remote_control_client`，不再通过 socket 发送 `remoteControl/enable`。
+- CLI help 文案从“启用 remote control”改为 legacy hosted remote control 在 Astral 中禁用。
+
+为什么要做：
+
+- 上一个 slice 已经让 app-server 暴露层拒绝 legacy hosted remote control；如果 CLI/daemon 仍尝试启动，
+  用户会先看到旧启动流程和旧 daemon 语义，再在更深处失败。
+- Astral 没有 provider-neutral remote-control 服务端协议前，不应该保留任何显式启用 hosted
+  remote-control 的入口。
+- 保留 app-server daemon 的普通 start/stop/version，不影响本地 C/S 架构。
+
+后续风险：
+
+- `app-server-daemon` 的 pid backend 仍知道 `remote_control_enabled` 设置并能拼出
+  `app-server --remote-control` 参数；因为所有公开 enable/bootstrap 入口已拒绝，默认路径不会走到这里。
+  后续更洁癖时可以把 settings 字段和 pid 参数一起清掉。
 
 ## 最近完成的 account slice
 
@@ -719,6 +759,8 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
 - `just test -p codex-core load_config_does_not_default_to_chatgpt_backend`
 - `cargo check --tests -p codex-app-server`
 - `just test -p codex-app-server remote_control`
+- `CARGO_INCREMENTAL=0 cargo check --tests -p codex-cli -p codex-app-server-daemon`
+- `CARGO_INCREMENTAL=0 just test -p codex-cli remote_control_subcommand_names_match_cli_shape`
 - 旧 ChatGPT refresh 符号窄范围搜索：`codex-rs/login` 与 app-server auth 测试无命中。
 - `git diff --check`
 

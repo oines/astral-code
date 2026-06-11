@@ -134,7 +134,7 @@ enum Subcommand {
     /// [experimental] Run the app server or related tooling.
     AppServer(AppServerCommand),
 
-    /// [experimental] Manage the app-server daemon with remote control enabled.
+    /// [legacy] Hosted remote control is disabled in Astral.
     RemoteControl(RemoteControlCommand),
 
     /// Launch the Astral desktop app (opens the app installer if missing).
@@ -478,7 +478,7 @@ struct AppServerCommand {
     #[arg(long = "stdio", conflicts_with = "listen")]
     stdio: bool,
 
-    /// Enable remote control for this app-server process.
+    /// Legacy hosted remote control is disabled in Astral.
     #[arg(long = "remote-control", hide = true)]
     remote_control: bool,
 
@@ -568,10 +568,10 @@ enum AppServerDaemonSubcommand {
     /// Restart the local app server daemon.
     Restart,
 
-    /// Enable remote control for future starts and a currently running managed daemon.
+    /// Legacy hosted remote control is disabled in Astral.
     EnableRemoteControl,
 
-    /// Disable remote control for future starts and a currently running managed daemon.
+    /// Disable the legacy remote-control daemon setting if it exists.
     DisableRemoteControl,
 
     /// Stop the local app server daemon.
@@ -594,7 +594,7 @@ struct AppServerProxyCommand {
 
 #[derive(Debug, Args)]
 struct AppServerBootstrapCommand {
-    /// Launch the managed app-server with remote control enabled.
+    /// Legacy hosted remote control is disabled in Astral.
     #[arg(long = "remote-control")]
     remote_control: bool,
 }
@@ -1038,6 +1038,11 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
             )?;
             match subcommand {
                 None => {
+                    if remote_control {
+                        anyhow::bail!(
+                            codex_app_server_daemon::LEGACY_REMOTE_CONTROL_DISABLED_MESSAGE
+                        );
+                    }
                     let transport = if stdio {
                         codex_app_server::AppServerTransport::Stdio
                     } else {
@@ -1066,6 +1071,11 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                         print_app_server_daemon_output(AppServerLifecycleCommand::Start).await?;
                     }
                     AppServerDaemonSubcommand::Bootstrap(bootstrap_cli) => {
+                        if bootstrap_cli.remote_control {
+                            anyhow::bail!(
+                                codex_app_server_daemon::LEGACY_REMOTE_CONTROL_DISABLED_MESSAGE
+                            );
+                        }
                         let output =
                             codex_app_server_daemon::bootstrap(AppServerBootstrapOptions {
                                 remote_control_enabled: bootstrap_cli.remote_control,
@@ -1077,8 +1087,9 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                         print_app_server_daemon_output(AppServerLifecycleCommand::Restart).await?;
                     }
                     AppServerDaemonSubcommand::EnableRemoteControl => {
-                        print_app_server_remote_control_output(AppServerRemoteControlMode::Enabled)
-                            .await?;
+                        anyhow::bail!(
+                            codex_app_server_daemon::LEGACY_REMOTE_CONTROL_DISABLED_MESSAGE
+                        );
                     }
                     AppServerDaemonSubcommand::DisableRemoteControl => {
                         print_app_server_remote_control_output(

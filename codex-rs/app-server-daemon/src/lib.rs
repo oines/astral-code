@@ -1,7 +1,6 @@
 mod backend;
 mod client;
 mod managed_install;
-mod remote_control_client;
 mod settings;
 mod update_loop;
 
@@ -32,6 +31,7 @@ const UPDATE_PID_FILE_NAME: &str = "app-server-updater.pid";
 const OPERATION_LOCK_FILE_NAME: &str = "daemon.lock";
 const SETTINGS_FILE_NAME: &str = "settings.json";
 const STATE_DIR_NAME: &str = "app-server-daemon";
+pub const LEGACY_REMOTE_CONTROL_DISABLED_MESSAGE: &str = "legacy hosted remote control is disabled in Astral until a provider-neutral control plane exists";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LifecycleCommand {
@@ -193,41 +193,39 @@ pub async fn run(command: LifecycleCommand) -> Result<LifecycleOutput> {
 }
 
 pub async fn bootstrap(options: BootstrapOptions) -> Result<BootstrapOutput> {
+    if options.remote_control_enabled {
+        reject_legacy_remote_control()?;
+    }
     ensure_supported_platform()?;
     Daemon::from_environment()?.bootstrap(options).await
 }
 
 pub async fn ensure_remote_control_started() -> Result<RemoteControlStartOutput> {
-    ensure_supported_platform()?;
-    Daemon::from_environment()?
-        .ensure_remote_control_started()
-        .await
+    reject_legacy_remote_control()
 }
 
 pub async fn ensure_remote_control_ready() -> Result<RemoteControlReadyOutput> {
-    ensure_supported_platform()?;
-    Daemon::from_environment()?
-        .ensure_remote_control_ready()
-        .await
+    reject_legacy_remote_control()
 }
 
 pub async fn enable_remote_control_on_socket(
-    socket_path: &Path,
-    connect_timeout: Duration,
-    connect_retry_delay: Duration,
+    _socket_path: &Path,
+    _connect_timeout: Duration,
+    _connect_retry_delay: Duration,
 ) -> Result<RemoteControlReadyStatus> {
-    ensure_supported_platform()?;
-    remote_control_client::enable_remote_control_with_connect_retry(
-        socket_path,
-        connect_timeout,
-        connect_retry_delay,
-    )
-    .await
+    reject_legacy_remote_control()
 }
 
 pub async fn set_remote_control(mode: RemoteControlMode) -> Result<RemoteControlOutput> {
+    if mode.is_enabled() {
+        reject_legacy_remote_control()?;
+    }
     ensure_supported_platform()?;
     Daemon::from_environment()?.set_remote_control(mode).await
+}
+
+fn reject_legacy_remote_control<T>() -> Result<T> {
+    anyhow::bail!(LEGACY_REMOTE_CONTROL_DISABLED_MESSAGE)
 }
 
 pub async fn run_pid_update_loop() -> Result<()> {
@@ -488,35 +486,6 @@ impl Daemon {
         self.bootstrap_locked(options).await
     }
 
-    async fn ensure_remote_control_started(&self) -> Result<RemoteControlStartOutput> {
-        let _operation_lock = self.acquire_operation_lock().await?;
-        let settings = self.load_settings().await?;
-        if self.is_bootstrapped(&settings).await? {
-            let _ = self
-                .set_remote_control_locked(RemoteControlMode::Enabled)
-                .await?;
-            let output = self.start().await?;
-            return Ok(RemoteControlStartOutput::Start(output));
-        }
-
-        let output = self
-            .bootstrap_locked(BootstrapOptions {
-                remote_control_enabled: true,
-            })
-            .await?;
-        Ok(RemoteControlStartOutput::Bootstrap(output))
-    }
-
-    async fn ensure_remote_control_ready(&self) -> Result<RemoteControlReadyOutput> {
-        let daemon = self.ensure_remote_control_started().await?;
-        let remote_control =
-            remote_control_client::enable_remote_control(&self.socket_path).await?;
-        Ok(RemoteControlReadyOutput {
-            daemon,
-            remote_control,
-        })
-    }
-
     async fn set_remote_control(&self, mode: RemoteControlMode) -> Result<RemoteControlOutput> {
         let _operation_lock = self.acquire_operation_lock().await?;
         self.set_remote_control_locked(mode).await
@@ -643,10 +612,6 @@ impl Daemon {
         let backend =
             backend::pid_backend(self.backend_paths_with_bin(settings, managed_codex_bin));
         backend.start().await
-    }
-
-    async fn is_bootstrapped(&self, settings: &DaemonSettings) -> Result<bool> {
-        Ok(self.running_backend_instance(settings).await?.is_some())
     }
 
     fn ensure_managed_codex_bin(&self) -> Result<()> {
