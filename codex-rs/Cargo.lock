@@ -1972,7 +1972,6 @@ dependencies = [
  "codex-app-server-transport",
  "codex-arg0",
  "codex-backend-client",
- "codex-chatgpt",
  "codex-config",
  "codex-core",
  "codex-core-plugins",
@@ -2275,28 +2274,6 @@ dependencies = [
  "cc",
  "libc",
  "pkg-config",
-]
-
-[[package]]
-name = "codex-chatgpt"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "clap",
- "codex-app-server-protocol",
- "codex-connectors",
- "codex-core",
- "codex-core-plugins",
- "codex-git-utils",
- "codex-login",
- "codex-plugin",
- "codex-utils-cargo-bin",
- "codex-utils-cli",
- "pretty_assertions",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
 ]
 
 [[package]]

@@ -57,6 +57,12 @@ fn app(id: &str) -> AppInfo {
     }
 }
 
+fn merged_app(id: &str, is_accessible: bool) -> AppInfo {
+    let mut app = app(id);
+    app.is_accessible = is_accessible;
+    app
+}
+
 fn plugin_names(names: &[&str]) -> Vec<String> {
     names.iter().map(ToString::to_string).collect()
 }
@@ -103,6 +109,59 @@ fn with_accessible_connectors_cache_cleared<R>(f: impl FnOnce() -> R) -> R {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     *cache_guard = previous;
     result
+}
+
+#[test]
+fn merge_connectors_with_accessible_excludes_unknown_accessible_connectors_when_all_loaded() {
+    let merged = merge_connectors_with_accessible(
+        vec![app("alpha")],
+        vec![app("alpha"), app("beta")],
+        /*all_connectors_loaded*/ true,
+    );
+    assert_eq!(merged, vec![merged_app("alpha", /*is_accessible*/ true)]);
+}
+
+#[test]
+fn merge_connectors_with_accessible_keeps_unknown_accessible_connectors_while_loading() {
+    let merged = merge_connectors_with_accessible(
+        vec![app("alpha")],
+        vec![app("alpha"), app("beta")],
+        /*all_connectors_loaded*/ false,
+    );
+    assert_eq!(
+        merged,
+        vec![
+            merged_app("alpha", /*is_accessible*/ true),
+            merged_app("beta", /*is_accessible*/ true)
+        ]
+    );
+}
+
+#[test]
+fn connectors_for_plugin_apps_returns_only_requested_plugin_apps() {
+    let connectors = connectors_for_plugin_apps(
+        vec![app("alpha"), app("beta")],
+        &[
+            AppConnectorId("gmail".to_string()),
+            AppConnectorId("alpha".to_string()),
+            AppConnectorId("gmail".to_string()),
+        ],
+    );
+    assert_eq!(
+        connectors,
+        vec![merged_app("gmail", /*is_accessible*/ false), app("alpha")]
+    );
+}
+
+#[test]
+fn connectors_for_plugin_apps_filters_disallowed_plugin_apps() {
+    let connectors = connectors_for_plugin_apps(
+        Vec::new(),
+        &[AppConnectorId(
+            "asdk_app_6938a94a61d881918ef32cb999ff937c".to_string(),
+        )],
+    );
+    assert_eq!(connectors, Vec::<AppInfo>::new());
 }
 
 #[test]

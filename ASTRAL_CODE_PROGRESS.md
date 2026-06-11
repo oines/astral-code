@@ -1,6 +1,6 @@
 # Astral-Code 项目总控记录
 
-最后更新：2026-06-11 21:37 CST
+最后更新：2026-06-11 22:08 CST
 
 这份文档是 Astral-Code 长线改造的中文 handoff。它的用途不是对外宣传，而是让后续任何一次
 compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道：我们到底要做什么、为什么这么做、
@@ -104,9 +104,17 @@ vendor-specific 分支，也不需要用户在不可表达 null 的 TOML 里写�
 `/backend-api` 的 hosted backend 时才走旧 `wham/apps` path style。普通 hosted URL 默认走
 `/api/codex/apps`。
 
-下一步优先继续处理 Agent Identity auth/storage 残留、connectors/apps 里其他 ChatGPT hosted 残留和
-`codex-chatgpt` 相关 crate 边界；provider adapter 方向则继续补 Anthropic/chat-completions fixture 和国内模型
-兼容选项。
+最新补充 14：app-server 已从 `codex-chatgpt` crate 脱钩。connector helper 上移到
+`codex_core::connectors`，app-server 自己持有 provider-neutral 的 workspace settings stub；随后删除了未再被引用的
+`codex-rs/chatgpt` legacy crate、它的 BUILD/Cargo/test fixture，以及 root workspace dependency。对应的 connector
+行为测试已迁移到 core。
+
+本轮依赖检查备注：`just bazel-lock-update` 已执行成功；`just bazel-lock-check` 在本机因 `/usr/bin/python3`
+是 3.9.6、不支持 `.github/scripts/run_bazel_with_buildbuddy.py` 里的 `str | None` 类型语法而失败。当前
+`MODULE.bazel.lock` 没有 diff。
+
+下一步优先继续处理 Agent Identity auth/storage 残留、connectors/apps 里其他 ChatGPT hosted 残留；
+provider adapter 方向则继续补 Anthropic/chat-completions fixture 和国内模型兼容选项。
 remote-control 主入口已经禁用，不再作为最高优先级，除非后续要把底层 `app-server-transport` 旧模块降级成独立
 stub 或删除。
 当前明确口径：标准 OpenAI API 指 `/v1/chat/completions`，不是旧 `/v1/completions`；Anthropic 路线是

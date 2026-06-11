@@ -41,6 +41,7 @@ use codex_mcp::codex_apps_tools_cache_key;
 use codex_mcp::compute_auth_statuses;
 use codex_mcp::host_owned_codex_apps_enabled;
 use codex_mcp::with_codex_apps_mcp;
+use codex_plugin::AppConnectorId;
 
 const CONNECTORS_READY_TIMEOUT_ON_EMPTY_TOOLS: Duration = Duration::from_secs(30);
 
@@ -93,6 +94,101 @@ pub async fn list_accessible_connectors_from_mcp_tools(
         .await?
         .connectors,
     )
+}
+
+pub async fn list_all_connectors(config: &Config) -> anyhow::Result<Vec<AppInfo>> {
+    list_all_connectors_with_options(config, /*force_refetch*/ false).await
+}
+
+pub async fn list_cached_all_connectors(config: &Config) -> Option<Vec<AppInfo>> {
+    if !config.features.apps_enabled() {
+        return Some(Vec::new());
+    }
+
+    let connectors = codex_connectors::merge::merge_plugin_connectors(
+        Vec::new(),
+        plugin_apps_for_config(config)
+            .await
+            .into_iter()
+            .map(|connector_id| connector_id.0),
+    );
+    Some(codex_connectors::filter::filter_disallowed_connectors(
+        connectors,
+        originator().value.as_str(),
+    ))
+}
+
+pub async fn list_all_connectors_with_options(
+    config: &Config,
+    _force_refetch: bool,
+) -> anyhow::Result<Vec<AppInfo>> {
+    if !config.features.apps_enabled() {
+        return Ok(Vec::new());
+    }
+    let connectors = codex_connectors::merge::merge_plugin_connectors(
+        Vec::new(),
+        plugin_apps_for_config(config)
+            .await
+            .into_iter()
+            .map(|connector_id| connector_id.0),
+    );
+    Ok(codex_connectors::filter::filter_disallowed_connectors(
+        connectors,
+        originator().value.as_str(),
+    ))
+}
+
+async fn plugin_apps_for_config(config: &Config) -> Vec<AppConnectorId> {
+    let plugins_input = config.plugins_config_input();
+    PluginsManager::new(config.codex_home.to_path_buf())
+        .plugins_for_config(&plugins_input)
+        .await
+        .effective_apps()
+}
+
+pub fn connectors_for_plugin_apps(
+    connectors: Vec<AppInfo>,
+    plugin_apps: &[AppConnectorId],
+) -> Vec<AppInfo> {
+    let connectors = codex_connectors::merge::merge_plugin_connectors(
+        connectors,
+        plugin_apps
+            .iter()
+            .map(|connector_id| connector_id.0.clone()),
+    );
+    let mut connectors_by_id = codex_connectors::filter::filter_disallowed_connectors(
+        connectors,
+        originator().value.as_str(),
+    )
+    .into_iter()
+    .map(|connector| (connector.id.clone(), connector))
+    .collect::<HashMap<_, _>>();
+
+    plugin_apps
+        .iter()
+        .filter_map(|connector_id| connectors_by_id.remove(connector_id.0.as_str()))
+        .collect()
+}
+
+pub fn merge_connectors_with_accessible(
+    connectors: Vec<AppInfo>,
+    accessible_connectors: Vec<AppInfo>,
+    all_connectors_loaded: bool,
+) -> Vec<AppInfo> {
+    let accessible_connectors = if all_connectors_loaded {
+        let connector_ids: HashSet<&str> = connectors
+            .iter()
+            .map(|connector| connector.id.as_str())
+            .collect();
+        accessible_connectors
+            .into_iter()
+            .filter(|connector| connector_ids.contains(connector.id.as_str()))
+            .collect()
+    } else {
+        accessible_connectors
+    };
+    let merged = codex_connectors::merge::merge_connectors(connectors, accessible_connectors);
+    codex_connectors::filter::filter_disallowed_connectors(merged, originator().value.as_str())
 }
 
 pub(crate) async fn list_accessible_and_enabled_connectors_from_manager(
