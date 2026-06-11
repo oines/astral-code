@@ -717,7 +717,7 @@ pub async fn run_main_with_transport_options(
 
     let (remote_control_accept_handle, remote_control_handle) = start_remote_control(
         RemoteControlStartConfig {
-            remote_control_url: config.chatgpt_base_url.clone(),
+            remote_control_url: String::new(),
             installation_id: installation_id.clone(),
         },
         state_db.clone(),

@@ -1,6 +1,6 @@
 # Astral-Code 项目总控记录
 
-最后更新：2026-06-11 17:17 CST
+最后更新：2026-06-11 17:23 CST
 
 这份文档是 Astral-Code 长线改造的中文 handoff。它的用途不是对外宣传，而是让后续任何一次
 compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道：我们到底要做什么、为什么这么做、
@@ -34,10 +34,10 @@ provider 去 OpenAI 默认路由、登录态清理、cloud-config/cloud-tasks �
 - Provider-neutral Agent IR / Anthropic Messages / chat completions：仍是后续核心大块工作。
 - 全量 CI：当前不追求全绿，用户明确要求先推进实现，最后集中测试集中修。
 
-当前最新 slice：`plugin/installed` 在 remote plugin control-plane 禁用时不再触发 remote installed catalog
-fetch 或 bundle sync；remote plugin/share/read/install/uninstall disabled 路径也会先短路，不再为了返回
-disabled 而读取旧 config/auth。下一步优先继续处理 `core-plugins/src/remote/*` 旧实现、底层
-app-server-transport remote-control 旧模块和其他 ChatGPT hosted 残留。
+当前最新 slice：app-server disabled remote-control runtime 不再携带 `config.chatgpt_base_url`；`plugin/installed`
+在 remote plugin control-plane 禁用时也不再触发 remote installed catalog fetch 或 bundle sync。
+下一步优先继续处理 `core-plugins/src/remote/*` 旧实现、底层 app-server-transport remote-control 旧模块和其他
+ChatGPT hosted 残留。
 
 ## 项目身份
 
@@ -616,6 +616,36 @@ account 或 OpenAI-only plugin 分发的代码，都需要删除、禁用或隔�
   remote control。底层 `app-server-transport` 里的旧 remote-control 模块仍存在，但默认和 app-server
   暴露路径已经切断。
 
+## 最近完成的 app-server remote-control URL cleanup slice
+
+本轮完成的代码 slice：
+
+> app-server disabled remote-control runtime 不再携带 `config.chatgpt_base_url`。
+
+已编辑文件：
+
+- `codex-rs/app-server/src/lib.rs`
+- `ASTRAL_CODE_PROGRESS.md`
+
+改动内容：
+
+- app-server 启动时仍会创建 disabled remote-control handle，以保持 status/disable/read 生命周期稳定。
+- 但传给 `RemoteControlStartConfig.remote_control_url` 的值从 `config.chatgpt_base_url.clone()` 改为空字符串。
+- 由于 `remote_control_enabled = false`，底层不会 normalize 或连接这个 URL；这一步避免 disabled runtime
+  的 handle/log 上继续携带 ChatGPT hosted backend URL。
+
+为什么要做：
+
+- 上一批改动已经禁用了 remote control 启用入口，但 disabled runtime 仍在构造时持有旧
+  ChatGPT base URL。
+- Astral 默认路径不应该携带 OpenAI/ChatGPT hosted 控制面的 URL，即使它当前不会被连接。
+- 这一步不破坏 app-server C/S 架构，也不改变 remote-control status disabled 语义。
+
+后续风险：
+
+- `app-server-transport/src/transport/remote_control/*` 仍包含完整 legacy WHAM/WebSocket 实现和测试。
+  下一步可以继续把底层 transport 降级成 Astral disabled stub，或拆成非默认 legacy feature。
+
 ## 最近完成的 app-server remote installed plugin slice
 
 本轮完成的代码 slice：
@@ -879,6 +909,7 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
 - `CARGO_INCREMENTAL=0 just test -p codex-app-server plugin_share_save_rejects_when_plugin_sharing_disabled`
 - `CARGO_INCREMENTAL=0 just test -p codex-app-server plugin_read_rejects_remote_marketplace_when_plugins_are_disabled`
 - `CARGO_INCREMENTAL=0 just test -p codex-app-server plugin_installed_skips_remote_fetch_when_control_plane_disabled`
+- `CARGO_INCREMENTAL=0 just test -p codex-app-server remote_control`
 - 旧 ChatGPT refresh 符号窄范围搜索：`codex-rs/login` 与 app-server auth 测试无命中。
 - `git diff --check`
 
