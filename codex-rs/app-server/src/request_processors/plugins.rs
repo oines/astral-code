@@ -2133,9 +2133,9 @@ fn remote_plugin_catalog_error_to_jsonrpc(
 ) -> JSONRPCErrorError {
     let message = format!("{context}: {err}");
     match &err {
-        RemotePluginCatalogError::AuthRequired | RemotePluginCatalogError::UnsupportedAuthMode => {
-            invalid_request(message)
-        }
+        RemotePluginCatalogError::ControlPlaneDisabled
+        | RemotePluginCatalogError::AuthRequired
+        | RemotePluginCatalogError::UnsupportedAuthMode => invalid_request(message),
         RemotePluginCatalogError::UnexpectedStatus { status, .. } if status.as_u16() == 404 => {
             invalid_request(message)
         }

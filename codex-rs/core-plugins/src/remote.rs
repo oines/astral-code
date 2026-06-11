@@ -98,6 +98,14 @@ pub fn remote_plugin_background_sync_available() -> bool {
     false
 }
 
+fn remote_plugin_control_plane_disabled() -> bool {
+    true
+}
+
+fn remote_plugin_control_plane_disabled_error() -> RemotePluginCatalogError {
+    RemotePluginCatalogError::ControlPlaneDisabled
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemotePluginServiceConfig {
     pub chatgpt_base_url: String,
@@ -245,6 +253,9 @@ pub fn validate_remote_plugin_id(plugin_id: &str) -> Result<(), JSONRPCErrorErro
 
 #[derive(Debug, thiserror::Error)]
 pub enum RemotePluginCatalogError {
+    #[error("legacy hosted remote plugin control-plane is disabled in Astral")]
+    ControlPlaneDisabled,
+
     #[error("chatgpt authentication required for remote plugin catalog")]
     AuthRequired,
 
@@ -562,6 +573,10 @@ pub async fn fetch_remote_marketplaces(
     sources: &[RemoteMarketplaceSource],
     global_catalog_cache_path: Option<&Path>,
 ) -> Result<Vec<RemoteMarketplace>, RemotePluginCatalogError> {
+    if remote_plugin_control_plane_disabled() {
+        return Err(remote_plugin_control_plane_disabled_error());
+    }
+
     let auth = ensure_chatgpt_auth(auth)?;
     let mut marketplaces = Vec::new();
     let needs_workspace_installed = sources.iter().any(|source| {
@@ -708,6 +723,10 @@ pub async fn fetch_and_cache_global_remote_plugin_catalog(
     config: &RemotePluginServiceConfig,
     auth: Option<&CodexAuth>,
 ) -> Result<(), RemotePluginCatalogError> {
+    if remote_plugin_control_plane_disabled() {
+        return Err(remote_plugin_control_plane_disabled_error());
+    }
+
     let auth = ensure_chatgpt_auth(auth)?;
     let plugins =
         fetch_directory_plugins_for_scope(config, auth, RemotePluginScope::Global).await?;
@@ -720,6 +739,10 @@ pub fn has_cached_global_remote_plugin_catalog(
     config: &RemotePluginServiceConfig,
     auth: Option<&CodexAuth>,
 ) -> bool {
+    if remote_plugin_control_plane_disabled() {
+        return false;
+    }
+
     let Ok(auth) = ensure_chatgpt_auth(auth) else {
         return false;
     };
@@ -731,6 +754,10 @@ pub fn cached_global_remote_discoverable_plugins(
     config: &RemotePluginServiceConfig,
     auth: &CodexAuth,
 ) -> Vec<RemoteDiscoverablePlugin> {
+    if remote_plugin_control_plane_disabled() {
+        return Vec::new();
+    }
+
     catalog_cache::load_cached_global_directory_plugins(codex_home, config, auth)
         .unwrap_or_default()
         .into_iter()
@@ -748,6 +775,10 @@ pub async fn fetch_openai_curated_remote_collection_marketplace(
     config: &RemotePluginServiceConfig,
     auth: Option<&CodexAuth>,
 ) -> Result<Option<RemoteMarketplace>, RemotePluginCatalogError> {
+    if remote_plugin_control_plane_disabled() {
+        return Err(remote_plugin_control_plane_disabled_error());
+    }
+
     let auth = ensure_chatgpt_auth(auth)?;
     let scope = RemotePluginScope::Global;
     let (directory_plugins, installed_plugins) = tokio::try_join!(
@@ -821,6 +852,10 @@ pub(crate) async fn fetch_remote_installed_plugins(
     config: &RemotePluginServiceConfig,
     auth: Option<&CodexAuth>,
 ) -> Result<Vec<RemoteInstalledPlugin>, RemotePluginCatalogError> {
+    if remote_plugin_control_plane_disabled() {
+        return Err(remote_plugin_control_plane_disabled_error());
+    }
+
     let auth = ensure_chatgpt_auth(auth)?;
     let global = async {
         let scope = RemotePluginScope::Global;
@@ -917,6 +952,10 @@ pub async fn fetch_remote_plugin_share_context(
     auth: Option<&CodexAuth>,
     plugin_id: &str,
 ) -> Result<Option<RemotePluginShareContext>, RemotePluginCatalogError> {
+    if remote_plugin_control_plane_disabled() {
+        return Err(remote_plugin_control_plane_disabled_error());
+    }
+
     let auth = ensure_chatgpt_auth(auth)?;
     let plugin = fetch_plugin_detail(
         config, auth, plugin_id, /*include_download_urls*/ false,
@@ -948,6 +987,10 @@ pub async fn fetch_remote_plugin_skill_detail(
     plugin_id: &str,
     skill_name: &str,
 ) -> Result<RemotePluginSkillDetail, RemotePluginCatalogError> {
+    if remote_plugin_control_plane_disabled() {
+        return Err(remote_plugin_control_plane_disabled_error());
+    }
+
     let auth = ensure_chatgpt_auth(auth)?;
     if RemotePluginScope::from_marketplace_name(marketplace_name).is_none() {
         return Err(RemotePluginCatalogError::UnknownMarketplace {
@@ -984,6 +1027,10 @@ async fn fetch_remote_plugin_detail_with_download_url_option(
     plugin_id: &str,
     include_download_urls: bool,
 ) -> Result<RemotePluginDetail, RemotePluginCatalogError> {
+    if remote_plugin_control_plane_disabled() {
+        return Err(remote_plugin_control_plane_disabled_error());
+    }
+
     let auth = ensure_chatgpt_auth(auth)?;
     let plugin = fetch_plugin_detail(config, auth, plugin_id, include_download_urls).await?;
     let scope = plugin.scope;
@@ -1076,6 +1123,10 @@ pub async fn install_remote_plugin(
     _marketplace_name: &str,
     plugin_id: &str,
 ) -> Result<(), RemotePluginCatalogError> {
+    if remote_plugin_control_plane_disabled() {
+        return Err(remote_plugin_control_plane_disabled_error());
+    }
+
     let auth = ensure_chatgpt_auth(auth)?;
     // Remote plugin IDs uniquely identify remote plugins, so the caller-provided
     // marketplace name is not validated before sending the install mutation.
@@ -1108,6 +1159,10 @@ pub async fn uninstall_remote_plugin(
     codex_home: PathBuf,
     plugin_id: &str,
 ) -> Result<(), RemotePluginCatalogError> {
+    if remote_plugin_control_plane_disabled() {
+        return Err(remote_plugin_control_plane_disabled_error());
+    }
+
     let auth = ensure_chatgpt_auth(auth)?;
     let plugin = fetch_plugin_detail(
         config, auth, plugin_id, /*include_download_urls*/ false,
@@ -1657,3 +1712,7 @@ async fn send_and_decode<T: for<'de> Deserialize<'de>>(
         source,
     })
 }
+
+#[cfg(test)]
+#[path = "remote_tests.rs"]
+mod tests;

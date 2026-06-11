@@ -143,6 +143,10 @@ pub async fn save_remote_plugin_share(
     remote_plugin_id: Option<&str>,
     access_policy: RemotePluginShareAccessPolicy,
 ) -> Result<RemotePluginShareSaveResult, RemotePluginCatalogError> {
+    if super::remote_plugin_control_plane_disabled() {
+        return Err(super::remote_plugin_control_plane_disabled_error());
+    }
+
     let auth = ensure_chatgpt_auth(auth)?;
     let plugin_path_for_archive = plugin_path.as_path().to_path_buf();
     let (filename, archive_bytes) = tokio::task::spawn_blocking(move || {
@@ -207,6 +211,10 @@ pub async fn list_remote_plugin_shares(
     auth: Option<&CodexAuth>,
     codex_home: &Path,
 ) -> Result<Vec<RemotePluginShareSummary>, RemotePluginCatalogError> {
+    if super::remote_plugin_control_plane_disabled() {
+        return Err(super::remote_plugin_control_plane_disabled_error());
+    }
+
     let auth = ensure_chatgpt_auth(auth)?;
     let created_plugins = fetch_created_workspace_plugins(config, auth).await?;
     if created_plugins.is_empty() {
@@ -276,6 +284,10 @@ pub async fn delete_remote_plugin_share(
     codex_home: &Path,
     remote_plugin_id: &str,
 ) -> Result<(), RemotePluginCatalogError> {
+    if super::remote_plugin_control_plane_disabled() {
+        return Err(super::remote_plugin_control_plane_disabled_error());
+    }
+
     let auth = ensure_chatgpt_auth(auth)?;
     let base_url = config.chatgpt_base_url.trim_end_matches('/');
     let url = format!("{base_url}/public/plugins/workspace/{remote_plugin_id}");
@@ -298,6 +310,10 @@ pub async fn update_remote_plugin_share_targets(
     targets: Vec<RemotePluginShareTarget>,
     discoverability: RemotePluginShareUpdateDiscoverability,
 ) -> Result<RemotePluginShareUpdateTargetsResult, RemotePluginCatalogError> {
+    if super::remote_plugin_control_plane_disabled() {
+        return Err(super::remote_plugin_control_plane_disabled_error());
+    }
+
     let auth = ensure_chatgpt_auth(auth)?;
     let target_discoverability = match discoverability {
         RemotePluginShareUpdateDiscoverability::Unlisted => {

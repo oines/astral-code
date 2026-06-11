@@ -1,6 +1,6 @@
 # Astral-Code 项目总控记录
 
-最后更新：2026-06-11 17:23 CST
+最后更新：2026-06-11 17:41 CST
 
 这份文档是 Astral-Code 长线改造的中文 handoff。它的用途不是对外宣传，而是让后续任何一次
 compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道：我们到底要做什么、为什么这么做、
@@ -31,12 +31,15 @@ provider 去 OpenAI 默认路由、登录态清理、cloud-config/cloud-tasks �
 - Plan Mode / Goal Mode / local compact：决定保留 Codex 方案，当前不作为重构主战场。
 - OpenAI 登录态和 ChatGPT OAuth：主路径已删除或禁用。
 - OpenAI/ChatGPT hosted control-plane：已经拆掉多处默认外联，但仍是最高优先级扫尾区域。
-- Provider-neutral Agent IR / Anthropic Messages / chat completions：仍是后续核心大块工作。
+- Provider-neutral Agent IR / Anthropic Messages / OpenAI-compatible chat completions：仍是后续核心大块工作。
 - 全量 CI：当前不追求全绿，用户明确要求先推进实现，最后集中测试集中修。
 
-当前最新 slice：app-server disabled remote-control runtime 不再携带 `config.chatgpt_base_url`；`plugin/installed`
-在 remote plugin control-plane 禁用时也不再触发 remote installed catalog fetch 或 bundle sync。
-下一步优先继续处理 `core-plugins/src/remote/*` 旧实现、底层 app-server-transport remote-control 旧模块和其他
+当前最新 slice：`core-plugins/src/remote/*` hosted remote plugin 控制面已经在库层短路为
+`ControlPlaneDisabled`，直接调用 remote marketplace、remote share、remote installed sync、remote
+install/uninstall/read/skill detail 等函数时，也会在 auth、network、archive/cache 之前返回 Astral
+disabled；app-server 将该错误映射为 `invalid_request`。
+
+下一步优先继续处理底层 `app-server-transport` remote-control 旧模块、`chatgpt_base_url` 配置字段和其他
 ChatGPT hosted 残留。
 
 ## 项目身份
@@ -117,8 +120,12 @@ Astral 的内部方向是“深度重构”，不是“尾端 adapter 改名”�
    - OpenAI Responses、Anthropic Messages、OpenAI-compatible chat completions 都只映射到这个 IR。
 
 2. Provider adapters
-   - Anthropic Messages adapter 成为一等路径。
-   - OpenAI-compatible `/v1/chat/completions` adapter 成为一等路径。
+   - Anthropic Messages adapter 成为一等路径，目标兼容 `/anthropic` / `/v1/messages` 这类国内网关常见
+     Anthropic 入口。
+   - OpenAI-compatible `/v1/chat/completions` adapter 成为一等路径，这是 DeepSeek 等国产模型最常用的
+     OpenAI API 兼容面。
+   - 老式 `/v1/completions` 文本补全不是主路径；如果未来确实需要，只能作为极薄降级 adapter，不能反过来
+     约束 agent/tool 协议设计。
    - OpenAI Responses 降级为 legacy/optional adapter。
 
 3. Astral-native tool flavor
@@ -616,6 +623,50 @@ account 或 OpenAI-only plugin 分发的代码，都需要删除、禁用或隔�
   remote control。底层 `app-server-transport` 里的旧 remote-control 模块仍存在，但默认和 app-server
   暴露路径已经切断。
 
+## 最近完成的 core-plugins remote guard slice
+
+本轮完成的代码 slice：
+
+> `core-plugins/src/remote/*` hosted remote plugin 控制面在库层直接禁用，防止 app-server 以外的调用路径
+> 绕过上层 gate 后触碰旧 ChatGPT auth/network/archive 逻辑。
+
+已编辑文件：
+
+- `codex-rs/core-plugins/src/remote.rs`
+- `codex-rs/core-plugins/src/remote/share.rs`
+- `codex-rs/core-plugins/src/remote/remote_installed_plugin_sync.rs`
+- `codex-rs/core-plugins/src/remote_tests.rs`
+- `codex-rs/app-server/src/request_processors/plugins.rs`
+- `ASTRAL_CODE_PROGRESS.md`
+
+改动内容：
+
+- 新增 `RemotePluginCatalogError::ControlPlaneDisabled`，统一表达 Astral 禁用 legacy hosted remote
+  plugin control-plane。
+- `fetch_remote_marketplaces(...)`、global remote catalog fetch/cache helpers、OpenAI curated remote
+  marketplace fetch、remote installed plugins fetch、remote share context fetch、remote skill/detail fetch、
+  remote install/uninstall 等入口在函数最前面返回 `ControlPlaneDisabled`。
+- `has_cached_global_remote_plugin_catalog(...)` 在 Astral disabled 模式下固定返回 `false`。
+- `cached_global_remote_discoverable_plugins(...)` 在 Astral disabled 模式下固定返回空列表。
+- `save/list/delete/update remote plugin share` 在 archive/config/auth 前直接返回 disabled。
+- `sync_remote_installed_plugin_bundles_once(...)` 在 auth/config/network 前直接返回 disabled。
+- app-server 将 `ControlPlaneDisabled` 映射成 `invalid_request`，保持 RPC 层禁用语义清晰。
+
+为什么要做：
+
+- 之前 app-server 层已经禁用了 remote plugin/share/read/install/uninstall 多数入口，但底层
+  `core-plugins` remote 函数仍然保留完整 hosted control-plane 实现。
+- Astral 是新项目，不兼容旧 Codex remote plugin/share 状态，也不应该保留任何默认可触发的
+  ChatGPT plugin service 外联口。
+- 这一步不是删除本地 plugin/skill/MCP runtime，而是把 OpenAI hosted plugin 分发与分享控制面从默认
+  库能力里切掉。
+
+后续风险：
+
+- remote plugin 类型、测试 fixture 和部分 manager 调度结构仍存在，用于当前编译边界。
+- 更洁癖的下一步可以把 legacy remote plugin 实现拆成非默认 feature 或删除对应类型面，但要避免一次性
+  引爆 plugin manager、app-server protocol 和测试 fixture 的大范围 diff。
+
 ## 最近完成的 app-server remote-control URL cleanup slice
 
 本轮完成的代码 slice：
@@ -910,6 +961,9 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
 - `CARGO_INCREMENTAL=0 just test -p codex-app-server plugin_read_rejects_remote_marketplace_when_plugins_are_disabled`
 - `CARGO_INCREMENTAL=0 just test -p codex-app-server plugin_installed_skips_remote_fetch_when_control_plane_disabled`
 - `CARGO_INCREMENTAL=0 just test -p codex-app-server remote_control`
+- `CARGO_INCREMENTAL=0 cargo check --tests -p codex-core-plugins -p codex-app-server`
+- `CARGO_INCREMENTAL=0 just test -p codex-core-plugins control_plane_disabled`
+- `CARGO_INCREMENTAL=0 just test -p codex-app-server plugin_read_rejects_remote_marketplace_when_plugins_are_disabled`
 - 旧 ChatGPT refresh 符号窄范围搜索：`codex-rs/login` 与 app-server auth 测试无命中。
 - `git diff --check`
 
