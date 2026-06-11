@@ -1,6 +1,6 @@
 # Astral-Code 项目总控记录
 
-最后更新：2026-06-11 20:33 CST
+最后更新：2026-06-11 20:40 CST
 
 这份文档是 Astral-Code 长线改造的中文 handoff。它的用途不是对外宣传，而是让后续任何一次
 compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道：我们到底要做什么、为什么这么做、
@@ -78,6 +78,10 @@ headers，不再要求 `uses_codex_backend()`，也不再打印 `ChatGPT-Account
 最新补充 7：core-plugins curated startup sync 删除了 ChatGPT backend export archive fallback。git sync 失败后仍可
 尝试 GitHub API zipball fallback，但如果 GitHub HTTP 也失败，将直接失败并保留已有本地 curated snapshot，不再访问
 `https://chatgpt.com/backend-api/plugins/export/curated`，也不再维护 backup archive zip / git ref 解析代码。
+
+最新补充 8：core-skills remote skill control-plane 从“禁用 guard 包着旧实现”升级为“只保留 unsupported stub”。
+`list_remote_skills(...)` / `export_remote_skill(...)` 不再包含 ChatGPT `/hazelnuts` HTTP client、Codex backend
+auth 检查、download zip 校验或解压逻辑；本地 skills runtime 不受影响。
 
 下一步优先继续处理 `chatgpt_base_url` 配置字段、Agent Identity auth/storage 残留、connectors/apps 和其他
 ChatGPT hosted 残留；provider adapter 方向则继续补 Anthropic/chat-completions fixture 和国内模型兼容选项。
@@ -818,12 +822,12 @@ account 或 OpenAI-only plugin 分发的代码，都需要删除、禁用或隔�
 - 如果后续完全删除 AgentIdentity auth 类型，需要联动 app-server account/auth status、storage fixture 和
   config/schema 测试，适合作为单独机械清理。
 
-## 最近完成的 core-skills remote guard slice
+## 最近完成的 core-skills remote skill stub slice
 
 本轮完成的代码 slice：
 
-> `core-skills/src/remote.rs` hosted remote skill API 在库层直接禁用，避免未来入口误接上
-> ChatGPT `/hazelnuts` skill service。
+> `core-skills/src/remote.rs` hosted remote skill API 不再保留 ChatGPT `/hazelnuts` client 实现；
+> Astral 只保留当前调用方需要的 unsupported API 边界。
 
 已编辑文件：
 
@@ -833,21 +837,21 @@ account 或 OpenAI-only plugin 分发的代码，都需要删除、禁用或隔�
 
 改动内容：
 
-- 新增 remote skill control-plane disabled guard。
-- `list_remote_skills(...)` 在处理 `chatgpt_base_url` 和 ChatGPT auth 前直接返回 Astral disabled。
-- `export_remote_skill(...)` 在 ChatGPT auth、download request、zip payload 校验和 extract 前直接返回
-  Astral disabled。
-- 新增两条测试，确认 list/export 都在缺少 auth 时返回 disabled，而不是进入旧 ChatGPT auth 错误或网络路径。
+- `list_remote_skills(...)` / `export_remote_skill(...)` 现在直接返回 Astral disabled。
+- 删除旧 ChatGPT `/hazelnuts` HTTP 请求构造、Codex backend auth 检查、auth header 映射、download zip payload
+  校验、zip 解压和路径防穿越 helper。
+- 测试继续确认 list/export 都在缺少 auth 时返回 disabled；测试 fixture 不再使用 `chatgpt.example/backend-api`。
 
 为什么要做：
 
-- remote skill client 当前注释为“future wiring”，但代码已经是完整 ChatGPT hosted `/hazelnuts` API 客户端。
+- remote skill client 虽然此前已经被 guard 禁用，但文件里仍保留完整 ChatGPT hosted `/hazelnuts` API 客户端。
 - Astral 的 skill runtime 要保留，但 hosted skill marketplace/export 控制面不能默认保留旧 ChatGPT 后端语义。
 - 这一步和 remote plugin guard 保持同一原则：本地 skills/plugins/MCP 不动，OpenAI hosted 分发面默认切断。
 
 后续风险：
 
-- `RemoteSkillScope` / `RemoteSkillProductSurface` 等类型仍存在，用于当前编译边界。
+- `RemoteSkillScope` / `RemoteSkillProductSurface` 等类型仍存在，用于当前编译边界；它们后续可随调用方一起删。
+- `codex-core-skills` 的 Cargo 依赖里仍有旧实现留下的依赖，后续做依赖清理时再配合 Bazel lock 更新。
 - 如果后续要做 provider-neutral skill registry，应新建 Astral 自己的服务协议，不复用 `chatgpt_base_url` 和
   `/hazelnuts` 语义。
 

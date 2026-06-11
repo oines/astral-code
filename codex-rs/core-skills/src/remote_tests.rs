@@ -8,7 +8,7 @@ use super::list_remote_skills;
 #[tokio::test]
 async fn list_remote_skills_returns_control_plane_disabled_before_auth() {
     let err = list_remote_skills(
-        "https://chatgpt.example/backend-api".to_string(),
+        "https://hosted.example/api".to_string(),
         /*auth*/ None,
         RemoteSkillScope::WorkspaceShared,
         RemoteSkillProductSurface::Codex,
@@ -26,7 +26,7 @@ async fn list_remote_skills_returns_control_plane_disabled_before_auth() {
 #[tokio::test]
 async fn export_remote_skill_returns_control_plane_disabled_before_auth() {
     let err = export_remote_skill(
-        "https://chatgpt.example/backend-api".to_string(),
+        "https://hosted.example/api".to_string(),
         PathBuf::from("/tmp/astral-disabled-skill-home"),
         /*auth*/ None,
         "skill_test",
