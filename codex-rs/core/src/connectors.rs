@@ -10,8 +10,6 @@ use async_channel::unbounded;
 pub use codex_app_server_protocol::AppBranding;
 pub use codex_app_server_protocol::AppInfo;
 pub use codex_app_server_protocol::AppMetadata;
-use codex_connectors::ConnectorDirectoryCacheContext;
-use codex_connectors::ConnectorDirectoryCacheKey;
 use codex_exec_server::EnvironmentManager;
 use codex_exec_server::ExecServerRuntimePaths;
 use codex_protocol::models::PermissionProfile;
@@ -118,10 +116,8 @@ pub(crate) async fn list_tool_suggest_discoverable_tools_with_auth(
     loaded_plugin_app_connector_ids: &[String],
 ) -> anyhow::Result<Vec<DiscoverableTool>> {
     let connector_ids = tool_suggest_connector_ids(config, loaded_plugin_app_connector_ids);
-    let directory_connectors = codex_connectors::merge::merge_plugin_connectors(
-        cached_directory_connectors_for_tool_suggest_with_auth(config, auth).await,
-        connector_ids.iter().cloned(),
-    );
+    let directory_connectors =
+        codex_connectors::merge::merge_plugin_connectors(Vec::new(), connector_ids.iter().cloned());
     let discoverable_connectors =
         codex_connectors::filter::filter_tool_suggest_discoverable_connectors(
             directory_connectors,
@@ -431,45 +427,6 @@ fn tool_suggest_connector_ids(
         .collect::<HashSet<_>>();
     connector_ids.retain(|connector_id| !disabled_connector_ids.contains(connector_id.as_str()));
     connector_ids
-}
-
-async fn cached_directory_connectors_for_tool_suggest_with_auth(
-    config: &Config,
-    auth: Option<&CodexAuth>,
-) -> Vec<AppInfo> {
-    if !config.features.enabled(Feature::Apps) {
-        return Vec::new();
-    }
-
-    let loaded_auth;
-    let auth = if let Some(auth) = auth {
-        Some(auth)
-    } else {
-        let auth_manager =
-            AuthManager::shared_from_config(config, /*enable_codex_api_key_env*/ false).await;
-        loaded_auth = auth_manager.auth().await;
-        loaded_auth.as_ref()
-    };
-    let Some(auth) = auth.filter(|auth| auth.uses_codex_backend()) else {
-        return Vec::new();
-    };
-
-    let account_id = match auth.get_account_id() {
-        Some(account_id) if !account_id.is_empty() => account_id,
-        _ => return Vec::new(),
-    };
-    let is_workspace_account = auth.is_workspace_account();
-    let cache_context = ConnectorDirectoryCacheContext::new(
-        config.codex_home.to_path_buf(),
-        ConnectorDirectoryCacheKey::new(
-            config.chatgpt_base_url.clone(),
-            Some(account_id),
-            auth.get_chatgpt_user_id(),
-            is_workspace_account,
-        ),
-    );
-
-    codex_connectors::cached_directory_connectors(&cache_context).unwrap_or_default()
 }
 
 pub(crate) fn accessible_connectors_from_mcp_tools(mcp_tools: &[ToolInfo]) -> Vec<AppInfo> {

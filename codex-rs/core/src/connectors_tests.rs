@@ -17,7 +17,6 @@ use codex_config::types::AppsDefaultConfig;
 use codex_connectors::merge::plugin_connector_to_app_info;
 use codex_connectors::metadata::sanitize_name;
 use codex_features::Feature;
-use codex_login::CodexAuth;
 use codex_mcp::CODEX_APPS_MCP_SERVER_NAME;
 use codex_mcp::ToolInfo;
 use codex_utils_absolute_path::AbsolutePathBuf;
@@ -1282,7 +1281,7 @@ disabled_tools = [
 }
 
 #[tokio::test]
-async fn tool_suggest_uses_connector_id_fallback_when_directory_cache_is_empty() {
+async fn tool_suggest_uses_connector_id_without_directory_cache() {
     let codex_home = tempdir().expect("tempdir should succeed");
     std::fs::write(
         codex_home.path().join(CONFIG_TOML_FILE),
@@ -1302,18 +1301,12 @@ discoverables = [
         .build()
         .await
         .expect("config should load");
-    let auth = CodexAuth::create_dummy_chatgpt_auth_for_testing();
     let plugins_manager = PluginsManager::new(config.codex_home.to_path_buf());
 
-    let discoverable_tools = list_tool_suggest_discoverable_tools_with_auth(
-        &config,
-        &plugins_manager,
-        Some(&auth),
-        &[],
-        &[],
-    )
-    .await
-    .expect("discoverable tools should load");
+    let discoverable_tools =
+        list_tool_suggest_discoverable_tools_with_auth(&config, &plugins_manager, None, &[], &[])
+            .await
+            .expect("discoverable tools should load");
 
     assert_eq!(
         discoverable_tools,
@@ -1339,14 +1332,13 @@ apps = true
         .build()
         .await
         .expect("config should load");
-    let auth = CodexAuth::create_dummy_chatgpt_auth_for_testing();
     let loaded_plugin_app_connector_ids = vec!["asdk_app_databricks_workspace".to_string()];
     let plugins_manager = PluginsManager::new(config.codex_home.to_path_buf());
 
     let discoverable_tools = list_tool_suggest_discoverable_tools_with_auth(
         &config,
         &plugins_manager,
-        Some(&auth),
+        None,
         &[],
         &loaded_plugin_app_connector_ids,
     )

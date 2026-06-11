@@ -1,6 +1,6 @@
 # Astral-Code 项目总控记录
 
-最后更新：2026-06-11 19:56 CST
+最后更新：2026-06-11 20:10 CST
 
 这份文档是 Astral-Code 长线改造的中文 handoff。它的用途不是对外宣传，而是让后续任何一次
 compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道：我们到底要做什么、为什么这么做、
@@ -64,6 +64,10 @@ auth elicitation 安装引导。
 provider-neutral apps 是否开启，不再要求 `CodexAuth::uses_codex_backend()` 或 `is_chatgpt_auth()`。这会让本地
 plugin apps、MCP apps 和 app-server `apps/list` 在 Astral API-key/provider-neutral 模式下按 feature flag 工作，
 而不是因为没有 ChatGPT 登录态被静默置空。
+
+最新补充 5：tool suggest 的 connector 候选不再读取 legacy ChatGPT connector directory cache。Astral 现在只从
+本地 plugin app connector ids 和显式配置的 connector discoverables 构造候选，再和 MCP/accessibility 状态合并；
+不会因为 tool suggest 去读取旧 hosted directory cache、`chatgpt_base_url` 或 ChatGPT account/user id。
 
 下一步优先继续处理 `chatgpt_base_url` 配置字段、Agent Identity auth/storage 残留、connectors/apps 和其他
 ChatGPT hosted 残留；provider adapter 方向则继续补 Anthropic/chat-completions fixture 和国内模型兼容选项。
@@ -536,6 +540,41 @@ account 或 OpenAI-only plugin 分发的代码，都需要删除、禁用或隔�
 - `just fmt`
 - `CARGO_INCREMENTAL=0 cargo check --tests -p codex-features -p codex-chatgpt -p codex-core -p codex-app-server`
 - `just test -p codex-features apps_follow_feature_flag`
+
+## 最近完成的 tool suggest connector directory cleanup slice
+
+本轮完成的代码 slice：
+
+> tool suggest 不再读取 legacy ChatGPT connector directory cache。
+
+已编辑文件：
+
+- `codex-rs/core/src/connectors.rs`
+- `codex-rs/core/src/connectors_tests.rs`
+- `ASTRAL_CODE_PROGRESS.md`
+
+改动内容：
+
+- `list_tool_suggest_discoverable_tools_with_auth(...)` 不再调用旧
+  `cached_directory_connectors_for_tool_suggest_with_auth(...)`。
+- 删除旧 helper，以及它依赖的 `ConnectorDirectoryCacheContext` / `ConnectorDirectoryCacheKey` 读取逻辑。
+- tool suggest 的 connector 候选现在由本地 loaded plugin app connector ids 和显式
+  `[tool_suggest].discoverables` 生成，再走原有 filter/accessible 合并。
+- 相关测试不再创建 dummy ChatGPT auth，改为验证无 directory cache 时仍能按 connector id fallback。
+
+为什么要做：
+
+- hosted connector directory 已经不该作为 Astral 默认控制面存在；tool suggest 不能为了补 connector metadata
+  去读取旧 ChatGPT directory cache。
+- 旧 helper 会把 `config.chatgpt_base_url`、ChatGPT account id、user id、workspace account 状态重新带回
+  discoverable tools 路径。
+- 这一步不影响本地 plugin/MCP tool suggest 能力，只移除 legacy hosted directory 参与。
+
+验证：
+
+- `just fmt`
+- `CARGO_INCREMENTAL=0 cargo check --tests -p codex-core`
+- `just test -p codex-core tool_suggest_uses_connector_id_without_directory_cache tool_suggest_includes_connectors_from_loaded_plugin_apps`
 
 ## 最近完成的 cloud-config slice
 
