@@ -212,7 +212,7 @@ pub fn build_reqwest_client() -> reqwest::Client {
             .unwrap_or_else(|fallback_error| {
                 tracing::warn!(
                     error = %fallback_error,
-                    "failed to build fallback reqwest client with ChatGPT Cloudflare cookie store"
+                    "failed to build fallback reqwest client"
                 );
                 reqwest::Client::new()
             })

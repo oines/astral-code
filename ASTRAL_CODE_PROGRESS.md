@@ -1,6 +1,6 @@
 # Astral-Code 项目总控记录
 
-最后更新：2026-06-11 17:58 CST
+最后更新：2026-06-11 18:06 CST
 
 这份文档是 Astral-Code 长线改造的中文 handoff。它的用途不是对外宣传，而是让后续任何一次
 compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道：我们到底要做什么、为什么这么做、
@@ -35,12 +35,14 @@ provider 去 OpenAI 默认路由、登录态清理、cloud-config/cloud-tasks �
   国产模型兼容细节、fixture 和端到端测试。
 - 全量 CI：当前不追求全绿，用户明确要求先推进实现，最后集中测试集中修。
 
-当前最新 slice：`codex-agent-identity` 的 hosted 网络控制面已禁用；`fetch_agent_identity_jwks(...)` 和
-`register_agent_task(...)` 会在访问 ChatGPT JWKS/task registration 前返回 Astral disabled。本地
-JWT decode、key generation、AgentAssertion 签名工具仍保留。
+当前最新 slice：`codex-client` 的 ChatGPT Cloudflare 全局 cookie store 已降级为 no-op shim。
+`with_chatgpt_cloudflare_cookie_store(...)` 仍保留为兼容函数，但不再安装 process-global cookie jar，也不会缓存
+ChatGPT/Cloudflare cookie。`login` fallback 日志里的 ChatGPT Cloudflare 文案也已移除。
 
 下一步优先继续处理底层 `app-server-transport` remote-control 旧模块、`chatgpt_base_url` 配置字段和其他
-ChatGPT hosted 残留；provider adapter 方向则继续补 Anthropic/chat-completions fixture 和兼容选项。
+ChatGPT hosted 残留；provider adapter 方向则继续补 Anthropic/chat-completions fixture 和国内模型兼容选项。
+当前明确口径：标准 OpenAI API 指 `/v1/chat/completions`，不是旧 `/v1/completions`；Anthropic 路线是
+Messages API，`base_url` 可以承载 `/v1` 或 `/anthropic/v1` 这类网关前缀。
 
 ## 项目身份
 
@@ -288,6 +290,13 @@ Remote / cloud control-plane 风险区：
 account 或 OpenAI-only plugin 分发的代码，都需要删除、禁用或隔离到显式非默认 feature。
 
 ## 已完成的重要提交
+
+- 本轮已完成：ChatGPT Cloudflare 全局 cookie store 禁用
+  - `codex-rs/codex-client/src/chatgpt_cloudflare_cookies.rs` 保留
+    `with_chatgpt_cloudflare_cookie_store(...)` 兼容函数，但函数直接返回原 builder。
+  - 旧 process-global `Jar`、Cloudflare cookie allowlist、ChatGPT host cookie 过滤和对应测试已移除。
+  - `codex-rs/login/src/auth/default_client.rs` fallback 日志不再提 ChatGPT Cloudflare cookie store。
+  - 目的：去掉一个 ChatGPT hosted control-plane 遗留状态源，同时不搅乱现有 reqwest/custom-CA 构造链路。
 
 - 本轮已完成：ChatGPT workspace settings / connector directory 不再联网
   - `codex-rs/chatgpt/src/workspace_settings.rs` 不再请求
@@ -1077,6 +1086,8 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
 - `CARGO_INCREMENTAL=0 just test -p codex-core-skills remote_skill`
 - `CARGO_INCREMENTAL=0 cargo check --tests -p codex-agent-identity`
 - `CARGO_INCREMENTAL=0 just test -p codex-agent-identity hosted_agent_identity_control_plane_is_disabled`
+- `just fmt`
+- `CARGO_INCREMENTAL=0 cargo check --tests -p codex-client -p codex-login -p codex-backend-client`
 - 旧 ChatGPT refresh 符号窄范围搜索：`codex-rs/login` 与 app-server auth 测试无命中。
 - `git diff --check`
 
@@ -1167,8 +1178,8 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
      ChatGPT task fetch/apply 默认路径。
    - `codex-rs/memories/write/src/guard.rs`：检查是否还会通过 `BackendClient::from_auth(...)`
      访问 hosted backend。
-   - `app-server` / `core-plugins` remote plugin install/share/read：继续隔离 ChatGPT hosted plugin
-     control-plane。
+   - `codex-rs/core/src/config` / `codex-rs/config`：继续收敛 `chatgpt_base_url` 和旧 ChatGPT auth/config
+     字段，注意不要破坏新的 `ASTRAL_BASE_URL` / provider-neutral 配置。
 
 5. 搜索优先关键词：
    - `chatgpt_base_url`
