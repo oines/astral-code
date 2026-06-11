@@ -26,6 +26,7 @@ use codex_tools::ToolExposure;
 use codex_tools::ToolName;
 use codex_tools::ToolOutput;
 use codex_tools::ToolSpec;
+use codex_tools::create_agent_tools_for_provider_neutral_request;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 
@@ -460,6 +461,50 @@ async fn shell_family_registers_visible_unified_exec_and_hidden_legacy_shell() {
     ]);
     assert_eq!(plan.exposure("shell_command"), ToolExposure::Hidden);
     assert!(has_parameter(plan.visible_spec("Bash"), "command"));
+}
+
+#[tokio::test]
+async fn model_visible_core_tools_convert_to_provider_neutral_astral_names() {
+    let plan = probe(|turn| {
+        set_features(turn, &[Feature::ShellTool, Feature::UnifiedExec]);
+        set_feature(turn, Feature::ShellZshFork, /*enabled*/ false);
+        turn.model_info.shell_type = ConfigShellToolType::ShellCommand;
+    })
+    .await;
+
+    let agent_tools = create_agent_tools_for_provider_neutral_request(&plan.visible_specs)
+        .expect("visible core tools should be provider-neutral compatible");
+    let agent_tool_names = agent_tools
+        .iter()
+        .map(|tool| tool.name.as_str())
+        .collect::<Vec<_>>();
+
+    for expected in [
+        "Bash",
+        "Monitor",
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Grep",
+        "TodoWrite",
+    ] {
+        assert!(
+            agent_tool_names.contains(&expected),
+            "expected provider-neutral tool `{expected}` in {agent_tool_names:?}"
+        );
+    }
+    for legacy in [
+        "exec_command",
+        "write_stdin",
+        "shell_command",
+        "update_plan",
+    ] {
+        assert!(
+            !agent_tool_names.contains(&legacy),
+            "legacy tool `{legacy}` leaked into provider-neutral tools {agent_tool_names:?}"
+        );
+    }
 }
 
 #[tokio::test]
