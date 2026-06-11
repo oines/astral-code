@@ -742,7 +742,6 @@ async fn remote_control_start_allows_missing_auth_when_enabled() {
         codex_home.path().to_path_buf(),
         /*enable_codex_api_key_env*/ false,
         AuthCredentialsStoreMode::File,
-        /*chatgpt_base_url*/ None,
     )
     .await;
     let (transport_event_tx, _transport_event_rx) =
@@ -1551,7 +1550,6 @@ async fn remote_control_waits_for_account_id_before_enrolling() {
         codex_home.path().to_path_buf(),
         /*enable_codex_api_key_env*/ false,
         AuthCredentialsStoreMode::File,
-        /*chatgpt_base_url*/ None,
     )
     .await;
     let expected_server_name = gethostname().to_string_lossy().trim().to_string();

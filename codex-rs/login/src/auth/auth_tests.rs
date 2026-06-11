@@ -45,13 +45,9 @@ fn login_with_api_key_overwrites_existing_auth_json() {
 #[serial(codex_auth_env)]
 async fn missing_auth_json_returns_none() {
     let dir = tempdir().unwrap();
-    let auth = CodexAuth::from_auth_storage(
-        dir.path(),
-        AuthCredentialsStoreMode::File,
-        /*chatgpt_base_url*/ None,
-    )
-    .await
-    .expect("call should succeed");
+    let auth = CodexAuth::from_auth_storage(dir.path(), AuthCredentialsStoreMode::File)
+        .await
+        .expect("call should succeed");
     assert_eq!(auth, None);
 }
 
@@ -73,7 +69,6 @@ async fn stored_chatgpt_auth_without_api_key_is_rejected() {
         codex_home.path(),
         /*enable_codex_api_key_env*/ false,
         AuthCredentialsStoreMode::File,
-        /*chatgpt_base_url*/ None,
     )
     .await
     .expect_err("stored ChatGPT auth should be rejected");
@@ -96,7 +91,6 @@ async fn loads_api_key_from_auth_json() {
         dir.path(),
         /*enable_codex_api_key_env*/ false,
         AuthCredentialsStoreMode::File,
-        /*chatgpt_base_url*/ None,
     )
     .await
     .unwrap()
@@ -133,7 +127,6 @@ async fn unauthorized_recovery_reports_mode_and_step_names() {
         dir.path().to_path_buf(),
         /*enable_codex_api_key_env*/ false,
         AuthCredentialsStoreMode::File,
-        /*chatgpt_base_url*/ None,
     )
     .await;
     let managed = manager.unauthorized_recovery();
@@ -455,7 +448,6 @@ async fn load_auth_keeps_astral_api_key_env_precedence() {
         codex_home.path(),
         /*enable_codex_api_key_env*/ true,
         AuthCredentialsStoreMode::File,
-        /*chatgpt_base_url*/ None,
     )
     .await
     .expect("env auth should load")

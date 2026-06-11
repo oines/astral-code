@@ -51,7 +51,6 @@ async fn auth_manager_logout_with_revoke_clears_cached_auth() -> Result<()> {
         codex_home.path().to_path_buf(),
         /*enable_codex_api_key_env*/ false,
         AuthCredentialsStoreMode::File,
-        /*chatgpt_base_url*/ None,
     )
     .await;
     save_auth(

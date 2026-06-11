@@ -161,12 +161,8 @@ fn read_stdin_secret(terminal_message: &str, reading_message: &str, empty_messag
 pub async fn run_login_status(cli_config_overrides: CliConfigOverrides) -> ! {
     let config = load_config_or_exit(cli_config_overrides).await;
 
-    match CodexAuth::from_auth_storage(
-        &config.codex_home,
-        config.cli_auth_credentials_store_mode,
-        /*chatgpt_base_url*/ None,
-    )
-    .await
+    match CodexAuth::from_auth_storage(&config.codex_home, config.cli_auth_credentials_store_mode)
+        .await
     {
         Ok(Some(auth)) => match auth.api_auth_mode() {
             AuthMode::ApiKey => match auth.get_token() {

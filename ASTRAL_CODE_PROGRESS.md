@@ -1,6 +1,6 @@
 # Astral-Code 项目总控记录
 
-最后更新：2026-06-11 13:42 CST
+最后更新：2026-06-11 14:13 CST
 
 这份文档是 Astral-Code 长线改造的中文 handoff。它的用途不是对外宣传，而是让后续任何一次
 compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道：我们到底要做什么、哪些边界不能碰、
@@ -217,6 +217,14 @@ account 或 OpenAI-only plugin 分发的代码，都需要删除、禁用或隔�
 
 ## 已完成的重要提交
 
+- 本轮已完成：拆除 AuthManager 对 `chatgpt_base_url` 的依赖
+  - `CodexAuth::from_auth_storage(...)` 不再接收 ChatGPT base URL。
+  - `AuthManager::new(...)` / `AuthManager::shared(...)` 不再保存或转发 ChatGPT base URL。
+  - `load_auth(...)` / `from_auth_dot_json(...)` 不再携带无效 ChatGPT URL 参数。
+  - cloud-config 仍然把 `chatgpt_base_url` 用于 legacy backend bundle client，但不再传给
+    AuthManager。
+  - 这一步不等于全仓删除 `chatgpt_base_url`，只是把 auth 层从 ChatGPT hosted URL 概念里解耦出来。
+
 - 本轮已完成：停止 app-server account login/logout 触发 ChatGPT remote plugin 刷新
   - `account/login/start` 协议层已经是 API-key-only。
   - `AccountRequestProcessor` 不再持有 `ThreadManager` 或 `ConfigManager`。
@@ -338,6 +346,8 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
 - `just test -p codex-app-server suite::auth::get_auth_status_with_api_key`
 - `just test -p codex-app-server suite::v2::account::login_account_api_key_succeeds_and_notifies`
 - `just test -p codex-app-server suite::v2::account::logout_account_removes_auth_and_notifies`
+- `just test -p codex-login auth`
+- `cargo check --tests -p codex-cli -p codex-cloud-config -p codex-cloud-tasks -p codex-app-server-transport -p codex-core`
 - 旧 ChatGPT refresh 符号窄范围搜索：`codex-rs/login` 与 app-server auth 测试无命中。
 - `git diff --check`
 
@@ -351,7 +361,7 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
 ## 剩余高优先级工作
 
 1. 审计并清理剩余 OpenAI/ChatGPT auth/config 面
-   - `chatgpt_base_url`
+   - core config 和 remote/cloud 模块中剩余的 `chatgpt_base_url`
    - app-server account docs/tests 中残留的 ChatGPT auth 语义
    - `AuthMode::ChatGPT` / PAT / Agent Identity 是否需要彻底删除、隔离或标记 legacy unsupported
 

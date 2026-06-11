@@ -142,7 +142,6 @@ impl CodexAuth {
         _codex_home: &Path,
         auth_dot_json: AuthDotJson,
         _auth_credentials_store_mode: AuthCredentialsStoreMode,
-        _chatgpt_base_url: Option<&str>,
     ) -> std::io::Result<Self> {
         let auth_mode = auth_dot_json.resolved_mode();
         if auth_mode == ApiAuthMode::ApiKey {
@@ -165,21 +164,16 @@ impl CodexAuth {
     pub async fn from_auth_storage(
         codex_home: &Path,
         auth_credentials_store_mode: AuthCredentialsStoreMode,
-        chatgpt_base_url: Option<&str>,
     ) -> std::io::Result<Option<Self>> {
         load_auth(
             codex_home,
             /*enable_codex_api_key_env*/ false,
             auth_credentials_store_mode,
-            chatgpt_base_url,
         )
         .await
     }
 
-    pub async fn from_agent_identity_jwt(
-        _jwt: &str,
-        _chatgpt_base_url: Option<&str>,
-    ) -> std::io::Result<Self> {
+    pub async fn from_agent_identity_jwt(_jwt: &str) -> std::io::Result<Self> {
         Err(std::io::Error::other(
             UNSUPPORTED_OPENAI_AUTH_MESSAGE.to_string(),
         ))
@@ -403,7 +397,6 @@ pub async fn logout_with_revoke(
         codex_home.to_path_buf(),
         /*enable_codex_api_key_env*/ false,
         auth_credentials_store_mode,
-        /*chatgpt_base_url*/ None,
     )
     .await
     .logout()
@@ -466,7 +459,6 @@ async fn load_auth(
     codex_home: &Path,
     enable_codex_api_key_env: bool,
     auth_credentials_store_mode: AuthCredentialsStoreMode,
-    chatgpt_base_url: Option<&str>,
 ) -> std::io::Result<Option<CodexAuth>> {
     // API key via env var takes precedence over any other auth method.
     if enable_codex_api_key_env && let Some(api_key) = read_astral_api_key_from_env() {
@@ -485,13 +477,9 @@ async fn load_auth(
         None => return Ok(None),
     };
 
-    let auth = CodexAuth::from_auth_dot_json(
-        codex_home,
-        auth_dot_json,
-        auth_credentials_store_mode,
-        chatgpt_base_url,
-    )
-    .await?;
+    let auth =
+        CodexAuth::from_auth_dot_json(codex_home, auth_dot_json, auth_credentials_store_mode)
+            .await?;
     Ok(Some(auth))
 }
 
@@ -676,7 +664,6 @@ pub struct AuthManager {
     auth_change_tx: watch::Sender<u64>,
     enable_codex_api_key_env: bool,
     auth_credentials_store_mode: AuthCredentialsStoreMode,
-    chatgpt_base_url: Option<String>,
     refresh_lock: Semaphore,
     external_auth: RwLock<Option<Arc<dyn ExternalAuth>>>,
 }
@@ -705,7 +692,6 @@ impl Debug for AuthManager {
                 "auth_credentials_store_mode",
                 &self.auth_credentials_store_mode,
             )
-            .field("chatgpt_base_url", &self.chatgpt_base_url)
             .field("has_external_auth", &self.has_external_auth())
             .finish_non_exhaustive()
     }
@@ -720,13 +706,11 @@ impl AuthManager {
         codex_home: PathBuf,
         enable_codex_api_key_env: bool,
         auth_credentials_store_mode: AuthCredentialsStoreMode,
-        chatgpt_base_url: Option<String>,
     ) -> Self {
         let managed_auth = load_auth(
             &codex_home,
             enable_codex_api_key_env,
             auth_credentials_store_mode,
-            chatgpt_base_url.as_deref(),
         )
         .await
         .ok()
@@ -738,7 +722,6 @@ impl AuthManager {
             auth_change_tx,
             enable_codex_api_key_env,
             auth_credentials_store_mode,
-            chatgpt_base_url,
             refresh_lock: Semaphore::new(/*permits*/ 1),
             external_auth: RwLock::new(None),
         }
@@ -755,7 +738,6 @@ impl AuthManager {
             auth_change_tx,
             enable_codex_api_key_env: false,
             auth_credentials_store_mode: AuthCredentialsStoreMode::File,
-            chatgpt_base_url: None,
             refresh_lock: Semaphore::new(/*permits*/ 1),
             external_auth: RwLock::new(None),
         })
@@ -771,7 +753,6 @@ impl AuthManager {
             auth_change_tx,
             enable_codex_api_key_env: false,
             auth_credentials_store_mode: AuthCredentialsStoreMode::File,
-            chatgpt_base_url: None,
             refresh_lock: Semaphore::new(/*permits*/ 1),
             external_auth: RwLock::new(None),
         })
@@ -785,7 +766,6 @@ impl AuthManager {
             auth_change_tx,
             enable_codex_api_key_env: false,
             auth_credentials_store_mode: AuthCredentialsStoreMode::File,
-            chatgpt_base_url: None,
             refresh_lock: Semaphore::new(/*permits*/ 1),
             external_auth: RwLock::new(Some(
                 Arc::new(BearerTokenRefresher::new(config)) as Arc<dyn ExternalAuth>
@@ -858,7 +838,6 @@ impl AuthManager {
             &self.codex_home,
             self.enable_codex_api_key_env,
             self.auth_credentials_store_mode,
-            self.chatgpt_base_url.as_deref(),
         )
         .await
         .ok()
@@ -907,14 +886,12 @@ impl AuthManager {
         codex_home: PathBuf,
         enable_codex_api_key_env: bool,
         auth_credentials_store_mode: AuthCredentialsStoreMode,
-        chatgpt_base_url: Option<String>,
     ) -> Arc<Self> {
         Arc::new(
             Self::new(
                 codex_home,
                 enable_codex_api_key_env,
                 auth_credentials_store_mode,
-                chatgpt_base_url,
             )
             .await,
         )
@@ -929,7 +906,6 @@ impl AuthManager {
             config.codex_home(),
             enable_codex_api_key_env,
             config.cli_auth_credentials_store_mode(),
-            /*chatgpt_base_url*/ None,
         )
         .await
     }

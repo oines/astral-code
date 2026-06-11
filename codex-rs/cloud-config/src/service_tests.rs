@@ -47,7 +47,6 @@ async fn auth_manager_with_api_key() -> Arc<AuthManager> {
             tmp.path().to_path_buf(),
             /*enable_codex_api_key_env*/ false,
             AuthCredentialsStoreMode::File,
-            /*chatgpt_base_url*/ None,
         )
         .await,
     )
@@ -75,7 +74,6 @@ async fn auth_manager_with_plan_and_identity(
             tmp.path().to_path_buf(),
             /*enable_codex_api_key_env*/ false,
             AuthCredentialsStoreMode::File,
-            /*chatgpt_base_url*/ None,
         )
         .await,
     )
@@ -632,7 +630,6 @@ async fn get_bundle_recovers_after_unauthorized_reload() {
             auth_home.path().to_path_buf(),
             /*enable_codex_api_key_env*/ false,
             AuthCredentialsStoreMode::File,
-            /*chatgpt_base_url*/ None,
         )
         .await,
     );
@@ -686,7 +683,6 @@ async fn get_bundle_recovers_after_unauthorized_reload_updates_cache_identity() 
             auth_home.path().to_path_buf(),
             /*enable_codex_api_key_env*/ false,
             AuthCredentialsStoreMode::File,
-            /*chatgpt_base_url*/ None,
         )
         .await,
     );
@@ -748,7 +744,6 @@ async fn get_bundle_surfaces_auth_recovery_message() {
             auth_home.path().to_path_buf(),
             /*enable_codex_api_key_env*/ false,
             AuthCredentialsStoreMode::File,
-            /*chatgpt_base_url*/ None,
         )
         .await,
     );
