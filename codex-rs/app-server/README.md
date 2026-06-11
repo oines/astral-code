@@ -1783,7 +1783,6 @@ Codex supports these authentication modes. The current mode is surfaced in `acco
 - `account/rateLimits/read` — account-backend rate limits are unavailable for Astral-managed providers.
 - `account/usage/read` — account-backend token usage is unavailable for Astral-managed providers.
 - `account/rateLimits/updated` (notify) — sparse rolling rate-limit updates when a provider supplies them.
-- `account/sendAddCreditsNudgeEmail` — account-backend nudge emails are unavailable for Astral-managed providers.
 - `mcpServer/oauthLogin/completed` (notify) — emitted after a `mcpServer/oauth/login` flow finishes for a server; payload includes `{ name, success, error? }`.
 - `mcpServer/startupStatus/updated` (notify) — emitted when a configured MCP server's startup status changes; payload includes `{ threadId, name, status, error }`, where `threadId` is the owning thread when startup is thread-scoped and `null` when it is app-scoped, and `status` is `starting`, `ready`, `failed`, or `cancelled`.
 
@@ -1886,15 +1885,6 @@ Field notes:
 - `resetsAt` is a Unix timestamp (seconds) for the next reset.
 - `rateLimitReachedType` identifies the backend-classified limit state when one has been reached.
 - `individualLimit` describes the effective monthly credit limit when available. In an `account/rateLimits/read` response, `null` means no monthly limit is available. In a sparse `account/rateLimits/updated` notification, nullable account metadata may be unavailable and does not clear a previously observed value.
-
-### 8) Notify a workspace owner about a limit
-
-```json
-{ "method": "account/sendAddCreditsNudgeEmail", "id": 8, "params": { "creditType": "credits" } }
-{ "id": 8, "result": { "status": "sent" } }
-```
-
-Use `creditType: "credits"` when workspace credits are depleted, or `creditType: "usage_limit"` when the workspace usage limit has been reached. If the owner was already notified recently, the response status is `cooldown_active`.
 
 ## Experimental API Opt-in
 

@@ -196,36 +196,6 @@ pub struct AccountTokenUsageDailyBucket {
     pub tokens: i64,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "v2/")]
-pub struct SendAddCreditsNudgeEmailParams {
-    pub credit_type: AddCreditsNudgeCreditType,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "snake_case")]
-#[ts(export_to = "v2/", rename_all = "snake_case")]
-pub enum AddCreditsNudgeCreditType {
-    Credits,
-    UsageLimit,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "v2/")]
-pub struct SendAddCreditsNudgeEmailResponse {
-    pub status: AddCreditsNudgeEmailStatus,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "snake_case")]
-#[ts(export_to = "v2/", rename_all = "snake_case")]
-pub enum AddCreditsNudgeEmailStatus {
-    Sent,
-    CooldownActive,
-}
-
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]

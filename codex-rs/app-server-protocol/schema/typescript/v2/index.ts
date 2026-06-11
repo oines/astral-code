@@ -7,8 +7,6 @@ export type { AccountTokenUsageDailyBucket } from "./AccountTokenUsageDailyBucke
 export type { AccountTokenUsageSummary } from "./AccountTokenUsageSummary";
 export type { AccountUpdatedNotification } from "./AccountUpdatedNotification";
 export type { ActivePermissionProfile } from "./ActivePermissionProfile";
-export type { AddCreditsNudgeCreditType } from "./AddCreditsNudgeCreditType";
-export type { AddCreditsNudgeEmailStatus } from "./AddCreditsNudgeEmailStatus";
 export type { AdditionalContextEntry } from "./AdditionalContextEntry";
 export type { AdditionalContextKind } from "./AdditionalContextKind";
 export type { AdditionalFileSystemPermissions } from "./AdditionalFileSystemPermissions";
@@ -330,8 +328,6 @@ export type { ReviewTarget } from "./ReviewTarget";
 export type { SandboxMode } from "./SandboxMode";
 export type { SandboxPolicy } from "./SandboxPolicy";
 export type { SandboxWorkspaceWrite } from "./SandboxWorkspaceWrite";
-export type { SendAddCreditsNudgeEmailParams } from "./SendAddCreditsNudgeEmailParams";
-export type { SendAddCreditsNudgeEmailResponse } from "./SendAddCreditsNudgeEmailResponse";
 export type { ServerRequestResolvedNotification } from "./ServerRequestResolvedNotification";
 export type { SessionMigration } from "./SessionMigration";
 export type { SessionSource } from "./SessionSource";

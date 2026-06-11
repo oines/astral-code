@@ -92,15 +92,6 @@ impl AccountRequestProcessor {
             .map(|response| Some(response.into()))
     }
 
-    pub(crate) async fn send_add_credits_nudge_email(
-        &self,
-        params: SendAddCreditsNudgeEmailParams,
-    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
-        self.send_add_credits_nudge_email_response(params)
-            .await
-            .map(|response| Some(response.into()))
-    }
-
     pub(crate) async fn cancel_active_login(&self) {}
 
     pub(crate) fn clear_external_auth(&self) {
@@ -417,13 +408,6 @@ impl AccountRequestProcessor {
     async fn get_account_token_usage_response(
         &self,
     ) -> Result<GetAccountTokenUsageResponse, JSONRPCErrorError> {
-        Err(invalid_request(ACCOUNT_BACKEND_DISABLED_MESSAGE))
-    }
-
-    async fn send_add_credits_nudge_email_response(
-        &self,
-        _params: SendAddCreditsNudgeEmailParams,
-    ) -> Result<SendAddCreditsNudgeEmailResponse, JSONRPCErrorError> {
         Err(invalid_request(ACCOUNT_BACKEND_DISABLED_MESSAGE))
     }
 }

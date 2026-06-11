@@ -1240,11 +1240,6 @@ impl MessageProcessor {
             ClientRequest::GetAccountTokenUsage { .. } => {
                 self.account_processor.get_account_token_usage().await
             }
-            ClientRequest::SendAddCreditsNudgeEmail { params, .. } => {
-                self.account_processor
-                    .send_add_credits_nudge_email(params)
-                    .await
-            }
             ClientRequest::GitDiffToRemote { params, .. } => {
                 self.git_processor.git_diff_to_remote(params).await
             }
