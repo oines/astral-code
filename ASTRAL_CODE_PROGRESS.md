@@ -1,10 +1,13 @@
 # Astral-Code 项目总控记录
 
-最后更新：2026-06-11 15:05 CST
+最后更新：2026-06-11 15:25 CST
 
 这份文档是 Astral-Code 长线改造的中文 handoff。它的用途不是对外宣传，而是让后续任何一次
-compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道：我们到底要做什么、哪些边界不能碰、
-哪些已经完成、现在停在哪里、下一刀应该切哪里。
+compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道：我们到底要做什么、为什么这么做、
+哪些边界不能碰、哪些已经完成、现在停在哪里、下一刀应该切哪里。
+
+文档必须保持中文。可以保留源码符号、路径、commit hash、API 名和工具名的英文原文，但解释、进度、
+取舍和恢复指令都应使用中文。
 
 ## 一句话目标
 
@@ -13,6 +16,26 @@ compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道�
 模型都能用接近 Claude Code 的工具轨迹顺手工作。
 
 这不是 Codex 兼容升级，也不是 OpenAI Responses 协议外面套一层代理。
+
+## 当前整体进度快照
+
+当前状态：项目已经从“方案评估”进入“深度 fork 实施中期”。命名空间、CLI、若干核心工具 flavor、
+provider 去 OpenAI 默认路由、登录态清理、cloud-config/cloud-tasks 控制面拆除等关键 slice 已落地。
+
+粗略完成度判断：
+
+- 项目身份与命名：基本完成。
+- `~/.astral-code` / `ASTRAL_*` 命名空间：主路径已完成，仍需继续扫尾旧测试和边缘文案。
+- Claude-ish tool flavor：核心文件和 handler 已落地一批，仍需继续校准 schema/result shape。
+- terminal 执行体验：继承 Codex 的 PTY / UnifiedExec / exec-server，不应重写。
+- Plan Mode / Goal Mode / local compact：决定保留 Codex 方案，当前不作为重构主战场。
+- OpenAI 登录态和 ChatGPT OAuth：主路径已删除或禁用。
+- OpenAI/ChatGPT hosted control-plane：已经拆掉多处默认外联，但仍是最高优先级扫尾区域。
+- Provider-neutral Agent IR / Anthropic Messages / chat completions：仍是后续核心大块工作。
+- 全量 CI：当前不追求全绿，用户明确要求先推进实现，最后集中测试集中修。
+
+当前暂停点：用户要求暂停编码，把项目整体目标和进度写入详细中文 Markdown，防止长时间执行和多次
+compact 后做歪。完成本文档更新后，再继续下一块代码 slice。
 
 ## 项目身份
 
@@ -38,6 +61,26 @@ compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道�
 - 不靠外部 100 行 Go/Python 反代劫持协议作为主路线。
 - 不为了 Claude Code 风格而破坏 Codex 的 sandbox、PTY、exec-server、approval 或 C/S 架构。
 - 不把真实 API key、DeepSeek key 或任何 provider secret 写进仓库、fixture 或文档。
+
+## 用户真实诉求
+
+用户不是想做一个“小修小补的 Codex 皮肤”，而是要一个新的公开项目 `astral-code`：
+
+- 继承 Codex 的强工程骨架：daemon、app-server、exec-server、PTY、sandbox、approval、MCP、
+  skills/plugins、multi-agent、Goal Mode、Plan Mode 和 local compact。
+- 删除 OpenAI/ChatGPT 专有控制面：登录、遥测、feedback、remote compact、workspace settings、
+  connector directory、cloud-config policy fetch、OpenAI hosted backend 默认路由等。
+- 重做模型协议：把 OpenAI Responses 从核心真相降级，改成 provider-neutral 内部 IR，再支持
+  Anthropic Messages 和 OpenAI-compatible chat completions。
+- 重做模型可见工具：不是把旧 Codex 工具包一层改名 adapter，而是实现 Astral-native 的
+  Claude-ish schema、参数类型、handler 和 tool_result。
+- 重点服务国产模型：例如 DeepSeek v4 pro / flash 一类 OpenAI-compatible 或 Anthropic-ish 模型，
+  让它们看到更接近 Claude Code SFT 轨迹的工具形状，从而更顺手地做 agentic coding。
+- 不要求 100% 复刻 Claude Code 官方全部工具。原则是：对模型编程能力最关键、Codex runtime 已经有良好
+  承载能力的工具优先做；没有 runtime 的工具不要硬造假。
+
+特别重要：用户很看重 Codex 的 terminal agentic 体验。长命令、ffmpeg、卡住的 shell、需要 stdin 的
+交互命令，都要保留 Codex 这种持续观察、可写入、可终止的丝滑感。不要为了 Claude Code 外形牺牲这个优势。
 
 ## 需要继承的 Codex 骨架
 
@@ -111,6 +154,26 @@ Astral 的内部方向是“深度重构”，不是“尾端 adapter 改名”�
 - `Skill`
 - `ListMcpResourcesTool`
 - `ReadMcpResourceTool`
+
+当前实现状态：
+
+- 已有 `codex-rs/tools/src/astral_flavor.rs`，用于集中定义 Astral 工具 flavor。
+- 已有 `codex-rs/core/src/tools/astral_tool_bridge.rs`，用于把 Astral 工具名/参数桥接到 Codex runtime。
+- 已有 `codex-rs/core/src/tools/handlers/astral_bash.rs`。
+- 已有 `codex-rs/core/src/tools/handlers/astral_monitor.rs`。
+- 已有 `codex-rs/core/src/tools/handlers/astral_file_tools.rs`。
+- 已有 `codex-rs/core/src/tools/handlers/astral_todo_write.rs`。
+- 已有 `codex-rs/core/src/tools/handlers/astral_agent.rs`。
+- 已有 `codex-rs/core/src/tools/handlers/astral_send_message.rs`。
+- 已有 `codex-rs/core/src/tools/handlers/astral_task_stop.rs`。
+- 已有 `codex-rs/core/src/tools/handlers/astral_request_permissions.rs`。
+- 已有 `codex-rs/core/src/tools/handlers/astral_ask_user_question.rs`。
+- 已有 `codex-rs/core/src/tools/handlers/astral_tool_search.rs`。
+- 已有 `codex-rs/core/src/tools/handlers/astral_skill.rs`。
+- 已有 `codex-rs/core/src/tools/handlers/astral_mcp_resource.rs`。
+
+后续不要误判为“工具还没开始”。真正剩余的是：继续对齐 Claude Code-like schema/result，补 integration
+测试，确认所有 handler 都走 Codex 原生 runtime、安全边界和事件链路。
 
 暂缓或不做的工具：
 
@@ -361,8 +424,6 @@ account 或 OpenAI-only plugin 分发的代码，都需要删除、禁用或隔�
 
 本轮完成的代码 slice：
 
-本轮完成的代码 slice：
-
 > 让 `codex-cloud-config` 的导出 loader 不再启动 legacy ChatGPT hosted workspace policy 拉取。
 
 已编辑文件：
@@ -565,14 +626,25 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
 3. 查看当前工作树：
    - `git status --short`
    - `git diff --stat`
-   - `git diff -- codex-rs/cloud-config/src/lib.rs codex-rs/cloud-config/src/bundle_loader.rs`
+   - 如果有未提交改动，先读 diff，确认是否来自上一轮正在做的 slice，不要误删。
 
-4. 选择下一块时优先看：
+4. 继续开发时，优先从以下三条线中选最小 coherent slice：
+   - `codex-rs/chatgpt/src/chatgpt_client.rs`、`get_task.rs`、`apply_command.rs`：禁用 legacy
+     ChatGPT task fetch/apply 默认路径。
+   - `codex-rs/memories/write/src/guard.rs`：检查是否还会通过 `BackendClient::from_auth(...)`
+     访问 hosted backend。
+   - `app-server` / `core-plugins` remote plugin install/share/read：继续隔离 ChatGPT hosted plugin
+     control-plane。
+
+5. 搜索优先关键词：
    - `chatgpt_base_url`
-   - app-server account docs/tests 旧语义
-   - `chatgpt_client` / `get_task`
+   - `chatgpt_get_request`
+   - `backend-api`
+   - `AuthMode::ChatGPT`
+   - `uses_codex_backend`
+   - `remote_plugin_control_plane_enabled`
 
-5. 不要把 goal 标记为 complete，除非 provider-neutral protocol、Claude-ish tools、OpenAI 控制面清理、
+6. 不要把 goal 标记为 complete，除非 provider-neutral protocol、Claude-ish tools、OpenAI 控制面清理、
    app-server/account/remote plugin 风险都已经达到可交付状态。
 
 ## 安全与风格约束
