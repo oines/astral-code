@@ -1,6 +1,6 @@
 # Astral-Code 项目总控记录
 
-最后更新：2026-06-11 17:07 CST
+最后更新：2026-06-11 17:13 CST
 
 这份文档是 Astral-Code 长线改造的中文 handoff。它的用途不是对外宣传，而是让后续任何一次
 compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道：我们到底要做什么、为什么这么做、
@@ -34,9 +34,9 @@ provider 去 OpenAI 默认路由、登录态清理、cloud-config/cloud-tasks �
 - Provider-neutral Agent IR / Anthropic Messages / chat completions：仍是后续核心大块工作。
 - 全量 CI：当前不追求全绿，用户明确要求先推进实现，最后集中测试集中修。
 
-当前最新 slice：app-server 在 remote plugin control-plane 禁用时，不再读取或展示本地旧
-`localPluginPathsByRemotePluginId` share 映射；legacy hosted remote control 的显式启用入口也已禁用。
-下一步优先继续处理 remote plugin share/install/read、底层 app-server-transport remote-control 旧模块和其他
+当前最新 slice：app-server remote plugin/share/read/install/uninstall 入口在 hosted control-plane 禁用时会先短路，
+不再为了返回 disabled 而读取旧 config/auth；本地旧 `localPluginPathsByRemotePluginId` share 映射也不会展示。
+下一步优先继续处理 `core-plugins/src/remote/*` 旧实现、底层 app-server-transport remote-control 旧模块和其他
 ChatGPT hosted 残留。
 
 ## 项目身份
@@ -616,6 +616,38 @@ account 或 OpenAI-only plugin 分发的代码，都需要删除、禁用或隔�
   remote control。底层 `app-server-transport` 里的旧 remote-control 模块仍存在，但默认和 app-server
   暴露路径已经切断。
 
+## 最近完成的 app-server remote plugin disabled short-circuit slice
+
+本轮完成的代码 slice：
+
+> remote plugin/share/read/install/uninstall 的 disabled 判断前移，避免返回禁用前触碰旧 config/auth。
+
+已编辑文件：
+
+- `codex-rs/app-server/src/request_processors/plugins.rs`
+- `ASTRAL_CODE_PROGRESS.md`
+
+改动内容：
+
+- `plugin/read` 的 remote marketplace 分支在 `remote_plugin_control_plane_enabled() == false` 时，加载
+  config 前直接返回 `remote plugin read is not enabled ...`。
+- `plugin/skill/read` 在 control-plane 禁用时，加载 config 前直接返回 disabled。
+- `plugin/share/save`、`plugin/share/updateTargets`、`plugin/share/checkout` 在 control-plane 禁用时，调用
+  `load_plugin_share_config_and_auth()` 前直接返回 `plugin sharing is disabled`。
+- remote `plugin/install`、remote `plugin/uninstall` 在 control-plane 禁用时，加载 config 前直接返回 disabled。
+- 保留原有错误文案，避免这一步扩大 app-server API 行为差异。
+
+为什么要做：
+
+- 这些入口已经被 false 闸门挡住，但原先部分路径仍会先读取 config/auth，再判断 disabled。
+- Astral 不兼容旧 Codex 用户数据，也不应该在 provider-neutral 模式里无意义触碰 ChatGPT/OpenAI auth 面。
+- 这一步不影响本地 plugin install/read/uninstall，也不影响 MCP/skills。
+
+后续风险：
+
+- 源码内的 remote plugin service client、bundle download/install、remote installed sync 仍存在；这一步只是把
+  app-server disabled 快速路径进一步收紧。
+
 ## 最近完成的 app-server remote plugin mapping slice
 
 本轮完成的代码 slice：
@@ -807,6 +839,10 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
 - `CARGO_INCREMENTAL=0 cargo check --tests -p codex-app-server`
 - `CARGO_INCREMENTAL=0 just test -p codex-app-server plugin_list_ignores_local_share_mapping_when_remote_control_plane_disabled`
 - `CARGO_INCREMENTAL=0 just test -p codex-app-server plugin_read_ignores_local_share_mapping_when_remote_control_plane_disabled`
+- `CARGO_INCREMENTAL=0 just test -p codex-app-server plugin_install_rejects_remote_marketplace_when_plugins_are_disabled`
+- `CARGO_INCREMENTAL=0 just test -p codex-app-server plugin_uninstall_rejects_remote_plugin_when_plugins_are_disabled`
+- `CARGO_INCREMENTAL=0 just test -p codex-app-server plugin_share_save_rejects_when_plugin_sharing_disabled`
+- `CARGO_INCREMENTAL=0 just test -p codex-app-server plugin_read_rejects_remote_marketplace_when_plugins_are_disabled`
 - 旧 ChatGPT refresh 符号窄范围搜索：`codex-rs/login` 与 app-server auth 测试无命中。
 - `git diff --check`
 
