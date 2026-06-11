@@ -100,6 +100,10 @@ fn remote_plugin_control_plane_enabled() -> bool {
 fn load_shared_plugin_ids_by_local_path(
     config: &Config,
 ) -> Result<std::collections::BTreeMap<AbsolutePathBuf, String>, JSONRPCErrorError> {
+    if !remote_plugin_control_plane_enabled() {
+        return Ok(std::collections::BTreeMap::new());
+    }
+
     codex_core_plugins::remote::load_plugin_share_remote_ids_by_local_path(
         config.codex_home.as_path(),
     )

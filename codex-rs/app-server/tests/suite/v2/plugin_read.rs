@@ -1113,7 +1113,8 @@ async fn plugin_read_keeps_remote_version_when_share_principals_are_missing() ->
 }
 
 #[tokio::test]
-async fn plugin_read_falls_back_to_local_share_context_without_remote_auth() -> Result<()> {
+async fn plugin_read_ignores_local_share_mapping_when_remote_control_plane_disabled() -> Result<()>
+{
     let codex_home = TempDir::new()?;
     let repo_root = TempDir::new()?;
     write_plugins_enabled_config(&codex_home)?;
@@ -1149,19 +1150,7 @@ async fn plugin_read_falls_back_to_local_share_context_without_remote_auth() -> 
 
     assert_eq!(response.plugin.summary.remote_plugin_id, None);
     assert_eq!(response.plugin.summary.local_version, None);
-    let share_context = response
-        .plugin
-        .summary
-        .share_context
-        .as_ref()
-        .expect("expected share context");
-    assert_eq!(share_context.remote_plugin_id, "plugins_123");
-    assert_eq!(share_context.remote_version, None);
-    assert_eq!(share_context.discoverability, None);
-    assert_eq!(share_context.share_url, None);
-    assert_eq!(share_context.creator_account_user_id, None);
-    assert_eq!(share_context.creator_name, None);
-    assert_eq!(share_context.share_principals, None);
+    assert_eq!(response.plugin.summary.share_context, None);
     Ok(())
 }
 

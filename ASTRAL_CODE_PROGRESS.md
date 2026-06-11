@@ -1,6 +1,6 @@
 # Astral-Code 项目总控记录
 
-最后更新：2026-06-11 16:16 CST
+最后更新：2026-06-11 17:07 CST
 
 这份文档是 Astral-Code 长线改造的中文 handoff。它的用途不是对外宣传，而是让后续任何一次
 compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道：我们到底要做什么、为什么这么做、
@@ -34,10 +34,10 @@ provider 去 OpenAI 默认路由、登录态清理、cloud-config/cloud-tasks �
 - Provider-neutral Agent IR / Anthropic Messages / chat completions：仍是后续核心大块工作。
 - 全量 CI：当前不追求全绿，用户明确要求先推进实现，最后集中测试集中修。
 
-当前最新 slice：legacy hosted remote control 的显式启用入口已禁用；app-server 启动/RPC、顶层
-`astral remote-control`、`app-server daemon enable-remote-control`、`bootstrap --remote-control` 都会返回
-Astral disabled 错误。下一步优先继续处理 remote plugin share/install/read、底层 app-server-transport
-remote-control 旧模块和其他 ChatGPT hosted 残留。
+当前最新 slice：app-server 在 remote plugin control-plane 禁用时，不再读取或展示本地旧
+`localPluginPathsByRemotePluginId` share 映射；legacy hosted remote control 的显式启用入口也已禁用。
+下一步优先继续处理 remote plugin share/install/read、底层 app-server-transport remote-control 旧模块和其他
+ChatGPT hosted 残留。
 
 ## 项目身份
 
@@ -616,6 +616,42 @@ account 或 OpenAI-only plugin 分发的代码，都需要删除、禁用或隔�
   remote control。底层 `app-server-transport` 里的旧 remote-control 模块仍存在，但默认和 app-server
   暴露路径已经切断。
 
+## 最近完成的 app-server remote plugin mapping slice
+
+本轮完成的代码 slice：
+
+> remote plugin control-plane 禁用时，app-server 不再读取或展示本地旧 share 映射。
+
+已编辑文件：
+
+- `codex-rs/app-server/src/request_processors/plugins.rs`
+- `codex-rs/app-server/tests/suite/v2/plugin_list.rs`
+- `codex-rs/app-server/tests/suite/v2/plugin_read.rs`
+- `ASTRAL_CODE_PROGRESS.md`
+
+改动内容：
+
+- `load_shared_plugin_ids_by_local_path(...)` 在 `remote_plugin_control_plane_enabled() == false` 时直接返回空映射。
+- `plugin/list` 读取本地 marketplace 时，即使 Astral home 里残留
+  `localPluginPathsByRemotePluginId`，也不会在 `PluginSummary.share_context` 暴露旧 hosted share 状态。
+- `plugin/read` 读取本地插件详情时，同样忽略旧 share mapping，不再表现为“曾经分享到 ChatGPT
+  plugin service 的本地插件”。
+- 更新两条窄测试，明确 Astral disabled control-plane 下旧 mapping 应被忽略。
+
+为什么要做：
+
+- Astral 是新项目，不兼容旧 Codex 用户数据；不能因为磁盘上存在旧 mapping 文件，就让 API 暗示仍有
+  ChatGPT hosted plugin sharing。
+- 上游 remote plugin/share 代码仍在编译边界内，但 control-plane 已禁用。读取旧 mapping 是一个显示层回流口，
+  会让用户以为 share/install/read 还有 hosted 后端语义。
+- 这一步不破坏本地 plugin/skill/MCP 能力，只隐藏旧 remote share metadata。
+
+后续风险：
+
+- `core-plugins/src/remote/share.rs`、`remote_installed_plugin_sync.rs` 和 app-server remote
+  `plugin/share/*`、remote install/uninstall/read 的旧实现仍在源码中。当前 app-server 闸门默认挡住调用，
+  后续要么降级成 Astral disabled stub，要么拆成非默认 legacy feature。
+
 ## 最近完成的 app-server remote control slice
 
 本轮完成的代码 slice：
@@ -768,6 +804,9 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
 - `CARGO_INCREMENTAL=0 just test -p codex-cli remote_control_subcommand_names_match_cli_shape`
 - `CARGO_INCREMENTAL=0 cargo check --tests -p codex-app-server-daemon`
 - `CARGO_INCREMENTAL=0 just test -p codex-app-server-daemon remote_control`
+- `CARGO_INCREMENTAL=0 cargo check --tests -p codex-app-server`
+- `CARGO_INCREMENTAL=0 just test -p codex-app-server plugin_list_ignores_local_share_mapping_when_remote_control_plane_disabled`
+- `CARGO_INCREMENTAL=0 just test -p codex-app-server plugin_read_ignores_local_share_mapping_when_remote_control_plane_disabled`
 - 旧 ChatGPT refresh 符号窄范围搜索：`codex-rs/login` 与 app-server auth 测试无命中。
 - `git diff --check`
 

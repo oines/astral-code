@@ -829,7 +829,8 @@ async fn plugin_list_accepts_omitted_cwds() -> Result<()> {
 }
 
 #[tokio::test]
-async fn plugin_list_returns_share_context_for_shared_local_plugin() -> Result<()> {
+async fn plugin_list_ignores_local_share_mapping_when_remote_control_plane_disabled() -> Result<()>
+{
     let codex_home = TempDir::new()?;
     let repo_root = TempDir::new()?;
     let plugin_root = repo_root.path().join("plugins/demo-plugin");
@@ -887,17 +888,7 @@ async fn plugin_list_returns_share_context_for_shared_local_plugin() -> Result<(
         .expect("expected demo-plugin entry");
     assert_eq!(plugin.remote_plugin_id, None);
     assert_eq!(plugin.local_version.as_deref(), Some("1.2.3"));
-    let share_context = plugin
-        .share_context
-        .as_ref()
-        .expect("expected share context");
-    assert_eq!(share_context.remote_plugin_id, "plugins_123");
-    assert_eq!(share_context.remote_version, None);
-    assert_eq!(share_context.discoverability, None);
-    assert_eq!(share_context.share_url, None);
-    assert_eq!(share_context.creator_account_user_id, None);
-    assert_eq!(share_context.creator_name, None);
-    assert_eq!(share_context.share_principals, None);
+    assert_eq!(plugin.share_context, None);
     Ok(())
 }
 
