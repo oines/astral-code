@@ -63,7 +63,7 @@ use tracing::info;
 use tracing::warn;
 
 pub(super) const REMOTE_CONTROL_PROTOCOL_VERSION: &str = "3";
-pub(super) const REMOTE_CONTROL_INSTALLATION_ID_HEADER: &str = "x-codex-installation-id";
+pub(super) const REMOTE_CONTROL_INSTALLATION_ID_HEADER: &str = "x-astral-installation-id";
 const REMOTE_CONTROL_SUBSCRIBE_CURSOR_HEADER: &str = "x-codex-subscribe-cursor";
 const REMOTE_CONTROL_WEBSOCKET_PING_INTERVAL: std::time::Duration =
     std::time::Duration::from_secs(10);
@@ -2210,7 +2210,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn connect_remote_control_websocket_requires_chatgpt_auth() {
+    async fn connect_remote_control_websocket_requires_hosted_account_auth() {
         let remote_control_target = normalize_remote_control_url("http://127.0.0.1:9/backend-api/")
             .expect("target should parse");
         let codex_home = TempDir::new().expect("temp dir should create");
@@ -2256,7 +2256,7 @@ mod tests {
         assert_eq!(err.kind(), ErrorKind::PermissionDenied);
         assert_eq!(
             err.to_string(),
-            "remote control requires ChatGPT authentication"
+            "remote control requires hosted account authentication"
         );
         assert_eq!(*current_enrollment.lock().await, None);
         assert_eq!(

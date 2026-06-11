@@ -22,7 +22,7 @@ pub(super) async fn load_remote_control_auth(
             if reloaded {
                 return Err(io::Error::new(
                     ErrorKind::PermissionDenied,
-                    "remote control requires ChatGPT authentication",
+                    "remote control requires hosted account authentication",
                 ));
             }
             auth_manager.reload().await;
@@ -43,7 +43,7 @@ pub(super) async fn load_remote_control_auth(
     if !auth.uses_codex_backend() {
         return Err(io::Error::new(
             ErrorKind::PermissionDenied,
-            "remote control requires ChatGPT authentication; API key auth is not supported",
+            "remote control requires hosted account authentication; provider API key auth is not supported",
         ));
     }
 
@@ -52,7 +52,7 @@ pub(super) async fn load_remote_control_auth(
         account_id: auth.get_account_id().ok_or_else(|| {
             io::Error::new(
                 ErrorKind::WouldBlock,
-                "remote control enrollment is waiting for a ChatGPT account id",
+                "remote control enrollment is waiting for a hosted account id",
             )
         })?,
     })

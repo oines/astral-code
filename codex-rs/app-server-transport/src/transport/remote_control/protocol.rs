@@ -190,16 +190,6 @@ pub(crate) struct ServerEnvelope {
     pub(crate) seq_id: u64,
 }
 
-fn is_allowed_remote_control_chatgpt_host(host: &Option<Host<&str>>) -> bool {
-    let Some(Host::Domain(host)) = *host else {
-        return false;
-    };
-    host == "chatgpt.com"
-        || host == "chatgpt-staging.com"
-        || host.ends_with(".chatgpt.com")
-        || host.ends_with(".chatgpt-staging.com")
-}
-
 fn is_localhost(host: &Option<Host<&str>>) -> bool {
     match host {
         Some(Host::Domain("localhost")) => true,
@@ -268,7 +258,7 @@ pub(super) fn normalize_remote_control_base_url(remote_control_url: &str) -> io:
         io::Error::new(
             ErrorKind::InvalidInput,
             format!(
-                "invalid remote control URL `{remote_control_url}`; expected HTTPS URL for chatgpt.com or chatgpt-staging.com, or HTTP/HTTPS URL for localhost"
+                "invalid remote control URL `{remote_control_url}`; expected HTTP/HTTPS URL for localhost"
             ),
         )
     };
@@ -281,7 +271,7 @@ pub(super) fn normalize_remote_control_base_url(remote_control_url: &str) -> io:
 
     let host = remote_control_url.host();
     match remote_control_url.scheme() {
-        "https" if is_localhost(&host) || is_allowed_remote_control_chatgpt_host(&host) => {}
+        "https" if is_localhost(&host) => {}
         "http" if is_localhost(&host) => {}
         _ => return Err(map_scheme_error(())),
     }
@@ -293,48 +283,6 @@ pub(super) fn normalize_remote_control_base_url(remote_control_url: &str) -> io:
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
-
-    #[test]
-    fn normalize_remote_control_url_accepts_chatgpt_https_urls() {
-        assert_eq!(
-            normalize_remote_control_url("https://chatgpt.com/backend-api")
-                .expect("chatgpt.com URL should normalize"),
-            RemoteControlTarget {
-                websocket_url: "wss://chatgpt.com/backend-api/wham/remote/control/server"
-                    .to_string(),
-                enroll_url: "https://chatgpt.com/backend-api/wham/remote/control/server/enroll"
-                    .to_string(),
-                refresh_url: "https://chatgpt.com/backend-api/wham/remote/control/server/refresh"
-                    .to_string(),
-                pair_url: "https://chatgpt.com/backend-api/wham/remote/control/server/pair"
-                    .to_string(),
-                pair_status_url:
-                    "https://chatgpt.com/backend-api/wham/remote/control/server/pair/status"
-                        .to_string(),
-            }
-        );
-        assert_eq!(
-            normalize_remote_control_url("https://api.chatgpt-staging.com/backend-api")
-                .expect("chatgpt-staging.com subdomain URL should normalize"),
-            RemoteControlTarget {
-                websocket_url:
-                    "wss://api.chatgpt-staging.com/backend-api/wham/remote/control/server"
-                        .to_string(),
-                enroll_url:
-                    "https://api.chatgpt-staging.com/backend-api/wham/remote/control/server/enroll"
-                        .to_string(),
-                refresh_url:
-                    "https://api.chatgpt-staging.com/backend-api/wham/remote/control/server/refresh"
-                        .to_string(),
-                pair_url:
-                    "https://api.chatgpt-staging.com/backend-api/wham/remote/control/server/pair"
-                        .to_string(),
-                pair_status_url:
-                    "https://api.chatgpt-staging.com/backend-api/wham/remote/control/server/pair/status"
-                        .to_string(),
-            }
-        );
-    }
 
     #[test]
     fn normalize_remote_control_url_accepts_localhost_urls() {
@@ -381,6 +329,8 @@ mod tests {
             "http://chatgpt.com/backend-api",
             "http://example.com/backend-api",
             "https://example.com/backend-api",
+            "https://chatgpt.com/backend-api",
+            "https://api.chatgpt-staging.com/backend-api",
             "https://chat.openai.com/backend-api",
             "https://chatgpt.com.evil.com/backend-api",
             "https://evilchatgpt.com/backend-api",
@@ -393,7 +343,7 @@ mod tests {
             assert_eq!(
                 err.to_string(),
                 format!(
-                    "invalid remote control URL `{remote_control_url}`; expected HTTPS URL for chatgpt.com or chatgpt-staging.com, or HTTP/HTTPS URL for localhost"
+                    "invalid remote control URL `{remote_control_url}`; expected HTTP/HTTPS URL for localhost"
                 )
             );
         }
