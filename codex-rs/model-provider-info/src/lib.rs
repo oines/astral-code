@@ -7,7 +7,6 @@
 
 use codex_api::Provider as ApiProvider;
 use codex_api::RetryConfig as ApiRetryConfig;
-use codex_app_server_protocol::AuthMode;
 use codex_protocol::config_types::ModelProviderAuthInfo;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::EnvVarError;
@@ -35,8 +34,6 @@ const MAX_REQUEST_MAX_RETRIES: u64 = 100;
 
 const OPENAI_PROVIDER_NAME: &str = "OpenAI";
 pub const OPENAI_PROVIDER_ID: &str = "openai";
-const OPENAI_DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
-pub const CHATGPT_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
 const ASTRAL_PROVIDER_NAME: &str = "Astral";
 pub const ASTRAL_PROVIDER_ID: &str = "astral";
 pub const ASTRAL_API_KEY_ENV_VAR: &str = "ASTRAL_API_KEY";
@@ -262,23 +259,14 @@ impl ModelProviderInfo {
         Ok(headers)
     }
 
-    pub fn to_api_provider(&self, auth_mode: Option<AuthMode>) -> CodexResult<ApiProvider> {
-        let openai_auth_mode = self.is_openai()
-            && matches!(
-                auth_mode,
-                Some(AuthMode::Chatgpt | AuthMode::AgentIdentity | AuthMode::PersonalAccessToken)
-            );
-        let default_base_url = if openai_auth_mode {
-            CHATGPT_CODEX_BASE_URL
-        } else if self.is_openai() {
-            OPENAI_DEFAULT_BASE_URL
-        } else {
-            DEFAULT_ASTRAL_BASE_URL
-        };
+    pub fn to_api_provider(
+        &self,
+        _auth_mode: Option<codex_app_server_protocol::AuthMode>,
+    ) -> CodexResult<ApiProvider> {
         let base_url = self
             .base_url
             .clone()
-            .unwrap_or_else(|| default_base_url.to_string());
+            .unwrap_or_else(|| DEFAULT_ASTRAL_BASE_URL.to_string());
 
         let headers = self.build_header_map()?;
         let retry = ApiRetryConfig {
@@ -401,24 +389,14 @@ impl ModelProviderInfo {
                     .into_iter()
                     .collect(),
             ),
-            env_http_headers: Some(
-                [
-                    (
-                        "OpenAI-Organization".to_string(),
-                        "OPENAI_ORGANIZATION".to_string(),
-                    ),
-                    ("OpenAI-Project".to_string(), "OPENAI_PROJECT".to_string()),
-                ]
-                .into_iter()
-                .collect(),
-            ),
+            env_http_headers: None,
             // Use global defaults for retry/timeout unless overridden in config.toml.
             request_max_retries: None,
             stream_max_retries: None,
             stream_idle_timeout_ms: None,
             websocket_connect_timeout_ms: None,
-            requires_astral_auth: true,
-            supports_websockets: true,
+            requires_astral_auth: false,
+            supports_websockets: false,
         }
     }
 

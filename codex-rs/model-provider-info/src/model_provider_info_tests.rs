@@ -225,24 +225,6 @@ supports_websockets = true
 }
 
 #[test]
-fn test_personal_access_token_uses_chatgpt_codex_base_url() {
-    let api_provider = ModelProviderInfo::create_openai_provider(/*base_url*/ None)
-        .to_api_provider(Some(AuthMode::PersonalAccessToken))
-        .expect("OpenAI provider should build API provider");
-
-    assert_eq!(api_provider.base_url, CHATGPT_CODEX_BASE_URL);
-}
-
-#[test]
-fn test_openai_provider_without_auth_uses_openai_base_url() {
-    let api_provider = ModelProviderInfo::create_openai_provider(/*base_url*/ None)
-        .to_api_provider(/*auth_mode*/ None)
-        .expect("OpenAI provider should build API provider");
-
-    assert_eq!(api_provider.base_url, OPENAI_DEFAULT_BASE_URL);
-}
-
-#[test]
 fn test_custom_provider_without_base_url_uses_astral_base_url() {
     let api_provider = ModelProviderInfo {
         name: "Custom".to_string(),
@@ -251,6 +233,17 @@ fn test_custom_provider_without_base_url_uses_astral_base_url() {
     }
     .to_api_provider(/*auth_mode*/ None)
     .expect("custom provider should build API provider");
+
+    assert_eq!(api_provider.base_url, DEFAULT_ASTRAL_BASE_URL);
+}
+
+#[test]
+fn test_auth_mode_does_not_route_provider_to_chatgpt_codex_backend() {
+    let api_provider = ModelProviderInfo::create_openai_provider(/*base_url*/ None)
+        .to_api_provider(Some(
+            codex_app_server_protocol::AuthMode::PersonalAccessToken,
+        ))
+        .expect("provider should build API provider");
 
     assert_eq!(api_provider.base_url, DEFAULT_ASTRAL_BASE_URL);
 }
@@ -513,7 +506,7 @@ fn test_validate_provider_aws_rejects_conflicting_auth() {
 
     assert_eq!(
         provider.validate(),
-        Err("provider aws cannot be combined with env_key, requires_astral_auth".to_string())
+        Err("provider aws cannot be combined with env_key".to_string())
     );
 }
 

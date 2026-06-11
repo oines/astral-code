@@ -2,18 +2,15 @@ use super::*;
 use crate::ModelsManagerConfig;
 use chrono::Utc;
 use codex_app_server_protocol::AuthMode;
-use codex_login::AuthCredentialsStoreMode;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
 use codex_login::ExternalAuth;
 use codex_login::ExternalAuthRefreshContext;
 use codex_login::ExternalAuthTokens;
-use codex_login::TokenData;
 use codex_protocol::openai_models::ModelsResponse;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 use std::collections::VecDeque;
-use std::path::Path;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicUsize;
@@ -73,6 +70,7 @@ fn assert_models_contain(actual: &[ModelInfo], expected: &[ModelInfo]) {
 #[derive(Debug)]
 struct TestModelsEndpoint {
     has_command_auth: bool,
+    has_provider_auth: bool,
     uses_codex_backend: bool,
     responses: Mutex<VecDeque<Vec<ModelInfo>>>,
     fetch_count: AtomicUsize,
@@ -82,6 +80,7 @@ impl TestModelsEndpoint {
     fn new(responses: Vec<Vec<ModelInfo>>) -> Arc<Self> {
         Arc::new(Self {
             has_command_auth: false,
+            has_provider_auth: false,
             uses_codex_backend: true,
             responses: Mutex::new(responses.into()),
             fetch_count: AtomicUsize::new(0),
@@ -91,6 +90,17 @@ impl TestModelsEndpoint {
     fn without_refresh(responses: Vec<Vec<ModelInfo>>) -> Arc<Self> {
         Arc::new(Self {
             has_command_auth: false,
+            has_provider_auth: false,
+            uses_codex_backend: false,
+            responses: Mutex::new(responses.into()),
+            fetch_count: AtomicUsize::new(0),
+        })
+    }
+
+    fn with_provider_auth(responses: Vec<Vec<ModelInfo>>) -> Arc<Self> {
+        Arc::new(Self {
+            has_command_auth: false,
+            has_provider_auth: true,
             uses_codex_backend: false,
             responses: Mutex::new(responses.into()),
             fetch_count: AtomicUsize::new(0),
@@ -150,6 +160,10 @@ impl ModelsEndpointClient for TestModelsEndpoint {
         self.has_command_auth
     }
 
+    fn has_provider_auth(&self) -> bool {
+        self.has_provider_auth
+    }
+
     async fn uses_codex_backend(&self) -> bool {
         self.uses_codex_backend
     }
@@ -192,42 +206,6 @@ fn openai_manager_for_tests_with_auth(
 
 fn static_manager_for_tests(model_catalog: ModelsResponse) -> StaticModelsManager {
     StaticModelsManager::new(/*auth_manager*/ None, model_catalog)
-}
-
-async fn chatgpt_auth_for_tests(codex_home: &Path) -> CodexAuth {
-    let auth_dot_json = codex_login::AuthDotJson {
-        auth_mode: Some(AuthMode::Chatgpt),
-        openai_api_key: None,
-        tokens: Some(TokenData {
-            id_token: codex_login::token_data::parse_chatgpt_jwt_claims(
-                "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.\
-eyJlbWFpbCI6InVzZXJAZXhhbXBsZS5jb20iLCJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9wbGFuX3R5cGUiOiJwcm8iLCJjaGF0Z3B0X3VzZXJfaWQiOiJ1c2VyLWlkIiwiY2hhdGdwdF9hY2NvdW50X2lkIjoiYWNjb3VudC1pZCJ9fQ.\
-c2ln",
-            )
-            .expect("fake id token should parse"),
-            access_token: "Access Token".to_string(),
-            refresh_token: "test".to_string(),
-            account_id: Some("account_id".to_string()),
-        }),
-        last_refresh: Some(Utc::now()),
-        agent_identity: None,
-        personal_access_token: None,
-    };
-    std::fs::create_dir_all(codex_home).expect("codex home should be created");
-    std::fs::write(
-        codex_home.join("auth.json"),
-        serde_json::to_string(&auth_dot_json).expect("auth should serialize"),
-    )
-    .expect("auth.json should be written");
-
-    CodexAuth::from_auth_storage(
-        codex_home,
-        AuthCredentialsStoreMode::File,
-        /*chatgpt_base_url*/ None,
-    )
-    .await
-    .expect("auth should load")
-    .expect("auth should be present")
 }
 
 #[tokio::test]
@@ -498,6 +476,7 @@ async fn refresh_available_models_keeps_merging_for_api_auth() {
     let codex_home = tempdir().expect("temp dir");
     let endpoint = Arc::new(TestModelsEndpoint {
         has_command_auth: true,
+        has_provider_auth: false,
         uses_codex_backend: false,
         responses: Mutex::new(vec![remote_models.clone()].into()),
         fetch_count: AtomicUsize::new(0),
@@ -828,25 +807,24 @@ async fn refresh_available_models_uses_cached_chatgpt_when_external_api_key_is_u
 }
 
 #[tokio::test]
-async fn refresh_available_models_fetches_with_chatgpt_auth() {
-    let dynamic_slug = "dynamic-model-only-for-test-chatgpt-auth";
+async fn refresh_available_models_fetches_with_provider_auth() {
+    let dynamic_slug = "dynamic-model-only-for-test-provider-auth";
     let codex_home = tempdir().expect("temp dir");
-    let endpoint = TestModelsEndpoint::new(vec![vec![remote_model(
+    let endpoint = TestModelsEndpoint::with_provider_auth(vec![vec![remote_model(
         dynamic_slug,
-        "ChatGPT Auth",
+        "Provider Auth",
         /*priority*/ 1,
     )]]);
-    let auth = chatgpt_auth_for_tests(codex_home.path()).await;
     let manager = openai_manager_for_tests_with_auth(
         codex_home.path().to_path_buf(),
         endpoint.clone(),
-        Some(AuthManager::from_auth_for_testing(auth)),
+        /*auth_manager*/ None,
     );
 
     manager
         .refresh_available_models(RefreshStrategy::Online)
         .await
-        .expect("refresh should fetch with ChatGPT auth");
+        .expect("refresh should fetch with provider auth");
 
     assert!(
         manager
@@ -854,12 +832,12 @@ async fn refresh_available_models_fetches_with_chatgpt_auth() {
             .await
             .iter()
             .any(|candidate| candidate.slug == dynamic_slug),
-        "remote refresh should include models fetched with ChatGPT auth tokens"
+        "remote refresh should include models fetched with provider auth"
     );
     assert_eq!(
         endpoint.fetch_count(),
         1,
-        "endpoint should fetch models with ChatGPT auth tokens"
+        "endpoint should fetch models with provider auth"
     );
 }
 

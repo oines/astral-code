@@ -34,8 +34,8 @@ impl Default for ProviderCapabilities {
     fn default() -> Self {
         Self {
             namespace_tools: true,
-            image_generation: true,
-            web_search: true,
+            image_generation: false,
+            web_search: false,
         }
     }
 }
@@ -146,14 +146,10 @@ impl ModelProvider for ConfiguredModelProvider {
     }
 
     fn capabilities(&self) -> ProviderCapabilities {
-        if self.info.is_openai() {
-            ProviderCapabilities::default()
-        } else {
-            ProviderCapabilities {
-                namespace_tools: true,
-                image_generation: false,
-                web_search: false,
-            }
+        ProviderCapabilities {
+            namespace_tools: true,
+            image_generation: false,
+            web_search: false,
         }
     }
 
@@ -401,7 +397,7 @@ mod tests {
     }
 
     #[test]
-    fn openai_provider_returns_unauthenticated_openai_account_state() {
+    fn legacy_responses_provider_returns_no_account_state() {
         let provider = create_model_provider(
             ModelProviderInfo::create_openai_provider(/*base_url*/ None),
             /*auth_manager*/ None,
@@ -411,13 +407,13 @@ mod tests {
             provider.account_state(),
             ProviderAccountState {
                 account: None,
-                requires_astral_auth: true,
+                requires_astral_auth: false,
             }
         );
     }
 
     #[test]
-    fn openai_provider_returns_api_key_account_state() {
+    fn legacy_responses_provider_does_not_use_astral_auth_manager() {
         let provider = create_model_provider(
             ModelProviderInfo::create_openai_provider(/*base_url*/ None),
             Some(AuthManager::from_auth_for_testing(CodexAuth::from_api_key(
@@ -428,14 +424,14 @@ mod tests {
         assert_eq!(
             provider.account_state(),
             ProviderAccountState {
-                account: Some(ProviderAccount::ApiKey),
-                requires_astral_auth: true,
+                account: None,
+                requires_astral_auth: false,
             }
         );
     }
 
     #[test]
-    fn openai_provider_hides_unsupported_chatgpt_account_state() {
+    fn legacy_responses_provider_ignores_chatgpt_account_state() {
         let provider = create_model_provider(
             ModelProviderInfo::create_openai_provider(/*base_url*/ None),
             Some(AuthManager::from_auth_for_testing(
@@ -447,7 +443,7 @@ mod tests {
             provider.account_state(),
             ProviderAccountState {
                 account: None,
-                requires_astral_auth: true,
+                requires_astral_auth: false,
             }
         );
     }
