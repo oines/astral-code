@@ -48,9 +48,14 @@ metrics exporter 现在是 `none`，旧配置里显式写 `statsig` 也会在 `c
 `Config.chatgpt_base_url` 和 schema；后者涉及插件、apps、测试 fixture 和旧 hosted backend 命名，需要后续
 单独分阶段拆。
 
-下一步优先继续处理 `chatgpt_base_url` 配置字段、Agent Identity、connectors/apps 和其他 ChatGPT hosted
-残留；provider adapter 方向则继续补 Anthropic/chat-completions fixture 和国内模型兼容选项。remote-control
-主入口已经禁用，不再作为最高优先级，除非后续要把底层 `app-server-transport` 旧模块降级成独立 stub 或删除。
+最新补充：Agent Identity 的 hosted 控制面此前已经硬禁用；本轮只把公开函数参数从
+`chatgpt_base_url` 改成 `hosted_base_url`，不改 JWT claim 里的 `chatgpt_user_id` /
+`chatgpt_account_is_fedramp`，因为那是历史 token payload 形状。
+
+下一步优先继续处理 `chatgpt_base_url` 配置字段、Agent Identity auth/storage 残留、connectors/apps 和其他
+ChatGPT hosted 残留；provider adapter 方向则继续补 Anthropic/chat-completions fixture 和国内模型兼容选项。
+remote-control 主入口已经禁用，不再作为最高优先级，除非后续要把底层 `app-server-transport` 旧模块降级成独立
+stub 或删除。
 当前明确口径：标准 OpenAI API 指 `/v1/chat/completions`，不是旧 `/v1/completions`；Anthropic 路线是
 Messages API，`base_url` 可以承载 `/v1` 或 `/anthropic/v1` 这类网关前缀。
 

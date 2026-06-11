@@ -142,12 +142,12 @@ pub fn authorization_header_for_agent_task(
 
 pub async fn fetch_agent_identity_jwks(
     client: &reqwest::Client,
-    chatgpt_base_url: &str,
+    hosted_base_url: &str,
 ) -> Result<JwkSet> {
     ensure_hosted_agent_identity_control_plane_enabled()?;
 
     let response = client
-        .get(agent_identity_jwks_url(chatgpt_base_url))
+        .get(agent_identity_jwks_url(hosted_base_url))
         .timeout(AGENT_IDENTITY_JWKS_TIMEOUT)
         .send()
         .await
@@ -212,7 +212,7 @@ pub fn sign_task_registration_payload(
 
 pub async fn register_agent_task(
     client: &reqwest::Client,
-    chatgpt_base_url: &str,
+    hosted_base_url: &str,
     key: AgentIdentityKey<'_>,
 ) -> Result<String> {
     ensure_hosted_agent_identity_control_plane_enabled()?;
@@ -222,7 +222,7 @@ pub async fn register_agent_task(
         signature: sign_task_registration_payload(key, &timestamp)?,
         timestamp,
     };
-    let url = agent_task_registration_url(chatgpt_base_url, key.agent_runtime_id);
+    let url = agent_task_registration_url(hosted_base_url, key.agent_runtime_id);
 
     let response = client
         .post(url)
@@ -315,23 +315,23 @@ pub fn curve25519_secret_key_from_private_key_pkcs8_base64(
     Ok(curve25519_secret_key_from_signing_key(&signing_key))
 }
 
-pub fn agent_registration_url(chatgpt_base_url: &str) -> String {
-    let trimmed = chatgpt_base_url.trim_end_matches('/');
+pub fn agent_registration_url(hosted_base_url: &str) -> String {
+    let trimmed = hosted_base_url.trim_end_matches('/');
     format!("{trimmed}/v1/agent/register")
 }
 
-pub fn agent_task_registration_url(chatgpt_base_url: &str, agent_runtime_id: &str) -> String {
-    let trimmed = chatgpt_base_url.trim_end_matches('/');
+pub fn agent_task_registration_url(hosted_base_url: &str, agent_runtime_id: &str) -> String {
+    let trimmed = hosted_base_url.trim_end_matches('/');
     format!("{trimmed}/v1/agent/{agent_runtime_id}/task/register")
 }
 
-pub fn agent_identity_biscuit_url(chatgpt_base_url: &str) -> String {
-    let trimmed = chatgpt_base_url.trim_end_matches('/');
+pub fn agent_identity_biscuit_url(hosted_base_url: &str) -> String {
+    let trimmed = hosted_base_url.trim_end_matches('/');
     format!("{trimmed}/authenticate_app_v2")
 }
 
-pub fn agent_identity_jwks_url(chatgpt_base_url: &str) -> String {
-    let trimmed = chatgpt_base_url.trim_end_matches('/');
+pub fn agent_identity_jwks_url(hosted_base_url: &str) -> String {
+    let trimmed = hosted_base_url.trim_end_matches('/');
     if trimmed.contains("/backend-api") {
         format!("{trimmed}/wham/agent-identities/jwks")
     } else {
