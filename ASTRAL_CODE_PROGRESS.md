@@ -1,6 +1,6 @@
 # Astral-Code 项目总控记录
 
-最后更新：2026-06-11 14:33 CST
+最后更新：2026-06-11 14:44 CST
 
 这份文档是 Astral-Code 长线改造的中文 handoff。它的用途不是对外宣传，而是让后续任何一次
 compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道：我们到底要做什么、哪些边界不能碰、
@@ -217,6 +217,14 @@ account 或 OpenAI-only plugin 分发的代码，都需要删除、禁用或隔�
 
 ## 已完成的重要提交
 
+- 本轮已完成：cloud-config 导出入口不再启动 ChatGPT hosted policy fetch
+  - `codex-cloud-config` 的公开 `cloud_config_bundle_loader(...)` 改为返回 no-op
+    `CloudConfigBundleLoader::default()`。
+  - `cloud_config_bundle_loader_for_storage(...)` 不再创建 shared `AuthManager`，也不再构造远程
+    backend client。
+  - 删除旧 `BackendBundleClient` 和后台 cache refresh loop。
+  - 旧 cloud-config service/backend/cache 只在测试构建中保留，用于现有 bundle 解析、验证和缓存测试。
+
 - 本轮已完成：cloud-tasks 不再默认访问 ChatGPT hosted backend
   - 删除 `codex-rs/cloud-tasks` 中对 `CODEX_CLOUD_TASKS_BASE_URL` 的读取。
   - 新增 `ASTRAL_CLOUD_TASKS_BASE_URL` 作为 cloud tasks 的显式后端配置入口。
@@ -303,6 +311,43 @@ account 或 OpenAI-only plugin 分发的代码，都需要删除、禁用或隔�
 - `5a9ddcf8d4 Remove add-credits nudge from TUI`
 - `b756262d8e Remove add-credits nudge backend client`
   - 删除 OpenAI add-credits / rate-limit upsell 路径。
+
+## 最近完成的 cloud-config slice
+
+本轮完成的代码 slice：
+
+> 让 `codex-cloud-config` 的导出 loader 不再启动 legacy ChatGPT hosted workspace policy 拉取。
+
+已编辑文件：
+
+- `codex-rs/cloud-config/src/lib.rs`
+- `codex-rs/cloud-config/src/bundle_loader.rs`
+- `codex-rs/cloud-config/src/backend.rs`
+- `codex-rs/cloud-config/src/service.rs`
+
+改动内容：
+
+- 生产导出的 `cloud_config_bundle_loader(...)` 现在直接返回空 loader。
+- 生产导出的 `cloud_config_bundle_loader_for_storage(...)` 现在直接返回空 loader。
+- 删除 `BackendBundleClient`，避免 cloud-config crate 自己构造 hosted backend client。
+- 删除后台 refresh loop，避免长期后台轮询 remote policy bundle。
+- 将旧 backend/cache/metrics/service/validation 模块限制为测试构建。
+- 旧 ChatGPT hosted fetch 行为测试已标记 ignored，避免测试把旧控制面重新拉回默认路径。
+
+为什么要做：
+
+- TUI 主入口已经默认使用空 `CloudConfigBundleLoader`，但 crate 导出函数仍能被误用并启动
+  ChatGPT hosted cloud-config 控制面。
+- Astral 不需要 OpenAI/ChatGPT workspace-managed policy 拉取。
+- provider-neutral policy/config control plane 未来应该重新设计，不应复用旧 ChatGPT hosted bundle。
+
+仍需后续处理：
+
+- `codex-rs/core/src/config` 里 `chatgpt_base_url` 字段和 config schema 仍存在。
+- app-server plugins/catalog/apps 里仍有 workspace settings / remote plugin 旧语义，需要继续去 OpenAI 化。
+- cloud-config 的旧测试 fixture 仍保留 `codex` 命名和 ChatGPT auth 概念，后续做机械/语义清理。
+- `just test -p codex-cloud-config` 当前结果是 13 passed / 14 skipped；skipped 部分都是旧
+  ChatGPT hosted fetch 行为。
 
 ## 最近完成的 cloud-tasks slice
 
@@ -393,6 +438,8 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
 - `just test -p codex-login auth`
 - `cargo check --tests -p codex-cli -p codex-cloud-config -p codex-cloud-tasks -p codex-app-server-transport -p codex-core`
 - `cargo check --tests -p codex-cloud-tasks`
+- `cargo check --tests -p codex-cloud-config`
+- `just test -p codex-cloud-config`
 - 旧 ChatGPT refresh 符号窄范围搜索：`codex-rs/login` 与 app-server auth 测试无命中。
 - `git diff --check`
 
@@ -412,12 +459,12 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
 
 2. 审计 remote/cloud control-plane
    - `backend-client`
-   - `cloud-config`
+   - `cloud-config` 旧测试/类型命名
    - `cloud-tasks` 旧 auth/header 语义
    - `core-plugins/src/remote*`
    - `memories/write`
    - 目标：默认路径不能静默访问 `chatgpt.com/backend-api`。
-   - 下一刀建议优先处理 `core-plugins/src/remote*` 或 `cloud-config`，继续拔掉 hosted control-plane 默认路径。
+   - 下一刀建议优先处理 app-server plugins/catalog/apps 的 workspace settings 和 remote plugin 旧语义。
 
 3. 推进 provider-neutral protocol
    - Anthropic Messages stream/tool_use/tool_result。
@@ -469,12 +516,12 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
 3. 查看当前工作树：
    - `git status --short`
    - `git diff --stat`
-   - `git diff -- codex-rs/cloud-tasks/src/lib.rs codex-rs/cloud-tasks/src/util.rs`
+   - `git diff -- codex-rs/cloud-config/src/lib.rs codex-rs/cloud-config/src/bundle_loader.rs`
 
 4. 选择下一块时优先看：
    - `chatgpt_base_url`
    - app-server account docs/tests 旧语义
-   - `core-plugins` remote control-plane
+   - app-server plugins/catalog/apps 旧 workspace settings
 
 5. 不要把 goal 标记为 complete，除非 provider-neutral protocol、Claude-ish tools、OpenAI 控制面清理、
    app-server/account/remote plugin 风险都已经达到可交付状态。

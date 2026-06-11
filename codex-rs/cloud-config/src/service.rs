@@ -1,8 +1,6 @@
 //! Cloud config bundle lifecycle orchestration.
 //!
-//! Startup loads a single shared bundle from cache or backend, and a background
-//! refresher keeps the cache warm for future app starts without changing the
-//! already-snapshotted runtime config.
+//! Startup loads a single shared bundle from cache or a caller-provided backend.
 
 use crate::backend::BundleClient;
 use crate::backend::BundleRequestError;
@@ -32,7 +30,6 @@ use tokio::time::timeout;
 
 pub(crate) const CLOUD_CONFIG_BUNDLE_TIMEOUT: Duration = Duration::from_secs(15);
 const CLOUD_CONFIG_BUNDLE_MAX_ATTEMPTS: usize = 5;
-const CLOUD_CONFIG_BUNDLE_CACHE_REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const CLOUD_CONFIG_BUNDLE_LOAD_FAILED_MESSAGE: &str =
     "Failed to load cloud config bundle (workspace-managed policies).";
 const CLOUD_CONFIG_BUNDLE_AUTH_RECOVERY_FAILED_MESSAGE: &str = concat!(
@@ -452,22 +449,6 @@ where
             status_code,
             CLOUD_CONFIG_BUNDLE_AUTH_RECOVERY_FAILED_MESSAGE,
         ))
-    }
-
-    pub(crate) async fn refresh_cache_in_background(&self) {
-        loop {
-            sleep(CLOUD_CONFIG_BUNDLE_CACHE_REFRESH_INTERVAL).await;
-            match timeout(self.timeout, self.refresh_cache_once()).await {
-                Ok(true) => {}
-                Ok(false) => break,
-                Err(_) => {
-                    tracing::error!(
-                        "Timed out refreshing cloud config bundle cache from remote; keeping existing cache"
-                    );
-                    emit_load_metric("refresh", "error", /*bundle*/ None);
-                }
-            }
-        }
     }
 
     async fn refresh_cache_once(&self) -> bool {

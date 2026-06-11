@@ -364,6 +364,7 @@ async fn get_bundle_skips_individual_plan() {
 }
 
 #[tokio::test]
+#[ignore = "Astral disables legacy ChatGPT-hosted cloud config fetches"]
 async fn get_bundle_allows_eligible_workspace_plans_and_writes_cache() {
     for plan_type in [
         "business",
@@ -419,6 +420,7 @@ async fn get_bundle_skips_team_like_usage_based_plan() {
 }
 
 #[tokio::test]
+#[ignore = "Astral disables legacy ChatGPT-hosted cloud config fetches"]
 async fn get_bundle_rejects_invalid_remote_bundle_before_cache_write() {
     let codex_home = tempdir().expect("tempdir");
     let fetcher = Arc::new(StaticBundleClient::new(invalid_config_bundle()));
@@ -446,6 +448,7 @@ async fn get_bundle_rejects_invalid_remote_bundle_before_cache_write() {
 }
 
 #[tokio::test]
+#[ignore = "Astral disables legacy ChatGPT-hosted cloud config fetches"]
 async fn get_bundle_ignores_invalid_cache_and_refetches() {
     let codex_home = tempdir().expect("tempdir");
     let cache = create_test_cache(codex_home.path());
@@ -482,6 +485,7 @@ async fn get_bundle_ignores_invalid_cache_and_refetches() {
 }
 
 #[tokio::test]
+#[ignore = "Astral disables legacy ChatGPT-hosted cloud config fetches"]
 async fn get_bundle_empty_response_is_success_and_cached() {
     let codex_home = tempdir().expect("tempdir");
     let fetcher = Arc::new(StaticBundleClient::new(CloudConfigBundle::default()));
@@ -503,6 +507,7 @@ async fn get_bundle_empty_response_is_success_and_cached() {
 }
 
 #[tokio::test]
+#[ignore = "Astral disables legacy ChatGPT-hosted cloud config fetches"]
 async fn get_bundle_uses_cache_when_valid() {
     let bundle = test_bundle();
     let codex_home = tempdir().expect("tempdir");
@@ -527,6 +532,7 @@ async fn get_bundle_uses_cache_when_valid() {
 }
 
 #[tokio::test]
+#[ignore = "Astral disables legacy ChatGPT-hosted cloud config fetches"]
 async fn get_bundle_ignores_cache_for_different_auth_identity() {
     let codex_home = tempdir().expect("tempdir");
     let prime_service = CloudConfigBundleService::new(
@@ -567,6 +573,7 @@ async fn get_bundle_ignores_cache_for_different_auth_identity() {
 }
 
 #[tokio::test(start_paused = true)]
+#[ignore = "Astral disables legacy ChatGPT-hosted cloud config fetches"]
 async fn get_bundle_times_out() {
     let codex_home = tempdir().expect("tempdir");
     let service = CloudConfigBundleService::new(
@@ -587,6 +594,7 @@ async fn get_bundle_times_out() {
 }
 
 #[tokio::test(start_paused = true)]
+#[ignore = "Astral disables legacy ChatGPT-hosted cloud config fetches"]
 async fn get_bundle_retries_until_success() {
     let fetcher = Arc::new(SequenceBundleClient::new(vec![
         Err(request_error()),
@@ -609,6 +617,7 @@ async fn get_bundle_retries_until_success() {
 }
 
 #[tokio::test]
+#[ignore = "Astral disables legacy ChatGPT-hosted cloud config fetches"]
 async fn get_bundle_recovers_after_unauthorized_reload() {
     let auth_home = tempdir().expect("tempdir");
     write_auth_json(
@@ -664,6 +673,7 @@ async fn get_bundle_recovers_after_unauthorized_reload() {
 }
 
 #[tokio::test]
+#[ignore = "Astral disables legacy ChatGPT-hosted cloud config fetches"]
 async fn get_bundle_recovers_after_unauthorized_reload_updates_cache_identity() {
     let auth_home = tempdir().expect("tempdir");
     write_auth_json(
@@ -726,6 +736,7 @@ async fn get_bundle_recovers_after_unauthorized_reload_updates_cache_identity() 
 }
 
 #[tokio::test]
+#[ignore = "Astral disables legacy ChatGPT-hosted cloud config fetches"]
 async fn get_bundle_surfaces_auth_recovery_message() {
     let auth_home = tempdir().expect("tempdir");
     write_auth_json(
@@ -787,6 +798,7 @@ async fn get_bundle_surfaces_auth_recovery_message() {
 }
 
 #[tokio::test]
+#[ignore = "Astral disables legacy ChatGPT-hosted cloud config fetches"]
 async fn get_bundle_does_not_use_cache_when_auth_identity_is_incomplete() {
     let codex_home = tempdir().expect("tempdir");
     let prime_service = CloudConfigBundleService::new(
@@ -830,6 +842,7 @@ async fn get_bundle_does_not_use_cache_when_auth_identity_is_incomplete() {
 }
 
 #[tokio::test(start_paused = true)]
+#[ignore = "Astral disables legacy ChatGPT-hosted cloud config fetches"]
 async fn get_bundle_stops_after_max_retries() {
     let fetcher = Arc::new(SequenceBundleClient::new(vec![
         Err(request_error());
@@ -861,6 +874,7 @@ async fn get_bundle_stops_after_max_retries() {
 }
 
 #[tokio::test]
+#[ignore = "Astral disables legacy ChatGPT-hosted cloud config fetches"]
 async fn refresh_from_remote_updates_cached_bundle() {
     let replacement_bundle = CloudConfigBundle {
         config_toml: CloudConfigTomlBundle::default(),
