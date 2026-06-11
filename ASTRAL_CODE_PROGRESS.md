@@ -1,6 +1,6 @@
 # Astral-Code 项目总控记录
 
-最后更新：2026-06-11 14:44 CST
+最后更新：2026-06-11 15:05 CST
 
 这份文档是 Astral-Code 长线改造的中文 handoff。它的用途不是对外宣传，而是让后续任何一次
 compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道：我们到底要做什么、哪些边界不能碰、
@@ -217,6 +217,16 @@ account 或 OpenAI-only plugin 分发的代码，都需要删除、禁用或隔�
 
 ## 已完成的重要提交
 
+- 本轮已完成：ChatGPT workspace settings / connector directory 不再联网
+  - `codex-rs/chatgpt/src/workspace_settings.rs` 不再请求
+    `/accounts/{account_id}/settings`。
+  - `codex_plugins_enabled_for_workspace(...)` 现在本地返回 `true`，插件是否启用只由 Astral 本地
+    feature/config 决定。
+  - `codex-rs/chatgpt/src/connectors.rs` 不再请求 ChatGPT connector directory，也不再要求
+    ChatGPT/Codex backend auth。
+  - connector list 仍保留 plugin apps 和 MCP accessible connectors；这是去 hosted control-plane，不是砍
+    apps/plugins/MCP 骨架。
+
 - 本轮已完成：cloud-config 导出入口不再启动 ChatGPT hosted policy fetch
   - `codex-cloud-config` 的公开 `cloud_config_bundle_loader(...)` 改为返回 no-op
     `CloudConfigBundleLoader::default()`。
@@ -312,7 +322,44 @@ account 或 OpenAI-only plugin 分发的代码，都需要删除、禁用或隔�
 - `b756262d8e Remove add-credits nudge backend client`
   - 删除 OpenAI add-credits / rate-limit upsell 路径。
 
+## 最近完成的 chatgpt workspace/connectors slice
+
+本轮完成的代码 slice：
+
+> 让 app-server 相关的 workspace settings 和 connector directory 路径不再访问 ChatGPT hosted backend。
+
+已编辑文件：
+
+- `codex-rs/chatgpt/src/workspace_settings.rs`
+- `codex-rs/chatgpt/src/connectors.rs`
+- `codex-rs/chatgpt/src/workspace_settings_tests.rs`
+
+改动内容：
+
+- 删除 workspace settings cache、settings response 解析和 path encoding 逻辑。
+- `codex_plugins_enabled_for_workspace(...)` 改成本地 no-op allow。
+- 删除 connector directory cache context、connector auth 和 ChatGPT directory fetch closure。
+- `list_all_connectors_with_options(...)` 只从 plugin apps 构造 connector 列表。
+- `list_connectors(...)` 继续合并 MCP accessible connectors，并把 `all_connectors_loaded` 设为
+  `false`，避免没有 hosted directory 时过滤掉 MCP 可访问项。
+- 删除旧 workspace settings URL encoding 测试。
+
+为什么要做：
+
+- Astral 不需要 ChatGPT workspace beta setting 作为插件开关来源。
+- Astral 不应该依赖 ChatGPT hosted connector directory 才能列出 app/plugin/MCP 能力。
+- 这一步保留本地 plugin app、MCP app 和 feature flag 行为，只移除 OpenAI hosted 查询。
+
+仍需后续处理：
+
+- `codex-rs/chatgpt/src/chatgpt_client.rs` 仍存在，当前主要还被 `get_task.rs` 使用。
+- app-server plugin remote share/install/read 路径仍保留大量 remote plugin 类型和 ChatGPT 语义，但多数入口已有
+  `remote_plugin_control_plane_enabled() == false` gate。
+- core config 里的 `chatgpt_base_url` 字段仍未移除。
+
 ## 最近完成的 cloud-config slice
+
+本轮完成的代码 slice：
 
 本轮完成的代码 slice：
 
@@ -440,6 +487,8 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
 - `cargo check --tests -p codex-cloud-tasks`
 - `cargo check --tests -p codex-cloud-config`
 - `just test -p codex-cloud-config`
+- `cargo check --tests -p codex-chatgpt`
+- `just test -p codex-chatgpt`
 - 旧 ChatGPT refresh 符号窄范围搜索：`codex-rs/login` 与 app-server auth 测试无命中。
 - `git diff --check`
 
@@ -464,7 +513,7 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
    - `core-plugins/src/remote*`
    - `memories/write`
    - 目标：默认路径不能静默访问 `chatgpt.com/backend-api`。
-   - 下一刀建议优先处理 app-server plugins/catalog/apps 的 workspace settings 和 remote plugin 旧语义。
+   - 下一刀建议优先处理 `chatgpt_client` / `get_task` 或 app-server plugin remote share/install/read 的旧语义。
 
 3. 推进 provider-neutral protocol
    - Anthropic Messages stream/tool_use/tool_result。
@@ -521,7 +570,7 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
 4. 选择下一块时优先看：
    - `chatgpt_base_url`
    - app-server account docs/tests 旧语义
-   - app-server plugins/catalog/apps 旧 workspace settings
+   - `chatgpt_client` / `get_task`
 
 5. 不要把 goal 标记为 complete，除非 provider-neutral protocol、Claude-ish tools、OpenAI 控制面清理、
    app-server/account/remote plugin 风险都已经达到可交付状态。
