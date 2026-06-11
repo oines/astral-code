@@ -1,6 +1,6 @@
 # Astral-Code 项目总控记录
 
-最后更新：2026-06-11 20:40 CST
+最后更新：2026-06-11 20:49 CST
 
 这份文档是 Astral-Code 长线改造的中文 handoff。它的用途不是对外宣传，而是让后续任何一次
 compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道：我们到底要做什么、为什么这么做、
@@ -82,6 +82,10 @@ headers，不再要求 `uses_codex_backend()`，也不再打印 `ChatGPT-Account
 最新补充 8：core-skills remote skill control-plane 从“禁用 guard 包着旧实现”升级为“只保留 unsupported stub”。
 `list_remote_skills(...)` / `export_remote_skill(...)` 不再包含 ChatGPT `/hazelnuts` HTTP client、Codex backend
 auth 检查、download zip 校验或解压逻辑；本地 skills runtime 不受影响。
+
+最新补充 9：core-plugins legacy remote featured/mutation client 也已收敛成 disabled stub。旧
+`/plugins/featured`、`/plugins/{id}/enable`、`/plugins/{id}/uninstall` HTTP 实现和 ChatGPT auth 检查被删除；
+即使 manager featured ids 入口未来被误触发，也只会返回 Astral disabled，不会访问 hosted plugin service。
 
 下一步优先继续处理 `chatgpt_base_url` 配置字段、Agent Identity auth/storage 残留、connectors/apps 和其他
 ChatGPT hosted 残留；provider adapter 方向则继续补 Anthropic/chat-completions fixture 和国内模型兼容选项。
@@ -894,6 +898,41 @@ account 或 OpenAI-only plugin 分发的代码，都需要删除、禁用或隔�
   delta、reasoning/thinking、provider-specific request body 字段和错误恢复。
 - 需要评估是否增加显式 provider config，用于 omit 某些国内网关不兼容的 chat-completions 字段，例如
   `parallel_tool_calls` 或 `stream_options`。
+
+## 最近完成的 core-plugins remote legacy stub slice
+
+本轮完成的代码 slice：
+
+> `core-plugins/src/remote_legacy.rs` 不再保留旧 featured plugin fetch 和 enable/uninstall mutation
+> HTTP client；只保留当前 manager 编译边界需要的 disabled stub。
+
+已编辑文件：
+
+- `codex-rs/core-plugins/src/remote_legacy.rs`
+- `codex-rs/core-plugins/src/remote_legacy_tests.rs`
+- `ASTRAL_CODE_PROGRESS.md`
+
+改动内容：
+
+- `fetch_remote_featured_plugin_ids(...)` 直接返回 `RemotePluginFetchError::ControlPlaneDisabled`。
+- `enable_remote_plugin(...)` / `uninstall_remote_plugin(...)` 直接返回
+  `RemotePluginMutationError::ControlPlaneDisabled`。
+- 删除旧 `/plugins/featured`、`/plugins/{id}/enable`、`/plugins/{id}/uninstall` URL 构造、reqwest 请求、
+  ChatGPT/Codex backend auth 校验、auth header 注入、mutation response 校验和 JSON decode。
+- 新增三条窄测试，防止 legacy 入口重新触碰 hosted control-plane。
+
+为什么要做：
+
+- manager 的 featured plugin ids 路径已经被 `remote_plugin_background_sync_available() == false` no-op，
+  但底层 legacy 模块仍保留完整 OpenAI hosted plugin service client。
+- Astral 不需要旧 ChatGPT plugin marketplace 的 featured ids、enable/uninstall mutation。
+- 这一步继续把“禁用但保留实现”的旧控制面变成“实现本身不可联网”的 stub。
+
+后续风险：
+
+- `remote_legacy` 模块名和 manager 里的 featured ids cache 结构仍存在，后续可以继续删调用链和 cache 类型。
+- remote plugin catalog/share/detail 的新模块里仍有大量旧类型和测试 fixture，虽然当前入口已 disabled；
+  完全删除需要单独切片，避免一次性打爆 app-server protocol 和 plugin list/read 测试。
 
 ## 最近完成的 core-plugins remote guard slice
 
