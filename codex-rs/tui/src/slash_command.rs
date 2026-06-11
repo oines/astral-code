@@ -81,7 +81,7 @@ impl SlashCommand {
     /// User-visible description shown in the popup.
     pub fn description(self) -> &'static str {
         match self {
-            SlashCommand::Feedback => "send logs to maintainers",
+            SlashCommand::Feedback => "show that feedback uploads are disabled",
             SlashCommand::New => "start a new chat during a conversation",
             SlashCommand::Init => "create an AGENTS.md file with instructions for Astral",
             SlashCommand::Compact => "summarize conversation to prevent hitting the context limit",

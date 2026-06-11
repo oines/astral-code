@@ -35,10 +35,13 @@ provider 去 OpenAI 默认路由、登录态清理、cloud-config/cloud-tasks �
   国产模型兼容细节、fixture 和端到端测试。
 - 全量 CI：当前不追求全绿，用户明确要求先推进实现，最后集中测试集中修。
 
-当前最新 slice：禁用了 Codex/OpenAI 内置 Statsig 遥测默认外联。Astral 的 OTEL 默认 metrics exporter
-现在是 `none`，旧配置里显式写 `statsig` 也会在 `codex-otel` 层解析为 `None`，源码中不再携带
-`https://ab.chatgpt.com/otlp/v1/metrics` 和内置 Statsig key。用户仍可显式配置自己的 `otlp-http` /
-`otlp-grpc` endpoint，这是 provider-neutral 自管遥测，不属于 OpenAI 专有控制面。
+最近完成的主要 slice：禁用了 Codex/OpenAI 内置 Statsig 遥测默认外联。Astral 的 OTEL 默认
+metrics exporter 现在是 `none`，旧配置里显式写 `statsig` 也会在 `codex-otel` 层解析为 `None`，
+源码中不再携带 `https://ab.chatgpt.com/otlp/v1/metrics` 和内置 Statsig key。用户仍可显式配置
+自己的 `otlp-http` / `otlp-grpc` endpoint，这是 provider-neutral 自管遥测，不属于 OpenAI 专有控制面。
+
+当前补充 slice：`feedback/upload` 真实上传链路此前已经硬禁用；本轮继续清理残留的 `/feedback`
+用户引导文案，避免 Astral 在错误消息、slash 描述或启动 tips 里暗示还能把日志上传给维护者。
 
 下一步优先继续处理底层 `app-server-transport` remote-control 旧模块、`chatgpt_base_url` 配置字段和其他
 ChatGPT hosted 残留；provider adapter 方向则继续补 Anthropic/chat-completions fixture 和国内模型兼容选项。
