@@ -145,6 +145,13 @@ Astral 不应该是一个薄反代，也不应该靠末端 hook 偷换协议。
 
 近期关键进展：
 
+- 本轮已完成：删除 `codex-login` 的旧 OAuth callback/revoke 控制面
+  - 删除 `LoginServer`、`ServerOptions`、`ShutdownHandle`、`run_login_server` 公共导出。
+  - 删除 `codex-rs/login/src/server.rs`、`pkce.rs`、OAuth callback HTML assets。
+  - 删除 `login_server_e2e` 集成测试模块。
+  - 删除 OpenAI OAuth revoke helper 和 `CODEX_REVOKE_TOKEN_URL_OVERRIDE` export。
+  - `codex-login` 不再包含 `/oauth/token` callback server 或 `/oauth/revoke` logout/revoke helper。
+
 - 本轮已完成：让 logout 不再调用旧 OpenAI OAuth revoke
   - `codex_login::logout_with_revoke` 保留为兼容 wrapper，但行为改为本地删除 auth。
   - `AuthManager::logout_with_revoke` 不再读取 cached ChatGPT token，也不再访问
@@ -210,20 +217,20 @@ Astral 不应该是一个薄反代，也不应该靠末端 hook 偷换协议。
 
 最新完成的代码 slice 是：
 
-- 本轮已完成：让 logout 不再调用旧 OpenAI OAuth revoke
+- 本轮已完成：删除 `codex-login` 的旧 OAuth callback/revoke 控制面
 
 意图：
 
-- Astral 不支持旧 token-backed hosted auth，所以 logout 不应该向 OpenAI OAuth revoke endpoint
-  发请求。
-- 保留现有 CLI/app-server 调用边界，不破坏 auth manager cache refresh 行为。
-- 旧函数名 `logout_with_revoke` 暂时保留，避免在同一 slice 里引入大面积 API rename。
+- Astral 不提供 ChatGPT/OAuth browser login，所以 `codex-login` 不应该继续暴露本地 callback
+  server API。
+- 删除旧 browser login 的 PKCE、HTML success/error pages、token exchange e2e 测试。
+- 删除已经无调用点的 OpenAI OAuth revoke helper。
 
 该 slice 已运行验证：
 
 - `just fmt`
 - `just test -p codex-login logout`
-  - 结果：4 个测试通过，87 个测试跳过。
+  - 结果：4 个测试通过，66 个测试跳过。
 
 ## 已运行验证
 
@@ -252,8 +259,7 @@ Astral 不应该是一个薄反代，也不应该靠末端 hook 偷换协议。
 1. 审计并移除剩余 OpenAI/ChatGPT auth/config 面：
    - core config 里的 `chatgpt_base_url`
    - app-server 的 `account/login/start` 行为
-   - `codex-rs/login/src/server.rs` OAuth callback server
-   - 只服务 ChatGPT OAuth 的 revoke/token 路径
+   - 仍在 `codex-login` 内部存在的 ChatGPT token refresh 路径
 
 2. 审计 cloud/remote control-plane crates：
    - `codex-rs/backend-client`

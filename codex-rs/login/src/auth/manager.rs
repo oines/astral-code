@@ -88,9 +88,7 @@ const REFRESH_TOKEN_ACCOUNT_MISMATCH_MESSAGE: &str = "Your access token could no
 const UNSUPPORTED_OPENAI_AUTH_MESSAGE: &str =
     "Stored OpenAI/ChatGPT credentials are not supported by Astral. Use API key auth instead.";
 const REFRESH_TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
-pub(super) const REVOKE_TOKEN_URL: &str = "https://auth.openai.com/oauth/revoke";
 pub const REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR: &str = "CODEX_REFRESH_TOKEN_URL_OVERRIDE";
-pub const REVOKE_TOKEN_URL_OVERRIDE_ENV_VAR: &str = "CODEX_REVOKE_TOKEN_URL_OVERRIDE";
 static NEXT_DUMMY_AUTH_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Error)]

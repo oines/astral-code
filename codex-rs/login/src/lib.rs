@@ -2,15 +2,8 @@ pub mod auth;
 pub mod auth_env_telemetry;
 pub mod token_data;
 
-mod pkce;
-mod server;
-
 pub use codex_client::BuildCustomCaTransportError as BuildLoginHttpClientError;
 pub use codex_config::types::AuthCredentialsStoreMode;
-pub use server::LoginServer;
-pub use server::ServerOptions;
-pub use server::ShutdownHandle;
-pub use server::run_login_server;
 
 pub use auth::ASTRAL_API_KEY_ENV_VAR;
 pub use auth::AuthDotJson;
@@ -23,7 +16,6 @@ pub use auth::ExternalAuthRefreshContext;
 pub use auth::ExternalAuthRefreshReason;
 pub use auth::ExternalAuthTokens;
 pub use auth::REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR;
-pub use auth::REVOKE_TOKEN_URL_OVERRIDE_ENV_VAR;
 pub use auth::RefreshTokenError;
 pub use auth::UnauthorizedRecovery;
 pub use auth::default_client;
