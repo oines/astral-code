@@ -116,7 +116,7 @@ fn login_without_flags_requires_explicit_credential_source() -> Result<()> {
 }
 
 #[test]
-fn login_with_access_token_is_not_available() -> Result<()> {
+fn login_with_access_token_flag_is_not_registered() -> Result<()> {
     let codex_home = TempDir::new()?;
     write_file_auth_config(codex_home.path())?;
 
@@ -125,13 +125,13 @@ fn login_with_access_token_is_not_available() -> Result<()> {
         .write_stdin("not-a-jwt\n")
         .assert()
         .failure()
-        .stderr(contains("Access token login is not available in Astral"));
+        .stderr(contains("unexpected argument '--with-access-token'"));
 
     Ok(())
 }
 
 #[test]
-fn login_with_device_auth_rejects_chatgpt_flow() -> Result<()> {
+fn login_with_device_auth_flag_is_not_registered() -> Result<()> {
     let codex_home = TempDir::new()?;
     write_file_auth_config(codex_home.path())?;
 
@@ -139,9 +139,7 @@ fn login_with_device_auth_rejects_chatgpt_flow() -> Result<()> {
     cmd.args(["login", "--device-auth"])
         .assert()
         .failure()
-        .stderr(contains(
-            "Browser/device ChatGPT login is not available in Astral",
-        ));
+        .stderr(contains("unexpected argument '--device-auth'"));
 
     Ok(())
 }

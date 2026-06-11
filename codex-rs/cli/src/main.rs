@@ -10,9 +10,7 @@ use codex_arg0::Arg0DispatchPaths;
 use codex_arg0::arg0_dispatch_or_else;
 use codex_cli::read_api_key_from_stdin;
 use codex_cli::run_login_status;
-use codex_cli::run_login_with_access_token;
 use codex_cli::run_login_with_api_key;
-use codex_cli::run_login_with_device_code;
 use codex_cli::run_login_without_credentials;
 use codex_cli::run_logout;
 use codex_exec::Cli as ExecCli;
@@ -431,9 +429,6 @@ struct LoginCommand {
     )]
     with_api_key: bool,
 
-    #[arg(long = "with-access-token", hide = true)]
-    with_access_token: bool,
-
     #[arg(
         long = "api-key",
         num_args = 0..=1,
@@ -443,18 +438,6 @@ struct LoginCommand {
         hide = true
     )]
     api_key: Option<String>,
-
-    #[arg(long = "device-auth", hide = true)]
-    use_device_code: bool,
-
-    /// EXPERIMENTAL: Use custom OAuth issuer base URL (advanced)
-    /// Override the OAuth issuer base URL (advanced)
-    #[arg(long = "experimental_issuer", value_name = "URL", hide = true)]
-    issuer_base_url: Option<String>,
-
-    /// EXPERIMENTAL: Use custom OAuth client ID (advanced)
-    #[arg(long = "experimental_client-id", value_name = "CLIENT_ID", hide = true)]
-    client_id: Option<String>,
 
     #[command(subcommand)]
     action: Option<LoginSubcommand>,
@@ -1265,19 +1248,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                     run_login_status(login_cli.config_overrides).await;
                 }
                 None => {
-                    if login_cli.with_api_key && login_cli.with_access_token {
-                        eprintln!(
-                            "Choose one login credential source: --with-api-key or --with-access-token."
-                        );
-                        std::process::exit(1);
-                    } else if login_cli.use_device_code {
-                        run_login_with_device_code(
-                            login_cli.config_overrides,
-                            login_cli.issuer_base_url,
-                            login_cli.client_id,
-                        )
-                        .await;
-                    } else if login_cli.api_key.is_some() {
+                    if login_cli.api_key.is_some() {
                         eprintln!(
                             "The --api-key flag is no longer supported. Set ASTRAL_API_KEY for the default model provider."
                         );
@@ -1285,9 +1256,6 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                     } else if login_cli.with_api_key {
                         let api_key = read_api_key_from_stdin();
                         run_login_with_api_key(login_cli.config_overrides, api_key).await;
-                    } else if login_cli.with_access_token {
-                        run_login_with_access_token(login_cli.config_overrides, String::new())
-                            .await;
                     } else {
                         run_login_without_credentials(login_cli.config_overrides).await;
                     }

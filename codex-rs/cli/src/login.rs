@@ -23,8 +23,6 @@ use tracing_subscriber::Layer;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
-const CHATGPT_LOGIN_DISABLED_MESSAGE: &str = "Browser/device ChatGPT login is not available in Astral. Set ASTRAL_API_KEY for the active model provider.";
-const ACCESS_TOKEN_LOGIN_DISABLED_MESSAGE: &str = "Access token login is not available in Astral. Set ASTRAL_API_KEY for the active model provider.";
 const LOGIN_SUCCESS_MESSAGE: &str = "Successfully logged in";
 const UNSUPPORTED_STORED_AUTH_MESSAGE: &str = "Stored OpenAI/ChatGPT credentials are not supported by Astral. Run `astral logout`, then set ASTRAL_API_KEY.";
 
@@ -127,27 +125,11 @@ pub async fn run_login_with_api_key(
     }
 }
 
-pub async fn run_login_with_access_token(
-    _cli_config_overrides: CliConfigOverrides,
-    _access_token: String,
-) -> ! {
-    eprintln!("{ACCESS_TOKEN_LOGIN_DISABLED_MESSAGE}");
-    std::process::exit(1);
-}
-
 pub fn read_api_key_from_stdin() -> String {
     read_stdin_secret(
         "--with-api-key expects the API key on stdin. The default Astral model provider reads ASTRAL_API_KEY directly.",
         "Reading API key from stdin...",
         "No API key provided via stdin.",
-    )
-}
-
-pub fn read_access_token_from_stdin() -> String {
-    read_stdin_secret(
-        "--with-access-token is not available in Astral.",
-        "Reading access token from stdin...",
-        "No access token provided via stdin.",
     )
 }
 
@@ -174,26 +156,6 @@ fn read_stdin_secret(terminal_message: &str, reading_message: &str, empty_messag
     }
 
     secret
-}
-
-/// Login using the OAuth device code flow.
-pub async fn run_login_with_device_code(
-    _cli_config_overrides: CliConfigOverrides,
-    _issuer_base_url: Option<String>,
-    _client_id: Option<String>,
-) -> ! {
-    eprintln!("{CHATGPT_LOGIN_DISABLED_MESSAGE}");
-    std::process::exit(1);
-}
-
-/// Legacy entry point retained for callers that still request device-code fallback.
-pub async fn run_login_with_device_code_fallback_to_browser(
-    _cli_config_overrides: CliConfigOverrides,
-    _issuer_base_url: Option<String>,
-    _client_id: Option<String>,
-) -> ! {
-    eprintln!("{CHATGPT_LOGIN_DISABLED_MESSAGE}");
-    std::process::exit(1);
 }
 
 pub async fn run_login_status(cli_config_overrides: CliConfigOverrides) -> ! {
