@@ -664,6 +664,9 @@ account 或 OpenAI-only plugin 分发的代码，都需要删除、禁用或隔�
 - `codex-rs/cli/src/remote_control_cmd.rs`
 - `codex-rs/cli/src/main.rs`
 - `codex-rs/app-server-daemon/src/lib.rs`
+- `codex-rs/app-server-daemon/src/settings.rs`
+- `codex-rs/app-server-daemon/src/backend/pid.rs`
+- `codex-rs/app-server-daemon/src/backend/pid_tests.rs`
 - `codex-rs/app-server-daemon/src/remote_control_client.rs`
 - `ASTRAL_CODE_PROGRESS.md`
 
@@ -678,6 +681,9 @@ account 或 OpenAI-only plugin 分发的代码，都需要删除、禁用或隔�
   `enable_remote_control_on_socket(...)` 直接拒绝。
 - `set_remote_control(RemoteControlMode::Enabled)` 直接拒绝；`Disabled` 保留，作为无害清理动作。
 - 删除 daemon 内部旧 `remote_control_client`，不再通过 socket 发送 `remoteControl/enable`。
+- daemon 读取到旧 `remoteControlEnabled: true` 设置时归一成 `false`。
+- pid backend 即使被传入 `remote_control_enabled = true`，也只启动普通
+  `app-server --listen unix://`，不会拼 `--remote-control`。
 - CLI help 文案从“启用 remote control”改为 legacy hosted remote control 在 Astral 中禁用。
 
 为什么要做：
@@ -690,9 +696,8 @@ account 或 OpenAI-only plugin 分发的代码，都需要删除、禁用或隔�
 
 后续风险：
 
-- `app-server-daemon` 的 pid backend 仍知道 `remote_control_enabled` 设置并能拼出
-  `app-server --remote-control` 参数；因为所有公开 enable/bootstrap 入口已拒绝，默认路径不会走到这里。
-  后续更洁癖时可以把 settings 字段和 pid 参数一起清掉。
+- `app-server-daemon` 的输出类型和 settings 类型仍保留 `remote_control_enabled` 字段用于当前 API 编译边界；
+  但读取和启动效果已经固定为 disabled。后续更洁癖时可以把字段从协议/输出形状里一起删掉。
 
 ## 最近完成的 account slice
 
@@ -761,6 +766,8 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
 - `just test -p codex-app-server remote_control`
 - `CARGO_INCREMENTAL=0 cargo check --tests -p codex-cli -p codex-app-server-daemon`
 - `CARGO_INCREMENTAL=0 just test -p codex-cli remote_control_subcommand_names_match_cli_shape`
+- `CARGO_INCREMENTAL=0 cargo check --tests -p codex-app-server-daemon`
+- `CARGO_INCREMENTAL=0 just test -p codex-app-server-daemon remote_control`
 - 旧 ChatGPT refresh 符号窄范围搜索：`codex-rs/login` 与 app-server auth 测试无命中。
 - `git diff --check`
 

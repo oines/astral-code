@@ -161,7 +161,7 @@ fn update_loop_uses_hidden_app_server_subcommand() {
 }
 
 #[test]
-fn app_server_remote_control_uses_runtime_flag() {
+fn app_server_remote_control_flag_is_ignored() {
     let backend = PidBackend::new(
         "codex".into(),
         "app-server.pid".into(),
@@ -170,7 +170,7 @@ fn app_server_remote_control_uses_runtime_flag() {
 
     assert_eq!(
         backend.command_args(),
-        vec!["app-server", "--remote-control", "--listen", "unix://"]
+        vec!["app-server", "--listen", "unix://"]
     );
 }
 
