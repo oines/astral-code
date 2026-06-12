@@ -8,6 +8,10 @@ export type ModelListParams = {
  */
 cursor?: string | null,
 /**
+ * Optional provider id to list models for. Omitted means the thread's active provider.
+ */
+modelProvider?: string | null,
+/**
  * Optional page size; defaults to a reasonable server-side value.
  */
 limit?: number | null,

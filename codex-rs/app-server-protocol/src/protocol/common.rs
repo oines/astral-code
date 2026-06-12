@@ -2586,6 +2586,7 @@ mod tests {
                 "params": {
                     "limit": null,
                     "cursor": null,
+                    "modelProvider": null,
                     "includeHidden": null
                 }
             }),

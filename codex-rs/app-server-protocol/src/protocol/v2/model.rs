@@ -45,6 +45,9 @@ pub struct ModelListParams {
     /// Opaque pagination cursor returned by a previous call.
     #[ts(optional = nullable)]
     pub cursor: Option<String>,
+    /// Optional provider id to list models for. Omitted means the thread's active provider.
+    #[ts(optional = nullable)]
+    pub model_provider: Option<String>,
     /// Optional page size; defaults to a reasonable server-side value.
     #[ts(optional = nullable)]
     pub limit: Option<u32>,

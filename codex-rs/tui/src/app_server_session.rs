@@ -252,6 +252,7 @@ impl AppServerSession {
                 request_id: model_request_id,
                 params: ModelListParams {
                     cursor: None,
+                    model_provider: None,
                     limit: None,
                     include_hidden: Some(true),
                 },

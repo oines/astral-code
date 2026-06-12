@@ -1,5 +1,8 @@
 use super::*;
+use crate::models::supported_models_from_manager;
 use codex_config::config_toml::ConfigToml;
+use codex_model_provider::create_model_provider;
+use codex_models_manager::manager::RefreshStrategy;
 use futures::StreamExt;
 
 #[derive(Clone)]
@@ -14,6 +17,16 @@ pub(crate) struct CatalogRequestProcessor {
 }
 
 const SKILLS_LIST_CWD_CONCURRENCY: usize = 5;
+
+fn safe_model_provider_cache_dir(model_provider_id: &str) -> String {
+    model_provider_id
+        .chars()
+        .map(|ch| match ch {
+            '/' | '\\' => '_',
+            _ => ch,
+        })
+        .collect()
+}
 
 fn skills_to_info(
     skills: &[codex_core::skills::SkillMetadata],
@@ -157,9 +170,14 @@ impl CatalogRequestProcessor {
         &self,
         params: ModelListParams,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
-        Self::list_models(self.thread_manager.clone(), self.config.clone(), params)
-            .await
-            .map(|response| Some(response.into()))
+        Self::list_models(
+            self.thread_manager.clone(),
+            self.config.clone(),
+            self.auth_manager.clone(),
+            params,
+        )
+        .await
+        .map(|response| Some(response.into()))
     }
 
     pub(crate) async fn experimental_feature_list(
@@ -248,20 +266,59 @@ impl CatalogRequestProcessor {
     async fn list_models(
         thread_manager: Arc<ThreadManager>,
         config: Arc<Config>,
+        auth_manager: Arc<AuthManager>,
         params: ModelListParams,
     ) -> Result<ModelListResponse, JSONRPCErrorError> {
         let ModelListParams {
             limit,
             cursor,
+            model_provider,
             include_hidden,
         } = params;
-        let models = supported_models(
-            thread_manager,
-            config.model_provider_id.clone(),
-            config.model_provider.name.clone(),
-            include_hidden.unwrap_or(false),
-        )
-        .await;
+        let include_hidden = include_hidden.unwrap_or(false);
+        let models = match model_provider.as_deref() {
+            None => {
+                supported_models(
+                    thread_manager,
+                    config.model_provider_id.clone(),
+                    config.model_provider.name.clone(),
+                    include_hidden,
+                )
+                .await
+            }
+            Some(model_provider_id) if model_provider_id == config.model_provider_id => {
+                supported_models(
+                    thread_manager,
+                    config.model_provider_id.clone(),
+                    config.model_provider.name.clone(),
+                    include_hidden,
+                )
+                .await
+            }
+            Some(model_provider_id) => {
+                let provider = config
+                    .model_providers
+                    .get(model_provider_id)
+                    .ok_or_else(|| {
+                        invalid_request(format!("unknown model provider: {model_provider_id}"))
+                    })?;
+                let cache_dir = config
+                    .codex_home
+                    .to_path_buf()
+                    .join("model_caches")
+                    .join(safe_model_provider_cache_dir(model_provider_id));
+                let models_manager = create_model_provider(provider.clone(), Some(auth_manager))
+                    .models_manager(cache_dir, config.model_catalog.clone());
+                supported_models_from_manager(
+                    models_manager,
+                    model_provider_id.to_string(),
+                    provider.name.clone(),
+                    include_hidden,
+                    RefreshStrategy::OnlineIfUncached,
+                )
+                .await
+            }
+        };
         let total = models.len();
 
         if total == 0 {

@@ -103,6 +103,7 @@ async fn list_models_returns_all_models_with_large_limit() -> Result<()> {
         .send_list_models_request(ModelListParams {
             limit: Some(100),
             cursor: None,
+            model_provider: None,
             include_hidden: None,
         })
         .await?;
@@ -137,6 +138,7 @@ async fn list_models_includes_hidden_models() -> Result<()> {
         .send_list_models_request(ModelListParams {
             limit: Some(100),
             cursor: None,
+            model_provider: None,
             include_hidden: Some(true),
         })
         .await?;
@@ -153,6 +155,86 @@ async fn list_models_includes_hidden_models() -> Result<()> {
     } = to_response::<ModelListResponse>(response)?;
 
     assert!(items.iter().any(|item| item.hidden));
+    assert!(next_cursor.is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn list_models_can_target_configured_model_provider() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    let catalog_path = codex_home.path().join("models.json");
+    let catalog = ModelsResponse {
+        models: vec![serde_json::from_value(json!({
+            "slug": "deepseek-v4-pro",
+            "display_name": "DeepSeek V4 Pro",
+            "description": "DeepSeek provider model",
+            "default_reasoning_level": "medium",
+            "supported_reasoning_levels": [{"effort": "medium", "description": "medium"}],
+            "shell_type": "shell_command",
+            "visibility": "list",
+            "minimal_client_version": [0, 1, 0],
+            "supported_in_api": true,
+            "priority": 0,
+            "upgrade": null,
+            "base_instructions": "base instructions",
+            "supports_reasoning_summaries": false,
+            "support_verbosity": false,
+            "default_verbosity": null,
+            "apply_patch_tool_type": null,
+            "truncation_policy": {"mode": "bytes", "limit": 10_000},
+            "supports_parallel_tool_calls": false,
+            "supports_image_detail_original": false,
+            "context_window": 128_000,
+            "max_context_window": 128_000,
+            "experimental_supported_tools": [],
+        }))?],
+    };
+    std::fs::write(&catalog_path, serde_json::to_string(&catalog)?)?;
+    std::fs::write(
+        codex_home.path().join("config.toml"),
+        format!(
+            r#"
+model = "deepseek-v4-pro"
+model_provider = "astral"
+model_catalog_json = "{}"
+
+[model_providers.deepseek]
+name = "DeepSeek"
+base_url = "https://api.deepseek.example/v1"
+env_key = "DEEPSEEK_API_KEY"
+wire_api = "chat_completions"
+"#,
+            catalog_path.display()
+        ),
+    )?;
+
+    let mut mcp = TestAppServer::new(codex_home.path()).await?;
+    timeout(DEFAULT_TIMEOUT, mcp.initialize()).await??;
+
+    let request_id = mcp
+        .send_list_models_request(ModelListParams {
+            limit: Some(100),
+            cursor: None,
+            model_provider: Some("deepseek".to_string()),
+            include_hidden: Some(true),
+        })
+        .await?;
+
+    let response: JSONRPCResponse = timeout(
+        DEFAULT_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+    )
+    .await??;
+
+    let ModelListResponse {
+        data: items,
+        next_cursor,
+    } = to_response::<ModelListResponse>(response)?;
+
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].model_provider, "deepseek");
+    assert_eq!(items[0].model_provider_name, "DeepSeek");
+    assert_eq!(items[0].model, "deepseek-v4-pro");
     assert!(next_cursor.is_none());
     Ok(())
 }
@@ -224,6 +306,7 @@ openai_base_url = "{server_uri}/v1"
         .send_list_models_request(ModelListParams {
             limit: Some(100),
             cursor: None,
+            model_provider: None,
             include_hidden: None,
         })
         .await?;
@@ -286,6 +369,7 @@ async fn list_models_pagination_works() -> Result<()> {
             .send_list_models_request(ModelListParams {
                 limit: Some(1),
                 cursor: cursor.clone(),
+                model_provider: None,
                 include_hidden: None,
             })
             .await?;
@@ -330,6 +414,7 @@ async fn list_models_rejects_invalid_cursor() -> Result<()> {
         .send_list_models_request(ModelListParams {
             limit: None,
             cursor: Some("invalid".to_string()),
+            model_provider: None,
             include_hidden: None,
         })
         .await?;

@@ -4217,3 +4217,53 @@ CARGO_INCREMENTAL=0 just test -p codex-app-server-protocol
 - 还没有完成完整的 provider 分组 picker；下一步要么扩展 `model/list` 支持按 provider / all providers 查询，
   要么在 TUI 里增加 provider 分组和按需刷新。这个阶段没有触碰 exec-server、PTY、sandbox、Plan/Goal、MCP 等
   Codex 骨架边界。
+
+## 最新补充 60：`model/list` 支持显式指定 provider
+
+继续推进 `/model` 热切换，不做无边界重写。
+
+已完成：
+
+- app-server v2 `ModelListParams` 新增可选字段：
+  - `modelProvider`
+- `model/list` 行为：
+  - 不传 `modelProvider`：保持原行为，列当前 thread/provider 的模型。
+  - 传当前 provider：仍复用当前 `ThreadManager` 的 `ModelsManager`。
+  - 传其他已配置 provider：临时构造该 provider 的 `ModelsManager`，并把模型响应标记为该 provider。
+- 非当前 provider 的模型目录缓存使用隔离目录：
+  - `$ASTRAL_HOME/model_caches/<provider-id>/models_cache.json`
+  - 避免把 DeepSeek 的 `/models` 缓存误当成其他厂商的模型列表。
+- provider id 会先转成安全目录名，避免配置 key 中的 `/` 或 `\` 穿出缓存目录。
+
+新增测试：
+
+- `list_models_can_target_configured_model_provider`
+  - 在测试配置中添加 `model_providers.deepseek`。
+  - 通过 `model_catalog_json` 注入用户声明的 `deepseek-v4-pro`。
+  - 请求 `model/list` 时传 `modelProvider = "deepseek"`。
+  - 断言响应模型带：
+    - `model_provider = "deepseek"`
+    - `model_provider_name = "DeepSeek"`
+    - `model = "deepseek-v4-pro"`
+
+验证命令：
+
+```bash
+CARGO_INCREMENTAL=0 just test -p codex-app-server list_models_can_target_configured_model_provider
+just write-app-server-schema
+CARGO_INCREMENTAL=0 just test -p codex-app-server-protocol serialize_list_models
+```
+
+结果：
+
+- app-server targeted test：1 passed
+- protocol serialization targeted test：1 passed
+- 本轮 full protocol 曾跑到 221/222 passed，唯一失败是新增 nullable `modelProvider` 后旧 JSON 断言未更新；修正后 targeted test passed。
+
+意义：
+
+- TUI 之后可以实现真正的 provider 分组/按需刷新，而不是启动时扫所有 provider。
+- 这个设计保留了 Codex 的 thread/app-server 架构，只是在 catalog RPC 增加 provider 维度。
+- `/model` 热切换链路现在已有两段基础：
+  1. catalog item 能携带 provider。
+  2. app-server 能按指定 provider 返回模型列表。
