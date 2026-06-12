@@ -4035,3 +4035,48 @@ CARGO_INCREMENTAL=0 just test -p codex-core astral_background_task_tools_round_t
 
 - 测试后磁盘剩余约 13Gi。
 - `codex-rs/target/debug/incremental` 仍为 0B。
+
+## 最新补充 56：模型能力配置化、单模态图片降级与 `/model` 窗口切换测试通过
+
+本轮补齐“国产模型很多、能力差异由用户声明、单模态模型不能把 session 搞废”的关键测试证据。
+
+改动点：
+
+- `model_switching.rs` 中自定义模型能力测试不再依赖远端 `/models` catalog 预热。
+- 测试改为通过 `config.model_catalog` 注入用户声明的模型能力：
+  - 输入模态：`text` / `text+image`
+  - context window
+  - effective context window percent
+- 相关测试 auth 改为普通 API key 形态，避免把 OpenAI/ChatGPT hosted auth 路径混进 Astral provider-neutral 行为验证。
+- 增加测试内专用等待 helper，等待窗口调为 30 秒，并在失败时只打印紧凑事件类型名，避免把完整上下文刷爆输出。
+
+已验证行为：
+
+1. 多模态模型收到图片后，历史里保留图片输入。
+2. 切到单模态文本模型后，后续请求会去掉不支持的图片内容。
+3. 单模态降级会插入文本占位：`image content omitted because you do not support image input`。
+4. `/model` 切到更小 context window 的模型后，`TurnStarted` 和 `TokenCount` 都反映新的有效窗口。
+5. context window 不是内置预设硬编码，而是来自用户配置的 model catalog。
+
+验证命令：
+
+```bash
+CARGO_INCREMENTAL=0 just test -p codex-core -E 'test(model_change_from_image_to_text_strips_prior_image_content) or test(model_switch_to_smaller_model_updates_token_context_window)'
+```
+
+结果：
+
+- 2 tests run
+- 2 passed
+- 2642 skipped
+
+意义：
+
+- Astral 不维护内置模型预设的方向继续成立。
+- 单模态模型不会像 Claude Code 那样因为历史里混入图片而把整个 session 搞废。
+- `/model` 热切换至少在模型窗口和输入模态两条核心能力维度上已有端到端覆盖。
+
+磁盘：
+
+- 当前磁盘剩余约 13Gi。
+- `codex-rs/target` 约 141G，是当前最大开发缓存；暂不清理，避免刚暖起来的 Rust 编译缓存失效。

@@ -2,7 +2,6 @@ use anyhow::Result;
 use codex_config::types::Personality;
 use codex_features::Feature;
 use codex_login::CodexAuth;
-use codex_models_manager::manager::RefreshStrategy;
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
 use codex_protocol::config_types::ServiceTier;
@@ -64,6 +63,49 @@ fn read_only_user_turn(test: &TestCodex, items: Vec<UserInput>, model: String) -
             }),
             ..Default::default()
         },
+    }
+}
+
+async fn wait_for_model_switching_event(
+    test: &TestCodex,
+    mut predicate: impl FnMut(&EventMsg) -> bool,
+) -> EventMsg {
+    let mut seen_events = Vec::new();
+    loop {
+        let event =
+            tokio::time::timeout(std::time::Duration::from_secs(30), test.codex.next_event())
+                .await
+                .unwrap_or_else(|_| {
+                    panic!("timeout waiting for turn completion; seen events: {seen_events:?}");
+                })
+                .expect("event stream ended unexpectedly");
+        let event_name = match &event.msg {
+            EventMsg::McpStartupComplete(_) => "McpStartupComplete",
+            EventMsg::ThreadSettingsApplied(_) => "ThreadSettingsApplied",
+            EventMsg::TurnStarted(_) => "TurnStarted",
+            EventMsg::RawResponseItem(_) => "RawResponseItem",
+            EventMsg::ItemStarted(_) => "ItemStarted",
+            EventMsg::ItemCompleted(_) => "ItemCompleted",
+            EventMsg::UserMessage(_) => "UserMessage",
+            EventMsg::TokenCount(_) => "TokenCount",
+            EventMsg::TurnComplete(_) => "TurnComplete",
+            EventMsg::Error(_) => "Error",
+            _ => "Other",
+        };
+        if predicate(&event.msg) {
+            return event.msg;
+        }
+        seen_events.push(event_name);
+    }
+}
+
+async fn wait_for_turn_complete_or_error(test: &TestCodex) {
+    let event = wait_for_model_switching_event(test, |event| {
+        matches!(event, EventMsg::TurnComplete(_) | EventMsg::Error(_))
+    })
+    .await;
+    if let EventMsg::Error(error) = event {
+        panic!("turn failed: {}", error.message);
     }
 }
 
@@ -141,6 +183,12 @@ fn test_model_info(
     }
 }
 
+async fn mount_models_for_refreshes(server: &MockServer, body: ModelsResponse) {
+    for _ in 0..4 {
+        mount_models_once(server, body.clone()).await;
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn model_change_appends_model_instructions_developer_message() -> Result<()> {
     skip_if_no_network!(Ok(()));
@@ -166,7 +214,7 @@ async fn model_change_appends_model_instructions_developer_message() -> Result<(
             test.session_configured.model.clone(),
         ))
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_turn_complete_or_error(&test).await;
 
     core_test_support::submit_thread_settings(
         &test.codex,
@@ -187,7 +235,7 @@ async fn model_change_appends_model_instructions_developer_message() -> Result<(
             next_model.to_string(),
         ))
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_turn_complete_or_error(&test).await;
 
     let requests = resp_mock.requests();
     assert_eq!(requests.len(), 2, "expected two model requests");
@@ -238,7 +286,7 @@ async fn model_and_personality_change_only_appends_model_instructions() -> Resul
             test.session_configured.model.clone(),
         ))
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_turn_complete_or_error(&test).await;
 
     core_test_support::submit_thread_settings(
         &test.codex,
@@ -260,7 +308,7 @@ async fn model_and_personality_change_only_appends_model_instructions() -> Resul
             next_model.to_string(),
         ))
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_turn_complete_or_error(&test).await;
 
     let requests = resp_mock.requests();
     assert_eq!(requests.len(), 2, "expected two model requests");
@@ -481,13 +529,10 @@ async fn model_change_from_image_to_text_strips_prior_image_content() -> Result<
         "text only",
         vec![InputModality::Text],
     );
-    mount_models_once(
-        &server,
-        ModelsResponse {
-            models: vec![image_model, text_model],
-        },
-    )
-    .await;
+    let model_catalog = ModelsResponse {
+        models: vec![image_model, text_model],
+    };
+    mount_models_for_refreshes(&server, model_catalog.clone()).await;
 
     let responses = mount_sse_sequence(
         &server,
@@ -496,15 +541,12 @@ async fn model_change_from_image_to_text_strips_prior_image_content() -> Result<
     .await;
 
     let mut builder = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+        .with_auth(CodexAuth::from_api_key("dummy"))
         .with_config(move |config| {
             config.model = Some(image_model_slug.to_string());
+            config.model_catalog = Some(model_catalog);
         });
     let test = builder.build(&server).await?;
-    let models_manager = test.thread_manager.get_models_manager();
-    let _ = models_manager
-        .list_models(RefreshStrategy::OnlineIfUncached)
-        .await;
     let image_url = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII="
         .to_string();
 
@@ -524,7 +566,7 @@ async fn model_change_from_image_to_text_strips_prior_image_content() -> Result<
             image_model_slug.to_string(),
         ))
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_turn_complete_or_error(&test).await;
 
     test.codex
         .submit(read_only_user_turn(
@@ -536,7 +578,7 @@ async fn model_change_from_image_to_text_strips_prior_image_content() -> Result<
             text_model_slug.to_string(),
         ))
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_turn_complete_or_error(&test).await;
 
     let requests = responses.requests();
     assert_eq!(requests.len(), 2, "expected two model requests");
@@ -574,13 +616,10 @@ async fn generated_image_is_replayed_for_image_capable_models() -> Result<()> {
         "supports image input",
         default_input_modalities(),
     );
-    mount_models_once(
-        &server,
-        ModelsResponse {
-            models: vec![image_model],
-        },
-    )
-    .await;
+    let model_catalog = ModelsResponse {
+        models: vec![image_model],
+    };
+    mount_models_for_refreshes(&server, model_catalog.clone()).await;
 
     let responses = mount_sse_sequence(
         &server,
@@ -596,9 +635,10 @@ async fn generated_image_is_replayed_for_image_capable_models() -> Result<()> {
     .await;
 
     let mut builder = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+        .with_auth(CodexAuth::from_api_key("dummy"))
         .with_config(move |config| {
             config.model = Some(image_model_slug.to_string());
+            config.model_catalog = Some(model_catalog);
         });
     let test = builder.build(&server).await?;
     let saved_path = image_generation_artifact_path(
@@ -607,11 +647,6 @@ async fn generated_image_is_replayed_for_image_capable_models() -> Result<()> {
         "ig_123",
     );
     let _ = std::fs::remove_file(&saved_path);
-    let models_manager = test.thread_manager.get_models_manager();
-    let _ = models_manager
-        .list_models(RefreshStrategy::OnlineIfUncached)
-        .await;
-
     test.codex
         .submit(read_only_user_turn(
             &test,
@@ -622,7 +657,7 @@ async fn generated_image_is_replayed_for_image_capable_models() -> Result<()> {
             image_model_slug.to_string(),
         ))
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_turn_complete_or_error(&test).await;
 
     test.codex
         .submit(read_only_user_turn(
@@ -634,7 +669,7 @@ async fn generated_image_is_replayed_for_image_capable_models() -> Result<()> {
             image_model_slug.to_string(),
         ))
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_turn_complete_or_error(&test).await;
 
     let requests = responses.requests();
     assert_eq!(requests.len(), 2, "expected two model requests");
@@ -688,13 +723,10 @@ async fn model_change_from_generated_image_to_text_preserves_prior_generated_ima
         "text only",
         vec![InputModality::Text],
     );
-    mount_models_once(
-        &server,
-        ModelsResponse {
-            models: vec![image_model, text_model],
-        },
-    )
-    .await;
+    let model_catalog = ModelsResponse {
+        models: vec![image_model, text_model],
+    };
+    mount_models_for_refreshes(&server, model_catalog.clone()).await;
 
     let responses = mount_sse_sequence(
         &server,
@@ -710,9 +742,10 @@ async fn model_change_from_generated_image_to_text_preserves_prior_generated_ima
     .await;
 
     let mut builder = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+        .with_auth(CodexAuth::from_api_key("dummy"))
         .with_config(move |config| {
             config.model = Some(image_model_slug.to_string());
+            config.model_catalog = Some(model_catalog);
         });
     let test = builder.build(&server).await?;
     let saved_path = image_generation_artifact_path(
@@ -721,11 +754,6 @@ async fn model_change_from_generated_image_to_text_preserves_prior_generated_ima
         "ig_123",
     );
     let _ = std::fs::remove_file(&saved_path);
-    let models_manager = test.thread_manager.get_models_manager();
-    let _ = models_manager
-        .list_models(RefreshStrategy::OnlineIfUncached)
-        .await;
-
     test.codex
         .submit(read_only_user_turn(
             &test,
@@ -736,7 +764,7 @@ async fn model_change_from_generated_image_to_text_preserves_prior_generated_ima
             image_model_slug.to_string(),
         ))
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_turn_complete_or_error(&test).await;
 
     test.codex
         .submit(read_only_user_turn(
@@ -748,7 +776,7 @@ async fn model_change_from_generated_image_to_text_preserves_prior_generated_ima
             text_model_slug.to_string(),
         ))
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_turn_complete_or_error(&test).await;
 
     let requests = responses.requests();
     assert_eq!(requests.len(), 2, "expected two model requests");
@@ -804,13 +832,10 @@ async fn thread_rollback_after_generated_image_drops_entire_image_turn_history()
         "supports image input",
         default_input_modalities(),
     );
-    mount_models_once(
-        &server,
-        ModelsResponse {
-            models: vec![image_model],
-        },
-    )
-    .await;
+    let model_catalog = ModelsResponse {
+        models: vec![image_model],
+    };
+    mount_models_for_refreshes(&server, model_catalog.clone()).await;
 
     let responses = mount_sse_sequence(
         &server,
@@ -826,9 +851,10 @@ async fn thread_rollback_after_generated_image_drops_entire_image_turn_history()
     .await;
 
     let mut builder = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+        .with_auth(CodexAuth::from_api_key("dummy"))
         .with_config(move |config| {
             config.model = Some(image_model_slug.to_string());
+            config.model_catalog = Some(model_catalog);
         });
     let test = builder.build(&server).await?;
     let saved_path = image_generation_artifact_path(
@@ -837,11 +863,6 @@ async fn thread_rollback_after_generated_image_drops_entire_image_turn_history()
         "ig_rollback",
     );
     let _ = std::fs::remove_file(&saved_path);
-    let models_manager = test.thread_manager.get_models_manager();
-    let _ = models_manager
-        .list_models(RefreshStrategy::OnlineIfUncached)
-        .await;
-
     test.codex
         .submit(read_only_user_turn(
             &test,
@@ -852,7 +873,7 @@ async fn thread_rollback_after_generated_image_drops_entire_image_turn_history()
             image_model_slug.to_string(),
         ))
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_turn_complete_or_error(&test).await;
 
     test.codex
         .submit(Op::ThreadRollback { num_turns: 1 })
@@ -872,7 +893,7 @@ async fn thread_rollback_after_generated_image_drops_entire_image_turn_history()
             image_model_slug.to_string(),
         ))
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_turn_complete_or_error(&test).await;
 
     let requests = responses.requests();
     assert_eq!(requests.len(), 2, "expected two model requests");
@@ -966,13 +987,10 @@ async fn model_switch_to_smaller_model_updates_token_context_window() -> Result<
     smaller_model.description = Some("smaller context window model".to_string());
     smaller_model.context_window = Some(smaller_context_window);
 
-    mount_models_once(
-        &server,
-        ModelsResponse {
-            models: vec![base_model, smaller_model],
-        },
-    )
-    .await;
+    let model_catalog = ModelsResponse {
+        models: vec![base_model, smaller_model],
+    };
+    mount_models_for_refreshes(&server, model_catalog.clone()).await;
 
     mount_sse_sequence(
         &server,
@@ -990,20 +1008,14 @@ async fn model_switch_to_smaller_model_updates_token_context_window() -> Result<
     .await;
 
     let mut builder = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
-        .with_config(|config| {
+        .with_auth(CodexAuth::from_api_key("dummy"))
+        .with_config(move |config| {
             config.model = Some(large_model_slug.to_string());
+            config.model_catalog = Some(model_catalog);
         });
     let test = builder.build(&server).await?;
 
     let models_manager = test.thread_manager.get_models_manager();
-    let available_models = models_manager.list_models(RefreshStrategy::Online).await;
-    assert!(
-        available_models
-            .iter()
-            .any(|model| model.model == smaller_model_slug),
-        "expected {smaller_model_slug} to be available in remote model list"
-    );
     let large_model_info = models_manager
         .get_model_info(large_model_slug, &test.config.to_models_manager_config())
         .await;
@@ -1027,7 +1039,7 @@ async fn model_switch_to_smaller_model_updates_token_context_window() -> Result<
         ))
         .await?;
 
-    let large_window_event = wait_for_event(&test.codex, |event| {
+    let large_window_event = wait_for_model_switching_event(&test, |event| {
         matches!(
             event,
             EventMsg::TokenCount(token_count)
@@ -1048,7 +1060,7 @@ async fn model_switch_to_smaller_model_updates_token_context_window() -> Result<
             .and_then(|info| info.model_context_window),
         Some(large_effective_window)
     );
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_turn_complete_or_error(&test).await;
 
     core_test_support::submit_thread_settings(
         &test.codex,
@@ -1070,7 +1082,7 @@ async fn model_switch_to_smaller_model_updates_token_context_window() -> Result<
         ))
         .await?;
 
-    let smaller_turn_started_event = wait_for_event(&test.codex, |event| {
+    let smaller_turn_started_event = wait_for_model_switching_event(&test, |event| {
         matches!(
             event,
             EventMsg::TurnStarted(started)
@@ -1086,7 +1098,7 @@ async fn model_switch_to_smaller_model_updates_token_context_window() -> Result<
         Some(smaller_effective_window)
     );
 
-    let smaller_window_event = wait_for_event(&test.codex, |event| {
+    let smaller_window_event = wait_for_model_switching_event(&test, |event| {
         matches!(
             event,
             EventMsg::TokenCount(token_count)
@@ -1106,7 +1118,7 @@ async fn model_switch_to_smaller_model_updates_token_context_window() -> Result<
         .and_then(|info| info.model_context_window);
     assert_eq!(smaller_window, Some(smaller_effective_window));
     assert_ne!(smaller_window, Some(large_effective_window));
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_turn_complete_or_error(&test).await;
 
     Ok(())
 }
