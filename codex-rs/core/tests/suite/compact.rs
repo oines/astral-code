@@ -305,6 +305,16 @@ fn chat_completions_mock_model_provider(server: &MockServer) -> ModelProviderInf
     }
 }
 
+fn anthropic_messages_mock_model_provider(server: &MockServer) -> ModelProviderInfo {
+    ModelProviderInfo {
+        name: "Anthropic messages mock".into(),
+        base_url: Some(format!("{}/v1", server.uri())),
+        wire_api: WireApi::AnthropicMessages,
+        supports_websockets: false,
+        ..ModelProviderInfo::default()
+    }
+}
+
 fn chat_completions_text_sse(id: &str, text: &str) -> String {
     [
         format!(
@@ -335,7 +345,53 @@ fn chat_completions_text_sse(id: &str, text: &str) -> String {
     .join("")
 }
 
-async fn mount_chat_completions_sse_sequence(server: &MockServer, bodies: Vec<String>) {
+fn anthropic_messages_text_sse(id: &str, text: &str) -> String {
+    [
+        format!(
+            "data: {}\n\n",
+            json!({
+                "type": "message_start",
+                "message": { "id": id, "model": "astral-test-model" }
+            })
+        ),
+        format!(
+            "data: {}\n\n",
+            json!({
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": { "type": "text", "text": "" }
+            })
+        ),
+        format!(
+            "data: {}\n\n",
+            json!({
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": { "type": "text_delta", "text": text }
+            })
+        ),
+        format!(
+            "data: {}\n\n",
+            json!({ "type": "content_block_stop", "index": 0 })
+        ),
+        format!(
+            "data: {}\n\n",
+            json!({
+                "type": "message_delta",
+                "delta": { "stop_reason": "end_turn" },
+                "usage": { "input_tokens": 13, "output_tokens": 5 }
+            })
+        ),
+        "data: {\"type\":\"message_stop\"}\n\n".to_string(),
+    ]
+    .join("")
+}
+
+async fn mount_provider_neutral_sse_sequence(
+    server: &MockServer,
+    endpoint_pattern: &str,
+    bodies: Vec<String>,
+) {
     struct SeqResponder {
         num_calls: AtomicUsize,
         responses: Vec<String>,
@@ -360,12 +416,20 @@ async fn mount_chat_completions_sse_sequence(server: &MockServer, bodies: Vec<St
     };
 
     Mock::given(method("POST"))
-        .and(path_regex(".*/chat/completions$"))
+        .and(path_regex(endpoint_pattern))
         .respond_with(responder)
         .up_to_n_times(num_calls as u64)
         .expect(num_calls as u64)
         .mount(server)
         .await;
+}
+
+async fn mount_chat_completions_sse_sequence(server: &MockServer, bodies: Vec<String>) {
+    mount_provider_neutral_sse_sequence(server, ".*/chat/completions$", bodies).await;
+}
+
+async fn mount_anthropic_messages_sse_sequence(server: &MockServer, bodies: Vec<String>) {
+    mount_provider_neutral_sse_sequence(server, ".*/messages$", bodies).await;
 }
 
 fn model_info_with_context_window(slug: &str, context_window: i64) -> ModelInfo {
@@ -448,6 +512,50 @@ async fn assert_compaction_uses_turn_lifecycle_id(codex: &std::sync::Arc<codex_c
         "compaction item completion should use the turn event id"
     );
 }
+
+fn assert_provider_neutral_compact_request_bodies(
+    label: &str,
+    bodies: &[Value],
+    first_user_msg: &str,
+    final_user_msg: &str,
+) {
+    assert_eq!(bodies.len(), 3, "expected exactly three {label} requests");
+
+    let first_body = bodies[0].to_string();
+    let compact_body = bodies[1].to_string();
+    let follow_up_body = bodies[2].to_string();
+    let expected_summary_message = summary_with_prefix(SUMMARY_TEXT);
+
+    assert!(
+        body_contains_text(&first_body, first_user_msg),
+        "first {label} request should include the original user message"
+    );
+    assert!(
+        body_contains_text(&compact_body, SUMMARIZATION_PROMPT),
+        "compact {label} request should include the summarize trigger"
+    );
+    assert!(
+        body_contains_text(&follow_up_body, first_user_msg),
+        "post-compact {label} request should retain the original user message"
+    );
+    assert!(
+        body_contains_text(&follow_up_body, &expected_summary_message),
+        "post-compact {label} request should include the compacted summary"
+    );
+    assert!(
+        body_contains_text(&follow_up_body, final_user_msg),
+        "post-compact {label} request should include the new user message"
+    );
+    assert!(
+        !body_contains_text(&follow_up_body, FIRST_REPLY),
+        "post-compact {label} request should not retain pre-compact assistant output"
+    );
+    assert!(
+        !body_contains_text(&follow_up_body, SUMMARIZATION_PROMPT),
+        "post-compact {label} request should not retain the summarize trigger"
+    );
+}
+
 fn context_snapshot_options() -> ContextSnapshotOptions {
     ContextSnapshotOptions::default()
         .strip_capability_instructions()
@@ -723,44 +831,65 @@ async fn summarize_context_round_trips_through_chat_completions() {
         .filter(|request| request.url.path().ends_with("/chat/completions"))
         .map(request_body_json)
         .collect::<Vec<_>>();
-    assert_eq!(
-        chat_bodies.len(),
-        3,
-        "expected exactly three chat completions requests"
+    assert_provider_neutral_compact_request_bodies(
+        "chat completions",
+        &chat_bodies,
+        "hello world",
+        THIRD_USER_MSG,
     );
+}
 
-    let first_body = chat_bodies[0].to_string();
-    let compact_body = chat_bodies[1].to_string();
-    let follow_up_body = chat_bodies[2].to_string();
-    let expected_summary_message = summary_with_prefix(SUMMARY_TEXT);
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn summarize_context_round_trips_through_anthropic_messages() {
+    skip_if_no_network!();
 
-    assert!(
-        body_contains_text(&first_body, "hello world"),
-        "first chat request should include the original user message"
-    );
-    assert!(
-        body_contains_text(&compact_body, SUMMARIZATION_PROMPT),
-        "compact chat request should include the summarize trigger"
-    );
-    assert!(
-        body_contains_text(&follow_up_body, "hello world"),
-        "post-compact chat request should retain the original user message"
-    );
-    assert!(
-        body_contains_text(&follow_up_body, &expected_summary_message),
-        "post-compact chat request should include the compacted summary"
-    );
-    assert!(
-        body_contains_text(&follow_up_body, THIRD_USER_MSG),
-        "post-compact chat request should include the new user message"
-    );
-    assert!(
-        !body_contains_text(&follow_up_body, FIRST_REPLY),
-        "post-compact chat request should not retain pre-compact assistant output"
-    );
-    assert!(
-        !body_contains_text(&follow_up_body, SUMMARIZATION_PROMPT),
-        "post-compact chat request should not retain the summarize trigger"
+    let server = start_mock_server().await;
+    mount_anthropic_messages_sse_sequence(
+        &server,
+        vec![
+            anthropic_messages_text_sse("msg_1", FIRST_REPLY),
+            anthropic_messages_text_sse("msg_2", SUMMARY_TEXT),
+            anthropic_messages_text_sse("msg_3", FINAL_REPLY),
+        ],
+    )
+    .await;
+
+    let model_provider = anthropic_messages_mock_model_provider(&server);
+    let mut builder = test_codex().with_config(move |config| {
+        config.model_provider = model_provider;
+        set_test_compact_prompt(config);
+        config.model_auto_compact_token_limit = Some(200_000);
+    });
+    let test = builder.build(&server).await.unwrap();
+    let codex = test.codex.clone();
+
+    test.submit_turn("hello anthropic")
+        .await
+        .expect("submit first user turn");
+
+    codex.submit(Op::Compact).await.unwrap();
+    let warning_event = wait_for_event(&codex, |ev| matches!(ev, EventMsg::Warning(_))).await;
+    let EventMsg::Warning(WarningEvent { message }) = warning_event else {
+        panic!("expected warning event after compact");
+    };
+    assert_eq!(message, COMPACT_WARNING_MESSAGE);
+    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+
+    test.submit_turn(THIRD_USER_MSG)
+        .await
+        .expect("submit post-compact user turn");
+
+    let requests = server.received_requests().await.unwrap_or_default();
+    let message_bodies = requests
+        .iter()
+        .filter(|request| request.url.path().ends_with("/messages"))
+        .map(request_body_json)
+        .collect::<Vec<_>>();
+    assert_provider_neutral_compact_request_bodies(
+        "Anthropic messages",
+        &message_bodies,
+        "hello anthropic",
+        THIRD_USER_MSG,
     );
 }
 

@@ -4312,3 +4312,58 @@ CARGO_INCREMENTAL=0 just test -p codex-tui model_picker_hides_show_in_picker_fal
 - `/model` 已经具备不重启 TUI 的跨 provider 选择 UI 骨架。
 - provider 模型列表是按需加载，不会启动时扫所有厂商。
 - 仍然没有改 exec-server / PTY / sandbox / approval / Plan / Goal / MCP 等 Codex 骨架。
+
+## 最新补充 62：Anthropic Messages compact fixture 补齐
+
+继续按“最终可用验收”推进，没有继续扫历史 OpenAI 字符串，也没有重写 compact 设计。本轮补上
+local compact 在 Anthropic Messages / `/v1/messages` 请求形状下的 provider-neutral 集成证据。
+
+改动：
+
+- `codex-rs/core/tests/suite/compact.rs` 新增 Anthropic Messages mock provider：
+  - `wire_api = AnthropicMessages`
+  - base URL 指向 mock `/v1`
+  - 请求落到 `/v1/messages`
+- 新增最小 Anthropic stream fixture：
+  - `message_start`
+  - `content_block_start`
+  - `content_block_delta` / `text_delta`
+  - `content_block_stop`
+  - `message_delta` / `stop_reason = end_turn`
+  - `message_stop`
+- 将原 chat-completions SSE sequence responder 泛化为 provider-neutral helper，继续服务
+  `/chat/completions` 和 `/messages` 两条测试路径。
+- 新增 `summarize_context_round_trips_through_anthropic_messages`：
+  1. 第一轮用户输入走 `/v1/messages`，模型返回普通 assistant 文本。
+  2. 手动 `/compact`，第二次请求包含 `SUMMARIZATION_PROMPT`，模型返回摘要。
+  3. compact 后继续用户输入，第三次请求包含原始用户消息、`SUMMARY_PREFIX + SUMMARY_TEXT` 和新用户消息。
+  4. 第三次请求不再包含 compact 前 assistant 输出，也不再包含 `SUMMARIZATION_PROMPT`。
+- 把 chat-completions compact 测试和 Anthropic compact 测试的共同断言收敛到
+  `assert_provider_neutral_compact_request_bodies(...)`，避免两条 provider-neutral fixture 逻辑漂移。
+
+验证命令：
+
+```bash
+just fmt
+CARGO_INCREMENTAL=0 just test -p codex-core summarize_context_round_trips_through_anthropic_messages
+```
+
+结果：
+
+- `just fmt` 通过。
+- `codex-core::all suite::compact::summarize_context_round_trips_through_anthropic_messages` 通过。
+- 1 test run, 1 passed, 2645 skipped。
+
+意义：
+
+- local compact 现在不只在旧 Responses fixture 和 OpenAI-compatible `/v1/chat/completions` 下有证据，
+  在 Anthropic Messages `/v1/messages` 下也有真实请求形状验证。
+- 这进一步支持此前决策：compact 大方向继承 Codex local compact，不需要重做；剩余工作是少量旧
+  Responses integration fixture 迁移和最终 smoke，而不是重新设计 compact。
+- 没有触碰 exec-server、UnifiedExec、PTY、sandbox、approval、Plan、Goal、MCP、skills/plugins。
+
+磁盘：
+
+- 本轮 core test 重新编译较重，结束后磁盘剩余约 10Gi。
+- 已清理 Astral-Code 项目内低风险 `codex-rs/target/debug/incremental`，剩余空间回到约 11Gi。
+- 未清理 `target/debug/deps`，避免显著拖慢后续开发。
