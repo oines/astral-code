@@ -3973,3 +3973,65 @@ CARGO_INCREMENTAL=0 just test -p codex-core summarize_context_round_trips_throug
 - 本次 `codex-core` 窄测触发一次较长重编，用时约 8 分钟编译 + 17 秒测试。
 - 测试后磁盘剩余约 12Gi。
 - `codex-rs/target/debug/incremental` 仍为 0B；没有可清的低风险增量缓存。
+
+## 最新补充 55：后台任务工具闭环补齐，并暴露 Bash tty
+
+本轮继续推进“terminal agentic 体验要像 Codex 一样丝滑”的主线，补齐 Astral Claude-ish 后台任务工具的关键集成证据。
+
+新增行为：
+
+- `Bash` schema 新增 `tty: boolean`。
+  - 原因：如果命令会卡在 y/n、read、交互 prompt，模型必须知道可以申请 PTY。
+  - 没有 `tty` 时，底层 UnifiedExec 会关闭 stdin，`SendTaskInput` 会返回“stdin is closed for this session”。
+  - 这不是绕过 Codex，而是把 Codex 原本 `exec_command tty` 能力以 Astral/Claude-ish schema 暴露给模型。
+
+新增测试：
+
+- `codex-core::suite::unified_exec::astral_background_task_tools_round_trip_through_unified_exec`
+
+测试轨迹：
+
+1. 模型调用 `Bash`：
+   - command 启动一个等待 stdin 的 shell。
+   - `run_in_background = true`
+   - `tty = true`
+   - 返回 `Task running with task_id 1000`。
+2. 模型调用 `ListBackgroundTasks`：
+   - 返回 tasks 列表。
+   - 断言其中包含 `task_id = 1000` 且 `status = running`。
+3. 模型调用 `SendTaskInput`：
+   - 对 `task_id = 1000` 发送 `astral-input\n`。
+   - 断言仍复用同一个 task id，并能看到终端回显。
+4. 模型调用 `StopBackgroundTask`：
+   - 停止 `task_id = 1000`。
+   - 断言返回 `{ "task_id": 1000, "status": "stopped" }`。
+
+同时更新了测试解析器：
+
+- 旧 Codex 输出：`Process running with session ID ...`
+- Astral 输出：`Task running with task_id ...`
+
+现在两种格式都能解析，避免测试仍按旧 session 文案理解新 task 语义。
+
+验证命令：
+
+```bash
+CARGO_INCREMENTAL=0 just test -p codex-tools bash_schema_uses_claudeish_command_shape
+CARGO_INCREMENTAL=0 just test -p codex-core astral_background_task_tools_round_trip_through_unified_exec
+```
+
+结果：
+
+- `codex-tools` schema 单测：1 passed, 96 skipped。
+- `codex-core` 后台任务集成测试：1 passed, 2643 skipped。
+
+关于 `ReadTaskOutput`：
+
+- `ReadTaskOutput` 的 schema、参数重写和 legacy `write_stdin` 空 poll 映射已有单元测试覆盖。
+- 真实 DeepSeek smoke 里也已经跑通过 `ReadTaskOutput` 轮询后台输出并接着 `StopBackgroundTask`。
+- 本轮新增 integration 重点覆盖之前缺口：`Bash` task id、`ListBackgroundTasks`、交互 stdin、停止任务，以及 `tty` 这个真实 y/n 场景的必要开关。
+
+磁盘：
+
+- 测试后磁盘剩余约 13Gi。
+- `codex-rs/target/debug/incremental` 仍为 0B。

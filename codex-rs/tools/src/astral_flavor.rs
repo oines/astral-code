@@ -100,6 +100,10 @@ fn bash_tool() -> AgentTool {
                     "run_in_background",
                     "Set true for long-running commands that should keep running while you monitor output separately",
                 ),
+                bool_property(
+                    "tty",
+                    "Allocate a PTY for interactive commands that need follow-up input",
+                ),
                 string_property(
                     "environment_id",
                     "Optional target execution environment id when multiple environments exist",

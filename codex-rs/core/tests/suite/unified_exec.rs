@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs;
 use std::sync::OnceLock;
+use std::time::Instant;
 
 use anyhow::Context;
 use anyhow::Result;
@@ -75,7 +76,7 @@ fn parse_unified_exec_output(raw: &str) -> Result<ParsedUnifiedExecOutput> {
             r#"(?:Chunk ID: (?P<chunk_id>[^\n]+)\n)?"#,
             r#"Wall time: (?P<wall_time>-?\d+(?:\.\d+)?) seconds\n"#,
             r#"(?:Process exited with code (?P<exit_code>-?\d+)\n)?"#,
-            r#"(?:Process running with session ID (?P<process_id>-?\d+)\n)?"#,
+            r#"(?:(?:Process running with session ID|Task running with task_id) (?P<process_id>-?\d+)\n)?"#,
             r#"(?:Original token count: (?P<original_token_count>\d+)\n)?"#,
             r#"Output:\n?(?P<output>.*)$"#,
         ))
@@ -158,6 +159,26 @@ fn collect_tool_outputs(bodies: &[Value]) -> Result<HashMap<String, ParsedUnifie
                     })?;
                     outputs.insert(call_id.to_string(), parsed);
                 }
+            }
+        }
+    }
+    Ok(outputs)
+}
+
+fn collect_function_output_texts(bodies: &[Value]) -> Result<HashMap<String, String>> {
+    let mut outputs = HashMap::new();
+    for body in bodies {
+        if let Some(items) = body.get("input").and_then(Value::as_array) {
+            for item in items {
+                if item.get("type").and_then(Value::as_str) != Some("function_call_output") {
+                    continue;
+                }
+                let Some(call_id) = item.get("call_id").and_then(Value::as_str) else {
+                    continue;
+                };
+                let content = extract_output_text(item)
+                    .ok_or_else(|| anyhow::anyhow!("missing tool output content"))?;
+                outputs.insert(call_id.to_string(), content.to_string());
             }
         }
     }
@@ -1075,6 +1096,176 @@ async fn unified_exec_emits_terminal_interaction_for_write_stdin() -> Result<()>
         .and_then(Value::as_str)
         .expect("stdin chars");
     assert_eq!(delta.stdin, expected_stdin);
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn astral_background_task_tools_round_trip_through_unified_exec() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    skip_if_sandbox!(Ok(()));
+    skip_if_windows!(Ok(()));
+
+    let server = start_mock_server().await;
+
+    let mut builder = test_codex().with_config(|config| {
+        config
+            .features
+            .enable(Feature::UnifiedExec)
+            .expect("test config should allow feature update");
+    });
+    let test = builder.build(&server).await?;
+
+    let start_call_id = "astral-bash-start";
+    let list_call_id = "astral-list-tasks";
+    let send_call_id = "astral-send-input";
+    let stop_call_id = "astral-stop-task";
+    let task_id = 1000;
+    let start_args = json!({
+        "command": "/bin/sh -c 'printf \"READY\\n\"; IFS= read line; sleep 1; printf \"GOT:%s\\n\" \"$line\"; sleep 60'",
+        "run_in_background": true,
+        "tty": true,
+    });
+    let list_args = json!({});
+    let send_args = json!({
+        "task_id": task_id,
+        "input": "astral-input\n",
+        "yield_time_ms": 100,
+    });
+    let stop_args = json!({
+        "task_id": task_id,
+    });
+
+    let responses = vec![
+        sse(vec![
+            ev_response_created("resp-1"),
+            ev_function_call(start_call_id, "Bash", &serde_json::to_string(&start_args)?),
+            ev_completed("resp-1"),
+        ]),
+        sse(vec![
+            ev_response_created("resp-2"),
+            ev_function_call(
+                list_call_id,
+                "ListBackgroundTasks",
+                &serde_json::to_string(&list_args)?,
+            ),
+            ev_completed("resp-2"),
+        ]),
+        sse(vec![
+            ev_response_created("resp-3"),
+            ev_function_call(
+                send_call_id,
+                "SendTaskInput",
+                &serde_json::to_string(&send_args)?,
+            ),
+            ev_completed("resp-3"),
+        ]),
+        sse(vec![
+            ev_response_created("resp-4"),
+            ev_function_call(
+                stop_call_id,
+                "StopBackgroundTask",
+                &serde_json::to_string(&stop_args)?,
+            ),
+            ev_completed("resp-4"),
+        ]),
+        sse(vec![
+            ev_response_created("resp-5"),
+            ev_assistant_message("msg-1", "background task complete"),
+            ev_completed("resp-5"),
+        ]),
+    ];
+    let request_log = mount_sse_sequence(&server, responses).await;
+
+    submit_unified_exec_turn(
+        &test,
+        "exercise Astral background task tools",
+        PermissionProfile::Disabled,
+    )
+    .await?;
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let mut observed_events = Vec::new();
+    loop {
+        let remaining = deadline
+            .checked_duration_since(Instant::now())
+            .unwrap_or_default();
+        if remaining.is_zero() {
+            panic!(
+                "timed out waiting for Astral background task turn to complete; observed {observed_events:?}; response requests: {}",
+                request_log.requests().len()
+            );
+        }
+        let event = match tokio::time::timeout(remaining, test.codex.next_event()).await {
+            Ok(Ok(event)) => event.msg,
+            Ok(Err(err)) => panic!("event stream ended unexpectedly: {err}"),
+            Err(_) => panic!(
+                "timed out waiting for Astral background task turn to complete; observed {observed_events:?}; response requests: {}",
+                request_log.requests().len()
+            ),
+        };
+        observed_events.push(format!("{event:?}"));
+        if matches!(event, EventMsg::TurnComplete(_)) {
+            break;
+        }
+    }
+
+    let requests = request_log.requests();
+    assert!(!requests.is_empty(), "expected model follow-up requests");
+    let bodies = requests
+        .into_iter()
+        .map(|request| request.body_json())
+        .collect::<Vec<_>>();
+    let raw_outputs = collect_function_output_texts(&bodies)?;
+
+    let start_output = raw_outputs
+        .get(start_call_id)
+        .expect("missing Bash tool output");
+    let parsed_start = parse_unified_exec_output(start_output)?;
+    assert_eq!(
+        parsed_start.process_id.as_deref(),
+        Some("1000"),
+        "Bash should return the background task id through unified exec"
+    );
+    assert!(
+        parsed_start.output.contains("READY"),
+        "Bash output should include initial command output; got {parsed_start:?}"
+    );
+
+    let list_output = raw_outputs
+        .get(list_call_id)
+        .expect("missing ListBackgroundTasks output");
+    let listed: Value = serde_json::from_str(list_output)?;
+    let tasks = listed["tasks"]
+        .as_array()
+        .expect("ListBackgroundTasks output should contain tasks array");
+    assert!(
+        tasks.iter().any(|task| {
+            task.get("task_id").and_then(Value::as_i64) == Some(i64::from(task_id))
+                && task.get("status").and_then(Value::as_str) == Some("running")
+        }),
+        "ListBackgroundTasks should include the running task; got {listed}"
+    );
+
+    let send_output = raw_outputs
+        .get(send_call_id)
+        .expect("missing SendTaskInput output");
+    let parsed_send = parse_unified_exec_output(send_output)?;
+    assert_eq!(
+        parsed_send.process_id.as_deref(),
+        Some("1000"),
+        "SendTaskInput should keep the same background task id"
+    );
+    assert!(
+        parsed_send.output.contains("astral-input"),
+        "SendTaskInput should capture terminal echo from stdin; got {parsed_send:?}"
+    );
+
+    let stop_output = raw_outputs
+        .get(stop_call_id)
+        .expect("missing StopBackgroundTask output");
+    let stopped: Value = serde_json::from_str(stop_output)?;
+    assert_eq!(stopped["task_id"].as_i64(), Some(i64::from(task_id)));
+    assert_eq!(stopped["status"].as_str(), Some("stopped"));
+
     Ok(())
 }
 
