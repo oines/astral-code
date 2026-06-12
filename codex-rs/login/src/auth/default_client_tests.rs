@@ -4,8 +4,8 @@ use core_test_support::skip_if_no_network;
 use pretty_assertions::assert_eq;
 
 #[test]
-fn test_get_codex_user_agent() {
-    let user_agent = get_codex_user_agent();
+fn test_get_astral_user_agent() {
+    let user_agent = get_astral_user_agent();
     let originator = originator().value;
     let prefix = format!("{originator}/");
     assert!(user_agent.starts_with(&prefix));
@@ -14,22 +14,19 @@ fn test_get_codex_user_agent() {
 #[test]
 fn is_first_party_originator_matches_known_values() {
     assert_eq!(is_first_party_originator(DEFAULT_ORIGINATOR), true);
-    assert_eq!(is_first_party_originator("codex-tui"), true);
-    assert_eq!(is_first_party_originator("codex_vscode"), true);
-    assert_eq!(is_first_party_originator("Codex Something Else"), true);
-    assert_eq!(is_first_party_originator("codex_cli"), false);
+    assert_eq!(is_first_party_originator("astral-tui"), true);
+    assert_eq!(is_first_party_originator("astral_vscode"), true);
+    assert_eq!(is_first_party_originator("Astral Something Else"), true);
+    assert_eq!(is_first_party_originator("astral_cli"), false);
     assert_eq!(is_first_party_originator("Other"), false);
 }
 
 #[test]
 fn is_first_party_chat_originator_matches_known_values() {
-    assert_eq!(is_first_party_chat_originator("codex_atlas"), true);
-    assert_eq!(
-        is_first_party_chat_originator("codex_chatgpt_desktop"),
-        true
-    );
+    assert_eq!(is_first_party_chat_originator("astral_atlas"), true);
+    assert_eq!(is_first_party_chat_originator("astral_chat_desktop"), true);
     assert_eq!(is_first_party_chat_originator(DEFAULT_ORIGINATOR), false);
-    assert_eq!(is_first_party_chat_originator("codex_vscode"), false);
+    assert_eq!(is_first_party_chat_originator("astral_vscode"), false);
 }
 
 #[tokio::test]
@@ -74,8 +71,8 @@ async fn test_create_client_sets_default_headers() {
         .expect("originator header missing");
     assert_eq!(originator_header.to_str().unwrap(), originator().value);
 
-    // User-Agent matches the computed Codex UA for that originator
-    let expected_ua = get_codex_user_agent();
+    // User-Agent matches the computed Astral UA for that originator.
+    let expected_ua = get_astral_user_agent();
     let ua_header = headers
         .get("user-agent")
         .expect("user-agent header missing");
@@ -115,7 +112,7 @@ fn test_invalid_suffix_is_sanitized2() {
 #[cfg(target_os = "macos")]
 fn test_macos() {
     use regex_lite::Regex;
-    let user_agent = get_codex_user_agent();
+    let user_agent = get_astral_user_agent();
     let originator = regex_lite::escape(originator().value.as_str());
     let re = Regex::new(&format!(
         r"^{originator}/\d+\.\d+\.\d+ \(Mac OS \d+\.\d+\.\d+; (x86_64|arm64)\) (\S+)$"

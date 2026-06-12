@@ -4,12 +4,92 @@ use crate::error::ApiError;
 use crate::provider::Provider;
 use codex_client::HttpTransport;
 use codex_client::RequestTelemetry;
+use codex_protocol::config_types::ReasoningSummary;
+use codex_protocol::openai_models::ConfigShellToolType;
+use codex_protocol::openai_models::InputModality;
 use codex_protocol::openai_models::ModelInfo;
+use codex_protocol::openai_models::ModelVisibility;
 use codex_protocol::openai_models::ModelsResponse;
+use codex_protocol::openai_models::TruncationPolicyConfig;
+use codex_protocol::openai_models::WebSearchToolType;
 use http::HeaderMap;
 use http::Method;
 use http::header::ETAG;
+use serde::Deserialize;
 use std::sync::Arc;
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum ModelsEndpointResponse {
+    Astral(ModelsResponse),
+    OpenAi(OpenAiModelsListResponse),
+}
+
+#[derive(Deserialize)]
+struct OpenAiModelsListResponse {
+    data: Vec<OpenAiModel>,
+}
+
+#[derive(Deserialize)]
+struct OpenAiModel {
+    id: String,
+}
+
+impl ModelsEndpointResponse {
+    fn into_models(self) -> Vec<ModelInfo> {
+        match self {
+            Self::Astral(ModelsResponse { models }) => models,
+            Self::OpenAi(response) => response
+                .data
+                .into_iter()
+                .enumerate()
+                .map(|(index, model)| provider_model_id_to_model_info(model.id, index))
+                .collect(),
+        }
+    }
+}
+
+fn provider_model_id_to_model_info(id: String, index: usize) -> ModelInfo {
+    ModelInfo {
+        slug: id.clone(),
+        display_name: id,
+        description: None,
+        default_reasoning_level: None,
+        supported_reasoning_levels: Vec::new(),
+        shell_type: ConfigShellToolType::Default,
+        visibility: ModelVisibility::List,
+        supported_in_api: true,
+        priority: i32::try_from(index).unwrap_or(i32::MAX),
+        additional_speed_tiers: Vec::new(),
+        service_tiers: Vec::new(),
+        default_service_tier: None,
+        availability_nux: None,
+        upgrade: None,
+        base_instructions: String::new(),
+        model_messages: None,
+        supports_reasoning_summaries: false,
+        default_reasoning_summary: ReasoningSummary::Auto,
+        support_verbosity: false,
+        default_verbosity: None,
+        apply_patch_tool_type: None,
+        web_search_tool_type: WebSearchToolType::Text,
+        truncation_policy: TruncationPolicyConfig::bytes(/*limit*/ 10_000),
+        supports_parallel_tool_calls: false,
+        supports_image_detail_original: false,
+        context_window: None,
+        max_context_window: None,
+        auto_compact_token_limit: None,
+        effective_context_window_percent: 95,
+        experimental_supported_tools: Vec::new(),
+        input_modalities: vec![InputModality::Text],
+        used_fallback_model_metadata: true,
+        supports_search_tool: false,
+        use_responses_lite: false,
+        auto_review_model_override: None,
+        tool_mode: None,
+        multi_agent_version: None,
+    }
+}
 
 pub struct ModelsClient<T: HttpTransport> {
     session: EndpointSession<T>,
@@ -61,13 +141,14 @@ impl<T: HttpTransport> ModelsClient<T> {
             .and_then(|value| value.to_str().ok())
             .map(ToString::to_string);
 
-        let ModelsResponse { models } = serde_json::from_slice::<ModelsResponse>(&resp.body)
+        let models = serde_json::from_slice::<ModelsEndpointResponse>(&resp.body)
             .map_err(|e| {
                 ApiError::Stream(format!(
                     "failed to decode models response: {e}; body: {}",
                     String::from_utf8_lossy(&resp.body)
                 ))
-            })?;
+            })?
+            .into_models();
 
         Ok((models, header_etag))
     }
@@ -94,7 +175,7 @@ mod tests {
     #[derive(Clone)]
     struct CapturingTransport {
         last_request: Arc<Mutex<Option<Request>>>,
-        body: Arc<ModelsResponse>,
+        body: Arc<serde_json::Value>,
         etag: Option<String>,
     }
 
@@ -102,7 +183,7 @@ mod tests {
         fn default() -> Self {
             Self {
                 last_request: Arc::new(Mutex::new(None)),
-                body: Arc::new(ModelsResponse { models: Vec::new() }),
+                body: Arc::new(json!({ "models": [] })),
                 etag: None,
             }
         }
@@ -159,7 +240,7 @@ mod tests {
 
         let transport = CapturingTransport {
             last_request: Arc::new(Mutex::new(None)),
-            body: Arc::new(response),
+            body: Arc::new(serde_json::to_value(response).unwrap()),
             etag: None,
         };
 
@@ -223,7 +304,7 @@ mod tests {
 
         let transport = CapturingTransport {
             last_request: Arc::new(Mutex::new(None)),
-            body: Arc::new(response),
+            body: Arc::new(serde_json::to_value(response).unwrap()),
             etag: None,
         };
 
@@ -245,12 +326,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn parses_openai_models_list_response() {
+        let transport = CapturingTransport {
+            last_request: Arc::new(Mutex::new(None)),
+            body: Arc::new(json!({
+                "object": "list",
+                "data": [
+                    {
+                        "id": "deepseek-v4-flash",
+                        "object": "model",
+                        "owned_by": "deepseek"
+                    },
+                    {
+                        "id": "deepseek-v4-pro",
+                        "object": "model",
+                        "owned_by": "deepseek"
+                    }
+                ]
+            })),
+            etag: None,
+        };
+
+        let client = ModelsClient::new(
+            transport,
+            provider("https://example.com/v1"),
+            Arc::new(DummyAuth),
+        );
+
+        let (models, _) = client
+            .list_models("0.99.0", HeaderMap::new())
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0].slug, "deepseek-v4-flash");
+        assert_eq!(models[0].display_name, "deepseek-v4-flash");
+        assert_eq!(models[0].priority, 0);
+        assert_eq!(models[0].base_instructions, "");
+        assert_eq!(models[0].input_modalities, vec![InputModality::Text]);
+        assert!(models[0].used_fallback_model_metadata);
+        assert_eq!(models[1].slug, "deepseek-v4-pro");
+        assert_eq!(models[1].priority, 1);
+    }
+
+    #[tokio::test]
     async fn list_models_includes_etag() {
         let response = ModelsResponse { models: Vec::new() };
 
         let transport = CapturingTransport {
             last_request: Arc::new(Mutex::new(None)),
-            body: Arc::new(response),
+            body: Arc::new(serde_json::to_value(response).unwrap()),
             etag: Some("\"abc\"".to_string()),
         };
 

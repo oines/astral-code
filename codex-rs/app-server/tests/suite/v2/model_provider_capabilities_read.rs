@@ -31,8 +31,8 @@ async fn read_default_provider_capabilities() -> Result<()> {
 
     let expected = ModelProviderCapabilitiesReadResponse {
         namespace_tools: true,
-        image_generation: true,
-        web_search: true,
+        image_generation: false,
+        web_search: false,
     };
     assert_eq!(received, expected);
     Ok(())

@@ -5,10 +5,10 @@ expression: "render_snapshot(&view, Rect::new(0, 0, 72, view.desired_height(72))
 
   Google Calendar
 
-  Reconnect Google Calendar on ChatGPT.
+  Reconnect Google Calendar.
 
   URL
-  https://chatgpt.com/apps/google-calendar/connector_google_calendar
+  https://apps.example/google-calendar/connector_google_calendar
 
   Sign in to this app in your browser, then return here.
 

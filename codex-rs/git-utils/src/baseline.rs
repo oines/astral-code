@@ -15,7 +15,7 @@ use tokio::task;
 use crate::operations::run_git_for_status;
 
 const BASELINE_COMMIT_MESSAGE: &str =
-    "Initialize Codex git baseline\n\nCo-authored-by: Codex <noreply@openai.com>";
+    "Initialize Astral-Code git baseline\n\nCo-authored-by: Astral-Code <noreply@astral-code.dev>";
 
 /// File-level change status between a git baseline and the current directory.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -139,7 +139,7 @@ fn commit_current_tree(repo: &gix::Repository, message: &str) -> anyhow::Result<
         .workdir()
         .context("git baseline repo must have a worktree")?;
     let tree_id = write_tree(repo, root)?;
-    let signature = codex_signature();
+    let signature = astral_signature();
     let mut time = gix::date::parse::TimeBuf::default();
     let signature_ref = signature.to_ref(&mut time);
     repo.commit_as(
@@ -159,10 +159,10 @@ fn write_index_from_head(root: &Path) -> anyhow::Result<()> {
         .context("write git baseline index from HEAD")
 }
 
-fn codex_signature() -> gix::actor::Signature {
+fn astral_signature() -> gix::actor::Signature {
     gix::actor::Signature {
-        name: "Codex".into(),
-        email: "noreply@openai.com".into(),
+        name: "Astral-Code".into(),
+        email: "noreply@astral-code.dev".into(),
         time: gix::date::Time {
             seconds: chrono::Utc::now().timestamp(),
             offset: 0,

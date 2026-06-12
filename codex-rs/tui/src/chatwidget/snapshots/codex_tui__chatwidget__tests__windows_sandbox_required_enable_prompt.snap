@@ -1,10 +1,11 @@
 ---
 source: tui/src/chatwidget/tests/permissions.rs
+assertion_line: 462
 expression: "render_bottom_popup(&chat, 120)"
 ---
-  Your organization requires the default Codex agent sandbox to continue. Set it up to protect your files and control
+  Your organization requires the default Astral agent sandbox to continue. Set it up to protect your files and control
   network access.
-  Learn more <https://developers.openai.com/codex/windows>
+  Learn more <https://github.com/oines/astral-code/blob/main/docs/sandbox.md>
 
 › 1. Set up default sandbox (requires Administrator permissions)
   2. Quit

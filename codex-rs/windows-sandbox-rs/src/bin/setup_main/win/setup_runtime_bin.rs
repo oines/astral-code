@@ -10,7 +10,7 @@ use windows_sys::Win32::Security::OBJECT_INHERIT_ACE;
 use windows_sys::Win32::Storage::FileSystem::FILE_GENERIC_EXECUTE;
 use windows_sys::Win32::Storage::FileSystem::FILE_GENERIC_READ;
 
-pub(super) fn ensure_codex_app_runtime_bin_readable(
+pub(super) fn ensure_astral_app_runtime_bin_readable(
     sandbox_group_psid: *mut c_void,
     refresh_errors: &mut Vec<String>,
     log: &mut dyn Write,
@@ -26,9 +26,12 @@ pub(super) fn ensure_codex_app_runtime_bin_readable(
         return Ok(());
     };
 
-    // Codex desktop copies bundled Windows binaries out of WindowsApps to this
-    // fixed LocalAppData cache before launching codex.exe.
-    let runtime_bin_dir = local_app_data.join("OpenAI").join("Codex").join("bin");
+    // Astral desktop copies bundled Windows binaries out of WindowsApps to this
+    // fixed LocalAppData cache before launching astral.exe.
+    let runtime_bin_dir = local_app_data
+        .join("Astral-Code")
+        .join("Astral")
+        .join("bin");
     if !runtime_bin_dir.is_dir() {
         return Ok(());
     }

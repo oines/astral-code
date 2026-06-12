@@ -234,8 +234,36 @@ fn messages_request_provider_null_override_removes_default_field() {
             "messages": [{
                 "role": "user",
                 "content": [{ "type": "text", "text": "hello" }]
+            }]
+        })
+    );
+}
+
+#[test]
+fn messages_request_omits_tool_choice_without_tools() {
+    let request = AgentRequest {
+        model: "anthropic-compatible".to_string(),
+        messages: vec![AgentMessage {
+            role: MessageRole::User,
+            content: vec![ContentBlock::Text {
+                text: "hello".to_string(),
             }],
-            "tool_choice": { "type": "auto" }
+            id: None,
+        }],
+        stream: true,
+        ..AgentRequest::default()
+    };
+
+    assert_eq!(
+        to_messages_request(&request, AnthropicMessagesOptions { max_tokens: 1024 }),
+        json!({
+            "model": "anthropic-compatible",
+            "max_tokens": 1024,
+            "stream": true,
+            "messages": [{
+                "role": "user",
+                "content": [{ "type": "text", "text": "hello" }]
+            }]
         })
     );
 }
@@ -289,6 +317,16 @@ fn stream_parser_maps_anthropic_events_to_agent_ir() {
                 partial_json: r#"{"command":"pwd"}"#.to_string(),
             },
         })
+    );
+
+    assert_eq!(
+        parse_stream_event(json!({
+            "type": "content_block_delta",
+            "index": 1,
+            "delta": { "type": "signature_delta", "signature": "sig_opaque" }
+        }))
+        .expect("parse signature_delta"),
+        None
     );
 
     assert_eq!(

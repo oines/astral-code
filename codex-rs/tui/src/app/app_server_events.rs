@@ -88,7 +88,7 @@ impl App {
                     notification.plan_type,
                     notification
                         .auth_mode
-                        .is_some_and(AuthMode::has_chatgpt_account),
+                        .is_some_and(AuthMode::has_legacy_hosted_account),
                 );
                 return;
             }

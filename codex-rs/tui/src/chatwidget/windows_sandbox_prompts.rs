@@ -233,7 +233,7 @@ impl ChatWidget {
             header.push(*Box::new(
                 Paragraph::new(vec![
                     line!["Agent mode on Windows uses an experimental sandbox to limit network and filesystem access.".bold()],
-                    line!["Learn more: https://developers.openai.com/codex/windows"],
+                    line!["Learn more: https://github.com/oines/astral-code/blob/main/docs/sandbox.md"],
                 ])
                 .wrap(Wrap { trim: false }),
             ));
@@ -288,12 +288,12 @@ impl ChatWidget {
         header.push(*Box::new(
             Paragraph::new(if allow_unelevated {
                 vec![
-                    line!["Set up the Codex agent sandbox to protect your files and control network access. Learn more <https://developers.openai.com/codex/windows>"],
+                    line!["Set up the Astral agent sandbox to protect your files and control network access. Learn more <https://github.com/oines/astral-code/blob/main/docs/sandbox.md>"],
                 ]
             } else {
                 vec![
-                    line!["Your organization requires the default Codex agent sandbox to continue. Set it up to protect your files and control network access."],
-                    line!["Learn more <https://developers.openai.com/codex/windows>"],
+                    line!["Your organization requires the default Astral agent sandbox to continue. Set it up to protect your files and control network access."],
+                    line!["Learn more <https://github.com/oines/astral-code/blob/main/docs/sandbox.md>"],
                 ]
             })
             .wrap(Wrap { trim: false }),
@@ -401,15 +401,15 @@ impl ChatWidget {
         lines.push(line![""]);
         if allow_unelevated {
             lines.push(line![
-                "You can still use Codex in a non-admin sandbox. It carries greater risk if prompt injected."
+                "You can still use Astral in a non-admin sandbox. It carries greater risk if prompt injected."
             ]);
         } else {
             lines.push(line![
-                "Your organization requires the default sandbox before Codex can continue."
+                "Your organization requires the default sandbox before Astral can continue."
             ]);
         }
         lines.push(line![
-            "Learn more <https://developers.openai.com/codex/windows>"
+            "Learn more <https://github.com/oines/astral-code/blob/main/docs/sandbox.md>"
         ]);
 
         let mut header = ColumnRenderable::new();

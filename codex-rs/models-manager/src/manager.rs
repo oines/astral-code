@@ -3,13 +3,11 @@ use crate::collaboration_mode_presets::builtin_collaboration_mode_presets;
 use crate::config::ModelsManagerConfig;
 use crate::model_info;
 use async_trait::async_trait;
-use codex_app_server_protocol::AuthMode;
 use codex_login::AuthManager;
 use codex_protocol::config_types::CollaborationModeMask;
 use codex_protocol::error::Result as CoreResult;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelPreset;
-use codex_protocol::openai_models::ModelVisibility;
 use codex_protocol::openai_models::ModelsResponse;
 use std::fmt;
 use std::path::PathBuf;
@@ -38,9 +36,6 @@ pub trait ModelsEndpointClient: fmt::Debug + Send + Sync {
     fn has_provider_auth(&self) -> bool {
         false
     }
-
-    /// Returns whether the currently resolved auth can use Codex backend-only models.
-    async fn uses_codex_backend(&self) -> bool;
 
     /// Fetches the latest remote model catalog and optional ETag.
     async fn list_models(
@@ -114,11 +109,8 @@ pub trait ModelsManager: fmt::Debug + Send + Sync {
     fn build_available_models(&self, mut remote_models: Vec<ModelInfo>) -> Vec<ModelPreset> {
         remote_models.sort_by_key(|model| model.priority);
 
-        let mut presets: Vec<ModelPreset> = remote_models.into_iter().map(Into::into).collect();
-        let uses_codex_backend = self
-            .auth_manager()
-            .is_some_and(AuthManager::current_auth_uses_codex_backend);
-        presets = ModelPreset::filter_by_auth(presets, uses_codex_backend);
+        let presets: Vec<ModelPreset> = remote_models.into_iter().map(Into::into).collect();
+        let mut presets = ModelPreset::filter_api_supported(presets);
 
         ModelPreset::mark_default_by_picker_visibility(&mut presets);
 
@@ -317,9 +309,7 @@ impl OpenAiModelsManager {
     }
 
     async fn should_refresh_models(&self) -> bool {
-        self.endpoint_client.uses_codex_backend().await
-            || self.endpoint_client.has_command_auth()
-            || self.endpoint_client.has_provider_auth()
+        self.endpoint_client.has_command_auth() || self.endpoint_client.has_provider_auth()
     }
 
     async fn get_etag(&self) -> Option<String> {
@@ -328,22 +318,10 @@ impl OpenAiModelsManager {
 
     /// Replace the cached remote models and rebuild the derived presets list.
     async fn apply_remote_models(&self, models: Vec<ModelInfo>) {
-        // Use the remote models list as the source of truth if it contains at least one
-        // non-hidden model and the user is using ChatGPT auth.
-        let should_use_remote_models_only = !models.is_empty()
-            && models
-                .iter()
-                .any(|model| model.visibility == ModelVisibility::List)
-            && self.auth_manager.as_ref().is_some_and(|auth_manager| {
-                auth_manager
-                    .auth_mode()
-                    .is_some_and(AuthMode::has_chatgpt_account)
-            });
-        if should_use_remote_models_only {
-            *self.remote_models.write().await = models;
-            return;
-        }
-
+        // Astral treats provider `/models` output as an overlay on the bundled
+        // provider-neutral catalog. The old Codex hosted catalog could replace
+        // the bundled catalog wholesale for ChatGPT auth; keeping that behavior
+        // would make a legacy hosted account shape control Astral's model list.
         let mut existing_models = load_remote_models_from_file().unwrap_or_default();
         for model in models {
             if let Some(existing_index) = existing_models

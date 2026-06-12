@@ -792,7 +792,7 @@ async fn includes_session_id_thread_id_and_model_headers_in_request() {
         Some(thread_id_string.as_str())
     );
     assert_eq!(
-        request_body["client_metadata"]["x-codex-installation-id"].as_str(),
+        request_body["client_metadata"]["x-astral-installation-id"].as_str(),
         Some(installation_id.as_str())
     );
 }
@@ -1059,7 +1059,7 @@ async fn managed_auth_sends_authorized_responses_request() {
     assert_eq!(request_authorization, "Bearer Access Token");
     assert_eq!(request.header("chatgpt-account-id"), None);
     assert_eq!(
-        request_body["client_metadata"]["x-codex-installation-id"].as_str(),
+        request_body["client_metadata"]["x-astral-installation-id"].as_str(),
         Some(installation_id.as_str())
     );
     assert!(request_body["stream"].as_bool().unwrap());

@@ -167,10 +167,7 @@ async fn initialize_rejects_invalid_client_name() -> Result<()> {
     create_config_toml(codex_home.path(), &server.uri(), "never")?;
     let mut mcp = TestAppServer::new_with_env(
         codex_home.path(),
-        &[
-            ("ASTRAL_INTERNAL_ORIGINATOR_OVERRIDE", None),
-            ("CODEX_INTERNAL_ORIGINATOR_OVERRIDE", None),
-        ],
+        &[("ASTRAL_INTERNAL_ORIGINATOR_OVERRIDE", None)],
     )
     .await?;
 

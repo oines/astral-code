@@ -1,18 +1,15 @@
 ---
 source: tui/src/status/tests.rs
+assertion_line: 1020
 expression: sanitized
 ---
 /status
 
 ╭────────────────────────────────────────────╮
-│  >_ OpenAI Codex (v0.0.0)                  │
-│                                            │
-│ Visit                                      │
-│ https://chatgpt.com/codex/settings/usage   │
-│ for up-to-date                             │
-│ information on rate limits and credits     │
+│  >_ Astral-Code (v0.0.0)                   │
 │                                            │
 │  Model:                  gpt-5.1-codex-max │
+│  Model provider:         Astral            │
 │  Directory: [[workspace]]                  │
 │  Permissions:            Custom (workspace │
 │  Agents.md:              <none>            │

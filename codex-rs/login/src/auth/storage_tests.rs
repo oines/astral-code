@@ -311,11 +311,11 @@ fn keyring_auth_storage_load_returns_deserialized_auth() -> anyhow::Result<()> {
 
 #[test]
 fn keyring_auth_storage_compute_store_key_for_home_directory() -> anyhow::Result<()> {
-    let codex_home = PathBuf::from("~/.codex");
+    let codex_home = PathBuf::from("~/.astral-code");
 
     let key = compute_store_key(codex_home.as_path())?;
 
-    assert_eq!(key, "cli|940db7b1d0e4eb40");
+    assert_eq!(key, "cli|f05172cba701f51c");
     Ok(())
 }
 

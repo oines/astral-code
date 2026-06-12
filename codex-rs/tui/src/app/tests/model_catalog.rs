@@ -1,6 +1,7 @@
 use super::*;
 use assert_matches::assert_matches;
 use codex_config::types::ModelAvailabilityNuxConfig;
+use codex_model_provider_info::ModelProviderInfo;
 use codex_protocol::openai_models::ModelAvailabilityNux;
 use pretty_assertions::assert_eq;
 use tokio::sync::mpsc::unbounded_channel;
@@ -182,6 +183,7 @@ async fn prepare_startup_tooltip_override_persists_model_availability_nux_count(
         .build()
         .await
         .expect("config");
+    config.model_provider = ModelProviderInfo::create_openai_provider(/*base_url*/ None);
     let mut presets = all_model_presets();
     presets.iter_mut().for_each(|preset| {
         preset.availability_nux = None;
@@ -212,6 +214,33 @@ async fn prepare_startup_tooltip_override_persists_model_availability_nux_count(
         reloaded.model_availability_nux.shown_count,
         HashMap::from([("gpt-5.4".to_string(), 1)])
     );
+}
+
+#[tokio::test]
+async fn prepare_startup_tooltip_override_skips_non_openai_provider() {
+    let codex_home = tempdir().expect("temp codex home");
+    let mut config = ConfigBuilder::default()
+        .codex_home(codex_home.path().to_path_buf())
+        .build()
+        .await
+        .expect("config");
+    let mut presets = all_model_presets();
+    presets.iter_mut().for_each(|preset| {
+        preset.availability_nux = None;
+    });
+    let target = presets
+        .iter_mut()
+        .find(|preset| preset.model == "gpt-5.4")
+        .expect("target preset present");
+    target.availability_nux = Some(ModelAvailabilityNux {
+        message: "gpt-5.4 is available".to_string(),
+    });
+
+    let tooltip =
+        prepare_startup_tooltip_override(&mut config, &presets, /*is_first_run*/ false).await;
+
+    assert_eq!(tooltip, None);
+    assert_eq!(config.model_availability_nux.shown_count, HashMap::new());
 }
 
 #[tokio::test]
@@ -252,7 +281,7 @@ async fn accepted_model_migration_persists_target_default_reasoning_effort() {
     let update_model = rx.try_recv().expect("update model event");
     assert_matches!(
         update_model,
-        AppEvent::UpdateModel(model) if model == "gpt-5.4"
+        AppEvent::UpdateModel { model, model_provider: None } if model == "gpt-5.4"
     );
 
     let update_effort = rx.try_recv().expect("update effort event");

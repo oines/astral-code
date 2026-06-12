@@ -82,8 +82,8 @@ fn find_span_event_by_name_attr<'a>(
 
 fn auth_env_metadata() -> AuthEnvTelemetryMetadata {
     AuthEnvTelemetryMetadata {
-        codex_api_key_env_present: false,
-        codex_api_key_env_enabled: true,
+        astral_api_key_env_present: false,
+        astral_api_key_env_enabled: true,
         provider_env_key_name: Some("configured".to_string()),
         provider_env_key_present: Some(true),
         refresh_token_url_override_present: true,
@@ -124,7 +124,7 @@ fn otel_export_routing_policy_routes_user_prompt_log_and_trace_events() {
             Some("account-id".to_string()),
             Some("engineer@example.com".to_string()),
             Some(TelemetryAuthMode::ApiKey),
-            "codex_exec".to_string(),
+            "astral_exec".to_string(),
             /*log_user_prompts*/ true,
             "tty".to_string(),
             SessionSource::Cli,
@@ -235,7 +235,7 @@ fn otel_export_routing_policy_routes_tool_result_log_and_trace_events() {
             Some("account-id".to_string()),
             Some("engineer@example.com".to_string()),
             Some(TelemetryAuthMode::ApiKey),
-            "codex_exec".to_string(),
+            "astral_exec".to_string(),
             /*log_user_prompts*/ true,
             "tty".to_string(),
             SessionSource::Cli,
@@ -346,7 +346,7 @@ fn otel_export_routing_policy_routes_auth_recovery_log_and_trace_events() {
             Some("account-id".to_string()),
             Some("engineer@example.com".to_string()),
             Some(TelemetryAuthMode::Chatgpt),
-            "codex_exec".to_string(),
+            "astral_exec".to_string(),
             /*log_user_prompts*/ true,
             "tty".to_string(),
             SessionSource::Cli,
@@ -492,7 +492,7 @@ fn otel_export_routing_policy_routes_api_request_auth_observability() {
             Some("account-id".to_string()),
             Some("engineer@example.com".to_string()),
             Some(TelemetryAuthMode::Chatgpt),
-            "codex_exec".to_string(),
+            "astral_exec".to_string(),
             /*log_user_prompts*/ true,
             "tty".to_string(),
             SessionSource::Cli,
@@ -582,7 +582,7 @@ fn otel_export_routing_policy_routes_api_request_auth_observability() {
     );
     assert_eq!(
         request_log_attrs
-            .get("auth.env_codex_api_key_enabled")
+            .get("auth.env_astral_api_key_enabled")
             .map(String::as_str),
         Some("true")
     );
@@ -664,7 +664,7 @@ fn otel_export_routing_policy_routes_websocket_connect_auth_observability() {
             Some("account-id".to_string()),
             Some("engineer@example.com".to_string()),
             Some(TelemetryAuthMode::Chatgpt),
-            "codex_exec".to_string(),
+            "astral_exec".to_string(),
             /*log_user_prompts*/ true,
             "tty".to_string(),
             SessionSource::Cli,
@@ -781,7 +781,7 @@ fn otel_export_routing_policy_routes_websocket_request_transport_observability()
             Some("account-id".to_string()),
             Some("engineer@example.com".to_string()),
             Some(TelemetryAuthMode::Chatgpt),
-            "codex_exec".to_string(),
+            "astral_exec".to_string(),
             /*log_user_prompts*/ true,
             "tty".to_string(),
             SessionSource::Cli,

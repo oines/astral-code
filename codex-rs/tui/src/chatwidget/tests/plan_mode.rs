@@ -311,6 +311,7 @@ async fn reasoning_selection_in_plan_mode_opens_scope_prompt_event() {
         event,
         AppEvent::OpenPlanReasoningScopePrompt {
             model,
+            model_provider: None,
             effort: Some(_)
         } if model == "gpt-5.4"
     );
@@ -337,7 +338,10 @@ async fn reasoning_selection_in_plan_mode_without_effort_change_does_not_open_sc
     assert!(
         events.iter().any(|event| matches!(
             event,
-            AppEvent::UpdateModel(model) if model == "gpt-5.4"
+            AppEvent::UpdateModel {
+                model,
+                model_provider: None,
+            } if model == "gpt-5.4"
         )),
         "expected model update event; events: {events:?}"
     );
@@ -375,6 +379,7 @@ async fn reasoning_selection_in_plan_mode_matching_plan_effort_but_different_glo
         event,
         AppEvent::OpenPlanReasoningScopePrompt {
             model,
+            model_provider: None,
             effort: Some(ReasoningEffortConfig::Medium)
         } if model == "gpt-5.4"
     );
@@ -469,7 +474,10 @@ async fn reasoning_selection_in_plan_mode_model_switch_does_not_open_scope_promp
     assert!(
         events.iter().any(|event| matches!(
             event,
-            AppEvent::UpdateModel(model) if model == "gpt-5.2"
+            AppEvent::UpdateModel {
+                model,
+                model_provider: None,
+            } if model == "gpt-5.2"
         )),
         "expected model update event; events: {events:?}"
     );

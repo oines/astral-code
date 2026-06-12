@@ -362,7 +362,7 @@ mod tests {
                         "astral exec-server --listen stdio".to_string(),
                     ]),
                     env: Some(HashMap::from([(
-                        "CODEX_LOG".to_string(),
+                        "ASTRAL_LOG".to_string(),
                         "debug".to_string(),
                     )])),
                     ..Default::default()
@@ -741,7 +741,7 @@ program = "ssh"
 args = ["dev", "astral exec-server --listen stdio"]
 cwd = "/tmp"
 [environments.env]
-CODEX_LOG = "debug"
+ASTRAL_LOG = "debug"
 "#,
         )
         .expect("write environments.toml");
@@ -771,7 +771,7 @@ CODEX_LOG = "debug"
                     "astral exec-server --listen stdio".to_string(),
                 ]),
                 env: Some(HashMap::from([(
-                    "CODEX_LOG".to_string(),
+                    "ASTRAL_LOG".to_string(),
                     "debug".to_string(),
                 )])),
                 cwd: Some(PathBuf::from("/tmp")),

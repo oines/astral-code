@@ -8,7 +8,7 @@ use crate::OPENAI_CURATED_MARKETPLACE_NAME;
 #[test]
 fn legacy_local_curated_filter_matches_wsl_windows_backed_curated_checkout() {
     let marketplace_path =
-        Path::new("/mnt/c/Users/user/.codex/.tmp/plugins/.agents/plugins/marketplace.json");
+        Path::new("/mnt/c/Users/user/.astral-code/.tmp/plugins/.agents/plugins/marketplace.json");
 
     assert!(should_use_legacy_local_curated_discovery_filter(
         OPENAI_CURATED_MARKETPLACE_NAME,
@@ -19,7 +19,7 @@ fn legacy_local_curated_filter_matches_wsl_windows_backed_curated_checkout() {
 #[test]
 fn legacy_local_curated_filter_does_not_match_native_wsl_curated_checkout() {
     let marketplace_path =
-        Path::new("/home/user/.codex/.tmp/plugins/.agents/plugins/marketplace.json");
+        Path::new("/home/user/.astral-code/.tmp/plugins/.agents/plugins/marketplace.json");
 
     assert!(!should_use_legacy_local_curated_discovery_filter(
         OPENAI_CURATED_MARKETPLACE_NAME,
@@ -30,10 +30,10 @@ fn legacy_local_curated_filter_does_not_match_native_wsl_curated_checkout() {
 #[test]
 fn legacy_local_curated_filter_does_not_match_other_wsl_marketplaces() {
     let other_marketplace_path = Path::new(
-        "/mnt/c/Users/user/.codex/.tmp/marketplaces/other/.agents/plugins/marketplace.json",
+        "/mnt/c/Users/user/.astral-code/.tmp/marketplaces/other/.agents/plugins/marketplace.json",
     );
     let local_curated_marketplace_path =
-        Path::new("/mnt/c/Users/user/.codex/.tmp/plugins/.agents/plugins/marketplace.json");
+        Path::new("/mnt/c/Users/user/.astral-code/.tmp/plugins/.agents/plugins/marketplace.json");
 
     assert!(!should_use_legacy_local_curated_discovery_filter(
         OPENAI_CURATED_MARKETPLACE_NAME,
@@ -48,7 +48,7 @@ fn legacy_local_curated_filter_does_not_match_other_wsl_marketplaces() {
 #[test]
 fn wsl_windows_drive_path_matches_only_mnt_drive_paths() {
     assert!(is_wsl_windows_drive_path(Path::new(
-        "/mnt/c/Users/user/.codex/.tmp/plugins",
+        "/mnt/c/Users/user/.astral-code/.tmp/plugins",
     )));
     assert!(is_wsl_windows_drive_path(Path::new("/mnt/Z/tmp")));
     assert!(!is_wsl_windows_drive_path(Path::new("/home/user/.codex")));

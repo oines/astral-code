@@ -24,7 +24,7 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
 const LOGIN_SUCCESS_MESSAGE: &str = "Successfully logged in";
-const UNSUPPORTED_STORED_AUTH_MESSAGE: &str = "Stored OpenAI/ChatGPT credentials are not supported by Astral. Run `astral logout`, then set ASTRAL_API_KEY.";
+const UNSUPPORTED_STORED_AUTH_MESSAGE: &str = "Stored upstream hosted credentials are not supported by Astral. Run `astral logout`, then set ASTRAL_API_KEY.";
 
 /// Installs a small file-backed tracing layer for direct `astral login` flows.
 ///

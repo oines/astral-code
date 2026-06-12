@@ -39,8 +39,8 @@ pub enum AuthMode {
 }
 
 impl AuthMode {
-    /// Returns whether this legacy mode represented a human ChatGPT account.
-    pub fn has_chatgpt_account(self) -> bool {
+    /// Returns whether this legacy mode represented an upstream hosted account.
+    pub fn has_legacy_hosted_account(self) -> bool {
         match self {
             Self::Chatgpt | Self::PersonalAccessToken => true,
             Self::ApiKey | Self::AgentIdentity => false,
@@ -2391,7 +2391,7 @@ mod tests {
                     parent_thread_id: None,
                     preview: "first prompt".to_string(),
                     ephemeral: true,
-                    model_provider: "openai".to_string(),
+                    model_provider: "astral".to_string(),
                     created_at: 1,
                     updated_at: 2,
                     status: v2::ThreadStatus::Idle,
@@ -2407,7 +2407,7 @@ mod tests {
                     turns: Vec::new(),
                 },
                 model: "gpt-5".to_string(),
-                model_provider: "openai".to_string(),
+                model_provider: "astral".to_string(),
                 service_tier: None,
                 cwd,
                 runtime_workspace_roots: Vec::new(),
@@ -2434,7 +2434,7 @@ mod tests {
                         "parentThreadId": null,
                         "preview": "first prompt",
                         "ephemeral": true,
-                        "modelProvider": "openai",
+                        "modelProvider": "astral",
                         "createdAt": 1,
                         "updatedAt": 2,
                         "status": {
@@ -2452,7 +2452,7 @@ mod tests {
                         "turns": []
                     },
                     "model": "gpt-5",
-                    "modelProvider": "openai",
+                    "modelProvider": "astral",
                     "serviceTier": null,
                     "cwd": absolute_path_string("tmp"),
                     "runtimeWorkspaceRoots": [],
@@ -3107,7 +3107,7 @@ mod tests {
                     sandbox_policy: v2::SandboxPolicy::DangerFullAccess,
                     active_permission_profile: None,
                     model: "gpt-5.4".to_string(),
-                    model_provider: "openai".to_string(),
+                    model_provider: "astral".to_string(),
                     service_tier: None,
                     effort: None,
                     summary: None,

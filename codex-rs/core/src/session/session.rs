@@ -244,6 +244,31 @@ impl SessionConfiguration {
         if let Some(personality) = updates.personality {
             next_configuration.personality = Some(personality);
         }
+        if let Some(model_provider_id) = updates.model_provider.clone() {
+            let allowed_model_providers = self
+                .original_config_do_not_use
+                .model_providers
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ");
+            let model_provider = self
+                .original_config_do_not_use
+                .model_providers
+                .get(&model_provider_id)
+                .ok_or_else(|| ConstraintError::InvalidValue {
+                    field_name: "model_provider",
+                    candidate: model_provider_id.clone(),
+                    allowed: allowed_model_providers,
+                    requirement_source: codex_config::RequirementSource::Unknown,
+                })?
+                .clone();
+            let mut config = (*next_configuration.original_config_do_not_use).clone();
+            config.model_provider_id = model_provider_id;
+            config.model_provider = model_provider.clone();
+            next_configuration.provider = model_provider;
+            next_configuration.original_config_do_not_use = Arc::new(config);
+        }
         if let Some(approval_policy) = updates.approval_policy {
             next_configuration.approval_policy.set(approval_policy)?;
         }
@@ -419,6 +444,7 @@ pub(crate) struct SessionSettingsUpdate {
     pub(crate) active_permission_profile: Option<ActivePermissionProfile>,
     pub(crate) windows_sandbox_level: Option<WindowsSandboxLevel>,
     pub(crate) collaboration_mode: Option<CollaborationMode>,
+    pub(crate) model_provider: Option<String>,
     pub(crate) reasoning_summary: Option<ReasoningSummaryConfig>,
     pub(crate) service_tier: Option<Option<String>>,
     pub(crate) final_output_json_schema: Option<Option<Value>>,
@@ -760,7 +786,7 @@ impl Session {
             let session_model = session_configuration.collaboration_mode.model().to_string();
             let auth_env_telemetry = collect_auth_env_telemetry(
                 &session_configuration.provider,
-                auth_manager.codex_api_key_env_enabled(),
+                auth_manager.astral_api_key_env_enabled(),
             );
             let mut session_telemetry = SessionTelemetry::new(
                 thread_id,

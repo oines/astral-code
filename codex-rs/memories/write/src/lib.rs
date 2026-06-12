@@ -72,7 +72,6 @@ signal to remove stale memories derived only from those resources.
 }
 
 mod stage_one {
-    pub(super) const MODEL: &str = "gpt-5.4-mini";
     pub(super) const REASONING_EFFORT: codex_protocol::openai_models::ReasoningEffort =
         codex_protocol::openai_models::ReasoningEffort::Low;
     pub(super) const CONCURRENCY_LIMIT: usize = 8;
@@ -97,7 +96,6 @@ mod stage_one {
 }
 
 mod stage_two {
-    pub(super) const MODEL: &str = "gpt-5.4";
     pub(super) const REASONING_EFFORT: codex_protocol::openai_models::ReasoningEffort =
         codex_protocol::openai_models::ReasoningEffort::Medium;
     pub(super) const JOB_LEASE_SECONDS: i64 = 3_600;
@@ -125,6 +123,23 @@ pub fn memory_extensions_root(root: &Path) -> PathBuf {
 
 pub fn raw_memories_file(root: &Path) -> PathBuf {
     root.join(artifacts::RAW_MEMORIES_FILENAME)
+}
+
+fn memory_model_name(
+    config: &codex_core::config::Config,
+    override_model: Option<&str>,
+) -> Option<String> {
+    override_model
+        .map(str::trim)
+        .filter(|model| !model.is_empty())
+        .or_else(|| {
+            config
+                .model
+                .as_deref()
+                .map(str::trim)
+                .filter(|model| !model.is_empty())
+        })
+        .map(ToOwned::to_owned)
 }
 
 pub async fn ensure_layout(root: &Path) -> std::io::Result<()> {

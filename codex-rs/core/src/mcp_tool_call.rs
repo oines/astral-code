@@ -1029,7 +1029,7 @@ fn build_mcp_tool_call_request_meta(
         })
     {
         request_meta.insert(
-            crate::X_CODEX_TURN_METADATA_HEADER.to_string(),
+            crate::X_ASTRAL_TURN_METADATA_HEADER.to_string(),
             turn_metadata,
         );
     }

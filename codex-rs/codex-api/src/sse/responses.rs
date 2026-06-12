@@ -56,7 +56,7 @@ pub fn spawn_response_stream(
     if let Some(turn_state) = turn_state.as_ref()
         && let Some(header_value) = stream_response
             .headers
-            .get("x-codex-turn-state")
+            .get("x-astral-turn-state")
             .and_then(|v| v.to_str().ok())
     {
         let _ = turn_state.set(header_value.to_string());

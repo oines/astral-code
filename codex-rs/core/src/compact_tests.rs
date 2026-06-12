@@ -141,6 +141,9 @@ fn collect_user_messages_filters_legacy_warnings() {
         user_message(
             "Warning: Your account was flagged for potentially high-risk cyber activity and this request was routed to gpt-5.2 as a fallback. To regain access to gpt-5.3-codex, apply for trusted access: https://chatgpt.com/cyber or learn more: https://developers.openai.com/codex/concepts/cyber-safety",
         ),
+        user_message(
+            "Warning: The provider returned model deepseek-v4-flash while deepseek-v4-pro was requested. Astral will continue with the provider-selected model for this turn.",
+        ),
         user_message("real user message"),
     ];
 
@@ -368,6 +371,9 @@ async fn process_compacted_history_drops_legacy_warnings() {
         ),
         user_message(
             "Warning: Your account was flagged for potentially high-risk cyber activity and this request was routed to gpt-5.2 as a fallback. To regain access to gpt-5.3-codex, apply for trusted access: https://chatgpt.com/cyber or learn more: https://developers.openai.com/codex/concepts/cyber-safety",
+        ),
+        user_message(
+            "Warning: The provider returned model deepseek-v4-flash while deepseek-v4-pro was requested. Astral will continue with the provider-selected model for this turn.",
         ),
         latest_user.clone(),
     ];

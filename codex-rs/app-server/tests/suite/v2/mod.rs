@@ -18,7 +18,7 @@ mod external_agent_config;
 mod feedback;
 mod fs;
 mod hooks_list;
-mod imagegen_extension;
+// Astral v1 does not default-install the legacy OpenAI-hosted image generation extension.
 mod initialize;
 mod marketplace_add;
 mod marketplace_remove;

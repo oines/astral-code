@@ -28,7 +28,7 @@ use crate::thread_state::ThreadStateManager;
 pub(crate) fn thread_extensions<S>(
     guardian_agent_spawner: S,
     event_sink: Arc<dyn ExtensionEventSink>,
-    auth_manager: Arc<AuthManager>,
+    _auth_manager: Arc<AuthManager>,
     state_db: Option<StateDbHandle>,
     thread_manager: Weak<ThreadManager>,
     goal_service: Arc<GoalService>,
@@ -49,7 +49,6 @@ where
     }
     codex_guardian::install(&mut builder, guardian_agent_spawner);
     codex_memories_extension::install(&mut builder, codex_otel::global());
-    codex_image_generation_extension::install(&mut builder, auth_manager);
     Arc::new(builder.build())
 }
 

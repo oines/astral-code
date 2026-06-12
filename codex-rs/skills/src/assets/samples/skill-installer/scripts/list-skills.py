@@ -11,8 +11,8 @@ import urllib.error
 
 from github_utils import github_api_contents_url, github_request
 
-DEFAULT_REPO = "openai/skills"
-DEFAULT_PATH = "skills/.curated"
+DEFAULT_REPO = "oines/astral-code"
+DEFAULT_PATH = "codex-rs/skills/src/assets/samples"
 DEFAULT_REF = "main"
 
 
@@ -28,15 +28,15 @@ class Args(argparse.Namespace):
 
 
 def _request(url: str) -> bytes:
-    return github_request(url, "codex-skill-list")
+    return github_request(url, "astral-skill-list")
 
 
-def _codex_home() -> str:
-    return os.environ.get("CODEX_HOME", os.path.expanduser("~/.codex"))
+def _astral_home() -> str:
+    return os.environ.get("ASTRAL_HOME", os.path.expanduser("~/.astral-code"))
 
 
 def _installed_skills() -> set[str]:
-    root = os.path.join(_codex_home(), "skills")
+    root = os.path.join(_astral_home(), "skills")
     if not os.path.isdir(root):
         return set()
     entries = set()
@@ -71,7 +71,7 @@ def _parse_args(argv: list[str]) -> Args:
     parser.add_argument(
         "--path",
         default=DEFAULT_PATH,
-        help="Repo path to list (default: skills/.curated)",
+        help="Repo path to list (default: Astral bundled sample skills)",
     )
     parser.add_argument("--ref", default=DEFAULT_REF)
     parser.add_argument(

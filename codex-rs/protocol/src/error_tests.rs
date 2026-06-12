@@ -1,4 +1,5 @@
 use super::*;
+use crate::auth::KnownPlan;
 use crate::exec_output::StreamOutput;
 use crate::protocol::RateLimitWindow;
 use chrono::DateTime;
@@ -61,7 +62,7 @@ fn usage_limit_reached_error_formats_plus_plan() {
     };
     assert_eq!(
         err.to_string(),
-        "You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again later."
+        "You've hit your usage limit. Check your provider account, billing, or model quota or try again later."
     );
 }
 
@@ -70,7 +71,7 @@ fn usage_limit_reached_error_formats_rate_limit_reached_types() {
     let cases = [
         (
             RateLimitReachedType::RateLimitReached,
-            "You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again later.",
+            "You've hit your usage limit. Check your provider account, billing, or model quota or try again later.",
         ),
         (
             RateLimitReachedType::WorkspaceOwnerCreditsDepleted,
@@ -221,7 +222,7 @@ fn usage_limit_reached_error_formats_free_plan() {
     };
     assert_eq!(
         err.to_string(),
-        "You've hit your usage limit. Upgrade to Plus to continue using Codex (https://chatgpt.com/explore/plus), or try again later."
+        "You've hit your usage limit. Check your provider account, billing, or model quota or try again later."
     );
 }
 
@@ -236,7 +237,7 @@ fn usage_limit_reached_error_formats_go_plan() {
     };
     assert_eq!(
         err.to_string(),
-        "You've hit your usage limit. Upgrade to Plus to continue using Codex (https://chatgpt.com/explore/plus), or try again later."
+        "You've hit your usage limit. Check your provider account, billing, or model quota or try again later."
     );
 }
 
@@ -251,7 +252,7 @@ fn usage_limit_reached_error_formats_default_when_none() {
     };
     assert_eq!(
         err.to_string(),
-        "You've hit your usage limit. Try again later."
+        "You've hit your usage limit. Check your provider account, billing, or model quota or try again later."
     );
 }
 
@@ -269,7 +270,7 @@ fn usage_limit_reached_error_formats_team_plan() {
             rate_limit_reached_type: None,
         };
         let expected = format!(
-            "You've hit your usage limit. To get more access now, send a request to your admin or try again at {expected_time}."
+            "You've hit your usage limit. Check your provider account, billing, or model quota or try again at {expected_time}."
         );
         assert_eq!(err.to_string(), expected);
     });
@@ -286,7 +287,7 @@ fn usage_limit_reached_error_formats_business_plan_without_reset() {
     };
     assert_eq!(
         err.to_string(),
-        "You've hit your usage limit. To get more access now, send a request to your admin or try again later."
+        "You've hit your usage limit. Check your provider account, billing, or model quota or try again later."
     );
 }
 
@@ -301,7 +302,7 @@ fn usage_limit_reached_error_formats_self_serve_business_usage_based_plan() {
     };
     assert_eq!(
         err.to_string(),
-        "You've hit your usage limit. To get more access now, send a request to your admin or try again later."
+        "You've hit your usage limit. Check your provider account, billing, or model quota or try again later."
     );
 }
 
@@ -316,7 +317,7 @@ fn usage_limit_reached_error_formats_enterprise_cbp_usage_based_plan() {
     };
     assert_eq!(
         err.to_string(),
-        "You've hit your usage limit. To get more access now, send a request to your admin or try again later."
+        "You've hit your usage limit. Check your provider account, billing, or model quota or try again later."
     );
 }
 
@@ -331,7 +332,7 @@ fn usage_limit_reached_error_formats_default_for_other_plans() {
     };
     assert_eq!(
         err.to_string(),
-        "You've hit your usage limit. Try again later."
+        "You've hit your usage limit. Check your provider account, billing, or model quota or try again later."
     );
 }
 
@@ -349,7 +350,7 @@ fn usage_limit_reached_error_formats_pro_plan_with_reset() {
             rate_limit_reached_type: None,
         };
         let expected = format!(
-            "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at {expected_time}."
+            "You've hit your usage limit. Check your provider account, billing, or model quota or try again at {expected_time}."
         );
         assert_eq!(err.to_string(), expected);
     });
@@ -369,10 +370,7 @@ fn usage_limit_reached_error_hides_upsell_for_non_codex_limit_name() {
                 limit_name: Some("codex_other".to_string()),
                 ..rate_limit_snapshot()
             })),
-            promo_message: Some(
-                "Visit https://chatgpt.com/codex/settings/usage to purchase more credits"
-                    .to_string(),
-            ),
+            promo_message: Some("Visit hosted billing to increase quota".to_string()),
             rate_limit_reached_type: None,
         };
         let expected = format!(
@@ -395,7 +393,9 @@ fn usage_limit_reached_includes_minutes_when_available() {
             promo_message: None,
             rate_limit_reached_type: None,
         };
-        let expected = format!("You've hit your usage limit. Try again at {expected_time}.");
+        let expected = format!(
+            "You've hit your usage limit. Check your provider account, billing, or model quota or try again at {expected_time}."
+        );
         assert_eq!(err.to_string(), expected);
     });
 }
@@ -445,7 +445,7 @@ fn unexpected_status_prefers_error_message_when_present() {
         status: StatusCode::UNAUTHORIZED,
         body: r#"{"error":{"message":"Workspace is not authorized in this region."},"status":401}"#
             .to_string(),
-        url: Some("https://chatgpt.com/backend-api/codex/responses".to_string()),
+        url: Some("https://provider.example/api/astral/responses".to_string()),
         cf_ray: None,
         request_id: Some("req-123".to_string()),
         identity_authorization_error: None,
@@ -455,7 +455,7 @@ fn unexpected_status_prefers_error_message_when_present() {
     assert_eq!(
         err.to_string(),
         format!(
-            "unexpected status {status}: Workspace is not authorized in this region., url: https://chatgpt.com/backend-api/codex/responses, request id: req-123"
+            "unexpected status {status}: Workspace is not authorized in this region., url: https://provider.example/api/astral/responses, request id: req-123"
         )
     );
 }
@@ -487,7 +487,7 @@ fn unexpected_status_includes_cf_ray_and_request_id() {
     let err = UnexpectedResponseError {
         status: StatusCode::UNAUTHORIZED,
         body: "plain text error".to_string(),
-        url: Some("https://chatgpt.com/backend-api/codex/responses".to_string()),
+        url: Some("https://provider.example/api/astral/responses".to_string()),
         cf_ray: Some("9c81f9f18f2fa49d-LHR".to_string()),
         request_id: Some("req-xyz".to_string()),
         identity_authorization_error: None,
@@ -497,7 +497,7 @@ fn unexpected_status_includes_cf_ray_and_request_id() {
     assert_eq!(
         err.to_string(),
         format!(
-            "unexpected status {status}: plain text error, url: https://chatgpt.com/backend-api/codex/responses, cf-ray: 9c81f9f18f2fa49d-LHR, request id: req-xyz"
+            "unexpected status {status}: plain text error, url: https://provider.example/api/astral/responses, cf-ray: 9c81f9f18f2fa49d-LHR, request id: req-xyz"
         )
     );
 }
@@ -507,7 +507,7 @@ fn unexpected_status_includes_identity_auth_details() {
     let err = UnexpectedResponseError {
         status: StatusCode::UNAUTHORIZED,
         body: "plain text error".to_string(),
-        url: Some("https://chatgpt.com/backend-api/codex/models".to_string()),
+        url: Some("https://provider.example/api/astral/models".to_string()),
         cf_ray: Some("cf-ray-auth-401-test".to_string()),
         request_id: Some("req-auth".to_string()),
         identity_authorization_error: Some("missing_authorization_header".to_string()),
@@ -517,7 +517,7 @@ fn unexpected_status_includes_identity_auth_details() {
     assert_eq!(
         err.to_string(),
         format!(
-            "unexpected status {status}: plain text error, url: https://chatgpt.com/backend-api/codex/models, cf-ray: cf-ray-auth-401-test, request id: req-auth, auth error: missing_authorization_header, auth error code: token_expired"
+            "unexpected status {status}: plain text error, url: https://provider.example/api/astral/models, cf-ray: cf-ray-auth-401-test, request id: req-auth, auth error: missing_authorization_header, auth error code: token_expired"
         )
     );
 }
@@ -536,7 +536,7 @@ fn usage_limit_reached_includes_hours_and_minutes() {
             rate_limit_reached_type: None,
         };
         let expected = format!(
-            "You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at {expected_time}."
+            "You've hit your usage limit. Check your provider account, billing, or model quota or try again at {expected_time}."
         );
         assert_eq!(err.to_string(), expected);
     });
@@ -556,7 +556,9 @@ fn usage_limit_reached_includes_days_hours_minutes() {
             promo_message: None,
             rate_limit_reached_type: None,
         };
-        let expected = format!("You've hit your usage limit. Try again at {expected_time}.");
+        let expected = format!(
+            "You've hit your usage limit. Check your provider account, billing, or model quota or try again at {expected_time}."
+        );
         assert_eq!(err.to_string(), expected);
     });
 }
@@ -574,7 +576,9 @@ fn usage_limit_reached_less_than_minute() {
             promo_message: None,
             rate_limit_reached_type: None,
         };
-        let expected = format!("You've hit your usage limit. Try again at {expected_time}.");
+        let expected = format!(
+            "You've hit your usage limit. Check your provider account, billing, or model quota or try again at {expected_time}."
+        );
         assert_eq!(err.to_string(), expected);
     });
 }
@@ -589,13 +593,11 @@ fn usage_limit_reached_with_promo_message() {
             plan_type: None,
             resets_at: Some(resets_at),
             rate_limits: Some(Box::new(rate_limit_snapshot())),
-            promo_message: Some(
-                "To continue using Codex, start a free trial of <PLAN> today".to_string(),
-            ),
+            promo_message: Some("Use hosted billing to upgrade this account".to_string()),
             rate_limit_reached_type: None,
         };
         let expected = format!(
-            "You've hit your usage limit. To continue using Codex, start a free trial of <PLAN> today, or try again at {expected_time}."
+            "You've hit your usage limit. Check your provider account, billing, or model quota or try again at {expected_time}."
         );
         assert_eq!(err.to_string(), expected);
     });

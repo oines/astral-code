@@ -82,14 +82,14 @@ fn now_ts() -> String {
 }
 
 pub(crate) fn maybe_init(config: &Config) {
-    let enabled = std::env::var("CODEX_TUI_RECORD_SESSION")
+    let enabled = std::env::var("ASTRAL_TUI_RECORD_SESSION")
         .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
         .unwrap_or(false);
     if !enabled {
         return;
     }
 
-    let path = if let Ok(path) = std::env::var("CODEX_TUI_SESSION_LOG_PATH") {
+    let path = if let Ok(path) = std::env::var("ASTRAL_TUI_SESSION_LOG_PATH") {
         PathBuf::from(path)
     } else {
         let mut p = config.log_dir.clone();

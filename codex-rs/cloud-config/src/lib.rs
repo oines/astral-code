@@ -1,21 +1,9 @@
-//! Cloud-hosted configuration data for Astral.
+//! Provider-neutral configuration bundle hook for Astral.
 //!
-//! Astral does not enable the legacy ChatGPT-hosted configuration control plane
-//! by default. Parsing and composition remain in `codex-config`; the old remote
-//! transport is retained only for tests while the provider-neutral replacement is
-//! designed.
+//! Parsing and composition remain in `codex-config`; this crate exposes disabled
+//! bundle loaders until a provider-neutral replacement exists.
 
-#[cfg(test)]
-mod backend;
 mod bundle_loader;
-#[cfg(test)]
-mod cache;
-#[cfg(test)]
-mod metrics;
-#[cfg(test)]
-mod service;
-#[cfg(test)]
-mod validation;
 
 pub use bundle_loader::cloud_config_bundle_loader;
 pub use bundle_loader::cloud_config_bundle_loader_for_storage;

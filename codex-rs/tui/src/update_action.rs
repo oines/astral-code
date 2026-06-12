@@ -145,7 +145,7 @@ mod tests {
                 "sh",
                 &[
                     "-c",
-                    "curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh"
+                    "curl -fsSL https://raw.githubusercontent.com/oines/astral-code/main/install.sh | ASTRAL_NON_INTERACTIVE=1 sh"
                 ][..],
             )
         );
@@ -157,7 +157,7 @@ mod tests {
                     "-ExecutionPolicy",
                     "Bypass",
                     "-c",
-                    "$env:CODEX_NON_INTERACTIVE=1; irm https://chatgpt.com/codex/install.ps1 | iex"
+                    "$env:ASTRAL_NON_INTERACTIVE=1; irm https://raw.githubusercontent.com/oines/astral-code/main/install.ps1 | iex"
                 ][..],
             )
         );

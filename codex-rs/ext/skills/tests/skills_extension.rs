@@ -38,7 +38,7 @@ use pretty_assertions::assert_eq;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
-static NEXT_CODEX_HOME_ID: AtomicUsize = AtomicUsize::new(0);
+static NEXT_ASTRAL_HOME_ID: AtomicUsize = AtomicUsize::new(0);
 
 #[tokio::test]
 async fn installed_extension_loads_host_skills_from_legacy_roots() -> TestResult {
@@ -384,9 +384,9 @@ async fn default_config() -> std::io::Result<Config> {
 }
 
 fn test_codex_home() -> PathBuf {
-    let id = NEXT_CODEX_HOME_ID.fetch_add(1, Ordering::Relaxed);
+    let id = NEXT_ASTRAL_HOME_ID.fetch_add(1, Ordering::Relaxed);
     std::env::temp_dir().join(format!(
-        "codex-skills-extension-test-{}-{id}",
+        "astral-skills-extension-test-{}-{id}",
         std::process::id(),
     ))
 }

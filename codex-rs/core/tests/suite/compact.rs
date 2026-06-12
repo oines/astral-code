@@ -2752,7 +2752,7 @@ async fn manual_compact_twice_preserves_latest_user_messages() {
     );
     let compact_metadata: Value = serde_json::from_str(
         &requests[1]
-            .header("x-codex-turn-metadata")
+            .header("x-astral-turn-metadata")
             .expect("local compact request should include turn metadata"),
     )
     .expect("local compact turn metadata should be valid json");
@@ -2762,7 +2762,7 @@ async fn manual_compact_twice_preserves_latest_user_messages() {
     );
     assert_eq!(
         compact_metadata["window_id"].as_str(),
-        requests[1].header("x-codex-window-id").as_deref()
+        requests[1].header("x-astral-window-id").as_deref()
     );
     assert_eq!(
         compact_metadata["compaction"],
@@ -2781,7 +2781,7 @@ async fn manual_compact_twice_preserves_latest_user_messages() {
     );
     let next_turn_metadata: Value = serde_json::from_str(
         &requests[2]
-            .header("x-codex-turn-metadata")
+            .header("x-astral-turn-metadata")
             .expect("next regular request should include turn metadata"),
     )
     .expect("next regular turn metadata should be valid json");
@@ -2792,7 +2792,7 @@ async fn manual_compact_twice_preserves_latest_user_messages() {
     );
     assert_eq!(
         next_turn_metadata["window_id"].as_str(),
-        requests[2].header("x-codex-window-id").as_deref()
+        requests[2].header("x-astral-window-id").as_deref()
     );
     assert_ne!(
         compact_metadata["window_id"], next_turn_metadata["window_id"],

@@ -68,7 +68,15 @@ struct StageOneOutput {
 /// 3) run stage-1 extraction jobs in parallel
 /// 4) emit metrics and logs
 pub async fn run(context: Arc<MemoryStartupContext>, config: Arc<Config>) {
-    let stage_one_context = build_request_context(context.as_ref(), config.as_ref()).await;
+    let Some(stage_one_context) = build_request_context(context.as_ref(), config.as_ref()).await
+    else {
+        context.counter(
+            MEMORY_PHASE_ONE_JOBS,
+            /*inc*/ 1,
+            &[("status", "skipped_no_model")],
+        );
+        return;
+    };
     let _phase_one_e2e_timer = stage_one_context.start_timer(MEMORY_PHASE_ONE_E2E_MS);
 
     // 1. Claim startup job.
@@ -189,15 +197,18 @@ async fn claim_startup_jobs(
 async fn build_request_context(
     context: &MemoryStartupContext,
     config: &Config,
-) -> StageOneRequestContext {
-    let model_name = config
-        .memories
-        .extract_model
-        .clone()
-        .unwrap_or(crate::stage_one::MODEL.to_string());
-    context
-        .stage_one_request_context(config, &model_name, crate::stage_one::REASONING_EFFORT)
-        .await
+) -> Option<StageOneRequestContext> {
+    let Some(model_name) =
+        crate::memory_model_name(config, config.memories.extract_model.as_deref())
+    else {
+        warn!("skipping memory stage-1 extraction because no model is configured");
+        return None;
+    };
+    Some(
+        context
+            .stage_one_request_context(config, &model_name, crate::stage_one::REASONING_EFFORT)
+            .await,
+    )
 }
 
 async fn run_jobs(

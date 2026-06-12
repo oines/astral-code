@@ -1019,7 +1019,7 @@ async fn mcp_tool_call_request_meta_includes_turn_metadata_for_custom_server() {
     )
     .expect("custom servers should receive turn metadata");
     let turn_metadata = meta
-        .get(crate::X_CODEX_TURN_METADATA_HEADER)
+        .get(crate::X_ASTRAL_TURN_METADATA_HEADER)
         .expect("turn metadata should be present");
 
     assert_eq!(
@@ -1041,7 +1041,7 @@ async fn mcp_tool_call_request_meta_includes_turn_metadata_for_custom_server() {
     assert_eq!(
         meta,
         serde_json::json!({
-            crate::X_CODEX_TURN_METADATA_HEADER: expected_turn_metadata,
+            crate::X_ASTRAL_TURN_METADATA_HEADER: expected_turn_metadata,
         })
     );
 }
@@ -1061,7 +1061,7 @@ async fn mcp_tool_call_request_meta_includes_turn_started_at_unix_ms() {
     )
     .expect("custom servers should receive turn metadata");
     let turn_metadata = meta
-        .get(crate::X_CODEX_TURN_METADATA_HEADER)
+        .get(crate::X_ASTRAL_TURN_METADATA_HEADER)
         .expect("turn metadata should be present");
 
     assert_eq!(
@@ -1089,7 +1089,7 @@ async fn plugin_mcp_tool_call_request_meta_includes_plugin_id() {
     assert_eq!(
         build_mcp_tool_call_request_meta(&turn_context, "sample", "call-plugin", Some(&metadata),),
         Some(serde_json::json!({
-            crate::X_CODEX_TURN_METADATA_HEADER: expected_turn_metadata,
+            crate::X_ASTRAL_TURN_METADATA_HEADER: expected_turn_metadata,
             MCP_TOOL_PLUGIN_ID_META_KEY: "sample@test",
         }))
     );
@@ -1165,7 +1165,7 @@ async fn codex_apps_tool_call_request_meta_includes_turn_metadata_and_codex_apps
             Some(&metadata),
         ),
         Some(serde_json::json!({
-            crate::X_CODEX_TURN_METADATA_HEADER: expected_turn_metadata,
+            crate::X_ASTRAL_TURN_METADATA_HEADER: expected_turn_metadata,
             MCP_TOOL_CODEX_APPS_META_KEY: {
                 "call_id": "call_abc123xyz789",
                 "resource_uri": "connector://calendar/tools/calendar_create_event",
@@ -1192,7 +1192,7 @@ async fn codex_apps_tool_call_request_meta_includes_call_id_without_existing_cod
             /*metadata*/ None,
         ),
         Some(serde_json::json!({
-            crate::X_CODEX_TURN_METADATA_HEADER: expected_turn_metadata,
+            crate::X_ASTRAL_TURN_METADATA_HEADER: expected_turn_metadata,
             MCP_TOOL_CODEX_APPS_META_KEY: {
                 "call_id": "call_abc123xyz789",
             },

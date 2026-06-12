@@ -64,7 +64,7 @@ use tracing::warn;
 
 pub(super) const REMOTE_CONTROL_PROTOCOL_VERSION: &str = "3";
 pub(super) const REMOTE_CONTROL_INSTALLATION_ID_HEADER: &str = "x-astral-installation-id";
-const REMOTE_CONTROL_SUBSCRIBE_CURSOR_HEADER: &str = "x-codex-subscribe-cursor";
+const REMOTE_CONTROL_SUBSCRIBE_CURSOR_HEADER: &str = "x-astral-subscribe-cursor";
 const REMOTE_CONTROL_WEBSOCKET_PING_INTERVAL: std::time::Duration =
     std::time::Duration::from_secs(10);
 const REMOTE_CONTROL_WEBSOCKET_PONG_TIMEOUT: std::time::Duration =
@@ -1146,15 +1146,15 @@ fn build_remote_control_websocket_request(
         )
     })?;
     let headers = request.headers_mut();
-    set_remote_control_header(headers, "x-codex-server-id", &enrollment.server_id)?;
+    set_remote_control_header(headers, "x-astral-server-id", &enrollment.server_id)?;
     set_remote_control_header(
         headers,
-        "x-codex-name",
+        "x-astral-name",
         &base64::engine::general_purpose::STANDARD.encode(&enrollment.server_name),
     )?;
     set_remote_control_header(
         headers,
-        "x-codex-protocol-version",
+        "x-astral-protocol-version",
         REMOTE_CONTROL_PROTOCOL_VERSION,
     )?;
     set_remote_control_header(
@@ -2011,7 +2011,7 @@ mod tests {
         let state_db = remote_control_state_runtime(&codex_home).await;
         let auth_manager = AuthManager::shared(
             codex_home.path().to_path_buf(),
-            /*enable_codex_api_key_env*/ false,
+            /*enable_astral_api_key_env*/ false,
             AuthCredentialsStoreMode::File,
         )
         .await;
@@ -2102,7 +2102,7 @@ mod tests {
         let state_db = remote_control_state_runtime(&codex_home).await;
         let auth_manager = AuthManager::shared(
             codex_home.path().to_path_buf(),
-            /*enable_codex_api_key_env*/ false,
+            /*enable_astral_api_key_env*/ false,
             AuthCredentialsStoreMode::File,
         )
         .await;
@@ -2217,7 +2217,7 @@ mod tests {
         let state_db = remote_control_state_runtime(&codex_home).await;
         let auth_manager = AuthManager::shared(
             codex_home.path().to_path_buf(),
-            /*enable_codex_api_key_env*/ false,
+            /*enable_astral_api_key_env*/ false,
             AuthCredentialsStoreMode::File,
         )
         .await;

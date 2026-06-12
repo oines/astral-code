@@ -137,8 +137,8 @@ async fn shutdown_thread(codex: &Arc<CodexThread>) -> Result<()> {
 
 fn window_id_parts(request: &ResponsesRequest) -> (String, u64) {
     let window_id = request
-        .header("x-codex-window-id")
-        .expect("missing x-codex-window-id header");
+        .header("x-astral-window-id")
+        .expect("missing x-astral-window-id header");
     let (thread_id, generation) = window_id
         .rsplit_once(':')
         .unwrap_or_else(|| panic!("invalid window id header: {window_id}"));

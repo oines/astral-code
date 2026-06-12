@@ -263,8 +263,8 @@ enabled = true
     let remote_marketplace = response
         .marketplaces
         .iter()
-        .find(|marketplace| marketplace.name == "openai-curated-remote")
-        .expect("expected openai-curated-remote marketplace entry");
+        .find(|marketplace| marketplace.name == "astral-curated-remote")
+        .expect("expected astral-curated-remote marketplace entry");
     assert_eq!(
         remote_marketplace
             .plugins
@@ -272,8 +272,8 @@ enabled = true
             .map(|plugin| plugin.id.clone())
             .collect::<Vec<_>>(),
         vec![
-            "linear@openai-curated-remote".to_string(),
-            "remote-only@openai-curated-remote".to_string(),
+            "linear@astral-curated-remote".to_string(),
+            "remote-only@astral-curated-remote".to_string(),
         ]
     );
     assert_eq!(response.marketplace_load_errors, Vec::new());
@@ -1492,7 +1492,7 @@ async fn app_server_startup_does_not_sync_remote_installed_plugin_bundles() -> R
 
     let installed_path = codex_home
         .path()
-        .join("plugins/cache/openai-curated-remote/linear/1.2.3");
+        .join("plugins/cache/astral-curated-remote/linear/1.2.3");
     let mut mcp = TestAppServer::new_with_env_and_plugin_startup_tasks(
         codex_home.path(),
         &[(TEST_ALLOW_HTTP_REMOTE_PLUGIN_BUNDLE_DOWNLOADS, Some("1"))],
@@ -1508,7 +1508,7 @@ async fn app_server_startup_does_not_sync_remote_installed_plugin_bundles() -> R
     .await?;
     assert!(!installed_path.join(".codex-plugin/plugin.json").exists());
     let config = std::fs::read_to_string(codex_home.path().join("config.toml"))?;
-    assert!(!config.contains("linear@openai-curated-remote"));
+    assert!(!config.contains("linear@astral-curated-remote"));
     Ok(())
 }
 
@@ -1528,8 +1528,8 @@ async fn plugin_list_sync_upgrades_and_removes_remote_installed_plugin_bundles()
             .chatgpt_account_id("account-123"),
         AuthCredentialsStoreMode::File,
     )?;
-    write_installed_plugin_with_version(&codex_home, "openai-curated-remote", "linear", "1.0.0")?;
-    write_installed_plugin_with_version(&codex_home, "openai-curated-remote", "stale", "1.0.0")?;
+    write_installed_plugin_with_version(&codex_home, "astral-curated-remote", "linear", "1.0.0")?;
+    write_installed_plugin_with_version(&codex_home, "astral-curated-remote", "stale", "1.0.0")?;
 
     let bundle_url = mount_remote_plugin_bundle(
         &server,
@@ -1558,13 +1558,13 @@ async fn plugin_list_sync_upgrades_and_removes_remote_installed_plugin_bundles()
 
     let old_path = codex_home
         .path()
-        .join("plugins/cache/openai-curated-remote/linear/1.0.0");
+        .join("plugins/cache/astral-curated-remote/linear/1.0.0");
     let new_path = codex_home
         .path()
-        .join("plugins/cache/openai-curated-remote/linear/1.2.3");
+        .join("plugins/cache/astral-curated-remote/linear/1.2.3");
     let stale_path = codex_home
         .path()
-        .join("plugins/cache/openai-curated-remote/stale");
+        .join("plugins/cache/astral-curated-remote/stale");
 
     let mut mcp = TestAppServer::new_with_env(
         codex_home.path(),
@@ -1588,22 +1588,22 @@ async fn plugin_list_sync_upgrades_and_removes_remote_installed_plugin_bundles()
     let remote_marketplace = response
         .marketplaces
         .into_iter()
-        .find(|marketplace| marketplace.name == "openai-curated-remote")
-        .expect("expected openai-curated-remote marketplace entry");
+        .find(|marketplace| marketplace.name == "astral-curated-remote")
+        .expect("expected astral-curated-remote marketplace entry");
     assert_eq!(
         remote_marketplace
             .plugins
             .into_iter()
             .map(|plugin| (plugin.id, plugin.installed, plugin.enabled))
             .collect::<Vec<_>>(),
-        vec![("linear@openai-curated-remote".to_string(), true, true)]
+        vec![("linear@astral-curated-remote".to_string(), true, true)]
     );
 
     assert!(!new_path.join(".codex-plugin/plugin.json").exists());
     assert!(old_path.exists());
     assert!(stale_path.exists());
     let config = std::fs::read_to_string(codex_home.path().join("config.toml"))?;
-    assert!(!config.contains("linear@openai-curated-remote"));
+    assert!(!config.contains("linear@astral-curated-remote"));
     Ok(())
 }
 
@@ -1752,20 +1752,20 @@ async fn plugin_list_includes_remote_marketplaces_when_remote_plugin_enabled() -
     let remote_marketplace = response
         .marketplaces
         .into_iter()
-        .find(|marketplace| marketplace.name == "openai-curated-remote")
-        .expect("expected openai-curated remote marketplace");
+        .find(|marketplace| marketplace.name == "astral-curated-remote")
+        .expect("expected astral-curated remote marketplace");
     assert_eq!(remote_marketplace.path, None);
     assert_eq!(
         remote_marketplace
             .interface
             .as_ref()
             .and_then(|interface| interface.display_name.as_deref()),
-        Some("OpenAI Curated Remote")
+        Some("Astral Curated Remote")
     );
     assert_eq!(remote_marketplace.plugins.len(), 1);
     assert_eq!(
         remote_marketplace.plugins[0].id,
-        "linear@openai-curated-remote"
+        "linear@astral-curated-remote"
     );
     assert_eq!(
         remote_marketplace.plugins[0].remote_plugin_id.as_deref(),
@@ -1883,11 +1883,11 @@ async fn plugin_list_uses_cached_global_remote_catalog_without_background_refres
     let remote_marketplace = response
         .marketplaces
         .iter()
-        .find(|marketplace| marketplace.name == "openai-curated-remote")
+        .find(|marketplace| marketplace.name == "astral-curated-remote")
         .expect("expected warmed remote marketplace");
     assert_eq!(
         remote_marketplace.plugins[0].id,
-        "linear@openai-curated-remote"
+        "linear@astral-curated-remote"
     );
     wait_for_remote_plugin_request_count(&server, "/ps/plugins/list", /*expected_count*/ 1).await?;
     wait_for_cached_remote_catalog_plugin_ids(codex_home.path(), &[cached_remote_plugin_id])
@@ -1925,11 +1925,11 @@ async fn plugin_list_uses_cached_global_remote_catalog_without_background_refres
     let remote_marketplace = response
         .marketplaces
         .iter()
-        .find(|marketplace| marketplace.name == "openai-curated-remote")
+        .find(|marketplace| marketplace.name == "astral-curated-remote")
         .expect("expected cached remote marketplace");
     assert_eq!(
         remote_marketplace.plugins[0].id,
-        "linear@openai-curated-remote"
+        "linear@astral-curated-remote"
     );
     wait_for_remote_plugin_request_count(&server, "/ps/plugins/list", /*expected_count*/ 0).await?;
     wait_for_cached_remote_catalog_plugin_ids(codex_home.path(), &[cached_remote_plugin_id])
@@ -2005,19 +2005,19 @@ async fn plugin_list_includes_openai_curated_remote_collection_when_requested() 
     let remote_marketplace = response
         .marketplaces
         .into_iter()
-        .find(|marketplace| marketplace.name == "openai-curated-remote")
-        .expect("expected openai-curated remote marketplace");
+        .find(|marketplace| marketplace.name == "astral-curated-remote")
+        .expect("expected astral-curated remote marketplace");
     assert_eq!(remote_marketplace.path, None);
     assert_eq!(
         remote_marketplace
             .interface
             .as_ref()
             .and_then(|interface| interface.display_name.as_deref()),
-        Some("OpenAI Curated Remote")
+        Some("Astral Curated Remote")
     );
     assert_eq!(remote_marketplace.plugins.len(), 1);
     let plugin = &remote_marketplace.plugins[0];
-    assert_eq!(plugin.id, "linear@openai-curated-remote");
+    assert_eq!(plugin.id, "linear@astral-curated-remote");
     assert_eq!(
         plugin.remote_plugin_id.as_deref(),
         Some("plugins~Plugin_00000000000000000000000000000000")
@@ -2093,7 +2093,7 @@ async fn plugin_list_fail_opens_openai_curated_remote_collection_errors() -> Res
         response
             .marketplaces
             .iter()
-            .all(|marketplace| marketplace.name != "openai-curated-remote")
+            .all(|marketplace| marketplace.name != "astral-curated-remote")
     );
     Ok(())
 }
@@ -2135,7 +2135,7 @@ async fn plugin_list_does_not_query_openai_curated_remote_collection_by_default(
         response
             .marketplaces
             .iter()
-            .all(|marketplace| marketplace.name != "openai-curated-remote")
+            .all(|marketplace| marketplace.name != "astral-curated-remote")
     );
     assert!(
         server
@@ -2188,7 +2188,7 @@ async fn plugin_list_vertical_kind_noops_when_remote_plugin_enabled() -> Result<
         response
             .marketplaces
             .iter()
-            .all(|marketplace| marketplace.name != "openai-curated-remote")
+            .all(|marketplace| marketplace.name != "astral-curated-remote")
     );
     assert!(
         server
@@ -2243,7 +2243,7 @@ async fn plugin_list_does_not_append_global_remote_when_marketplace_kinds_are_ex
         response
             .marketplaces
             .iter()
-            .all(|marketplace| marketplace.name != "openai-curated-remote")
+            .all(|marketplace| marketplace.name != "astral-curated-remote")
     );
     wait_for_remote_plugin_request_count(&server, "/ps/plugins/list", /*expected_count*/ 0).await?;
     Ok(())
@@ -2412,7 +2412,7 @@ plugin_sharing = false
     assert!(response.marketplaces.is_empty());
     let installed_path = codex_home
         .path()
-        .join("plugins/cache/openai-curated-remote/linear/1.2.3/.codex-plugin/plugin.json");
+        .join("plugins/cache/astral-curated-remote/linear/1.2.3/.codex-plugin/plugin.json");
     assert!(!installed_path.exists());
     wait_for_remote_plugin_request_count(
         &server,
@@ -2890,7 +2890,7 @@ async fn plugin_list_marks_remote_plugin_disabled_by_admin() -> Result<()> {
     let remote_marketplace = response
         .marketplaces
         .into_iter()
-        .find(|marketplace| marketplace.name == "openai-curated-remote")
+        .find(|marketplace| marketplace.name == "astral-curated-remote")
         .expect("expected ChatGPT remote marketplace");
     let plugin = remote_marketplace
         .plugins

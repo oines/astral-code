@@ -1,9 +1,22 @@
+use std::collections::HashMap;
+use std::io;
+use std::path::Path;
+
 use pretty_assertions::assert_eq;
 use serde_json::json;
+use tokio::sync::Mutex;
 
+use codex_exec_server::CopyOptions;
+use codex_exec_server::CreateDirectoryOptions;
+use codex_exec_server::ExecutorFileSystem;
+use codex_exec_server::FileMetadata;
+use codex_exec_server::FileSystemResult;
 use codex_exec_server::FileSystemSandboxContext;
 use codex_exec_server::LOCAL_FS;
+use codex_exec_server::ReadDirectoryEntry;
+use codex_exec_server::RemoveOptions;
 use codex_protocol::models::PermissionProfile;
+use codex_utils_absolute_path::AbsolutePathBuf;
 use core_test_support::PathExt;
 
 use super::GrepArgs;
@@ -14,6 +27,155 @@ use super::file_environment_id;
 use super::is_blocked_device_path;
 use super::push_content_matches;
 use super::split_lines_preserving_newline;
+use super::write_file;
+
+#[derive(Default)]
+struct RecordingFileSystem {
+    files: Mutex<HashMap<String, Vec<u8>>>,
+    calls: Mutex<Vec<String>>,
+}
+
+impl RecordingFileSystem {
+    async fn insert_file(&self, path: &AbsolutePathBuf, contents: impl Into<Vec<u8>>) {
+        self.files
+            .lock()
+            .await
+            .insert(path_key(path), contents.into());
+    }
+
+    async fn file_contents(&self, path: &AbsolutePathBuf) -> Option<Vec<u8>> {
+        self.files.lock().await.get(&path_key(path)).cloned()
+    }
+
+    async fn calls(&self) -> Vec<String> {
+        self.calls.lock().await.clone()
+    }
+
+    async fn record(&self, method: &str, path: &AbsolutePathBuf) {
+        self.calls
+            .lock()
+            .await
+            .push(format!("{method}:{}", path.display()));
+    }
+}
+
+fn path_key(path: &AbsolutePathBuf) -> String {
+    path.to_string_lossy().into_owned()
+}
+
+#[async_trait::async_trait]
+impl ExecutorFileSystem for RecordingFileSystem {
+    async fn canonicalize(
+        &self,
+        path: &AbsolutePathBuf,
+        _sandbox: Option<&FileSystemSandboxContext>,
+    ) -> FileSystemResult<AbsolutePathBuf> {
+        Ok(path.clone())
+    }
+
+    async fn join(
+        &self,
+        base_path: &AbsolutePathBuf,
+        path: &Path,
+    ) -> FileSystemResult<AbsolutePathBuf> {
+        Ok(base_path.join(path))
+    }
+
+    async fn parent(&self, path: &AbsolutePathBuf) -> FileSystemResult<Option<AbsolutePathBuf>> {
+        Ok(path.parent())
+    }
+
+    async fn read_file(
+        &self,
+        path: &AbsolutePathBuf,
+        _sandbox: Option<&FileSystemSandboxContext>,
+    ) -> FileSystemResult<Vec<u8>> {
+        self.record("read_file", path).await;
+        self.file_contents(path).await.ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("{} not found", path.display()),
+            )
+        })
+    }
+
+    async fn write_file(
+        &self,
+        path: &AbsolutePathBuf,
+        contents: Vec<u8>,
+        _sandbox: Option<&FileSystemSandboxContext>,
+    ) -> FileSystemResult<()> {
+        self.record("write_file", path).await;
+        self.insert_file(path, contents).await;
+        Ok(())
+    }
+
+    async fn create_directory(
+        &self,
+        _path: &AbsolutePathBuf,
+        _create_directory_options: CreateDirectoryOptions,
+        _sandbox: Option<&FileSystemSandboxContext>,
+    ) -> FileSystemResult<()> {
+        Ok(())
+    }
+
+    async fn get_metadata(
+        &self,
+        path: &AbsolutePathBuf,
+        _sandbox: Option<&FileSystemSandboxContext>,
+    ) -> FileSystemResult<FileMetadata> {
+        if self.file_contents(path).await.is_some() {
+            Ok(FileMetadata {
+                is_directory: false,
+                is_file: true,
+                is_symlink: false,
+                created_at_ms: 0,
+                modified_at_ms: 0,
+            })
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("{} not found", path.display()),
+            ))
+        }
+    }
+
+    async fn read_directory(
+        &self,
+        _path: &AbsolutePathBuf,
+        _sandbox: Option<&FileSystemSandboxContext>,
+    ) -> FileSystemResult<Vec<ReadDirectoryEntry>> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "read_directory unsupported by recording filesystem",
+        ))
+    }
+
+    async fn remove(
+        &self,
+        _path: &AbsolutePathBuf,
+        _remove_options: RemoveOptions,
+        _sandbox: Option<&FileSystemSandboxContext>,
+    ) -> FileSystemResult<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "remove unsupported by recording filesystem",
+        ))
+    }
+
+    async fn copy(
+        &self,
+        _source_path: &AbsolutePathBuf,
+        _destination_path: &AbsolutePathBuf,
+        _copy_options: CopyOptions,
+        _sandbox: Option<&FileSystemSandboxContext>,
+    ) -> FileSystemResult<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "copy unsupported by recording filesystem",
+        ))
+    }
+}
 
 #[test]
 fn read_output_uses_compact_line_number_prefixes() {
@@ -100,6 +262,69 @@ async fn edit_empty_old_string_creates_missing_file() {
         std::fs::read_to_string(temp_dir.path().join("created.txt")).expect("created file"),
         "created content\n"
     );
+}
+
+#[tokio::test]
+async fn write_uses_executor_file_system() {
+    let temp_dir = tempfile::TempDir::new().expect("temp dir");
+    let cwd = temp_dir.path().abs();
+    let path = cwd.join("remote.txt");
+    let fs = RecordingFileSystem::default();
+    let sandbox = FileSystemSandboxContext::from_permission_profile(PermissionProfile::Disabled);
+    let arguments = json!({
+        "file_path": "remote.txt",
+        "content": "written through backend\n"
+    })
+    .to_string();
+
+    let output = write_file(arguments, &fs, &sandbox, &cwd)
+        .await
+        .expect("write succeeds");
+
+    assert_eq!(output, "Wrote remote.txt");
+    assert_eq!(
+        fs.file_contents(&path).await.expect("recorded file"),
+        b"written through backend\n"
+    );
+    assert_eq!(
+        fs.calls().await,
+        vec![format!("write_file:{}", path.display())]
+    );
+    assert!(!temp_dir.path().join("remote.txt").exists());
+}
+
+#[tokio::test]
+async fn edit_uses_executor_file_system() {
+    let temp_dir = tempfile::TempDir::new().expect("temp dir");
+    let cwd = temp_dir.path().abs();
+    let path = cwd.join("remote.txt");
+    let fs = RecordingFileSystem::default();
+    fs.insert_file(&path, b"before\n").await;
+    let sandbox = FileSystemSandboxContext::from_permission_profile(PermissionProfile::Disabled);
+    let arguments = json!({
+        "file_path": "remote.txt",
+        "old_string": "before",
+        "new_string": "after"
+    })
+    .to_string();
+
+    let output = edit_file(arguments, &fs, &sandbox, &cwd)
+        .await
+        .expect("edit succeeds");
+
+    assert_eq!(output, "Updated remote.txt (1 replacement)");
+    assert_eq!(
+        fs.file_contents(&path).await.expect("recorded file"),
+        b"after\n"
+    );
+    assert_eq!(
+        fs.calls().await,
+        vec![
+            format!("read_file:{}", path.display()),
+            format!("write_file:{}", path.display())
+        ]
+    );
+    assert!(!temp_dir.path().join("remote.txt").exists());
 }
 
 #[tokio::test]

@@ -1,15 +1,18 @@
 use pretty_assertions::assert_eq;
 use serde_json::json;
 
-use super::AGENT_TOOL_NAME;
 use super::ASTRAL_CORE_TOOL_NAMES;
 use super::BASH_TOOL_NAME;
 use super::EDIT_TOOL_NAME;
 use super::GREP_TOOL_NAME;
-use super::MONITOR_TOOL_NAME;
+use super::LIST_BACKGROUND_TASKS_TOOL_NAME;
+use super::READ_TASK_OUTPUT_TOOL_NAME;
 use super::READ_TOOL_NAME;
+use super::SEND_TASK_INPUT_TOOL_NAME;
 use super::SKILL_TOOL_NAME;
+use super::STOP_BACKGROUND_TASK_TOOL_NAME;
 use super::TODO_WRITE_TOOL_NAME;
+use super::WRITE_TOOL_NAME;
 use super::astral_core_tool_by_name;
 use super::astral_core_tools;
 
@@ -54,12 +57,13 @@ fn file_and_search_tools_expose_expected_required_fields() {
     let read = astral_core_tool_by_name(READ_TOOL_NAME).expect("Read tool exists");
     let edit = astral_core_tool_by_name(EDIT_TOOL_NAME).expect("Edit tool exists");
     let grep = astral_core_tool_by_name(GREP_TOOL_NAME).expect("Grep tool exists");
+    let write = astral_core_tool_by_name(WRITE_TOOL_NAME).expect("Write tool exists");
 
     assert_eq!(read.input_schema["required"], json!(["file_path"]));
-    assert_eq!(
-        read.input_schema["properties"]["pages"]["type"],
-        json!("string")
-    );
+    assert!(!read.description.contains("local filesystem"));
+    assert!(!write.description.contains("local filesystem"));
+    assert!(!edit.description.contains("local filesystem"));
+    assert!(read.input_schema["properties"]["pages"].is_null());
     assert_eq!(
         read.input_schema["properties"]["environment_id"]["type"],
         json!("string")
@@ -118,30 +122,28 @@ fn todo_write_uses_claudeish_task_list_shape() {
 }
 
 #[test]
-fn agent_exposes_addressable_name_without_requiring_it() {
-    let tool = astral_core_tool_by_name(AGENT_TOOL_NAME).expect("Agent exists");
+fn background_task_tools_use_task_id_shape() {
+    let read = astral_core_tool_by_name(READ_TASK_OUTPUT_TOOL_NAME).expect("ReadTaskOutput exists");
+    let send = astral_core_tool_by_name(SEND_TASK_INPUT_TOOL_NAME).expect("SendTaskInput exists");
+    let list = astral_core_tool_by_name(LIST_BACKGROUND_TASKS_TOOL_NAME)
+        .expect("ListBackgroundTasks exists");
+    let stop = astral_core_tool_by_name(STOP_BACKGROUND_TASK_TOOL_NAME)
+        .expect("StopBackgroundTask exists");
 
+    assert_eq!(read.input_schema["required"], json!(["task_id"]));
     assert_eq!(
-        tool.input_schema["required"],
-        json!(["description", "prompt"])
-    );
-    assert_eq!(
-        tool.input_schema["properties"]["name"]["type"],
-        json!("string")
-    );
-}
-
-#[test]
-fn monitor_uses_running_session_shape() {
-    let tool = astral_core_tool_by_name(MONITOR_TOOL_NAME).expect("Monitor exists");
-
-    assert_eq!(tool.input_schema["required"], json!([]));
-    assert_eq!(
-        tool.input_schema["properties"]["session_id"]["anyOf"],
+        read.input_schema["properties"]["task_id"]["anyOf"],
         json!([{ "type": "integer" }, { "type": "string" }])
     );
+    assert_eq!(send.input_schema["required"], json!(["task_id", "input"]));
     assert_eq!(
-        tool.input_schema["properties"]["shell_id"]["anyOf"],
+        send.input_schema["properties"]["input"]["type"],
+        json!("string")
+    );
+    assert_eq!(list.input_schema["required"], json!([]));
+    assert_eq!(stop.input_schema["required"], json!(["task_id"]));
+    assert_eq!(
+        stop.input_schema["properties"]["task_id"]["anyOf"],
         json!([{ "type": "integer" }, { "type": "string" }])
     );
 }

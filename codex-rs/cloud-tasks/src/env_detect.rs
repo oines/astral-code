@@ -33,17 +33,10 @@ pub async fn autodetect_environment_id(
     let mut by_repo_envs: Vec<CodeEnvironment> = Vec::new();
     for origin in &origins {
         if let Some((owner, repo)) = parse_owner_repo(origin) {
-            let url = if base_url.contains("/backend-api") {
-                format!(
-                    "{}/wham/environments/by-repo/{}/{}/{}",
-                    base_url, "github", owner, repo
-                )
-            } else {
-                format!(
-                    "{}/api/codex/environments/by-repo/{}/{}/{}",
-                    base_url, "github", owner, repo
-                )
-            };
+            let url = crate::util::codex_api_url(
+                base_url,
+                &format!("environments/by-repo/github/{owner}/{repo}"),
+            );
             crate::append_error_log(format!("env: GET {url}"));
             match get_json::<Vec<CodeEnvironment>>(&url, headers).await {
                 Ok(mut list) => {
@@ -67,11 +60,7 @@ pub async fn autodetect_environment_id(
     }
 
     // 2) Fallback to the full list
-    let list_url = if base_url.contains("/backend-api") {
-        format!("{base_url}/wham/environments")
-    } else {
-        format!("{base_url}/api/codex/environments")
-    };
+    let list_url = crate::util::codex_api_url(base_url, "environments");
     crate::append_error_log(format!("env: GET {list_url}"));
     // Fetch and log the full environments JSON for debugging
     let http = build_reqwest_client_with_custom_ca(reqwest::Client::builder())?;
@@ -263,17 +252,10 @@ pub async fn list_environments(
     let origins = get_git_origins();
     for origin in &origins {
         if let Some((owner, repo)) = parse_owner_repo(origin) {
-            let url = if base_url.contains("/backend-api") {
-                format!(
-                    "{}/wham/environments/by-repo/{}/{}/{}",
-                    base_url, "github", owner, repo
-                )
-            } else {
-                format!(
-                    "{}/api/codex/environments/by-repo/{}/{}/{}",
-                    base_url, "github", owner, repo
-                )
-            };
+            let url = crate::util::codex_api_url(
+                base_url,
+                &format!("environments/by-repo/github/{owner}/{repo}"),
+            );
             match get_json::<Vec<CodeEnvironment>>(&url, headers).await {
                 Ok(list) => {
                     info!("env_tui: by-repo {}:{} -> {} envs", owner, repo, list.len());
@@ -307,11 +289,7 @@ pub async fn list_environments(
     }
 
     // 2) Fallback to the full list; on error return what we have if any.
-    let list_url = if base_url.contains("/backend-api") {
-        format!("{base_url}/wham/environments")
-    } else {
-        format!("{base_url}/api/codex/environments")
-    };
+    let list_url = crate::util::codex_api_url(base_url, "environments");
     match get_json::<Vec<CodeEnvironment>>(&list_url, headers).await {
         Ok(list) => {
             info!("env_tui: global list -> {} envs", list.len());

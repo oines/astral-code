@@ -443,8 +443,6 @@ pub(crate) fn resolve_multi_agent_version(
 
 pub(crate) const INITIAL_SUBMIT_ID: &str = "";
 pub(crate) const SUBMISSION_CHANNEL_CAPACITY: usize = 512;
-const CYBER_VERIFY_URL: &str = "https://chatgpt.com/cyber";
-const CYBER_SAFETY_URL: &str = "https://developers.openai.com/codex/concepts/cyber-safety";
 
 impl Codex {
     /// Spawn a new [`Codex`] and initialize the session.
@@ -913,7 +911,7 @@ impl Session {
         !matches!(permission_profile, PermissionProfile::Disabled)
     }
 
-    /// Builds the `x-codex-beta-features` header value for this session.
+    /// Builds the `x-astral-beta-features` header value for this session.
     ///
     /// `ModelClient` is session-scoped and intentionally does not depend on the full `Config`, so
     /// we precompute the comma-separated list of enabled experimental feature keys at session
@@ -2598,7 +2596,7 @@ impl Session {
         warn!("server reported model {server_model} while requested model was {requested_model}");
 
         let warning_message = format!(
-            "Your account was flagged for potentially high-risk cyber activity and this request was routed to gpt-5.2 as a fallback. To regain access to gpt-5.3-codex, apply for trusted access: {CYBER_VERIFY_URL} or learn more: {CYBER_SAFETY_URL}"
+            "The provider returned model {server_model} while {requested_model} was requested. Astral will continue with the provider-selected model for this turn."
         );
 
         self.send_event(
@@ -2606,7 +2604,7 @@ impl Session {
             EventMsg::ModelReroute(ModelRerouteEvent {
                 from_model: requested_model.clone(),
                 to_model: server_model.clone(),
-                reason: ModelRerouteReason::HighRiskCyberActivity,
+                reason: ModelRerouteReason::ProviderModelReroute,
             }),
         )
         .await;

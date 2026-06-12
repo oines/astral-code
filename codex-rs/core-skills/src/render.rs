@@ -18,8 +18,8 @@ const DEFAULT_SKILL_METADATA_CHAR_BUDGET: usize = 8_000;
 const SKILL_METADATA_CONTEXT_WINDOW_PERCENT: usize = 2;
 const SKILL_DESCRIPTION_TRUNCATION_WARNING_THRESHOLD_CHARS: usize = 100;
 const APPROX_BYTES_PER_TOKEN: usize = 4;
-pub const SKILL_DESCRIPTION_TRUNCATED_WARNING: &str = "Skill descriptions were shortened to fit the skills context budget. Codex can still see every skill, but some descriptions are shorter. Disable unused skills or plugins to leave more room for the rest.";
-pub const SKILL_DESCRIPTION_TRUNCATED_WARNING_WITH_PERCENT: &str = "Skill descriptions were shortened to fit the 2% skills context budget. Codex can still see every skill, but some descriptions are shorter. Disable unused skills or plugins to leave more room for the rest.";
+pub const SKILL_DESCRIPTION_TRUNCATED_WARNING: &str = "Skill descriptions were shortened to fit the skills context budget. Astral can still see every skill, but some descriptions are shorter. Disable unused skills or plugins to leave more room for the rest.";
+pub const SKILL_DESCRIPTION_TRUNCATED_WARNING_WITH_PERCENT: &str = "Skill descriptions were shortened to fit the 2% skills context budget. Astral can still see every skill, but some descriptions are shorter. Disable unused skills or plugins to leave more room for the rest.";
 pub const SKILL_DESCRIPTIONS_REMOVED_WARNING_PREFIX: &str =
     "Exceeded skills context budget. All skill descriptions were removed and";
 pub const SKILLS_INTRO_WITH_ABSOLUTE_PATHS: &str = "A skill is a set of local instructions to follow that is stored in a `SKILL.md` file. Below is the list of skills that can be used. Each entry includes a name, description, and file path so you can open the source for full instructions when using a specific skill.";
@@ -1097,7 +1097,7 @@ mod tests {
         assert_eq!(
             rendered.warning_message,
             Some(
-                "Skill descriptions were shortened to fit the skills context budget. Codex can still see every skill, but some descriptions are shorter. Disable unused skills or plugins to leave more room for the rest."
+                "Skill descriptions were shortened to fit the skills context budget. Astral can still see every skill, but some descriptions are shorter. Disable unused skills or plugins to leave more room for the rest."
                     .to_string()
             )
         );
@@ -1230,7 +1230,7 @@ mod tests {
     #[test]
     fn outcome_rendering_uses_aliases_when_they_allow_more_skills_to_fit() {
         let root = test_path_buf(
-            "/Users/xl/.codex/plugins/cache/openai-curated/example/hash1234567890/skills-with-a-very-long-shared-prefix",
+            "/Users/xl/.astral-code/plugins/cache/openai-curated/example/hash1234567890/skills-with-a-very-long-shared-prefix",
         )
         .abs();
         let skills = (0..12)
@@ -1277,7 +1277,7 @@ mod tests {
                 "- `r0` = `{}`",
                 normalized_path(
                     &test_path_buf(
-                        "/Users/xl/.codex/plugins/cache/openai-curated/example/hash1234567890/skills-with-a-very-long-shared-prefix"
+                        "/Users/xl/.astral-code/plugins/cache/openai-curated/example/hash1234567890/skills-with-a-very-long-shared-prefix"
                     )
                     .abs()
                 )
@@ -1290,10 +1290,12 @@ mod tests {
 
     #[test]
     fn outcome_rendering_uses_marketplace_root_for_single_skill_plugin_versions() {
-        let github_root =
-            test_path_buf("/Users/xl/.codex/plugins/cache/openai-curated/github/hash123/skills")
-                .abs();
-        let marketplace_root = test_path_buf("/Users/xl/.codex/plugins/cache/openai-curated").abs();
+        let github_root = test_path_buf(
+            "/Users/xl/.astral-code/plugins/cache/openai-curated/github/hash123/skills",
+        )
+        .abs();
+        let marketplace_root =
+            test_path_buf("/Users/xl/.astral-code/plugins/cache/openai-curated").abs();
         let github = skill_with_path("github:gh-fix-ci", &github_root.join("gh-fix-ci/SKILL.md"));
         let outcome = outcome_with_roots(vec![github.clone()], vec![github_root.clone()]);
         let plan = build_alias_plan(
@@ -1318,9 +1320,10 @@ mod tests {
 
     #[test]
     fn outcome_rendering_uses_skill_root_for_multiple_skills_in_one_plugin_version() {
-        let github_root =
-            test_path_buf("/Users/xl/.codex/plugins/cache/openai-curated/github/hash123/skills")
-                .abs();
+        let github_root = test_path_buf(
+            "/Users/xl/.astral-code/plugins/cache/openai-curated/github/hash123/skills",
+        )
+        .abs();
         let fix_ci = skill_with_path("github:gh-fix-ci", &github_root.join("gh-fix-ci/SKILL.md"));
         let yeet = skill_with_path("github:yeet", &github_root.join("yeet/SKILL.md"));
         let outcome = outcome_with_roots(
@@ -1357,7 +1360,7 @@ mod tests {
     #[test]
     fn outcome_rendering_counts_plugin_version_skills_before_budget_omission() {
         let root = test_path_buf(
-            "/Users/xl/.codex/plugins/cache/openai-curated/example/hash1234567890/skills-with-a-very-long-shared-prefix",
+            "/Users/xl/.astral-code/plugins/cache/openai-curated/example/hash1234567890/skills-with-a-very-long-shared-prefix",
         )
         .abs();
         let alpha = skill_with_path("alpha-skill", &root.join("alpha/SKILL.md"));
@@ -1394,11 +1397,12 @@ mod tests {
 
     #[test]
     fn outcome_rendering_uses_each_skill_root_for_multiple_roots_in_one_plugin_version() {
-        let skills_root =
-            test_path_buf("/Users/xl/.codex/plugins/cache/openai-curated/github/hash123/skills")
-                .abs();
+        let skills_root = test_path_buf(
+            "/Users/xl/.astral-code/plugins/cache/openai-curated/github/hash123/skills",
+        )
+        .abs();
         let extra_root = test_path_buf(
-            "/Users/xl/.codex/plugins/cache/openai-curated/github/hash123/extra-skills",
+            "/Users/xl/.astral-code/plugins/cache/openai-curated/github/hash123/extra-skills",
         )
         .abs();
         let fix_ci = skill_with_path("github:gh-fix-ci", &skills_root.join("gh-fix-ci/SKILL.md"));
@@ -1439,13 +1443,16 @@ mod tests {
 
     #[test]
     fn outcome_rendering_extracts_plugin_marketplace_root_for_multiple_plugins() {
-        let github_root =
-            test_path_buf("/Users/xl/.codex/plugins/cache/openai-curated/github/hash123/skills")
-                .abs();
-        let slack_root =
-            test_path_buf("/Users/xl/.codex/plugins/cache/openai-curated/slack/hash456/skills")
-                .abs();
-        let marketplace_root = test_path_buf("/Users/xl/.codex/plugins/cache/openai-curated").abs();
+        let github_root = test_path_buf(
+            "/Users/xl/.astral-code/plugins/cache/openai-curated/github/hash123/skills",
+        )
+        .abs();
+        let slack_root = test_path_buf(
+            "/Users/xl/.astral-code/plugins/cache/openai-curated/slack/hash456/skills",
+        )
+        .abs();
+        let marketplace_root =
+            test_path_buf("/Users/xl/.astral-code/plugins/cache/openai-curated").abs();
         let github = skill_with_path("github:gh-fix-ci", &github_root.join("gh-fix-ci/SKILL.md"));
         let slack = skill_with_path(
             "slack:daily-digest",
@@ -1487,14 +1494,16 @@ mod tests {
 
     #[test]
     fn outcome_rendering_uses_one_marketplace_root_for_multiple_plugin_versions() {
-        let skills_root =
-            test_path_buf("/Users/xl/.codex/plugins/cache/openai-curated/github/hash123/skills")
-                .abs();
-        let extra_root = test_path_buf(
-            "/Users/xl/.codex/plugins/cache/openai-curated/github/hash456/extra-skills",
+        let skills_root = test_path_buf(
+            "/Users/xl/.astral-code/plugins/cache/openai-curated/github/hash123/skills",
         )
         .abs();
-        let marketplace_root = test_path_buf("/Users/xl/.codex/plugins/cache/openai-curated").abs();
+        let extra_root = test_path_buf(
+            "/Users/xl/.astral-code/plugins/cache/openai-curated/github/hash456/extra-skills",
+        )
+        .abs();
+        let marketplace_root =
+            test_path_buf("/Users/xl/.astral-code/plugins/cache/openai-curated").abs();
         let fix_ci = skill_with_path("github:gh-fix-ci", &skills_root.join("gh-fix-ci/SKILL.md"));
         let yeet = skill_with_path("github:yeet", &extra_root.join("yeet/SKILL.md"));
         let outcome = outcome_with_roots(

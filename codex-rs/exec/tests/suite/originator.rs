@@ -2,7 +2,6 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use codex_login::default_client::ASTRAL_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR;
-use codex_login::default_client::CODEX_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR;
 use core_test_support::responses;
 use core_test_support::test_codex_exec::test_codex_exec;
 use wiremock::matchers::header;
@@ -10,7 +9,7 @@ use wiremock::matchers::header;
 /// Verify that when the server reports an error, `codex-exec` exits with a
 /// non-zero status code so automation can detect failures.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn send_codex_exec_originator() -> anyhow::Result<()> {
+async fn send_astral_exec_originator() -> anyhow::Result<()> {
     let test = test_codex_exec();
 
     let server = responses::start_mock_server().await;
@@ -19,10 +18,9 @@ async fn send_codex_exec_originator() -> anyhow::Result<()> {
         responses::ev_assistant_message("response_1", "Hello, world!"),
         responses::ev_completed("response_1"),
     ]);
-    responses::mount_sse_once_match(&server, header("Originator", "codex_exec"), body).await;
+    responses::mount_sse_once_match(&server, header("Originator", "astral_exec"), body).await;
 
     test.cmd_with_server(&server)
-        .env_remove(CODEX_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR)
         .env_remove(ASTRAL_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR)
         .arg("--skip-git-repo-check")
         .arg("tell me something")
@@ -50,7 +48,6 @@ async fn supports_originator_override() -> anyhow::Result<()> {
             ASTRAL_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR,
             "astral_exec_override",
         )
-        .env_remove(CODEX_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR)
         .arg("--skip-git-repo-check")
         .arg("tell me something")
         .assert()

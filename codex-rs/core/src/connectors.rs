@@ -64,7 +64,7 @@ impl Default for AppToolPolicy {
 struct AccessibleConnectorsCacheKey {
     hosted_base_url: String,
     account_id: Option<String>,
-    chatgpt_user_id: Option<String>,
+    legacy_user_id: Option<String>,
     is_workspace_account: bool,
 }
 
@@ -244,7 +244,7 @@ pub async fn list_cached_accessible_connectors_from_mcp_tools(
         return Some(Vec::new());
     }
     let auth_manager =
-        AuthManager::shared_from_config(config, /*enable_codex_api_key_env*/ false).await;
+        AuthManager::shared_from_config(config, /*enable_astral_api_key_env*/ false).await;
     let auth = auth_manager.auth().await;
     let cache_key = accessible_connectors_cache_key(config, auth.as_ref());
     read_cached_accessible_connectors(&cache_key).map(|connectors| {
@@ -317,7 +317,7 @@ pub async fn list_accessible_connectors_from_mcp_tools_with_environment_manager(
         });
     }
     let auth_manager =
-        AuthManager::shared_from_config(config, /*enable_codex_api_key_env*/ false).await;
+        AuthManager::shared_from_config(config, /*enable_astral_api_key_env*/ false).await;
     let auth = auth_manager.auth().await;
     let cache_key = accessible_connectors_cache_key(config, auth.as_ref());
     let plugins_manager = Arc::new(PluginsManager::new(config.codex_home.to_path_buf()));
@@ -454,12 +454,12 @@ fn accessible_connectors_cache_key(
     auth: Option<&CodexAuth>,
 ) -> AccessibleConnectorsCacheKey {
     let account_id = auth.and_then(CodexAuth::get_account_id);
-    let chatgpt_user_id = auth.and_then(CodexAuth::get_chatgpt_user_id);
+    let legacy_user_id = auth.and_then(CodexAuth::get_chatgpt_user_id);
     let is_workspace_account = auth.is_some_and(CodexAuth::is_workspace_account);
     AccessibleConnectorsCacheKey {
         hosted_base_url: config.hosted_base_url.clone(),
         account_id,
-        chatgpt_user_id,
+        legacy_user_id,
         is_workspace_account,
     }
 }

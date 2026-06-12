@@ -2,10 +2,10 @@ use super::AuthRequestTelemetryContext;
 use super::ModelClient;
 use super::PendingUnauthorizedRetry;
 use super::UnauthorizedRecoveryExecution;
-use super::X_CODEX_INSTALLATION_ID_HEADER;
-use super::X_CODEX_PARENT_THREAD_ID_HEADER;
-use super::X_CODEX_TURN_METADATA_HEADER;
-use super::X_CODEX_WINDOW_ID_HEADER;
+use super::X_ASTRAL_INSTALLATION_ID_HEADER;
+use super::X_ASTRAL_PARENT_THREAD_ID_HEADER;
+use super::X_ASTRAL_TURN_METADATA_HEADER;
+use super::X_ASTRAL_WINDOW_ID_HEADER;
 use crate::AttestationContext;
 use crate::AttestationProvider;
 use crate::GenerateAttestationFuture;
@@ -423,19 +423,19 @@ fn build_ws_client_metadata_includes_window_lineage_and_turn_metadata() {
         client_metadata,
         std::collections::HashMap::from([
             (
-                X_CODEX_INSTALLATION_ID_HEADER.to_string(),
+                X_ASTRAL_INSTALLATION_ID_HEADER.to_string(),
                 "11111111-1111-4111-8111-111111111111".to_string(),
             ),
             (
-                X_CODEX_WINDOW_ID_HEADER.to_string(),
+                X_ASTRAL_WINDOW_ID_HEADER.to_string(),
                 format!("{thread_id}:1"),
             ),
             (
-                X_CODEX_PARENT_THREAD_ID_HEADER.to_string(),
+                X_ASTRAL_PARENT_THREAD_ID_HEADER.to_string(),
                 parent_thread_id.to_string(),
             ),
             (
-                X_CODEX_TURN_METADATA_HEADER.to_string(),
+                X_ASTRAL_TURN_METADATA_HEADER.to_string(),
                 r#"{"turn_id":"turn-123"}"#.to_string(),
             ),
         ])

@@ -96,7 +96,7 @@ impl AppLinkViewParams {
             return None;
         };
         if server_name == MCP_CODEX_APPS_SERVER_NAME {
-            let url = validate_external_url(url, /*require_chatgpt_host*/ true)?;
+            let url = validate_external_url(url)?;
             return Self::from_codex_apps_auth_url_parts(
                 thread_id,
                 server_name,
@@ -108,7 +108,7 @@ impl AppLinkViewParams {
             );
         }
 
-        let url = validate_external_url(url, /*require_chatgpt_host*/ false)?;
+        let url = validate_external_url(url)?;
         Some(Self::from_generic_url_parts(
             thread_id,
             server_name,
@@ -203,7 +203,7 @@ impl AppLinkViewParams {
     }
 }
 
-fn validate_external_url(url: &str, require_chatgpt_host: bool) -> Option<Url> {
+fn validate_external_url(url: &str) -> Option<Url> {
     let parsed = Url::parse(url).ok()?;
     if parsed.scheme() != "https" || parsed.host_str().is_none() {
         return None;
@@ -211,18 +211,7 @@ fn validate_external_url(url: &str, require_chatgpt_host: bool) -> Option<Url> {
     if !parsed.username().is_empty() || parsed.password().is_some() {
         return None;
     }
-    if require_chatgpt_host && !is_allowed_chatgpt_auth_host(parsed.host_str()?) {
-        return None;
-    }
     Some(parsed)
-}
-
-fn is_allowed_chatgpt_auth_host(host: &str) -> bool {
-    let host = host.to_ascii_lowercase();
-    host == "chatgpt.com"
-        || host == "chatgpt-staging.com"
-        || host.ends_with(".chatgpt.com")
-        || host.ends_with(".chatgpt-staging.com")
 }
 
 pub(crate) struct AppLinkView {
@@ -307,7 +296,7 @@ impl AppLinkView {
             AppLinkScreen::Link => {
                 if self.is_installed {
                     vec![
-                        "Manage on ChatGPT",
+                        "Manage app",
                         if self.is_enabled {
                             "Disable app"
                         } else {
@@ -316,10 +305,10 @@ impl AppLinkView {
                         "Back",
                     ]
                 } else {
-                    vec!["Install on ChatGPT", "Back"]
+                    vec!["Install app", "Back"]
                 }
             }
-            AppLinkScreen::InstallConfirmation => vec!["I already Installed it", "Back"],
+            AppLinkScreen::InstallConfirmation => vec!["I already installed it", "Back"],
         }
     }
 
@@ -579,7 +568,7 @@ impl AppLinkView {
         if is_auth_suggestion {
             for line in wrap(
                 if is_codex_apps_auth {
-                    "Sign in to the app on ChatGPT in the browser window that just opened."
+                    "Sign in to the app in the browser window that just opened."
                 } else {
                     "Complete authentication in the browser window that just opened."
                 },
@@ -605,13 +594,13 @@ impl AppLinkView {
             }
         } else {
             for line in wrap(
-                "Complete app setup on ChatGPT in the browser window that just opened.",
+                "Complete app setup in the browser window that just opened.",
                 usable_width,
             ) {
                 lines.push(Line::from(line.into_owned()));
             }
             for line in wrap(
-                "Sign in there if needed, then return here and select \"I already Installed it\".",
+                "Sign in there if needed, then return here and select \"I already installed it\".",
                 usable_width,
             ) {
                 lines.push(Line::from(line.into_owned()));
@@ -886,7 +875,7 @@ mod tests {
                     },
                 },
             })),
-            message: "Reconnect Google Calendar on ChatGPT.".to_string(),
+            message: "Reconnect Google Calendar.".to_string(),
             url: url.to_string(),
             elicitation_id: "codex_apps_auth_call_123".to_string(),
         }
@@ -895,8 +884,7 @@ mod tests {
     #[test]
     fn codex_apps_auth_url_elicitation_builds_auth_app_link_params() {
         let target = suggestion_target();
-        let request =
-            auth_url_request("https://chatgpt.com/apps/google-calendar/connector_calendar");
+        let request = auth_url_request("https://apps.example/google-calendar/connector_calendar");
 
         let params = AppLinkViewParams::from_url_app_server_request(
             target.thread_id,
@@ -910,7 +898,7 @@ mod tests {
         assert_eq!(params.title, "Google Calendar");
         assert_eq!(
             params.url,
-            "https://chatgpt.com/apps/google-calendar/connector_calendar"
+            "https://apps.example/google-calendar/connector_calendar"
         );
         assert_eq!(params.suggestion_type, Some(AppLinkSuggestionType::Auth));
         assert_eq!(params.elicitation_target, Some(target));
@@ -953,13 +941,12 @@ mod tests {
     }
 
     #[test]
-    fn codex_apps_auth_url_elicitation_rejects_untrusted_urls() {
+    fn codex_apps_auth_url_elicitation_rejects_invalid_urls() {
         let target = suggestion_target();
         for url in [
-            "http://chatgpt.com/apps/google-calendar/connector_calendar",
-            "https://user:pass@chatgpt.com/apps/google-calendar/connector_calendar",
-            "https://chatgpt.com.evil.example/apps/google-calendar/connector_calendar",
-            "https://evilchatgpt.com/apps/google-calendar/connector_calendar",
+            "http://apps.example/google-calendar/connector_calendar",
+            "https://user:pass@apps.example/google-calendar/connector_calendar",
+            "not-a-url",
         ] {
             let request = auth_url_request(url);
             let params = AppLinkViewParams::from_url_app_server_request(
@@ -1042,7 +1029,7 @@ mod tests {
 
         assert_eq!(
             view.action_labels(),
-            vec!["Manage on ChatGPT", "Disable app", "Back"]
+            vec!["Manage app", "Disable app", "Back"]
         );
     }
 
@@ -1193,7 +1180,7 @@ mod tests {
 
         assert_eq!(
             view.action_labels(),
-            vec!["Manage on ChatGPT", "Enable app", "Back"]
+            vec!["Manage app", "Enable app", "Back"]
         );
     }
 
@@ -1622,11 +1609,10 @@ mod tests {
                 title: "Google Calendar".to_string(),
                 description: None,
                 instructions: "Sign in to this app in your browser, then return here.".to_string(),
-                url: "https://chatgpt.com/apps/google-calendar/connector_google_calendar"
-                    .to_string(),
+                url: "https://apps.example/google-calendar/connector_google_calendar".to_string(),
                 is_installed: true,
                 is_enabled: true,
-                suggest_reason: Some("Reconnect Google Calendar on ChatGPT.".to_string()),
+                suggest_reason: Some("Reconnect Google Calendar.".to_string()),
                 suggestion_type: Some(AppLinkSuggestionType::Auth),
                 elicitation_target: Some(suggestion_target()),
             },

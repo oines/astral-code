@@ -1,3 +1,3 @@
-# Codex CLI
+# Astral CLI
 
-[**Codex CLI Documentation**](https://developers.openai.com/codex/cli)
+[**Astral-Code Documentation**](../README.md)

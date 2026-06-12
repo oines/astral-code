@@ -139,7 +139,7 @@ where
         let name = name.clone();
         let config = server.configured_config().cloned();
         let has_runtime_auth = name == CODEX_APPS_MCP_SERVER_NAME
-            && auth.is_some_and(CodexAuth::uses_codex_backend)
+            && auth.is_some_and(CodexAuth::uses_hosted_backend)
             && config.as_ref().is_some_and(|config| {
                 matches!(
                     &config.transport,

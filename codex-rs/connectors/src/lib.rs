@@ -25,7 +25,7 @@ pub const CONNECTORS_CACHE_TTL: Duration = Duration::from_secs(3600);
 pub struct ConnectorDirectoryCacheKey {
     hosted_base_url: String,
     account_id: Option<String>,
-    chatgpt_user_id: Option<String>,
+    legacy_user_id: Option<String>,
     is_workspace_account: bool,
 }
 
@@ -33,13 +33,13 @@ impl ConnectorDirectoryCacheKey {
     pub fn new(
         hosted_base_url: String,
         account_id: Option<String>,
-        chatgpt_user_id: Option<String>,
+        legacy_user_id: Option<String>,
         is_workspace_account: bool,
     ) -> Self {
         Self {
             hosted_base_url,
             account_id,
-            chatgpt_user_id,
+            legacy_user_id,
             is_workspace_account,
         }
     }

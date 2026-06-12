@@ -12,8 +12,9 @@ use serde_json::Value as JsonValue;
 use ts_rs::TS;
 
 v2_enum_from_core!(
-    pub enum ModelRerouteReason from CoreModelRerouteReason {
-        HighRiskCyberActivity
+pub enum ModelRerouteReason from CoreModelRerouteReason {
+        HighRiskCyberActivity,
+        ProviderModelReroute
     }
 );
 

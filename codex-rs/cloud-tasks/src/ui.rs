@@ -61,7 +61,7 @@ static ROUNDED: OnceLock<bool> = OnceLock::new();
 
 fn rounded_enabled() -> bool {
     *ROUNDED.get_or_init(|| {
-        std::env::var("CODEX_TUI_ROUNDED")
+        std::env::var("ASTRAL_TUI_ROUNDED")
             .ok()
             .map(|v| v == "1")
             .unwrap_or(true)

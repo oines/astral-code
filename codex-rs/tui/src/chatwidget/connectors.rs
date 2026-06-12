@@ -55,7 +55,7 @@ impl ChatWidget {
     }
 
     pub(super) fn connectors_enabled(&self) -> bool {
-        self.config.features.enabled(Feature::Apps) && self.has_chatgpt_account
+        self.config.features.enabled(Feature::Apps)
     }
 
     pub(super) fn connectors_for_mentions(&self) -> Option<&[AppInfo]> {

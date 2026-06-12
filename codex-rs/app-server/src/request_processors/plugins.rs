@@ -641,7 +641,7 @@ impl PluginRequestProcessor {
         // TODO(remote plugins): Remove this once remote plugins are ready and vertical plugins are
         // served directly from the normal remote catalog.
         if include_vertical && !config.features.enabled(Feature::RemotePlugin) {
-            match codex_core_plugins::remote::fetch_openai_curated_remote_collection_marketplace(
+            match codex_core_plugins::remote::fetch_astral_curated_remote_collection_marketplace(
                 &remote_plugin_service_config,
                 auth.as_ref(),
             )
@@ -658,7 +658,7 @@ impl PluginRequestProcessor {
                 Err(err) => {
                     warn!(
                         error = %err,
-                        "plugin/list openai-curated-remote collection fetch failed; returning local marketplaces only"
+                        "plugin/list astral-curated-remote collection fetch failed; returning local marketplaces only"
                     );
                 }
             }
@@ -976,6 +976,9 @@ impl PluginRequestProcessor {
                 ));
             }
         };
+        if read_source.is_err() {
+            validate_remote_plugin_id(&plugin_name)?;
+        }
         if let Err(remote_marketplace_name) = &read_source
             && !remote_plugin_control_plane_enabled()
         {
@@ -1122,7 +1125,6 @@ impl PluginRequestProcessor {
                 let remote_plugin_service_config = RemotePluginServiceConfig {
                     hosted_base_url: config.hosted_base_url.clone(),
                 };
-                validate_remote_plugin_id(&plugin_name)?;
                 let remote_detail = codex_core_plugins::remote::fetch_remote_plugin_detail(
                     &remote_plugin_service_config,
                     auth.as_ref(),
@@ -1163,6 +1165,12 @@ impl PluginRequestProcessor {
             skill_name,
         } = params;
 
+        validate_remote_plugin_id(&remote_plugin_id)?;
+        if skill_name.is_empty() {
+            return Err(invalid_request(
+                "invalid remote plugin skill name: cannot be empty",
+            ));
+        }
         if !remote_plugin_control_plane_enabled() {
             return Err(invalid_request(format!(
                 "remote plugin skill read is not enabled for marketplace {remote_marketplace_name}"
@@ -1173,12 +1181,6 @@ impl PluginRequestProcessor {
             return Err(invalid_request(format!(
                 "remote plugin skill read is not enabled for marketplace {remote_marketplace_name}"
             )));
-        }
-        validate_remote_plugin_id(&remote_plugin_id)?;
-        if skill_name.is_empty() {
-            return Err(invalid_request(
-                "invalid remote plugin skill name: cannot be empty",
-            ));
         }
 
         let auth = self.auth_manager.auth().await;
@@ -1500,6 +1502,7 @@ impl PluginRequestProcessor {
         remote_marketplace_name: String,
         remote_plugin_id: String,
     ) -> Result<PluginInstallResponse, JSONRPCErrorError> {
+        validate_remote_plugin_id(&remote_plugin_id)?;
         if !remote_plugin_control_plane_enabled() {
             return Err(invalid_request(format!(
                 "remote plugin install is not enabled for marketplace {remote_marketplace_name}"
@@ -1511,7 +1514,6 @@ impl PluginRequestProcessor {
                 "remote plugin install is not enabled for marketplace {remote_marketplace_name}"
             )));
         }
-        validate_remote_plugin_id(&remote_plugin_id)?;
 
         let auth = self.auth_manager.auth().await;
         let remote_plugin_service_config = RemotePluginServiceConfig {

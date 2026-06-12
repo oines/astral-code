@@ -89,7 +89,7 @@ async fn openai_model_header_mismatch_emits_warning_event() -> Result<()> {
     };
     assert_eq!(reroute.from_model, REQUESTED_MODEL);
     assert_eq!(reroute.to_model, SERVER_MODEL);
-    assert_eq!(reroute.reason, ModelRerouteReason::HighRiskCyberActivity);
+    assert_eq!(reroute.reason, ModelRerouteReason::ProviderModelReroute);
 
     let warning = wait_for_event(&test.codex, |event| matches!(event, EventMsg::Warning(_))).await;
     let EventMsg::Warning(warning) = warning else {
@@ -176,7 +176,7 @@ async fn response_model_field_mismatch_emits_warning_when_header_matches_request
     };
     assert_eq!(reroute.from_model, REQUESTED_MODEL);
     assert_eq!(reroute.to_model, SERVER_MODEL);
-    assert_eq!(reroute.reason, ModelRerouteReason::HighRiskCyberActivity);
+    assert_eq!(reroute.reason, ModelRerouteReason::ProviderModelReroute);
 
     let warning = wait_for_event(&test.codex, |event| {
         matches!(
@@ -184,7 +184,7 @@ async fn response_model_field_mismatch_emits_warning_when_header_matches_request
             EventMsg::Warning(warning)
                 if warning
                     .message
-                    .contains("flagged for potentially high-risk cyber activity")
+                    .contains("provider returned model")
         )
     })
     .await;
@@ -277,11 +277,7 @@ async fn openai_model_header_casing_only_mismatch_does_not_warn() -> Result<()> 
         let event = wait_for_event(&test.codex, |_| true).await;
         match event {
             EventMsg::ModelReroute(_) => reroute_count += 1,
-            EventMsg::Warning(warning)
-                if warning
-                    .message
-                    .contains("flagged for potentially high-risk cyber activity") =>
-            {
+            EventMsg::Warning(warning) if warning.message.contains("provider returned model") => {
                 warning_count += 1;
             }
             EventMsg::TurnComplete(_) => break,

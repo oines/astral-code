@@ -1,10 +1,12 @@
 # Configuration
 
-For basic configuration instructions, see [this documentation](https://developers.openai.com/codex/config-basic).
+Astral configuration lives under `ASTRAL_HOME`, which defaults to
+`~/.astral-code`. The project does not read, migrate, or fall back to old Codex
+configuration.
 
-For advanced configuration instructions, see [this documentation](https://developers.openai.com/codex/config-advanced).
-
-For a full configuration reference, see [this documentation](https://developers.openai.com/codex/config-reference).
+Provider credentials are configured with provider-neutral settings such as
+`ASTRAL_API_KEY` and `ASTRAL_BASE_URL`, plus the corresponding keys in
+`config.toml`.
 
 ## Lifecycle hooks
 

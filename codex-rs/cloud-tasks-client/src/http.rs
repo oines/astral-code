@@ -43,8 +43,8 @@ impl HttpClient {
         self
     }
 
-    pub fn with_chatgpt_account_id(mut self, account_id: impl Into<String>) -> Self {
-        self.backend = self.backend.clone().with_chatgpt_account_id(account_id);
+    pub fn with_hosted_account_id(mut self, account_id: impl Into<String>) -> Self {
+        self.backend = self.backend.clone().with_hosted_account_id(account_id);
         self
     }
 
@@ -278,10 +278,7 @@ mod api {
                 return Ok(vec![format!("Task failed: {err}")]);
             }
 
-            let url = match details_path(self.base_url, &id.0) {
-                Some(url) => url,
-                None => format!("{}/api/codex/tasks/{}", self.base_url, id.0),
-            };
+            let url = details_path(self.base_url, &id.0);
             Err(CloudTaskError::Http(format!(
                 "No assistant text messages in response. GET {url}; content-type={ct}; body={body}"
             )))
@@ -331,7 +328,7 @@ mod api {
                 "content": [{ "content_type": "text", "text": prompt }]
             }));
 
-            if let Ok(diff) = std::env::var("CODEX_STARTING_DIFF")
+            if let Ok(diff) = std::env::var("ASTRAL_STARTING_DIFF")
                 && !diff.is_empty()
             {
                 input_items.push(serde_json::json!({
@@ -561,13 +558,12 @@ mod api {
         }
     }
 
-    fn details_path(base_url: &str, id: &str) -> Option<String> {
-        if base_url.contains("/backend-api") {
-            Some(format!("{base_url}/wham/tasks/{id}"))
-        } else if base_url.contains("/api/codex") {
-            Some(format!("{base_url}/tasks/{id}"))
+    fn details_path(base_url: &str, id: &str) -> String {
+        let base_url = base_url.trim_end_matches('/');
+        if base_url.ends_with("/api/codex") {
+            format!("{base_url}/tasks/{id}")
         } else {
-            None
+            format!("{base_url}/api/codex/tasks/{id}")
         }
     }
 

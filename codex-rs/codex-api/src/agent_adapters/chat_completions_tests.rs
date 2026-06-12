@@ -4,6 +4,7 @@ use codex_agent_protocol::AgentStreamEvent;
 use codex_agent_protocol::AgentTool;
 use codex_agent_protocol::ContentBlock;
 use codex_agent_protocol::ContentDelta;
+use codex_agent_protocol::ImageSource;
 use codex_agent_protocol::MessageRole;
 use codex_agent_protocol::RequestMetadata;
 use codex_agent_protocol::StopReason;
@@ -93,7 +94,7 @@ fn request_maps_tool_use_and_tool_result_to_chat_shape() {
                 { "role": "system", "content": "You are Astral-Code." },
                 {
                     "role": "user",
-                    "content": [{ "type": "text", "text": "list files" }]
+                    "content": "list files"
                 },
                 {
                     "role": "assistant",
@@ -181,7 +182,7 @@ fn request_collapses_system_and_developer_messages_to_head_system_message() {
                 },
                 {
                     "role": "user",
-                    "content": [{ "type": "text", "text": "hello" }]
+                    "content": "hello"
                 }
             ]
         })
@@ -223,7 +224,7 @@ fn request_drops_tool_control_fields_when_provider_override_clears_tools() {
             "stream": false,
             "messages": [{
                 "role": "user",
-                "content": [{ "type": "text", "text": "hello" }]
+                "content": "hello"
             }],
             "tools": []
         })
@@ -260,7 +261,48 @@ fn request_provider_null_override_removes_default_field() {
             "temperature": 0.1,
             "messages": [{
                 "role": "user",
-                "content": [{ "type": "text", "text": "hello" }]
+                "content": "hello"
+            }]
+        })
+    );
+}
+
+#[test]
+fn request_keeps_multimodal_user_content_as_parts_array() {
+    let request = AgentRequest {
+        model: "vision-compatible".to_string(),
+        messages: vec![AgentMessage {
+            role: MessageRole::User,
+            content: vec![
+                ContentBlock::Text {
+                    text: "inspect".to_string(),
+                },
+                ContentBlock::Image {
+                    source: ImageSource::Url {
+                        url: "https://example.com/screenshot.png".to_string(),
+                    },
+                },
+            ],
+            id: None,
+        }],
+        stream: false,
+        ..AgentRequest::default()
+    };
+
+    assert_eq!(
+        to_chat_completions_request(&request, ChatCompletionsOptions { max_tokens: None }),
+        json!({
+            "model": "vision-compatible",
+            "stream": false,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    { "type": "text", "text": "inspect" },
+                    {
+                        "type": "image_url",
+                        "image_url": { "url": "https://example.com/screenshot.png" }
+                    }
+                ]
             }]
         })
     );
@@ -307,7 +349,7 @@ fn stream_chunk_maps_text_tool_calls_finish_reason_and_usage() {
                 },
             },
             AgentStreamEvent::ContentBlockStart {
-                index: 1,
+                index: 2,
                 block: ContentBlock::ToolUse {
                     id: "call_1".to_string(),
                     name: "Bash".to_string(),
@@ -315,7 +357,7 @@ fn stream_chunk_maps_text_tool_calls_finish_reason_and_usage() {
                 },
             },
             AgentStreamEvent::ContentBlockDelta {
-                index: 1,
+                index: 2,
                 delta: ContentDelta::ToolInputJson {
                     partial_json: r#"{"command":"pwd"}"#.to_string(),
                 },
@@ -328,6 +370,35 @@ fn stream_chunk_maps_text_tool_calls_finish_reason_and_usage() {
                     cache_creation_input_tokens: None,
                     cache_read_input_tokens: Some(3),
                 }),
+            },
+        ]
+    );
+}
+
+#[test]
+fn stream_chunk_maps_deepseek_reasoning_content_delta() {
+    assert_eq!(
+        parse_stream_chunk(json!({
+            "id": "chatcmpl_reasoning",
+            "model": "deepseek-v4-pro",
+            "choices": [{
+                "delta": {
+                    "role": "assistant",
+                    "reasoning_content": "I should inspect the repo first."
+                }
+            }]
+        }))
+        .expect("parse stream chunk"),
+        vec![
+            AgentStreamEvent::MessageStart {
+                id: Some("chatcmpl_reasoning".to_string()),
+                model: Some("deepseek-v4-pro".to_string()),
+            },
+            AgentStreamEvent::ContentBlockDelta {
+                index: 1,
+                delta: ContentDelta::Reasoning {
+                    text: "I should inspect the repo first.".to_string(),
+                },
             },
         ]
     );
@@ -354,6 +425,56 @@ fn stream_chunk_maps_usage_only_chunk() {
 }
 
 #[test]
+fn stream_chunk_ignores_null_usage() {
+    assert_eq!(
+        parse_stream_chunk(json!({
+            "id": "chatcmpl_1",
+            "model": "deepseek-v4-pro",
+            "choices": [{
+                "delta": { "role": "assistant", "content": null },
+                "finish_reason": null
+            }],
+            "usage": null
+        }))
+        .expect("parse stream chunk"),
+        vec![AgentStreamEvent::MessageStart {
+            id: Some("chatcmpl_1".to_string()),
+            model: Some("deepseek-v4-pro".to_string()),
+        }]
+    );
+}
+
+#[test]
+fn stream_chunk_maps_finish_reason_without_delta() {
+    assert_eq!(
+        parse_stream_chunk(json!({
+            "choices": [{ "finish_reason": "stop" }]
+        }))
+        .expect("parse stream chunk"),
+        vec![AgentStreamEvent::MessageStop {
+            stop_reason: Some(StopReason::EndTurn),
+            usage: None,
+        }]
+    );
+}
+
+#[test]
+fn stream_chunk_maps_error_payload_to_terminal_error_reason() {
+    assert_eq!(
+        parse_stream_chunk(json!({
+            "error": { "message": "provider overloaded" }
+        }))
+        .expect("parse stream chunk"),
+        vec![AgentStreamEvent::MessageStop {
+            stop_reason: Some(StopReason::Error {
+                message: "provider overloaded".to_string(),
+            }),
+            usage: None,
+        }]
+    );
+}
+
+#[test]
 fn stream_chunk_maps_openai_compatible_empty_choices_usage_chunk() {
     assert_eq!(
         parse_stream_chunk(json!({
@@ -372,6 +493,32 @@ fn stream_chunk_maps_openai_compatible_empty_choices_usage_chunk() {
                 output_tokens: Some(5),
                 cache_creation_input_tokens: None,
                 cache_read_input_tokens: Some(8),
+            }),
+        }]
+    );
+}
+
+#[test]
+fn stream_chunk_maps_deepseek_cache_usage_fields() {
+    assert_eq!(
+        parse_stream_chunk(json!({
+            "choices": [],
+            "usage": {
+                "prompt_tokens": 23,
+                "completion_tokens": 5,
+                "prompt_cache_hit_tokens": 17,
+                "prompt_cache_miss_tokens": 6,
+                "total_tokens": 28
+            }
+        }))
+        .expect("parse stream chunk"),
+        vec![AgentStreamEvent::MessageStop {
+            stop_reason: None,
+            usage: Some(TokenUsage {
+                input_tokens: Some(23),
+                output_tokens: Some(5),
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: Some(17),
             }),
         }]
     );

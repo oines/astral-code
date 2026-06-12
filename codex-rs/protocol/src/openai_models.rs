@@ -609,13 +609,11 @@ impl ModelInfo {
 }
 
 impl ModelPreset {
-    /// Filter models based on authentication mode.
-    ///
-    /// In ChatGPT mode, all models are visible. Otherwise, only API-supported models are shown.
-    pub fn filter_by_auth(models: Vec<ModelPreset>, chatgpt_mode: bool) -> Vec<ModelPreset> {
+    /// Filter out models that are not available through provider-neutral API auth.
+    pub fn filter_api_supported(models: Vec<ModelPreset>) -> Vec<ModelPreset> {
         models
             .into_iter()
-            .filter(|model| chatgpt_mode || model.supported_in_api)
+            .filter(|model| model.supported_in_api)
             .collect()
     }
 
@@ -1043,6 +1041,24 @@ mod tests {
             preset.default_service_tier,
             Some(ServiceTier::Fast.request_value().to_string())
         );
+    }
+
+    #[test]
+    fn model_preset_filter_api_supported_removes_hosted_only_models() {
+        let api_supported = ModelPreset::from(ModelInfo {
+            slug: "api-model".to_string(),
+            supported_in_api: true,
+            ..test_model(/*spec*/ None)
+        });
+        let hosted_only = ModelPreset::from(ModelInfo {
+            slug: "hosted-only-model".to_string(),
+            supported_in_api: false,
+            ..test_model(/*spec*/ None)
+        });
+
+        let filtered = ModelPreset::filter_api_supported(vec![hosted_only, api_supported.clone()]);
+
+        assert_eq!(filtered, vec![api_supported]);
     }
 
     #[test]

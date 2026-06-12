@@ -1,3 +1,5 @@
 # Skills
 
-For information about skills, refer to [this documentation](https://developers.openai.com/codex/skills).
+Astral preserves the local skills runtime and plugin loading boundary. Skills
+remain local project/user assets and should be resolved from `ASTRAL_HOME` or
+the active workspace rather than any Codex user data directory.

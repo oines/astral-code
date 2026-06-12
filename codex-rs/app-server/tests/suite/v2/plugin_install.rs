@@ -136,7 +136,7 @@ async fn plugin_install_rejects_multiple_install_sources() -> Result<()> {
             marketplace_path: Some(AbsolutePathBuf::try_from(
                 codex_home.path().join("marketplace.json"),
             )?),
-            remote_marketplace_name: Some("openai-curated-remote".to_string()),
+            remote_marketplace_name: Some("astral-curated-remote".to_string()),
             plugin_name: "sample-plugin".to_string(),
         })
         .await?;
@@ -171,7 +171,7 @@ plugins = false
     let request_id = mcp
         .send_plugin_install_request(PluginInstallParams {
             marketplace_path: None,
-            remote_marketplace_name: Some("openai-curated-remote".to_string()),
+            remote_marketplace_name: Some("astral-curated-remote".to_string()),
             plugin_name: "plugins~Plugin_22222222222222222222222222222222".to_string(),
         })
         .await?;
@@ -197,7 +197,7 @@ async fn plugin_install_writes_remote_plugin_to_cloud_and_cache() -> Result<()> 
     let server = MockServer::start().await;
     let installed_path = codex_home
         .path()
-        .join("plugins/cache/openai-curated-remote/linear/1.2.3");
+        .join("plugins/cache/astral-curated-remote/linear/1.2.3");
     let remote_app_manifest = json!({
         "apps": {
             "linear-remote": {
@@ -281,7 +281,7 @@ async fn plugin_install_writes_remote_plugin_to_cloud_and_cache() -> Result<()> 
         !codex_home
             .path()
             .join(format!(
-                "plugins/cache/openai-curated-remote/{REMOTE_PLUGIN_ID}/1.2.3"
+                "plugins/cache/astral-curated-remote/{REMOTE_PLUGIN_ID}/1.2.3"
             ))
             .exists()
     );
@@ -328,7 +328,7 @@ async fn plugin_install_rejects_missing_remote_bundle_url() -> Result<()> {
     assert!(
         !codex_home
             .path()
-            .join("plugins/cache/openai-curated-remote/linear")
+            .join("plugins/cache/astral-curated-remote/linear")
             .exists()
     );
     Ok(())
@@ -369,7 +369,7 @@ async fn plugin_install_rejects_plain_http_remote_bundle_url() -> Result<()> {
     assert!(
         !codex_home
             .path()
-            .join("plugins/cache/openai-curated-remote/linear")
+            .join("plugins/cache/astral-curated-remote/linear")
             .exists()
     );
     Ok(())
@@ -411,7 +411,7 @@ async fn plugin_install_rejects_invalid_remote_release_version() -> Result<()> {
     assert!(
         !codex_home
             .path()
-            .join("plugins/cache/openai-curated-remote/linear")
+            .join("plugins/cache/astral-curated-remote/linear")
             .exists()
     );
     Ok(())
@@ -427,7 +427,7 @@ async fn plugin_install_rejects_invalid_remote_plugin_name() -> Result<()> {
     let request_id = mcp
         .send_plugin_install_request(PluginInstallParams {
             marketplace_path: None,
-            remote_marketplace_name: Some("openai-curated-remote".to_string()),
+            remote_marketplace_name: Some("astral-curated-remote".to_string()),
             plugin_name: "linear/../../oops".to_string(),
         })
         .await?;
@@ -497,7 +497,7 @@ async fn plugin_install_rejects_remote_plugin_disabled_by_admin_before_download(
     assert!(
         !codex_home
             .path()
-            .join("plugins/cache/openai-curated-remote/linear")
+            .join("plugins/cache/astral-curated-remote/linear")
             .exists()
     );
     Ok(())
@@ -795,7 +795,7 @@ async fn plugin_install_tracks_remote_plugin_analytics_event() -> Result<()> {
                 "event_params": {
                     "plugin_id": REMOTE_PLUGIN_ID,
                     "plugin_name": "linear",
-                    "marketplace_name": "openai-curated-remote",
+                    "marketplace_name": "astral-curated-remote",
                     "has_skills": true,
                     "mcp_server_count": 0,
                     "connector_ids": [],
@@ -855,7 +855,7 @@ async fn plugin_install_errors_when_remote_bundle_download_fails() -> Result<()>
     assert!(
         !codex_home
             .path()
-            .join("plugins/cache/openai-curated-remote/linear")
+            .join("plugins/cache/astral-curated-remote/linear")
             .exists()
     );
     Ok(())

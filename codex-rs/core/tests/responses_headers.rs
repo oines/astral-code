@@ -152,16 +152,16 @@ async fn responses_stream_includes_subagent_header_on_review() {
         Some("review")
     );
     assert_eq!(
-        request.header("x-codex-window-id").as_deref(),
+        request.header("x-astral-window-id").as_deref(),
         Some(expected_window_id.as_str())
     );
-    assert_eq!(request.header("x-codex-parent-thread-id"), None);
+    assert_eq!(request.header("x-astral-parent-thread-id"), None);
     assert_eq!(
-        request.body_json()["client_metadata"]["x-codex-installation-id"].as_str(),
+        request.body_json()["client_metadata"]["x-astral-installation-id"].as_str(),
         Some(TEST_INSTALLATION_ID)
     );
     assert_eq!(
-        request.body_json()["client_metadata"]["x-codex-window-id"].as_str(),
+        request.body_json()["client_metadata"]["x-astral-window-id"].as_str(),
         Some(expected_window_id.as_str())
     );
     assert_eq!(request.header("x-codex-sandbox"), None);
@@ -440,10 +440,10 @@ async fn responses_stream_includes_turn_metadata_header_for_git_workspace_e2e() 
         .expect("submit first turn prompt");
     let initial_header = first_request
         .single_request()
-        .header("x-codex-turn-metadata")
-        .expect("x-codex-turn-metadata header should be present");
+        .header("x-astral-turn-metadata")
+        .expect("x-astral-turn-metadata header should be present");
     let initial_parsed: serde_json::Value =
-        serde_json::from_str(&initial_header).expect("x-codex-turn-metadata should be valid JSON");
+        serde_json::from_str(&initial_header).expect("x-astral-turn-metadata should be valid JSON");
     let initial_turn_id = initial_parsed
         .get("turn_id")
         .and_then(serde_json::Value::as_str)
@@ -451,7 +451,7 @@ async fn responses_stream_includes_turn_metadata_header_for_git_workspace_e2e() 
         .to_string();
     assert!(
         !initial_turn_id.is_empty(),
-        "turn_id should not be empty in x-codex-turn-metadata"
+        "turn_id should not be empty in x-astral-turn-metadata"
     );
     let initial_turn_started_at_unix_ms = initial_parsed
         .get("turn_started_at_unix_ms")
@@ -545,13 +545,13 @@ async fn responses_stream_includes_turn_metadata_header_for_git_workspace_e2e() 
 
     let first_parsed: serde_json::Value = serde_json::from_str(
         &requests[0]
-            .header("x-codex-turn-metadata")
+            .header("x-astral-turn-metadata")
             .expect("first request should include turn metadata"),
     )
     .expect("first metadata should be valid json");
     let second_parsed: serde_json::Value = serde_json::from_str(
         &requests[1]
-            .header("x-codex-turn-metadata")
+            .header("x-astral-turn-metadata")
             .expect("second request should include turn metadata"),
     )
     .expect("second metadata should be valid json");

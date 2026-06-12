@@ -96,14 +96,14 @@ async fn websocket_first_turn_uses_startup_prewarm_and_create() -> Result<()> {
     assert_eq!(warmup["type"].as_str(), Some("response.create"));
     assert_eq!(warmup["generate"].as_bool(), Some(false));
     let warmup_metadata: Value = serde_json::from_str(
-        warmup["client_metadata"]["x-codex-turn-metadata"]
+        warmup["client_metadata"]["x-astral-turn-metadata"]
             .as_str()
             .expect("warmup turn metadata"),
     )?;
     assert_eq!(warmup_metadata["request_kind"].as_str(), Some("prewarm"));
     assert_eq!(
         warmup_metadata["window_id"].as_str(),
-        warmup["client_metadata"]["x-codex-window-id"].as_str()
+        warmup["client_metadata"]["x-astral-window-id"].as_str()
     );
     assert!(
         turn["tools"]
@@ -113,7 +113,7 @@ async fn websocket_first_turn_uses_startup_prewarm_and_create() -> Result<()> {
     );
     assert_eq!(turn["type"].as_str(), Some("response.create"));
     let turn_metadata: Value = serde_json::from_str(
-        turn["client_metadata"]["x-codex-turn-metadata"]
+        turn["client_metadata"]["x-astral-turn-metadata"]
             .as_str()
             .expect("turn metadata"),
     )?;

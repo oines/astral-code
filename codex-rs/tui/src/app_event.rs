@@ -617,8 +617,11 @@ pub(crate) enum AppEvent {
     /// Update the current reasoning effort in the running app and widget.
     UpdateReasoningEffort(Option<ReasoningEffort>),
 
-    /// Update the current model slug in the running app and widget.
-    UpdateModel(String),
+    /// Update the current model/provider selection in the running app and widget.
+    UpdateModel {
+        model: String,
+        model_provider: Option<String>,
+    },
 
     /// Update the current personality in the running app and widget.
     UpdatePersonality(Personality),
@@ -675,6 +678,7 @@ pub(crate) enum AppEvent {
     /// Open the Plan-mode reasoning scope prompt for the selected model/effort.
     OpenPlanReasoningScopePrompt {
         model: String,
+        model_provider: Option<String>,
         effort: Option<ReasoningEffort>,
     },
 

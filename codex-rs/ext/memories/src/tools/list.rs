@@ -51,7 +51,7 @@ where
     fn spec(&self) -> ToolSpec {
         memory_function_tool::<ListArgs, ListMemoriesResponse>(
             LIST_TOOL_NAME,
-            "List immediate files and directories under a path in the Codex memories store.",
+            "List immediate files and directories under a path in the Astral memories store.",
         )
     }
 

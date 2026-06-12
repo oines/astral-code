@@ -62,8 +62,8 @@ struct ChatgptAuthState {
     auth_dot_json: Arc<Mutex<Option<AuthDotJson>>>,
 }
 
-const UNSUPPORTED_OPENAI_AUTH_MESSAGE: &str =
-    "Stored OpenAI/ChatGPT credentials are not supported by Astral. Use API key auth instead.";
+const UNSUPPORTED_LEGACY_HOSTED_AUTH_MESSAGE: &str =
+    "Stored upstream hosted credentials are not supported by Astral. Use API key auth instead.";
 
 #[derive(Debug, Error)]
 pub enum RefreshTokenError {
@@ -155,7 +155,7 @@ impl CodexAuth {
             ApiAuthMode::Chatgpt
             | ApiAuthMode::AgentIdentity
             | ApiAuthMode::PersonalAccessToken => Err(std::io::Error::other(
-                UNSUPPORTED_OPENAI_AUTH_MESSAGE.to_string(),
+                UNSUPPORTED_LEGACY_HOSTED_AUTH_MESSAGE.to_string(),
             )),
             ApiAuthMode::ApiKey => unreachable!("api key mode is handled above"),
         }
@@ -167,7 +167,7 @@ impl CodexAuth {
     ) -> std::io::Result<Option<Self>> {
         load_auth(
             codex_home,
-            /*enable_codex_api_key_env*/ false,
+            /*enable_astral_api_key_env*/ false,
             auth_credentials_store_mode,
         )
         .await
@@ -175,13 +175,13 @@ impl CodexAuth {
 
     pub async fn from_agent_identity_jwt(_jwt: &str) -> std::io::Result<Self> {
         Err(std::io::Error::other(
-            UNSUPPORTED_OPENAI_AUTH_MESSAGE.to_string(),
+            UNSUPPORTED_LEGACY_HOSTED_AUTH_MESSAGE.to_string(),
         ))
     }
 
     pub async fn from_personal_access_token(_access_token: &str) -> std::io::Result<Self> {
         Err(std::io::Error::other(
-            UNSUPPORTED_OPENAI_AUTH_MESSAGE.to_string(),
+            UNSUPPORTED_LEGACY_HOSTED_AUTH_MESSAGE.to_string(),
         ))
     }
 
@@ -211,11 +211,11 @@ impl CodexAuth {
         self.auth_mode() == AuthMode::PersonalAccessToken
     }
 
-    pub fn is_chatgpt_auth(&self) -> bool {
-        self.api_auth_mode().has_chatgpt_account()
+    pub fn is_legacy_hosted_account_auth(&self) -> bool {
+        self.api_auth_mode().has_legacy_hosted_account()
     }
 
-    pub fn uses_codex_backend(&self) -> bool {
+    pub fn uses_hosted_backend(&self) -> bool {
         matches!(
             self,
             Self::Chatgpt(_) | Self::AgentIdentity(_) | Self::PersonalAccessToken(_)
@@ -230,7 +230,7 @@ impl CodexAuth {
         }
     }
 
-    /// Returns `Err` if token-backed ChatGPT auth is unavailable.
+    /// Returns `Err` if token-backed legacy hosted auth is unavailable.
     pub fn get_token_data(&self) -> Result<TokenData, std::io::Error> {
         let auth_dot_json: Option<AuthDotJson> = self.get_current_auth_json();
         match auth_dot_json {
@@ -258,7 +258,7 @@ impl CodexAuth {
         }
     }
 
-    /// Returns `None` if Codex backend auth does not expose an account id.
+    /// Returns `None` if hosted backend auth does not expose an account id.
     pub fn get_account_id(&self) -> Option<String> {
         match self {
             Self::AgentIdentity(auth) => Some(auth.account_id().to_string()),
@@ -267,7 +267,7 @@ impl CodexAuth {
         }
     }
 
-    /// Returns false if Codex backend auth omits the FedRAMP claim.
+    /// Returns false if hosted backend auth omits the legacy FedRAMP claim.
     pub fn is_fedramp_account(&self) -> bool {
         match self {
             Self::AgentIdentity(auth) => auth.is_fedramp_account(),
@@ -278,7 +278,7 @@ impl CodexAuth {
         }
     }
 
-    /// Returns `None` if Codex backend auth does not expose an account email.
+    /// Returns `None` if hosted backend auth does not expose an account email.
     pub fn get_account_email(&self) -> Option<String> {
         match self {
             Self::AgentIdentity(auth) => Some(auth.email().to_string()),
@@ -287,7 +287,7 @@ impl CodexAuth {
         }
     }
 
-    /// Returns `None` if Codex backend auth does not expose a ChatGPT user id.
+    /// Returns `None` if hosted backend auth does not expose a legacy user id.
     pub fn get_chatgpt_user_id(&self) -> Option<String> {
         match self {
             Self::AgentIdentity(auth) => Some(auth.chatgpt_user_id().to_string()),
@@ -322,7 +322,7 @@ impl CodexAuth {
             .is_some_and(AccountPlanType::is_workspace_account)
     }
 
-    /// Returns `None` if token-backed ChatGPT auth is unavailable.
+    /// Returns `None` if token-backed legacy hosted auth is unavailable.
     fn get_current_auth_json(&self) -> Option<AuthDotJson> {
         let state = match self {
             Self::Chatgpt(auth) => &auth.state,
@@ -332,7 +332,7 @@ impl CodexAuth {
         state.auth_dot_json.lock().unwrap().clone()
     }
 
-    /// Returns `None` if token-backed ChatGPT auth is unavailable.
+    /// Returns `None` if token-backed legacy hosted auth is unavailable.
     fn get_current_token_data(&self) -> Option<TokenData> {
         self.get_current_auth_json().and_then(|t| t.tokens)
     }
@@ -395,7 +395,7 @@ pub async fn logout_with_revoke(
 ) -> std::io::Result<bool> {
     AuthManager::new(
         codex_home.to_path_buf(),
-        /*enable_codex_api_key_env*/ false,
+        /*enable_astral_api_key_env*/ false,
         auth_credentials_store_mode,
     )
     .await
@@ -457,11 +457,11 @@ fn logout_all_stores(
 
 async fn load_auth(
     codex_home: &Path,
-    enable_codex_api_key_env: bool,
+    enable_astral_api_key_env: bool,
     auth_credentials_store_mode: AuthCredentialsStoreMode,
 ) -> std::io::Result<Option<CodexAuth>> {
     // API key via env var takes precedence over any other auth method.
-    if enable_codex_api_key_env && let Some(api_key) = read_astral_api_key_from_env() {
+    if enable_astral_api_key_env && let Some(api_key) = read_astral_api_key_from_env() {
         return Ok(Some(CodexAuth::from_api_key(api_key.as_str())));
     }
 
@@ -534,7 +534,7 @@ enum UnauthorizedRecoveryMode {
 
 // UnauthorizedRecovery is a state machine that handles an attempt to refresh
 // external bearer authentication when requests to the API fail with 401 status
-// code. Astral does not support managed ChatGPT/OAuth token refresh.
+// code. Astral does not support managed legacy-hosted/OAuth token refresh.
 pub struct UnauthorizedRecovery {
     manager: Arc<AuthManager>,
     step: UnauthorizedRecoveryStep,
@@ -662,7 +662,7 @@ pub struct AuthManager {
     codex_home: PathBuf,
     inner: RwLock<CachedAuth>,
     auth_change_tx: watch::Sender<u64>,
-    enable_codex_api_key_env: bool,
+    enable_astral_api_key_env: bool,
     auth_credentials_store_mode: AuthCredentialsStoreMode,
     refresh_lock: Semaphore,
     external_auth: RwLock<Option<Arc<dyn ExternalAuth>>>,
@@ -687,7 +687,7 @@ impl Debug for AuthManager {
         f.debug_struct("AuthManager")
             .field("codex_home", &self.codex_home)
             .field("inner", &self.inner)
-            .field("enable_codex_api_key_env", &self.enable_codex_api_key_env)
+            .field("enable_astral_api_key_env", &self.enable_astral_api_key_env)
             .field(
                 "auth_credentials_store_mode",
                 &self.auth_credentials_store_mode,
@@ -704,12 +704,12 @@ impl AuthManager {
     /// unauthenticated state.
     pub async fn new(
         codex_home: PathBuf,
-        enable_codex_api_key_env: bool,
+        enable_astral_api_key_env: bool,
         auth_credentials_store_mode: AuthCredentialsStoreMode,
     ) -> Self {
         let managed_auth = load_auth(
             &codex_home,
-            enable_codex_api_key_env,
+            enable_astral_api_key_env,
             auth_credentials_store_mode,
         )
         .await
@@ -720,7 +720,7 @@ impl AuthManager {
             codex_home,
             inner: RwLock::new(CachedAuth { auth: managed_auth }),
             auth_change_tx,
-            enable_codex_api_key_env,
+            enable_astral_api_key_env,
             auth_credentials_store_mode,
             refresh_lock: Semaphore::new(/*permits*/ 1),
             external_auth: RwLock::new(None),
@@ -736,7 +736,7 @@ impl AuthManager {
             codex_home: PathBuf::from("non-existent"),
             inner: RwLock::new(cached),
             auth_change_tx,
-            enable_codex_api_key_env: false,
+            enable_astral_api_key_env: false,
             auth_credentials_store_mode: AuthCredentialsStoreMode::File,
             refresh_lock: Semaphore::new(/*permits*/ 1),
             external_auth: RwLock::new(None),
@@ -751,7 +751,7 @@ impl AuthManager {
             codex_home,
             inner: RwLock::new(cached),
             auth_change_tx,
-            enable_codex_api_key_env: false,
+            enable_astral_api_key_env: false,
             auth_credentials_store_mode: AuthCredentialsStoreMode::File,
             refresh_lock: Semaphore::new(/*permits*/ 1),
             external_auth: RwLock::new(None),
@@ -764,7 +764,7 @@ impl AuthManager {
             codex_home: PathBuf::from("non-existent"),
             inner: RwLock::new(CachedAuth { auth: None }),
             auth_change_tx,
-            enable_codex_api_key_env: false,
+            enable_astral_api_key_env: false,
             auth_credentials_store_mode: AuthCredentialsStoreMode::File,
             refresh_lock: Semaphore::new(/*permits*/ 1),
             external_auth: RwLock::new(Some(
@@ -789,8 +789,8 @@ impl AuthManager {
 
     /// Current cached auth (clone). May be `None` if not logged in or load failed.
     pub async fn auth(&self) -> Option<CodexAuth> {
-        if let Some(auth) = self.resolve_external_api_key_auth().await {
-            return Some(auth);
+        if self.has_external_api_key_auth() {
+            return self.resolve_external_api_key_auth().await;
         }
 
         self.auth_cached()
@@ -836,7 +836,7 @@ impl AuthManager {
     async fn load_auth_from_storage(&self) -> Option<CodexAuth> {
         load_auth(
             &self.codex_home,
-            self.enable_codex_api_key_env,
+            self.enable_astral_api_key_env,
             self.auth_credentials_store_mode,
         )
         .await
@@ -877,20 +877,20 @@ impl AuthManager {
         self.external_auth().is_some()
     }
 
-    pub fn codex_api_key_env_enabled(&self) -> bool {
-        self.enable_codex_api_key_env
+    pub fn astral_api_key_env_enabled(&self) -> bool {
+        self.enable_astral_api_key_env
     }
 
     /// Convenience constructor returning an `Arc` wrapper.
     pub async fn shared(
         codex_home: PathBuf,
-        enable_codex_api_key_env: bool,
+        enable_astral_api_key_env: bool,
         auth_credentials_store_mode: AuthCredentialsStoreMode,
     ) -> Arc<Self> {
         Arc::new(
             Self::new(
                 codex_home,
-                enable_codex_api_key_env,
+                enable_astral_api_key_env,
                 auth_credentials_store_mode,
             )
             .await,
@@ -900,11 +900,11 @@ impl AuthManager {
     /// Convenience constructor returning an `Arc` wrapper from resolved config.
     pub async fn shared_from_config(
         config: &impl AuthManagerConfig,
-        enable_codex_api_key_env: bool,
+        enable_astral_api_key_env: bool,
     ) -> Arc<Self> {
         Self::shared(
             config.codex_home(),
-            enable_codex_api_key_env,
+            enable_astral_api_key_env,
             config.cli_auth_credentials_store_mode(),
         )
         .await
@@ -949,7 +949,7 @@ impl AuthManager {
     }
 
     /// Refresh external bearer auth if a provider supplies it. Astral does not
-    /// support managed ChatGPT/OAuth token refresh.
+    /// support managed legacy-hosted/OAuth token refresh.
     pub async fn refresh_token(&self) -> Result<(), RefreshTokenError> {
         let _refresh_guard = self.refresh_lock.acquire().await.map_err(|_| {
             RefreshTokenError::Transient(std::io::Error::other("auth refresh lock closed"))
@@ -991,13 +991,6 @@ impl AuthManager {
             return Some(AuthMode::ApiKey);
         }
         self.auth_cached().as_ref().map(CodexAuth::auth_mode)
-    }
-
-    pub fn current_auth_uses_codex_backend(&self) -> bool {
-        matches!(
-            self.auth_mode(),
-            Some(AuthMode::Chatgpt | AuthMode::AgentIdentity | AuthMode::PersonalAccessToken)
-        )
     }
 
     async fn refresh_external_auth(

@@ -88,7 +88,7 @@ impl MemoryStartupContext {
         let model = config.model.as_deref().unwrap_or("unknown");
         let auth_env_telemetry = collect_auth_env_telemetry(
             &config.model_provider,
-            auth_manager.codex_api_key_env_enabled(),
+            auth_manager.astral_api_key_env_enabled(),
         );
         let session_telemetry = SessionTelemetry::new(
             thread_id,

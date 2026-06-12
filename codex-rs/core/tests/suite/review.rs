@@ -133,7 +133,7 @@ async fn review_op_emits_lifecycle_and_review_output() {
     );
     let turn_metadata: serde_json::Value = serde_json::from_str(
         &request
-            .header("x-codex-turn-metadata")
+            .header("x-astral-turn-metadata")
             .expect("review request turn metadata"),
     )
     .expect("review request turn metadata json");

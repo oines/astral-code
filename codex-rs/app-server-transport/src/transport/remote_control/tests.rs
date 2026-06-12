@@ -740,7 +740,7 @@ async fn remote_control_start_allows_missing_auth_when_enabled() {
     let codex_home = TempDir::new().expect("temp dir should create");
     let auth_manager = AuthManager::shared(
         codex_home.path().to_path_buf(),
-        /*enable_codex_api_key_env*/ false,
+        /*enable_astral_api_key_env*/ false,
         AuthCredentialsStoreMode::File,
     )
     .await;
@@ -1219,15 +1219,15 @@ async fn remote_control_http_mode_enrolls_before_connecting() {
         Some(&TEST_INSTALLATION_ID.to_string())
     );
     assert_eq!(
-        handshake_request.headers.get("x-codex-server-id"),
+        handshake_request.headers.get("x-astral-server-id"),
         Some(&"srv_e_test".to_string())
     );
     assert_eq!(
-        handshake_request.headers.get("x-codex-name"),
+        handshake_request.headers.get("x-astral-name"),
         Some(&base64::engine::general_purpose::STANDARD.encode(&expected_server_name))
     );
     assert_eq!(
-        handshake_request.headers.get("x-codex-protocol-version"),
+        handshake_request.headers.get("x-astral-protocol-version"),
         Some(&REMOTE_CONTROL_PROTOCOL_VERSION.to_string())
     );
 
@@ -1429,7 +1429,7 @@ async fn remote_control_http_mode_refreshes_persisted_enrollment_before_connecti
         "/backend-api/wham/remote/control/server"
     );
     assert_eq!(
-        handshake_request.headers.get("x-codex-server-id"),
+        handshake_request.headers.get("x-astral-server-id"),
         Some(&persisted_enrollment.server_id)
     );
     assert_eq!(
@@ -1524,7 +1524,7 @@ async fn remote_control_stdio_mode_waits_for_client_name_before_connecting() {
     .await;
     let (handshake_request, _websocket) = accept_remote_control_backend_connection(&listener).await;
     assert_eq!(
-        handshake_request.headers.get("x-codex-server-id"),
+        handshake_request.headers.get("x-astral-server-id"),
         Some(&persisted_enrollment.server_id)
     );
 
@@ -1548,7 +1548,7 @@ async fn remote_control_waits_for_account_id_before_enrolling() {
     let state_db = remote_control_state_runtime(&codex_home).await;
     let auth_manager = AuthManager::shared(
         codex_home.path().to_path_buf(),
-        /*enable_codex_api_key_env*/ false,
+        /*enable_astral_api_key_env*/ false,
         AuthCredentialsStoreMode::File,
     )
     .await;
@@ -1614,7 +1614,7 @@ async fn remote_control_waits_for_account_id_before_enrolling() {
 
     let (handshake_request, _websocket) = accept_remote_control_backend_connection(&listener).await;
     assert_eq!(
-        handshake_request.headers.get("x-codex-server-id"),
+        handshake_request.headers.get("x-astral-server-id"),
         Some(&expected_enrollment.server_id)
     );
 
@@ -1722,7 +1722,7 @@ async fn remote_control_http_mode_reenrolls_when_refresh_reports_stale_enrollmen
     )
     .await;
     assert_eq!(
-        handshake_request.headers.get("x-codex-server-id"),
+        handshake_request.headers.get("x-astral-server-id"),
         Some(&refreshed_enrollment.server_id)
     );
     assert_eq!(
@@ -1820,7 +1820,7 @@ async fn remote_control_http_mode_reenrolls_after_explicit_missing_server_404() 
         "GET /backend-api/wham/remote/control/server HTTP/1.1"
     );
     assert_eq!(
-        websocket_request.headers.get("x-codex-server-id"),
+        websocket_request.headers.get("x-astral-server-id"),
         Some(&stale_enrollment.server_id)
     );
     expect_remote_control_status(
@@ -1865,7 +1865,7 @@ async fn remote_control_http_mode_reenrolls_after_explicit_missing_server_404() 
     )
     .await;
     assert_eq!(
-        handshake_request.headers.get("x-codex-server-id"),
+        handshake_request.headers.get("x-astral-server-id"),
         Some(&refreshed_enrollment.server_id)
     );
     assert_eq!(
@@ -1953,7 +1953,7 @@ async fn remote_control_http_mode_preserves_enrollment_after_generic_websocket_4
         "GET /backend-api/wham/remote/control/server HTTP/1.1"
     );
     assert_eq!(
-        websocket_request.headers.get("x-codex-server-id"),
+        websocket_request.headers.get("x-astral-server-id"),
         Some(&stale_enrollment.server_id)
     );
     assert_eq!(
@@ -1990,7 +1990,7 @@ async fn remote_control_http_mode_preserves_enrollment_after_generic_websocket_4
 
     let (handshake_request, _websocket) = accept_remote_control_backend_connection(&listener).await;
     assert_eq!(
-        handshake_request.headers.get("x-codex-server-id"),
+        handshake_request.headers.get("x-astral-server-id"),
         Some(&stale_enrollment.server_id)
     );
     assert_eq!(

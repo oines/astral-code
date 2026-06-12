@@ -192,7 +192,10 @@ pub(super) fn apply_accepted_model_migration(
 
     config.model = Some(target_model.clone());
     config.model_reasoning_effort = Some(target_default_effort.clone());
-    app_event_tx.send(AppEvent::UpdateModel(target_model.clone()));
+    app_event_tx.send(AppEvent::UpdateModel {
+        model: target_model.clone(),
+        model_provider: None,
+    });
     app_event_tx.send(AppEvent::UpdateReasoningEffort(Some(
         target_default_effort.clone(),
     )));
@@ -233,6 +236,10 @@ pub(super) async fn prepare_startup_tooltip_override(
     available_models: &[ModelPreset],
     is_first_run: bool,
 ) -> Option<String> {
+    if !config.model_provider.is_openai() {
+        return None;
+    }
+
     if is_first_run || !config.show_tooltips {
         return None;
     }
@@ -274,6 +281,10 @@ pub(super) async fn handle_model_migration_prompt_if_needed(
     app_event_tx: &AppEventSender,
     available_models: &[ModelPreset],
 ) -> Option<AppExitInfo> {
+    if !config.model_provider.is_openai() {
+        return None;
+    }
+
     let upgrade = available_models
         .iter()
         .find(|preset| preset.model == model)
@@ -433,7 +444,10 @@ mod tests {
     #[test]
     fn skill_load_warning_state_suppresses_repeated_active_errors() {
         let mut state = SkillLoadWarningState::default();
-        let error = skill_error("/repo/.codex/skills/abc/SKILL.md", "invalid description");
+        let error = skill_error(
+            "/repo/.astral-code/skills/abc/SKILL.md",
+            "invalid description",
+        );
 
         assert_eq!(
             state.newly_active_errors(std::slice::from_ref(&error)),
@@ -448,7 +462,10 @@ mod tests {
     #[test]
     fn skill_load_warning_state_reemits_after_error_clears() {
         let mut state = SkillLoadWarningState::default();
-        let error = skill_error("/repo/.codex/skills/abc/SKILL.md", "invalid description");
+        let error = skill_error(
+            "/repo/.astral-code/skills/abc/SKILL.md",
+            "invalid description",
+        );
 
         assert_eq!(
             state.newly_active_errors(std::slice::from_ref(&error)),
@@ -464,8 +481,14 @@ mod tests {
     #[test]
     fn skill_load_warning_state_displays_new_message_for_active_path() {
         let mut state = SkillLoadWarningState::default();
-        let initial = skill_error("/repo/.codex/skills/abc/SKILL.md", "invalid description");
-        let changed = skill_error("/repo/.codex/skills/abc/SKILL.md", "invalid frontmatter");
+        let initial = skill_error(
+            "/repo/.astral-code/skills/abc/SKILL.md",
+            "invalid description",
+        );
+        let changed = skill_error(
+            "/repo/.astral-code/skills/abc/SKILL.md",
+            "invalid frontmatter",
+        );
 
         assert_eq!(
             state.newly_active_errors(std::slice::from_ref(&initial)),
@@ -480,7 +503,10 @@ mod tests {
     #[test]
     fn skill_load_warning_state_clear_allows_active_error_again() {
         let mut state = SkillLoadWarningState::default();
-        let error = skill_error("/repo/.codex/skills/abc/SKILL.md", "invalid description");
+        let error = skill_error(
+            "/repo/.astral-code/skills/abc/SKILL.md",
+            "invalid description",
+        );
 
         assert_eq!(
             state.newly_active_errors(std::slice::from_ref(&error)),
@@ -502,7 +528,10 @@ mod tests {
     #[test]
     fn repeated_active_skill_load_warning_renders_once() {
         let mut state = SkillLoadWarningState::default();
-        let error = skill_error("/repo/.codex/skills/abc/SKILL.md", "invalid description");
+        let error = skill_error(
+            "/repo/.astral-code/skills/abc/SKILL.md",
+            "invalid description",
+        );
 
         let first_errors = state.newly_active_errors(std::slice::from_ref(&error));
         let repeated_errors = state.newly_active_errors(std::slice::from_ref(&error));
@@ -517,7 +546,7 @@ mod tests {
 
         insta::assert_snapshot!(rendered, @r"
 ⚠ Skipped loading 1 skill(s) due to invalid SKILL.md files.
-⚠ /repo/.codex/skills/abc/SKILL.md: invalid description
+⚠ /repo/.astral-code/skills/abc/SKILL.md: invalid description
 ");
     }
 }

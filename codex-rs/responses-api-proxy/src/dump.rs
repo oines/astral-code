@@ -231,9 +231,9 @@ mod tests {
             Header::from_bytes(&b"Cookie"[..], &b"user-session=secret"[..]).expect("cookie header"),
             Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
                 .expect("content-type header"),
-            Header::from_bytes(&b"x-codex-window-id"[..], &b"thread-1:0"[..])
+            Header::from_bytes(&b"x-astral-window-id"[..], &b"thread-1:0"[..])
                 .expect("window id header"),
-            Header::from_bytes(&b"x-codex-parent-thread-id"[..], &b"parent-thread-1"[..])
+            Header::from_bytes(&b"x-astral-parent-thread-id"[..], &b"parent-thread-1"[..])
                 .expect("parent thread id header"),
             Header::from_bytes(&b"x-astral-subagent"[..], &b"collab_spawn"[..])
                 .expect("subagent header"),
@@ -270,11 +270,11 @@ mod tests {
                         "value": "application/json"
                     },
                     {
-                        "name": "x-codex-window-id",
+                        "name": "x-astral-window-id",
                         "value": "thread-1:0"
                     },
                     {
-                        "name": "x-codex-parent-thread-id",
+                        "name": "x-astral-parent-thread-id",
                         "value": "parent-thread-1"
                     },
                     {

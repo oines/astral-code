@@ -52,7 +52,7 @@ pub fn filter_disallowed_connectors(
 }
 
 fn is_first_party_chat_originator(originator_value: &str) -> bool {
-    originator_value == "codex_atlas" || originator_value == "codex_chatgpt_desktop"
+    originator_value == "astral_atlas" || originator_value == "astral_chat_desktop"
 }
 
 fn is_connector_id_allowed(connector_id: &str, first_party_chat_originator: bool) -> bool {
@@ -99,25 +99,25 @@ mod tests {
     #[test]
     fn filter_disallowed_connectors_allows_non_disallowed_connectors() {
         let filtered =
-            filter_disallowed_connectors(vec![app("asdk_app_hidden"), app("alpha")], "codex_cli");
+            filter_disallowed_connectors(vec![app("asdk_app_hidden"), app("alpha")], "astral_cli");
         assert_eq!(filtered, vec![app("asdk_app_hidden"), app("alpha")]);
     }
 
     #[test]
-    fn filter_disallowed_connectors_allows_openai_prefix() {
+    fn filter_disallowed_connectors_allows_provider_prefix() {
         let filtered = filter_disallowed_connectors(
             vec![
-                app("connector_openai_foo"),
-                app("connector_openai_bar"),
+                app("connector_provider_foo"),
+                app("connector_provider_bar"),
                 app("gamma"),
             ],
-            "codex_cli",
+            "astral_cli",
         );
         assert_eq!(
             filtered,
             vec![
-                app("connector_openai_foo"),
-                app("connector_openai_bar"),
+                app("connector_provider_foo"),
+                app("connector_provider_bar"),
                 app("gamma")
             ]
         );
@@ -131,7 +131,7 @@ mod tests {
                 app("connector_3f8d1a79f27c4c7ba1a897ab13bf37dc"),
                 app("delta"),
             ],
-            "codex_cli",
+            "astral_cli",
         );
         assert_eq!(filtered, vec![app("delta")]);
     }
@@ -140,16 +140,16 @@ mod tests {
     fn first_party_chat_originator_filters_target_connector_ids() {
         let filtered = filter_disallowed_connectors(
             vec![
-                app("connector_openai_foo"),
+                app("connector_provider_foo"),
                 app("asdk_app_6938a94a61d881918ef32cb999ff937c"),
                 app("connector_0f9c9d4592e54d0a9a12b3f44a1e2010"),
             ],
-            "codex_atlas",
+            "astral_atlas",
         );
         assert_eq!(
             filtered,
             vec![
-                app("connector_openai_foo"),
+                app("connector_provider_foo"),
                 app("asdk_app_6938a94a61d881918ef32cb999ff937c")
             ]
         );

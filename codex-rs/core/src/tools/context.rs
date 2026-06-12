@@ -421,7 +421,7 @@ impl ExecCommandToolOutput {
         }
 
         if let Some(process_id) = &self.process_id {
-            sections.push(format!("Process running with session ID {process_id}"));
+            sections.push(format!("Task running with task_id {process_id}"));
         }
 
         if let Some(original_token_count) = self.original_token_count {

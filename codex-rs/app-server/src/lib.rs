@@ -699,7 +699,7 @@ pub async fn run_main_with_transport_options(
     drop(unix_socket_startup_lock);
 
     let auth_manager =
-        AuthManager::shared_from_config(&config, /*enable_codex_api_key_env*/ false).await;
+        AuthManager::shared_from_config(&config, /*enable_astral_api_key_env*/ false).await;
 
     let remote_control_requested = runtime_options.remote_control_enabled;
     if remote_control_requested {

@@ -34,9 +34,9 @@ allow_upstream_proxy = true
 dangerously_allow_non_loopback_proxy = false
 mode = "full" # default when unset; use "limited" for read-only mode
 # HTTPS MITM is enabled automatically when `mode = "limited"` or when MITM hooks are configured.
-# CA cert/key are managed internally under $CODEX_HOME/proxy/ (ca.pem + ca.key).
+# CA cert/key are managed internally under $ASTRAL_HOME/proxy/ (ca.pem + ca.key).
 # When MITM is active, spawned commands receive CA bundle env vars pointing at
-# immutable bundles under $CODEX_HOME/proxy/ so common HTTPS clients trust the managed CA.
+# immutable bundles under $ASTRAL_HOME/proxy/ so common HTTPS clients trust the managed CA.
 
 # If false, local/private networking is rejected. Explicit allowlisting of local IP literals
 # (or `localhost`) is required to permit them.

@@ -16,7 +16,9 @@ use codex_login::CodexAuth;
 use codex_login::collect_auth_env_telemetry;
 use codex_login::default_client::build_reqwest_client;
 use codex_model_provider_info::ModelProviderInfo;
+use codex_models_manager::bundled_models_response;
 use codex_models_manager::manager::ModelsEndpointClient;
+use codex_models_manager::model_info;
 use codex_otel::TelemetryAuthMode;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CoreResult;
@@ -57,11 +59,11 @@ impl OpenAiModelsEndpoint {
     }
 
     fn auth_env(&self) -> AuthEnvTelemetry {
-        let codex_api_key_env_enabled = self
+        let astral_api_key_env_enabled = self
             .auth_manager
             .as_ref()
-            .is_some_and(|auth_manager| auth_manager.codex_api_key_env_enabled());
-        collect_auth_env_telemetry(&self.provider_info, codex_api_key_env_enabled)
+            .is_some_and(|auth_manager| auth_manager.astral_api_key_env_enabled());
+        collect_auth_env_telemetry(&self.provider_info, astral_api_key_env_enabled)
     }
 }
 
@@ -78,13 +80,6 @@ impl ModelsEndpointClient for OpenAiModelsEndpoint {
                 .env_key
                 .as_ref()
                 .is_some_and(|env_key| std::env::var_os(env_key).is_some())
-    }
-
-    async fn uses_codex_backend(&self) -> bool {
-        self.auth()
-            .await
-            .as_ref()
-            .is_some_and(CodexAuth::uses_codex_backend)
     }
 
     async fn list_models(
@@ -108,14 +103,51 @@ impl ModelsEndpointClient for OpenAiModelsEndpoint {
         let client = ModelsClient::new(transport, api_provider, api_auth)
             .with_telemetry(Some(request_telemetry));
 
-        timeout(
+        let (models, etag) = timeout(
             MODELS_REFRESH_TIMEOUT,
             client.list_models(client_version, HeaderMap::new()),
         )
         .await
         .map_err(|_| CodexErr::Timeout)?
-        .map_err(map_api_error)
+        .map_err(map_api_error)?;
+
+        Ok((enrich_provider_model_listings(models), etag))
     }
+}
+
+fn enrich_provider_model_listings(models: Vec<ModelInfo>) -> Vec<ModelInfo> {
+    let bundled_models = bundled_models_response()
+        .map(|response| response.models)
+        .unwrap_or_default();
+    models
+        .into_iter()
+        .map(|model| {
+            if !is_provider_model_id_listing(&model) {
+                return model;
+            }
+            if let Some(mut bundled_model) = bundled_models
+                .iter()
+                .filter(|candidate| model.slug.starts_with(candidate.slug.as_str()))
+                .max_by_key(|candidate| candidate.slug.len())
+                .cloned()
+            {
+                bundled_model.slug = model.slug;
+                return bundled_model;
+            }
+
+            let mut fallback_model = model_info::model_info_from_slug(&model.slug);
+            fallback_model.display_name = model.display_name;
+            fallback_model.description = model.description;
+            fallback_model.visibility = model.visibility;
+            fallback_model.supported_in_api = model.supported_in_api;
+            fallback_model.priority = model.priority;
+            fallback_model
+        })
+        .collect()
+}
+
+fn is_provider_model_id_listing(model: &ModelInfo) -> bool {
+    model.base_instructions.is_empty() && model.supported_reasoning_levels.is_empty()
 }
 
 #[derive(Clone)]
@@ -152,8 +184,8 @@ impl RequestTelemetry for ModelsRequestTelemetry {
             endpoint = MODELS_ENDPOINT,
             auth.header_attached = self.auth_header_attached,
             auth.header_name = self.auth_header_name,
-            auth.env_codex_api_key_present = self.auth_env.codex_api_key_env_present,
-            auth.env_codex_api_key_enabled = self.auth_env.codex_api_key_env_enabled,
+            auth.env_astral_api_key_present = self.auth_env.astral_api_key_env_present,
+            auth.env_astral_api_key_enabled = self.auth_env.astral_api_key_env_enabled,
             auth.env_provider_key_name = self.auth_env.provider_env_key_name.as_deref(),
             auth.env_provider_key_present = self.auth_env.provider_env_key_present,
             auth.env_refresh_token_url_override_present = self.auth_env.refresh_token_url_override_present,
@@ -175,8 +207,8 @@ impl RequestTelemetry for ModelsRequestTelemetry {
             endpoint = MODELS_ENDPOINT,
             auth.header_attached = self.auth_header_attached,
             auth.header_name = self.auth_header_name,
-            auth.env_codex_api_key_present = self.auth_env.codex_api_key_env_present,
-            auth.env_codex_api_key_enabled = self.auth_env.codex_api_key_env_enabled,
+            auth.env_astral_api_key_present = self.auth_env.astral_api_key_env_present,
+            auth.env_astral_api_key_enabled = self.auth_env.astral_api_key_env_enabled,
             auth.env_provider_key_name = self.auth_env.provider_env_key_name.as_deref(),
             auth.env_provider_key_present = self.auth_env.provider_env_key_present,
             auth.env_refresh_token_url_override_present = self.auth_env.refresh_token_url_override_present,
@@ -250,5 +282,21 @@ mod tests {
         );
 
         assert!(!endpoint.has_command_auth());
+    }
+
+    #[test]
+    fn provider_model_id_listing_uses_bundled_metadata_when_available() {
+        let mut listed_model = model_info::model_info_from_slug("deepseek-v4-flash");
+        listed_model.base_instructions.clear();
+        listed_model.supported_reasoning_levels.clear();
+
+        let models = enrich_provider_model_listings(vec![listed_model]);
+
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].slug, "deepseek-v4-flash");
+        assert_eq!(models[0].display_name, "DeepSeek V4 Flash");
+        assert!(!models[0].base_instructions.is_empty());
+        assert!(!models[0].supported_reasoning_levels.is_empty());
+        assert!(models[0].supports_parallel_tool_calls);
     }
 }

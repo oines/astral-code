@@ -63,8 +63,8 @@ const USER_AGENT_HEADER: &str = "user-agent";
 const WS_V2_BETA_HEADER_VALUE: &str = "responses_websockets=2026-02-06";
 const X_CLIENT_REQUEST_ID_HEADER: &str = "x-client-request-id";
 const TEST_INSTALLATION_ID: &str = "11111111-1111-4111-8111-111111111111";
-const X_CODEX_WS_STREAM_REQUEST_START_MS_CLIENT_METADATA_KEY: &str =
-    "x-codex-ws-stream-request-start-ms";
+const X_ASTRAL_WS_STREAM_REQUEST_START_MS_CLIENT_METADATA_KEY: &str =
+    "x-astral-ws-stream-request-start-ms";
 
 fn assert_request_trace_matches(body: &serde_json::Value, expected_trace: &W3cTraceContext) {
     let client_metadata = body["client_metadata"]
@@ -146,14 +146,14 @@ async fn responses_websocket_streams_request() {
     );
     assert_eq!(
         handshake.header(USER_AGENT_HEADER),
-        Some(codex_login::default_client::get_codex_user_agent())
+        Some(codex_login::default_client::get_astral_user_agent())
     );
     assert_eq!(
-        body["client_metadata"]["x-codex-installation-id"].as_str(),
+        body["client_metadata"]["x-astral-installation-id"].as_str(),
         Some(TEST_INSTALLATION_ID)
     );
     let stream_request_start_ms = body["client_metadata"]
-        [X_CODEX_WS_STREAM_REQUEST_START_MS_CLIENT_METADATA_KEY]
+        [X_ASTRAL_WS_STREAM_REQUEST_START_MS_CLIENT_METADATA_KEY]
         .as_str()
         .expect("missing websocket stream request start timestamp")
         .parse::<i64>()
@@ -228,7 +228,7 @@ async fn responses_websocket_reuses_connection_with_per_turn_trace_payloads() {
     assert_eq!(server.handshakes().len(), 1);
     assert_eq!(
         server.single_handshake().header(USER_AGENT_HEADER),
-        Some(codex_login::default_client::get_codex_user_agent())
+        Some(codex_login::default_client::get_astral_user_agent())
     );
     let connection = server.single_connection();
     assert_eq!(connection.len(), 2);
@@ -317,7 +317,7 @@ async fn responses_websocket_preconnect_reuses_connection() {
     assert_eq!(server.handshakes().len(), 1);
     assert_eq!(
         server.single_handshake().header(USER_AGENT_HEADER),
-        Some(codex_login::default_client::get_codex_user_agent())
+        Some(codex_login::default_client::get_astral_user_agent())
     );
     let connection = server.single_connection();
     assert_eq!(connection.len(), 1);
@@ -355,7 +355,7 @@ async fn responses_websocket_request_prewarm_reuses_connection() {
     assert_eq!(server.handshakes().len(), 1);
     assert_eq!(
         server.single_handshake().header(USER_AGENT_HEADER),
-        Some(codex_login::default_client::get_codex_user_agent())
+        Some(codex_login::default_client::get_astral_user_agent())
     );
     let connection = server.single_connection();
     assert_eq!(connection.len(), 2);
@@ -1384,8 +1384,8 @@ async fn responses_websocket_connection_limit_error_reconnects_and_completes() {
     assert_eq!(
         handshake_user_agents,
         vec![
-            Some(codex_login::default_client::get_codex_user_agent()),
-            Some(codex_login::default_client::get_codex_user_agent()),
+            Some(codex_login::default_client::get_astral_user_agent()),
+            Some(codex_login::default_client::get_astral_user_agent()),
         ]
     );
 
@@ -1487,13 +1487,13 @@ async fn responses_websocket_forwards_turn_metadata_on_initial_and_incremental_c
 
     assert_eq!(first["type"].as_str(), Some("response.create"));
     assert_eq!(
-        first["client_metadata"]["x-codex-turn-metadata"].as_str(),
+        first["client_metadata"]["x-astral-turn-metadata"].as_str(),
         Some(first_turn_metadata)
     );
     assert_eq!(second["type"].as_str(), Some("response.create"));
     assert_eq!(second["previous_response_id"].as_str(), Some("resp-1"));
     assert_eq!(
-        second["client_metadata"]["x-codex-turn-metadata"].as_str(),
+        second["client_metadata"]["x-astral-turn-metadata"].as_str(),
         Some(enriched_turn_metadata)
     );
 
@@ -1551,7 +1551,7 @@ async fn responses_websocket_preserves_custom_turn_metadata_fields() {
 
     assert_eq!(body["type"].as_str(), Some("response.create"));
     assert_eq!(
-        body["client_metadata"]["x-codex-turn-metadata"]
+        body["client_metadata"]["x-astral-turn-metadata"]
             .as_str()
             .map(|value| serde_json::from_str::<serde_json::Value>(value).expect("valid json")),
         Some(json!({

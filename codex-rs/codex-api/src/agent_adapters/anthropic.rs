@@ -52,12 +52,11 @@ pub fn to_messages_request(request: &AgentRequest, options: AnthropicMessagesOpt
             add_cache_control_to_last_object(&mut tools);
         }
         body.insert("tools".to_string(), Value::Array(tools));
+        body.insert(
+            "tool_choice".to_string(),
+            tool_choice_to_anthropic(&request.tool_choice),
+        );
     }
-
-    body.insert(
-        "tool_choice".to_string(),
-        tool_choice_to_anthropic(&request.tool_choice),
-    );
     apply_provider_body_overrides(&mut body, request);
 
     Value::Object(body)
@@ -86,7 +85,10 @@ pub fn parse_stream_event(value: Value) -> Result<Option<AgentStreamEvent>, Anth
         })),
         "content_block_delta" => Ok(Some(AgentStreamEvent::ContentBlockDelta {
             index: required_usize(&value, "index")?,
-            delta: content_delta_from_anthropic(required_value(&value, "delta")?)?,
+            delta: match content_delta_from_anthropic(required_value(&value, "delta")?)? {
+                Some(delta) => delta,
+                None => return Ok(None),
+            },
         })),
         "content_block_stop" => Ok(Some(AgentStreamEvent::ContentBlockStop {
             index: required_usize(&value, "index")?,
@@ -333,18 +335,21 @@ fn content_block_from_anthropic(value: &Value) -> Result<ContentBlock, Anthropic
     }
 }
 
-fn content_delta_from_anthropic(value: &Value) -> Result<ContentDelta, AnthropicStreamError> {
+fn content_delta_from_anthropic(
+    value: &Value,
+) -> Result<Option<ContentDelta>, AnthropicStreamError> {
     let delta_type = required_str(value, "type")?;
     match delta_type {
-        "text_delta" => Ok(ContentDelta::Text {
+        "text_delta" => Ok(Some(ContentDelta::Text {
             text: required_str(value, "text")?.to_string(),
-        }),
-        "input_json_delta" => Ok(ContentDelta::ToolInputJson {
+        })),
+        "input_json_delta" => Ok(Some(ContentDelta::ToolInputJson {
             partial_json: required_str(value, "partial_json")?.to_string(),
-        }),
-        "thinking_delta" => Ok(ContentDelta::Reasoning {
+        })),
+        "thinking_delta" => Ok(Some(ContentDelta::Reasoning {
             text: required_str(value, "thinking")?.to_string(),
-        }),
+        })),
+        "signature_delta" => Ok(None),
         other => Err(AnthropicStreamError::UnknownContentDelta(other.to_string())),
     }
 }

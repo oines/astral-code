@@ -447,7 +447,18 @@ async fn shell_family_registers_visible_unified_exec_and_hidden_legacy_shell() {
     })
     .await;
 
-    plan.assert_visible_contains(&["Bash", "Monitor", "Read", "Write", "Edit", "Glob", "Grep"]);
+    plan.assert_visible_contains(&[
+        "Bash",
+        "ReadTaskOutput",
+        "SendTaskInput",
+        "ListBackgroundTasks",
+        "StopBackgroundTask",
+        "Read",
+        "Write",
+        "Edit",
+        "Glob",
+        "Grep",
+    ]);
     plan.assert_visible_lacks(&["shell_command"]);
     plan.assert_registered_contains(&[
         "exec_command",
@@ -458,6 +469,10 @@ async fn shell_family_registers_visible_unified_exec_and_hidden_legacy_shell() {
         "Edit",
         "Glob",
         "Grep",
+        "ReadTaskOutput",
+        "SendTaskInput",
+        "ListBackgroundTasks",
+        "StopBackgroundTask",
     ]);
     assert_eq!(plan.exposure("shell_command"), ToolExposure::Hidden);
     assert!(has_parameter(plan.visible_spec("Bash"), "command"));
@@ -481,7 +496,10 @@ async fn model_visible_core_tools_convert_to_provider_neutral_astral_names() {
 
     for expected in [
         "Bash",
-        "Monitor",
+        "ReadTaskOutput",
+        "SendTaskInput",
+        "ListBackgroundTasks",
+        "StopBackgroundTask",
         "Read",
         "Write",
         "Edit",
@@ -499,6 +517,7 @@ async fn model_visible_core_tools_convert_to_provider_neutral_astral_names() {
         "write_stdin",
         "shell_command",
         "update_plan",
+        "Monitor",
     ] {
         assert!(
             !agent_tool_names.contains(&legacy),
@@ -518,7 +537,16 @@ async fn shell_zsh_fork_standalone_backend_keeps_bash_model_visible() {
     .await;
 
     standalone.assert_visible_contains(&["Bash"]);
-    standalone.assert_visible_lacks(&["shell_command", "exec_command", "write_stdin", "Monitor"]);
+    standalone.assert_visible_lacks(&[
+        "shell_command",
+        "exec_command",
+        "write_stdin",
+        "Monitor",
+        "ReadTaskOutput",
+        "SendTaskInput",
+        "ListBackgroundTasks",
+        "StopBackgroundTask",
+    ]);
     standalone.assert_registered_contains(&["Bash", "shell_command"]);
     standalone.assert_registered_lacks(&["exec_command", "write_stdin"]);
     assert_eq!(standalone.exposure("shell_command"), ToolExposure::Hidden);
@@ -538,12 +566,24 @@ async fn shell_zsh_fork_standalone_backend_keeps_bash_model_visible() {
     .await;
 
     if codex_utils_pty::conpty_supported() {
-        composed.assert_visible_contains(&["Bash", "Monitor"]);
+        composed.assert_visible_contains(&[
+            "Bash",
+            "ReadTaskOutput",
+            "SendTaskInput",
+            "ListBackgroundTasks",
+            "StopBackgroundTask",
+        ]);
         composed.assert_visible_lacks(&["shell_command"]);
         composed.assert_registered_contains(&["exec_command", "write_stdin", "shell_command"]);
         assert_eq!(composed.exposure("shell_command"), ToolExposure::Hidden);
     } else {
-        composed.assert_visible_contains(&["Bash", "Monitor"]);
+        composed.assert_visible_contains(&[
+            "Bash",
+            "ReadTaskOutput",
+            "SendTaskInput",
+            "ListBackgroundTasks",
+            "StopBackgroundTask",
+        ]);
         composed.assert_visible_lacks(&["exec_command", "write_stdin"]);
     }
 }
@@ -569,7 +609,13 @@ async fn zsh_fork_unified_exec_hides_shell_parameter() {
     })
     .await;
 
-    plan.assert_visible_contains(&["Bash", "Monitor"]);
+    plan.assert_visible_contains(&[
+        "Bash",
+        "ReadTaskOutput",
+        "SendTaskInput",
+        "ListBackgroundTasks",
+        "StopBackgroundTask",
+    ]);
     assert!(!has_parameter(plan.visible_spec("Bash"), "shell"));
 }
 
@@ -613,7 +659,13 @@ async fn zsh_fork_unified_exec_keeps_shell_parameter_when_remote_environment_ava
     })
     .await;
 
-    plan.assert_visible_contains(&["Bash", "Monitor"]);
+    plan.assert_visible_contains(&[
+        "Bash",
+        "ReadTaskOutput",
+        "SendTaskInput",
+        "ListBackgroundTasks",
+        "StopBackgroundTask",
+    ]);
     assert!(has_parameter(plan.visible_spec("Bash"), "environment_id"));
 }
 
@@ -630,6 +682,10 @@ async fn environment_count_controls_environment_backed_tools() {
         "exec_command",
         "Bash",
         "Monitor",
+        "ReadTaskOutput",
+        "SendTaskInput",
+        "ListBackgroundTasks",
+        "StopBackgroundTask",
         "Read",
         "Write",
         "Edit",
@@ -1062,26 +1118,25 @@ async fn multi_agent_feature_selects_one_agent_tool_family() {
     })
     .await;
     v2.assert_visible_contains(&[
-        "Agent",
-        "SendMessage",
+        "spawn_agent",
+        "send_message",
         "followup_task",
         "wait_agent",
-        "TaskStop",
+        "interrupt_agent",
         "list_agents",
     ]);
     v2.assert_visible_lacks(&[
-        "spawn_agent",
-        "send_message",
         "send_input",
         "resume_agent",
         "assign_task",
         "close_agent",
-        "interrupt_agent",
+        "Agent",
+        "SendMessage",
+        "TaskStop",
     ]);
-    v2.assert_registered_contains(&["spawn_agent", "send_message", "interrupt_agent"]);
-    let spawn_agent_description = match v2.visible_spec("Agent") {
+    let spawn_agent_description = match v2.visible_spec("spawn_agent") {
         ToolSpec::Function(tool) => tool.description.as_str(),
-        other => panic!("expected Agent function spec, got {other:?}"),
+        other => panic!("expected spawn_agent function spec, got {other:?}"),
     };
     assert!(spawn_agent_description.contains("max_concurrent_threads_per_session = 17"));
 
@@ -1099,7 +1154,7 @@ async fn multi_agent_feature_selects_one_agent_tool_family() {
         });
     })
     .await;
-    direct_model_only.assert_visible_contains(&["Agent", "SendMessage", "wait_agent"]);
+    direct_model_only.assert_visible_contains(&["spawn_agent", "send_message", "wait_agent"]);
     assert_eq!(
         direct_model_only.exposure("spawn_agent"),
         ToolExposure::DirectModelOnly
@@ -1113,8 +1168,8 @@ async fn multi_agent_v2_message_schemas_are_encrypted() {
     })
     .await;
     for (tool_name, encrypted_property) in [
-        ("Agent", "prompt"),
-        ("SendMessage", "message"),
+        ("spawn_agent", "message"),
+        ("send_message", "message"),
         ("followup_task", "message"),
     ] {
         let ToolSpec::Function(tool) = plan.visible_spec(tool_name) else {
@@ -1366,11 +1421,11 @@ async fn openai_hosted_tools_are_not_model_visible() {
             codex_code_mode::PUBLIC_TOOL_NAME,
             codex_code_mode::WAIT_TOOL_NAME,
             // Multi-agent v2 tools.
-            "Agent",
-            "SendMessage",
+            "spawn_agent",
+            "send_message",
             "followup_task",
             "wait_agent",
-            "TaskStop",
+            "interrupt_agent",
             "list_agents",
         ]
     );

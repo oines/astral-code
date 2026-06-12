@@ -341,7 +341,7 @@ remote_plugin = true
     assert!(
         discoverable_plugins
             .iter()
-            .all(|plugin| plugin.id != "github@openai-curated-remote")
+            .all(|plugin| plugin.id != "github@astral-curated-remote")
     );
 
     for scope in ["GLOBAL", "WORKSPACE"] {
@@ -379,20 +379,20 @@ remote_plugin = true
     assert_eq!(
         discoverable_plugins
             .iter()
-            .filter(|plugin| plugin.id.ends_with("@openai-curated-remote"))
+            .filter(|plugin| plugin.id.ends_with("@astral-curated-remote"))
             .map(|plugin| plugin.id.as_str())
             .collect::<Vec<_>>(),
-        vec!["github@openai-curated-remote"]
+        vec!["github@astral-curated-remote"]
     );
     let remote_plugins = discoverable_plugins
         .into_iter()
-        .filter(|plugin| plugin.id == "github@openai-curated-remote")
+        .filter(|plugin| plugin.id == "github@astral-curated-remote")
         .collect::<Vec<_>>();
 
     assert_eq!(
         remote_plugins,
         vec![DiscoverablePluginInfo {
-            id: "github@openai-curated-remote".to_string(),
+            id: "github@astral-curated-remote".to_string(),
             name: "Remote GitHub".to_string(),
             description: Some("Remote GitHub short".to_string()),
             has_skills: true,
@@ -409,7 +409,7 @@ remote_plugin = true
 
 [tool_suggest]
 disabled_tools = [
-  { type = "plugin", id = "github@openai-curated-remote" }
+  { type = "plugin", id = "github@astral-curated-remote" }
 ]
 "#,
     );
@@ -426,7 +426,7 @@ disabled_tools = [
     assert!(
         discoverable_plugins
             .iter()
-            .all(|plugin| plugin.id != "github@openai-curated-remote")
+            .all(|plugin| plugin.id != "github@astral-curated-remote")
     );
 }
 

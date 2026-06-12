@@ -14,11 +14,13 @@ pub(crate) fn static_model_catalog() -> ModelsResponse {
             gpt_5_bedrock_model(
                 GPT_5_5_OPENAI_MODEL_ID,
                 AMAZON_BEDROCK_GPT_5_5_MODEL_ID,
+                "Bedrock GPT-5.5",
                 /*priority*/ 0,
             ),
             gpt_5_bedrock_model(
                 GPT_5_4_OPENAI_MODEL_ID,
                 AMAZON_BEDROCK_GPT_5_4_MODEL_ID,
+                "Bedrock GPT-5.4",
                 /*priority*/ 1,
             ),
         ],
@@ -35,22 +37,39 @@ pub(crate) fn with_default_only_service_tier(mut catalog: ModelsResponse) -> Mod
     catalog
 }
 
-fn gpt_5_bedrock_model(openai_slug: &str, bedrock_slug: &str, priority: i32) -> ModelInfo {
-    let mut model = bundled_openai_model(openai_slug);
+fn gpt_5_bedrock_model(
+    openai_slug: &str,
+    bedrock_slug: &str,
+    display_name: &str,
+    priority: i32,
+) -> ModelInfo {
+    let mut model = bundled_reference_model(openai_slug);
     model.slug = bedrock_slug.to_string();
+    model.display_name = display_name.to_string();
+    model.description = Some(format!("Amazon Bedrock {display_name} via Mantle."));
     model.priority = priority;
     model.context_window = Some(GPT_5_BEDROCK_CONTEXT_WINDOW);
     model.max_context_window = Some(GPT_5_BEDROCK_CONTEXT_WINDOW);
     model
 }
 
-fn bundled_openai_model(slug: &str) -> ModelInfo {
-    bundled_models_response()
+fn bundled_reference_model(slug: &str) -> ModelInfo {
+    let catalog = bundled_models_response()
         .unwrap_or_else(|err| panic!("bundled models.json should parse: {err}"))
-        .models
+        .models;
+    if let Some(model) = catalog.iter().find(|model| model.slug == slug) {
+        return model.clone();
+    }
+    if let Some(model) = catalog
+        .iter()
+        .find(|model| model.slug == GPT_5_4_OPENAI_MODEL_ID)
+    {
+        return model.clone();
+    }
+    catalog
         .into_iter()
-        .find(|model| model.slug == slug)
-        .unwrap_or_else(|| panic!("bundled models.json should include {slug}"))
+        .next()
+        .expect("bundled models.json should include at least one model")
 }
 
 #[cfg(test)]

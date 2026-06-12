@@ -1,3 +1,4 @@
 # Non-interactive mode
 
-For information about non-interactive mode, see [this documentation](https://developers.openai.com/codex/noninteractive).
+Non-interactive execution is exposed through `astral exec`. It reuses the same
+exec backend, sandbox, approval, and PTY boundaries as interactive Astral runs.

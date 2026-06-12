@@ -18,7 +18,6 @@ use crate::key_hint;
 use crate::legacy_core::config::Config;
 use crate::motion::MotionMode;
 use crate::motion::shimmer_text;
-use crate::onboarding::mark_url_hyperlink;
 use crate::render::renderable::ColumnRenderable;
 use crate::render::renderable::Renderable;
 use crate::tui::FrameRequester;
@@ -135,8 +134,6 @@ impl Renderable for DelayedLoadingHeader {
     }
 }
 
-const APPS_HELP_ARTICLE_URL: &str = "https://help.openai.com/en/articles/11487775-apps-in-chatgpt";
-
 struct PluginDisclosureLine {
     line: Line<'static>,
 }
@@ -146,7 +143,6 @@ impl Renderable for PluginDisclosureLine {
         Paragraph::new(self.line.clone())
             .wrap(Wrap { trim: false })
             .render(area, buf);
-        mark_url_hyperlink(buf, area, APPS_HELP_ARTICLE_URL);
     }
 
     fn desired_height(&self, width: u16) -> u16 {
@@ -869,7 +865,7 @@ impl ChatWidget {
         let status_label = if is_installed {
             "Already installed in this session."
         } else {
-            "Install the required Apps in ChatGPT to continue:"
+            "Install the required apps in your browser to continue:"
         };
         let mut header = ColumnRenderable::new();
         header.push(Line::from("Plugins".bold()));
@@ -885,13 +881,13 @@ impl ChatWidget {
 
         if let Some(install_url) = app.install_url.clone() {
             let install_label = if is_installed {
-                "Manage on ChatGPT"
+                "Manage app"
             } else {
-                "Install on ChatGPT"
+                "Install app"
             };
             items.push(SelectionItem {
                 name: install_label.to_string(),
-                description: Some("Open the ChatGPT app management page".to_string()),
+                description: Some("Open the app management page".to_string()),
                 selected_description: Some("Open the app page in your browser.".to_string()),
                 actions: vec![Box::new(move |tx| {
                     tx.send(AppEvent::OpenUrlInBrowser {
@@ -902,7 +898,7 @@ impl ChatWidget {
             });
         } else {
             items.push(SelectionItem {
-                name: "ChatGPT apps link unavailable".to_string(),
+                name: "App link unavailable".to_string(),
                 description: Some("This app did not provide an install/manage URL.".to_string()),
                 is_disabled: true,
                 ..Default::default()
@@ -1493,16 +1489,16 @@ impl ChatWidget {
             .count();
         tabs.push(SelectionTab {
             id: OPENAI_CURATED_TAB_ID.to_string(),
-            label: "OpenAI Curated".to_string(),
+            label: "Astral Curated".to_string(),
             header: plugins_header(
-                "OpenAI Curated marketplace.".to_string(),
-                format!("Installed {curated_installed} of {curated_total} OpenAI Curated plugins."),
+                "Astral Curated marketplace.".to_string(),
+                format!("Installed {curated_installed} of {curated_total} Astral Curated plugins."),
             ),
             items: self.plugin_selection_items(
                 curated_entries,
                 /*include_marketplace_names*/ false,
-                "No OpenAI Curated plugins available",
-                "No OpenAI Curated plugins available.",
+                "No Astral Curated plugins available",
+                "No Astral Curated plugins available.",
             ),
         });
 
@@ -1650,8 +1646,6 @@ impl ChatWidget {
                     "terms of service".bold(),
                     " and ".into(),
                     "privacy policy".bold(),
-                    ". ".into(),
-                    "Learn more".cyan().underlined(),
                     ".".into(),
                 ]),
             });

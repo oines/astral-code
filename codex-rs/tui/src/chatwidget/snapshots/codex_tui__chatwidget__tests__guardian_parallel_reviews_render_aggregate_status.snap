@@ -1,5 +1,6 @@
 ---
 source: tui/src/chatwidget/tests/guardian.rs
+assertion_line: 548
 expression: normalize_snapshot_paths(rendered)
 ---
 • Reviewing 2 approval requests (0s • esc to interrupt)
@@ -9,4 +10,4 @@ expression: normalize_snapshot_paths(rendered)
 
 › Ask Codex to do anything
 
-  gpt-5.5 default · /tmp/project
+  deepseek-v4-pro default · /tmp/project

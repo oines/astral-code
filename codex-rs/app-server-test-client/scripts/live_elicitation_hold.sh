@@ -12,9 +12,9 @@ require_env() {
 require_env APP_SERVER_URL
 require_env APP_SERVER_TEST_CLIENT_BIN
 
-thread_id="${CODEX_THREAD_ID:-${THREAD_ID-}}"
+thread_id="${ASTRAL_THREAD_ID:-${THREAD_ID-}}"
 if [ -z "$thread_id" ]; then
-  echo "missing required env var: CODEX_THREAD_ID" >&2
+  echo "missing required env var: ASTRAL_THREAD_ID" >&2
   exit 1
 fi
 

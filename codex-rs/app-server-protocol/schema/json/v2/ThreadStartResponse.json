@@ -1019,7 +1019,7 @@
           "type": "string"
         },
         "modelProvider": {
-          "description": "Model provider used for this thread (for example, 'openai').",
+          "description": "Model provider used for this thread (for example, 'astral').",
           "type": "string"
         },
         "name": {

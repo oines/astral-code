@@ -96,27 +96,27 @@ const NOTIFICATIONS_TO_OPT_OUT: &[&str] = &[
 const APP_SERVER_GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 const APP_SERVER_GRACEFUL_SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const DEFAULT_ANALYTICS_ENABLED: bool = true;
-const OTEL_SERVICE_NAME: &str = "codex-app-server-test-client";
+const OTEL_SERVICE_NAME: &str = "astral-app-server-test-client";
 const TRACE_DISABLED_MESSAGE: &str =
-    "Not enabled - enable tracing in $CODEX_HOME/config.toml to get a trace URL!";
+    "Not enabled - enable tracing in $ASTRAL_HOME/config.toml to get a trace URL!";
 
-/// Minimal launcher that initializes the Codex app-server and logs the handshake.
+/// Minimal launcher that initializes the Astral app-server and logs the handshake.
 #[derive(Parser)]
-#[command(author = "Codex", version, about = "Bootstrap Codex app-server", long_about = None)]
+#[command(author = "Astral", version, about = "Bootstrap Astral app-server", long_about = None)]
 struct Cli {
-    /// Path to the `codex` CLI binary. When set, requests use stdio by
-    /// spawning `codex app-server` as a child process.
-    #[arg(long, env = "CODEX_BIN", global = true)]
-    codex_bin: Option<PathBuf>,
+    /// Path to the `astral` CLI binary. When set, requests use stdio by
+    /// spawning `astral app-server` as a child process.
+    #[arg(long, env = "ASTRAL_BIN", global = true)]
+    astral_bin: Option<PathBuf>,
 
     /// Existing websocket server URL to connect to.
     ///
-    /// If neither `--codex-bin` nor `--url` is provided, defaults to
+    /// If neither `--astral-bin` nor `--url` is provided, defaults to
     /// `ws://127.0.0.1:4222`.
-    #[arg(long, env = "CODEX_APP_SERVER_URL", global = true)]
+    #[arg(long, env = "ASTRAL_APP_SERVER_URL", global = true)]
     url: Option<String>,
 
-    /// Forwarded to the `codex` CLI as `--config key=value`. Repeatable.
+    /// Forwarded to the `astral` CLI as `--config key=value`. Repeatable.
     ///
     /// Example:
     ///   `--config 'model_providers.mock.base_url="http://localhost:4010/v2"'`
@@ -144,21 +144,21 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum CliCommand {
-    /// Start `codex app-server` on a websocket endpoint in the background.
+    /// Start `astral app-server` on a websocket endpoint in the background.
     ///
     /// Logs are written to:
-    ///   `/tmp/codex-app-server-test-client/`
+    ///   `/tmp/astral-app-server-test-client/`
     Serve {
-        /// WebSocket listen URL passed to `codex app-server --listen`.
+        /// WebSocket listen URL passed to `astral app-server --listen`.
         #[arg(long, default_value = "ws://127.0.0.1:4222")]
         listen: String,
         /// Kill any process listening on the same port before starting.
         #[arg(long, default_value_t = false)]
         kill: bool,
     },
-    /// Send a user message through the Codex app-server.
+    /// Send a user message through the Astral app-server.
     SendMessage {
-        /// User message to send to Codex.
+        /// User message to send to Astral.
         user_message: String,
     },
     /// Send a user message through the app-server V2 thread/turn APIs.
@@ -166,14 +166,14 @@ enum CliCommand {
         /// Opt into experimental app-server methods and fields.
         #[arg(long)]
         experimental_api: bool,
-        /// User message to send to Codex.
+        /// User message to send to Astral.
         user_message: String,
     },
     /// Resume a V2 thread by id, then send a user message.
     ResumeMessageV2 {
         /// Existing thread id to resume.
         thread_id: String,
-        /// User message to send to Codex.
+        /// User message to send to Astral.
         user_message: String,
     },
     /// Resume a V2 thread and continuously stream notifications/events.
@@ -221,12 +221,12 @@ enum CliCommand {
         #[arg(long)]
         abort_on: Option<usize>,
     },
-    /// Fetch the current account rate limits from the Codex app-server.
+    /// Fetch the current account rate limits from the Astral app-server.
     GetAccountRateLimits,
-    /// List the available models from the Codex app-server.
+    /// List the available models from the Astral app-server.
     #[command(name = "model-list")]
     ModelList,
-    /// List stored threads from the Codex app-server.
+    /// List stored threads from the Astral app-server.
     #[command(name = "thread-list")]
     ThreadList {
         /// Number of threads to return.
@@ -250,7 +250,7 @@ enum CliCommand {
     #[command(name = "live-elicitation-timeout-pause")]
     LiveElicitationTimeoutPause {
         /// Model passed to `thread/start`.
-        #[arg(long, env = "CODEX_E2E_MODEL", default_value = "gpt-5")]
+        #[arg(long, env = "ASTRAL_E2E_MODEL", default_value = "gpt-5")]
         model: String,
         /// Existing workspace path used as the turn cwd.
         #[arg(long, value_name = "path", default_value = ".")]
@@ -267,7 +267,7 @@ enum CliCommand {
 
 pub async fn run() -> Result<()> {
     let Cli {
-        codex_bin,
+        astral_bin,
         url,
         config_overrides,
         dynamic_tools,
@@ -279,19 +279,19 @@ pub async fn run() -> Result<()> {
     match command {
         CliCommand::Serve { listen, kill } => {
             ensure_dynamic_tools_unused(&dynamic_tools, "serve")?;
-            let codex_bin = codex_bin.unwrap_or_else(|| PathBuf::from("codex"));
-            serve(&codex_bin, &config_overrides, &listen, kill)
+            let astral_bin = astral_bin.unwrap_or_else(|| PathBuf::from("astral"));
+            serve(&astral_bin, &config_overrides, &listen, kill)
         }
         CliCommand::SendMessage { user_message } => {
             ensure_dynamic_tools_unused(&dynamic_tools, "send-message")?;
-            let endpoint = resolve_endpoint(codex_bin, url)?;
+            let endpoint = resolve_endpoint(astral_bin, url)?;
             send_message(&endpoint, &config_overrides, user_message).await
         }
         CliCommand::SendMessageV2 {
             experimental_api,
             user_message,
         } => {
-            let endpoint = resolve_endpoint(codex_bin, url)?;
+            let endpoint = resolve_endpoint(astral_bin, url)?;
             send_message_v2_endpoint(
                 &endpoint,
                 &config_overrides,
@@ -305,7 +305,7 @@ pub async fn run() -> Result<()> {
             thread_id,
             user_message,
         } => {
-            let endpoint = resolve_endpoint(codex_bin, url)?;
+            let endpoint = resolve_endpoint(astral_bin, url)?;
             resume_message_v2(
                 &endpoint,
                 &config_overrides,
@@ -317,31 +317,31 @@ pub async fn run() -> Result<()> {
         }
         CliCommand::ThreadResume { thread_id } => {
             ensure_dynamic_tools_unused(&dynamic_tools, "thread-resume")?;
-            let endpoint = resolve_endpoint(codex_bin, url)?;
+            let endpoint = resolve_endpoint(astral_bin, url)?;
             thread_resume_follow(&endpoint, &config_overrides, thread_id).await
         }
         CliCommand::Watch => {
             ensure_dynamic_tools_unused(&dynamic_tools, "watch")?;
-            let endpoint = resolve_endpoint(codex_bin, url)?;
+            let endpoint = resolve_endpoint(astral_bin, url)?;
             watch(&endpoint, &config_overrides).await
         }
         CliCommand::TriggerCmdApproval { user_message } => {
-            let endpoint = resolve_endpoint(codex_bin, url)?;
+            let endpoint = resolve_endpoint(astral_bin, url)?;
             trigger_cmd_approval(&endpoint, &config_overrides, user_message, &dynamic_tools).await
         }
         CliCommand::TriggerPatchApproval { user_message } => {
-            let endpoint = resolve_endpoint(codex_bin, url)?;
+            let endpoint = resolve_endpoint(astral_bin, url)?;
             trigger_patch_approval(&endpoint, &config_overrides, user_message, &dynamic_tools).await
         }
         CliCommand::NoTriggerCmdApproval => {
-            let endpoint = resolve_endpoint(codex_bin, url)?;
+            let endpoint = resolve_endpoint(astral_bin, url)?;
             no_trigger_cmd_approval(&endpoint, &config_overrides, &dynamic_tools).await
         }
         CliCommand::SendFollowUpV2 {
             first_message,
             follow_up_message,
         } => {
-            let endpoint = resolve_endpoint(codex_bin, url)?;
+            let endpoint = resolve_endpoint(astral_bin, url)?;
             send_follow_up_v2(
                 &endpoint,
                 &config_overrides,
@@ -356,7 +356,7 @@ pub async fn run() -> Result<()> {
             min_approvals,
             abort_on,
         } => {
-            let endpoint = resolve_endpoint(codex_bin, url)?;
+            let endpoint = resolve_endpoint(astral_bin, url)?;
             trigger_zsh_fork_multi_cmd_approval(
                 &endpoint,
                 &config_overrides,
@@ -369,27 +369,29 @@ pub async fn run() -> Result<()> {
         }
         CliCommand::GetAccountRateLimits => {
             ensure_dynamic_tools_unused(&dynamic_tools, "get-account-rate-limits")?;
-            let endpoint = resolve_endpoint(codex_bin, url)?;
+            let endpoint = resolve_endpoint(astral_bin, url)?;
             get_account_rate_limits(&endpoint, &config_overrides).await
         }
         CliCommand::ModelList => {
             ensure_dynamic_tools_unused(&dynamic_tools, "model-list")?;
-            let endpoint = resolve_endpoint(codex_bin, url)?;
+            let endpoint = resolve_endpoint(astral_bin, url)?;
             model_list(&endpoint, &config_overrides).await
         }
         CliCommand::ThreadList { limit } => {
             ensure_dynamic_tools_unused(&dynamic_tools, "thread-list")?;
-            let endpoint = resolve_endpoint(codex_bin, url)?;
+            let endpoint = resolve_endpoint(astral_bin, url)?;
             thread_list(&endpoint, &config_overrides, limit).await
         }
         CliCommand::ThreadIncrementElicitation { thread_id } => {
             ensure_dynamic_tools_unused(&dynamic_tools, "thread-increment-elicitation")?;
-            let url = resolve_shared_websocket_url(codex_bin, url, "thread-increment-elicitation")?;
+            let url =
+                resolve_shared_websocket_url(astral_bin, url, "thread-increment-elicitation")?;
             thread_increment_elicitation(&url, thread_id)
         }
         CliCommand::ThreadDecrementElicitation { thread_id } => {
             ensure_dynamic_tools_unused(&dynamic_tools, "thread-decrement-elicitation")?;
-            let url = resolve_shared_websocket_url(codex_bin, url, "thread-decrement-elicitation")?;
+            let url =
+                resolve_shared_websocket_url(astral_bin, url, "thread-decrement-elicitation")?;
             thread_decrement_elicitation(&url, thread_id)
         }
         CliCommand::LiveElicitationTimeoutPause {
@@ -400,7 +402,7 @@ pub async fn run() -> Result<()> {
         } => {
             ensure_dynamic_tools_unused(&dynamic_tools, "live-elicitation-timeout-pause")?;
             live_elicitation_timeout_pause(
-                codex_bin,
+                astral_bin,
                 url,
                 &config_overrides,
                 model,
@@ -413,7 +415,7 @@ pub async fn run() -> Result<()> {
 }
 
 enum Endpoint {
-    SpawnCodex(PathBuf),
+    SpawnAstral(PathBuf),
     ConnectWs(String),
 }
 
@@ -422,12 +424,12 @@ struct BackgroundAppServer {
     url: String,
 }
 
-fn resolve_endpoint(codex_bin: Option<PathBuf>, url: Option<String>) -> Result<Endpoint> {
-    if codex_bin.is_some() && url.is_some() {
-        bail!("--codex-bin and --url are mutually exclusive");
+fn resolve_endpoint(astral_bin: Option<PathBuf>, url: Option<String>) -> Result<Endpoint> {
+    if astral_bin.is_some() && url.is_some() {
+        bail!("--astral-bin and --url are mutually exclusive");
     }
-    if let Some(codex_bin) = codex_bin {
-        return Ok(Endpoint::SpawnCodex(codex_bin));
+    if let Some(astral_bin) = astral_bin {
+        return Ok(Endpoint::SpawnAstral(astral_bin));
     }
     if let Some(url) = url {
         return Ok(Endpoint::ConnectWs(url));
@@ -436,13 +438,13 @@ fn resolve_endpoint(codex_bin: Option<PathBuf>, url: Option<String>) -> Result<E
 }
 
 fn resolve_shared_websocket_url(
-    codex_bin: Option<PathBuf>,
+    astral_bin: Option<PathBuf>,
     url: Option<String>,
     command: &str,
 ) -> Result<String> {
-    if codex_bin.is_some() {
+    if astral_bin.is_some() {
         bail!(
-            "{command} requires --url or an already-running websocket app-server; --codex-bin would spawn a private stdio app-server instead"
+            "{command} requires --url or an already-running websocket app-server; --astral-bin would spawn a private stdio app-server instead"
         );
     }
 
@@ -450,16 +452,16 @@ fn resolve_shared_websocket_url(
 }
 
 impl BackgroundAppServer {
-    fn spawn(codex_bin: &Path, config_overrides: &[String]) -> Result<Self> {
+    fn spawn(astral_bin: &Path, config_overrides: &[String]) -> Result<Self> {
         let listener = TcpListener::bind("127.0.0.1:0")
             .context("failed to reserve a local port for websocket app-server")?;
         let addr = listener.local_addr()?;
         drop(listener);
 
         let url = format!("ws://{addr}");
-        let mut cmd = Command::new(codex_bin);
-        if let Some(codex_bin_parent) = codex_bin.parent() {
-            let mut path = OsString::from(codex_bin_parent.as_os_str());
+        let mut cmd = Command::new(astral_bin);
+        if let Some(astral_bin_parent) = astral_bin.parent() {
+            let mut path = OsString::from(astral_bin_parent.as_os_str());
             if let Some(existing_path) = std::env::var_os("PATH") {
                 path.push(":");
                 path.push(existing_path);
@@ -477,7 +479,7 @@ impl BackgroundAppServer {
             .stdout(Stdio::null())
             .stderr(Stdio::inherit())
             .spawn()
-            .with_context(|| format!("failed to start `{}` app-server", codex_bin.display()))?;
+            .with_context(|| format!("failed to start `{}` app-server", astral_bin.display()))?;
 
         Ok(Self { process, url })
     }
@@ -495,8 +497,8 @@ impl Drop for BackgroundAppServer {
     }
 }
 
-fn serve(codex_bin: &Path, config_overrides: &[String], listen: &str, kill: bool) -> Result<()> {
-    let runtime_dir = PathBuf::from("/tmp/codex-app-server-test-client");
+fn serve(astral_bin: &Path, config_overrides: &[String], listen: &str, kill: bool) -> Result<()> {
+    let runtime_dir = PathBuf::from("/tmp/astral-app-server-test-client");
     fs::create_dir_all(&runtime_dir)
         .with_context(|| format!("failed to create runtime dir {}", runtime_dir.display()))?;
     let log_path = runtime_dir.join("app-server.log");
@@ -515,7 +517,7 @@ fn serve(codex_bin: &Path, config_overrides: &[String], listen: &str, kill: bool
 
     let mut cmdline = format!(
         "tail -f /dev/null | RUST_BACKTRACE=full RUST_LOG=warn,codex_=trace {}",
-        shell_quote(&codex_bin.display().to_string())
+        shell_quote(&astral_bin.display().to_string())
     );
     for override_kv in config_overrides {
         cmdline.push_str(&format!(" --config {}", shell_quote(override_kv)));
@@ -530,11 +532,11 @@ fn serve(codex_bin: &Path, config_overrides: &[String], listen: &str, kill: bool
         .stdout(Stdio::from(log_file))
         .stderr(Stdio::from(log_file_stderr))
         .spawn()
-        .with_context(|| format!("failed to start `{}` app-server", codex_bin.display()))?;
+        .with_context(|| format!("failed to start `{}` app-server", astral_bin.display()))?;
 
     let pid = child.id();
 
-    println!("started codex app-server");
+    println!("started astral app-server");
     println!("listen: {listen}");
     println!("pid: {pid} (launcher process)");
     println!("log: {}", log_path.display());
@@ -637,12 +639,12 @@ async fn send_message(
 }
 
 pub async fn send_message_v2(
-    codex_bin: &Path,
+    astral_bin: &Path,
     config_overrides: &[String],
     user_message: String,
     dynamic_tools: &Option<Vec<DynamicToolSpec>>,
 ) -> Result<()> {
-    let endpoint = Endpoint::SpawnCodex(codex_bin.to_path_buf());
+    let endpoint = Endpoint::SpawnAstral(astral_bin.to_path_buf());
     send_message_v2_endpoint(
         &endpoint,
         config_overrides,
@@ -1126,7 +1128,7 @@ fn thread_decrement_elicitation(url: &str, thread_id: String) -> Result<()> {
 }
 
 fn live_elicitation_timeout_pause(
-    codex_bin: Option<PathBuf>,
+    astral_bin: Option<PathBuf>,
     url: Option<String>,
     config_overrides: &[String],
     model: String,
@@ -1142,10 +1144,10 @@ fn live_elicitation_timeout_pause(
     }
 
     let mut _background_server = None;
-    let websocket_url = match (codex_bin, url) {
-        (Some(_), Some(_)) => bail!("--codex-bin and --url are mutually exclusive"),
-        (Some(codex_bin), None) => {
-            let server = BackgroundAppServer::spawn(&codex_bin, config_overrides)?;
+    let websocket_url = match (astral_bin, url) {
+        (Some(_), Some(_)) => bail!("--astral-bin and --url are mutually exclusive"),
+        (Some(astral_bin), None) => {
+            let server = BackgroundAppServer::spawn(&astral_bin, config_overrides)?;
             let websocket_url = server.url.clone();
             _background_server = Some(server);
             websocket_url
@@ -1166,8 +1168,8 @@ fn live_elicitation_timeout_pause(
     let workspace = workspace
         .canonicalize()
         .with_context(|| format!("failed to resolve workspace `{}`", workspace.display()))?;
-    let app_server_test_client_bin = std::env::current_exe()
-        .context("failed to resolve codex-app-server-test-client binary path")?;
+    let app_server_test_client_bin =
+        std::env::current_exe().context("failed to resolve app-server-test-client binary path")?;
     let endpoint = Endpoint::ConnectWs(websocket_url.clone());
     let mut client = CodexClient::connect(&endpoint, &[])?;
 
@@ -1366,16 +1368,16 @@ fn item_started_before_helper_done_is_unexpected(
 impl CodexClient {
     fn connect(endpoint: &Endpoint, config_overrides: &[String]) -> Result<Self> {
         match endpoint {
-            Endpoint::SpawnCodex(codex_bin) => Self::spawn_stdio(codex_bin, config_overrides),
+            Endpoint::SpawnAstral(astral_bin) => Self::spawn_stdio(astral_bin, config_overrides),
             Endpoint::ConnectWs(url) => Self::connect_websocket(url),
         }
     }
 
-    fn spawn_stdio(codex_bin: &Path, config_overrides: &[String]) -> Result<Self> {
-        let codex_bin_display = codex_bin.display();
-        let mut cmd = Command::new(codex_bin);
-        if let Some(codex_bin_parent) = codex_bin.parent() {
-            let mut path = OsString::from(codex_bin_parent.as_os_str());
+    fn spawn_stdio(astral_bin: &Path, config_overrides: &[String]) -> Result<Self> {
+        let astral_bin_display = astral_bin.display();
+        let mut cmd = Command::new(astral_bin);
+        if let Some(astral_bin_parent) = astral_bin.parent() {
+            let mut path = OsString::from(astral_bin_parent.as_os_str());
             if let Some(existing_path) = std::env::var_os("PATH") {
                 path.push(":");
                 path.push(existing_path);
@@ -1391,16 +1393,16 @@ impl CodexClient {
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .spawn()
-            .with_context(|| format!("failed to start `{codex_bin_display}` app-server"))?;
+            .with_context(|| format!("failed to start `{astral_bin_display}` app-server"))?;
 
         let stdin = codex_app_server
             .stdin
             .take()
-            .context("codex app-server stdin unavailable")?;
+            .context("astral app-server stdin unavailable")?;
         let stdout = codex_app_server
             .stdout
             .take()
-            .context("codex app-server stdout unavailable")?;
+            .context("astral app-server stdout unavailable")?;
 
         Ok(Self {
             transport: ClientTransport::Stdio {
@@ -1486,8 +1488,8 @@ impl CodexClient {
             request_id: request_id.clone(),
             params: InitializeParams {
                 client_info: ClientInfo {
-                    name: "codex-toy-app-server".to_string(),
-                    title: Some("Codex Toy App Server".to_string()),
+                    name: "astral-toy-app-server".to_string(),
+                    title: Some("Astral Toy App Server".to_string()),
                     version: env!("CARGO_PKG_VERSION").to_string(),
                 },
                 capabilities: Some(InitializeCapabilities {
@@ -1961,10 +1963,10 @@ impl CodexClient {
                     writeln!(stdin, "{payload}")?;
                     stdin
                         .flush()
-                        .context("failed to flush payload to codex app-server")?;
+                        .context("failed to flush payload to astral app-server")?;
                     return Ok(());
                 }
-                bail!("codex app-server stdin closed")
+                bail!("astral app-server stdin closed")
             }
             ClientTransport::WebSocket { socket, url } => {
                 socket
@@ -1981,9 +1983,9 @@ impl CodexClient {
                 let mut response_line = String::new();
                 let bytes = stdout
                     .read_line(&mut response_line)
-                    .context("failed to read from codex app-server")?;
+                    .context("failed to read from astral app-server")?;
                 if bytes == 0 {
-                    bail!("codex app-server closed stdout");
+                    bail!("astral app-server closed stdout");
                 }
                 Ok(response_line)
             }
@@ -2098,14 +2100,14 @@ impl Drop for CodexClient {
         let _ = stdin.take();
 
         if let Ok(Some(status)) = child.try_wait() {
-            println!("[codex app-server exited: {status}]");
+            println!("[astral app-server exited: {status}]");
             return;
         }
 
         let deadline = SystemTime::now() + APP_SERVER_GRACEFUL_SHUTDOWN_TIMEOUT;
         loop {
             if let Ok(Some(status)) = child.try_wait() {
-                println!("[codex app-server exited: {status}]");
+                println!("[astral app-server exited: {status}]");
                 return;
             }
 

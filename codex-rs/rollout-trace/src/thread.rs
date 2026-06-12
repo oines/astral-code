@@ -41,7 +41,7 @@ use crate::protocol_event::wrapped_protocol_event_type;
 /// The value is a root directory. Each independent root session gets one child
 /// bundle directory. Spawned child threads share their root session's bundle so
 /// one reduced `state.json` describes the whole multi-agent rollout tree.
-pub const CODEX_ROLLOUT_TRACE_ROOT_ENV: &str = "CODEX_ROLLOUT_TRACE_ROOT";
+pub const ASTRAL_ROLLOUT_TRACE_ROOT_ENV: &str = "ASTRAL_ROLLOUT_TRACE_ROOT";
 
 /// Metadata captured once at thread/session start.
 ///
@@ -98,13 +98,13 @@ impl ThreadTraceContext {
         }
     }
 
-    /// Starts a root thread trace from `CODEX_ROLLOUT_TRACE_ROOT`, or disables tracing.
+    /// Starts a root thread trace from `ASTRAL_ROLLOUT_TRACE_ROOT`, or disables tracing.
     ///
-    /// Trace startup is best-effort. A tracing failure must not make the Codex
+    /// Trace startup is best-effort. A tracing failure must not make the Astral
     /// session unusable, because traces are diagnostic and can be enabled while
     /// debugging unrelated production failures.
     pub fn start_root_or_disabled(metadata: ThreadStartedTraceMetadata) -> Self {
-        let Some(root) = std::env::var_os(CODEX_ROLLOUT_TRACE_ROOT_ENV) else {
+        let Some(root) = std::env::var_os(ASTRAL_ROLLOUT_TRACE_ROOT_ENV) else {
             return Self::disabled();
         };
         let root = PathBuf::from(root);
@@ -213,7 +213,7 @@ impl ThreadTraceContext {
         });
     }
 
-    /// Emits typed Codex turn lifecycle events from protocol lifecycle events.
+    /// Emits typed Astral turn lifecycle events from protocol lifecycle events.
     pub fn record_codex_turn_event(&self, default_turn_id: &str, event: &EventMsg) {
         let ThreadTraceContextState::Enabled(context) = &self.state else {
             return;
@@ -349,7 +349,7 @@ impl ThreadTraceContext {
         ToolDispatchTraceContext::start(Arc::clone(&context.writer), invocation)
     }
 
-    /// Builds reusable inference trace context for one Codex turn.
+    /// Builds reusable inference trace context for one Astral turn.
     ///
     /// The returned context is intentionally not "an inference call" yet.
     /// Transport code owns retry/fallback attempts and calls `start_attempt`

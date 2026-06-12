@@ -67,13 +67,13 @@ async fn stored_chatgpt_auth_without_api_key_is_rejected() {
 
     let err = super::load_auth(
         codex_home.path(),
-        /*enable_codex_api_key_env*/ false,
+        /*enable_astral_api_key_env*/ false,
         AuthCredentialsStoreMode::File,
     )
     .await
     .expect_err("stored ChatGPT auth should be rejected");
 
-    assert_eq!(err.to_string(), UNSUPPORTED_OPENAI_AUTH_MESSAGE);
+    assert_eq!(err.to_string(), UNSUPPORTED_LEGACY_HOSTED_AUTH_MESSAGE);
 }
 
 #[tokio::test]
@@ -89,7 +89,7 @@ async fn loads_api_key_from_auth_json() {
 
     let auth = super::load_auth(
         dir.path(),
-        /*enable_codex_api_key_env*/ false,
+        /*enable_astral_api_key_env*/ false,
         AuthCredentialsStoreMode::File,
     )
     .await
@@ -125,7 +125,7 @@ async fn unauthorized_recovery_reports_mode_and_step_names() {
     let dir = tempdir().unwrap();
     let manager = AuthManager::shared(
         dir.path().to_path_buf(),
-        /*enable_codex_api_key_env*/ false,
+        /*enable_astral_api_key_env*/ false,
         AuthCredentialsStoreMode::File,
     )
     .await;
@@ -188,6 +188,17 @@ async fn external_bearer_only_auth_manager_returns_none_when_command_fails() {
     let manager = AuthManager::external_bearer_only(script.auth_config());
 
     assert_eq!(manager.auth().await, None);
+}
+
+#[tokio::test]
+async fn external_api_key_auth_failure_does_not_fall_back_to_cached_auth() {
+    let script = ProviderAuthScript::new_failing().unwrap();
+    let manager = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("cached-api-key"));
+    manager.set_external_auth(Arc::new(BearerTokenRefresher::new(script.auth_config())));
+
+    assert_eq!(manager.auth().await, None);
+    assert_eq!(manager.auth_mode(), Some(AuthMode::ApiKey));
+    assert_eq!(manager.get_api_auth_mode(), Some(ApiAuthMode::ApiKey));
 }
 
 #[tokio::test]
@@ -446,7 +457,7 @@ async fn load_auth_keeps_astral_api_key_env_precedence() {
 
     let auth = super::load_auth(
         codex_home.path(),
-        /*enable_codex_api_key_env*/ true,
+        /*enable_astral_api_key_env*/ true,
         AuthCredentialsStoreMode::File,
     )
     .await

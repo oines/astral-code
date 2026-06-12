@@ -152,7 +152,7 @@ impl Drop for WsStream {
     }
 }
 
-const X_CODEX_TURN_STATE_HEADER: &str = "x-codex-turn-state";
+const X_ASTRAL_TURN_STATE_HEADER: &str = "x-astral-turn-state";
 const X_MODELS_ETAG_HEADER: &str = "x-models-etag";
 const X_REASONING_INCLUDED_HEADER: &str = "x-reasoning-included";
 const OPENAI_MODEL_HEADER: &str = "openai-model";
@@ -490,7 +490,7 @@ async fn connect_websocket(
     if let Some(turn_state) = turn_state
         && let Some(header_value) = response
             .headers()
-            .get(X_CODEX_TURN_STATE_HEADER)
+            .get(X_ASTRAL_TURN_STATE_HEADER)
             .and_then(|value| value.to_str().ok())
     {
         let _ = turn_state.set(header_value.to_string());

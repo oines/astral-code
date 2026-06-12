@@ -117,7 +117,7 @@ impl From<WorkspaceGitMetadata> for TurnMetadataWorkspace {
     }
 }
 
-/// Base payload for the outbound model request `x-codex-turn-metadata` header.
+/// Base payload for the outbound model request `x-astral-turn-metadata` header.
 ///
 /// Turn-owned state populates identity fields, including optional fork and subagent lineage. A
 /// concrete request kind is added at outbound model dispatch so turns, startup prewarm, and

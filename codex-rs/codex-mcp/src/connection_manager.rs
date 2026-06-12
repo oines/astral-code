@@ -240,7 +240,7 @@ impl McpConnectionManager {
         let tool_plugin_provenance = Arc::new(tool_plugin_provenance);
         let startup_submit_id = submit_id.clone();
         let codex_apps_auth_provider = auth
-            .filter(|auth| auth.uses_codex_backend())
+            .filter(|auth| auth.uses_hosted_backend())
             .map(codex_model_provider::auth_provider_from_auth);
         let mcp_servers = mcp_servers.clone();
         for (server_name, server) in mcp_servers

@@ -521,8 +521,8 @@ mod tests {
             .expect("bundled models should parse")
             .models
             .into_iter()
-            .find(|model| model.slug == "gpt-5.5")
-            .expect("bundled models should include GPT-5.5");
+            .find(|model| model.slug == "gpt-5.4")
+            .expect("bundled models should include GPT-5.4");
         assert!(!configured_model.additional_speed_tiers.is_empty());
         assert!(!configured_model.service_tiers.is_empty());
 
@@ -540,7 +540,7 @@ mod tests {
         let catalog = manager.raw_model_catalog(RefreshStrategy::Online).await;
 
         assert_eq!(catalog.models.len(), 1);
-        assert_eq!(catalog.models[0].slug, "gpt-5.5");
+        assert_eq!(catalog.models[0].slug, "gpt-5.4");
         assert_eq!(
             catalog.models[0].additional_speed_tiers,
             Vec::<String>::new()

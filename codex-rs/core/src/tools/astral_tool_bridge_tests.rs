@@ -1,15 +1,12 @@
 use super::*;
-use codex_tools::AGENT_TOOL_NAME;
 use codex_tools::ASK_USER_QUESTION_TOOL_NAME;
 use codex_tools::BASH_TOOL_NAME;
 use codex_tools::EDIT_TOOL_NAME;
 use codex_tools::GLOB_TOOL_NAME;
 use codex_tools::GREP_TOOL_NAME;
-use codex_tools::MONITOR_TOOL_NAME;
 use codex_tools::READ_TOOL_NAME;
 use codex_tools::REQUEST_PERMISSIONS_TOOL_NAME;
-use codex_tools::SEND_MESSAGE_TOOL_NAME;
-use codex_tools::TASK_STOP_TOOL_NAME;
+use codex_tools::SEND_TASK_INPUT_TOOL_NAME;
 use codex_tools::TODO_WRITE_TOOL_NAME;
 use codex_tools::TOOL_SEARCH_FLAVOR_TOOL_NAME;
 use codex_tools::WRITE_TOOL_NAME;
@@ -56,23 +53,23 @@ fn leaves_bash_native_for_astral_handler() -> anyhow::Result<()> {
 }
 
 #[test]
-fn leaves_monitor_native_for_astral_handler() -> anyhow::Result<()> {
+fn leaves_send_task_input_native_for_astral_handler() -> anyhow::Result<()> {
     let (tool_name, arguments) = canonicalize_function(
-        MONITOR_TOOL_NAME,
+        SEND_TASK_INPUT_TOOL_NAME,
         json!({
-            "shell_id": 42,
-            "chars": "y\n",
+            "task_id": 42,
+            "input": "y\n",
             "yield_time_ms": 30000,
             "max_output_tokens": 2000
         }),
     )?;
 
-    assert_eq!(tool_name, ToolName::plain(MONITOR_TOOL_NAME));
+    assert_eq!(tool_name, ToolName::plain(SEND_TASK_INPUT_TOOL_NAME));
     assert_eq!(
         arguments,
         json!({
-            "shell_id": 42,
-            "chars": "y\n",
+            "task_id": 42,
+            "input": "y\n",
             "yield_time_ms": 30000,
             "max_output_tokens": 2000
         })
@@ -268,53 +265,6 @@ fn leaves_tool_search_native_for_astral_handler() -> anyhow::Result<()> {
 
     assert_eq!(tool_name, ToolName::plain(TOOL_SEARCH_FLAVOR_TOOL_NAME));
     assert_eq!(arguments, json!({ "query": "gmail", "max_results": 3 }));
-    Ok(())
-}
-
-#[test]
-fn canonicalizes_multi_agent_tools() -> anyhow::Result<()> {
-    let (tool_name, arguments) = canonicalize_function(
-        AGENT_TOOL_NAME,
-        json!({
-            "description": "audit adapters",
-            "prompt": "Inspect provider adapters and report gaps",
-            "subagent_type": "reviewer",
-            "model": "astral-fast"
-        }),
-    )?;
-    assert_eq!(tool_name, ToolName::plain(AGENT_TOOL_NAME));
-    assert_eq!(
-        arguments,
-        json!({
-            "description": "audit adapters",
-            "prompt": "Inspect provider adapters and report gaps",
-            "subagent_type": "reviewer",
-            "model": "astral-fast",
-        })
-    );
-
-    let (tool_name, arguments) = canonicalize_function(
-        SEND_MESSAGE_TOOL_NAME,
-        json!({
-            "to": "agent-1",
-            "summary": "new input",
-            "message": { "text": "Please include runtime tests" }
-        }),
-    )?;
-    assert_eq!(tool_name, ToolName::plain(SEND_MESSAGE_TOOL_NAME));
-    assert_eq!(
-        arguments,
-        json!({
-            "to": "agent-1",
-            "summary": "new input",
-            "message": { "text": "Please include runtime tests" }
-        })
-    );
-
-    let (tool_name, arguments) =
-        canonicalize_function(TASK_STOP_TOOL_NAME, json!({ "task_id": "agent-1" }))?;
-    assert_eq!(tool_name, ToolName::plain(TASK_STOP_TOOL_NAME));
-    assert_eq!(arguments, json!({ "task_id": "agent-1" }));
     Ok(())
 }
 

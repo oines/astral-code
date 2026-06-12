@@ -49,7 +49,7 @@ async fn auth_manager_logout_with_revoke_clears_cached_auth() -> Result<()> {
     )?;
     let manager = AuthManager::new(
         codex_home.path().to_path_buf(),
-        /*enable_codex_api_key_env*/ false,
+        /*enable_astral_api_key_env*/ false,
         AuthCredentialsStoreMode::File,
     )
     .await;

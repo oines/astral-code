@@ -27,7 +27,7 @@ use std::path::PathBuf;
 fn write_skill_metadata(home: &Path, name: &str, contents: &str) -> Result<()> {
     let metadata_dir = home.join("skills").join(name).join("agents");
     fs::create_dir_all(&metadata_dir)?;
-    fs::write(metadata_dir.join("openai.yaml"), contents)?;
+    fs::write(metadata_dir.join("astral.yaml"), contents)?;
     Ok(())
 }
 

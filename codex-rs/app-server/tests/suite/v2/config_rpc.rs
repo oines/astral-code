@@ -479,7 +479,7 @@ writable_roots = [{}]
     let mut mcp = TestAppServer::new_with_env(
         codex_home.path(),
         &[(
-            "CODEX_APP_SERVER_MANAGED_CONFIG_PATH",
+            "ASTRAL_APP_SERVER_MANAGED_CONFIG_PATH",
             Some(&managed_path_str),
         )],
     )

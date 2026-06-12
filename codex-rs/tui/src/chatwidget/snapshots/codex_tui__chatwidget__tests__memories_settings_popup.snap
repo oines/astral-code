@@ -1,5 +1,6 @@
 ---
 source: tui/src/chatwidget/tests/popups_and_settings.rs
+assertion_line: 2194
 expression: popup
 ---
   Memories
@@ -12,6 +13,6 @@ expression: popup
   Reset all memories     Clear local memory files and summaries. Existing
                          threads stay intact.
 
-  Learn more: https://developers.openai.com/codex/memories
+  Learn more: https://github.com/oines/astral-code/blob/main/codex-rs/memories
 
   Press space to toggle; enter to save or select

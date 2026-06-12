@@ -4,39 +4,39 @@ use serde_json::Value;
 use serde_json::json;
 use std::collections::BTreeMap;
 
-pub const AGENT_TOOL_NAME: &str = "Agent";
 pub const ASK_USER_QUESTION_TOOL_NAME: &str = "AskUserQuestion";
 pub const BASH_TOOL_NAME: &str = "Bash";
 pub const EDIT_TOOL_NAME: &str = "Edit";
 pub const GLOB_TOOL_NAME: &str = "Glob";
 pub const GREP_TOOL_NAME: &str = "Grep";
 pub const LIST_MCP_RESOURCES_TOOL_NAME: &str = "ListMcpResourcesTool";
-pub const MONITOR_TOOL_NAME: &str = "Monitor";
+pub const LIST_BACKGROUND_TASKS_TOOL_NAME: &str = "ListBackgroundTasks";
 pub const READ_MCP_RESOURCE_TOOL_NAME: &str = "ReadMcpResourceTool";
+pub const READ_TASK_OUTPUT_TOOL_NAME: &str = "ReadTaskOutput";
 pub const READ_TOOL_NAME: &str = "Read";
 pub const REQUEST_PERMISSIONS_TOOL_NAME: &str = "RequestPermissions";
-pub const SEND_MESSAGE_TOOL_NAME: &str = "SendMessage";
+pub const SEND_TASK_INPUT_TOOL_NAME: &str = "SendTaskInput";
 pub const SKILL_TOOL_NAME: &str = "Skill";
-pub const TASK_STOP_TOOL_NAME: &str = "TaskStop";
+pub const STOP_BACKGROUND_TASK_TOOL_NAME: &str = "StopBackgroundTask";
 pub const TODO_WRITE_TOOL_NAME: &str = "TodoWrite";
 pub const TOOL_SEARCH_FLAVOR_TOOL_NAME: &str = "ToolSearch";
 pub const WRITE_TOOL_NAME: &str = "Write";
 
 pub const ASTRAL_CORE_TOOL_NAMES: &[&str] = &[
-    AGENT_TOOL_NAME,
     ASK_USER_QUESTION_TOOL_NAME,
     BASH_TOOL_NAME,
     EDIT_TOOL_NAME,
     GLOB_TOOL_NAME,
     GREP_TOOL_NAME,
+    LIST_BACKGROUND_TASKS_TOOL_NAME,
     LIST_MCP_RESOURCES_TOOL_NAME,
-    MONITOR_TOOL_NAME,
     READ_MCP_RESOURCE_TOOL_NAME,
+    READ_TASK_OUTPUT_TOOL_NAME,
     READ_TOOL_NAME,
     REQUEST_PERMISSIONS_TOOL_NAME,
-    SEND_MESSAGE_TOOL_NAME,
+    SEND_TASK_INPUT_TOOL_NAME,
     SKILL_TOOL_NAME,
-    TASK_STOP_TOOL_NAME,
+    STOP_BACKGROUND_TASK_TOOL_NAME,
     TODO_WRITE_TOOL_NAME,
     TOOL_SEARCH_FLAVOR_TOOL_NAME,
     WRITE_TOOL_NAME,
@@ -51,20 +51,20 @@ pub fn astral_core_tools() -> Vec<AgentTool> {
 
 pub fn astral_core_tool_by_name(name: &str) -> Option<AgentTool> {
     match name {
-        AGENT_TOOL_NAME => Some(agent_tool()),
         ASK_USER_QUESTION_TOOL_NAME => Some(ask_user_question_tool()),
         BASH_TOOL_NAME => Some(bash_tool()),
         EDIT_TOOL_NAME => Some(edit_tool()),
         GLOB_TOOL_NAME => Some(glob_tool()),
         GREP_TOOL_NAME => Some(grep_tool()),
+        LIST_BACKGROUND_TASKS_TOOL_NAME => Some(list_background_tasks_tool()),
         LIST_MCP_RESOURCES_TOOL_NAME => Some(list_mcp_resources_tool()),
-        MONITOR_TOOL_NAME => Some(monitor_tool()),
         READ_MCP_RESOURCE_TOOL_NAME => Some(read_mcp_resource_tool()),
+        READ_TASK_OUTPUT_TOOL_NAME => Some(read_task_output_tool()),
         READ_TOOL_NAME => Some(read_tool()),
         REQUEST_PERMISSIONS_TOOL_NAME => Some(request_permissions_tool()),
-        SEND_MESSAGE_TOOL_NAME => Some(send_message_tool()),
+        SEND_TASK_INPUT_TOOL_NAME => Some(send_task_input_tool()),
         SKILL_TOOL_NAME => Some(skill_tool()),
-        TASK_STOP_TOOL_NAME => Some(task_stop_tool()),
+        STOP_BACKGROUND_TASK_TOOL_NAME => Some(stop_background_task_tool()),
         TODO_WRITE_TOOL_NAME => Some(todo_write_tool()),
         TOOL_SEARCH_FLAVOR_TOOL_NAME => Some(tool_search_tool()),
         WRITE_TOOL_NAME => Some(write_tool()),
@@ -113,7 +113,7 @@ fn bash_tool() -> AgentTool {
 fn read_tool() -> AgentTool {
     tool(
         READ_TOOL_NAME,
-        "Read a text file or local image from the filesystem. Text output uses cat -n style line numbers.",
+        "Read a text file or image from the active execution environment. Text output uses cat -n style line numbers.",
         object(
             [
                 string_property("file_path", "The absolute path to the file to read"),
@@ -126,10 +126,6 @@ fn read_tool() -> AgentTool {
                     "limit",
                     "The number of lines to read; only provide for large files",
                 ),
-                string_property(
-                    "pages",
-                    "Page range for PDF files, for example 1-5, 3, or 10-20",
-                ),
             ],
             ["file_path"],
         ),
@@ -139,7 +135,7 @@ fn read_tool() -> AgentTool {
 fn write_tool() -> AgentTool {
     tool(
         WRITE_TOOL_NAME,
-        "Create or overwrite a file on the local filesystem.",
+        "Create or overwrite a file in the active execution environment.",
         object(
             [
                 string_property(
@@ -157,7 +153,7 @@ fn write_tool() -> AgentTool {
 fn edit_tool() -> AgentTool {
     tool(
         EDIT_TOOL_NAME,
-        "Edit a file by replacing exact text.",
+        "Edit a file in the active execution environment by replacing exact text.",
         object(
             [
                 string_property("file_path", "The absolute path to the file to modify"),
@@ -263,53 +259,6 @@ fn todo_write_tool() -> AgentTool {
     )
 }
 
-fn agent_tool() -> AgentTool {
-    tool(
-        AGENT_TOOL_NAME,
-        "Launch a subagent with its own context to work on a task.",
-        object(
-            [
-                string_property("description", "A short 3-5 word description of the task"),
-                string_property("prompt", "The task for the agent to perform"),
-                string_property(
-                    "name",
-                    "Optional addressable name for the spawned agent; use with SendMessage",
-                ),
-                string_property("subagent_type", "Optional specialized agent type to use"),
-                string_property("model", "Optional model override for the spawned agent"),
-                string_property(
-                    "reasoning_effort",
-                    "Optional reasoning effort override for the spawned agent",
-                ),
-                string_property(
-                    "service_tier",
-                    "Optional service tier override for the spawned agent",
-                ),
-                string_property(
-                    "fork_turns",
-                    "Context fork mode: none, all, or a positive integer string",
-                ),
-            ],
-            ["description", "prompt"],
-        ),
-    )
-}
-
-fn send_message_tool() -> AgentTool {
-    tool(
-        SEND_MESSAGE_TOOL_NAME,
-        "Send a message to a running subagent or teammate.",
-        object(
-            [
-                string_property("to", "Recipient name, or * to broadcast"),
-                string_property("summary", "A 5-10 word preview summary"),
-                json_property("message", "Plain text or structured message content"),
-            ],
-            ["to", "message"],
-        ),
-    )
-}
-
 fn skill_tool() -> AgentTool {
     tool(
         SKILL_TOOL_NAME,
@@ -327,40 +276,64 @@ fn skill_tool() -> AgentTool {
     )
 }
 
-fn task_stop_tool() -> AgentTool {
+fn read_task_output_tool() -> AgentTool {
     tool(
-        TASK_STOP_TOOL_NAME,
-        "Stop a running background task by ID.",
+        READ_TASK_OUTPUT_TOOL_NAME,
+        "Read or poll output from a running background task.",
         object(
             [
-                string_property("task_id", "The ID of the background task to stop"),
-                string_property("shell_id", "Deprecated alias for task_id"),
-            ],
-            [],
-        ),
-    )
-}
-
-fn monitor_tool() -> AgentTool {
-    tool(
-        MONITOR_TOOL_NAME,
-        "Poll or write to a running background Bash command.",
-        object(
-            [
-                session_identifier_property("session_id", "The running Bash session id"),
-                session_identifier_property(
-                    "task_id",
-                    "Alias for session_id when using task-style ids",
-                ),
-                session_identifier_property("shell_id", "Deprecated alias for session_id"),
-                string_property("chars", "Optional stdin bytes to write before polling"),
+                session_identifier_property("task_id", "The background task id returned by Bash"),
                 integer_property(
                     "yield_time_ms",
                     "Milliseconds to wait for fresh output before returning",
                 ),
                 integer_property("max_output_tokens", "Maximum output tokens to return"),
             ],
-            [],
+            ["task_id"],
+        ),
+    )
+}
+
+fn send_task_input_tool() -> AgentTool {
+    tool(
+        SEND_TASK_INPUT_TOOL_NAME,
+        "Send interactive stdin to a running background task, such as y\\n for a confirmation prompt.",
+        object(
+            [
+                session_identifier_property("task_id", "The background task id returned by Bash"),
+                string_property(
+                    "input",
+                    "Exact stdin bytes to send; include a trailing newline when pressing Enter is intended",
+                ),
+                integer_property(
+                    "yield_time_ms",
+                    "Milliseconds to wait for output after sending input",
+                ),
+                integer_property("max_output_tokens", "Maximum output tokens to return"),
+            ],
+            ["task_id", "input"],
+        ),
+    )
+}
+
+fn list_background_tasks_tool() -> AgentTool {
+    tool(
+        LIST_BACKGROUND_TASKS_TOOL_NAME,
+        "List running background tasks and their task ids.",
+        object([], []),
+    )
+}
+
+fn stop_background_task_tool() -> AgentTool {
+    tool(
+        STOP_BACKGROUND_TASK_TOOL_NAME,
+        "Stop a running background task by task id.",
+        object(
+            [session_identifier_property(
+                "task_id",
+                "The background task id returned by Bash or ListBackgroundTasks",
+            )],
+            ["task_id"],
         ),
     )
 }

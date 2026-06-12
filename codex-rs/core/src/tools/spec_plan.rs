@@ -4,18 +4,18 @@ use crate::session::turn_context::TurnContext;
 use crate::tools::code_mode::execute_spec::create_code_mode_tool;
 use crate::tools::context::ToolInvocation;
 use crate::tools::handlers::ApplyPatchHandler;
-use crate::tools::handlers::AstralAgentHandler;
 use crate::tools::handlers::AstralAskUserQuestionHandler;
 use crate::tools::handlers::AstralBashHandler;
 use crate::tools::handlers::AstralFileToolHandler;
 use crate::tools::handlers::AstralFileToolKind;
+use crate::tools::handlers::AstralListBackgroundTasksHandler;
 use crate::tools::handlers::AstralListMcpResourcesHandler;
-use crate::tools::handlers::AstralMonitorHandler;
 use crate::tools::handlers::AstralReadMcpResourceHandler;
+use crate::tools::handlers::AstralReadTaskOutputHandler;
 use crate::tools::handlers::AstralRequestPermissionsHandler;
-use crate::tools::handlers::AstralSendMessageHandler;
+use crate::tools::handlers::AstralSendTaskInputHandler;
 use crate::tools::handlers::AstralSkillHandler;
-use crate::tools::handlers::AstralTaskStopHandler;
+use crate::tools::handlers::AstralStopBackgroundTaskHandler;
 use crate::tools::handlers::AstralTodoWriteHandler;
 use crate::tools::handlers::AstralToolSearchHandler;
 use crate::tools::handlers::CodeModeExecuteHandler;
@@ -54,6 +54,8 @@ use crate::tools::handlers::multi_agents_spec::WaitAgentTimeoutOptions;
 use crate::tools::handlers::multi_agents_v2::FollowupTaskHandler as FollowupTaskHandlerV2;
 use crate::tools::handlers::multi_agents_v2::InterruptAgentHandler;
 use crate::tools::handlers::multi_agents_v2::ListAgentsHandler as ListAgentsHandlerV2;
+use crate::tools::handlers::multi_agents_v2::SendMessageHandler as SendMessageHandlerV2;
+use crate::tools::handlers::multi_agents_v2::SpawnAgentHandler as SpawnAgentHandlerV2;
 use crate::tools::handlers::multi_agents_v2::WaitAgentHandler as WaitAgentHandlerV2;
 use crate::tools::handlers::view_image_spec::ViewImageToolOptions;
 use crate::tools::registry::CoreToolRuntime;
@@ -70,17 +72,15 @@ use codex_protocol::openai_models::ToolMode;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
-use codex_tools::AGENT_TOOL_NAME;
 use codex_tools::BASH_TOOL_NAME;
 use codex_tools::DiscoverableTool;
 use codex_tools::EDIT_TOOL_NAME;
 use codex_tools::GLOB_TOOL_NAME;
 use codex_tools::GREP_TOOL_NAME;
-use codex_tools::MONITOR_TOOL_NAME;
+use codex_tools::READ_TASK_OUTPUT_TOOL_NAME;
 use codex_tools::READ_TOOL_NAME;
 use codex_tools::ResponsesApiNamespace;
 use codex_tools::ResponsesApiNamespaceTool;
-use codex_tools::SEND_MESSAGE_TOOL_NAME;
 use codex_tools::TODO_WRITE_TOOL_NAME;
 use codex_tools::TOOL_SEARCH_TOOL_NAME;
 use codex_tools::ToolCall as ExtensionToolCall;
@@ -296,7 +296,7 @@ fn astral_spec_for_model_request(
 
     let astral_tool_name = match tool_name.name.as_str() {
         "exec_command" => Some(BASH_TOOL_NAME),
-        "write_stdin" => Some(MONITOR_TOOL_NAME),
+        "write_stdin" => Some(READ_TASK_OUTPUT_TOOL_NAME),
         "shell_command" if registered_tool_names.contains(&ToolName::plain("exec_command")) => {
             Some(BASH_TOOL_NAME)
         }
@@ -325,9 +325,8 @@ fn astral_tool_spec_from_source(name: &str, source: &ToolSpec) -> ToolSpec {
     let tool = astral_core_tool_by_name(name).unwrap_or_else(|| {
         panic!("astral core tool `{name}` should have a schema");
     });
-    let mut parameters = parse_tool_input_schema_without_compaction(&tool.input_schema)
+    let parameters = parse_tool_input_schema_without_compaction(&tool.input_schema)
         .unwrap_or_else(|err| panic!("astral core tool `{name}` schema should parse: {err}"));
-    propagate_sensitive_tool_schema_metadata(name, source, &mut parameters);
     let description = source_description(source).map_or(tool.description.clone(), |source| {
         if source.trim().is_empty() || source == tool.description {
             tool.description.clone()
@@ -353,42 +352,6 @@ fn source_description(source: &ToolSpec) -> Option<&str> {
         | ToolSpec::ImageGeneration { .. }
         | ToolSpec::WebSearch { .. }
         | ToolSpec::Freeform(_) => None,
-    }
-}
-
-fn propagate_sensitive_tool_schema_metadata(
-    astral_tool_name: &str,
-    source: &ToolSpec,
-    parameters: &mut codex_tools::JsonSchema,
-) {
-    let ToolSpec::Function(source_tool) = source else {
-        return;
-    };
-    let Some(source_properties) = source_tool.parameters.properties.as_ref() else {
-        return;
-    };
-    let Some(target_properties) = parameters.properties.as_mut() else {
-        return;
-    };
-    let source_message_encrypted = source_properties
-        .get("message")
-        .and_then(|schema| schema.encrypted);
-    if source_message_encrypted != Some(true) {
-        return;
-    }
-
-    match astral_tool_name {
-        AGENT_TOOL_NAME => {
-            if let Some(prompt) = target_properties.get_mut("prompt") {
-                prompt.encrypted = Some(true);
-            }
-        }
-        SEND_MESSAGE_TOOL_NAME => {
-            if let Some(message) = target_properties.get_mut("message") {
-                message.encrypted = Some(true);
-            }
-        }
-        _ => {}
     }
 }
 
@@ -715,7 +678,10 @@ fn add_shell_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut Planne
                 include_shell_parameter: unified_exec_should_include_shell_parameter(turn_context),
             };
             planned_tools.add(AstralBashHandler::new(exec_options));
-            planned_tools.add(AstralMonitorHandler::new());
+            planned_tools.add(AstralReadTaskOutputHandler::new());
+            planned_tools.add(AstralSendTaskInputHandler::new());
+            planned_tools.add(AstralListBackgroundTasksHandler);
+            planned_tools.add(AstralStopBackgroundTaskHandler);
             planned_tools.add_dispatch_only(ExecCommandHandler::new(exec_options));
             planned_tools.add_dispatch_only(WriteStdinHandler);
 
@@ -836,7 +802,7 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mu
                 agent_type_description(turn_context, context.default_agent_type_description);
             planned_tools.add_arc(override_tool_exposure(
                 multi_agent_v2_handler(
-                    AstralAgentHandler::new(SpawnAgentToolOptions {
+                    SpawnAgentHandlerV2::new(SpawnAgentToolOptions {
                         available_models: turn_context.available_models.clone(),
                         agent_type_description,
                         hide_agent_type_model_reasoning: turn_context
@@ -854,7 +820,7 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mu
                 exposure,
             ));
             planned_tools.add_arc(override_tool_exposure(
-                multi_agent_v2_handler(AstralSendMessageHandler::new(), tool_namespace),
+                multi_agent_v2_handler(SendMessageHandlerV2, tool_namespace),
                 exposure,
             ));
             planned_tools.add_arc(override_tool_exposure(
@@ -869,10 +835,9 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mu
                 exposure,
             ));
             planned_tools.add_arc(override_tool_exposure(
-                multi_agent_v2_handler(AstralTaskStopHandler::new(), tool_namespace),
+                multi_agent_v2_handler(InterruptAgentHandler, tool_namespace),
                 exposure,
             ));
-            planned_tools.add_with_exposure(InterruptAgentHandler, ToolExposure::Hidden);
             planned_tools.add_arc(override_tool_exposure(
                 multi_agent_v2_handler(ListAgentsHandlerV2, tool_namespace),
                 exposure,

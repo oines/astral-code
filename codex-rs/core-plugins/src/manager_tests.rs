@@ -132,7 +132,7 @@ fn remote_installed_linear_plugin() -> RemoteInstalledPlugin {
 
 fn remote_installed_plugin(name: &str) -> RemoteInstalledPlugin {
     RemoteInstalledPlugin {
-        marketplace_name: "openai-curated-remote".to_string(),
+        marketplace_name: "astral-curated-remote".to_string(),
         id: format!("plugins~Plugin_{name}"),
         name: name.to_string(),
         enabled: true,
@@ -380,8 +380,8 @@ enabled = true
     );
     write_cached_plugin(codex_home.path(), "openai-curated", "linear");
     write_cached_plugin(codex_home.path(), "openai-curated", "calendar");
-    write_cached_plugin(codex_home.path(), "openai-curated-remote", "linear");
-    write_cached_plugin(codex_home.path(), "openai-curated-remote", "remote-only");
+    write_cached_plugin(codex_home.path(), "astral-curated-remote", "linear");
+    write_cached_plugin(codex_home.path(), "astral-curated-remote", "remote-only");
 
     let config = load_config(codex_home.path(), codex_home.path()).await;
     let manager = PluginsManager::new(codex_home.path().to_path_buf());
@@ -400,7 +400,7 @@ enabled = true
         vec![
             "calendar@openai-curated".to_string(),
             "linear@openai-curated".to_string(),
-            "remote-only@openai-curated-remote".to_string(),
+            "remote-only@astral-curated-remote".to_string(),
         ]
     );
 }
@@ -423,8 +423,8 @@ enabled = true
     );
     write_cached_plugin(codex_home.path(), "openai-curated", "linear");
     write_cached_plugin(codex_home.path(), "openai-curated", "calendar");
-    write_cached_plugin(codex_home.path(), "openai-curated-remote", "linear");
-    write_cached_plugin(codex_home.path(), "openai-curated-remote", "remote-only");
+    write_cached_plugin(codex_home.path(), "astral-curated-remote", "linear");
+    write_cached_plugin(codex_home.path(), "astral-curated-remote", "remote-only");
 
     let config = load_config(codex_home.path(), codex_home.path()).await;
     let manager = PluginsManager::new(codex_home.path().to_path_buf());
@@ -442,8 +442,8 @@ enabled = true
             .collect::<Vec<_>>(),
         vec![
             "calendar@openai-curated".to_string(),
-            "linear@openai-curated-remote".to_string(),
-            "remote-only@openai-curated-remote".to_string(),
+            "linear@astral-curated-remote".to_string(),
+            "remote-only@astral-curated-remote".to_string(),
         ]
     );
 }
@@ -481,11 +481,11 @@ async fn build_remote_installed_plugin_marketplaces_from_cache_uses_remote_metad
         .build_remote_installed_plugin_marketplaces_from_cache(&[RemotePluginScope::Global])
         .expect("remote installed cache should be present");
     assert_eq!(marketplaces.len(), 1);
-    assert_eq!(marketplaces[0].name, "openai-curated-remote");
-    assert_eq!(marketplaces[0].display_name, "OpenAI Curated Remote");
+    assert_eq!(marketplaces[0].name, "astral-curated-remote");
+    assert_eq!(marketplaces[0].display_name, "Astral Curated Remote");
     assert_eq!(marketplaces[0].plugins.len(), 1);
     let plugin = &marketplaces[0].plugins[0];
-    assert_eq!(plugin.id, "linear@openai-curated-remote");
+    assert_eq!(plugin.id, "linear@astral-curated-remote");
     assert_eq!(plugin.remote_plugin_id, "plugins~Plugin_linear");
     assert_eq!(plugin.name, "linear");
     assert_eq!(plugin.installed, true);
@@ -2043,7 +2043,7 @@ enabled = true
 "#,
     );
     write_file(
-        &repo_root.join(".codex/config.toml"),
+        &repo_root.join(".astral-code/config.toml"),
         r#"[[skills.config]]
 name = "enabled-plugin:sample-search"
 enabled = false
@@ -3458,7 +3458,7 @@ async fn load_plugins_ignores_project_config_files() {
         r#"{"name":"sample"}"#,
     );
     write_file(
-        &project_root.join(".codex/config.toml"),
+        &project_root.join(".astral-code/config.toml"),
         &plugin_config_toml(/*enabled*/ true, /*plugins_feature_enabled*/ true),
     );
 

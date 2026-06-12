@@ -349,7 +349,7 @@ async fn build_report(
     match &config_result {
         Ok(config) => {
             let auth_manager =
-                AuthManager::shared_from_config(config, /*enable_codex_api_key_env*/ true).await;
+                AuthManager::shared_from_config(config, /*enable_astral_api_key_env*/ true).await;
             let reachability_plan = provider_reachability_plan(config);
             let (
                 config_check,
@@ -793,12 +793,12 @@ fn installation_check(show_details: bool) -> DoctorCheck {
     ));
     details.push(format!(
         "managed by bun: {}",
-        env::var_os("CODEX_MANAGED_BY_BUN").is_some()
+        env::var_os("ASTRAL_MANAGED_BY_BUN").is_some()
     ));
     push_env_path_detail(
         &mut details,
         "managed package root",
-        "CODEX_MANAGED_PACKAGE_ROOT",
+        "ASTRAL_MANAGED_PACKAGE_ROOT",
     );
 
     let path_entries = codex_path_entries();
@@ -844,7 +844,7 @@ fn installation_check(show_details: bool) -> DoctorCheck {
                 status = status.max(CheckStatus::Warning);
                 summary = "npm-managed launch is missing package-root provenance".to_string();
                 remediation = Some(
-                    "Reinstall or update Astral-Code so the JS shim provides CODEX_MANAGED_PACKAGE_ROOT."
+                    "Reinstall or update Astral-Code so the JS shim provides ASTRAL_MANAGED_PACKAGE_ROOT."
                         .to_string(),
                 );
             }
@@ -875,13 +875,13 @@ fn doctor_install_context(current_exe: Option<&Path>) -> InstallContext {
 }
 
 fn doctor_managed_by_npm(current_exe: Option<&Path>) -> bool {
-    env::var_os("CODEX_MANAGED_BY_NPM").is_some()
+    env::var_os("ASTRAL_MANAGED_BY_NPM").is_some()
         && !inherited_managed_env_for_cargo_binary(current_exe)
 }
 
 fn inherited_managed_env_for_cargo_binary(current_exe: Option<&Path>) -> bool {
-    if env::var_os("CODEX_MANAGED_BY_NPM").is_none()
-        && env::var_os("CODEX_MANAGED_BY_BUN").is_none()
+    if env::var_os("ASTRAL_MANAGED_BY_NPM").is_none()
+        && env::var_os("ASTRAL_MANAGED_BY_BUN").is_none()
     {
         return false;
     }
@@ -980,7 +980,7 @@ enum NpmRootCheck {
 }
 
 fn npm_global_root_check() -> NpmRootCheck {
-    let Some(running_package_root) = env::var_os("CODEX_MANAGED_PACKAGE_ROOT").map(PathBuf::from)
+    let Some(running_package_root) = env::var_os("ASTRAL_MANAGED_PACKAGE_ROOT").map(PathBuf::from)
     else {
         return NpmRootCheck::MissingPackageRoot;
     };
@@ -1379,7 +1379,7 @@ fn network_check() -> DoctorCheck {
 
     let mut status = CheckStatus::Ok;
     let mut summary = "network-related environment looks readable".to_string();
-    for name in ["CODEX_CA_CERTIFICATE", "SSL_CERT_FILE"] {
+    for name in ["ASTRAL_CA_CERTIFICATE", "SSL_CERT_FILE"] {
         if let Some(raw) = env::var_os(name) {
             let path = PathBuf::from(raw);
             match std::fs::metadata(&path) {

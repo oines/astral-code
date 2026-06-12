@@ -242,7 +242,7 @@ async fn function_hook_input_defaults_empty_arguments_to_object() {
 }
 
 #[tokio::test]
-async fn spawn_agent_function_tools_use_agent_matcher_alias() {
+async fn spawn_agent_function_tools_use_spawn_agent_hook_name() {
     let (session, turn) = crate::session::tests::make_session_and_context().await;
     let session = Arc::new(session);
     let turn = Arc::new(turn);

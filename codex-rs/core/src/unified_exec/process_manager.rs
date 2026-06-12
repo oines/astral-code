@@ -11,7 +11,7 @@ use tokio::time::Duration;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
-use crate::exec_env::CODEX_THREAD_ID_ENV_VAR;
+use crate::exec_env::ASTRAL_THREAD_ID_ENV_VAR;
 use crate::exec_env::create_env;
 use crate::exec_policy::ExecApprovalRequest;
 use crate::sandboxing::ExecRequest;
@@ -27,6 +27,8 @@ use crate::tools::runtimes::unified_exec::UnifiedExecRequest as UnifiedExecToolR
 use crate::tools::runtimes::unified_exec::UnifiedExecRuntime;
 use crate::tools::sandboxing::ToolCtx;
 use crate::tools::sandboxing::ToolError;
+use crate::unified_exec::BackgroundTaskSnapshot;
+use crate::unified_exec::BackgroundTaskStatus;
 use crate::unified_exec::ExecCommandRequest;
 use crate::unified_exec::MAX_UNIFIED_EXEC_PROCESSES;
 use crate::unified_exec::MAX_YIELD_TIME_MS;
@@ -68,7 +70,7 @@ const UNIFIED_EXEC_ENV: [(&str, &str); 10] = [
     ("PAGER", "cat"),
     ("GIT_PAGER", "cat"),
     ("GH_PAGER", "cat"),
-    ("CODEX_CI", "1"),
+    ("ASTRAL_CI", "1"),
 ];
 const NETWORK_ACCESS_DENIED_MESSAGE: &str =
     "Network access was denied by the Codex sandbox network proxy.";
@@ -398,6 +400,40 @@ impl UnifiedExecProcessManager {
             process_id: entry.process_id,
             command,
         })
+    }
+
+    pub(crate) async fn list_background_tasks(&self) -> Vec<BackgroundTaskSnapshot> {
+        let now = Instant::now();
+        let mut tasks = {
+            let store = self.process_store.lock().await;
+            store
+                .processes
+                .values()
+                .map(|entry| {
+                    let status = if entry.process.has_exited() {
+                        BackgroundTaskStatus::Exited
+                    } else {
+                        BackgroundTaskStatus::Running
+                    };
+                    BackgroundTaskSnapshot {
+                        task_id: entry.process_id,
+                        command: entry.hook_command.clone(),
+                        cwd: entry.cwd.to_string_lossy().to_string(),
+                        status,
+                        exit_code: entry.process.exit_code(),
+                        tty: entry.tty,
+                        elapsed_ms: crate::unified_exec::duration_ms_u64(
+                            now.saturating_duration_since(entry.started_at),
+                        ),
+                        last_used_ms_ago: crate::unified_exec::duration_ms_u64(
+                            now.saturating_duration_since(entry.last_used),
+                        ),
+                    }
+                })
+                .collect::<Vec<_>>()
+        };
+        tasks.sort_by_key(|task| task.task_id);
+        tasks
     }
 
     pub(crate) async fn exec_command(
@@ -861,8 +897,10 @@ impl UnifiedExecProcessManager {
             process_id,
             hook_command,
             tty,
+            cwd: cwd.clone(),
             network_approval,
             session: Arc::downgrade(&context.session),
+            started_at,
             last_used: started_at,
         };
         let pruned_entry = {
@@ -1038,7 +1076,7 @@ impl UnifiedExecProcessManager {
         );
         let mut env = local_policy_env.clone();
         env.insert(
-            CODEX_THREAD_ID_ENV_VAR.to_string(),
+            ASTRAL_THREAD_ID_ENV_VAR.to_string(),
             context.session.thread_id.to_string(),
         );
         let env = apply_unified_exec_env(env);

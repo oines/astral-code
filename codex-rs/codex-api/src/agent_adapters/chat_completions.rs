@@ -14,7 +14,9 @@ use serde_json::Map;
 use serde_json::Value;
 use serde_json::json;
 
-const TOOL_CALL_BLOCK_INDEX_OFFSET: usize = 1;
+const TEXT_BLOCK_INDEX: usize = 0;
+const REASONING_BLOCK_INDEX: usize = 1;
+const TOOL_CALL_BLOCK_INDEX_OFFSET: usize = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChatCompletionsOptions {
@@ -78,6 +80,20 @@ pub fn parse_stream_chunk(
 ) -> Result<Vec<AgentStreamEvent>, ChatCompletionsStreamError> {
     let mut events = Vec::new();
 
+    if let Some(error) = value.get("error") {
+        let message = error
+            .get("message")
+            .and_then(Value::as_str)
+            .or_else(|| error.as_str())
+            .unwrap_or("chat completions stream error")
+            .to_string();
+        events.push(AgentStreamEvent::MessageStop {
+            stop_reason: Some(StopReason::Error { message }),
+            usage: None,
+        });
+        return Ok(events);
+    }
+
     let choices = required_array(&value, "choices")?;
     if choices.is_empty() {
         if let Some(usage) = usage_from_chat(value.get("usage")) {
@@ -90,9 +106,13 @@ pub fn parse_stream_chunk(
     }
 
     for choice in choices {
-        let delta = choice
-            .get("delta")
-            .ok_or(ChatCompletionsStreamError::MissingField("delta"))?;
+        let finish_reason = choice.get("finish_reason").and_then(Value::as_str);
+        let usage = usage_from_chat(value.get("usage"));
+        let delta = match choice.get("delta") {
+            Some(delta) => delta,
+            None if finish_reason.is_some() || usage.is_some() => &Value::Null,
+            None => return Err(ChatCompletionsStreamError::MissingField("delta")),
+        };
 
         if delta.get("role").and_then(Value::as_str) == Some("assistant") {
             events.push(AgentStreamEvent::MessageStart {
@@ -104,11 +124,22 @@ pub fn parse_stream_chunk(
             });
         }
 
+        if let Some(reasoning_content) = delta.get("reasoning_content").and_then(Value::as_str)
+            && !reasoning_content.is_empty()
+        {
+            events.push(AgentStreamEvent::ContentBlockDelta {
+                index: REASONING_BLOCK_INDEX,
+                delta: ContentDelta::Reasoning {
+                    text: reasoning_content.to_string(),
+                },
+            });
+        }
+
         if let Some(content) = delta.get("content").and_then(Value::as_str)
             && !content.is_empty()
         {
             events.push(AgentStreamEvent::ContentBlockDelta {
-                index: 0,
+                index: TEXT_BLOCK_INDEX,
                 delta: ContentDelta::Text {
                     text: content.to_string(),
                 },
@@ -121,8 +152,6 @@ pub fn parse_stream_chunk(
             }
         }
 
-        let finish_reason = choice.get("finish_reason").and_then(Value::as_str);
-        let usage = usage_from_chat(value.get("usage"));
         if finish_reason.is_some() || usage.is_some() {
             events.push(AgentStreamEvent::MessageStop {
                 stop_reason: finish_reason.map(stop_reason_from_chat),
@@ -235,17 +264,40 @@ fn chat_message_text(message: &Value) -> Option<String> {
 
 fn user_message_to_chat_messages(message: &AgentMessage) -> Vec<Value> {
     let mut messages = Vec::new();
-    let user_content = message
+    let user_blocks = message
         .content
         .iter()
         .filter(|block| !matches!(block, ContentBlock::ToolResult { .. }))
-        .map(content_block_to_user_content)
         .collect::<Vec<_>>();
-    if !user_content.is_empty() {
-        messages.push(json!({
-            "role": "user",
-            "content": user_content,
-        }));
+
+    if !user_blocks.is_empty() {
+        let user_content = if user_blocks.iter().all(|block| {
+            matches!(
+                block,
+                ContentBlock::Text { .. } | ContentBlock::Reasoning { .. }
+            )
+        }) {
+            let text = user_blocks
+                .iter()
+                .map(|block| content_block_text(block))
+                .filter(|text| !text.is_empty())
+                .collect::<Vec<_>>()
+                .join("\n");
+            (!text.is_empty()).then_some(Value::String(text))
+        } else {
+            let parts = user_blocks
+                .iter()
+                .filter_map(|block| content_block_to_user_content(block))
+                .collect::<Vec<_>>();
+            (!parts.is_empty()).then_some(Value::Array(parts))
+        };
+
+        if let Some(user_content) = user_content {
+            messages.push(json!({
+                "role": "user",
+                "content": user_content,
+            }));
+        }
     }
 
     messages.extend(
@@ -370,16 +422,18 @@ fn remove_tool_control_fields_without_tools(body: &mut Map<String, Value>) {
     body.remove("parallel_tool_calls");
 }
 
-fn content_block_to_user_content(block: &ContentBlock) -> Value {
+fn content_block_to_user_content(block: &ContentBlock) -> Option<Value> {
     match block {
-        ContentBlock::Text { text } => json!({ "type": "text", "text": text }),
-        ContentBlock::Image { source } => json!({
+        ContentBlock::Text { text } | ContentBlock::Reasoning { text, signature: _ } => {
+            (!text.is_empty()).then(|| json!({ "type": "text", "text": text }))
+        }
+        ContentBlock::Image { source } => Some(json!({
             "type": "image_url",
             "image_url": { "url": image_source_url(source) }
-        }),
-        ContentBlock::Reasoning { text, signature: _ } => json!({ "type": "text", "text": text }),
+        })),
         ContentBlock::ToolUse { .. } | ContentBlock::ToolResult { .. } => {
-            json!({ "type": "text", "text": content_block_text(block) })
+            let text = content_block_text(block);
+            (!text.is_empty()).then(|| json!({ "type": "text", "text": text }))
         }
     }
 }
@@ -495,13 +549,28 @@ fn stop_reason_from_chat(reason: &str) -> StopReason {
 
 fn usage_from_chat(value: Option<&Value>) -> Option<TokenUsage> {
     let value = value?;
+    if value.is_null() {
+        return None;
+    }
+    let prompt_cache_hit_tokens = value.get("prompt_cache_hit_tokens").and_then(Value::as_u64);
+    let prompt_cache_miss_tokens = value
+        .get("prompt_cache_miss_tokens")
+        .and_then(Value::as_u64);
     Some(TokenUsage {
-        input_tokens: value.get("prompt_tokens").and_then(Value::as_u64),
+        input_tokens: value
+            .get("prompt_tokens")
+            .and_then(Value::as_u64)
+            .or_else(|| {
+                prompt_cache_hit_tokens
+                    .zip(prompt_cache_miss_tokens)
+                    .map(|(hit, miss)| hit.saturating_add(miss))
+            }),
         output_tokens: value.get("completion_tokens").and_then(Value::as_u64),
         cache_creation_input_tokens: None,
         cache_read_input_tokens: value
             .pointer("/prompt_tokens_details/cached_tokens")
-            .and_then(Value::as_u64),
+            .and_then(Value::as_u64)
+            .or(prompt_cache_hit_tokens),
     })
 }
 

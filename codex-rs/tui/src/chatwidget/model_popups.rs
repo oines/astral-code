@@ -45,7 +45,7 @@ impl ChatWidget {
     fn model_menu_warning_line(&self) -> Option<Line<'static>> {
         let base_url = self.custom_openai_base_url()?;
         let warning = format!(
-            "Warning: OpenAI base URL is overridden to {base_url}. Selecting models may not be supported or work properly."
+            "Warning: configured base URL is {base_url}. Selecting built-in models may not be supported or work properly."
         );
         Some(Line::from(warning.red()))
     }
@@ -222,12 +222,16 @@ impl ChatWidget {
             if should_prompt_plan_mode_scope {
                 tx.send(AppEvent::OpenPlanReasoningScopePrompt {
                     model: model_for_action.clone(),
+                    model_provider: None,
                     effort: effort_for_action.clone(),
                 });
                 return;
             }
 
-            tx.send(AppEvent::UpdateModel(model_for_action.clone()));
+            tx.send(AppEvent::UpdateModel {
+                model: model_for_action.clone(),
+                model_provider: None,
+            });
             tx.send(AppEvent::UpdateReasoningEffort(effort_for_action.clone()));
             tx.send(AppEvent::PersistModelSelection {
                 model: model_for_action.clone(),
@@ -259,6 +263,7 @@ impl ChatWidget {
     pub(crate) fn open_plan_reasoning_scope_prompt(
         &mut self,
         model: String,
+        model_provider: Option<String>,
         effort: Option<ReasoningEffortConfig>,
     ) {
         let reasoning_phrase = match effort.as_ref() {
@@ -302,15 +307,22 @@ impl ChatWidget {
 
         let plan_only_actions: Vec<SelectionAction> = vec![Box::new({
             let model = model.clone();
+            let model_provider = model_provider.clone();
             let effort = effort.clone();
             move |tx| {
-                tx.send(AppEvent::UpdateModel(model.clone()));
+                tx.send(AppEvent::UpdateModel {
+                    model: model.clone(),
+                    model_provider: model_provider.clone(),
+                });
                 tx.send(AppEvent::UpdatePlanModeReasoningEffort(effort.clone()));
                 tx.send(AppEvent::PersistPlanModeReasoningEffort(effort.clone()));
             }
         })];
         let all_modes_actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
-            tx.send(AppEvent::UpdateModel(model.clone()));
+            tx.send(AppEvent::UpdateModel {
+                model: model.clone(),
+                model_provider: model_provider.clone(),
+            });
             tx.send(AppEvent::UpdateReasoningEffort(effort.clone()));
             tx.send(AppEvent::UpdatePlanModeReasoningEffort(effort.clone()));
             tx.send(AppEvent::PersistPlanModeReasoningEffort(effort.clone()));
@@ -392,6 +404,7 @@ impl ChatWidget {
                 self.app_event_tx
                     .send(AppEvent::OpenPlanReasoningScopePrompt {
                         model: selected_model,
+                        model_provider: None,
                         effort: selected_effort,
                     });
             } else {
@@ -460,10 +473,14 @@ impl ChatWidget {
                 if should_prompt_plan_mode_scope {
                     tx.send(AppEvent::OpenPlanReasoningScopePrompt {
                         model: model_for_action.clone(),
+                        model_provider: None,
                         effort: choice_effort.clone(),
                     });
                 } else {
-                    tx.send(AppEvent::UpdateModel(model_for_action.clone()));
+                    tx.send(AppEvent::UpdateModel {
+                        model: model_for_action.clone(),
+                        model_provider: None,
+                    });
                     tx.send(AppEvent::UpdateReasoningEffort(choice_effort.clone()));
                     tx.send(AppEvent::PersistModelSelection {
                         model: model_for_action.clone(),
@@ -521,7 +538,10 @@ impl ChatWidget {
         model: String,
         effort: Option<ReasoningEffortConfig>,
     ) {
-        self.app_event_tx.send(AppEvent::UpdateModel(model));
+        self.app_event_tx.send(AppEvent::UpdateModel {
+            model,
+            model_provider: None,
+        });
         self.app_event_tx
             .send(AppEvent::UpdateReasoningEffort(effort));
     }

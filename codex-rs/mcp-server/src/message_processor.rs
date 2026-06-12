@@ -9,7 +9,7 @@ use codex_exec_server::EnvironmentManager;
 use codex_extension_api::empty_extension_registry;
 use codex_login::AuthManager;
 use codex_login::default_client::USER_AGENT_SUFFIX;
-use codex_login::default_client::get_codex_user_agent;
+use codex_login::default_client::get_astral_user_agent;
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::Submission;
@@ -59,7 +59,7 @@ impl MessageProcessor {
         let outgoing = Arc::new(outgoing);
         let auth_manager = AuthManager::shared_from_config(
             config.as_ref(),
-            /*enable_codex_api_key_env*/ false,
+            /*enable_astral_api_key_env*/ false,
         )
         .await;
         let thread_manager = Arc::new(ThreadManager::new(
@@ -237,7 +237,7 @@ impl MessageProcessor {
             }
         };
         if let serde_json::Value::Object(ref mut obj) = server_info_value {
-            obj.insert("user_agent".to_string(), json!(get_codex_user_agent()));
+            obj.insert("user_agent".to_string(), json!(get_astral_user_agent()));
         }
 
         let capabilities = ServerCapabilities::builder()

@@ -743,9 +743,12 @@ impl App {
                 self.sync_active_thread_reasoning_setting(app_server, effort)
                     .await;
             }
-            AppEvent::UpdateModel(model) => {
+            AppEvent::UpdateModel {
+                model,
+                model_provider,
+            } => {
                 self.chat_widget.set_model(&model);
-                self.sync_active_thread_model_setting(app_server, model)
+                self.sync_active_thread_model_setting(app_server, model, model_provider)
                     .await;
                 self.sync_active_thread_service_tier_to_cached_session()
                     .await;
@@ -770,9 +773,13 @@ impl App {
             AppEvent::OpenReasoningPopup { model } => {
                 self.chat_widget.open_reasoning_popup(model);
             }
-            AppEvent::OpenPlanReasoningScopePrompt { model, effort } => {
+            AppEvent::OpenPlanReasoningScopePrompt {
+                model,
+                model_provider,
+                effort,
+            } => {
                 self.chat_widget
-                    .open_plan_reasoning_scope_prompt(model, effort);
+                    .open_plan_reasoning_scope_prompt(model, model_provider, effort);
             }
             AppEvent::OpenAllModelsPopup { models } => {
                 self.chat_widget.open_all_models_popup(models);

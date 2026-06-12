@@ -94,7 +94,7 @@ impl AccountRequestProcessor {
 
     fn current_account_updated_notification(&self) -> AccountUpdatedNotification {
         let auth = self.auth_manager.auth_cached();
-        let supported_auth = auth.as_ref().filter(|auth| !auth.uses_codex_backend());
+        let supported_auth = auth.as_ref().filter(|auth| !auth.uses_hosted_backend());
         AccountUpdatedNotification {
             auth_mode: supported_auth.map(CodexAuth::api_auth_mode),
             plan_type: supported_auth.and_then(CodexAuth::account_plan_type),
@@ -221,7 +221,7 @@ impl AccountRequestProcessor {
             .auth_manager
             .auth_cached()
             .as_ref()
-            .is_some_and(CodexAuth::uses_codex_backend)
+            .is_some_and(CodexAuth::uses_hosted_backend)
         {
             return RefreshTokenRequestOutcome::NotAttemptedOrSucceeded;
         }
@@ -263,7 +263,7 @@ impl AccountRequestProcessor {
                 self.auth_manager.auth().await
             };
             match auth {
-                Some(auth) if auth.uses_codex_backend() => GetAuthStatusResponse {
+                Some(auth) if auth.uses_hosted_backend() => GetAuthStatusResponse {
                     auth_method: None,
                     auth_token: None,
                     requires_astral_auth: Some(true),

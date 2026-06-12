@@ -9,9 +9,8 @@ use crate::types::TurnAttemptsSiblingTurnsResponse;
 use anyhow::Result;
 use codex_api::SharedAuthProvider;
 use codex_client::build_reqwest_client_with_custom_ca;
-use codex_client::with_chatgpt_cloudflare_cookie_store;
 use codex_login::CodexAuth;
-use codex_login::default_client::get_codex_user_agent;
+use codex_login::default_client::get_astral_user_agent;
 use codex_protocol::account::PlanType as AccountPlanType;
 use codex_protocol::protocol::CreditsSnapshot;
 use codex_protocol::protocol::RateLimitReachedType;
@@ -90,16 +89,12 @@ pub enum PathStyle {
     /// /api/codex/…
     CodexApi,
     /// /wham/…
-    ChatGptApi,
+    HostedApi,
 }
 
 impl PathStyle {
-    pub fn from_base_url(base_url: &str) -> Self {
-        if base_url.contains("/backend-api") {
-            PathStyle::ChatGptApi
-        } else {
-            PathStyle::CodexApi
-        }
+    pub fn from_base_url(_base_url: &str) -> Self {
+        PathStyle::CodexApi
     }
 }
 
@@ -109,8 +104,7 @@ pub struct Client {
     http: reqwest::Client,
     auth_provider: SharedAuthProvider,
     user_agent: Option<HeaderValue>,
-    chatgpt_account_id: Option<String>,
-    chatgpt_account_is_fedramp: bool,
+    hosted_account_id: Option<String>,
     path_style: PathStyle,
 }
 
@@ -120,11 +114,7 @@ impl fmt::Debug for Client {
             .field("base_url", &self.base_url)
             .field("auth_provider", &"<provider>")
             .field("user_agent", &self.user_agent)
-            .field("chatgpt_account_id", &self.chatgpt_account_id)
-            .field(
-                "chatgpt_account_is_fedramp",
-                &self.chatgpt_account_is_fedramp,
-            )
+            .field("hosted_account_id", &self.hosted_account_id)
             .field("path_style", &self.path_style)
             .finish_non_exhaustive()
     }
@@ -134,28 +124,25 @@ impl Client {
     pub fn new(base_url: impl Into<String>) -> Result<Self> {
         let mut base_url = base_url.into();
         // Trim trailing slashes for consistent URL building. Astral does not
-        // implicitly rewrite ChatGPT hosts into hosted backend-api URLs.
+        // implicitly rewrite legacy hosted roots into backend-api URLs.
         while base_url.ends_with('/') {
             base_url.pop();
         }
-        let http = build_reqwest_client_with_custom_ca(with_chatgpt_cloudflare_cookie_store(
-            reqwest::Client::builder(),
-        ))?;
+        let http = build_reqwest_client_with_custom_ca(reqwest::Client::builder())?;
         let path_style = PathStyle::from_base_url(&base_url);
         Ok(Self {
             base_url,
             http,
             auth_provider: codex_model_provider::unauthenticated_auth_provider(),
             user_agent: None,
-            chatgpt_account_id: None,
-            chatgpt_account_is_fedramp: false,
+            hosted_account_id: None,
             path_style,
         })
     }
 
     pub fn from_auth(base_url: impl Into<String>, auth: &CodexAuth) -> Result<Self> {
         Ok(Self::new(base_url)?
-            .with_user_agent(get_codex_user_agent())
+            .with_user_agent(get_astral_user_agent())
             .with_auth_provider(codex_model_provider::auth_provider_from_auth(auth)))
     }
 
@@ -171,13 +158,8 @@ impl Client {
         self
     }
 
-    pub fn with_chatgpt_account_id(mut self, account_id: impl Into<String>) -> Self {
-        self.chatgpt_account_id = Some(account_id.into());
-        self
-    }
-
-    pub fn with_fedramp_routing_header(mut self) -> Self {
-        self.chatgpt_account_is_fedramp = true;
+    pub fn with_hosted_account_id(mut self, account_id: impl Into<String>) -> Self {
+        self.hosted_account_id = Some(account_id.into());
         self
     }
 
@@ -191,19 +173,14 @@ impl Client {
         if let Some(ua) = &self.user_agent {
             h.insert(USER_AGENT, ua.clone());
         } else {
-            h.insert(USER_AGENT, HeaderValue::from_static("codex-cli"));
+            h.insert(USER_AGENT, HeaderValue::from_static("astral"));
         }
         self.auth_provider.add_auth_headers(&mut h);
-        if let Some(acc) = &self.chatgpt_account_id
-            && let Ok(name) = HeaderName::from_bytes(b"ChatGPT-Account-Id")
+        if let Some(acc) = &self.hosted_account_id
+            && let Ok(name) = HeaderName::from_bytes(b"Astral-Account-Id")
             && let Ok(hv) = HeaderValue::from_str(acc)
         {
             h.insert(name, hv);
-        }
-        if self.chatgpt_account_is_fedramp
-            && let Ok(name) = HeaderName::from_bytes(b"X-OpenAI-Fedramp")
-        {
-            h.insert(name, HeaderValue::from_static("true"));
         }
         h
     }
@@ -277,7 +254,7 @@ impl Client {
     pub async fn get_rate_limits_many(&self) -> Result<Vec<RateLimitSnapshot>> {
         let url = match self.path_style {
             PathStyle::CodexApi => format!("{}/api/codex/usage", self.base_url),
-            PathStyle::ChatGptApi => format!("{}/wham/usage", self.base_url),
+            PathStyle::HostedApi => format!("{}/wham/usage", self.base_url),
         };
         let req = self.http.get(&url).headers(self.headers());
         let (body, ct) = self.exec_request(req, "GET", &url).await?;
@@ -288,7 +265,7 @@ impl Client {
     pub async fn get_accounts_check(&self) -> Result<AccountsCheckResponse> {
         let url = match self.path_style {
             PathStyle::CodexApi => format!("{}/api/codex/accounts/check", self.base_url),
-            PathStyle::ChatGptApi => format!("{}/wham/accounts/check", self.base_url),
+            PathStyle::HostedApi => format!("{}/wham/accounts/check", self.base_url),
         };
         let req = self.http.get(&url).headers(self.headers());
         let (body, ct) = self.exec_request(req, "GET", &url).await?;
@@ -305,7 +282,7 @@ impl Client {
     fn token_usage_profile_url(&self) -> String {
         match self.path_style {
             PathStyle::CodexApi => format!("{}/api/codex/profiles/me", self.base_url),
-            PathStyle::ChatGptApi => format!("{}/wham/profiles/me", self.base_url),
+            PathStyle::HostedApi => format!("{}/wham/profiles/me", self.base_url),
         }
     }
 
@@ -318,7 +295,7 @@ impl Client {
     ) -> Result<PaginatedListTaskListItem> {
         let url = match self.path_style {
             PathStyle::CodexApi => format!("{}/api/codex/tasks/list", self.base_url),
-            PathStyle::ChatGptApi => format!("{}/wham/tasks/list", self.base_url),
+            PathStyle::HostedApi => format!("{}/wham/tasks/list", self.base_url),
         };
         let req = self.http.get(&url).headers(self.headers());
         let req = if let Some(lim) = limit {
@@ -356,7 +333,7 @@ impl Client {
     ) -> Result<(CodeTaskDetailsResponse, String, String)> {
         let url = match self.path_style {
             PathStyle::CodexApi => format!("{}/api/codex/tasks/{}", self.base_url, task_id),
-            PathStyle::ChatGptApi => format!("{}/wham/tasks/{}", self.base_url, task_id),
+            PathStyle::HostedApi => format!("{}/wham/tasks/{}", self.base_url, task_id),
         };
         let req = self.http.get(&url).headers(self.headers());
         let (body, ct) = self.exec_request(req, "GET", &url).await?;
@@ -374,7 +351,7 @@ impl Client {
                 "{}/api/codex/tasks/{}/turns/{}/sibling_turns",
                 self.base_url, task_id, turn_id
             ),
-            PathStyle::ChatGptApi => format!(
+            PathStyle::HostedApi => format!(
                 "{}/wham/tasks/{}/turns/{}/sibling_turns",
                 self.base_url, task_id, turn_id
             ),
@@ -384,16 +361,16 @@ impl Client {
         self.decode_json::<TurnAttemptsSiblingTurnsResponse>(&url, &ct, &body)
     }
 
-    /// Fetch the selected cloud-managed config bundle from codex-backend.
+    /// Fetch the selected cloud-managed config bundle from an Astral backend.
     ///
-    /// `GET /api/codex/config/bundle` (Codex API style) or
-    /// `GET /wham/config/bundle` (ChatGPT backend-api style).
+    /// `GET /api/codex/config/bundle` (Astral API style) or
+    /// `GET /wham/config/bundle` (hosted backend-api style).
     pub async fn get_config_bundle(
         &self,
     ) -> std::result::Result<ConfigBundleResponse, RequestError> {
         let url = match self.path_style {
             PathStyle::CodexApi => format!("{}/api/codex/config/bundle", self.base_url),
-            PathStyle::ChatGptApi => format!("{}/wham/config/bundle", self.base_url),
+            PathStyle::HostedApi => format!("{}/wham/config/bundle", self.base_url),
         };
         let req = self.http.get(&url).headers(self.headers());
         let (body, ct) = self.exec_request_detailed(req, "GET", &url).await?;
@@ -406,7 +383,7 @@ impl Client {
     pub async fn create_task(&self, request_body: serde_json::Value) -> Result<String> {
         let url = match self.path_style {
             PathStyle::CodexApi => format!("{}/api/codex/tasks", self.base_url),
-            PathStyle::ChatGptApi => format!("{}/wham/tasks", self.base_url),
+            PathStyle::HostedApi => format!("{}/wham/tasks", self.base_url),
         };
         let req = self
             .http
@@ -855,10 +832,18 @@ mod tests {
             "https://example.test/api/codex/profiles/me"
         );
 
-        let chatgpt_client = test_client("https://chatgpt.com/backend-api", PathStyle::ChatGptApi);
+        let hosted_client = test_client("https://hosted.example/backend-api", PathStyle::HostedApi);
         assert_eq!(
-            chatgpt_client.token_usage_profile_url(),
-            "https://chatgpt.com/backend-api/wham/profiles/me"
+            hosted_client.token_usage_profile_url(),
+            "https://hosted.example/backend-api/wham/profiles/me"
+        );
+    }
+
+    #[test]
+    fn base_url_does_not_infer_legacy_hosted_path_style() {
+        assert_eq!(
+            PathStyle::from_base_url("https://hosted.example/backend-api"),
+            PathStyle::CodexApi
         );
     }
 
@@ -868,8 +853,7 @@ mod tests {
             http: reqwest::Client::new(),
             auth_provider: codex_model_provider::unauthenticated_auth_provider(),
             user_agent: None,
-            chatgpt_account_id: None,
-            chatgpt_account_is_fedramp: false,
+            hosted_account_id: None,
             path_style,
         }
     }

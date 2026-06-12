@@ -158,7 +158,7 @@ mod tests {
         let hidden_root = AbsolutePathBuf::try_from(if cfg!(windows) {
             "C:\\Users\\test\\.codex\\memories"
         } else {
-            "/Users/test/.codex/memories"
+            "/Users/test/.astral-code/memories"
         })
         .unwrap();
         let profile = PermissionProfile::workspace_write_with(

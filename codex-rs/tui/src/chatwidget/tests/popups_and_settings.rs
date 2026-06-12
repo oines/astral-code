@@ -1163,12 +1163,12 @@ async fn plugins_popup_openai_curated_tab_omits_marketplace_in_rows() {
 
     let popup = render_bottom_popup(&chat, /*width*/ 100);
     assert!(
-        popup.contains("OpenAI Curated marketplace."),
-        "expected OpenAI Curated tab header, got:\n{popup}"
+        popup.contains("Astral Curated marketplace."),
+        "expected Astral Curated tab header, got:\n{popup}"
     );
     assert!(
         popup.contains("Calendar") && !popup.contains("Repo Plugin"),
-        "expected OpenAI Curated tab to show only official marketplace plugins, got:\n{popup}"
+        "expected Astral Curated tab to show only official marketplace plugins, got:\n{popup}"
     );
     assert!(
         !popup.contains("ChatGPT Marketplace ·"),
@@ -1297,9 +1297,8 @@ async fn plugins_popup_search_no_matches_and_backspace_restores_results() {
 }
 
 #[tokio::test]
-async fn apps_popup_stays_loading_until_final_snapshot_updates() {
+async fn apps_popup_stays_loading_without_chatgpt_account_until_final_snapshot_updates() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    set_chatgpt_auth(&mut chat);
     chat.config
         .features
         .enable(Feature::Apps)
@@ -2380,7 +2379,11 @@ async fn server_overloaded_error_does_not_switch_models() {
     );
 
     while let Ok(event) = rx.try_recv() {
-        if let AppEvent::UpdateModel(model) = event {
+        if let AppEvent::UpdateModel {
+            model,
+            model_provider: None,
+        } = event
+        {
             assert_eq!(
                 model, "gpt-5.3-codex",
                 "did not expect model switch on server-overloaded error"
@@ -2483,9 +2486,13 @@ async fn assert_reasoning_shortcuts_update_effort(
         let events = std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>();
         if expect_model_update {
             assert!(
-                events.iter().any(
-                    |event| matches!(event, AppEvent::UpdateModel(model) if model == "gpt-5.4")
-                ),
+                events.iter().any(|event| matches!(
+                    event,
+                    AppEvent::UpdateModel {
+                        model,
+                        model_provider: None,
+                    } if model == "gpt-5.4"
+                )),
                 "expected model update event for {key_event:?}; events: {events:?}"
             );
         }

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-OpenAI YAML Generator - Creates agents/openai.yaml for a skill folder.
+Astral YAML Generator - Creates agents/astral.yaml for a skill folder.
 
 Usage:
-    generate_openai_yaml.py <skill_dir> [--name <skill_name>] [--interface key=value]
+    generate_astral_yaml.py <skill_dir> [--name <skill_name>] [--interface key=value]
 """
 
 import argparse
@@ -153,7 +153,7 @@ def parse_interface_overrides(raw_overrides):
     return overrides, optional_order
 
 
-def write_openai_yaml(skill_dir, skill_name, raw_overrides):
+def write_astral_yaml(skill_dir, skill_name, raw_overrides):
     overrides, optional_order = parse_interface_overrides(raw_overrides)
     if overrides is None:
         return None
@@ -181,15 +181,15 @@ def write_openai_yaml(skill_dir, skill_name, raw_overrides):
 
     agents_dir = Path(skill_dir) / "agents"
     agents_dir.mkdir(parents=True, exist_ok=True)
-    output_path = agents_dir / "openai.yaml"
+    output_path = agents_dir / "astral.yaml"
     output_path.write_text("\n".join(interface_lines) + "\n")
-    print(f"[OK] Created agents/openai.yaml")
+    print("[OK] Created agents/astral.yaml")
     return output_path
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Create agents/openai.yaml for a skill directory.",
+        description="Create agents/astral.yaml for a skill directory.",
     )
     parser.add_argument("skill_dir", help="Path to the skill directory")
     parser.add_argument(
@@ -216,7 +216,7 @@ def main():
     if not skill_name:
         sys.exit(1)
 
-    result = write_openai_yaml(skill_dir, skill_name, args.interface)
+    result = write_astral_yaml(skill_dir, skill_name, args.interface)
     if result:
         sys.exit(0)
     sys.exit(1)

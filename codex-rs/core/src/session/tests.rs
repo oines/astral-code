@@ -27,6 +27,8 @@ use core_test_support::test_codex::local_selections;
 use codex_features::Feature;
 use codex_login::CodexAuth;
 use codex_model_provider_info::ModelProviderInfo;
+use codex_model_provider_info::WireApi;
+use codex_model_provider_info::create_oss_provider_with_base_url;
 use codex_models_manager::bundled_models_response;
 use codex_models_manager::model_info;
 use codex_models_manager::test_support::construct_model_info_offline_for_tests;
@@ -3762,6 +3764,46 @@ async fn session_settings_legacy_fast_service_tier_update_uses_priority_request_
         updated.service_tier,
         Some(ServiceTier::Fast.request_value().to_string())
     );
+}
+
+#[tokio::test]
+async fn session_settings_model_provider_update_changes_provider_snapshot() {
+    let mut session_configuration = make_session_configuration_for_tests().await;
+    let provider_id = "provider-b".to_string();
+    let provider =
+        create_oss_provider_with_base_url("http://127.0.0.1:9876/v1", WireApi::ChatCompletions);
+    let mut config = (*session_configuration.original_config_do_not_use).clone();
+    config
+        .model_providers
+        .insert(provider_id.clone(), provider.clone());
+    session_configuration.original_config_do_not_use = Arc::new(config);
+
+    let updated = session_configuration
+        .apply(&SessionSettingsUpdate {
+            model_provider: Some(provider_id.clone()),
+            ..Default::default()
+        })
+        .expect("model provider update should apply");
+
+    assert_eq!(updated.provider, provider);
+    assert_eq!(
+        updated.thread_config_snapshot().model_provider_id,
+        provider_id
+    );
+}
+
+#[tokio::test]
+async fn session_settings_model_provider_update_rejects_unknown_provider() {
+    let session_configuration = make_session_configuration_for_tests().await;
+
+    let err = session_configuration
+        .apply(&SessionSettingsUpdate {
+            model_provider: Some("missing-provider".to_string()),
+            ..Default::default()
+        })
+        .expect_err("unknown model provider should be rejected");
+
+    assert!(err.to_string().contains("model_provider"));
 }
 
 pub(crate) async fn make_session_configuration_for_tests() -> SessionConfiguration {

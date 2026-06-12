@@ -1,5 +1,6 @@
 ---
 source: tui/src/chatwidget/tests/popups_and_settings.rs
+assertion_line: 2163
 expression: popup
 ---
   Enable memories?
@@ -8,5 +9,6 @@ expression: popup
 › 1. Yes, enable  Save the setting now. You will need a new session to use it.
   2. Not now      Keep memories disabled.
 
-  Learn more: https://developers.openai.com/codex/memories
+  Learn more: https://github.com/oines/astral-code/blob/main/codex-rs/memories/
+  README.md
   Press enter to confirm or esc to go back

@@ -1,5 +1,6 @@
 ---
 source: tui/src/chatwidget/tests/exec_flow.rs
+assertion_line: 241
 expression: normalized_backend_snapshot(terminal.backend())
 ---
 "                                                                                "
@@ -8,4 +9,4 @@ expression: normalized_backend_snapshot(terminal.backend())
 "                                                                                "
 "› Ask Codex to do anything                                                      "
 "                                                                                "
-"  gpt-5.5 default · /tmp/project                                                "
+"  deepseek-v4-pro default · /tmp/project                                        "

@@ -287,7 +287,8 @@ async fn memories_startup_phase1_uses_live_thread_service_tier_and_detached_meta
     let request_context = context
         .stage_one_request_context(
             &test.config,
-            test.config.model.as_deref().unwrap_or("gpt-5.4-mini"),
+            &crate::memory_model_name(&test.config, test.config.memories.extract_model.as_deref())
+                .expect("test config should provide a memory model"),
             ReasoningEffort::Low,
         )
         .await;
@@ -314,7 +315,7 @@ async fn memories_startup_phase1_uses_live_thread_service_tier_and_detached_meta
         .await?;
     let request = wait_for_single_request(&stage_one).await;
     let metadata_header = request
-        .header("x-codex-turn-metadata")
+        .header("x-astral-turn-metadata")
         .expect("detached memory request should include workspace metadata");
     let metadata: serde_json::Value =
         serde_json::from_str(&metadata_header).expect("turn metadata json");
@@ -336,6 +337,7 @@ async fn build_test_codex(
     test_codex()
         .with_home(home)
         .with_config(|config| {
+            config.model = Some("test-memory-model".to_string());
             config
                 .features
                 .enable(Feature::Sqlite)

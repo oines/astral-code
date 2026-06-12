@@ -326,14 +326,14 @@ mod tests {
     #[test]
     fn normalize_remote_control_url_rejects_unsupported_urls() {
         for remote_control_url in [
-            "http://chatgpt.com/backend-api",
+            "http://hosted.example/backend-api",
             "http://example.com/backend-api",
             "https://example.com/backend-api",
-            "https://chatgpt.com/backend-api",
-            "https://api.chatgpt-staging.com/backend-api",
-            "https://chat.openai.com/backend-api",
-            "https://chatgpt.com.evil.com/backend-api",
-            "https://evilchatgpt.com/backend-api",
+            "https://hosted.example/backend-api",
+            "https://api.hosted.example/backend-api",
+            "https://remote.example/backend-api",
+            "https://localhost.evil.example/backend-api",
+            "https://evil-localhost.example/backend-api",
             "https://foo.localhost/backend-api",
         ] {
             let err = normalize_remote_control_url(remote_control_url)

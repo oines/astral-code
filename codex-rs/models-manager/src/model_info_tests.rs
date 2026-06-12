@@ -1,5 +1,6 @@
 use super::*;
 use crate::ModelsManagerConfig;
+use codex_protocol::openai_models::InputModality;
 use pretty_assertions::assert_eq;
 
 #[test]
@@ -71,4 +72,26 @@ fn model_context_window_uses_model_value_without_override() {
     let updated = with_config_overrides(model.clone(), &config);
 
     assert_eq!(updated, model);
+}
+
+#[test]
+fn unknown_model_defaults_to_text_only_input() {
+    let model = model_info_from_slug("unknown-model");
+
+    assert_eq!(model.input_modalities, vec![InputModality::Text]);
+}
+
+#[test]
+fn model_input_modalities_override_sets_declared_capabilities() {
+    let model = model_info_from_slug("unknown-model");
+    let config = ModelsManagerConfig {
+        model_input_modalities: Some(vec![InputModality::Text, InputModality::Image]),
+        ..Default::default()
+    };
+
+    let updated = with_config_overrides(model.clone(), &config);
+    let mut expected = model;
+    expected.input_modalities = vec![InputModality::Text, InputModality::Image];
+
+    assert_eq!(updated, expected);
 }

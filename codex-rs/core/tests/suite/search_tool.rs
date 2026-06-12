@@ -607,23 +607,23 @@ async fn tool_search_returns_deferred_tools_without_follow_up_tool_injection() -
         }))
     );
     assert_eq!(
-        apps_tool_call.pointer("/params/_meta/x-codex-turn-metadata/session_id"),
+        apps_tool_call.pointer("/params/_meta/x-astral-turn-metadata/session_id"),
         Some(&json!(test.session_configured.session_id.to_string()))
     );
     assert_eq!(
-        apps_tool_call.pointer("/params/_meta/x-codex-turn-metadata/thread_id"),
+        apps_tool_call.pointer("/params/_meta/x-astral-turn-metadata/thread_id"),
         Some(&json!(test.session_configured.thread_id.to_string()))
     );
     assert!(
         apps_tool_call
-            .pointer("/params/_meta/x-codex-turn-metadata/turn_id")
+            .pointer("/params/_meta/x-astral-turn-metadata/turn_id")
             .and_then(Value::as_str)
             .is_some_and(|turn_id| !turn_id.is_empty()),
         "apps tools/call should include turn metadata turn_id: {apps_tool_call:?}"
     );
     assert_eq!(
         apps_tool_call
-            .pointer("/params/_meta/x-codex-turn-metadata/model")
+            .pointer("/params/_meta/x-astral-turn-metadata/model")
             .and_then(Value::as_str),
         Some("gpt-5.4")
     );
@@ -633,12 +633,12 @@ async fn tool_search_returns_deferred_tools_without_follow_up_tool_injection() -
         .expect("first response request should include reasoning effort");
     assert_eq!(
         apps_tool_call
-            .pointer("/params/_meta/x-codex-turn-metadata/reasoning_effort")
+            .pointer("/params/_meta/x-astral-turn-metadata/reasoning_effort")
             .and_then(Value::as_str),
         Some(first_request_reasoning_effort)
     );
     let mcp_turn_started_at_unix_ms = apps_tool_call
-        .pointer("/params/_meta/x-codex-turn-metadata/turn_started_at_unix_ms")
+        .pointer("/params/_meta/x-astral-turn-metadata/turn_started_at_unix_ms")
         .and_then(Value::as_i64)
         .expect("apps tools/call should include turn_started_at_unix_ms");
     assert!(
@@ -648,7 +648,7 @@ async fn tool_search_returns_deferred_tools_without_follow_up_tool_injection() -
 
     let first_request_turn_metadata: Value = serde_json::from_str(
         &requests[0]
-            .header("x-codex-turn-metadata")
+            .header("x-astral-turn-metadata")
             .expect("first response request should include turn metadata"),
     )
     .expect("first response request turn metadata should be valid JSON");

@@ -18,7 +18,7 @@ import re
 import sys
 from pathlib import Path
 
-from generate_openai_yaml import write_openai_yaml
+from generate_astral_yaml import write_astral_yaml
 
 MAX_SKILL_NAME_LENGTH = 64
 ALLOWED_RESOURCES = {"scripts", "references", "assets"}
@@ -83,20 +83,20 @@ Executable code (Python/Bash/etc.) that can be run directly to perform specific 
 
 **Appropriate for:** Python scripts, shell scripts, or any executable code that performs automation, data processing, or specific operations.
 
-**Note:** Scripts may be executed without loading into context, but can still be read by Codex for patching or environment adjustments.
+**Note:** Scripts may be executed without loading into context, but can still be read by Astral for patching or environment adjustments.
 
 ### references/
-Documentation and reference material intended to be loaded into context to inform Codex's process and thinking.
+Documentation and reference material intended to be loaded into context to inform Astral's process and thinking.
 
 **Examples from other skills:**
 - Product management: `communication.md`, `context_building.md` - detailed workflow guides
 - BigQuery: API reference documentation and query examples
 - Finance: Schema documentation, company policies
 
-**Appropriate for:** In-depth documentation, API references, database schemas, comprehensive guides, or any detailed information that Codex should reference while working.
+**Appropriate for:** In-depth documentation, API references, database schemas, comprehensive guides, or any detailed information that Astral should reference while working.
 
 ### assets/
-Files not intended to be loaded into context, but rather used within the output Codex produces.
+Files not intended to be loaded into context, but rather used within the output Astral produces.
 
 **Examples from other skills:**
 - Brand styling: PowerPoint template files (.pptx), logo files
@@ -173,7 +173,7 @@ This placeholder represents where asset files would be stored.
 Replace with actual asset files (templates, images, fonts, etc.) or delete if not needed.
 
 Asset files are NOT intended to be loaded into context, but rather used within
-the output Codex produces.
+the output Astral produces.
 
 Example asset files from other skills:
 - Brand guidelines: logo.png, slides_template.pptx
@@ -296,13 +296,13 @@ def init_skill(skill_name, path, resources, include_examples, interface_override
         print(f"[ERROR] Error creating SKILL.md: {e}")
         return None
 
-    # Create agents/openai.yaml
+    # Create agents/astral.yaml
     try:
-        result = write_openai_yaml(skill_dir, skill_name, interface_overrides)
+        result = write_astral_yaml(skill_dir, skill_name, interface_overrides)
         if not result:
             return None
     except Exception as e:
-        print(f"[ERROR] Error creating agents/openai.yaml: {e}")
+        print(f"[ERROR] Error creating agents/astral.yaml: {e}")
         return None
 
     # Create resource directories if requested
@@ -324,7 +324,7 @@ def init_skill(skill_name, path, resources, include_examples, interface_override
             print("2. Add resources to scripts/, references/, and assets/ as needed")
     else:
         print("2. Create resource directories only if needed (scripts/, references/, assets/)")
-    print("3. Update agents/openai.yaml if the UI metadata should differ")
+    print("3. Update agents/astral.yaml if the UI metadata should differ")
     print("4. Run the validator when ready to check the skill structure")
     print(
         "5. Forward-test complex skills with realistic user requests to ensure they work as intended"

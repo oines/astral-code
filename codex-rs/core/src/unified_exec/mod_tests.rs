@@ -118,8 +118,10 @@ async fn exec_command_with_tty(
             process_id,
             hook_command: cmd.to_string(),
             tty,
+            cwd,
             network_approval: None,
             session: Arc::downgrade(session),
+            started_at,
             last_used: started_at,
         };
         manager

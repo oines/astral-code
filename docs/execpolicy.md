@@ -1,3 +1,5 @@
 # Execution policy
 
-For an overview of execution policy rules, see [this documentation](https://developers.openai.com/codex/exec-policy).
+Astral inherits the Codex execution-policy machinery: sandbox policy, approval
+policy, and command execution policy are enforced by the runtime, not by a
+provider-specific model endpoint.

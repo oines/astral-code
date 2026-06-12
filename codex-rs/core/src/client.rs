@@ -10,7 +10,7 @@
 //!
 //! A [`ModelClientSession`] is created per turn and is used to stream one or more Responses API
 //! requests during that turn. It caches a Responses WebSocket connection (opened lazily) and stores
-//! per-turn state such as the `x-codex-turn-state` token used for sticky routing.
+//! per-turn state such as the `x-astral-turn-state` token used for sticky routing.
 //!
 //! WebSocket prewarm is a v2-only `response.create` with `generate=false`; it waits for completion
 //! so the next request can reuse the same connection and `previous_response_id`.
@@ -130,15 +130,15 @@ use codex_response_debug_context::telemetry_api_error_message;
 use codex_response_debug_context::telemetry_transport_error_message;
 
 pub const OPENAI_BETA_HEADER: &str = "OpenAI-Beta";
-pub const X_CODEX_INSTALLATION_ID_HEADER: &str = "x-codex-installation-id";
-pub const X_CODEX_TURN_STATE_HEADER: &str = "x-codex-turn-state";
-pub const X_CODEX_TURN_METADATA_HEADER: &str = "x-codex-turn-metadata";
-pub const X_CODEX_PARENT_THREAD_ID_HEADER: &str = "x-codex-parent-thread-id";
-pub const X_CODEX_WINDOW_ID_HEADER: &str = "x-codex-window-id";
+pub const X_ASTRAL_INSTALLATION_ID_HEADER: &str = "x-astral-installation-id";
+pub const X_ASTRAL_TURN_STATE_HEADER: &str = "x-astral-turn-state";
+pub const X_ASTRAL_TURN_METADATA_HEADER: &str = "x-astral-turn-metadata";
+pub const X_ASTRAL_PARENT_THREAD_ID_HEADER: &str = "x-astral-parent-thread-id";
+pub const X_ASTRAL_WINDOW_ID_HEADER: &str = "x-astral-window-id";
 pub const X_RESPONSESAPI_INCLUDE_TIMING_METRICS_HEADER: &str =
     "x-responsesapi-include-timing-metrics";
-const X_CODEX_WS_STREAM_REQUEST_START_MS_CLIENT_METADATA_KEY: &str =
-    "x-codex-ws-stream-request-start-ms";
+const X_ASTRAL_WS_STREAM_REQUEST_START_MS_CLIENT_METADATA_KEY: &str =
+    "x-astral-ws-stream-request-start-ms";
 const RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE: &str = "responses_websockets=2026-02-06";
 const RESPONSES_ENDPOINT: &str = "/responses";
 const ANTHROPIC_MESSAGES_ENDPOINT: &str = "/messages";
@@ -217,7 +217,7 @@ pub struct ModelClient {
 ///
 /// - The last full request, so subsequent calls can reuse incremental websocket request payloads
 ///   only when the current request is an incremental extension of the previous one.
-/// - The `x-codex-turn-state` sticky-routing token, which must be replayed for all requests within
+/// - The `x-astral-turn-state` sticky-routing token, which must be replayed for all requests within
 ///   the same turn.
 ///
 /// Create a fresh `ModelClientSession` for each Codex turn. Reusing it across turns would replay
@@ -229,8 +229,8 @@ pub struct ModelClientSession {
     /// Turn state for sticky routing.
     ///
     /// This is an `OnceLock` that stores the turn state value received from the server
-    /// on turn start via the `x-codex-turn-state` response header. Once set, this value
-    /// should be sent back to the server in the `x-codex-turn-state` request header for
+    /// on turn start via the `x-astral-turn-state` response header. Once set, this value
+    /// should be sent back to the server in the `x-astral-turn-state` request header for
     /// all subsequent requests within the same turn to maintain sticky routing.
     ///
     /// This is a contract between the client and server: we receive it at turn start,
@@ -288,9 +288,9 @@ pub(crate) struct RealtimeWebrtcCallStart {
 
 /// Reuses the API-auth material that created the WebRTC call for the sideband WebSocket join.
 ///
-/// API-key sessions send that API bearer. ChatGPT-auth sessions send their bearer plus account id;
-/// transceiver is responsible for accepting that same call-create identity on the direct
-/// `api.openai.com` sideband path.
+/// API-key sessions send that API bearer. Legacy hosted sessions send their bearer plus account
+/// id; the transceiver is responsible for accepting that same call-create identity on the direct
+/// sideband path.
 fn sideband_websocket_auth_headers(api_auth: &dyn AuthProvider) -> ApiHeaderMap {
     let mut headers = ApiHeaderMap::new();
     api_auth.add_auth_headers(&mut headers);
@@ -318,12 +318,12 @@ impl ModelClient {
         attestation_provider: Option<Arc<dyn AttestationProvider>>,
     ) -> Self {
         let model_provider = create_model_provider(provider_info, auth_manager);
-        let codex_api_key_env_enabled = model_provider
+        let astral_api_key_env_enabled = model_provider
             .auth_manager()
             .as_ref()
-            .is_some_and(|manager| manager.codex_api_key_env_enabled());
+            .is_some_and(|manager| manager.astral_api_key_env_enabled());
         let auth_env_telemetry =
-            collect_auth_env_telemetry(model_provider.info(), codex_api_key_env_enabled);
+            collect_auth_env_telemetry(model_provider.info(), astral_api_key_env_enabled);
         let include_attestation = model_provider.supports_attestation();
         Self {
             state: Arc::new(ModelClientState {
@@ -483,10 +483,10 @@ impl ModelClient {
         if let Some(parent_thread_id) = parent_thread_id_header_value(self.state.parent_thread_id)
             && let Ok(val) = HeaderValue::from_str(&parent_thread_id)
         {
-            extra_headers.insert(X_CODEX_PARENT_THREAD_ID_HEADER, val);
+            extra_headers.insert(X_ASTRAL_PARENT_THREAD_ID_HEADER, val);
         }
         if let Ok(val) = HeaderValue::from_str(&self.current_window_id()) {
-            extra_headers.insert(X_CODEX_WINDOW_ID_HEADER, val);
+            extra_headers.insert(X_ASTRAL_WINDOW_ID_HEADER, val);
         }
         extra_headers
     }
@@ -497,16 +497,16 @@ impl ModelClient {
     ) -> HashMap<String, String> {
         let mut client_metadata = HashMap::new();
         client_metadata.insert(
-            X_CODEX_INSTALLATION_ID_HEADER.to_string(),
+            X_ASTRAL_INSTALLATION_ID_HEADER.to_string(),
             self.state.installation_id.clone(),
         );
         client_metadata.insert(
-            X_CODEX_WINDOW_ID_HEADER.to_string(),
+            X_ASTRAL_WINDOW_ID_HEADER.to_string(),
             self.current_window_id(),
         );
         if let Some(parent_thread_id) = parent_thread_id_header_value(self.state.parent_thread_id) {
             client_metadata.insert(
-                X_CODEX_PARENT_THREAD_ID_HEADER.to_string(),
+                X_ASTRAL_PARENT_THREAD_ID_HEADER.to_string(),
                 parent_thread_id,
             );
         }
@@ -514,7 +514,7 @@ impl ModelClient {
             && let Ok(turn_metadata) = turn_metadata_header.to_str()
         {
             client_metadata.insert(
-                X_CODEX_TURN_METADATA_HEADER.to_string(),
+                X_ASTRAL_TURN_METADATA_HEADER.to_string(),
                 turn_metadata.to_string(),
             );
         }
@@ -607,11 +607,11 @@ impl ModelClient {
             text,
             client_metadata: Some(HashMap::from([
                 (
-                    X_CODEX_INSTALLATION_ID_HEADER.to_string(),
+                    X_ASTRAL_INSTALLATION_ID_HEADER.to_string(),
                     self.state.installation_id.clone(),
                 ),
                 (
-                    X_CODEX_WINDOW_ID_HEADER.to_string(),
+                    X_ASTRAL_WINDOW_ID_HEADER.to_string(),
                     self.current_window_id(),
                 ),
             ])),
@@ -1030,7 +1030,7 @@ impl ModelClientSession {
 
     fn responses_request_compression(&self, auth: Option<&CodexAuth>) -> Compression {
         if self.client.state.enable_request_compression
-            && auth.is_some_and(CodexAuth::uses_codex_backend)
+            && auth.is_some_and(CodexAuth::uses_hosted_backend)
             && self.client.state.provider.info().is_openai()
         {
             Compression::Zstd
@@ -1652,18 +1652,18 @@ fn stamp_ws_stream_request_start_ms(request: &mut ResponsesWsRequest) {
         .client_metadata
         .get_or_insert_with(HashMap::new)
         .insert(
-            X_CODEX_WS_STREAM_REQUEST_START_MS_CLIENT_METADATA_KEY.to_string(),
+            X_ASTRAL_WS_STREAM_REQUEST_START_MS_CLIENT_METADATA_KEY.to_string(),
             crate::turn_timing::now_unix_timestamp_ms().to_string(),
         );
 }
 
 /// Builds the extra headers attached to Responses API requests.
 ///
-/// These headers implement Codex-specific conventions:
+/// These headers implement Astral-specific conventions:
 ///
-/// - `x-codex-beta-features`: comma-separated beta feature keys enabled for the session.
-/// - `x-codex-turn-state`: sticky routing token captured earlier in the turn.
-/// - `x-codex-turn-metadata`: optional per-turn metadata for observability.
+/// - `x-astral-beta-features`: comma-separated beta feature keys enabled for the session.
+/// - `x-astral-turn-state`: sticky routing token captured earlier in the turn.
+/// - `x-astral-turn-metadata`: optional per-turn metadata for observability.
 fn build_responses_headers(
     beta_features_header: Option<&str>,
     turn_state: Option<&Arc<OnceLock<String>>>,
@@ -1674,16 +1674,16 @@ fn build_responses_headers(
         && !value.is_empty()
         && let Ok(header_value) = HeaderValue::from_str(value)
     {
-        headers.insert("x-codex-beta-features", header_value);
+        headers.insert("x-astral-beta-features", header_value);
     }
     if let Some(turn_state) = turn_state
         && let Some(state) = turn_state.get()
         && let Ok(header_value) = HeaderValue::from_str(state)
     {
-        headers.insert(X_CODEX_TURN_STATE_HEADER, header_value);
+        headers.insert(X_ASTRAL_TURN_STATE_HEADER, header_value);
     }
     if let Some(header_value) = turn_metadata_header {
-        headers.insert(X_CODEX_TURN_METADATA_HEADER, header_value.clone());
+        headers.insert(X_ASTRAL_TURN_METADATA_HEADER, header_value.clone());
     }
     headers
 }
@@ -1863,7 +1863,7 @@ where
     )
 }
 
-/// Handles a 401 response by optionally refreshing ChatGPT tokens once.
+/// Handles a 401 response by optionally refreshing external API-key auth once.
 ///
 /// When refresh succeeds, the caller should retry the API call; otherwise
 /// the mapped `CodexErr` is returned to the caller.
@@ -1911,7 +1911,7 @@ impl AuthRequestTelemetryContext {
             auth_mode: auth_mode.map(|mode| match mode {
                 AuthMode::ApiKey => "ApiKey",
                 AuthMode::Chatgpt | AuthMode::AgentIdentity | AuthMode::PersonalAccessToken => {
-                    "Chatgpt"
+                    "LegacyHosted"
                 }
             }),
             auth_header_attached: auth_telemetry.attached,

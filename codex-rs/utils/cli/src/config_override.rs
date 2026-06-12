@@ -23,7 +23,7 @@ pub struct CliConfigOverrides {
     /// parse as TOML, the raw string is used as a literal.
     ///
     /// Examples:
-    ///   - `-c model="o3"`
+    ///   - `-c model="deepseek-v4-pro"`
     ///   - `-c 'sandbox_permissions=["disk-full-read-access"]'`
     ///   - `-c shell_environment_policy.inherit=all`
     #[arg(

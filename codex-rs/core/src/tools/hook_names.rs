@@ -39,14 +39,10 @@ impl HookToolName {
     }
 
     /// Returns the hook identity for spawning sub-agents.
-    ///
-    /// The serialized name remains `spawn_agent`, while `Agent` is accepted as
-    /// a matcher alias for compatibility with hook configurations that describe
-    /// sub-agent creation using Claude Code-style names.
     pub(crate) fn spawn_agent() -> Self {
         Self {
             name: "spawn_agent".to_string(),
-            matcher_aliases: vec!["Agent".to_string()],
+            matcher_aliases: Vec::new(),
         }
     }
 

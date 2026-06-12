@@ -532,7 +532,7 @@ async fn remote_control_handle_recovers_auth_before_refreshing_pairing() {
     .expect("stale auth should save");
     let auth_manager = AuthManager::shared(
         codex_home.path().to_path_buf(),
-        /*enable_codex_api_key_env*/ false,
+        /*enable_astral_api_key_env*/ false,
         AuthCredentialsStoreMode::File,
     )
     .await;
@@ -787,7 +787,7 @@ async fn remote_control_handle_discards_pairing_response_after_auth_change() {
     .expect("initial auth should save");
     let auth_manager = AuthManager::shared(
         codex_home.path().to_path_buf(),
-        /*enable_codex_api_key_env*/ false,
+        /*enable_astral_api_key_env*/ false,
         AuthCredentialsStoreMode::File,
     )
     .await;

@@ -170,7 +170,7 @@ async fn auto_compaction_local_emits_compaction_turn_metadata() -> Result<()> {
         .iter()
         .map(|request| {
             request
-                .header("x-codex-turn-metadata")
+                .header("x-astral-turn-metadata")
                 .as_deref()
                 .map(parse_json_header)
                 .unwrap_or_else(|| panic!("turn request should include turn metadata"))
@@ -186,13 +186,13 @@ async fn auto_compaction_local_emits_compaction_turn_metadata() -> Result<()> {
         );
         assert_eq!(
             metadata["window_id"].as_str(),
-            request.header("x-codex-window-id").as_deref()
+            request.header("x-astral-window-id").as_deref()
         );
         assert!(metadata.get("compaction").is_none());
     }
 
     let compact_metadata = response_requests[2]
-        .header("x-codex-turn-metadata")
+        .header("x-astral-turn-metadata")
         .as_deref()
         .map(parse_json_header)
         .unwrap_or_else(|| panic!("compact request should include turn metadata"));
@@ -216,7 +216,7 @@ async fn auto_compaction_local_emits_compaction_turn_metadata() -> Result<()> {
     );
     assert_eq!(
         compact_metadata["window_id"].as_str(),
-        response_requests[2].header("x-codex-window-id").as_deref()
+        response_requests[2].header("x-astral-window-id").as_deref()
     );
 
     Ok(())

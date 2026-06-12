@@ -4559,7 +4559,7 @@ fn session_start_error_surfaces_archived_guidance_without_rollout_path() {
         ThreadId::from_string("019e72f4-e09a-70f2-b2c2-a153a57b8cc0").expect("thread id");
     let target_session = SessionTarget {
         path: Some(std::path::PathBuf::from(
-            "/Users/me/.codex/archived_sessions/rollout.jsonl",
+            "/Users/me/.astral-code/archived_sessions/rollout.jsonl",
         )),
         thread_id,
     };
@@ -5547,11 +5547,15 @@ async fn thread_setting_update_params_sync_model_and_default_reasoning() {
 
     app.chat_widget.set_model("gpt-5.4");
     let params = app
-        .active_thread_model_setting_update_params("gpt-5.4".to_string())
+        .active_thread_model_setting_update_params(
+            "gpt-5.4".to_string(),
+            Some("provider-b".to_string()),
+        )
         .expect("active thread should produce update params");
 
     assert_eq!(params.thread_id, thread_id.to_string());
     assert_eq!(params.model, Some("gpt-5.4".to_string()));
+    assert_eq!(params.model_provider, Some("provider-b".to_string()));
     assert_eq!(
         params
             .collaboration_mode
@@ -5755,7 +5759,7 @@ async fn clear_only_ui_reset_preserves_chat_session_state() {
 async fn clear_only_ui_reset_allows_active_skill_warning_to_render_again() {
     let mut app = make_test_app().await;
     let error = SkillErrorInfo {
-        path: test_path_buf("/tmp/project/.codex/skills/abc/SKILL.md"),
+        path: test_path_buf("/tmp/project/.astral-code/skills/abc/SKILL.md"),
         message: "invalid description".to_string(),
     };
 

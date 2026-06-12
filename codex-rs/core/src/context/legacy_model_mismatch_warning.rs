@@ -18,9 +18,10 @@ impl ContextualUserFragment for LegacyModelMismatchWarning {
     }
 
     fn matches_text(text: &str) -> bool {
-        text.trim().starts_with(
+        let trimmed = text.trim();
+        trimmed.starts_with(
             "Warning: Your account was flagged for potentially high-risk cyber activity",
-        )
+        ) || trimmed.starts_with("Warning: The provider returned model ")
     }
 
     fn body(&self) -> String {

@@ -60,7 +60,7 @@ async fn verified_plugin_install_completed_requires_installed_plugin() {
 #[test]
 fn remote_plugin_install_suggestions_skip_core_installed_verification() {
     assert!(is_remote_plugin_install_suggestion(
-        "snowflake@openai-curated-remote"
+        "snowflake@astral-curated-remote"
     ));
     assert!(!is_remote_plugin_install_suggestion(
         "snowflake@openai-curated"

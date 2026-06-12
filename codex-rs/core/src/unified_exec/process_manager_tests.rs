@@ -16,7 +16,7 @@ fn unified_exec_env_injects_defaults() {
         ("PAGER".to_string(), "cat".to_string()),
         ("GIT_PAGER".to_string(), "cat".to_string()),
         ("GH_PAGER".to_string(), "cat".to_string()),
-        ("CODEX_CI".to_string(), "1".to_string()),
+        ("ASTRAL_CI".to_string(), "1".to_string()),
     ]);
 
     assert_eq!(env, expected);
@@ -45,7 +45,7 @@ fn env_overlay_for_exec_server_keeps_runtime_changes_only() {
         ("HOME".to_string(), "/client-home".to_string()),
         ("PATH".to_string(), "/sandbox-path".to_string()),
         ("SHELL_SET".to_string(), "policy".to_string()),
-        ("CODEX_THREAD_ID".to_string(), "thread-1".to_string()),
+        ("ASTRAL_THREAD_ID".to_string(), "thread-1".to_string()),
         (
             "CODEX_SANDBOX_NETWORK_DISABLED".to_string(),
             "1".to_string(),
@@ -56,7 +56,7 @@ fn env_overlay_for_exec_server_keeps_runtime_changes_only() {
         env_overlay_for_exec_server(&request_env, &local_policy_env),
         HashMap::from([
             ("PATH".to_string(), "/sandbox-path".to_string()),
-            ("CODEX_THREAD_ID".to_string(), "thread-1".to_string()),
+            ("ASTRAL_THREAD_ID".to_string(), "thread-1".to_string()),
             (
                 "CODEX_SANDBOX_NETWORK_DISABLED".to_string(),
                 "1".to_string()
@@ -81,7 +81,7 @@ fn exec_server_params_use_env_policy_overlay_contract() {
         env: HashMap::from([
             ("HOME".to_string(), "/client-home".to_string()),
             ("PATH".to_string(), "/sandbox-path".to_string()),
-            ("CODEX_THREAD_ID".to_string(), "thread-1".to_string()),
+            ("ASTRAL_THREAD_ID".to_string(), "thread-1".to_string()),
         ]),
         exec_server_env_config: Some(ExecServerEnvConfig {
             policy: codex_exec_server::ExecEnvPolicy {
@@ -120,7 +120,7 @@ fn exec_server_params_use_env_policy_overlay_contract() {
         params.env,
         HashMap::from([
             ("PATH".to_string(), "/sandbox-path".to_string()),
-            ("CODEX_THREAD_ID".to_string(), "thread-1".to_string()),
+            ("ASTRAL_THREAD_ID".to_string(), "thread-1".to_string()),
         ])
     );
 }

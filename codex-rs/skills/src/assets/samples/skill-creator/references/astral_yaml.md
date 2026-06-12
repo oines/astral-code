@@ -1,6 +1,6 @@
-# openai.yaml fields (full example + descriptions)
+# astral.yaml fields (full example + descriptions)
 
-`agents/openai.yaml` is an extended, product-specific config intended for the machine/harness to read, not the agent. Other product-specific config can also live in the `agents/` folder.
+`agents/astral.yaml` is an extended, product-specific config intended for the machine/harness to read, not the agent. Other product-specific config can also live in the `agents/` folder.
 
 ## Full example
 

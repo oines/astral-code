@@ -1,24 +1,10 @@
-use super::REMOTE_GLOBAL_MARKETPLACE_NAME;
-use super::REMOTE_WORKSPACE_MARKETPLACE_NAME;
-use super::REMOTE_WORKSPACE_SHARED_WITH_ME_MARKETPLACE_NAME;
-use super::REMOTE_WORKSPACE_SHARED_WITH_ME_PRIVATE_MARKETPLACE_NAME;
-use super::REMOTE_WORKSPACE_SHARED_WITH_ME_UNLISTED_MARKETPLACE_NAME;
 use super::RemotePluginCatalogError;
-use super::RemotePluginScope;
 use super::RemotePluginServiceConfig;
-use super::ensure_chatgpt_auth;
-use super::fetch_installed_plugins_for_scope_with_download_url;
-use super::remote_plugin_canonical_marketplace_name;
 use crate::store::PLUGINS_CACHE_DIR;
-use crate::store::PluginStore;
 use crate::store::PluginStoreError;
 use codex_login::CodexAuth;
-use codex_plugin::PluginId;
-use std::collections::BTreeMap;
-use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -123,148 +109,11 @@ pub(crate) fn maybe_start_remote_installed_plugin_bundle_sync(
 }
 
 pub async fn sync_remote_installed_plugin_bundles_once(
-    codex_home: PathBuf,
-    config: &RemotePluginServiceConfig,
-    auth: Option<&CodexAuth>,
+    _codex_home: PathBuf,
+    _config: &RemotePluginServiceConfig,
+    _auth: Option<&CodexAuth>,
 ) -> Result<RemoteInstalledPluginBundleSyncOutcome, RemoteInstalledPluginBundleSyncError> {
-    if super::remote_plugin_control_plane_disabled() {
-        return Err(super::remote_plugin_control_plane_disabled_error().into());
-    }
-
-    let auth = ensure_chatgpt_auth(auth)?;
-    let global = async {
-        let scope = RemotePluginScope::Global;
-        let installed_plugins = fetch_installed_plugins_for_scope_with_download_url(
-            config, auth, scope, /*include_download_urls*/ true,
-        )
-        .await?;
-        Ok::<_, RemotePluginCatalogError>((scope, installed_plugins))
-    };
-    let workspace = async {
-        let scope = RemotePluginScope::Workspace;
-        let installed_plugins = fetch_installed_plugins_for_scope_with_download_url(
-            config, auth, scope, /*include_download_urls*/ true,
-        )
-        .await?;
-        Ok::<_, RemotePluginCatalogError>((scope, installed_plugins))
-    };
-
-    let (global, workspace) = tokio::try_join!(global, workspace)?;
-    let store = PluginStore::try_new(codex_home.clone())?;
-    let mut installed_plugin_names_by_marketplace =
-        BTreeMap::<String, BTreeSet<String>>::from_iter([
-            (REMOTE_GLOBAL_MARKETPLACE_NAME.to_string(), BTreeSet::new()),
-            (
-                REMOTE_WORKSPACE_MARKETPLACE_NAME.to_string(),
-                BTreeSet::new(),
-            ),
-            (
-                REMOTE_WORKSPACE_SHARED_WITH_ME_MARKETPLACE_NAME.to_string(),
-                BTreeSet::new(),
-            ),
-            (
-                REMOTE_WORKSPACE_SHARED_WITH_ME_PRIVATE_MARKETPLACE_NAME.to_string(),
-                BTreeSet::new(),
-            ),
-            (
-                REMOTE_WORKSPACE_SHARED_WITH_ME_UNLISTED_MARKETPLACE_NAME.to_string(),
-                BTreeSet::new(),
-            ),
-        ]);
-    let mut installed_plugin_ids = BTreeSet::new();
-    let mut failed_remote_plugin_ids = BTreeSet::new();
-
-    for (_scope, installed_plugins) in [global, workspace] {
-        for installed_plugin in installed_plugins {
-            let plugin = installed_plugin.plugin;
-            let marketplace_name = remote_plugin_canonical_marketplace_name(&plugin)?.to_string();
-            installed_plugin_names_by_marketplace
-                .entry(marketplace_name.clone())
-                .or_default()
-                .insert(plugin.name.clone());
-            let plugin_id = match PluginId::new(plugin.name.clone(), marketplace_name.clone()) {
-                Ok(plugin_id) => plugin_id,
-                Err(err) => {
-                    warn!(
-                        remote_plugin_id = %plugin.id,
-                        plugin = %plugin.name,
-                        marketplace = %marketplace_name,
-                        error = %err,
-                        "skipping remote installed plugin with invalid local cache id"
-                    );
-                    failed_remote_plugin_ids.insert(plugin.id);
-                    continue;
-                }
-            };
-            let release_version = plugin
-                .release
-                .version
-                .as_deref()
-                .map(str::trim)
-                .filter(|version| !version.is_empty());
-            if store.active_plugin_version(&plugin_id).as_deref() == release_version {
-                continue;
-            }
-
-            let bundle = match crate::remote_bundle::validate_remote_plugin_bundle(
-                &plugin.id,
-                &marketplace_name,
-                &plugin.name,
-                release_version,
-                plugin.release.bundle_download_url.as_deref(),
-                plugin.release.app_manifest.clone(),
-            ) {
-                Ok(bundle) => bundle,
-                Err(err) => {
-                    warn!(
-                        remote_plugin_id = %plugin.id,
-                        plugin = %plugin.name,
-                        marketplace = %marketplace_name,
-                        error = %err,
-                        "skipping remote installed plugin bundle download"
-                    );
-                    failed_remote_plugin_ids.insert(plugin.id);
-                    continue;
-                }
-            };
-
-            match crate::remote_bundle::download_and_install_remote_plugin_bundle(
-                codex_home.clone(),
-                bundle,
-            )
-            .await
-            {
-                Ok(result) => {
-                    installed_plugin_ids.insert(result.plugin_id.as_key());
-                }
-                Err(err) => {
-                    warn!(
-                        remote_plugin_id = %plugin.id,
-                        plugin = %plugin.name,
-                        marketplace = %marketplace_name,
-                        error = %err,
-                        "failed to download remote installed plugin bundle"
-                    );
-                    failed_remote_plugin_ids.insert(plugin.id);
-                }
-            }
-        }
-    }
-
-    let removed_cache_plugin_ids = tokio::task::spawn_blocking(move || {
-        remove_stale_remote_plugin_caches(
-            codex_home.as_path(),
-            &installed_plugin_names_by_marketplace,
-        )
-    })
-    .await?
-    .map_err(RemoteInstalledPluginBundleSyncError::CacheRemove)?;
-
-    Ok(RemoteInstalledPluginBundleSyncOutcome {
-        installed_plugin_ids: installed_plugin_ids.into_iter().collect(),
-        removed_cache_plugin_ids,
-        failed_remote_plugin_ids: failed_remote_plugin_ids.into_iter().collect(),
-    })
+    Err(super::remote_plugin_control_plane_disabled_error().into())
 }
 
 pub fn mark_remote_plugin_cache_mutation_in_flight(
@@ -305,101 +154,8 @@ impl Drop for RemotePluginCacheMutationGuard {
     }
 }
 
-fn remove_stale_remote_plugin_caches(
-    codex_home: &Path,
-    installed_plugin_names_by_marketplace: &BTreeMap<String, BTreeSet<String>>,
-) -> Result<Vec<String>, String> {
-    let mut removed_cache_plugin_ids = Vec::new();
-    for marketplace_name in [
-        REMOTE_GLOBAL_MARKETPLACE_NAME,
-        REMOTE_WORKSPACE_MARKETPLACE_NAME,
-        REMOTE_WORKSPACE_SHARED_WITH_ME_MARKETPLACE_NAME,
-        REMOTE_WORKSPACE_SHARED_WITH_ME_PRIVATE_MARKETPLACE_NAME,
-        REMOTE_WORKSPACE_SHARED_WITH_ME_UNLISTED_MARKETPLACE_NAME,
-    ] {
-        let marketplace_root = codex_home.join(PLUGINS_CACHE_DIR).join(marketplace_name);
-        if !marketplace_root.exists() {
-            continue;
-        }
-        let installed_plugin_names = installed_plugin_names_by_marketplace
-            .get(marketplace_name)
-            .cloned()
-            .unwrap_or_default();
-        for entry in fs::read_dir(&marketplace_root).map_err(|err| {
-            format!(
-                "failed to read remote plugin cache directory {}: {err}",
-                marketplace_root.display()
-            )
-        })? {
-            let entry = entry.map_err(|err| {
-                format!(
-                    "failed to enumerate remote plugin cache directory {}: {err}",
-                    marketplace_root.display()
-                )
-            })?;
-            let plugin_name = entry.file_name().into_string().map_err(|file_name| {
-                format!(
-                    "remote plugin cache entry under {} is not valid UTF-8: {:?}",
-                    marketplace_root.display(),
-                    file_name
-                )
-            })?;
-            if installed_plugin_names.contains(&plugin_name) {
-                continue;
-            }
-            if is_remote_plugin_cache_mutation_in_flight(codex_home, marketplace_name, &plugin_name)
-            {
-                continue;
-            }
-
-            let cache_path = entry.path();
-            if cache_path.is_dir() {
-                fs::remove_dir_all(&cache_path).map_err(|err| {
-                    format!(
-                        "failed to remove stale remote plugin cache entry {}: {err}",
-                        cache_path.display()
-                    )
-                })?;
-            } else {
-                fs::remove_file(&cache_path).map_err(|err| {
-                    format!(
-                        "failed to remove stale remote plugin cache entry {}: {err}",
-                        cache_path.display()
-                    )
-                })?;
-            }
-            let plugin_key = PluginId::new(plugin_name.clone(), marketplace_name.to_string())
-                .map(|plugin_id| plugin_id.as_key())
-                .unwrap_or_else(|_| format!("{plugin_name}@{marketplace_name}"));
-            removed_cache_plugin_ids.push(plugin_key);
-        }
-    }
-
-    removed_cache_plugin_ids.sort();
-    Ok(removed_cache_plugin_ids)
-}
-
 fn remote_plugin_cache_root(codex_home: &Path) -> PathBuf {
     codex_home.join(PLUGINS_CACHE_DIR)
-}
-
-fn is_remote_plugin_cache_mutation_in_flight(
-    codex_home: &Path,
-    marketplace_name: &str,
-    plugin_name: &str,
-) -> bool {
-    let Some(mutations) = REMOTE_PLUGIN_CACHE_MUTATIONS_IN_FLIGHT.get() else {
-        return false;
-    };
-    let mutations = match mutations.lock() {
-        Ok(mutations) => mutations,
-        Err(err) => err.into_inner(),
-    };
-    mutations.contains_key(&RemotePluginCacheMutationKey {
-        plugin_cache_root: remote_plugin_cache_root(codex_home),
-        marketplace_name: marketplace_name.to_string(),
-        plugin_name: plugin_name.to_string(),
-    })
 }
 
 fn mark_remote_installed_plugin_bundle_sync_in_flight(
@@ -428,7 +184,6 @@ fn clear_remote_installed_plugin_bundle_sync_in_flight(key: &RemoteInstalledPlug
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pretty_assertions::assert_eq;
 
     #[test]
     fn remote_installed_plugin_sync_in_flight_dedupes_by_cache_root() {
@@ -449,136 +204,5 @@ mod tests {
             key.clone()
         ));
         clear_remote_installed_plugin_bundle_sync_in_flight(&key);
-    }
-
-    #[test]
-    fn stale_remote_plugin_cleanup_skips_cache_mutations_in_progress() {
-        let codex_home = tempfile::tempdir().expect("create codex home");
-        let cached_manifest = codex_home
-            .path()
-            .join(PLUGINS_CACHE_DIR)
-            .join(REMOTE_GLOBAL_MARKETPLACE_NAME)
-            .join("linear")
-            .join("1.2.3")
-            .join(".codex-plugin")
-            .join("plugin.json");
-        std::fs::create_dir_all(cached_manifest.parent().expect("manifest parent"))
-            .expect("create cached plugin manifest parent");
-        std::fs::write(&cached_manifest, r#"{"name":"linear"}"#)
-            .expect("write cached plugin manifest");
-        let installed_plugin_names_by_marketplace =
-            BTreeMap::<String, BTreeSet<String>>::from_iter([
-                (REMOTE_GLOBAL_MARKETPLACE_NAME.to_string(), BTreeSet::new()),
-                (
-                    REMOTE_WORKSPACE_MARKETPLACE_NAME.to_string(),
-                    BTreeSet::new(),
-                ),
-                (
-                    REMOTE_WORKSPACE_SHARED_WITH_ME_PRIVATE_MARKETPLACE_NAME.to_string(),
-                    BTreeSet::new(),
-                ),
-                (
-                    REMOTE_WORKSPACE_SHARED_WITH_ME_UNLISTED_MARKETPLACE_NAME.to_string(),
-                    BTreeSet::new(),
-                ),
-            ]);
-
-        let guard = mark_remote_plugin_cache_mutation_in_flight(
-            codex_home.path(),
-            REMOTE_GLOBAL_MARKETPLACE_NAME,
-            "linear",
-        );
-        let second_guard = mark_remote_plugin_cache_mutation_in_flight(
-            codex_home.path(),
-            REMOTE_GLOBAL_MARKETPLACE_NAME,
-            "linear",
-        );
-        let removed = remove_stale_remote_plugin_caches(
-            codex_home.path(),
-            &installed_plugin_names_by_marketplace,
-        )
-        .expect("cleanup while install is guarded");
-        assert_eq!(removed, Vec::<String>::new());
-        assert!(cached_manifest.is_file());
-
-        drop(guard);
-        let removed = remove_stale_remote_plugin_caches(
-            codex_home.path(),
-            &installed_plugin_names_by_marketplace,
-        )
-        .expect("cleanup while second install guard is still active");
-        assert_eq!(removed, Vec::<String>::new());
-        assert!(cached_manifest.is_file());
-
-        drop(second_guard);
-        let removed = remove_stale_remote_plugin_caches(
-            codex_home.path(),
-            &installed_plugin_names_by_marketplace,
-        )
-        .expect("cleanup after install guard is dropped");
-        assert_eq!(removed, vec!["linear@openai-curated-remote".to_string()]);
-        assert!(!cached_manifest.exists());
-    }
-
-    #[test]
-    fn stale_remote_plugin_cleanup_removes_old_shared_with_me_cache_and_keeps_canonical_cache() {
-        let codex_home = tempfile::tempdir().expect("create codex home");
-        let cached_manifest = codex_home
-            .path()
-            .join(PLUGINS_CACHE_DIR)
-            .join(REMOTE_WORKSPACE_SHARED_WITH_ME_PRIVATE_MARKETPLACE_NAME)
-            .join("private-plugin")
-            .join("1.2.3")
-            .join(".codex-plugin")
-            .join("plugin.json");
-        std::fs::create_dir_all(cached_manifest.parent().expect("manifest parent"))
-            .expect("create cached plugin manifest parent");
-        std::fs::write(&cached_manifest, r#"{"name":"private-plugin"}"#)
-            .expect("write cached plugin manifest");
-        let canonical_cached_manifest = codex_home
-            .path()
-            .join(PLUGINS_CACHE_DIR)
-            .join(REMOTE_WORKSPACE_SHARED_WITH_ME_MARKETPLACE_NAME)
-            .join("shared-plugin")
-            .join("1.2.3")
-            .join(".codex-plugin")
-            .join("plugin.json");
-        std::fs::create_dir_all(canonical_cached_manifest.parent().expect("manifest parent"))
-            .expect("create canonical cached plugin manifest parent");
-        std::fs::write(&canonical_cached_manifest, r#"{"name":"shared-plugin"}"#)
-            .expect("write canonical cached plugin manifest");
-        let installed_plugin_names_by_marketplace =
-            BTreeMap::<String, BTreeSet<String>>::from_iter([
-                (REMOTE_GLOBAL_MARKETPLACE_NAME.to_string(), BTreeSet::new()),
-                (
-                    REMOTE_WORKSPACE_MARKETPLACE_NAME.to_string(),
-                    BTreeSet::new(),
-                ),
-                (
-                    REMOTE_WORKSPACE_SHARED_WITH_ME_MARKETPLACE_NAME.to_string(),
-                    BTreeSet::from(["shared-plugin".to_string()]),
-                ),
-                (
-                    REMOTE_WORKSPACE_SHARED_WITH_ME_PRIVATE_MARKETPLACE_NAME.to_string(),
-                    BTreeSet::new(),
-                ),
-                (
-                    REMOTE_WORKSPACE_SHARED_WITH_ME_UNLISTED_MARKETPLACE_NAME.to_string(),
-                    BTreeSet::new(),
-                ),
-            ]);
-
-        let removed = remove_stale_remote_plugin_caches(
-            codex_home.path(),
-            &installed_plugin_names_by_marketplace,
-        )
-        .expect("cleanup private shared-with-me cache");
-
-        assert_eq!(
-            removed,
-            vec!["private-plugin@workspace-shared-with-me-private".to_string()]
-        );
-        assert!(!cached_manifest.exists());
-        assert!(canonical_cached_manifest.is_file());
     }
 }

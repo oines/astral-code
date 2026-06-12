@@ -114,7 +114,7 @@ pub struct Thread {
     pub preview: String,
     /// Whether the thread is ephemeral and should not be materialized on disk.
     pub ephemeral: bool,
-    /// Model provider used for this thread (for example, 'openai').
+    /// Model provider used for this thread (for example, 'astral').
     pub model_provider: String,
     /// Unix timestamp (in seconds) when the thread was created.
     #[ts(type = "number")]

@@ -36,6 +36,16 @@ pub fn normalize_base_url(input: &str) -> String {
     base_url
 }
 
+pub fn codex_api_url(base_url: &str, path: &str) -> String {
+    let base_url = normalize_base_url(base_url);
+    let path = path.trim_start_matches('/');
+    if base_url.ends_with("/api/codex") {
+        format!("{base_url}/{path}")
+    } else {
+        format!("{base_url}/api/codex/{path}")
+    }
+}
+
 pub fn cloud_tasks_base_url_from_env() -> anyhow::Result<String> {
     let value = std::env::var(ASTRAL_CLOUD_TASKS_BASE_URL_ENV_VAR).map_err(|_| {
         anyhow::anyhow!(
@@ -55,7 +65,7 @@ pub async fn load_auth_manager() -> Option<AuthManager> {
     Some(
         AuthManager::new(
             config.codex_home.to_path_buf(),
-            /*enable_codex_api_key_env*/ false,
+            /*enable_astral_api_key_env*/ false,
             config.cli_auth_credentials_store_mode,
         )
         .await,
@@ -67,12 +77,12 @@ pub async fn build_astral_auth_headers() -> HeaderMap {
     use reqwest::header::HeaderValue;
     use reqwest::header::USER_AGENT;
 
-    set_user_agent_suffix("codex_cloud_tasks_tui");
-    let ua = codex_login::default_client::get_codex_user_agent();
+    set_user_agent_suffix("astral_cloud_tasks_tui");
+    let ua = codex_login::default_client::get_astral_user_agent();
     let mut headers = HeaderMap::new();
     headers.insert(
         USER_AGENT,
-        HeaderValue::from_str(&ua).unwrap_or(HeaderValue::from_static("codex-cli")),
+        HeaderValue::from_str(&ua).unwrap_or(HeaderValue::from_static("astral")),
     );
     if let Some(am) = load_auth_manager().await
         && let Some(auth) = am.auth().await
@@ -85,9 +95,6 @@ pub async fn build_astral_auth_headers() -> HeaderMap {
 /// Construct a browser-friendly task URL for the given backend base URL.
 pub fn task_url(base_url: &str, task_id: &str) -> String {
     let normalized = normalize_base_url(base_url);
-    if let Some(root) = normalized.strip_suffix("/backend-api") {
-        return format!("{root}/codex/tasks/{task_id}");
-    }
     if let Some(root) = normalized.strip_suffix("/api/codex") {
         return format!("{root}/codex/tasks/{task_id}");
     }

@@ -1,6 +1,6 @@
 # Astral-Code 项目总控记录
 
-最后更新：2026-06-11 23:12 CST
+最后更新：2026-06-12 本轮
 
 这份文档是 Astral-Code 长线改造的中文 handoff。它的用途不是对外宣传，而是让后续任何一次
 compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道：我们到底要做什么、为什么这么做、
@@ -123,6 +123,317 @@ remote-control 测试/自测路径。remote-control 请求头也从 `chatgpt-acc
 `approvals_reviewer = "auto_review"` 或 MCP/app override 请求 AutoReview，Astral 也不会启动 Guardian
 review subagent，权限请求回到普通用户审批事件与现有 sandbox/approval 链路。`strict_auto_review`
 响应也会被归一化为 `false`，不再强制后续工具调用进入 Guardian。
+
+最新补充 18：multi-agent / subagent 不再继续 Claude-ish 改名。此前实现过 `Agent` / `SendMessage` /
+`TaskStop` 三个薄包装，但复盘后确认 subagent 不是 v1 主路径，薄改名收益低、容易留下半新半旧的模型可见面。
+本轮已删除这些 Astral subagent handler 和 schema，multi-agent v2 模型可见工具恢复 Codex 原版
+`spawn_agent`、`send_message`、`followup_task`、`wait_agent`、`interrupt_agent`、`list_agents`。
+底层 `AgentControl`、thread tree、mailbox、fork/resume、approval/sandbox 继续完整继承 Codex，不做重写。
+
+最新补充 19：subagent 回退切片已做 scoped 编译验证：
+`CARGO_INCREMENTAL=0 cargo check --tests -p codex-core -p codex-tools` 通过。随后继续推进 provider
+adapter 兼容性：Anthropic Messages adapter 现在只有在请求实际包含 tools 时才默认发送 `tool_choice`；
+纯文本/无工具请求不再携带 `tool_choice: { "type": "auto" }`，避免严格 `/anthropic` 兼容网关因为“无 tools
+却有 tool_choice”拒绝请求。对应窄测试 `just test -p codex-api anthropic` 通过 6 个测试。
+
+最新补充 20：OpenAI-compatible chat-completions adapter 增加 DeepSeek cache usage 归一化。DeepSeek 官方
+usage 字段包含 `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`；Astral 现在会把
+`prompt_cache_hit_tokens` 映射到内部 `cache_read_input_tokens`，并在缺少 `prompt_tokens` 时可用 hit+miss
+回推输入 token 数。这让后续 cache 命中率、成本估算和 status/usage 展示不会丢失 DeepSeek 官方缓存信息。
+对应窄测试 `just test -p codex-api chat_completions` 通过 8 个测试。
+
+最新补充 21：OpenAI-compatible chat-completions stream parser 增加 DeepSeek 风格
+`delta.reasoning_content` 支持。该字段现在会映射到内部 `ContentDelta::Reasoning`，并使用独立 block index，
+避免 reasoning、正文和 tool call 在 Response event mapper 里互相覆盖。对应窄测试
+`just test -p codex-api chat_completions` 通过 9 个测试。
+
+最新补充 22：OpenAI-compatible chat-completions request serializer 对纯文本 user message 改为更保守的
+`"content": "..."` 字符串形状，贴近 DeepSeek 和多数国内 OpenAI-compatible 网关的 text-only 入参习惯。
+包含图片的 user message 仍保留 OpenAI content parts 数组，确保原版 Codex 可读图/多模态能力不被削弱。
+对应窄测试 `just test -p codex-api chat_completions` 通过 10 个测试。
+
+最新补充 23：remote plugin 的用户可见 marketplace 展示名从 `OpenAI Curated Remote` 收敛为
+`Astral Curated Remote`，TUI 本地 curated tab 文案也从 `OpenAI Curated` 改为 `Astral Curated`。
+manager 的 remote discoverable cache 入口不再用 `uses_codex_backend()` / ChatGPT account id 做 gating；
+因为 Astral 当前 remote plugin control-plane 已整体 disabled，默认路径会直接返回空，不再保留“必须是
+ChatGPT 后端 auth 才能继续”的语义。对应窄测试：
+`just test -p codex-core-plugins build_remote_installed_plugin_marketplaces_from_cache_uses_remote_metadata`
+通过 1 个测试；
+`just test -p codex-tui plugins_popup_openai_curated_tab_omits_marketplace_in_rows`
+通过 1 个测试。后者编译较重，后续非必要不要频繁跑 TUI 单测。
+
+磁盘维护记录：TUI 窄测编译后 `codex-rs/target` 涨到约 109G、磁盘剩余约 44Gi。按用户要求只清理
+Astral-Code 项目内较低风险构建缓存，删除 `codex-rs/target/debug/incremental`，释放约 6Gi；
+清理后 `codex-rs/target` 约 103G、磁盘剩余约 50Gi。未删除项目外任何文件。
+
+最新补充 24：Guardian / auto_review 旁路审计完成。MCP elicitation、delegated subagent MCP
+compatibility path、普通 shell/apply_patch approval 都会先检查
+`routes_approval_to_guardian_with_reviewer(...)` 或 `routes_approval_to_guardian(...)`；该函数在 Astral
+当前实现中无条件返回 `false`，并已有测试覆盖 `AutoReview` 配置和 app/MCP override 都不能重新启用 Guardian。
+`strict_auto_review` 也会在 request-permissions 响应归一化时清掉，不能授予 session 级自动审查能力。
+因此当前没有发现 MCP elicitation 绕过普通用户审批而触发 Guardian review subagent 的运行时路径。
+剩余 Guardian 类型、analytics、UI notification 和 tests 属于 legacy/dead surface，后续可继续隔离或删除，
+但它们不是当前默认外联风险。
+
+最新补充 25：OpenAI hosted-only extensions 默认暴露路径完成审计。`web-search` extension 当前没有安装进
+app-server extension registry；`image-generation` extension 虽然仍在 registry 里，但工具暴露被双重 gating：
+只有 `config.model_provider.is_openai()` 且当前 auth 使用 Codex backend 时才会注入。因此 Astral API-key、
+Anthropic Messages、国内 OpenAI-compatible provider 默认都不会看到这些 hosted-only tool。结论是 v1 暂不需要
+额外删除该入口；后续若做完整 hosted-control-plane 瘦身，可把 image-generation 也改成显式 provider/plugin
+能力，而不是默认内置能力。
+
+最新补充 26：`codex-memories-write` 后台 memories 任务移除 OpenAI 模型名硬编码。Stage 1 原先默认
+`gpt-5.4-mini`，Stage 2 原先默认 `gpt-5.4`；现在两阶段都走“显式 `memories.extract_model` /
+`memories.consolidation_model` 优先，否则继承当前 `config.model`，仍无模型则跳过后台模型调用”的路径。
+这样保留 Codex 的本地 memories/local compact 工程设计，但不会在 Astral provider-neutral 模式下偷偷 fallback 到
+OpenAI 模型名。对应轻量验证已跑：
+`just fmt` 通过；
+`just test -p codex-memories-write memories_startup_phase1_uses_live_thread_service_tier_and_detached_metadata`
+通过 1 个测试。该测试首次编译较重，结束后磁盘剩余约 46Gi，暂未清缓存；后续如继续接近告警线，只清理
+`/Users/oines/project/astral-code` 内的低风险构建缓存。
+
+最新补充 27：TUI app connector handoff 文案从 ChatGPT 绑定改为 provider-neutral。`app_link_view` 不再要求
+`codex_apps` auth URL 必须属于 `chatgpt.com` / `chatgpt-staging.com`，而是和普通外部 action 一样只接受
+HTTPS、禁止 username/password；按钮从 `Install/Manage on ChatGPT` 改成 `Install app` / `Manage app`，
+浏览器确认文案也改为通用 app/browser 表述。`chatwidget/plugins.rs` 里的 plugin 安装后 app setup
+弹窗同步改成“在浏览器里安装/管理 app”，并移除默认 `help.openai.com/.../apps-in-chatgpt` hyperlink。
+相关 app_link snapshot 已手动更新。验证：
+`just fmt` 通过；
+`cargo check -p codex-tui` 通过。第一次 check 较重，触到 TUI 共享依赖；第二次增量复查约 9 秒通过。
+随后按用户要求只清理 Astral-Code 项目内的 `codex-rs/target/debug/incremental`，磁盘剩余从约 45Gi 回到约 49Gi；
+未删除项目外任何文件。
+
+最新补充 28：TUI apps/connectors 前端可见性也已从 ChatGPT account gating 中解耦。
+`chatwidget/connectors.rs` 的 `connectors_enabled()` 现在只看 `Feature::Apps`，因此 `/apps`、`$app`
+mention 候选、session 配置后的 prefetch 和 bottom pane 开关不会因为没有 ChatGPT 登录态而被静默关闭。
+同时把一个 apps popup 测试改成“无 ChatGPT account 也能保持 loading 并接收最终 snapshot”的防回归用例。
+`model_popups.rs` 中“OpenAI base URL is overridden”的用户可见警告也改成中性的 configured base URL 文案。
+验证：
+`just fmt` 通过；
+`CARGO_INCREMENTAL=0 cargo check -p codex-tui` 通过。磁盘当前剩余约 48Gi；
+`codex-rs/target` 约 104G，其中 `debug/deps` 约 100G、`debug/incremental` 为 0B。因为剩余空间仍健康，
+暂不删除 `debug/deps`，避免显著拖慢后续开发；后续若再次逼近告警线，只清理 Astral-Code 项目内构建缓存。
+
+最新补充 29：模型 reroute warning 从 OpenAI/ChatGPT cyber 文案改为 provider-neutral。
+此前 `server_model != requested_model` 会被无条件解释成“high-risk cyber activity”，并向用户展示
+`https://chatgpt.com/cyber` 和 OpenAI cyber-safety 文档链接；这在国产 OpenAI-compatible 网关返回别名模型、
+fallback 模型或路由模型时会严重误导。现在 core 新增 `ModelRerouteReason::ProviderModelReroute`，app-server
+v2 schema 同步暴露 `providerModelReroute`，session warning 改成“provider returned model X while Y was
+requested”。旧 `HighRiskCyberActivity` 变体保留，用于 legacy/error 兼容；compact 的 warning filter 同时识别
+旧 OpenAI warning 和新 Astral provider reroute warning，避免它们作为用户消息进入模型上下文。
+验证：
+`just fmt` 通过；
+`just write-app-server-schema` 通过；
+`just test -p codex-app-server-protocol` 通过 222 个测试；
+`just test -p codex-core safety_check_downgrade` 通过 7 个测试；
+`just test -p codex-core collect_user_messages_filters_legacy_warnings` 通过；
+`just test -p codex-core process_compacted_history_drops_legacy_warnings` 通过。
+本次 core 窄测首次重编较重，用时约 8 分半，后续非必要不要频繁跑 core 测试。测试后磁盘剩余约 41Gi；
+已按用户要求仅删除 Astral-Code 项目内 `codex-rs/target/debug/incremental`，清理后剩余约 45Gi，
+未删除项目外文件，也未删除 `debug/deps`。
+
+最新补充 30：Claude-ish 核心工具 schema 对照继续推进。对照 `/Users/oines/project/claude-code/tools`
+里的 Bash、Read、Write、Edit、Glob、Grep、TodoWrite、AskUserQuestion、ToolSearch 源码后，确认当前
+Astral 的 `ToolSearch.max_results`、`Bash.command/timeout/description/run_in_background`、文件工具
+`file_path/old_string/new_string/replace_all`、`TodoWrite.todos[].content/status/activeForm` 这些主轨迹字段
+基本贴近 Claude Code。发现并修正一个实际错配：Astral `Read` runtime 当前只稳定支持文本文件和本地图片，
+PDF/pages 会明确拒绝；因此本轮从模型可见 `Read` schema 中撤掉 `pages` 字段，避免模型按 Claude Code 的
+PDF page extraction 习惯调用尚未实现的能力。handler 里仍保留对外部硬塞 `pages` 的显式拒绝分支，保证边界清晰。
+验证：
+`just fmt` 通过；
+`just test -p codex-tools astral` 通过 7 个 Astral schema 相关测试。
+本次窄测触发部分共享依赖重编，磁盘剩余约 44Gi；暂不删除 `debug/deps`，只在继续下降时清理
+Astral-Code 项目内低风险构建缓存。
+
+最新补充 31：协议层 usage/quota 错误文案去 ChatGPT 化。`codex-protocol` 里 `UsageNotIncluded` 不再提示
+“用 ChatGPT plan 升级 Plus”，而是提示当前账号/API key 没有 provider 访问权限；`UsageLimitReachedError`
+不再根据 ChatGPT plan 类型输出 Plus/Pro 升级、`chatgpt.com/codex/settings/usage` 或 hosted promo 文案。
+现在通用限额只展示 provider-neutral 消息：“检查 provider account、billing 或 model quota”，并继续保留
+`resets_at` 的本地化重试时间。workspace credits / spend cap 这类有用结构化错误仍保留原行为。
+同时把相关协议测试中的 ChatGPT hosted URL fixture 换成中性的 `provider.example` URL，避免测试样例继续暗示
+Astral 默认使用 ChatGPT backend。验证：
+`just fmt` 通过；
+`just test -p codex-protocol error` 通过 33 个相关测试。
+本轮测试后只清理了 Astral-Code 项目内 `codex-rs/target/debug/incremental`（约 435M），磁盘剩余约 44Gi；
+未删除项目外文件，也未删除 `debug/deps`。
+
+最新补充 32：TUI 启动阶段的 OpenAI 模型 upsell 提示默认隔离。原 Codex 的 model migration prompt /
+model availability NUX 会根据 model catalog 推 `gpt-*` 新模型或迁移目标；这在 Astral 默认 `astral`
+provider（DeepSeek/OpenAI-compatible chat-completions）下会给用户错误信号。现在
+`prepare_startup_tooltip_override(...)` 和 `handle_model_migration_prompt_if_needed(...)` 都会先检查
+`config.model_provider.is_openai()`，非 OpenAI provider 直接不展示这些 OpenAI 模型推广/迁移提示。旧 helper
+和显式 OpenAI provider 路径保留，避免大面积删除 TUI 迁移组件；Astral 默认路径不会触发。
+验证：
+`just fmt` 通过；
+`just test -p codex-tui prepare_startup_tooltip_override` 通过 2 个过滤测试。
+注意：该 TUI 过滤测试编译成本很高，触发了约 5 分半依赖重编，后续非必要不要再跑 TUI nextest；
+测试后只清理了 Astral-Code 项目内 `codex-rs/target/debug/incremental`（约 4.7G），磁盘剩余约 44Gi。
+
+最新补充 33：继续清理用户可见 OpenAI/ChatGPT 出口，但不动 sandbox/exec 行为。完成项：
+standalone update 命令和 release notes snapshot 已指向 `oines/astral-code` 与 `ASTRAL_NON_INTERACTIVE`；
+npm registry 测试 fixture 从 `@openai/codex` 改为 `astral-code`；TUI Cyber / Trusted Access 提示改成
+provider-neutral 的“provider requested additional safety review”，不再展示 `chatgpt.com/cyber`；memories、
+MCP 空状态、Windows sandbox 帮助链接改到 Astral 仓库文档；feature flag、profile 冲突、metrics、bwrap
+warning 等 CLI/config/sandbox 文案也改为 Astral 文档或 Astral 项目名。`/status` 相关快照同步更新为
+`Astral-Code`，移除 ChatGPT usage 链接，并展示 `Model provider: Astral`。
+验证：
+`just fmt` 通过；
+`just test -p codex-tui cyber_policy_error_event` 通过 2 个测试；
+`just test -p codex-tui standalone` 通过 4 个测试；
+`just test -p codex-tui memories_enable_prompt memories_settings_popup windows_sandbox_required` 通过 6 个测试；
+`just test -p codex-tui status_snapshot` 通过 24 个测试；
+`just test -p codex-features deprecation` 通过 1 个测试；
+`just test -p codex-config profile_v2` 通过 3 个测试。
+`just test -p codex-sandboxing bwrap` 因过滤器没有匹配到测试返回 “0 tests”，但 `codex-sandboxing` crate 已编译通过。
+本轮误把三个 Rust 测试并行启动，Cargo 锁导致后两个排队；后续 Rust 测试应顺序跑。磁盘当前约 40Gi 可用，
+`codex-rs/target/debug/incremental` 为 0B，`debug/deps` 约 108G；按用户要求暂不删除 `debug/deps`，只继续监控。
+
+最新补充 34：core-plugins curated startup sync 已从 OpenAI 默认外联改成 Astral 本地 snapshot-only stub。
+原实现会默认 `git ls-remote` / `git fetch` `https://github.com/openai/plugins.git`，失败后还会走 GitHub API
+repository/zipball fallback；这条默认外联链路已经删除。现在 `sync_curated_plugins_repo(...)` 只做三件事：
+拿 `.tmp/plugins.sync.lock`，如果本地 `.tmp/plugins/.agents/plugins/marketplace.json` 和 `.tmp/plugins.sha`
+同时存在则返回本地 sha，否则返回明确错误
+`Astral curated plugin startup sync is disabled and no local curated plugins snapshot is available`。
+本地 curated marketplace 读取、plugin install 时对本地 sha 的依赖、MCP/plugins runtime 均保留；只是不会默认拉
+OpenAI plugins 仓库。内部函数名也从 `sync_openai_plugins_repo` 改为 `sync_curated_plugins_repo`，避免后续误读。
+验证：
+`just fmt` 通过；
+`just test -p codex-core-plugins startup_sync` 通过 5 个测试。
+本轮后 `startup_sync.rs` / `startup_sync_tests.rs` 已搜不到 `openai/plugins`、`api.github.com`、`zipball`、
+`GitHub HTTP`、`sync_openai_plugins_repo` 等旧入口。磁盘仍约 40Gi 可用，`debug/incremental` 为 0B，
+`debug/deps` 约 108G，暂不清理高价值编译缓存。
+
+最新补充 35（2026-06-12 03:14 CST）：继续收敛用户可见文档、模型 catalog 和 fallback prompt。
+完成项：
+`codex-rs/README.md`、`docs/*`、`codex-rs/app-server-daemon/README.md`、`codex-rs/default.nix` 已改为
+Astral 命名、Astral 安装路径、`ASTRAL_HOME`、`astral` CLI 和 provider-neutral auth/config 文案；这些文档中
+已不再含 `developers.openai.com`、`github.com/openai`、`chatgpt.com`、`CODEX_HOME` 等旧入口。
+`codex-rs/models-manager/models.json` 现在所有 bundled model 都复用第一条 DeepSeek/Astral base instructions 和
+model_messages；`upgrade` / `availability_nux` 全部清空；`available_in_plans` 清空；`supports_search_tool` 关闭；
+`apply_patch_tool_type` 设为 `null`，避免默认把旧 `apply_patch` 暴露给模型侧工具面。`codex-auto-review` 的展示名改为
+`Astral Auto Review`，但 slug 暂保留以降低测试/兼容面冲击；`gpt-5.3-codex` slug 也暂保留，展示名改成 legacy。
+`codex-rs/models-manager/prompt.md` 的 fallback 提示词改成 Astral 工具口径：强调 `Bash`、`Read`、`Write`、
+`Edit`、`Glob`、`Grep`、`TodoWrite` 等，不再指导模型使用 `update_plan` 或 `apply_patch` 作为模型侧工具。
+`codex-rs/models-manager/src/model_info.rs` 的未知模型 personality fallback header 已从 “You are Codex...” 改为
+“You are Astral...”。`codex-rs/tui/src/lib.rs` 的新 TUI 日志文件名改成 `astral-tui.log`，同时保留对旧
+`codex-tui.log` 的启动清理。
+登录/配置运行时文案里 “Stored OpenAI/ChatGPT credentials...” 改为 “Stored upstream hosted credentials...”；
+MCP OAuth 注释里的 OpenAI GitHub 链接移除，相关注释改为 Astral。
+验证：
+`just fmt` 通过；
+`just test -p codex-models-manager bundled_models_json_roundtrips` 通过 1 个测试；
+`just test -p codex-tui startup_removes_legacy_tui_log_file` 通过 1 个测试。
+磁盘从约 40Gi 可用降到约 38Gi 可用，主要来自 Rust 编译缓存增长；仍未清理 `debug/deps`，因为这会显著拖慢后续开发。
+
+最新补充 36（2026-06-12 03:35 CST）：backend-client / cloud-tasks hosted backend 命名继续去 OpenAI 化。
+`codex-rs/backend-client/src/client.rs` 不再使用 `ChatGptApi` path style，改为 `HostedApi`；默认 HTTP user-agent
+从 `codex-cli` 改为 `astral`。client 也不再生成 `ChatGPT-Account-Id` 或 `X-OpenAI-Fedramp` 这类 OpenAI
+专用 header，账号透传改为 Astral 自有的 `Astral-Account-Id`。Cloud tasks 的 debug env 和 CLI 文案此前已经改成
+`ASTRAL_CLOUD_TASKS_*` / `astral cloud`，本轮又把 `codex-rs/cloud-tasks-client/src/http.rs` 的 wrapper 方法收敛为
+`with_hosted_account_id(...)`。`codex-rs/cloud-tasks/src` / `tests`、`codex-rs/backend-client/src`、
+`codex-rs/cloud-tasks-client/src` 范围内已搜不到 `ChatGptApi`、`ChatGPT-Account-Id`、`X-OpenAI-Fedramp`、
+`chatgpt.com`、`OpenAI`、`CODEX_CLOUD_TASKS`、`codex cloud`、`Codex Cloud` 等旧控制面关键词。
+验证：
+`just fmt` 通过；
+`CARGO_INCREMENTAL=0 cargo check -p codex-backend-client -p codex-cloud-tasks-client -p codex-cloud-tasks`
+通过。磁盘仍约 38Gi 可用，未清理高价值编译缓存。
+
+最新补充 37（2026-06-12 03:47 CST）：`uses_codex_backend` 语义收敛为 `uses_hosted_backend`。
+这次是符号级机械重命名，覆盖 `login`、`model-provider`、`models-manager`、`app-server`、`codex-mcp`、
+`app-server-transport`、`core-plugins`、`cloud-config`、`core/src/client.rs`、`image-generation-extension` 等调用链。
+行为没有变：legacy token / agent identity / personal access token 仍被视作 hosted backend auth，但 Astral 登录入口已经拒绝这些
+token-backed hosted 凭据；这个重命名主要是避免后续维护者误把它理解成 Codex/OpenAI 专属后端。注释中 “Codex backend auth”
+也改为 hosted backend auth；`get_chatgpt_user_id` 这类旧 JWT claim accessor 暂不改名，因为它牵涉插件/cache 数据结构，
+且当前只是用来识别 legacy hosted payload。
+验证：
+`just fmt` 通过；
+`CARGO_INCREMENTAL=0 cargo check -p codex-login -p codex-models-manager -p codex-model-provider -p codex-app-server -p codex-core -p codex-mcp -p codex-app-server-transport -p codex-image-generation-extension -p codex-core-plugins -p codex-cloud-config`
+通过。磁盘约 40Gi 可用；`target/debug/incremental` 0B，`target/tmp` 0B，`target/debug/deps` 约 109G，按用户要求暂不删除。
+
+最新补充 38（2026-06-12 04:05 CST）：默认 HTTP client 去掉 ChatGPT/Cloudflare shim 和旧 `CODEX_*` originator fallback。
+`codex-rs/codex-client/src/chatgpt_cloudflare_cookies.rs`、`codex-rs/codex-client/src/chatgpt_hosts.rs` 已删除，`codex-client`
+不再导出 `with_chatgpt_cloudflare_cookie_store` 或 `is_allowed_chatgpt_host`。`codex-rs/login/src/auth/default_client.rs`
+不再读取 `CODEX_INTERNAL_ORIGINATOR_OVERRIDE`，只接受 `ASTRAL_INTERNAL_ORIGINATOR_OVERRIDE`；默认 client 构造也不再经过
+ChatGPT Cloudflare cookie shim。旧 OpenAI internal residency header
+`x-openai-internal-codex-residency` 改为 Astral 自有的 `x-astral-residency`。
+first-party originator 判定从 `codex-tui` / `codex_vscode` / `Codex *`、`codex_atlas` /
+`codex_chatgpt_desktop` 收敛为 `astral-tui` / `astral_vscode` / `Astral *`、`astral_atlas` /
+`astral_chat_desktop`；`exec` runtime 自报 originator/client_name/OTEL process name 从 `codex_exec` 改为
+`astral_exec`，OTEL 低基数字段 allowlist 同步新增 Astral originator 值。相关测试 helper 同步改用 Astral env。
+验证：
+`just fmt` 通过；
+`CARGO_INCREMENTAL=0 cargo check -p codex-client -p codex-login -p codex-exec -p codex-connectors -p codex-otel -p codex-app-server`
+通过。磁盘约 39Gi 可用，仍未清理 `target/debug/deps`。
+
+最新补充 39（2026-06-12 04:16 CST）：内部 user-agent API 从 Codex 命名收敛为 Astral 命名。
+`get_codex_user_agent()` 已机械重命名为 `get_astral_user_agent()`，调用点覆盖 `mcp-server`、`cloud-tasks`、
+`backend-client`、`app-server initialize` 和 websocket tests。上一条补充里的 default HTTP client / originator 清理后，
+本轮复查确认以下旧入口在相关范围内已经消失：
+`get_codex_user_agent`、`CODEX_INTERNAL_ORIGINATOR_OVERRIDE`、`with_chatgpt_cloudflare_cookie_store`、
+`is_allowed_chatgpt_host`、`chatgpt_hosts`、`chatgpt_cloudflare`、
+`x-openai-internal-codex-residency`、`codex_atlas`、`codex_chatgpt_desktop`、`connector_openai`。
+验证：
+`just fmt` 通过；
+`CARGO_INCREMENTAL=0 cargo check -p codex-client -p codex-login -p codex-exec -p codex-connectors -p codex-otel -p codex-app-server -p codex-mcp-server -p codex-cloud-tasks -p codex-backend-client`
+通过。磁盘约 39Gi 可用，`target/debug/incremental` 和 `target/tmp` 均为 0B。
+
+最新补充 40（2026-06-12 04:29 CST）：auth keyring 与 Astral 数据隔离继续收敛。
+`codex-rs/login/src/auth/storage.rs` 的 keyring service 从 `Codex Auth` 改为 `Astral Auth`，这样 Astral 不会读取旧
+Codex keychain 项；测试里的示例 home 从 `~/.codex` 改为 `~/.astral-code`，对应 store key 更新为
+`cli|f05172cba701f51c`。`find_codex_home()` 的实际实现此前已经只认 `ASTRAL_HOME` / `~/.astral-code`，
+没有 `CODEX_HOME` fallback；本轮重点补上 keyring service 这一条容易漏的旧数据入口。
+验证：
+`just fmt` 通过；
+`just test -p codex-login storage` 通过 17 个测试。该测试触发了约 2.7G incremental 缓存；按用户要求只清理
+`/Users/oines/project/astral-code/codex-rs/target/debug/incremental`，未碰 `target/debug/deps` 或电脑其他目录。
+清理后磁盘约 39Gi 可用，`target/tmp` 为 0B。
+
+最新补充 41（2026-06-12 04:45 CST）：`CODEX_HOME` 环境变量残留清零。
+实际 home 解析此前已经只认 `ASTRAL_HOME` / `~/.astral-code`；本轮把测试 harness、MCP tool schema 文案、
+Windows sandbox helper 顶层错误日志、network-proxy/TUI 错误文案、skills/theme/pets 注释和测试失败信息中的
+`CODEX_HOME` 改为 `ASTRAL_HOME`。关键点：没有修改 `CODEX_SANDBOX_*` 相关代码，也没有改 sandbox policy；Windows
+sandbox 变更只影响错误日志找 home 目录时读取的环境变量。复查 `rg -n "CODEX_HOME" codex-rs -g '*.rs'` 已无结果。
+验证：
+`just fmt` 通过；
+`CARGO_INCREMENTAL=0 cargo check -p codex-login -p codex-mcp-server -p codex-windows-sandbox -p codex-network-proxy -p codex-tui -p codex-core-skills -p codex-rmcp-client -p codex-skills-extension -p codex-skills -p codex-app-server-test-client`
+通过。磁盘约 38Gi 可用，`target/debug/incremental` 和 `target/tmp` 均为 0B。
+
+最新补充 42（2026-06-12 本轮）：DeepSeek 真实 smoke 和 provider/model 热切换底层链路推进。
+OpenAI-compatible chat-completions stream parser 已修正一个真实 DeepSeek 兼容坑：DeepSeek SSE 首个 role-only
+chunk 会带 `usage: null`，旧逻辑把它当 usage-only 完成事件，导致 `astral exec` 直接空输出。现在
+`usage_from_chat(...)` 显式忽略 JSON null，并新增对应单测；真实 `deepseek-v4-pro` OpenAI-compatible
+smoke 已返回 `OK_ASTRAL_OPENAI`。同时确认 provider 下面会有多个模型，不能把 `/model` 继续建成单层模型字符串。
+本轮已把 app-server/core/protocol 的 thread settings override 扩成 `(model_provider, model)` 二元组：
+`TurnStartParams` / `ThreadSettingsUpdateParams` / `ThreadSettingsOverrides` / `SessionSettingsUpdate` 都能携带
+`model_provider`，core 会按 provider id 切换 `ModelProviderInfo`，从而改变后续 turn 的 base URL、auth source、
+wire API 和 capability profile。TUI 内部 `AppEvent::UpdateModel` 也已改为 `{ model, model_provider }`，
+Plan mode 的 reasoning scope 二级确认会保留 provider，不会在确认阶段丢失。当前旧 `/model` UI 仍只在当前
+provider 内切模型，全部传 `model_provider: None`；完整 provider 分组 picker 仍未完成，下一步应做
+“provider 列表 -> provider 内 models -> 提交 provider+model”的 UI/状态层。
+验证：
+`just fmt` 通过；
+`just test -p codex-api stream_chunk_ignores_null_usage stream_chunk_maps_deepseek_reasoning_content_delta stream_chunk_maps_deepseek_cache_usage_fields`
+通过；
+`cargo build -p codex-cli` 通过；
+本轮尝试 `CARGO_INCREMENTAL=0 cargo check -p codex-tui --lib`，但 TTY 会话长时间无输出且进程视图未见 cargo/rustc，
+已用 Ctrl-C 停止，不能算通过；随后尝试 `just write-app-server-schema` 同样在编译阶段出现 TTY 会话无输出且进程视图
+无 cargo/rustc 的异常状态，已 Ctrl-C 停止，schema 生成仍待补。随后按用户要求只删除
+`/Users/oines/project/astral-code/codex-rs/target/debug/incremental`，磁盘从约 15Gi 回到约 19Gi 可用，
+`codex-rs/target` 约 129G；未删除 `target/debug/deps` 或项目外文件。若后续再次逼近告警线，仍优先只清理
+Astral-Code 项目内 incremental 缓存。
+
+最新补充 43（2026-06-12 本轮）：模型能力 catalog 策略重新定案为“完全不内置预设”。
+用户明确要求 Astral 不维护任何内置 provider/model 预设，不内置 DeepSeek/Kimi/小米/智谱等模型能力知识库，也不把
+`/models` API 的薄 model id 列表当能力真相。后续目标应改为 user-declared models：用户在配置文件中显式声明
+provider、model、wire API、context window、input modalities、reasoning/cache/tool 能力等。Astral 只负责：
+解析/校验 schema、给出缺配置错误、按声明能力构建请求、在单模态模型下安全剥离图片上下文、保留用户 override。
+未知模型默认必须保守，尤其 `input_modalities` 应视为 text-only，不能因为历史 Codex 兼容默认 `text+image` 而把图片塞给
+单模态国产模型。完整实现还未完成；当前 `models-manager/models.json` 仍有 bundled entries，需要后续专门移除或降级成
+测试 fixture / 空 catalog fallback。
+
+真实 DeepSeek 联调口径：用户已授权后续真实测试可使用 DeepSeek 官方模型 `deepseek-v4-pro`。任何 API key
+只能通过临时环境变量或本机未提交配置注入；不得写入仓库、fixture、文档、日志样例或 commit message。真实测试应在
+独立实验目录和独立 `ASTRAL_HOME` 下进行，不删除用户文件，不复用正常工作配置。
 
 本轮依赖检查备注：`just bazel-lock-update` 已执行成功；`just bazel-lock-check` 在本机因 `/usr/bin/python3`
 是 3.9.6、不支持 `.github/scripts/run_bazel_with_buildbuddy.py` 里的 `str | None` 类型语法而失败。当前
@@ -264,16 +575,16 @@ Astral 的内部方向是“深度重构”，不是“尾端 adapter 改名”�
 已决定做或已做的核心工具：
 
 - `Bash`
-- `Monitor`
-- `TaskStop`
+- `ReadTaskOutput`
+- `SendTaskInput`
+- `ListBackgroundTasks`
+- `StopBackgroundTask`
 - `Read`
 - `Write`
 - `Edit`
 - `Glob`
 - `Grep`
 - `TodoWrite`
-- `Agent`
-- `SendMessage`
 - `AskUserQuestion`
 - `RequestPermissions`
 - `ToolSearch`
@@ -286,12 +597,9 @@ Astral 的内部方向是“深度重构”，不是“尾端 adapter 改名”�
 - 已有 `codex-rs/tools/src/astral_flavor.rs`，用于集中定义 Astral 工具 flavor。
 - 已有 `codex-rs/core/src/tools/astral_tool_bridge.rs`，用于把 Astral 工具名/参数桥接到 Codex runtime。
 - 已有 `codex-rs/core/src/tools/handlers/astral_bash.rs`。
-- 已有 `codex-rs/core/src/tools/handlers/astral_monitor.rs`。
+- 已有 `codex-rs/core/src/tools/handlers/astral_background_tasks.rs`。
 - 已有 `codex-rs/core/src/tools/handlers/astral_file_tools.rs`。
 - 已有 `codex-rs/core/src/tools/handlers/astral_todo_write.rs`。
-- 已有 `codex-rs/core/src/tools/handlers/astral_agent.rs`。
-- 已有 `codex-rs/core/src/tools/handlers/astral_send_message.rs`。
-- 已有 `codex-rs/core/src/tools/handlers/astral_task_stop.rs`。
 - 已有 `codex-rs/core/src/tools/handlers/astral_request_permissions.rs`。
 - 已有 `codex-rs/core/src/tools/handlers/astral_ask_user_question.rs`。
 - 已有 `codex-rs/core/src/tools/handlers/astral_tool_search.rs`。
@@ -307,7 +615,7 @@ Astral 的内部方向是“深度重构”，不是“尾端 adapter 改名”�
 - `Cron`：Codex 没有对应 session cron runtime，暂缓。
 - `Worktree`：需要清晰隔离 git/worktree 生命周期，暂缓。
 - `Team`：Claude experimental agent teams，不是 v1 核心。
-- Claude Task v2：先用 Codex Goal/Multi-agent/TaskStop 能力，不追 v2 task 系统。
+- Claude Task v2：先用 Codex Goal/Multi-agent 能力，不追 v2 task 系统。
 - `NotebookEdit`：非主线编程 agent 能力。
 - `PowerShell`：未来 Windows 可考虑，现在不抢。
 - `Workflow`、`RemoteTrigger`、`ScheduleWakeup`、`PushNotification`：暂缓。
@@ -322,13 +630,10 @@ Astral 的内部方向是“深度重构”，不是“尾端 adapter 改名”�
   - 运行时：映射到 Codex shell execution / UnifiedExec。
   - 保留 timeout、background、stdout/stderr streaming、stdin、terminate、approval 和 sandbox。
 
-- `Monitor`
-  - 模型侧：用于持续盯后台命令输出、poll 日志、处理长命令进度。
-  - 运行时：映射到 Codex `write_stdin` / unified exec session 观察能力。
+- `ReadTaskOutput` / `SendTaskInput` / `ListBackgroundTasks` / `StopBackgroundTask`
+  - 模型侧：把后台命令观察、交互输入、任务找回和终止拆成清晰工具。
+  - 运行时：复用 Codex `write_stdin` / UnifiedExec manager / terminate 能力。
   - 这是用户明确喜欢 Codex 的关键体验之一：ffmpeg 等长任务要持续汇报，不要像 Claude Code 那样沉默卡住。
-
-- `TaskStop`
-  - 运行时：可以停止 shell task，也可以 interrupt multi-agent task。
 
 - `Read` / `Write` / `Edit` / `Glob` / `Grep`
   - 运行时：复用 Codex filesystem、patch/search/sandbox context。
@@ -338,11 +643,12 @@ Astral 的内部方向是“深度重构”，不是“尾端 adapter 改名”�
   - 运行时：映射到 Codex `update_plan`。
   - 注意：Plan Mode 和 TodoWrite 不是一回事。Plan Mode 是长计划、用户批准后执行；TodoWrite 是执行过程中的 checklist / progress state。
 
-- `Agent`
-  - 运行时：映射 Codex multi-agent spawn。
-
-- `SendMessage`
-  - 运行时：映射 multi-agent v2 messaging/mailbox。
+- Multi-agent / subagent
+  - 运行时：完整继承 Codex 原版 `multi_agents_v2` / `AgentControl`。
+  - 模型侧：不再暴露 Astral 改名的 `Agent` / `SendMessage` / `TaskStop` 包装，直接使用 Codex 原版
+    `spawn_agent`、`send_message`、`followup_task`、`wait_agent`、`interrupt_agent`、`list_agents`。
+  - 取舍：这块不是 v1 核心 SFT 主路径，薄改名价值不如 Bash/Read/Edit/Grep/TodoWrite，后续不要继续深挖
+    Claude Code background task / team / sidechain runtime。
 
 - `AskUserQuestion`
   - 运行时：映射 Codex 用户输入/澄清问题通道。
@@ -367,9 +673,6 @@ Astral 的内部方向是“深度重构”，不是“尾端 adapter 改名”�
 - `codex-rs/core/src/tools/handlers/astral_monitor.rs`
 - `codex-rs/core/src/tools/handlers/astral_file_tools.rs`
 - `codex-rs/core/src/tools/handlers/astral_todo_write.rs`
-- `codex-rs/core/src/tools/handlers/astral_agent.rs`
-- `codex-rs/core/src/tools/handlers/astral_send_message.rs`
-- `codex-rs/core/src/tools/handlers/astral_task_stop.rs`
 - `codex-rs/core/src/tools/handlers/astral_request_permissions.rs`
 
 Auth / OpenAI 控制面相关：
@@ -1441,6 +1744,1543 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
 - `just test -p codex-app-server remote_control` 的旧失败来源已在 app-server 暴露层处理：测试改为验证
   Astral disabled 语义。底层 `app-server-transport` remote-control 旧模块仍待后续降级或删除。
 
+### 最新补充 42（2026-06-12 05:05 CST）
+
+完成 `ASTRAL_API_KEY` 相关 auth env telemetry 和内部 AuthManager 开关命名收口：
+
+- `AuthEnvTelemetry` / `AuthEnvTelemetryMetadata` 字段从
+  `codex_api_key_env_*` 改为 `astral_api_key_env_*`。
+- `AuthManager` 内部开关和方法从 `enable_codex_api_key_env` /
+  `codex_api_key_env_enabled()` 改为 `enable_astral_api_key_env` /
+  `astral_api_key_env_enabled()`。
+- feedback/OTEL/model-provider 请求日志 tag 从
+  `auth.env_codex_api_key_*` / `auth_env_codex_api_key_*`
+  改为 `auth.env_astral_api_key_*` / `auth_env_astral_api_key_*`。
+- 清理了 `exec` auth env 测试函数名中的旧 Codex 命名。
+- 运行了 `just fmt`。
+- 运行了轻量编译检查：
+  `CARGO_INCREMENTAL=0 cargo check -p codex-login -p codex-feedback -p codex-otel -p codex-model-provider -p codex-core -p codex-exec`
+  通过。
+- 磁盘复查：`/Users/oines/project/astral-code` 所在卷仍约 38Gi 可用；`target/debug/incremental`
+  和 `target/tmp` 为 0B，`target/debug/deps` 约 109G，暂不删除以免严重拖慢后续开发。
+
+### 最新补充 43（2026-06-12 05:18 CST）
+
+完成 MCP connector 授权提示的 provider-neutral/Astral 文案清理：
+
+- `codex-mcp/src/auth_elicitation.rs` 不再提示用户去 ChatGPT 重新连接 connector，也不再说
+  “在 Codex 中使用”。
+- 授权提示改为 “your connector provider” / “Astral” 口径，保留 MCP connector auth
+  elicitation 的原有流程和 metadata shape。
+- 单元测试里的 fixture URL 从 `chatgpt.com/apps/...` 改为 `apps.example/...`，避免测试继续固化
+  OpenAI/ChatGPT 专有入口。
+- 运行了 `just fmt`。
+- 运行了轻量编译检查：`CARGO_INCREMENTAL=0 cargo check -p codex-mcp` 通过。
+- 磁盘复查：仍约 38Gi 可用；`target/debug/incremental` 和 `target/tmp` 仍为 0B。
+
+### 最新补充 44（2026-06-12 05:32 CST）
+
+完成 Astral Cloud Tasks 的剩余 user-agent / CLI copy 收口：
+
+- `codex-cloud-tasks` 的运行时 user-agent suffix 从 `codex_cloud_tasks_*` 改为
+  `astral_cloud_tasks_*`。
+- cloud tasks fallback user-agent 从 `codex-cli` 改为 `astral`。
+- 保留现有 cloud task 功能边界：release 路径仍要求显式配置
+  `ASTRAL_CLOUD_TASKS_BASE_URL`；debug mock 才使用 localhost `/backend-api`。
+- 顺手确认 `ASTRAL_CLOUD_TASKS_MODE` / `ASTRAL_CLOUD_TASKS_FORCE_INTERNAL` 已经替代旧
+  `CODEX_CLOUD_TASKS_*`。
+- 运行了 `just fmt`。
+- 运行了轻量编译检查：`CARGO_INCREMENTAL=0 cargo check -p codex-cloud-tasks` 通过。
+- 磁盘复查：仍约 38Gi 可用；`target/debug/incremental` 和 `target/tmp` 仍为 0B。
+
+### 最新补充 45（2026-06-12 05:44 CST）
+
+完成 CLI remote auth token env 测试口径的 Astral 化：
+
+- `codex-rs/cli/src/main.rs` 中 `--remote-auth-token-env` 相关测试/fixture 从
+  `CODEX_REMOTE_AUTH_TOKEN` 改为 `ASTRAL_REMOTE_AUTH_TOKEN`。
+- 这是用户可见/可复制的 env 名称清理，不改变 remote control、app-server、token 读取函数或
+  底层边界行为。
+- 运行了 `just fmt`。
+- 运行了轻量编译检查：`CARGO_INCREMENTAL=0 cargo check -p codex-cli` 通过。
+- 磁盘复查：仍约 38Gi 可用；`target/debug/incremental` 和 `target/tmp` 仍为 0B，暂不清理。
+
+### 最新补充 46（2026-06-12 05:55 CST）
+
+完成 app-server managed config debug/test env 的 Astral 化：
+
+- `codex-rs/app-server/src/main.rs` 中 debug-only managed config env 从
+  `CODEX_APP_SERVER_MANAGED_CONFIG_PATH` / `CODEX_APP_SERVER_DISABLE_MANAGED_CONFIG`
+  改为 `ASTRAL_APP_SERVER_MANAGED_CONFIG_PATH` / `ASTRAL_APP_SERVER_DISABLE_MANAGED_CONFIG`。
+- app-server integration test harness 和 strict/config RPC 测试同步改为新的 `ASTRAL_APP_SERVER_*`
+  名称。
+- 这是 app-server 测试/调试入口命名清理，不改变 managed config layer 的加载、禁用、strict config
+  或 transport 行为。
+- 运行了 `just fmt`。
+- 运行了轻量编译检查：`CARGO_INCREMENTAL=0 cargo check -p codex-app-server` 通过。
+- 磁盘复查：仍约 38Gi 可用；`target/debug/incremental` 和 `target/tmp` 仍为 0B；
+  `target/debug/deps` 约 109G，暂不删除以免显著拖慢开发。
+
+### 最新补充 47（2026-06-12 06:13 CST）
+
+完成 Astral 自定义 CA 环境变量迁移：
+
+- 专属 CA override 从 `CODEX_CA_CERTIFICATE` 改为 `ASTRAL_CA_CERTIFICATE`。
+- 覆盖范围包括：
+  - `codex-client` 的 reqwest/rustls shared custom CA 逻辑、错误提示、日志字段和测试；
+  - `custom_ca_probe` 子进程测试探针 env；
+  - `astral doctor` 的网络环境检查；
+  - `network-proxy` 向子工具链传播 CA bundle 的 env key 列表；
+  - `login` 默认 HTTP client 注释。
+- 仍保留通用 fallback `SSL_CERT_FILE`，并保持 “Astral override 优先，SSL_CERT_FILE 其次”
+  的原有 precedence 行为。
+- 运行了 `just fmt`。
+- 运行了轻量编译检查：
+  `CARGO_INCREMENTAL=0 cargo check -p codex-client -p codex-cli -p codex-network-proxy`
+  通过。
+- 残留扫描确认没有 `CODEX_CA_CERTIFICATE` / `CODEX_CUSTOM_CA_PROBE_*`。
+- 磁盘复查：约 37Gi 可用；`target/debug/incremental` 和 `target/tmp` 仍为 0B，暂不清理。
+
+### 最新补充 48（2026-06-12 06:32 CST）
+
+完成 app-server test client 的外部 env / CLI 口径 Astral 化：
+
+- `codex-rs/app-server-test-client/src/lib.rs` 中：
+  - `CODEX_BIN` -> `ASTRAL_BIN`；
+  - `CODEX_APP_SERVER_URL` -> `ASTRAL_APP_SERVER_URL`；
+  - `CODEX_E2E_MODEL` -> `ASTRAL_E2E_MODEL`；
+  - 默认 spawned CLI 从 `codex` 改为 `astral`；
+  - 用户可见 flag/help/error 从 `--codex-bin` / `codex app-server` 改为
+    `--astral-bin` / `astral app-server`。
+- 保留 Cargo package/bin 名称 `codex-app-server-test-client`，避免这一轮牵出 workspace/bazel/CI
+  级联改名；后续可以作为纯机械命名阶段单独处理。
+- 运行了 `just fmt`。
+- 运行了轻量编译检查：`CARGO_INCREMENTAL=0 cargo check -p codex-app-server-test-client`
+  通过。
+- 残留扫描确认该文件内没有 `CODEX_BIN` / `CODEX_APP_SERVER_URL` / `CODEX_E2E_MODEL`
+  / `--codex-bin`。
+- 磁盘复查：约 38Gi 可用；`target/debug/incremental` 和 `target/tmp` 仍为 0B。
+
+### 最新补充 49（2026-06-12 06:40 CST）
+
+完成 bundled sample skills 中 home 路径和 Astral 口径迁移：
+
+- `codex-rs/skills/src/assets/samples/**` 中面向模型/用户的 `$CODEX_HOME`、
+  `~/.codex`、`.codex/skills` 示例改为 `$ASTRAL_HOME`、`~/.astral-code`、
+  `.astral-code/skills`。
+- 覆盖 `imagegen`、`skill-installer`、`skill-creator`、`plugin-creator` 等 sample skill 文案。
+- `plugin-creator` 中 `.codex-plugin/plugin.json` 仍保留，因为这更像现有插件 manifest 目录格式，
+  不在本轮 home/env 命名清理范围内。
+- 运行了 `just fmt`。
+- 这是文档/技能素材改动，未跑 Rust 编译。
+- 磁盘复查：约 38Gi 可用；未清理任何非 Astral-Code 目录。
+
+### 最新补充 50（2026-06-12 06:47 CST）
+
+完成 app-server / network-proxy / memories / responses-api-proxy README 的旧 home 路径清理：
+
+- `app-server/README.md` 中 `$CODEX_HOME/app-server-control`、`CODEX_HOME/memories`、
+  `/Users/*/.codex/...` 示例改为 `$ASTRAL_HOME` / `~/.astral-code`。
+- `network-proxy/README.md` 中 managed MITM CA bundle 路径从 `$CODEX_HOME/proxy`
+  改为 `$ASTRAL_HOME/proxy`。
+- `memories/README.md` 中 memories git 路径改为 `~/.astral-code/memories/.git`。
+- `responses-api-proxy/README.md` 的 legacy 示例配置路径改为 `~/.astral-code/config.toml`；
+  该组件仍作为 legacy 残留，后续需要决定删除或隔离。
+- 运行了 `just fmt`。
+- 这是文档改动，未跑 Rust 编译。
+- 磁盘复查：约 38Gi 可用；`target/debug/incremental` 和 `target/tmp` 仍为 0B。
+
+### 最新补充 51（2026-06-12 06:55 CST）
+
+完成 `codex-rs` 内旧 home/path fixture 的 Astral 化：
+
+- 将测试/注释/示例中的 `~/.codex`、`/.codex/`、`.codex/skills`、`.codex/config.toml`
+  路径迁移到 `~/.astral-code`、`/.astral-code/`、`.astral-code/skills`、
+  `.astral-code/config.toml`。
+- 覆盖 message history、rollout、arg0 `.env`、analytics/core-skills/core-plugins/tui
+  测试 fixture、sandbox-summary、external-agent migration 等路径字符串。
+- 保留 `.codex-plugin` manifest 目录名不变，避免混淆插件格式迁移和 Astral home 迁移。
+- 运行了 `just fmt`。
+- 复查 `rg -n "~/.codex|/\\.codex/|\\.codex/config|\\.codex/skills|CODEX_HOME" codex-rs`
+  已无结果。
+- 这是注释/测试 fixture/文档字符串迁移，未跑 Rust 大范围测试；后续统一收敛时再覆盖。
+- 磁盘复查：约 38Gi 可用。
+
+### 最新补充 52（2026-06-12 07:08 CST）
+
+完成安装/doctor 管理器 env 命名迁移：
+
+- `CODEX_MANAGED_BY_NPM` -> `ASTRAL_MANAGED_BY_NPM`。
+- `CODEX_MANAGED_BY_BUN` -> `ASTRAL_MANAGED_BY_BUN`。
+- `CODEX_MANAGED_PACKAGE_ROOT` -> `ASTRAL_MANAGED_PACKAGE_ROOT`。
+- 覆盖 `doctor` 安装检查、doctor updates 文案和 `install-context` 的运行时安装来源判断。
+- 运行了 `just fmt`。
+- 运行了轻量编译检查：
+  `CARGO_INCREMENTAL=0 cargo check -p codex-cli -p codex-install-context` 通过。
+- 该 check 顺带覆盖了 `codex-skills`、`codex-message-history`、`codex-arg0`、`codex-core-skills`、
+  `codex-core-plugins`、`codex-tui` 等多项刚刚 touched 的 crate 编译。
+- 残留扫描确认 `codex-rs` 中没有 `CODEX_MANAGED_BY_NPM` / `CODEX_MANAGED_BY_BUN` /
+  `CODEX_MANAGED_PACKAGE_ROOT`。
+- 磁盘复查：约 38Gi 可用；`target/debug/incremental` 和 `target/tmp` 仍为 0B。
+
+### 最新补充 53（2026-06-12 07:25 CST）
+
+完成 shell/unified exec 注入环境变量的 Astral 化：
+
+- `CODEX_THREAD_ID` -> `ASTRAL_THREAD_ID`。
+- `CODEX_CI` -> `ASTRAL_CI`。
+- Rust 常量从 `CODEX_THREAD_ID_ENV_VAR` 改为 `ASTRAL_THREAD_ID_ENV_VAR`，覆盖
+  `protocol::shell_environment`、`core::exec_env`、unified exec process manager、runtime snapshot
+  restore 和相关测试。
+- 保持注入时机、thread id 传递、shell snapshot 恢复和 UnifiedExec 行为不变；只改命名。
+- 明确没有修改 `CODEX_SANDBOX_*`，这类 sandbox 边界 env 继续按原仓库约束保留。
+- 运行了 `just fmt`。
+- 运行了轻量编译检查：`CARGO_INCREMENTAL=0 cargo check -p codex-protocol -p codex-core`
+  通过。
+- 残留扫描确认 `codex-rs` 中没有 `CODEX_THREAD_ID` / `CODEX_CI`。
+- 磁盘复查：约 38Gi 可用；`target/debug/incremental` 和 `target/tmp` 仍为 0B。
+
+### 最新补充 54（2026-06-12 07:43 CST）
+
+完成核心 per-turn / client metadata header 的 Astral 化：
+
+- `x-codex-installation-id` -> `x-astral-installation-id`。
+- `x-codex-turn-state` -> `x-astral-turn-state`。
+- `x-codex-turn-metadata` -> `x-astral-turn-metadata`。
+- `x-codex-parent-thread-id` -> `x-astral-parent-thread-id`。
+- `x-codex-window-id` -> `x-astral-window-id`。
+- `x-codex-ws-stream-request-start-ms` -> `x-astral-ws-stream-request-start-ms`。
+- `x-codex-beta-features` -> `x-astral-beta-features`。
+- Rust 常量同步从 `X_CODEX_*` 改为 `X_ASTRAL_*`，覆盖 core client、MCP turn metadata、
+  websocket client metadata、app-server v2 tests、responses-api-proxy dump fixture 等主路径。
+- 该切片只迁移 Astral 自己发送/回放的 per-turn metadata header；OpenAI/Codex 后端 rate-limit
+  header、legacy proxy 兼容 header 和 remote-control 握手 header 暂未在这一刀处理。
+- 运行了 `just fmt`。
+- 运行了轻量编译检查：
+  `CARGO_INCREMENTAL=0 cargo check -p codex-core -p codex-api -p codex-app-server -p codex-responses-api-proxy`
+  通过。
+- 残留扫描确认没有 `x-codex-installation-id` / `x-codex-turn-state` /
+  `x-codex-turn-metadata` / `x-codex-parent-thread-id` / `x-codex-window-id` /
+  `x-codex-ws-stream-request-start-ms` / `x-codex-beta-features`。
+- 磁盘复查：约 36Gi 可用；`target/debug/incremental` 和 `target/tmp` 仍为 0B。
+
+### 最新补充 55（2026-06-12 08:14 CST）
+
+完成 legacy remote plugin control-plane 的 OpenAI/ChatGPT 语义收敛：
+
+- `core-plugins/src/remote.rs` 中的 hosted auth guard 从 `ensure_chatgpt_auth` 改为
+  `ensure_hosted_auth`。
+- remote plugin catalog 的错误消息从 `chatgpt authentication required...` 改为
+  `hosted authentication required for legacy remote plugin catalog...`。
+- curated remote collection 函数从
+  `fetch_openai_curated_remote_collection_marketplace` 改为
+  `fetch_astral_curated_remote_collection_marketplace`，并同步 app-server 调用点。
+- remote plugin 请求里残留的产品 SKU 常量从 `CODEX_PRODUCT_SKU = "codex"` 改为
+  `ASTRAL_PRODUCT_SKU = "astral-code"`。
+- 该模块仍保持 `remote_plugin_control_plane_disabled() == true`，没有重新启用 legacy hosted
+  remote plugin control-plane，也没有触碰 sandbox / exec / approval 边界。
+- 残留扫描确认该 slice 中没有
+  `ensure_chatgpt_auth` / `fetch_openai_curated_remote_collection_marketplace` /
+  `OPENAI_CURATED_REMOTE_COLLECTION_KEY` / `CODEX_PRODUCT_SKU` /
+  `chatgpt authentication`。
+- 运行了 `just fmt`。
+- 运行了轻量编译检查：
+  `CARGO_INCREMENTAL=0 cargo check -p codex-core-plugins -p codex-app-server`
+  通过。
+- 磁盘复查：约 36Gi 可用；`target/debug/incremental` 和 `target/tmp` 仍为 0B。
+
+### 最新补充 56（2026-06-12 08:20 CST）
+
+完成 auth/client 侧一刀 ChatGPT 语义收敛：
+
+- `AuthMode::has_chatgpt_account()` 改为 `AuthMode::has_legacy_hosted_account()`。
+- `CodexAuth::is_chatgpt_auth()` 改为 `CodexAuth::is_legacy_hosted_account_auth()`。
+- `models-manager` 里依赖该判断的 remote model source-of-truth 逻辑同步改名，并把注释改为
+  legacy hosted account auth。
+- TUI app-server account update 路径同步从 `AuthMode::has_chatgpt_account` 改为
+  `AuthMode::has_legacy_hosted_account`。
+- `core/src/client.rs` 里 401 恢复注释从 ChatGPT token refresh 改为 external API-key auth
+  refresh；auth telemetry 中旧 token-backed 模式从 `"Chatgpt"` 改为 `"LegacyHosted"`。
+- 保留 `AuthMode::Chatgpt` wire variant，当前仍作为 legacy payload 的识别/拒绝标记；没有重新启用
+  OAuth/ChatGPT 登录，也没有引入旧 Codex 数据兼容读取。
+- 运行了 `just fmt`。
+- 运行了轻量编译检查：
+  `CARGO_INCREMENTAL=0 cargo check -p codex-app-server-protocol -p codex-login -p codex-core -p codex-tui`
+  通过。
+- 磁盘复查：约 37Gi 可用；`target/debug/incremental` 和 `target/tmp` 仍为 0B。
+
+### 最新补充 57（2026-06-12 08:28 CST）
+
+完成 backend/cloud-tasks 侧一刀 OpenAI/Codex 命名空间收敛：
+
+- 审计 `backend-client`：默认不会把 ChatGPT host 隐式重写为 `/backend-api`；只有显式传入包含
+  `/backend-api` 的 base URL 时才使用 hosted path style。
+- `backend-client` 相关注释从 “ChatGPT hosts” 改为 legacy hosted roots，行为不变。
+- `cloud-tasks-client` 的 `CODEX_STARTING_DIFF` 改为 `ASTRAL_STARTING_DIFF`，不保留旧 env fallback。
+- `cloud-tasks` TUI 的 `CODEX_TUI_ROUNDED` 改为 `ASTRAL_TUI_ROUNDED`，不保留旧 env fallback。
+- `cloud-tasks` 仍要求 `ASTRAL_CLOUD_TASKS_BASE_URL`；debug mock 只默认到 localhost，不会默认访问
+  `chatgpt.com/backend-api`。
+- 残留扫描确认没有 `CODEX_STARTING_DIFF` / `CODEX_TUI_ROUNDED` / `ChatGPT hosts`。
+- 运行了 `just fmt`。
+- 运行了轻量编译检查：
+  `CARGO_INCREMENTAL=0 cargo check -p codex-backend-client -p codex-cloud-tasks-client -p codex-cloud-tasks`
+  通过。
+- 磁盘复查：约 37Gi 可用；`target/debug/incremental` 和 `target/tmp` 仍为 0B。
+
+### 最新补充 58（2026-06-12 08:33 CST）
+
+完成 Agent Identity 专有 hosted auth 残留的一刀隔离：
+
+- 审计 `agent-identity`：`fetch_agent_identity_jwks` 和 `register_agent_task` 已经先经过
+  `hosted_agent_identity_control_plane_disabled() == true`，默认不会访问外部 hosted control-plane。
+- `login` 层的 `from_agent_identity_jwt` 当前仍直接返回 unsupported，不会恢复旧 Agent Identity 登录。
+- 将 Agent Identity JWT issuer 从真实 `chatgpt.com/codex-backend/agent-identity` 改为
+  `https://legacy-hosted.invalid/agent-identity`，避免 Astral 代码继续信任真实 OpenAI issuer。
+- Agent Identity JWKS URL 测试里的真实 `chatgpt.com/backend-api` 改为 `hosted.example/backend-api`。
+- 残留扫描确认 `codex-rs/agent-identity/src/lib.rs` 中没有 `chatgpt.com` / `codex-backend`。
+- 运行了 `just fmt`。
+- 运行了轻量编译检查：
+  `CARGO_INCREMENTAL=0 cargo check -p codex-agent-identity -p codex-model-provider`
+  通过。
+- 磁盘复查：约 37Gi 可用；`target/debug/incremental` 和 `target/tmp` 仍为 0B。
+
+### 最新补充 59（2026-06-12 08:38 CST）
+
+完成 app-server remote-control 的一刀审计和残留收敛：
+
+- 审计确认 app-server 启动层已经强制将 legacy hosted remote-control 置为 disabled；即使传入
+  `--remote-control`，也只记录警告并继续以 disabled 状态启动。
+- `RemoteControlRequestProcessor` 的 enable / pairing / clients list / revoke 入口继续直接返回
+  `legacy hosted remote control is disabled in Astral until a provider-neutral control plane exists`。
+- remote-control transport 里的订阅游标 header 从 `x-codex-subscribe-cursor` 改为
+  `x-astral-subscribe-cursor`。
+- remote-control URL 归一化测试中用于“非 localhost 必须拒绝”的真实 OpenAI/ChatGPT 域名替换为
+  通用 `hosted.example` / `remote.example` / `localhost.evil.example` 域名，保留安全断言。
+- 残留扫描确认 `app-server-transport/src/transport/remote_control` 中没有
+  `x-codex-subscribe-cursor` / `chatgpt.com` / `api.chatgpt-staging.com` /
+  `chat.openai.com` / `evilchatgpt`。
+- 运行了 `just fmt`。
+- 运行了轻量编译检查：
+  `CARGO_INCREMENTAL=0 cargo check -p codex-app-server-transport`
+  通过。
+- 磁盘复查：约 37Gi 可用；`target/debug/incremental` 和 `target/tmp` 仍为 0B。
+
+### 最新补充 60（2026-06-12 08:41 CST）
+
+完成协议调试 / realtime fixture 中真实 ChatGPT backend URL 的替换：
+
+- `response-debug-context` 测试里的
+  `https://chatgpt.com/backend-api/codex/models` /
+  `https://chatgpt.com/backend-api/codex/responses` 改为
+  `https://hosted.example/backend-api/codex/...`。
+- `codex-api` bridge/realtime tests 里的
+  `https://chatgpt.com/backend-api/codex` 改为
+  `https://hosted.example/backend-api/codex`。
+- 保留 `/backend-api/codex` 路径形状，用于测试 backend-style URL 分支，但不再使用真实 OpenAI /
+  ChatGPT 域名。
+- 残留扫描确认 `response-debug-context/src` 和 `codex-api/src` 中没有 `chatgpt.com/backend-api`
+  或真实 `chatgpt.com` fixture。
+- 运行了 `just fmt`。
+- 运行了轻量编译检查：
+  `CARGO_INCREMENTAL=0 cargo check -p codex-api -p codex-response-debug-context`
+  通过。
+- 磁盘复查：约 37Gi 可用；`target/debug/incremental` 和 `target/tmp` 仍为 0B。
+
+### 最新补充 61（2026-06-12 08:46 CST）
+
+完成 remote-control websocket handshake header 的 Astral 化：
+
+- `app-server-transport/src/transport/remote_control/websocket.rs` 中运行时握手 header 改名：
+  - `x-codex-server-id` -> `x-astral-server-id`
+  - `x-codex-name` -> `x-astral-name`
+  - `x-codex-protocol-version` -> `x-astral-protocol-version`
+- 同步更新 `app-server-transport/src/transport/remote_control/tests.rs` 的断言。
+- 复查 `app-server-transport/src/transport/remote_control`，确认旧 websocket handshake header 名不再残留。
+- 运行了 `just fmt`。
+- 运行了轻量编译检查：
+  `CARGO_INCREMENTAL=0 cargo check -p codex-app-server-transport`
+  通过。
+- 磁盘复查：约 37Gi 可用；`target/debug/incremental` 和 `target/tmp` 仍为 0B。
+
+### 最新补充 62（2026-06-12 08:57 CST）
+
+完成一组低风险、用户可见 / 运行时调试命名的 Astral 化：
+
+- `codex-exec` 的纯文本启动摘要从 `OpenAI Codex v...` 改为 `Astral-Code v...`。
+- TUI 调试 session log 环境变量改名：
+  - `CODEX_TUI_RECORD_SESSION` -> `ASTRAL_TUI_RECORD_SESSION`
+  - `CODEX_TUI_SESSION_LOG_PATH` -> `ASTRAL_TUI_SESSION_LOG_PATH`
+- TUI keyboard enhancement 禁用开关改名：
+  - `CODEX_TUI_DISABLE_KEYBOARD_ENHANCEMENT` -> `ASTRAL_TUI_DISABLE_KEYBOARD_ENHANCEMENT`
+- git patch 内部调试配置环境变量改名：
+  - `CODEX_APPLY_GIT_CFG` -> `ASTRAL_APPLY_GIT_CFG`
+- git baseline 初始化提交身份从
+  `Codex <noreply@openai.com>` 改为
+  `Astral-Code <noreply@astral-code.dev>`。
+- 复扫确认上述旧 env / 输出名 / OpenAI 邮箱不再残留于非 snapshot 源码。
+- 运行了 `just fmt`。
+- 运行了轻量编译检查：
+  `CARGO_INCREMENTAL=0 cargo check -p codex-exec -p codex-tui -p codex-git-utils`
+  通过，用时 4m36s。
+- 磁盘复查：约 37Gi 可用；`target/debug/incremental` 和 `target/tmp` 仍为 0B。
+
+### 最新补充 63（2026-06-12 09:01 CST）
+
+完成 host-owned apps MCP 控制面里残留 OpenAI/Codex header/env 的清理：
+
+- `codex-mcp/src/mcp/mod.rs` 中 connector bearer token 环境变量改名：
+  - `CODEX_CONNECTORS_TOKEN` -> `ASTRAL_CONNECTORS_TOKEN`
+- host-owned apps MCP 的 product SKU header 改名：
+  - `X-OpenAI-Product-Sku` -> `X-Astral-Product-Sku`
+- 确认 `host_owned_codex_apps_enabled` 当前仍固定返回 `false`，因此这不改变普通本地 MCP server
+  行为，也不会重新启用 OpenAI/ChatGPT hosted apps 控制面。
+- 复扫 `codex-mcp/src`、`core/src`、`app-server/src`、`config/src`，确认旧
+  `CODEX_CONNECTORS_TOKEN` 和 `X-OpenAI-Product-Sku` 不再残留。
+- 运行了 `just fmt`。
+- 运行了轻量编译检查：
+  `CARGO_INCREMENTAL=0 cargo check -p codex-mcp`
+  通过，用时 2m00s。
+- 磁盘复查：约 37Gi 可用；`target/debug/incremental` 和 `target/tmp` 仍为 0B。
+
+### 最新补充 64（2026-06-12 09:10 CST）
+
+完成 `responses-api-proxy` 的 provider-neutral 降级：
+
+- `responses-api-proxy` CLI 不再默认转发到
+  `https://api.openai.com/v1/responses`。
+- `--upstream-url` 现在是必填参数；proxy 只转发到用户显式指定的 upstream。
+- CLI `about` 从 `Minimal OpenAI responses proxy` 改为
+  `Minimal provider-neutral Responses proxy`。
+- stdin key 缺失错误示例从 `OPENAI_API_KEY | codex ...` 改为
+  `ASTRAL_API_KEY | astral ...`。
+- crate README 改成 Astral/provider-neutral 示例：
+  - 使用 `~/.astral-code/config.toml`
+  - 使用 `astral -p proxy` / `astral exec`
+  - 使用通用 provider upstream 示例，不再写死 OpenAI endpoint
+- npm package 发布身份从 `@openai/codex-responses-api-proxy` 改为
+  `@astral-code/responses-api-proxy`，仓库 URL 改为
+  `github.com/oines/astral-code`。
+- 复扫 `responses-api-proxy` crate，确认 OpenAI 默认 URL、`@openai` 包名、旧
+  `OPENAI_API_KEY` 示例和 `openai/codex` 链接不再残留。
+- 运行了 `just fmt`。
+- 运行了轻量编译检查：
+  `CARGO_INCREMENTAL=0 cargo check -p codex-responses-api-proxy`
+  通过，用时 1m01s。
+- 磁盘复查：约 37Gi 可用；`target/debug/incremental` 和 `target/tmp` 仍为 0B。
+
+### 最新补充 65（2026-06-12 09:14 CST）
+
+完成一组 opt-in 诊断 env / 文档命名迁移：
+
+- `exec-server` 环境配置测试示例从 `CODEX_LOG` 改为 `ASTRAL_LOG`。
+- rollout trace 开关从
+  `CODEX_ROLLOUT_TRACE_ROOT` / `CODEX_ROLLOUT_TRACE_ROOT_ENV`
+  改为
+  `ASTRAL_ROLLOUT_TRACE_ROOT` / `ASTRAL_ROLLOUT_TRACE_ROOT_ENV`。
+- `rollout-trace` crate 顶层说明和 README 中的用户可见描述改为 Astral 语义：
+  - tracing 是 Astral 本地诊断，不上传遥测
+  - `state.json` 由 `astral debug trace-reduce` 生成
+  - 热路径描述从 Codex session/rollout 改为 Astral session/rollout
+- 保留内部 `CodexTurnId` 等 schema/模型标识，未在本 slice 硬拆，避免扩大 trace schema
+  破坏面。
+- 明确未触碰 `CODEX_ESCALATE_SOCKET`，它属于 shell escalation 内部协议，后续需要单独评估。
+- 复扫 `exec-server` 与 `rollout-trace`，确认旧 `CODEX_LOG` 和
+  `CODEX_ROLLOUT_TRACE_ROOT` 不再残留。
+- 运行了 `just fmt`。
+- 运行了轻量编译检查：
+  `CARGO_INCREMENTAL=0 cargo check -p codex-exec-server -p codex-rollout-trace`
+  通过，用时 1m04s。
+- 磁盘复查：约 37Gi 可用；`target/debug/incremental` 和 `target/tmp` 仍为 0B。
+
+### 最新补充 66（2026-06-12 09:22 CST）
+
+完成 bundled skills / app-server test-client 中旧 Codex 用户目录和 thread env 的清理：
+
+- `skill-installer` 示例脚本不再读取 `CODEX_HOME` 或 `~/.codex`：
+  - `install-skill-from-github.py` 改为 `$ASTRAL_HOME/skills`，默认
+    `~/.astral-code/skills`
+  - `list-skills.py` 改为 `$ASTRAL_HOME/skills`，默认
+    `~/.astral-code/skills`
+- skill installer GitHub request user-agent 从 `codex-skill-*` 改为
+  `astral-skill-*`。
+- skill installer 临时目录从 `/tmp/codex` 改为 `/tmp/astral-code`。
+- `app-server-test-client/scripts/live_elicitation_hold.sh` 不再读取
+  `CODEX_THREAD_ID`，改为 `ASTRAL_THREAD_ID`，仍保留通用 `THREAD_ID` fallback。
+- 复扫 `skill-installer` 和 `app-server-test-client/scripts`，确认旧
+  `CODEX_HOME`、`~/.codex`、`CODEX_THREAD_ID`、`codex-skill-*` 不再残留。
+- 运行了 `just fmt`。
+- 运行了轻量编译检查：
+  `CARGO_INCREMENTAL=0 cargo check -p codex-skills -p codex-app-server-test-client`
+  通过，用时 2m25s。
+- 磁盘复查：约 37Gi 可用；`target/debug/incremental` 和 `target/tmp` 仍为 0B。
+
+### 最新补充 67（2026-06-12 09:30 CST）
+
+完成 Windows / debug config 路径身份对齐：
+
+- TUI debug config 测试路径从旧 Codex/OpenAI 位置改为 Astral 位置：
+  - `/etc/codex/...` -> `/etc/astral-code/...`
+  - `C:\repo\.codex` -> `C:\repo\.astral-code`
+  - `C:\users\alice\.codex\config.toml` -> `C:\users\alice\.astral-code\config.toml`
+  - `C:\ProgramData\OpenAI\Codex\requirements.toml` ->
+    `C:\ProgramData\Astral-Code\requirements.toml`
+- Windows sandbox 受保护 workspace 元目录从 `.codex` 对齐到 `.astral-code`：
+  - `protect_workspace_codex_dir` -> `protect_workspace_astral_dir`
+  - allow/spawn/setup/helper 测试中的受保护目录同步改为 `.astral-code`
+  - command-runner cwd junction 目录同步改为 `.astral-code/.sandbox/cwd`
+- Windows app runtime cache 路径从 `%LOCALAPPDATA%\OpenAI\Codex\bin` 改为
+  `%LOCALAPPDATA%\Astral-Code\Astral\bin`，注释同步为 `astral.exe`。
+- Windows setup-main 顶层错误日志 env 从 `CODEX_HOME` 改为 `ASTRAL_HOME`。
+- 使用带引号 / 路径分隔符的固定字符串复扫，确认上述文件中不再保留旧 `.codex`
+  路径字面量、`OpenAI\Codex` 或 `/etc/codex`。
+- 未修改 `CODEX_SANDBOX_*`，未改 sandbox 策略算法，只改 Astral 项目路径身份。
+- 运行了 `just fmt`。
+- 运行了轻量编译检查：
+  `CARGO_INCREMENTAL=0 cargo check -p codex-windows-sandbox -p codex-tui`
+  通过，用时 2m31s。
+- 磁盘复查：约 37Gi 可用；`target/debug/incremental` 和 `target/tmp` 仍为 0B。
+
+### 最新补充 68（2026-06-12 09:39 CST）
+
+完成 app-server test-client 与 skill-installer 的 OpenAI/Codex 默认语义清理：
+
+- `app-server-test-client/README.md` 不再指导构建或启动 `codex app-server`：
+  - debug binary 示例改为 `cargo build -p codex-cli --bin astral`
+  - 启动参数改为 `--astral-bin ./target/debug/astral`
+  - app-server log 路径改为 `/tmp/astral-app-server-test-client/app-server.log`
+- `app-server-test-client` 的少量用户可见运行时标识同步为 Astral：
+  - toy app-server client name 从 `codex-toy-app-server` 改为 `astral-toy-app-server`
+  - 当前可执行文件解析错误文案去掉 `codex-app-server-test-client` 专名
+- `skill-installer` 默认 listing 不再访问 `openai/skills`：
+  - `DEFAULT_REPO` 改为 `oines/astral-code`
+  - `DEFAULT_PATH` 改为 `codex-rs/skills/src/assets/samples`
+  - 文档改成 Astral-Code bundled sample skills，安装示例改为
+    `--repo oines/astral-code --path codex-rs/skills/src/assets/samples/<skill-name>`
+  - 安装后提示改为 “Restart Astral to pick up new skills.”
+- `skill-installer/agents/openai.yaml` 的短描述去掉 `openai/skills` 默认源；文件名暂不改，
+  因为 `agents/openai.yaml` 是当前 skills 元数据约定的一部分，牵到 skill-creator 和 plugin validator，
+  后续需要单独规划整体迁移。
+- 复扫本 slice 涉及目录，确认不再残留：
+  `openai/skills`、`skills/.curated`、`skills/.experimental`、`Restart Codex`、
+  `--codex-bin`、`target/debug/codex`、`codex app-server`、
+  `/tmp/codex-app-server-test-client`、`codex-toy-app-server`。
+- 运行了 `just fmt`。
+- 运行了轻量编译检查：
+  `CARGO_INCREMENTAL=0 cargo check -p codex-skills -p codex-app-server-test-client`
+  通过，用时 1m23s。
+- 磁盘复查：约 37Gi 可用；`codex-rs/target` 约 113G，`target/debug/incremental` 为 0B。
+
+### 最新补充 69（2026-06-12 09:52 CST）
+
+完成 skills 元数据文件名从 `agents/openai.yaml` 到 `agents/astral.yaml` 的 Astral-native 迁移：
+
+- `core-skills` loader 的 skill metadata 文件常量从 `openai.yaml` 改为 `astral.yaml`。
+  Astral 不做旧 `openai.yaml` fallback，符合“新项目不兼容旧 Codex 数据”的原则。
+- bundled sample skills 的 metadata 文件全部移动为 `agents/astral.yaml`：
+  - `imagegen`
+  - `openai-docs`
+  - `plugin-creator`
+  - `skill-creator`
+  - `skill-installer`
+- `skill-creator` 工具链同步改名：
+  - `generate_openai_yaml.py` -> `generate_astral_yaml.py`
+  - `write_openai_yaml(...)` -> `write_astral_yaml(...)`
+  - reference 文档 `openai_yaml.md` -> `astral_yaml.md`
+  - 新 skill 初始化输出 `agents/astral.yaml`
+- `plugin-creator` validator 现在校验 `skills/<name>/agents/astral.yaml`。
+- core / app-server 测试 fixture 中的 skill metadata 写入路径同步改为 `astral.yaml`。
+- 全仓复扫确认除本进度文档历史记录外，不再有：
+  `openai.yaml`、`agents/openai`、`generate_openai_yaml`、`write_openai_yaml`、
+  `openai_yaml`。
+- 这条补充取代第 68 条里“文件名暂不改”的临时判断；迁移已经完成。
+- 运行了 `just fmt`。
+- 运行了轻量编译检查：
+  `CARGO_INCREMENTAL=0 cargo check --tests -p codex-core-skills -p codex-skills -p codex-app-server -p codex-core`
+  通过，用时 6m06s。
+- 磁盘复查：约 37Gi 可用；`codex-rs/target` 约 113G，`target/debug/incremental` 为 0B。
+
+### 最新补充 70（2026-06-12 09:59 CST）
+
+完成一组模型可见 skills 文案的 Astral 化：
+
+- `core-skills/src/render.rs` 中技能上下文预算 warning 不再写
+  “Codex can still see every skill”，改为 “Astral can still see every skill”。
+  这是可能进入模型上下文和 UI warning 的文案，属于高价值品牌残留清理。
+- `skill-creator` bundled skill 的模型可见说明和新 skill 模板文案从 Codex 改为 Astral：
+  - “extends Codex's capabilities” -> “extends Astral's capabilities”
+  - “Codex is already very smart” -> “Astral is already very smart”
+  - “Codex reads / references / produces” -> “Astral reads / references / produces”
+  - 新 skill 初始化模板中的资源说明同步改为 Astral
+- 复扫 `core-skills/src/render.rs` 与 `skill-creator` 相关文件，确认已清掉这些模型可见 Codex 品牌句式。
+- 运行了 `just fmt`。
+- 运行了窄测试：
+  `just test -p codex-core-skills budgeted_rendering_token_budget_truncation_warning_mentions_two_percent`
+  通过，1 个测试通过、102 个跳过，用时 1m44s。
+- 运行了轻量脚本检查：
+  - `python3 .../generate_astral_yaml.py --help`
+  - `python3 .../init_skill.py --help`
+  均可正常输出帮助，说明 `generate_astral_yaml` 重命名后的 import 路径未断。
+- 测试后磁盘剩余约 35Gi，`codex-rs/target/debug/incremental` 增至约 1.6G；按用户要求只清理
+  Astral-Code 项目内低影响增量缓存，删除该 incremental 目录后磁盘约 36Gi 可用。
+
+### 最新补充 71（2026-06-12 10:07 CST）
+
+完成 core-skills / system skills cache 中旧 Codex 路径身份的进一步收敛：
+
+- embedded system skills cache marker 从
+  `.codex-system-skills.marker` 改为 `.astral-system-skills.marker`。
+  这是写入 `$ASTRAL_HOME/skills/.system` 的真实运行时文件名，不再保留旧 Codex marker。
+- `core-skills` loader 中系统 config/skills 注释从 `/etc/codex/...` 改为
+  `/etc/astral-code/...`。
+- `core-skills` loader 中“System skills are written by Codex itself”的注释改为 Astral。
+- `core-skills` 测试中的项目本地 config/skills 目录从 `.codex` 改为 `.astral-code`：
+  - `REPO_ROOT_CONFIG_DIR_NAME`
+  - disabled project layer fixture
+  - manager 的 repo/user roots fixture
+- `core-skills` 测试中的系统 config fixture 从 `etc/codex/config.toml` 改为
+  `etc/astral-code/config.toml`。
+- 复扫 `skills/src/lib.rs`、`core-skills/src/*.rs` 和 `core-skills/src/*_tests.rs`：
+  旧 `.codex` project config/skills、`/etc/codex`、`.codex-system-skills.marker`、
+  `CODEX_HOME`、`Codex itself` 已清掉。
+- 剩余 `.codex-plugin/plugin.json` 只属于 plugin manifest 目录约定，本 slice 未动；这需要作为
+  plugin manifest 兼容/重命名问题单独评估，避免破坏插件加载面。
+- 运行了 `just fmt`。
+- 运行了轻量编译检查：
+  `CARGO_INCREMENTAL=0 cargo check --tests -p codex-skills -p codex-core-skills`
+  通过，用时 1m33s。
+- 磁盘复查：约 36Gi 可用；`codex-rs/target` 约 114G，`target/debug/incremental` 为 0B。
+
+### 最新补充 72（2026-06-12 10:20 CST）
+
+推进 OpenAI/ChatGPT hosted control-plane 清理中的 remote plugin share 这一刀：
+
+- 审计 `core-plugins/src/remote.rs`、`core-plugins/src/remote/share.rs`、
+  `core-plugins/src/remote/share/checkout.rs` 和 app-server plugin request processor。
+- 确认 `remote_plugin_control_plane_disabled()` 已经恒为 `true`，app-server 侧
+  `remote_plugin_control_plane_enabled()` 也恒为 `false`；运行时不会触发 hosted remote
+  plugin control-plane。
+- 在此基础上进一步去掉 `remote/share.rs` 中旧的远程分享实装，而不是只靠 runtime guard：
+  - 删除 workspace plugin upload URL 请求/响应结构。
+  - 删除 `.tar.gz` 打包上传流程。
+  - 删除 Azure blob PUT 上传路径。
+  - 删除 `/public/plugins/workspace` create/update/delete 路径。
+  - 删除 `/ps/plugins/workspace/created` list 路径。
+  - 删除 `/ps/plugins/{id}/shares` targets update 路径。
+- `save_remote_plugin_share`、`list_remote_plugin_shares`、`delete_remote_plugin_share`、
+  `update_remote_plugin_share_targets` 现在直接返回
+  `RemotePluginCatalogError::ControlPlaneDisabled`。
+- 保留 `load_plugin_share_remote_ids_by_local_path` 只读能力，用于读取历史/本地 mapping 时保持
+  app-server 类型链路稳定；不再写入或删除该 mapping。
+- 简化 `remote/share/checkout.rs`：
+  - 删除旧的 remote detail fetch + bundle download + personal marketplace 写入 checkout 实装。
+  - `checkout_remote_plugin_share` 直接返回 `ControlPlaneDisabled`。
+  - 保留返回类型，避免 app-server/API 类型面产生无关大改。
+- 删除 `remote/share/tests.rs` 中所有旧 hosted 行为测试，因为这些测试的目标已经与 Astral 的
+  “无 OpenAI hosted control-plane”目标相反。
+- 清理 share/checkout 切除后暴露出来的死代码：
+  - 删除 `plugin_bundle_archive.rs` 中仅用于分享上传的 bundle packer 和 size-limited writer。
+  - 删除 `remote/share/local_paths.rs` 中仅用于 share save/delete 的 mapping 写入/删除函数。
+  - 删除 `remote_bundle.rs` 中仅用于 share checkout 的
+    `download_and_extract_remote_plugin_bundle_to_path` 和 checkout-to-path 解压函数。
+- 复扫 `core-plugins/src/remote/share*`，旧 share 关键词
+  `public/plugins/workspace`、`ps/plugins/.../shares`、`chatgpt-account-id`、
+  `archive_plugin_for_upload`、`download_and_extract_remote_plugin_bundle_to_path`
+  已不再存在。
+- 运行了 `just fmt`。
+- 运行了轻量编译检查：
+  `CARGO_INCREMENTAL=0 cargo check --tests -p codex-core-plugins`
+  通过，用时约 8 秒；之前因为切除产生的 dead-code warning 已消失。
+- 磁盘复查：约 36Gi 可用，`target/debug/incremental` 为 0B，不需要清理缓存。
+
+### 最新补充 73（2026-06-12 10:33 CST）
+
+继续收敛 OpenAI/ChatGPT hosted control-plane：切除后台 remote installed plugin bundle sync 的
+旧托管同步实装。
+
+- 审计 `core-plugins/src/remote/remote_installed_plugin_sync.rs`。
+- 原状态：函数入口已经被 `remote_plugin_control_plane_disabled()` 拦住，但函数体仍保留：
+  - hosted installed plugin list fetch。
+  - workspace/global 两个 scope 的 remote bundle download URL 获取。
+  - remote bundle 下载并安装到本地 cache。
+  - stale remote plugin cache 清理。
+- 新状态：
+  - `sync_remote_installed_plugin_bundles_once` 直接返回
+    `RemotePluginCatalogError::ControlPlaneDisabled`。
+  - 删除该函数内的 hosted fetch/install/cache cleanup 实装。
+  - 删除 `remove_stale_remote_plugin_caches` 和
+    `is_remote_plugin_cache_mutation_in_flight` 私有函数。
+  - 删除对应的 stale cache cleanup 测试，这些测试已经与 Astral 的“无 hosted remote control-plane”
+    目标相反。
+  - 保留 `RemotePluginCacheMutationGuard`、in-flight 去重和 mutation guard 结构；这些属于本地并发边界，
+    不触达 OpenAI 控制面，可以继续为未来 provider-neutral/plugin runtime 使用。
+- 运行了 `just fmt`。
+- 运行了轻量编译检查：
+  `CARGO_INCREMENTAL=0 cargo check --tests -p codex-core-plugins`
+  通过，用时约 8 秒。
+- 重要剩余：`core-plugins/src/remote.rs` 主 catalog/detail/install/uninstall HTTP 实装仍在文件中，
+  但入口已经被 disabled guard 拦住；下一轮建议把这块拆成更干净的 Astral stub，避免旧代码长期滞留。
+
+### 最新补充 74（2026-06-12 10:52 CST）
+
+完成 `core-plugins/src/remote.rs` 主 hosted catalog/detail/install/uninstall 实装切除。
+
+- 原状态：
+  - `remote.rs` 入口已经被 disabled guard 拦住。
+  - 但文件内仍保留完整 OpenAI hosted remote plugin catalog client：
+    - `/ps/plugins/list`
+    - `/ps/plugins/workspace/shared`
+    - `/ps/plugins/installed`
+    - `/ps/plugins/{id}`
+    - `/ps/plugins/{id}/skills/{skill}`
+    - `/ps/plugins/{id}/install`
+    - `/plugins/{id}/uninstall`
+  - 还保留 `OAI-Product-Sku` header、`build_reqwest_client`、`authenticated_request`、
+    `send_and_decode`、remote catalog disk cache、response DTO、remote response -> app-server
+    model 转换逻辑。
+- 新状态：
+  - 删除 `remote/catalog_cache.rs`。
+  - 删除 `remote.rs` 中所有 hosted HTTP helper、response DTO、catalog cache 读写、remote detail
+    转换、install/uninstall mutation 实装。
+  - `fetch_remote_marketplaces`、`fetch_and_cache_global_remote_plugin_catalog`、
+    `fetch_astral_curated_remote_collection_marketplace`、`fetch_remote_installed_plugins`、
+    `fetch_remote_plugin_detail`、`fetch_remote_plugin_share_context`、
+    `fetch_remote_plugin_detail_with_download_urls`、`fetch_remote_plugin_skill_detail`、
+    `install_remote_plugin`、`uninstall_remote_plugin` 现在全部直接返回
+    `RemotePluginCatalogError::ControlPlaneDisabled`。
+  - `has_cached_global_remote_plugin_catalog` 直接返回 `false`。
+  - `cached_global_remote_discoverable_plugins` 直接返回空列表。
+  - 保留公开类型、remote marketplace 常量、remote plugin id validation、以及
+    `group_remote_installed_plugins_by_marketplaces`。这些仍被 app-server/manager 类型面使用，
+    且不触达 hosted control-plane。
+  - `remote.rs` 当前约 522 行；本轮相关 8 个文件净删约 2900 行。
+- 复扫 `core-plugins/src/remote.rs` 和 `core-plugins/src/remote/**`：
+  `ps/plugins`、`public/plugins`、`backend-api`、`authenticated_request`、
+  `send_and_decode`、`build_reqwest_client`、`OAI-Product-Sku`、`chatgpt-account-id`、
+  hosted response DTO 名称均已清掉。
+- 运行了 `just fmt`。
+- 运行了轻量编译检查：
+  `CARGO_INCREMENTAL=0 cargo check --tests -p codex-core-plugins`
+  通过，且无 warning。
+
+### 最新补充 75（2026-06-12 11:02 CST）
+
+推进 hosted backend 默认路径切断：调整 `backend-client` 的 path style 推断。
+
+- 审计 `backend-client/src/client.rs`。
+- 原状态：
+  - `PathStyle::from_base_url` 会在 base URL 包含 `/backend-api` 时自动选择 `HostedApi`。
+  - `HostedApi` 会把账户、usage、profile、task、config bundle 等请求路由到 `/wham/*`。
+  - 这意味着只要配置里出现 legacy hosted backend-api 风格 URL，通用 backend client 就会自动进入
+    OpenAI hosted 后端路径。
+- 新状态：
+  - `PathStyle::from_base_url` 永远返回 `PathStyle::CodexApi`。
+  - 新增测试 `base_url_does_not_infer_legacy_hosted_path_style`，确认
+    `https://hosted.example/backend-api` 不再自动推断为 `HostedApi`。
+  - 显式 `with_path_style(PathStyle::HostedApi)` 仍保留，避免一刀删掉所有 legacy 类型面；但默认/自动路径
+    不再因 URL 字符串进入 `/wham/*`。
+- 运行了 `just fmt`。
+- 运行了轻量编译检查：
+  `CARGO_INCREMENTAL=0 cargo check --tests -p codex-backend-client`
+  通过。
+- 磁盘复查：约 36Gi 可用，`target/debug/incremental` 为 0B。
+- 当前总 diff：约 328 个文件，`+3037 / -8392`。
+
+### 最新补充 76（2026-06-12 11:35 CST）
+
+补强 Claude-ish 文件工具对 Codex/Astral 可替换执行后端的保护证据。
+
+- 审计当前 `Read` / `Write` / `Edit` / `Glob` / `Grep` handler：
+  - 非 `Read` 路径统一从 `turn_environment.environment.get_filesystem()` 取
+    `ExecutorFileSystem`。
+  - `Write` / `Edit` / `Glob` / `Grep` 都把 `&dyn ExecutorFileSystem` 继续传给内部函数。
+  - `Write` 最终调用 `fs.write_file(...)`。
+  - `Edit` 最终调用 `fs.read_file(...)` 和 `fs.write_file(...)`。
+  - `Read` 文本路径走同一 filesystem 抽象；图片路径走 `ViewImageHandler`，带
+    `environment_id`，继续由对应环境读取。
+- 新增 `RecordingFileSystem` 测试后端，证明 Astral file tools 不直接触达本地磁盘：
+  - `write_uses_executor_file_system`
+  - `edit_uses_executor_file_system`
+- 两个测试都断言：
+  - tool output 正常。
+  - 调用记录只包含 `read_file` / `write_file` trait 方法。
+  - temp dir 里没有生成真实本地文件。
+- 结论：
+  - 当前 Claude-ish 文件工具只是换了模型侧 schema/名字/结果手感。
+  - runtime 仍然继承 Codex 的 `Environment -> ExecutorFileSystem` 边界。
+  - 未来 SSH/container/VM/K8s/exec-server 文件系统后端仍可替换；不能为了工具 flavor 直接绕回
+    `std::fs`。
+- 运行了 `just fmt`。
+- 验证：
+  - 第一次误用文件名 filter 跑了
+    `just test -p codex-core astral_file_tools_tests`，编译完成但 0 tests matched，nextest
+    以 exit code 4 返回。
+  - 随后用函数名公共片段跑：
+    `just test -p codex-core executor_file_system`
+    通过，2 个测试通过。
+- 磁盘复查：
+  - core 测试冷启动后可用空间从约 36Gi 降到 32Gi。
+  - 仅清理 Astral-Code 内部低价值缓存 `codex-rs/target/debug/incremental`。
+  - 清理后可用空间约 35Gi，`codex-rs/target` 约 115Gi。
+
+### 最新补充 77（2026-06-12 12:05 CST）
+
+继续切断 cloud tasks 中手写的 OpenAI hosted `/backend-api -> /wham/*` 路径。
+
+- 审计 `cloud-tasks` / `cloud-tasks-client`：
+  - `cloud-tasks/src/env_detect.rs` 仍会在 `base_url.contains("/backend-api")` 时手写访问
+    `/wham/environments` 和 `/wham/environments/by-repo/...`。
+  - `cloud-tasks/src/lib.rs` 启动日志仍把这种路径称为 `path_style=wham`。
+  - debug mock 默认 base URL 仍是 `http://localhost/backend-api`。
+  - `cloud-tasks-client/src/http.rs` 的错误提示 URL 仍会把 `/backend-api` 映射到 `/wham/tasks/...`。
+  - `cloud-tasks/src/util.rs::task_url` 仍把 `/backend-api` 特殊剥离为旧 hosted UI root。
+- 新状态：
+  - 新增 `util::codex_api_url(base_url, path)`：
+    - base 已经以 `/api/codex` 结尾时直接拼子路径。
+    - 其他 base 一律拼为 `{base}/api/codex/{path}`。
+    - 即使 base 是 `.../backend-api`，也不会再进入 `/wham/*`。
+  - `env_detect` 的 repo environment lookup 和 global environment list 都统一用
+    `util::codex_api_url(...)`。
+  - `init_backend` debug mock 默认 base 改为 `http://localhost`。
+  - startup log 固定为 `path_style=codex-api`，不再根据 URL 内容推断 hosted style。
+  - `cloud-tasks-client` 的 details error URL 不再生成 `/wham/tasks/...`。
+  - `task_url` 不再把 `/backend-api` 特殊剥离为 hosted UI root；它现在把该 URL 当普通 root。
+- 复扫：
+  - `cloud-tasks/src/env_detect.rs`、`cloud-tasks/src/util.rs`、
+    `cloud-tasks-client/src/http.rs` 中已无 `/wham` 残留。
+  - 当前只剩测试用的 `/backend-api` 字面量，用于证明不再特殊改写。
+- 运行了 `just fmt`。
+- 验证：
+  - `just test -p codex-cloud-tasks codex_api_url`
+    通过，1 个测试通过。
+  - `just test -p codex-cloud-tasks format_task_list_lines_formats_urls`
+    通过，1 个测试通过。
+  - `codex-cloud-tasks-client` 在上述测试编译链中成功编译，覆盖了 `details_path` 类型改动。
+- 磁盘复查：
+  - 可用空间约 31Gi。
+  - `target/debug/incremental` 约 4.0Gi。本轮暂不清理，保留热编译缓存；若继续跌到 25Gi
+    左右再清理更划算。
+
+### 最新补充 78（2026-06-12 12:34 CST）
+
+删除 `codex-cloud-config` 中 test-only 的旧 ChatGPT-hosted remote bundle 实现。
+
+- 审计结果：
+  - 生产入口 `cloud_config_bundle_loader(...)` / `cloud_config_bundle_loader_for_storage(...)`
+    已经只返回 `CloudConfigBundleLoader::default()`，不再发远程请求。
+  - 但 crate 内仍保留 `#[cfg(test)]` 的旧实现：
+    `backend.rs`、`cache.rs`、`metrics.rs`、`service.rs`、`validation.rs` 和两组大测试。
+  - 这些文件包含旧 hosted bundle retry、auth recovery、signed cache、ChatGPT identity cache key 等
+    OpenAI 控制面逻辑，虽然只在测试编译中出现，但已经不再符合 Astral 的目标形态。
+- 新状态：
+  - `cloud-config/src/lib.rs` 只保留 `bundle_loader`。
+  - 删除旧 test-only remote bundle service/cache/backend/validation/metrics 以及对应测试文件：
+    - `backend.rs`
+    - `cache.rs`
+    - `cache_tests.rs`
+    - `metrics.rs`
+    - `service.rs`
+    - `service_tests.rs`
+    - `validation.rs`
+  - `bundle_loader` 参数从 `_hosted_base_url` 收敛为 `_base_url`。
+  - crate 文档改为 provider-neutral disabled hook，不再描述 ChatGPT-hosted control plane。
+  - `cloud-config/Cargo.toml` 依赖从旧 backend/cache/service 所需的一大组依赖收窄到：
+    - `codex-config`
+    - `codex-login`
+  - `Cargo.lock` 中 `codex-cloud-config` 条目同步移除旧依赖。
+- 复扫：
+  - `codex-rs/cloud-config/src` 中已无 `chatgpt`、`ChatGPT`、`hosted`、`backend`、
+    `BundleClient`、`CloudConfigBundleService`、`CloudConfigBundleCache` 等残留命中。
+- 运行了：
+  - `just fmt`
+  - `just bazel-lock-update`
+  - `PATH=/opt/homebrew/bin:$PATH just bazel-lock-check`
+  - `just test -p codex-cloud-config --no-tests pass`
+- 备注：
+  - 第一次直接跑 `just bazel-lock-check` 会用 macOS `/usr/bin/python3` 3.9.6，无法解析脚本里的
+    `str | None` 类型语法并失败；用 Homebrew Python 3.14 放到 PATH 后检查通过。
+  - `MODULE.bazel.lock` 无 diff。
+  - 当前可用空间约 28Gi，`target/debug/incremental` 约 5.3Gi。暂不清，避免下一轮继续冷编。
+
+### 最新补充 79（2026-06-12 12:43 CST）
+
+模型 catalog 的 legacy ChatGPT source-of-truth 分支已删除。
+
+- 旧状态：
+  - `OpenAiModelsManager::apply_remote_models(...)` 在 remote `/models` 返回至少一个可见模型，且当前
+    auth mode 是 legacy ChatGPT/hosted account 时，会把 remote catalog 整体当成唯一真相。
+  - 这会让旧 Codex hosted catalog 语义凌驾于 Astral 的 bundled provider-neutral catalog 之上，也会让
+    `get_model_info(...)` 对 bundled 模型错误地走 fallback metadata。
+- 新状态：
+  - provider `/models` 输出始终作为 bundled catalog 的 overlay：同 slug 覆盖，不同 slug 追加。
+  - 每次 refresh 都从 bundled catalog 重新合并 remote models，因此 remote 里删除的 provider-only model
+    仍会被正确移除；但 bundled metadata 不会因为 legacy hosted auth 形状被整体替换掉。
+  - `ModelsEndpointClient` 的刷新能力抽象、provider auth、command auth、cache/ETag 行为保留不动。
+  - 这次改动不触碰 exec-server、sandbox、PTY、UnifiedExec 或文件执行后端抽象。
+- 验证：
+  - `just fmt` 通过。
+  - `just test -p codex-models-manager refresh_available_models_merges_visible_provider_catalog_with_bundled_catalog refresh_available_models_merges_cached_provider_catalog_with_bundled_catalog get_model_info_keeps_bundled_metadata_when_provider_catalog_refreshes refresh_available_models_preserves_bundled_catalog_for_empty_provider_remote refresh_available_models_merges_hidden_only_provider_remote_with_bundled_catalog`
+    通过，5 个测试通过。
+- 磁盘：
+  - 当前可用空间约 29Gi，`codex-rs/target/debug/incremental` 约 5.3Gi。暂未清理，保留热编译缓存；
+    如果继续下降到告警线，再只清理 Astral-Code 项目内构建缓存。
+
+### 最新补充 80（2026-06-12 12:55 CST）
+
+external API-key auth 现在严格覆盖 cached hosted auth，不再失败后回退到旧 ChatGPT/hosted token。
+
+- 旧状态：
+  - `AuthManager::auth()` 会先尝试 `resolve_external_api_key_auth()`。
+  - 如果 external API-key provider 返回 `None` 或报错，会继续返回 `auth_cached()`。
+  - 这意味着在测试或异常状态下，外部 API key provider 失效后，模型 catalog 等路径仍可能用 cached
+    legacy ChatGPT/hosted auth 继续请求。
+- 新状态：
+  - 一旦配置了 external API-key auth，`AuthManager::auth()` 就只返回 external provider 的解析结果。
+  - external provider 失败时返回 unauthenticated，不再 fallback 到 cached hosted credentials。
+  - `auth_mode()` / `get_api_auth_mode()` 仍报告 `ApiKey`，因此上层知道当前配置意图是 provider-neutral
+    API key，而不是 legacy hosted account。
+  - `models-manager` 的 unresolved external API-key 测试同步改成“不抓 remote models”。
+- 验证：
+  - `just fmt` 通过。
+  - `just test -p codex-login external_api_key_auth_failure_does_not_fall_back_to_cached_auth`
+    通过，1 个测试通过。
+  - `just test -p codex-models-manager refresh_available_models_skips_network_when_external_api_key_is_unresolved refresh_available_models_skips_network_when_external_api_key_overrides_cached_hosted_auth`
+    通过，2 个测试通过。
+- 磁盘：
+  - 本轮测试触发较重共享 crate 编译，跑完后可用空间降到约 25Gi，`debug/incremental` 涨到约 8.1Gi。
+  - 已按用户要求只清理 Astral-Code 项目内 `codex-rs/target/debug/incremental`。
+  - 清理后可用空间约 31Gi；未删除项目外文件，也未删除 `debug/deps`。
+
+### 最新补充 81（2026-06-12 13:05 CST）
+
+模型 `/models` refresh 不再由 legacy hosted/ChatGPT auth 触发。
+
+- 旧状态：
+  - `ModelsEndpointClient` 暴露 `uses_hosted_backend()`。
+  - `OpenAiModelsManager::should_refresh_models()` 会因为 hosted backend auth 为 true 而刷新远程模型目录。
+  - 这让旧 ChatGPT/hosted auth 形状仍然参与 Astral 的模型目录控制面，即使实际目标是 provider-neutral
+    `/models`。
+- 新状态：
+  - 删除 `ModelsEndpointClient::uses_hosted_backend()`。
+  - `/models` refresh 只由 provider-neutral 能力触发：
+    - provider command auth；
+    - provider env / bearer token auth。
+  - 测试 endpoint 默认改为 `has_provider_auth = true` 来表达“这个 provider 自己具备远程模型刷新能力”，
+    而不是靠 hosted account。
+  - `model-provider` 的 `OpenAiModelsEndpoint` 不再需要提供 hosted refresh 判断。
+- 保留边界：
+  - provider `/models`、cache、ETag、bundled catalog overlay 行为保留。
+  - 本轮没有触碰 exec-server、sandbox、PTY、UnifiedExec、approval 或文件执行后端。
+  - `AuthManager::current_auth_uses_hosted_backend()` 目前仍只影响 picker 里 hosted-only model visibility，
+    后续可以单独收敛。
+- 验证：
+  - `just fmt` 通过。
+  - `just test -p codex-models-manager refresh_available_models_merges_visible_provider_catalog_with_bundled_catalog refresh_available_models_skips_network_without_provider_refresh_auth refresh_available_models_skips_network_when_external_api_key_overrides_cached_hosted_auth refresh_available_models_skips_network_when_external_api_key_is_unresolved refresh_available_models_fetches_with_provider_auth`
+    通过，5 个测试通过。
+  - `just test -p codex-model-provider models_endpoint`
+    通过，2 个测试通过。
+- 磁盘：
+  - 当前可用空间约 30Gi，`codex-rs/target/debug/incremental` 约 1.5Gi。暂不清理。
+
+### 最新补充 82（2026-06-12 13:18 CST）
+
+模型 picker 不再因为 cached legacy hosted auth 展示 hosted-only / non-API 模型。
+
+- 旧状态：
+  - `ModelPreset::filter_by_auth(models, chatgpt_mode)` 暴露 `chatgpt_mode` 参数。
+  - `ModelsManager::build_available_models(...)` 会根据
+    `AuthManager::current_auth_uses_hosted_backend()` 决定是否展示 `supported_in_api = false` 的模型。
+  - 这意味着只要缓存里有 legacy ChatGPT/hosted auth，Astral 的模型 picker 就可能显示 API/provider
+    模式不可用的 hosted-only 模型。
+- 新状态：
+  - `ModelPreset::filter_by_auth(...)` 改为 `ModelPreset::filter_api_supported(...)`。
+  - 过滤器无 auth 参数，固定移除 `supported_in_api = false` 的模型。
+  - `ModelsManager::build_available_models(...)` 总是使用 provider/API 可用模型集。
+  - app-server v2 `model/list` 测试 helper 同步改为 `filter_api_supported(...)`，不再携带
+    `chatgpt_mode = false` 这种旧形状。
+- 保留边界：
+  - 模型 catalog overlay、provider `/models` refresh、cache/ETag 行为不变。
+  - 本轮没有触碰 exec-server、sandbox、PTY、UnifiedExec、approval 或文件执行后端。
+  - `AuthManager::current_auth_uses_hosted_backend()` 目前只剩 image-generation hosted-only gate 使用，
+    后续如继续清 OpenAI hosted extension，可单独处理。
+- 验证：
+  - `just fmt` 通过。
+  - `just test -p codex-protocol model_preset_filter_api_supported_removes_hosted_only_models`
+    通过，1 个测试通过。
+  - `just test -p codex-models-manager static_manager_hides_models_not_supported_in_api_even_with_cached_hosted_auth`
+    通过，1 个测试通过。
+  - app-server v2 `model/list` 只改了测试 helper 调用，未跑 app-server 测试，避免触发更重编译；后续阶段性
+    集中测试时需要覆盖。
+- 磁盘：
+  - 当前可用空间约 29Gi，`codex-rs/target/debug/incremental` 约 3.1Gi。暂不清理。
+
+### 最新补充 83（2026-06-12 13:39 CST）
+
+完成一轮 hosted extension / 执行后端边界确认。
+
+- image-generation 默认安装入口已从 app-server extension registry 移除：
+  - `codex-rs/app-server/src/extensions.rs` 不再默认安装 legacy OpenAI-hosted image generation extension。
+  - `codex-rs/app-server/Cargo.toml` / `codex-rs/core/Cargo.toml` 移除对
+    `codex-image-generation-extension` 的 app-server/core dev 依赖。
+  - `codex-rs/ext/image-generation/src/extension.rs` 保留 crate 壳，但默认 `available = false` 且不暴露工具。
+- 执行后端边界确认：
+  - 本轮没有重写或改变 exec-server、app-server process exec、Environment、ExecBackend、UnifiedExec、
+    PTY、sandbox 或 approval 的执行语义。
+  - 当前工作树里 `unified_exec` / `exec_env` / `shell_environment` 有少量 Astral 命名级 diff：
+    `CODEX_THREAD_ID` -> `ASTRAL_THREAD_ID`、`CODEX_CI` -> `ASTRAL_CI`，以及测试专用类型/方法的
+    `#[cfg(test)]` 收敛；这些不是执行后端抽象重构。
+  - Astral/Claude-ish 的 `Bash` 语义仍应映射到 Codex 原本统一执行链路，不绕过可替换执行后端。
+  - app-server 全量测试误触发后，`process_exec::*`、`thread_shell_command::*`、approval replay、
+    sandbox/thread setting 相关用例均通过，侧面说明执行后端抽象没有被本轮改动打坏。
+  - 这也符合后续远程设备、容器、SSH 工作区等 harness 目标：工具 flavor 可以换，但落地必须继续走
+    Codex 的执行后端抽象。
+- 验证：
+  - `just fmt` 通过。
+  - `just bazel-lock-update` 通过。
+  - `PATH=/opt/homebrew/bin:$PATH just bazel-lock-check` 通过。
+  - `just test -p codex-image-generation-extension` 通过，9 个测试通过；由于 extension 默认禁用，
+    backend/tool 类型出现 dead code warning，暂记为后续瘦身项。
+  - 误触发 `just test -p codex-app-server --no-tests pass` 后，实际跑了 app-server suite：
+    773 个测试运行，702 passed、70 failed、1 timed out、13 skipped。失败集中在：
+    OpenAI/remote plugin marketplace、hosted app list、Bedrock 旧 `gpt-5.5` catalog 假设、
+    image/web search capability 旧预期、local compact metadata 旧预期、OpenAI model reroute reason
+    旧预期、Astral 默认 prompt 文案差异、MCP/resource 个别旧测试漂移。
+    这些失败暂按“测试预期尚未 Astral 化”处理，不作为执行后端退化证据。
+- 磁盘：
+  - 因全量 app-server suite 产生构建压力，可用空间降到约 21Gi。
+  - 已仅删除项目内低风险缓存 `codex-rs/target/debug/incremental`，释放约 9.8Gi；当前可用空间约 29Gi。
+  - 代价是后续 Rust 增量编译会慢一些，但不影响源码和测试结果本身。
+
+### 最新补充 84（2026-06-12 14:02 CST）
+
+完成 provider capability / Bedrock catalog 的 Astral 化小切片。
+
+- Bedrock 静态模型目录不再强依赖 bundled catalog 里必须存在 `gpt-5.5`：
+  - `codex-rs/model-provider/src/amazon_bedrock/catalog.rs` 将旧的
+    `bundled_openai_model(...)` 改为 `bundled_reference_model(...)`。
+  - 优先复用目标 slug 的 bundled metadata；缺失时 fallback 到 `gpt-5.4`，再 fallback 到 catalog
+    第一个模型。
+  - 这样 Astral bundled catalog 可以以 DeepSeek/provider-neutral 模型为默认，不需要为了 Bedrock 测试把
+    OpenAI `gpt-5.5` 加回模型目录。
+  - Bedrock 对外仍暴露 Mantle model id：`openai.gpt-5.5` / `openai.gpt-5.4`，但显示名和描述改成
+    Bedrock-specific，避免把 fallback metadata 的 display name 泄露给用户。
+- 默认 provider capability 测试同步到 Astral 语义：
+  - app-server v2 `modelProvider/capabilities/read` 默认预期现在是
+    `namespace_tools = true`、`image_generation = false`、`web_search = false`。
+  - 这和已禁用 legacy OpenAI-hosted image-generation extension 的方向一致，也避免 UI/客户端误以为默认
+    provider 提供 hosted image/web search。
+- 保留边界：
+  - 本轮没有触碰 exec-server、sandbox、PTY、UnifiedExec、approval 或文件/命令执行后端。
+  - 改动只在 model-provider catalog 和 app-server capability 测试预期。
+- 验证：
+  - `just fmt` 通过。
+  - `just test -p codex-model-provider amazon_bedrock` 通过：17 个测试通过，16 个 skipped。
+  - `just test -p codex-app-server model_provider_capabilities_read` 通过：2 个测试通过，784 个 skipped。
+- 磁盘：
+  - 测试后可用空间约 25Gi，`codex-rs/target/debug/incremental` 约 3.3Gi。
+  - 暂不清理，保留热编译缓存；若继续下降到危险区再只清 Astral-Code 项目内低价值缓存。
+
+### 最新补充 85（2026-06-12 14:22 CST）
+
+完成 remote marketplace 外露 id 的 Astral 化切片。
+
+- 旧状态：
+  - remote plugin 控制面已被禁用，但全仓仍有大量 `openai-curated-remote` 作为远程 marketplace id、
+    缓存路径、测试 fixture 和模型可见 plugin id 后缀。
+  - 这会让 Astral 在 remote plugin disabled stub 下仍暴露 OpenAI 命名，和“新项目、不兼容旧 Codex 数据”
+    的方向冲突。
+- 新状态：
+  - `codex-rs/core-plugins/src/remote.rs` 的 `REMOTE_GLOBAL_MARKETPLACE_NAME` 改为
+    `astral-curated-remote`。
+  - app-server、core-plugins、core plugin discoverable / request install 测试 fixture 中的
+    `openai-curated-remote` 已机械替换为 `astral-curated-remote`。
+  - app-server remote plugin warning 文案也同步改成 `astral-curated-remote collection fetch failed...`。
+  - `rg "openai-curated-remote|OpenAI Curated Remote|openai-curated remote" codex-rs -g '*.rs' -g '*.toml'`
+    已无命中。
+- 保留边界：
+  - 本轮不改变 remote plugin 控制面仍 disabled 的事实。
+  - 本轮不触碰 exec-server、sandbox、PTY、UnifiedExec、approval 或文件/命令执行后端。
+  - 本轮只收口 remote marketplace 身份和相关测试 fixture，不重新接回任何 hosted 网络路径。
+- 验证：
+  - `just fmt` 通过。
+  - `just test -p codex-core-plugins remote_bundle` 通过：15 个测试通过，171 个 skipped。
+  - `just test -p codex-core-plugins discoverable` 通过：6 个测试通过，180 个 skipped。
+  - 未跑 app-server/plugin 全套；那块仍有大量“旧 OpenAI hosted 行为预期”需要后续统一改成
+    Astral disabled/unsupported 语义。
+- 磁盘：
+  - 测试后可用空间约 24Gi，`codex-rs/target/debug/incremental` 约 5.0Gi。
+  - 暂时保留热缓存；若继续下降，再只清 Astral-Code 项目内 `target/debug/incremental`。
+
+### 最新补充 86（2026-06-12 14:50 CST）
+
+收尾 app-server remote plugin disabled guard 的校验顺序。
+
+- 旧状态：
+  - remote plugin control-plane 已经禁用，但部分 app-server 入口在 disabled guard 前后的错误优先级仍不够干净。
+  - 对 Astral 来说，远程 hosted 控制面应该被挡住，但纯本地的参数校验仍应保留，否则非法 plugin id 会被
+    “remote plugin not enabled” 掩盖，调试和客户端行为都不够明确。
+- 新状态：
+  - `plugin/read` 的 remote 分支在返回 disabled 之前先校验 `plugin_name`。
+  - `plugin/skill/read` 在返回 disabled 之前先校验 `remote_plugin_id` 和空 `skill_name`。
+  - `plugin/install` 的 remote 分支在返回 disabled 之前先校验 `remote_plugin_id`。
+  - 真正会加载 config、读取 auth、请求 remote catalog 或下载 bundle 的路径仍在 disabled guard 之后，
+    没有重新打开任何 hosted 网络控制面。
+- 保留边界：
+  - 不改变 local marketplace plugin read/install 行为。
+  - 不触碰 exec-server、sandbox、PTY、UnifiedExec、approval 或文件/命令执行后端。
+  - 不恢复旧 OpenAI/ChatGPT remote plugin control-plane。
+- 验证：
+  - `just fmt` 通过。
+  - `just test -p codex-app-server plugin_install_rejects_invalid_remote_plugin_name` 通过：
+    1 个测试通过，785 个 skipped。
+  - `just test -p codex-app-server plugin_read_rejects_invalid_remote_plugin_name` 通过：
+    1 个测试通过，785 个 skipped。
+  - `git diff --check` 通过。
+- 磁盘：
+  - 测试后可用空间约 23Gi，`codex-rs/target/debug/incremental` 约 6.3Gi。
+  - 目前继续保留热缓存；若可用空间继续明显下降，再只清 Astral-Code 项目内构建缓存。
+
+### 最新补充 87（2026-06-12 15:03 CST）
+
+收敛 app-server API 文档里的 OpenAI/ChatGPT 专有集成指引。
+
+- 旧状态：
+  - `codex-rs/app-server/README.md` 仍把 app-server 描述成 Codex / OpenAI VS Code extension 的接口。
+  - 初始化文档还要求 `clientInfo.name` 对接 OpenAI Compliance Logs Platform，并链接
+    `chatgpt.com/admin/api-reference#tag/Logs:-Codex`。
+  - `plugin/uninstall` 仍描述“转发到 ChatGPT plugin backend”。
+  - schema generation 示例仍使用 `codex app-server`，部分示例 `modelProvider` 仍写 `openai`。
+- 新状态：
+  - app-server 文档入口改成 `astral app-server` / Astral-Code。
+  - `clientInfo.name` 改为 provider-neutral 的稳定客户端标识说明。
+  - remote plugin uninstall 文档改为当前 Astral 事实：legacy hosted remote-plugin uninstall disabled，
+    未来只有显式 provider-neutral marketplace 才可支持。
+  - 示例命令、`ASTRAL_HOME`、`.astral-code` skill/config 路径和示例 `modelProvider: "astral"` 已同步。
+  - attestation 文档从 `x-oai-attestation` / ChatGPT Codex 改为 provider-neutral attestation metadata。
+- 保留边界：
+  - 这是 docs-only 切片，不改 app-server wire schema，不重命名 `codexHome` 等现存 API 字段。
+  - 不触碰 exec-server、sandbox、PTY、UnifiedExec、approval 或文件/命令执行后端。
+- 验证：
+  - `rg "codex app-server|OpenAI|ChatGPT|openai.chatgpt|x-oai-attestation|chatgpt.com/admin|modelProvider\\\": \\\"openai\\\"|/Users/me/openai|api.openai.com" codex-rs/app-server/README.md`
+    只剩一条有意保留的 “Legacy ChatGPT OAuth ... not accepted by Astral”。
+  - `git diff --check` 通过。
+
+### 最新补充 88（2026-06-12 本轮）
+
+修正 Claude-ish 文件工具 schema 的执行环境表述。
+
+- 旧状态：
+  - `Read` 的模型可见描述写着 “local image from the filesystem”。
+  - `Write` 的模型可见描述写着 “local filesystem”。
+  - 这和用户明确要求的 harness 目标不一致：Astral agent 在本机运行，但最终作用对象应由
+    Codex/Astral 的 Environment / ExecBackend / exec-server 抽象决定，可以是本机、远程设备、容器或未来别的后端。
+- 新状态：
+  - `Read` 改为 “active execution environment”。
+  - `Write` 改为 “active execution environment”。
+  - `Edit` 也明确是 “active execution environment”。
+  - schema 里已有的 `environment_id` 参数保留，继续表达多执行环境目标选择。
+- 保留边界：
+  - 只改模型可见 tool description 和 schema 测试，不改文件工具 runtime。
+  - 没有绕过 Codex 原有的 `ExecutorFileSystem`、Environment、ExecBackend、sandbox 或 approval 边界。
+  - `Bash` / 后台任务工具组仍走 Codex/Astral 的 PTY / UnifiedExec 长任务观察能力。
+- 验证：
+  - `just fmt` 通过。
+  - `just test -p codex-tools astral` 通过：7 个测试通过，90 个 skipped。
+  - `git diff --check` 通过。
+- 磁盘：
+  - 测试后可用空间降到约 21Gi，`codex-rs/target/debug/incremental` 约 7.4Gi。
+  - 已按用户要求只删除 Astral-Code 项目内
+    `/Users/oines/project/astral-code/codex-rs/target/debug/incremental`。
+  - 清理后可用空间约 27Gi；未删除 `debug/deps`，未删除项目外文件。
+
+### 最新补充 89（2026-06-12 本轮）
+
+硬化 Anthropic Messages stream 对 Claude extended thinking `signature_delta` 的兼容。
+
+- 旧状态：
+  - Anthropic stream parser 支持 `text_delta`、`input_json_delta`、`thinking_delta`。
+  - 真实 Claude / Anthropic extended thinking stream 还可能出现 `signature_delta`。
+  - Astral 当前内部 `ContentDelta` 没有 signature delta 表示；旧行为会把它当 unknown delta 报错，导致
+    `/anthropic` stream 在 reasoning 签名事件上提前失败。
+- 新状态：
+  - `signature_delta` 现在被安全忽略，返回 `None`，不产生模型输出、不计入文本/工具增量。
+  - 这和 Claude Code 的处理方向一致：signature 是 cryptographic/authentication metadata，不是普通模型输出。
+  - 没有扩展 Agent IR，也没有把 signature 拼进 reasoning text，避免污染 compact/history/token 轨迹。
+- 保留边界：
+  - `ContentBlock::Reasoning { signature }` 的非流式/完整 block 结构仍保留。
+  - 只改 Anthropic adapter 的 stream parser，不改 chat-completions adapter，不改 core session/runtime。
+- 验证：
+  - 对照 `/Users/oines/project/claude-code/services/api/claude.ts` 和
+    `/Users/oines/project/claude-code/utils/messages.ts` 确认 Claude Code 对 `signature_delta` 单独处理且不计普通输出。
+  - `just fmt` 通过。
+  - `just test -p codex-api anthropic` 通过：6 个测试通过，135 个 skipped。
+  - `git diff --check` 通过。
+- 磁盘：
+  - 测试后可用空间约 27Gi，`codex-rs/target/debug/incremental` 约 515M。
+  - 暂不继续清理。
+
+### 最新补充 90（2026-06-12 本轮）
+
+硬化 OpenAI-compatible chat-completions stream 的国内网关兼容性。
+
+- 旧状态：
+  - stream parser 要求每个 chunk 都有 `choices[].delta`。
+  - 有些兼容网关的最终 chunk 可能只有 `finish_reason`，没有 `delta`。
+  - 有些兼容网关会直接 SSE 输出 `{ "error": { "message": "..." } }`，而不是 `choices`。
+  - 旧行为会把这些情况报成 parser 结构错误，丢掉 provider 的真实错误或正常终止原因。
+- 新状态：
+  - `{"error": {"message": "..."}}` 会映射为 `StopReason::Error`，再由 agent SSE mapper 转成终止错误。
+  - 缺少 `delta` 但包含 `finish_reason` 或 `usage` 的 chunk 现在可以正常处理。
+  - 原有 DeepSeek `reasoning_content`、cache usage、tool_calls 增量和 usage-only chunk 逻辑不变。
+- 保留边界：
+  - 只改 chat-completions provider adapter，不改 core session、tool runtime、sandbox 或 exec。
+  - 仍然保留对真正 malformed chunk 的 `MissingField("delta")` 校验：没有 `delta`、也没有
+    `finish_reason` / `usage` 的 choices 不会被静默吞掉。
+- 验证：
+  - `just fmt` 通过。
+  - `just test -p codex-api chat_completions` 通过：12 个测试通过，131 个 skipped。
+  - `git diff --check` 通过。
+- 磁盘：
+  - 测试后可用空间约 26Gi，`codex-rs/target/debug/incremental` 约 678M。
+  - 暂不清理。
+
+### 最新补充 91（2026-06-12 本轮）
+
+清理 app-server-protocol 里的 OpenAI 示例值和生成 schema 注释。
+
+- 旧状态：
+  - `Thread.modelProvider` 的协议注释仍写着 `for example, 'openai'`。
+  - app-server protocol 序列化测试中仍使用 `model_provider: "openai"`、`api.openai.com`、
+    `github.com/openai/example.git`、`openai-curated-remote` 等示例值。
+  - 这些不是 runtime 行为，但会继续把 OpenAI 作为 Astral 协议层的默认 mental model 暴露在 fixture
+    和生成类型里。
+- 新状态：
+  - `Thread.modelProvider` 注释示例改成 `astral`。
+  - 相关 protocol 测试示例改成 provider-neutral 或 Astral 命名：
+    `api.provider.example`、`github.com/astral-code/example.git`、`astral-curated-remote`。
+  - 重新生成 app-server schema fixtures，使 JSON/TypeScript 生成件与源码注释一致。
+- 保留边界：
+  - 只改测试值、注释和生成 schema fixture，不改变 app-server v2 wire shape。
+  - 不改 exec-server、sandbox、approval、Plan Mode、Goal Mode 或 compact。
+  - 不新增旧 Codex 数据兼容路径。
+- 验证：
+  - `just fmt` 通过。
+  - `just write-app-server-schema` 已执行并更新 fixture。
+  - `just test -p codex-app-server-protocol` 通过：222 个测试通过，0 个 skipped。
+  - `git diff --check` 通过。
+- 磁盘：
+  - 测试后可用空间约 24Gi，`codex-rs/target/debug/incremental` 约 2.7G。
+  - 下一步清理这块低价值增量缓存，避免继续挤压开发空间。
+
+### 最新补充 92（2026-06-12 本轮）
+
+清理 realtime 默认 backend prompt 的 OpenAI 身份句。
+
+- 旧状态：
+  - `codex-rs/prompts/templates/realtime/backend_prompt.md` 默认身份写的是
+    `You are Codex, an OpenAI general-purpose agentic assistant...`。
+  - 这不是普通注释或测试名，而是 realtime 会话会加载的模型可见默认 prompt，会直接影响模型上下文和
+    Astral 的品牌/轨迹手感。
+- 新状态：
+  - 默认身份改为 `You are Astral, a provider-neutral agentic assistant...`。
+  - 保留原有 realtime “统一 assistant / backend 执行 / 用户可 steer”的工作模型，不改交互协议。
+  - 对应 `realtime_prompt` 测试断言同步改为 Astral/provider-neutral 身份。
+- 保留边界：
+  - 不改 `prepare_realtime_backend_prompt` 的 override 规则。
+  - 不改 realtime transport、WebRTC/WebSocket、auth、sandbox、exec-server。
+  - 这次只处理模型可见身份文案，不碰 Claude-ish tool schema。
+- 验证：
+  - `just fmt` 通过。
+  - `just test -p codex-core realtime_prompt` 通过：4 个测试通过，2634 个 skipped。
+  - `git diff --check` 通过。
+- 磁盘：
+  - 因为刚清过 incremental 后触发 `codex-core` 重编译，本轮测试耗时较长。
+  - 测试后可用空间约 21Gi，`codex-rs/target/debug/incremental` 约 3.5G。
+  - 下一步清理 Astral-Code 自己的 incremental 缓存，避免磁盘继续告警。
+
+### 最新补充 93（2026-06-12 本轮）
+
+清理主模型指令模板的 Codex/OpenAI 身份残留。
+
+- 旧状态：
+  - `codex-rs/core/templates/model_instructions/gpt-5.2-codex_instructions_template.md` 第一句仍是
+    `You are Codex, a coding agent based on GPT-5...`。
+  - 这是主 agent model instructions 模板，不是普通文档；如果后续从模板再生成或派发指令，会把 Codex
+    身份重新带回模型上下文。
+- 新状态：
+  - 第一句改成 `You are Astral, a coding agent running in astral-code...`。
+  - `codex-rs/prompts`、`codex-rs/core/templates`、`codex-rs/core/*.md`、
+    `codex-rs/protocol/src/prompts` 范围内已经扫不到 `You are Codex` 或
+    `OpenAI general-purpose` 身份句。
+- 保留边界：
+  - 只改模型可见身份句，不重写整份开发者指令。
+  - 不改 runtime、tool schema、sandbox、exec-server 或 provider adapter。
+  - 文件名里保留 `gpt-5.2-codex`，这是现有模型/模板命名遗留，后续模型 catalog 收敛时统一处理。
+- 验证：
+  - `rg -n "You are Codex|OpenAI general-purpose|You are Astral|You are a coding agent running in astral-code"`
+    已确认 prompt/model-instructions 区域只剩 Astral/provider-neutral 身份句。
+  - `git diff --check` 通过。
+- 磁盘：
+  - 本 slice 未触发新的 Rust 编译。
+  - 清理 incremental 后可用空间约 24Gi。
+
+### 最新补充 94（2026-06-12 本轮）
+
+收敛 login auth 主模块里的 OpenAI 命名残留。
+
+- 旧状态：
+  - `codex-rs/login/src/auth/manager.rs` 中拒绝旧 hosted 凭据的常量仍叫
+    `UNSUPPORTED_OPENAI_AUTH_MESSAGE`。
+  - 运行时行为已经是 Astral-only：ChatGPT / Agent Identity / Personal Access Token 存储凭据都会被拒绝，
+    但源码命名仍把这条路径标成 OpenAI auth。
+- 新状态：
+  - 常量重命名为 `UNSUPPORTED_LEGACY_HOSTED_AUTH_MESSAGE`。
+  - 错误消息保持 provider-neutral：`Stored upstream hosted credentials are not supported by Astral. Use API key auth instead.`
+  - `from_auth_dot_json`、`from_agent_identity_jwt`、`from_personal_access_token` 三条 legacy hosted auth
+    拒绝路径统一使用新的 legacy-hosted 常量。
+- 保留边界：
+  - 行为不放宽：旧 ChatGPT/PAT/AgentIdentity 凭据仍然不可用。
+  - 不改 token payload 里的历史 `chatgpt_*` claim 字段；那是旧 token 结构解析壳，不是新 Astral
+    auth 入口。
+  - 不碰 sandbox、exec-server、approval 或 provider adapter。
+- 验证：
+  - `just fmt` 通过。
+  - `just test -p codex-login stored_chatgpt_auth_without_api_key_is_rejected` 通过：1 个测试通过，49 个 skipped。
+  - `git diff --check` 通过。
+- 磁盘：
+  - 因清过 incremental 后触发 `codex-login` 依赖链重编译，本轮测试耗时较长。
+  - 测试后可用空间约 21Gi，`codex-rs/target/debug/incremental` 约 2.7G。
+  - 下一步清理 Astral-Code 自己的 incremental 缓存。
+
+### 最新补充 95（2026-06-12 本轮）
+
+收敛 connectors / plugins 缓存 key 的 ChatGPT 用户字段命名。
+
+- 旧状态：
+  - `AccessibleConnectorsCacheKey`、`ConnectorDirectoryCacheKey`、`FeaturedPluginIdsCacheKey`
+    都使用 `chatgpt_user_id` 字段。
+  - Astral API-key/provider-neutral 主路径下这个值基本为 `None`，但 cache key 是 Astral 自己的内部
+    状态，不应该继续把 ChatGPT 当默认语义。
+- 新状态：
+  - 这三个 cache key 字段统一改成 `legacy_user_id`。
+  - 仍然通过 `CodexAuth::get_chatgpt_user_id` 从旧 token payload 读取历史 claim；这个方法名和
+    `chatgpt_*` claim 暂时保留，因为它描述的是旧 token 结构，不是新的 Astral auth 入口。
+  - `ConnectorDirectoryCacheKey` 的序列化字段随之变成 `legacy_user_id`，新项目不维护旧 cache key
+    兼容路径。
+- 保留边界：
+  - 不改 connector/app 功能行为。
+  - 不改旧 auth fixture 里的 `chatgpt_user_id` claim。
+  - 不改 MCP、plugin runtime、sandbox 或 exec-server。
+- 验证：
+  - `just fmt` 通过。
+  - `rg -n "chatgpt_user_id" core/src/connectors.rs connectors/src/lib.rs core-plugins/src/manager.rs`
+    只剩读取旧 claim 的 `CodexAuth::get_chatgpt_user_id` 调用。
+  - `git diff --check` 通过。
+  - 未额外跑 `codex-core` / `codex-core-plugins` 测试，避免再次触发长时间重编译和磁盘压力；后续阶段性测试
+    应覆盖这三个 crate。
+- 磁盘：
+  - 当前可用空间约 23Gi。
+
+### 最新补充 96（2026-06-12 本轮）
+
+收敛 memory write/read 路径里的模型可见 Codex/OpenAI 文案。
+
+- 旧状态：
+  - `codex-rs/memories/write/templates/memories/consolidation.md` 仍把 memory workspace 描述为
+    Codex 管理，并在 retrieval-bias 例子中使用 `api.openai.org/v1/files`、`OpenAI Internal Slack`。
+  - `codex-rs/memories/write/src/prompts.rs` 的 fallback prompt 仍写
+    `Consolidate Codex memories`。
+  - `codex-rs/memories/write/src/workspace.rs` 生成的 diff 文件头仍写
+    `Generated by Codex`。
+  - `codex-rs/ext/memories/src/tools/{ad_hoc_note,list,read,search}.rs` 的 tool schema 描述仍把
+    memory store/file 叫 Codex memories。
+- 新状态：
+  - memory consolidation prompt 和 workspace diff 头统一改成 Astral。
+  - OpenAI 专有 retrieval 例子改成 provider-neutral 的 `api.example.internal/v1/files`、
+    `Internal Slack`。
+  - memory extension 四个 tool 描述统一改成 Astral memory store/file。
+- 保留边界：
+  - 不改 memory 存储根目录、不改 `codex_home` 内部结构字段、不改 metrics 名、不改 crate 名。
+  - 不改 local compact、memory consolidation 行为、sandbox、exec-server 或 provider adapter。
+  - 这次只处理模型/agent 会看到的文案，不把内部历史命名强行机械清空。
+- 验证：
+  - `just fmt` 通过。
+  - `just test -p codex-memories-extension` 通过：15 个测试全部通过。
+  - `git diff --check` 通过。
+  - 定向 `rg` 已确认上述 memory prompt/tool schema 里旧的 Codex/OpenAI 示例文案被覆盖。
+- 测试成本记录：
+  - `codex-memories-extension` 这次冷编译触发了 `codex-api`、`app-server-protocol`、
+    `codex-core` 等共享依赖，编译耗时约 23 分 34 秒，实际测试只跑约 0.05 秒。
+  - 后续类似“纯模型可见文案”改动，优先使用 `fmt + diff-check + targeted rg`，除非改到逻辑路径，
+    避免每个小 slice 都触发重编译。
+- 磁盘：
+  - 测试后可用空间约 21Gi，`codex-rs/target/debug/incremental` 约 2.2G。
+  - 已只清理 Astral-Code 自己的 `codex-rs/target/debug/incremental`，可用空间回到约 22Gi。
+
+### 最新补充 97（2026-06-12 本轮）
+
+收敛 CLI/login 中残留的 legacy hosted auth 用户可见文案。
+
+- 旧状态：
+  - `astral login --with-api-key` 的 help 仍写 `Astral-managed auth`，容易和旧 hosted managed auth
+    语义混在一起。
+  - remote exec-server 注册时如果拿到旧 ChatGPT / Agent Identity auth，错误消息直接点名
+    `ChatGPT and Agent Identity auth are disabled in Astral`。
+  - `codex-rs/login/src/auth/manager.rs` 的 unauthorized refresh 注释仍写
+    `managed ChatGPT/OAuth token refresh`。
+- 新状态：
+  - `--with-api-key` help 改成 `Astral API-key auth`。
+  - remote exec-server auth 错误改成 `legacy hosted credentials are disabled in Astral`。
+  - unauthorized refresh 注释改成 `managed legacy-hosted/OAuth token refresh`。
+- 保留边界：
+  - 不改 `is_supported_exec_server_remote_auth` 判断：remote exec-server 仍只接受 API-key auth。
+  - 不改旧 token fixture、`chatgpt_user_id` 结构字段或测试 helper 名；这些描述的是旧 token payload。
+  - 不改 app-server、exec-server、sandbox、approval 或 provider adapter。
+- 验证：
+  - `just fmt` 通过。
+  - `git diff --check` 通过。
+  - 定向 `rg` 确认 `managed ChatGPT/OAuth`、`ChatGPT and Agent Identity auth are disabled`、
+    `Astral-managed auth` 已不再出现在相关 CLI/login 文件中。
+- 测试：
+  - 未跑额外 Rust 测试；本 slice 仅改变 help/error/comment 文案，上一条 memory slice 已暴露冷编译成本偏高。
+
+### 最新补充 98（2026-06-12 本轮）
+
+修正 DeepSeek/OpenAI-compatible 示例配置，避免真实 smoke test 走错协议或 URL。
+
+- 旧状态：
+  - `docs/example-config.md` 仍是旧占位文档，或示例里使用过期的 `wire_api = "chat"`。
+  - 示例 `base_url` 未明确带 `/v1`，会让 `chat/completions` endpoint 拼到错误路径。
+  - 示例表结构没有展示真实的 provider catalog 写法。
+- 新状态：
+  - 示例改成：
+    - `model = "deepseek-v4-pro"`
+    - `model_provider = "deepseek"`
+    - `[model_providers.deepseek]`
+    - `base_url = "https://api.deepseek.com/v1"`
+    - `env_key = "ASTRAL_API_KEY"`
+    - `wire_api = "chat_completions"`
+- 保留边界：
+  - 不改内置 Astral provider：默认仍是 `https://api.deepseek.com/v1` + `ASTRAL_API_KEY`
+    + `WireApi::ChatCompletions`。
+  - 不改 provider runtime 或 adapter。
+- 验证：
+  - `git diff --check` 通过。
+  - 定向 `rg` 确认 docs / README 中不再有用户可复制的 `wire_api = "chat"` 或错误 DeepSeek base URL。
+  - 剩余 `wire_api = "chat"` 只在 model-provider-info 的负向测试里，用来验证旧值会报错。
+
+### 最新补充 99（2026-06-12 本轮）
+
+补齐 `deepseek-v4-flash` 的 Astral 内置模型识别路径，方便后续快速真实 smoke test。
+
+- 旧状态：
+  - 内置 `models.json` 只有 `deepseek-v4-pro`。
+  - 用户提供的 `deepseek-v4-flash` slug 如果直接使用，会落到 fallback model metadata，
+    UI 和 runtime 仍能跑，但会丢失 Astral 默认模型能力描述、reasoning 默认值、parallel tool
+    calling、图片输入等元数据。
+- 新状态：
+  - `codex-rs/models-manager/src/manager.rs` 在加载 bundled catalog 时，从
+    `deepseek-v4-pro` 派生一个 `deepseek-v4-flash` 内置条目。
+  - flash 继承 Astral 的基础 instructions、Claude-ish tool flavor 指令、sandbox/exec 元数据、
+    图片输入和 parallel tool calling 能力。
+  - flash 的显示名、描述、默认 reasoning effort 和优先级独立设置：
+    `DeepSeek V4 Flash`、快速 coding/smoke 用途、默认 low reasoning、排在 pro 之后。
+- 保留边界：
+  - 不复制大段 `models.json`，避免巨型重复 JSON。
+  - 不改 provider adapter、exec-server、sandbox、approval、compact 或 tool runtime。
+  - 不把未知模型 fallback 行为删除，第三方自定义 slug 仍可继续使用 fallback metadata。
+- 验证：
+  - 已执行 `just fmt`。
+  - 未跑重测试；这是 bundled catalog 派生逻辑，后续真实 smoke test 会覆盖。
+
+### 最新补充 100（2026-06-12 本轮）
+
+锁定并开始落地后台终端工具拆分、多模态降级和上下文窗口策略。这三点都是 Astral
+面向国产/多 provider 模型的核心 harness 约束，不是 UI 文案层的小改名。
+
+- 后台终端工具命名正式锁定：
+  - `Bash`：启动命令，返回 `task_id`。
+  - `ReadTaskOutput`：只读取/轮询输出。
+  - `SendTaskInput`：只向 stdin 写入交互输入，例如 `y\n`、REPL 命令。
+  - `ListBackgroundTasks`：列出 live/recent 后台任务，解决模型忘记 `task_id` 的问题。
+  - `StopBackgroundTask`：按 `task_id` 干净终止任务。
+- 实现方向：
+  - 不重写 Codex exec 骨架。
+  - `task_id` 在 v1 内部直接映射 UnifiedExec process/session id。
+  - `Bash` 继续走 Codex `UnifiedExecProcessManager + Environment + ExecBackend + approval/sandbox`。
+  - `ReadTaskOutput` / `SendTaskInput` 复用原 `write_stdin` 后端语义，但模型侧 schema 不再把“看输出”和“写输入”
+    混在 `Monitor` 一个工具里。
+  - `ListBackgroundTasks` 只读 UnifiedExec manager snapshot。
+  - `StopBackgroundTask` 复用 UnifiedExec terminate 路径。
+- 当前代码状态：
+  - `codex-rs/tools/src/astral_flavor.rs` 已加入上述四个后台任务工具 schema，并把旧 `Monitor` 从
+    Astral core tool list 移出；后续又删除了 `Monitor` schema helper、导出常量和旧 handler 文件，避免
+    继续留下半新半旧的模型可调用面。
+  - `codex-rs/core/src/tools/handlers/astral_background_tasks.rs` 已新增四个 Astral-native handler。
+  - `codex-rs/core/src/unified_exec/*` 已补充 background task snapshot 和 terminate/list 所需的公开 manager
+    能力。
+  - `codex-rs/core/src/tools/spec_plan.rs` 已把 UnifiedExec 注册面切到新工具组。
+  - 实现审计确认新 handler 没有 `std::process` / 本地 `ps` / 本地 kill 旁路，只通过
+    `WriteStdinHandler` 和 `unified_exec_manager` 进入 Codex 可替换执行后端。
+- 多模态策略正式锁定：
+  - Astral 内部原始历史不删除图片、不破坏多模态 session。
+  - 每次请求发送前，根据当前模型声明能力做“请求投影”。
+  - 当前模型是单模态或能力未知时，图片/视觉片段降级为有界文本占位，而不是原样塞 image block 让 API
+    报错或让 session 变成只能用多模态模型。
+  - 切回多模态模型时，原始图片上下文仍可恢复。
+- 上下文窗口策略正式锁定：
+  - 不维护任何内置 provider/model 预设 catalog。
+  - 用户在 provider/model 配置中声明 `context_window`、`max_output_tokens`、输入模态、工具能力、reasoning/cache
+    能力等。
+  - 未声明能力走保守默认：文本-only、小窗口、少做激进上下文塞入。
+  - 这样国内新模型快速出现时，只要仍走 `/anthropic` 或 OpenAI-compatible `/v1/chat/completions`，
+    Astral 不需要每月追内置表。
+- 验证：
+  - `just fmt` 已通过。
+  - 修复 `cwd` move 后，`CARGO_INCREMENTAL=0 cargo check -p codex-core --lib` 通过。
+  - 删除旧 `Monitor` 残影后，`just fmt && CARGO_INCREMENTAL=0 cargo check -p codex-tools -p codex-core --lib`
+    通过。
+
+### 最新补充 101（2026-06-12 本轮）
+
+推进模型能力声明、多模态安全降级和后台任务生命周期语义。
+
+- 多模态/单模态策略从“决策”推进到配置主路径：
+  - 新增 `model_input_modalities` 配置字段，可在 `config.toml` 中声明当前模型输入能力，例如
+    `["text"]` 或 `["text", "image"]`。
+  - `ConfigToml -> Config -> ModelsManagerConfig -> ModelInfo` 链路已接通。
+  - `codex-rs/core/config.schema.json` 已通过 `just write-config-schema` 更新。
+- 未知模型能力默认更保守：
+  - `model_info_from_slug(...)` 的 unknown/fallback model 现在默认 `input_modalities = ["text"]`。
+  - OpenAI-compatible `/models` 只返回 id 的 listing 也默认 `["text"]`。
+  - 只有 bundled catalog、Astral models response 或用户配置明确声明 image 时，才认为模型可接收图片。
+- 这与现有 context 投影机制配合：
+  - `ContextManager::for_prompt(&model_info.input_modalities)` 已经在 prompt snapshot 上调用
+    `strip_images_when_unsupported(...)`。
+  - 该路径是 clone 后 normalize，原始 `raw_items()` 历史仍保留图片；单模态模型只收到文本占位，切回多模态模型
+    后仍可恢复原始图片上下文。
+  - 这正是用户要求的“不要像 Claude Code 那样一旦 session 混入图片，单模态模型就废掉”。
+- 后台任务生命周期语义确认：
+  - `Bash` 启动的是当前 Astral session scoped task，不是 durable job。
+  - 本地 PTY 的 `UnifiedExecProcess::drop()` 会调用 `terminate()`；TUI 正常 `/exit` 或关闭进程时，当前 harness
+    持有的后台命令应随 session 清理。
+  - stdio exec-server 客户端 drop 已有测试覆盖会终止 spawned server process tree。
+  - 远端/常驻 exec-server 也会走 terminate/unregister 语义，但如果网络断开或远端 daemon 失联，未来还需要
+    session lease/heartbeat TTL 才能把“退出一定清理”做成强保证。
+  - 因此 `ListBackgroundTasks` 只承诺找回当前 harness/session 还持有的任务；未来如需跨 session 持久任务，应另建
+    `Job` / `Workflow` 语义，不要偷换现有 PTY task。
+- 验证：
+  - `just fmt` 通过。
+  - `CARGO_INCREMENTAL=0 cargo check -p codex-config -p codex-models-manager -p codex-api -p codex-core --lib`
+    通过。
+  - `just write-config-schema` 通过。
+  - `just test -p codex-models-manager model_input_modalities` 通过。
+  - `just test -p codex-models-manager unknown_model_defaults_to_text_only_input` 通过。
+  - `just test -p codex-api parses_openai_models_list_response` 通过。
+- 磁盘：
+  - schema 生成后可用空间降到约 15Gi。
+  - 已只清理 Astral-Code 项目内 `codex-rs/target/debug/incremental`，随后测试再次生成的 incremental 也已清理。
+    当前可用空间约 16Gi。
+
 ## 剩余高优先级工作
 
 1. 审计并清理剩余 OpenAI/ChatGPT auth/config 面
@@ -1449,14 +3289,16 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
    - `AuthMode::ChatGPT` / PAT / Agent Identity 是否需要彻底删除、隔离或标记 legacy unsupported
 
 2. 审计 remote/cloud control-plane
-   - `backend-client`
-   - `cloud-config` 旧测试/类型命名
-   - `cloud-tasks` 旧 auth/header 语义
-   - `core-plugins/src/remote*`
+   - `backend-client` 默认 URL 推断已不再自动进入 `/wham/*`；后续可评估是否彻底删除显式
+     `HostedApi` variant。
+   - `cloud-config` 旧 hosted remote bundle service/cache/backend 已删除；后续只剩全仓命名复扫。
+   - `cloud-tasks` 默认 `/wham/*` hosted 路径已切断；后续只需复扫旧 auth/header 语义。
+   - `core-plugins/src/remote*` 主 hosted catalog/share/sync 已降级为 Astral disabled stub；后续只需
+     复扫 app-server 入口和残留命名。
    - `memories/write`
    - 目标：默认路径不能静默访问 `chatgpt.com/backend-api`。
-  - app-server remote control 暴露入口已禁用；下一刀建议优先处理 app-server / core-plugins remote
-     plugin share/install/read 的旧语义，或把 app-server-transport remote-control 旧模块降级为 stub。
+   - app-server remote control 暴露入口已禁用；下一刀建议转向 `memories/write`、`cloud-config`
+     或 app-server account/auth 残留。
 
 3. 推进 provider-neutral protocol
    - Anthropic Messages stream/tool_use/tool_result。
@@ -1467,14 +3309,19 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
 4. 硬化 Claude-ish tool result
    - 必要时对照 `/Users/oines/project/claude-code` 源码。
    - 必要时真实跑 Claude Code 抓 fixture。
-   - 优先校准 `Bash`、`Monitor`、`Read`、`Edit`、`TodoWrite`、`Agent`、
-     `RequestPermissions` 的 schema/result shape。
+   - 优先校准 `Bash`、`ReadTaskOutput`、`SendTaskInput`、`ListBackgroundTasks`、`StopBackgroundTask`、
+     `Read`、`Edit`、`TodoWrite`、`RequestPermissions` 的 schema/result shape。
+   - `Read` / `Write` / `Edit` / `Glob` / `Grep` 的 runtime boundary 已有
+     `ExecutorFileSystem` 测试保护；后续改 schema/result 时不能绕过这个抽象。
+   - multi-agent/subagent 暂不继续 Claude-ish 化，保持 Codex 原版工具面。
 
 5. 验证 terminal agentic 体验
    - 后台长命令持续 monitor。
    - y/n prompt 可写 stdin。
    - ffmpeg 等长任务有进度输出。
-   - `TaskStop` 可终止。
+   - 后台 shell 可通过 Codex UnifiedExec 路径继续控制和终止；模型侧使用
+     `ReadTaskOutput` / `SendTaskInput` / `ListBackgroundTasks` / `StopBackgroundTask`，不要为了 Claude
+     `TaskStop` 重写 subagent。
    - 保持 Codex 比 Claude Code 更丝滑的 terminal 体验。
 
 6. 清理 CI 和 GitHub Actions 噪音
@@ -1511,12 +3358,12 @@ plugin `needsAuth` 测试，那些测试还保留旧 ChatGPT app auth 语义，�
    - 如果有未提交改动，先读 diff，确认是否来自上一轮正在做的 slice，不要误删。
 
 4. 继续开发时，优先从以下三条线中选最小 coherent slice：
-   - `codex-rs/chatgpt/src/chatgpt_client.rs`、`get_task.rs`、`apply_command.rs`：禁用 legacy
-     ChatGPT task fetch/apply 默认路径。
-   - `codex-rs/memories/write/src/guard.rs`：检查是否还会通过 `BackendClient::from_auth(...)`
-     访问 hosted backend。
-   - `codex-rs/core/src/config` / `codex-rs/config`：继续收敛 `chatgpt_base_url` 和旧 ChatGPT auth/config
-     字段，注意不要破坏新的 `ASTRAL_BASE_URL` / provider-neutral 配置。
+   - `codex-rs/models-manager`：继续收敛旧 ChatGPT auth fallback 测试和 hosted-only model filtering，
+     但不要破坏 provider `/models`、cache、ETag 和 bundled catalog overlay 行为。
+   - `codex-rs/login` / `codex-rs/app-server-protocol`：评估 `AuthMode::ChatGPT`、PAT、
+     Agent Identity 等 legacy token 类型是否彻底删除、隔离或保持 unsupported compatibility shell。
+   - `codex-rs/core/src/config` / `codex-rs/config`：继续收敛旧 ChatGPT auth/config 字段，注意不要破坏新的
+     `ASTRAL_BASE_URL` / provider-neutral 配置。
 
 5. 搜索优先关键词：
    - `chatgpt_base_url`

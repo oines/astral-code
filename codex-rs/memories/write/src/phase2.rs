@@ -45,6 +45,21 @@ struct Counters {
 pub async fn run(context: Arc<MemoryStartupContext>, config: Arc<Config>) {
     let phase_two_e2e_timer = context.start_timer(MEMORY_PHASE_TWO_E2E_MS);
 
+    if crate::memory_model_name(
+        config.as_ref(),
+        config.memories.consolidation_model.as_deref(),
+    )
+    .is_none()
+    {
+        tracing::warn!("skipping memory phase-2 consolidation because no model is configured");
+        context.counter(
+            MEMORY_PHASE_TWO_JOBS,
+            /*inc*/ 1,
+            &[("status", "skipped_no_model")],
+        );
+        return;
+    }
+
     let Some(db) = context.state_db() else {
         // This should not happen.
         return;
@@ -334,13 +349,9 @@ mod agent {
             .set_legacy_sandbox_policy(consolidation_sandbox_policy, agent_config.cwd.as_path())
             .ok()?;
 
-        agent_config.model = Some(
-            config
-                .memories
-                .consolidation_model
-                .clone()
-                .unwrap_or(crate::stage_two::MODEL.to_string()),
-        );
+        let model_name =
+            crate::memory_model_name(config, config.memories.consolidation_model.as_deref())?;
+        agent_config.model = Some(model_name);
         agent_config.model_reasoning_effort = Some(crate::stage_two::REASONING_EFFORT);
 
         Some(agent_config)

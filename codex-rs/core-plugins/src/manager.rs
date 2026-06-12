@@ -43,7 +43,7 @@ use crate::remote::RemotePluginServiceConfig;
 use crate::remote_legacy::RemotePluginFetchError;
 use crate::remote_legacy::RemotePluginMutationError;
 use crate::startup_sync::read_curated_plugins_sha;
-use crate::startup_sync::sync_openai_plugins_repo;
+use crate::startup_sync::sync_curated_plugins_repo;
 use crate::store::PluginInstallResult as StorePluginInstallResult;
 use crate::store::PluginStore;
 use crate::store::PluginStoreError;
@@ -110,7 +110,7 @@ impl PluginsConfigInput {
 struct FeaturedPluginIdsCacheKey {
     hosted_base_url: String,
     account_id: Option<String>,
-    chatgpt_user_id: Option<String>,
+    legacy_user_id: Option<String>,
     is_workspace_account: bool,
 }
 
@@ -198,7 +198,7 @@ fn featured_plugin_ids_cache_key(
     FeaturedPluginIdsCacheKey {
         hosted_base_url: config.hosted_base_url.clone(),
         account_id: auth.and_then(CodexAuth::get_account_id),
-        chatgpt_user_id: auth.and_then(CodexAuth::get_chatgpt_user_id),
+        legacy_user_id: auth.and_then(CodexAuth::get_chatgpt_user_id),
         is_workspace_account: auth.is_some_and(CodexAuth::is_workspace_account),
     }
 }
@@ -350,13 +350,13 @@ impl PluginsManager {
         codex_home: PathBuf,
         restriction_product: Option<Product>,
     ) -> Self {
-        // Product restrictions are enforced at marketplace admission time for a given CODEX_HOME:
+        // Product restrictions are enforced at marketplace admission time for a given ASTRAL_HOME:
         // listing, install, and curated refresh all consult this restriction context before new
         // plugins enter local config or cache. After admission, runtime plugin loading trusts the
-        // contents of that CODEX_HOME and does not re-filter configured plugins by product, so
+        // contents of that ASTRAL_HOME and does not re-filter configured plugins by product, so
         // already-admitted plugins may continue exposing MCP servers/tools from shared local state.
         //
-        // This assumes a single CODEX_HOME is only used by one product.
+        // This assumes a single ASTRAL_HOME is only used by one product.
         Self {
             codex_home: codex_home.clone(),
             store: PluginStore::new(codex_home),
@@ -580,15 +580,9 @@ impl PluginsManager {
         {
             return Vec::new();
         }
-        let Some(auth) = auth.filter(|auth| auth.uses_codex_backend()) else {
+        let Some(auth) = auth else {
             return Vec::new();
         };
-        let Some(account_id) = auth.get_account_id() else {
-            return Vec::new();
-        };
-        if account_id.is_empty() {
-            return Vec::new();
-        }
 
         crate::remote::cached_global_remote_discoverable_plugins(
             self.codex_home.as_path(),
@@ -1576,7 +1570,7 @@ impl PluginsManager {
         if let Err(err) = std::thread::Builder::new()
             .name("plugins-curated-repo-sync".to_string())
             .spawn(
-                move || match sync_openai_plugins_repo(codex_home.as_path()) {
+                move || match sync_curated_plugins_repo(codex_home.as_path()) {
                     Ok(curated_plugin_version) => {
                         let configured_curated_plugin_ids =
                             configured_curated_plugin_ids_from_codex_home(codex_home.as_path());

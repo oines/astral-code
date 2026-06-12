@@ -26,6 +26,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::Weak;
+use std::time::Duration;
 
 use codex_exec_server::Environment;
 use codex_network_proxy::NetworkProxy;
@@ -35,6 +36,7 @@ use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_output_truncation::TruncationPolicy;
 use rand::Rng;
 use rand::rng;
+use serde::Serialize;
 use tokio::sync::Mutex;
 
 use crate::sandboxing::SandboxPermissions;
@@ -124,6 +126,25 @@ pub(crate) struct TerminatedProcess {
     pub(crate) command: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum BackgroundTaskStatus {
+    Running,
+    Exited,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct BackgroundTaskSnapshot {
+    pub(crate) task_id: i32,
+    pub(crate) command: String,
+    pub(crate) cwd: String,
+    pub(crate) status: BackgroundTaskStatus,
+    pub(crate) exit_code: Option<i32>,
+    pub(crate) tty: bool,
+    pub(crate) elapsed_ms: u64,
+    pub(crate) last_used_ms_ago: u64,
+}
+
 #[derive(Default)]
 pub(crate) struct ProcessStore {
     processes: HashMap<i32, ProcessEntry>,
@@ -164,9 +185,15 @@ struct ProcessEntry {
     process_id: i32,
     hook_command: String,
     tty: bool,
+    cwd: AbsolutePathBuf,
     network_approval: Option<DeferredNetworkApproval>,
     session: Weak<Session>,
+    started_at: tokio::time::Instant,
     last_used: tokio::time::Instant,
+}
+
+fn duration_ms_u64(duration: Duration) -> u64 {
+    duration.as_millis().min(u128::from(u64::MAX)) as u64
 }
 
 pub(crate) fn clamp_yield_time(yield_time_ms: u64) -> u64 {

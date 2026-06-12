@@ -78,8 +78,8 @@ fn emit_feedback_request_tags_records_sentry_feedback_fields() {
         .set_default();
 
     let auth_env = AuthEnvTelemetry {
-        codex_api_key_env_present: false,
-        codex_api_key_env_enabled: true,
+        astral_api_key_env_present: false,
+        astral_api_key_env_enabled: true,
         provider_env_key_name: Some("configured".to_string()),
         provider_env_key_present: Some(true),
         refresh_token_url_override_present: true,
@@ -119,12 +119,12 @@ fn emit_feedback_request_tags_records_sentry_feedback_fields() {
         Some("\"authorization\"")
     );
     assert_eq!(
-        tags.get("auth_env_codex_api_key_present")
+        tags.get("auth_env_astral_api_key_present")
             .map(String::as_str),
         Some("false")
     );
     assert_eq!(
-        tags.get("auth_env_codex_api_key_enabled")
+        tags.get("auth_env_astral_api_key_enabled")
             .map(String::as_str),
         Some("true")
     );
@@ -316,8 +316,8 @@ fn emit_feedback_request_tags_preserves_auth_env_fields_for_legacy_emitters() {
         .set_default();
 
     let auth_env = AuthEnvTelemetry {
-        codex_api_key_env_present: true,
-        codex_api_key_env_enabled: true,
+        astral_api_key_env_present: true,
+        astral_api_key_env_enabled: true,
         provider_env_key_name: Some("configured".to_string()),
         provider_env_key_present: Some(true),
         refresh_token_url_override_present: true,
@@ -376,12 +376,12 @@ fn emit_feedback_request_tags_preserves_auth_env_fields_for_legacy_emitters() {
         Some("\"\"")
     );
     assert_eq!(
-        tags.get("auth_env_codex_api_key_present")
+        tags.get("auth_env_astral_api_key_present")
             .map(String::as_str),
         Some("true")
     );
     assert_eq!(
-        tags.get("auth_env_codex_api_key_enabled")
+        tags.get("auth_env_astral_api_key_enabled")
             .map(String::as_str),
         Some("true")
     );
