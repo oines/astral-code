@@ -3880,3 +3880,48 @@ instructions 更准确，需要在用户配置的 model catalog / model capabili
 
 - 暂不为了确认日志消失再次跑真实 DeepSeek smoke，因为这会重建 CLI 并进一步压缩磁盘。
 - 下一轮真实端到端验收时顺带观察输出即可。
+
+## 最新补充 53：TUI Goal / Plan / compact UI 基础路径当前验收通过
+
+为了继续朝“最终可用”推进，而不是卡在旧 `/responses` compact fixture 迁移点，本轮先跑了一个轻量 TUI
+过滤测试，覆盖 Goal、Plan Mode 和 compact-running 时的用户输入排队行为。
+
+命令：
+
+```bash
+CARGO_INCREMENTAL=0 just test -p codex-tui -E 'test(goal_slash_command_emits_set_goal_event) or test(plan_implementation_popup_shows_after_proposed_plan_output) or test(submit_user_message_queues_while_compaction_turn_is_running)'
+```
+
+结果：
+
+- 5 tests run
+- 5 passed
+- 2785 skipped
+
+实际命中的测试：
+
+- `goal_slash_command_emits_set_goal_event`
+- `queued_goal_slash_command_emits_set_goal_event_after_thread_starts`
+- `restored_queued_goal_slash_command_emits_set_goal_event`
+- `plan_implementation_popup_shows_after_proposed_plan_output`
+- `submit_user_message_queues_while_compaction_turn_is_running`
+
+覆盖意义：
+
+- `/goal` slash 命令仍会发出 `SetThreadGoalObjective`，没有被 Astral 改造破坏。
+- queued/restored queued goal 路径仍能在线程启动后正确落到目标 thread。
+- Plan Mode 的 `<proposed_plan>` / plan item 输出后，TUI 仍能展示执行计划弹窗。
+- compact turn 运行中提交用户输入时，TUI 会先按当前机制尝试 steer，遇到“compact turn 不可 steer”后回退到排队，
+  保持 Codex 原有 local compact 边界行为。
+
+磁盘：
+
+- 本次 TUI 窄测需要重编 `codex-core` / `codex-tui` / app-server 相关链路，用时约 6 分钟。
+- 使用 `CARGO_INCREMENTAL=0`，`codex-rs/target/debug/incremental` 仍为 0B。
+- 测试后磁盘剩余约 13Gi；目前不再继续跑 TUI/core 大测试，避免挤爆磁盘。
+
+当前结论：
+
+- Goal Mode 和 Plan Mode 的 TUI 基础路径有当前测试证据证明仍继承可用。
+- local compact 的 TUI 排队/steer 边界也有当前测试证据。
+- 剩余 compact blocker 仍是 core integration fixture 迁移到 provider-neutral mock，而不是 TUI compact 交互坏掉。
