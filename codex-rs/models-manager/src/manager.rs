@@ -174,7 +174,7 @@ pub trait ModelsManager: fmt::Debug + Send + Sync {
 /// Shared model manager handle used across runtime services.
 pub type SharedModelsManager = Arc<dyn ModelsManager>;
 
-/// OpenAI-compatible model manager backed by bundled models, cache, and `/models`.
+/// Provider-neutral model manager backed by optional cache and `/models`.
 #[derive(Debug)]
 pub struct OpenAiModelsManager {
     remote_models: RwLock<Vec<ModelInfo>>,
@@ -200,9 +200,8 @@ impl OpenAiModelsManager {
     ) -> Self {
         let cache_path = codex_home.join(MODEL_CACHE_FILE);
         let cache_manager = ModelsCacheManager::new(cache_path, DEFAULT_MODEL_CACHE_TTL);
-        let remote_models = load_remote_models_from_file().unwrap_or_default();
         Self {
-            remote_models: RwLock::new(remote_models),
+            remote_models: RwLock::new(Vec::new()),
             etag: RwLock::new(None),
             cache_manager,
             endpoint_client,
@@ -316,24 +315,12 @@ impl OpenAiModelsManager {
         self.etag.read().await.clone()
     }
 
-    /// Replace the cached remote models and rebuild the derived presets list.
+    /// Replace the cached remote models with the active provider catalog.
     async fn apply_remote_models(&self, models: Vec<ModelInfo>) {
-        // Astral treats provider `/models` output as an overlay on the bundled
-        // provider-neutral catalog. The old Codex hosted catalog could replace
-        // the bundled catalog wholesale for ChatGPT auth; keeping that behavior
-        // would make a legacy hosted account shape control Astral's model list.
-        let mut existing_models = load_remote_models_from_file().unwrap_or_default();
-        for model in models {
-            if let Some(existing_index) = existing_models
-                .iter()
-                .position(|existing| existing.slug == model.slug)
-            {
-                existing_models[existing_index] = model;
-            } else {
-                existing_models.push(model);
-            }
-        }
-        *self.remote_models.write().await = existing_models;
+        // Astral does not seed provider-neutral runs with OpenAI/Codex bundled
+        // model presets. Users can provide a catalog via config, a fresh cache,
+        // or the active provider's `/models` route.
+        *self.remote_models.write().await = models;
     }
 
     /// Attempt to satisfy the refresh from the cache when it matches the provider and TTL.
@@ -388,10 +375,6 @@ impl ModelsManager for StaticModelsManager {
     }
 
     async fn refresh_if_new_etag(&self, _etag: String) {}
-}
-
-fn load_remote_models_from_file() -> Result<Vec<ModelInfo>, std::io::Error> {
-    Ok(crate::bundled_models_response()?.models)
 }
 
 fn default_model_from_available(available: Vec<ModelPreset>) -> String {

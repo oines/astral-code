@@ -8,32 +8,12 @@ pub mod test_support;
 
 pub use codex_app_server_protocol::AuthMode;
 use codex_protocol::openai_models::ModelsResponse;
-use codex_protocol::openai_models::ReasoningEffort;
 
 pub use config::ModelsManagerConfig;
 
-/// Load the bundled model catalog shipped with `codex-models-manager`.
+/// Load the bundled model catalog fixture shipped with `codex-models-manager`.
 pub fn bundled_models_response() -> std::result::Result<ModelsResponse, serde_json::Error> {
-    let mut response: ModelsResponse = serde_json::from_str(include_str!("../models.json"))?;
-    if !response
-        .models
-        .iter()
-        .any(|model| model.slug == "deepseek-v4-flash")
-        && let Some(mut flash) = response
-            .models
-            .iter()
-            .find(|model| model.slug == "deepseek-v4-pro")
-            .cloned()
-    {
-        flash.slug = "deepseek-v4-flash".to_string();
-        flash.display_name = "DeepSeek V4 Flash".to_string();
-        flash.description =
-            Some("Fast Astral model for quick coding turns and smoke tests.".to_string());
-        flash.default_reasoning_level = Some(ReasoningEffort::Low);
-        flash.priority = 1;
-        response.models.push(flash);
-    }
-    Ok(response)
+    serde_json::from_str(include_str!("../models.json"))
 }
 
 /// Convert the client version string to a whole version string (e.g. "1.2.3-alpha.4" -> "1.2.3").

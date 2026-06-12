@@ -1,6 +1,7 @@
 use crate::ModelsManagerConfig;
 use crate::manager::ModelsManager;
 use codex_protocol::openai_models::TruncationPolicyConfig;
+use codex_utils_output_truncation::approx_bytes_for_tokens;
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;
 
@@ -40,6 +41,8 @@ async fn offline_model_info_with_tool_output_override() {
 
     assert_eq!(
         model_info.truncation_policy,
-        TruncationPolicyConfig::tokens(/*limit*/ 123)
+        TruncationPolicyConfig::bytes(
+            i64::try_from(approx_bytes_for_tokens(/*tokens*/ 123)).expect("fits i64")
+        )
     );
 }

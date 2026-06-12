@@ -202,25 +202,24 @@ fn static_manager_for_tests(model_catalog: ModelsResponse) -> StaticModelsManage
 
 #[tokio::test]
 async fn get_model_info_tracks_fallback_usage() {
-    let codex_home = tempdir().expect("temp dir");
     let config = ModelsManagerConfig::default();
-    let manager = openai_manager_for_tests(
+    let known_model = remote_model("provider-known", "Provider Known", /*priority*/ 0);
+    let manager = static_manager_for_tests(ModelsResponse {
+        models: vec![known_model],
+    });
+
+    let known = manager.get_model_info("provider-known", &config).await;
+    assert!(!known.used_fallback_model_metadata);
+    assert_eq!(known.slug, "provider-known");
+
+    let codex_home = tempdir().expect("temp dir");
+    let empty_manager = openai_manager_for_tests(
         codex_home.path().to_path_buf(),
         TestModelsEndpoint::new(Vec::new()),
     );
-    let known_slug = manager
-        .get_remote_models()
-        .await
-        .first()
-        .expect("bundled models should include at least one model")
-        .slug
-        .clone();
+    assert_eq!(empty_manager.get_remote_models().await, Vec::new());
 
-    let known = manager.get_model_info(known_slug.as_str(), &config).await;
-    assert!(!known.used_fallback_model_metadata);
-    assert_eq!(known.slug, known_slug);
-
-    let unknown = manager
+    let unknown = empty_manager
         .get_model_info("model-that-does-not-exist", &config)
         .await;
     assert!(unknown.used_fallback_model_metadata);
@@ -283,20 +282,12 @@ async fn get_model_info_matches_hyphenated_provider_namespace_suffix() {
 
 #[tokio::test]
 async fn get_model_info_rejects_multi_segment_namespace_suffix_matching() {
-    let codex_home = tempdir().expect("temp dir");
     let config = ModelsManagerConfig::default();
-    let manager = openai_manager_for_tests(
-        codex_home.path().to_path_buf(),
-        TestModelsEndpoint::new(Vec::new()),
-    );
-    let known_slug = manager
-        .get_remote_models()
-        .await
-        .first()
-        .expect("bundled models should include at least one model")
-        .slug
-        .clone();
-    let namespaced_model = format!("ns1/ns2/{known_slug}");
+    let remote = remote_model("gpt-image", "Image", /*priority*/ 0);
+    let manager = static_manager_for_tests(ModelsResponse {
+        models: vec![remote],
+    });
+    let namespaced_model = "ns1/ns2/gpt-image".to_string();
 
     let model_info = manager.get_model_info(&namespaced_model, &config).await;
 
@@ -338,7 +329,7 @@ async fn refresh_available_models_sorts_by_priority() {
 }
 
 #[tokio::test]
-async fn refresh_available_models_merges_visible_provider_catalog_with_bundled_catalog() {
+async fn refresh_available_models_uses_visible_provider_catalog() {
     let remote_models = vec![remote_model(
         "provider-visible-model",
         "Provider Visible",
@@ -347,20 +338,17 @@ async fn refresh_available_models_merges_visible_provider_catalog_with_bundled_c
     let codex_home = tempdir().expect("temp dir");
     let endpoint = TestModelsEndpoint::new(vec![remote_models.clone()]);
     let manager = openai_manager_for_tests(codex_home.path().to_path_buf(), endpoint.clone());
-    let mut expected = load_remote_models_from_file().expect("bundled models should parse");
-    expected.extend(remote_models);
-
     manager
         .refresh_available_models(RefreshStrategy::OnlineIfUncached)
         .await
         .expect("refresh succeeds");
 
-    assert_eq!(manager.get_remote_models().await, expected);
+    assert_eq!(manager.get_remote_models().await, remote_models);
     assert_eq!(endpoint.fetch_count(), 1, "expected a single model fetch");
 }
 
 #[tokio::test]
-async fn refresh_available_models_merges_cached_provider_catalog_with_bundled_catalog() {
+async fn refresh_available_models_uses_cached_provider_catalog() {
     let remote_models = vec![remote_model(
         "provider-cached-model",
         "Provider Cached",
@@ -370,9 +358,6 @@ async fn refresh_available_models_merges_cached_provider_catalog_with_bundled_ca
     let fetch_endpoint = TestModelsEndpoint::new(vec![remote_models.clone()]);
     let fetch_manager =
         openai_manager_for_tests(codex_home.path().to_path_buf(), fetch_endpoint.clone());
-    let mut expected = load_remote_models_from_file().expect("bundled models should parse");
-    expected.extend(remote_models);
-
     fetch_manager
         .refresh_available_models(RefreshStrategy::OnlineIfUncached)
         .await
@@ -387,7 +372,7 @@ async fn refresh_available_models_merges_cached_provider_catalog_with_bundled_ca
         .await
         .expect("cached refresh succeeds");
 
-    assert_eq!(cache_manager.get_remote_models().await, expected);
+    assert_eq!(cache_manager.get_remote_models().await, remote_models);
     assert_eq!(
         cache_endpoint.fetch_count(),
         0,
@@ -396,7 +381,7 @@ async fn refresh_available_models_merges_cached_provider_catalog_with_bundled_ca
 }
 
 #[tokio::test]
-async fn get_model_info_keeps_bundled_metadata_when_provider_catalog_refreshes() {
+async fn get_model_info_uses_fallback_when_model_is_absent_from_provider_catalog() {
     let remote_models = vec![remote_model(
         "provider-refreshed-model-info",
         "Provider Model Info",
@@ -405,12 +390,6 @@ async fn get_model_info_keeps_bundled_metadata_when_provider_catalog_refreshes()
     let codex_home = tempdir().expect("temp dir");
     let endpoint = TestModelsEndpoint::new(vec![remote_models]);
     let manager = openai_manager_for_tests(codex_home.path().to_path_buf(), endpoint);
-    let bundled_slug = load_remote_models_from_file()
-        .expect("bundled models should parse")
-        .first()
-        .expect("bundled models should contain at least one model")
-        .slug
-        .clone();
 
     manager
         .refresh_available_models(RefreshStrategy::OnlineIfUncached)
@@ -418,30 +397,30 @@ async fn get_model_info_keeps_bundled_metadata_when_provider_catalog_refreshes()
         .expect("refresh succeeds");
 
     let model_info = manager
-        .get_model_info(&bundled_slug, &ModelsManagerConfig::default())
+        .get_model_info("missing-from-provider", &ModelsManagerConfig::default())
         .await;
 
-    assert_eq!(model_info.slug, bundled_slug);
-    assert!(!model_info.used_fallback_model_metadata);
+    assert_eq!(model_info.slug, "missing-from-provider");
+    assert!(model_info.used_fallback_model_metadata);
+    assert_eq!(model_info.context_window, None);
 }
 
 #[tokio::test]
-async fn refresh_available_models_preserves_bundled_catalog_for_empty_provider_remote() {
+async fn refresh_available_models_keeps_empty_catalog_for_empty_provider_remote() {
     let codex_home = tempdir().expect("temp dir");
     let endpoint = TestModelsEndpoint::new(vec![Vec::new()]);
     let manager = openai_manager_for_tests(codex_home.path().to_path_buf(), endpoint);
-    let expected = load_remote_models_from_file().expect("bundled models should parse");
 
     manager
         .refresh_available_models(RefreshStrategy::OnlineIfUncached)
         .await
         .expect("refresh succeeds");
 
-    assert_eq!(manager.get_remote_models().await, expected);
+    assert_eq!(manager.get_remote_models().await, Vec::new());
 }
 
 #[tokio::test]
-async fn refresh_available_models_merges_hidden_only_provider_remote_with_bundled_catalog() {
+async fn refresh_available_models_uses_hidden_only_provider_remote() {
     let hidden_remote = remote_model_with_visibility(
         "provider-hidden-only",
         "Provider Hidden",
@@ -451,15 +430,13 @@ async fn refresh_available_models_merges_hidden_only_provider_remote_with_bundle
     let codex_home = tempdir().expect("temp dir");
     let endpoint = TestModelsEndpoint::new(vec![vec![hidden_remote.clone()]]);
     let manager = openai_manager_for_tests(codex_home.path().to_path_buf(), endpoint);
-    let mut expected = load_remote_models_from_file().expect("bundled models should parse");
-    expected.push(hidden_remote);
 
     manager
         .refresh_available_models(RefreshStrategy::OnlineIfUncached)
         .await
         .expect("refresh succeeds");
 
-    assert_eq!(manager.get_remote_models().await, expected);
+    assert_eq!(manager.get_remote_models().await, vec![hidden_remote]);
 }
 
 #[tokio::test]
@@ -483,15 +460,12 @@ async fn refresh_available_models_keeps_merging_for_api_auth() {
             "test-api-key",
         ))),
     );
-    let mut expected = load_remote_models_from_file().expect("bundled models should parse");
-    expected.extend(remote_models);
-
     manager
         .refresh_available_models(RefreshStrategy::OnlineIfUncached)
         .await
         .expect("refresh succeeds");
 
-    assert_eq!(manager.get_remote_models().await, expected);
+    assert_eq!(manager.get_remote_models().await, remote_models);
     assert_eq!(endpoint.fetch_count(), 1, "expected a single model fetch");
 }
 
@@ -891,12 +865,5 @@ fn bundled_models_json_roundtrips() {
     assert!(
         !response.models.is_empty(),
         "bundled models.json should contain at least one model"
-    );
-    assert!(
-        response
-            .models
-            .iter()
-            .any(|model| model.slug == "deepseek-v4-flash"),
-        "bundled model catalog should expose deepseek-v4-flash"
     );
 }

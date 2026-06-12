@@ -2668,7 +2668,9 @@ external API-key auth 现在严格覆盖 cached hosted auth，不再失败后回
     而不是靠 hosted account。
   - `model-provider` 的 `OpenAiModelsEndpoint` 不再需要提供 hosted refresh 判断。
 - 保留边界：
-  - provider `/models`、cache、ETag、bundled catalog overlay 行为保留。
+  - provider `/models`、cache、ETag 行为保留。
+  - 注意：本段当时仍保留 bundled catalog overlay；该口径已在最新补充 44 中撤销，运行时不得恢复
+    bundled catalog overlay。
   - 本轮没有触碰 exec-server、sandbox、PTY、UnifiedExec、approval 或文件执行后端。
   - `AuthManager::current_auth_uses_hosted_backend()` 目前仍只影响 picker 里 hosted-only model visibility，
     后续可以单独收敛。
@@ -3168,16 +3170,20 @@ external API-key auth 现在严格覆盖 cached hosted auth，不再失败后回
   - 定向 `rg` 确认 docs / README 中不再有用户可复制的 `wire_api = "chat"` 或错误 DeepSeek base URL。
   - 剩余 `wire_api = "chat"` 只在 model-provider-info 的负向测试里，用来验证旧值会报错。
 
-### 最新补充 99（2026-06-12 本轮）
+### 最新补充 99（2026-06-12 本轮，已撤销）
 
 补齐 `deepseek-v4-flash` 的 Astral 内置模型识别路径，方便后续快速真实 smoke test。
+
+注意：这个决定已在最新补充 44 中撤销。Astral 不再内置 `deepseek-v4-flash`，也不再从
+`deepseek-v4-pro` 派生任何隐藏模型预设。后续真实 smoke test 应通过用户配置或临时测试配置显式声明
+provider、model、base URL、context window 和 modality。
 
 - 旧状态：
   - 内置 `models.json` 只有 `deepseek-v4-pro`。
   - 用户提供的 `deepseek-v4-flash` slug 如果直接使用，会落到 fallback model metadata，
     UI 和 runtime 仍能跑，但会丢失 Astral 默认模型能力描述、reasoning 默认值、parallel tool
     calling、图片输入等元数据。
-- 新状态：
+- 当时状态（已撤销）：
   - `codex-rs/models-manager/src/manager.rs` 在加载 bundled catalog 时，从
     `deepseek-v4-pro` 派生一个 `deepseek-v4-flash` 内置条目。
   - flash 继承 Astral 的基础 instructions、Claude-ish tool flavor 指令、sandbox/exec 元数据、
@@ -3188,7 +3194,7 @@ external API-key auth 现在严格覆盖 cached hosted auth，不再失败后回
   - 不复制大段 `models.json`，避免巨型重复 JSON。
   - 不改 provider adapter、exec-server、sandbox、approval、compact 或 tool runtime。
   - 不把未知模型 fallback 行为删除，第三方自定义 slug 仍可继续使用 fallback metadata。
-- 验证：
+- 当时验证：
   - 已执行 `just fmt`。
   - 未跑重测试；这是 bundled catalog 派生逻辑，后续真实 smoke test 会覆盖。
 
@@ -3409,6 +3415,28 @@ Guardian / auto-review 从“硬禁用旧 hosted Guardian”推进到“Astral �
   - 后续还要继续审计模型 catalog / model picker 的 OpenAI preset 文案和默认模型列表，避免 UI 继续暗示只有
     GPT/Claude 固定 catalog。
 
+最新补充 44（2026-06-12 本轮）：模型 catalog 运行时正式改成 provider/user-declared。
+
+- 完成项：
+  - `OpenAiModelsManager::new(...)` 不再从 bundled `models.json` 初始化运行时模型目录，启动时目录为空。
+  - provider `/models` 或 cache 命中后会替换当前运行时目录，不再和旧 bundled GPT/OpenAI catalog overlay。
+  - provider 返回空目录时，运行时目录保持为空，不再 fallback 到 bundled catalog。
+  - provider 删除模型后，下一次刷新会真实移除旧模型，避免 `/model` 列表保留 provider 已经撤掉的条目。
+  - unknown model fallback 不再声明 `context_window = 272000` / `max_context_window = 272000`；窗口大小必须来自
+    provider catalog 或用户配置。
+  - unknown model fallback 仍默认 `input_modalities = [text]`，与“单模态模型遇到图片时降级成文本占位”的方向一致。
+  - 删除 `bundled_models_response()` 里从 `deepseek-v4-pro` 克隆 `deepseek-v4-flash` 的隐藏预设逻辑。
+  - TUI 模型选择文案从 “built-in models / codex -m” 改成 “catalog models / astral -m”。
+- 保留边界：
+  - `bundled_models_response()` 仍作为测试/fixture loader 存在，但不再参与 runtime `OpenAiModelsManager` 默认目录。
+  - 本 slice 没有改 sandbox、exec-server、UnifiedExec、Plan/Goal、MCP 或 tool runtime。
+- 验证：
+  - `just fmt` 通过。
+  - `just test -p codex-models-manager` 通过 35 个测试。
+- 结果：
+  - 更贴近“内置完全不做模型/provider 预设”的要求。
+  - 后续 `/model` provider 分组 UI 应该基于用户配置的 provider 列表和各 provider catalog，而不是 bundled catalog。
+
 ## 剩余高优先级工作
 
 1. 审计并清理剩余 OpenAI/ChatGPT auth/config 面
@@ -3488,8 +3516,8 @@ Guardian / auto-review 从“硬禁用旧 hosted Guardian”推进到“Astral �
    - 如果有未提交改动，先读 diff，确认是否来自上一轮正在做的 slice，不要误删。
 
 4. 继续开发时，优先从以下三条线中选最小 coherent slice：
-   - `codex-rs/models-manager`：继续收敛旧 ChatGPT auth fallback 测试和 hosted-only model filtering，
-     但不要破坏 provider `/models`、cache、ETag 和 bundled catalog overlay 行为。
+   - `codex-rs/models-manager`：继续收敛旧 ChatGPT auth fallback 测试和 hosted-only model filtering；
+     provider `/models`、cache、ETag 必须保持可用，但不要恢复 bundled catalog overlay。
    - `codex-rs/login` / `codex-rs/app-server-protocol`：评估 `AuthMode::ChatGPT`、PAT、
      Agent Identity 等 legacy token 类型是否彻底删除、隔离或保持 unsupported compatibility shell。
    - `codex-rs/core/src/config` / `codex-rs/config`：继续收敛旧 ChatGPT auth/config 字段，注意不要破坏新的

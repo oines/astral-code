@@ -45,7 +45,7 @@ impl ChatWidget {
     fn model_menu_warning_line(&self) -> Option<Line<'static>> {
         let base_url = self.custom_openai_base_url()?;
         let warning = format!(
-            "Warning: configured base URL is {base_url}. Selecting built-in models may not be supported or work properly."
+            "Warning: configured base URL is {base_url}. Selecting catalog models may not be supported or work properly."
         );
         Some(Line::from(warning.red()))
     }
@@ -203,7 +203,7 @@ impl ChatWidget {
 
         let header = self.model_menu_header(
             "Select Model and Effort",
-            "Access legacy models by running codex -m <model_name> or in your config.toml",
+            "Use astral -m <model_name> or config.toml for models outside this catalog.",
         );
         self.bottom_pane.show_selection_view(SelectionViewParams {
             footer_hint: Some(self.bottom_pane.standard_popup_hint_line()),

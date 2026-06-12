@@ -82,6 +82,14 @@ fn unknown_model_defaults_to_text_only_input() {
 }
 
 #[test]
+fn unknown_model_does_not_guess_context_window() {
+    let model = model_info_from_slug("unknown-model");
+
+    assert_eq!(model.context_window, None);
+    assert_eq!(model.max_context_window, None);
+}
+
+#[test]
 fn model_input_modalities_override_sets_declared_capabilities() {
     let model = model_info_from_slug("unknown-model");
     let config = ModelsManagerConfig {
