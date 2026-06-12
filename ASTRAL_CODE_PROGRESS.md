@@ -4722,3 +4722,64 @@ CARGO_INCREMENTAL=0 just test -p codex-core \
 
 - 本轮后磁盘剩余约 11Gi。
 - 未额外清理构建缓存，保留增量编译速度。
+
+## 最新补充 70：插件远程控制面与 Claude-ish tool registry 核查
+
+本轮按“不要卡在单点，先确认全局关键路径”的策略，核查了两个容易反复担心的面。
+
+### 插件/skills 远程控制面
+
+确认结果：
+
+- `Config::plugins_config_input()` 固定传入 `remote_plugin_enabled = false`。
+- `codex-rs/core-plugins/src/remote.rs`
+  - `remote_plugin_background_sync_available()` 当前硬返回 `false`。
+  - remote plugin install/share/catalog/fetch 等控制面入口都返回 `ControlPlaneDisabled`。
+- `codex-rs/core-plugins/src/startup_sync.rs`
+  - curated plugin startup sync 不联网。
+  - 只接受本地 curated snapshot；没有本地 snapshot 时返回 disabled 错误。
+- 因此目前插件/skills 的远程 OpenAI/hosted 控制面不是运行时阻塞项。
+
+仍然存在但暂不作为 P0 的残留：
+
+- `openai-curated` / `openai-bundled` 等历史 marketplace 名称和测试 fixture 仍在。
+- 这些更多是旧本地缓存/fixture/兼容命名残留，不是当前会主动联网的 OpenAI 控制面。
+- 后续可以分阶段改名或删除，但不应阻塞 provider/tool/E2E 主线。
+
+### Claude-ish core tools 注册路径
+
+确认结果：
+
+- `Bash`
+  - 由 `AstralBashHandler` 直接以 `Bash` 注册为 runtime。
+  - UnifiedExec 模式内部转发到 `ExecCommandHandler`，不是绕开执行后端。
+- `ReadTaskOutput` / `SendTaskInput`
+  - 由 Astral handlers 直接以公开工具名注册。
+  - 内部转发到 `WriteStdinHandler`，但模型侧不暴露 `write_stdin`。
+- `ListBackgroundTasks` / `StopBackgroundTask`
+  - 直接走 `UnifiedExecProcessManager::list_background_tasks()` / `terminate_process()`。
+  - 保持 Codex 可替换执行后端和 PTY/session 管理边界。
+- `Read` / `Write` / `Edit` / `Glob` / `Grep`
+  - 由 `AstralFileToolHandler` 直接注册。
+- `TodoWrite`
+  - 由 `AstralTodoWriteHandler` 直接注册。
+  - 旧 `update_plan` 仅 dispatch-only。
+- `AskUserQuestion`
+  - 由 `AstralAskUserQuestionHandler` 直接注册。
+  - 旧 `request_user_input` 仅 dispatch-only。
+- `RequestPermissions`
+  - 由 `AstralRequestPermissionsHandler` 直接注册。
+  - 旧 `request_permissions` 仅 dispatch-only。
+- `Skill` 与 MCP resource tools 也有 Astral wrapper。
+
+结论：
+
+- 当前核心工具不是“外面套一层 proxy adapter”；模型可见工具名和 runtime handler 已经是 Astral-native。
+- 旧 Codex 工具保留为内部执行后端/dispatch-only，符合“尊重 Codex 骨架，不绕过 sandbox/PTY/approval/exec-server”的设计。
+- `astral_tool_bridge` 当前是空 canonicalization，但主路径不依赖它把 `Bash` 映射到 `exec_command`，因为 `Bash`
+  自身已经是注册 runtime。
+
+验证：
+
+- 本轮为源码核查和文档固化，没有新增代码变更。
+- 未运行测试，避免重复消耗磁盘和时间。
