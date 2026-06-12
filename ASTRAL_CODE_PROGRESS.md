@@ -3812,3 +3812,35 @@ DeepSeek `/anthropic` base 下 inference 可以正常工作，但 `/models` 返�
 1. 原子提交并 push 当前 provider catalog 兼容切片。
 2. 不继续扩大 `/models` 配置面，除非真实 TUI `/model` 使用时还有痛点。
 3. 转入真实 smoke 补洞：Plan/Goal/local compact/TUI 基础路径优先，旧 Responses compact integration fixture 单独排后处理。
+
+## 最新补充 51：provider catalog 404 修复的真实 DeepSeek `/anthropic` smoke 通过
+
+在提交 `d06957cfc9 Handle providers without model catalogs` 后，使用临时 `ASTRAL_HOME` 重新跑了一次真实
+DeepSeek Anthropic-compatible smoke：
+
+- provider id：`deepseek-anthropic`
+- `base_url = "https://api.deepseek.com/anthropic/v1"`
+- `wire_api = "anthropic_messages"`
+- 模型：`deepseek-v4-flash`
+- prompt：要求模型用 `Bash` 执行 `printf catalog-unavailable-smoke-ok`
+
+结果：
+
+- `MODEL_CATALOG_NOISE_ABSENT`。
+- 没有再出现 `failed to refresh available models`、`unexpected status 404` 或 `/models` 错误噪声。
+- `Bash` 工具调用成功，UnifiedExec 执行 `/bin/zsh -lc 'printf catalog-unavailable-smoke-ok'`。
+- 最终 agent message 为 `catalog-unavailable-smoke-ok`。
+
+仍然存在的 warning：
+
+- `Unknown model deepseek-v4-flash is used. This will use fallback model metadata.`
+- `Model personality requested but model_messages is missing, falling back to base instructions.`
+
+这两个 warning 和当前决策一致：Astral 不内置国产模型预设；如果用户希望上下文窗口、多模态、personality/base
+instructions 更准确，需要在用户配置的 model catalog / model capability override 中声明。它们不影响真实执行闭环。
+
+磁盘状态：
+
+- `cargo run` 重建 CLI 后磁盘剩余约 16Gi。
+- `codex-rs/target/debug/incremental` 仍为 0B，没有可安全清理的增量缓存。
+- 后续应避免继续跑 core/TUI 重编级测试，直到磁盘空间更宽松或必须验收。
