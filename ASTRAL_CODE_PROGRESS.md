@@ -3587,3 +3587,100 @@ Goal 仍然 active：
 
 目前还没有达到 complete 条件。当前最重要的是按原子提交继续推进剩余硬块，不再把所有历史命名残留都当成 v1
 blocker；真正 blocker 是运行控制面、provider/tool 真实闭环和端到端验收。
+
+## 最新补充 46：全局航向校准与两个风险收口
+
+用户提醒不要卡在单点死循环后，重新对照 Goal 做了一轮全局校准：
+
+1. 当前主线不是继续无限清理历史 OpenAI/Codex 命名残留，而是把 Astral-Code 做到真实可用：
+   - provider-neutral 主循环可真实调用国内常用 OpenAI-compatible API 和 `/anthropic`/Messages API。
+   - Claude-ish core tools 能形成模型顺手的轨迹形状。
+   - terminal agentic 体验保持 Codex 的 UnifiedExec/PTY 丝滑度。
+   - 单模态模型不会因为历史中存在图片而废掉整个 session。
+   - 最后用 DeepSeek 等真实模型做最小端到端 smoke。
+
+2. `Bash` 与后台任务工具不是绕过 Codex 的脏 adapter：
+   - 模型侧暴露 `Bash`、`ReadTaskOutput`、`SendTaskInput`、`ListBackgroundTasks`、`StopBackgroundTask`。
+   - handler 侧改写参数后复用 Codex 原生 `ExecCommandHandler`、`WriteStdinHandler` 和
+     `UnifiedExecProcessManager`。
+   - `Bash(run_in_background=true)` 通过短 `yield_time_ms` 快速返回，普通 tool output 会出现
+     `Task running with task_id ...`。
+   - `ReadTaskOutput` 是对同一 task 的空 stdin poll。
+   - `SendTaskInput` 是对同一 task 写 stdin，例如 `y\n`。
+   - `ListBackgroundTasks` 读取 UnifiedExec 进程表，包含 `task_id`、`command`、`cwd`、`status`、
+     `exit_code`、`tty`、`elapsed_ms`、`last_used_ms_ago`。
+   - `StopBackgroundTask` 调用 UnifiedExec 的 `terminate_process`。
+   - 结论：这条线保持了可替换执行后端抽象，没有直接绑死本地终端或本地磁盘。
+
+3. 单模态图片降级路径已确认：
+   - `model_info.input_modalities` 已经是模型能力声明入口。
+   - 主循环构造请求前使用 `history.for_prompt(&turn_context.model_info.input_modalities)`。
+   - `for_prompt` 在模型不支持图片时会把 message/tool output 中的图片替换为文本占位。
+   - MCP tool result 也已有 `sanitize_mcp_tool_result_for_model`，在不支持图片时把 MCP 图片块替换为
+     `<image content omitted because you do not support image input>`。
+   - provider-neutral/Anthropic request 是从已经净化过的 prompt 转为 AgentRequest，因此不应绕过这层。
+
+4. 下一步优先级：
+   - 等当前 focused core 测试自然结束，确认后台任务工具窄测结果。
+   - 若无失败，将后台任务工具标记为完成，不继续打磨小 UX。
+   - 进入真实 smoke：临时 `ASTRAL_HOME` + DeepSeek OpenAI-compatible provider + 最小 `astral exec`
+     工具调用任务。
+   - `/anthropic` smoke 需要先确认目标 provider 的实际 Messages-compatible base path；不要假设 DeepSeek 官方一定提供。
+   - 更新文档、原子提交、push。
+
+5. 恢复注意：
+   - 不要把 `/model` 分组 UI、历史命名残留、旧 Codex 数据兼容当作当前 blocker。
+   - 不要重改 subagent；用户已决定保持 Codex 原版。
+   - 不要重做 compact；目前保留 Codex local compact。
+   - 不要破坏 sandbox、approval、exec-server、UnifiedExec、Environment/ExecBackend。
+
+## 最新补充 47：DeepSeek smoke 抓到 hidden legacy tool 泄漏并修复
+
+完成了一轮真实 DeepSeek OpenAI-compatible smoke：
+
+1. 基础工具闭环通过：
+   - 使用临时 `ASTRAL_HOME` 和 `--ephemeral`，不污染用户主配置。
+   - `ASTRAL_BASE_URL=https://api.deepseek.com/v1`
+   - 模型 `deepseek-v4-flash`
+   - prompt 要求模型调用 `Bash` 执行 `printf astral-smoke-ok`。
+   - 结果：模型调用 `Bash`，UnifiedExec 执行成功，tool_result 回灌成功，最终回答 `astral-smoke-ok`。
+   - usage 中出现较高 cached input，说明当前 prompt 形状可以获得 provider 侧缓存收益。
+
+2. 后台任务 smoke 第一次暴露问题：
+   - prompt 要求模型启动持续后台命令，然后 `ListBackgroundTasks`、`ReadTaskOutput`、`StopBackgroundTask`。
+   - 模型启动了后台命令并拿到 ID，但仍尝试/引用了 legacy `write_stdin` 路径，且生成过“没有
+     StopBackgroundTask 工具”的错误判断。
+   - 根因不是 visible tool spec，而是 hidden/dispatch-only runtime 虽然不在模型工具列表里，registry 仍允许模型幻觉旧工具名后直接 dispatch。
+   - 这会让残留 Codex flavor 绕开 Astral facade，破坏我们想要的 Claude-ish/Astral 工具轨迹。
+
+3. 修复：
+   - 在 `ToolRegistry::dispatch_any_with_terminal_outcome` 边界拒绝直接调用 `ToolExposure::Hidden` 工具。
+   - hidden tools 仍然注册，供 Astral-native handler 内部复用：
+     - `Bash` 内部复用 `exec_command` / `shell_command`
+     - `ReadTaskOutput` / `SendTaskInput` 内部复用 `write_stdin`
+   - 但模型直接调用 hidden tool 时，会得到可恢复错误：
+     - `exec_command` / `shell_command` → 提示使用 `Bash`
+     - `write_stdin` → 提示使用 `ReadTaskOutput` / `SendTaskInput`
+     - `update_plan` → 提示使用 `TodoWrite`
+     - `request_user_input` → 提示使用 `AskUserQuestion`
+     - `request_permissions` → 提示使用 `RequestPermissions`
+
+4. 验证：
+   - `just fmt`
+   - `just test -p codex-core -E 'test(hidden_tools_are_not_directly_callable_by_model) or test(astral_bash) or test(astral_background)'`
+     - 7 passed。
+   - 重建 `astral` debug CLI。
+   - 再次运行后台任务 DeepSeek smoke：
+     - 模型启动 `while true; do echo astral-loop-ok; sleep 1; done`
+     - 拿到 task id
+     - 读取到重复输出
+     - 停止任务
+     - 最终回答 `stopped-after-astral-loop-ok`
+   - JSON UI 将被停止的命令显示为 `exit_code=-1/status=failed`，这是当前终止进程呈现语义，不影响工具闭环。
+
+5. 磁盘：
+   - 重建 CLI 后磁盘降到约 13Gi 可用。
+   - 已清理 `codex-rs/target/debug/incremental`。
+   - 清理后约 17Gi 可用。
+
+当前结论：Claude-ish Bash/background task 工具链已经从“schema 看起来对”推进到“真实模型能跑通长任务、读取输出并停止任务”。下一步应进入 `/anthropic` 真实/模拟 smoke、compact/Plan/Goal 快速验收和最终端到端收口。

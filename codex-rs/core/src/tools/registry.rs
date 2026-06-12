@@ -467,6 +467,42 @@ impl ToolRegistry {
                 return Err(err);
             }
         };
+        if tool.exposure() == ToolExposure::Hidden {
+            let message = match tool_name.name.as_str() {
+                "exec_command" | "shell_command" => {
+                    "Bash is the public command execution tool in Astral; call Bash instead of internal shell tools.".to_string()
+                }
+                "write_stdin" => {
+                    "write_stdin is internal in Astral; call ReadTaskOutput to poll output or SendTaskInput to send interactive stdin.".to_string()
+                }
+                "update_plan" => {
+                    "update_plan is internal in Astral; call TodoWrite for checklist-style progress updates.".to_string()
+                }
+                "request_user_input" => {
+                    "request_user_input is internal in Astral; call AskUserQuestion when you need a user clarification.".to_string()
+                }
+                "request_permissions" => {
+                    "request_permissions is internal in Astral; call RequestPermissions when you need elevated permissions.".to_string()
+                }
+                _ => format!(
+                    "{tool_name} is an internal Astral tool and cannot be called directly."
+                ),
+            };
+            let log_payload = invocation.payload.log_payload();
+            otel.tool_result_with_tags(
+                tool_name_flat.as_ref(),
+                &call_id_owned,
+                log_payload.as_ref(),
+                Duration::ZERO,
+                /*success*/ false,
+                &message,
+                &base_tool_result_tags,
+                /*extra_trace_fields*/ &[],
+            );
+            let err = FunctionCallError::RespondToModel(message);
+            dispatch_trace.record_failed(&err);
+            return Err(err);
+        }
 
         let telemetry_tags = tool.telemetry_tags(&invocation).await;
         let mut tool_result_tags =
