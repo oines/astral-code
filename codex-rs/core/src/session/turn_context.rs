@@ -810,7 +810,7 @@ impl Session {
                 tc,
                 EventMsg::Warning(WarningEvent {
                     message: format!(
-                        "Model metadata for `{}` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.",
+                        "Model metadata for `{}` not found. Defaulting to fallback metadata; this can degrade performance and cause issues. Add `model_context_window` and `model_input_modalities` in config.toml if this provider does not expose model capabilities.",
                         tc.model_info.slug
                     ),
                 }),

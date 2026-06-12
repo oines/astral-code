@@ -4675,3 +4675,50 @@ CARGO_INCREMENTAL=0 just test -p codex-tui \
 
 - 本轮后磁盘剩余约 12Gi。
 - 未做额外缓存清理。
+
+## 最新补充 69：未知模型 metadata fallback 提示改为可操作
+
+本轮回到主线目标里的“国产模型/新模型能力声明”问题。之前已经确认：
+
+- 模型上下文窗口由 `model_context_window` / model metadata 提供。
+- 模型输入模态由 `model_input_modalities` / model metadata 提供。
+- 单模态模型遇到图片上下文时，已经走文本占位降级，不会像 Claude Code 那样把 session 直接卡死到只能换多模态模型。
+- auto-review/Guardian reviewer 当前使用主 turn 的 active model，不再依赖 OpenAI 专用 review 模型。
+
+发现的小缺口：
+
+- 当模型 metadata 查不到、进入 fallback metadata 时，warning 只说性能可能变差，没有告诉用户该补哪些配置。
+- 这会让国内新模型接入时排障成本变高，尤其是上下文窗口和图片能力声明。
+
+改动：
+
+- `codex-rs/core/src/session/turn_context.rs`
+  - 未知模型 fallback warning 现在明确提示用户在 `config.toml` 里补 `model_context_window` 和
+    `model_input_modalities`。
+  - 保留原有 `Defaulting to fallback metadata` 文案片段，避免破坏现有测试匹配语义。
+
+验证命令：
+
+```bash
+just fmt
+CARGO_INCREMENTAL=0 just test -p codex-core \
+  namespaced_model_slug_uses_catalog_metadata_without_fallback_warning
+```
+
+结果：
+
+- `just fmt` 通过。
+- `codex-core` 相关测试完成编译。
+- 该单条集成测试运行失败，失败原因是等待事件超时，不是编译错误或 warning 文案断言失败。
+- 按当前策略没有继续深挖该测试，避免再次把时间耗在单点测试排障上；后续统一 E2E/CI 收口时再处理。
+
+意义：
+
+- Astral-Code 对“模型能力由用户/Provider 声明”的路径更清晰。
+- 这直接服务于国内模型快速接入：没有内置模型能力预设时，用户能看到该补上下文窗口和模态配置。
+- 不影响 Codex 继承来的执行后端、sandbox、PTY、approval、compact 或 app-server 架构。
+
+磁盘：
+
+- 本轮后磁盘剩余约 11Gi。
+- 未额外清理构建缓存，保留增量编译速度。
