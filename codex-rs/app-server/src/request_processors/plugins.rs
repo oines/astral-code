@@ -2,15 +2,11 @@ use super::*;
 use crate::error_code::internal_error;
 use crate::error_code::invalid_request;
 use codex_app_server_protocol::PluginAvailability;
-use codex_app_server_protocol::PluginInstallPolicy;
 use codex_app_server_protocol::PluginSharePrincipalRole;
 use codex_app_server_protocol::PluginShareTargetRole;
 use codex_config::types::McpServerConfig;
 use codex_core_plugins::OPENAI_CURATED_MARKETPLACE_NAME;
 use codex_core_plugins::PluginListBackgroundTaskOptions;
-use codex_core_plugins::remote::REMOTE_GLOBAL_MARKETPLACE_NAME;
-use codex_core_plugins::remote::RemoteAppTemplateUnavailableReason;
-use codex_core_plugins::remote::RemotePluginScope;
 use codex_core_plugins::remote::is_valid_remote_plugin_id;
 use codex_core_plugins::remote::validate_remote_plugin_id;
 use codex_mcp::McpOAuthLoginSupport;
@@ -23,7 +19,6 @@ pub(crate) struct PluginRequestProcessor {
     auth_manager: Arc<AuthManager>,
     thread_manager: Arc<ThreadManager>,
     outgoing: Arc<OutgoingMessageSender>,
-    analytics_events_client: AnalyticsEventsClient,
     config_manager: ConfigManager,
     workspace_settings_cache: Arc<workspace_settings::WorkspaceSettingsCache>,
 }
@@ -98,20 +93,15 @@ fn remote_plugin_control_plane_enabled() -> bool {
 }
 
 fn load_shared_plugin_ids_by_local_path(
-    config: &Config,
+    _config: &Config,
 ) -> Result<std::collections::BTreeMap<AbsolutePathBuf, String>, JSONRPCErrorError> {
-    if !remote_plugin_control_plane_enabled() {
-        return Ok(std::collections::BTreeMap::new());
-    }
+    Ok(std::collections::BTreeMap::new())
+}
 
-    codex_core_plugins::remote::load_plugin_share_remote_ids_by_local_path(
-        config.codex_home.as_path(),
-    )
-    .map_err(|err| {
-        internal_error(format!(
-            "failed to load plugin share local path mapping: {err}"
-        ))
-    })
+fn hosted_plugin_control_plane_unavailable(action: &str) -> JSONRPCErrorError {
+    invalid_request(format!(
+        "{action} is not supported by Astral; install local plugins from configured marketplaces instead"
+    ))
 }
 
 fn share_context_for_source(
@@ -155,67 +145,6 @@ fn convert_configured_marketplace_plugin_to_plugin_summary(
         interface: plugin.interface.map(local_plugin_interface_to_info),
         keywords: plugin.keywords,
     }
-}
-
-fn remote_installed_plugin_visible_scopes(config: &Config) -> Vec<RemotePluginScope> {
-    if !remote_plugin_control_plane_enabled() {
-        return Vec::new();
-    }
-
-    let mut scopes = Vec::new();
-    if config.features.enabled(Feature::RemotePlugin) {
-        scopes.push(RemotePluginScope::Global);
-    }
-    if config.features.enabled(Feature::PluginSharing) {
-        scopes.push(RemotePluginScope::Workspace);
-    }
-    scopes
-}
-
-fn filter_openai_curated_installed_conflicts(
-    marketplaces: &mut Vec<PluginMarketplaceEntry>,
-    prefer_remote_curated_conflicts: bool,
-) {
-    let local_installed_plugin_names = marketplaces
-        .iter()
-        .find(|marketplace| marketplace.name == OPENAI_CURATED_MARKETPLACE_NAME)
-        .map(|marketplace| installed_plugin_names(&marketplace.plugins))
-        .unwrap_or_default();
-    let remote_installed_plugin_names = marketplaces
-        .iter()
-        .find(|marketplace| marketplace.name == REMOTE_GLOBAL_MARKETPLACE_NAME)
-        .map(|marketplace| installed_plugin_names(&marketplace.plugins))
-        .unwrap_or_default();
-    let conflicting_plugin_names = local_installed_plugin_names
-        .intersection(&remote_installed_plugin_names)
-        .cloned()
-        .collect::<HashSet<_>>();
-    if conflicting_plugin_names.is_empty() {
-        return;
-    }
-
-    let marketplace_to_filter = if prefer_remote_curated_conflicts {
-        OPENAI_CURATED_MARKETPLACE_NAME
-    } else {
-        REMOTE_GLOBAL_MARKETPLACE_NAME
-    };
-    for marketplace in marketplaces.iter_mut() {
-        if marketplace.name != marketplace_to_filter {
-            continue;
-        }
-        marketplace
-            .plugins
-            .retain(|plugin| !plugin.installed || !conflicting_plugin_names.contains(&plugin.name));
-    }
-    marketplaces.retain(|marketplace| !marketplace.plugins.is_empty());
-}
-
-fn installed_plugin_names(plugins: &[PluginSummary]) -> HashSet<String> {
-    plugins
-        .iter()
-        .filter(|plugin| plugin.installed)
-        .map(|plugin| plugin.name.clone())
-        .collect()
 }
 
 fn remote_plugin_share_discoverability(
@@ -341,7 +270,6 @@ impl PluginRequestProcessor {
         auth_manager: Arc<AuthManager>,
         thread_manager: Arc<ThreadManager>,
         outgoing: Arc<OutgoingMessageSender>,
-        analytics_events_client: AnalyticsEventsClient,
         config_manager: ConfigManager,
         workspace_settings_cache: Arc<workspace_settings::WorkspaceSettingsCache>,
     ) -> Self {
@@ -349,7 +277,6 @@ impl PluginRequestProcessor {
             auth_manager,
             thread_manager,
             outgoing,
-            analytics_events_client,
             config_manager,
             workspace_settings_cache,
         }
@@ -533,12 +460,9 @@ impl PluginRequestProcessor {
             marketplace_kinds,
         } = params;
         let roots = cwds.unwrap_or_default();
-        let explicit_marketplace_kinds = marketplace_kinds.is_some();
         let marketplace_kinds =
             marketplace_kinds.unwrap_or_else(|| vec![PluginListMarketplaceKind::Local]);
         let include_local = marketplace_kinds.contains(&PluginListMarketplaceKind::Local);
-        let include_vertical = remote_plugin_control_plane_enabled()
-            && marketplace_kinds.contains(&PluginListMarketplaceKind::Vertical);
 
         let config = self.load_latest_config(/*fallback_cwd*/ None).await?;
         let empty_response = || PluginListResponse {
@@ -557,21 +481,7 @@ impl PluginRequestProcessor {
             return Ok(empty_response());
         }
         let plugins_input = config.plugins_config_input();
-        let include_shared_with_me = remote_plugin_control_plane_enabled()
-            && marketplace_kinds.contains(&PluginListMarketplaceKind::SharedWithMe);
-        let include_global_remote = remote_plugin_control_plane_enabled()
-            && !explicit_marketplace_kinds
-            && config.features.enabled(Feature::RemotePlugin);
-        let remote_plugin_service_config = RemotePluginServiceConfig {
-            hosted_base_url: config.hosted_base_url.clone(),
-        };
-        let refresh_global_remote_catalog_cache = include_global_remote
-            && codex_core_plugins::remote::has_cached_global_remote_plugin_catalog(
-                config.codex_home.as_path(),
-                &remote_plugin_service_config,
-                auth.as_ref(),
-            );
-        let (mut data, marketplace_load_errors) = if include_local {
+        let (data, marketplace_load_errors) = if include_local {
             let config_for_marketplace_listing = plugins_input.clone();
             let plugins_manager_for_marketplace_listing = plugins_manager.clone();
             let roots_for_marketplace_listing = roots.clone();
@@ -638,95 +548,13 @@ impl PluginRequestProcessor {
             (Vec::new(), Vec::new())
         };
 
-        // TODO(remote plugins): Remove this once remote plugins are ready and vertical plugins are
-        // served directly from the normal remote catalog.
-        if include_vertical && !config.features.enabled(Feature::RemotePlugin) {
-            match codex_core_plugins::remote::fetch_astral_curated_remote_collection_marketplace(
-                &remote_plugin_service_config,
-                auth.as_ref(),
-            )
-            .await
-            {
-                Ok(Some(remote_marketplace)) => {
-                    data.push(remote_marketplace_to_info(remote_marketplace));
-                }
-                Ok(None) => {}
-                Err(
-                    RemotePluginCatalogError::AuthRequired
-                    | RemotePluginCatalogError::UnsupportedAuthMode,
-                ) => {}
-                Err(err) => {
-                    warn!(
-                        error = %err,
-                        "plugin/list astral-curated-remote collection fetch failed; returning local marketplaces only"
-                    );
-                }
-            }
-        }
-
-        let mut remote_sources = Vec::new();
-        if include_global_remote {
-            remote_sources.push(RemoteMarketplaceSource::Global);
-        }
-        if remote_plugin_control_plane_enabled()
-            && marketplace_kinds.contains(&PluginListMarketplaceKind::WorkspaceDirectory)
-        {
-            remote_sources.push(RemoteMarketplaceSource::WorkspaceDirectory);
-        }
-        if include_shared_with_me && config.features.enabled(Feature::PluginSharing) {
-            remote_sources.push(RemoteMarketplaceSource::SharedWithMe);
-        }
-        if !remote_sources.is_empty() {
-            match codex_core_plugins::remote::fetch_remote_marketplaces(
-                &remote_plugin_service_config,
-                auth.as_ref(),
-                &remote_sources,
-                /*global_catalog_cache_path*/ Some(config.codex_home.as_path()),
-            )
-            .await
-            {
-                Ok(remote_marketplaces) => {
-                    for remote_marketplace in remote_marketplaces
-                        .into_iter()
-                        .map(remote_marketplace_to_info)
-                    {
-                        data.push(remote_marketplace);
-                    }
-                }
-                Err(
-                    err @ (RemotePluginCatalogError::AuthRequired
-                    | RemotePluginCatalogError::UnsupportedAuthMode),
-                ) if explicit_marketplace_kinds => {
-                    return Err(remote_plugin_catalog_error_to_jsonrpc(
-                        err,
-                        "list remote plugin catalog",
-                    ));
-                }
-                Err(
-                    RemotePluginCatalogError::AuthRequired
-                    | RemotePluginCatalogError::UnsupportedAuthMode,
-                ) => {}
-                Err(err) if explicit_marketplace_kinds => {
-                    return Err(remote_plugin_catalog_error_to_jsonrpc(
-                        err,
-                        "list remote plugin catalog",
-                    ));
-                }
-                Err(err) => {
-                    warn!(
-                        error = %err,
-                        "plugin/list remote plugin catalog fetch failed; returning local marketplaces only"
-                    );
-                }
-            }
-        }
-        if include_local || include_shared_with_me || include_global_remote {
+        if include_local {
             plugins_manager.maybe_start_plugin_list_background_tasks_for_config(
                 &plugins_input,
                 auth.clone(),
                 &roots,
                 PluginListBackgroundTaskOptions {
-                    refresh_global_remote_catalog_cache,
+                    refresh_global_remote_catalog_cache: false,
                 },
                 Some(self.effective_plugins_changed_callback()),
             );
@@ -792,17 +620,8 @@ impl PluginRequestProcessor {
         }
 
         let plugins_input = config.plugins_config_input();
-        let remote_installed_plugin_visible_scopes =
-            remote_installed_plugin_visible_scopes(&config);
-        if !remote_installed_plugin_visible_scopes.is_empty() {
-            plugins_manager.maybe_start_remote_installed_plugin_bundle_sync(
-                &plugins_input,
-                auth.clone(),
-                Some(self.effective_plugins_changed_callback()),
-            );
-        }
 
-        let (mut data, marketplace_load_errors) = self
+        let (data, marketplace_load_errors) = self
             .load_local_installed_and_suggested_plugins(
                 plugins_manager.clone(),
                 &config,
@@ -811,20 +630,6 @@ impl PluginRequestProcessor {
                 install_suggestion_plugin_names,
             )
             .await?;
-
-        data.extend(
-            self.load_remote_installed_plugins(
-                plugins_manager,
-                &plugins_input,
-                &remote_installed_plugin_visible_scopes,
-                auth.as_ref(),
-            )
-            .await,
-        );
-        filter_openai_curated_installed_conflicts(
-            &mut data,
-            config.features.enabled(Feature::RemotePlugin),
-        );
 
         Ok(PluginInstalledResponse {
             marketplaces: data,
@@ -912,51 +717,6 @@ impl PluginRequestProcessor {
         }
     }
 
-    async fn load_remote_installed_plugins(
-        &self,
-        plugins_manager: Arc<codex_core_plugins::PluginsManager>,
-        plugins_input: &codex_core_plugins::PluginsConfigInput,
-        visible_scopes: &[RemotePluginScope],
-        auth: Option<&CodexAuth>,
-    ) -> Vec<PluginMarketplaceEntry> {
-        if visible_scopes.is_empty() {
-            return Vec::new();
-        }
-
-        let remote_marketplaces = if let Some(remote_marketplaces) =
-            plugins_manager.build_remote_installed_plugin_marketplaces_from_cache(visible_scopes)
-        {
-            Ok(remote_marketplaces)
-        } else {
-            plugins_manager
-                .build_and_cache_remote_installed_plugin_marketplaces(
-                    plugins_input,
-                    auth,
-                    visible_scopes,
-                    Some(self.effective_plugins_changed_callback()),
-                )
-                .await
-        };
-
-        match remote_marketplaces {
-            Ok(remote_marketplaces) => remote_marketplaces
-                .into_iter()
-                .map(remote_marketplace_to_info)
-                .collect(),
-            Err(
-                RemotePluginCatalogError::AuthRequired
-                | RemotePluginCatalogError::UnsupportedAuthMode,
-            ) => Vec::new(),
-            Err(err) => {
-                warn!(
-                    error = %err,
-                    "plugin/installed remote installed plugin fetch failed; returning local marketplaces only"
-                );
-                Vec::new()
-            }
-        }
-    }
-
     async fn plugin_read_response(
         &self,
         params: PluginReadParams,
@@ -979,11 +739,9 @@ impl PluginRequestProcessor {
         if read_source.is_err() {
             validate_remote_plugin_id(&plugin_name)?;
         }
-        if let Err(remote_marketplace_name) = &read_source
-            && !remote_plugin_control_plane_enabled()
-        {
-            return Err(invalid_request(format!(
-                "remote plugin read is not enabled for marketplace {remote_marketplace_name}"
+        if let Err(remote_marketplace_name) = &read_source {
+            return Err(hosted_plugin_control_plane_unavailable(&format!(
+                "remote plugin read for marketplace {remote_marketplace_name}"
             )));
         }
         let config_cwd = read_source.as_ref().ok().and_then(|marketplace_path| {
@@ -1009,55 +767,6 @@ impl PluginRequestProcessor {
                     &outcome.plugin.source,
                     &shared_plugin_ids_by_local_path,
                 );
-                let share_context = match (remote_plugin_control_plane_enabled(), share_context) {
-                    (false, share_context) => share_context,
-                    (true, None) => None,
-                    (true, Some(context)) => {
-                        let auth = self.auth_manager.auth().await;
-                        let remote_plugin_service_config = RemotePluginServiceConfig {
-                            hosted_base_url: config.hosted_base_url.clone(),
-                        };
-                        match codex_core_plugins::remote::fetch_remote_plugin_share_context(
-                            &remote_plugin_service_config,
-                            auth.as_ref(),
-                            &context.remote_plugin_id,
-                        )
-                        .await
-                        {
-                            Ok(Some(remote_share_context)) => {
-                                if remote_share_context.share_principals.is_some() {
-                                    Some(remote_plugin_share_context_to_info(remote_share_context))
-                                } else {
-                                    let remote_version = remote_share_context.remote_version;
-                                    let remote_plugin_id = context.remote_plugin_id.clone();
-                                    warn!(
-                                        remote_plugin_id = %remote_plugin_id,
-                                        "remote shared plugin detail did not include share principals; returning local share mapping context with remote version"
-                                    );
-                                    Some(PluginShareContext {
-                                        remote_version,
-                                        ..context
-                                    })
-                                }
-                            }
-                            Ok(None) => {
-                                warn!(
-                                    remote_plugin_id = %context.remote_plugin_id,
-                                    "remote shared plugin detail did not include share context; returning local share mapping context"
-                                );
-                                Some(context)
-                            }
-                            Err(err) => {
-                                warn!(
-                                    remote_plugin_id = %context.remote_plugin_id,
-                                    error = %err,
-                                    "failed to hydrate local plugin share context; returning local share mapping context"
-                                );
-                                Some(context)
-                            }
-                        }
-                    }
-                };
                 let environment_manager = self.thread_manager.environment_manager();
                 let app_summaries = load_plugin_app_summaries(
                     &config,
@@ -1114,41 +823,9 @@ impl PluginRequestProcessor {
                 }
             }
             Err(remote_marketplace_name) => {
-                if !remote_plugin_control_plane_enabled()
-                    || !config.features.enabled(Feature::Plugins)
-                {
-                    return Err(invalid_request(format!(
-                        "remote plugin read is not enabled for marketplace {remote_marketplace_name}"
-                    )));
-                }
-                let auth = self.auth_manager.auth().await;
-                let remote_plugin_service_config = RemotePluginServiceConfig {
-                    hosted_base_url: config.hosted_base_url.clone(),
-                };
-                let remote_detail = codex_core_plugins::remote::fetch_remote_plugin_detail(
-                    &remote_plugin_service_config,
-                    auth.as_ref(),
-                    &remote_marketplace_name,
-                    &plugin_name,
-                )
-                .await
-                .map_err(|err| {
-                    remote_plugin_catalog_error_to_jsonrpc(err, "read remote plugin details")
-                })?;
-                let plugin_apps = remote_detail
-                    .app_ids
-                    .iter()
-                    .cloned()
-                    .map(codex_plugin::AppConnectorId)
-                    .collect::<Vec<_>>();
-                let environment_manager = self.thread_manager.environment_manager();
-                let app_summaries = load_plugin_app_summaries(
-                    &config,
-                    &plugin_apps,
-                    Arc::clone(&environment_manager),
-                )
-                .await;
-                remote_plugin_detail_to_info(remote_detail, app_summaries)
+                return Err(hosted_plugin_control_plane_unavailable(&format!(
+                    "remote plugin read for marketplace {remote_marketplace_name}"
+                )));
             }
         };
 
@@ -1435,9 +1112,10 @@ impl PluginRequestProcessor {
         let marketplace_path = match (marketplace_path, remote_marketplace_name) {
             (Some(marketplace_path), None) => marketplace_path,
             (None, Some(remote_marketplace_name)) => {
-                return self
-                    .remote_plugin_install_response(remote_marketplace_name, plugin_name)
-                    .await;
+                validate_remote_plugin_id(&plugin_name)?;
+                return Err(hosted_plugin_control_plane_unavailable(&format!(
+                    "remote plugin install from marketplace {remote_marketplace_name}"
+                )));
             }
             (Some(_), Some(_)) | (None, None) => {
                 return Err(invalid_request(
@@ -1493,121 +1171,6 @@ impl PluginRequestProcessor {
 
         Ok(PluginInstallResponse {
             auth_policy: result.auth_policy.into(),
-            apps_needing_auth,
-        })
-    }
-
-    async fn remote_plugin_install_response(
-        &self,
-        remote_marketplace_name: String,
-        remote_plugin_id: String,
-    ) -> Result<PluginInstallResponse, JSONRPCErrorError> {
-        validate_remote_plugin_id(&remote_plugin_id)?;
-        if !remote_plugin_control_plane_enabled() {
-            return Err(invalid_request(format!(
-                "remote plugin install is not enabled for marketplace {remote_marketplace_name}"
-            )));
-        }
-        let config = self.load_latest_config(/*fallback_cwd*/ None).await?;
-        if !config.features.enabled(Feature::Plugins) {
-            return Err(invalid_request(format!(
-                "remote plugin install is not enabled for marketplace {remote_marketplace_name}"
-            )));
-        }
-
-        let auth = self.auth_manager.auth().await;
-        let remote_plugin_service_config = RemotePluginServiceConfig {
-            hosted_base_url: config.hosted_base_url.clone(),
-        };
-        let remote_detail =
-            codex_core_plugins::remote::fetch_remote_plugin_detail_with_download_urls(
-                &remote_plugin_service_config,
-                auth.as_ref(),
-                &remote_marketplace_name,
-                &remote_plugin_id,
-            )
-            .await
-            .map_err(|err| {
-                remote_plugin_catalog_error_to_jsonrpc(
-                    err,
-                    "read remote plugin details before install",
-                )
-            })?;
-        if remote_detail.summary.availability == PluginAvailability::DisabledByAdmin {
-            return Err(invalid_request(format!(
-                "remote plugin {remote_plugin_id} is disabled by admin"
-            )));
-        }
-        if remote_detail.summary.install_policy == PluginInstallPolicy::NotAvailable {
-            return Err(invalid_request(format!(
-                "remote plugin {remote_plugin_id} is not available for install"
-            )));
-        }
-        let actual_remote_marketplace_name = remote_detail.marketplace_name.clone();
-        // Direct install writes the same cache tree that installed-plugin sync
-        // prunes before the backend installed snapshot can include this plugin.
-        let _remote_plugin_cache_mutation =
-            codex_core_plugins::remote::mark_remote_plugin_cache_mutation_in_flight(
-                config.codex_home.as_path(),
-                &actual_remote_marketplace_name,
-                &remote_detail.summary.name,
-            );
-        let validated_bundle = codex_core_plugins::remote_bundle::validate_remote_plugin_bundle(
-            &remote_plugin_id,
-            &actual_remote_marketplace_name,
-            &remote_detail.summary.name,
-            remote_detail.release_version.as_deref(),
-            remote_detail.bundle_download_url.as_deref(),
-            remote_detail.app_manifest.clone(),
-        )
-        .map_err(remote_plugin_bundle_install_error_to_jsonrpc)?;
-
-        let result = codex_core_plugins::remote_bundle::download_and_install_remote_plugin_bundle(
-            config.codex_home.to_path_buf(),
-            validated_bundle,
-        )
-        .await
-        .map_err(remote_plugin_bundle_install_error_to_jsonrpc)?;
-
-        // Cache first so a backend install cannot succeed when local materialization fails.
-        // If this backend call fails, the cache entry is harmless because remote installed state
-        // is still backend-gated.
-        codex_core_plugins::remote::install_remote_plugin(
-            &remote_plugin_service_config,
-            auth.as_ref(),
-            &actual_remote_marketplace_name,
-            &remote_plugin_id,
-        )
-        .await
-        .map_err(|err| remote_plugin_catalog_error_to_jsonrpc(err, "install remote plugin"))?;
-
-        self.thread_manager
-            .plugins_manager()
-            .maybe_start_remote_installed_plugins_cache_refresh_after_mutation(
-                &config.plugins_config_input(),
-                auth.clone(),
-                Some(self.effective_plugins_changed_callback()),
-            );
-
-        let mut plugin_metadata =
-            plugin_telemetry_metadata_from_root(&result.plugin_id, &result.installed_path).await;
-        plugin_metadata.remote_plugin_id = Some(remote_plugin_id);
-        self.analytics_events_client
-            .track_plugin_installed(plugin_metadata);
-
-        let plugin_mcp_servers = load_plugin_mcp_servers(result.installed_path.as_path()).await;
-        if !plugin_mcp_servers.is_empty() {
-            self.start_plugin_mcp_oauth_logins(&config, plugin_mcp_servers)
-                .await;
-        }
-
-        let plugin_apps = load_plugin_apps(result.installed_path.as_path()).await;
-        let apps_needing_auth = self
-            .plugin_apps_needing_auth_for_install(&config, &result.plugin_id.as_key(), &plugin_apps)
-            .await;
-
-        Ok(PluginInstallResponse {
-            auth_policy: remote_detail.summary.auth_policy,
             apps_needing_auth,
         })
     }
@@ -1766,7 +1329,9 @@ impl PluginRequestProcessor {
             if !is_valid_remote_plugin_id(&plugin_id) {
                 return Err(invalid_request("invalid remote plugin id"));
             }
-            return self.remote_plugin_uninstall_response(plugin_id).await;
+            return Err(hosted_plugin_control_plane_unavailable(
+                "remote plugin uninstall",
+            ));
         }
         let plugins_manager = self.thread_manager.plugins_manager();
 
@@ -1844,52 +1409,6 @@ impl PluginRequestProcessor {
             | MarketplaceError::InvalidPlugin(_) => invalid_request(err.to_string()),
             MarketplaceError::Io { .. } => internal_error(format!("failed to {action}: {err}")),
         }
-    }
-
-    async fn remote_plugin_uninstall_response(
-        &self,
-        plugin_id: String,
-    ) -> Result<PluginUninstallResponse, JSONRPCErrorError> {
-        if !remote_plugin_control_plane_enabled() {
-            return Err(invalid_request("remote plugin uninstall is not enabled"));
-        }
-        let config = self.load_latest_config(/*fallback_cwd*/ None).await?;
-        if !config.features.enabled(Feature::Plugins) {
-            return Err(invalid_request("remote plugin uninstall is not enabled"));
-        }
-        validate_remote_plugin_id(&plugin_id)?;
-
-        let auth = self.auth_manager.auth().await;
-        let remote_plugin_service_config = RemotePluginServiceConfig {
-            hosted_base_url: config.hosted_base_url.clone(),
-        };
-        let uninstall_result = codex_core_plugins::remote::uninstall_remote_plugin(
-            &remote_plugin_service_config,
-            auth.as_ref(),
-            config.codex_home.to_path_buf(),
-            &plugin_id,
-        )
-        .await;
-
-        if matches!(
-            &uninstall_result,
-            Ok(()) | Err(RemotePluginCatalogError::CacheRemove(_))
-        ) {
-            let plugins_manager = self.thread_manager.plugins_manager();
-            if plugins_manager.clear_remote_installed_plugins_cache() {
-                self.on_effective_plugins_changed();
-            }
-            plugins_manager.maybe_start_remote_installed_plugins_cache_refresh_after_mutation(
-                &config.plugins_config_input(),
-                auth.clone(),
-                Some(self.effective_plugins_changed_callback()),
-            );
-        }
-
-        uninstall_result.map_err(|err| {
-            remote_plugin_catalog_error_to_jsonrpc(err, "uninstall remote plugin")
-        })?;
-        Ok(PluginUninstallResponse {})
     }
 }
 
@@ -1995,21 +1514,6 @@ fn plugin_apps_needing_auth(
         .collect()
 }
 
-fn remote_marketplace_to_info(marketplace: RemoteMarketplace) -> PluginMarketplaceEntry {
-    PluginMarketplaceEntry {
-        name: marketplace.name,
-        path: None,
-        interface: Some(MarketplaceInterface {
-            display_name: Some(marketplace.display_name),
-        }),
-        plugins: marketplace
-            .plugins
-            .into_iter()
-            .map(remote_plugin_summary_to_info)
-            .collect(),
-    }
-}
-
 fn remote_plugin_summary_to_info(summary: RemoteCatalogPluginSummary) -> PluginSummary {
     PluginSummary {
         id: summary.id,
@@ -2067,56 +1571,6 @@ fn remote_plugin_share_discoverability_to_info(
     }
 }
 
-fn remote_plugin_detail_to_info(
-    detail: RemoteCatalogPluginDetail,
-    apps: Vec<AppSummary>,
-) -> PluginDetail {
-    let app_templates = detail
-        .app_templates
-        .into_iter()
-        .map(|template| AppTemplateSummary {
-            template_id: template.template_id,
-            name: template.name,
-            description: template.description,
-            canonical_connector_id: template.canonical_connector_id,
-            logo_url: template.logo_url,
-            logo_url_dark: template.logo_url_dark,
-            materialized_app_ids: template.materialized_app_ids,
-            reason: template.reason.map(|reason| match reason {
-                RemoteAppTemplateUnavailableReason::NotConfiguredForWorkspace => {
-                    AppTemplateUnavailableReason::NotConfiguredForWorkspace
-                }
-                RemoteAppTemplateUnavailableReason::NoActiveWorkspace => {
-                    AppTemplateUnavailableReason::NoActiveWorkspace
-                }
-            }),
-        })
-        .collect();
-
-    PluginDetail {
-        marketplace_name: detail.marketplace_name,
-        marketplace_path: None,
-        summary: remote_plugin_summary_to_info(detail.summary),
-        description: detail.description,
-        skills: detail
-            .skills
-            .into_iter()
-            .map(|skill| SkillSummary {
-                name: skill.name,
-                description: skill.description,
-                short_description: skill.short_description,
-                interface: skill.interface,
-                path: None,
-                enabled: skill.enabled,
-            })
-            .collect(),
-        hooks: Vec::new(),
-        apps,
-        app_templates,
-        mcp_servers: detail.mcp_servers,
-    }
-}
-
 fn remote_plugin_catalog_error_to_jsonrpc(
     err: RemotePluginCatalogError,
     context: &str,
@@ -2148,10 +1602,4 @@ fn remote_plugin_catalog_error_to_jsonrpc(
         | RemotePluginCatalogError::UnexpectedResponse(_)
         | RemotePluginCatalogError::CacheRemove(_) => internal_error(message),
     }
-}
-
-fn remote_plugin_bundle_install_error_to_jsonrpc(
-    err: codex_core_plugins::remote_bundle::RemotePluginBundleInstallError,
-) -> JSONRPCErrorError {
-    internal_error(format!("install remote plugin bundle: {err}"))
 }

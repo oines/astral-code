@@ -3281,6 +3281,49 @@ external API-key auth 现在严格覆盖 cached hosted auth，不再失败后回
   - 已只清理 Astral-Code 项目内 `codex-rs/target/debug/incremental`，随后测试再次生成的 incremental 也已清理。
     当前可用空间约 16Gi。
 
+### 最新补充 102（2026-06-12 本轮）
+
+重开 Goal 后，目标口径已经从“无限清 OpenAI 残留”收敛为“最终可用验收”。新目标强调：
+
+- `astral-code` / `astral` 是全新项目。
+- 继承 Codex 的 app-server、exec-server、UnifiedExec、PTY、sandbox、approval、Plan Mode、Goal Mode、
+  local compact、MCP、skills/plugins 和可替换执行后端。
+- provider-neutral 主循环必须真实支持 `/anthropic` 和 OpenAI-compatible `/v1/chat/completions`。
+- Claude-ish core tools 与后台任务工具要能真实闭环。
+- Codex 原生 Goal tools 直接继承，不重新设计。
+- OpenAI/hosted 清理只针对实际运行控制面，不追求所有历史命名和 legacy fixture 字符串清零。
+- 最终完成条件包括 DeepSeek 等真实模型端到端测试、CLI/TUI、compact、`/model` 切换、Plan/Goal、MCP/skills/plugins
+  基础路径都能真实完成任务。
+
+本轮完成第一个新 Goal 下的原子切片：收口 app-server hosted remote plugin control-plane。
+
+- 修改文件：
+  - `codex-rs/app-server/src/request_processors/plugins.rs`
+  - `codex-rs/app-server/src/request_processors.rs`
+  - `codex-rs/app-server/src/message_processor.rs`
+- 行为变化：
+  - `plugin/list` 只列本地 marketplace，不再构造 hosted service config，不再尝试 remote/global/shared/vertical catalog fetch。
+  - `plugin/installed` 只读取本地 installed/suggested plugins，不再启动 remote installed bundle sync，不再从 remote cache
+    合并 marketplace。
+  - `plugin/read` 的 remote marketplace 分支直接返回 Astral 不支持 hosted control-plane。
+  - `plugin/install` 的 remote marketplace 分支直接返回 Astral 不支持 hosted control-plane。
+  - `plugin/uninstall` 对 remote plugin id 直接返回 Astral 不支持 hosted control-plane。
+  - 本地 plugin install/uninstall/read、plugin MCP OAuth login、skills、apps auth 检测和本地 marketplace 流程保持不动。
+- 删除代码：
+  - remote installed visible scope/filter conflict helper。
+  - app-server remote installed loader。
+  - app-server remote install/uninstall 方法。
+  - remote marketplace/detail 转换 helper。
+  - remote bundle install error helper。
+  - `PluginRequestProcessor` 中只服务 remote install telemetry 的 `analytics_events_client` 字段。
+- 验证：
+  - `just fmt` 通过。
+  - `CARGO_INCREMENTAL=0 cargo check -p codex-app-server --lib` 通过且无新增 warning。
+- 下一刀建议：
+  - 继续清理 `plugin/share/*` 和 `plugin/skill/read` 中仍然保留的 remote share control-plane 死分支，或者转向
+    Guardian -> Astral approval reviewer。优先级上，若继续同一模块，先把 `remote_plugin_control_plane_enabled()`
+    及 share 相关 remote helper 清掉。
+
 ## 剩余高优先级工作
 
 1. 审计并清理剩余 OpenAI/ChatGPT auth/config 面
@@ -3293,8 +3336,10 @@ external API-key auth 现在严格覆盖 cached hosted auth，不再失败后回
      `HostedApi` variant。
    - `cloud-config` 旧 hosted remote bundle service/cache/backend 已删除；后续只剩全仓命名复扫。
    - `cloud-tasks` 默认 `/wham/*` hosted 路径已切断；后续只需复扫旧 auth/header 语义。
-   - `core-plugins/src/remote*` 主 hosted catalog/share/sync 已降级为 Astral disabled stub；后续只需
-     复扫 app-server 入口和残留命名。
+   - `core-plugins/src/remote*` 主 hosted catalog/share/sync 已降级为 Astral disabled stub。
+   - app-server `plugin/list`、`plugin/installed`、`plugin/read`、`plugin/install`、`plugin/uninstall`
+     的 hosted remote marketplace/install/uninstall 运行路径已切断并删除死 helper。
+   - app-server 仍需后续清理 `plugin/share/*`、`plugin/skill/read` 中的 remote share control-plane 死分支。
    - `memories/write`
    - 目标：默认路径不能静默访问 `chatgpt.com/backend-api`。
    - app-server remote control 暴露入口已禁用；下一刀建议转向 `memories/write`、`cloud-config`
@@ -3391,7 +3436,13 @@ external API-key auth 现在严格覆盖 cached hosted auth，不再失败后回
 
 Goal 仍然 active：
 
-> 完成 astral-code 深度 fork：以全新公开项目形态继承 Codex 边界能力，重构 provider-neutral 协议层与
-> Claude-ish 工具 flavor，并移除 OpenAI 专有控制面。
+> 完成 Astral-Code 最终可用版：以 astral-code/astral 为全新项目，继承 Codex 的 app-server、exec-server、
+> UnifiedExec、PTY、sandbox、approval、Plan Mode、Goal Mode、local compact、MCP、skills/plugins 和可替换执行后端；
+> 完成 provider-neutral 主循环，真实支持 `/anthropic` 与 OpenAI-compatible `/v1/chat/completions`；实现
+> Claude-ish core tools 与后台任务工具；保留并接通 Codex 原生 Goal tools；移除实际运行控制面的 OpenAI/hosted
+> 专有依赖；将 Guardian/auto-review Astral 化为可选当前模型 approval reviewer；隔离 `/v1/responses` 为 legacy
+> adapter；支持用户配置模型能力和单模态图片降级；完成 DeepSeek 等真实模型端到端测试，确保 CLI/TUI、工具闭环、
+> 长任务、交互输入、权限提权、compact、`/model` 切换、Plan/Goal、MCP/skills/plugins 基础路径都能真实完成任务。
 
-目前还没有达到 complete 条件。当前最重要的是继续清理 OpenAI 专有控制面，同时保护 Codex 的执行骨架。
+目前还没有达到 complete 条件。当前最重要的是按原子提交继续推进剩余硬块，不再把所有历史命名残留都当成 v1
+blocker；真正 blocker 是运行控制面、provider/tool 真实闭环和端到端验收。
