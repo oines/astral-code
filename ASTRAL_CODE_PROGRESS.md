@@ -3382,6 +3382,33 @@ Guardian / auto-review 从“硬禁用旧 hosted Guardian”推进到“Astral �
   - 后续重点不是继续拆 Guardian 名字，而是真实 E2E 验证 auto-review 在 DeepSeek/Anthropic/chat-completions
     provider 下的审批请求体、失败恢复和 timeout 行为。
 
+### 最新补充 105（2026-06-12 本轮）
+
+模型 provider catalog 向“无厂商预设、用户显式声明”收敛。
+
+- 修改文件：
+  - `codex-rs/model-provider-info/src/lib.rs`
+  - `codex-rs/model-provider-info/src/model_provider_info_tests.rs`
+  - `codex-rs/core/src/config/config_tests.rs`
+- 行为变化：
+  - `astral` bootstrap provider 不再内置 `https://api.deepseek.com/v1` 作为默认 base URL。
+  - `ASTRAL_BASE_URL` 仍可作为显式环境配置来源；用户也可以在 `model_providers.<id>.base_url` 中声明 provider。
+  - `ModelProviderInfo::to_api_provider(...)` 在 provider 没有 `base_url` 时返回明确配置错误，不再静默 fallback 到任何厂商 URL。
+  - `merge_configured_model_providers(...)` 现在允许用户配置的同名 provider 覆盖 bootstrap provider。
+  - 这意味着 `astral`、`anthropic`、`amazon-bedrock` 等 bootstrap id 不再是权威预设；用户可以用自己的
+    `/anthropic` 或 OpenAI-compatible `/v1/chat/completions` endpoint 覆盖它们。
+- 保留边界：
+  - 本 slice 暂不删除 `ollama` / `lmstudio` bootstrap id，因为 `--oss` 本地选择路径仍依赖这两个 provider id。
+  - DeepSeek URL 只作为测试里的“用户配置示例字符串”存在，不再是运行时默认。
+- 验证：
+  - `just fmt` 通过。
+  - `just test -p codex-model-provider-info` 通过 23 个测试。
+  - `just test -p codex-core load_config_allows_configured_provider_to_override_bootstrap_provider` 通过 1 个测试。
+- 结果：
+  - 符合“国产模型很多、能力和上下文窗口由用户配置声明，Astral 不维护内置厂商预设”的方向。
+  - 后续还要继续审计模型 catalog / model picker 的 OpenAI preset 文案和默认模型列表，避免 UI 继续暗示只有
+    GPT/Claude 固定 catalog。
+
 ## 剩余高优先级工作
 
 1. 审计并清理剩余 OpenAI/ChatGPT auth/config 面

@@ -190,14 +190,13 @@ fn test_create_astral_provider_defaults_to_chat_completions() {
     let expected_base_url = std::env::var(ASTRAL_BASE_URL_ENV_VAR)
         .ok()
         .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| DEFAULT_ASTRAL_BASE_URL.to_string());
+        .filter(|value| !value.is_empty());
 
     assert_eq!(
         ModelProviderInfo::create_astral_provider(),
         ModelProviderInfo {
             name: "Astral".into(),
-            base_url: Some(expected_base_url),
+            base_url: expected_base_url,
             env_key: Some(ASTRAL_API_KEY_ENV_VAR.to_string()),
             env_key_instructions: Some(format!(
                 "Set {ASTRAL_API_KEY_ENV_VAR} for the active Astral model provider."
@@ -237,27 +236,31 @@ supports_websockets = true
 }
 
 #[test]
-fn test_custom_provider_without_base_url_uses_astral_base_url() {
-    let api_provider = ModelProviderInfo {
+fn test_custom_provider_without_base_url_returns_configuration_error() {
+    let err = ModelProviderInfo {
         name: "Custom".to_string(),
         base_url: None,
         ..ModelProviderInfo::default()
     }
     .to_api_provider(/*auth_mode*/ None)
-    .expect("custom provider should build API provider");
+    .expect_err("custom provider without base_url should fail");
 
-    assert_eq!(api_provider.base_url, DEFAULT_ASTRAL_BASE_URL);
+    assert!(
+        err.to_string().contains("has no base_url"),
+        "unexpected error: {err}"
+    );
 }
 
 #[test]
 fn test_auth_mode_does_not_route_provider_to_chatgpt_codex_backend() {
-    let api_provider = ModelProviderInfo::create_openai_provider(/*base_url*/ None)
-        .to_api_provider(Some(
-            codex_app_server_protocol::AuthMode::PersonalAccessToken,
-        ))
-        .expect("provider should build API provider");
+    let api_provider =
+        ModelProviderInfo::create_openai_provider(Some("https://models.example/v1".to_string()))
+            .to_api_provider(Some(
+                codex_app_server_protocol::AuthMode::PersonalAccessToken,
+            ))
+            .expect("provider should build API provider");
 
-    assert_eq!(api_provider.base_url, DEFAULT_ASTRAL_BASE_URL);
+    assert_eq!(api_provider.base_url, "https://models.example/v1");
 }
 
 #[test]
@@ -433,75 +436,22 @@ fn test_merge_configured_model_providers_adds_custom_provider() {
 }
 
 #[test]
-fn test_merge_configured_model_providers_applies_amazon_bedrock_profile_override() {
-    let configured_model_providers = std::collections::HashMap::from([(
-        AMAZON_BEDROCK_PROVIDER_ID.to_string(),
-        ModelProviderInfo {
-            aws: Some(ModelProviderAwsAuthInfo {
-                profile: Some("codex-bedrock".to_string()),
-                region: Some("us-west-2".to_string()),
-            }),
-            ..ModelProviderInfo::default()
-        },
-    )]);
+fn test_merge_configured_model_providers_overrides_bootstrap_provider() {
+    let custom_astral = ModelProviderInfo {
+        name: "Custom Astral".to_string(),
+        base_url: Some("https://models.example/v1".to_string()),
+        wire_api: WireApi::AnthropicMessages,
+        ..ModelProviderInfo::default()
+    };
+    let configured_model_providers =
+        std::collections::HashMap::from([(ASTRAL_PROVIDER_ID.to_string(), custom_astral.clone())]);
 
     let mut expected = built_in_model_providers();
-    expected
-        .get_mut(AMAZON_BEDROCK_PROVIDER_ID)
-        .expect("Amazon Bedrock provider should be built in")
-        .aws = Some(ModelProviderAwsAuthInfo {
-        profile: Some("codex-bedrock".to_string()),
-        region: Some("us-west-2".to_string()),
-    });
+    expected.insert(ASTRAL_PROVIDER_ID.to_string(), custom_astral);
 
     assert_eq!(
         merge_configured_model_providers(built_in_model_providers(), configured_model_providers),
         Ok(expected)
-    );
-}
-
-#[test]
-fn test_merge_configured_model_providers_rejects_amazon_bedrock_non_default_fields() {
-    let configured_model_providers = std::collections::HashMap::from([(
-        AMAZON_BEDROCK_PROVIDER_ID.to_string(),
-        ModelProviderInfo {
-            name: "Custom Bedrock".to_string(),
-            aws: Some(ModelProviderAwsAuthInfo {
-                profile: Some("codex-bedrock".to_string()),
-                region: None,
-            }),
-            ..ModelProviderInfo::default()
-        },
-    )]);
-
-    assert_eq!(
-        merge_configured_model_providers(
-            built_in_model_providers(),
-            configured_model_providers,
-        ),
-        Err(
-            "model_providers.amazon-bedrock only supports changing `aws.profile` and `aws.region`; other non-default provider fields are not supported"
-                .to_string()
-        )
-    );
-}
-
-#[test]
-fn test_merge_configured_model_providers_allows_amazon_bedrock_default_fields() {
-    let configured_model_providers = std::collections::HashMap::from([(
-        AMAZON_BEDROCK_PROVIDER_ID.to_string(),
-        ModelProviderInfo {
-            aws: Some(ModelProviderAwsAuthInfo {
-                profile: None,
-                region: None,
-            }),
-            ..ModelProviderInfo::default()
-        },
-    )]);
-
-    assert_eq!(
-        merge_configured_model_providers(built_in_model_providers(), configured_model_providers),
-        Ok(built_in_model_providers())
     );
 }
 

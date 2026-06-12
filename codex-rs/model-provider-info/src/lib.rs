@@ -1,9 +1,9 @@
 //! Registry of model providers supported by Astral.
 //!
 //! Providers can be defined in two places:
-//!   1. Built-in defaults compiled into the binary so Astral works out-of-the-box.
+//!   1. Minimal bootstrap providers compiled into the binary.
 //!   2. User-defined entries inside `~/.astral-code/config.toml` under the `model_providers`
-//!      key. These override or extend the defaults at runtime.
+//!      key. These override or extend the bootstrap entries at runtime.
 
 use codex_api::Provider as ApiProvider;
 use codex_api::RetryConfig as ApiRetryConfig;
@@ -40,7 +40,6 @@ pub const ASTRAL_API_KEY_ENV_VAR: &str = "ASTRAL_API_KEY";
 pub const ASTRAL_BASE_URL_ENV_VAR: &str = "ASTRAL_BASE_URL";
 const ASTRAL_OSS_BASE_URL_ENV_VAR: &str = "ASTRAL_OSS_BASE_URL";
 const ASTRAL_OSS_PORT_ENV_VAR: &str = "ASTRAL_OSS_PORT";
-const DEFAULT_ASTRAL_BASE_URL: &str = "https://api.deepseek.com/v1";
 const ANTHROPIC_PROVIDER_NAME: &str = "Anthropic";
 pub const ANTHROPIC_PROVIDER_ID: &str = "anthropic";
 pub const ANTHROPIC_API_KEY_ENV_VAR: &str = "ANTHROPIC_API_KEY";
@@ -271,10 +270,12 @@ impl ModelProviderInfo {
         &self,
         _auth_mode: Option<codex_app_server_protocol::AuthMode>,
     ) -> CodexResult<ApiProvider> {
-        let base_url = self
-            .base_url
-            .clone()
-            .unwrap_or_else(|| DEFAULT_ASTRAL_BASE_URL.to_string());
+        let base_url = self.base_url.clone().ok_or_else(|| {
+            CodexErr::InvalidRequest(format!(
+                "model provider `{}` has no base_url; set `{ASTRAL_BASE_URL_ENV_VAR}` or configure `model_providers.<id>.base_url`",
+                self.name
+            ))
+        })?;
 
         let headers = self.build_header_map()?;
         let retry = ApiRetryConfig {
@@ -348,12 +349,11 @@ impl ModelProviderInfo {
         let base_url = std::env::var(ASTRAL_BASE_URL_ENV_VAR)
             .ok()
             .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| DEFAULT_ASTRAL_BASE_URL.to_string());
+            .filter(|value| !value.is_empty());
 
         ModelProviderInfo {
             name: ASTRAL_PROVIDER_NAME.into(),
-            base_url: Some(base_url),
+            base_url,
             env_key: Some(ASTRAL_API_KEY_ENV_VAR.to_string()),
             env_key_instructions: Some(format!(
                 "Set {ASTRAL_API_KEY_ENV_VAR} for the active Astral model provider."
@@ -416,7 +416,7 @@ impl ModelProviderInfo {
             base_url: Some(ANTHROPIC_DEFAULT_BASE_URL.into()),
             env_key: None,
             env_key_instructions: Some(format!(
-                "Set {ANTHROPIC_API_KEY_ENV_VAR} for the built-in Anthropic model provider."
+                "Set {ANTHROPIC_API_KEY_ENV_VAR} for the Anthropic model provider."
             )),
             experimental_bearer_token: None,
             auth: None,
@@ -530,39 +530,17 @@ pub fn built_in_model_providers() -> HashMap<String, ModelProviderInfo> {
     .collect()
 }
 
-/// Merge configured providers into the built-in provider catalog.
+/// Merge configured providers into the bootstrap provider catalog.
 ///
-/// Configured providers extend the built-in set. Built-in providers are not
-/// generally overridable, but the built-in Amazon Bedrock provider allows the
-/// user to set `aws.profile` and `aws.region`.
+/// Configured providers extend or replace the bootstrap set. Astral does not
+/// treat compiled-in provider entries as authoritative presets; users can
+/// define their own provider shapes under the same ids in config.toml.
 pub fn merge_configured_model_providers(
     mut model_providers: HashMap<String, ModelProviderInfo>,
     configured_model_providers: HashMap<String, ModelProviderInfo>,
 ) -> Result<HashMap<String, ModelProviderInfo>, String> {
-    for (key, mut provider) in configured_model_providers {
-        if key == AMAZON_BEDROCK_PROVIDER_ID {
-            let aws_override = provider.aws.take();
-            if provider != ModelProviderInfo::default() {
-                return Err(format!(
-                    "model_providers.{AMAZON_BEDROCK_PROVIDER_ID} only supports changing \
-`aws.profile` and `aws.region`; other non-default provider fields are not supported"
-                ));
-            }
-
-            if let Some(aws_override) = aws_override
-                && let Some(built_in_provider) = model_providers.get_mut(AMAZON_BEDROCK_PROVIDER_ID)
-                && let Some(built_in_aws) = built_in_provider.aws.as_mut()
-            {
-                if let Some(profile) = aws_override.profile {
-                    built_in_aws.profile = Some(profile);
-                }
-                if let Some(region) = aws_override.region {
-                    built_in_aws.region = Some(region);
-                }
-            }
-        } else {
-            model_providers.entry(key).or_insert(provider);
-        }
+    for (key, provider) in configured_model_providers {
+        model_providers.insert(key, provider);
     }
 
     Ok(model_providers)
