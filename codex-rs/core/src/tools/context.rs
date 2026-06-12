@@ -372,7 +372,7 @@ impl ToolOutput for ExecCommandToolOutput {
             #[serde(skip_serializing_if = "Option::is_none")]
             exit_code: Option<i32>,
             #[serde(skip_serializing_if = "Option::is_none")]
-            session_id: Option<i32>,
+            task_id: Option<i32>,
             #[serde(skip_serializing_if = "Option::is_none")]
             original_token_count: Option<usize>,
             output: String,
@@ -382,7 +382,7 @@ impl ToolOutput for ExecCommandToolOutput {
             chunk_id: (!self.chunk_id.is_empty()).then(|| self.chunk_id.clone()),
             wall_time_seconds: self.wall_time.as_secs_f64(),
             exit_code: self.exit_code,
-            session_id: self.process_id,
+            task_id: self.process_id,
             original_token_count: self.original_token_count,
             output: match self.max_output_tokens {
                 Some(max_tokens) => self.truncated_output(max_tokens),

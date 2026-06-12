@@ -461,3 +461,31 @@ fn exec_command_tool_output_formats_truncated_response() {
         other => panic!("expected FunctionCallOutput, got {other:?}"),
     }
 }
+
+#[test]
+fn exec_command_code_mode_result_uses_task_id_for_running_tasks() {
+    let output = ExecCommandToolOutput {
+        event_call_id: "exec-call-42".to_string(),
+        chunk_id: "chunk-42".to_string(),
+        wall_time: std::time::Duration::from_millis(250),
+        raw_output: b"server started\n".to_vec(),
+        truncation_policy: TruncationPolicy::Tokens(10_000),
+        max_output_tokens: None,
+        process_id: Some(42),
+        exit_code: None,
+        original_token_count: None,
+        hook_command: Some("npm run dev".to_string()),
+    };
+
+    assert_eq!(
+        output.code_mode_result(&ToolPayload::Function {
+            arguments: "{}".to_string(),
+        }),
+        json!({
+            "chunk_id": "chunk-42",
+            "wall_time_seconds": 0.25,
+            "task_id": 42,
+            "output": "server started\n",
+        })
+    );
+}

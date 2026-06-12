@@ -4473,3 +4473,43 @@ CARGO_INCREMENTAL=0 just test -p codex-core task_io_errors_use_astral_tool_names
 
 - 本轮测试后磁盘剩余约 10Gi。
 - `codex-rs/target/debug/incremental` 为 0B，未清理 `debug/deps`，避免明显拖慢后续开发。
+
+## 最新补充 65：code-mode Bash 结果也改用 `task_id`
+
+继续沿同一条“终端 agentic 轨迹形状”主线收口。上一轮确认普通模型 tool_result 已经显示
+`Task running with task_id ...`，但 `ExecCommandToolOutput::code_mode_result(...)` 里仍把运行中的
+UnifiedExec id 命名为 `session_id`。
+
+这个结果不会改变底层 exec manager；它是 code-mode / nested tool runtime 返回给调用方的 JSON。对于 Astral，
+模型写代码调用 nested Bash 后，也应该拿到 `task_id`，再继续调用 `ReadTaskOutput`、`SendTaskInput`
+或 `StopBackgroundTask`，而不是被旧 Codex 的 `session_id` 名称带偏。
+
+改动：
+
+- `codex-rs/core/src/tools/context.rs`
+  - `ExecCommandToolOutput::code_mode_result(...)` 的运行中任务字段从 `session_id` 改为 `task_id`。
+- `codex-rs/core/src/tools/context_tests.rs`
+  - 新增 `exec_command_code_mode_result_uses_task_id_for_running_tasks`。
+
+验证命令：
+
+```bash
+just fmt
+CARGO_INCREMENTAL=0 just test -p codex-core exec_command_code_mode_result_uses_task_id_for_running_tasks
+```
+
+结果：
+
+- `just fmt` 通过。
+- 新增 1 个 `codex-core` context 测试通过。
+- 1 test run, 1 passed, 2649 skipped。
+
+意义：
+
+- 普通工具输出、后台任务错误、code-mode nested tool JSON 三条路径都统一到 `task_id`。
+- 这仍然只是模型/运行时边界命名收口，不触碰 Codex 的 UnifiedExec、PTY、exec-server、sandbox 或 approval。
+
+磁盘：
+
+- 本轮后磁盘剩余约 11Gi。
+- `codex-rs/target/debug/incremental` 为 0B，未清理 `debug/deps`。
