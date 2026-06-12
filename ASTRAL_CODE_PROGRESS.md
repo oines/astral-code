@@ -3684,3 +3684,85 @@ blocker；真正 blocker 是运行控制面、provider/tool 真实闭环和端�
    - 清理后约 17Gi 可用。
 
 当前结论：Claude-ish Bash/background task 工具链已经从“schema 看起来对”推进到“真实模型能跑通长任务、读取输出并停止任务”。下一步应进入 `/anthropic` 真实/模拟 smoke、compact/Plan/Goal 快速验收和最终端到端收口。
+
+## 最新补充 48：DeepSeek `/anthropic` / Messages API smoke 通过
+
+继续完成 provider-neutral 真实 smoke：
+
+1. 使用自定义临时 provider：
+   - provider id：`deepseek-anthropic`
+   - `base_url = "https://api.deepseek.com/anthropic/v1"`
+   - `env_key = "ASTRAL_API_KEY"`
+   - `wire_api = "anthropic_messages"`
+   - 模型：`deepseek-v4-flash`
+   - 临时 `ASTRAL_HOME` + `--ephemeral` + `--ignore-user-config`
+
+2. 结果：
+   - `astral exec` 成功走 Anthropic Messages adapter。
+   - 模型调用 `Bash` 执行 `printf anthropic-smoke-ok`。
+   - UnifiedExec 返回 tool result。
+   - 模型最终回答 `anthropic-smoke-ok`。
+   - usage 正常返回，且 cached input 很高。
+
+3. 观察到的小问题：
+   - DeepSeek Anthropic-compatible base 下 `/models` 返回 404，导致模型列表刷新打印 error。
+   - 会话继续 fallback 到 unknown model metadata，不影响执行。
+   - 后续 polish 可以让 provider 声明“禁用 /models refresh”或把 404 降级为非致命 warning，但这不是当前核心 blocker。
+
+当前结论：OpenAI-compatible `/v1/chat/completions` 与 Anthropic-compatible `/v1/messages` 两条真实模型路径均已跑通最小 CLI + Bash tool 闭环。
+
+## 最新补充 49：compact 快速验收暴露测试基座迁移问题
+
+对 compact/宿主模式做了一次 focused 测试：
+
+```bash
+just test -p codex-core -E 'test(compact) or test(model_visible_core_tools_convert_to_provider_neutral_astral_names)'
+```
+
+结果：
+
+- 76 tests run
+- 46 passed
+- 2 flaky 后通过
+- 30 failed
+
+通过的部分说明：
+
+- compact 纯函数和历史重建类测试通过，包括：
+  - `content_items_to_text_*`
+  - `build_token_limited_compacted_history_*`
+  - `process_compacted_history_*`
+  - `reconstruct_history_matches_live_compactions`
+  - `model_visible_core_tools_convert_to_provider_neutral_astral_names`
+
+失败模式：
+
+- 失败集中在 integration suite：
+  - `suite::compact::*`
+  - `suite::compact_resume_fork::*`
+  - 部分 `suite::pending_input::*`
+  - `suite::window_headers::*`
+- 错误基本都是 `timeout waiting for event`。
+
+初步判断：
+
+- 这些测试大量使用 `core_test_support::responses::*` 和 Responses SSE mock。
+- `TestCodexBuilder` / compact suite 里仍有 `responses_mock_model_provider(...)`，测试 fixture 仍按 `/responses`
+  形状和事件流写。
+- Astral 运行控制面已经默认转到 provider-neutral，真实 smoke 已经验证 `/v1/chat/completions` 和 `/v1/messages`
+  都能通。
+- 因此这批失败更像“旧 Responses compact integration fixture 没迁移到 Astral provider-neutral 测试形状”，不应立即误判为
+  local compact 逻辑坏掉。
+
+后续处理建议：
+
+1. 不要继续在这个点死循环。
+2. 单独开一个 coherent slice 迁移 compact integration tests：
+   - 新增 provider-neutral compact mock helpers，覆盖 chat-completions 和/或 Anthropic Messages stream。
+   - 保留少量 Responses legacy tests，只验证 legacy adapter。
+   - 把 compact request-shape snapshot 从 ResponsesRequest 改成 AgentRequest/adapter body snapshot。
+3. 如果要做真实 runtime compact smoke，使用临时 `ASTRAL_HOME` 和小上下文窗口配置触发 local compact，而不是依赖旧
+   `/responses` mock。
+
+当前结论：local compact 逻辑继承路径仍然存在，纯函数/历史重建验收通过；真正剩余 blocker 是 integration test
+fixture/provider-neutral 迁移和真实 compact smoke，而不是重新设计 compact。
