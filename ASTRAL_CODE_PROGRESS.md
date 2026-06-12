@@ -4080,3 +4080,51 @@ CARGO_INCREMENTAL=0 just test -p codex-core -E 'test(model_change_from_image_to_
 
 - 当前磁盘剩余约 13Gi。
 - `codex-rs/target` 约 141G，是当前最大开发缓存；暂不清理，避免刚暖起来的 Rust 编译缓存失效。
+
+## 最新补充 57：auto-review / Guardian 穿过 chat-completions + Bash 提权审批
+
+本轮没有继续扫 OpenAI 字符串残留，而是收口一个更接近最终可用的硬闭环：Astral 的自动审批 reviewer
+是否真的能在 OpenAI-compatible `/v1/chat/completions` provider 下工作，并且仍然走我们新的 `Bash` 工具面。
+
+新增测试：
+
+- `auto_review_uses_current_chat_completions_model_for_bash_approval`
+
+覆盖路径：
+
+1. 配置 provider：
+   - `wire_api = ChatCompletions`
+   - mock base URL 为 `/v1/chat/completions`
+   - auth 使用普通 API key 形态
+   - model catalog 由测试显式注入，模拟用户声明模型能力
+2. 父 agent 通过模型侧 `Bash` schema 发起命令：
+   - `command = "printf chat-approved > guardian-chat-completions.txt"`
+   - `sandbox_permissions = "require_escalated"`
+   - `justification = "Exercise Astral auto-review through chat completions."`
+3. approval 不弹给用户，而是被 `approvals_reviewer = auto_review` + `GuardianApproval` 接入本地 reviewer。
+4. Guardian reviewer 也走同一个 chat-completions provider，并返回 allow。
+5. 命令实际执行成功，工作区 marker 文件内容为 `chat-approved`。
+6. 断言三次 `/chat/completions` 请求模型一致：
+   - 父 agent tool call
+   - Guardian reviewer
+   - 父 agent follow-up
+7. 断言 reviewer 请求体里包含 Guardian prompt 和被审查的 Bash approval reason。
+
+验证命令：
+
+```bash
+CARGO_INCREMENTAL=0 just test -p codex-core auto_review_uses_current_chat_completions_model_for_bash_approval
+```
+
+结果：
+
+- 1 test run
+- 1 passed
+- 2644 skipped
+
+意义：
+
+- `auto_review` 不再只是旧 Responses fixture 的理论继承。
+- `Bash` 提权审批、Guardian reviewer、chat-completions provider 三者已经有真实集成证据。
+- reviewer 使用当前模型，而不是 OpenAI hosted Guardian / catalog override / Responses-only 路径。
+- 这块离最终目标中的“将 Guardian/auto-review Astral 化为可选当前模型 approval reviewer”又前进了一格。
