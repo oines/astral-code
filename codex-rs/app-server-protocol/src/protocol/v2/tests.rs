@@ -3649,6 +3649,7 @@ fn turn_start_params_preserve_explicit_null_service_tier() {
         approvals_reviewer: None,
         sandbox_policy: None,
         permissions: None,
+        model_provider: None,
         model: None,
         service_tier: None,
         effort: None,

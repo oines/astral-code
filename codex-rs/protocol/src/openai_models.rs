@@ -195,6 +195,12 @@ pub struct ModelServiceTier {
 /// Metadata describing a Codex-supported model.
 #[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema, PartialEq)]
 pub struct ModelPreset {
+    /// Provider id that owns this catalog entry when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_provider: Option<String>,
+    /// Provider display name that owns this catalog entry when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_provider_name: Option<String>,
     /// Stable identifier for the preset.
     pub id: String,
     /// Model slug (e.g., "gpt-5").
@@ -561,6 +567,8 @@ impl From<ModelInfo> for ModelPreset {
     fn from(info: ModelInfo) -> Self {
         let supports_personality = info.supports_personality();
         ModelPreset {
+            model_provider: None,
+            model_provider_name: None,
             id: info.slug.clone(),
             model: info.slug.clone(),
             display_name: info.display_name,

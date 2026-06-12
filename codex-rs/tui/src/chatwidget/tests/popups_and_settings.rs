@@ -2328,6 +2328,8 @@ async fn model_picker_hides_show_in_picker_false_models_from_cache() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("test-visible-model")).await;
     chat.thread_id = Some(ThreadId::new());
     let preset = |slug: &str, show_in_picker: bool| ModelPreset {
+        model_provider: None,
+        model_provider_name: None,
         id: slug.to_string(),
         model: slug.to_string(),
         display_name: slug.to_string(),
@@ -2490,8 +2492,8 @@ async fn assert_reasoning_shortcuts_update_effort(
                     event,
                     AppEvent::UpdateModel {
                         model,
-                        model_provider: None,
-                    } if model == "gpt-5.4"
+                        model_provider: Some(model_provider),
+                    } if model == "gpt-5.4" && model_provider == "test-provider"
                 )),
                 "expected model update event for {key_event:?}; events: {events:?}"
             );
@@ -2612,6 +2614,8 @@ async fn single_reasoning_option_skips_selection() {
         description: "Greater reasoning depth for complex or ambiguous problems".to_string(),
     }];
     let preset = ModelPreset {
+        model_provider: None,
+        model_provider_name: None,
         id: "model-with-single-reasoning".to_string(),
         model: "model-with-single-reasoning".to_string(),
         display_name: "model-with-single-reasoning".to_string(),
@@ -2647,6 +2651,60 @@ async fn single_reasoning_option_skips_selection() {
             .iter()
             .any(|ev| matches!(ev, AppEvent::UpdateReasoningEffort(Some(effort)) if *effort == ReasoningEffortConfig::High)),
         "expected reasoning effort to be applied automatically; events: {events:?}"
+    );
+}
+
+#[tokio::test]
+async fn reasoning_selection_preserves_model_provider() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+
+    let preset = ModelPreset {
+        model_provider: Some("deepseek".to_string()),
+        model_provider_name: Some("DeepSeek".to_string()),
+        id: "deepseek-v4-pro".to_string(),
+        model: "deepseek-v4-pro".to_string(),
+        display_name: "deepseek-v4-pro".to_string(),
+        description: String::new(),
+        default_reasoning_effort: ReasoningEffortConfig::High,
+        supported_reasoning_efforts: vec![ReasoningEffortPreset {
+            effort: ReasoningEffortConfig::High,
+            description: "high".to_string(),
+        }],
+        supports_personality: false,
+        additional_speed_tiers: Vec::new(),
+        service_tiers: Vec::new(),
+        default_service_tier: None,
+        is_default: false,
+        upgrade: None,
+        show_in_picker: true,
+        availability_nux: None,
+        supported_in_api: true,
+        input_modalities: default_input_modalities(),
+    };
+
+    chat.open_reasoning_popup(preset);
+
+    let events = std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>();
+    assert!(
+        events.iter().any(|event| matches!(
+            event,
+            AppEvent::UpdateModel {
+                model,
+                model_provider: Some(model_provider),
+            } if model == "deepseek-v4-pro" && model_provider == "deepseek"
+        )),
+        "expected provider-aware model update event: {events:?}"
+    );
+    assert!(
+        events.iter().any(|event| matches!(
+            event,
+            AppEvent::PersistModelSelection {
+                model,
+                model_provider: Some(model_provider),
+                effort: Some(ReasoningEffortConfig::High),
+            } if model == "deepseek-v4-pro" && model_provider == "deepseek"
+        )),
+        "expected provider-aware model persistence event: {events:?}"
     );
 }
 

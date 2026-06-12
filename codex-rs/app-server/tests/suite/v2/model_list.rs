@@ -32,6 +32,8 @@ const INVALID_REQUEST_ERROR_CODE: i64 = -32600;
 
 fn model_from_preset(preset: &ModelPreset) -> Model {
     Model {
+        model_provider: "astral".to_string(),
+        model_provider_name: "Astral".to_string(),
         id: preset.id.clone(),
         model: preset.model.clone(),
         upgrade: preset.upgrade.as_ref().map(|upgrade| upgrade.id.clone()),

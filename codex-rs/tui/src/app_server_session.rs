@@ -1200,6 +1200,8 @@ fn model_preset_from_api_model(model: ApiModel) -> ModelPreset {
     });
 
     ModelPreset {
+        model_provider: Some(model.model_provider),
+        model_provider_name: Some(model.model_provider_name),
         id: model.id,
         model: model.model,
         display_name: model.display_name,

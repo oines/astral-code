@@ -79,6 +79,12 @@
         "model": {
           "type": "string"
         },
+        "modelProvider": {
+          "type": "string"
+        },
+        "modelProviderName": {
+          "type": "string"
+        },
         "serviceTiers": {
           "default": [],
           "items": {
@@ -121,6 +127,8 @@
         "id",
         "isDefault",
         "model",
+        "modelProvider",
+        "modelProviderName",
         "supportedReasoningEfforts"
       ],
       "type": "object"

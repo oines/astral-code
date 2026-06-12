@@ -8020,6 +8020,12 @@
         "model": {
           "type": "string"
         },
+        "modelProvider": {
+          "type": "string"
+        },
+        "modelProviderName": {
+          "type": "string"
+        },
         "serviceTiers": {
           "default": [],
           "items": {
@@ -8062,6 +8068,8 @@
         "id",
         "isDefault",
         "model",
+        "modelProvider",
+        "modelProviderName",
         "supportedReasoningEfforts"
       ],
       "type": "object"
@@ -16412,6 +16420,13 @@
         },
         "model": {
           "description": "Override the model for this turn and subsequent turns.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "modelProvider": {
+          "description": "Override the model provider for this turn and subsequent turns.",
           "type": [
             "string",
             "null"

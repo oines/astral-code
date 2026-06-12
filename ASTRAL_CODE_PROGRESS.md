@@ -4162,3 +4162,58 @@ CARGO_INCREMENTAL=0 just test -p codex-core model_visible_core_tools_convert_to_
 - 模型侧看到的是 Astral/Claude-ish `RequestPermissions`。
 - Codex 原有 approval/sandbox/request-permissions 后端仍被继承，并通过 hidden dispatch handler 接住。
 - 这符合“新 schema、新 tool flavor；不绕过 Codex runtime primitives”的原则。
+
+## 最新补充 59：`/model` provider-aware 数据链路第一阶段
+
+本轮从全局目标里挑了 `/model` 热切换这条主线推进，没有继续卡在 CI 或 OpenAI 字符串清理。
+
+已完成：
+
+- `ModelPreset` 新增可选 provider 元数据：
+  - `model_provider`
+  - `model_provider_name`
+- app-server v2 `Model` 响应新增 provider 字段：
+  - `modelProvider`
+  - `modelProviderName`
+- app-server `model/list` 默认仍沿用当前 provider 的 `ModelsManager`，但会把当前
+  `model_provider_id` 和 provider display name 写入每个模型响应。
+- TUI bootstrap 会把 app-server 返回的 provider 元数据转回 `ModelPreset`。
+- TUI `/model` / reasoning popup 选中模型时，不再硬编码 `model_provider = None`：
+  - `UpdateModel`
+  - `PersistModelSelection`
+  - `OpenPlanReasoningScopePrompt`
+  都会保留 catalog item 上的 provider。
+- reasoning 快捷键只改 effort 时显式保留当前 provider，避免状态语义退回模糊。
+- `ModelPreset` 当前模型判断开始同时考虑 provider，避免不同 provider 下同名模型被误标为当前模型。
+
+新增/更新测试：
+
+- 新增 `reasoning_selection_preserves_model_provider`
+  - 构造 `deepseek/deepseek-v4-pro` catalog item。
+  - 断言 TUI 选择后发出的 `UpdateModel` / `PersistModelSelection` 都携带 `model_provider = "deepseek"`。
+- 更新 app-server `model/list` 预期模型响应，覆盖 provider 字段。
+- 更新 protocol/test fixture 中缺失的 `model_provider` 字段。
+- 重新生成 app-server schema / TypeScript fixtures。
+
+验证命令：
+
+```bash
+CARGO_INCREMENTAL=0 just test -p codex-tui reasoning_selection_preserves_model_provider
+CARGO_INCREMENTAL=0 just test -p codex-app-server list_models_returns_all_models_with_large_limit
+just write-app-server-schema
+CARGO_INCREMENTAL=0 just test -p codex-app-server-protocol
+```
+
+结果：
+
+- TUI targeted test：1 passed
+- app-server targeted test：1 passed
+- app-server-protocol：222 passed
+
+意义：
+
+- `/model` 的选择事件不再只知道模型名，而是能携带 provider。
+- 这为“不关 TUI、直接从 DeepSeek 切到小米/其他 provider”补上了必要数据骨架。
+- 还没有完成完整的 provider 分组 picker；下一步要么扩展 `model/list` 支持按 provider / all providers 查询，
+  要么在 TUI 里增加 provider 分组和按需刷新。这个阶段没有触碰 exec-server、PTY、sandbox、Plan/Goal、MCP 等
+  Codex 骨架边界。

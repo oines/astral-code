@@ -81,6 +81,8 @@ pub struct ModelServiceTier {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct Model {
+    pub model_provider: String,
+    pub model_provider_name: String,
     pub id: String,
     pub model: String,
     pub upgrade: Option<String>,

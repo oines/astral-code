@@ -75,10 +75,9 @@ impl ChatWidget {
             .filter(|preset| preset.show_in_picker)
             .collect();
 
-        let current_model = self.current_model();
         let current_label = presets
             .iter()
-            .find(|preset| preset.model.as_str() == current_model)
+            .find(|preset| self.preset_matches_current_model(preset))
             .map(|preset| preset.model.to_string())
             .unwrap_or_else(|| self.model_display_name().to_string());
 
@@ -98,19 +97,21 @@ impl ChatWidget {
                 let description =
                     (!preset.description.is_empty()).then_some(preset.description.clone());
                 let model = preset.model.clone();
+                let model_provider = preset.model_provider.clone();
                 let should_prompt_plan_mode_scope = self.should_prompt_plan_mode_reasoning_scope(
                     model.as_str(),
                     Some(preset.default_reasoning_effort.clone()),
                 );
                 let actions = Self::model_selection_actions(
                     model.clone(),
+                    model_provider,
                     Some(preset.default_reasoning_effort.clone()),
                     should_prompt_plan_mode_scope,
                 );
                 SelectionItem {
                     name: model.clone(),
                     description,
-                    is_current: model.as_str() == current_model,
+                    is_current: self.preset_matches_current_model(&preset),
                     is_default: preset.is_default,
                     actions,
                     dismiss_on_select: true,
@@ -167,6 +168,14 @@ impl ChatWidget {
         }
     }
 
+    fn preset_matches_current_model(&self, preset: &ModelPreset) -> bool {
+        let provider_matches = preset
+            .model_provider
+            .as_deref()
+            .map_or(true, |provider| provider == self.config.model_provider_id);
+        preset.model.as_str() == self.current_model() && provider_matches
+    }
+
     pub(crate) fn open_all_models_popup(&mut self, presets: Vec<ModelPreset>) {
         if presets.is_empty() {
             self.add_info_message(
@@ -180,7 +189,7 @@ impl ChatWidget {
         for preset in presets.into_iter() {
             let description =
                 (!preset.description.is_empty()).then_some(preset.description.to_string());
-            let is_current = preset.model.as_str() == self.current_model();
+            let is_current = self.preset_matches_current_model(&preset);
             let single_supported_effort = preset.supported_reasoning_efforts.len() == 1;
             let preset_for_action = preset.clone();
             let actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
@@ -215,6 +224,7 @@ impl ChatWidget {
 
     fn model_selection_actions(
         model_for_action: String,
+        model_provider_for_action: Option<String>,
         effort_for_action: Option<ReasoningEffortConfig>,
         should_prompt_plan_mode_scope: bool,
     ) -> Vec<SelectionAction> {
@@ -222,7 +232,7 @@ impl ChatWidget {
             if should_prompt_plan_mode_scope {
                 tx.send(AppEvent::OpenPlanReasoningScopePrompt {
                     model: model_for_action.clone(),
-                    model_provider: None,
+                    model_provider: model_provider_for_action.clone(),
                     effort: effort_for_action.clone(),
                 });
                 return;
@@ -230,12 +240,12 @@ impl ChatWidget {
 
             tx.send(AppEvent::UpdateModel {
                 model: model_for_action.clone(),
-                model_provider: None,
+                model_provider: model_provider_for_action.clone(),
             });
             tx.send(AppEvent::UpdateReasoningEffort(effort_for_action.clone()));
             tx.send(AppEvent::PersistModelSelection {
                 model: model_for_action.clone(),
-                model_provider: None,
+                model_provider: model_provider_for_action.clone(),
                 effort: effort_for_action.clone(),
             });
         })]
@@ -363,6 +373,7 @@ impl ChatWidget {
 
     /// Open a popup to choose the reasoning effort (stage 2) for the given model.
     pub(crate) fn open_reasoning_popup(&mut self, preset: ModelPreset) {
+        let is_current_model = self.preset_matches_current_model(&preset);
         let default_effort = preset.default_reasoning_effort;
         let supported = preset.supported_reasoning_efforts;
         let in_plan_mode =
@@ -400,17 +411,22 @@ impl ChatWidget {
         if choices.len() == 1 {
             let selected_effort = choices.first().cloned();
             let selected_model = preset.model;
+            let selected_model_provider = preset.model_provider;
             if self
                 .should_prompt_plan_mode_reasoning_scope(&selected_model, selected_effort.clone())
             {
                 self.app_event_tx
                     .send(AppEvent::OpenPlanReasoningScopePrompt {
                         model: selected_model,
-                        model_provider: None,
+                        model_provider: selected_model_provider,
                         effort: selected_effort,
                     });
             } else {
-                self.apply_model_and_effort(selected_model, selected_effort);
+                self.apply_model_and_effort(
+                    selected_model,
+                    selected_model_provider,
+                    selected_effort,
+                );
             }
             return;
         }
@@ -422,7 +438,7 @@ impl ChatWidget {
             .or(Some(default_effort));
 
         let model_slug = preset.model.to_string();
-        let is_current_model = self.current_model() == preset.model.as_str();
+        let model_provider = preset.model_provider.clone();
         let highlight_choice = if is_current_model {
             if in_plan_mode {
                 self.config
@@ -466,6 +482,7 @@ impl ChatWidget {
             };
 
             let model_for_action = model_slug.clone();
+            let model_provider_for_action = model_provider.clone();
             let choice_effort = Some(effort);
             let should_prompt_plan_mode_scope = self.should_prompt_plan_mode_reasoning_scope(
                 model_slug.as_str(),
@@ -475,18 +492,18 @@ impl ChatWidget {
                 if should_prompt_plan_mode_scope {
                     tx.send(AppEvent::OpenPlanReasoningScopePrompt {
                         model: model_for_action.clone(),
-                        model_provider: None,
+                        model_provider: model_provider_for_action.clone(),
                         effort: choice_effort.clone(),
                     });
                 } else {
                     tx.send(AppEvent::UpdateModel {
                         model: model_for_action.clone(),
-                        model_provider: None,
+                        model_provider: model_provider_for_action.clone(),
                     });
                     tx.send(AppEvent::UpdateReasoningEffort(choice_effort.clone()));
                     tx.send(AppEvent::PersistModelSelection {
                         model: model_for_action.clone(),
-                        model_provider: None,
+                        model_provider: model_provider_for_action.clone(),
                         effort: choice_effort.clone(),
                     });
                 }
@@ -539,21 +556,31 @@ impl ChatWidget {
     pub(super) fn apply_model_and_effort_without_persist(
         &self,
         model: String,
+        model_provider: Option<String>,
         effort: Option<ReasoningEffortConfig>,
     ) {
         self.app_event_tx.send(AppEvent::UpdateModel {
             model,
-            model_provider: None,
+            model_provider,
         });
         self.app_event_tx
             .send(AppEvent::UpdateReasoningEffort(effort));
     }
 
-    fn apply_model_and_effort(&self, model: String, effort: Option<ReasoningEffortConfig>) {
-        self.apply_model_and_effort_without_persist(model.clone(), effort.clone());
+    fn apply_model_and_effort(
+        &self,
+        model: String,
+        model_provider: Option<String>,
+        effort: Option<ReasoningEffortConfig>,
+    ) {
+        self.apply_model_and_effort_without_persist(
+            model.clone(),
+            model_provider.clone(),
+            effort.clone(),
+        );
         self.app_event_tx.send(AppEvent::PersistModelSelection {
             model,
-            model_provider: None,
+            model_provider,
             effort,
         });
     }

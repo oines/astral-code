@@ -11,6 +11,8 @@ use codex_protocol::openai_models::ReasoningEffortPreset;
 
 pub async fn supported_models(
     thread_manager: Arc<ThreadManager>,
+    model_provider: String,
+    model_provider_name: String,
     include_hidden: bool,
 ) -> Vec<Model> {
     thread_manager
@@ -18,12 +20,22 @@ pub async fn supported_models(
         .await
         .into_iter()
         .filter(|preset| include_hidden || preset.show_in_picker)
-        .map(model_from_preset)
+        .map(|preset| model_from_preset(preset, &model_provider, &model_provider_name))
         .collect()
 }
 
-fn model_from_preset(preset: ModelPreset) -> Model {
+fn model_from_preset(
+    preset: ModelPreset,
+    model_provider: &str,
+    model_provider_name: &str,
+) -> Model {
     Model {
+        model_provider: preset
+            .model_provider
+            .unwrap_or_else(|| model_provider.to_string()),
+        model_provider_name: preset
+            .model_provider_name
+            .unwrap_or_else(|| model_provider_name.to_string()),
         id: preset.id.to_string(),
         model: preset.model.to_string(),
         upgrade: preset.upgrade.as_ref().map(|upgrade| upgrade.id.clone()),

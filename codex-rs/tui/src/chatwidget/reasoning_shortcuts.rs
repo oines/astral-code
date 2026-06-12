@@ -113,7 +113,11 @@ impl ChatWidget {
             self.app_event_tx
                 .send(AppEvent::UpdatePlanModeReasoningEffort(Some(next_effort)));
         } else {
-            self.apply_model_and_effort_without_persist(current_model, Some(next_effort));
+            self.apply_model_and_effort_without_persist(
+                current_model,
+                Some(self.config.model_provider_id.clone()),
+                Some(next_effort),
+            );
         }
 
         true
