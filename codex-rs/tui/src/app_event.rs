@@ -629,6 +629,7 @@ pub(crate) enum AppEvent {
     /// Persist the selected model and reasoning effort to the appropriate config.
     PersistModelSelection {
         model: String,
+        model_provider: Option<String>,
         effort: Option<ReasoningEffort>,
     },
 

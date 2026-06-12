@@ -3437,6 +3437,34 @@ Guardian / auto-review 从“硬禁用旧 hosted Guardian”推进到“Astral �
   - 更贴近“内置完全不做模型/provider 预设”的要求。
   - 后续 `/model` provider 分组 UI 应该基于用户配置的 provider 列表和各 provider catalog，而不是 bundled catalog。
 
+最新补充 45（2026-06-12 本轮）：`/model` 热切换的 provider+model 基础链路收口。
+
+- 完成项：
+  - `AppEvent::PersistModelSelection` 新增可选 `model_provider`，跨 provider 选择时可以同时保存 provider 和 model。
+  - TUI `UpdateModel { model_provider: Some(...) }` 现在会立即同步 App/ChatWidget 的本地 provider 状态，不再只等
+    app-server 回推 `ThreadSettingsUpdated`。
+  - config 写入 helper `build_model_selection_edits(...)` 支持写入 `model_provider`，避免用户在 TUI 中切到另一个
+    provider 后重启又回到旧 provider。
+  - Plan mode reasoning scope 的 all-modes 路径保留并传递 provider，当前 provider 内切模型继续传 `None`，旧行为不变。
+  - `astral exec` 的 `TurnStartParams` 补齐 `model_provider: None`，保持沿用当前线程 provider 的行为。
+- 没做的事：
+  - 这还不是完整的跨 provider 分组 model picker。当前 app-server `model/list` 仍主要返回当前 provider catalog；
+    provider 分组 picker 需要额外设计 catalog 获取方式，不能在 TUI 里伪造。
+  - 不改 ThreadManager、exec-server、sandbox、UnifiedExec 或工具执行后端。
+- 验证：
+  - `just fmt` 通过。
+  - `cargo check -p codex-tui -p codex-exec` 通过。
+  - `just test -p codex-tui model_selection_edits_can_persist_provider accepted_model_migration_persists_target_default_reasoning_effort`
+    通过 2 个测试。
+  - `just test -p codex-tui plan_reasoning_scope_popup_all_modes_persists_global_and_plan_override` 通过 1 个测试。
+- 磁盘：
+  - TUI 编译后磁盘可用空间降到约 15Gi。
+  - 已只清理 Astral-Code 项目内 `codex-rs/target/debug/incremental`，可用空间回到约 19Gi。
+  - 未删除 `codex-rs/target/debug/deps`，避免显著拖慢后续开发。
+- 结果：
+  - 这是一块基础设施补强，不继续深挖 UI 细节，避免在 `/model` picker 上死循环。
+  - 下一步回到主线硬块：Claude-ish tool/result shape、后台任务工具闭环、单模态图片降级、真实 DeepSeek E2E。
+
 ## 剩余高优先级工作
 
 1. 审计并清理剩余 OpenAI/ChatGPT auth/config 面

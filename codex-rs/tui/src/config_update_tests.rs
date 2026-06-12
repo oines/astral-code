@@ -24,6 +24,30 @@ fn trusted_project_edit_targets_project_trust_level() {
 }
 
 #[test]
+fn model_selection_edits_can_persist_provider() {
+    assert_eq!(
+        build_model_selection_edits("deepseek-v4-pro", Some("deepseek"), Some("high")),
+        vec![
+            ConfigEdit {
+                key_path: "model".to_string(),
+                value: serde_json::json!("deepseek-v4-pro"),
+                merge_strategy: MergeStrategy::Replace,
+            },
+            ConfigEdit {
+                key_path: "model_reasoning_effort".to_string(),
+                value: serde_json::json!("high"),
+                merge_strategy: MergeStrategy::Replace,
+            },
+            ConfigEdit {
+                key_path: "model_provider".to_string(),
+                value: serde_json::json!("deepseek"),
+                merge_strategy: MergeStrategy::Replace,
+            },
+        ]
+    );
+}
+
+#[test]
 fn format_config_error_preserves_server_validation_message() {
     let err = Err::<(), _>(color_eyre::eyre::eyre!(
         "config/batchWrite failed: Invalid configuration: features.fast_mode=true violates \

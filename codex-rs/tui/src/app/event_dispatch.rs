@@ -747,6 +747,7 @@ impl App {
                 model,
                 model_provider,
             } => {
+                self.on_update_model_provider(model_provider.as_deref());
                 self.chat_widget.set_model(&model);
                 self.sync_active_thread_model_setting(app_server, model, model_provider)
                     .await;
@@ -1290,11 +1291,16 @@ impl App {
                     let _ = (preset, mode, profile_selection);
                 }
             }
-            AppEvent::PersistModelSelection { model, effort } => {
+            AppEvent::PersistModelSelection {
+                model,
+                model_provider,
+                effort,
+            } => {
                 match crate::config_update::write_config_batch(
                     app_server.request_handle(),
                     crate::config_update::build_model_selection_edits(
                         model.as_str(),
+                        model_provider.as_deref(),
                         effort.as_ref(),
                     ),
                 )
@@ -1305,8 +1311,14 @@ impl App {
                             .as_ref()
                             .map(std::string::ToString::to_string)
                             .unwrap_or_else(|| "default".to_string());
-                        tracing::info!("Selected model: {model}, Selected effort: {effort_label}");
-                        let mut message = format!("Model changed to {model}");
+                        tracing::info!(
+                            "Selected model: {model}, Selected provider: {:?}, Selected effort: {effort_label}",
+                            model_provider
+                        );
+                        let mut message = model_provider.as_ref().map_or_else(
+                            || format!("Model changed to {model}"),
+                            |provider| format!("Model changed to {provider}/{model}"),
+                        );
                         if let Some(label) = Self::reasoning_label_for(&model, effort.as_ref()) {
                             message.push(' ');
                             message.push_str(&label);

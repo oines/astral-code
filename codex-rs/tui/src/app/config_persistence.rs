@@ -740,6 +740,23 @@ impl App {
         self.chat_widget.set_reasoning_effort(effort);
     }
 
+    pub(super) fn on_update_model_provider(&mut self, model_provider: Option<&str>) {
+        let Some(model_provider) = model_provider else {
+            return;
+        };
+        let Some(provider) = self.config.model_providers.get(model_provider).cloned() else {
+            self.chat_widget.add_error_message(format!(
+                "Model provider `{model_provider}` is not configured."
+            ));
+            return;
+        };
+
+        self.config.model_provider_id = model_provider.to_string();
+        self.config.model_provider = provider.clone();
+        self.chat_widget
+            .set_model_provider(model_provider.to_string(), provider);
+    }
+
     pub(super) fn on_update_personality(&mut self, personality: Personality) {
         self.config.personality = Some(personality);
         self.chat_widget.set_personality(personality);
