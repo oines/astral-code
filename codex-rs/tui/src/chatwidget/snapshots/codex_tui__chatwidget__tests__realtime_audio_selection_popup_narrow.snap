@@ -1,9 +1,10 @@
 ---
 source: tui/src/chatwidget/tests/popups_and_settings.rs
+assertion_line: 2287
 expression: popup
 ---
   Settings
-  Configure settings for Codex.
+  Configure settings for Astral-Code.
 
 › 1. Microphone  Current: System default
   2. Speaker     Current: System default

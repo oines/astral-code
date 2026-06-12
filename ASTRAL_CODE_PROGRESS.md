@@ -4566,3 +4566,57 @@ CARGO_INCREMENTAL=0 just test -p codex-app-server \
 
 - 本轮后磁盘剩余约 11Gi。
 - `codex-rs/target/debug/incremental` 为 0B，未清理 `debug/deps`。
+
+## 最新补充 67：TUI 用户可见品牌残留收敛
+
+本轮按“不要卡在单点，但要让可用产品少一点 Codex 味”的原则，只处理真实用户会看到的 TUI 文案残留，
+不做大范围测试 fixture 机械替换，也不触碰执行后端、sandbox、approval 判定或协议主循环。
+
+改动：
+
+- `codex-rs/tui/src/chatwidget/notifications.rs`
+  - 编辑审批通知从 `Codex wants to edit ...` 改为 `Astral-Code wants to edit ...`。
+- `codex-rs/tui/src/chatwidget/turn_runtime.rs`
+  - 空 server overload 文案从 `Codex is currently experiencing high load.` 改为
+    `Astral-Code is currently experiencing high load.`。
+- `codex-rs/tui/src/chatwidget/settings_popups.rs`
+  - personality/settings 弹窗副标题从 Codex 收敛为 Astral-Code。
+- `codex-rs/tui/src/bottom_pane/approval_overlay.rs`
+  - approval 拒绝并反馈选项从 `tell Codex what to do differently` 改为
+    `tell Astral-Code what to do differently`。
+- `codex-rs/tui/src/keymap_setup.rs`
+  - 测试用 placeholder 从 `Ask Astral...` 收敛到项目命名规则里的 `Ask Astral-Code...`。
+- 同步更新 5 个相关 TUI 快照，全部是上述品牌文案变化。
+
+验证命令：
+
+```bash
+just fmt
+CARGO_INCREMENTAL=0 just test -p codex-tui \
+  generic_exec_options_can_offer_allow_for_session \
+  additional_permissions_exec_options_hide_execpolicy_amendment \
+  network_exec_prompt_title_includes_host \
+  personality_selection_popup_snapshot \
+  realtime_audio_selection_popup_snapshot \
+  realtime_audio_selection_popup_narrow_snapshot \
+  status_widget_and_approval_modal_snapshot
+```
+
+结果：
+
+- `just fmt` 通过。
+- 第一次测试只因预期快照文案变化失败；确认 `.snap.new` 只有 5 个品牌文案差异后接受快照。
+- 重跑同一组窄测试通过。
+- 7 tests run, 7 passed, 2785 skipped。
+
+意义：
+
+- TUI 里几处高频、用户会直接看到的 Codex 称谓已收敛为 Astral-Code。
+- 这一步只是产品外显层收口，不改变 Codex 原本优秀的 app-server / exec-server / UnifiedExec / PTY /
+  sandbox / approval 骨架。
+- 继续避免在测试 fixture 中无意义地全局替换，保持 diff 原子化。
+
+磁盘：
+
+- 本轮测试前后磁盘剩余约 11Gi。
+- 没有清理 `debug/deps`，只使用已有编译产物完成窄测试。

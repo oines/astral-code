@@ -1,9 +1,10 @@
 ---
 source: tui/src/chatwidget/tests/popups_and_settings.rs
+assertion_line: 2267
 expression: popup
 ---
   Select Personality
-  Choose a communication style for Codex.
+  Choose a communication style for Astral-Code.
 
   1. Friendly             Warm, collaborative, and helpful.
 › 2. Pragmatic (current)  Concise, task-focused, and direct.
