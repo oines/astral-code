@@ -21,6 +21,7 @@ use serde::de::DeserializeOwned;
 use serde::de::Error;
 use strum_macros::Display;
 use strum_macros::EnumIter;
+use tracing::debug;
 use tracing::warn;
 use ts_rs::TS;
 
@@ -456,11 +457,19 @@ impl ModelInfo {
                 .unwrap_or_default();
             template.replace(PERSONALITY_PLACEHOLDER, personality_message.as_str())
         } else if let Some(personality) = personality {
-            warn!(
-                model = %self.slug,
-                %personality,
-                "Model personality requested but model_messages is missing, falling back to base instructions."
-            );
+            if self.used_fallback_model_metadata {
+                debug!(
+                    model = %self.slug,
+                    %personality,
+                    "Model personality requested with fallback model metadata; using base instructions."
+                );
+            } else {
+                warn!(
+                    model = %self.slug,
+                    %personality,
+                    "Model personality requested but model_messages is missing, falling back to base instructions."
+                );
+            }
             self.base_instructions.clone()
         } else {
             self.base_instructions.clone()

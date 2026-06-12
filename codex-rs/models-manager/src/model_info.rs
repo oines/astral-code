@@ -11,7 +11,7 @@ use codex_protocol::openai_models::WebSearchToolType;
 
 use crate::config::ModelsManagerConfig;
 use codex_utils_output_truncation::approx_bytes_for_tokens;
-use tracing::warn;
+use tracing::info;
 
 pub const BASE_INSTRUCTIONS: &str = include_str!("../prompt.md");
 const DEFAULT_PERSONALITY_HEADER: &str = "You are Astral, an agentic coding assistant running inside astral-code. You and the user share one workspace, and your job is to keep working until the user's task is genuinely handled.";
@@ -67,7 +67,7 @@ pub fn with_config_overrides(mut model: ModelInfo, config: &ModelsManagerConfig)
 
 /// Build a minimal fallback model descriptor for missing/unknown slugs.
 pub fn model_info_from_slug(slug: &str) -> ModelInfo {
-    warn!("Unknown model {slug} is used. This will use fallback model metadata.");
+    info!("Unknown model {slug} is used. This will use fallback model metadata.");
     ModelInfo {
         slug: slug.to_string(),
         display_name: slug.to_string(),

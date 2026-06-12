@@ -3844,3 +3844,39 @@ instructions 更准确，需要在用户配置的 model catalog / model capabili
 - `cargo run` 重建 CLI 后磁盘剩余约 16Gi。
 - `codex-rs/target/debug/incremental` 仍为 0B，没有可安全清理的增量缓存。
 - 后续应避免继续跑 core/TUI 重编级测试，直到磁盘空间更宽松或必须验收。
+
+## 最新补充 52：未知模型 fallback metadata 降噪
+
+真实 DeepSeek `/anthropic` smoke 消除了 `/models` 404 噪声后，还剩两个 provider-neutral 场景下很常见的 warning：
+
+- `Unknown model deepseek-v4-flash is used. This will use fallback model metadata.`
+- `Model personality requested but model_messages is missing, falling back to base instructions.`
+
+这不是运行错误，而是 Astral 当前“不维护内置模型预设、允许用户自行声明模型能力”的正常退化路径。继续用 WARN 级别会让国内模型用户误以为会话有问题，尤其是每轮都会重复出现。
+
+本轮改动：
+
+1. `models-manager::model_info_from_slug(...)`
+   - 未知模型 fallback metadata 从 `warn!` 降为 `info!`。
+   - 真实请求错误、认证错误、协议错误仍然通过各自错误链路上报。
+
+2. `ModelInfo::get_model_instructions(...)`
+   - 如果模型来自 fallback metadata，并且缺少 `model_messages`，personality fallback 从 `warn!` 降为 `debug!`。
+   - 如果是正式 catalog 模型缺少 personality 模板，仍然保留 `warn!`，避免隐藏 catalog 数据问题。
+
+验证：
+
+- `just fmt` 通过。
+- `just test -p codex-models-manager model_info` 通过 16 个测试。
+- `just test -p codex-protocol get_model_instructions` 通过 3 个测试。
+
+磁盘维护：
+
+- 这轮窄测触发 `codex-protocol` 共享依赖重编后，磁盘剩余约 14Gi。
+- 只清理了 Astral-Code 项目内 `codex-rs/target/debug/incremental`（约 1.4G）。
+- 清理后磁盘剩余约 15Gi；没有删除 `debug/deps`，因为它是后续开发速度的大头缓存。
+
+当前取舍：
+
+- 暂不为了确认日志消失再次跑真实 DeepSeek smoke，因为这会重建 CLI 并进一步压缩磁盘。
+- 下一轮真实端到端验收时顺带观察输出即可。
