@@ -4513,3 +4513,56 @@ CARGO_INCREMENTAL=0 just test -p codex-core exec_command_code_mode_result_uses_t
 
 - 本轮后磁盘剩余约 11Gi。
 - `codex-rs/target/debug/incremental` 为 0B，未清理 `debug/deps`。
+
+## 最新补充 66：app-server 动态工具校验去 Responses API 化
+
+本轮从当前代码状态出发，继续找“仍把旧 OpenAI Responses 当成核心真相”的边界。确认到
+`app-server` 的动态工具校验仍在用户可见错误里写 `Responses API`：
+
+- identifier 正则错误提示：`to match Responses API`
+- 长度限制错误提示：`to match Responses API`
+- reserved namespace 错误提示：`reserved Responses API namespace`
+- 测试名也把动态工具 identifier 称为 `responses-compatible`
+
+这些规则本身仍然合理：动态工具名和 namespace 需要满足跨 provider 的保守标识符约束，也要避开系统
+reserved namespace。但 Astral 的目标不是让 app-server 动态工具“匹配 Responses API”，而是让它们在
+provider-neutral 工具传输里稳定工作。
+
+改动：
+
+- `codex-rs/app-server/src/request_processors/thread_processor.rs`
+  - `RESERVED_RESPONSES_NAMESPACES` 改为 `RESERVED_ASTRAL_TOOL_NAMESPACES`。
+  - identifier 错误提示改为 `Astral dynamic tool identifier pattern ...`。
+  - 长度限制错误提示改为 `for Astral dynamic tools`。
+  - reserved namespace 错误提示改为 `reserved Astral tool namespace`。
+- `codex-rs/app-server/src/request_processors/thread_processor_tests.rs`
+  - 测试名从 `responses_*` 收敛为 `astral_*`。
+  - 断言不再期待 `Responses API`，改为期待 Astral dynamic tool / Astral tool namespace 文案。
+
+验证命令：
+
+```bash
+just fmt
+CARGO_INCREMENTAL=0 just test -p codex-app-server \
+  validate_dynamic_tools_rejects_name_not_supported_by_astral_tools \
+  validate_dynamic_tools_rejects_reserved_astral_namespace \
+  validate_dynamic_tools_accepts_astral_compatible_identifiers
+```
+
+结果：
+
+- `just fmt` 通过。
+- 3 个 `codex-app-server` 动态工具校验测试通过。
+- 3 tests run, 3 passed, 784 skipped。
+
+意义：
+
+- app-server 动态工具 API 不再把 OpenAI Responses API 描述成校验规则的根源。
+- 这一步不改变动态工具协议字段，不扩大 provider 兼容风险；只是把对外解释和测试命名收敛到
+  Astral/provider-neutral 目标。
+- Codex 的 app-server 架构仍然保留，改动只发生在边界文案和测试期望。
+
+磁盘：
+
+- 本轮后磁盘剩余约 11Gi。
+- `codex-rs/target/debug/incremental` 为 0B，未清理 `debug/deps`。

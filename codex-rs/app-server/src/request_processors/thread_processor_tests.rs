@@ -164,7 +164,7 @@ mod thread_processor_behavior_tests {
     }
 
     #[test]
-    fn validate_dynamic_tools_accepts_responses_compatible_identifiers() {
+    fn validate_dynamic_tools_accepts_astral_compatible_identifiers() {
         let tools = vec![ApiDynamicToolSpec {
             namespace: Some("Codex-App_2".to_string()),
             name: "lookup-ticket_2".to_string(),
@@ -287,7 +287,7 @@ mod thread_processor_behavior_tests {
     }
 
     #[test]
-    fn validate_dynamic_tools_rejects_name_not_supported_by_responses() {
+    fn validate_dynamic_tools_rejects_name_not_supported_by_astral_tools() {
         let tools = vec![ApiDynamicToolSpec {
             namespace: None,
             name: "lookup.ticket".to_string(),
@@ -302,13 +302,14 @@ mod thread_processor_behavior_tests {
         let err = validate_dynamic_tools(&tools).expect_err("invalid name");
         assert!(err.contains("lookup.ticket"), "unexpected error: {err}");
         assert!(
-            err.contains("Responses API") && err.contains("^[a-zA-Z0-9_-]+$"),
+            err.contains("Astral dynamic tool identifier pattern")
+                && err.contains("^[a-zA-Z0-9_-]+$"),
             "unexpected error: {err}"
         );
     }
 
     #[test]
-    fn validate_dynamic_tools_rejects_namespace_not_supported_by_responses() {
+    fn validate_dynamic_tools_rejects_namespace_not_supported_by_astral_tools() {
         let tools = vec![ApiDynamicToolSpec {
             namespace: Some("codex.app".to_string()),
             name: "lookup_ticket".to_string(),
@@ -323,13 +324,14 @@ mod thread_processor_behavior_tests {
         let err = validate_dynamic_tools(&tools).expect_err("invalid namespace");
         assert!(err.contains("codex.app"), "unexpected error: {err}");
         assert!(
-            err.contains("Responses API") && err.contains("^[a-zA-Z0-9_-]+$"),
+            err.contains("Astral dynamic tool identifier pattern")
+                && err.contains("^[a-zA-Z0-9_-]+$"),
             "unexpected error: {err}"
         );
     }
 
     #[test]
-    fn validate_dynamic_tools_rejects_name_longer_than_responses_limit() {
+    fn validate_dynamic_tools_rejects_name_longer_than_astral_tool_limit() {
         let long_name = "a".repeat(129);
         let tools = vec![ApiDynamicToolSpec {
             namespace: None,
@@ -348,7 +350,7 @@ mod thread_processor_behavior_tests {
     }
 
     #[test]
-    fn validate_dynamic_tools_rejects_namespace_longer_than_responses_limit() {
+    fn validate_dynamic_tools_rejects_namespace_longer_than_astral_tool_limit() {
         let long_namespace = "a".repeat(65);
         let tools = vec![ApiDynamicToolSpec {
             namespace: Some(long_namespace.clone()),
@@ -367,7 +369,7 @@ mod thread_processor_behavior_tests {
     }
 
     #[test]
-    fn validate_dynamic_tools_rejects_reserved_responses_namespace() {
+    fn validate_dynamic_tools_rejects_reserved_astral_namespace() {
         let tools = vec![ApiDynamicToolSpec {
             namespace: Some("functions".to_string()),
             name: "lookup_ticket".to_string(),
@@ -379,9 +381,12 @@ mod thread_processor_behavior_tests {
             }),
             defer_loading: true,
         }];
-        let err = validate_dynamic_tools(&tools).expect_err("reserved Responses namespace");
+        let err = validate_dynamic_tools(&tools).expect_err("reserved Astral namespace");
         assert!(err.contains("functions"), "unexpected error: {err}");
-        assert!(err.contains("Responses API"), "unexpected error: {err}");
+        assert!(
+            err.contains("Astral tool namespace"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

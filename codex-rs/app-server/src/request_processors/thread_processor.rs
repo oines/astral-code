@@ -195,7 +195,7 @@ fn validate_dynamic_tools(tools: &[ApiDynamicToolSpec]) -> Result<(), String> {
     const DYNAMIC_TOOL_NAME_MAX_LEN: usize = 128;
     const DYNAMIC_TOOL_NAMESPACE_MAX_LEN: usize = 64;
     const DYNAMIC_TOOL_IDENTIFIER_PATTERN: &str = "^[a-zA-Z0-9_-]+$";
-    const RESERVED_RESPONSES_NAMESPACES: &[&str] = &[
+    const RESERVED_ASTRAL_TOOL_NAMESPACES: &[&str] = &[
         "api_tool",
         "browser",
         "computer",
@@ -226,13 +226,13 @@ fn validate_dynamic_tools(tools: &[ApiDynamicToolSpec]) -> Result<(), String> {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
         {
             return Err(format!(
-                "{label} must match {DYNAMIC_TOOL_IDENTIFIER_PATTERN} to match Responses API: {}",
+                "{label} must match Astral dynamic tool identifier pattern {DYNAMIC_TOOL_IDENTIFIER_PATTERN}: {}",
                 escape_identifier_for_error(value),
             ));
         }
         if value.chars().count() > max_len {
             return Err(format!(
-                "{label} must be at most {max_len} characters to match Responses API: {}",
+                "{label} must be at most {max_len} characters for Astral dynamic tools: {}",
                 escape_identifier_for_error(value),
             ));
         }
@@ -279,9 +279,9 @@ fn validate_dynamic_tools(tools: &[ApiDynamicToolSpec]) -> Result<(), String> {
                     "dynamic tool namespace is reserved for {name}: {namespace}"
                 ));
             }
-            if RESERVED_RESPONSES_NAMESPACES.contains(&namespace) {
+            if RESERVED_ASTRAL_TOOL_NAMESPACES.contains(&namespace) {
                 return Err(format!(
-                    "dynamic tool namespace collides with a reserved Responses API namespace for {name}: {namespace}",
+                    "dynamic tool namespace collides with a reserved Astral tool namespace for {name}: {namespace}",
                 ));
             }
         }
