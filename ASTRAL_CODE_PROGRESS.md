@@ -4824,3 +4824,35 @@ CARGO_INCREMENTAL=0 just test -p codex-core empty_turn_environments_omits_enviro
 - 两个目标测试均通过：
   - `suite::tools::empty_turn_environments_omits_environment_backed_tools`
   - `suite::tools::unified_exec_spec_toggle_end_to_end`
+
+## 最新补充 72：清理 spec plan 测试里的废弃 Monitor 工具名残留
+
+本轮继续沿“不要让旧工具名误导后续 compact/恢复”的方向，清掉 `spec_plan_tests` 中仅用于负向断言的 `Monitor` 字符串。
+
+调整内容：
+
+- `codex-rs/core/src/tools/spec_plan_tests.rs`
+  - 从 provider-neutral tool flavor、standalone shell backend、environment gating 三处测试负向列表中删除 `Monitor`。
+  - 保留对当前真实边界的断言：
+    - `Bash` 是公开 shell 工具名。
+    - `ReadTaskOutput` / `SendTaskInput` / `ListBackgroundTasks` / `StopBackgroundTask` 是后台任务工具组。
+    - `exec_command` / `write_stdin` / `shell_command` 仍是内部 runtime 或 dispatch-only 名，不暴露给模型。
+
+这和整体目标的关系：
+
+- `Monitor` 已不再属于 Astral-Code 的模型可见 core tool flavor。
+- 测试不再把一个废弃工具名写进“provider-neutral 工具形状”的心理模型里。
+- 该切片不改 runtime、不改 sandbox、不改 UnifiedExec/PTY/exec-server，只清理测试语义。
+
+验证：
+
+```bash
+cd /Users/oines/project/astral-code/codex-rs
+just fmt
+CARGO_INCREMENTAL=0 just test -p codex-core model_visible_core_tools_convert_to_provider_neutral_astral_names shell_zsh_fork_standalone_backend_keeps_bash_model_visible environment_count_controls_environment_backed_tools
+```
+
+结果：
+
+- `just fmt` 通过。
+- 三个目标测试均通过。

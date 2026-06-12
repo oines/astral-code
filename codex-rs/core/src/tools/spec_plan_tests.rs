@@ -526,7 +526,6 @@ async fn model_visible_core_tools_convert_to_provider_neutral_astral_names() {
         "shell_command",
         "update_plan",
         "request_permissions",
-        "Monitor",
     ] {
         assert!(
             !agent_tool_names.contains(&legacy),
@@ -553,7 +552,6 @@ async fn shell_zsh_fork_standalone_backend_keeps_bash_model_visible() {
         "shell_command",
         "exec_command",
         "write_stdin",
-        "Monitor",
         "ReadTaskOutput",
         "SendTaskInput",
         "ListBackgroundTasks",
@@ -693,7 +691,6 @@ async fn environment_count_controls_environment_backed_tools() {
         "shell_command",
         "exec_command",
         "Bash",
-        "Monitor",
         "ReadTaskOutput",
         "SendTaskInput",
         "ListBackgroundTasks",
