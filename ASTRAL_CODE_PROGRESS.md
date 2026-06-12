@@ -4128,3 +4128,37 @@ CARGO_INCREMENTAL=0 just test -p codex-core auto_review_uses_current_chat_comple
 - `Bash` 提权审批、Guardian reviewer、chat-completions provider 三者已经有真实集成证据。
 - reviewer 使用当前模型，而不是 OpenAI hosted Guardian / catalog override / Responses-only 路径。
 - 这块离最终目标中的“将 Guardian/auto-review Astral 化为可选当前模型 approval reviewer”又前进了一格。
+
+## 最新补充 58：RequestPermissions provider-neutral 工具名泄漏防线
+
+本轮继续推进 Claude-ish core tool flavor 的形状收口，补上 `RequestPermissions` 在 provider-neutral
+工具列表中的覆盖。
+
+改动：
+
+- `model_visible_core_tools_convert_to_provider_neutral_astral_names` 测试显式开启
+  `Feature::RequestPermissionsTool`。
+- 断言模型可见工具包含：
+  - `RequestPermissions`
+- 断言 provider-neutral request 不包含内部旧名：
+  - `request_permissions`
+- 断言 runtime registry 中仍保留 hidden dispatch handler：
+  - `request_permissions`
+
+验证命令：
+
+```bash
+CARGO_INCREMENTAL=0 just test -p codex-core model_visible_core_tools_convert_to_provider_neutral_astral_names
+```
+
+结果：
+
+- 1 test run
+- 1 passed
+- 2644 skipped
+
+意义：
+
+- 模型侧看到的是 Astral/Claude-ish `RequestPermissions`。
+- Codex 原有 approval/sandbox/request-permissions 后端仍被继承，并通过 hidden dispatch handler 接住。
+- 这符合“新 schema、新 tool flavor；不绕过 Codex runtime primitives”的原则。

@@ -481,7 +481,14 @@ async fn shell_family_registers_visible_unified_exec_and_hidden_legacy_shell() {
 #[tokio::test]
 async fn model_visible_core_tools_convert_to_provider_neutral_astral_names() {
     let plan = probe(|turn| {
-        set_features(turn, &[Feature::ShellTool, Feature::UnifiedExec]);
+        set_features(
+            turn,
+            &[
+                Feature::ShellTool,
+                Feature::UnifiedExec,
+                Feature::RequestPermissionsTool,
+            ],
+        );
         set_feature(turn, Feature::ShellZshFork, /*enabled*/ false);
         turn.model_info.shell_type = ConfigShellToolType::ShellCommand;
     })
@@ -506,6 +513,7 @@ async fn model_visible_core_tools_convert_to_provider_neutral_astral_names() {
         "Glob",
         "Grep",
         "TodoWrite",
+        "RequestPermissions",
     ] {
         assert!(
             agent_tool_names.contains(&expected),
@@ -517,6 +525,7 @@ async fn model_visible_core_tools_convert_to_provider_neutral_astral_names() {
         "write_stdin",
         "shell_command",
         "update_plan",
+        "request_permissions",
         "Monitor",
     ] {
         assert!(
@@ -524,6 +533,9 @@ async fn model_visible_core_tools_convert_to_provider_neutral_astral_names() {
             "legacy tool `{legacy}` leaked into provider-neutral tools {agent_tool_names:?}"
         );
     }
+    plan.assert_visible_lacks(&["request_permissions"]);
+    plan.assert_registered_contains(&["request_permissions"]);
+    assert_eq!(plan.exposure("request_permissions"), ToolExposure::Hidden);
 }
 
 #[tokio::test]
