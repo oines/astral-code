@@ -1198,7 +1198,7 @@ mod tests {
                 "token expired",
             )
             .detail("ASTRAL_API_KEY: present")
-            .remediation("Run `astral login`."),
+            .remediation("Pipe an API key to `astral login --with-api-key`."),
             DoctorCheck::new(
                 "updates.status",
                 "updates",
@@ -1248,7 +1248,7 @@ Codex Doctor v0.0.0
 
 Notes
    ⚠ terminal     narrow terminal
-   ✗ auth         token expired - Run `astral login`.
+   ✗ auth         token expired - Pipe an API key to `astral login --with-api-key`.
 ─────────────────────────────────────────────────────────────
 
 Environment
@@ -1277,7 +1277,7 @@ Environment
   ✓ state        state paths inspectable
 
 Configuration
-  ✗ auth         token expired — Run `astral login`.
+  ✗ auth         token expired — Pipe an API key to `astral login --with-api-key`.
       ASTRAL_API_KEY           present
 
 Updates
@@ -1319,7 +1319,7 @@ Codex Doctor v0.0.0
 
 Notes
    ⚠ terminal     narrow terminal
-   ✗ auth         token expired - Run `astral login`.
+   ✗ auth         token expired - Pipe an API key to `astral login --with-api-key`.
 ─────────────────────────────────────────────────────────────
 
 Environment
@@ -1333,7 +1333,7 @@ Environment
   ✓ state        state paths inspectable
 
 Configuration
-  ✗ auth         token expired — Run `astral login`.
+  ✗ auth         token expired — Pipe an API key to `astral login --with-api-key`.
 
 Updates
   ✓ updates      update configuration is locally consistent
@@ -1427,7 +1427,7 @@ Codex Doctor v0.0.0
 
 Notes
    [!!] terminal     narrow terminal
-   [XX] auth         token expired - Run `astral login`.
+   [XX] auth         token expired - Pipe an API key to `astral login --with-api-key`.
 -------------------------------------------------------------
 
 Environment
@@ -1441,7 +1441,7 @@ Environment
   [ok] state        state paths inspectable
 
 Configuration
-  [XX] auth         token expired - Run `astral login`.
+  [XX] auth         token expired - Pipe an API key to `astral login --with-api-key`.
 
 Updates
   [ok] updates      update configuration is locally consistent

@@ -4856,3 +4856,54 @@ CARGO_INCREMENTAL=0 just test -p codex-core model_visible_core_tools_convert_to_
 
 - `just fmt` 通过。
 - 三个目标测试均通过。
+
+## 最新补充 73：doctor 登录修复建议改为 Astral API-key 路径
+
+本轮回到真实用户可用性，而不是继续扫无害历史命名。确认 `astral login` 当前已经要求显式 credential source：
+
+- 正确路径是把 API key pipe 给 `astral login --with-api-key`。
+- 或者直接设置 `ASTRAL_API_KEY` / provider-specific auth env var。
+
+发现问题：
+
+- `codex-rs/cli/src/doctor.rs` 和 `doctor/output.rs` 仍有用户可见 remediation 提示直接运行 `astral login`。
+- 这会误导新用户，因为裸 `astral login` 会退出并提示需要显式 credential source。
+
+改动：
+
+- `codex-rs/cli/src/doctor.rs`
+  - stored credentials incomplete 时，修复建议改为：
+    - `Pipe an API key to astral login --with-api-key, or set ASTRAL_API_KEY.`
+  - 没有 Astral credentials 时，也给同样的 API-key/env 指引。
+  - auth storage 读取失败时，提示先修 storage，再用 API-key login 或 `ASTRAL_API_KEY`。
+- `codex-rs/cli/src/doctor/output.rs`
+  - 更新 human/ascii/summary 渲染测试预期，不再输出 `Run astral login`。
+
+验证：
+
+```bash
+cd /Users/oines/project/astral-code/codex-rs
+just fmt
+CARGO_INCREMENTAL=0 just test -p codex-cli --bin astral render_human_report_includes_details_by_default_without_color render_human_report_supports_summary_output_without_color render_human_report_supports_ascii_output stored_auth_validation_rejects_missing_api_key stored_auth_validation_rejects_legacy_credentials
+```
+
+结果：
+
+- `just fmt` 通过。
+- 5 个 `codex-cli::bin/astral` doctor 相关测试通过。
+
+测试注意：
+
+- 第一次误用宽过滤 `just test -p codex-cli ...`，`cargo-nextest` 卡在枚举一批无关 CLI 测试二进制。
+- 已终止该次 nextest 调度，随后改用 `--bin astral` 精确命中目标测试。
+- 后续跑 CLI doctor/output 单测时应优先使用 `--bin astral`，避免再次浪费时间。
+
+Actions 状态：
+
+- 复扫 `.github/workflows`，当前没有 `push` / `pull_request` / `schedule` 自动触发。
+- workflows 主要保留 `workflow_dispatch` 手动触发，因此当前 push 不应继续自动烧 Actions 额度或刷失败邮件。
+
+磁盘：
+
+- 本轮后磁盘剩余约 10Gi。
+- `codex-rs/target/debug/incremental` 为 0B，没有低风险增量缓存可清。

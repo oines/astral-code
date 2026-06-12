@@ -1235,7 +1235,7 @@ fn auth_check(config: &Config) -> DoctorCheck {
                 let remediation = if legacy_auth {
                     "Run astral logout, then configure ASTRAL_API_KEY or a provider-specific auth env var."
                 } else {
-                    "Run astral login again or provide a supported auth env var."
+                    "Pipe an API key to astral login --with-api-key, or set ASTRAL_API_KEY."
                 };
                 check = check.remediation(remediation);
             }
@@ -1251,11 +1251,11 @@ fn auth_check(config: &Config) -> DoctorCheck {
         Ok(None) => DoctorCheck::new(
             "auth.credentials",
             "auth",
-            CheckStatus::Fail,
-            "no Astral credentials were found",
-        )
-        .details(details)
-        .remediation("Run astral login or provide an API key through a supported auth env var."),
+        CheckStatus::Fail,
+        "no Astral credentials were found",
+    )
+    .details(details)
+    .remediation("Pipe an API key to astral login --with-api-key, or set ASTRAL_API_KEY."),
         Err(err) => DoctorCheck::new(
             "auth.credentials",
             "auth",
@@ -1263,7 +1263,9 @@ fn auth_check(config: &Config) -> DoctorCheck {
             "stored credentials could not be read",
         )
         .detail(err.to_string())
-        .remediation("Fix auth storage access or run astral login again."),
+        .remediation(
+            "Fix auth storage access, then pipe an API key to astral login --with-api-key or set ASTRAL_API_KEY.",
+        ),
     }
 }
 
