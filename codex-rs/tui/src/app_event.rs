@@ -688,6 +688,14 @@ pub(crate) enum AppEvent {
         models: Vec<ModelPreset>,
     },
 
+    /// Open the configured provider picker.
+    OpenModelProvidersPopup,
+
+    /// Fetch and open the model picker for a configured provider.
+    OpenProviderModelsPopup {
+        model_provider: String,
+    },
+
     /// Open the confirmation prompt before enabling full access mode.
     OpenFullAccessConfirmation {
         preset: ApprovalPreset,

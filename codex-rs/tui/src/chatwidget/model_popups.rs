@@ -143,6 +143,10 @@ impl ChatWidget {
             });
         }
 
+        if self.config.model_providers.len() > 1 {
+            items.push(Self::model_providers_selection_item());
+        }
+
         let header = self.model_menu_header(
             "Select Model",
             "Pick a quick auto mode or browse all models.",
@@ -210,12 +214,87 @@ impl ChatWidget {
             });
         }
 
+        if self.config.model_providers.len() > 1 {
+            items.push(Self::model_providers_selection_item());
+        }
+
         let header = self.model_menu_header(
             "Select Model and Effort",
             "Use astral -m <model_name> or config.toml for models outside this catalog.",
         );
         self.bottom_pane.show_selection_view(SelectionViewParams {
             footer_hint: Some(self.bottom_pane.standard_popup_hint_line()),
+            items,
+            header,
+            ..Default::default()
+        });
+    }
+
+    fn model_providers_selection_item() -> SelectionItem {
+        let actions: Vec<SelectionAction> = vec![Box::new(|tx| {
+            tx.send(AppEvent::OpenModelProvidersPopup);
+        })];
+        SelectionItem {
+            name: "Providers".to_string(),
+            description: Some("Browse configured model providers".to_string()),
+            actions,
+            dismiss_on_select: true,
+            dismiss_parent_on_child_accept: true,
+            ..Default::default()
+        }
+    }
+
+    pub(crate) fn open_model_providers_popup(&mut self) {
+        let mut providers = self
+            .config
+            .model_providers
+            .iter()
+            .map(|(provider_id, provider)| {
+                let display_name = if provider.name.is_empty() {
+                    provider_id.clone()
+                } else {
+                    provider.name.clone()
+                };
+                (provider_id.clone(), display_name)
+            })
+            .collect::<Vec<_>>();
+        providers.sort_by(|left, right| left.1.cmp(&right.1).then_with(|| left.0.cmp(&right.0)));
+
+        if providers.is_empty() {
+            self.add_info_message(
+                "No model providers are configured.".to_string(),
+                /*hint*/ None,
+            );
+            return;
+        }
+
+        let items = providers
+            .into_iter()
+            .map(|(provider_id, display_name)| {
+                let provider_for_action = provider_id.clone();
+                let actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
+                    tx.send(AppEvent::OpenProviderModelsPopup {
+                        model_provider: provider_for_action.clone(),
+                    });
+                })];
+                SelectionItem {
+                    name: display_name,
+                    description: Some(provider_id.clone()),
+                    is_current: provider_id == self.config.model_provider_id,
+                    actions,
+                    dismiss_on_select: true,
+                    dismiss_parent_on_child_accept: true,
+                    ..Default::default()
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let header = self.model_menu_header(
+            "Select Provider",
+            "Choose a provider, then pick one of its available models.",
+        );
+        self.bottom_pane.show_selection_view(SelectionViewParams {
+            footer_hint: Some(standard_popup_hint_line()),
             items,
             header,
             ..Default::default()

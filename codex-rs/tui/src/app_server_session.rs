@@ -315,6 +315,30 @@ impl AppServerSession {
         })
     }
 
+    pub(crate) async fn list_models_for_provider(
+        &mut self,
+        model_provider: String,
+    ) -> Result<Vec<ModelPreset>> {
+        let request_id = self.next_request_id();
+        let models: ModelListResponse = self
+            .client
+            .request_typed(ClientRequest::ModelList {
+                request_id,
+                params: ModelListParams {
+                    cursor: None,
+                    model_provider: Some(model_provider),
+                    limit: None,
+                    include_hidden: Some(true),
+                },
+            })
+            .await?;
+        Ok(models
+            .data
+            .into_iter()
+            .map(model_preset_from_api_model)
+            .collect())
+    }
+
     /// Fetches the current account info without refreshing the auth token.
     ///
     /// Used by both `bootstrap` (to populate the initial UI) and `get_login_status`

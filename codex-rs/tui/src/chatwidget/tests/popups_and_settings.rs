@@ -2368,6 +2368,26 @@ async fn model_picker_hides_show_in_picker_false_models_from_cache() {
 }
 
 #[tokio::test]
+async fn model_provider_popup_requests_selected_provider_models() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    let expected_provider = chat.config.model_provider_id.clone();
+
+    while rx.try_recv().is_ok() {}
+    chat.open_model_providers_popup();
+    chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+
+    let events = std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>();
+    assert!(
+        events.iter().any(|event| matches!(
+            event,
+            AppEvent::OpenProviderModelsPopup { model_provider }
+                if model_provider == &expected_provider
+        )),
+        "expected provider model popup event for {expected_provider}; events: {events:?}"
+    );
+}
+
+#[tokio::test]
 async fn server_overloaded_error_does_not_switch_models() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(Some("gpt-5.3-codex")).await;
     chat.set_model("gpt-5.3-codex");

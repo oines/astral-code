@@ -785,6 +785,28 @@ impl App {
             AppEvent::OpenAllModelsPopup { models } => {
                 self.chat_widget.open_all_models_popup(models);
             }
+            AppEvent::OpenModelProvidersPopup => {
+                self.chat_widget.open_model_providers_popup();
+            }
+            AppEvent::OpenProviderModelsPopup { model_provider } => {
+                match app_server
+                    .list_models_for_provider(model_provider.clone())
+                    .await
+                {
+                    Ok(models) => {
+                        self.chat_widget.open_all_models_popup(models);
+                    }
+                    Err(err) => {
+                        tracing::warn!(
+                            provider = %model_provider,
+                            "model/list failed for provider: {err:#}"
+                        );
+                        self.chat_widget.add_error_message(format!(
+                            "Failed to load models for provider {model_provider}: {err}"
+                        ));
+                    }
+                }
+            }
             AppEvent::OpenFullAccessConfirmation {
                 preset,
                 return_to_permissions,

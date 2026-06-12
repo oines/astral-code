@@ -4267,3 +4267,48 @@ CARGO_INCREMENTAL=0 just test -p codex-app-server-protocol serialize_list_models
 - `/model` 热切换链路现在已有两段基础：
   1. catalog item 能携带 provider。
   2. app-server 能按指定 provider 返回模型列表。
+
+## 最新补充 61：TUI `/model` provider 分组入口与按需加载
+
+继续完成 `/model` 热切换前端链路。
+
+已完成：
+
+- TUI `AppServerSession` 新增 `list_models_for_provider(model_provider)`：
+  - 走 app-server `model/list`
+  - 传入 `modelProvider`
+  - 返回 provider-aware `ModelPreset`
+- 新增 TUI 事件：
+  - `OpenModelProvidersPopup`
+  - `OpenProviderModelsPopup { model_provider }`
+- `/model` 主菜单和 All models 菜单中加入 `Providers` 入口。
+- `Providers` popup 从当前 config 的 `model_providers` 构建 provider 列表。
+- 选择 provider 后，App 异步调用 `model/list { modelProvider }`，然后打开该 provider 的模型列表。
+- RPC 失败时只在 TUI 显示错误，不破坏当前 session。
+- 更新 model picker snapshot：现在能看到 `Providers` 项，同时旧 `codex -m` 文案更新为 `astral -m`。
+
+新增/更新测试：
+
+- `model_provider_popup_requests_selected_provider_models`
+  - 打开 provider popup。
+  - 按 Enter 选择当前 provider。
+  - 断言发出 `OpenProviderModelsPopup { model_provider = 当前 provider }`。
+- 更新 `model_picker_filters_hidden_models` snapshot，接受 Providers 入口。
+
+验证命令：
+
+```bash
+CARGO_INCREMENTAL=0 just test -p codex-tui model_provider_popup_requests_selected_provider_models
+CARGO_INCREMENTAL=0 just test -p codex-tui model_picker_hides_show_in_picker_false_models_from_cache
+```
+
+结果：
+
+- provider popup targeted test：1 passed
+- model picker snapshot targeted test：1 passed
+
+意义：
+
+- `/model` 已经具备不重启 TUI 的跨 provider 选择 UI 骨架。
+- provider 模型列表是按需加载，不会启动时扫所有厂商。
+- 仍然没有改 exec-server / PTY / sandbox / approval / Plan / Goal / MCP 等 Codex 骨架。
