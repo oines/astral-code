@@ -546,6 +546,12 @@ impl Codex {
         let model = models_manager
             .get_default_model(&config.model, refresh_strategy)
             .await;
+        if model.trim().is_empty() {
+            return Err(CodexErr::InvalidRequest(format!(
+                "No model is configured for provider `{}` and the provider did not return a model catalog. Set `model` in config.toml or pass `--model`; if the provider does not expose `/models`, also declare model capabilities with `model_catalog_json`, `model_context_window`, and `model_input_modalities` as needed.",
+                config.model_provider_id
+            )));
+        }
 
         // Resolve base instructions for the session. Priority order:
         // 1. config.base_instructions override

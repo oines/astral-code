@@ -4367,3 +4367,55 @@ CARGO_INCREMENTAL=0 just test -p codex-core summarize_context_round_trips_throug
 - 本轮 core test 重新编译较重，结束后磁盘剩余约 10Gi。
 - 已清理 Astral-Code 项目内低风险 `codex-rs/target/debug/incremental`，剩余空间回到约 11Gi。
 - 未清理 `target/debug/deps`，避免显著拖慢后续开发。
+
+## 最新补充 63：无内置模型预设策略下禁止空模型启动
+
+用户此前锁定：Astral 不维护任何内置 provider/model 预设，模型能力、上下文窗口、多模态能力由用户配置或
+provider catalog 提供。本轮沿着这个目标补了一个实际运行边界保护。
+
+背景：
+
+- `ConfiguredModelProvider` 主路径已经不是把 `models-manager/models.json` 当成默认 truth：
+  - 有 `model_catalog_json` 时使用用户显式 catalog。
+  - 否则使用 provider `/models`、缓存或 fallback metadata。
+  - provider 没有 `/models` 时继续允许用户显式 `model` 运行。
+- 但 core session 启动时，如果用户没有配置 `model`，且 provider 也没有可用 model catalog，
+  `get_default_model(...)` 可能返回空字符串。
+- 这会和“无内置预设”目标冲突：我们不应该悄悄用空模型继续进入主循环，也不应该为了避免空模型而恢复 bundled
+  OpenAI/DeepSeek 预设。
+
+改动：
+
+- `codex-rs/core/src/session/mod.rs`
+  - session 解析默认模型后新增空值保护。
+  - 如果模型为空，返回 `CodexErr::InvalidRequest`。
+  - 错误信息明确提示：
+    - 当前 provider 没有配置模型且没有返回 model catalog。
+    - 用户应在 `config.toml` 设置 `model` 或通过 `--model` 传入。
+    - 如果 provider 不暴露 `/models`，需要按需声明 `model_catalog_json`、`model_context_window`、
+      `model_input_modalities`。
+- `codex-rs/core/tests/suite/remote_models.rs`
+  - 新增 `thread_start_requires_model_when_provider_catalog_is_empty`。
+  - 显式清空 `config.model` 和 `config.model_catalog`。
+  - 使用无 auth、无 cache、无 provider catalog 的 mock provider。
+  - 断言 thread start 失败，并且错误信息包含 `model_catalog_json` 配置指引。
+
+验证命令：
+
+```bash
+just fmt
+CARGO_INCREMENTAL=0 just test -p codex-core thread_start_requires_model_when_provider_catalog_is_empty
+```
+
+结果：
+
+- `just fmt` 通过。
+- `codex-core::all suite::remote_models::thread_start_requires_model_when_provider_catalog_is_empty` 通过。
+- 1 test run, 1 passed, 2646 skipped。
+
+意义：
+
+- Astral 可以继续保持“不内置模型预设”的产品口径，同时不会让 `astral exec` / headless session
+  在缺配置时用空模型进入主循环。
+- 这个 slice 没有恢复 bundled model catalog，也没有把 DeepSeek/Kimi/小米/智谱等模型硬编码回项目。
+- 仍然不触碰 app-server、exec-server、UnifiedExec、PTY、sandbox、approval、Plan、Goal、MCP、skills/plugins。

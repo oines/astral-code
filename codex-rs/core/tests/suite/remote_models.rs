@@ -61,6 +61,37 @@ fn legacy_openai_model_provider(server: &MockServer) -> ModelProviderInfo {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn thread_start_requires_model_when_provider_catalog_is_empty() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    skip_if_sandbox!(Ok(()));
+
+    let server = MockServer::start().await;
+    let result = test_codex()
+        .with_config(|config| {
+            config.model = None;
+            config.model_catalog = None;
+        })
+        .build(&server)
+        .await;
+    let err = match result {
+        Ok(_) => panic!("thread start should fail without a configured model or provider catalog"),
+        Err(err) => err,
+    };
+    let message = err.to_string();
+
+    assert!(
+        message.contains("No model is configured for provider"),
+        "unexpected error: {message}"
+    );
+    assert!(
+        message.contains("model_catalog_json"),
+        "error should tell users how to configure provider-neutral model capabilities: {message}"
+    );
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn remote_models_get_model_info_uses_longest_matching_prefix() -> Result<()> {
     skip_if_no_network!(Ok(()));
     skip_if_sandbox!(Ok(()));
