@@ -66,7 +66,7 @@ async fn empty_turn_environments_omits_environment_backed_tools() -> Result<()> 
     )
     .await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_codex().with_model("gpt-5.4").with_config(|config| {
         config
             .features
             .enable(Feature::UnifiedExec)
@@ -84,7 +84,10 @@ async fn empty_turn_environments_omits_environment_backed_tools() -> Result<()> 
     );
     for environment_tool in [
         "Bash",
-        "Monitor",
+        "ReadTaskOutput",
+        "SendTaskInput",
+        "ListBackgroundTasks",
+        "StopBackgroundTask",
         "Read",
         "Write",
         "Edit",
@@ -117,7 +120,7 @@ async fn turn_environment_selection_keeps_environment_backed_tools() -> Result<(
     )
     .await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_codex().with_model("gpt-5.4").with_config(|config| {
         config
             .features
             .enable(Feature::UnifiedExec)
@@ -486,19 +489,21 @@ async fn collect_tools(use_unified_exec: bool) -> Result<Vec<String>> {
     ])];
     let mock = mount_sse_sequence(&server, responses).await;
 
-    let mut builder = test_codex().with_config(move |config| {
-        if use_unified_exec {
-            config
-                .features
-                .enable(Feature::UnifiedExec)
-                .expect("test config should allow feature update");
-        } else {
-            config
-                .features
-                .disable(Feature::UnifiedExec)
-                .expect("test config should allow feature update");
-        }
-    });
+    let mut builder = test_codex()
+        .with_model("gpt-5.4")
+        .with_config(move |config| {
+            if use_unified_exec {
+                config
+                    .features
+                    .enable(Feature::UnifiedExec)
+                    .expect("test config should allow feature update");
+            } else {
+                config
+                    .features
+                    .disable(Feature::UnifiedExec)
+                    .expect("test config should allow feature update");
+            }
+        });
     let test = builder.build(&server).await?;
 
     test.submit_turn_with_approval_and_permission_profile(
@@ -518,23 +523,37 @@ async fn unified_exec_spec_toggle_end_to_end() -> Result<()> {
 
     let tools_disabled = collect_tools(/*use_unified_exec*/ false).await?;
     assert!(
-        !tools_disabled.iter().any(|name| name == "Bash"),
-        "tools list should not include Bash when unified exec is disabled: {tools_disabled:?}"
+        tools_disabled.iter().any(|name| name == "Bash"),
+        "tools list should keep the public Bash tool when unified exec is disabled: {tools_disabled:?}"
     );
-    assert!(
-        !tools_disabled.iter().any(|name| name == "Monitor"),
-        "tools list should not include Monitor when unified exec is disabled: {tools_disabled:?}"
-    );
+    for background_tool in [
+        "ReadTaskOutput",
+        "SendTaskInput",
+        "ListBackgroundTasks",
+        "StopBackgroundTask",
+    ] {
+        assert!(
+            !tools_disabled.iter().any(|name| name == background_tool),
+            "tools list should not include {background_tool} when unified exec is disabled: {tools_disabled:?}"
+        );
+    }
 
     let tools_enabled = collect_tools(/*use_unified_exec*/ true).await?;
     assert!(
         tools_enabled.iter().any(|name| name == "Bash"),
         "tools list should include Bash when unified exec is enabled: {tools_enabled:?}"
     );
-    assert!(
-        tools_enabled.iter().any(|name| name == "Monitor"),
-        "tools list should include Monitor when unified exec is enabled: {tools_enabled:?}"
-    );
+    for background_tool in [
+        "ReadTaskOutput",
+        "SendTaskInput",
+        "ListBackgroundTasks",
+        "StopBackgroundTask",
+    ] {
+        assert!(
+            tools_enabled.iter().any(|name| name == background_tool),
+            "tools list should include {background_tool} when unified exec is enabled: {tools_enabled:?}"
+        );
+    }
     assert!(
         !tools_enabled.iter().any(|name| name == "exec_command"),
         "runtime tool name should stay hidden from the model: {tools_enabled:?}"

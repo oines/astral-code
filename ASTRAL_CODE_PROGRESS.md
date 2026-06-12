@@ -4783,3 +4783,44 @@ CARGO_INCREMENTAL=0 just test -p codex-core \
 
 - 本轮为源码核查和文档固化，没有新增代码变更。
 - 未运行测试，避免重复消耗磁盘和时间。
+
+## 最新补充 71：工具列表测试收敛到 Astral 后台任务工具名
+
+本轮处理的是一个小但容易反复误判的测试边界：旧 Codex 测试还在把 `Monitor` 当作 UnifiedExec 相关的模型可见工具，而 Astral-Code 已经锁定为更清晰的后台任务工具组。
+
+调整内容：
+
+- `codex-rs/core/tests/suite/tools.rs`
+  - 将旧的 `Monitor` 断言替换为：
+    - `ReadTaskOutput`
+    - `SendTaskInput`
+    - `ListBackgroundTasks`
+    - `StopBackgroundTask`
+  - 给相关集成测试显式设置 `gpt-5.4`，避免测试继续依赖旧 Codex 的隐式模型/catalog 默认值。
+  - 修正 UnifiedExec toggle 断言：
+    - `Bash` 是 Astral 的公开 shell 工具名，即使 UnifiedExec 关闭也保留。
+    - UnifiedExec 关闭时只隐藏后台任务四件套。
+    - UnifiedExec 开启时暴露后台任务四件套。
+    - `exec_command` / `write_stdin` 继续保持内部 runtime 名，不暴露给模型。
+
+这和整体目标的关系：
+
+- 模型侧始终看到 Claude-ish 的 `Bash`，不会因为内部执行后端变化而换工具名。
+- UnifiedExec/PTY/exec-server 仍是后台任务能力的真实实现，不被绕开。
+- `shell_command` 是 UnifiedExec 关闭时的内部降级后端，模型侧仍不直接感知。
+- 这符合“新工具 flavor，继承 Codex 骨架”的设计，不是硬套 adapter。
+
+验证：
+
+```bash
+cd /Users/oines/project/astral-code/codex-rs
+just fmt
+CARGO_INCREMENTAL=0 just test -p codex-core empty_turn_environments_omits_environment_backed_tools unified_exec_spec_toggle_end_to_end
+```
+
+结果：
+
+- `just fmt` 通过。
+- 两个目标测试均通过：
+  - `suite::tools::empty_turn_environments_omits_environment_backed_tools`
+  - `suite::tools::unified_exec_spec_toggle_end_to_end`
