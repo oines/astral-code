@@ -3766,3 +3766,49 @@ just test -p codex-core -E 'test(compact) or test(model_visible_core_tools_conve
 
 当前结论：local compact 逻辑继承路径仍然存在，纯函数/历史重建验收通过；真正剩余 blocker 是 integration test
 fixture/provider-neutral 迁移和真实 compact smoke，而不是重新设计 compact。
+
+## 最新补充 50：provider `/models` 不可用退化为正常能力缺失
+
+对齐全局目标后，没有继续卡在 compact fixture 失败点，而是先处理真实 provider-neutral 路径里已经暴露的一个小而关键的兼容坑：
+DeepSeek `/anthropic` base 下 inference 可以正常工作，但 `/models` 返回 404，旧路径会把它记录成
+`failed to refresh available models` 错误噪声。
+
+本轮改动：
+
+1. `codex-models-manager` 新增 `RemoteModelCatalog`：
+   - `Catalog { models, etag }` 表示 provider 返回了远端模型目录。
+   - `Unavailable` 表示 provider/gateway 不暴露模型目录 endpoint。
+
+2. `ModelsEndpointClient::list_models(...)` 改为返回 `RemoteModelCatalog`。
+   - 真错误仍然走 `CoreResult` 返回。
+   - “没有 `/models`”不再伪装成错误。
+
+3. `OpenAiModelsManager::fetch_and_update_models(...)` 遇到 `Unavailable` 时：
+   - 不清空当前内存 catalog。
+   - 不写空 cache。
+   - 记录普通 info：`models endpoint unavailable; keeping current model catalog`。
+
+4. `codex-model-provider` 的 OpenAI-compatible `/models` endpoint 将 HTTP 404 / 405 映射为 `Unavailable`。
+   - 这覆盖 DeepSeek Anthropic-compatible base 这类“支持 Messages/inference，但不支持模型目录”的网关。
+   - 其他 HTTP 错误仍然按原错误链路上抛。
+
+这符合此前锁定的产品方向：Astral 不维护内置模型预设，模型能力、上下文窗口、多模态能力由用户配置或 provider catalog 提供；
+当 provider 没有 catalog 时，运行时应该继续使用用户声明/当前模型 fallback，而不是把 `/models` 404 当成会话错误。
+
+验证：
+
+- `just fmt` 通过。
+- `just test -p codex-models-manager refresh_available_models_keeps_current_catalog_when_provider_catalog_unavailable` 通过 1 个测试。
+- `just test -p codex-model-provider model_catalog_unavailable_accepts_missing_provider_catalog_routes` 通过 1 个测试。
+
+磁盘维护：
+
+- 本轮窄测后 `codex-rs/target` 约 135G，其中 `debug/deps` 约 131G。
+- 只清理了 Astral-Code 项目内低风险 `codex-rs/target/debug/incremental`（约 1.3G）。
+- 清理后磁盘剩余约 18Gi；未删除项目外文件，也未删除 `debug/deps`。
+
+当前下一步：
+
+1. 原子提交并 push 当前 provider catalog 兼容切片。
+2. 不继续扩大 `/models` 配置面，除非真实 TUI `/model` 使用时还有痛点。
+3. 转入真实 smoke 补洞：Plan/Goal/local compact/TUI 基础路径优先，旧 Responses compact integration fixture 单独排后处理。

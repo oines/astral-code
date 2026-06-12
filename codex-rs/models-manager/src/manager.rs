@@ -22,6 +22,23 @@ use tracing::info;
 const MODEL_CACHE_FILE: &str = "models_cache.json";
 const DEFAULT_MODEL_CACHE_TTL: Duration = Duration::from_secs(300);
 
+/// Result of asking a provider for a remote model catalog.
+///
+/// Providers that support an OpenAI-compatible `/models` route return a catalog.
+/// Some provider-neutral gateways only support inference routes; those should
+/// report `Unavailable` so Astral keeps using user-declared model metadata
+/// instead of treating discovery absence as a refresh failure.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RemoteModelCatalog {
+    /// The provider returned a model catalog and optional cache validator.
+    Catalog {
+        models: Vec<ModelInfo>,
+        etag: Option<String>,
+    },
+    /// The provider does not expose a model catalog endpoint.
+    Unavailable,
+}
+
 /// Remote endpoint used by the OpenAI-compatible model manager.
 ///
 /// Implementations own provider-specific auth and transport details. The model
@@ -37,11 +54,8 @@ pub trait ModelsEndpointClient: fmt::Debug + Send + Sync {
         false
     }
 
-    /// Fetches the latest remote model catalog and optional ETag.
-    async fn list_models(
-        &self,
-        client_version: &str,
-    ) -> CoreResult<(Vec<ModelInfo>, Option<String>)>;
+    /// Fetches the latest remote model catalog.
+    async fn list_models(&self, client_version: &str) -> CoreResult<RemoteModelCatalog>;
 }
 
 /// Strategy for refreshing available models.
@@ -298,7 +312,12 @@ impl OpenAiModelsManager {
 
     async fn fetch_and_update_models(&self) -> CoreResult<()> {
         let client_version = crate::client_version_to_whole();
-        let (models, etag) = self.endpoint_client.list_models(&client_version).await?;
+        let RemoteModelCatalog::Catalog { models, etag } =
+            self.endpoint_client.list_models(&client_version).await?
+        else {
+            info!("models endpoint unavailable; keeping current model catalog");
+            return Ok(());
+        };
         self.apply_remote_models(models.clone()).await;
         *self.etag.write().await = etag.clone();
         self.cache_manager

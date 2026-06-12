@@ -71,12 +71,16 @@ fn assert_models_contain(actual: &[ModelInfo], expected: &[ModelInfo]) {
 struct TestModelsEndpoint {
     has_command_auth: bool,
     has_provider_auth: bool,
-    responses: Mutex<VecDeque<Vec<ModelInfo>>>,
+    responses: Mutex<VecDeque<RemoteModelCatalog>>,
     fetch_count: AtomicUsize,
 }
 
 impl TestModelsEndpoint {
     fn new(responses: Vec<Vec<ModelInfo>>) -> Arc<Self> {
+        Self::with_catalogs(responses.into_iter().map(catalog_response).collect())
+    }
+
+    fn with_catalogs(responses: Vec<RemoteModelCatalog>) -> Arc<Self> {
         Arc::new(Self {
             has_command_auth: false,
             has_provider_auth: true,
@@ -89,7 +93,7 @@ impl TestModelsEndpoint {
         Arc::new(Self {
             has_command_auth: false,
             has_provider_auth: false,
-            responses: Mutex::new(responses.into()),
+            responses: Mutex::new(responses.into_iter().map(catalog_response).collect()),
             fetch_count: AtomicUsize::new(0),
         })
     }
@@ -98,7 +102,7 @@ impl TestModelsEndpoint {
         Arc::new(Self {
             has_command_auth: false,
             has_provider_auth: true,
-            responses: Mutex::new(responses.into()),
+            responses: Mutex::new(responses.into_iter().map(catalog_response).collect()),
             fetch_count: AtomicUsize::new(0),
         })
     }
@@ -106,6 +110,10 @@ impl TestModelsEndpoint {
     fn fetch_count(&self) -> usize {
         self.fetch_count.load(Ordering::SeqCst)
     }
+}
+
+fn catalog_response(models: Vec<ModelInfo>) -> RemoteModelCatalog {
+    RemoteModelCatalog::Catalog { models, etag: None }
 }
 
 #[derive(Debug)]
@@ -160,18 +168,15 @@ impl ModelsEndpointClient for TestModelsEndpoint {
         self.has_provider_auth
     }
 
-    async fn list_models(
-        &self,
-        _client_version: &str,
-    ) -> CoreResult<(Vec<ModelInfo>, Option<String>)> {
+    async fn list_models(&self, _client_version: &str) -> CoreResult<RemoteModelCatalog> {
         self.fetch_count.fetch_add(1, Ordering::SeqCst);
-        let models = self
+        let catalog = self
             .responses
             .lock()
             .expect("responses lock should not be poisoned")
             .pop_front()
-            .unwrap_or_default();
-        Ok((models, None))
+            .unwrap_or_else(|| catalog_response(Vec::new()));
+        Ok(catalog)
     }
 }
 
@@ -420,6 +425,37 @@ async fn refresh_available_models_keeps_empty_catalog_for_empty_provider_remote(
 }
 
 #[tokio::test]
+async fn refresh_available_models_keeps_current_catalog_when_provider_catalog_unavailable() {
+    let remote_models = vec![remote_model(
+        "provider-catalog-before-unavailable",
+        "Provider Catalog",
+        /*priority*/ 0,
+    )];
+    let codex_home = tempdir().expect("temp dir");
+    let endpoint = TestModelsEndpoint::with_catalogs(vec![
+        catalog_response(remote_models.clone()),
+        RemoteModelCatalog::Unavailable,
+    ]);
+    let manager = openai_manager_for_tests(codex_home.path().to_path_buf(), endpoint.clone());
+    manager
+        .refresh_available_models(RefreshStrategy::Online)
+        .await
+        .expect("initial refresh succeeds");
+
+    manager
+        .refresh_available_models(RefreshStrategy::Online)
+        .await
+        .expect("unavailable model catalog is not a refresh failure");
+
+    assert_eq!(manager.get_remote_models().await, remote_models);
+    assert_eq!(
+        endpoint.fetch_count(),
+        2,
+        "unavailable model catalog should still count as an attempted fetch"
+    );
+}
+
+#[tokio::test]
 async fn refresh_available_models_uses_hidden_only_provider_remote() {
     let hidden_remote = remote_model_with_visibility(
         "provider-hidden-only",
@@ -450,7 +486,7 @@ async fn refresh_available_models_keeps_merging_for_api_auth() {
     let endpoint = Arc::new(TestModelsEndpoint {
         has_command_auth: true,
         has_provider_auth: false,
-        responses: Mutex::new(vec![remote_models.clone()].into()),
+        responses: Mutex::new(vec![catalog_response(remote_models.clone())].into()),
         fetch_count: AtomicUsize::new(0),
     });
     let manager = openai_manager_for_tests_with_auth(
@@ -643,14 +679,14 @@ async fn refresh_available_models_skips_network_without_provider_refresh_auth() 
 
 #[derive(Debug)]
 struct TestNoRefreshAuthModelsEndpoint {
-    responses: Mutex<VecDeque<Vec<ModelInfo>>>,
+    responses: Mutex<VecDeque<RemoteModelCatalog>>,
     fetch_count: AtomicUsize,
 }
 
 impl TestNoRefreshAuthModelsEndpoint {
     fn new(responses: Vec<Vec<ModelInfo>>) -> Arc<Self> {
         Arc::new(Self {
-            responses: Mutex::new(responses.into()),
+            responses: Mutex::new(responses.into_iter().map(catalog_response).collect()),
             fetch_count: AtomicUsize::new(0),
         })
     }
@@ -666,18 +702,15 @@ impl ModelsEndpointClient for TestNoRefreshAuthModelsEndpoint {
         false
     }
 
-    async fn list_models(
-        &self,
-        _client_version: &str,
-    ) -> CoreResult<(Vec<ModelInfo>, Option<String>)> {
+    async fn list_models(&self, _client_version: &str) -> CoreResult<RemoteModelCatalog> {
         self.fetch_count.fetch_add(1, Ordering::SeqCst);
-        let models = self
+        let catalog = self
             .responses
             .lock()
             .expect("responses lock should not be poisoned")
             .pop_front()
-            .unwrap_or_default();
-        Ok((models, None))
+            .unwrap_or_else(|| catalog_response(Vec::new()));
+        Ok(catalog)
     }
 }
 

@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use codex_api::ApiError;
 use codex_api::ModelsClient;
 use codex_api::RequestTelemetry;
 use codex_api::ReqwestTransport;
@@ -18,9 +19,9 @@ use codex_login::default_client::build_reqwest_client;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_models_manager::bundled_models_response;
 use codex_models_manager::manager::ModelsEndpointClient;
+use codex_models_manager::manager::RemoteModelCatalog;
 use codex_models_manager::model_info;
 use codex_otel::TelemetryAuthMode;
-use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CoreResult;
 use codex_protocol::openai_models::ModelInfo;
 use codex_response_debug_context::extract_response_debug_context;
@@ -82,10 +83,7 @@ impl ModelsEndpointClient for OpenAiModelsEndpoint {
                 .is_some_and(|env_key| std::env::var_os(env_key).is_some())
     }
 
-    async fn list_models(
-        &self,
-        client_version: &str,
-    ) -> CoreResult<(Vec<ModelInfo>, Option<String>)> {
+    async fn list_models(&self, client_version: &str) -> CoreResult<RemoteModelCatalog> {
         let _timer =
             codex_otel::start_global_timer("codex.remote_models.fetch_update.duration_ms", &[]);
         let auth = self.auth().await;
@@ -103,16 +101,36 @@ impl ModelsEndpointClient for OpenAiModelsEndpoint {
         let client = ModelsClient::new(transport, api_provider, api_auth)
             .with_telemetry(Some(request_telemetry));
 
-        let (models, etag) = timeout(
+        let response = timeout(
             MODELS_REFRESH_TIMEOUT,
             client.list_models(client_version, HeaderMap::new()),
         )
         .await
-        .map_err(|_| CodexErr::Timeout)?
-        .map_err(map_api_error)?;
+        .map_err(|_| codex_protocol::error::CodexErr::Timeout)?;
+        let (models, etag) = match response {
+            Ok(result) => result,
+            Err(err) if model_catalog_unavailable(&err) => {
+                return Ok(RemoteModelCatalog::Unavailable);
+            }
+            Err(err) => return Err(map_api_error(err)),
+        };
 
-        Ok((enrich_provider_model_listings(models), etag))
+        Ok(RemoteModelCatalog::Catalog {
+            models: enrich_provider_model_listings(models),
+            etag,
+        })
     }
+}
+
+fn model_catalog_unavailable(err: &ApiError) -> bool {
+    matches!(
+        err,
+        ApiError::Transport(TransportError::Http { status, .. })
+            if matches!(
+                *status,
+                http::StatusCode::NOT_FOUND | http::StatusCode::METHOD_NOT_ALLOWED
+            )
+    )
 }
 
 fn enrich_provider_model_listings(models: Vec<ModelInfo>) -> Vec<ModelInfo> {
@@ -282,6 +300,30 @@ mod tests {
         );
 
         assert!(!endpoint.has_command_auth());
+    }
+
+    #[test]
+    fn model_catalog_unavailable_accepts_missing_provider_catalog_routes() {
+        for status in [
+            http::StatusCode::NOT_FOUND,
+            http::StatusCode::METHOD_NOT_ALLOWED,
+        ] {
+            let err = ApiError::Transport(TransportError::Http {
+                status,
+                url: None,
+                headers: None,
+                body: None,
+            });
+            assert!(model_catalog_unavailable(&err));
+        }
+
+        let err = ApiError::Transport(TransportError::Http {
+            status: http::StatusCode::INTERNAL_SERVER_ERROR,
+            url: None,
+            headers: None,
+            body: None,
+        });
+        assert!(!model_catalog_unavailable(&err));
     }
 
     #[test]
