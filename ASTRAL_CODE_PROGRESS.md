@@ -3925,3 +3925,51 @@ CARGO_INCREMENTAL=0 just test -p codex-tui -E 'test(goal_slash_command_emits_set
 - Goal Mode 和 Plan Mode 的 TUI 基础路径有当前测试证据证明仍继承可用。
 - local compact 的 TUI 排队/steer 边界也有当前测试证据。
 - 剩余 compact blocker 仍是 core integration fixture 迁移到 provider-neutral mock，而不是 TUI compact 交互坏掉。
+
+## 最新补充 54：provider-neutral compact core fixture 已补齐 chat-completions 路径
+
+为了验证 compact 不是只在旧 `/v1/responses` fixture 下自洽，本轮在 `codex-core` compact integration suite 中新增了一条
+OpenAI-compatible `/v1/chat/completions` wire path 测试：
+
+- 新增 chat-completions mock provider：`wire_api = "chat_completions"`。
+- mock SSE 走标准 chat-completions chunk 形状：`choices[].delta.content` + `finish_reason` + `usage`。
+- 测试流程仍是 compact 的核心三段：
+  1. 第一轮用户输入，模型返回普通 assistant 文本。
+  2. 手动 `/compact`，第二次请求带 `SUMMARIZATION_PROMPT`，模型返回摘要。
+  3. compact 后继续用户输入，第三次请求体必须带原始用户消息、摘要前缀消息和新用户消息。
+
+测试断言：
+
+- 第一次 chat-completions 请求包含原始用户消息。
+- 第二次 compact 请求包含 `SUMMARIZATION_PROMPT`。
+- 第三次 compact 后请求包含：
+  - 原始用户消息
+  - `SUMMARY_PREFIX + SUMMARY_TEXT`
+  - compact 后的新用户消息
+- 第三次请求不再包含：
+  - compact 前 assistant 输出
+  - compact 触发用的 `SUMMARIZATION_PROMPT`
+
+验证命令：
+
+```bash
+CARGO_INCREMENTAL=0 just test -p codex-core summarize_context_round_trips_through_chat_completions
+```
+
+结果：
+
+- 1 test run
+- 1 passed
+- 2642 skipped
+
+意义：
+
+- local compact 的“无状态 API 每次请求上下文真实形状”现在已经有 provider-neutral 证据。
+- 至少对国内模型最常用的 OpenAI-compatible `/v1/chat/completions`，compact 不依赖 `/responses` 请求体。
+- 当前还没有新增 Anthropic Messages compact fixture；因为真实 DeepSeek `/anthropic` 工具调用 smoke 已通过，下一步优先级应放到后台任务工具和最终端到端任务闭环，而不是继续膨胀 compact 测试。
+
+磁盘：
+
+- 本次 `codex-core` 窄测触发一次较长重编，用时约 8 分钟编译 + 17 秒测试。
+- 测试后磁盘剩余约 12Gi。
+- `codex-rs/target/debug/incremental` 仍为 0B；没有可清的低风险增量缓存。

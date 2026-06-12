@@ -56,7 +56,14 @@ use serde_json::Value;
 use serde_json::json;
 use std::fs;
 use std::path::Path;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+use wiremock::Mock;
 use wiremock::MockServer;
+use wiremock::Respond;
+use wiremock::ResponseTemplate;
+use wiremock::matchers::method;
+use wiremock::matchers::path_regex;
 // --- Test helpers -----------------------------------------------------------
 
 pub(super) const FIRST_REPLY: &str = "FIRST_REPLY";
@@ -154,6 +161,27 @@ fn json_fragment(text: &str) -> String {
         .expect("serialize text to JSON")
         .trim_matches('"')
         .to_string()
+}
+
+fn is_zstd_encoding(value: &str) -> bool {
+    value
+        .split(',')
+        .any(|entry| entry.trim().eq_ignore_ascii_case("zstd"))
+}
+
+fn request_body_json(request: &wiremock::Request) -> Value {
+    let body = if request
+        .headers
+        .get("content-encoding")
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(is_zstd_encoding)
+    {
+        zstd::stream::decode_all(std::io::Cursor::new(&request.body))
+            .unwrap_or_else(|err| panic!("failed to decode zstd request body: {err}"))
+    } else {
+        request.body.clone()
+    };
+    serde_json::from_slice(&body).expect("request body should be JSON")
 }
 
 fn read_hook_inputs(path: &Path) -> Vec<Value> {
@@ -265,6 +293,79 @@ fn responses_mock_model_provider(server: &MockServer) -> ModelProviderInfo {
         supports_websockets: false,
         ..ModelProviderInfo::default()
     }
+}
+
+fn chat_completions_mock_model_provider(server: &MockServer) -> ModelProviderInfo {
+    ModelProviderInfo {
+        name: "Chat completions mock".into(),
+        base_url: Some(format!("{}/v1", server.uri())),
+        wire_api: WireApi::ChatCompletions,
+        supports_websockets: false,
+        ..ModelProviderInfo::default()
+    }
+}
+
+fn chat_completions_text_sse(id: &str, text: &str) -> String {
+    [
+        format!(
+            "data: {}\n\n",
+            json!({
+                "id": id,
+                "model": "astral-test-model",
+                "choices": [{
+                    "delta": { "role": "assistant", "content": text }
+                }]
+            })
+        ),
+        format!(
+            "data: {}\n\n",
+            json!({
+                "choices": [{
+                    "delta": {},
+                    "finish_reason": "stop"
+                }],
+                "usage": {
+                    "prompt_tokens": 13,
+                    "completion_tokens": 5,
+                    "prompt_tokens_details": { "cached_tokens": 0 }
+                }
+            })
+        ),
+    ]
+    .join("")
+}
+
+async fn mount_chat_completions_sse_sequence(server: &MockServer, bodies: Vec<String>) {
+    struct SeqResponder {
+        num_calls: AtomicUsize,
+        responses: Vec<String>,
+    }
+
+    impl Respond for SeqResponder {
+        fn respond(&self, _: &wiremock::Request) -> ResponseTemplate {
+            let call_num = self.num_calls.fetch_add(1, Ordering::SeqCst);
+            match self.responses.get(call_num) {
+                Some(body) => ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(body.clone()),
+                None => panic!("no chat completions response for {call_num}"),
+            }
+        }
+    }
+
+    let num_calls = bodies.len();
+    let responder = SeqResponder {
+        num_calls: AtomicUsize::new(0),
+        responses: bodies,
+    };
+
+    Mock::given(method("POST"))
+        .and(path_regex(".*/chat/completions$"))
+        .respond_with(responder)
+        .up_to_n_times(num_calls as u64)
+        .expect(num_calls as u64)
+        .mount(server)
+        .await;
 }
 
 fn model_info_with_context_window(slug: &str, context_window: i64) -> ModelInfo {
@@ -573,6 +674,93 @@ async fn summarize_context_three_requests_and_instructions() {
     assert!(
         saw_compacted_summary,
         "expected a Compacted entry containing the summarizer output"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn summarize_context_round_trips_through_chat_completions() {
+    skip_if_no_network!();
+
+    let server = start_mock_server().await;
+    mount_chat_completions_sse_sequence(
+        &server,
+        vec![
+            chat_completions_text_sse("chatcmpl-1", FIRST_REPLY),
+            chat_completions_text_sse("chatcmpl-2", SUMMARY_TEXT),
+            chat_completions_text_sse("chatcmpl-3", FINAL_REPLY),
+        ],
+    )
+    .await;
+
+    let model_provider = chat_completions_mock_model_provider(&server);
+    let mut builder = test_codex().with_config(move |config| {
+        config.model_provider = model_provider;
+        set_test_compact_prompt(config);
+        config.model_auto_compact_token_limit = Some(200_000);
+    });
+    let test = builder.build(&server).await.unwrap();
+    let codex = test.codex.clone();
+
+    test.submit_turn("hello world")
+        .await
+        .expect("submit first user turn");
+
+    codex.submit(Op::Compact).await.unwrap();
+    let warning_event = wait_for_event(&codex, |ev| matches!(ev, EventMsg::Warning(_))).await;
+    let EventMsg::Warning(WarningEvent { message }) = warning_event else {
+        panic!("expected warning event after compact");
+    };
+    assert_eq!(message, COMPACT_WARNING_MESSAGE);
+    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+
+    test.submit_turn(THIRD_USER_MSG)
+        .await
+        .expect("submit post-compact user turn");
+
+    let requests = server.received_requests().await.unwrap_or_default();
+    let chat_bodies = requests
+        .iter()
+        .filter(|request| request.url.path().ends_with("/chat/completions"))
+        .map(request_body_json)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        chat_bodies.len(),
+        3,
+        "expected exactly three chat completions requests"
+    );
+
+    let first_body = chat_bodies[0].to_string();
+    let compact_body = chat_bodies[1].to_string();
+    let follow_up_body = chat_bodies[2].to_string();
+    let expected_summary_message = summary_with_prefix(SUMMARY_TEXT);
+
+    assert!(
+        body_contains_text(&first_body, "hello world"),
+        "first chat request should include the original user message"
+    );
+    assert!(
+        body_contains_text(&compact_body, SUMMARIZATION_PROMPT),
+        "compact chat request should include the summarize trigger"
+    );
+    assert!(
+        body_contains_text(&follow_up_body, "hello world"),
+        "post-compact chat request should retain the original user message"
+    );
+    assert!(
+        body_contains_text(&follow_up_body, &expected_summary_message),
+        "post-compact chat request should include the compacted summary"
+    );
+    assert!(
+        body_contains_text(&follow_up_body, THIRD_USER_MSG),
+        "post-compact chat request should include the new user message"
+    );
+    assert!(
+        !body_contains_text(&follow_up_body, FIRST_REPLY),
+        "post-compact chat request should not retain pre-compact assistant output"
+    );
+    assert!(
+        !body_contains_text(&follow_up_body, SUMMARIZATION_PROMPT),
+        "post-compact chat request should not retain the summarize trigger"
     );
 }
 
