@@ -4620,3 +4620,58 @@ CARGO_INCREMENTAL=0 just test -p codex-tui \
 
 - 本轮测试前后磁盘剩余约 11Gi。
 - 没有清理 `debug/deps`，只使用已有编译产物完成窄测试。
+
+## 最新补充 68：/model 切换 provider 后刷新运行时 base URL
+
+本轮回到主线目标里“同一个 TUI session 内切换多个厂商/多个模型”的体验检查。确认现有实现已经具备：
+
+- `/model` 选择事件携带 `model_provider`。
+- `PersistModelSelection` 会把 `model`、`model_provider`、`model_reasoning_effort` 写回配置。
+- app-server / core 的 thread settings 会接收 `model_provider`，并在 `Session` 内替换 provider 对象。
+- 现有测试已经覆盖 provider-aware model selection，例如 DeepSeek 这类 provider id。
+
+发现的小缺口：
+
+- TUI 切换 provider 时会更新 `config.model_provider` 和 `ChatWidget` 的 provider 配置，但不会重新解析并刷新
+  `runtime_model_provider_base_url`。
+- 这不会阻止 core 后端实际切 provider，但会让状态卡片和后续 fork/resume widget 初始化继承旧的 runtime base URL 展示。
+
+改动：
+
+- `codex-rs/tui/src/app/config_persistence.rs`
+  - `on_update_model_provider` 改为 async。
+  - 切换 provider 时调用已有 `resolve_runtime_model_provider_base_url(&provider).await`。
+  - 把解析出的 runtime base URL 同步给 `ChatWidget`。
+- `codex-rs/tui/src/chatwidget/settings.rs`
+  - `set_model_provider` 增加 `runtime_model_provider_base_url` 参数。
+  - 更新 provider 配置时同步刷新 widget 内的 runtime URL 状态。
+- `codex-rs/tui/src/app/event_dispatch.rs`
+  - `AppEvent::UpdateModel` 分支 await provider 更新。
+- `codex-rs/tui/src/app/tests.rs`
+  - 新增 `update_model_provider_refreshes_runtime_base_url`，验证 provider 切换后 widget runtime URL 立即更新。
+
+验证命令：
+
+```bash
+just fmt
+CARGO_INCREMENTAL=0 just test -p codex-tui \
+  update_model_provider_refreshes_runtime_base_url \
+  model_provider_popup_requests_selected_provider_models \
+  reasoning_selection_preserves_model_provider
+```
+
+结果：
+
+- `just fmt` 通过。
+- 3 个 provider/model 切换相关 TUI 测试通过。
+- 3 tests run, 3 passed, 2790 skipped。
+
+意义：
+
+- `/model` 的 provider-aware live switch 更完整：运行中不重启切 provider/model 时，实际 session 更新和 TUI 状态展示保持一致。
+- 这仍然尊重 Codex 的 app-server/thread settings 架构，不绕过 core session，不新建单独 provider 热切换通道。
+
+磁盘：
+
+- 本轮后磁盘剩余约 12Gi。
+- 未做额外缓存清理。

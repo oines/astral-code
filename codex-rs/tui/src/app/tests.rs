@@ -74,6 +74,8 @@ use codex_app_server_protocol::TurnStatus;
 use codex_app_server_protocol::UserInput;
 use codex_app_server_protocol::UserInput as AppServerUserInput;
 use codex_app_server_protocol::WarningNotification;
+use codex_model_provider_info::WireApi;
+use codex_model_provider_info::create_oss_provider_with_base_url;
 use codex_otel::SessionTelemetry;
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::CollaborationMode;
@@ -5591,6 +5593,29 @@ async fn thread_setting_update_params_sync_model_and_default_reasoning() {
     assert_eq!(
         collaboration_mode.settings.reasoning_effort,
         Some(ReasoningEffortConfig::High)
+    );
+}
+
+#[tokio::test]
+async fn update_model_provider_refreshes_runtime_base_url() {
+    let mut app = make_test_app().await;
+    let provider_id = "provider-b";
+    let provider = create_oss_provider_with_base_url(
+        "https://provider-b.example/v1",
+        WireApi::ChatCompletions,
+    );
+    app.config
+        .model_providers
+        .insert(provider_id.to_string(), provider);
+
+    assert_eq!(app.chat_widget.runtime_model_provider_base_url(), None);
+
+    app.on_update_model_provider(Some(provider_id)).await;
+
+    assert_eq!(app.config.model_provider_id, provider_id);
+    assert_eq!(
+        app.chat_widget.runtime_model_provider_base_url(),
+        Some("https://provider-b.example/v1")
     );
 }
 

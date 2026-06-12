@@ -271,9 +271,11 @@ impl ChatWidget {
         &mut self,
         model_provider_id: String,
         model_provider: ModelProviderInfo,
+        runtime_model_provider_base_url: Option<String>,
     ) {
         self.config.model_provider_id = model_provider_id;
         self.config.model_provider = model_provider;
+        self.runtime_model_provider_base_url = runtime_model_provider_base_url;
         self.refresh_model_dependent_surfaces();
     }
 

@@ -740,7 +740,7 @@ impl App {
         self.chat_widget.set_reasoning_effort(effort);
     }
 
-    pub(super) fn on_update_model_provider(&mut self, model_provider: Option<&str>) {
+    pub(super) async fn on_update_model_provider(&mut self, model_provider: Option<&str>) {
         let Some(model_provider) = model_provider else {
             return;
         };
@@ -753,8 +753,13 @@ impl App {
 
         self.config.model_provider_id = model_provider.to_string();
         self.config.model_provider = provider.clone();
-        self.chat_widget
-            .set_model_provider(model_provider.to_string(), provider);
+        let runtime_model_provider_base_url =
+            super::resolve_runtime_model_provider_base_url(&provider).await;
+        self.chat_widget.set_model_provider(
+            model_provider.to_string(),
+            provider,
+            runtime_model_provider_base_url,
+        );
     }
 
     pub(super) fn on_update_personality(&mut self, personality: Personality) {

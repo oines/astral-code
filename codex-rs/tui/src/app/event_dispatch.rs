@@ -747,7 +747,8 @@ impl App {
                 model,
                 model_provider,
             } => {
-                self.on_update_model_provider(model_provider.as_deref());
+                self.on_update_model_provider(model_provider.as_deref())
+                    .await;
                 self.chat_widget.set_model(&model);
                 self.sync_active_thread_model_setting(app_server, model, model_provider)
                     .await;
