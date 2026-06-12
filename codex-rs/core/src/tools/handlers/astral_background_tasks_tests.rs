@@ -3,7 +3,10 @@ use serde_json::Value;
 use serde_json::json;
 
 use super::TaskIoMode;
+use super::astral_stop_task_error;
+use super::normalize_task_tool_error;
 use super::rewrite_task_io_arguments;
+use crate::unified_exec::UnifiedExecError;
 
 fn rewritten(arguments: Value, mode: TaskIoMode) -> anyhow::Result<Value> {
     Ok(serde_json::from_str(&rewrite_task_io_arguments(
@@ -91,5 +94,31 @@ fn send_task_input_rejects_empty_input() {
     assert_eq!(
         err.to_string(),
         "SendTaskInput `input` must not be empty; use ReadTaskOutput to poll output"
+    );
+}
+
+#[test]
+fn task_io_errors_use_astral_tool_names_and_task_id() {
+    assert_eq!(
+        normalize_task_tool_error(
+            "ReadTaskOutput",
+            "write_stdin failed: Unknown process id 42"
+        ),
+        "ReadTaskOutput failed: unknown task_id 42"
+    );
+    assert_eq!(
+        normalize_task_tool_error(
+            "SendTaskInput",
+            "write_stdin failed: failed to write to stdin"
+        ),
+        "SendTaskInput failed: failed to write to stdin"
+    );
+}
+
+#[test]
+fn stop_background_task_errors_use_task_id() {
+    assert_eq!(
+        astral_stop_task_error(UnifiedExecError::UnknownProcessId { process_id: 42 }),
+        "StopBackgroundTask failed: unknown task_id 42"
     );
 }

@@ -4419,3 +4419,57 @@ CARGO_INCREMENTAL=0 just test -p codex-core thread_start_requires_model_when_pro
   在缺配置时用空模型进入主循环。
 - 这个 slice 没有恢复 bundled model catalog，也没有把 DeepSeek/Kimi/小米/智谱等模型硬编码回项目。
 - 仍然不触碰 app-server、exec-server、UnifiedExec、PTY、sandbox、approval、Plan、Goal、MCP、skills/plugins。
+
+## 最新补充 64：后台任务工具错误语义收口为 `task_id`
+
+本轮按“最终可用闭环”推进，没有继续扫历史字符串，也没有继续清缓存。重点复核 Claude-ish core tools
+是否破坏 Codex 原有执行骨架。
+
+确认结果：
+
+- `Bash` 只是把模型可见参数从 Claude-ish schema 改写成内部 `exec_command` / `shell_command`
+  调用，实际执行仍走 Codex 的 UnifiedExec、PTY、sandbox、approval 和可替换执行后端。
+- `Read` / `Write` / `Edit` / `Glob` / `Grep` 使用 `turn_environment.environment.get_filesystem()`，
+  不是裸 `std::fs` 绑死本地磁盘；多 environment 时仍可用 `environment_id` 路由。
+- 图片路径的 `Read` 会转到 `view_image`，而 `view_image` 同样通过选中的 environment filesystem
+  和 sandbox 读取。单模态模型下仍按已有能力 guard 返回清晰错误，不会把图片强塞进请求导致 session 作废。
+- `ReadTaskOutput` / `SendTaskInput` 外部暴露 `task_id`，内部才改写成旧 `write_stdin` 的
+  `session_id` 以复用 PTY stdin/poll 实现；模型可见主输出已经是 `Task running with task_id ...`。
+- post-hook 路径最终仍归并到原始 `Bash` call id 和原始命令，不会把后续 poll/input 当成新的
+  `write_stdin` 工具轨迹。
+
+本轮实际修正：
+
+- `codex-rs/core/src/tools/handlers/astral_background_tasks.rs`
+  - `ReadTaskOutput` / `SendTaskInput` 复用内部 `write_stdin` 失败时，错误不再泄漏
+    `write_stdin` 工具名。
+  - 找不到任务时，错误从 `Unknown process id ...` 收敛为 `unknown task_id ...`。
+  - `StopBackgroundTask` 找不到任务时同样返回 `StopBackgroundTask failed: unknown task_id ...`。
+- `codex-rs/core/src/tools/handlers/astral_background_tasks_tests.rs`
+  - 增加 `task_io_errors_use_astral_tool_names_and_task_id`。
+  - 增加 `stop_background_task_errors_use_task_id`。
+
+验证命令：
+
+```bash
+just fmt
+CARGO_INCREMENTAL=0 just test -p codex-core task_io_errors_use_astral_tool_names_and_task_id stop_background_task_errors_use_task_id
+```
+
+结果：
+
+- `just fmt` 通过。
+- 新增 2 个 `codex-core` handler 测试通过。
+- 2 tests run, 2 passed, 2647 skipped。
+
+意义：
+
+- 后台任务工具现在从 schema、模型可见输出到错误恢复提示都稳定使用 `task_id` 语义。
+- Codex 原有 exec-server / UnifiedExec / PTY / sandbox / approval 骨架没有被改动。
+- 这一步直接服务用户锁定的终端 agentic 体验：模型能启动长任务、找回任务、读输出、发 stdin、停止任务，
+  出错时也不会被内部 `process_id` / `write_stdin` 名称带偏。
+
+磁盘：
+
+- 本轮测试后磁盘剩余约 10Gi。
+- `codex-rs/target/debug/incremental` 为 0B，未清理 `debug/deps`，避免明显拖慢后续开发。

@@ -9,6 +9,7 @@ use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::PostToolUsePayload;
 use crate::tools::registry::PreToolUsePayload;
 use crate::tools::registry::ToolExecutor;
+use crate::unified_exec::UnifiedExecError;
 use codex_tools::LIST_BACKGROUND_TASKS_TOOL_NAME;
 use codex_tools::READ_TASK_OUTPUT_TOOL_NAME;
 use codex_tools::ResponsesApiTool;
@@ -70,6 +71,7 @@ impl ToolExecutor<ToolInvocation> for AstralReadTaskOutputHandler {
                 TaskIoMode::ReadOutput,
             )?)
             .await
+            .map_err(|err| astral_task_io_error(READ_TASK_OUTPUT_TOOL_NAME, err))
     }
 }
 
@@ -111,6 +113,7 @@ impl ToolExecutor<ToolInvocation> for AstralSendTaskInputHandler {
                 TaskIoMode::SendInput,
             )?)
             .await
+            .map_err(|err| astral_task_io_error(SEND_TASK_INPUT_TOOL_NAME, err))
     }
 }
 
@@ -206,9 +209,7 @@ impl ToolExecutor<ToolInvocation> for AstralStopBackgroundTaskHandler {
             .unified_exec_manager
             .terminate_process(task_id)
             .await
-            .map_err(|err| {
-                FunctionCallError::RespondToModel(format!("StopBackgroundTask failed: {err}"))
-            })?;
+            .map_err(|err| FunctionCallError::RespondToModel(astral_stop_task_error(err)))?;
         let output = serde_json::to_string_pretty(&serde_json::json!({
             "task_id": stopped.process_id,
             "status": "stopped",
@@ -223,6 +224,36 @@ impl ToolExecutor<ToolInvocation> for AstralStopBackgroundTaskHandler {
             output,
             Some(true),
         )))
+    }
+}
+
+fn astral_task_io_error(tool_name: &str, err: FunctionCallError) -> FunctionCallError {
+    match err {
+        FunctionCallError::RespondToModel(message) => {
+            FunctionCallError::RespondToModel(normalize_task_tool_error(tool_name, &message))
+        }
+        FunctionCallError::Fatal(message) => FunctionCallError::Fatal(message),
+    }
+}
+
+fn normalize_task_tool_error(tool_name: &str, message: &str) -> String {
+    if let Some(process_id) = message.strip_prefix("write_stdin failed: Unknown process id ") {
+        return format!("{tool_name} failed: unknown task_id {process_id}");
+    }
+
+    if let Some(rest) = message.strip_prefix("write_stdin failed: ") {
+        return format!("{tool_name} failed: {rest}");
+    }
+
+    message.replace("write_stdin", tool_name)
+}
+
+fn astral_stop_task_error(err: UnifiedExecError) -> String {
+    match err {
+        UnifiedExecError::UnknownProcessId { process_id } => {
+            format!("StopBackgroundTask failed: unknown task_id {process_id}")
+        }
+        _ => format!("StopBackgroundTask failed: {err}"),
     }
 }
 
