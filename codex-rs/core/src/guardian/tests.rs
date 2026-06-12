@@ -1085,7 +1085,7 @@ fn guardian_timeout_message_distinguishes_timeout_from_policy_denial() {
 }
 
 #[tokio::test]
-async fn routes_approval_to_guardian_is_disabled_for_astral() {
+async fn routes_approval_to_guardian_requires_explicit_auto_review() {
     let (_session, mut turn) = crate::session::tests::make_session_and_context().await;
     let mut config = (*turn.config).clone();
     config.approvals_reviewer = ApprovalsReviewer::User;
@@ -1095,19 +1095,32 @@ async fn routes_approval_to_guardian_is_disabled_for_astral() {
 
     config.approvals_reviewer = ApprovalsReviewer::AutoReview;
     turn.config = Arc::new(config);
+    turn.features
+        .disable(Feature::GuardianApproval)
+        .expect("test setup should allow disabling guardian approvals");
 
     assert!(!routes_approval_to_guardian(&turn));
+
+    turn.features
+        .enable(Feature::GuardianApproval)
+        .expect("test setup should allow enabling guardian approvals");
+
+    assert!(routes_approval_to_guardian(&turn));
 }
 
 #[tokio::test]
-async fn routes_approval_to_guardian_ignores_app_reviewer_override() {
-    let (_session, turn) = crate::session::tests::make_session_and_context().await;
+async fn routes_approval_to_guardian_uses_app_reviewer_override() {
+    let (_session, mut turn) = crate::session::tests::make_session_and_context().await;
+    turn.features
+        .enable(Feature::GuardianApproval)
+        .expect("test setup should allow enabling guardian approvals");
 
+    assert!(!routes_approval_to_guardian(&turn));
     assert!(!routes_approval_to_guardian_with_reviewer(
         &turn,
         ApprovalsReviewer::User
     ));
-    assert!(!routes_approval_to_guardian_with_reviewer(
+    assert!(routes_approval_to_guardian_with_reviewer(
         &turn,
         ApprovalsReviewer::AutoReview
     ));
@@ -1119,6 +1132,9 @@ async fn routes_approval_to_guardian_rejects_granular_review_policy() {
     let mut config = (*turn.config).clone();
     config.approvals_reviewer = ApprovalsReviewer::AutoReview;
     turn.config = Arc::new(config);
+    turn.features
+        .enable(Feature::GuardianApproval)
+        .expect("test setup should allow enabling guardian approvals");
     turn.approval_policy
         .set(AskForApproval::Granular(GranularApprovalConfig {
             sandbox_approval: true,

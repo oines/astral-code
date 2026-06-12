@@ -5,7 +5,9 @@ use codex_analytics::GuardianReviewFailureReason;
 use codex_analytics::GuardianReviewTerminalStatus;
 use codex_analytics::GuardianReviewTrackContext;
 use codex_analytics::GuardianReviewedAction;
+use codex_features::Feature;
 use codex_protocol::config_types::ApprovalsReviewer;
+use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::GuardianAssessmentDecisionSource;
 use codex_protocol::protocol::GuardianAssessmentEvent;
@@ -140,20 +142,22 @@ fn guardian_risk_level_str(level: GuardianRiskLevel) -> &'static str {
     }
 }
 
-/// Whether this turn should route allowed approval prompts through the guardian
-/// reviewer instead of surfacing them to the user. Astral disables the hosted
-/// Guardian auto-review control plane so approvals stay on the normal
-/// user/sandbox path.
+/// Whether this turn should route allowed approval prompts through the local
+/// automatic reviewer instead of surfacing them to the user. Astral keeps this
+/// as an explicit opt-in and runs the reviewer through the current provider
+/// configuration rather than any hosted OpenAI control plane.
 pub(crate) fn routes_approval_to_guardian(turn: &TurnContext) -> bool {
     routes_approval_to_guardian_with_reviewer(turn, turn.config.approvals_reviewer)
 }
 
 /// Whether an approval with its own reviewer selection should be routed through guardian.
 pub(crate) fn routes_approval_to_guardian_with_reviewer(
-    _turn: &TurnContext,
-    _approvals_reviewer: ApprovalsReviewer,
+    turn: &TurnContext,
+    approvals_reviewer: ApprovalsReviewer,
 ) -> bool {
-    false
+    approvals_reviewer == ApprovalsReviewer::AutoReview
+        && turn.features.enabled(Feature::GuardianApproval)
+        && !matches!(turn.approval_policy.value(), AskForApproval::Granular(_))
 }
 
 pub(crate) fn is_guardian_reviewer_source(

@@ -3796,12 +3796,12 @@ async fn session_settings_model_provider_update_changes_provider_snapshot() {
 async fn session_settings_model_provider_update_rejects_unknown_provider() {
     let session_configuration = make_session_configuration_for_tests().await;
 
-    let err = session_configuration
-        .apply(&SessionSettingsUpdate {
-            model_provider: Some("missing-provider".to_string()),
-            ..Default::default()
-        })
-        .expect_err("unknown model provider should be rejected");
+    let Err(err) = session_configuration.apply(&SessionSettingsUpdate {
+        model_provider: Some("missing-provider".to_string()),
+        ..Default::default()
+    }) else {
+        panic!("unknown model provider should be rejected");
+    };
 
     assert!(err.to_string().contains("model_provider"));
 }

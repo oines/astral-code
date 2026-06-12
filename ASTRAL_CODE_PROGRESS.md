@@ -3353,6 +3353,35 @@ control-plane 死分支。
   - 后续如果继续清理 remote/cloud，可转向 `core-plugins/src/remote*` 命名残留、`memories/write`、account/auth
     残留或 Guardian -> Astral approval reviewer。
 
+### 最新补充 104（2026-06-12 本轮）
+
+Guardian / auto-review 从“硬禁用旧 hosted Guardian”推进到“Astral 显式 opt-in 当前 provider reviewer”。
+
+- 修改文件：
+  - `codex-rs/core/src/guardian/review.rs`
+  - `codex-rs/core/src/guardian/tests.rs`
+  - `codex-rs/core/src/session/tests/guardian_tests.rs`
+  - `codex-rs/core/src/session/tests.rs`
+- 行为变化：
+  - `routes_approval_to_guardian_with_reviewer(...)` 不再无条件返回 `false`。
+  - 只有 `approvals_reviewer = "auto_review"` 且 `Feature::GuardianApproval` 开启时，approval 才会进入本地 reviewer。
+  - `AskForApproval::Granular(...)` 仍然拒绝进入 reviewer，避免和细粒度审批策略冲突。
+  - reviewer session 继续复用现有 `build_guardian_review_session_config(...)`：继承当前 config、当前
+    `model_provider` 和当前 active model，不恢复 OpenAI hosted Guardian / catalog override / 外部控制面。
+  - feature 未开启时，即使配置 `auto_review`，`RequestPermissions` 仍走普通用户审批事件。
+- 顺手修复：
+  - `session_settings_model_provider_update_rejects_unknown_provider` 不再用 `expect_err` 要求
+    `SessionConfiguration: Debug`，改成 match 取错误。这个是窄测编译时暴露的测试写法问题，不改生产类型。
+- 验证：
+  - `just fmt` 通过。
+  - `just test -p codex-core routes_approval_to_guardian` 通过 3 个测试。
+  - `just test -p codex-core request_permissions_uses_user_approval_when_auto_review_feature_is_disabled request_permissions_user_approval_wait_stops_when_cancelled`
+    通过 2 个测试。
+- 结果：
+  - Goal 中“将 Guardian/auto-review Astral 化为可选当前模型 approval reviewer”已经完成第一阶段可用闭环。
+  - 后续重点不是继续拆 Guardian 名字，而是真实 E2E 验证 auto-review 在 DeepSeek/Anthropic/chat-completions
+    provider 下的审批请求体、失败恢复和 timeout 行为。
+
 ## 剩余高优先级工作
 
 1. 审计并清理剩余 OpenAI/ChatGPT auth/config 面

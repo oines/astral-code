@@ -67,7 +67,7 @@ where
 }
 
 #[tokio::test]
-async fn request_permissions_uses_user_approval_when_auto_review_is_configured() {
+async fn request_permissions_uses_user_approval_when_auto_review_feature_is_disabled() {
     let (session, mut turn_context, rx_event) = make_session_and_context_with_rx().await;
     *session.active_turn.lock().await = Some(ActiveTurn::default());
     let turn_context_raw = Arc::get_mut(&mut turn_context).expect("single turn context ref");
@@ -77,8 +77,8 @@ async fn request_permissions_uses_user_approval_when_auto_review_is_configured()
         .expect("test setup should allow updating approval policy");
     turn_context_raw
         .features
-        .enable(Feature::GuardianApproval)
-        .expect("test setup should allow enabling guardian approvals");
+        .disable(Feature::GuardianApproval)
+        .expect("test setup should allow disabling guardian approvals");
     let mut config = (*turn_context_raw.config).clone();
     config.approvals_reviewer = ApprovalsReviewer::AutoReview;
     turn_context_raw.config = Arc::new(config);
@@ -177,8 +177,8 @@ async fn request_permissions_user_approval_wait_stops_when_cancelled() {
         .expect("test setup should allow updating approval policy");
     turn_context_raw
         .features
-        .enable(Feature::GuardianApproval)
-        .expect("test setup should allow enabling guardian approvals");
+        .disable(Feature::GuardianApproval)
+        .expect("test setup should allow disabling guardian approvals");
     let mut config = (*turn_context_raw.config).clone();
     config.approvals_reviewer = ApprovalsReviewer::AutoReview;
     turn_context_raw.config = Arc::new(config);
