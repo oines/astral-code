@@ -3324,6 +3324,35 @@ external API-key auth 现在严格覆盖 cached hosted auth，不再失败后回
     Guardian -> Astral approval reviewer。优先级上，若继续同一模块，先把 `remote_plugin_control_plane_enabled()`
     及 share 相关 remote helper 清掉。
 
+### 最新补充 103（2026-06-12 本轮）
+
+继续同一模块第二个原子切片：清理 app-server `plugin/share/*` 与 `plugin/skill/read` 的 hosted share
+control-plane 死分支。
+
+- 修改文件：
+  - `codex-rs/app-server/src/request_processors/plugins.rs`
+  - `codex-rs/app-server/src/request_processors.rs`
+- 行为变化：
+  - `plugin/skill/read` 直接返回 Astral 不支持 hosted control-plane。
+  - `plugin/share/save`、`plugin/share/updateTargets`、`plugin/share/checkout`、`plugin/share/delete`
+    直接返回 Astral 不支持 hosted control-plane。
+  - `plugin/share/list` 保持 disabled 行为，返回空列表。
+  - 不改本地 plugin、MCP、skills、apps、本地 marketplace install/uninstall/read。
+- 删除代码：
+  - `remote_plugin_control_plane_enabled()`。
+  - remote share discoverability/target/principal 参数转换。
+  - remote share checkout/list/save/update/delete 运行链路。
+  - remote skill detail fetch 运行链路。
+  - remote plugin catalog error -> JSON-RPC 映射 helper。
+  - `RemotePluginServiceConfig` / `RemotePluginCatalogError` / remote share summary/context import。
+- 验证：
+  - `just fmt` 通过。
+  - `CARGO_INCREMENTAL=0 cargo check -p codex-app-server --lib` 通过。
+- 结果：
+  - app-server 插件请求处理层已经不再保留 hosted remote marketplace/share/install/uninstall 的实际运行控制面。
+  - 后续如果继续清理 remote/cloud，可转向 `core-plugins/src/remote*` 命名残留、`memories/write`、account/auth
+    残留或 Guardian -> Astral approval reviewer。
+
 ## 剩余高优先级工作
 
 1. 审计并清理剩余 OpenAI/ChatGPT auth/config 面
@@ -3339,7 +3368,7 @@ external API-key auth 现在严格覆盖 cached hosted auth，不再失败后回
    - `core-plugins/src/remote*` 主 hosted catalog/share/sync 已降级为 Astral disabled stub。
    - app-server `plugin/list`、`plugin/installed`、`plugin/read`、`plugin/install`、`plugin/uninstall`
      的 hosted remote marketplace/install/uninstall 运行路径已切断并删除死 helper。
-   - app-server 仍需后续清理 `plugin/share/*`、`plugin/skill/read` 中的 remote share control-plane 死分支。
+   - app-server `plugin/share/*`、`plugin/skill/read` 的 hosted share/skill-read 运行路径已切断并删除死 helper。
    - `memories/write`
    - 目标：默认路径不能静默访问 `chatgpt.com/backend-api`。
    - app-server remote control 暴露入口已禁用；下一刀建议转向 `memories/write`、`cloud-config`

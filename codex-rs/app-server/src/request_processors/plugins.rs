@@ -2,8 +2,6 @@ use super::*;
 use crate::error_code::internal_error;
 use crate::error_code::invalid_request;
 use codex_app_server_protocol::PluginAvailability;
-use codex_app_server_protocol::PluginSharePrincipalRole;
-use codex_app_server_protocol::PluginShareTargetRole;
 use codex_config::types::McpServerConfig;
 use codex_core_plugins::OPENAI_CURATED_MARKETPLACE_NAME;
 use codex_core_plugins::PluginListBackgroundTaskOptions;
@@ -88,10 +86,6 @@ fn marketplace_plugin_source_to_info(source: MarketplacePluginSource) -> PluginS
     }
 }
 
-fn remote_plugin_control_plane_enabled() -> bool {
-    false
-}
-
 fn load_shared_plugin_ids_by_local_path(
     _config: &Config,
 ) -> Result<std::collections::BTreeMap<AbsolutePathBuf, String>, JSONRPCErrorError> {
@@ -144,124 +138,6 @@ fn convert_configured_marketplace_plugin_to_plugin_summary(
         availability: PluginAvailability::Available,
         interface: plugin.interface.map(local_plugin_interface_to_info),
         keywords: plugin.keywords,
-    }
-}
-
-fn remote_plugin_share_discoverability(
-    discoverability: PluginShareDiscoverability,
-) -> codex_core_plugins::remote::RemotePluginShareDiscoverability {
-    match discoverability {
-        PluginShareDiscoverability::Listed => {
-            codex_core_plugins::remote::RemotePluginShareDiscoverability::Listed
-        }
-        PluginShareDiscoverability::Unlisted => {
-            codex_core_plugins::remote::RemotePluginShareDiscoverability::Unlisted
-        }
-        PluginShareDiscoverability::Private => {
-            codex_core_plugins::remote::RemotePluginShareDiscoverability::Private
-        }
-    }
-}
-
-fn remote_plugin_share_update_discoverability(
-    discoverability: PluginShareUpdateDiscoverability,
-) -> codex_core_plugins::remote::RemotePluginShareUpdateDiscoverability {
-    match discoverability {
-        PluginShareUpdateDiscoverability::Unlisted => {
-            codex_core_plugins::remote::RemotePluginShareUpdateDiscoverability::Unlisted
-        }
-        PluginShareUpdateDiscoverability::Private => {
-            codex_core_plugins::remote::RemotePluginShareUpdateDiscoverability::Private
-        }
-    }
-}
-
-fn validate_client_plugin_share_targets(
-    targets: &[PluginShareTarget],
-) -> Result<(), JSONRPCErrorError> {
-    if targets
-        .iter()
-        .any(|target| target.principal_type == PluginSharePrincipalType::Workspace)
-    {
-        return Err(invalid_request(
-            "shareTargets cannot include workspace principals; use discoverability UNLISTED for workspace link access",
-        ));
-    }
-    Ok(())
-}
-
-fn remote_plugin_share_target_role(
-    role: PluginShareTargetRole,
-) -> codex_core_plugins::remote::RemotePluginShareTargetRole {
-    match role {
-        PluginShareTargetRole::Reader => {
-            codex_core_plugins::remote::RemotePluginShareTargetRole::Reader
-        }
-        PluginShareTargetRole::Editor => {
-            codex_core_plugins::remote::RemotePluginShareTargetRole::Editor
-        }
-    }
-}
-
-fn plugin_share_principal_role_from_remote(
-    role: codex_core_plugins::remote::RemotePluginSharePrincipalRole,
-) -> PluginSharePrincipalRole {
-    match role {
-        codex_core_plugins::remote::RemotePluginSharePrincipalRole::Reader => {
-            PluginSharePrincipalRole::Reader
-        }
-        codex_core_plugins::remote::RemotePluginSharePrincipalRole::Editor => {
-            PluginSharePrincipalRole::Editor
-        }
-        codex_core_plugins::remote::RemotePluginSharePrincipalRole::Owner => {
-            PluginSharePrincipalRole::Owner
-        }
-    }
-}
-
-fn remote_plugin_share_targets(
-    targets: Vec<PluginShareTarget>,
-) -> Vec<codex_core_plugins::remote::RemotePluginShareTarget> {
-    targets
-        .into_iter()
-        .map(
-            |target| codex_core_plugins::remote::RemotePluginShareTarget {
-                principal_type: match target.principal_type {
-                    PluginSharePrincipalType::User => {
-                        codex_core_plugins::remote::RemotePluginSharePrincipalType::User
-                    }
-                    PluginSharePrincipalType::Group => {
-                        codex_core_plugins::remote::RemotePluginSharePrincipalType::Group
-                    }
-                    PluginSharePrincipalType::Workspace => {
-                        codex_core_plugins::remote::RemotePluginSharePrincipalType::Workspace
-                    }
-                },
-                principal_id: target.principal_id,
-                role: remote_plugin_share_target_role(target.role),
-            },
-        )
-        .collect()
-}
-
-fn plugin_share_principal_from_remote(
-    principal: codex_core_plugins::remote::RemotePluginSharePrincipal,
-) -> PluginSharePrincipal {
-    PluginSharePrincipal {
-        principal_type: match principal.principal_type {
-            codex_core_plugins::remote::RemotePluginSharePrincipalType::User => {
-                PluginSharePrincipalType::User
-            }
-            codex_core_plugins::remote::RemotePluginSharePrincipalType::Group => {
-                PluginSharePrincipalType::Group
-            }
-            codex_core_plugins::remote::RemotePluginSharePrincipalType::Workspace => {
-                PluginSharePrincipalType::Workspace
-            }
-        },
-        principal_id: principal.principal_id,
-        role: plugin_share_principal_role_from_remote(principal.role),
-        name: principal.name,
     }
 }
 
@@ -834,270 +710,46 @@ impl PluginRequestProcessor {
 
     async fn plugin_skill_read_response(
         &self,
-        params: PluginSkillReadParams,
+        _params: PluginSkillReadParams,
     ) -> Result<PluginSkillReadResponse, JSONRPCErrorError> {
-        let PluginSkillReadParams {
-            remote_marketplace_name,
-            remote_plugin_id,
-            skill_name,
-        } = params;
-
-        validate_remote_plugin_id(&remote_plugin_id)?;
-        if skill_name.is_empty() {
-            return Err(invalid_request(
-                "invalid remote plugin skill name: cannot be empty",
-            ));
-        }
-        if !remote_plugin_control_plane_enabled() {
-            return Err(invalid_request(format!(
-                "remote plugin skill read is not enabled for marketplace {remote_marketplace_name}"
-            )));
-        }
-        let config = self.load_latest_config(/*fallback_cwd*/ None).await?;
-        if !config.features.enabled(Feature::Plugins) {
-            return Err(invalid_request(format!(
-                "remote plugin skill read is not enabled for marketplace {remote_marketplace_name}"
-            )));
-        }
-
-        let auth = self.auth_manager.auth().await;
-        let remote_plugin_service_config = RemotePluginServiceConfig {
-            hosted_base_url: config.hosted_base_url.clone(),
-        };
-        let remote_skill_detail = codex_core_plugins::remote::fetch_remote_plugin_skill_detail(
-            &remote_plugin_service_config,
-            auth.as_ref(),
-            &remote_marketplace_name,
-            &remote_plugin_id,
-            &skill_name,
-        )
-        .await
-        .map_err(|err| {
-            remote_plugin_catalog_error_to_jsonrpc(err, "read remote plugin skill details")
-        })?;
-
-        Ok(PluginSkillReadResponse {
-            contents: remote_skill_detail.contents,
-        })
+        Err(hosted_plugin_control_plane_unavailable(
+            "remote plugin skill read",
+        ))
     }
 
     async fn plugin_share_save_response(
         &self,
-        params: PluginShareSaveParams,
+        _params: PluginShareSaveParams,
     ) -> Result<PluginShareSaveResponse, JSONRPCErrorError> {
-        if !remote_plugin_control_plane_enabled() {
-            return Err(invalid_request("plugin sharing is disabled"));
-        }
-        let (config, auth) = self.load_plugin_share_config_and_auth().await?;
-        if !config.features.enabled(Feature::PluginSharing) {
-            return Err(invalid_request("plugin sharing is disabled"));
-        }
-        let PluginShareSaveParams {
-            plugin_path,
-            remote_plugin_id,
-            discoverability,
-            share_targets,
-        } = params;
-        if let Some(remote_plugin_id) = remote_plugin_id.as_ref()
-            && (remote_plugin_id.is_empty() || !is_valid_remote_plugin_id(remote_plugin_id))
-        {
-            return Err(invalid_request("invalid remote plugin id"));
-        }
-        if remote_plugin_id.is_some() && (discoverability.is_some() || share_targets.is_some()) {
-            return Err(invalid_request(
-                "discoverability and shareTargets are only supported when creating a plugin share; use plugin/share/updateTargets to update share settings",
-            ));
-        }
-        if discoverability == Some(PluginShareDiscoverability::Listed) {
-            return Err(invalid_request(
-                "discoverability LISTED is not supported for plugin/share/save; use UNLISTED or PRIVATE",
-            ));
-        }
-        if let Some(share_targets) = share_targets.as_ref() {
-            validate_client_plugin_share_targets(share_targets)?;
-        }
-
-        let remote_plugin_service_config = RemotePluginServiceConfig {
-            hosted_base_url: config.hosted_base_url.clone(),
-        };
-        let access_policy = codex_core_plugins::remote::RemotePluginShareAccessPolicy {
-            discoverability: discoverability.map(remote_plugin_share_discoverability),
-            share_targets: share_targets.map(remote_plugin_share_targets),
-        };
-        let result = codex_core_plugins::remote::save_remote_plugin_share(
-            &remote_plugin_service_config,
-            auth.as_ref(),
-            config.codex_home.as_path(),
-            &plugin_path,
-            remote_plugin_id.as_deref(),
-            access_policy,
-        )
-        .await
-        .map_err(|err| remote_plugin_catalog_error_to_jsonrpc(err, "save remote plugin share"))?;
-        let remote_plugin_id = result.remote_plugin_id;
-        self.clear_plugin_related_caches();
-        Ok(PluginShareSaveResponse {
-            remote_plugin_id,
-            share_url: result.share_url.unwrap_or_default(),
-        })
+        Err(hosted_plugin_control_plane_unavailable("plugin sharing"))
     }
 
     async fn plugin_share_update_targets_response(
         &self,
-        params: PluginShareUpdateTargetsParams,
+        _params: PluginShareUpdateTargetsParams,
     ) -> Result<PluginShareUpdateTargetsResponse, JSONRPCErrorError> {
-        if !remote_plugin_control_plane_enabled() {
-            return Err(invalid_request("plugin sharing is disabled"));
-        }
-        let (config, auth) = self.load_plugin_share_config_and_auth().await?;
-        if !config.features.enabled(Feature::PluginSharing) {
-            return Err(invalid_request("plugin sharing is disabled"));
-        }
-        let PluginShareUpdateTargetsParams {
-            remote_plugin_id,
-            discoverability,
-            share_targets,
-        } = params;
-        if remote_plugin_id.is_empty() || !is_valid_remote_plugin_id(&remote_plugin_id) {
-            return Err(invalid_request("invalid remote plugin id"));
-        }
-        validate_client_plugin_share_targets(&share_targets)?;
-
-        let remote_plugin_service_config = RemotePluginServiceConfig {
-            hosted_base_url: config.hosted_base_url.clone(),
-        };
-        let result = codex_core_plugins::remote::update_remote_plugin_share_targets(
-            &remote_plugin_service_config,
-            auth.as_ref(),
-            &remote_plugin_id,
-            remote_plugin_share_targets(share_targets),
-            remote_plugin_share_update_discoverability(discoverability),
-        )
-        .await
-        .map_err(|err| {
-            remote_plugin_catalog_error_to_jsonrpc(err, "update remote plugin share targets")
-        })?;
-        self.clear_plugin_related_caches();
-        Ok(PluginShareUpdateTargetsResponse {
-            principals: result
-                .principals
-                .into_iter()
-                .map(plugin_share_principal_from_remote)
-                .collect(),
-            discoverability: remote_plugin_share_discoverability_to_info(result.discoverability),
-        })
+        Err(hosted_plugin_control_plane_unavailable("plugin sharing"))
     }
 
     async fn plugin_share_list_response(
         &self,
         _params: PluginShareListParams,
     ) -> Result<PluginShareListResponse, JSONRPCErrorError> {
-        if !remote_plugin_control_plane_enabled() {
-            return Ok(PluginShareListResponse { data: Vec::new() });
-        }
-        let (config, auth) = self.load_plugin_share_config_and_auth().await?;
-        let remote_plugin_service_config = RemotePluginServiceConfig {
-            hosted_base_url: config.hosted_base_url.clone(),
-        };
-        let data = codex_core_plugins::remote::list_remote_plugin_shares(
-            &remote_plugin_service_config,
-            auth.as_ref(),
-            config.codex_home.as_path(),
-        )
-        .await
-        .map_err(|err| remote_plugin_catalog_error_to_jsonrpc(err, "list remote plugin shares"))?
-        .into_iter()
-        .map(|summary| {
-            let RemoteCatalogPluginShareSummary {
-                summary,
-                local_plugin_path,
-            } = summary;
-            let plugin = remote_plugin_summary_to_info(summary);
-            PluginShareListItem {
-                plugin,
-                local_plugin_path,
-            }
-        })
-        .collect();
-        Ok(PluginShareListResponse { data })
+        Ok(PluginShareListResponse { data: Vec::new() })
     }
 
     async fn plugin_share_checkout_response(
         &self,
-        params: PluginShareCheckoutParams,
+        _params: PluginShareCheckoutParams,
     ) -> Result<PluginShareCheckoutResponse, JSONRPCErrorError> {
-        if !remote_plugin_control_plane_enabled() {
-            return Err(invalid_request("plugin sharing is disabled"));
-        }
-        let (config, auth) = self.load_plugin_share_config_and_auth().await?;
-        if !config.features.enabled(Feature::PluginSharing) {
-            return Err(invalid_request("plugin sharing is disabled"));
-        }
-        let PluginShareCheckoutParams { remote_plugin_id } = params;
-        if remote_plugin_id.is_empty() || !is_valid_remote_plugin_id(&remote_plugin_id) {
-            return Err(invalid_request("invalid remote plugin id"));
-        }
-
-        let remote_plugin_service_config = RemotePluginServiceConfig {
-            hosted_base_url: config.hosted_base_url.clone(),
-        };
-        let result = codex_core_plugins::remote::checkout_remote_plugin_share(
-            &remote_plugin_service_config,
-            auth.as_ref(),
-            config.codex_home.as_path(),
-            &remote_plugin_id,
-        )
-        .await
-        .map_err(|err| remote_plugin_catalog_error_to_jsonrpc(err, "checkout plugin share"))?;
-        self.clear_plugin_related_caches();
-        Ok(PluginShareCheckoutResponse {
-            remote_plugin_id: result.remote_plugin_id,
-            plugin_id: result.plugin_id,
-            plugin_name: result.plugin_name,
-            plugin_path: result.plugin_path,
-            marketplace_name: result.marketplace_name,
-            marketplace_path: result.marketplace_path,
-            remote_version: result.remote_version,
-        })
+        Err(hosted_plugin_control_plane_unavailable("plugin sharing"))
     }
 
     async fn plugin_share_delete_response(
         &self,
-        params: PluginShareDeleteParams,
+        _params: PluginShareDeleteParams,
     ) -> Result<PluginShareDeleteResponse, JSONRPCErrorError> {
-        if !remote_plugin_control_plane_enabled() {
-            return Err(invalid_request("plugin sharing is disabled"));
-        }
-        let (config, auth) = self.load_plugin_share_config_and_auth().await?;
-        let PluginShareDeleteParams { remote_plugin_id } = params;
-        if remote_plugin_id.is_empty() || !is_valid_remote_plugin_id(&remote_plugin_id) {
-            return Err(invalid_request("invalid remote plugin id"));
-        }
-
-        let remote_plugin_service_config = RemotePluginServiceConfig {
-            hosted_base_url: config.hosted_base_url.clone(),
-        };
-        codex_core_plugins::remote::delete_remote_plugin_share(
-            &remote_plugin_service_config,
-            auth.as_ref(),
-            config.codex_home.as_path(),
-            &remote_plugin_id,
-        )
-        .await
-        .map_err(|err| remote_plugin_catalog_error_to_jsonrpc(err, "delete remote plugin share"))?;
-        self.clear_plugin_related_caches();
-        Ok(PluginShareDeleteResponse {})
-    }
-
-    async fn load_plugin_share_config_and_auth(
-        &self,
-    ) -> Result<(Config, Option<CodexAuth>), JSONRPCErrorError> {
-        let config = self.load_latest_config(/*fallback_cwd*/ None).await?;
-        if !config.features.enabled(Feature::Plugins) {
-            return Err(invalid_request("plugin sharing is not enabled"));
-        }
-        let auth = self.auth_manager.auth().await;
-        Ok((config, auth))
+        Err(hosted_plugin_control_plane_unavailable("plugin sharing"))
     }
 
     async fn plugin_install_response(
@@ -1512,94 +1164,4 @@ fn plugin_apps_needing_auth(
             needs_auth: true,
         })
         .collect()
-}
-
-fn remote_plugin_summary_to_info(summary: RemoteCatalogPluginSummary) -> PluginSummary {
-    PluginSummary {
-        id: summary.id,
-        remote_plugin_id: Some(summary.remote_plugin_id),
-        local_version: None,
-        name: summary.name,
-        share_context: summary
-            .share_context
-            .map(remote_plugin_share_context_to_info),
-        source: PluginSource::Remote,
-        installed: summary.installed,
-        enabled: summary.enabled,
-        install_policy: summary.install_policy,
-        auth_policy: summary.auth_policy,
-        availability: summary.availability,
-        interface: summary.interface,
-        keywords: summary.keywords,
-    }
-}
-
-fn remote_plugin_share_context_to_info(
-    context: RemoteCatalogPluginShareContext,
-) -> PluginShareContext {
-    PluginShareContext {
-        remote_plugin_id: context.remote_plugin_id,
-        remote_version: context.remote_version,
-        discoverability: Some(remote_plugin_share_discoverability_to_info(
-            context.discoverability,
-        )),
-        share_url: context.share_url,
-        creator_account_user_id: context.creator_account_user_id,
-        creator_name: context.creator_name,
-        share_principals: context.share_principals.map(|principals| {
-            principals
-                .into_iter()
-                .map(plugin_share_principal_from_remote)
-                .collect()
-        }),
-    }
-}
-
-fn remote_plugin_share_discoverability_to_info(
-    discoverability: codex_core_plugins::remote::RemotePluginShareDiscoverability,
-) -> PluginShareDiscoverability {
-    match discoverability {
-        codex_core_plugins::remote::RemotePluginShareDiscoverability::Listed => {
-            PluginShareDiscoverability::Listed
-        }
-        codex_core_plugins::remote::RemotePluginShareDiscoverability::Unlisted => {
-            PluginShareDiscoverability::Unlisted
-        }
-        codex_core_plugins::remote::RemotePluginShareDiscoverability::Private => {
-            PluginShareDiscoverability::Private
-        }
-    }
-}
-
-fn remote_plugin_catalog_error_to_jsonrpc(
-    err: RemotePluginCatalogError,
-    context: &str,
-) -> JSONRPCErrorError {
-    let message = format!("{context}: {err}");
-    match &err {
-        RemotePluginCatalogError::ControlPlaneDisabled
-        | RemotePluginCatalogError::AuthRequired
-        | RemotePluginCatalogError::UnsupportedAuthMode => invalid_request(message),
-        RemotePluginCatalogError::UnexpectedStatus { status, .. } if status.as_u16() == 404 => {
-            invalid_request(message)
-        }
-        RemotePluginCatalogError::InvalidPluginPath { .. }
-        | RemotePluginCatalogError::PluginShareCheckoutNotAvailable { .. }
-        | RemotePluginCatalogError::ArchiveTooLarge { .. }
-        | RemotePluginCatalogError::UnknownMarketplace { .. } => invalid_request(message),
-        RemotePluginCatalogError::AuthToken(_)
-        | RemotePluginCatalogError::Request { .. }
-        | RemotePluginCatalogError::UnexpectedStatus { .. }
-        | RemotePluginCatalogError::Decode { .. }
-        | RemotePluginCatalogError::InvalidBaseUrl(_)
-        | RemotePluginCatalogError::InvalidBaseUrlPath
-        | RemotePluginCatalogError::UnexpectedPluginId { .. }
-        | RemotePluginCatalogError::UnexpectedSkillName { .. }
-        | RemotePluginCatalogError::UnexpectedEnabledState { .. }
-        | RemotePluginCatalogError::Archive { .. }
-        | RemotePluginCatalogError::ArchiveJoin(_)
-        | RemotePluginCatalogError::MissingUploadEtag
-        | RemotePluginCatalogError::UnexpectedResponse(_)
-        | RemotePluginCatalogError::CacheRemove(_) => internal_error(message),
-    }
 }
