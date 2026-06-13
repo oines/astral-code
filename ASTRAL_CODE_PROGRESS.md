@@ -5640,3 +5640,30 @@ CARGO_BUILD_JOBS=2 just test -p codex-api request_preserves_assistant_reasoning_
 - 这是国产 OpenAI-compatible provider 的核心兼容点，不改会导致长线程、工具调用后续轮次、TUI 普通任务继续请求被 DeepSeek 拒绝。
 - 修复限制在 chat-completions adapter，不触碰 app-server/exec-server/PTY/sandbox/approval 骨架。
 - Anthropic Messages 路径不受影响；Anthropic adapter 仍使用 `thinking` block + signature。
+
+后续补验：
+
+- 清理了低风险的 `codex_protocol-*` 与 `codex_api-*` incremental 目录后，`codex-protocol` 与
+  `codex-api` 编译阶段恢复正常。
+- `cargo nextest` 在编译完成后仍卡在调度层 0% CPU，无子测试进程；已 Ctrl-C 退出。
+- 直接运行本轮编出的 test binary 验证新增测试通过：
+
+```bash
+codex-rs/target/debug/deps/codex_api-13c43f610e1d03d5 \
+  agent_adapters::chat_completions::tests::request_preserves_assistant_reasoning_content_for_deepseek \
+  --exact --nocapture
+```
+
+结果：
+
+```text
+running 1 test
+test agent_adapters::chat_completions::tests::request_preserves_assistant_reasoning_content_for_deepseek ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 131 filtered out; finished in 0.00s
+```
+
+当前判断：
+
+- 新增 adapter 单测已实际通过。
+- 本机 `nextest` hang 是测试调度层/本地 target 状态问题，不是本次 Rust 代码编译失败。
