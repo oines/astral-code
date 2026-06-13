@@ -283,10 +283,13 @@ fn skill_tool() -> AgentTool {
 fn read_task_output_tool() -> AgentTool {
     tool(
         READ_TASK_OUTPUT_TOOL_NAME,
-        "Read or poll output from a running background task.",
+        "Read or poll output from a running background task by task_id.",
         object(
             [
-                session_identifier_property("task_id", "The background task id returned by Bash"),
+                session_identifier_property(
+                    "task_id",
+                    "Background task_id returned by Bash or ListBackgroundTasks",
+                ),
                 integer_property(
                     "yield_time_ms",
                     "Milliseconds to wait for fresh output before returning",
@@ -301,10 +304,13 @@ fn read_task_output_tool() -> AgentTool {
 fn send_task_input_tool() -> AgentTool {
     tool(
         SEND_TASK_INPUT_TOOL_NAME,
-        "Send interactive stdin to a running background task, such as y\\n for a confirmation prompt.",
+        "Send interactive stdin to a running background task by task_id, such as y\\n for a confirmation prompt.",
         object(
             [
-                session_identifier_property("task_id", "The background task id returned by Bash"),
+                session_identifier_property(
+                    "task_id",
+                    "Background task_id returned by Bash or ListBackgroundTasks",
+                ),
                 string_property(
                     "input",
                     "Exact stdin bytes to send; include a trailing newline when pressing Enter is intended",
@@ -323,7 +329,7 @@ fn send_task_input_tool() -> AgentTool {
 fn list_background_tasks_tool() -> AgentTool {
     tool(
         LIST_BACKGROUND_TASKS_TOOL_NAME,
-        "List running background tasks and their task ids.",
+        "List running background tasks and their task_id values.",
         object([], []),
     )
 }
@@ -331,11 +337,11 @@ fn list_background_tasks_tool() -> AgentTool {
 fn stop_background_task_tool() -> AgentTool {
     tool(
         STOP_BACKGROUND_TASK_TOOL_NAME,
-        "Stop a running background task by task id.",
+        "Stop a running background task by task_id.",
         object(
             [session_identifier_property(
                 "task_id",
-                "The background task id returned by Bash or ListBackgroundTasks",
+                "Background task_id returned by Bash or ListBackgroundTasks",
             )],
             ["task_id"],
         ),

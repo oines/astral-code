@@ -6376,3 +6376,65 @@ Claude Code 对照状态：
 - 还不能声称“已经完成严格 Claude Code HTTP request diff”，但可以声称：
   Astral 的模型可见工具循环和 Claude Code stream-json 外层轨迹同构，且 terminal agentic 体验保留了
   Codex 更丝滑的后台执行骨架。
+
+### 最新补充 91：WebFetch 的 Anthropic 域名 preflight 决策
+
+用户明确锁定：Astral 后续实现 `WebFetch` 时，不需要 Claude Code 的 Anthropic 域名 preflight，必须直接砍掉。
+
+本次检查结果：
+
+- 当前 Astral 代码中没有引入 `api/web/domain_info`、`skipWebFetchPreflight`、`can_fetch` 等 Anthropic WebFetch
+  preflight 残留。
+- 当前仅有 `WebSearch/WebFetch` deferred 记录，以及 `ext/web-search` 被禁用的旧 OpenAI-native 搜索扩展。
+
+后续实现约束：
+
+- `WebFetch` 可以复刻 Claude Code 的模型侧工具形状：`WebFetch({ url, prompt })`。
+- 不允许默认请求 Anthropic `https://api.anthropic.com/api/web/domain_info?...`。
+- 安全边界改由 Astral 本地 provider-neutral 规则负责：
+  - URL 校验。
+  - domain allow/deny/ask 权限。
+  - 禁止内网/metadata/localhost 等高风险目标。
+  - timeout、body size、redirect、cache、content truncation 限制。
+- 抓取后的内容处理不能固定调用 Haiku；应使用 Astral 当前 provider 的 utility/small model，或配置为直接返回 bounded markdown。
+
+### 最新补充 92：v1 功能冻结与收尾标准
+
+用户明确锁定：当前 v1 不再继续扩张工具面，`WebFetch`、`WebSearch` 以及其他新增工具先进入 v1.1/backlog。
+
+v1 收口目标改为：
+
+- 跑通并跑顺现有 Astral 核心链路。
+- 保证同一个国产模型下，Astral 与 Claude Code 的核心 coding/terminal agentic 轨迹可对比。
+- 优先做真实任务验收，而不是继续扣字符串和非核心残留。
+- 使用 SWE-bench Lite/Verified 小样本或等价真实仓库 bugfix 任务，比较同一模型在 Astral 与 Claude Code 下的完成率、工具轨迹、失败原因和 terminal 体验。
+- v1 完成标准是“现有能力稳定可用 + 真实端到端测试可跑 + 形状对比报告明确”，而不是“Claude Code 官方工具全集复刻”。
+
+当前 v1 scope：
+
+- 保留：provider-neutral `/v1/chat/completions` 与 `/anthropic`，核心 Claude-ish coding tools，Codex terminal/exec-server/PTY/sandbox/approval/compact/Plan/Goal 骨架。
+- 不新增：`WebFetch`、`WebSearch`、LSP、Cron、Worktree、Team、Notebook、PowerShell、Workflow 等 deferred 工具。
+- 收尾优先级：
+  1. 现有功能 smoke 和真实 E2E。
+  2. SWE-bench/真实 bugfix 小样本对比。
+  3. Astral vs Claude Code 真实 trajectory 形状报告。
+  4. 只修测试中暴露的 blocker 或明显影响模型手感的问题。
+
+### 最新补充 93：Tool Schema 正向提示原则
+
+用户明确锁定：Astral 的 tool schema 应尽量避免负面提示词。模型可见 schema 应通过工具名、字段名、
+required 字段、enum 值和简短正向描述表达正确调用路径，而不是在 description 里反复写错误字段或禁令。
+
+原则：
+
+- 优先靠字段命名解决混淆。
+- 描述只写正向用途和正确来源。
+- 如果模型容易串味，优先改字段名、拆工具或收紧 schema，而不是补充负面提示。
+- 运行时可以严格报错，但 model-visible schema 尽量不暴露错误字段名。
+- 安全边界、破坏性操作、权限审批可以保留必要约束，但不应污染普通工具 schema 的调用语法。
+
+本次对应修正：
+
+- 后台终端任务工具统一强化 `task_id` 正向语法。
+- 不在 `StopBackgroundTask` 描述里写 `target`、`session_id`、`process_id` 等错误字段名。
+- subagent 的 `target` 暂不改名；v1 不再扩大非核心 schema 改造范围。
