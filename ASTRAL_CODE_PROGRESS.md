@@ -6195,3 +6195,37 @@ All checks passed!
   `trajectory_capture_proxy.py`，再由 proxy 转发到真实 provider。
 - 当前 shell 环境没有 `DEEPSEEK_API_KEY` / `ASTRAL_API_KEY` / `ANTHROPIC_API_KEY`。
   为避免把用户聊天里发过的 key 写进命令、临时文件或日志，本轮没有直接用明文 key 跑真实 Claude Code 双抓。
+
+## 最新补充 89：最终验收 runner 落地
+
+本轮新增 `scripts/astral_acceptance.py`，把最终收口测试变成可复跑入口：
+
+- 无 secret 时跑本地 smoke：`astral --version`、`mcp-server --help`、`plugin list`、trajectory 脚本编译。
+- 有 `ASTRAL_API_KEY` 或 `DEEPSEEK_API_KEY` 时，自动用临时 `ASTRAL_HOME` 和 capture proxy 跑：
+  - DeepSeek `/v1/chat/completions` golden code task。
+  - DeepSeek `/anthropic` golden code task。
+  - terminal agentic task：持续输出、无输出后台任务、交互 stdin、后台任务 list/stop。
+  - `chat-summary.json` / `anthropic-summary.json` request trajectory summary。
+- 可选 `--run-claude` 抓 Claude Code 参考轨迹；可选 `--run-rust-smokes` 跑定向 Rust 集成 smoke。
+- 脚本只把 env var 名写进临时 config，不把 API key 写进仓库、报告或命令日志。
+
+已验证：
+
+```bash
+python3 -m py_compile scripts/astral_acceptance.py
+uv run --frozen --project scripts --no-sync --with ruff ruff check scripts/astral_acceptance.py
+scripts/astral_acceptance.py --skip-real
+```
+
+离线报告显示 `astral 0.0.0`、MCP help、plugin list、trajectory compile 均通过；真实 provider P0 因当前
+shell 没有 `ASTRAL_API_KEY` / `DEEPSEEK_API_KEY` 被明确标记为 skipped。
+
+额外修复：`--run-rust-smokes` 中定向 `codex-core` 后台任务集成测试曾超过 240 秒，脚本已改为结构化
+timeout（exit code 124 + report/log），不会再 traceback 打断无人值守验收。没有使用 PID 杀 Rust 测试。
+
+SFT 形状报告口径已固化：最终结论以真实 request trajectory summary 为准，重点比较
+`Bash/Read/Edit/Grep/Glob` 工具循环、`tool_use -> tool_result` 节奏、coding task 轨迹；刻意差异记录
+Codex local compact、Goal/Plan、approval/sandbox，以及 Astral 的后台任务工具体系。
+
+下一步：用户在 shell 里 export key 后运行 `scripts/astral_acceptance.py --run-claude`，再根据
+`acceptance-report.md`、`chat-summary.json`、`anthropic-summary.json` 和 Claude diff 写最终中文 SFT 形状报告。
