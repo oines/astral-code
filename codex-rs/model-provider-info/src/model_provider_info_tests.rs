@@ -194,6 +194,20 @@ provider_flavor = "deepseek"
 }
 
 #[test]
+fn test_provider_flavor_serializes_to_config_wire_values() {
+    let provider = ModelProviderInfo {
+        provider_flavor: Some(ProviderFlavor::DeepSeek),
+        ..Default::default()
+    };
+
+    let serialized = toml::to_string(&provider).unwrap();
+    let parsed: ModelProviderInfo = toml::from_str(&serialized).unwrap();
+
+    assert!(serialized.contains(r#"provider_flavor = "deepseek""#));
+    assert_eq!(parsed, provider);
+}
+
+#[test]
 fn test_infer_provider_flavor_from_name_or_base_url() {
     let cases = [
         (

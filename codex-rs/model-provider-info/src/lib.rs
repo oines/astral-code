@@ -114,17 +114,23 @@ impl<'de> Deserialize<'de> for WireApi {
 #[serde(rename_all = "snake_case")]
 pub enum ProviderFlavor {
     /// Plain OpenAI-compatible provider. Astral does not send private reasoning fields.
+    #[serde(rename = "generic_openai")]
     #[default]
     GenericOpenAi,
     /// DeepSeek-compatible reasoning fields and cache usage.
+    #[serde(rename = "deepseek")]
     DeepSeek,
     /// OpenRouter gateway-specific reasoning object.
+    #[serde(rename = "openrouter")]
     OpenRouter,
     /// Providers such as DashScope/Qwen that use an `enable_thinking` switch.
+    #[serde(rename = "enable_thinking")]
     EnableThinking,
     /// Providers that use a `thinking.type` switch.
+    #[serde(rename = "thinking_type")]
     ThinkingType,
     /// MiniMax-compatible reasoning fields.
+    #[serde(rename = "minimax")]
     MiniMax,
 }
 

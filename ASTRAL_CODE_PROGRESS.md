@@ -6511,3 +6511,70 @@ P0 验收目标。
 - 当前大头是 `codex-rs/target/debug/incremental`，约 19G。
 - 暂时没有清理它，因为会显著影响后续 Rust 增量编译速度。
 - 如果磁盘继续下降到 8-10G 以下，再考虑按需清理部分构建缓存。
+
+### 最新补充 95：Mini SWE-bench 风格真实对比 smoke
+
+根据用户要求，开始从“功能实现”转向“真实任务验收”。考虑到官方 SWE-bench 需要数据集、Docker
+镜像和较多磁盘空间，而当前机器只有约 13G 可用空间，本轮先实现并运行轻量 mini SWE-bench 风格 smoke：
+
+- 新增脚本：`scripts/astral_swe_smoke.py`。
+- 脚本会创建临时小仓库，包含确定失败的 unittest。
+- 同一任务分别交给：
+  - Astral：`/v1/chat/completions`，DeepSeek official，`deepseek-v4-pro`。
+  - Claude Code：`ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic/v1`，同样使用
+    `deepseek-v4-pro`。
+- 每个 agent 都从干净 git fixture 开始。
+- 记录 before/after tests、agent exit code、耗时、最终 git diff 和日志。
+- 报告写入 `.cache/swe-smoke-*`，不会写入 API key。
+
+真实结果：
+
+- 单任务 smoke：`median_even`
+  - Astral：PASS，16.13s。
+  - Claude Code：PASS，18.76s。
+- 双任务 smoke：`median_even` + `duration_parser`
+  - Astral：2/2 PASS，平均 19.74s。
+  - Claude Code：2/2 PASS，平均 21.28s。
+- 报告目录：
+  - `.cache/swe-smoke-20260613-211241`
+  - `.cache/swe-smoke-20260613-211350`
+
+观察结论：
+
+- 这个样本太小，不能当作正式 SWE-bench 分数，但已经证明同一国产模型下：
+  - Astral 的 `/v1/chat/completions` 主线能完成完整 bugfix 闭环。
+  - Claude Code 也能通过 DeepSeek Anthropic-compatible 入口完成同任务。
+  - 两者都能自主跑测试、定位 bug、修改文件、复跑测试并收束。
+- 轨迹形状上：
+  - Claude Code 的 stream-json 清晰显示 `Bash -> Read -> Edit -> Bash`。
+  - Astral 的 JSONL 明显显示 command execution 和 agent messages，但文件编辑类事件没有同等清晰地暴露在
+    当前 `exec --json` 输出中；这不影响任务成功，但会影响后续“轨迹形状 diff”报告质量。
+  - Astral 的命令执行路径体现出 Codex 骨架优势：命令 item 有 started/completed、aggregated output、
+    exit code、status。
+- 费用/cache 观察：
+  - Claude Code stream-json 显示 DeepSeek cache read token 很高，说明 Anthropic-compatible 入口支持缓存读。
+  - Astral 本轮 usage 也显示大量 cached input tokens，但总输入上下文明显偏大；后续需要继续观察
+    context shape 是否有不必要膨胀。
+
+本轮发现并修复的 blocker：
+
+- 显式配置 `provider_flavor = "deepseek"` 时，配置层 roundtrip 会把 Rust enum `DeepSeek` 序列化成
+  `deep_seek`，而反序列化只接受 `deepseek`，导致 Astral 还没进模型就失败。
+- 已修复：
+  - 为 `ProviderFlavor` 各 variant 显式加 serde wire rename。
+  - 增加 `test_provider_flavor_serializes_to_config_wire_values`，防止配置 wire value 再次漂移。
+- 验证：
+  - `just fmt` 已运行。
+  - `just test -p codex-model-provider-info` 通过，26 passed。
+- 注意：
+  - 后续 `cargo build -p codex-cli --bin astral` 曾在本地 `rustc codex-api` 阶段长时间 0% CPU 卡住，
+    为继续验收已用 Ctrl-C 中断。
+  - 本轮 mini SWE smoke 使用脚本中更贴近目标用户体验的配置：不显式写 `provider_flavor`，
+    让 Astral 通过 provider/base URL 自动识别 DeepSeek。
+
+下一步建议：
+
+1. 把 mini SWE smoke 扩成 5-10 个小样本，但仍避免官方 SWE-bench 大下载。
+2. 增加 trajectory capture proxy 到 `astral_swe_smoke.py`，拿到模型 API 真实请求形状，而不是只看 CLI JSONL。
+3. 改善 Astral `exec --json` 对文件编辑类 tool/event 的可见性，方便与 Claude Code stream-json 对比。
+4. 在磁盘空间更充足时，再跑官方 SWE-bench Lite/Verified 小样本或接入现成 harness。
