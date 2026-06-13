@@ -304,6 +304,7 @@ mod tests {
             auth: None,
             aws: None,
             wire_api: WireApi::Responses,
+            provider_flavor: None,
             query_params: None,
             request_body: None,
             request_body_remove: Vec::new(),

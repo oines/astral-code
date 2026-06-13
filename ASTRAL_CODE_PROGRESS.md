@@ -6438,3 +6438,76 @@ required 字段、enum 值和简短正向描述表达正确调用路径，而不
 - 后台终端任务工具统一强化 `task_id` 正向语法。
 - 不在 `StopBackgroundTask` 描述里写 `target`、`session_id`、`process_id` 等错误字段名。
 - subagent 的 `target` 暂不改名；v1 不再扩大非核心 schema 改造范围。
+
+### 最新补充 94：国产 `/v1/chat/completions` 主线与模型能力 cache 落地
+
+本轮根据用户最新收口计划，正式把 Astral v1 主线压到 OpenAI-compatible
+`/v1/chat/completions`。`/anthropic` 保留为 experimental/best-effort，不再作为国产模型主路径或
+P0 验收目标。
+
+已完成改动：
+
+- 新增 provider flavor 概念：
+  - `generic_openai`
+  - `deepseek`
+  - `openrouter`
+  - `enable_thinking`
+  - `thinking_type`
+  - `minimax`
+- `wire_api` 仍表示外层协议；`provider_flavor` 表示同一 `/v1/chat/completions` 外壳里的厂商方言。
+- 用户可在 provider 配置里手动写 `provider_flavor`；未写时 Astral 会按 provider name/base_url 推断：
+  - DeepSeek -> `deepseek`
+  - OpenRouter -> `openrouter`
+  - DashScope/Qwen/aliyuncs -> `enable_thinking`
+  - GLM/Kimi/Moonshot/MiMo/Z.ai/BigModel -> `thinking_type`
+  - MiniMax -> `minimax`
+  - 其他 -> `generic_openai`
+- provider flavor 通过 Agent IR 的内部 metadata 传给 chat-completions adapter，不进入模型可见
+  messages/tools，也不会污染历史上下文。
+- chat-completions request shaping 已覆盖：
+  - DeepSeek：`thinking.type` + `reasoning_effort`。
+  - Qwen/DashScope 类：`enable_thinking`。
+  - GLM/Kimi/MiMo 类：`thinking: { type: ... }`。
+  - MiniMax：`thinking.type` + `reasoning_split`。
+  - OpenRouter：`reasoning` object。
+  - generic OpenAI-compatible：不主动发送私有 thinking 字段。
+- 用户 `request_body` / `request_body_remove` 仍然最后应用，所以手动 override 永远高于自动 shaping。
+- chat-completions stream parser 增补 `reasoning_details` -> Astral internal reasoning delta，用于 MiniMax 等兼容输出。
+- 调整 provider-neutral reasoning config：
+  - 以前只有 `supports_reasoning_summaries = true` 才会向 Agent IR 传 reasoning effort。
+  - 现在 reasoning summary 仍受 summary capability 控制，但 effort 可以独立传递给国产 `/v1` provider flavor。
+
+模型能力 cache：
+
+- 新增 `astral sync-caps` 顶层命令，不使用二级 `astral model sync-caps`。
+- 默认从 LiteLLM public registry 拉取模型 hint。
+- 输出到 `$ASTRAL_HOME/model-capabilities.toml`；也支持 `--output` 和 `--dry-run`。
+- 本地 cache 只保留 chat/completion/responses 相关条目，避免把 image/embedding 等无关能力塞进 Astral。
+- 当前 smoke 结果：
+  - `sync-caps --dry-run` 可生成 TOML。
+  - 临时输出文件测试成功。
+  - 生成 2265 条 chat 类模型能力记录，文件约 728K。
+- runtime 启动时会读取 `$ASTRAL_HOME/model-capabilities.toml`：
+  - 文件不存在时静默跳过。
+  - 文件损坏时只加入 startup warning，不阻止 Astral 启动。
+  - cache 会合并到 `ModelInfo`，为未知/国产模型补 context window、vision、parallel tools、reasoning hint。
+  - 用户手写 override 仍然最后应用，优先级最高。
+
+验证状态：
+
+- `cargo check -p codex-model-provider-info -p codex-agent-protocol -p codex-api -p codex-core` 通过。
+- `cargo check -p codex-models-manager --lib` 通过。
+- `cargo check -p codex-core --lib` 通过。
+- `cargo check -p codex-cli --bin astral` 通过。
+- `cargo build -p codex-cli --bin astral` 通过。
+- `just fmt` 已运行。
+- `just test -p codex-api`：157 passed。
+- `just test -p codex-model-provider-info`：25 passed。
+- `just test -p codex-models-manager`：39 passed。
+- 没有运行全 workspace 测试；当前磁盘只剩约 13G，继续全量测试/Clippy 风险较高。
+
+磁盘状态：
+
+- 当前大头是 `codex-rs/target/debug/incremental`，约 19G。
+- 暂时没有清理它，因为会显著影响后续 Rust 增量编译速度。
+- 如果磁盘继续下降到 8-10G 以下，再考虑按需清理部分构建缓存。

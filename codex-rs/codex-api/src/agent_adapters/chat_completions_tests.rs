@@ -6,6 +6,8 @@ use codex_agent_protocol::ContentBlock;
 use codex_agent_protocol::ContentDelta;
 use codex_agent_protocol::ImageSource;
 use codex_agent_protocol::MessageRole;
+use codex_agent_protocol::PROVIDER_FLAVOR_METADATA_KEY;
+use codex_agent_protocol::ReasoningConfig;
 use codex_agent_protocol::RequestMetadata;
 use codex_agent_protocol::StopReason;
 use codex_agent_protocol::TokenUsage;
@@ -263,6 +265,217 @@ fn request_provider_null_override_removes_default_field() {
                 "role": "user",
                 "content": "hello"
             }]
+        })
+    );
+}
+
+#[test]
+fn request_applies_deepseek_reasoning_shape() {
+    let request = AgentRequest {
+        model: "deepseek-v4-pro".to_string(),
+        stream: false,
+        reasoning: Some(ReasoningConfig {
+            effort: Some("xhigh".to_string()),
+            summary: None,
+        }),
+        metadata: RequestMetadata {
+            provider: BTreeMap::from([(
+                PROVIDER_FLAVOR_METADATA_KEY.to_string(),
+                json!("deepseek"),
+            )]),
+            ..RequestMetadata::default()
+        },
+        ..AgentRequest::default()
+    };
+
+    assert_eq!(
+        to_chat_completions_request(&request, ChatCompletionsOptions { max_tokens: None }),
+        json!({
+            "model": "deepseek-v4-pro",
+            "stream": false,
+            "messages": [],
+            "thinking": { "type": "enabled" },
+            "reasoning_effort": "max"
+        })
+    );
+}
+
+#[test]
+fn request_applies_enable_thinking_shape() {
+    let request = AgentRequest {
+        model: "qwen3-coder".to_string(),
+        stream: false,
+        reasoning: Some(ReasoningConfig {
+            effort: Some("none".to_string()),
+            summary: None,
+        }),
+        metadata: RequestMetadata {
+            provider: BTreeMap::from([(
+                PROVIDER_FLAVOR_METADATA_KEY.to_string(),
+                json!("enable_thinking"),
+            )]),
+            ..RequestMetadata::default()
+        },
+        ..AgentRequest::default()
+    };
+
+    assert_eq!(
+        to_chat_completions_request(&request, ChatCompletionsOptions { max_tokens: None }),
+        json!({
+            "model": "qwen3-coder",
+            "stream": false,
+            "messages": [],
+            "enable_thinking": false
+        })
+    );
+}
+
+#[test]
+fn request_applies_thinking_type_shape() {
+    let request = AgentRequest {
+        model: "glm-5.1".to_string(),
+        stream: false,
+        reasoning: Some(ReasoningConfig {
+            effort: Some("high".to_string()),
+            summary: None,
+        }),
+        metadata: RequestMetadata {
+            provider: BTreeMap::from([(
+                PROVIDER_FLAVOR_METADATA_KEY.to_string(),
+                json!("thinking_type"),
+            )]),
+            ..RequestMetadata::default()
+        },
+        ..AgentRequest::default()
+    };
+
+    assert_eq!(
+        to_chat_completions_request(&request, ChatCompletionsOptions { max_tokens: None }),
+        json!({
+            "model": "glm-5.1",
+            "stream": false,
+            "messages": [],
+            "thinking": { "type": "enabled" }
+        })
+    );
+}
+
+#[test]
+fn request_applies_minimax_reasoning_shape() {
+    let request = AgentRequest {
+        model: "MiniMax-M2".to_string(),
+        stream: false,
+        reasoning: Some(ReasoningConfig {
+            effort: Some("high".to_string()),
+            summary: None,
+        }),
+        metadata: RequestMetadata {
+            provider: BTreeMap::from([(
+                PROVIDER_FLAVOR_METADATA_KEY.to_string(),
+                json!("minimax"),
+            )]),
+            ..RequestMetadata::default()
+        },
+        ..AgentRequest::default()
+    };
+
+    assert_eq!(
+        to_chat_completions_request(&request, ChatCompletionsOptions { max_tokens: None }),
+        json!({
+            "model": "MiniMax-M2",
+            "stream": false,
+            "messages": [],
+            "thinking": { "type": "enabled" },
+            "reasoning_split": true
+        })
+    );
+}
+
+#[test]
+fn request_applies_openrouter_reasoning_shape() {
+    let request = AgentRequest {
+        model: "deepseek/deepseek-chat-v3.1".to_string(),
+        stream: false,
+        reasoning: Some(ReasoningConfig {
+            effort: Some("high".to_string()),
+            summary: None,
+        }),
+        metadata: RequestMetadata {
+            provider: BTreeMap::from([(
+                PROVIDER_FLAVOR_METADATA_KEY.to_string(),
+                json!("openrouter"),
+            )]),
+            ..RequestMetadata::default()
+        },
+        ..AgentRequest::default()
+    };
+
+    assert_eq!(
+        to_chat_completions_request(&request, ChatCompletionsOptions { max_tokens: None }),
+        json!({
+            "model": "deepseek/deepseek-chat-v3.1",
+            "stream": false,
+            "messages": [],
+            "reasoning": { "effort": "high" }
+        })
+    );
+}
+
+#[test]
+fn request_keeps_generic_openai_reasoning_private_fields_off() {
+    let request = AgentRequest {
+        model: "compatible-model".to_string(),
+        stream: false,
+        reasoning: Some(ReasoningConfig {
+            effort: Some("high".to_string()),
+            summary: None,
+        }),
+        metadata: RequestMetadata {
+            provider: BTreeMap::from([(
+                PROVIDER_FLAVOR_METADATA_KEY.to_string(),
+                json!("generic_openai"),
+            )]),
+            ..RequestMetadata::default()
+        },
+        ..AgentRequest::default()
+    };
+
+    assert_eq!(
+        to_chat_completions_request(&request, ChatCompletionsOptions { max_tokens: None }),
+        json!({
+            "model": "compatible-model",
+            "stream": false,
+            "messages": []
+        })
+    );
+}
+
+#[test]
+fn request_provider_override_can_clear_flavor_defaults() {
+    let request = AgentRequest {
+        model: "deepseek-v4-pro".to_string(),
+        stream: false,
+        reasoning: Some(ReasoningConfig {
+            effort: Some("high".to_string()),
+            summary: None,
+        }),
+        metadata: RequestMetadata {
+            provider: BTreeMap::from([
+                (PROVIDER_FLAVOR_METADATA_KEY.to_string(), json!("deepseek")),
+                ("thinking".to_string(), json!(null)),
+                ("reasoning_effort".to_string(), json!(null)),
+            ]),
+            ..RequestMetadata::default()
+        },
+        ..AgentRequest::default()
+    };
+
+    assert_eq!(
+        to_chat_completions_request(&request, ChatCompletionsOptions { max_tokens: None }),
+        json!({
+            "model": "deepseek-v4-pro",
+            "stream": false,
+            "messages": []
         })
     );
 }
@@ -531,6 +744,51 @@ fn stream_chunk_maps_deepseek_reasoning_content_delta() {
                 index: 1,
                 delta: ContentDelta::Reasoning {
                     text: "I should inspect the repo first.".to_string(),
+                },
+            },
+        ]
+    );
+}
+
+#[test]
+fn stream_chunk_maps_reasoning_details_delta() {
+    assert_eq!(
+        parse_stream_chunk(json!({
+            "id": "chatcmpl_reasoning_details",
+            "model": "MiniMax-M2",
+            "choices": [{
+                "delta": {
+                    "role": "assistant",
+                    "reasoning_details": [
+                        { "text": "I should inspect first." },
+                        { "content": "Then patch the file." },
+                        "Finally rerun the test."
+                    ]
+                }
+            }]
+        }))
+        .expect("parse stream chunk"),
+        vec![
+            AgentStreamEvent::MessageStart {
+                id: Some("chatcmpl_reasoning_details".to_string()),
+                model: Some("MiniMax-M2".to_string()),
+            },
+            AgentStreamEvent::ContentBlockDelta {
+                index: 1,
+                delta: ContentDelta::Reasoning {
+                    text: "I should inspect first.".to_string(),
+                },
+            },
+            AgentStreamEvent::ContentBlockDelta {
+                index: 1,
+                delta: ContentDelta::Reasoning {
+                    text: "Then patch the file.".to_string(),
+                },
+            },
+            AgentStreamEvent::ContentBlockDelta {
+                index: 1,
+                delta: ContentDelta::Reasoning {
+                    text: "Finally rerun the test.".to_string(),
                 },
             },
         ]

@@ -22,6 +22,7 @@ base_url = "http://localhost:11434/v1"
         auth: None,
         aws: None,
         wire_api: WireApi::ChatCompletions,
+        provider_flavor: None,
         query_params: None,
         request_body: None,
         request_body_remove: Vec::new(),
@@ -56,6 +57,7 @@ query_params = { api-version = "2025-04-01-preview" }
         auth: None,
         aws: None,
         wire_api: WireApi::ChatCompletions,
+        provider_flavor: None,
         query_params: Some(maplit::hashmap! {
             "api-version".to_string() => "2025-04-01-preview".to_string(),
         }),
@@ -93,6 +95,7 @@ env_http_headers = { "X-Example-Env-Header" = "EXAMPLE_ENV_VAR" }
         auth: None,
         aws: None,
         wire_api: WireApi::ChatCompletions,
+        provider_flavor: None,
         query_params: None,
         request_body: None,
         request_body_remove: Vec::new(),
@@ -173,6 +176,87 @@ wire_api = "chat_completions"
 }
 
 #[test]
+fn test_deserialize_provider_flavor_override() {
+    let provider_toml = r#"
+name = "Custom DeepSeek Gateway"
+base_url = "https://example.com/v1"
+provider_flavor = "deepseek"
+        "#;
+
+    let provider: ModelProviderInfo = toml::from_str(provider_toml).unwrap();
+
+    assert_eq!(provider.provider_flavor, Some(ProviderFlavor::DeepSeek));
+    assert_eq!(
+        provider.effective_provider_flavor(),
+        ProviderFlavor::DeepSeek
+    );
+    assert_eq!(ProviderFlavor::DeepSeek.to_string(), "deepseek");
+}
+
+#[test]
+fn test_infer_provider_flavor_from_name_or_base_url() {
+    let cases = [
+        (
+            ModelProviderInfo {
+                name: "DeepSeek".to_string(),
+                base_url: Some("https://api.deepseek.com/v1".to_string()),
+                ..ModelProviderInfo::default()
+            },
+            ProviderFlavor::DeepSeek,
+        ),
+        (
+            ModelProviderInfo {
+                name: "OpenRouter".to_string(),
+                base_url: Some("https://openrouter.ai/api/v1".to_string()),
+                ..ModelProviderInfo::default()
+            },
+            ProviderFlavor::OpenRouter,
+        ),
+        (
+            ModelProviderInfo {
+                name: "DashScope Qwen".to_string(),
+                base_url: Some("https://dashscope.aliyuncs.com/compatible-mode/v1".to_string()),
+                ..ModelProviderInfo::default()
+            },
+            ProviderFlavor::EnableThinking,
+        ),
+        (
+            ModelProviderInfo {
+                name: "GLM".to_string(),
+                base_url: Some("https://open.bigmodel.cn/api/paas/v4".to_string()),
+                ..ModelProviderInfo::default()
+            },
+            ProviderFlavor::ThinkingType,
+        ),
+        (
+            ModelProviderInfo {
+                name: "MiniMax".to_string(),
+                base_url: Some("https://api.minimax.chat/v1".to_string()),
+                ..ModelProviderInfo::default()
+            },
+            ProviderFlavor::MiniMax,
+        ),
+    ];
+
+    assert_eq!(
+        cases
+            .into_iter()
+            .map(|(provider, expected)| (provider.effective_provider_flavor(), expected))
+            .collect::<Vec<_>>(),
+        vec![
+            (ProviderFlavor::DeepSeek, ProviderFlavor::DeepSeek),
+            (ProviderFlavor::OpenRouter, ProviderFlavor::OpenRouter),
+            (
+                ProviderFlavor::EnableThinking,
+                ProviderFlavor::EnableThinking
+            ),
+            (ProviderFlavor::ThinkingType, ProviderFlavor::ThinkingType),
+            (ProviderFlavor::MiniMax, ProviderFlavor::MiniMax),
+        ]
+    );
+}
+
+#[test]
 fn test_deserialize_chat_wire_api_shows_helpful_error() {
     let provider_toml = r#"
 name = "OpenAI using Chat Completions"
@@ -205,6 +289,7 @@ fn test_create_astral_provider_defaults_to_chat_completions() {
             auth: None,
             aws: None,
             wire_api: WireApi::ChatCompletions,
+            provider_flavor: None,
             query_params: None,
             request_body: None,
             request_body_remove: Vec::new(),
@@ -329,6 +414,7 @@ fn test_create_amazon_bedrock_provider() {
                 region: None,
             }),
             wire_api: WireApi::Responses,
+            provider_flavor: None,
             query_params: None,
             request_body: None,
             request_body_remove: Vec::new(),

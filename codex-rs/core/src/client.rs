@@ -1215,6 +1215,14 @@ impl ModelClientSession {
                 summary,
                 service_tier: service_tier.clone(),
                 prompt_cache_key: self.client.prompt_cache_key(),
+                provider_flavor: Some(
+                    self.client
+                        .state
+                        .provider
+                        .info()
+                        .effective_provider_flavor()
+                        .to_string(),
+                ),
                 provider_request_body: self.client.state.provider.info().request_body.clone(),
                 provider_request_body_remove: self
                     .client

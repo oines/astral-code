@@ -177,6 +177,7 @@ fn model_provider_from_proto(
             .transpose()?,
         aws: None,
         wire_api,
+        provider_flavor: None,
         query_params: provider.query_params.map(|map| map.values),
         request_body: None,
         request_body_remove: Vec::new(),
@@ -206,6 +207,7 @@ fn model_provider_to_proto(
         auth,
         aws: _,
         wire_api,
+        provider_flavor: _,
         query_params,
         request_body: _,
         request_body_remove: _,
@@ -228,6 +230,7 @@ fn model_provider_to_proto(
         experimental_bearer_token,
         auth: auth.map(model_provider_auth_to_proto),
         wire_api: proto_wire_api(wire_api).into(),
+        provider_flavor: None,
         query_params: query_params.map(proto_string_map),
         http_headers: http_headers.map(proto_string_map),
         env_http_headers: env_http_headers.map(proto_string_map),
@@ -441,6 +444,7 @@ mod tests {
                                 cwd: workspace_cwd,
                             }),
                             wire_api: proto::WireApi::Responses.into(),
+                            provider_flavor: None,
                             query_params: Some(proto::StringMap {
                                 values: HashMap::from([(
                                     "api-version".to_string(),
@@ -510,6 +514,7 @@ mod tests {
                 cwd: workspace_dir(),
             }),
             wire_api: WireApi::Responses,
+            provider_flavor: None,
             query_params: Some(HashMap::from([(
                 "api-version".to_string(),
                 "2026-04-16".to_string(),

@@ -54,6 +54,14 @@ const AMAZON_BEDROCK_MANTLE_CLIENT_AGENT_HEADER: &str = "x-amzn-mantle-client-ag
 const AMAZON_BEDROCK_MANTLE_CLIENT_AGENT_VALUE: &str = "codex";
 const CHAT_WIRE_API_REMOVED_ERROR: &str = "`wire_api = \"chat\"` is no longer supported.\nHow to fix: set `wire_api = \"chat_completions\"` in your provider config.";
 const WIRE_API_VARIANTS: &[&str] = &["responses", "anthropic_messages", "chat_completions"];
+const PROVIDER_FLAVOR_VARIANTS: &[&str] = &[
+    "generic_openai",
+    "deepseek",
+    "openrouter",
+    "enable_thinking",
+    "thinking_type",
+    "minimax",
+];
 pub const LEGACY_OLLAMA_CHAT_PROVIDER_ID: &str = "ollama-chat";
 pub const OLLAMA_CHAT_PROVIDER_REMOVED_ERROR: &str = "`ollama-chat` is no longer supported.\nHow to fix: replace `ollama-chat` with `ollama` in `model_provider`, `oss_provider`, or `--local-provider`.\nMore info: https://github.com/openai/codex/discussions/7782";
 
@@ -97,6 +105,64 @@ impl<'de> Deserialize<'de> for WireApi {
     }
 }
 
+/// OpenAI-compatible `/v1/chat/completions` provider dialect.
+///
+/// `wire_api` selects the outer protocol. `ProviderFlavor` selects the small
+/// provider-specific request/stream differences inside that protocol, such as
+/// reasoning controls and usage accounting.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderFlavor {
+    /// Plain OpenAI-compatible provider. Astral does not send private reasoning fields.
+    #[default]
+    GenericOpenAi,
+    /// DeepSeek-compatible reasoning fields and cache usage.
+    DeepSeek,
+    /// OpenRouter gateway-specific reasoning object.
+    OpenRouter,
+    /// Providers such as DashScope/Qwen that use an `enable_thinking` switch.
+    EnableThinking,
+    /// Providers that use a `thinking.type` switch.
+    ThinkingType,
+    /// MiniMax-compatible reasoning fields.
+    MiniMax,
+}
+
+impl fmt::Display for ProviderFlavor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let value = match self {
+            Self::GenericOpenAi => "generic_openai",
+            Self::DeepSeek => "deepseek",
+            Self::OpenRouter => "openrouter",
+            Self::EnableThinking => "enable_thinking",
+            Self::ThinkingType => "thinking_type",
+            Self::MiniMax => "minimax",
+        };
+        f.write_str(value)
+    }
+}
+
+impl<'de> Deserialize<'de> for ProviderFlavor {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        match value.as_str() {
+            "generic_openai" => Ok(Self::GenericOpenAi),
+            "deepseek" => Ok(Self::DeepSeek),
+            "openrouter" => Ok(Self::OpenRouter),
+            "enable_thinking" => Ok(Self::EnableThinking),
+            "thinking_type" => Ok(Self::ThinkingType),
+            "minimax" => Ok(Self::MiniMax),
+            _ => Err(serde::de::Error::unknown_variant(
+                &value,
+                PROVIDER_FLAVOR_VARIANTS,
+            )),
+        }
+    }
+}
+
 /// Serializable representation of a provider definition.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -123,6 +189,9 @@ pub struct ModelProviderInfo {
     /// Which wire protocol this provider expects.
     #[serde(default)]
     pub wire_api: WireApi,
+    /// Optional provider dialect within the selected wire protocol.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_flavor: Option<ProviderFlavor>,
     /// Optional query parameters to append to the base URL.
     pub query_params: Option<HashMap<String, String>>,
     /// Additional JSON body fields to merge into provider-neutral agent requests.
@@ -345,6 +414,46 @@ impl ModelProviderInfo {
             .unwrap_or(Duration::from_millis(DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS))
     }
 
+    /// Effective provider dialect for OpenAI-compatible chat completions.
+    pub fn effective_provider_flavor(&self) -> ProviderFlavor {
+        self.provider_flavor
+            .unwrap_or_else(|| self.infer_provider_flavor())
+    }
+
+    fn infer_provider_flavor(&self) -> ProviderFlavor {
+        let haystack = format!(
+            "{} {}",
+            self.name.to_ascii_lowercase(),
+            self.base_url
+                .as_deref()
+                .unwrap_or_default()
+                .to_ascii_lowercase()
+        );
+
+        if haystack.contains("deepseek") {
+            ProviderFlavor::DeepSeek
+        } else if haystack.contains("openrouter") {
+            ProviderFlavor::OpenRouter
+        } else if haystack.contains("dashscope")
+            || haystack.contains("qwen")
+            || haystack.contains("aliyuncs.com")
+        {
+            ProviderFlavor::EnableThinking
+        } else if haystack.contains("minimax") {
+            ProviderFlavor::MiniMax
+        } else if haystack.contains("bigmodel")
+            || haystack.contains("z.ai")
+            || haystack.contains("glm")
+            || haystack.contains("kimi")
+            || haystack.contains("moonshot")
+            || haystack.contains("mimo")
+        {
+            ProviderFlavor::ThinkingType
+        } else {
+            ProviderFlavor::GenericOpenAi
+        }
+    }
+
     pub fn create_astral_provider() -> ModelProviderInfo {
         let base_url = std::env::var(ASTRAL_BASE_URL_ENV_VAR)
             .ok()
@@ -362,6 +471,7 @@ impl ModelProviderInfo {
             auth: None,
             aws: None,
             wire_api: WireApi::ChatCompletions,
+            provider_flavor: None,
             query_params: None,
             request_body: None,
             request_body_remove: Vec::new(),
@@ -391,6 +501,7 @@ impl ModelProviderInfo {
             auth: None,
             aws: None,
             wire_api: WireApi::Responses,
+            provider_flavor: None,
             query_params: None,
             request_body: None,
             request_body_remove: Vec::new(),
@@ -422,6 +533,7 @@ impl ModelProviderInfo {
             auth: None,
             aws: None,
             wire_api: WireApi::AnthropicMessages,
+            provider_flavor: None,
             query_params: None,
             request_body: None,
             request_body_remove: Vec::new(),
@@ -458,6 +570,7 @@ impl ModelProviderInfo {
                 region: None,
             })),
             wire_api: WireApi::Responses,
+            provider_flavor: None,
             query_params: None,
             request_body: None,
             request_body_remove: Vec::new(),
@@ -575,6 +688,7 @@ pub fn create_oss_provider_with_base_url(base_url: &str, wire_api: WireApi) -> M
         auth: None,
         aws: None,
         wire_api,
+        provider_flavor: None,
         query_params: None,
         request_body: None,
         request_body_remove: Vec::new(),

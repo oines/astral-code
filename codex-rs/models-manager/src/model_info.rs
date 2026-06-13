@@ -21,6 +21,13 @@ const LOCAL_PRAGMATIC_TEMPLATE: &str = "You are a deeply pragmatic, effective so
 const PERSONALITY_PLACEHOLDER: &str = "{{ personality }}";
 
 pub fn with_config_overrides(mut model: ModelInfo, config: &ModelsManagerConfig) -> ModelInfo {
+    if let Some(capability) = config
+        .model_capabilities
+        .as_ref()
+        .and_then(|cache| cache.lookup(&model.slug))
+    {
+        capability.apply_to_model_info(&mut model);
+    }
     if let Some(supports_reasoning_summaries) = config.model_supports_reasoning_summaries
         && supports_reasoning_summaries
     {

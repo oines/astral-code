@@ -1,6 +1,8 @@
 use codex_protocol::openai_models::InputModality;
 use codex_protocol::openai_models::ModelsResponse;
 
+use crate::capabilities::ModelCapabilitiesCache;
+
 #[derive(Debug, Clone, Default)]
 pub struct ModelsManagerConfig {
     pub model_context_window: Option<i64>,
@@ -11,4 +13,5 @@ pub struct ModelsManagerConfig {
     pub personality_enabled: bool,
     pub model_supports_reasoning_summaries: Option<bool>,
     pub model_catalog: Option<ModelsResponse>,
+    pub model_capabilities: Option<ModelCapabilitiesCache>,
 }

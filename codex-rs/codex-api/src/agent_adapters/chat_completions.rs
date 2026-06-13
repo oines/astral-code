@@ -6,6 +6,7 @@ use codex_agent_protocol::ContentBlock;
 use codex_agent_protocol::ContentDelta;
 use codex_agent_protocol::ImageSource;
 use codex_agent_protocol::MessageRole;
+use codex_agent_protocol::PROVIDER_FLAVOR_METADATA_KEY;
 use codex_agent_protocol::StopReason;
 use codex_agent_protocol::TokenUsage;
 use codex_agent_protocol::ToolChoice;
@@ -17,6 +18,12 @@ use serde_json::json;
 const TEXT_BLOCK_INDEX: usize = 0;
 const REASONING_BLOCK_INDEX: usize = 1;
 const TOOL_CALL_BLOCK_INDEX_OFFSET: usize = 2;
+const FLAVOR_DEEPSEEK: &str = "deepseek";
+const FLAVOR_ENABLE_THINKING: &str = "enable_thinking";
+const FLAVOR_GENERIC_OPENAI: &str = "generic_openai";
+const FLAVOR_MINIMAX: &str = "minimax";
+const FLAVOR_OPENROUTER: &str = "openrouter";
+const FLAVOR_THINKING_TYPE: &str = "thinking_type";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChatCompletionsOptions {
@@ -70,6 +77,7 @@ pub fn to_chat_completions_request(
             Value::Bool(request.parallel_tool_calls),
         );
     }
+    apply_provider_flavor_defaults(&mut body, request);
     apply_provider_body_overrides(&mut body, request);
     remove_tool_control_fields_without_tools(&mut body);
 
@@ -132,6 +140,14 @@ pub fn parse_stream_chunk(
                 index: REASONING_BLOCK_INDEX,
                 delta: ContentDelta::Reasoning {
                     text: reasoning_content.to_string(),
+                },
+            });
+        }
+        for reasoning_text in reasoning_details_texts(delta) {
+            events.push(AgentStreamEvent::ContentBlockDelta {
+                index: REASONING_BLOCK_INDEX,
+                delta: ContentDelta::Reasoning {
+                    text: reasoning_text,
                 },
             });
         }
@@ -494,11 +510,113 @@ fn tool_choice_to_chat(tool_choice: &ToolChoice) -> Value {
 
 fn apply_provider_body_overrides(body: &mut Map<String, Value>, request: &AgentRequest) {
     for (key, value) in &request.metadata.provider {
+        if key == PROVIDER_FLAVOR_METADATA_KEY {
+            continue;
+        }
         if value.is_null() {
             body.remove(key);
         } else {
             body.insert(key.clone(), value.clone());
         }
+    }
+}
+
+fn apply_provider_flavor_defaults(body: &mut Map<String, Value>, request: &AgentRequest) {
+    let provider_flavor = provider_flavor(request);
+    match provider_flavor {
+        FLAVOR_DEEPSEEK => apply_deepseek_reasoning(body, request),
+        FLAVOR_ENABLE_THINKING => apply_enable_thinking_reasoning(body, request),
+        FLAVOR_THINKING_TYPE => apply_thinking_type_reasoning(body, request),
+        FLAVOR_MINIMAX => apply_minimax_reasoning(body, request),
+        FLAVOR_OPENROUTER => apply_openrouter_reasoning(body, request),
+        FLAVOR_GENERIC_OPENAI => {}
+        _ => {}
+    }
+}
+
+fn provider_flavor(request: &AgentRequest) -> &str {
+    request
+        .metadata
+        .provider
+        .get(PROVIDER_FLAVOR_METADATA_KEY)
+        .and_then(Value::as_str)
+        .unwrap_or(FLAVOR_GENERIC_OPENAI)
+}
+
+fn reasoning_effort(request: &AgentRequest) -> Option<&str> {
+    request
+        .reasoning
+        .as_ref()
+        .and_then(|reasoning| reasoning.effort.as_deref())
+}
+
+fn reasoning_is_off(effort: &str) -> bool {
+    matches!(effort, "none" | "off" | "disabled")
+}
+
+fn apply_deepseek_reasoning(body: &mut Map<String, Value>, request: &AgentRequest) {
+    let Some(effort) = reasoning_effort(request) else {
+        return;
+    };
+    if reasoning_is_off(effort) {
+        body.insert("thinking".to_string(), json!({ "type": "disabled" }));
+    } else {
+        body.insert("thinking".to_string(), json!({ "type": "enabled" }));
+        body.insert(
+            "reasoning_effort".to_string(),
+            Value::String(deepseek_reasoning_effort(effort).to_string()),
+        );
+    }
+}
+
+fn deepseek_reasoning_effort(effort: &str) -> &str {
+    match effort {
+        "xhigh" | "max" => "max",
+        "minimal" | "low" | "medium" | "high" => "high",
+        custom => custom,
+    }
+}
+
+fn apply_enable_thinking_reasoning(body: &mut Map<String, Value>, request: &AgentRequest) {
+    let Some(effort) = reasoning_effort(request) else {
+        return;
+    };
+    body.insert(
+        "enable_thinking".to_string(),
+        Value::Bool(!reasoning_is_off(effort)),
+    );
+}
+
+fn apply_thinking_type_reasoning(body: &mut Map<String, Value>, request: &AgentRequest) {
+    let Some(effort) = reasoning_effort(request) else {
+        return;
+    };
+    body.insert(
+        "thinking".to_string(),
+        json!({ "type": if reasoning_is_off(effort) { "disabled" } else { "enabled" } }),
+    );
+}
+
+fn apply_minimax_reasoning(body: &mut Map<String, Value>, request: &AgentRequest) {
+    let Some(effort) = reasoning_effort(request) else {
+        return;
+    };
+    if reasoning_is_off(effort) {
+        body.insert("thinking".to_string(), json!({ "type": "disabled" }));
+    } else {
+        body.insert("thinking".to_string(), json!({ "type": "enabled" }));
+        body.insert("reasoning_split".to_string(), Value::Bool(true));
+    }
+}
+
+fn apply_openrouter_reasoning(body: &mut Map<String, Value>, request: &AgentRequest) {
+    let Some(effort) = reasoning_effort(request) else {
+        return;
+    };
+    if reasoning_is_off(effort) {
+        body.insert("reasoning".to_string(), json!({ "enabled": false }));
+    } else {
+        body.insert("reasoning".to_string(), json!({ "effort": effort }));
     }
 }
 
@@ -626,6 +744,33 @@ fn append_tool_call_delta(
     }
 
     Ok(())
+}
+
+fn reasoning_details_texts(delta: &Value) -> Vec<String> {
+    delta
+        .get("reasoning_details")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(reasoning_detail_text)
+        .collect()
+}
+
+fn reasoning_detail_text(detail: &Value) -> Option<String> {
+    if let Some(text) = detail.get("text").and_then(Value::as_str)
+        && !text.is_empty()
+    {
+        return Some(text.to_string());
+    }
+    if let Some(text) = detail.get("content").and_then(Value::as_str)
+        && !text.is_empty()
+    {
+        return Some(text.to_string());
+    }
+    detail
+        .as_str()
+        .filter(|text| !text.is_empty())
+        .map(str::to_string)
 }
 
 fn stop_reason_from_chat(reason: &str) -> StopReason {

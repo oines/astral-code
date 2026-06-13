@@ -3,6 +3,9 @@ use serde::Serialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
 
+/// Reserved metadata key used to pass the selected provider dialect to wire adapters.
+pub const PROVIDER_FLAVOR_METADATA_KEY: &str = "astral_provider_flavor";
+
 /// Provider-neutral request shape used between Astral's agent runtime and
 /// provider-specific wire adapters.
 ///

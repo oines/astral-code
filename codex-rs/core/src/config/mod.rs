@@ -80,6 +80,8 @@ use codex_model_provider_info::OLLAMA_CHAT_PROVIDER_REMOVED_ERROR;
 use codex_model_provider_info::built_in_model_providers;
 use codex_model_provider_info::merge_configured_model_providers;
 use codex_models_manager::ModelsManagerConfig;
+use codex_models_manager::capabilities::MODEL_CAPABILITIES_FILE_NAME;
+use codex_models_manager::capabilities::ModelCapabilitiesCache;
 use codex_protocol::config_types::AltScreenMode;
 use codex_protocol::config_types::AutoCompactTokenLimitScope;
 use codex_protocol::config_types::Personality;
@@ -928,6 +930,9 @@ pub struct Config {
     /// When set, this replaces the bundled catalog for the current process.
     pub model_catalog: Option<ModelsResponse>,
 
+    /// Optional local model capability hints loaded from `model-capabilities.toml`.
+    pub model_capabilities: Option<ModelCapabilitiesCache>,
+
     /// Optional verbosity control for GPT-5 models (Responses API `text.verbosity`).
     pub model_verbosity: Option<Verbosity>,
 
@@ -1355,6 +1360,7 @@ impl Config {
             personality_enabled: self.features.enabled(Feature::Personality),
             model_supports_reasoning_summaries: self.model_supports_reasoning_summaries,
             model_catalog: self.model_catalog.clone(),
+            model_capabilities: self.model_capabilities.clone(),
         }
     }
 
@@ -1691,6 +1697,37 @@ fn load_model_catalog(
     model_catalog_json
         .map(|path| load_catalog_json(&path))
         .transpose()
+}
+
+fn load_model_capabilities_cache(
+    codex_home: &Path,
+    startup_warnings: &mut Vec<String>,
+) -> Option<ModelCapabilitiesCache> {
+    let path = codex_home.join(MODEL_CAPABILITIES_FILE_NAME);
+    if !path.exists() {
+        return None;
+    }
+    let load_result = std::fs::read_to_string(&path).and_then(|contents| {
+        toml::from_str::<ModelCapabilitiesCache>(&contents).map_err(|err| {
+            std::io::Error::new(
+                ErrorKind::InvalidData,
+                format!(
+                    "failed to parse model capabilities cache `{}`: {err}",
+                    path.display()
+                ),
+            )
+        })
+    });
+    match load_result {
+        Ok(cache) => Some(cache),
+        Err(err) => {
+            startup_warnings.push(format!(
+                "Ignoring model capabilities cache at `{}` because it could not be loaded: {err}",
+                path.display()
+            ));
+            None
+        }
+    }
 }
 
 fn filter_mcp_servers_by_requirements(
@@ -3265,6 +3302,7 @@ impl Config {
 
         let check_for_update_on_startup = cfg.check_for_update_on_startup.unwrap_or(true);
         let model_catalog = load_model_catalog(cfg.model_catalog_json.clone())?;
+        let model_capabilities = load_model_capabilities_cache(&codex_home, &mut startup_warnings);
 
         let log_dir = cfg
             .log_dir
@@ -3520,6 +3558,7 @@ impl Config {
             model_reasoning_summary: cfg.model_reasoning_summary,
             model_supports_reasoning_summaries: cfg.model_supports_reasoning_summaries,
             model_catalog,
+            model_capabilities,
             model_verbosity: cfg.model_verbosity,
             hosted_base_url: cfg.hosted_base_url.unwrap_or_default(),
             apps_mcp_path_override,

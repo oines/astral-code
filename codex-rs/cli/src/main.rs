@@ -46,6 +46,7 @@ mod remote_control_cmd;
 #[cfg(target_os = "windows")]
 mod sandbox_setup;
 mod state_db_recovery;
+mod sync_caps_cmd;
 #[cfg(not(windows))]
 mod wsl_paths;
 
@@ -53,6 +54,7 @@ use crate::mcp_cmd::McpCli;
 use crate::plugin_cmd::PluginCli;
 use crate::plugin_cmd::PluginSubcommand;
 use crate::remote_control_cmd::RemoteControlCommand;
+use crate::sync_caps_cmd::SyncCapsCommand;
 use doctor::DoctorCommand;
 use state_db_recovery as local_state_db;
 
@@ -150,6 +152,10 @@ enum Subcommand {
 
     /// Diagnose local Astral installation, config, auth, and runtime health.
     Doctor(DoctorCommand),
+
+    /// Sync local model capability hints from LiteLLM.
+    #[clap(name = "sync-caps")]
+    SyncCaps(SyncCapsCommand),
 
     /// Run commands within an Astral-provided sandbox.
     Sandbox(HostSandboxArgs),
@@ -1312,6 +1318,14 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
             )
             .await?;
         }
+        Some(Subcommand::SyncCaps(cmd)) => {
+            reject_remote_mode_for_subcommand(
+                root_remote.as_deref(),
+                root_remote_auth_token_env.as_deref(),
+                "sync-caps",
+            )?;
+            sync_caps_cmd::run_sync_caps_command(cmd).await?;
+        }
         Some(Subcommand::Sandbox(mut sandbox_cli)) => {
             #[cfg(target_os = "windows")]
             if let Some(setup_cli) = sandbox_setup::parse_setup_command(&sandbox_cli.command)? {
@@ -1929,7 +1943,8 @@ fn unsupported_subcommand_name_for_strict_config(
         | Some(Subcommand::Archive(_))
         | Some(Subcommand::Unarchive(_))
         | Some(Subcommand::Fork(_))
-        | Some(Subcommand::Doctor(_)) => None,
+        | Some(Subcommand::Doctor(_))
+        | Some(Subcommand::SyncCaps(_)) => None,
         Some(Subcommand::AppServer(app_server)) if app_server.subcommand.is_none() => None,
         Some(Subcommand::AppServer(app_server)) => {
             Some(app_server_subcommand_name(app_server.subcommand.as_ref()))

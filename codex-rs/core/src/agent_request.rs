@@ -5,6 +5,7 @@ use codex_api::agent_protocol::AgentRequest;
 use codex_api::agent_protocol::ContentBlock;
 use codex_api::agent_protocol::ImageSource;
 use codex_api::agent_protocol::MessageRole;
+use codex_api::agent_protocol::PROVIDER_FLAVOR_METADATA_KEY;
 use codex_api::agent_protocol::ReasoningConfig;
 use codex_api::agent_protocol::RequestMetadata;
 use codex_api::agent_protocol::ToolChoice;
@@ -32,6 +33,7 @@ pub(crate) struct AgentRequestBuildParams<'a> {
     pub(crate) summary: ReasoningSummaryConfig,
     pub(crate) service_tier: Option<String>,
     pub(crate) prompt_cache_key: String,
+    pub(crate) provider_flavor: Option<String>,
     pub(crate) provider_request_body: Option<BTreeMap<String, Value>>,
     pub(crate) provider_request_body_remove: Vec<String>,
 }
@@ -47,6 +49,12 @@ pub(crate) fn build_agent_request(params: AgentRequestBuildParams<'_>) -> Result
         .collect();
 
     let mut provider = params.provider_request_body.unwrap_or_default();
+    if let Some(provider_flavor) = params.provider_flavor {
+        provider.insert(
+            PROVIDER_FLAVOR_METADATA_KEY.to_string(),
+            Value::String(provider_flavor),
+        );
+    }
     for key in params.provider_request_body_remove {
         provider.insert(key, Value::Null);
     }
@@ -77,14 +85,16 @@ fn build_reasoning_config(
     effort: Option<ReasoningEffortConfig>,
     summary: ReasoningSummaryConfig,
 ) -> Option<ReasoningConfig> {
-    if !model_info.supports_reasoning_summaries {
-        return None;
-    }
-
-    let effort = effort
-        .or_else(|| model_info.default_reasoning_level.clone())
+    let can_send_effort = effort.is_some()
+        || model_info.default_reasoning_level.is_some()
+        || !model_info.supported_reasoning_levels.is_empty();
+    let effort = can_send_effort
+        .then(|| effort.or_else(|| model_info.default_reasoning_level.clone()))
+        .flatten()
         .map(|effort| effort.to_string());
-    let summary = (summary != ReasoningSummaryConfig::None).then(|| summary.to_string());
+    let summary = (model_info.supports_reasoning_summaries
+        && summary != ReasoningSummaryConfig::None)
+        .then(|| summary.to_string());
 
     if effort.is_none() && summary.is_none() {
         return None;
