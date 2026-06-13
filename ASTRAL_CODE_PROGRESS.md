@@ -5460,3 +5460,128 @@ git diff --check
 - Astral 不再把 OpenAI-only web search 作为活工具暴露给国产模型。
 - `--search` 现在只是保留配置意图，不会偷渡旧 Responses web_search。
 - 这不影响 Bash/File/MCP/PTY/daemon/sandbox 等核心路径。
+
+## 最新补充 84：release/update warning 与权限工具真实请求补验
+
+本轮继续做“最终可用”收尾，不再纠缠纯字符串残留。
+
+release/update 收口：
+
+- `astral doctor --json` 之前在本地 debug/standalone 形态下整体 OK，但 update probe 会去查旧 release 源并返回 404 warning。
+- 已将 `InstallMethod::Other` 改为跳过远端 release probe：
+  - 本地/manual build 只返回 `Skipped("manual or local build install")` detail。
+  - Brew/Npm/Bun/Standalone 仍保留版本探测。
+  - doctor 不再把本地 debug build 的更新源 404 视为 warning。
+- 已执行：
+
+```bash
+cd /Users/oines/project/astral-code/codex-rs
+just fmt
+git diff --check
+```
+
+权限工具真实请求：
+
+- 静态检查确认：
+  - `RequestPermissions` 是公开 Astral tool。
+  - 内部旧 `request_permissions` 仍注册为 dispatch-only hidden tool。
+  - 未开启 `Feature::RequestPermissionsTool` 时，真实请求不会暴露 `RequestPermissions`。
+- 使用 trajectory capture proxy 对 DeepSeek `/v1/chat/completions` 做真请求补验。
+- 临时配置开启：
+
+```toml
+[features]
+request_permissions_tool = true
+```
+
+- 捕获到的真实工具列表：
+
+```text
+Bash
+ReadTaskOutput
+SendTaskInput
+ListBackgroundTasks
+StopBackgroundTask
+Read
+Write
+Edit
+Glob
+Grep
+TodoWrite
+Skill
+AskUserQuestion
+RequestPermissions
+close_agent
+resume_agent
+send_input
+spawn_agent
+wait_agent
+```
+
+结论：
+
+- `RequestPermissions` 没有丢，只是 feature-gated；这继承了 Codex 原本的审批/权限边界。
+- 模型侧看到的是 Astral/Claude-ish 工具名，不会看到旧 `request_permissions`。
+- 实际授权仍走 Codex approval/sandbox/runtime permissions，不绕过执行后端。
+
+本地构建状态：
+
+- 为排除上轮 `codex_web_search_extension` 增量 hang，清理了对应 incremental 目录并尝试：
+
+```bash
+CARGO_INCREMENTAL=0 cargo check -p codex-web-search-extension
+```
+
+- 本机随后在 `rustc --crate-name codex_protocol` 处 0% CPU 卡住，说明当前问题更像本地 rustc/incremental 环境卡死，不是刚改的 web-search 源码单点问题。
+- 不继续在本机冷编译上耗时间；后续以真实 E2E smoke + CI/独立环境编译为准。
+
+## 最新补充 85：TUI 纯 `/compact` 真路径通过，并记录 DeepSeek thinking 兼容坑
+
+compact 真实验收：
+
+- `exec resume --last "/compact ..."` 会把 `/compact ...` 当普通用户 prompt 发给模型，不能作为 slash command 验收依据。
+- TUI PTY 自动化中，提交键需要使用 enhanced keyboard Enter 序列 `ESC [ 13 u`；普通 CR/LF 会落到 composer 里。
+- 使用 TUI 输入纯 `/compact` 后，界面明确显示：
+
+```text
+Context compacted
+```
+
+- 轨迹代理捕获到 compact 请求：
+  - endpoint：`POST /chat/completions`
+  - tools：`0`
+  - messages：`2`
+  - user message 为本地 compact prompt：
+
+```text
+You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary for another LLM that will resume the task.
+```
+
+结论：
+
+- Astral 当前 compact 走 Codex local compact 路径。
+- 没有使用 OpenAI remote compact。
+- compact 外层形状是普通 provider-neutral model request，不依赖 OpenAI Responses 专有接口。
+- TUI slash command 路径可用；`exec resume "/compact ..."` 只是普通 prompt，这点要在最终测试口径里区分清楚。
+
+真实兼容坑：
+
+- 在一次 TUI 普通任务路径中，DeepSeek 返回：
+
+```text
+The `reasoning_content` in the thinking mode must be passed back to the API.
+```
+
+- 触发形态：
+  - DeepSeek `/v1/chat/completions`
+  - 上下文里存在 assistant thinking / reasoning 内容
+  - 后续请求没有按 DeepSeek 要求把 `reasoning_content` 以兼容形状回传
+- 这不是 compact 本身失败；纯 `/compact` 已成功。
+- 但这是国产 OpenAI-compatible API 的关键兼容项，必须进入最终收尾修复清单。
+
+下一步：
+
+1. 修 DeepSeek/openai-compatible `reasoning_content` 回传兼容。
+2. 对 `/anthropic` 再跑一轮 compact/工具连续轨迹，确认不会出现同类 history shape 问题。
+3. 做最终 `doctor --json` 复验，确认本地 build 不再有 update warning。
+4. 用更干净的构建环境或 CI 跑最终编译/测试，不再在当前 152GiB `target` 上反复冷启动。
