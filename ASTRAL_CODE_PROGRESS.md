@@ -458,6 +458,44 @@ provider、model、wire API、context window、input modalities、reasoning/cach
 只能通过临时环境变量或本机未提交配置注入；不得写入仓库、fixture、文档、日志样例或 commit message。真实测试应在
 独立实验目录和独立 `ASTRAL_HOME` 下进行，不删除用户文件，不复用正常工作配置。
 
+最新补充 44（2026-06-13 本轮）：完整 gauntlet 真实验收完成，并抓取了模型 API 每次收到的真实请求形状。
+新增 `/Users/oines/project/astral-code/scripts/astral_gauntlet.py`，它会启动本地 capture proxy、创建临时
+`ASTRAL_HOME` 和临时 git fixture repo，然后用 DeepSeek 官方 `deepseek-v4-pro` 跑两阶段任务：
+phase1 修 billing 逻辑并完成 terminal agentic 任务，phase2 通过 `astral exec resume` 续跑、修
+`parse_duration`、触发 local compact 后继续完成最终 marker。报告目录：
+`/Users/oines/project/astral-code/.cache/gauntlet-20260613-212850`。
+
+本次验收结果：
+
+- `phase1` exit=0，用时 364.91s；`phase2-resume` exit=0，用时 128.02s。
+- 最终 `python3 -m unittest -q` exit=0，fixture diff 正确：`calculate_total` 增加 `BASE_CHARGE=20`，
+  `parse_duration("1h30m")` 解析为 90。
+- terminal agentic 全链路通过：持续输出、无输出后台任务、交互式 `ask_yes.py` 的 `SendTaskInput`、
+  `ListBackgroundTasks`、`StopBackgroundTask` 都被模型真实调用并完成；`interactive.txt = got-yes`。
+- compact/resume 通过：捕获到 88 次 `/v1/chat/completions` 请求，其中 17 次请求包含 compact 形状；
+  `compact_survived.txt` 写入 `GAUNTLET_RULE_ALPHA` 和 `final-pass`。
+- 工具轨迹覆盖：请求侧包含 `Bash`、`ReadTaskOutput`、`SendTaskInput`、`ListBackgroundTasks`、
+  `StopBackgroundTask`、`Read`、`Write`、`Edit`、`Glob`、`Grep`、`TodoWrite`、`AskUserQuestion`、
+  `Skill` 以及保留的 Codex subagent/goal 工具；streamed tool calls 实际出现
+  `Bash/Edit/Glob/Grep/ListBackgroundTasks/Read/ReadTaskOutput/SendTaskInput/StopBackgroundTask/TodoWrite/Write`。
+
+真实粗糙点：
+
+- DeepSeek stream 有 12 次 retry/reconnect，Astral 最终都恢复了；说明 retry 层有价值，但 provider stream
+  解析仍应继续观察。
+- 模型在 stdlib-only fixture 中 8 次尝试 `pytest`，随后能自恢复到 `unittest`；这是模型习惯问题，不是
+  runtime blocker。
+- 在极低 `model_auto_compact_token_limit=3500` 的压力下，compact 摘要中出现 39 次 DSML-like
+  伪工具调用文本，模型有时把它当摘要继续读；最终仍完成任务，但这说明后续若要服务国产模型，应把 compact
+  summary prompt/formatter 做得更“不像工具调用”，避免把伪 XML/DSML 形状喂回模型。
+- 模型从长 policy 开头重复读取 143 次，说明极端 compact 压力下会产生冗余读文件轨迹。当前不阻断 v1，
+  但报告应作为后续优化 compact 摘要和长文档读取策略的依据。
+
+SFT 轨迹结论：核心 coding loop 已经很接近 Claude Code-ish：`Read/Glob/Grep -> Edit/Write -> Bash/test ->
+tool_result -> 继续修` 的形状成立，terminal 后台任务工具甚至比 Claude Code 更可控；差异主要来自 Codex
+骨架保留的 local compact、Goal/subagent 工具、approval/sandbox 形状和 Astral 的 background task 工具命名。
+这些差异当前属于可接受或刻意保留，不是 v1 blocker。真正需要后续修的是 compact summary 在国产模型上不够干净。
+
 本轮依赖检查备注：`just bazel-lock-update` 已执行成功；`just bazel-lock-check` 在本机因 `/usr/bin/python3`
 是 3.9.6、不支持 `.github/scripts/run_bazel_with_buildbuddy.py` 里的 `str | None` 类型语法而失败。当前
 `MODULE.bazel.lock` 没有 diff。
