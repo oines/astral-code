@@ -5130,3 +5130,50 @@ rg -n "ChatGPT" codex-rs/tui/src/status -g '*.rs'
 
 - `/status` 不再给 provider-neutral 用户旧 ChatGPT 控制面的心理暗示。
 - 这一步只改展示 fallback，不改 account 类型、rate limit 逻辑、provider runtime URL、app-server、core session 或 model switch。
+
+## 最新补充 79：模型迁移默认提示改为 provider-neutral/Astral
+
+继续处理真实启动路径上的旧 OpenAI/Codex 产品语义，不删除机制本身。
+
+判断：
+
+- model migration prompt 是活路径：TUI 启动时会根据 `available_models[].upgrade` 决定是否弹出。
+- Astral 不维护内置 OpenAI/Codex 模型预设，但用户自定义 model catalog 未来仍可能希望用 upgrade 提示。
+- 因此本轮不删除 migration 机制，只把默认 copy 和测试 fixture 改成 provider-neutral。
+
+改动：
+
+- `codex-rs/tui/src/model_migration.rs`
+  - 默认标题从 `Codex just got an upgrade...` 改为 `Astral has a recommended model...`。
+  - 菜单提示从 `Choose how you'd like Codex to proceed.` 改为 `Choose how you'd like Astral to proceed.`。
+  - 相关测试 fixture 中的 `Codex-optimized...` 改为 `Provider-optimized...`。
+  - 测试 fixture 链接从 `https://www.codex.com/models/...` 改为 `https://example.com/models/...`。
+- 同步更新 4 个 `model_migration` insta snapshots。
+
+验证：
+
+```bash
+cd /Users/oines/project/astral-code/codex-rs
+just fmt
+rg -n "Codex just got an upgrade|Choose how you'd like Codex|Codex-optimized|www\\.codex\\.com/models" codex-rs/tui/src/model_migration.rs codex-rs/tui/src/snapshots/codex_tui__model_migration__tests__*.snap
+rg --files | rg '\.snap\.new$'
+git diff --check -- ':(exclude)*.snap'
+```
+
+结果：
+
+- `just fmt` 通过。
+- `model_migration.rs` 和对应直接 snapshots 中旧默认 copy 清零。
+- 没有生成 `.snap.new`。
+- 非 snapshot 文件 `git diff --check` 通过。
+
+已知未处理：
+
+- `codex_tui__app__tests__model_catalog__model_migration_prompt_shows_for_hidden_model.snap`
+  中仍有一段来自旧 bundled test catalog 的 migration markdown。
+- 这属于“bundled catalog/test fixture”清理，不是默认 migration copy 的运行逻辑。本轮不扩大修改面。
+
+意义：
+
+- Astral 保留可用的模型推荐机制，但默认体验不再是 Codex/OpenAI 模型升级广告。
+- 不改 `/model` provider switch、model catalog 读取、app-server bootstrap 或 core session。
