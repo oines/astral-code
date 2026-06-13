@@ -53,6 +53,7 @@ pub fn to_chat_completions_request(
         .chain(request.messages.iter().flat_map(message_to_chat_messages))
         .collect::<Vec<_>>();
     normalize_system_messages(&mut messages);
+    merge_adjacent_assistant_messages(&mut messages);
     body.insert("messages".to_string(), Value::Array(messages));
 
     if !request.tools.is_empty() {
@@ -260,6 +261,82 @@ fn chat_message_text(message: &Value) -> Option<String> {
         }
         _ => None,
     }
+}
+
+fn merge_adjacent_assistant_messages(messages: &mut Vec<Value>) {
+    let mut merged = Vec::with_capacity(messages.len());
+    for message in std::mem::take(messages) {
+        let should_merge = merged.last().is_some_and(|previous| {
+            is_assistant_message(previous) && is_assistant_message(&message)
+        });
+        if should_merge && let Some(previous) = merged.last_mut() {
+            merge_assistant_message(previous, message);
+            continue;
+        }
+        merged.push(message);
+    }
+    *messages = merged;
+}
+
+fn is_assistant_message(message: &Value) -> bool {
+    message.get("role").and_then(Value::as_str) == Some("assistant")
+}
+
+fn merge_assistant_message(previous: &mut Value, next: Value) {
+    let Some(previous) = previous.as_object_mut() else {
+        return;
+    };
+    let Value::Object(mut next) = next else {
+        return;
+    };
+
+    merge_optional_text_field(previous, &mut next, "content");
+    merge_optional_text_field(previous, &mut next, "reasoning_content");
+
+    if let Some(Value::Array(mut next_tool_calls)) = next.remove("tool_calls") {
+        match previous.get_mut("tool_calls") {
+            Some(Value::Array(previous_tool_calls)) => {
+                previous_tool_calls.append(&mut next_tool_calls)
+            }
+            _ => {
+                previous.insert("tool_calls".to_string(), Value::Array(next_tool_calls));
+            }
+        }
+    }
+}
+
+fn merge_optional_text_field(
+    previous: &mut Map<String, Value>,
+    next: &mut Map<String, Value>,
+    field: &str,
+) {
+    let Some(next_value) = next.remove(field) else {
+        return;
+    };
+    let Some(next_text) = non_empty_string(&next_value) else {
+        if !previous.contains_key(field) {
+            previous.insert(field.to_string(), next_value);
+        }
+        return;
+    };
+
+    match previous.get_mut(field) {
+        Some(Value::String(previous_text)) if !previous_text.is_empty() => {
+            previous_text.push('\n');
+            previous_text.push_str(&next_text);
+        }
+        Some(Value::String(previous_text)) => previous_text.push_str(&next_text),
+        _ => {
+            previous.insert(field.to_string(), Value::String(next_text));
+        }
+    }
+}
+
+fn non_empty_string(value: &Value) -> Option<String> {
+    value
+        .as_str()
+        .filter(|text| !text.is_empty())
+        .map(str::to_string)
 }
 
 fn user_message_to_chat_messages(message: &AgentMessage) -> Vec<Value> {

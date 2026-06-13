@@ -374,6 +374,74 @@ fn request_sets_empty_content_for_reasoning_only_assistant_message() {
 }
 
 #[test]
+fn request_merges_adjacent_assistant_reasoning_and_tool_calls() {
+    let request = AgentRequest {
+        model: "deepseek-v4-pro".to_string(),
+        messages: vec![
+            AgentMessage {
+                role: MessageRole::Assistant,
+                content: vec![ContentBlock::Reasoning {
+                    text: "I should inspect first.".to_string(),
+                    signature: None,
+                }],
+                id: None,
+            },
+            AgentMessage {
+                role: MessageRole::Assistant,
+                content: vec![ContentBlock::ToolUse {
+                    id: "call_1".to_string(),
+                    name: "Bash".to_string(),
+                    input: json!({ "command": "find . -name '*.py'" }),
+                }],
+                id: None,
+            },
+            AgentMessage {
+                role: MessageRole::Assistant,
+                content: vec![ContentBlock::ToolUse {
+                    id: "call_2".to_string(),
+                    name: "Bash".to_string(),
+                    input: json!({ "command": "python3 -m unittest -q" }),
+                }],
+                id: None,
+            },
+        ],
+        stream: false,
+        ..AgentRequest::default()
+    };
+
+    assert_eq!(
+        to_chat_completions_request(&request, ChatCompletionsOptions { max_tokens: None }),
+        json!({
+            "model": "deepseek-v4-pro",
+            "stream": false,
+            "messages": [{
+                "role": "assistant",
+                "content": "",
+                "reasoning_content": "I should inspect first.",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "Bash",
+                            "arguments": r#"{"command":"find . -name '*.py'"}"#
+                        }
+                    },
+                    {
+                        "id": "call_2",
+                        "type": "function",
+                        "function": {
+                            "name": "Bash",
+                            "arguments": r#"{"command":"python3 -m unittest -q"}"#
+                        }
+                    }
+                ]
+            }]
+        })
+    );
+}
+
+#[test]
 fn stream_chunk_maps_text_tool_calls_finish_reason_and_usage() {
     assert_eq!(
         parse_stream_chunk(json!({

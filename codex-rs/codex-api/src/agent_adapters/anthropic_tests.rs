@@ -269,6 +269,94 @@ fn messages_request_omits_tool_choice_without_tools() {
 }
 
 #[test]
+fn messages_request_merges_adjacent_reasoning_tool_use_and_tool_results() {
+    let request = AgentRequest {
+        model: "deepseek-v4-pro".to_string(),
+        messages: vec![
+            AgentMessage {
+                role: MessageRole::Assistant,
+                content: vec![ContentBlock::Reasoning {
+                    text: "I should inspect first.".to_string(),
+                    signature: None,
+                }],
+                id: None,
+            },
+            AgentMessage {
+                role: MessageRole::Assistant,
+                content: vec![ContentBlock::ToolUse {
+                    id: "toolu_1".to_string(),
+                    name: "Bash".to_string(),
+                    input: json!({ "command": "find . -name '*.py'" }),
+                }],
+                id: None,
+            },
+            AgentMessage {
+                role: MessageRole::User,
+                content: vec![ContentBlock::ToolResult {
+                    tool_use_id: "toolu_1".to_string(),
+                    content: vec![ToolResultContent::Text {
+                        text: "calculator.py".to_string(),
+                    }],
+                    is_error: false,
+                }],
+                id: None,
+            },
+            AgentMessage {
+                role: MessageRole::User,
+                content: vec![ContentBlock::ToolResult {
+                    tool_use_id: "toolu_2".to_string(),
+                    content: vec![ToolResultContent::Text {
+                        text: "test_calculator.py".to_string(),
+                    }],
+                    is_error: false,
+                }],
+                id: None,
+            },
+        ],
+        stream: false,
+        ..AgentRequest::default()
+    };
+
+    assert_eq!(
+        to_messages_request(&request, AnthropicMessagesOptions { max_tokens: 4096 }),
+        json!({
+            "model": "deepseek-v4-pro",
+            "max_tokens": 4096,
+            "stream": false,
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": [
+                        { "type": "thinking", "thinking": "I should inspect first." },
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_1",
+                            "name": "Bash",
+                            "input": { "command": "find . -name '*.py'" }
+                        }
+                    ]
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_1",
+                            "content": [{ "type": "text", "text": "calculator.py" }]
+                        },
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_2",
+                            "content": [{ "type": "text", "text": "test_calculator.py" }]
+                        }
+                    ]
+                }
+            ]
+        })
+    );
+}
+
+#[test]
 fn stream_parser_maps_anthropic_events_to_agent_ir() {
     assert_eq!(
         parse_stream_event(json!({

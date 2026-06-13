@@ -37,6 +37,7 @@ pub fn to_messages_request(request: &AgentRequest, options: AnthropicMessagesOpt
         .iter()
         .filter_map(message_to_anthropic)
         .collect::<Vec<_>>();
+    merge_adjacent_messages(&mut messages);
     if cache_control_enabled {
         add_cache_control_to_last_message_block(&mut messages);
     }
@@ -191,6 +192,37 @@ fn message_to_anthropic(message: &AgentMessage) -> Option<Value> {
             .map(content_block_to_anthropic)
             .collect::<Vec<_>>()
     }))
+}
+
+fn merge_adjacent_messages(messages: &mut Vec<Value>) {
+    let mut merged = Vec::with_capacity(messages.len());
+    for message in std::mem::take(messages) {
+        let should_merge = merged
+            .last()
+            .is_some_and(|previous| message_role(previous) == message_role(&message));
+        if should_merge && let Some(previous) = merged.last_mut() {
+            merge_message_content(previous, message);
+            continue;
+        }
+        merged.push(message);
+    }
+    *messages = merged;
+}
+
+fn message_role(message: &Value) -> Option<&str> {
+    message.get("role").and_then(Value::as_str)
+}
+
+fn merge_message_content(previous: &mut Value, next: Value) {
+    let Some(previous_content) = previous.get_mut("content").and_then(Value::as_array_mut) else {
+        return;
+    };
+    let Value::Object(mut next) = next else {
+        return;
+    };
+    if let Some(Value::Array(mut next_content)) = next.remove("content") {
+        previous_content.append(&mut next_content);
+    }
 }
 
 fn tool_to_anthropic(tool: &AgentTool) -> Value {
