@@ -5788,3 +5788,176 @@ permission / goal / doctor 快速验收：
   2. TUI `/model` 热切换做人工/脚本最小验证。
   3. app-server daemon + exec-server standalone 启停 smoke。
   4. 最后汇总剩余 OpenAI 字符串中哪些只是 legacy/error/docs，哪些仍是运行时控制面。
+
+## 最新补充 88：Anthropic / daemon / exec-server / model switch 收尾烟测
+
+在 `ea8868f38d` 推送后，继续推进最终验收，没有停在单个修复点。
+
+### DeepSeek `/anthropic` 多轮工具 smoke
+
+使用临时 capture proxy：
+
+- upstream：`https://api.deepseek.com/anthropic/v1`
+- local base：`http://127.0.0.1:49634`
+- provider：`wire_api = "anthropic_messages"`
+- 模型：`deepseek-v4-flash`
+
+第一轮：
+
+- prompt 要求模型使用 `Bash` 写入 `result.txt`，再读回并只回复文件内容。
+- 结果：
+
+```text
+anthropic-regression-ok
+```
+
+第二轮：
+
+- 对同一 session `exec resume --last`。
+- prompt 要求读取 `result.txt` 并回复 `second-` + 文件内容。
+- 结果：
+
+```text
+second-anthropic-regression-ok
+```
+
+trajectory summary 显示：
+
+- `/messages` 请求全部 200。
+- 多轮 messages 中包含 Anthropic-compatible 的：
+  - `thinking`
+  - `tool_use`
+  - `tool_result`
+  - 后续普通 `text`
+- `/models?client_version=...` 在 DeepSeek `/anthropic/v1` base 下仍返回 404，但不会阻断 inference；
+  这符合前面 provider catalog 404 容忍逻辑。
+
+### app-server daemon smoke
+
+直接运行：
+
+```bash
+ASTRAL_HOME=/tmp/astral-appserver-smoke/home \
+  ./codex-rs/target/debug/astral app-server daemon start
+```
+
+第一次失败是预期行为：
+
+```text
+managed standalone Astral install not found ...
+Managed auto-update is disabled in astral-code until an Astral release channel exists.
+```
+
+原因：
+
+- daemon 设计上从 `$ASTRAL_HOME/packages/standalone/current/astral` 启动 managed standalone。
+- 当前是开发 checkout，还没有正式 release channel。
+
+临时 symlink 当前 debug binary 到 managed path 后，daemon 管理链路通过：
+
+```text
+{"status":"started",...}
+{"status":"running",...}
+{"status":"stopped",...}
+```
+
+结论：
+
+- app-server daemon 本身可启动、可查询版本、可停止。
+- release/packaging 仍需要正式解决 managed standalone 安装路径。
+
+### exec-server standalone smoke
+
+执行：
+
+```bash
+ASTRAL_HOME=/tmp/astral-appserver-smoke/home \
+  ./codex-rs/target/debug/astral exec-server --listen ws://127.0.0.1:0
+```
+
+结果：
+
+```text
+ws://127.0.0.1:55337
+```
+
+随后 Ctrl-C 停止。
+
+结论：
+
+- standalone exec-server 可正常启动并监听本地 WS。
+- 这条路径仍继承 Codex 的可替换执行后端思路，没有被 Claude-ish tools 改坏。
+
+### model/provider 热切换底层 smoke
+
+为了验证“不关 TUI，切换 provider/model 后继续同一任务”的底层能力，使用两个本地 capture proxy：
+
+- provider A：`http://127.0.0.1:49635`
+- provider B：`http://127.0.0.1:49636`
+
+流程：
+
+1. 第一轮新 session 走 provider A。
+2. 第二轮显式 `exec resume <thread_id>`，通过配置覆盖切到 provider B：
+
+```bash
+astral exec resume <thread_id> \
+  -c 'model_provider="provider_b"' \
+  -m deepseek-v4-flash ...
+```
+
+结果：
+
+- 第一轮请求进入 provider A。
+- 显式 resume 后请求进入 provider B。
+- provider B 的第二个请求带 `messages=7`，说明它不是新空会话，而是带着旧历史继续请求。
+
+注意：
+
+- `resume --last` 在这次临时目录测试中选择了另一个新 thread，不能作为热切换结论。
+- 显式 thread id resume 证明底层配置切换链路可用。
+- 真正 TUI `/model` 选择器的 UI 层仍建议补一个截图/交互级 smoke。
+
+### OpenAI / hosted 控制面运行时复核
+
+本轮只查运行时入口，不追求删光所有字符串。
+
+确认：
+
+- `astral remote-control start` 返回：
+
+```text
+legacy hosted remote control is disabled in Astral until a provider-neutral control plane exists
+```
+
+- `astral app-server daemon enable-remote-control` 返回同样禁用错误。
+- `astral login status` 当前显示 API key 登录，不触发 ChatGPT/OAuth。
+- `doctor --json` 在临时 provider 配置下没有 OpenAI update/login/remote compact 告警。
+
+残留分类：
+
+- 合理残留：
+  - `OpenAI-compatible` 作为 `/v1/chat/completions` 兼容协议描述。
+  - Azure/OpenAI URL 测试 fixture。
+  - `openai_models` 旧模块名和协议类型名。
+  - legacy remote-control disabled stub。
+  - MCP OAuth login/logout，属于 MCP server auth，不是 OpenAI 登录。
+- 仍需后续审计但不是当前阻断：
+  - app-server message processor 内仍有 feedback/account/remote-control processor 类型名。
+  - realtime/web-search/images/memories endpoint 中仍有 telemetry 结构和 OpenAI-style 测试 URL。
+  - plugin marketplace 常量中还有 `openai-bundled-alpha` / `openai-primary-runtime` 历史命名。
+
+当前判断：
+
+- 对最终可用性最关键的真实 provider 路径已经跑通：
+  - OpenAI-compatible chat-completions 多轮 resume。
+  - Anthropic Messages 多轮 tool/use/result。
+  - RequestPermissions / Goal tools 暴露。
+  - app-server daemon 管理链路。
+  - standalone exec-server。
+  - provider/model 切换底层链路。
+- 剩余重点不再是协议主干，而是：
+  1. TUI `/model` UI 级验证。
+  2. 正式 release/standalone packaging。
+  3. 残留 OpenAI/hosted 命名继续分批清理。
+  4. 全量端到端任务回归和 CI 修复。
