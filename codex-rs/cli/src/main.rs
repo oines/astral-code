@@ -80,6 +80,7 @@ use codex_terminal_detection::TerminalName;
 /// If no subcommand is specified, options will be forwarded to the interactive CLI.
 #[derive(Debug, Parser)]
 #[clap(
+    name = "astral",
     author,
     version,
     // If a sub‑command is given, ignore requirements of the default args.
@@ -2632,6 +2633,12 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(!subcommands.contains(&"responses"));
         assert!(!subcommands.contains(&"responses-api-proxy"));
+    }
+
+    #[test]
+    fn version_output_uses_astral_command_name() {
+        let version = MultitoolCli::command().render_version().to_string();
+        assert_eq!(version, format!("astral {}\n", env!("CARGO_PKG_VERSION")));
     }
 
     fn help_from_args(args: &[&str]) -> String {
