@@ -316,12 +316,7 @@ fn assistant_message_to_chat(message: &AgentMessage) -> Value {
     let text = message
         .content
         .iter()
-        .filter(|block| {
-            matches!(
-                block,
-                ContentBlock::Text { .. } | ContentBlock::Reasoning { .. }
-            )
-        })
+        .filter(|block| matches!(block, ContentBlock::Text { .. }))
         .map(content_block_text)
         .filter(|text| !text.is_empty())
         .collect::<Vec<_>>()
@@ -330,6 +325,21 @@ fn assistant_message_to_chat(message: &AgentMessage) -> Value {
         value.insert("content".to_string(), Value::String(text));
     } else {
         value.insert("content".to_string(), Value::Null);
+    }
+
+    let reasoning_content = message
+        .content
+        .iter()
+        .filter(|block| matches!(block, ContentBlock::Reasoning { .. }))
+        .map(content_block_text)
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if !reasoning_content.is_empty() {
+        value.insert(
+            "reasoning_content".to_string(),
+            Value::String(reasoning_content),
+        );
     }
 
     let tool_calls = message

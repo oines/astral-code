@@ -5585,3 +5585,58 @@ The `reasoning_content` in the thinking mode must be passed back to the API.
 2. 对 `/anthropic` 再跑一轮 compact/工具连续轨迹，确认不会出现同类 history shape 问题。
 3. 做最终 `doctor --json` 复验，确认本地 build 不再有 update warning。
 4. 用更干净的构建环境或 CI 跑最终编译/测试，不再在当前 152GiB `target` 上反复冷启动。
+
+## 最新补充 86：修复 chat-completions assistant reasoning 回灌形状
+
+针对最新补充 85 抓到的 DeepSeek 兼容问题，已收敛到 `codex-api` 的 provider adapter：
+
+- 文件：
+  - `codex-rs/codex-api/src/agent_adapters/chat_completions.rs`
+  - `codex-rs/codex-api/src/agent_adapters/chat_completions_tests.rs`
+- 问题：
+  - stream parser 已经能把 DeepSeek `delta.reasoning_content` 转成 provider-neutral `ContentBlock::Reasoning`。
+  - 但下一轮请求时，`assistant_message_to_chat` 把 `ContentBlock::Reasoning` 拼进了 assistant `content`。
+  - DeepSeek thinking 模式要求历史里的 assistant reasoning 继续以 `reasoning_content` 字段回传。
+- 修复：
+  - assistant 普通 `content` 只拼 `ContentBlock::Text`。
+  - assistant `ContentBlock::Reasoning` 单独写入 `reasoning_content`。
+  - `ToolUse`/`tool_calls` 形状不变。
+- 新增测试：
+  - `request_preserves_assistant_reasoning_content_for_deepseek`
+  - 断言：
+
+```json
+{
+  "role": "assistant",
+  "content": "I will check the files.",
+  "reasoning_content": "I should inspect the repo first."
+}
+```
+
+已执行：
+
+```bash
+cd /Users/oines/project/astral-code/codex-rs
+just fmt
+git diff --check
+```
+
+结果：
+
+- `just fmt` 通过。
+- `git diff --check` 通过。
+- 尝试最窄测试：
+
+```bash
+CARGO_BUILD_JOBS=2 just test -p codex-api request_preserves_assistant_reasoning_content_for_deepseek
+```
+
+- 本机再次卡在 `rustc --crate-name codex_protocol`，0% CPU，和前两次 local compile hang 一致。
+- 已发送 SIGINT 清理卡死 nextest/rustc；当前没有遗留 Rust 测试进程。
+- 这次修复未完成本机编译级验证，需要 CI 或干净构建环境确认。
+
+意义：
+
+- 这是国产 OpenAI-compatible provider 的核心兼容点，不改会导致长线程、工具调用后续轮次、TUI 普通任务继续请求被 DeepSeek 拒绝。
+- 修复限制在 chat-completions adapter，不触碰 app-server/exec-server/PTY/sandbox/approval 骨架。
+- Anthropic Messages 路径不受影响；Anthropic adapter 仍使用 `thinking` block + signature。

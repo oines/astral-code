@@ -309,6 +309,41 @@ fn request_keeps_multimodal_user_content_as_parts_array() {
 }
 
 #[test]
+fn request_preserves_assistant_reasoning_content_for_deepseek() {
+    let request = AgentRequest {
+        model: "deepseek-v4-pro".to_string(),
+        messages: vec![AgentMessage {
+            role: MessageRole::Assistant,
+            content: vec![
+                ContentBlock::Reasoning {
+                    text: "I should inspect the repo first.".to_string(),
+                    signature: None,
+                },
+                ContentBlock::Text {
+                    text: "I will check the files.".to_string(),
+                },
+            ],
+            id: None,
+        }],
+        stream: false,
+        ..AgentRequest::default()
+    };
+
+    assert_eq!(
+        to_chat_completions_request(&request, ChatCompletionsOptions { max_tokens: None }),
+        json!({
+            "model": "deepseek-v4-pro",
+            "stream": false,
+            "messages": [{
+                "role": "assistant",
+                "content": "I will check the files.",
+                "reasoning_content": "I should inspect the repo first."
+            }]
+        })
+    );
+}
+
+#[test]
 fn stream_chunk_maps_text_tool_calls_finish_reason_and_usage() {
     assert_eq!(
         parse_stream_chunk(json!({
