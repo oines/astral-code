@@ -61,7 +61,9 @@ pub struct Cli {
     #[arg(long = "ask-for-approval", short = 'a')]
     pub approval_policy: Option<ApprovalModeCliArg>,
 
-    /// Enable live web search. When enabled, the native Responses `web_search` tool is available to the model (no per‑call approval).
+    /// Request live web search mode. Astral v1 does not expose the legacy
+    /// OpenAI-native web_search tool; provider-neutral WebSearch/WebFetch will
+    /// be wired separately.
     #[arg(long = "search", default_value_t = false)]
     pub web_search: bool,
 

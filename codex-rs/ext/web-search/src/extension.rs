@@ -37,9 +37,11 @@ impl From<&Config> for WebSearchExtensionConfig {
     fn from(config: &Config) -> Self {
         let web_search_mode = config.web_search_mode.value();
         Self {
-            // Core selects this executor per turn using the feature flag or model metadata.
-            available: config.model_provider.is_openai()
-                && web_search_mode != WebSearchMode::Disabled,
+            // Astral v1 intentionally does not expose the legacy OpenAI-native
+            // web_search tool. Keep the extension installed so a
+            // provider-neutral WebSearch/WebFetch implementation can reuse this
+            // boundary later.
+            available: false,
             provider: config.model_provider.clone(),
             settings: search_settings(config, web_search_mode),
         }

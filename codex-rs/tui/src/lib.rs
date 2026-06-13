@@ -920,7 +920,9 @@ pub async fn run_main(
         )
     };
 
-    // Map the legacy --search flag to the canonical web_search mode.
+    // Preserve the launch flag as config state. Astral v1 keeps the legacy
+    // OpenAI-native web_search tool disabled until provider-neutral search is
+    // implemented.
     if cli.web_search {
         cli.config_overrides
             .raw_overrides
