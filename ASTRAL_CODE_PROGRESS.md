@@ -5255,3 +5255,93 @@ CARGO_INCREMENTAL=0 just test -p codex-model-provider provider_model_id_listing_
 - `/model` 跨 provider 切换时，不会因为同一个 `ASTRAL_HOME` 里的模型缓存而串厂商。
 - Astral 的“无内置模型预设”原则更干净：provider 裸 `/models` listing 不再自动套 bundled `models.json`。
 - 这一步不改模型请求协议、不改工具 runtime、不改 app-server/thread settings，也不影响 exec-server、sandbox、PTY。
+
+## 最新补充 81：真实模型 API trajectory capture harness 落地并完成首轮抓取
+
+按用户要求，开始从“功能跑通”进入“真实模型 API 轨迹形状对比”阶段。目标不是只看 UI 行为，而是看无状态
+模型 API 每轮实际收到的 `messages`、`tools`、`tool_use/tool_result`、stream event 和 compact/permission
+上下文形状。
+
+新增脚本：
+
+- `scripts/trajectory_capture_proxy.py`
+  - 标准库实现的本地转发代理。
+  - Astral 或 Claude Code 指向本地 `base_url`，代理转发到真实 upstream，并把每个请求/响应保存为 redacted
+    JSON fixture。
+  - 会 redaction `Authorization`、`Cookie`、`x-api-key`、`anthropic-api-key` 等 header。
+  - 支持流式响应边转发边截取，避免破坏真实工具调用。
+- `scripts/trajectory_summarize.py`
+  - 把 capture dump 压成稳定结构摘要。
+  - 默认不输出 prompt 正文和 tool output 正文，只输出角色、content block 类型、工具名、schema 字段、
+    tool call / tool result 链接、SSE event 类型与计数。
+  - 用于后续和 Claude Code fixture 做机械 diff，避免靠肉眼翻大 JSON。
+
+真实抓取：
+
+- OpenAI-compatible `/v1/chat/completions`
+  - upstream：DeepSeek 官方 `/v1`。
+  - provider：`wire_api = "chat_completions"`。
+  - 模型：`deepseek-v4-flash`。
+  - 临时 `ASTRAL_HOME` + 临时 workdir + `--ephemeral`。
+  - 任务：模型调用 `Bash` 写入并读取 `trajectory-chat.txt`。
+  - 结果：1 次 `/models` + 3 次 `/chat/completions` 已抓到；模型实际调用 `Bash`，随后调用 `Read` 验证。
+  - 请求外形：`assistant.tool_calls` 后接 `role = "tool"` 的 tool result，符合 OpenAI-compatible 工具轨迹。
+- Anthropic-compatible `/anthropic/v1/messages`
+  - upstream：DeepSeek 官方 `/anthropic/v1`。
+  - provider：`wire_api = "anthropic_messages"`。
+  - 模型：`deepseek-v4-flash`。
+  - 同样临时 `ASTRAL_HOME` / workdir / `--ephemeral`。
+  - 任务：模型调用 `Bash` 写入并读取 `trajectory-anthropic.txt`。
+  - 结果：`/models` 返回 404 但不阻断主请求；3 次 `/messages` 已抓到；模型实际调用 `Bash`，随后调用
+    `Read` 验证。
+  - 请求外形：`assistant` 的 `tool_use` block 后接 `user` 的 `tool_result` block，stream event 包含
+    `content_block_start/delta/stop`、`message_delta`、`message_stop`，已经贴近 Claude Code 的原生
+    Anthropic Messages 轨迹外层。
+
+首轮摘要观察：
+
+- 两条协议路径模型可见核心工具均为 18 个，其中前排是：
+  `Bash`、`ReadTaskOutput`、`SendTaskInput`、`ListBackgroundTasks`、`StopBackgroundTask`、`Read`、`Write`、
+  `Edit`、`Glob`、`Grep`、`TodoWrite`、`Skill`、`AskUserQuestion`。
+- `Bash` schema 当前包含：
+  `command`、`timeout`、`description`、`cwd`、`yield_time_ms`、`max_output_tokens`、`run_in_background`、
+  `tty`、`environment_id`。
+- Claude Code 的 `Bash` schema 关键字段是：
+  `command`、`timeout`、`description`、`run_in_background`、`dangerouslyDisableSandbox`。
+  Astral 没有暴露 `dangerouslyDisableSandbox`，因为提权仍必须走 Codex/Astral approval + sandbox 骨架；
+  同时 Astral 多了 `tty`、`environment_id` 和输出轮询参数，以保留可替换执行后端、PTY 和远程 exec-server
+  能力。
+- Claude Code 的文件工具字段与 Astral 基本对齐：
+  `Read.file_path/offset/limit`、`Write.file_path/content`、`Edit.file_path/old_string/new_string/replace_all`、
+  `Glob.pattern/path`、`Grep.pattern/path/glob/output_mode/-A/-B/-C/context/-n/-i/type/head_limit/offset/multiline`。
+  Astral 额外保留 `environment_id`，这是为了将来远程/容器/SSH workspace 通过 exec-server 抽象承载，
+  不强绑本机磁盘。
+- `TodoWrite` 继续映射到 Codex `PlanUpdate` 语义，字段为 `todos[].content/status/activeForm`，这与此前
+  锁定的“保留 Codex Plan/Goal，模型侧用 Claude-ish checklist 工具”一致。
+- `subagent` 仍保持 Codex 原版工具面，不再强行改名为 Claude Code `Agent/SendMessage`，这是用户此前已锁定的取舍。
+
+验证：
+
+```bash
+cd /Users/oines/project/astral-code
+python3 -m py_compile scripts/trajectory_capture_proxy.py scripts/trajectory_summarize.py
+scripts/trajectory_capture_proxy.py --help
+scripts/trajectory_summarize.py /tmp/astral-trajectory/chat /tmp/astral-trajectory/anthropic --output /tmp/astral-trajectory/summary.json
+cd codex-rs && just fmt
+```
+
+提交：
+
+- `775c7928b4 Add trajectory capture proxy`
+- `39865b1418 Add trajectory summary tool`
+
+下一步：
+
+- 用同一个 capture proxy 抓 Claude Code 对同类 Bash/File 任务的实际 Anthropic request fixture，或至少从
+  `/Users/oines/project/claude-code` 源码继续抽取 request builder 和 tool schema。
+- 做一个 compact/permission/long-task 的小型 trajectory suite，重点比较：
+  1. 首轮 tool schema。
+  2. `tool_use -> tool_result` 回灌形状。
+  3. compact 后历史消息是否仍保持工具轨迹闭合。
+  4. sandbox denial / permission request 给模型的错误形状。
+  5. 长任务 `Bash -> ReadTaskOutput/SendTaskInput/ListBackgroundTasks/StopBackgroundTask` 是否稳定。
