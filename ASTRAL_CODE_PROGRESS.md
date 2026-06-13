@@ -6101,3 +6101,80 @@ OK
 3. 修复真实 E2E 抓到的问题。
 4. CI/release 工作流后续需要单独切片收敛旧 `codex-package` 文件名、内部变量名和 Python 版本入口；
    但当前用户可见 package entrypoint 与 daemon managed path 已是 `astral`。
+
+## 最新补充 88：trajectory diff harness 落地
+
+为了完成“对比 Claude Code 和 Astral-Code 的模型 API 收到的真实上下文形状”这个最终验收项，本轮在已有
+capture/summarize 工具上补了结构化 diff 脚本。
+
+新增脚本：
+
+- `scripts/trajectory_diff.py`
+
+设计：
+
+1. `trajectory_capture_proxy.py` 负责真实抓包并转发上游。
+2. `trajectory_summarize.py` 负责把 raw fixture 规整成不含 prompt/tool output 明文的 summary。
+3. `trajectory_diff.py` 负责比较两个 summary，例如：
+   - Claude Code summary vs Astral-Code summary。
+   - Astral `/v1/chat/completions` summary vs Astral `/anthropic` summary。
+   - 修改前 summary vs 修改后 summary。
+
+当前 diff 覆盖的结构：
+
+- request 数量、API kind、client path、model。
+- request body keys。
+- model-visible tool names。
+- 每个 tool 的 schema properties / required 字段。
+- message role 序列。
+- message field set，例如是否出现 `reasoning_content`。
+- message content block 类型，例如 `text` / `thinking` / `tool_use` / `tool_result`。
+- tool call name。
+- tool_result 数量。
+- response SSE event/data type/content block type。
+
+用法示例：
+
+```bash
+scripts/trajectory_summarize.py /tmp/astral-capture --output /tmp/astral-summary.json
+scripts/trajectory_summarize.py /tmp/claude-capture --output /tmp/claude-summary.json
+
+scripts/trajectory_diff.py \
+  --left /tmp/claude-summary.json \
+  --right /tmp/astral-summary.json \
+  --left-label claude-code \
+  --right-label astral-code \
+  --format markdown \
+  --output /tmp/trajectory-diff.md
+```
+
+验证：
+
+```bash
+just fmt
+uv run --frozen --project scripts --no-sync python -m py_compile scripts/trajectory_diff.py
+uv run --frozen --project scripts --no-sync --with ruff ruff check scripts/trajectory_diff.py
+```
+
+同时用两份临时 synthetic summary 做 smoke：
+
+- 左侧 `Bash` schema 含 `command` + `description`。
+- 右侧 `Bash` schema 只含 `command`。
+- 右侧 assistant message 多一个 `reasoning_content` field。
+- 同时覆盖 Anthropic `tool_result` block 和 chat-completions 风格 `tool_call_id` tool result 计数，避免
+  diff 里把同一个工具结果重复计数。
+
+结果：
+
+```text
+trajectory_diff smoke ok
+All checks passed!
+```
+
+结论：
+
+- 现在已经有完整的三段式 trajectory harness：
+  capture -> summarize -> diff。
+- 下一步真实对比时，不需要先改 Astral 核心逻辑；只要用同一 prompt 分别跑 Claude Code 和 Astral-Code，
+  然后比较 summary 即可。
+- 这一步不改变 runtime、不改变 provider adapter、不触碰 sandbox/PTY/exec-server。
