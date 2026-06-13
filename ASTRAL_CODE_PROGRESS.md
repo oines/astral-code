@@ -4990,3 +4990,61 @@ CARGO_INCREMENTAL=0 just test -p codex-exec prints_final_tty_message_when_not_ye
 
 - `astral exec` 的直接终端输出不再把 agent 叫成 `codex`。
 - 这一步只改输出标签和注释/log 文案，不改 exec-server、UnifiedExec、PTY、sandbox、approval 或 provider adapter。
+
+## 最新补充 76：TUI 输入占位符从 Ask Codex 收敛为 Ask Astral-Code
+
+继续处理真实 TUI 第一眼会看到的产品身份残留。
+
+发现问题：
+
+- TUI 主输入框默认 placeholder 仍是 `Ask Codex to do anything`。
+- 这个字符串同时出现在 runtime 初始化、TUI 测试 helper 和大量 insta snapshot 中。
+- 之前只在 `keymap_setup.rs` 有一处改成了 `Ask Astral-Code...`，其余主路径仍是旧文案。
+
+改动：
+
+- 机械替换 `codex-rs/tui/src` 下的 exact string：
+  - `Ask Codex to do anything`
+  - 改为 `Ask Astral-Code to do anything`
+- 覆盖范围：
+  - `chatwidget/constructor.rs` 传入的 runtime placeholder。
+  - `bottom_pane` / `chat_composer` / `history_search` / `slash_input` 测试 fixture。
+  - 相关 bottom pane/chatwidget snapshots。
+- 对三个窄宽 snapshot 中原本被截断的 `Ask Codex...` 片段，按现有 snapshot 宽度手工同步为
+  `Ask Astral-Code...` 的截断形状。
+- `bottom_pane/mod.rs` 中检查 placeholder 可见性的测试断言从 `Ask Codex` 改为 `Ask Astral-Code`。
+
+验证：
+
+```bash
+cd /Users/oines/project/astral-code/codex-rs
+just fmt
+rg -n "Ask Codex" codex-rs/tui/src -g '*.rs' -g '*.snap'
+git diff --check -- ':(exclude)*.snap'
+```
+
+结果：
+
+- `just fmt` 通过。
+- `Ask Codex` 在 TUI 源码和 snapshot 中已清零。
+- 非 snapshot 文件 `git diff --check` 通过。
+- 普通 `git diff --check` 会报若干 `.snap` 行尾空格；这是 ratatui/insta 快照用于表达终端宽度的内容，不是代码空白错误。
+
+测试注意：
+
+- 尝试跑：
+  - `CARGO_INCREMENTAL=0 just test -p codex-tui footer_collapse_empty_mode_only footer_collapse_plan_empty_mode_only`
+- 编译完成后，`cargo-nextest` 卡在 `codex_tui ... --list --format terse` 枚举阶段。
+- 已终止该次 nextest 调度，避免再次把时间耗在测试调度上。
+- 后续如果要验收这批 TUI snapshots，建议在磁盘更宽松时直接跑目标 test binary 或一次性跑 TUI snapshot 更新流程。
+
+磁盘：
+
+- 当前磁盘剩余约 9Gi。
+- `codex-rs/target/debug/incremental` 仍为 0B。
+- 没有删除 `target/debug/deps`，继续保留 Rust 编译缓存。
+
+意义：
+
+- TUI 主输入框不再把 Astral-Code 叫成 Codex。
+- 这一步只改用户可见文案、测试 fixture 和 snapshot，不触碰 app-server、exec-server、UnifiedExec、PTY、sandbox、approval、provider adapter 或工具 runtime。

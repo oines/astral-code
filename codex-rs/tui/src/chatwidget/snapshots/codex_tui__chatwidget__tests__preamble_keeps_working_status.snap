@@ -7,6 +7,6 @@ expression: normalized_backend_snapshot(terminal.backend())
 "• Working (0s • esc to interrupt)                                               "
 "                                                                                "
 "                                                                                "
-"› Ask Codex to do anything                                                      "
+"› Ask Astral-Code to do anything                                                      "
 "                                                                                "
 "  deepseek-v4-pro default · /tmp/project                                        "
