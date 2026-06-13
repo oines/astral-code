@@ -87,7 +87,7 @@ pub(super) fn updates_check(config: &Config) -> DoctorCheck {
     }
 
     match fetch_latest_version(&install_context) {
-        Ok(latest_version) => {
+        LatestVersionProbe::Available(latest_version) => {
             details.push(format!("latest version: {latest_version}"));
             if is_newer(&latest_version, env!("CARGO_PKG_VERSION")) == Some(true) {
                 details.push("latest version status: newer version is available".to_string());
@@ -95,7 +95,10 @@ pub(super) fn updates_check(config: &Config) -> DoctorCheck {
                 details.push("latest version status: current version is not older".to_string());
             }
         }
-        Err(err) => {
+        LatestVersionProbe::Skipped(reason) => {
+            details.push(format!("latest version probe: skipped ({reason})"));
+        }
+        LatestVersionProbe::Failed(err) => {
             status = status.max(CheckStatus::Warning);
             details.push(format!("latest version probe: {err}"));
         }
@@ -140,13 +143,23 @@ fn update_action_label(context: &InstallContext) -> &'static str {
     }
 }
 
-fn fetch_latest_version(context: &InstallContext) -> Result<String, String> {
+enum LatestVersionProbe {
+    Available(String),
+    Skipped(&'static str),
+    Failed(String),
+}
+
+fn fetch_latest_version(context: &InstallContext) -> LatestVersionProbe {
     match &context.method {
-        InstallMethod::Brew => fetch_homebrew_cask_version(),
-        InstallMethod::Npm
-        | InstallMethod::Bun
-        | InstallMethod::Standalone { .. }
-        | InstallMethod::Other => fetch_latest_github_release_version(),
+        InstallMethod::Brew => fetch_homebrew_cask_version()
+            .map(LatestVersionProbe::Available)
+            .unwrap_or_else(LatestVersionProbe::Failed),
+        InstallMethod::Npm | InstallMethod::Bun | InstallMethod::Standalone { .. } => {
+            fetch_latest_github_release_version()
+                .map(LatestVersionProbe::Available)
+                .unwrap_or_else(LatestVersionProbe::Failed)
+        }
+        InstallMethod::Other => LatestVersionProbe::Skipped("manual or local build install"),
     }
 }
 
