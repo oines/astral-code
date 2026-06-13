@@ -5048,3 +5048,45 @@ git diff --check -- ':(exclude)*.snap'
 
 - TUI 主输入框不再把 Astral-Code 叫成 Codex。
 - 这一步只改用户可见文案、测试 fixture 和 snapshot，不触碰 app-server、exec-server、UnifiedExec、PTY、sandbox、approval、provider adapter 或工具 runtime。
+
+## 最新补充 77：图片/IDE/session 错误文案收口为 Astral
+
+继续按全局目标推进，不再在单个测试或命名点死循环。本轮只处理真实运行路径中用户可能直接看到的旧 Codex 文案：
+
+- 本地图片读取失败/格式不支持。
+- session 文件初始化失败。
+- IDE context 请求/读取失败。
+- 覆盖配置写入后无法刷新 effective config。
+
+改动：
+
+- `codex-rs/protocol/src/models.rs`
+  - `Codex could not read the local image...` 改为 `Astral could not read...`。
+  - `Codex cannot attach image...` 改为 `Astral cannot attach image...`。
+  - 同步更新本地图片 unsupported format 测试预期。
+- `codex-rs/core/src/session_rollout_init_error.rs`
+  - session 文件权限、缺失、被文件阻塞、路径类型异常等 fatal hint 改为 Astral/Astral home。
+- `codex-rs/tui/src/ide_context/ipc.rs`
+  - IDE context 请求失败、读取失败、超时、连接变化等提示改为 Astral。
+- `codex-rs/tui/src/app/config_persistence.rs`
+  - overridden config 写入后刷新失败提示改为 Astral。
+
+验证：
+
+```bash
+cd /Users/oines/project/astral-code/codex-rs
+just fmt
+CARGO_INCREMENTAL=0 just test -p codex-protocol local_image_read_error_adds_placeholder local_image_non_image_adds_placeholder local_image_unsupported_image_format_adds_placeholder
+```
+
+结果：
+
+- `just fmt` 通过。
+- `codex-protocol` 3 个图片占位相关测试通过。
+- 定向 `rg` 确认本轮 4 个文件中上述旧 Codex 用户可见文案已清零。
+- 非 snapshot 文件 `git diff --check` 通过。
+
+意义：
+
+- 单模态/图片降级相关错误路径不再把新项目叫成 Codex。
+- 这一步只改用户可见文案和测试预期，不改变 `input_modalities`、`for_prompt`、provider adapter、MCP sanitize、sandbox、approval 或执行后端。

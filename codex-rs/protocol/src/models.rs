@@ -1003,7 +1003,7 @@ fn local_image_error_placeholder(
 ) -> ContentItem {
     ContentItem::InputText {
         text: format!(
-            "Codex could not read the local image at `{}`: {}",
+            "Astral could not read the local image at `{}`: {}",
             path.display(),
             error
         ),
@@ -1069,7 +1069,7 @@ fn invalid_image_error_placeholder(
 fn unsupported_image_error_placeholder(path: &std::path::Path, mime: &str) -> ContentItem {
     ContentItem::InputText {
         text: format!(
-            "Codex cannot attach image at `{}`: unsupported image `{}`.",
+            "Astral cannot attach image at `{}`: unsupported image `{}`.",
             path.display(),
             mime
         ),
@@ -3043,7 +3043,7 @@ mod tests {
             ResponseInputItem::Message { content, .. } => {
                 assert_eq!(content.len(), 1);
                 let expected = format!(
-                    "Codex cannot attach image at `{}`: unsupported image `image/svg+xml`.",
+                    "Astral cannot attach image at `{}`: unsupported image `image/svg+xml`.",
                     svg_path.display()
                 );
                 match &content[0] {
