@@ -17,7 +17,6 @@ use codex_login::CodexAuth;
 use codex_login::collect_auth_env_telemetry;
 use codex_login::default_client::build_reqwest_client;
 use codex_model_provider_info::ModelProviderInfo;
-use codex_models_manager::bundled_models_response;
 use codex_models_manager::manager::ModelsEndpointClient;
 use codex_models_manager::manager::RemoteModelCatalog;
 use codex_models_manager::model_info;
@@ -70,6 +69,18 @@ impl OpenAiModelsEndpoint {
 
 #[async_trait]
 impl ModelsEndpointClient for OpenAiModelsEndpoint {
+    fn cache_key(&self) -> String {
+        format!(
+            "name={};base_url={};wire_api={};env_key={};auth={};aws={}",
+            self.provider_info.name,
+            self.provider_info.base_url.as_deref().unwrap_or_default(),
+            self.provider_info.wire_api,
+            self.provider_info.env_key.as_deref().unwrap_or_default(),
+            self.provider_info.auth.is_some(),
+            self.provider_info.aws.is_some()
+        )
+    }
+
     fn has_command_auth(&self) -> bool {
         self.provider_info.has_command_auth()
     }
@@ -134,25 +145,12 @@ fn model_catalog_unavailable(err: &ApiError) -> bool {
 }
 
 fn enrich_provider_model_listings(models: Vec<ModelInfo>) -> Vec<ModelInfo> {
-    let bundled_models = bundled_models_response()
-        .map(|response| response.models)
-        .unwrap_or_default();
     models
         .into_iter()
         .map(|model| {
             if !is_provider_model_id_listing(&model) {
                 return model;
             }
-            if let Some(mut bundled_model) = bundled_models
-                .iter()
-                .filter(|candidate| model.slug.starts_with(candidate.slug.as_str()))
-                .max_by_key(|candidate| candidate.slug.len())
-                .cloned()
-            {
-                bundled_model.slug = model.slug;
-                return bundled_model;
-            }
-
             let mut fallback_model = model_info::model_info_from_slug(&model.slug);
             fallback_model.display_name = model.display_name;
             fallback_model.description = model.description;
@@ -327,7 +325,7 @@ mod tests {
     }
 
     #[test]
-    fn provider_model_id_listing_uses_bundled_metadata_when_available() {
+    fn provider_model_id_listing_uses_minimal_fallback_metadata() {
         let mut listed_model = model_info::model_info_from_slug("deepseek-v4-flash");
         listed_model.base_instructions.clear();
         listed_model.supported_reasoning_levels.clear();
@@ -336,9 +334,9 @@ mod tests {
 
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].slug, "deepseek-v4-flash");
-        assert_eq!(models[0].display_name, "DeepSeek V4 Flash");
+        assert_eq!(models[0].display_name, "deepseek-v4-flash");
         assert!(!models[0].base_instructions.is_empty());
-        assert!(!models[0].supported_reasoning_levels.is_empty());
-        assert!(models[0].supports_parallel_tool_calls);
+        assert!(models[0].supported_reasoning_levels.is_empty());
+        assert!(!models[0].supports_parallel_tool_calls);
     }
 }

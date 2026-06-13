@@ -5177,3 +5177,58 @@ git diff --check -- ':(exclude)*.snap'
 
 - Astral 保留可用的模型推荐机制，但默认体验不再是 Codex/OpenAI 模型升级广告。
 - 不改 `/model` provider switch、model catalog 读取、app-server bootstrap 或 core session。
+
+## 最新补充 80：模型 catalog cache 按 provider 隔离，并移除 bundled preset 偷渡
+
+回到用户要求的硬主线：“同一个 TUI session 可以切 DeepSeek、小米等多个 provider/model，并且 Astral 不维护内置模型预设。”
+
+发现问题：
+
+- `codex-rs/models-manager/src/manager.rs` 仍使用单个 `models_cache.json`。
+- TODO 明确指出：切换 provider 时可能复用另一个 provider 的 fresh cache。
+- `codex-rs/model-provider/src/models_endpoint.rs` 对 provider `/models` 返回的裸 id listing 仍会用 bundled
+  `models.json` enrichment，这等于把内置 DeepSeek/OpenAI/Codex 预设通过 `/models` 偷渡回来。
+
+改动：
+
+- `codex-rs/models-manager/src/manager.rs`
+  - `ModelsEndpointClient` 新增默认 `cache_key()`。
+  - `OpenAiModelsManager::new(...)` 从单文件 `models_cache.json` 改为
+    `models_cache/<hash>.json`。
+  - cache hash 来自 endpoint 的 provider identity，不把 key 原文写入路径。
+  - 删除 provider cache TODO。
+- `codex-rs/model-provider/src/models_endpoint.rs`
+  - `OpenAiModelsEndpoint::cache_key()` 使用非 secret provider identity：
+    `name`、`base_url`、`wire_api`、`env_key`、是否使用 command auth/AWS auth。
+  - 移除 `bundled_models_response()` enrichment。
+  - provider `/models` 只有裸 id 时，使用最小 fallback metadata；用户需要通过
+    `model_catalog_json` / `model_context_window` / `model_input_modalities` 声明能力。
+- `codex-rs/models-manager/src/manager_tests.rs`
+  - 测试 endpoint 支持 cache key。
+  - 新增 `refresh_available_models_isolates_cache_by_provider_key`，验证不同 provider key 不复用缓存。
+- `codex-rs/model-provider/src/models_endpoint.rs`
+  - 旧测试 `provider_model_id_listing_uses_bundled_metadata_when_available` 改为
+    `provider_model_id_listing_uses_minimal_fallback_metadata`。
+
+验证：
+
+```bash
+cd /Users/oines/project/astral-code/codex-rs
+just fmt
+CARGO_INCREMENTAL=0 just test -p codex-models-manager refresh_available_models_uses_cached_provider_catalog refresh_available_models_isolates_cache_by_provider_key
+CARGO_INCREMENTAL=0 just test -p codex-model-provider provider_model_id_listing_uses_minimal_fallback_metadata
+```
+
+结果：
+
+- `just fmt` 通过。
+- `codex-models-manager` 2 个 cache 测试通过。
+- `codex-model-provider` 1 个 provider listing fallback 测试通过。
+- 曾尝试跑完整 `codex-model-provider`，35 个测试中 34 通过，唯一失败就是旧 bundled metadata 预期；本轮已按
+  Astral 方向改掉并单测通过。
+
+意义：
+
+- `/model` 跨 provider 切换时，不会因为同一个 `ASTRAL_HOME` 里的模型缓存而串厂商。
+- Astral 的“无内置模型预设”原则更干净：provider 裸 `/models` listing 不再自动套 bundled `models.json`。
+- 这一步不改模型请求协议、不改工具 runtime、不改 app-server/thread settings，也不影响 exec-server、sandbox、PTY。

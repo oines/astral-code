@@ -69,6 +69,7 @@ fn assert_models_contain(actual: &[ModelInfo], expected: &[ModelInfo]) {
 
 #[derive(Debug)]
 struct TestModelsEndpoint {
+    cache_key: String,
     has_command_auth: bool,
     has_provider_auth: bool,
     responses: Mutex<VecDeque<RemoteModelCatalog>>,
@@ -81,7 +82,12 @@ impl TestModelsEndpoint {
     }
 
     fn with_catalogs(responses: Vec<RemoteModelCatalog>) -> Arc<Self> {
+        Self::with_cache_key("test-provider", responses)
+    }
+
+    fn with_cache_key(cache_key: &str, responses: Vec<RemoteModelCatalog>) -> Arc<Self> {
         Arc::new(Self {
+            cache_key: cache_key.to_string(),
             has_command_auth: false,
             has_provider_auth: true,
             responses: Mutex::new(responses.into()),
@@ -91,6 +97,7 @@ impl TestModelsEndpoint {
 
     fn without_refresh(responses: Vec<Vec<ModelInfo>>) -> Arc<Self> {
         Arc::new(Self {
+            cache_key: "test-provider".to_string(),
             has_command_auth: false,
             has_provider_auth: false,
             responses: Mutex::new(responses.into_iter().map(catalog_response).collect()),
@@ -100,6 +107,7 @@ impl TestModelsEndpoint {
 
     fn with_provider_auth(responses: Vec<Vec<ModelInfo>>) -> Arc<Self> {
         Arc::new(Self {
+            cache_key: "test-provider".to_string(),
             has_command_auth: false,
             has_provider_auth: true,
             responses: Mutex::new(responses.into_iter().map(catalog_response).collect()),
@@ -160,6 +168,10 @@ impl ExternalAuth for TestUnresolvedExternalApiKeyAuth {
 
 #[async_trait]
 impl ModelsEndpointClient for TestModelsEndpoint {
+    fn cache_key(&self) -> String {
+        self.cache_key.clone()
+    }
+
     fn has_command_auth(&self) -> bool {
         self.has_command_auth
     }
@@ -386,6 +398,51 @@ async fn refresh_available_models_uses_cached_provider_catalog() {
 }
 
 #[tokio::test]
+async fn refresh_available_models_isolates_cache_by_provider_key() {
+    let provider_a_models = vec![remote_model(
+        "provider-a-cached-model",
+        "Provider A Cached",
+        /*priority*/ 0,
+    )];
+    let provider_b_models = vec![remote_model(
+        "provider-b-refreshed-model",
+        "Provider B Refreshed",
+        /*priority*/ 0,
+    )];
+    let codex_home = tempdir().expect("temp dir");
+    let provider_a_endpoint =
+        TestModelsEndpoint::with_cache_key("provider-a", vec![catalog_response(provider_a_models)]);
+    let provider_a_manager =
+        openai_manager_for_tests(codex_home.path().to_path_buf(), provider_a_endpoint.clone());
+    provider_a_manager
+        .refresh_available_models(RefreshStrategy::OnlineIfUncached)
+        .await
+        .expect("provider a refresh succeeds");
+
+    let provider_b_endpoint = TestModelsEndpoint::with_cache_key(
+        "provider-b",
+        vec![catalog_response(provider_b_models.clone())],
+    );
+    let provider_b_manager =
+        openai_manager_for_tests(codex_home.path().to_path_buf(), provider_b_endpoint.clone());
+
+    provider_b_manager
+        .refresh_available_models(RefreshStrategy::OnlineIfUncached)
+        .await
+        .expect("provider b refresh succeeds");
+
+    assert_eq!(
+        provider_b_manager.get_remote_models().await,
+        provider_b_models
+    );
+    assert_eq!(
+        provider_b_endpoint.fetch_count(),
+        1,
+        "different provider key should not reuse another provider cache"
+    );
+}
+
+#[tokio::test]
 async fn get_model_info_uses_fallback_when_model_is_absent_from_provider_catalog() {
     let remote_models = vec![remote_model(
         "provider-refreshed-model-info",
@@ -484,6 +541,7 @@ async fn refresh_available_models_keeps_merging_for_api_auth() {
     )];
     let codex_home = tempdir().expect("temp dir");
     let endpoint = Arc::new(TestModelsEndpoint {
+        cache_key: "api-auth-provider".to_string(),
         has_command_auth: true,
         has_provider_auth: false,
         responses: Mutex::new(vec![catalog_response(remote_models.clone())].into()),
@@ -679,6 +737,7 @@ async fn refresh_available_models_skips_network_without_provider_refresh_auth() 
 
 #[derive(Debug)]
 struct TestNoRefreshAuthModelsEndpoint {
+    cache_key: String,
     responses: Mutex<VecDeque<RemoteModelCatalog>>,
     fetch_count: AtomicUsize,
 }
@@ -686,6 +745,7 @@ struct TestNoRefreshAuthModelsEndpoint {
 impl TestNoRefreshAuthModelsEndpoint {
     fn new(responses: Vec<Vec<ModelInfo>>) -> Arc<Self> {
         Arc::new(Self {
+            cache_key: "test-no-refresh-provider".to_string(),
             responses: Mutex::new(responses.into_iter().map(catalog_response).collect()),
             fetch_count: AtomicUsize::new(0),
         })
@@ -698,6 +758,10 @@ impl TestNoRefreshAuthModelsEndpoint {
 
 #[async_trait]
 impl ModelsEndpointClient for TestNoRefreshAuthModelsEndpoint {
+    fn cache_key(&self) -> String {
+        self.cache_key.clone()
+    }
+
     fn has_command_auth(&self) -> bool {
         false
     }

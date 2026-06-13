@@ -9,7 +9,10 @@ use codex_protocol::error::Result as CoreResult;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::openai_models::ModelsResponse;
+use std::collections::hash_map::DefaultHasher;
 use std::fmt;
+use std::hash::Hash;
+use std::hash::Hasher;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -19,7 +22,7 @@ use tracing::Instrument as _;
 use tracing::error;
 use tracing::info;
 
-const MODEL_CACHE_FILE: &str = "models_cache.json";
+const MODEL_CACHE_DIR: &str = "models_cache";
 const DEFAULT_MODEL_CACHE_TTL: Duration = Duration::from_secs(300);
 
 /// Result of asking a provider for a remote model catalog.
@@ -46,6 +49,15 @@ pub enum RemoteModelCatalog {
 /// this endpoint only when it decides a remote refresh should happen.
 #[async_trait]
 pub trait ModelsEndpointClient: fmt::Debug + Send + Sync {
+    /// Stable provider identity used to isolate cached model catalogs.
+    ///
+    /// Implementations should include non-secret provider identity such as base URL,
+    /// wire protocol, provider name, and credential source. Different providers must
+    /// not share this value unless they intentionally share the same model catalog.
+    fn cache_key(&self) -> String {
+        "default".to_string()
+    }
+
     /// Returns whether this provider can authenticate command-scoped requests.
     fn has_command_auth(&self) -> bool;
 
@@ -212,7 +224,7 @@ impl OpenAiModelsManager {
         endpoint_client: Arc<dyn ModelsEndpointClient>,
         auth_manager: Option<Arc<AuthManager>>,
     ) -> Self {
-        let cache_path = codex_home.join(MODEL_CACHE_FILE);
+        let cache_path = model_cache_path(codex_home, &endpoint_client.cache_key());
         let cache_manager = ModelsCacheManager::new(cache_path, DEFAULT_MODEL_CACHE_TTL);
         Self {
             remote_models: RwLock::new(Vec::new()),
@@ -222,6 +234,14 @@ impl OpenAiModelsManager {
             auth_manager,
         }
     }
+}
+
+fn model_cache_path(codex_home: PathBuf, cache_key: &str) -> PathBuf {
+    let mut hasher = DefaultHasher::new();
+    cache_key.hash(&mut hasher);
+    codex_home
+        .join(MODEL_CACHE_DIR)
+        .join(format!("{:016x}.json", hasher.finish()))
 }
 
 impl StaticModelsManager {
@@ -348,8 +368,6 @@ impl OpenAiModelsManager {
             codex_otel::start_global_timer("codex.remote_models.load_cache.duration_ms", &[]);
         let client_version = crate::client_version_to_whole();
         info!(client_version, "models cache: evaluating cache eligibility");
-        // TODO(celia-oai): Include provider identity in cache eligibility so switching
-        // providers does not reuse a fresh models_cache.json entry from another provider.
         let cache = match self.cache_manager.load_fresh(&client_version).await {
             Some(cache) => cache,
             None => {
