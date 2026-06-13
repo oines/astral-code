@@ -6229,3 +6229,150 @@ Codex local compact、Goal/Plan、approval/sandbox，以及 Astral 的后台任�
 
 下一步：用户在 shell 里 export key 后运行 `scripts/astral_acceptance.py --run-claude`，再根据
 `acceptance-report.md`、`chat-summary.json`、`anthropic-summary.json` 和 Claude diff 写最终中文 SFT 形状报告。
+
+## 最新补充 90：DeepSeek 真实 P0 验收通过，修复 thinking/tool_use 续传形状
+
+本轮使用用户提供的 DeepSeek 测试额度做了真实端到端验收。API key 只通过环境变量传给子进程，没有写入
+repo、报告、临时 config 或命令日志。
+
+真实验收命令形状：
+
+```bash
+scripts/astral_acceptance.py \
+  --run-claude \
+  --chat-model deepseek-v4-pro \
+  --anthropic-model deepseek-v4-pro \
+  --timeout-seconds 420
+```
+
+真实报告目录：
+
+```text
+/var/folders/gd/rg7jch6j5bl7q5_2f0wkl3mr0000gn/T/astral-acceptance-14x0i1uc
+```
+
+P0 结果：
+
+- PASS：`astral --version`、`astral mcp-server --help`、`astral plugin list`。
+- PASS：trajectory capture/summarize/diff 脚本编译。
+- PASS：DeepSeek `/v1/chat/completions` golden code task。
+  - 任务从 failing unittest 开始。
+  - 模型走 `Bash -> Read/Edit/Write/Bash rerun -> final` 类轨迹。
+  - 最终 unittest 从失败变为通过。
+- PASS：DeepSeek `/anthropic` Messages golden code task。
+  - 同样从 failing unittest 开始。
+  - 最终 unittest 从失败变为通过。
+- PASS：terminal agentic task。
+  - 覆盖持续输出命令。
+  - 覆盖无输出长任务和 `ReadTaskOutput` 轮询。
+  - 覆盖 TTY/交互输入：`SendTaskInput` 写入 `y\n`。
+  - 覆盖 `ListBackgroundTasks` 找回后台任务。
+  - 覆盖 `StopBackgroundTask` 停止后台任务。
+  - 最终写入 `terminal_acceptance.txt = terminal-ok`。
+- PASS：Astral chat/antrhopic request trajectory summary 生成。
+- PASS：Claude Code CLI stream-json probe。
+
+本轮暴露并修复的真实 blocker：
+
+- DeepSeek thinking mode 要求上一轮 assistant 的 reasoning/thinking 与本轮 `tool_calls` / `tool_use`
+  位于同一个 assistant message。
+- 之前 Astral 的内部历史会把 reasoning/thinking 和 tool call 拆成相邻 assistant item；OpenAI-compatible
+  和 Anthropic adapter 序列化时没有合并，导致真实 DeepSeek 返回：
+  - chat-completions：必须把 `reasoning_content` 传回 API。
+  - anthropic：必须把 `content[].thinking` 传回 API。
+- 已在 provider adapter 边界修复：
+  - `/v1/chat/completions`：合并相邻 assistant messages，把 `reasoning_content` 与 `tool_calls`
+    放回同一 assistant message。
+  - `/anthropic` Messages：合并相邻同 role messages，把 `thinking`、`tool_use`、`tool_result`
+    放回 Anthropic 原生 block shape。
+- 这个修复只改变 wire adapter 序列化，不重写 core history，不破坏 Codex 的 incremental context
+  与 compact 机制。
+
+相关验证：
+
+```bash
+just fmt
+just test -p codex-api \
+  request_merges_adjacent_assistant_reasoning_and_tool_calls \
+  messages_request_merges_adjacent_reasoning_tool_use_and_tool_results
+CARGO_INCREMENTAL=0 cargo build --bin astral
+python3 -m py_compile scripts/astral_acceptance.py
+uv run --frozen --project scripts --no-sync --with ruff ruff check scripts/astral_acceptance.py
+```
+
+构建备注：
+
+- 普通 `cargo build --bin astral` 曾在 `codex-protocol` 增量编译处出现长时间 0% CPU。
+- 使用 `CARGO_INCREMENTAL=0 cargo build --bin astral` 后正常完成，耗时约 12 分 17 秒。
+- 当前磁盘在验收前后仍有约 29-30GiB 可用。
+
+本轮真实 trajectory 观察：
+
+- chat-completions summary：
+  - `fixture_count = 27`。
+  - `chat_completions = 25`。
+  - 模型可见工具包括：
+    `Bash`、`ReadTaskOutput`、`SendTaskInput`、`ListBackgroundTasks`、`StopBackgroundTask`、
+    `Read`、`Write`、`Edit`、`Glob`、`Grep`、`TodoWrite`、`Skill`、`AskUserQuestion`、
+    以及当前继承的 subagent/goal 工具。
+  - 实际 response tool names 包括：
+    `Bash`、`Edit`、`ListBackgroundTasks`、`Read`、`ReadTaskOutput`、`SendTaskInput`、
+    `StopBackgroundTask`、`TodoWrite`、`Write`。
+  - assistant message 已出现 `content + reasoning_content + tool_calls` 同消息形状。
+- Anthropic summary：
+  - `fixture_count = 9`。
+  - `anthropic_messages = 7`。
+  - assistant content block 类型包括 `thinking`、`tool_use`、`text`。
+  - user content block 类型包括 `text`、`tool_result`。
+  - 真实请求呈现 Anthropic 原生 `thinking/tool_use -> tool_result -> thinking/tool_use` 节奏。
+
+Claude Code 对照状态：
+
+- `claude --bare -p --output-format stream-json --verbose --tools Bash,Read,Edit,Grep,Glob ...`
+  可以成功跑通 DeepSeek 模型，并输出 Claude Code 自身的 stream-json 轨迹。
+- 该 stream-json 轨迹显示 Claude Code 的外层是：
+  - system init。
+  - assistant `thinking`。
+  - assistant `tool_use`。
+  - user `tool_result`。
+  - assistant `thinking`。
+  - assistant `text`。
+- 但是当前本机 Claude Code 没有命中 `trajectory_capture_proxy.py` 的 HTTP 抓包代理：
+  - 即使设置 `ANTHROPIC_BASE_URL=http://127.0.0.1:<proxy>`，proxy dump 仍为空。
+  - 查看 `/Users/oines/project/claude-code/services/api/client.ts` 后发现，当前源码中的 direct Anthropic SDK
+    client 没有显式把 `ANTHROPIC_BASE_URL` 塞入 SDK `baseURL`；用户本机 Claude Code 能跑 DeepSeek
+    可能是其它 provider/cc-switch 接管路径在生效。
+- 因此本轮“Claude Code 对照”是 CLI stream-json 外层轨迹对照，不是 Claude Code 真实 HTTP request
+  抓包对照。后续如必须做严格 HTTP request diff，需要走更深的 cc-switch hook、SDK fetch hook 或
+  HTTPS MITM，而不是简单设置环境变量。
+
+当前 SFT 形状判断：
+
+- Astral 与 Claude Code 在核心 coding agent 轨迹上已经高度接近：
+  - 工具名主路径接近：`Bash`、`Read`、`Edit`、`Grep`、`Glob`、`Write`。
+  - 循环形状接近：assistant thinking/reasoning -> tool_use/tool_calls -> tool_result -> 继续推理。
+  - 编程节奏接近：先跑测试/搜索/读文件，再编辑，再复跑测试，最后总结。
+  - Todo/plan 类行为可用：模型在 terminal task 中自然使用 `TodoWrite` 更新任务清单。
+- Astral 刻意保留并优于 Claude Code 的差异：
+  - terminal 后台任务工具更强：`ReadTaskOutput`、`SendTaskInput`、`ListBackgroundTasks`、
+    `StopBackgroundTask` 明确拆分，避免长命令让模型“变哑巴”。
+  - execution 仍走 Codex 的 UnifiedExec/exec-server/PTY/sandbox/approval 骨架，没有绑死本地 shell。
+- Astral 仍有残留差异：
+  - subagent/goal 工具目前仍保留 Codex 风格名字：`spawn_agent`、`send_input`、`wait_agent`、
+    `create_goal`、`update_goal` 等。之前已经决定 goal 继承 Codex；subagent 不再强行改名。
+  - permission/approval 形状还不是 Claude Code 原样；底层安全边界优先继承 Codex。
+  - Claude Code 的真实 HTTP request 还未成功抓到，只完成 CLI stream-json 形状对照。
+
+小瑕疵：
+
+- terminal task 中模型第一次调用 `StopBackgroundTask` 时曾传入 `target` 而不是 `task_id`，工具返回错误后，
+  模型改用正确 `task_id` 并成功停止任务。
+- 结论：schema 已足以自恢复；后续可收紧工具描述，强调唯一参数名是 `task_id`。
+
+总体结论：
+
+- 以 Astral 自己的真实模型 API request 为准，P0 已经达到“可用且轨迹接近 Claude-ish coding harness”
+  的标准。
+- 还不能声称“已经完成严格 Claude Code HTTP request diff”，但可以声称：
+  Astral 的模型可见工具循环和 Claude Code stream-json 外层轨迹同构，且 terminal agentic 体验保留了
+  Codex 更丝滑的后台执行骨架。

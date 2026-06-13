@@ -138,11 +138,15 @@ def run(
             timeout=timeout,
         )
     except subprocess.TimeoutExpired as exc:
-        stdout = exc.stdout if isinstance(exc.stdout, str) else (exc.stdout or b"").decode(
-            "utf-8", errors="replace"
+        stdout = (
+            exc.stdout
+            if isinstance(exc.stdout, str)
+            else (exc.stdout or b"").decode("utf-8", errors="replace")
         )
-        stderr = exc.stderr if isinstance(exc.stderr, str) else (exc.stderr or b"").decode(
-            "utf-8", errors="replace"
+        stderr = (
+            exc.stderr
+            if isinstance(exc.stderr, str)
+            else (exc.stderr or b"").decode("utf-8", errors="replace")
         )
         stderr = f"{stderr}\nTimed out after {timeout} seconds.\n"
         return subprocess.CompletedProcess(
@@ -153,7 +157,9 @@ def run(
         )
 
 
-def append_log(path: Path, title: str, completed: subprocess.CompletedProcess[str]) -> None:
+def append_log(
+    path: Path, title: str, completed: subprocess.CompletedProcess[str]
+) -> None:
     with path.open("a", encoding="utf-8") as handle:
         handle.write(f"\n## {title}\n")
         handle.write(f"$ {' '.join(completed.args)}\n")
@@ -391,7 +397,9 @@ def run_golden_task(
     elif after.returncode != 0:
         step.fail(reason="unittest still failing", stdout=after.stdout[-1000:])
     elif "2.5" not in fixed_source and "/ 2" not in fixed_source:
-        step.fail(reason="test passed but source does not show an obvious even median fix")
+        step.fail(
+            reason="test passed but source does not show an obvious even median fix"
+        )
     else:
         step.pass_(workdir=str(work_root))
 
@@ -451,7 +459,9 @@ def run_terminal_task(
     step.pass_(workdir=str(work_root))
 
 
-def summarize_capture(dump_dir: Path, output_path: Path) -> subprocess.CompletedProcess[str]:
+def summarize_capture(
+    dump_dir: Path, output_path: Path
+) -> subprocess.CompletedProcess[str]:
     return run(
         [
             sys.executable,
@@ -489,6 +499,7 @@ def run_claude_probe(
         "Use Bash to print the current directory and then answer with one short "
         "sentence. Do not modify files."
     )
+    before_captures = set(anthropic_proxy.dump_dir.glob("*.json"))
     completed = run(
         [
             claude,
@@ -496,6 +507,7 @@ def run_claude_probe(
             "-p",
             "--output-format",
             "stream-json",
+            "--verbose",
             "--tools",
             "Bash,Read,Edit,Grep,Glob",
             "--dangerously-skip-permissions",
@@ -509,7 +521,23 @@ def run_claude_probe(
     )
     append_log(log_path, "claude trajectory probe", completed)
     if completed.returncode == 0:
-        step.pass_(capture_dir=str(anthropic_proxy.dump_dir))
+        after_captures = set(anthropic_proxy.dump_dir.glob("*.json"))
+        new_captures = sorted(
+            path.name
+            for path in after_captures - before_captures
+            if path.name != "server-info.json"
+        )
+        if new_captures:
+            step.pass_(
+                capture_dir=str(anthropic_proxy.dump_dir),
+                request_capture="captured",
+                captured_requests=str(len(new_captures)),
+            )
+        else:
+            step.pass_(
+                request_capture="not_captured",
+                stream_json="pass",
+            )
     else:
         step.fail(reason="Claude Code probe failed", returncode=completed.returncode)
 
@@ -528,7 +556,9 @@ def local_smokes(
     if completed.returncode != 0:
         version_step.fail(reason="astral --version failed")
     else:
-        mcp = run([str(astral_bin), "mcp-server", "--help"], cwd=repo_root(), timeout=30)
+        mcp = run(
+            [str(astral_bin), "mcp-server", "--help"], cwd=repo_root(), timeout=30
+        )
         plugin = run([str(astral_bin), "plugin", "list"], cwd=repo_root(), timeout=30)
         append_log(log_path, "astral mcp-server --help", mcp)
         append_log(log_path, "astral plugin list", plugin)
@@ -585,19 +615,25 @@ def local_smokes(
     steps.append(rust_step)
 
 
-def write_reports(report_dir: Path, steps: list[Step], metadata: dict[str, Any]) -> None:
+def write_reports(
+    report_dir: Path, steps: list[Step], metadata: dict[str, Any]
+) -> None:
     report = {
         "metadata": metadata,
         "steps": [step.to_json() for step in steps],
     }
     report_path = report_dir / "acceptance-report.json"
-    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    report_path.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     lines = ["# Astral-Code Acceptance Report", ""]
     for step in steps:
         lines.append(f"- {step.status.upper()}: {step.name}")
         if step.details:
-            detail = ", ".join(f"{key}={value}" for key, value in sorted(step.details.items()))
+            detail = ", ".join(
+                f"{key}={value}" for key, value in sorted(step.details.items())
+            )
             lines.append(f"  {detail}")
     lines.append("")
     lines.append("## SFT Shape Notes")
@@ -720,10 +756,15 @@ def main() -> int:
         anthropic_summary = report_dir / "anthropic-summary.json"
         summary_step = Step("P0: trajectory summaries")
         chat_summary_result = summarize_capture(chat_proxy.dump_dir, chat_summary)
-        anthropic_summary_result = summarize_capture(anthropic_proxy.dump_dir, anthropic_summary)
+        anthropic_summary_result = summarize_capture(
+            anthropic_proxy.dump_dir, anthropic_summary
+        )
         append_log(log_path, "summarize chat trajectory", chat_summary_result)
         append_log(log_path, "summarize anthropic trajectory", anthropic_summary_result)
-        if chat_summary_result.returncode == 0 and anthropic_summary_result.returncode == 0:
+        if (
+            chat_summary_result.returncode == 0
+            and anthropic_summary_result.returncode == 0
+        ):
             summary_step.pass_(
                 chat_summary=str(chat_summary),
                 anthropic_summary=str(anthropic_summary),
