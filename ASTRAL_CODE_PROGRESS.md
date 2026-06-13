@@ -4946,3 +4946,47 @@ CARGO_INCREMENTAL=0 just test -p codex-cli --bin astral render_human_report_incl
 
 - CLI 排障路径不再把新项目叫成 Codex。
 - 这一步只改用户可见 CLI 文案和测试预期，不触碰 app-server、exec-server、UnifiedExec、PTY、sandbox、approval、provider adapter 或工具 runtime。
+
+## 最新补充 75：`astral exec` human output 标签改为 Astral
+
+继续处理真实 CLI/headless 用户会看到的输出。
+
+发现问题：
+
+- `astral exec` 的 human output 在 agent 最终消息前仍显示 `codex` 角色标签。
+- `codex-rs/exec/src/lib.rs` 里还有少量 `codex exec` / `Codex initialized` 注释和日志字符串。
+
+改动：
+
+- `codex-rs/exec/src/event_processor_with_human_output.rs`
+  - agent message 标签从 `codex` 改为 `astral`。
+  - shutdown 时补打 final message 的标签同样改为 `astral`。
+- `codex-rs/exec/src/lib.rs`
+  - `codex exec` 注释改为 `astral exec`。
+  - originator warning 和 initialized log 改为 Astral。
+- `codex-rs/exec/src/exec_events.rs`
+  - JSONL event 注释改为 `astral exec`。
+
+验证：
+
+```bash
+cd /Users/oines/project/astral-code/codex-rs
+just fmt
+CARGO_INCREMENTAL=0 just test -p codex-exec prints_final_tty_message_when_not_yet_rendered final_message_from_turn_items_uses_latest_agent_message turn_completed_recovers_final_message_from_turn_items
+```
+
+结果：
+
+- `just fmt` 通过。
+- 3 个 `codex-exec` human output/final-message 相关测试通过。
+
+磁盘：
+
+- 本轮 `codex-exec` 窄测触发共享依赖重编，磁盘剩余降到约 8.3Gi。
+- `codex-rs/target/debug/incremental` 和 `target/tmp` 均为 0B。
+- `codex-rs/target/debug/deps` 约 143G，是当前最大缓存；暂不删除，避免明显拖慢后续开发。
+
+意义：
+
+- `astral exec` 的直接终端输出不再把 agent 叫成 `codex`。
+- 这一步只改输出标签和注释/log 文案，不改 exec-server、UnifiedExec、PTY、sandbox、approval 或 provider adapter。
