@@ -6178,3 +6178,20 @@ All checks passed!
 - 下一步真实对比时，不需要先改 Astral 核心逻辑；只要用同一 prompt 分别跑 Claude Code 和 Astral-Code，
   然后比较 summary 即可。
 - 这一步不改变 runtime、不改变 provider adapter、不触碰 sandbox/PTY/exec-server。
+
+补充探测：
+
+- 本机存在官方 Claude Code CLI：`/opt/homebrew/bin/claude`。
+- 版本：`2.1.142 (Claude Code)`。
+- `claude --help` 确认可用于后续真实 trajectory 抓取的参数：
+  - `--bare`
+  - `-p/--print`
+  - `--output-format stream-json`
+  - `--tools`
+  - `--allowedTools`
+  - `--dangerously-skip-permissions`
+  - `--model`
+- Claude Code 源码中确认会读取 `ANTHROPIC_BASE_URL`，所以后续可以把它指向
+  `trajectory_capture_proxy.py`，再由 proxy 转发到真实 provider。
+- 当前 shell 环境没有 `DEEPSEEK_API_KEY` / `ASTRAL_API_KEY` / `ANTHROPIC_API_KEY`。
+  为避免把用户聊天里发过的 key 写进命令、临时文件或日志，本轮没有直接用明文 key 跑真实 Claude Code 双抓。
