@@ -1,6 +1,6 @@
 # Astral-Code 项目总控记录
 
-最后更新：2026-06-12 本轮
+最后更新：2026-06-13 本轮
 
 这份文档是 Astral-Code 长线改造的中文 handoff。它的用途不是对外宣传，而是让后续任何一次
 compact、睡醒恢复、subagent 接手或人工复盘时，都能迅速知道：我们到底要做什么、为什么这么做、
@@ -5961,3 +5961,143 @@ legacy hosted remote control is disabled in Astral until a provider-neutral cont
   2. 正式 release/standalone packaging。
   3. 残留 OpenAI/hosted 命名继续分批清理。
   4. 全量端到端任务回归和 CI 修复。
+
+## 最新补充 87：TUI `/model` provider 入口与 package layout smoke 收口
+
+本轮按当前 goal 继续收尾，不再卡在旧字符串清理。优先补两个此前明确列为剩余项的证据：
+
+1. TUI `/model` UI 级 provider 入口。
+2. standalone/release package layout 与 daemon managed path。
+
+### TUI `/model` provider 入口
+
+新增测试：
+
+- `codex-rs/tui/src/chatwidget/tests/popups_and_settings.rs`
+  - `model_picker_exposes_configured_providers`
+
+测试覆盖：
+
+- 在 TUI 测试配置里加入第二个 provider：`deepseek`，display name 为 `DeepSeek`。
+- 打开 `/model` 的主 picker。
+- 断言 UI 中出现：
+  - `Providers`
+  - `Browse configured model providers`
+- 打开 provider picker。
+- 断言 provider picker 显示：
+  - `Select Provider`
+  - `DeepSeek`
+  - `deepseek`
+
+这颗测试补的是用户动作入口；此前已经存在的
+`reasoning_selection_preserves_model_provider` 继续覆盖“选中 provider-specific model 后，
+`UpdateModel` / `PersistModelSelection` 都携带 `model_provider`”。
+
+验证：
+
+```bash
+just fmt
+just test -p codex-tui model_picker_exposes_configured_providers
+```
+
+`just test` 完成编译后，`cargo nextest` 卡在 test listing 阶段，相关 `--list` 子进程 0% CPU，
+不是测试失败。已发送 SIGINT 清理该 runner，随后直接运行编译出的 TUI test binary 精确验证：
+
+```bash
+RUST_MIN_STACK=8388608 \
+  target/debug/deps/codex_tui-4887b26b1ec6e599 \
+  model_picker_exposes_configured_providers \
+  --nocapture --test-threads=1
+```
+
+结果：
+
+```text
+running 1 test
+test chatwidget::tests::popups_and_settings::model_picker_exposes_configured_providers ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2780 filtered out
+```
+
+结论：
+
+- `/model` provider 入口已有 TUI 侧测试证据。
+- provider-aware model selection 的事件链和持久化链路已有既有测试覆盖。
+- 这一步不改 app-server、exec-server、UnifiedExec、PTY、sandbox、approval 或 provider adapter。
+
+### standalone/package layout smoke
+
+检查结果：
+
+- `codex-rs/cli/Cargo.toml` 中 CLI binary 是 `astral`。
+- `codex-rs/app-server-daemon/src/managed_install.rs` 查找 managed binary 的路径是：
+  `$ASTRAL_HOME/packages/standalone/current/astral`
+- `scripts/codex_package/targets.py` 的默认 package variant 是：
+  - `name = "astral"`
+  - `cargo_bin = "astral"`
+  - `executable_stem = "astral"`
+- `scripts/build_codex_package.py --help` 在 `uv run --project scripts` 下正常显示，默认
+  `--variant astral`。
+
+轻量 package smoke：
+
+```bash
+uv run --frozen --project scripts --no-sync python scripts/build_codex_package.py \
+  --target aarch64-apple-darwin \
+  --variant astral \
+  --entrypoint-bin codex-rs/target/debug/astral \
+  --rg-bin "$(command -v rg)" \
+  --package-dir "$tmpdir/pkg" \
+  --force
+```
+
+为了避免重编 release，本轮使用已编译的 debug `astral` 和本机 `rg` 作为预构建输入；
+临时 package 目录在验证后已删除。
+
+验证到的 metadata：
+
+```json
+{
+  "layoutVersion": 1,
+  "version": "0.0.0",
+  "target": "aarch64-apple-darwin",
+  "variant": "astral",
+  "entrypoint": "bin/astral",
+  "resourcesDir": "codex-resources",
+  "pathDir": "codex-path"
+}
+```
+
+同时运行：
+
+```bash
+uv run --frozen --project scripts --no-sync python -m unittest discover \
+  -s scripts/codex_package -p 'test_*.py' -q
+```
+
+结果：
+
+```text
+Ran 9 tests
+OK
+```
+
+注意：
+
+- 本机系统 `python3` 是 3.9，直接运行 `python3 scripts/build_codex_package.py --help`
+  会因为 `Path | None` 类型语法失败。
+- `scripts/pyproject.toml` 已声明 `requires-python = ">=3.10"`，所以本地正确入口是
+  `uv run --project scripts ...` 或 Python 3.10+。
+- `.github/workflows/ci.yml` 目前在 setup-uv 之前直接用 `python3 -m unittest discover`
+  跑 package builder tests；如果 CI runner 的 `python3` 低于 3.10 会失败。当前
+  ubuntu-latest 通常满足，但更稳的后续收口是把该 step 移到 setup-uv 之后并改用
+  `uv run --project scripts`。
+
+当前剩余重点更新：
+
+1. 继续做最终真实 E2E 任务闭环，而不是再扩大 TUI 单测。
+2. 对比 Claude Code 与 Astral-Code 的真实 model API request trajectory：
+   messages / tools / tool_use / tool_result / compact / permission。
+3. 修复真实 E2E 抓到的问题。
+4. CI/release 工作流后续需要单独切片收敛旧 `codex-package` 文件名、内部变量名和 Python 版本入口；
+   但当前用户可见 package entrypoint 与 daemon managed path 已是 `astral`。

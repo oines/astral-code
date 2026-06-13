@@ -2388,6 +2388,65 @@ async fn model_provider_popup_requests_selected_provider_models() {
 }
 
 #[tokio::test]
+async fn model_picker_exposes_configured_providers() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    let mut deepseek_provider = codex_model_provider_info::create_oss_provider_with_base_url(
+        "http://127.0.0.1:45678/v1",
+        codex_model_provider_info::WireApi::ChatCompletions,
+    );
+    deepseek_provider.name = "DeepSeek".to_string();
+    chat.config
+        .model_providers
+        .insert("deepseek".to_string(), deepseek_provider);
+
+    let preset = ModelPreset {
+        model_provider: Some(chat.config.model_provider_id.clone()),
+        model_provider_name: Some(chat.config.model_provider.name.clone()),
+        id: "codex-auto-balanced".to_string(),
+        model: "codex-auto-balanced".to_string(),
+        display_name: "codex-auto-balanced".to_string(),
+        description: "balanced".to_string(),
+        default_reasoning_effort: ReasoningEffortConfig::Medium,
+        supported_reasoning_efforts: vec![ReasoningEffortPreset {
+            effort: ReasoningEffortConfig::Medium,
+            description: "medium".to_string(),
+        }],
+        supports_personality: false,
+        additional_speed_tiers: Vec::new(),
+        service_tiers: Vec::new(),
+        default_service_tier: None,
+        is_default: true,
+        upgrade: None,
+        show_in_picker: true,
+        availability_nux: None,
+        supported_in_api: true,
+        input_modalities: default_input_modalities(),
+    };
+
+    chat.open_model_popup_with_presets(vec![preset]);
+    let model_popup = render_bottom_popup(&chat, /*width*/ 90);
+    assert!(
+        model_popup.contains("Providers"),
+        "expected /model picker to expose provider switching:\n{model_popup}"
+    );
+    assert!(
+        model_popup.contains("Browse configured model providers"),
+        "expected /model picker to describe provider switching:\n{model_popup}"
+    );
+
+    chat.open_model_providers_popup();
+    let providers_popup = render_bottom_popup(&chat, /*width*/ 90);
+    assert!(
+        providers_popup.contains("Select Provider"),
+        "expected provider selection popup:\n{providers_popup}"
+    );
+    assert!(
+        providers_popup.contains("DeepSeek") && providers_popup.contains("deepseek"),
+        "expected configured provider name and id in popup:\n{providers_popup}"
+    );
+}
+
+#[tokio::test]
 async fn server_overloaded_error_does_not_switch_models() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(Some("gpt-5.3-codex")).await;
     chat.set_model("gpt-5.3-codex");
