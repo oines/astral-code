@@ -5090,3 +5090,43 @@ CARGO_INCREMENTAL=0 just test -p codex-protocol local_image_read_error_adds_plac
 
 - 单模态/图片降级相关错误路径不再把新项目叫成 Codex。
 - 这一步只改用户可见文案和测试预期，不改变 `input_modalities`、`for_prompt`、provider adapter、MCP sanitize、sandbox、approval 或执行后端。
+
+## 最新补充 78：`/status` account fallback 不再显示 ChatGPT
+
+继续收口真实用户可见的旧 hosted 控制面残留。
+
+发现问题：
+
+- `codex-rs/tui/src/status/card.rs` 中，如果 status account 仍是旧 hosted account 结构但缺少 email/plan，
+  `/status` 会 fallback 显示 `ChatGPT`。
+- Astral 的主路径是 provider-neutral/API-key；即使未来存在 hosted account，也不应该在无明确信息时把它展示成
+  ChatGPT。
+
+改动：
+
+- `StatusAccountDisplay::ChatGpt { email: None, plan: None }` 的展示从 `ChatGPT` 改为 `Hosted account`。
+
+验证：
+
+```bash
+cd /Users/oines/project/astral-code/codex-rs
+just fmt
+rg -n "\"ChatGPT\"\\.to_string\\(\\)|\\(None, None\\).*ChatGPT|Hosted account" codex-rs/tui/src/status/card.rs codex-rs/tui/src/status/tests.rs
+rg -n "ChatGPT" codex-rs/tui/src/status -g '*.rs'
+```
+
+结果：
+
+- `just fmt` 通过。
+- `/status` runtime 代码里不再有 `ChatGPT` fallback。
+- `codex-rs/tui/src/status` 下剩余 `ChatGPT` 只在测试断言描述里用于确认旧 usage link 不显示。
+
+测试注意：
+
+- 本轮未跑 TUI nextest。此前 TUI nextest 在本机低磁盘状态下多次卡在 test list 阶段；这次只改一处 fallback 文案，
+  先用格式化和定向静态检查收口，最终验收阶段再统一跑 TUI。
+
+意义：
+
+- `/status` 不再给 provider-neutral 用户旧 ChatGPT 控制面的心理暗示。
+- 这一步只改展示 fallback，不改 account 类型、rate limit 逻辑、provider runtime URL、app-server、core session 或 model switch。

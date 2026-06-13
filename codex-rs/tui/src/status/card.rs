@@ -718,7 +718,7 @@ impl HistoryCell for StatusHistoryCell {
                 (Some(email), Some(plan)) => format!("{email} ({plan})"),
                 (Some(email), None) => email.clone(),
                 (None, Some(plan)) => plan.clone(),
-                (None, None) => "ChatGPT".to_string(),
+                (None, None) => "Hosted account".to_string(),
             },
             StatusAccountDisplay::ApiKey => "API key configured".to_string(),
         });
