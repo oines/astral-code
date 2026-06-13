@@ -4907,3 +4907,42 @@ Actions 状态：
 
 - 本轮后磁盘剩余约 10Gi。
 - `codex-rs/target/debug/incremental` 为 0B，没有低风险增量缓存可清。
+
+## 最新补充 74：CLI Doctor 与本地状态恢复文案 Astral 化
+
+继续处理真实用户会看到的 CLI 输出，不碰执行后端和协议主循环。
+
+发现问题：
+
+- `astral doctor` 的 human report 标题仍显示 `Codex Doctor`。
+- config load 失败的修复建议仍写 `rerun codex doctor`。
+- 本地 state DB 损坏/修复提示仍写 `Codex couldn't start...`。
+
+改动：
+
+- `codex-rs/cli/src/doctor/output.rs`
+  - human report 标题改为 `Astral Doctor`。
+  - summary 提示改为 `Run astral doctor without --summary...`。
+- `codex-rs/cli/src/doctor.rs`
+  - doctor 模块注释和 config remediation 改为 `astral doctor`。
+- `codex-rs/cli/src/state_db_recovery.rs`
+  - 本地数据库损坏、safe repair、诊断指引全部改为 Astral 文案。
+- 更新 doctor human report snapshot。
+
+验证：
+
+```bash
+cd /Users/oines/project/astral-code/codex-rs
+just fmt
+CARGO_INCREMENTAL=0 just test -p codex-cli --bin astral render_human_report_includes_details_by_default_without_color render_human_report_snapshot_covers_environment_rows render_human_report_supports_summary_output_without_color render_human_report_supports_ascii_output stored_auth_validation_rejects_missing_api_key stored_auth_validation_rejects_legacy_credentials
+```
+
+结果：
+
+- `just fmt` 通过。
+- 6 个 `codex-cli::bin/astral` doctor 相关测试通过。
+
+意义：
+
+- CLI 排障路径不再把新项目叫成 Codex。
+- 这一步只改用户可见 CLI 文案和测试预期，不触碰 app-server、exec-server、UnifiedExec、PTY、sandbox、approval、provider adapter 或工具 runtime。

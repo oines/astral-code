@@ -17,8 +17,8 @@ pub(crate) fn is_locked(detail: &str) -> bool {
 }
 
 pub(crate) fn confirm_repair(startup_error: &LocalStateDbStartupError) -> std::io::Result<bool> {
-    eprintln!("Codex couldn't start because its local database appears to be damaged.");
-    eprintln!("Codex can try a safe repair by backing up those files and rebuilding them.");
+    eprintln!("Astral couldn't start because its local database appears to be damaged.");
+    eprintln!("Astral can try a safe repair by backing up those files and rebuilding them.");
     print_technical_details(startup_error);
     crate::confirm("Repair Astral local data now? [y/N]: ")
 }
@@ -75,8 +75,8 @@ pub(crate) fn print_repair_backups(backups: &[PathBuf]) {
 }
 
 pub(crate) fn print_diagnostic_guidance(startup_error: &LocalStateDbStartupError) {
-    eprintln!("Codex couldn't start because its local database appears to be damaged.");
-    eprintln!("Run `codex doctor` to check your setup and get next-step guidance.");
+    eprintln!("Astral couldn't start because its local database appears to be damaged.");
+    eprintln!("Run `astral doctor` to check your setup and get next-step guidance.");
     eprintln!("If this keeps happening, share the technical details below when asking for help.");
     print_technical_details(startup_error);
 }

@@ -2,11 +2,11 @@
 source: cli/src/doctor/output.rs
 expression: "render_human_report(&sample_report(), detailed_no_color_unicode_options())"
 ---
-Codex Doctor v0.0.0
+Astral Doctor v0.0.0
 
 Notes
    ⚠ terminal     narrow terminal
-   ✗ auth         token expired - Run `astral login`.
+   ✗ auth         token expired - Pipe an API key to `astral login --with-api-key`.
 ─────────────────────────────────────────────────────────────
 
 Environment
@@ -35,7 +35,7 @@ Environment
   ✓ state        state paths inspectable
 
 Configuration
-  ✗ auth         token expired — Run `astral login`.
+  ✗ auth         token expired — Pipe an API key to `astral login --with-api-key`.
       ASTRAL_API_KEY           present
 
 Updates
