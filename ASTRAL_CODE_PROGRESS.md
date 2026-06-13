@@ -5667,3 +5667,124 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 131 filtered out; fi
 
 - 新增 adapter 单测已实际通过。
 - 本机 `nextest` hang 是测试调度层/本地 target 状态问题，不是本次 Rust 代码编译失败。
+
+## 最新补充 87：DeepSeek resume 真实回归通过，补齐 reasoning-only 形状
+
+继续沿着最终验收目标推进，本轮用最新本地 `astral` 二进制和 DeepSeek 官方
+OpenAI-compatible `/v1/chat/completions` 做了真实 resume 回归。
+
+执行口径：
+
+- 临时 `ASTRAL_HOME`。
+- 临时本地 capture proxy 转发到 DeepSeek 官方上游。
+- 模型：`deepseek-v4-pro` / `deepseek-v4-flash`。
+- API key 只放在进程环境变量里，没有写入仓库或项目配置。
+
+真实发现：
+
+- 第一轮请求成功。
+- 第二轮 `exec resume --last` 使用历史上下文时，DeepSeek 返回：
+
+```text
+Invalid assistant message: content or tool_calls must be set
+```
+
+- capture fixture 显示，历史中存在一条 assistant 消息只有：
+
+```json
+{
+  "role": "assistant",
+  "content": null,
+  "reasoning_content": "..."
+}
+```
+
+- DeepSeek 要求 reasoning-only assistant 历史消息也必须显式带 `content` 或 `tool_calls`。
+
+修复：
+
+- `codex-rs/codex-api/src/agent_adapters/chat_completions.rs`
+  - assistant `ContentBlock::Text` 仍进入 `content`。
+  - assistant `ContentBlock::Reasoning` 仍进入 `reasoning_content`。
+  - 如果 assistant 只有 reasoning、没有 text、也没有 tool calls，则序列化为：
+
+```json
+{
+  "role": "assistant",
+  "content": "",
+  "reasoning_content": "..."
+}
+```
+
+  - 如果 assistant 是工具调用消息，保持现有 `content: null + tool_calls` 形状。
+
+- `codex-rs/codex-api/src/agent_adapters/chat_completions_tests.rs`
+  - 新增 `request_sets_empty_content_for_reasoning_only_assistant_message`。
+
+验证：
+
+```bash
+cd /Users/oines/project/astral-code/codex-rs
+just fmt
+just test -p codex-api \
+  request_preserves_assistant_reasoning_content_for_deepseek \
+  request_sets_empty_content_for_reasoning_only_assistant_message
+```
+
+- `just fmt` 通过。
+- `codex-api` 编译通过。
+- 本机 `nextest` runner 仍在运行阶段静默卡住；已 Ctrl-C。
+- 直接运行编译出的 `codex_api` test binary，两个目标测试均通过。
+- 重新构建最新 `astral` 二进制成功：
+
+```bash
+CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=2 cargo build -p codex-cli --bin astral
+```
+
+- 修复后再次运行 DeepSeek `exec resume --last` 成功：
+
+```text
+Astral DeepSeek turn two is good to go after the fix.
+```
+
+- usage 中出现缓存命中：
+
+```text
+input_tokens=22684
+cached_input_tokens=11136
+```
+
+这说明真实长上下文 resume 请求不仅通过，而且 DeepSeek 侧已经开始命中输入缓存。
+
+trajectory 工具补强：
+
+- `scripts/trajectory_summarize.py` 现在会在 message summary 中保留：
+  - `fields`
+  - `reasoning_content`
+- 这样后续比较 Claude Code 与 Astral-Code 的真实 request trajectory 时，可以直接看出：
+  - 修复前：`content` 是 `none`
+  - 修复后：`content` 是空字符串 text，且保留 `reasoning_content`
+
+permission / goal / doctor 快速验收：
+
+- `RequestPermissions` feature 打开后，真实 DeepSeek 请求的工具列表包含：
+  - `RequestPermissions`
+  - `get_goal`
+  - `create_goal`
+  - `update_goal`
+- 工具列表不再暴露旧 snake_case `request_permissions`。
+- `astral doctor --json` 在临时 home 下生成完整报告：
+  - auth/provider/app-server/MCP/reachability 均正常。
+  - 唯一失败项是非交互 shell 下的 `TERM=dumb`，属于当前测试环境问题。
+  - 没有 OpenAI update/login/remote compact 类告警。
+
+当前收口判断：
+
+- DeepSeek OpenAI-compatible 多轮 reasoning history 真实问题已修复并通过。
+- compact 仍保持 Codex local compact；前面已确认 TUI `/compact` 走 provider-neutral model request，不走 OpenAI remote compact。
+- `trajectory_summarize.py` 已具备对比真实 API 上下文形状的最小能力。
+- 下一步应做一次最终原子提交，并继续剩余真实验收：
+  1. `/anthropic` 再跑一轮多轮工具/compact 组合 smoke。
+  2. TUI `/model` 热切换做人工/脚本最小验证。
+  3. app-server daemon + exec-server standalone 启停 smoke。
+  4. 最后汇总剩余 OpenAI 字符串中哪些只是 legacy/error/docs，哪些仍是运行时控制面。

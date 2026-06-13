@@ -167,8 +167,13 @@ def summarize_message(message: Any, include_text: bool) -> dict[str, Any]:
 
     summary: dict[str, Any] = {
         "role": message.get("role"),
+        "fields": sorted(message.keys()),
         "content": summarize_content(message.get("content"), include_text),
     }
+    if message.get("reasoning_content") is not None:
+        summary["reasoning_content"] = maybe_text_shape(
+            message.get("reasoning_content"), include_text
+        )
     if message.get("tool_call_id") is not None:
         summary["tool_call_id"] = message.get("tool_call_id")
     if isinstance(message.get("tool_calls"), list):

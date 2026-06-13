@@ -313,6 +313,12 @@ fn assistant_message_to_chat(message: &AgentMessage) -> Value {
     let mut value = Map::new();
     value.insert("role".to_string(), Value::String("assistant".to_string()));
 
+    let tool_calls = message
+        .content
+        .iter()
+        .filter_map(tool_use_to_chat_tool_call)
+        .collect::<Vec<_>>();
+
     let text = message
         .content
         .iter()
@@ -321,10 +327,9 @@ fn assistant_message_to_chat(message: &AgentMessage) -> Value {
         .filter(|text| !text.is_empty())
         .collect::<Vec<_>>()
         .join("\n");
-    if !text.is_empty() {
+    let has_text = !text.is_empty();
+    if has_text {
         value.insert("content".to_string(), Value::String(text));
-    } else {
-        value.insert("content".to_string(), Value::Null);
     }
 
     let reasoning_content = message
@@ -336,17 +341,18 @@ fn assistant_message_to_chat(message: &AgentMessage) -> Value {
         .collect::<Vec<_>>()
         .join("\n");
     if !reasoning_content.is_empty() {
+        if !has_text && tool_calls.is_empty() {
+            value.insert("content".to_string(), Value::String(String::new()));
+        }
         value.insert(
             "reasoning_content".to_string(),
             Value::String(reasoning_content),
         );
     }
 
-    let tool_calls = message
-        .content
-        .iter()
-        .filter_map(tool_use_to_chat_tool_call)
-        .collect::<Vec<_>>();
+    if !value.contains_key("content") {
+        value.insert("content".to_string(), Value::Null);
+    }
     if !tool_calls.is_empty() {
         value.insert("tool_calls".to_string(), Value::Array(tool_calls));
     }

@@ -344,6 +344,36 @@ fn request_preserves_assistant_reasoning_content_for_deepseek() {
 }
 
 #[test]
+fn request_sets_empty_content_for_reasoning_only_assistant_message() {
+    let request = AgentRequest {
+        model: "deepseek-v4-pro".to_string(),
+        messages: vec![AgentMessage {
+            role: MessageRole::Assistant,
+            content: vec![ContentBlock::Reasoning {
+                text: "I should answer briefly.".to_string(),
+                signature: None,
+            }],
+            id: None,
+        }],
+        stream: false,
+        ..AgentRequest::default()
+    };
+
+    assert_eq!(
+        to_chat_completions_request(&request, ChatCompletionsOptions { max_tokens: None }),
+        json!({
+            "model": "deepseek-v4-pro",
+            "stream": false,
+            "messages": [{
+                "role": "assistant",
+                "content": "",
+                "reasoning_content": "I should answer briefly."
+            }]
+        })
+    );
+}
+
+#[test]
 fn stream_chunk_maps_text_tool_calls_finish_reason_and_usage() {
     assert_eq!(
         parse_stream_chunk(json!({
