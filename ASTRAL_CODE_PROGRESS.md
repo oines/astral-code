@@ -35,6 +35,26 @@ provider 去 OpenAI 默认路由、登录态清理、cloud-config/cloud-tasks �
   国产模型兼容细节、fixture 和端到端测试。
 - 全量 CI：当前不追求全绿，用户明确要求先推进实现，最后集中测试集中修。
 
+真实功能验收记录（2026-06-13 CST）：
+
+- 当前源码已成功重新编译出 `codex-rs/target/debug/astral`，`astral --version` 输出 `astral 0.0.0`。
+- DeepSeek 官方 OpenAI-compatible `/v1/chat/completions` 路径已真实跑通。`deepseek-v4-flash`
+  完成文件读写 smoke，创建 `result.txt = astral-e2e-ok`；usage 中可见 DeepSeek cache 命中字段已映射
+  （一次 smoke 中 input 45915、cached 38528）。
+- terminal agentic 体验已真实跑通：持续输出 Bash、无输出长任务、后台 PTY 交互 stdin 都能由 DeepSeek
+  模型完成。无输出任务能返回 task id 并通过读取输出等待完成；交互任务第一次普通 stdin 失败后，模型改用
+  PTY 拿到 task id，再通过 `SendTaskInput` 发送输入，最终写出 `interactive.txt = got-yes`。
+- DeepSeek 官方 Anthropic-compatible Messages 路径已真实跑通。临时 provider 使用
+  `base_url = "https://api.deepseek.com/anthropic"`、`wire_api = "anthropic_messages"`，完成
+  `anthropic.txt = anthropic-ok`。
+- 单模态模型图片降级路径已跑通：`model_input_modalities=["text"]` 时附带本地 PNG 不会废掉 session，
+  模型继续完成 `image-downgrade.txt = image-placeholder-ok`。
+- 宿主骨架轻量 smoke 已跑：`mcp-server --help`、`plugin list`、`doctor --json` 正常。app-server daemon
+  在临时 home 下默认找不到 managed standalone binary；symlink 当前 debug binary 到
+  `packages/standalone/current/astral` 后，`app-server daemon start -> version -> stop` 全链路正常。
+- 观察项：一次持续输出命令的最终 JSON `aggregated_output` 漏掉首行 `progress-1`，但随后的
+  `alpha/beta/gamma` 复现未稳定出现。先记录为 terminal JSON 聚合观察项，不作为当前主阻断。
+
 最近完成的主要 slice：禁用了 Codex/OpenAI 内置 Statsig 遥测默认外联。Astral 的 OTEL 默认
 metrics exporter 现在是 `none`，旧配置里显式写 `statsig` 也会在 `codex-otel` 层解析为 `None`，
 源码中不再携带 `https://ab.chatgpt.com/otlp/v1/metrics` 和内置 Statsig key。用户仍可显式配置
