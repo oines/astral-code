@@ -47,6 +47,9 @@ provider 去 OpenAI 默认路由、登录态清理、cloud-config/cloud-tasks �
 - DeepSeek 官方 Anthropic-compatible Messages 路径已真实跑通。临时 provider 使用
   `base_url = "https://api.deepseek.com/anthropic"`、`wire_api = "anthropic_messages"`，完成
   `anthropic.txt = anthropic-ok`。
+- 会话恢复 + 模型覆盖路径已真实跑通。`astral exec resume --last -m deepseek-v4-pro` 成功接续上一轮
+  `deepseek-v4-flash` session，日志明确提示 previous flash / current pro，并完成
+  `resume-pro.txt = resume-pro-ok`。这不是 TUI `/model` 热切换的完整替代，但验证了底层 resume 时模型覆盖可用。
 - 单模态模型图片降级路径已跑通：`model_input_modalities=["text"]` 时附带本地 PNG 不会废掉 session，
   模型继续完成 `image-downgrade.txt = image-placeholder-ok`。
 - 宿主骨架轻量 smoke 已跑：`mcp-server --help`、`plugin list`、`doctor --json` 正常。app-server daemon
