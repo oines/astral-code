@@ -5345,3 +5345,118 @@ cd codex-rs && just fmt
   3. compact 后历史消息是否仍保持工具轨迹闭合。
   4. sandbox denial / permission request 给模型的错误形状。
   5. 长任务 `Bash -> ReadTaskOutput/SendTaskInput/ListBackgroundTasks/StopBackgroundTask` 是否稳定。
+
+## 最新补充 82：后台任务 trajectory 与 TUI/model/app-server smoke 完成
+
+继续按“先真实端到端，再修真实问题”的节奏推进收尾验收。
+
+后台任务轨迹：
+
+- 第一轮短命令测试：
+  - 模型按预期调用 `Bash -> ListBackgroundTasks -> ReadTaskOutput -> StopBackgroundTask`。
+  - 测试命令本身太短，任务在 `StopBackgroundTask` 前自然结束，因此返回过一次 `unknown task_id`。
+  - 结论：这不是 exec skeleton 失效，而是 fixture 设计不适合验证 stop。
+- 第二轮稳定 stop 测试：
+  - 命令改为 `while true; do echo bg-stop-trajectory; sleep 1; done`。
+  - 模型按预期调用：
+    `Bash -> ListBackgroundTasks -> ReadTaskOutput -> StopBackgroundTask -> final`。
+  - `StopBackgroundTask` 成功停止任务；停止后的命令状态显示为 killed/failure 形态，输出可通过 task id 读取。
+  - 结论：`task_id`、后台任务列表、输出轮询、停止链路都走通，且仍然继承 Codex PTY/UnifiedExec 行为。
+
+TUI `/model` 热切换：
+
+- 使用临时 `ASTRAL_HOME`、临时 git workdir、预置信任项目，避免污染用户数据。
+- 启动命令使用 `--no-alt-screen --dangerously-bypass-approvals-and-sandbox`，trace log 写入临时目录。
+- TUI 主界面显示：
+  - `Astral-Code (v0.0.0)`
+  - 当前模型 `deepseek-v4-flash`
+  - `/model to change`
+  - `YOLO mode`
+- 自动化 PTY 中提交键需要发送 CR (`\r`) 而不是 LF (`\n`)。
+- `/model` 面板打开成功，显示：
+  - `deepseek-v4-flash (current)`
+  - `deepseek-v4-pro`
+  - `Providers`
+- 选择 `deepseek-v4-pro` 后，TUI 回报：
+  - `Model changed to deepseek-official/deepseek-v4-pro default`
+- `/exit` 正常关闭，log 里能看到 `config/batchWrite`、`Selected model: deepseek-v4-pro`、`thread/unsubscribe`、`Shutdown`。
+
+MCP / plugin / doctor / daemon smoke：
+
+- `astral mcp-server --help` 正常，命令面已经使用 Astral 文案和 `~/.astral-code/config.toml`。
+- `ASTRAL_HOME=<临时目录> astral plugin list` 正常返回 `No marketplace plugins found.`。
+- `astral doctor --json` 在有效临时配置下整体为 `warning`：
+  - `config.load` OK。
+  - auth 由 active model provider 提供，`ASTRAL_API_KEY` 被识别。
+  - DeepSeek provider reachability OK。
+  - MCP config OK。
+  - sandbox/state DB/rollout DB OK。
+  - warning 来自 update probe 404，说明 Astral 更新源还没有最终接管。
+- app-server daemon 生命周期通过：
+  - 用临时 standalone symlink 指向 debug `astral`。
+  - `app-server daemon start` 返回 `started`。
+  - `app-server daemon version` 返回 `running`。
+  - `app-server daemon stop` 返回 `stopped`。
+  - control socket 与 daemon state 都落在临时 `ASTRAL_HOME` 下。
+
+验证记录：
+
+```bash
+env ASTRAL_HOME=/tmp/astral-tui-smoke2/home ASTRAL_API_KEY=<redacted> \
+  RUST_LOG=trace TERM=xterm-256color COLUMNS=120 LINES=40 \
+  /Users/oines/project/astral-code/codex-rs/target/debug/astral \
+  --no-alt-screen --dangerously-bypass-approvals-and-sandbox \
+  -C /tmp/astral-tui-smoke2/work \
+  -c 'log_dir="/tmp/astral-tui-smoke2/logs"'
+
+ASTRAL_HOME=/tmp/astral-tui-smoke2/home astral plugin list
+ASTRAL_HOME=/tmp/astral-tui-smoke2/home ASTRAL_API_KEY=<redacted> TERM=xterm-256color astral doctor --json
+ASTRAL_HOME=/tmp/astral-daemon-smoke-home astral app-server daemon start
+ASTRAL_HOME=/tmp/astral-daemon-smoke-home astral app-server daemon version
+ASTRAL_HOME=/tmp/astral-daemon-smoke-home astral app-server daemon stop
+```
+
+意义：
+
+- TUI、provider model 切换、app-server 内嵌请求、plugin list、doctor、daemon 生命周期已经有真实 smoke 证据。
+- `exec-server/app-server/PTY/sandbox` 骨架没有被 Astral tool flavor 破坏。
+- 仍未把更新源完整切到 Astral release endpoint；doctor 的 update warning 是后续 release 收口项。
+
+## 最新补充 83：暂停旧 OpenAI-native WebSearch 暴露
+
+审计 OpenAI/hosted 控制面时发现：
+
+- `codex-rs/ext/web-search/src/extension.rs` 仍按 `config.model_provider.is_openai()` 暴露旧 web search extension。
+- 这和已锁定的 Astral v1 决策冲突：`WebSearch/WebFetch` 只有完成 provider-neutral 搜索实现后再暴露。
+
+改动：
+
+- `codex-rs/ext/web-search/src/extension.rs`
+  - `WebSearchExtensionConfig::from` 中的 `available` 改为恒 `false`。
+  - 保留 extension 安装点，未来 provider-neutral WebSearch/WebFetch 可以复用这个边界。
+- `codex-rs/tui/src/cli.rs`
+  - `--search` 文案改为：Astral v1 不暴露 legacy OpenAI-native `web_search`，provider-neutral 搜索将单独接入。
+- `codex-rs/tui/src/lib.rs`、`codex-rs/cli/src/main.rs`
+  - 注释改为“保留 search flag 的 config state，但旧 OpenAI-native search disabled”。
+
+验证：
+
+```bash
+cd /Users/oines/project/astral-code/codex-rs
+just fmt
+git diff --check
+```
+
+结果：
+
+- `just fmt` 通过。
+- `git diff --check` 通过。
+- 尝试增量编译 `cargo build -p codex-cli --bin astral` 时，本机 `rustc --crate-name codex_web_search_extension`
+  卡在 0% CPU 超过 7 分钟；已发送精确 SIGINT 清掉 cargo 和孤儿 rustc。
+  这次未作为源码失败处理，后续需要在清理 incremental 或 CI 上复跑。
+
+意义：
+
+- Astral 不再把 OpenAI-only web search 作为活工具暴露给国产模型。
+- `--search` 现在只是保留配置意图，不会偷渡旧 Responses web_search。
+- 这不影响 Bash/File/MCP/PTY/daemon/sandbox 等核心路径。
