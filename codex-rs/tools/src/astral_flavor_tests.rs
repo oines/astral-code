@@ -4,10 +4,12 @@ use serde_json::json;
 use super::ASTRAL_CORE_TOOL_NAMES;
 use super::BASH_TOOL_NAME;
 use super::EDIT_TOOL_NAME;
+use super::GLOB_TOOL_NAME;
 use super::GREP_TOOL_NAME;
 use super::LIST_BACKGROUND_TASKS_TOOL_NAME;
 use super::READ_TASK_OUTPUT_TOOL_NAME;
 use super::READ_TOOL_NAME;
+use super::REQUEST_PERMISSIONS_TOOL_NAME;
 use super::SEND_TASK_INPUT_TOOL_NAME;
 use super::SKILL_TOOL_NAME;
 use super::STOP_BACKGROUND_TASK_TOOL_NAME;
@@ -32,6 +34,42 @@ fn bash_schema_uses_claudeish_command_shape() {
     let tool = astral_core_tool_by_name(BASH_TOOL_NAME).expect("Bash tool exists");
 
     assert_eq!(tool.name, "Bash");
+    assert!(
+        tool.description
+            .contains("Executes a given bash command and returns its output.")
+    );
+    assert!(
+        tool.description
+            .contains("File search: Use Glob (NOT find or ls)")
+    );
+    assert!(
+        tool.description
+            .contains("Content search: Use Grep (NOT grep or rg)")
+    );
+    assert!(
+        tool.description
+            .contains("Read files: Use Read (NOT cat/head/tail)")
+    );
+    assert!(
+        tool.description
+            .contains("After starting a background command, use ReadTaskOutput")
+    );
+    assert!(
+        tool.description
+            .contains("use SendTaskInput to send exact stdin bytes")
+    );
+    assert!(tool.description.contains("use ListBackgroundTasks"));
+    assert!(tool.description.contains("use StopBackgroundTask"));
+    assert!(
+        tool.description
+            .contains("If a command is blocked by the sandbox or environment permission policy")
+    );
+    assert!(
+        tool.description
+            .contains("call RequestPermissions for the required access")
+    );
+    assert!(!tool.description.contains("dangerouslyDisableSandbox"));
+    assert!(!tool.description.contains("Monitor"));
     assert_eq!(
         tool.input_schema,
         json!({
@@ -54,16 +92,96 @@ fn bash_schema_uses_claudeish_command_shape() {
 }
 
 #[test]
+fn request_permissions_schema_guides_exact_permission_recovery() {
+    let tool =
+        astral_core_tool_by_name(REQUEST_PERMISSIONS_TOOL_NAME).expect("RequestPermissions exists");
+
+    assert_eq!(tool.name, "RequestPermissions");
+    assert!(
+        tool.description
+            .contains("Request exact filesystem or network permissions")
+    );
+    assert!(tool.description.contains("Wait for approval"));
+    assert!(tool.description.contains("retry the original action"));
+    assert!(
+        tool.description
+            .contains("does not execute the blocked action")
+    );
+    assert_eq!(
+        tool.input_schema["required"],
+        json!(["permissions", "reason"])
+    );
+    assert_eq!(
+        tool.input_schema["properties"]["permissions"]["type"],
+        json!("object")
+    );
+    assert_eq!(
+        tool.input_schema["properties"]["permissions"]["properties"]["file_system"]["properties"]["read"]
+            ["items"]["type"],
+        json!("string")
+    );
+    assert_eq!(
+        tool.input_schema["properties"]["permissions"]["properties"]["file_system"]["properties"]["write"]
+            ["items"]["type"],
+        json!("string")
+    );
+    assert_eq!(
+        tool.input_schema["properties"]["permissions"]["properties"]["network"]["properties"]["enabled"]
+            ["type"],
+        json!("boolean")
+    );
+}
+
+#[test]
 fn file_and_search_tools_expose_expected_required_fields() {
     let read = astral_core_tool_by_name(READ_TOOL_NAME).expect("Read tool exists");
     let edit = astral_core_tool_by_name(EDIT_TOOL_NAME).expect("Edit tool exists");
+    let glob = astral_core_tool_by_name(GLOB_TOOL_NAME).expect("Glob tool exists");
     let grep = astral_core_tool_by_name(GREP_TOOL_NAME).expect("Grep tool exists");
     let write = astral_core_tool_by_name(WRITE_TOOL_NAME).expect("Write tool exists");
 
     assert_eq!(read.input_schema["required"], json!(["file_path"]));
-    assert!(!read.description.contains("local filesystem"));
-    assert!(!write.description.contains("local filesystem"));
-    assert!(!edit.description.contains("local filesystem"));
+    assert!(
+        read.description
+            .contains("Reads a file from the local filesystem.")
+    );
+    assert!(
+        read.description
+            .contains("Results are returned using cat -n format, with line numbers starting at 1")
+    );
+    assert!(
+        read.description
+            .contains("If the user provides a path to a screenshot, ALWAYS use this tool")
+    );
+    assert!(
+        write
+            .description
+            .contains("Writes a file to the local filesystem.")
+    );
+    assert!(
+        write
+            .description
+            .contains("Prefer the Edit tool for modifying existing files")
+    );
+    assert!(
+        edit.description.contains(
+            "The line number prefix format is: line number + tab. Everything after that is the actual file content to match. Never include any part of the line number prefix in the old_string or new_string."
+        )
+    );
+    assert!(edit.description.contains(
+        "You must use your `Read` tool at least once in the conversation before editing."
+    ));
+    assert!(
+        glob.description
+            .contains("Fast file pattern matching tool that works with any codebase size")
+    );
+    assert!(
+        grep.description
+            .contains("A powerful search tool built on ripgrep")
+    );
+    assert!(grep.description.contains(
+        "ALWAYS use Grep for search tasks. NEVER invoke `grep` or `rg` as a Bash command."
+    ));
     assert!(read.input_schema["properties"]["pages"].is_null());
     assert_eq!(
         read.input_schema["properties"]["environment_id"]["type"],
@@ -102,6 +220,22 @@ fn file_and_search_tools_expose_expected_required_fields() {
 fn todo_write_uses_claudeish_task_list_shape() {
     let tool = astral_core_tool_by_name(TODO_WRITE_TOOL_NAME).expect("TodoWrite exists");
 
+    assert!(
+        tool.description
+            .contains("Use this tool to create and manage a structured task list")
+    );
+    assert!(
+        tool.description
+            .contains("Mark it as in_progress BEFORE beginning work")
+    );
+    assert!(
+        tool.description
+            .contains("activeForm: The present continuous form shown during execution")
+    );
+    assert!(
+        tool.description
+            .contains("Exactly ONE task must be in_progress at any time")
+    );
     assert_eq!(tool.input_schema["required"], json!(["todos"]));
     assert_eq!(
         tool.input_schema["properties"]

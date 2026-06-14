@@ -1,3 +1,4 @@
+use crate::astral_prompts;
 use codex_agent_protocol::AgentTool;
 use serde_json::Map;
 use serde_json::Value;
@@ -75,7 +76,7 @@ pub fn astral_core_tool_by_name(name: &str) -> Option<AgentTool> {
 fn bash_tool() -> AgentTool {
     tool(
         BASH_TOOL_NAME,
-        "Execute a shell command through Astral's sandboxed PTY runtime.",
+        astral_prompts::bash_description(),
         object(
             [
                 string_property("command", "The command to execute"),
@@ -117,7 +118,7 @@ fn bash_tool() -> AgentTool {
 fn read_tool() -> AgentTool {
     tool(
         READ_TOOL_NAME,
-        "Read a text file or image from the active execution environment. Text output uses cat -n style line numbers.",
+        astral_prompts::read_description(),
         object(
             [
                 string_property("file_path", "The absolute path to the file to read"),
@@ -139,7 +140,7 @@ fn read_tool() -> AgentTool {
 fn write_tool() -> AgentTool {
     tool(
         WRITE_TOOL_NAME,
-        "Create or overwrite a file in the active execution environment.",
+        astral_prompts::write_description(),
         object(
             [
                 string_property(
@@ -157,15 +158,18 @@ fn write_tool() -> AgentTool {
 fn edit_tool() -> AgentTool {
     tool(
         EDIT_TOOL_NAME,
-        "Edit a file in the active execution environment by replacing exact text.",
+        astral_prompts::edit_description(),
         object(
             [
                 string_property("file_path", "The absolute path to the file to modify"),
                 environment_id_property(),
-                string_property("old_string", "The text to replace"),
+                string_property(
+                    "old_string",
+                    "The exact text to replace. CRITICAL: Never include any part of the line number prefix from the Read tool output in old_string.",
+                ),
                 string_property(
                     "new_string",
-                    "The text to replace it with; must be different from old_string",
+                    "The text to replace it with; must be different from old_string. CRITICAL: Never include any part of the line number prefix from the Read tool output in new_string.",
                 ),
                 bool_property(
                     "replace_all",
@@ -180,7 +184,7 @@ fn edit_tool() -> AgentTool {
 fn glob_tool() -> AgentTool {
     tool(
         GLOB_TOOL_NAME,
-        "Find files by glob pattern, sorted by modification time.",
+        astral_prompts::glob_description(),
         object(
             [
                 string_property("pattern", "The glob pattern to match files against"),
@@ -198,7 +202,7 @@ fn glob_tool() -> AgentTool {
 fn grep_tool() -> AgentTool {
     tool(
         GREP_TOOL_NAME,
-        "Search file contents with ripgrep-compatible options.",
+        astral_prompts::grep_description(),
         object(
             [
                 string_property("pattern", "The regular expression pattern to search for"),
@@ -235,7 +239,7 @@ fn grep_tool() -> AgentTool {
 fn todo_write_tool() -> AgentTool {
     tool(
         TODO_WRITE_TOOL_NAME,
-        "Update the session task checklist.",
+        astral_prompts::todo_write_description(),
         object(
             [array_property(
                 "todos",
@@ -283,7 +287,7 @@ fn skill_tool() -> AgentTool {
 fn read_task_output_tool() -> AgentTool {
     tool(
         READ_TASK_OUTPUT_TOOL_NAME,
-        "Read or poll output from a running background task by task_id.",
+        astral_prompts::read_task_output_description(),
         object(
             [
                 session_identifier_property(
@@ -304,7 +308,7 @@ fn read_task_output_tool() -> AgentTool {
 fn send_task_input_tool() -> AgentTool {
     tool(
         SEND_TASK_INPUT_TOOL_NAME,
-        "Send interactive stdin to a running background task by task_id, such as y\\n for a confirmation prompt.",
+        astral_prompts::send_task_input_description(),
         object(
             [
                 session_identifier_property(
@@ -329,7 +333,7 @@ fn send_task_input_tool() -> AgentTool {
 fn list_background_tasks_tool() -> AgentTool {
     tool(
         LIST_BACKGROUND_TASKS_TOOL_NAME,
-        "List running background tasks and their task_id values.",
+        astral_prompts::list_background_tasks_description(),
         object([], []),
     )
 }
@@ -337,7 +341,7 @@ fn list_background_tasks_tool() -> AgentTool {
 fn stop_background_task_tool() -> AgentTool {
     tool(
         STOP_BACKGROUND_TASK_TOOL_NAME,
-        "Stop a running background task by task_id.",
+        astral_prompts::stop_background_task_description(),
         object(
             [session_identifier_property(
                 "task_id",
@@ -388,22 +392,31 @@ fn ask_user_question_tool() -> AgentTool {
 fn request_permissions_tool() -> AgentTool {
     tool(
         REQUEST_PERMISSIONS_TOOL_NAME,
-        "Request elevated permission for a blocked action.",
+        astral_prompts::request_permissions_description(),
         object(
             [
-                string_property("tool_name", "The tool requiring permission"),
-                json_property("input", "The original tool input that was blocked"),
-                json_property(
+                permission_profile_property(
                     "permissions",
-                    "Permission profile to request directly when no blocked tool input is available",
+                    "Exact filesystem or network permissions needed for the blocked action",
+                ),
+                string_property(
+                    "reason",
+                    "Brief reason the exact filesystem or network permissions are needed",
+                ),
+                string_property(
+                    "tool_name",
+                    "Optional source tool name for compatibility; permissions controls the actual request",
+                ),
+                json_property(
+                    "input",
+                    "Optional original blocked tool input for compatibility; prefer direct permissions",
                 ),
                 string_property(
                     "environment_id",
                     "Optional target execution environment id when multiple environments exist",
                 ),
-                string_property("reason", "Brief reason permission is needed"),
             ],
-            ["reason"],
+            ["permissions", "reason"],
         ),
     )
 }
@@ -514,6 +527,50 @@ fn bool_property(name: &'static str, description: &'static str) -> (&'static str
 
 fn json_property(name: &'static str, description: &'static str) -> (&'static str, Value) {
     (name, json!({ "description": description }))
+}
+
+fn permission_profile_property(
+    name: &'static str,
+    description: &'static str,
+) -> (&'static str, Value) {
+    (
+        name,
+        json!({
+            "type": "object",
+            "description": description,
+            "properties": {
+                "file_system": {
+                    "type": "object",
+                    "description": "Filesystem permissions needed for the blocked action",
+                    "properties": {
+                        "read": {
+                            "type": "array",
+                            "description": "Absolute paths to grant read access",
+                            "items": { "type": "string" }
+                        },
+                        "write": {
+                            "type": "array",
+                            "description": "Absolute paths to grant write access",
+                            "items": { "type": "string" }
+                        }
+                    },
+                    "additionalProperties": false
+                },
+                "network": {
+                    "type": "object",
+                    "description": "Network permissions needed for the blocked action",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean",
+                            "description": "True requests network access"
+                        }
+                    },
+                    "additionalProperties": false
+                }
+            },
+            "additionalProperties": false
+        }),
+    )
 }
 
 fn session_identifier_property(

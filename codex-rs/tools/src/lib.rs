@@ -2,6 +2,7 @@
 //! outside `codex-core`.
 
 mod astral_flavor;
+mod astral_prompts;
 mod code_mode;
 mod dynamic_tool;
 mod function_call_error;
