@@ -9,13 +9,14 @@ use pretty_assertions::assert_eq;
 use super::*;
 
 #[tokio::test]
-async fn glob_without_slash_only_matches_direct_children_and_sorts_by_mtime() -> io::Result<()> {
+async fn glob_without_slash_recurses_and_sorts_by_oldest_mtime() -> io::Result<()> {
     let temp_dir = tempfile::TempDir::new()?;
     let root = AbsolutePathBuf::from_absolute_path(temp_dir.path())?;
     std::fs::create_dir_all(temp_dir.path().join("nested"))?;
     std::fs::write(temp_dir.path().join("old.toml"), "")?;
     std::thread::sleep(Duration::from_millis(20));
     std::fs::write(temp_dir.path().join("new.toml"), "")?;
+    std::thread::sleep(Duration::from_millis(20));
     std::fs::write(temp_dir.path().join("nested/child.toml"), "")?;
 
     let response = glob_search(GlobSearchRequest {
@@ -30,8 +31,62 @@ async fn glob_without_slash_only_matches_direct_children_and_sorts_by_mtime() ->
         .iter()
         .map(|matched| relative_slash_path(matched.path.as_path(), root.as_path()))
         .collect::<Vec<_>>();
-    assert_eq!(paths, vec!["new.toml", "old.toml"]);
+    assert_eq!(paths, vec!["old.toml", "new.toml", "nested/child.toml"]);
     assert!(!response.truncated);
+    Ok(())
+}
+
+#[tokio::test]
+async fn glob_with_slash_matches_relative_path() -> io::Result<()> {
+    let temp_dir = tempfile::TempDir::new()?;
+    let root = AbsolutePathBuf::from_absolute_path(temp_dir.path())?;
+    std::fs::create_dir_all(temp_dir.path().join("src/nested"))?;
+    std::fs::write(temp_dir.path().join("src/lib.rs"), "")?;
+    std::fs::write(temp_dir.path().join("src/nested/mod.rs"), "")?;
+
+    let response = glob_search(GlobSearchRequest {
+        root: root.clone(),
+        pattern: "src/*.rs".to_string(),
+        max_results: 10,
+    })
+    .await?;
+
+    let paths = response
+        .matches
+        .iter()
+        .map(|matched| relative_slash_path(matched.path.as_path(), root.as_path()))
+        .collect::<Vec<_>>();
+    assert_eq!(paths, vec!["src/lib.rs"]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn glob_absolute_pattern_extracts_search_root() -> io::Result<()> {
+    let temp_dir = tempfile::TempDir::new()?;
+    let root = AbsolutePathBuf::from_absolute_path(temp_dir.path())?;
+    std::fs::create_dir_all(temp_dir.path().join("src"))?;
+    std::fs::write(temp_dir.path().join("src/lib.rs"), "")?;
+    std::fs::write(temp_dir.path().join("other.rs"), "")?;
+    let absolute_pattern = temp_dir
+        .path()
+        .join("src")
+        .join("*.rs")
+        .to_string_lossy()
+        .into_owned();
+
+    let response = glob_search(GlobSearchRequest {
+        root: root.clone(),
+        pattern: absolute_pattern,
+        max_results: 10,
+    })
+    .await?;
+
+    let paths = response
+        .matches
+        .iter()
+        .map(|matched| relative_slash_path(matched.path.as_path(), root.as_path()))
+        .collect::<Vec<_>>();
+    assert_eq!(paths, vec!["src/lib.rs"]);
     Ok(())
 }
 
@@ -102,6 +157,7 @@ async fn grep_supports_count_content_context_and_glob_filters() -> io::Result<()
     let root = AbsolutePathBuf::from_absolute_path(temp_dir.path())?;
     std::fs::create_dir_all(temp_dir.path().join("nested"))?;
     std::fs::write(temp_dir.path().join("root.md"), "alpha\nneedle\nomega\n")?;
+    std::thread::sleep(Duration::from_millis(20));
     std::fs::write(temp_dir.path().join("nested/child.md"), "needle\n")?;
 
     let files = grep_search(GrepSearchRequest {
@@ -119,22 +175,26 @@ async fn grep_supports_count_content_context_and_glob_filters() -> io::Result<()
         multiline: false,
     })
     .await?;
-    assert_eq!(files.lines, vec!["root.md"]);
+    assert_eq!(files.lines, vec!["nested/child.md", "root.md"]);
+    assert_eq!(files.num_files, 2);
+    assert_eq!(files.applied_limit, None);
 
     let count = grep_search(GrepSearchRequest {
         output_mode: GrepOutputMode::Count,
-        glob: Some("*.md".to_string()),
+        glob: Some("root.md".to_string()),
         ..grep_request_defaults(root.clone())
     })
     .await?;
     assert_eq!(count.lines, vec!["root.md:1"]);
+    assert_eq!(count.num_files, 1);
+    assert_eq!(count.num_matches, Some(1));
 
     let content = grep_search(GrepSearchRequest {
         output_mode: GrepOutputMode::Content,
         context_before: 1,
         context_after: 1,
         line_numbers: true,
-        glob: Some("*.md".to_string()),
+        glob: Some("root.md".to_string()),
         ..grep_request_defaults(root)
     })
     .await?;
@@ -142,6 +202,27 @@ async fn grep_supports_count_content_context_and_glob_filters() -> io::Result<()
         content.lines,
         vec!["root.md:1:alpha", "root.md:2:needle", "root.md:3:omega"]
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn grep_head_limit_zero_is_unlimited() -> io::Result<()> {
+    let temp_dir = tempfile::TempDir::new()?;
+    let root = AbsolutePathBuf::from_absolute_path(temp_dir.path())?;
+    std::fs::write(temp_dir.path().join("a.txt"), "needle\n")?;
+    std::fs::write(temp_dir.path().join("b.txt"), "needle\n")?;
+    std::fs::write(temp_dir.path().join("c.txt"), "needle\n")?;
+
+    let response = grep_search(GrepSearchRequest {
+        head_limit: 0,
+        ..grep_request_defaults(root)
+    })
+    .await?;
+
+    assert_eq!(response.lines.len(), 3);
+    assert_eq!(response.num_files, 3);
+    assert_eq!(response.applied_limit, None);
+    assert!(!response.truncated);
     Ok(())
 }
 

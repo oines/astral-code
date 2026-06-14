@@ -23,7 +23,7 @@ fn search_types_serde_round_trip() -> anyhow::Result<()> {
         truncated: true,
     };
     let grep_request = GrepSearchRequest {
-        root: root,
+        root,
         pattern: "needle".to_string(),
         glob: Some("**/*.rs".to_string()),
         file_type: Some("rust".to_string()),
@@ -38,6 +38,10 @@ fn search_types_serde_round_trip() -> anyhow::Result<()> {
     };
     let grep_response = GrepSearchResponse {
         lines: vec!["lib.rs:4:needle".to_string()],
+        num_files: 0,
+        num_matches: None,
+        applied_limit: None,
+        applied_offset: None,
         truncated: false,
     };
 

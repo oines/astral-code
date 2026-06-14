@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::io;
 use std::path::Path;
+use std::time::Duration;
 
 use pretty_assertions::assert_eq;
 use serde_json::json;
@@ -229,6 +230,10 @@ impl ExecutorFileSystem for RecordingFileSystem {
             .clone()
             .unwrap_or(GrepSearchResponse {
                 lines: Vec::new(),
+                num_files: 0,
+                num_matches: None,
+                applied_limit: None,
+                applied_offset: None,
                 truncated: false,
             }))
     }
@@ -289,7 +294,7 @@ async fn grep_content_output_can_include_line_numbers() {
     .await
     .expect("grep succeeds");
 
-    assert_eq!(output, "lib.rs:2:needle\n");
+    assert_eq!(output, "lib.rs:2:needle");
 }
 
 #[test]
@@ -420,7 +425,7 @@ async fn grep_prunes_generated_and_vcs_directories() {
     .await
     .expect("grep succeeds");
 
-    assert_eq!(output, "src/lib.rs\n");
+    assert_eq!(output, "Found 1 file\nsrc/lib.rs");
 }
 
 #[tokio::test]
@@ -447,7 +452,7 @@ async fn glob_uses_executor_search_backend() {
     .await
     .expect("glob succeeds");
 
-    assert_eq!(output, "src/lib.rs\n");
+    assert_eq!(output, "src/lib.rs");
     assert_eq!(
         fs.calls().await,
         vec![format!("glob_search:{}:**/*.rs", cwd.join("src").display())]
@@ -461,6 +466,10 @@ async fn grep_uses_executor_search_backend() {
     let fs = RecordingFileSystem::default();
     fs.set_grep_response(GrepSearchResponse {
         lines: vec!["lib.rs:1:needle".to_string()],
+        num_files: 0,
+        num_matches: None,
+        applied_limit: None,
+        applied_offset: None,
         truncated: false,
     })
     .await;
@@ -480,7 +489,7 @@ async fn grep_uses_executor_search_backend() {
     .await
     .expect("grep succeeds");
 
-    assert_eq!(output, "src/lib.rs:1:needle\n");
+    assert_eq!(output, "src/lib.rs:1:needle");
     assert_eq!(
         fs.calls().await,
         vec![format!("grep_search:{}:needle", cwd.join("src").display())]
@@ -488,11 +497,147 @@ async fn grep_uses_executor_search_backend() {
 }
 
 #[tokio::test]
-async fn glob_pattern_without_slash_does_not_recurse() {
+async fn glob_formats_empty_and_truncated_results_like_claude() {
+    let temp_dir = tempfile::TempDir::new().expect("temp dir");
+    let cwd = temp_dir.path().abs();
+    let fs = RecordingFileSystem::default();
+    let sandbox = FileSystemSandboxContext::from_permission_profile(PermissionProfile::Disabled);
+
+    let empty = glob_files(
+        json!({ "pattern": "*.rs" }).to_string(),
+        &fs,
+        &sandbox,
+        &cwd,
+    )
+    .await
+    .expect("glob succeeds");
+    assert_eq!(empty, "No files found");
+
+    fs.set_glob_response(GlobSearchResponse {
+        matches: vec![GlobSearchMatch {
+            path: cwd.join("src/lib.rs"),
+            modified_at_ms: 42,
+        }],
+        truncated: true,
+    })
+    .await;
+    let truncated = glob_files(
+        json!({ "pattern": "*.rs" }).to_string(),
+        &fs,
+        &sandbox,
+        &cwd,
+    )
+    .await
+    .expect("glob succeeds");
+    assert_eq!(
+        truncated,
+        "src/lib.rs\n(Results are truncated. Consider using a more specific path or pattern.)"
+    );
+}
+
+#[tokio::test]
+async fn grep_formats_files_count_content_and_pagination_like_claude() {
+    let temp_dir = tempfile::TempDir::new().expect("temp dir");
+    let cwd = temp_dir.path().abs();
+    let fs = RecordingFileSystem::default();
+    let sandbox = FileSystemSandboxContext::from_permission_profile(PermissionProfile::Disabled);
+
+    fs.set_grep_response(GrepSearchResponse {
+        lines: vec!["src/lib.rs".to_string(), "src/main.rs".to_string()],
+        num_files: 2,
+        num_matches: None,
+        applied_limit: Some(2),
+        applied_offset: Some(5),
+        truncated: true,
+    })
+    .await;
+    let files = grep_files(
+        json!({ "pattern": "needle", "output_mode": "files_with_matches" }).to_string(),
+        &fs,
+        &sandbox,
+        &cwd,
+    )
+    .await
+    .expect("grep succeeds");
+    assert_eq!(
+        files,
+        "Found 2 files limit: 2, offset: 5\nsrc/lib.rs\nsrc/main.rs"
+    );
+
+    fs.set_grep_response(GrepSearchResponse {
+        lines: vec!["src/lib.rs:3".to_string()],
+        num_files: 1,
+        num_matches: Some(3),
+        applied_limit: None,
+        applied_offset: None,
+        truncated: false,
+    })
+    .await;
+    let count = grep_files(
+        json!({ "pattern": "needle", "output_mode": "count" }).to_string(),
+        &fs,
+        &sandbox,
+        &cwd,
+    )
+    .await
+    .expect("grep succeeds");
+    assert_eq!(
+        count,
+        "src/lib.rs:3\n\nFound 3 total occurrences across 1 file."
+    );
+
+    fs.set_grep_response(GrepSearchResponse {
+        lines: Vec::new(),
+        num_files: 0,
+        num_matches: None,
+        applied_limit: Some(250),
+        applied_offset: Some(10),
+        truncated: true,
+    })
+    .await;
+    let content = grep_files(
+        json!({ "pattern": "needle", "output_mode": "content" }).to_string(),
+        &fs,
+        &sandbox,
+        &cwd,
+    )
+    .await
+    .expect("grep succeeds");
+    assert_eq!(
+        content,
+        "No matches found\n\n[Showing results with pagination = limit: 250, offset: 10]"
+    );
+}
+
+#[tokio::test]
+async fn grep_omitted_path_searches_cwd() {
+    let temp_dir = tempfile::TempDir::new().expect("temp dir");
+    let cwd = temp_dir.path().abs();
+    let fs = RecordingFileSystem::default();
+    let sandbox = FileSystemSandboxContext::from_permission_profile(PermissionProfile::Disabled);
+
+    let _ = grep_files(
+        json!({ "pattern": "needle" }).to_string(),
+        &fs,
+        &sandbox,
+        &cwd,
+    )
+    .await
+    .expect("grep succeeds");
+
+    assert_eq!(
+        fs.calls().await,
+        vec![format!("grep_search:{}:needle", cwd.display())]
+    );
+}
+
+#[tokio::test]
+async fn glob_pattern_without_slash_recurses() {
     let temp_dir = tempfile::TempDir::new().expect("temp dir");
     let cwd = temp_dir.path().abs();
     std::fs::create_dir_all(temp_dir.path().join("nested")).expect("create nested");
     std::fs::write(temp_dir.path().join("root.toml"), "").expect("write root");
+    std::thread::sleep(Duration::from_millis(20));
     std::fs::write(temp_dir.path().join("nested/child.toml"), "").expect("write child");
     let sandbox = FileSystemSandboxContext::from_permission_profile(PermissionProfile::Disabled);
 
@@ -505,7 +650,7 @@ async fn glob_pattern_without_slash_does_not_recurse() {
     .await
     .expect("glob succeeds");
 
-    assert_eq!(output, "root.toml\n");
+    assert_eq!(output, "root.toml\nnested/child.toml");
 }
 
 #[tokio::test]
@@ -527,7 +672,7 @@ async fn glob_uses_literal_prefix_for_fixed_depth_patterns() {
     .await
     .expect("glob succeeds");
 
-    assert_eq!(output, "src/lib.rs\n");
+    assert_eq!(output, "src/lib.rs");
 }
 
 #[tokio::test]
@@ -556,11 +701,12 @@ async fn glob_double_star_recurses_under_literal_prefix() {
 }
 
 #[tokio::test]
-async fn grep_glob_pattern_without_slash_does_not_recurse() {
+async fn grep_glob_pattern_without_slash_recurses() {
     let temp_dir = tempfile::TempDir::new().expect("temp dir");
     let cwd = temp_dir.path().abs();
     std::fs::create_dir_all(temp_dir.path().join("nested")).expect("create nested");
     std::fs::write(temp_dir.path().join("root.md"), "needle\n").expect("write root");
+    std::thread::sleep(Duration::from_millis(20));
     std::fs::write(temp_dir.path().join("nested/child.md"), "needle\n").expect("write child");
     let sandbox = FileSystemSandboxContext::from_permission_profile(PermissionProfile::Disabled);
 
@@ -579,5 +725,5 @@ async fn grep_glob_pattern_without_slash_does_not_recurse() {
     .await
     .expect("grep succeeds");
 
-    assert_eq!(output, "root.md\n");
+    assert_eq!(output, "Found 2 files\nnested/child.md\nroot.md");
 }

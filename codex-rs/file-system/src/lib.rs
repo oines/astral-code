@@ -95,6 +95,10 @@ pub struct GrepSearchRequest {
 #[serde(rename_all = "camelCase")]
 pub struct GrepSearchResponse {
     pub lines: Vec<String>,
+    pub num_files: usize,
+    pub num_matches: Option<usize>,
+    pub applied_limit: Option<usize>,
+    pub applied_offset: Option<usize>,
     pub truncated: bool,
 }
 

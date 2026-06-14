@@ -443,6 +443,10 @@ mod tests {
                     result: serde_json::to_value(FsGrepResponse {
                         response: GrepSearchResponse {
                             lines: vec!["src/main.rs".to_string()],
+                            num_files: 1,
+                            num_matches: None,
+                            applied_limit: None,
+                            applied_offset: None,
                             truncated: false,
                         },
                     })
@@ -504,6 +508,10 @@ mod tests {
             grep_response,
             GrepSearchResponse {
                 lines: vec!["src/main.rs".to_string()],
+                num_files: 1,
+                num_matches: None,
+                applied_limit: None,
+                applied_offset: None,
                 truncated: false,
             }
         );

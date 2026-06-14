@@ -82,8 +82,7 @@ fn bash_schema_uses_claudeish_command_shape() {
                 "yield_time_ms": { "type": "integer", "description": "Milliseconds to wait for initial output before returning" },
                 "max_output_tokens": { "type": "integer", "description": "Maximum output tokens to return" },
                 "run_in_background": { "type": "boolean", "description": "Set true for long-running commands that should keep running while you monitor output separately" },
-                "tty": { "type": "boolean", "description": "Allocate a PTY for interactive commands that need follow-up input" },
-                "environment_id": { "type": "string", "description": "Optional target execution environment id when multiple environments exist" }
+                "tty": { "type": "boolean", "description": "Allocate a PTY for interactive commands that need follow-up input" }
             },
             "required": ["command"],
             "additionalProperties": false
@@ -130,6 +129,7 @@ fn request_permissions_schema_guides_exact_permission_recovery() {
             ["type"],
         json!("boolean")
     );
+    assert!(tool.input_schema["properties"]["environment_id"].is_null());
 }
 
 #[test]
@@ -183,35 +183,43 @@ fn file_and_search_tools_expose_expected_required_fields() {
         "ALWAYS use Grep for search tasks. NEVER invoke `grep` or `rg` as a Bash command."
     ));
     assert!(read.input_schema["properties"]["pages"].is_null());
-    assert_eq!(
-        read.input_schema["properties"]["environment_id"]["type"],
-        json!("string")
-    );
-    assert_eq!(
-        edit.input_schema["properties"]["environment_id"]["type"],
-        json!("string")
-    );
+    assert!(read.input_schema["properties"]["environment_id"].is_null());
+    assert!(write.input_schema["properties"]["environment_id"].is_null());
+    assert!(edit.input_schema["properties"]["environment_id"].is_null());
     assert_eq!(
         edit.input_schema["required"],
         json!(["file_path", "old_string", "new_string"])
     );
-    assert_eq!(grep.input_schema["required"], json!(["pattern"]));
+    assert_eq!(glob.input_schema["required"], json!(["pattern"]));
+    assert!(glob.input_schema["properties"]["environment_id"].is_null());
     assert_eq!(
-        grep.input_schema["properties"]["environment_id"]["type"],
-        json!("string")
+        glob.input_schema["properties"]["path"]["description"],
+        json!(
+            "The directory to search in. If not specified, the current working directory will be used. IMPORTANT: Omit this field to use the default directory. DO NOT enter \"undefined\" or \"null\" - simply omit it for the default behavior. Must be a valid directory path if provided."
+        )
     );
+    assert_eq!(grep.input_schema["required"], json!(["pattern"]));
+    assert!(grep.input_schema["properties"]["environment_id"].is_null());
     assert_eq!(
         grep.input_schema["properties"]["output_mode"]["enum"],
         json!(["content", "files_with_matches", "count"])
     );
     assert_eq!(
         grep.input_schema["properties"]["-n"]["description"],
-        json!("Show line numbers in content output; defaults to true in content mode")
+        json!(
+            "Show line numbers in output (rg -n). Requires output_mode: \"content\", ignored otherwise. Defaults to true."
+        )
     );
     assert_eq!(
         grep.input_schema["properties"]["head_limit"]["description"],
         json!(
-            "Limit output to first N lines or entries; defaults to 250, pass 0 for the maximum bounded output"
+            "Limit output to first N lines/entries, equivalent to \"| head -N\". Works across all output modes: content (limits output lines), files_with_matches (limits file paths), count (limits count entries). Defaults to 250 when unspecified. Pass 0 for unlimited (use sparingly — large result sets waste context)."
+        )
+    );
+    assert_eq!(
+        grep.input_schema["properties"]["offset"]["description"],
+        json!(
+            "Skip first N lines/entries before applying head_limit, equivalent to \"| tail -n +N | head -N\". Works across all output modes. Defaults to 0."
         )
     );
 }

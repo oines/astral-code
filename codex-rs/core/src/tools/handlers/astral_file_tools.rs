@@ -17,6 +17,7 @@ use codex_exec_server::FileSystemSandboxContext;
 use codex_exec_server::GlobSearchRequest;
 use codex_exec_server::GrepOutputMode;
 use codex_exec_server::GrepSearchRequest;
+use codex_exec_server::GrepSearchResponse;
 use codex_tools::EDIT_TOOL_NAME;
 use codex_tools::GLOB_TOOL_NAME;
 use codex_tools::GREP_TOOL_NAME;
@@ -32,8 +33,8 @@ use serde::Deserialize;
 use serde_json::json;
 
 const DEFAULT_READ_LINE_LIMIT: usize = 2_000;
+const DEFAULT_GLOB_RESULT_LIMIT: usize = 100;
 const DEFAULT_GREP_HEAD_LIMIT: usize = 250;
-const MAX_RESULT_LINES: usize = 1_000;
 const BLOCKED_DEVICE_PATHS: &[&str] = &[
     "/dev/zero",
     "/dev/random",
@@ -468,20 +469,13 @@ async fn glob_files(
             GlobSearchRequest {
                 root,
                 pattern: args.pattern,
-                max_results: MAX_RESULT_LINES,
+                max_results: DEFAULT_GLOB_RESULT_LIMIT,
             },
             Some(sandbox),
         )
         .await
         .map_err(|err| FunctionCallError::RespondToModel(format!("glob search failed: {err}")))?;
-    Ok(join_search_lines(
-        response
-            .matches
-            .into_iter()
-            .map(|matched| display_path(&matched.path, cwd))
-            .collect(),
-        response.truncated,
-    ))
+    Ok(format_glob_response(response, cwd))
 }
 
 #[derive(Deserialize)]
@@ -497,7 +491,9 @@ struct GrepArgs {
     before: Option<usize>,
     #[serde(default, rename = "-A", alias = "after")]
     after: Option<usize>,
-    #[serde(default, rename = "-C", alias = "context")]
+    #[serde(default, rename = "-C")]
+    context_c: Option<usize>,
+    #[serde(default)]
     context: Option<usize>,
     #[serde(default, rename = "-n", alias = "line_numbers")]
     line_numbers: Option<bool>,
@@ -522,16 +518,17 @@ async fn grep_files(
     let args: GrepArgs = parse_arguments(&arguments)?;
     let root = resolve_path(cwd, args.path.as_deref().unwrap_or("."));
     let output_mode = grep_output_mode(args.output_mode.as_deref())?;
-    let context_before = args.context.or(args.before).unwrap_or(0);
-    let context_after = args.context.or(args.after).unwrap_or(0);
+    let (context_before, context_after) = if let Some(context) = args.context {
+        (context, context)
+    } else if let Some(context_c) = args.context_c {
+        (context_c, context_c)
+    } else {
+        (args.before.unwrap_or(0), args.after.unwrap_or(0))
+    };
     let line_numbers = args
         .line_numbers
         .unwrap_or(output_mode == GrepOutputMode::Content);
-    let limit = match args.head_limit {
-        Some(0) => MAX_RESULT_LINES,
-        Some(limit) => limit.min(MAX_RESULT_LINES),
-        None => DEFAULT_GREP_HEAD_LIMIT,
-    };
+    let limit = args.head_limit.unwrap_or(DEFAULT_GREP_HEAD_LIMIT);
     let response = fs
         .grep_search(
             GrepSearchRequest {
@@ -552,10 +549,7 @@ async fn grep_files(
         )
         .await
         .map_err(|err| FunctionCallError::RespondToModel(format!("grep search failed: {err}")))?;
-    Ok(join_search_lines(
-        format_grep_lines(response.lines, output_mode, &root, cwd),
-        response.truncated,
-    ))
+    Ok(format_grep_response(response, output_mode, &root, cwd))
 }
 
 fn resolve_path(cwd: &AbsolutePathBuf, path: &str) -> AbsolutePathBuf {
@@ -610,6 +604,110 @@ fn prefix_relative_path(path: &str, prefix: Option<&str>) -> String {
     }
 }
 
+fn format_glob_response(
+    response: codex_exec_server::GlobSearchResponse,
+    cwd: &AbsolutePathBuf,
+) -> String {
+    let mut lines = response
+        .matches
+        .into_iter()
+        .map(|matched| display_path(&matched.path, cwd))
+        .collect::<Vec<_>>();
+    if lines.is_empty() {
+        return "No files found".to_string();
+    }
+    if response.truncated {
+        lines.push(
+            "(Results are truncated. Consider using a more specific path or pattern.)".to_string(),
+        );
+    }
+    lines.join("\n")
+}
+
+fn format_grep_response(
+    response: GrepSearchResponse,
+    output_mode: GrepOutputMode,
+    root: &AbsolutePathBuf,
+    cwd: &AbsolutePathBuf,
+) -> String {
+    let lines = format_grep_lines(response.lines, output_mode, root, cwd);
+    let limit_info = format_limit_info(response.applied_limit, response.applied_offset);
+    match output_mode {
+        GrepOutputMode::Content => {
+            let result = if lines.is_empty() {
+                "No matches found".to_string()
+            } else {
+                lines.join("\n")
+            };
+            if limit_info.is_empty() {
+                result
+            } else {
+                format!("{result}\n\n[Showing results with pagination = {limit_info}]")
+            }
+        }
+        GrepOutputMode::Count => {
+            let raw_content = if lines.is_empty() {
+                "No matches found".to_string()
+            } else {
+                lines.join("\n")
+            };
+            let num_matches = response.num_matches.unwrap_or(0);
+            let occurrence = if num_matches == 1 {
+                "occurrence"
+            } else {
+                "occurrences"
+            };
+            let file = if response.num_files == 1 {
+                "file"
+            } else {
+                "files"
+            };
+            let pagination = if limit_info.is_empty() {
+                String::new()
+            } else {
+                format!(" with pagination = {limit_info}")
+            };
+            format!(
+                "{raw_content}\n\nFound {num_matches} total {occurrence} across {} {file}.{pagination}",
+                response.num_files
+            )
+        }
+        GrepOutputMode::FilesWithMatches => {
+            if response.num_files == 0 {
+                return "No files found".to_string();
+            }
+            let file = if response.num_files == 1 {
+                "file"
+            } else {
+                "files"
+            };
+            let pagination = if limit_info.is_empty() {
+                String::new()
+            } else {
+                format!(" {limit_info}")
+            };
+            format!(
+                "Found {} {file}{pagination}\n{}",
+                response.num_files,
+                lines.join("\n")
+            )
+        }
+    }
+}
+
+fn format_limit_info(applied_limit: Option<usize>, applied_offset: Option<usize>) -> String {
+    let mut parts = Vec::new();
+    if let Some(applied_limit) = applied_limit {
+        parts.push(format!("limit: {applied_limit}"));
+    }
+    if let Some(applied_offset) = applied_offset
+        && applied_offset > 0
+    {
+        parts.push(format!("offset: {applied_offset}"));
+    }
+    parts.join(", ")
+}
+
 fn split_lines_preserving_newline(text: &str) -> Vec<&str> {
     if text.is_empty() {
         return Vec::new();
@@ -649,17 +747,6 @@ fn is_pdf_path(path: &AbsolutePathBuf) -> bool {
         .extension()
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"))
-}
-
-fn join_search_lines(mut lines: Vec<String>, truncated: bool) -> String {
-    if truncated {
-        lines.push(format!("[Showing first {} results]", lines.len()));
-    }
-    if lines.is_empty() {
-        String::new()
-    } else {
-        format!("{}\n", lines.join("\n"))
-    }
 }
 
 #[cfg(test)]

@@ -11,7 +11,6 @@ use codex_file_system::GlobSearchResponse;
 use codex_file_system::GrepOutputMode;
 use codex_file_system::GrepSearchRequest;
 use codex_file_system::GrepSearchResponse;
-use codex_utils_absolute_path::AbsolutePathBuf;
 use globset::GlobBuilder;
 use globset::GlobSet;
 use globset::GlobSetBuilder;
@@ -19,7 +18,6 @@ use ignore::WalkBuilder;
 use regex_lite::Regex;
 use regex_lite::RegexBuilder;
 
-const HARD_RESULT_LIMIT: usize = 1_000;
 const SEARCH_PRUNED_DIRECTORY_NAMES: &[&str] = &[
     ".git",
     ".svn",
@@ -35,15 +33,9 @@ const SEARCH_PRUNED_DIRECTORY_NAMES: &[&str] = &[
     "target",
 ];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum GlobTraversalDepth {
-    Recursive,
-    Fixed(usize),
-}
-
 #[derive(Debug)]
 struct GlobCandidate {
-    path: AbsolutePathBuf,
+    path: codex_utils_absolute_path::AbsolutePathBuf,
     relative_slash_path: String,
     modified_at_ms: i64,
 }
@@ -52,6 +44,15 @@ struct GlobCandidate {
 struct GrepCandidate {
     path: PathBuf,
     relative_slash_path: String,
+    modified_at_ms: i64,
+}
+
+#[derive(Debug)]
+struct LimitedLines {
+    lines: Vec<String>,
+    truncated: bool,
+    applied_limit: Option<usize>,
+    applied_offset: Option<usize>,
 }
 
 pub(crate) async fn glob_search(request: GlobSearchRequest) -> io::Result<GlobSearchResponse> {
@@ -67,10 +68,9 @@ pub(crate) async fn grep_search(request: GrepSearchRequest) -> io::Result<GrepSe
 }
 
 fn glob_search_blocking(request: GlobSearchRequest) -> io::Result<GlobSearchResponse> {
-    let pattern = normalize_pattern(&request.pattern);
-    let matcher = compile_glob_set(pattern)?;
-    let traversal_depth = glob_traversal_depth(pattern);
-    let candidates = glob_candidates(request.root.as_path(), pattern, &matcher, traversal_depth)?;
+    let (root, pattern) = glob_root_and_pattern(request.root.as_path(), &request.pattern);
+    let matcher = compile_glob_set(&pattern)?;
+    let candidates = glob_candidates(root.as_path(), &pattern, &matcher)?;
     let max_results = request.max_results;
     let truncated = candidates.len() > max_results;
     let matches = candidates
@@ -89,12 +89,12 @@ fn glob_candidates(
     root: &Path,
     pattern: &str,
     matcher: &GlobSet,
-    traversal_depth: GlobTraversalDepth,
 ) -> io::Result<Vec<GlobCandidate>> {
     let prefix = glob_literal_directory_prefix(pattern);
     let Some(start_dir) = resolve_glob_start_dir(root, &prefix)? else {
         return Ok(Vec::new());
     };
+    let match_basename = !pattern.contains('/');
     let mut candidates = Vec::new();
     for entry in search_walker(start_dir.as_path()) {
         let entry = match entry {
@@ -106,14 +106,11 @@ fn glob_candidates(
             continue;
         }
         let relative_slash_path = relative_slash_path(entry.path(), root);
-        if !glob_file_depth_matches(traversal_depth, &relative_slash_path) {
-            continue;
-        }
-        if !matcher.is_match(&relative_slash_path) {
+        if !glob_path_matches(matcher, match_basename, &relative_slash_path, entry.path()) {
             continue;
         }
         candidates.push(GlobCandidate {
-            path: AbsolutePathBuf::from_absolute_path(entry.path())?,
+            path: codex_utils_absolute_path::AbsolutePathBuf::from_absolute_path(entry.path())?,
             modified_at_ms: std::fs::metadata(entry.path())
                 .ok()
                 .and_then(|metadata| metadata.modified().ok())
@@ -123,9 +120,8 @@ fn glob_candidates(
     }
 
     candidates.sort_by(|left, right| {
-        right
-            .modified_at_ms
-            .cmp(&left.modified_at_ms)
+        left.modified_at_ms
+            .cmp(&right.modified_at_ms)
             .then_with(|| left.relative_slash_path.cmp(&right.relative_slash_path))
     });
     Ok(candidates)
@@ -139,6 +135,7 @@ fn grep_search_blocking(request: GrepSearchRequest) -> io::Result<GrepSearchResp
     let regex = regex_builder.build().map_err(invalid_pattern_error)?;
     let candidates = grep_candidates(&request)?;
     let mut output = Vec::new();
+    let mut files_with_matches = Vec::new();
 
     for candidate in candidates {
         if !type_filter_matches(candidate.path.as_path(), request.file_type.as_deref()) {
@@ -160,7 +157,9 @@ fn grep_search_blocking(request: GrepSearchRequest) -> io::Result<GrepSearchResp
         }
 
         match request.output_mode {
-            GrepOutputMode::FilesWithMatches => output.push(candidate.relative_slash_path),
+            GrepOutputMode::FilesWithMatches => {
+                files_with_matches.push((candidate.relative_slash_path, candidate.modified_at_ms));
+            }
             GrepOutputMode::Count => {
                 output.push(format!(
                     "{}:{}",
@@ -180,15 +179,70 @@ fn grep_search_blocking(request: GrepSearchRequest) -> io::Result<GrepSearchResp
         }
     }
 
-    let offset = request.offset.min(output.len());
-    let limit = if request.head_limit == 0 {
-        HARD_RESULT_LIMIT
-    } else {
-        request.head_limit.min(HARD_RESULT_LIMIT)
-    };
-    let truncated = output.len().saturating_sub(offset) > limit;
-    let lines = output.into_iter().skip(offset).take(limit).collect();
-    Ok(GrepSearchResponse { lines, truncated })
+    if request.output_mode == GrepOutputMode::FilesWithMatches {
+        files_with_matches
+            .sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+        output = files_with_matches
+            .into_iter()
+            .map(|(path, _modified_at_ms)| path)
+            .collect();
+    }
+
+    let LimitedLines {
+        lines,
+        truncated,
+        applied_limit,
+        applied_offset,
+    } = apply_head_limit(output, request.head_limit, request.offset);
+    let (num_files, num_matches) = grep_result_counts(request.output_mode, &lines);
+    Ok(GrepSearchResponse {
+        lines,
+        num_files,
+        num_matches,
+        applied_limit,
+        applied_offset,
+        truncated,
+    })
+}
+
+fn apply_head_limit(
+    lines: Vec<String>,
+    head_limit: usize,
+    requested_offset: usize,
+) -> LimitedLines {
+    let offset = requested_offset.min(lines.len());
+    let applied_offset = (requested_offset > 0).then_some(requested_offset);
+    if head_limit == 0 {
+        return LimitedLines {
+            lines: lines.into_iter().skip(offset).collect(),
+            truncated: false,
+            applied_limit: None,
+            applied_offset,
+        };
+    }
+
+    let truncated = lines.len().saturating_sub(offset) > head_limit;
+    LimitedLines {
+        lines: lines.into_iter().skip(offset).take(head_limit).collect(),
+        truncated,
+        applied_limit: truncated.then_some(head_limit),
+        applied_offset,
+    }
+}
+
+fn grep_result_counts(output_mode: GrepOutputMode, lines: &[String]) -> (usize, Option<usize>) {
+    match output_mode {
+        GrepOutputMode::FilesWithMatches => (lines.len(), None),
+        GrepOutputMode::Content => (0, None),
+        GrepOutputMode::Count => {
+            let num_matches = lines
+                .iter()
+                .filter_map(|line| line.rsplit_once(':'))
+                .filter_map(|(_path, count)| count.parse::<usize>().ok())
+                .sum();
+            (lines.len(), Some(num_matches))
+        }
+    }
 }
 
 fn grep_candidates(request: &GrepSearchRequest) -> io::Result<Vec<GrepCandidate>> {
@@ -197,6 +251,7 @@ fn grep_candidates(request: &GrepSearchRequest) -> io::Result<Vec<GrepCandidate>
         return Ok(vec![GrepCandidate {
             path: request.root.to_path_buf(),
             relative_slash_path: String::new(),
+            modified_at_ms: metadata.modified().ok().map_or(0, system_time_to_unix_ms),
         }]);
     }
     if !metadata.is_dir() {
@@ -204,9 +259,12 @@ fn grep_candidates(request: &GrepSearchRequest) -> io::Result<Vec<GrepCandidate>
     }
 
     let glob = request.glob.as_deref().map(normalize_pattern);
-    let matcher = glob.map(compile_glob_set).transpose()?;
-    let traversal_depth = glob.map(glob_traversal_depth);
-    let prefix = glob.map(glob_literal_directory_prefix).unwrap_or_default();
+    let matcher = glob.as_deref().map(compile_glob_set).transpose()?;
+    let match_basename = glob.as_deref().is_some_and(|glob| !glob.contains('/'));
+    let prefix = glob
+        .as_deref()
+        .map(glob_literal_directory_prefix)
+        .unwrap_or_default();
     let Some(start_dir) = resolve_glob_start_dir(request.root.as_path(), &prefix)? else {
         return Ok(Vec::new());
     };
@@ -222,19 +280,18 @@ fn grep_candidates(request: &GrepSearchRequest) -> io::Result<Vec<GrepCandidate>
             continue;
         }
         let relative_slash_path = relative_slash_path(entry.path(), request.root.as_path());
-        if let Some(traversal_depth) = traversal_depth
-            && !glob_file_depth_matches(traversal_depth, &relative_slash_path)
-        {
-            continue;
-        }
         if let Some(matcher) = &matcher
-            && !matcher.is_match(&relative_slash_path)
+            && !glob_path_matches(matcher, match_basename, &relative_slash_path, entry.path())
         {
             continue;
         }
         candidates.push(GrepCandidate {
             path: entry.path().to_path_buf(),
             relative_slash_path,
+            modified_at_ms: std::fs::metadata(entry.path())
+                .ok()
+                .and_then(|metadata| metadata.modified().ok())
+                .map_or(0, system_time_to_unix_ms),
         });
     }
     Ok(candidates)
@@ -260,8 +317,44 @@ fn is_pruned_directory(path: &Path) -> bool {
         .is_some_and(|name| SEARCH_PRUNED_DIRECTORY_NAMES.contains(&name))
 }
 
-fn normalize_pattern(pattern: &str) -> &str {
-    pattern.strip_prefix("./").unwrap_or(pattern)
+fn glob_root_and_pattern(root: &Path, pattern: &str) -> (PathBuf, String) {
+    if Path::new(pattern).is_absolute()
+        && let Some((base_dir, relative_pattern)) = absolute_glob_base(pattern)
+    {
+        return (base_dir, normalize_pattern(&relative_pattern));
+    }
+
+    (root.to_path_buf(), normalize_pattern(pattern))
+}
+
+fn absolute_glob_base(pattern: &str) -> Option<(PathBuf, String)> {
+    let glob_index = pattern.find(['*', '?', '[', '{']).unwrap_or(pattern.len());
+    let static_prefix = &pattern[..glob_index];
+    let last_separator = static_prefix
+        .rfind('/')
+        .into_iter()
+        .chain(static_prefix.rfind('\\'))
+        .max()?;
+    let base_end = if last_separator == 0
+        || static_prefix
+            .as_bytes()
+            .get(last_separator.saturating_sub(1))
+            .is_some_and(|byte| *byte == b':')
+    {
+        last_separator + 1
+    } else {
+        last_separator
+    };
+    let base_dir = PathBuf::from(&pattern[..base_end]);
+    let relative_pattern = pattern[last_separator + 1..].to_string();
+    Some((base_dir, relative_pattern))
+}
+
+fn normalize_pattern(pattern: &str) -> String {
+    pattern
+        .strip_prefix("./")
+        .unwrap_or(pattern)
+        .replace('\\', "/")
 }
 
 fn compile_glob_set(pattern: &str) -> io::Result<GlobSet> {
@@ -292,13 +385,6 @@ fn expanded_glob_patterns(pattern: &str) -> Vec<String> {
     patterns
 }
 
-fn glob_traversal_depth(pattern: &str) -> GlobTraversalDepth {
-    if pattern.split('/').any(|segment| segment == "**") {
-        return GlobTraversalDepth::Recursive;
-    }
-    GlobTraversalDepth::Fixed(pattern.matches('/').count())
-}
-
 fn glob_literal_directory_prefix(pattern: &str) -> Vec<&str> {
     let segments = pattern.split('/').collect::<Vec<_>>();
     let mut prefix = Vec::new();
@@ -312,7 +398,7 @@ fn glob_literal_directory_prefix(pattern: &str) -> Vec<&str> {
 }
 
 fn has_glob_meta(segment: &str) -> bool {
-    segment.contains('*') || segment.contains('?')
+    segment.contains('*') || segment.contains('?') || segment.contains('[') || segment.contains('{')
 }
 
 fn resolve_glob_start_dir(root: &Path, prefix: &[&str]) -> io::Result<Option<PathBuf>> {
@@ -328,13 +414,19 @@ fn resolve_glob_start_dir(root: &Path, prefix: &[&str]) -> io::Result<Option<Pat
     }
 }
 
-fn glob_file_depth_matches(depth: GlobTraversalDepth, relative_slash_path: &str) -> bool {
-    match depth {
-        GlobTraversalDepth::Recursive => true,
-        GlobTraversalDepth::Fixed(max_file_depth) => {
-            relative_slash_path.matches('/').count() == max_file_depth
-        }
+fn glob_path_matches(
+    matcher: &GlobSet,
+    match_basename: bool,
+    relative_slash_path: &str,
+    path: &Path,
+) -> bool {
+    if !match_basename {
+        return matcher.is_match(relative_slash_path);
     }
+
+    path.file_name()
+        .and_then(|file_name| file_name.to_str())
+        .is_some_and(|file_name| matcher.is_match(file_name))
 }
 
 fn relative_slash_path(path: &Path, root: &Path) -> String {

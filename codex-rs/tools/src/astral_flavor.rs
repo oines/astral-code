@@ -105,10 +105,6 @@ fn bash_tool() -> AgentTool {
                     "tty",
                     "Allocate a PTY for interactive commands that need follow-up input",
                 ),
-                string_property(
-                    "environment_id",
-                    "Optional target execution environment id when multiple environments exist",
-                ),
             ],
             ["command"],
         ),
@@ -122,7 +118,6 @@ fn read_tool() -> AgentTool {
         object(
             [
                 string_property("file_path", "The absolute path to the file to read"),
-                environment_id_property(),
                 integer_property(
                     "offset",
                     "The line number to start reading from; only provide for large files",
@@ -147,7 +142,6 @@ fn write_tool() -> AgentTool {
                     "file_path",
                     "The absolute path to the file to write; must be absolute",
                 ),
-                environment_id_property(),
                 string_property("content", "The content to write to the file"),
             ],
             ["file_path", "content"],
@@ -162,7 +156,6 @@ fn edit_tool() -> AgentTool {
         object(
             [
                 string_property("file_path", "The absolute path to the file to modify"),
-                environment_id_property(),
                 string_property(
                     "old_string",
                     "The exact text to replace. CRITICAL: Never include any part of the line number prefix from the Read tool output in old_string.",
@@ -190,9 +183,8 @@ fn glob_tool() -> AgentTool {
                 string_property("pattern", "The glob pattern to match files against"),
                 string_property(
                     "path",
-                    "Directory to search in; omit to use the current working directory",
+                    "The directory to search in. If not specified, the current working directory will be used. IMPORTANT: Omit this field to use the default directory. DO NOT enter \"undefined\" or \"null\" - simply omit it for the default behavior. Must be a valid directory path if provided.",
                 ),
-                environment_id_property(),
             ],
             ["pattern"],
         ),
@@ -205,31 +197,57 @@ fn grep_tool() -> AgentTool {
         astral_prompts::grep_description(),
         object(
             [
-                string_property("pattern", "The regular expression pattern to search for"),
-                string_property("path", "File or directory to search in; defaults to cwd"),
-                environment_id_property(),
-                string_property("glob", "Glob pattern to filter files"),
+                string_property(
+                    "pattern",
+                    "The regular expression pattern to search for in file contents",
+                ),
+                string_property(
+                    "path",
+                    "File or directory to search in (rg PATH). Defaults to current working directory.",
+                ),
+                string_property(
+                    "glob",
+                    "Glob pattern to filter files (e.g. \"*.js\", \"*.{ts,tsx}\") - maps to rg --glob",
+                ),
                 enum_property(
                     "output_mode",
-                    "Output mode; defaults to files_with_matches",
+                    "Output mode: \"content\" shows matching lines (supports -A/-B/-C context, -n line numbers, head_limit), \"files_with_matches\" shows file paths (supports head_limit), \"count\" shows match counts (supports head_limit). Defaults to \"files_with_matches\".",
                     ["content", "files_with_matches", "count"],
                 ),
-                integer_property("-B", "Number of lines to show before each match"),
-                integer_property("-A", "Number of lines to show after each match"),
-                integer_property("-C", "Number of context lines before and after each match"),
-                integer_property("context", "Alias for -C context lines"),
+                number_property(
+                    "-B",
+                    "Number of lines to show before each match (rg -B). Requires output_mode: \"content\", ignored otherwise.",
+                ),
+                number_property(
+                    "-A",
+                    "Number of lines to show after each match (rg -A). Requires output_mode: \"content\", ignored otherwise.",
+                ),
+                number_property("-C", "Alias for context."),
+                number_property(
+                    "context",
+                    "Number of lines to show before and after each match (rg -C). Requires output_mode: \"content\", ignored otherwise.",
+                ),
                 bool_property(
                     "-n",
-                    "Show line numbers in content output; defaults to true in content mode",
+                    "Show line numbers in output (rg -n). Requires output_mode: \"content\", ignored otherwise. Defaults to true.",
                 ),
-                bool_property("-i", "Case-insensitive search"),
-                string_property("type", "File type to search, such as rust, py, js, go"),
-                integer_property(
+                bool_property("-i", "Case insensitive search (rg -i)"),
+                string_property(
+                    "type",
+                    "File type to search (rg --type). Common types: js, py, rust, go, java, etc. More efficient than include for standard file types.",
+                ),
+                number_property(
                     "head_limit",
-                    "Limit output to first N lines or entries; defaults to 250, pass 0 for the maximum bounded output",
+                    "Limit output to first N lines/entries, equivalent to \"| head -N\". Works across all output modes: content (limits output lines), files_with_matches (limits file paths), count (limits count entries). Defaults to 250 when unspecified. Pass 0 for unlimited (use sparingly — large result sets waste context).",
                 ),
-                integer_property("offset", "Skip first N lines or entries before limiting"),
-                bool_property("multiline", "Enable multiline mode"),
+                number_property(
+                    "offset",
+                    "Skip first N lines/entries before applying head_limit, equivalent to \"| tail -n +N | head -N\". Works across all output modes. Defaults to 0.",
+                ),
+                bool_property(
+                    "multiline",
+                    "Enable multiline mode where . matches newlines and patterns can span lines (rg -U --multiline-dotall). Default: false.",
+                ),
             ],
             ["pattern"],
         ),
@@ -411,10 +429,6 @@ fn request_permissions_tool() -> AgentTool {
                     "input",
                     "Optional original blocked tool input for compatibility; prefer direct permissions",
                 ),
-                string_property(
-                    "environment_id",
-                    "Optional target execution environment id when multiple environments exist",
-                ),
             ],
             ["permissions", "reason"],
         ),
@@ -494,13 +508,6 @@ fn string_property(name: &'static str, description: &'static str) -> (&'static s
     (
         name,
         json!({ "type": "string", "description": description }),
-    )
-}
-
-fn environment_id_property() -> (&'static str, Value) {
-    string_property(
-        "environment_id",
-        "Optional target execution environment id when multiple environments exist",
     )
 }
 

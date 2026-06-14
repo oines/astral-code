@@ -419,6 +419,10 @@ mod tests {
         let grep_response = FsHelperPayload::Grep(FsGrepResponse {
             response: crate::GrepSearchResponse {
                 lines: vec!["src/main.rs".to_string()],
+                num_files: 1,
+                num_matches: None,
+                applied_limit: None,
+                applied_offset: None,
                 truncated: false,
             },
         })
@@ -429,6 +433,10 @@ mod tests {
             FsGrepResponse {
                 response: crate::GrepSearchResponse {
                     lines: vec!["src/main.rs".to_string()],
+                    num_files: 1,
+                    num_matches: None,
+                    applied_limit: None,
+                    applied_offset: None,
                     truncated: false,
                 },
             }
