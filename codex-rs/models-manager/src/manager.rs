@@ -15,6 +15,7 @@ use std::hash::Hash;
 use std::hash::Hasher;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::LazyLock;
 use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::sync::TryLockError;
@@ -98,6 +99,9 @@ impl fmt::Display for RefreshStrategy {
 }
 
 type SharedModelsEndpointClient = Arc<dyn ModelsEndpointClient>;
+static BUNDLED_MODEL_CATALOG: LazyLock<Vec<ModelInfo>> = LazyLock::new(|| {
+    crate::bundled_models_response().map_or_else(|_| Vec::new(), |catalog| catalog.models)
+});
 
 /// Coordinates model discovery plus cached metadata on disk.
 #[async_trait]
@@ -468,7 +472,10 @@ pub(crate) fn construct_model_info_from_candidates(
     // First use the normal longest-prefix match. If that misses, allow a narrowly scoped
     // retry for namespaced slugs like `custom/gpt-5.3-codex`.
     let remote = find_model_by_longest_prefix(model, candidates)
-        .or_else(|| find_model_by_namespaced_suffix(model, candidates));
+        .or_else(|| find_model_by_namespaced_suffix(model, candidates))
+        .or_else(|| find_model_by_longest_prefix(model, BUNDLED_MODEL_CATALOG.as_slice()))
+        .or_else(|| find_model_by_namespaced_suffix(model, BUNDLED_MODEL_CATALOG.as_slice()));
+    let has_configured_capability = config.lookup_model_capability(model).is_some();
     let model_info = if let Some(remote) = remote {
         ModelInfo {
             slug: model.to_string(),
@@ -476,7 +483,12 @@ pub(crate) fn construct_model_info_from_candidates(
             ..remote
         }
     } else {
-        model_info::model_info_from_slug(model)
+        let mut model_info =
+            model_info::model_info_from_slug_with_warning(model, !has_configured_capability);
+        if has_configured_capability {
+            model_info.used_fallback_model_metadata = false;
+        }
+        model_info
     };
     model_info::with_config_overrides(model_info, config)
 }

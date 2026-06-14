@@ -77,24 +77,55 @@ fn model_from_preset(preset: &ModelPreset) -> Model {
     }
 }
 
-fn expected_visible_models() -> Vec<Model> {
-    let mut presets =
-        ModelPreset::filter_api_supported(codex_core::test_support::all_model_presets().clone());
+fn write_configured_models_config(codex_home: &std::path::Path) -> Result<()> {
+    std::fs::write(
+        codex_home.join("config.toml"),
+        r#"
+model = "deepseek-v4-pro"
+model_provider = "deepseek"
 
-    // Mirror `ModelsManager::build_available_models()` default selection after auth filtering.
-    ModelPreset::mark_default_by_picker_visibility(&mut presets);
+[model_providers.deepseek]
+name = "DeepSeek"
+base_url = "https://api.deepseek.example/v1"
+env_key = "DEEPSEEK_API_KEY"
+wire_api = "chat_completions"
 
-    presets
-        .iter()
-        .filter(|preset| preset.show_in_picker)
-        .map(model_from_preset)
-        .collect()
+[model_providers.mimo]
+name = "MiMo"
+base_url = "https://api.mimo.example/v1"
+env_key = "MIMO_API_KEY"
+wire_api = "chat_completions"
+
+[model_capabilities."deepseek/deepseek-v4-pro"]
+context_window = 200000
+max_context_window = 1000000
+max_output_tokens = 32000
+supports_tools = true
+supports_vision = false
+
+[model_capabilities."deepseek/deepseek-v4-flash"]
+context_window = 200000
+max_context_window = 1000000
+max_output_tokens = 32000
+supports_tools = true
+supports_vision = false
+
+[model_capabilities."mimo/mimo-v2.5-pro"]
+context_window = 200000
+max_context_window = 1000000
+max_output_tokens = 32000
+supports_tools = true
+supports_vision = false
+"#,
+    )?;
+    Ok(())
 }
 
 #[tokio::test]
-async fn list_models_returns_all_models_with_large_limit() -> Result<()> {
+async fn list_models_returns_configured_models_with_large_limit() -> Result<()> {
     let codex_home = TempDir::new()?;
     write_models_cache(codex_home.path())?;
+    write_configured_models_config(codex_home.path())?;
     let mut mcp = TestAppServer::new(codex_home.path()).await?;
 
     timeout(DEFAULT_TIMEOUT, mcp.initialize()).await??;
@@ -119,17 +150,29 @@ async fn list_models_returns_all_models_with_large_limit() -> Result<()> {
         next_cursor,
     } = to_response::<ModelListResponse>(response)?;
 
-    let expected_models = expected_visible_models();
-
-    assert_eq!(items, expected_models);
+    let model_names = items
+        .iter()
+        .map(|model| (model.model_provider.as_str(), model.model.as_str()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        model_names,
+        vec![
+            ("deepseek", "deepseek-v4-pro"),
+            ("deepseek", "deepseek-v4-flash"),
+            ("mimo", "mimo-v2.5-pro"),
+        ]
+    );
+    assert!(items[0].is_default);
+    assert!(items.iter().all(|model| !model.hidden));
     assert!(next_cursor.is_none());
     Ok(())
 }
 
 #[tokio::test]
-async fn list_models_includes_hidden_models() -> Result<()> {
+async fn list_models_include_hidden_still_returns_configured_models_only() -> Result<()> {
     let codex_home = TempDir::new()?;
     write_models_cache(codex_home.path())?;
+    write_configured_models_config(codex_home.path())?;
     let mut mcp = TestAppServer::new(codex_home.path()).await?;
 
     timeout(DEFAULT_TIMEOUT, mcp.initialize()).await??;
@@ -154,7 +197,8 @@ async fn list_models_includes_hidden_models() -> Result<()> {
         next_cursor,
     } = to_response::<ModelListResponse>(response)?;
 
-    assert!(items.iter().any(|item| item.hidden));
+    assert_eq!(items.len(), 3);
+    assert!(items.iter().all(|item| !item.hidden));
     assert!(next_cursor.is_none());
     Ok(())
 }
@@ -162,51 +206,8 @@ async fn list_models_includes_hidden_models() -> Result<()> {
 #[tokio::test]
 async fn list_models_can_target_configured_model_provider() -> Result<()> {
     let codex_home = TempDir::new()?;
-    let catalog_path = codex_home.path().join("models.json");
-    let catalog = ModelsResponse {
-        models: vec![serde_json::from_value(json!({
-            "slug": "deepseek-v4-pro",
-            "display_name": "DeepSeek V4 Pro",
-            "description": "DeepSeek provider model",
-            "default_reasoning_level": "medium",
-            "supported_reasoning_levels": [{"effort": "medium", "description": "medium"}],
-            "shell_type": "shell_command",
-            "visibility": "list",
-            "minimal_client_version": [0, 1, 0],
-            "supported_in_api": true,
-            "priority": 0,
-            "upgrade": null,
-            "base_instructions": "base instructions",
-            "supports_reasoning_summaries": false,
-            "support_verbosity": false,
-            "default_verbosity": null,
-            "apply_patch_tool_type": null,
-            "truncation_policy": {"mode": "bytes", "limit": 10_000},
-            "supports_parallel_tool_calls": false,
-            "supports_image_detail_original": false,
-            "context_window": 128_000,
-            "max_context_window": 128_000,
-            "experimental_supported_tools": [],
-        }))?],
-    };
-    std::fs::write(&catalog_path, serde_json::to_string(&catalog)?)?;
-    std::fs::write(
-        codex_home.path().join("config.toml"),
-        format!(
-            r#"
-model = "deepseek-v4-pro"
-model_provider = "astral"
-model_catalog_json = "{}"
-
-[model_providers.deepseek]
-name = "DeepSeek"
-base_url = "https://api.deepseek.example/v1"
-env_key = "DEEPSEEK_API_KEY"
-wire_api = "chat_completions"
-"#,
-            catalog_path.display()
-        ),
-    )?;
+    write_models_cache(codex_home.path())?;
+    write_configured_models_config(codex_home.path())?;
 
     let mut mcp = TestAppServer::new(codex_home.path()).await?;
     timeout(DEFAULT_TIMEOUT, mcp.initialize()).await??;
@@ -231,10 +232,13 @@ wire_api = "chat_completions"
         next_cursor,
     } = to_response::<ModelListResponse>(response)?;
 
-    assert_eq!(items.len(), 1);
+    assert_eq!(items.len(), 2);
     assert_eq!(items[0].model_provider, "deepseek");
     assert_eq!(items[0].model_provider_name, "DeepSeek");
     assert_eq!(items[0].model, "deepseek-v4-pro");
+    assert_eq!(items[1].model_provider, "deepseek");
+    assert_eq!(items[1].model_provider_name, "DeepSeek");
+    assert_eq!(items[1].model, "deepseek-v4-flash");
     assert!(next_cursor.is_none());
     Ok(())
 }
@@ -356,11 +360,16 @@ openai_base_url = "{server_uri}/v1"
 async fn list_models_pagination_works() -> Result<()> {
     let codex_home = TempDir::new()?;
     write_models_cache(codex_home.path())?;
+    write_configured_models_config(codex_home.path())?;
     let mut mcp = TestAppServer::new(codex_home.path()).await?;
 
     timeout(DEFAULT_TIMEOUT, mcp.initialize()).await??;
 
-    let expected_models = expected_visible_models();
+    let expected_models = vec![
+        ("deepseek", "deepseek-v4-pro"),
+        ("deepseek", "deepseek-v4-flash"),
+        ("mimo", "mimo-v2.5-pro"),
+    ];
     let mut cursor = None;
     let mut items = Vec::new();
 
@@ -391,7 +400,11 @@ async fn list_models_pagination_works() -> Result<()> {
         if let Some(next_cursor) = next_cursor {
             cursor = Some(next_cursor);
         } else {
-            assert_eq!(items, expected_models);
+            let model_names = items
+                .iter()
+                .map(|model: &Model| (model.model_provider.as_str(), model.model.as_str()))
+                .collect::<Vec<_>>();
+            assert_eq!(model_names, expected_models);
             return Ok(());
         }
     }
@@ -406,6 +419,7 @@ async fn list_models_pagination_works() -> Result<()> {
 async fn list_models_rejects_invalid_cursor() -> Result<()> {
     let codex_home = TempDir::new()?;
     write_models_cache(codex_home.path())?;
+    write_configured_models_config(codex_home.path())?;
     let mut mcp = TestAppServer::new(codex_home.path()).await?;
 
     timeout(DEFAULT_TIMEOUT, mcp.initialize()).await??;

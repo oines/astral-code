@@ -1352,6 +1352,7 @@ impl Config {
 
     pub fn to_models_manager_config(&self) -> ModelsManagerConfig {
         ModelsManagerConfig {
+            model_provider_id: Some(self.model_provider_id.clone()),
             model_context_window: self.model_context_window,
             model_input_modalities: self.model_input_modalities.clone(),
             model_auto_compact_token_limit: self.model_auto_compact_token_limit,

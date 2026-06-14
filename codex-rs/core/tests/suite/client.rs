@@ -2945,6 +2945,7 @@ async fn azure_overrides_assign_properties_used_for_responses_url() {
         request_body_remove: Vec::new(),
         env_key_instructions: None,
         wire_api: WireApi::Responses,
+        provider_flavor: None,
         http_headers: Some(std::collections::HashMap::from([(
             "Custom-Header".to_string(),
             "Value".to_string(),
@@ -3036,6 +3037,7 @@ async fn env_var_overrides_loaded_auth() {
         auth: None,
         aws: None,
         wire_api: WireApi::Responses,
+        provider_flavor: None,
         http_headers: Some(std::collections::HashMap::from([(
             "Custom-Header".to_string(),
             "Value".to_string(),

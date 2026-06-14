@@ -21,11 +21,7 @@ const LOCAL_PRAGMATIC_TEMPLATE: &str = "You are a deeply pragmatic, effective so
 const PERSONALITY_PLACEHOLDER: &str = "{{ personality }}";
 
 pub fn with_config_overrides(mut model: ModelInfo, config: &ModelsManagerConfig) -> ModelInfo {
-    if let Some(capability) = config
-        .model_capabilities
-        .as_ref()
-        .and_then(|cache| cache.lookup(&model.slug))
-    {
+    if let Some(capability) = config.lookup_model_capability(&model.slug) {
         capability.apply_to_model_info(&mut model);
     }
     if let Some(supports_reasoning_summaries) = config.model_supports_reasoning_summaries
@@ -74,7 +70,13 @@ pub fn with_config_overrides(mut model: ModelInfo, config: &ModelsManagerConfig)
 
 /// Build a minimal fallback model descriptor for missing/unknown slugs.
 pub fn model_info_from_slug(slug: &str) -> ModelInfo {
-    info!("Unknown model {slug} is used. This will use fallback model metadata.");
+    model_info_from_slug_with_warning(slug, /*warn*/ true)
+}
+
+pub(crate) fn model_info_from_slug_with_warning(slug: &str, warn: bool) -> ModelInfo {
+    if warn {
+        info!("Unknown model {slug} is used. This will use fallback model metadata.");
+    }
     ModelInfo {
         slug: slug.to_string(),
         display_name: slug.to_string(),

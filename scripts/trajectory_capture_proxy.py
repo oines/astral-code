@@ -213,7 +213,8 @@ class CaptureHandler(BaseHTTPRequestHandler):
         forwarded = {
             key: value
             for key, value in headers.items()
-            if key.lower() not in HOP_BY_HOP_HEADERS and key.lower() != "host"
+            if key.lower() not in HOP_BY_HOP_HEADERS
+            and key.lower() not in {"content-length", "host"}
         }
         forwarded["Content-Length"] = str(len(body))
         return forwarded

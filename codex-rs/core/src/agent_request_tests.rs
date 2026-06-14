@@ -129,6 +129,7 @@ fn build_agent_request_maps_prompt_history_tools_and_metadata() {
         prompt_cache_key: "thread-1".to_string(),
         provider_request_body: Some(BTreeMap::from([("temperature".to_string(), json!(0.2))])),
         provider_request_body_remove: vec!["stream_options".to_string()],
+        provider_flavor: None,
     })
     .expect("build agent request");
 
@@ -238,6 +239,7 @@ fn build_agent_request_rejects_responses_only_hosted_tools() {
         prompt_cache_key: "thread-1".to_string(),
         provider_request_body: None,
         provider_request_body_remove: Vec::new(),
+        provider_flavor: None,
     })
     .expect_err("hosted tools should not convert to provider-neutral tools");
 

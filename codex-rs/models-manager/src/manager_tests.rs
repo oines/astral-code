@@ -1,5 +1,7 @@
 use super::*;
 use crate::ModelsManagerConfig;
+use crate::capabilities::ModelCapabilitiesCache;
+use crate::capabilities::ModelCapability;
 use chrono::Utc;
 use codex_app_server_protocol::AuthMode;
 use codex_login::AuthManager;
@@ -10,6 +12,7 @@ use codex_login::ExternalAuthTokens;
 use codex_protocol::openai_models::ModelsResponse;
 use pretty_assertions::assert_eq;
 use serde_json::json;
+use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -244,6 +247,23 @@ async fn get_model_info_tracks_fallback_usage() {
 }
 
 #[tokio::test]
+async fn get_model_info_uses_bundled_metadata_when_provider_catalog_misses() {
+    let config = ModelsManagerConfig::default();
+    let codex_home = tempdir().expect("temp dir");
+    let manager = openai_manager_for_tests(
+        codex_home.path().to_path_buf(),
+        TestModelsEndpoint::new(Vec::new()),
+    );
+
+    let model_info = manager.get_model_info("deepseek-v4-pro", &config).await;
+
+    assert_eq!(model_info.slug, "deepseek-v4-pro");
+    assert_eq!(model_info.display_name, "DeepSeek V4 Pro");
+    assert!(!model_info.supported_reasoning_levels.is_empty());
+    assert!(!model_info.used_fallback_model_metadata);
+}
+
+#[tokio::test]
 async fn get_model_info_uses_custom_catalog() {
     let config = ModelsManagerConfig::default();
     let mut overlay = remote_model("gpt-overlay", "Overlay", /*priority*/ 0);
@@ -310,6 +330,36 @@ async fn get_model_info_rejects_multi_segment_namespace_suffix_matching() {
 
     assert_eq!(model_info.slug, namespaced_model);
     assert!(model_info.used_fallback_model_metadata);
+}
+
+#[tokio::test]
+async fn get_model_info_uses_current_provider_capability_for_bare_model_name() {
+    let mut models = BTreeMap::new();
+    models.insert(
+        "mimo/mimo-v2.5-pro".to_string(),
+        ModelCapability {
+            max_context_window: Some(1_000_000),
+            supports_tools: Some(true),
+            ..Default::default()
+        },
+    );
+    let config = ModelsManagerConfig {
+        model_provider_id: Some("mimo".to_string()),
+        model_capabilities: Some(ModelCapabilitiesCache {
+            version: 1,
+            source: "test".to_string(),
+            generated_at_unix_seconds: 0,
+            models,
+        }),
+        ..Default::default()
+    };
+    let manager = static_manager_for_tests(ModelsResponse { models: Vec::new() });
+
+    let model_info = manager.get_model_info("mimo-v2.5-pro", &config).await;
+
+    assert_eq!(model_info.slug, "mimo-v2.5-pro");
+    assert_eq!(model_info.max_context_window, Some(1_000_000));
+    assert!(!model_info.used_fallback_model_metadata);
 }
 
 #[tokio::test]
