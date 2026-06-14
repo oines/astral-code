@@ -5,6 +5,7 @@ use crate::ResponsesApiNamespace;
 use crate::ResponsesApiNamespaceTool;
 use crate::ResponsesApiTool;
 use codex_agent_protocol::AgentTool;
+use codex_protocol::ToolName;
 use codex_protocol::config_types::WebSearchContextSize;
 use codex_protocol::config_types::WebSearchFilters as ConfigWebSearchFilters;
 use codex_protocol::config_types::WebSearchUserLocation as ConfigWebSearchUserLocation;
@@ -14,6 +15,8 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use thiserror::Error;
+
+const PROVIDER_NEUTRAL_TOOL_NAME_DELIMITER: &str = "__";
 
 /// When serialized as JSON, this produces a valid "Tool" in the OpenAI
 /// Responses API.
@@ -124,6 +127,10 @@ pub fn create_agent_tools_for_provider_neutral_request(
                 for tool in &namespace.tools {
                     match tool {
                         ResponsesApiNamespaceTool::Function(tool) => {
+                            let original_name =
+                                ToolName::namespaced(namespace.name.clone(), tool.name.clone());
+                            let agent_tool_name =
+                                provider_neutral_tool_name_for_tool_name(&original_name);
                             let metadata = BTreeMap::from([
                                 (
                                     "namespace".to_string(),
@@ -133,11 +140,16 @@ pub fn create_agent_tools_for_provider_neutral_request(
                                     "namespaceDescription".to_string(),
                                     Value::String(namespace.description.clone()),
                                 ),
+                                ("originalName".to_string(), Value::String(tool.name.clone())),
                             ]);
                             push_agent_tool(
                                 &mut agent_tools,
                                 &mut seen_names,
-                                responses_api_tool_to_agent_tool(tool, metadata)?,
+                                responses_api_tool_to_agent_tool_with_name(
+                                    tool,
+                                    agent_tool_name,
+                                    metadata,
+                                )?,
                             )?;
                         }
                     }
@@ -172,8 +184,29 @@ pub fn create_agent_tools_for_provider_neutral_request(
     Ok(agent_tools)
 }
 
+pub fn provider_neutral_tool_name_for_tool_name(tool_name: &ToolName) -> String {
+    match tool_name.namespace.as_deref() {
+        Some(namespace) => {
+            provider_neutral_namespaced_tool_name(namespace, tool_name.name.as_str())
+        }
+        None => tool_name.name.clone(),
+    }
+}
+
+pub fn provider_neutral_namespaced_tool_name(namespace: &str, name: &str) -> String {
+    format!("{namespace}{PROVIDER_NEUTRAL_TOOL_NAME_DELIMITER}{name}")
+}
+
 fn responses_api_tool_to_agent_tool(
     tool: &ResponsesApiTool,
+    metadata: BTreeMap<String, Value>,
+) -> Result<AgentTool, AgentToolSpecError> {
+    responses_api_tool_to_agent_tool_with_name(tool, tool.name.clone(), metadata)
+}
+
+fn responses_api_tool_to_agent_tool_with_name(
+    tool: &ResponsesApiTool,
+    name: String,
     mut metadata: BTreeMap<String, Value>,
 ) -> Result<AgentTool, AgentToolSpecError> {
     if tool.strict {
@@ -187,9 +220,9 @@ fn responses_api_tool_to_agent_tool(
     }
 
     Ok(AgentTool {
-        name: tool.name.clone(),
+        name: name.clone(),
         description: tool.description.clone(),
-        input_schema: schema_to_value(&tool.name, &tool.parameters)?,
+        input_schema: schema_to_value(&name, &tool.parameters)?,
         metadata,
     })
 }

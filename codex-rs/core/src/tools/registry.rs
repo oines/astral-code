@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
+use std::collections::hash_map::Entry;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -36,6 +38,7 @@ use codex_rollout::state_db;
 use codex_tools::ToolName;
 use codex_tools::ToolSearchInfo;
 use codex_tools::ToolSpec;
+use codex_tools::provider_neutral_tool_name_for_tool_name;
 use futures::future::BoxFuture;
 use serde_json::Value;
 
@@ -328,11 +331,16 @@ impl CoreToolRuntime for ExposureOverride {
 
 pub struct ToolRegistry {
     tools: HashMap<ToolName, Arc<dyn CoreToolRuntime>>,
+    provider_neutral_aliases: HashMap<ToolName, ToolName>,
 }
 
 impl ToolRegistry {
     fn new(tools: HashMap<ToolName, Arc<dyn CoreToolRuntime>>) -> Self {
-        Self { tools }
+        let provider_neutral_aliases = provider_neutral_aliases(&tools);
+        Self {
+            tools,
+            provider_neutral_aliases,
+        }
     }
 
     pub(crate) fn from_tools(tools: impl IntoIterator<Item = Arc<dyn CoreToolRuntime>>) -> Self {
@@ -363,7 +371,21 @@ impl ToolRegistry {
     }
 
     fn tool(&self, name: &ToolName) -> Option<Arc<dyn CoreToolRuntime>> {
-        self.tools.get(name).map(Arc::clone)
+        self.tools
+            .get(name)
+            .or_else(|| {
+                self.provider_neutral_aliases
+                    .get(name)
+                    .and_then(|canonical_name| self.tools.get(canonical_name))
+            })
+            .map(Arc::clone)
+    }
+
+    fn canonical_runtime_tool_name(&self, name: ToolName) -> ToolName {
+        self.provider_neutral_aliases
+            .get(&name)
+            .cloned()
+            .unwrap_or(name)
     }
 
     #[cfg(test)]
@@ -415,7 +437,7 @@ impl ToolRegistry {
     ) -> Result<AnyToolResult, FunctionCallError> {
         let (tool_name, payload) =
             canonicalize_astral_tool_call(invocation.tool_name, invocation.payload)?;
-        invocation.tool_name = tool_name;
+        invocation.tool_name = self.canonical_runtime_tool_name(tool_name);
         invocation.payload = payload;
 
         let tool_name = invocation.tool_name.clone();
@@ -748,6 +770,38 @@ impl ToolRegistry {
             }
         }
     }
+}
+
+fn provider_neutral_aliases(
+    tools: &HashMap<ToolName, Arc<dyn CoreToolRuntime>>,
+) -> HashMap<ToolName, ToolName> {
+    let mut aliases = HashMap::new();
+    let mut ambiguous_aliases = HashSet::new();
+
+    for tool_name in tools.keys() {
+        if tool_name.namespace.is_none() {
+            continue;
+        }
+
+        let alias = ToolName::plain(provider_neutral_tool_name_for_tool_name(tool_name));
+        if tools.contains_key(&alias) || ambiguous_aliases.contains(&alias) {
+            continue;
+        }
+
+        match aliases.entry(alias.clone()) {
+            Entry::Vacant(entry) => {
+                entry.insert(tool_name.clone());
+            }
+            Entry::Occupied(entry) => {
+                if entry.get() != tool_name {
+                    entry.remove();
+                    ambiguous_aliases.insert(alias);
+                }
+            }
+        }
+    }
+
+    aliases
 }
 
 async fn notify_tool_finish_if_unclaimed(

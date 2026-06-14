@@ -7,6 +7,9 @@ use codex_protocol::models::ReasoningItemReasoningSummary;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_tools::AdditionalProperties;
 use codex_tools::JsonSchema;
+use codex_tools::LoadableToolSpec;
+use codex_tools::ResponsesApiNamespace;
+use codex_tools::ResponsesApiNamespaceTool;
 use codex_tools::ResponsesApiTool;
 use codex_tools::ToolSpec;
 use pretty_assertions::assert_eq;
@@ -65,6 +68,21 @@ fn bash_tool_spec() -> ToolSpec {
         ),
         output_schema: None,
     })
+}
+
+fn test_function_tool(name: &str, description: &str) -> ResponsesApiTool {
+    ResponsesApiTool {
+        name: name.to_string(),
+        description: description.to_string(),
+        strict: false,
+        defer_loading: None,
+        parameters: JsonSchema::object(
+            BTreeMap::new(),
+            /*required*/ None,
+            /*additional_properties*/ None,
+        ),
+        output_schema: None,
+    }
 }
 
 #[test]
@@ -214,6 +232,98 @@ fn build_agent_request_maps_prompt_history_tools_and_metadata() {
                 ]),
             },
         }
+    );
+}
+
+#[test]
+fn build_agent_request_loads_recent_tool_search_results() {
+    let prompt = Prompt {
+        input: vec![ResponseItem::ToolSearchOutput {
+            call_id: None,
+            status: "completed".to_string(),
+            execution: "client".to_string(),
+            tools: vec![
+                serde_json::to_value(LoadableToolSpec::Function(test_function_tool(
+                    "plain_loaded",
+                    "Loaded duplicate should not override direct tool.",
+                )))
+                .expect("serialize loadable tool"),
+                serde_json::to_value(LoadableToolSpec::Namespace(ResponsesApiNamespace {
+                    name: "multi_agent_v1".to_string(),
+                    description: "Tools for spawning and managing sub-agents.".to_string(),
+                    tools: vec![ResponsesApiNamespaceTool::Function(test_function_tool(
+                        "spawn_agent",
+                        "Spawn a sub-agent.",
+                    ))],
+                }))
+                .expect("serialize loadable namespace"),
+            ],
+        }],
+        tools: vec![
+            bash_tool_spec(),
+            ToolSpec::Function(test_function_tool(
+                "plain_loaded",
+                "Direct tool wins over loaded duplicate.",
+            )),
+        ],
+        ..Prompt::default()
+    };
+
+    let request = build_agent_request(AgentRequestBuildParams {
+        prompt: &prompt,
+        model_info: &test_model_info(/*supports_reasoning_summaries*/ false),
+        effort: None,
+        summary: ReasoningSummaryConfig::None,
+        service_tier: None,
+        prompt_cache_key: "thread-1".to_string(),
+        provider_request_body: None,
+        provider_request_body_remove: Vec::new(),
+        provider_flavor: None,
+    })
+    .expect("build agent request");
+
+    assert_eq!(
+        request.tools,
+        vec![
+            AgentTool {
+                name: "Bash".to_string(),
+                description: "Run a shell command".to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "command": { "type": "string" }
+                    },
+                    "required": ["command"],
+                    "additionalProperties": false,
+                }),
+                metadata: BTreeMap::from([("strict".to_string(), json!(true))]),
+            },
+            AgentTool {
+                name: "plain_loaded".to_string(),
+                description: "Direct tool wins over loaded duplicate.".to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {},
+                }),
+                metadata: BTreeMap::new(),
+            },
+            AgentTool {
+                name: "multi_agent_v1__spawn_agent".to_string(),
+                description: "Spawn a sub-agent.".to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {},
+                }),
+                metadata: BTreeMap::from([
+                    ("namespace".to_string(), json!("multi_agent_v1")),
+                    (
+                        "namespaceDescription".to_string(),
+                        json!("Tools for spawning and managing sub-agents.")
+                    ),
+                    ("originalName".to_string(), json!("spawn_agent")),
+                ]),
+            },
+        ]
     );
 }
 

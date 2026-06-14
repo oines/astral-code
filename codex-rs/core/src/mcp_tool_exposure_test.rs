@@ -4,6 +4,8 @@ use std::sync::Arc;
 use codex_features::Feature;
 use codex_mcp::CODEX_APPS_MCP_SERVER_NAME;
 use codex_mcp::ToolInfo;
+use codex_model_provider_info::ModelProviderInfo;
+use codex_model_provider_info::OPENAI_PROVIDER_ID;
 use codex_tools::ToolName;
 use pretty_assertions::assert_eq;
 use rmcp::model::JsonObject;
@@ -91,9 +93,16 @@ fn with_visibility(mut tool: ToolInfo, visibility: &[&str]) -> ToolInfo {
     tool
 }
 
+async fn non_astral_config() -> crate::config::Config {
+    let mut config = test_config().await;
+    config.model_provider_id = OPENAI_PROVIDER_ID.to_string();
+    config.model_provider = ModelProviderInfo::create_openai_provider(/*base_url*/ None);
+    config
+}
+
 #[tokio::test]
-async fn directly_exposes_small_effective_tool_sets() {
-    let config = test_config().await;
+async fn non_astral_directly_exposes_small_effective_tool_sets() {
+    let config = non_astral_config().await;
     let mcp_tools = numbered_mcp_tools(DIRECT_MCP_TOOL_EXPOSURE_THRESHOLD - 1);
 
     let exposure = build_mcp_tool_exposure(
@@ -102,6 +111,23 @@ async fn directly_exposes_small_effective_tool_sets() {
 
     assert_eq!(tool_names(&exposure.direct_tools), tool_names(&mcp_tools));
     assert!(exposure.deferred_tools.is_none());
+}
+
+#[tokio::test]
+async fn astral_defers_small_effective_tool_sets_when_search_is_enabled() {
+    let config = test_config().await;
+    let mcp_tools = numbered_mcp_tools(DIRECT_MCP_TOOL_EXPOSURE_THRESHOLD - 1);
+
+    let exposure = build_mcp_tool_exposure(
+        &mcp_tools, /*connectors*/ None, &config, /*search_tool_enabled*/ true,
+    );
+
+    assert!(exposure.direct_tools.is_empty());
+    let deferred_tools = exposure
+        .deferred_tools
+        .as_ref()
+        .expect("Astral should load MCP tools through tool_search");
+    assert_eq!(tool_names(deferred_tools), tool_names(&mcp_tools));
 }
 
 #[tokio::test]

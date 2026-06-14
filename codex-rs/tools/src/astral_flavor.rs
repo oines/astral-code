@@ -20,7 +20,6 @@ pub const SEND_TASK_INPUT_TOOL_NAME: &str = "SendTaskInput";
 pub const SKILL_TOOL_NAME: &str = "Skill";
 pub const STOP_BACKGROUND_TASK_TOOL_NAME: &str = "StopBackgroundTask";
 pub const TODO_WRITE_TOOL_NAME: &str = "TodoWrite";
-pub const TOOL_SEARCH_FLAVOR_TOOL_NAME: &str = "ToolSearch";
 pub const WRITE_TOOL_NAME: &str = "Write";
 
 pub const ASTRAL_CORE_TOOL_NAMES: &[&str] = &[
@@ -39,7 +38,6 @@ pub const ASTRAL_CORE_TOOL_NAMES: &[&str] = &[
     SKILL_TOOL_NAME,
     STOP_BACKGROUND_TASK_TOOL_NAME,
     TODO_WRITE_TOOL_NAME,
-    TOOL_SEARCH_FLAVOR_TOOL_NAME,
     WRITE_TOOL_NAME,
 ];
 
@@ -67,7 +65,6 @@ pub fn astral_core_tool_by_name(name: &str) -> Option<AgentTool> {
         SKILL_TOOL_NAME => Some(skill_tool()),
         STOP_BACKGROUND_TASK_TOOL_NAME => Some(stop_background_task_tool()),
         TODO_WRITE_TOOL_NAME => Some(todo_write_tool()),
-        TOOL_SEARCH_FLAVOR_TOOL_NAME => Some(tool_search_tool()),
         WRITE_TOOL_NAME => Some(write_tool()),
         _ => None,
     }
@@ -431,27 +428,6 @@ fn request_permissions_tool() -> AgentTool {
                 ),
             ],
             ["permissions", "reason"],
-        ),
-    )
-}
-
-fn tool_search_tool() -> AgentTool {
-    tool(
-        TOOL_SEARCH_FLAVOR_TOOL_NAME,
-        "Search and load deferred tools.",
-        object(
-            [
-                string_property("query", "Search query for tools"),
-                integer_property(
-                    "max_results",
-                    "Maximum number of tools to return; defaults to 5",
-                ),
-                integer_property(
-                    "limit",
-                    "Compatibility alias for max_results; prefer max_results",
-                ),
-            ],
-            ["query"],
         ),
     )
 }

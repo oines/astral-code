@@ -15,6 +15,7 @@ use codex_protocol::models::ContentItem;
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::ResponseItem;
+use codex_protocol::models::SearchToolCallParams;
 use codex_tools::ResponsesApiNamespace;
 use codex_tools::ResponsesApiNamespaceTool;
 use codex_tools::ToolName;
@@ -166,6 +167,35 @@ async fn build_tool_call_uses_namespace_for_registry_name() -> anyhow::Result<()
             assert_eq!(arguments, "{}");
         }
         other => panic!("expected function payload, got {other:?}"),
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn build_tool_call_maps_provider_neutral_tool_search_function_call() -> anyhow::Result<()> {
+    let call = ToolRouter::build_tool_call(ResponseItem::FunctionCall {
+        id: None,
+        name: "tool_search".to_string(),
+        namespace: None,
+        arguments: r#"{"query":"subagent","limit":3}"#.to_string(),
+        call_id: "call-tool-search".to_string(),
+    })?
+    .expect("tool_search function_call should produce a tool call");
+
+    assert_eq!(call.tool_name, ToolName::plain("tool_search"));
+    assert_eq!(call.call_id, "call-tool-search");
+    match call.payload {
+        ToolPayload::ToolSearch { arguments } => {
+            assert_eq!(
+                arguments,
+                SearchToolCallParams {
+                    query: "subagent".to_string(),
+                    limit: Some(3),
+                }
+            );
+        }
+        other => panic!("expected tool_search payload, got {other:?}"),
     }
 
     Ok(())

@@ -139,6 +139,8 @@ fn handler_looks_up_namespaced_aliases_explicitly() {
     let tool_name = "gmail_get_recent_emails";
     let plain_name = codex_tools::ToolName::plain(tool_name);
     let namespaced_name = codex_tools::ToolName::namespaced(namespace, tool_name);
+    let provider_neutral_alias =
+        codex_tools::ToolName::plain("mcp__codex_apps__gmail__gmail_get_recent_emails");
     let plain_handler = Arc::new(TestHandler {
         tool_name: plain_name.clone(),
     }) as Arc<dyn CoreToolRuntime>;
@@ -152,14 +154,16 @@ fn handler_looks_up_namespaced_aliases_explicitly() {
 
     let plain = registry.tool(&plain_name);
     let namespaced = registry.tool(&namespaced_name);
+    let alias = registry.tool(&provider_neutral_alias);
     let missing_namespaced = registry.tool(&codex_tools::ToolName::namespaced(
         "mcp__codex_apps__calendar",
         tool_name,
     ));
 
-    assert_eq!(plain.is_some(), true);
-    assert_eq!(namespaced.is_some(), true);
-    assert_eq!(missing_namespaced.is_none(), true);
+    assert!(plain.is_some());
+    assert!(namespaced.is_some());
+    assert!(alias.is_some());
+    assert!(missing_namespaced.is_none());
     assert!(
         plain
             .as_ref()
@@ -170,6 +174,45 @@ fn handler_looks_up_namespaced_aliases_explicitly() {
             .as_ref()
             .is_some_and(|handler| Arc::ptr_eq(handler, &namespaced_handler))
     );
+    assert!(
+        alias
+            .as_ref()
+            .is_some_and(|handler| Arc::ptr_eq(handler, &namespaced_handler))
+    );
+}
+
+#[test]
+fn provider_neutral_alias_dispatch_preserves_namespaced_tools() {
+    let v1_spawn = codex_tools::ToolName::namespaced(MULTI_AGENT_V1_NAMESPACE, "spawn_agent");
+    let gmail_send = codex_tools::ToolName::namespaced("mcp__codex_apps__gmail", "_send_email");
+    let v1_handler = Arc::new(TestHandler {
+        tool_name: v1_spawn.clone(),
+    }) as Arc<dyn CoreToolRuntime>;
+    let gmail_handler = Arc::new(TestHandler {
+        tool_name: gmail_send.clone(),
+    }) as Arc<dyn CoreToolRuntime>;
+    let registry = ToolRegistry::new(HashMap::from([
+        (v1_spawn, Arc::clone(&v1_handler)),
+        (gmail_send, Arc::clone(&gmail_handler)),
+    ]));
+
+    let v1_alias = registry.tool(&codex_tools::ToolName::plain("multi_agent_v1__spawn_agent"));
+    let gmail_alias = registry.tool(&codex_tools::ToolName::plain(
+        "mcp__codex_apps__gmail___send_email",
+    ));
+    let bare_spawn = registry.tool(&codex_tools::ToolName::plain("spawn_agent"));
+
+    assert!(
+        v1_alias
+            .as_ref()
+            .is_some_and(|handler| Arc::ptr_eq(handler, &v1_handler))
+    );
+    assert!(
+        gmail_alias
+            .as_ref()
+            .is_some_and(|handler| Arc::ptr_eq(handler, &gmail_handler))
+    );
+    assert!(bare_spawn.is_none());
 }
 
 #[tokio::test]

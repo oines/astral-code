@@ -790,14 +790,14 @@ async fn mcp_and_tool_search_follow_direct_and_deferred_tool_exposure() {
         },
     )
     .await;
-    missing_model_capability.assert_visible_lacks(&["ToolSearch"]);
+    missing_model_capability.assert_visible_lacks(&["tool_search"]);
 
     let missing_deferred_tools = probe(|turn| {
         set_feature(turn, Feature::Collab, /*enabled*/ false);
         turn.model_info.supports_search_tool = true;
     })
     .await;
-    missing_deferred_tools.assert_visible_lacks(&["ToolSearch"]);
+    missing_deferred_tools.assert_visible_lacks(&["tool_search"]);
     missing_deferred_tools.assert_visible_lacks(&[
         "ListMcpResourcesTool",
         "list_mcp_resource_templates",
@@ -815,7 +815,7 @@ async fn mcp_and_tool_search_follow_direct_and_deferred_tool_exposure() {
         },
     )
     .await;
-    bedrock_namespace_capability.assert_visible_contains(&["ToolSearch"]);
+    bedrock_namespace_capability.assert_visible_contains(&["tool_search"]);
 
     let enabled = probe_with(
         |turn| {
@@ -824,7 +824,7 @@ async fn mcp_and_tool_search_follow_direct_and_deferred_tool_exposure() {
         searchable_mcp,
     )
     .await;
-    enabled.assert_visible_contains(&["ToolSearch"]);
+    enabled.assert_visible_contains(&["tool_search"]);
     enabled.assert_registered_contains(&[
         "tool_search",
         &ToolName::namespaced("mcp__searchable", "lookup").to_string(),
@@ -844,7 +844,7 @@ async fn deferred_extension_tools_are_discoverable_with_tool_search() {
     )
     .await;
 
-    plan.assert_visible_contains(&["ToolSearch"]);
+    plan.assert_visible_contains(&["tool_search"]);
     plan.assert_visible_lacks(&["extension_echo"]);
     plan.assert_registered_contains(&["extension_echo"]);
     assert_eq!(plan.exposure("extension_echo"), ToolExposure::Deferred);
@@ -941,7 +941,7 @@ async fn install_suggestion_tools_stay_visible_without_tool_search() {
         "list_available_plugins_to_install",
         "request_plugin_install",
     ]);
-    plan.assert_visible_lacks(&["ToolSearch"]);
+    plan.assert_visible_lacks(&["tool_search"]);
 }
 
 #[tokio::test]
@@ -1221,7 +1221,7 @@ async fn v1_multi_agent_tools_defer_when_tool_search_available() {
     })
     .await;
 
-    plan.assert_visible_contains(&["ToolSearch"]);
+    plan.assert_visible_contains(&["tool_search"]);
     plan.assert_visible_lacks(&[
         "spawn_agent",
         "send_input",
@@ -1251,13 +1251,10 @@ async fn v1_multi_agent_tools_defer_when_tool_search_available() {
         );
         assert_eq!(plan.exposure(&namespaced_tool_name), ToolExposure::Deferred);
     }
-    let ToolSpec::Function(tool) = plan.visible_spec("ToolSearch") else {
-        panic!("expected visible ToolSearch function spec");
+    let ToolSpec::ToolSearch { description, .. } = plan.visible_spec("tool_search") else {
+        panic!("expected visible tool_search spec");
     };
-    assert!(
-        tool.description
-            .contains("- Multi-agent tools: Spawn and manage sub-agents.")
-    );
+    assert!(description.contains("- Multi-agent tools: Spawn and manage sub-agents."));
 }
 
 #[tokio::test]

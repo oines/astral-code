@@ -17,7 +17,6 @@ use crate::tools::handlers::AstralSendTaskInputHandler;
 use crate::tools::handlers::AstralSkillHandler;
 use crate::tools::handlers::AstralStopBackgroundTaskHandler;
 use crate::tools::handlers::AstralTodoWriteHandler;
-use crate::tools::handlers::AstralToolSearchHandler;
 use crate::tools::handlers::CodeModeExecuteHandler;
 use crate::tools::handlers::CodeModeWaitHandler;
 use crate::tools::handlers::DynamicToolHandler;
@@ -949,8 +948,7 @@ fn append_tool_search_executor(
         return;
     }
 
-    planned_tools.add(AstralToolSearchHandler::new(search_infos.clone()));
-    planned_tools.add_dispatch_only(ToolSearchHandler::new(search_infos));
+    planned_tools.add(ToolSearchHandler::new(search_infos));
 }
 
 fn prepend_code_mode_executors(
