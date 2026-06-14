@@ -191,6 +191,7 @@ impl MemoryStartupContext {
         let mut client_session = model_client.new_session();
         let mut stream = client_session
             .stream(
+                model_client.default_provider(),
                 prompt,
                 &context.model_info,
                 &context.session_telemetry,

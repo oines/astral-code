@@ -97,6 +97,55 @@ async fn submission_preserves_text_elements_and_local_images() {
 }
 
 #[tokio::test]
+async fn submission_carries_thread_model_provider() {
+    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+
+    let thread_id = ThreadId::new();
+    let rollout_file = NamedTempFile::new().unwrap();
+    let configured = crate::session_state::ThreadSessionState {
+        thread_id,
+        forked_from_id: None,
+        fork_parent_title: None,
+        thread_name: None,
+        model: "provider-model".to_string(),
+        model_provider_id: "provider-a".to_string(),
+        service_tier: None,
+        approval_policy: AskForApproval::Never,
+        approvals_reviewer: ApprovalsReviewer::User,
+        permission_profile: PermissionProfile::read_only(),
+        active_permission_profile: None,
+        cwd: test_path_buf("/home/user/project").abs(),
+        runtime_workspace_roots: Vec::new(),
+        instruction_source_paths: Vec::new(),
+        reasoning_effort: Some(ReasoningEffortConfig::default()),
+        collaboration_mode: None,
+        personality: None,
+        message_history: None,
+        network_proxy: None,
+        rollout_path: Some(rollout_file.path().to_path_buf()),
+    };
+    chat.handle_thread_session(configured);
+    drain_insert_history(&mut rx);
+
+    chat.bottom_pane
+        .set_composer_text("submit".to_string(), Vec::new(), Vec::new());
+    chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    let (model, model_provider) = match next_submit_op(&mut op_rx) {
+        Op::UserTurn {
+            model,
+            model_provider,
+            ..
+        } => (model, model_provider),
+        other => panic!("expected Op::UserTurn, got {other:?}"),
+    };
+    assert_eq!(
+        (model, model_provider),
+        ("provider-model".to_string(), "provider-a".to_string())
+    );
+}
+
+#[tokio::test]
 async fn submission_includes_configured_active_permission_profile() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 

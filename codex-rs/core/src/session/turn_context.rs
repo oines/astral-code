@@ -412,6 +412,11 @@ impl Session {
         per_turn_config.service_tier = session_configuration.service_tier.clone();
         per_turn_config.personality = session_configuration.personality;
         per_turn_config.approvals_reviewer = session_configuration.approvals_reviewer;
+        per_turn_config.model_provider_id = session_configuration
+            .original_config_do_not_use
+            .model_provider_id
+            .clone();
+        per_turn_config.model_provider = session_configuration.provider.clone();
         session_configuration
             .apply_permission_profile_to_permissions(&mut per_turn_config.permissions);
         let permission_profile = session_configuration.permission_profile();
@@ -439,6 +444,11 @@ impl Session {
         let mut config =
             Self::build_per_turn_config(session_configuration, session_configuration.cwd().clone());
         config.model = Some(session_configuration.collaboration_mode.model().to_string());
+        config.model_provider_id = session_configuration
+            .original_config_do_not_use
+            .model_provider_id
+            .clone();
+        config.model_provider = session_configuration.provider.clone();
         config.permissions.approval_policy = session_configuration.approval_policy.clone();
         config.workspace_roots = session_configuration.workspace_roots.clone();
         config

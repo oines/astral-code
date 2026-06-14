@@ -13,6 +13,7 @@ use codex_features::Feature;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
 use codex_login::default_client::originator;
+use codex_model_provider::create_model_provider;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::WireApi;
 use codex_models_manager::bundled_models_response;
@@ -898,10 +899,16 @@ async fn send_provider_auth_request(server: &MockServer, auth: ModelProviderAuth
         "test".to_string(),
         SessionSource::Exec,
     );
-    let client = ModelClient::new(
+    let auth_manager =
+        AuthManager::from_auth_for_testing(CodexAuth::from_api_key("unused-api-key"));
+    let runtime_provider = create_model_provider(
+        provider.clone(),
         Some(AuthManager::from_auth_for_testing(CodexAuth::from_api_key(
             "unused-api-key",
         ))),
+    );
+    let client = ModelClient::new(
+        Some(auth_manager),
         thread_id.into(),
         thread_id,
         /*installation_id*/ "11111111-1111-4111-8111-111111111111".to_string(),
@@ -927,6 +934,7 @@ async fn send_provider_auth_request(server: &MockServer, auth: ModelProviderAuth
 
     let mut stream = client_session
         .stream(
+            runtime_provider,
             &prompt,
             &model_info,
             &session_telemetry,
@@ -2391,6 +2399,7 @@ async fn azure_responses_request_includes_store_and_reasoning_ids() {
         /*beta_features_header*/ None,
         /*attestation_provider*/ None,
     );
+    let runtime_provider = create_model_provider(provider.clone(), /*auth_manager*/ None);
     let mut client_session = client.new_session();
 
     let mut prompt = Prompt::default();
@@ -2458,6 +2467,7 @@ async fn azure_responses_request_includes_store_and_reasoning_ids() {
 
     let mut stream = client_session
         .stream(
+            runtime_provider,
             &prompt,
             &model_info,
             &session_telemetry,

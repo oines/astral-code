@@ -8,6 +8,8 @@ use codex_core::ResponseEvent;
 use codex_core::X_RESPONSESAPI_INCLUDE_TIMING_METRICS_HEADER;
 use codex_features::Feature;
 use codex_login::CodexAuth;
+use codex_model_provider::SharedModelProvider;
+use codex_model_provider::create_model_provider;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::WireApi;
 use codex_otel::MetricsClient;
@@ -95,6 +97,7 @@ fn assert_request_trace_matches(body: &serde_json::Value, expected_trace: &W3cTr
 struct WebsocketTestHarness {
     _codex_home: TempDir,
     client: ModelClient,
+    provider: SharedModelProvider,
     session_id: SessionId,
     thread_id: ThreadId,
     model_info: ModelInfo,
@@ -272,7 +275,11 @@ async fn responses_websocket_preconnect_does_not_replace_turn_trace_payload() {
     let harness = websocket_harness(&server).await;
     let mut client_session = harness.client.new_session();
     client_session
-        .preconnect_websocket(&harness.session_telemetry, &harness.model_info)
+        .preconnect_websocket(
+            harness.provider.clone(),
+            &harness.session_telemetry,
+            &harness.model_info,
+        )
         .await
         .expect("websocket preconnect failed");
     let prompt = prompt_with_input(vec![message_item("hello")]);
@@ -308,7 +315,11 @@ async fn responses_websocket_preconnect_reuses_connection() {
     let harness = websocket_harness(&server).await;
     let mut client_session = harness.client.new_session();
     client_session
-        .preconnect_websocket(&harness.session_telemetry, &harness.model_info)
+        .preconnect_websocket(
+            harness.provider.clone(),
+            &harness.session_telemetry,
+            &harness.model_info,
+        )
         .await
         .expect("websocket preconnect failed");
     let prompt = prompt_with_input(vec![message_item("hello")]);
@@ -340,6 +351,7 @@ async fn responses_websocket_request_prewarm_reuses_connection() {
     let prompt = prompt_with_input(vec![message_item("hello")]);
     client_session
         .prewarm_websocket(
+            harness.provider.clone(),
             &prompt,
             &harness.model_info,
             &harness.session_telemetry,
@@ -394,6 +406,7 @@ async fn responses_websocket_request_prewarm_traces_logical_request() {
 
     client_session
         .prewarm_websocket(
+            harness.provider.clone(),
             &prompt,
             &harness.model_info,
             &harness.session_telemetry,
@@ -439,6 +452,7 @@ async fn responses_websocket_request_prewarm_traces_logical_request() {
 
     let mut stream = client_session
         .stream(
+            harness.provider.clone(),
             &prompt,
             &harness.model_info,
             &harness.session_telemetry,
@@ -599,12 +613,17 @@ async fn responses_websocket_preconnect_is_reused_even_with_header_changes() {
     let harness = websocket_harness(&server).await;
     let mut client_session = harness.client.new_session();
     client_session
-        .preconnect_websocket(&harness.session_telemetry, &harness.model_info)
+        .preconnect_websocket(
+            harness.provider.clone(),
+            &harness.session_telemetry,
+            &harness.model_info,
+        )
         .await
         .expect("websocket preconnect failed");
     let prompt = prompt_with_input(vec![message_item("hello")]);
     let mut stream = client_session
         .stream(
+            harness.provider.clone(),
             &prompt,
             &harness.model_info,
             &harness.session_telemetry,
@@ -644,6 +663,7 @@ async fn responses_websocket_request_prewarm_is_reused_even_with_header_changes(
     let prompt = prompt_with_input(vec![message_item("hello")]);
     client_session
         .prewarm_websocket(
+            harness.provider.clone(),
             &prompt,
             &harness.model_info,
             &harness.session_telemetry,
@@ -656,6 +676,7 @@ async fn responses_websocket_request_prewarm_is_reused_even_with_header_changes(
         .expect("websocket prewarm failed");
     let mut stream = client_session
         .stream(
+            harness.provider.clone(),
             &prompt,
             &harness.model_info,
             &harness.session_telemetry,
@@ -710,6 +731,7 @@ async fn responses_websocket_prewarm_uses_v2_when_provider_supports_websockets()
     let prompt = prompt_with_input(vec![message_item("hello")]);
     client_session
         .prewarm_websocket(
+            harness.provider.clone(),
             &prompt,
             &harness.model_info,
             &harness.session_telemetry,
@@ -765,7 +787,11 @@ async fn responses_websocket_preconnect_runs_when_only_v2_feature_enabled() {
     let harness = websocket_harness_with_options(&server, /*runtime_metrics_enabled*/ true).await;
     let mut client_session = harness.client.new_session();
     client_session
-        .preconnect_websocket(&harness.session_telemetry, &harness.model_info)
+        .preconnect_websocket(
+            harness.provider.clone(),
+            &harness.session_telemetry,
+            &harness.model_info,
+        )
         .await
         .expect("websocket preconnect failed");
 
@@ -1059,6 +1085,7 @@ async fn responses_websocket_emits_reasoning_included_event() {
 
     let mut stream = client_session
         .stream(
+            harness.provider.clone(),
             &prompt,
             &harness.model_info,
             &harness.session_telemetry,
@@ -1133,6 +1160,7 @@ async fn responses_websocket_emits_rate_limit_events() {
 
     let mut stream = client_session
         .stream(
+            harness.provider.clone(),
             &prompt,
             &harness.model_info,
             &harness.session_telemetry,
@@ -1787,6 +1815,7 @@ async fn responses_websocket_v2_after_error_uses_full_create_without_previous_re
 
     let mut second_stream = session
         .stream(
+            harness.provider.clone(),
             &prompt_two,
             &harness.model_info,
             &harness.session_telemetry,
@@ -1875,6 +1904,7 @@ async fn responses_websocket_v2_surfaces_terminal_error_without_close_handshake(
 
     let mut second_stream = session
         .stream(
+            harness.provider.clone(),
             &prompt_two,
             &harness.model_info,
             &harness.session_telemetry,
@@ -2062,6 +2092,7 @@ async fn websocket_harness_with_provider_options(
     .with_metrics(metrics);
     let effort = None;
     let summary = ReasoningSummary::Auto;
+    let runtime_provider = create_model_provider(provider.clone(), /*auth_manager*/ None);
     let client = ModelClient::new(
         /*auth_manager*/ None,
         session_id,
@@ -2080,6 +2111,7 @@ async fn websocket_harness_with_provider_options(
     WebsocketTestHarness {
         _codex_home: codex_home,
         client,
+        provider: runtime_provider,
         session_id,
         thread_id,
         model_info,
@@ -2112,6 +2144,7 @@ async fn stream_until_complete_with_model_info(
 ) {
     let mut stream = client_session
         .stream(
+            harness.provider.clone(),
             prompt,
             model_info,
             &harness.session_telemetry,
@@ -2179,6 +2212,7 @@ async fn stream_until_complete_with_request_metadata(
 ) {
     let mut stream = client_session
         .stream(
+            harness.provider.clone(),
             prompt,
             &harness.model_info,
             &harness.session_telemetry,

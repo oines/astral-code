@@ -16,6 +16,7 @@ use codex_app_server_protocol::AuthMode;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
 use codex_model_provider::BearerAuthProvider;
+use codex_model_provider::create_model_provider;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::WireApi;
 use codex_model_provider_info::create_oss_provider_with_base_url;
@@ -285,6 +286,7 @@ async fn provider_neutral_wire_apis_stream_from_mock_server() -> anyhow::Result<
 
         let provider =
             create_oss_provider_with_base_url(&format!("{}/v1", server.uri()), case.wire_api);
+        let runtime_provider = create_model_provider(provider.clone(), /*auth_manager*/ None);
         let model_client = ModelClient::new(
             /*auth_manager*/ None,
             SessionId::new(),
@@ -305,6 +307,7 @@ async fn provider_neutral_wire_apis_stream_from_mock_server() -> anyhow::Result<
         let mut stream = model_client
             .new_session()
             .stream(
+                runtime_provider,
                 &Prompt::default(),
                 &model_info,
                 &session_telemetry,
@@ -671,7 +674,11 @@ async fn websocket_handshake_includes_attestation_for_managed_responses_provider
         model_client_with_counting_attestation(/*include_attestation*/ true);
 
     let headers = model_client
-        .build_websocket_headers(/*turn_state*/ None, /*turn_metadata_header*/ None)
+        .build_websocket_headers(
+            &model_client.state.provider,
+            /*turn_state*/ None,
+            /*turn_metadata_header*/ None,
+        )
         .await;
 
     assert_eq!(
@@ -689,15 +696,24 @@ async fn non_chatgpt_codex_endpoints_omit_attestation_generation() {
         model_client_with_counting_attestation(/*include_attestation*/ false);
     let mut response_headers = http::HeaderMap::new();
 
-    if let Some(header_value) = model_client.generate_attestation_header_for().await {
+    if let Some(header_value) = model_client
+        .generate_attestation_header_for(&model_client.state.provider)
+        .await
+    {
         response_headers.insert(crate::attestation::X_OAI_ATTESTATION_HEADER, header_value);
     }
     let mut compaction_headers = http::HeaderMap::new();
-    if let Some(header_value) = model_client.generate_attestation_header_for().await {
+    if let Some(header_value) = model_client
+        .generate_attestation_header_for(&model_client.state.provider)
+        .await
+    {
         compaction_headers.insert(crate::attestation::X_OAI_ATTESTATION_HEADER, header_value);
     }
     let mut realtime_headers = http::HeaderMap::new();
-    if let Some(header_value) = model_client.generate_attestation_header_for().await {
+    if let Some(header_value) = model_client
+        .generate_attestation_header_for(&model_client.state.provider)
+        .await
+    {
         realtime_headers.insert(crate::attestation::X_OAI_ATTESTATION_HEADER, header_value);
     }
 

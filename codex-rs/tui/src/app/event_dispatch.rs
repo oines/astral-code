@@ -740,6 +740,10 @@ impl App {
             }
             AppEvent::UpdateReasoningEffort(effort) => {
                 self.on_update_reasoning_effort(effort.clone());
+                if let Some(thread_id) = self.active_thread_id {
+                    self.clear_active_turn_id_for_thread(thread_id).await;
+                    self.require_new_turn_for_thread(thread_id);
+                }
                 self.sync_active_thread_reasoning_setting(app_server, effort)
                     .await;
             }
@@ -750,13 +754,44 @@ impl App {
                 self.on_update_model_provider(model_provider.as_deref())
                     .await;
                 self.chat_widget.set_model(&model);
+                if let Some(thread_id) = self.active_thread_id {
+                    self.clear_active_turn_id_for_thread(thread_id).await;
+                    self.require_new_turn_for_thread(thread_id);
+                }
                 self.sync_active_thread_model_setting(app_server, model, model_provider)
                     .await;
                 self.sync_active_thread_service_tier_to_cached_session()
                     .await;
             }
+            AppEvent::UpdateModelAndReasoning {
+                model,
+                model_provider,
+                effort,
+            } => {
+                self.on_update_model_provider(model_provider.as_deref())
+                    .await;
+                self.chat_widget.set_model(&model);
+                self.on_update_reasoning_effort(effort.clone());
+                if let Some(thread_id) = self.active_thread_id {
+                    self.clear_active_turn_id_for_thread(thread_id).await;
+                    self.require_new_turn_for_thread(thread_id);
+                }
+                self.sync_active_thread_model_and_reasoning_setting(
+                    app_server,
+                    model,
+                    model_provider,
+                    effort,
+                )
+                .await;
+                self.sync_active_thread_service_tier_to_cached_session()
+                    .await;
+            }
             AppEvent::UpdatePersonality(personality) => {
                 self.on_update_personality(personality);
+                if let Some(thread_id) = self.active_thread_id {
+                    self.clear_active_turn_id_for_thread(thread_id).await;
+                    self.require_new_turn_for_thread(thread_id);
+                }
                 self.sync_active_thread_personality_setting(app_server, personality)
                     .await;
             }
@@ -785,28 +820,6 @@ impl App {
             }
             AppEvent::OpenAllModelsPopup { models } => {
                 self.chat_widget.open_all_models_popup(models);
-            }
-            AppEvent::OpenModelProvidersPopup => {
-                self.chat_widget.open_model_providers_popup();
-            }
-            AppEvent::OpenProviderModelsPopup { model_provider } => {
-                match app_server
-                    .list_models_for_provider(model_provider.clone())
-                    .await
-                {
-                    Ok(models) => {
-                        self.chat_widget.open_all_models_popup(models);
-                    }
-                    Err(err) => {
-                        tracing::warn!(
-                            provider = %model_provider,
-                            "model/list failed for provider: {err:#}"
-                        );
-                        self.chat_widget.add_error_message(format!(
-                            "Failed to load models for provider {model_provider}: {err}"
-                        ));
-                    }
-                }
             }
             AppEvent::OpenFullAccessConfirmation {
                 preset,

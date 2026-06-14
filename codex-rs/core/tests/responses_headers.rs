@@ -5,6 +5,7 @@ use codex_core::ModelClient;
 use codex_core::Prompt;
 use codex_core::ResponseEvent;
 use codex_login::CodexAuth;
+use codex_model_provider::create_model_provider;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::WireApi;
 use codex_otel::SessionTelemetry;
@@ -115,6 +116,7 @@ async fn responses_stream_includes_subagent_header_on_review() {
         /*beta_features_header*/ None,
         /*attestation_provider*/ None,
     );
+    let runtime_provider = create_model_provider(provider.clone(), /*auth_manager*/ None);
     let mut client_session = client.new_session();
 
     let mut prompt = Prompt::default();
@@ -129,6 +131,7 @@ async fn responses_stream_includes_subagent_header_on_review() {
 
     let mut stream = client_session
         .stream(
+            runtime_provider,
             &prompt,
             &model_info,
             &session_telemetry,
@@ -251,6 +254,7 @@ async fn responses_stream_includes_subagent_header_on_other() {
         /*beta_features_header*/ None,
         /*attestation_provider*/ None,
     );
+    let runtime_provider = create_model_provider(provider.clone(), /*auth_manager*/ None);
     let mut client_session = client.new_session();
 
     let mut prompt = Prompt::default();
@@ -265,6 +269,7 @@ async fn responses_stream_includes_subagent_header_on_other() {
 
     let mut stream = client_session
         .stream(
+            runtime_provider,
             &prompt,
             &model_info,
             &session_telemetry,
@@ -372,6 +377,7 @@ async fn responses_respects_model_info_overrides_from_config() {
         /*beta_features_header*/ None,
         /*attestation_provider*/ None,
     );
+    let runtime_provider = create_model_provider(provider.clone(), /*auth_manager*/ None);
     let mut client_session = client.new_session();
 
     let mut prompt = Prompt::default();
@@ -386,6 +392,7 @@ async fn responses_respects_model_info_overrides_from_config() {
 
     let mut stream = client_session
         .stream(
+            runtime_provider,
             &prompt,
             &model_info,
             &session_telemetry,

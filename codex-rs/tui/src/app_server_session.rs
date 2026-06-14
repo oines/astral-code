@@ -315,30 +315,6 @@ impl AppServerSession {
         })
     }
 
-    pub(crate) async fn list_models_for_provider(
-        &mut self,
-        model_provider: String,
-    ) -> Result<Vec<ModelPreset>> {
-        let request_id = self.next_request_id();
-        let models: ModelListResponse = self
-            .client
-            .request_typed(ClientRequest::ModelList {
-                request_id,
-                params: ModelListParams {
-                    cursor: None,
-                    model_provider: Some(model_provider),
-                    limit: None,
-                    include_hidden: Some(true),
-                },
-            })
-            .await?;
-        Ok(models
-            .data
-            .into_iter()
-            .map(model_preset_from_api_model)
-            .collect())
-    }
-
     /// Fetches the current account info without refreshing the auth token.
     ///
     /// Used by both `bootstrap` (to populate the initial UI) and `get_login_status`
@@ -700,6 +676,7 @@ impl AppServerSession {
         permissions_override: TurnPermissionsOverride,
         workspace_roots: &[AbsolutePathBuf],
         model: String,
+        model_provider: String,
         effort: Option<codex_protocol::openai_models::ReasoningEffort>,
         summary: Option<codex_protocol::config_types::ReasoningSummary>,
         service_tier: Option<Option<String>>,
@@ -727,7 +704,7 @@ impl AppServerSession {
                     sandbox_policy,
                     permissions,
                     model: Some(model),
-                    model_provider: None,
+                    model_provider: Some(model_provider),
                     service_tier,
                     effort,
                     summary,

@@ -623,6 +623,13 @@ pub(crate) enum AppEvent {
         model_provider: Option<String>,
     },
 
+    /// Update the current model/provider and reasoning selection atomically.
+    UpdateModelAndReasoning {
+        model: String,
+        model_provider: Option<String>,
+        effort: Option<ReasoningEffort>,
+    },
+
     /// Update the current personality in the running app and widget.
     UpdatePersonality(Personality),
 
@@ -686,14 +693,6 @@ pub(crate) enum AppEvent {
     /// Open the full model picker (non-auto models).
     OpenAllModelsPopup {
         models: Vec<ModelPreset>,
-    },
-
-    /// Open the configured provider picker.
-    OpenModelProvidersPopup,
-
-    /// Fetch and open the model picker for a configured provider.
-    OpenProviderModelsPopup {
-        model_provider: String,
     },
 
     /// Open the confirmation prompt before enabling full access mode.
