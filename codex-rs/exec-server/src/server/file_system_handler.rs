@@ -19,6 +19,10 @@ use crate::protocol::FsCreateDirectoryParams;
 use crate::protocol::FsCreateDirectoryResponse;
 use crate::protocol::FsGetMetadataParams;
 use crate::protocol::FsGetMetadataResponse;
+use crate::protocol::FsGlobParams;
+use crate::protocol::FsGlobResponse;
+use crate::protocol::FsGrepParams;
+use crate::protocol::FsGrepResponse;
 use crate::protocol::FsJoinParams;
 use crate::protocol::FsJoinResponse;
 use crate::protocol::FsParentParams;
@@ -200,6 +204,30 @@ impl FileSystemHandler {
             .await
             .map_err(map_fs_error)?;
         Ok(FsCopyResponse {})
+    }
+
+    pub(crate) async fn glob(
+        &self,
+        params: FsGlobParams,
+    ) -> Result<FsGlobResponse, JSONRPCErrorError> {
+        let response = self
+            .file_system
+            .glob_search(params.request, params.sandbox.as_ref())
+            .await
+            .map_err(map_fs_error)?;
+        Ok(FsGlobResponse { response })
+    }
+
+    pub(crate) async fn grep(
+        &self,
+        params: FsGrepParams,
+    ) -> Result<FsGrepResponse, JSONRPCErrorError> {
+        let response = self
+            .file_system
+            .grep_search(params.request, params.sandbox.as_ref())
+            .await
+            .map_err(map_fs_error)?;
+        Ok(FsGrepResponse { response })
     }
 }
 

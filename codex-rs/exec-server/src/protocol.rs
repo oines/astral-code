@@ -2,6 +2,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::FileSystemSandboxContext;
+use crate::GlobSearchRequest;
+use crate::GlobSearchResponse;
+use crate::GrepSearchRequest;
+use crate::GrepSearchResponse;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use codex_protocol::config_types::ShellEnvironmentPolicyInherit;
 use codex_utils_absolute_path::AbsolutePathBuf;
@@ -30,6 +34,8 @@ pub const FS_PARENT_METHOD: &str = "fs/parent";
 pub const FS_READ_DIRECTORY_METHOD: &str = "fs/readDirectory";
 pub const FS_REMOVE_METHOD: &str = "fs/remove";
 pub const FS_COPY_METHOD: &str = "fs/copy";
+pub const FS_GLOB_METHOD: &str = "fs/glob";
+pub const FS_GREP_METHOD: &str = "fs/grep";
 /// JSON-RPC request method for executor-side HTTP requests.
 pub const HTTP_REQUEST_METHOD: &str = "http/request";
 /// JSON-RPC notification method for streamed executor HTTP response bodies.
@@ -316,6 +322,32 @@ pub struct FsCopyParams {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FsCopyResponse {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FsGlobParams {
+    pub request: GlobSearchRequest,
+    pub sandbox: Option<FileSystemSandboxContext>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FsGlobResponse {
+    pub response: GlobSearchResponse,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FsGrepParams {
+    pub request: GrepSearchRequest,
+    pub sandbox: Option<FileSystemSandboxContext>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FsGrepResponse {
+    pub response: GrepSearchResponse,
+}
 
 /// HTTP header represented in the executor protocol.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

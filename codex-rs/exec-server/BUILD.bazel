@@ -4,6 +4,9 @@ codex_rust_crate(
     name = "exec-server",
     crate_name = "codex_exec_server",
     deps_extra = [
+        "@crates//:globset",
+        "@crates//:ignore",
+        "@crates//:regex_lite",
         "@crates//:toml",
     ],
     # Keep the crate's integration tests single-threaded under Bazel because

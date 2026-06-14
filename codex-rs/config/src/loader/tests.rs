@@ -5,6 +5,10 @@ use codex_file_system::CreateDirectoryOptions;
 use codex_file_system::FileMetadata;
 use codex_file_system::FileSystemResult;
 use codex_file_system::FileSystemSandboxContext;
+use codex_file_system::GlobSearchRequest;
+use codex_file_system::GlobSearchResponse;
+use codex_file_system::GrepSearchRequest;
+use codex_file_system::GrepSearchResponse;
 use codex_file_system::ReadDirectoryEntry;
 use codex_file_system::RemoveOptions;
 use pretty_assertions::assert_eq;
@@ -94,6 +98,28 @@ impl ExecutorFileSystem for TestFileSystem {
         _sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<()> {
         unimplemented!("test filesystem only supports reads")
+    }
+
+    async fn glob_search(
+        &self,
+        _request: GlobSearchRequest,
+        _sandbox: Option<&FileSystemSandboxContext>,
+    ) -> FileSystemResult<GlobSearchResponse> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "test filesystem only supports reads",
+        ))
+    }
+
+    async fn grep_search(
+        &self,
+        _request: GrepSearchRequest,
+        _sandbox: Option<&FileSystemSandboxContext>,
+    ) -> FileSystemResult<GrepSearchResponse> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "test filesystem only supports reads",
+        ))
     }
 }
 

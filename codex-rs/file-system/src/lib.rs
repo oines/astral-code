@@ -46,6 +46,60 @@ pub struct ReadDirectoryEntry {
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct GlobSearchRequest {
+    pub root: AbsolutePathBuf,
+    pub pattern: String,
+    pub max_results: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GlobSearchMatch {
+    pub path: AbsolutePathBuf,
+    pub modified_at_ms: i64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GlobSearchResponse {
+    pub matches: Vec<GlobSearchMatch>,
+    pub truncated: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GrepOutputMode {
+    Content,
+    FilesWithMatches,
+    Count,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GrepSearchRequest {
+    pub root: AbsolutePathBuf,
+    pub pattern: String,
+    pub glob: Option<String>,
+    pub file_type: Option<String>,
+    pub output_mode: GrepOutputMode,
+    pub context_before: usize,
+    pub context_after: usize,
+    pub line_numbers: bool,
+    pub ignore_case: bool,
+    pub head_limit: usize,
+    pub offset: usize,
+    pub multiline: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GrepSearchResponse {
+    pub lines: Vec<String>,
+    pub truncated: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FileSystemSandboxContext {
     pub permissions: PermissionProfile,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -206,4 +260,16 @@ pub trait ExecutorFileSystem: Send + Sync {
         copy_options: CopyOptions,
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<()>;
+
+    async fn glob_search(
+        &self,
+        request: GlobSearchRequest,
+        sandbox: Option<&FileSystemSandboxContext>,
+    ) -> FileSystemResult<GlobSearchResponse>;
+
+    async fn grep_search(
+        &self,
+        request: GrepSearchRequest,
+        sandbox: Option<&FileSystemSandboxContext>,
+    ) -> FileSystemResult<GrepSearchResponse>;
 }

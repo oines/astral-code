@@ -1,0 +1,163 @@
+use std::time::Duration;
+
+use codex_file_system::GlobSearchRequest;
+use codex_file_system::GrepOutputMode;
+use codex_file_system::GrepSearchRequest;
+use codex_utils_absolute_path::AbsolutePathBuf;
+use pretty_assertions::assert_eq;
+
+use super::*;
+
+#[tokio::test]
+async fn glob_without_slash_only_matches_direct_children_and_sorts_by_mtime() -> io::Result<()> {
+    let temp_dir = tempfile::TempDir::new()?;
+    let root = AbsolutePathBuf::from_absolute_path(temp_dir.path())?;
+    std::fs::create_dir_all(temp_dir.path().join("nested"))?;
+    std::fs::write(temp_dir.path().join("old.toml"), "")?;
+    std::thread::sleep(Duration::from_millis(20));
+    std::fs::write(temp_dir.path().join("new.toml"), "")?;
+    std::fs::write(temp_dir.path().join("nested/child.toml"), "")?;
+
+    let response = glob_search(GlobSearchRequest {
+        root: root.clone(),
+        pattern: "*.toml".to_string(),
+        max_results: 10,
+    })
+    .await?;
+
+    let paths = response
+        .matches
+        .iter()
+        .map(|matched| relative_slash_path(matched.path.as_path(), root.as_path()))
+        .collect::<Vec<_>>();
+    assert_eq!(paths, vec!["new.toml", "old.toml"]);
+    assert!(!response.truncated);
+    Ok(())
+}
+
+#[tokio::test]
+async fn glob_double_star_recurses_under_literal_prefix() -> io::Result<()> {
+    let temp_dir = tempfile::TempDir::new()?;
+    let root = AbsolutePathBuf::from_absolute_path(temp_dir.path())?;
+    std::fs::create_dir_all(temp_dir.path().join("src/nested"))?;
+    std::fs::create_dir_all(temp_dir.path().join("tests/nested"))?;
+    std::fs::write(temp_dir.path().join("src/lib.rs"), "")?;
+    std::fs::write(temp_dir.path().join("src/nested/mod.rs"), "")?;
+    std::fs::write(temp_dir.path().join("tests/nested/mod.rs"), "")?;
+
+    let response = glob_search(GlobSearchRequest {
+        root: root.clone(),
+        pattern: "src/**/*.rs".to_string(),
+        max_results: 10,
+    })
+    .await?;
+
+    let mut paths = response
+        .matches
+        .iter()
+        .map(|matched| relative_slash_path(matched.path.as_path(), root.as_path()))
+        .collect::<Vec<_>>();
+    paths.sort();
+    assert_eq!(paths, vec!["src/lib.rs", "src/nested/mod.rs"]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn grep_prunes_generated_and_vcs_directories() -> io::Result<()> {
+    let temp_dir = tempfile::TempDir::new()?;
+    let root = AbsolutePathBuf::from_absolute_path(temp_dir.path())?;
+    std::fs::create_dir_all(temp_dir.path().join("src"))?;
+    std::fs::create_dir_all(temp_dir.path().join(".git"))?;
+    std::fs::create_dir_all(temp_dir.path().join("target/debug"))?;
+    std::fs::write(temp_dir.path().join("src/lib.rs"), "needle\n")?;
+    std::fs::write(temp_dir.path().join(".git/config"), "needle\n")?;
+    std::fs::write(
+        temp_dir.path().join("target/debug/generated.rs"),
+        "needle\n",
+    )?;
+
+    let response = grep_search(GrepSearchRequest {
+        root,
+        pattern: "needle".to_string(),
+        glob: None,
+        file_type: None,
+        output_mode: GrepOutputMode::FilesWithMatches,
+        context_before: 0,
+        context_after: 0,
+        line_numbers: false,
+        ignore_case: false,
+        head_limit: 10,
+        offset: 0,
+        multiline: false,
+    })
+    .await?;
+
+    assert_eq!(response.lines, vec!["src/lib.rs"]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn grep_supports_count_content_context_and_glob_filters() -> io::Result<()> {
+    let temp_dir = tempfile::TempDir::new()?;
+    let root = AbsolutePathBuf::from_absolute_path(temp_dir.path())?;
+    std::fs::create_dir_all(temp_dir.path().join("nested"))?;
+    std::fs::write(temp_dir.path().join("root.md"), "alpha\nneedle\nomega\n")?;
+    std::fs::write(temp_dir.path().join("nested/child.md"), "needle\n")?;
+
+    let files = grep_search(GrepSearchRequest {
+        root: root.clone(),
+        pattern: "needle".to_string(),
+        glob: Some("*.md".to_string()),
+        file_type: Some("markdown".to_string()),
+        output_mode: GrepOutputMode::FilesWithMatches,
+        context_before: 0,
+        context_after: 0,
+        line_numbers: false,
+        ignore_case: false,
+        head_limit: 10,
+        offset: 0,
+        multiline: false,
+    })
+    .await?;
+    assert_eq!(files.lines, vec!["root.md"]);
+
+    let count = grep_search(GrepSearchRequest {
+        output_mode: GrepOutputMode::Count,
+        glob: Some("*.md".to_string()),
+        ..grep_request_defaults(root.clone())
+    })
+    .await?;
+    assert_eq!(count.lines, vec!["root.md:1"]);
+
+    let content = grep_search(GrepSearchRequest {
+        output_mode: GrepOutputMode::Content,
+        context_before: 1,
+        context_after: 1,
+        line_numbers: true,
+        glob: Some("*.md".to_string()),
+        ..grep_request_defaults(root)
+    })
+    .await?;
+    assert_eq!(
+        content.lines,
+        vec!["root.md:1:alpha", "root.md:2:needle", "root.md:3:omega"]
+    );
+    Ok(())
+}
+
+fn grep_request_defaults(root: AbsolutePathBuf) -> GrepSearchRequest {
+    GrepSearchRequest {
+        root,
+        pattern: "needle".to_string(),
+        glob: None,
+        file_type: None,
+        output_mode: GrepOutputMode::FilesWithMatches,
+        context_before: 0,
+        context_after: 0,
+        line_numbers: false,
+        ignore_case: false,
+        head_limit: 10,
+        offset: 0,
+        multiline: false,
+    }
+}

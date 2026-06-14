@@ -14,6 +14,9 @@ use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::ToolExecutor;
 use codex_exec_server::ExecutorFileSystem;
 use codex_exec_server::FileSystemSandboxContext;
+use codex_exec_server::GlobSearchRequest;
+use codex_exec_server::GrepOutputMode;
+use codex_exec_server::GrepSearchRequest;
 use codex_tools::EDIT_TOOL_NAME;
 use codex_tools::GLOB_TOOL_NAME;
 use codex_tools::GREP_TOOL_NAME;
@@ -25,28 +28,12 @@ use codex_tools::WRITE_TOOL_NAME;
 use codex_tools::astral_core_tool_by_name;
 use codex_tools::parse_tool_input_schema_without_compaction;
 use codex_utils_absolute_path::AbsolutePathBuf;
-use regex_lite::Regex;
 use serde::Deserialize;
 use serde_json::json;
 
 const DEFAULT_READ_LINE_LIMIT: usize = 2_000;
 const DEFAULT_GREP_HEAD_LIMIT: usize = 250;
-const MAX_SCAN_ENTRIES: usize = 10_000;
 const MAX_RESULT_LINES: usize = 1_000;
-const SEARCH_PRUNED_DIRECTORY_NAMES: &[&str] = &[
-    ".git",
-    ".svn",
-    ".hg",
-    ".bzr",
-    ".jj",
-    ".cache",
-    ".next",
-    ".turbo",
-    "build",
-    "dist",
-    "node_modules",
-    "target",
-];
 const BLOCKED_DEVICE_PATHS: &[&str] = &[
     "/dev/zero",
     "/dev/random",
@@ -468,18 +455,6 @@ struct GlobArgs {
     path: Option<String>,
 }
 
-#[derive(Debug)]
-struct GlobMatch {
-    path: AbsolutePathBuf,
-    modified_at_ms: i64,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum GlobTraversalDepth {
-    Recursive,
-    Fixed(usize),
-}
-
 async fn glob_files(
     arguments: String,
     fs: &dyn ExecutorFileSystem,
@@ -488,171 +463,25 @@ async fn glob_files(
 ) -> Result<String, FunctionCallError> {
     let args: GlobArgs = parse_arguments(&arguments)?;
     let root = resolve_path(cwd, args.path.as_deref().unwrap_or("."));
-    let matcher = glob_regex(&args.pattern)?;
-    let mut matches = collect_glob_matches(fs, sandbox, &root, &args.pattern, &matcher).await?;
-    matches.sort_by(|left, right| {
-        right
-            .modified_at_ms
-            .cmp(&left.modified_at_ms)
-            .then_with(|| display_path(&left.path, cwd).cmp(&display_path(&right.path, cwd)))
-    });
-    Ok(join_limited_lines(
-        matches
+    let response = fs
+        .glob_search(
+            GlobSearchRequest {
+                root,
+                pattern: args.pattern,
+                max_results: MAX_RESULT_LINES,
+            },
+            Some(sandbox),
+        )
+        .await
+        .map_err(|err| FunctionCallError::RespondToModel(format!("glob search failed: {err}")))?;
+    Ok(join_search_lines(
+        response
+            .matches
             .into_iter()
             .map(|matched| display_path(&matched.path, cwd))
             .collect(),
-        MAX_RESULT_LINES,
+        response.truncated,
     ))
-}
-
-async fn collect_glob_matches(
-    fs: &dyn ExecutorFileSystem,
-    sandbox: &FileSystemSandboxContext,
-    root: &AbsolutePathBuf,
-    pattern: &str,
-    matcher: &Regex,
-) -> Result<Vec<GlobMatch>, FunctionCallError> {
-    let traversal_depth = glob_traversal_depth(pattern);
-    let prefix = glob_literal_directory_prefix(pattern);
-    let start_depth = prefix.len();
-    let Some(start_dir) = resolve_glob_start_dir(fs, sandbox, root, &prefix).await? else {
-        return Ok(Vec::new());
-    };
-    let mut matches = Vec::new();
-    let mut stack = vec![(start_dir, start_depth)];
-    let mut visited_entries = 0usize;
-
-    while let Some((dir, dir_depth)) = stack.pop() {
-        visited_entries = visited_entries.saturating_add(1);
-        if visited_entries > MAX_SCAN_ENTRIES {
-            return Err(FunctionCallError::RespondToModel(format!(
-                "scan exceeded {MAX_SCAN_ENTRIES} filesystem entries; narrow the path or glob"
-            )));
-        }
-
-        let entries = fs
-            .read_directory(&dir, Some(sandbox))
-            .await
-            .map_err(|err| {
-                FunctionCallError::RespondToModel(format!(
-                    "unable to read directory `{}`: {err}",
-                    dir.display()
-                ))
-            })?;
-
-        for entry in entries {
-            visited_entries = visited_entries.saturating_add(1);
-            if visited_entries > MAX_SCAN_ENTRIES {
-                return Err(FunctionCallError::RespondToModel(format!(
-                    "scan exceeded {MAX_SCAN_ENTRIES} filesystem entries; narrow the path or glob"
-                )));
-            }
-
-            let path = fs
-                .join(&dir, Path::new(&entry.file_name))
-                .await
-                .map_err(|err| {
-                    FunctionCallError::RespondToModel(format!(
-                        "unable to resolve `{}` under `{}`: {err}",
-                        entry.file_name,
-                        dir.display()
-                    ))
-                })?;
-
-            if entry.is_directory {
-                if SEARCH_PRUNED_DIRECTORY_NAMES.contains(&entry.file_name.as_str()) {
-                    continue;
-                }
-                if should_descend_for_glob(traversal_depth, dir_depth) {
-                    stack.push((path, dir_depth + 1));
-                }
-            } else if entry.is_file && glob_file_depth_matches(traversal_depth, dir_depth) {
-                let relative = relative_slash_path(&path, root);
-                if matcher.is_match(&relative) {
-                    let modified_at_ms = fs
-                        .get_metadata(&path, Some(sandbox))
-                        .await
-                        .ok()
-                        .map_or(0, |metadata| metadata.modified_at_ms);
-                    matches.push(GlobMatch {
-                        path,
-                        modified_at_ms,
-                    });
-                    if matches.len() >= MAX_RESULT_LINES {
-                        return Ok(matches);
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(matches)
-}
-
-fn glob_traversal_depth(pattern: &str) -> GlobTraversalDepth {
-    let pattern = pattern.strip_prefix("./").unwrap_or(pattern);
-    if pattern.split('/').any(|segment| segment == "**") {
-        return GlobTraversalDepth::Recursive;
-    }
-    GlobTraversalDepth::Fixed(pattern.matches('/').count())
-}
-
-fn glob_literal_directory_prefix(pattern: &str) -> Vec<&str> {
-    let pattern = pattern.strip_prefix("./").unwrap_or(pattern);
-    let segments = pattern.split('/').collect::<Vec<_>>();
-    let mut prefix = Vec::new();
-    for segment in segments.iter().take(segments.len().saturating_sub(1)) {
-        if *segment == "**" || has_glob_meta(segment) {
-            break;
-        }
-        prefix.push(*segment);
-    }
-    prefix
-}
-
-async fn resolve_glob_start_dir(
-    fs: &dyn ExecutorFileSystem,
-    sandbox: &FileSystemSandboxContext,
-    root: &AbsolutePathBuf,
-    prefix: &[&str],
-) -> Result<Option<AbsolutePathBuf>, FunctionCallError> {
-    let mut dir = root.clone();
-    for segment in prefix {
-        dir = fs.join(&dir, Path::new(segment)).await.map_err(|err| {
-            FunctionCallError::RespondToModel(format!(
-                "unable to resolve `{segment}` under `{}`: {err}",
-                dir.display()
-            ))
-        })?;
-    }
-
-    match fs.get_metadata(&dir, Some(sandbox)).await {
-        Ok(metadata) if metadata.is_directory => Ok(Some(dir)),
-        Ok(_) => Ok(None),
-        Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),
-        Err(err) => Err(FunctionCallError::RespondToModel(format!(
-            "unable to stat `{}`: {err}",
-            dir.display()
-        ))),
-    }
-}
-
-fn has_glob_meta(segment: &str) -> bool {
-    segment.contains('*') || segment.contains('?')
-}
-
-fn should_descend_for_glob(depth: GlobTraversalDepth, dir_depth: usize) -> bool {
-    match depth {
-        GlobTraversalDepth::Recursive => true,
-        GlobTraversalDepth::Fixed(max_file_depth) => dir_depth < max_file_depth,
-    }
-}
-
-fn glob_file_depth_matches(depth: GlobTraversalDepth, file_depth: usize) -> bool {
-    match depth {
-        GlobTraversalDepth::Recursive => true,
-        GlobTraversalDepth::Fixed(max_file_depth) => file_depth == max_file_depth,
-    }
 }
 
 #[derive(Deserialize)]
@@ -692,149 +521,92 @@ async fn grep_files(
 ) -> Result<String, FunctionCallError> {
     let args: GrepArgs = parse_arguments(&arguments)?;
     let root = resolve_path(cwd, args.path.as_deref().unwrap_or("."));
-    let regex = grep_regex(&args)?;
-    let files = if let Some(glob_pattern) = args.glob.as_deref() {
-        let metadata = fs.get_metadata(&root, Some(sandbox)).await.map_err(|err| {
-            FunctionCallError::RespondToModel(format!("unable to stat `{}`: {err}", root.display()))
-        })?;
-        if metadata.is_directory {
-            let matcher = glob_regex(glob_pattern)?;
-            collect_glob_matches(fs, sandbox, &root, glob_pattern, &matcher)
-                .await?
-                .into_iter()
-                .map(|matched| matched.path)
-                .collect()
-        } else if metadata.is_file {
-            vec![root.clone()]
-        } else {
-            Vec::new()
-        }
-    } else {
-        files_for_grep(fs, sandbox, &root).await?
-    };
-    let output_mode = args.output_mode.as_deref().unwrap_or("files_with_matches");
+    let output_mode = grep_output_mode(args.output_mode.as_deref())?;
     let context_before = args.context.or(args.before).unwrap_or(0);
     let context_after = args.context.or(args.after).unwrap_or(0);
-    let line_numbers = args.line_numbers.unwrap_or(output_mode == "content");
-    let mut output = Vec::new();
-
-    for path in files {
-        let display = display_path(&path, cwd);
-        if !type_filter_matches(&path, args.file_type.as_deref()) {
-            continue;
-        }
-
-        let bytes = match fs.read_file(&path, Some(sandbox)).await {
-            Ok(bytes) => bytes,
-            Err(_) => continue,
-        };
-        let text = String::from_utf8_lossy(&bytes);
-        let lines = split_lines_preserving_newline(&text);
-        let matched_lines = matching_line_indexes(&regex, &lines, args.multiline, &text);
-        if matched_lines.is_empty() {
-            continue;
-        }
-
-        match output_mode {
-            "files_with_matches" => output.push(display),
-            "count" => output.push(format!("{display}:{}", matched_lines.len())),
-            "content" => push_content_matches(
-                &mut output,
-                &display,
-                &lines,
-                &matched_lines,
-                line_numbers,
-                context_before,
-                context_after,
-            ),
-            other => {
-                return Err(FunctionCallError::RespondToModel(format!(
-                    "unsupported Grep output_mode `{other}`"
-                )));
-            }
-        }
-    }
-
-    let offset = args.offset.unwrap_or(0).min(output.len());
+    let line_numbers = args
+        .line_numbers
+        .unwrap_or(output_mode == GrepOutputMode::Content);
     let limit = match args.head_limit {
         Some(0) => MAX_RESULT_LINES,
         Some(limit) => limit.min(MAX_RESULT_LINES),
         None => DEFAULT_GREP_HEAD_LIMIT,
     };
-    Ok(join_limited_lines(output[offset..].to_vec(), limit))
+    let response = fs
+        .grep_search(
+            GrepSearchRequest {
+                root: root.clone(),
+                pattern: args.pattern,
+                glob: args.glob,
+                file_type: args.file_type,
+                output_mode,
+                context_before,
+                context_after,
+                line_numbers,
+                ignore_case: args.ignore_case,
+                head_limit: limit,
+                offset: args.offset.unwrap_or(0),
+                multiline: args.multiline,
+            },
+            Some(sandbox),
+        )
+        .await
+        .map_err(|err| FunctionCallError::RespondToModel(format!("grep search failed: {err}")))?;
+    Ok(join_search_lines(
+        format_grep_lines(response.lines, output_mode, &root, cwd),
+        response.truncated,
+    ))
 }
 
 fn resolve_path(cwd: &AbsolutePathBuf, path: &str) -> AbsolutePathBuf {
     cwd.join(path)
 }
 
-async fn collect_files(
-    fs: &dyn ExecutorFileSystem,
-    sandbox: &FileSystemSandboxContext,
-    root: &AbsolutePathBuf,
-) -> Result<Vec<AbsolutePathBuf>, FunctionCallError> {
-    let mut files = Vec::new();
-    let mut stack = vec![root.clone()];
-    let mut visited = 0usize;
-
-    while let Some(dir) = stack.pop() {
-        visited += 1;
-        if visited > MAX_SCAN_ENTRIES {
-            return Err(FunctionCallError::RespondToModel(format!(
-                "scan exceeded {MAX_SCAN_ENTRIES} filesystem entries; narrow the path or glob"
-            )));
-        }
-
-        let entries = fs
-            .read_directory(&dir, Some(sandbox))
-            .await
-            .map_err(|err| {
-                FunctionCallError::RespondToModel(format!(
-                    "unable to read directory `{}`: {err}",
-                    dir.display()
-                ))
-            })?;
-        for entry in entries {
-            if entry.is_directory
-                && SEARCH_PRUNED_DIRECTORY_NAMES.contains(&entry.file_name.as_str())
-            {
-                continue;
-            }
-            let path = fs
-                .join(&dir, Path::new(&entry.file_name))
-                .await
-                .map_err(|err| {
-                    FunctionCallError::RespondToModel(format!(
-                        "unable to resolve `{}` under `{}`: {err}",
-                        entry.file_name,
-                        dir.display()
-                    ))
-                })?;
-            if entry.is_directory {
-                stack.push(path);
-            } else if entry.is_file {
-                files.push(path);
-            }
-        }
+fn grep_output_mode(output_mode: Option<&str>) -> Result<GrepOutputMode, FunctionCallError> {
+    match output_mode.unwrap_or("files_with_matches") {
+        "content" => Ok(GrepOutputMode::Content),
+        "files_with_matches" => Ok(GrepOutputMode::FilesWithMatches),
+        "count" => Ok(GrepOutputMode::Count),
+        other => Err(FunctionCallError::RespondToModel(format!(
+            "unsupported Grep output_mode `{other}`"
+        ))),
     }
-
-    Ok(files)
 }
 
-async fn files_for_grep(
-    fs: &dyn ExecutorFileSystem,
-    sandbox: &FileSystemSandboxContext,
+fn format_grep_lines(
+    lines: Vec<String>,
+    output_mode: GrepOutputMode,
     root: &AbsolutePathBuf,
-) -> Result<Vec<AbsolutePathBuf>, FunctionCallError> {
-    let metadata = fs.get_metadata(root, Some(sandbox)).await.map_err(|err| {
-        FunctionCallError::RespondToModel(format!("unable to stat `{}`: {err}", root.display()))
-    })?;
-    if metadata.is_file {
-        Ok(vec![root.clone()])
-    } else if metadata.is_directory {
-        collect_files(fs, sandbox, root).await
+    cwd: &AbsolutePathBuf,
+) -> Vec<String> {
+    let prefix = display_path(root, cwd);
+    let prefix = (!prefix.is_empty()).then_some(prefix);
+    lines
+        .into_iter()
+        .map(|line| format_grep_line(line, output_mode, prefix.as_deref()))
+        .collect()
+}
+
+fn format_grep_line(line: String, output_mode: GrepOutputMode, prefix: Option<&str>) -> String {
+    match output_mode {
+        GrepOutputMode::FilesWithMatches => prefix_relative_path(&line, prefix),
+        GrepOutputMode::Count | GrepOutputMode::Content => {
+            let Some((path, rest)) = line.split_once(':') else {
+                return prefix_relative_path(&line, prefix);
+            };
+            format!("{}:{rest}", prefix_relative_path(path, prefix))
+        }
+    }
+}
+
+fn prefix_relative_path(path: &str, prefix: Option<&str>) -> String {
+    let Some(prefix) = prefix else {
+        return path.to_string();
+    };
+    if path.is_empty() {
+        prefix.to_string()
     } else {
-        Ok(Vec::new())
+        format!("{prefix}/{path}")
     }
 }
 
@@ -851,113 +623,6 @@ fn add_line_numbers(lines: &[&str], start_line: usize) -> String {
         output.push_str(&format!("{}\t{}", start_line + index, line));
     }
     output
-}
-
-fn matching_line_indexes(
-    regex: &Regex,
-    lines: &[&str],
-    multiline: bool,
-    full_text: &str,
-) -> Vec<usize> {
-    if multiline && regex.is_match(full_text) && !lines.is_empty() {
-        return (0..lines.len()).collect();
-    }
-
-    lines
-        .iter()
-        .enumerate()
-        .filter_map(|(index, line)| regex.is_match(line).then_some(index))
-        .collect()
-}
-
-fn push_content_matches(
-    output: &mut Vec<String>,
-    display: &str,
-    lines: &[&str],
-    matched_lines: &[usize],
-    line_numbers: bool,
-    context_before: usize,
-    context_after: usize,
-) {
-    let mut last_pushed = None;
-    for line_index in matched_lines {
-        let start = line_index.saturating_sub(context_before);
-        let end = (line_index + context_after + 1).min(lines.len());
-        for index in start..end {
-            if last_pushed.is_some_and(|last| index <= last) {
-                continue;
-            }
-            last_pushed = Some(index);
-            let line = lines[index].trim_end_matches(['\r', '\n']);
-            if line_numbers {
-                output.push(format!("{display}:{}:{line}", index + 1));
-            } else {
-                output.push(format!("{display}:{line}"));
-            }
-        }
-    }
-}
-
-fn grep_regex(args: &GrepArgs) -> Result<Regex, FunctionCallError> {
-    let mut pattern = String::new();
-    if args.ignore_case {
-        pattern.push_str("(?i)");
-    }
-    if args.multiline {
-        pattern.push_str("(?s)");
-    }
-    pattern.push_str(&args.pattern);
-    Regex::new(&pattern).map_err(|err| {
-        FunctionCallError::RespondToModel(format!("invalid Grep pattern `{}`: {err}", args.pattern))
-    })
-}
-
-fn glob_regex(pattern: &str) -> Result<Regex, FunctionCallError> {
-    let pattern = pattern.strip_prefix("./").unwrap_or(pattern);
-    let mut regex = String::from("^");
-    let chars = pattern.chars().collect::<Vec<_>>();
-    let mut index = 0;
-    while index < chars.len() {
-        match chars[index] {
-            '*' if chars.get(index + 1) == Some(&'*') => {
-                if chars.get(index + 2) == Some(&'/') {
-                    regex.push_str("(?:.*/)?");
-                    index += 3;
-                } else {
-                    regex.push_str(".*");
-                    index += 2;
-                }
-            }
-            '*' => {
-                regex.push_str("[^/]*");
-                index += 1;
-            }
-            '?' => {
-                regex.push_str("[^/]");
-                index += 1;
-            }
-            '/' => {
-                regex.push('/');
-                index += 1;
-            }
-            ch => {
-                regex.push_str(&regex_lite::escape(&ch.to_string()));
-                index += 1;
-            }
-        }
-    }
-    regex.push('$');
-    Regex::new(&regex).map_err(|err| {
-        FunctionCallError::RespondToModel(format!("invalid Glob pattern `{pattern}`: {err}"))
-    })
-}
-
-fn relative_slash_path(path: &AbsolutePathBuf, root: &AbsolutePathBuf) -> String {
-    path.as_path()
-        .strip_prefix(root.as_path())
-        .unwrap_or_else(|_| path.as_path())
-        .to_string_lossy()
-        .replace('\\', "/")
 }
 
 fn display_path(path: &AbsolutePathBuf, cwd: &AbsolutePathBuf) -> String {
@@ -986,41 +651,15 @@ fn is_pdf_path(path: &AbsolutePathBuf) -> bool {
         .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"))
 }
 
-fn join_limited_lines(lines: Vec<String>, limit: usize) -> String {
-    let total = lines.len();
-    let mut selected = lines.into_iter().take(limit).collect::<Vec<_>>();
-    if total > limit {
-        selected.push(format!("[Showing first {limit} of {total} results]"));
+fn join_search_lines(mut lines: Vec<String>, truncated: bool) -> String {
+    if truncated {
+        lines.push(format!("[Showing first {} results]", lines.len()));
     }
-    if selected.is_empty() {
+    if lines.is_empty() {
         String::new()
     } else {
-        format!("{}\n", selected.join("\n"))
+        format!("{}\n", lines.join("\n"))
     }
-}
-
-fn type_filter_matches(path: &AbsolutePathBuf, file_type: Option<&str>) -> bool {
-    let Some(file_type) = file_type else {
-        return true;
-    };
-    let extension = path
-        .as_path()
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .unwrap_or_default();
-    let expected = match file_type {
-        "rust" => "rs",
-        "python" | "py" => "py",
-        "javascript" | "js" => "js",
-        "typescript" | "ts" => "ts",
-        "tsx" => "tsx",
-        "go" => "go",
-        "java" => "java",
-        "markdown" | "md" => "md",
-        "json" => "json",
-        other => other,
-    };
-    extension == expected
 }
 
 #[cfg(test)]

@@ -47,6 +47,8 @@ use crate::protocol::FS_CANONICALIZE_METHOD;
 use crate::protocol::FS_COPY_METHOD;
 use crate::protocol::FS_CREATE_DIRECTORY_METHOD;
 use crate::protocol::FS_GET_METADATA_METHOD;
+use crate::protocol::FS_GLOB_METHOD;
+use crate::protocol::FS_GREP_METHOD;
 use crate::protocol::FS_JOIN_METHOD;
 use crate::protocol::FS_PARENT_METHOD;
 use crate::protocol::FS_READ_DIRECTORY_METHOD;
@@ -61,6 +63,10 @@ use crate::protocol::FsCreateDirectoryParams;
 use crate::protocol::FsCreateDirectoryResponse;
 use crate::protocol::FsGetMetadataParams;
 use crate::protocol::FsGetMetadataResponse;
+use crate::protocol::FsGlobParams;
+use crate::protocol::FsGlobResponse;
+use crate::protocol::FsGrepParams;
+use crate::protocol::FsGrepResponse;
 use crate::protocol::FsJoinParams;
 use crate::protocol::FsJoinResponse;
 use crate::protocol::FsParentParams;
@@ -469,6 +475,14 @@ impl ExecServerClient {
 
     pub async fn fs_copy(&self, params: FsCopyParams) -> Result<FsCopyResponse, ExecServerError> {
         self.call(FS_COPY_METHOD, &params).await
+    }
+
+    pub async fn fs_glob(&self, params: FsGlobParams) -> Result<FsGlobResponse, ExecServerError> {
+        self.call(FS_GLOB_METHOD, &params).await
+    }
+
+    pub async fn fs_grep(&self, params: FsGrepParams) -> Result<FsGrepResponse, ExecServerError> {
+        self.call(FS_GREP_METHOD, &params).await
     }
 
     pub(crate) async fn register_session(

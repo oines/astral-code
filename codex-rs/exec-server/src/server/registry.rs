@@ -10,6 +10,8 @@ use crate::protocol::FS_CANONICALIZE_METHOD;
 use crate::protocol::FS_COPY_METHOD;
 use crate::protocol::FS_CREATE_DIRECTORY_METHOD;
 use crate::protocol::FS_GET_METADATA_METHOD;
+use crate::protocol::FS_GLOB_METHOD;
+use crate::protocol::FS_GREP_METHOD;
 use crate::protocol::FS_JOIN_METHOD;
 use crate::protocol::FS_PARENT_METHOD;
 use crate::protocol::FS_READ_DIRECTORY_METHOD;
@@ -20,6 +22,8 @@ use crate::protocol::FsCanonicalizeParams;
 use crate::protocol::FsCopyParams;
 use crate::protocol::FsCreateDirectoryParams;
 use crate::protocol::FsGetMetadataParams;
+use crate::protocol::FsGlobParams;
+use crate::protocol::FsGrepParams;
 use crate::protocol::FsJoinParams;
 use crate::protocol::FsParentParams;
 use crate::protocol::FsReadDirectoryParams;
@@ -141,6 +145,18 @@ pub(crate) fn build_router() -> RpcRouter<ExecServerHandler> {
         FS_COPY_METHOD,
         |handler: Arc<ExecServerHandler>, params: FsCopyParams| async move {
             handler.fs_copy(params).await
+        },
+    );
+    router.request(
+        FS_GLOB_METHOD,
+        |handler: Arc<ExecServerHandler>, params: FsGlobParams| async move {
+            handler.fs_glob(params).await
+        },
+    );
+    router.request(
+        FS_GREP_METHOD,
+        |handler: Arc<ExecServerHandler>, params: FsGrepParams| async move {
+            handler.fs_grep(params).await
         },
     );
     router

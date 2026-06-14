@@ -13,6 +13,10 @@ use crate::ExecutorFileSystem;
 use crate::FileMetadata;
 use crate::FileSystemResult;
 use crate::FileSystemSandboxContext;
+use crate::GlobSearchRequest;
+use crate::GlobSearchResponse;
+use crate::GrepSearchRequest;
+use crate::GrepSearchResponse;
 use crate::ReadDirectoryEntry;
 use crate::RemoveOptions;
 use crate::client::LazyRemoteExecServerClient;
@@ -20,6 +24,8 @@ use crate::protocol::FsCanonicalizeParams;
 use crate::protocol::FsCopyParams;
 use crate::protocol::FsCreateDirectoryParams;
 use crate::protocol::FsGetMetadataParams;
+use crate::protocol::FsGlobParams;
+use crate::protocol::FsGrepParams;
 use crate::protocol::FsJoinParams;
 use crate::protocol::FsParentParams;
 use crate::protocol::FsReadDirectoryParams;
@@ -235,6 +241,40 @@ impl ExecutorFileSystem for RemoteFileSystem {
             .map_err(map_remote_error)?;
         Ok(())
     }
+
+    async fn glob_search(
+        &self,
+        request: GlobSearchRequest,
+        sandbox: Option<&FileSystemSandboxContext>,
+    ) -> FileSystemResult<GlobSearchResponse> {
+        trace!("remote fs glob_search");
+        let client = self.client.get().await.map_err(map_remote_error)?;
+        let response = client
+            .fs_glob(FsGlobParams {
+                request,
+                sandbox: remote_sandbox_context(sandbox),
+            })
+            .await
+            .map_err(map_remote_error)?;
+        Ok(response.response)
+    }
+
+    async fn grep_search(
+        &self,
+        request: GrepSearchRequest,
+        sandbox: Option<&FileSystemSandboxContext>,
+    ) -> FileSystemResult<GrepSearchResponse> {
+        trace!("remote fs grep_search");
+        let client = self.client.get().await.map_err(map_remote_error)?;
+        let response = client
+            .fs_grep(FsGrepParams {
+                request,
+                sandbox: remote_sandbox_context(sandbox),
+            })
+            .await
+            .map_err(map_remote_error)?;
+        Ok(response.response)
+    }
 }
 
 fn remote_sandbox_context(
@@ -263,6 +303,10 @@ fn map_remote_error(error: ExecServerError) -> io::Error {
 
 #[cfg(test)]
 mod tests {
+    use codex_app_server_protocol::JSONRPCMessage;
+    use codex_app_server_protocol::JSONRPCNotification;
+    use codex_app_server_protocol::JSONRPCRequest;
+    use codex_app_server_protocol::JSONRPCResponse;
     use codex_protocol::models::PermissionProfile;
     use codex_protocol::permissions::FileSystemAccessMode;
     use codex_protocol::permissions::FileSystemPath;
@@ -270,9 +314,24 @@ mod tests {
     use codex_protocol::permissions::FileSystemSandboxPolicy;
     use codex_protocol::permissions::FileSystemSpecialPath;
     use codex_protocol::permissions::NetworkSandboxPolicy;
+    use futures::SinkExt;
+    use futures::StreamExt;
     use pretty_assertions::assert_eq;
+    use std::time::Duration;
+    use tokio::net::TcpListener;
+    use tokio::net::TcpStream;
+    use tokio::time::timeout;
+    use tokio_tungstenite::WebSocketStream;
+    use tokio_tungstenite::accept_async;
+    use tokio_tungstenite::tungstenite::Message;
 
     use super::*;
+    use crate::client_api::ExecServerTransportParams;
+    use crate::protocol::FsGlobResponse;
+    use crate::protocol::FsGrepResponse;
+    use crate::protocol::INITIALIZE_METHOD;
+    use crate::protocol::INITIALIZED_METHOD;
+    use crate::protocol::InitializeResponse;
 
     #[test]
     fn remote_sandbox_context_drops_unused_cwd() {
@@ -345,8 +404,186 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn remote_searches_are_single_rpc_calls() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let websocket_url = format!(
+            "ws://{}",
+            listener.local_addr().expect("listener should have address")
+        );
+        let server = tokio::spawn(async move {
+            let mut websocket = accept_websocket(&listener).await;
+            complete_initialize(&mut websocket).await;
+
+            let glob = read_jsonrpc_websocket(&mut websocket).await;
+            let glob_request = request_for_method(glob, crate::protocol::FS_GLOB_METHOD);
+            write_jsonrpc_websocket(
+                &mut websocket,
+                JSONRPCMessage::Response(JSONRPCResponse {
+                    id: glob_request.id,
+                    result: serde_json::to_value(FsGlobResponse {
+                        response: GlobSearchResponse {
+                            matches: Vec::new(),
+                            truncated: false,
+                        },
+                    })
+                    .expect("glob response should serialize"),
+                }),
+            )
+            .await;
+
+            let grep = read_jsonrpc_websocket(&mut websocket).await;
+            let grep_request = request_for_method(grep, crate::protocol::FS_GREP_METHOD);
+            write_jsonrpc_websocket(
+                &mut websocket,
+                JSONRPCMessage::Response(JSONRPCResponse {
+                    id: grep_request.id,
+                    result: serde_json::to_value(FsGrepResponse {
+                        response: GrepSearchResponse {
+                            lines: vec!["src/main.rs".to_string()],
+                            truncated: false,
+                        },
+                    })
+                    .expect("grep response should serialize"),
+                }),
+            )
+            .await;
+        });
+
+        let file_system = RemoteFileSystem::new(LazyRemoteExecServerClient::new(
+            ExecServerTransportParams::WebSocketUrl {
+                websocket_url,
+                connect_timeout: Duration::from_secs(1),
+                initialize_timeout: Duration::from_secs(1),
+            },
+        ));
+        let root = absolute_test_path("remote-search-root");
+
+        let glob_response = file_system
+            .glob_search(
+                GlobSearchRequest {
+                    root: root.clone(),
+                    pattern: "**/*.rs".to_string(),
+                    max_results: 10,
+                },
+                /*sandbox*/ None,
+            )
+            .await
+            .expect("remote glob should succeed");
+        assert_eq!(
+            glob_response,
+            GlobSearchResponse {
+                matches: Vec::new(),
+                truncated: false,
+            }
+        );
+
+        let grep_response = file_system
+            .grep_search(
+                GrepSearchRequest {
+                    root,
+                    pattern: "needle".to_string(),
+                    glob: None,
+                    file_type: None,
+                    output_mode: crate::GrepOutputMode::FilesWithMatches,
+                    context_before: 0,
+                    context_after: 0,
+                    line_numbers: false,
+                    ignore_case: false,
+                    head_limit: 250,
+                    offset: 0,
+                    multiline: false,
+                },
+                /*sandbox*/ None,
+            )
+            .await
+            .expect("remote grep should succeed");
+        assert_eq!(
+            grep_response,
+            GrepSearchResponse {
+                lines: vec!["src/main.rs".to_string()],
+                truncated: false,
+            }
+        );
+
+        drop(file_system);
+        server.await.expect("server task should finish");
+    }
+
     fn absolute_test_path(name: &str) -> AbsolutePathBuf {
         let path = std::env::temp_dir().join(name);
         AbsolutePathBuf::from_absolute_path(&path).expect("absolute path")
+    }
+
+    async fn accept_websocket(listener: &TcpListener) -> WebSocketStream<TcpStream> {
+        let (stream, _) = listener.accept().await.expect("listener should accept");
+        accept_async(stream)
+            .await
+            .expect("websocket handshake should succeed")
+    }
+
+    async fn complete_initialize(websocket: &mut WebSocketStream<TcpStream>) {
+        let initialize = read_jsonrpc_websocket(websocket).await;
+        let request = request_for_method(initialize, INITIALIZE_METHOD);
+        write_jsonrpc_websocket(
+            websocket,
+            JSONRPCMessage::Response(JSONRPCResponse {
+                id: request.id,
+                result: serde_json::to_value(InitializeResponse {
+                    session_id: "session-1".to_string(),
+                })
+                .expect("initialize response should serialize"),
+            }),
+        )
+        .await;
+
+        let initialized = read_jsonrpc_websocket(websocket).await;
+        match initialized {
+            JSONRPCMessage::Notification(JSONRPCNotification { method, .. })
+                if method == INITIALIZED_METHOD => {}
+            other => panic!("expected initialized notification, got {other:?}"),
+        }
+    }
+
+    fn request_for_method(message: JSONRPCMessage, method: &str) -> JSONRPCRequest {
+        match message {
+            JSONRPCMessage::Request(request) if request.method == method => request,
+            other => panic!("expected {method} request, got {other:?}"),
+        }
+    }
+
+    async fn read_jsonrpc_websocket(websocket: &mut WebSocketStream<TcpStream>) -> JSONRPCMessage {
+        loop {
+            match timeout(Duration::from_secs(1), websocket.next())
+                .await
+                .expect("json-rpc websocket read should not time out")
+                .expect("websocket should stay open")
+                .expect("websocket frame should read")
+            {
+                Message::Text(text) => {
+                    return serde_json::from_str(text.as_ref())
+                        .expect("json-rpc text frame should parse");
+                }
+                Message::Binary(bytes) => {
+                    return serde_json::from_slice(bytes.as_ref())
+                        .expect("json-rpc binary frame should parse");
+                }
+                Message::Ping(_) | Message::Pong(_) => {}
+                other => panic!("expected json-rpc websocket frame, got {other:?}"),
+            }
+        }
+    }
+
+    async fn write_jsonrpc_websocket(
+        websocket: &mut WebSocketStream<TcpStream>,
+        message: JSONRPCMessage,
+    ) {
+        let encoded = serde_json::to_string(&message).expect("json-rpc should serialize");
+        websocket
+            .send(Message::Text(encoded.into()))
+            .await
+            .expect("json-rpc websocket frame should write");
     }
 }

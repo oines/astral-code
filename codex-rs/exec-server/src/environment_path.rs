@@ -135,6 +135,10 @@ mod tests {
     use std::path::Path;
     use std::sync::Mutex;
 
+    use crate::GlobSearchRequest;
+    use crate::GlobSearchResponse;
+    use crate::GrepSearchRequest;
+    use crate::GrepSearchResponse;
     use crate::LOCAL_FS;
 
     #[derive(Clone, Debug, Eq, PartialEq)]
@@ -307,6 +311,22 @@ mod tests {
             _sandbox: Option<&FileSystemSandboxContext>,
         ) -> io::Result<()> {
             unreachable!("copy should not be called")
+        }
+
+        async fn glob_search(
+            &self,
+            _request: GlobSearchRequest,
+            _sandbox: Option<&FileSystemSandboxContext>,
+        ) -> io::Result<GlobSearchResponse> {
+            unreachable!("glob_search should not be called")
+        }
+
+        async fn grep_search(
+            &self,
+            _request: GrepSearchRequest,
+            _sandbox: Option<&FileSystemSandboxContext>,
+        ) -> io::Result<GrepSearchResponse> {
+            unreachable!("grep_search should not be called")
         }
     }
 

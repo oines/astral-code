@@ -13,6 +13,10 @@ use crate::ExecutorFileSystem;
 use crate::FileMetadata;
 use crate::FileSystemResult;
 use crate::FileSystemSandboxContext;
+use crate::GlobSearchRequest;
+use crate::GlobSearchResponse;
+use crate::GrepSearchRequest;
+use crate::GrepSearchResponse;
 use crate::ReadDirectoryEntry;
 use crate::RemoveOptions;
 use crate::fs_helper::FsHelperPayload;
@@ -22,6 +26,8 @@ use crate::protocol::FsCanonicalizeParams;
 use crate::protocol::FsCopyParams;
 use crate::protocol::FsCreateDirectoryParams;
 use crate::protocol::FsGetMetadataParams;
+use crate::protocol::FsGlobParams;
+use crate::protocol::FsGrepParams;
 use crate::protocol::FsReadDirectoryParams;
 use crate::protocol::FsReadFileParams;
 use crate::protocol::FsRemoveParams;
@@ -249,6 +255,46 @@ impl ExecutorFileSystem for SandboxedFileSystem {
         .expect_copy()
         .map_err(map_sandbox_error)?;
         Ok(())
+    }
+
+    async fn glob_search(
+        &self,
+        request: GlobSearchRequest,
+        sandbox: Option<&FileSystemSandboxContext>,
+    ) -> FileSystemResult<GlobSearchResponse> {
+        let sandbox = require_platform_sandbox(sandbox)?;
+        let response = self
+            .run_sandboxed(
+                sandbox,
+                FsHelperRequest::Glob(FsGlobParams {
+                    request,
+                    sandbox: None,
+                }),
+            )
+            .await?
+            .expect_glob()
+            .map_err(map_sandbox_error)?;
+        Ok(response.response)
+    }
+
+    async fn grep_search(
+        &self,
+        request: GrepSearchRequest,
+        sandbox: Option<&FileSystemSandboxContext>,
+    ) -> FileSystemResult<GrepSearchResponse> {
+        let sandbox = require_platform_sandbox(sandbox)?;
+        let response = self
+            .run_sandboxed(
+                sandbox,
+                FsHelperRequest::Grep(FsGrepParams {
+                    request,
+                    sandbox: None,
+                }),
+            )
+            .await?
+            .expect_grep()
+            .map_err(map_sandbox_error)?;
+        Ok(response.response)
     }
 }
 

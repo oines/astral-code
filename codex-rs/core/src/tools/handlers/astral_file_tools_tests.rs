@@ -12,6 +12,11 @@ use codex_exec_server::ExecutorFileSystem;
 use codex_exec_server::FileMetadata;
 use codex_exec_server::FileSystemResult;
 use codex_exec_server::FileSystemSandboxContext;
+use codex_exec_server::GlobSearchMatch;
+use codex_exec_server::GlobSearchRequest;
+use codex_exec_server::GlobSearchResponse;
+use codex_exec_server::GrepSearchRequest;
+use codex_exec_server::GrepSearchResponse;
 use codex_exec_server::LOCAL_FS;
 use codex_exec_server::ReadDirectoryEntry;
 use codex_exec_server::RemoveOptions;
@@ -21,13 +26,11 @@ use core_test_support::PathExt;
 
 use super::GrepArgs;
 use super::add_line_numbers;
-use super::collect_files;
 use super::edit_file;
 use super::file_environment_id;
 use super::glob_files;
 use super::grep_files;
 use super::is_blocked_device_path;
-use super::push_content_matches;
 use super::split_lines_preserving_newline;
 use super::write_file;
 
@@ -35,6 +38,8 @@ use super::write_file;
 struct RecordingFileSystem {
     files: Mutex<HashMap<String, Vec<u8>>>,
     calls: Mutex<Vec<String>>,
+    glob_response: Mutex<Option<GlobSearchResponse>>,
+    grep_response: Mutex<Option<GrepSearchResponse>>,
 }
 
 impl RecordingFileSystem {
@@ -51,6 +56,14 @@ impl RecordingFileSystem {
 
     async fn calls(&self) -> Vec<String> {
         self.calls.lock().await.clone()
+    }
+
+    async fn set_glob_response(&self, response: GlobSearchResponse) {
+        *self.glob_response.lock().await = Some(response);
+    }
+
+    async fn set_grep_response(&self, response: GrepSearchResponse) {
+        *self.grep_response.lock().await = Some(response);
     }
 
     async fn record(&self, method: &str, path: &AbsolutePathBuf) {
@@ -177,6 +190,48 @@ impl ExecutorFileSystem for RecordingFileSystem {
             "copy unsupported by recording filesystem",
         ))
     }
+
+    async fn glob_search(
+        &self,
+        request: GlobSearchRequest,
+        _sandbox: Option<&FileSystemSandboxContext>,
+    ) -> FileSystemResult<GlobSearchResponse> {
+        self.calls.lock().await.push(format!(
+            "glob_search:{}:{}",
+            request.root.display(),
+            request.pattern
+        ));
+        Ok(self
+            .glob_response
+            .lock()
+            .await
+            .clone()
+            .unwrap_or(GlobSearchResponse {
+                matches: Vec::new(),
+                truncated: false,
+            }))
+    }
+
+    async fn grep_search(
+        &self,
+        request: GrepSearchRequest,
+        _sandbox: Option<&FileSystemSandboxContext>,
+    ) -> FileSystemResult<GrepSearchResponse> {
+        self.calls.lock().await.push(format!(
+            "grep_search:{}:{}",
+            request.root.display(),
+            request.pattern
+        ));
+        Ok(self
+            .grep_response
+            .lock()
+            .await
+            .clone()
+            .unwrap_or(GrepSearchResponse {
+                lines: Vec::new(),
+                truncated: false,
+            }))
+    }
 }
 
 #[test]
@@ -212,23 +267,29 @@ fn file_tools_accept_snake_and_camel_environment_ids() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[test]
-fn grep_content_output_can_include_line_numbers() {
-    let text = "alpha\nneedle\nomega\n";
-    let lines = split_lines_preserving_newline(text);
-    let mut output = Vec::new();
+#[tokio::test]
+async fn grep_content_output_can_include_line_numbers() {
+    let temp_dir = tempfile::TempDir::new().expect("temp dir");
+    let cwd = temp_dir.path().abs();
+    std::fs::write(temp_dir.path().join("lib.rs"), "alpha\nneedle\nomega\n").expect("write source");
+    let sandbox = FileSystemSandboxContext::from_permission_profile(PermissionProfile::Disabled);
 
-    push_content_matches(
-        &mut output,
-        "src/lib.rs",
-        &lines,
-        &[1],
-        /*line_numbers*/ true,
-        /*context_before*/ 0,
-        /*context_after*/ 0,
-    );
+    let output = grep_files(
+        json!({
+            "pattern": "needle",
+            "path": ".",
+            "output_mode": "content",
+            "line_numbers": true
+        })
+        .to_string(),
+        LOCAL_FS.as_ref(),
+        &sandbox,
+        &cwd,
+    )
+    .await
+    .expect("grep succeeds");
 
-    assert_eq!(output, vec!["src/lib.rs:2:needle"]);
+    assert_eq!(output, "lib.rs:2:needle\n");
 }
 
 #[test]
@@ -330,7 +391,7 @@ async fn edit_uses_executor_file_system() {
 }
 
 #[tokio::test]
-async fn file_search_prunes_generated_and_vcs_directories() {
+async fn grep_prunes_generated_and_vcs_directories() {
     let temp_dir = tempfile::TempDir::new().expect("temp dir");
     let cwd = temp_dir.path().abs();
     std::fs::create_dir_all(temp_dir.path().join("src")).expect("create src");
@@ -345,22 +406,85 @@ async fn file_search_prunes_generated_and_vcs_directories() {
     .expect("write generated");
     let sandbox = FileSystemSandboxContext::from_permission_profile(PermissionProfile::Disabled);
 
-    let files = collect_files(LOCAL_FS.as_ref(), &sandbox, &cwd)
-        .await
-        .expect("collect files");
-    let mut display_paths = files
-        .iter()
-        .map(|path| {
-            path.as_path()
-                .strip_prefix(temp_dir.path())
-                .expect("path under temp dir")
-                .to_string_lossy()
-                .replace('\\', "/")
+    let output = grep_files(
+        json!({
+            "pattern": "pub fn",
+            "path": ".",
+            "output_mode": "files_with_matches"
         })
-        .collect::<Vec<_>>();
-    display_paths.sort();
+        .to_string(),
+        LOCAL_FS.as_ref(),
+        &sandbox,
+        &cwd,
+    )
+    .await
+    .expect("grep succeeds");
 
-    assert_eq!(display_paths, vec!["src/lib.rs"]);
+    assert_eq!(output, "src/lib.rs\n");
+}
+
+#[tokio::test]
+async fn glob_uses_executor_search_backend() {
+    let temp_dir = tempfile::TempDir::new().expect("temp dir");
+    let cwd = temp_dir.path().abs();
+    let fs = RecordingFileSystem::default();
+    fs.set_glob_response(GlobSearchResponse {
+        matches: vec![GlobSearchMatch {
+            path: cwd.join("src/lib.rs"),
+            modified_at_ms: 42,
+        }],
+        truncated: false,
+    })
+    .await;
+    let sandbox = FileSystemSandboxContext::from_permission_profile(PermissionProfile::Disabled);
+
+    let output = glob_files(
+        json!({ "pattern": "**/*.rs", "path": "src" }).to_string(),
+        &fs,
+        &sandbox,
+        &cwd,
+    )
+    .await
+    .expect("glob succeeds");
+
+    assert_eq!(output, "src/lib.rs\n");
+    assert_eq!(
+        fs.calls().await,
+        vec![format!("glob_search:{}:**/*.rs", cwd.join("src").display())]
+    );
+}
+
+#[tokio::test]
+async fn grep_uses_executor_search_backend() {
+    let temp_dir = tempfile::TempDir::new().expect("temp dir");
+    let cwd = temp_dir.path().abs();
+    let fs = RecordingFileSystem::default();
+    fs.set_grep_response(GrepSearchResponse {
+        lines: vec!["lib.rs:1:needle".to_string()],
+        truncated: false,
+    })
+    .await;
+    let sandbox = FileSystemSandboxContext::from_permission_profile(PermissionProfile::Disabled);
+
+    let output = grep_files(
+        json!({
+            "pattern": "needle",
+            "path": "src",
+            "output_mode": "content"
+        })
+        .to_string(),
+        &fs,
+        &sandbox,
+        &cwd,
+    )
+    .await
+    .expect("grep succeeds");
+
+    assert_eq!(output, "src/lib.rs:1:needle\n");
+    assert_eq!(
+        fs.calls().await,
+        vec![format!("grep_search:{}:needle", cwd.join("src").display())]
+    );
 }
 
 #[tokio::test]

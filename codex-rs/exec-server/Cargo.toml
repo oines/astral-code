@@ -27,8 +27,11 @@ codex-utils-absolute-path = { workspace = true }
 codex-utils-pty = { workspace = true }
 codex-utils-rustls-provider = { workspace = true }
 futures = { workspace = true }
+globset = { workspace = true }
+ignore = { workspace = true }
 reqwest = { workspace = true, features = ["json", "rustls-tls", "stream"] }
 prost = "0.14.3"
+regex-lite = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

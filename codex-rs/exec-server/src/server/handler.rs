@@ -25,6 +25,10 @@ use crate::protocol::FsCreateDirectoryParams;
 use crate::protocol::FsCreateDirectoryResponse;
 use crate::protocol::FsGetMetadataParams;
 use crate::protocol::FsGetMetadataResponse;
+use crate::protocol::FsGlobParams;
+use crate::protocol::FsGlobResponse;
+use crate::protocol::FsGrepParams;
+use crate::protocol::FsGrepResponse;
 use crate::protocol::FsJoinParams;
 use crate::protocol::FsJoinResponse;
 use crate::protocol::FsParentParams;
@@ -298,6 +302,22 @@ impl ExecServerHandler {
     ) -> Result<FsCopyResponse, JSONRPCErrorError> {
         self.require_initialized_for("filesystem")?;
         self.file_system.copy(params).await
+    }
+
+    pub(crate) async fn fs_glob(
+        &self,
+        params: FsGlobParams,
+    ) -> Result<FsGlobResponse, JSONRPCErrorError> {
+        self.require_initialized_for("filesystem")?;
+        self.file_system.glob(params).await
+    }
+
+    pub(crate) async fn fs_grep(
+        &self,
+        params: FsGrepParams,
+    ) -> Result<FsGrepResponse, JSONRPCErrorError> {
+        self.require_initialized_for("filesystem")?;
+        self.file_system.grep(params).await
     }
 
     fn require_initialized_for(

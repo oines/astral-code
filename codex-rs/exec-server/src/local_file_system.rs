@@ -15,6 +15,10 @@ use crate::ExecutorFileSystem;
 use crate::FileMetadata;
 use crate::FileSystemResult;
 use crate::FileSystemSandboxContext;
+use crate::GlobSearchRequest;
+use crate::GlobSearchResponse;
+use crate::GrepSearchRequest;
+use crate::GrepSearchResponse;
 use crate::ReadDirectoryEntry;
 use crate::RemoveOptions;
 use crate::sandboxed_file_system::SandboxedFileSystem;
@@ -169,6 +173,24 @@ impl ExecutorFileSystem for LocalFileSystem {
             .copy(source_path, destination_path, options, sandbox)
             .await
     }
+
+    async fn glob_search(
+        &self,
+        request: GlobSearchRequest,
+        sandbox: Option<&FileSystemSandboxContext>,
+    ) -> FileSystemResult<GlobSearchResponse> {
+        let (file_system, sandbox) = self.file_system_for(sandbox)?;
+        file_system.glob_search(request, sandbox).await
+    }
+
+    async fn grep_search(
+        &self,
+        request: GrepSearchRequest,
+        sandbox: Option<&FileSystemSandboxContext>,
+    ) -> FileSystemResult<GrepSearchResponse> {
+        let (file_system, sandbox) = self.file_system_for(sandbox)?;
+        file_system.grep_search(request, sandbox).await
+    }
 }
 
 #[async_trait]
@@ -274,6 +296,28 @@ impl ExecutorFileSystem for UnsandboxedFileSystem {
                 options,
                 /*sandbox*/ None,
             )
+            .await
+    }
+
+    async fn glob_search(
+        &self,
+        request: GlobSearchRequest,
+        sandbox: Option<&FileSystemSandboxContext>,
+    ) -> FileSystemResult<GlobSearchResponse> {
+        reject_platform_sandbox_context(sandbox)?;
+        self.file_system
+            .glob_search(request, /*sandbox*/ None)
+            .await
+    }
+
+    async fn grep_search(
+        &self,
+        request: GrepSearchRequest,
+        sandbox: Option<&FileSystemSandboxContext>,
+    ) -> FileSystemResult<GrepSearchResponse> {
+        reject_platform_sandbox_context(sandbox)?;
+        self.file_system
+            .grep_search(request, /*sandbox*/ None)
             .await
     }
 }
@@ -457,6 +501,24 @@ impl ExecutorFileSystem for DirectFileSystem {
         })
         .await
         .map_err(|err| io::Error::other(format!("filesystem task failed: {err}")))?
+    }
+
+    async fn glob_search(
+        &self,
+        request: GlobSearchRequest,
+        sandbox: Option<&FileSystemSandboxContext>,
+    ) -> FileSystemResult<GlobSearchResponse> {
+        reject_sandbox_context(sandbox)?;
+        crate::search::glob_search(request).await
+    }
+
+    async fn grep_search(
+        &self,
+        request: GrepSearchRequest,
+        sandbox: Option<&FileSystemSandboxContext>,
+    ) -> FileSystemResult<GrepSearchResponse> {
+        reject_sandbox_context(sandbox)?;
+        crate::search::grep_search(request).await
     }
 }
 

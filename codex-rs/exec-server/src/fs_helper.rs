@@ -14,6 +14,8 @@ use crate::protocol::FS_CANONICALIZE_METHOD;
 use crate::protocol::FS_COPY_METHOD;
 use crate::protocol::FS_CREATE_DIRECTORY_METHOD;
 use crate::protocol::FS_GET_METADATA_METHOD;
+use crate::protocol::FS_GLOB_METHOD;
+use crate::protocol::FS_GREP_METHOD;
 use crate::protocol::FS_READ_DIRECTORY_METHOD;
 use crate::protocol::FS_READ_FILE_METHOD;
 use crate::protocol::FS_REMOVE_METHOD;
@@ -26,6 +28,10 @@ use crate::protocol::FsCreateDirectoryParams;
 use crate::protocol::FsCreateDirectoryResponse;
 use crate::protocol::FsGetMetadataParams;
 use crate::protocol::FsGetMetadataResponse;
+use crate::protocol::FsGlobParams;
+use crate::protocol::FsGlobResponse;
+use crate::protocol::FsGrepParams;
+use crate::protocol::FsGrepResponse;
 use crate::protocol::FsReadDirectoryEntry;
 use crate::protocol::FsReadDirectoryParams;
 use crate::protocol::FsReadDirectoryResponse;
@@ -60,6 +66,10 @@ pub(crate) enum FsHelperRequest {
     Remove(FsRemoveParams),
     #[serde(rename = "fs/copy")]
     Copy(FsCopyParams),
+    #[serde(rename = "fs/glob")]
+    Glob(FsGlobParams),
+    #[serde(rename = "fs/grep")]
+    Grep(FsGrepParams),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -88,6 +98,10 @@ pub(crate) enum FsHelperPayload {
     Remove(FsRemoveResponse),
     #[serde(rename = "fs/copy")]
     Copy(FsCopyResponse),
+    #[serde(rename = "fs/glob")]
+    Glob(FsGlobResponse),
+    #[serde(rename = "fs/grep")]
+    Grep(FsGrepResponse),
 }
 
 impl FsHelperPayload {
@@ -101,6 +115,8 @@ impl FsHelperPayload {
             Self::ReadDirectory(_) => FS_READ_DIRECTORY_METHOD,
             Self::Remove(_) => FS_REMOVE_METHOD,
             Self::Copy(_) => FS_COPY_METHOD,
+            Self::Glob(_) => FS_GLOB_METHOD,
+            Self::Grep(_) => FS_GREP_METHOD,
         }
     }
 
@@ -173,6 +189,20 @@ impl FsHelperPayload {
         match self {
             Self::Copy(response) => Ok(response),
             other => Err(unexpected_response(FS_COPY_METHOD, other.operation())),
+        }
+    }
+
+    pub(crate) fn expect_glob(self) -> Result<FsGlobResponse, JSONRPCErrorError> {
+        match self {
+            Self::Glob(response) => Ok(response),
+            other => Err(unexpected_response(FS_GLOB_METHOD, other.operation())),
+        }
+    }
+
+    pub(crate) fn expect_grep(self) -> Result<FsGrepResponse, JSONRPCErrorError> {
+        match self {
+            Self::Grep(response) => Ok(response),
+            other => Err(unexpected_response(FS_GREP_METHOD, other.operation())),
         }
     }
 }
@@ -290,6 +320,20 @@ pub(crate) async fn run_direct_request(
                 .map_err(map_fs_error)?;
             Ok(FsHelperPayload::Copy(FsCopyResponse {}))
         }
+        FsHelperRequest::Glob(params) => {
+            let response = file_system
+                .glob_search(params.request, /*sandbox*/ None)
+                .await
+                .map_err(map_fs_error)?;
+            Ok(FsHelperPayload::Glob(FsGlobResponse { response }))
+        }
+        FsHelperRequest::Grep(params) => {
+            let response = file_system
+                .grep_search(params.request, /*sandbox*/ None)
+                .await
+                .map_err(map_fs_error)?;
+            Ok(FsHelperPayload::Grep(FsGrepResponse { response }))
+        }
     }
 }
 
@@ -309,19 +353,94 @@ mod tests {
 
     #[test]
     fn helper_requests_use_fs_method_names() -> serde_json::Result<()> {
+        let root = absolute_test_path("fs-helper-root");
         assert_eq!(
             serde_json::to_value(FsHelperRequest::WriteFile(FsWriteFileParams {
-                path: std::env::current_dir()
-                    .expect("cwd")
-                    .join("file")
-                    .as_path()
-                    .try_into()
-                    .expect("absolute path"),
+                path: root.join("file"),
                 data_base64: String::new(),
                 sandbox: None,
             }))?["operation"],
             FS_WRITE_FILE_METHOD,
         );
+        assert_eq!(
+            serde_json::to_value(FsHelperRequest::Glob(FsGlobParams {
+                request: crate::GlobSearchRequest {
+                    root: root.clone(),
+                    pattern: "**/*.rs".to_string(),
+                    max_results: 10,
+                },
+                sandbox: None,
+            }))?["operation"],
+            FS_GLOB_METHOD,
+        );
+        assert_eq!(
+            serde_json::to_value(FsHelperRequest::Grep(FsGrepParams {
+                request: crate::GrepSearchRequest {
+                    root,
+                    pattern: "needle".to_string(),
+                    glob: Some("*.rs".to_string()),
+                    file_type: None,
+                    output_mode: crate::GrepOutputMode::FilesWithMatches,
+                    context_before: 0,
+                    context_after: 0,
+                    line_numbers: false,
+                    ignore_case: false,
+                    head_limit: 250,
+                    offset: 0,
+                    multiline: false,
+                },
+                sandbox: None,
+            }))?["operation"],
+            FS_GREP_METHOD,
+        );
         Ok(())
+    }
+
+    #[test]
+    fn helper_payload_expect_accepts_search_responses() {
+        let glob_response = FsHelperPayload::Glob(FsGlobResponse {
+            response: crate::GlobSearchResponse {
+                matches: Vec::new(),
+                truncated: false,
+            },
+        })
+        .expect_glob()
+        .expect("glob payload should match");
+        assert_eq!(
+            glob_response,
+            FsGlobResponse {
+                response: crate::GlobSearchResponse {
+                    matches: Vec::new(),
+                    truncated: false,
+                },
+            }
+        );
+
+        let grep_response = FsHelperPayload::Grep(FsGrepResponse {
+            response: crate::GrepSearchResponse {
+                lines: vec!["src/main.rs".to_string()],
+                truncated: false,
+            },
+        })
+        .expect_grep()
+        .expect("grep payload should match");
+        assert_eq!(
+            grep_response,
+            FsGrepResponse {
+                response: crate::GrepSearchResponse {
+                    lines: vec!["src/main.rs".to_string()],
+                    truncated: false,
+                },
+            }
+        );
+    }
+
+    fn absolute_test_path(name: &str) -> codex_utils_absolute_path::AbsolutePathBuf {
+        std::env::current_dir()
+            .expect("cwd")
+            .join(name)
+            .as_path()
+            .try_into()
+            .expect("absolute path")
     }
 }
