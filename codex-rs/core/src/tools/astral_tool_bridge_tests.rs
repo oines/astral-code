@@ -8,7 +8,6 @@ use codex_tools::READ_TOOL_NAME;
 use codex_tools::REQUEST_PERMISSIONS_TOOL_NAME;
 use codex_tools::SEND_TASK_INPUT_TOOL_NAME;
 use codex_tools::TODO_WRITE_TOOL_NAME;
-use codex_tools::TOOL_SEARCH_FLAVOR_TOOL_NAME;
 use codex_tools::WRITE_TOOL_NAME;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
@@ -253,18 +252,6 @@ fn leaves_request_permissions_native_for_astral_handler() -> anyhow::Result<()> 
             }
         })
     );
-    Ok(())
-}
-
-#[test]
-fn leaves_tool_search_native_for_astral_handler() -> anyhow::Result<()> {
-    let (tool_name, arguments) = canonicalize_function(
-        TOOL_SEARCH_FLAVOR_TOOL_NAME,
-        json!({ "query": "gmail", "max_results": 3 }),
-    )?;
-
-    assert_eq!(tool_name, ToolName::plain(TOOL_SEARCH_FLAVOR_TOOL_NAME));
-    assert_eq!(arguments, json!({ "query": "gmail", "max_results": 3 }));
     Ok(())
 }
 

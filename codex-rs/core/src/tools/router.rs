@@ -14,6 +14,7 @@ use codex_protocol::dynamic_tools::DynamicToolSpec;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::models::SearchToolCallParams;
 use codex_tools::DiscoverableTool;
+use codex_tools::TOOL_SEARCH_TOOL_NAME;
 use codex_tools::ToolCall as ExtensionToolCall;
 use codex_tools::ToolExecutor;
 use codex_tools::ToolName;
@@ -104,6 +105,20 @@ impl ToolRouter {
                 call_id,
                 ..
             } => {
+                if namespace.is_none() && name == TOOL_SEARCH_TOOL_NAME {
+                    let arguments: SearchToolCallParams = serde_json::from_str(&arguments)
+                        .map_err(|err| {
+                            FunctionCallError::RespondToModel(format!(
+                                "failed to parse tool_search arguments: {err}"
+                            ))
+                        })?;
+                    return Ok(Some(ToolCall {
+                        tool_name: ToolName::plain(TOOL_SEARCH_TOOL_NAME),
+                        call_id,
+                        payload: ToolPayload::ToolSearch { arguments },
+                    }));
+                }
+
                 let tool_name = ToolName::new(namespace, name);
                 Ok(Some(ToolCall {
                     tool_name,

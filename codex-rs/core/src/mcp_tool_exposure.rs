@@ -31,9 +31,10 @@ pub(crate) fn build_mcp_tool_exposure(
     }
 
     let should_defer = search_tool_enabled
-        && (config
-            .features
-            .enabled(Feature::ToolSearchAlwaysDeferMcpTools)
+        && (config.model_provider.is_astral()
+            || config
+                .features
+                .enabled(Feature::ToolSearchAlwaysDeferMcpTools)
             || deferred_tools.len() >= DIRECT_MCP_TOOL_EXPOSURE_THRESHOLD);
 
     if !should_defer {

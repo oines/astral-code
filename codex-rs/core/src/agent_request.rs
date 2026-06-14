@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 
 use codex_api::agent_protocol::AgentMessage;
 use codex_api::agent_protocol::AgentRequest;
@@ -22,9 +23,15 @@ use codex_protocol::models::ReasoningItemReasoningSummary;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
+use codex_tools::LoadableToolSpec;
+use codex_tools::ResponsesApiNamespaceTool;
+use codex_tools::ToolName;
+use codex_tools::ToolSpec;
 use serde_json::Value;
 
 use crate::client_common::Prompt;
+
+const MAX_PROVIDER_NEUTRAL_SEARCH_LOADED_FUNCTIONS: usize = 64;
 
 pub(crate) struct AgentRequestBuildParams<'a> {
     pub(crate) prompt: &'a Prompt,
@@ -39,11 +46,11 @@ pub(crate) struct AgentRequestBuildParams<'a> {
 }
 
 pub(crate) fn build_agent_request(params: AgentRequestBuildParams<'_>) -> Result<AgentRequest> {
-    let tools = codex_tools::create_agent_tools_for_provider_neutral_request(&params.prompt.tools)
+    let formatted_input = params.prompt.get_formatted_input();
+    let tool_specs = provider_neutral_tool_specs(&params.prompt.tools, &formatted_input);
+    let tools = codex_tools::create_agent_tools_for_provider_neutral_request(&tool_specs)
         .map_err(|err| CodexErr::InvalidRequest(format!("failed to convert tools: {err}")))?;
-    let messages = params
-        .prompt
-        .get_formatted_input()
+    let messages = formatted_input
         .iter()
         .filter_map(response_item_to_agent_message)
         .collect();
@@ -78,6 +85,102 @@ pub(crate) fn build_agent_request(params: AgentRequestBuildParams<'_>) -> Result
             provider,
         },
     })
+}
+
+fn provider_neutral_tool_specs(base_tools: &[ToolSpec], input: &[ResponseItem]) -> Vec<ToolSpec> {
+    let mut tools = base_tools.to_vec();
+    let mut seen_names = provider_neutral_tool_names_for_specs(base_tools);
+
+    for loadable_tool in collect_search_loaded_tool_specs(input) {
+        let spec = ToolSpec::from(loadable_tool);
+        let names = provider_neutral_tool_names_for_spec(&spec);
+        if names.is_empty() || names.iter().any(|name| seen_names.contains(name)) {
+            continue;
+        }
+
+        seen_names.extend(names);
+        tools.push(spec);
+    }
+
+    tools
+}
+
+fn provider_neutral_tool_names_for_specs(tools: &[ToolSpec]) -> BTreeSet<String> {
+    tools
+        .iter()
+        .flat_map(provider_neutral_tool_names_for_spec)
+        .collect()
+}
+
+fn provider_neutral_tool_names_for_spec(spec: &ToolSpec) -> Vec<String> {
+    match spec {
+        ToolSpec::Function(tool) => vec![tool.name.clone()],
+        ToolSpec::Namespace(namespace) => namespace
+            .tools
+            .iter()
+            .map(|tool| match tool {
+                ResponsesApiNamespaceTool::Function(tool) => {
+                    codex_tools::provider_neutral_tool_name_for_tool_name(&ToolName::namespaced(
+                        namespace.name.clone(),
+                        tool.name.clone(),
+                    ))
+                }
+            })
+            .collect(),
+        ToolSpec::ToolSearch { .. } => vec![spec.name().to_string()],
+        ToolSpec::ImageGeneration { .. } => vec![spec.name().to_string()],
+        ToolSpec::WebSearch { .. } => vec![spec.name().to_string()],
+        ToolSpec::Freeform(tool) => vec![tool.name.clone()],
+    }
+}
+
+fn collect_search_loaded_tool_specs(input: &[ResponseItem]) -> Vec<LoadableToolSpec> {
+    let mut loaded_tools = Vec::new();
+    let mut function_count = 0usize;
+
+    for item in input.iter().rev() {
+        let ResponseItem::ToolSearchOutput {
+            execution, tools, ..
+        } = item
+        else {
+            continue;
+        };
+        if execution != "client" {
+            continue;
+        }
+
+        for tool in tools.iter().rev() {
+            let Ok(tool) = serde_json::from_value::<LoadableToolSpec>(tool.clone()) else {
+                continue;
+            };
+            let tool_function_count = loadable_tool_function_count(&tool);
+            if tool_function_count == 0 {
+                continue;
+            }
+            if function_count + tool_function_count > MAX_PROVIDER_NEUTRAL_SEARCH_LOADED_FUNCTIONS {
+                continue;
+            }
+
+            loaded_tools.push(tool);
+            function_count += tool_function_count;
+            if function_count == MAX_PROVIDER_NEUTRAL_SEARCH_LOADED_FUNCTIONS {
+                break;
+            }
+        }
+        if function_count == MAX_PROVIDER_NEUTRAL_SEARCH_LOADED_FUNCTIONS {
+            break;
+        }
+    }
+
+    loaded_tools.reverse();
+    loaded_tools
+}
+
+fn loadable_tool_function_count(tool: &LoadableToolSpec) -> usize {
+    match tool {
+        LoadableToolSpec::Function(_) => 1,
+        LoadableToolSpec::Namespace(namespace) => namespace.tools.len(),
+    }
 }
 
 fn build_reasoning_config(

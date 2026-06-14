@@ -11,7 +11,9 @@ use crate::ResponsesApiNamespaceTool;
 use crate::ResponsesApiTool;
 use crate::create_agent_tools_for_provider_neutral_request;
 use crate::create_tools_json_for_responses_api;
+use crate::provider_neutral_tool_name_for_tool_name;
 use codex_agent_protocol::AgentTool;
+use codex_protocol::ToolName;
 use codex_protocol::config_types::WebSearchContextSize;
 use codex_protocol::config_types::WebSearchFilters as ConfigWebSearchFilters;
 use codex_protocol::config_types::WebSearchUserLocation as ConfigWebSearchUserLocation;
@@ -214,7 +216,7 @@ fn create_agent_tools_flattens_namespace_tools() {
         )])
         .expect("convert tools"),
         vec![AgentTool {
-            name: "lookup_order".to_string(),
+            name: "mcp__demo____lookup_order".to_string(),
             description: "Look up an order".to_string(),
             input_schema: json!({
                 "type": "object",
@@ -225,8 +227,24 @@ fn create_agent_tools_flattens_namespace_tools() {
             metadata: BTreeMap::from([
                 ("namespace".to_string(), json!("mcp__demo__")),
                 ("namespaceDescription".to_string(), json!("Demo tools")),
+                ("originalName".to_string(), json!("lookup_order")),
             ]),
         }]
+    );
+}
+
+#[test]
+fn provider_neutral_tool_name_preserves_namespace_identity() {
+    assert_eq!(
+        provider_neutral_tool_name_for_tool_name(&ToolName::namespaced(
+            "mcp__codex_apps__gmail",
+            "_send_email"
+        )),
+        "mcp__codex_apps__gmail___send_email"
+    );
+    assert_eq!(
+        provider_neutral_tool_name_for_tool_name(&ToolName::plain("tool_search")),
+        "tool_search"
     );
 }
 
