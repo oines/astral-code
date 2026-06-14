@@ -268,6 +268,7 @@ async fn schedule_startup_prewarm_inner(
     let websocket_warmup_started_at = Instant::now();
     client_session
         .prewarm_websocket(
+            startup_turn_context.provider.clone(),
             &startup_prompt,
             &startup_turn_context.model_info,
             &startup_turn_context.session_telemetry,

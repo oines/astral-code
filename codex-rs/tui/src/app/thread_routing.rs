@@ -123,6 +123,36 @@ impl App {
         store.active_turn_id().map(ToOwned::to_owned)
     }
 
+    pub(super) async fn clear_active_turn_id_for_thread(&mut self, thread_id: ThreadId) {
+        if let Some(channel) = self.thread_event_channels.get(&thread_id) {
+            let mut store = channel.store.lock().await;
+            store.clear_active_turn_id();
+        }
+    }
+
+    pub(super) fn require_new_turn_for_thread(&mut self, thread_id: ThreadId) {
+        self.threads_requiring_new_turn.insert(thread_id);
+    }
+
+    async fn active_thread_settings_match_user_turn(
+        &self,
+        thread_id: ThreadId,
+        model: &str,
+        model_provider: &str,
+        effort: &Option<codex_protocol::openai_models::ReasoningEffort>,
+    ) -> bool {
+        let Some(channel) = self.thread_event_channels.get(&thread_id) else {
+            return true;
+        };
+        let store = channel.store.lock().await;
+        let Some(session) = store.session.as_ref() else {
+            return true;
+        };
+        session.model == model
+            && session.model_provider_id == model_provider
+            && session.reasoning_effort == *effort
+    }
+
     pub(super) fn thread_label(&self, thread_id: ThreadId) -> String {
         let is_primary = self.primary_thread_id == Some(thread_id);
         let fallback_label = if is_primary {
@@ -513,6 +543,7 @@ impl App {
                 approvals_reviewer,
                 active_permission_profile,
                 model,
+                model_provider,
                 effort,
                 summary,
                 service_tier,
@@ -521,7 +552,18 @@ impl App {
                 personality,
             } => {
                 let mut should_start_turn = true;
-                if let Some(turn_id) = self.active_turn_id_for_thread(thread_id).await {
+                let force_new_turn = self.threads_requiring_new_turn.contains(&thread_id)
+                    || !self
+                        .active_thread_settings_match_user_turn(
+                            thread_id,
+                            model,
+                            model_provider,
+                            effort,
+                        )
+                        .await;
+                if !force_new_turn
+                    && let Some(turn_id) = self.active_turn_id_for_thread(thread_id).await
+                {
                     let mut steer_turn_id = turn_id;
                     let mut retried_after_turn_mismatch = false;
                     loop {
@@ -606,6 +648,7 @@ impl App {
                             permissions_override,
                             config.permissions.user_visible_workspace_roots(),
                             model.to_string(),
+                            model_provider.to_string(),
                             effort.clone(),
                             *summary,
                             service_tier.clone(),
@@ -614,6 +657,7 @@ impl App {
                             final_output_json_schema.clone(),
                         )
                         .await?;
+                    self.threads_requiring_new_turn.remove(&thread_id);
                 }
                 Ok(true)
             }

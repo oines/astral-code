@@ -571,6 +571,30 @@ async fn active_turn_id_for_thread_uses_snapshot_turns() {
 }
 
 #[tokio::test]
+async fn runtime_setting_change_clears_cached_active_turn_id() {
+    let mut app = make_test_app().await;
+    let thread_id = ThreadId::new();
+    let session = test_thread_session(thread_id, test_path_buf("/tmp/project"));
+    app.thread_event_channels.insert(
+        thread_id,
+        ThreadEventChannel::new_with_session(
+            THREAD_EVENT_CHANNEL_CAPACITY,
+            session,
+            vec![test_turn("turn-1", TurnStatus::InProgress, Vec::new())],
+        ),
+    );
+
+    assert_eq!(
+        app.active_turn_id_for_thread(thread_id).await,
+        Some("turn-1".to_string())
+    );
+
+    app.clear_active_turn_id_for_thread(thread_id).await;
+
+    assert_eq!(app.active_turn_id_for_thread(thread_id).await, None);
+}
+
+#[tokio::test]
 async fn replayed_turn_complete_submits_restored_queued_follow_up() {
     let (mut app, _app_event_rx, _op_rx) = make_test_app_with_channels().await;
     let thread_id = ThreadId::new();
@@ -3974,6 +3998,7 @@ async fn make_test_app() -> App {
         windows_sandbox: WindowsSandboxState::default(),
         thread_event_channels: HashMap::new(),
         thread_event_listener_tasks: HashMap::new(),
+        threads_requiring_new_turn: std::collections::HashSet::new(),
         agent_navigation: AgentNavigationState::default(),
         side_threads: HashMap::new(),
         active_thread_id: None,
@@ -4039,6 +4064,7 @@ async fn make_test_app_with_channels() -> (
             windows_sandbox: WindowsSandboxState::default(),
             thread_event_channels: HashMap::new(),
             thread_event_listener_tasks: HashMap::new(),
+            threads_requiring_new_turn: std::collections::HashSet::new(),
             agent_navigation: AgentNavigationState::default(),
             side_threads: HashMap::new(),
             active_thread_id: None,

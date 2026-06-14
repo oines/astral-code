@@ -24,6 +24,8 @@ use super::add_line_numbers;
 use super::collect_files;
 use super::edit_file;
 use super::file_environment_id;
+use super::glob_files;
+use super::grep_files;
 use super::is_blocked_device_path;
 use super::push_content_matches;
 use super::split_lines_preserving_newline;
@@ -359,4 +361,99 @@ async fn file_search_prunes_generated_and_vcs_directories() {
     display_paths.sort();
 
     assert_eq!(display_paths, vec!["src/lib.rs"]);
+}
+
+#[tokio::test]
+async fn glob_pattern_without_slash_does_not_recurse() {
+    let temp_dir = tempfile::TempDir::new().expect("temp dir");
+    let cwd = temp_dir.path().abs();
+    std::fs::create_dir_all(temp_dir.path().join("nested")).expect("create nested");
+    std::fs::write(temp_dir.path().join("root.toml"), "").expect("write root");
+    std::fs::write(temp_dir.path().join("nested/child.toml"), "").expect("write child");
+    let sandbox = FileSystemSandboxContext::from_permission_profile(PermissionProfile::Disabled);
+
+    let output = glob_files(
+        json!({ "pattern": "*.toml", "path": "." }).to_string(),
+        LOCAL_FS.as_ref(),
+        &sandbox,
+        &cwd,
+    )
+    .await
+    .expect("glob succeeds");
+
+    assert_eq!(output, "root.toml\n");
+}
+
+#[tokio::test]
+async fn glob_uses_literal_prefix_for_fixed_depth_patterns() {
+    let temp_dir = tempfile::TempDir::new().expect("temp dir");
+    let cwd = temp_dir.path().abs();
+    std::fs::create_dir_all(temp_dir.path().join("src")).expect("create src");
+    std::fs::create_dir_all(temp_dir.path().join("tests")).expect("create tests");
+    std::fs::write(temp_dir.path().join("src/lib.rs"), "").expect("write source");
+    std::fs::write(temp_dir.path().join("tests/lib.rs"), "").expect("write test source");
+    let sandbox = FileSystemSandboxContext::from_permission_profile(PermissionProfile::Disabled);
+
+    let output = glob_files(
+        json!({ "pattern": "src/*.rs", "path": "." }).to_string(),
+        LOCAL_FS.as_ref(),
+        &sandbox,
+        &cwd,
+    )
+    .await
+    .expect("glob succeeds");
+
+    assert_eq!(output, "src/lib.rs\n");
+}
+
+#[tokio::test]
+async fn glob_double_star_recurses_under_literal_prefix() {
+    let temp_dir = tempfile::TempDir::new().expect("temp dir");
+    let cwd = temp_dir.path().abs();
+    std::fs::create_dir_all(temp_dir.path().join("src/nested")).expect("create nested src");
+    std::fs::create_dir_all(temp_dir.path().join("tests/nested")).expect("create nested tests");
+    std::fs::write(temp_dir.path().join("src/lib.rs"), "").expect("write source");
+    std::fs::write(temp_dir.path().join("src/nested/mod.rs"), "").expect("write nested source");
+    std::fs::write(temp_dir.path().join("tests/nested/mod.rs"), "").expect("write test source");
+    let sandbox = FileSystemSandboxContext::from_permission_profile(PermissionProfile::Disabled);
+
+    let output = glob_files(
+        json!({ "pattern": "src/**/*.rs", "path": "." }).to_string(),
+        LOCAL_FS.as_ref(),
+        &sandbox,
+        &cwd,
+    )
+    .await
+    .expect("glob succeeds");
+    let mut lines = output.lines().collect::<Vec<_>>();
+    lines.sort();
+
+    assert_eq!(lines, vec!["src/lib.rs", "src/nested/mod.rs"]);
+}
+
+#[tokio::test]
+async fn grep_glob_pattern_without_slash_does_not_recurse() {
+    let temp_dir = tempfile::TempDir::new().expect("temp dir");
+    let cwd = temp_dir.path().abs();
+    std::fs::create_dir_all(temp_dir.path().join("nested")).expect("create nested");
+    std::fs::write(temp_dir.path().join("root.md"), "needle\n").expect("write root");
+    std::fs::write(temp_dir.path().join("nested/child.md"), "needle\n").expect("write child");
+    let sandbox = FileSystemSandboxContext::from_permission_profile(PermissionProfile::Disabled);
+
+    let output = grep_files(
+        json!({
+            "pattern": "needle",
+            "path": ".",
+            "glob": "*.md",
+            "output_mode": "files_with_matches"
+        })
+        .to_string(),
+        LOCAL_FS.as_ref(),
+        &sandbox,
+        &cwd,
+    )
+    .await
+    .expect("grep succeeds");
+
+    assert_eq!(output, "root.md\n");
 }

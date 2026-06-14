@@ -29,6 +29,7 @@ pub(crate) async fn handle_retryable_response_stream_error(
 ) -> Result<(), CodexErr> {
     if *retries >= max_retries
         && client_session.try_switch_fallback_transport(
+            &turn_context.provider,
             &turn_context.session_telemetry,
             &turn_context.model_info,
         )
@@ -59,7 +60,10 @@ pub(crate) async fn handle_retryable_response_stream_error(
         // transient reconnect messages. In debug builds, keep full visibility for diagnosis.
         let report_error = retry_count > 1
             || cfg!(debug_assertions)
-            || !sess.services.model_client.responses_websocket_enabled();
+            || !sess
+                .services
+                .model_client
+                .responses_websocket_enabled_for(&turn_context.provider);
         if report_error {
             // Surface retry information to any UI/front-end so the user understands what is
             // happening instead of staring at a seemingly frozen screen.

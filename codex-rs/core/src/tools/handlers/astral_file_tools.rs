@@ -468,6 +468,18 @@ struct GlobArgs {
     path: Option<String>,
 }
 
+#[derive(Debug)]
+struct GlobMatch {
+    path: AbsolutePathBuf,
+    modified_at_ms: i64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum GlobTraversalDepth {
+    Recursive,
+    Fixed(usize),
+}
+
 async fn glob_files(
     arguments: String,
     fs: &dyn ExecutorFileSystem,
@@ -477,24 +489,170 @@ async fn glob_files(
     let args: GlobArgs = parse_arguments(&arguments)?;
     let root = resolve_path(cwd, args.path.as_deref().unwrap_or("."));
     let matcher = glob_regex(&args.pattern)?;
-    let files = collect_files(fs, sandbox, &root).await?;
-    let mut matches = Vec::new();
-    for path in files {
-        if !matcher.is_match(&relative_slash_path(&path, &root)) {
-            continue;
-        }
-        let modified_at_ms = fs
-            .get_metadata(&path, Some(sandbox))
-            .await
-            .ok()
-            .map_or(0, |metadata| metadata.modified_at_ms);
-        matches.push((display_path(&path, cwd), modified_at_ms));
-    }
-    matches.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+    let mut matches = collect_glob_matches(fs, sandbox, &root, &args.pattern, &matcher).await?;
+    matches.sort_by(|left, right| {
+        right
+            .modified_at_ms
+            .cmp(&left.modified_at_ms)
+            .then_with(|| display_path(&left.path, cwd).cmp(&display_path(&right.path, cwd)))
+    });
     Ok(join_limited_lines(
-        matches.into_iter().map(|(path, _)| path).collect(),
+        matches
+            .into_iter()
+            .map(|matched| display_path(&matched.path, cwd))
+            .collect(),
         MAX_RESULT_LINES,
     ))
+}
+
+async fn collect_glob_matches(
+    fs: &dyn ExecutorFileSystem,
+    sandbox: &FileSystemSandboxContext,
+    root: &AbsolutePathBuf,
+    pattern: &str,
+    matcher: &Regex,
+) -> Result<Vec<GlobMatch>, FunctionCallError> {
+    let traversal_depth = glob_traversal_depth(pattern);
+    let prefix = glob_literal_directory_prefix(pattern);
+    let start_depth = prefix.len();
+    let Some(start_dir) = resolve_glob_start_dir(fs, sandbox, root, &prefix).await? else {
+        return Ok(Vec::new());
+    };
+    let mut matches = Vec::new();
+    let mut stack = vec![(start_dir, start_depth)];
+    let mut visited_entries = 0usize;
+
+    while let Some((dir, dir_depth)) = stack.pop() {
+        visited_entries = visited_entries.saturating_add(1);
+        if visited_entries > MAX_SCAN_ENTRIES {
+            return Err(FunctionCallError::RespondToModel(format!(
+                "scan exceeded {MAX_SCAN_ENTRIES} filesystem entries; narrow the path or glob"
+            )));
+        }
+
+        let entries = fs
+            .read_directory(&dir, Some(sandbox))
+            .await
+            .map_err(|err| {
+                FunctionCallError::RespondToModel(format!(
+                    "unable to read directory `{}`: {err}",
+                    dir.display()
+                ))
+            })?;
+
+        for entry in entries {
+            visited_entries = visited_entries.saturating_add(1);
+            if visited_entries > MAX_SCAN_ENTRIES {
+                return Err(FunctionCallError::RespondToModel(format!(
+                    "scan exceeded {MAX_SCAN_ENTRIES} filesystem entries; narrow the path or glob"
+                )));
+            }
+
+            let path = fs
+                .join(&dir, Path::new(&entry.file_name))
+                .await
+                .map_err(|err| {
+                    FunctionCallError::RespondToModel(format!(
+                        "unable to resolve `{}` under `{}`: {err}",
+                        entry.file_name,
+                        dir.display()
+                    ))
+                })?;
+
+            if entry.is_directory {
+                if SEARCH_PRUNED_DIRECTORY_NAMES.contains(&entry.file_name.as_str()) {
+                    continue;
+                }
+                if should_descend_for_glob(traversal_depth, dir_depth) {
+                    stack.push((path, dir_depth + 1));
+                }
+            } else if entry.is_file && glob_file_depth_matches(traversal_depth, dir_depth) {
+                let relative = relative_slash_path(&path, root);
+                if matcher.is_match(&relative) {
+                    let modified_at_ms = fs
+                        .get_metadata(&path, Some(sandbox))
+                        .await
+                        .ok()
+                        .map_or(0, |metadata| metadata.modified_at_ms);
+                    matches.push(GlobMatch {
+                        path,
+                        modified_at_ms,
+                    });
+                    if matches.len() >= MAX_RESULT_LINES {
+                        return Ok(matches);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(matches)
+}
+
+fn glob_traversal_depth(pattern: &str) -> GlobTraversalDepth {
+    let pattern = pattern.strip_prefix("./").unwrap_or(pattern);
+    if pattern.split('/').any(|segment| segment == "**") {
+        return GlobTraversalDepth::Recursive;
+    }
+    GlobTraversalDepth::Fixed(pattern.matches('/').count())
+}
+
+fn glob_literal_directory_prefix(pattern: &str) -> Vec<&str> {
+    let pattern = pattern.strip_prefix("./").unwrap_or(pattern);
+    let segments = pattern.split('/').collect::<Vec<_>>();
+    let mut prefix = Vec::new();
+    for segment in segments.iter().take(segments.len().saturating_sub(1)) {
+        if *segment == "**" || has_glob_meta(segment) {
+            break;
+        }
+        prefix.push(*segment);
+    }
+    prefix
+}
+
+async fn resolve_glob_start_dir(
+    fs: &dyn ExecutorFileSystem,
+    sandbox: &FileSystemSandboxContext,
+    root: &AbsolutePathBuf,
+    prefix: &[&str],
+) -> Result<Option<AbsolutePathBuf>, FunctionCallError> {
+    let mut dir = root.clone();
+    for segment in prefix {
+        dir = fs.join(&dir, Path::new(segment)).await.map_err(|err| {
+            FunctionCallError::RespondToModel(format!(
+                "unable to resolve `{segment}` under `{}`: {err}",
+                dir.display()
+            ))
+        })?;
+    }
+
+    match fs.get_metadata(&dir, Some(sandbox)).await {
+        Ok(metadata) if metadata.is_directory => Ok(Some(dir)),
+        Ok(_) => Ok(None),
+        Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(FunctionCallError::RespondToModel(format!(
+            "unable to stat `{}`: {err}",
+            dir.display()
+        ))),
+    }
+}
+
+fn has_glob_meta(segment: &str) -> bool {
+    segment.contains('*') || segment.contains('?')
+}
+
+fn should_descend_for_glob(depth: GlobTraversalDepth, dir_depth: usize) -> bool {
+    match depth {
+        GlobTraversalDepth::Recursive => true,
+        GlobTraversalDepth::Fixed(max_file_depth) => dir_depth < max_file_depth,
+    }
+}
+
+fn glob_file_depth_matches(depth: GlobTraversalDepth, file_depth: usize) -> bool {
+    match depth {
+        GlobTraversalDepth::Recursive => true,
+        GlobTraversalDepth::Fixed(max_file_depth) => file_depth == max_file_depth,
+    }
 }
 
 #[derive(Deserialize)]
@@ -535,8 +693,25 @@ async fn grep_files(
     let args: GrepArgs = parse_arguments(&arguments)?;
     let root = resolve_path(cwd, args.path.as_deref().unwrap_or("."));
     let regex = grep_regex(&args)?;
-    let glob = args.glob.as_deref().map(glob_regex).transpose()?;
-    let files = files_for_grep(fs, sandbox, &root).await?;
+    let files = if let Some(glob_pattern) = args.glob.as_deref() {
+        let metadata = fs.get_metadata(&root, Some(sandbox)).await.map_err(|err| {
+            FunctionCallError::RespondToModel(format!("unable to stat `{}`: {err}", root.display()))
+        })?;
+        if metadata.is_directory {
+            let matcher = glob_regex(glob_pattern)?;
+            collect_glob_matches(fs, sandbox, &root, glob_pattern, &matcher)
+                .await?
+                .into_iter()
+                .map(|matched| matched.path)
+                .collect()
+        } else if metadata.is_file {
+            vec![root.clone()]
+        } else {
+            Vec::new()
+        }
+    } else {
+        files_for_grep(fs, sandbox, &root).await?
+    };
     let output_mode = args.output_mode.as_deref().unwrap_or("files_with_matches");
     let context_before = args.context.or(args.before).unwrap_or(0);
     let context_after = args.context.or(args.after).unwrap_or(0);
@@ -546,12 +721,6 @@ async fn grep_files(
     for path in files {
         let display = display_path(&path, cwd);
         if !type_filter_matches(&path, args.file_type.as_deref()) {
-            continue;
-        }
-        if let Some(glob) = &glob
-            && !glob.is_match(&relative_slash_path(&path, &root))
-            && !glob.is_match(&display)
-        {
             continue;
         }
 

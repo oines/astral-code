@@ -143,14 +143,8 @@ impl ChatWidget {
             });
         }
 
-        if self.config.model_providers.len() > 1 {
-            items.push(Self::model_providers_selection_item());
-        }
-
-        let header = self.model_menu_header(
-            "Select Model",
-            "Pick a quick auto mode or browse all models.",
-        );
+        let header =
+            self.model_menu_header("Select Model", "Choose one of your configured models.");
         self.bottom_pane.show_selection_view(SelectionViewParams {
             footer_hint: Some(standard_popup_hint_line()),
             items,
@@ -183,7 +177,7 @@ impl ChatWidget {
     pub(crate) fn open_all_models_popup(&mut self, presets: Vec<ModelPreset>) {
         if presets.is_empty() {
             self.add_info_message(
-                "No additional models are available right now.".to_string(),
+                "No configured models are available right now.".to_string(),
                 /*hint*/ None,
             );
             return;
@@ -194,7 +188,6 @@ impl ChatWidget {
             let description =
                 (!preset.description.is_empty()).then_some(preset.description.to_string());
             let is_current = self.preset_matches_current_model(&preset);
-            let single_supported_effort = preset.supported_reasoning_efforts.len() == 1;
             let preset_for_action = preset.clone();
             let actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
                 let preset_for_event = preset_for_action.clone();
@@ -208,93 +201,18 @@ impl ChatWidget {
                 is_current,
                 is_default: preset.is_default,
                 actions,
-                dismiss_on_select: single_supported_effort,
-                dismiss_parent_on_child_accept: !single_supported_effort,
+                dismiss_on_select: false,
+                dismiss_parent_on_child_accept: true,
                 ..Default::default()
             });
         }
 
-        if self.config.model_providers.len() > 1 {
-            items.push(Self::model_providers_selection_item());
-        }
-
         let header = self.model_menu_header(
             "Select Model and Effort",
-            "Use astral -m <model_name> or config.toml for models outside this catalog.",
+            "Choose one of your configured models, then confirm its reasoning level.",
         );
         self.bottom_pane.show_selection_view(SelectionViewParams {
             footer_hint: Some(self.bottom_pane.standard_popup_hint_line()),
-            items,
-            header,
-            ..Default::default()
-        });
-    }
-
-    fn model_providers_selection_item() -> SelectionItem {
-        let actions: Vec<SelectionAction> = vec![Box::new(|tx| {
-            tx.send(AppEvent::OpenModelProvidersPopup);
-        })];
-        SelectionItem {
-            name: "Providers".to_string(),
-            description: Some("Browse configured model providers".to_string()),
-            actions,
-            dismiss_on_select: true,
-            dismiss_parent_on_child_accept: true,
-            ..Default::default()
-        }
-    }
-
-    pub(crate) fn open_model_providers_popup(&mut self) {
-        let mut providers = self
-            .config
-            .model_providers
-            .iter()
-            .map(|(provider_id, provider)| {
-                let display_name = if provider.name.is_empty() {
-                    provider_id.clone()
-                } else {
-                    provider.name.clone()
-                };
-                (provider_id.clone(), display_name)
-            })
-            .collect::<Vec<_>>();
-        providers.sort_by(|left, right| left.1.cmp(&right.1).then_with(|| left.0.cmp(&right.0)));
-
-        if providers.is_empty() {
-            self.add_info_message(
-                "No model providers are configured.".to_string(),
-                /*hint*/ None,
-            );
-            return;
-        }
-
-        let items = providers
-            .into_iter()
-            .map(|(provider_id, display_name)| {
-                let provider_for_action = provider_id.clone();
-                let actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
-                    tx.send(AppEvent::OpenProviderModelsPopup {
-                        model_provider: provider_for_action.clone(),
-                    });
-                })];
-                SelectionItem {
-                    name: display_name,
-                    description: Some(provider_id.clone()),
-                    is_current: provider_id == self.config.model_provider_id,
-                    actions,
-                    dismiss_on_select: true,
-                    dismiss_parent_on_child_accept: true,
-                    ..Default::default()
-                }
-            })
-            .collect::<Vec<_>>();
-
-        let header = self.model_menu_header(
-            "Select Provider",
-            "Choose a provider, then pick one of its available models.",
-        );
-        self.bottom_pane.show_selection_view(SelectionViewParams {
-            footer_hint: Some(standard_popup_hint_line()),
             items,
             header,
             ..Default::default()
@@ -317,11 +235,11 @@ impl ChatWidget {
                 return;
             }
 
-            tx.send(AppEvent::UpdateModel {
+            tx.send(AppEvent::UpdateModelAndReasoning {
                 model: model_for_action.clone(),
                 model_provider: model_provider_for_action.clone(),
+                effort: effort_for_action.clone(),
             });
-            tx.send(AppEvent::UpdateReasoningEffort(effort_for_action.clone()));
             tx.send(AppEvent::PersistModelSelection {
                 model: model_for_action.clone(),
                 model_provider: model_provider_for_action.clone(),
@@ -409,11 +327,11 @@ impl ChatWidget {
             }
         })];
         let all_modes_actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
-            tx.send(AppEvent::UpdateModel {
+            tx.send(AppEvent::UpdateModelAndReasoning {
                 model: model.clone(),
                 model_provider: model_provider.clone(),
+                effort: effort.clone(),
             });
-            tx.send(AppEvent::UpdateReasoningEffort(effort.clone()));
             tx.send(AppEvent::UpdatePlanModeReasoningEffort(effort.clone()));
             tx.send(AppEvent::PersistPlanModeReasoningEffort(effort.clone()));
             tx.send(AppEvent::PersistModelSelection {
@@ -487,29 +405,6 @@ impl ChatWidget {
             choices.push(default_effort.clone());
         }
 
-        if choices.len() == 1 {
-            let selected_effort = choices.first().cloned();
-            let selected_model = preset.model;
-            let selected_model_provider = preset.model_provider;
-            if self
-                .should_prompt_plan_mode_reasoning_scope(&selected_model, selected_effort.clone())
-            {
-                self.app_event_tx
-                    .send(AppEvent::OpenPlanReasoningScopePrompt {
-                        model: selected_model,
-                        model_provider: selected_model_provider,
-                        effort: selected_effort,
-                    });
-            } else {
-                self.apply_model_and_effort(
-                    selected_model,
-                    selected_model_provider,
-                    selected_effort,
-                );
-            }
-            return;
-        }
-
         let default_choice = choices
             .contains(&default_effort)
             .then(|| default_effort.clone())
@@ -575,11 +470,11 @@ impl ChatWidget {
                         effort: choice_effort.clone(),
                     });
                 } else {
-                    tx.send(AppEvent::UpdateModel {
+                    tx.send(AppEvent::UpdateModelAndReasoning {
                         model: model_for_action.clone(),
                         model_provider: model_provider_for_action.clone(),
+                        effort: choice_effort.clone(),
                     });
-                    tx.send(AppEvent::UpdateReasoningEffort(choice_effort.clone()));
                     tx.send(AppEvent::PersistModelSelection {
                         model: model_for_action.clone(),
                         model_provider: model_provider_for_action.clone(),
@@ -638,26 +533,7 @@ impl ChatWidget {
         model_provider: Option<String>,
         effort: Option<ReasoningEffortConfig>,
     ) {
-        self.app_event_tx.send(AppEvent::UpdateModel {
-            model,
-            model_provider,
-        });
-        self.app_event_tx
-            .send(AppEvent::UpdateReasoningEffort(effort));
-    }
-
-    fn apply_model_and_effort(
-        &self,
-        model: String,
-        model_provider: Option<String>,
-        effort: Option<ReasoningEffortConfig>,
-    ) {
-        self.apply_model_and_effort_without_persist(
-            model.clone(),
-            model_provider.clone(),
-            effort.clone(),
-        );
-        self.app_event_tx.send(AppEvent::PersistModelSelection {
+        self.app_event_tx.send(AppEvent::UpdateModelAndReasoning {
             model,
             model_provider,
             effort,

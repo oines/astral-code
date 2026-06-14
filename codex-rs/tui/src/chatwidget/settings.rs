@@ -279,6 +279,24 @@ impl ChatWidget {
         self.refresh_model_dependent_surfaces();
     }
 
+    pub(super) fn sync_model_provider_id(&mut self, model_provider_id: String) {
+        if let Some(model_provider) = self.config.model_providers.get(&model_provider_id).cloned() {
+            self.set_model_provider(
+                model_provider_id,
+                model_provider,
+                /*runtime_model_provider_base_url*/ None,
+            );
+        } else {
+            tracing::warn!(
+                model_provider_id,
+                "thread references model provider not present in TUI config"
+            );
+            self.config.model_provider_id = model_provider_id;
+            self.runtime_model_provider_base_url = None;
+            self.refresh_model_dependent_surfaces();
+        }
+    }
+
     pub(crate) fn current_model(&self) -> &str {
         if !self.collaboration_modes_enabled() {
             return self.current_collaboration_mode.model();
@@ -522,7 +540,7 @@ impl ChatWidget {
     fn apply_thread_settings(&mut self, mut settings: ThreadSettings) {
         let cwd_changed = self.config.cwd != settings.cwd;
         self.apply_thread_settings_cwd(settings.cwd.clone());
-        self.config.model_provider_id = settings.model_provider.clone();
+        self.sync_model_provider_id(settings.model_provider.clone());
         self.set_service_tier(settings.service_tier.clone());
         self.set_approval_policy(settings.approval_policy);
         self.set_approvals_reviewer(settings.approvals_reviewer.to_core());

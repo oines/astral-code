@@ -2368,27 +2368,7 @@ async fn model_picker_hides_show_in_picker_false_models_from_cache() {
 }
 
 #[tokio::test]
-async fn model_provider_popup_requests_selected_provider_models() {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    let expected_provider = chat.config.model_provider_id.clone();
-
-    while rx.try_recv().is_ok() {}
-    chat.open_model_providers_popup();
-    chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
-
-    let events = std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>();
-    assert!(
-        events.iter().any(|event| matches!(
-            event,
-            AppEvent::OpenProviderModelsPopup { model_provider }
-                if model_provider == &expected_provider
-        )),
-        "expected provider model popup event for {expected_provider}; events: {events:?}"
-    );
-}
-
-#[tokio::test]
-async fn model_picker_exposes_configured_providers() {
+async fn model_picker_lists_only_models_not_providers() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     let mut deepseek_provider = codex_model_provider_info::create_oss_provider_with_base_url(
         "http://127.0.0.1:45678/v1",
@@ -2426,23 +2406,8 @@ async fn model_picker_exposes_configured_providers() {
     chat.open_model_popup_with_presets(vec![preset]);
     let model_popup = render_bottom_popup(&chat, /*width*/ 90);
     assert!(
-        model_popup.contains("Providers"),
-        "expected /model picker to expose provider switching:\n{model_popup}"
-    );
-    assert!(
-        model_popup.contains("Browse configured model providers"),
-        "expected /model picker to describe provider switching:\n{model_popup}"
-    );
-
-    chat.open_model_providers_popup();
-    let providers_popup = render_bottom_popup(&chat, /*width*/ 90);
-    assert!(
-        providers_popup.contains("Select Provider"),
-        "expected provider selection popup:\n{providers_popup}"
-    );
-    assert!(
-        providers_popup.contains("DeepSeek") && providers_popup.contains("deepseek"),
-        "expected configured provider name and id in popup:\n{providers_popup}"
+        !model_popup.contains("Providers"),
+        "expected /model picker to list configured models only:\n{model_popup}"
     );
 }
 
@@ -2524,7 +2489,7 @@ async fn model_reasoning_selection_popup_applies_custom_effort() {
 
     let selected_effort_events = std::iter::from_fn(|| rx.try_recv().ok())
         .filter_map(|event| match event {
-            AppEvent::UpdateReasoningEffort(effort) => Some((None, effort)),
+            AppEvent::UpdateModelAndReasoning { effort, .. } => Some((None, effort)),
             AppEvent::PersistModelSelection { model, effort, .. } => Some((Some(model), effort)),
             _ => None,
         })
@@ -2685,7 +2650,7 @@ async fn reasoning_popup_shows_extra_high_with_space() {
 }
 
 #[tokio::test]
-async fn single_reasoning_option_skips_selection() {
+async fn single_reasoning_option_still_opens_selection() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 
     let single_effort = vec![ReasoningEffortPreset {
@@ -2716,8 +2681,12 @@ async fn single_reasoning_option_skips_selection() {
 
     let popup = render_bottom_popup(&chat, /*width*/ 80);
     assert!(
-        !popup.contains("Select Reasoning Level"),
-        "expected reasoning selection popup to be skipped"
+        popup.contains("Select Reasoning Level for model-with-single-reasoning"),
+        "expected reasoning selection popup to open:\n{popup}"
+    );
+    assert!(
+        popup.contains("High (default)"),
+        "expected single available reasoning option to be visible:\n{popup}"
     );
 
     let mut events = Vec::new();
@@ -2728,8 +2697,8 @@ async fn single_reasoning_option_skips_selection() {
     assert!(
         events
             .iter()
-            .any(|ev| matches!(ev, AppEvent::UpdateReasoningEffort(Some(effort)) if *effort == ReasoningEffortConfig::High)),
-        "expected reasoning effort to be applied automatically; events: {events:?}"
+            .all(|ev| !matches!(ev, AppEvent::UpdateReasoningEffort(_))),
+        "did not expect reasoning effort to be applied before confirmation; events: {events:?}"
     );
 }
 
@@ -2762,14 +2731,16 @@ async fn reasoning_selection_preserves_model_provider() {
     };
 
     chat.open_reasoning_popup(preset);
+    chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
 
     let events = std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>();
     assert!(
         events.iter().any(|event| matches!(
             event,
-            AppEvent::UpdateModel {
+            AppEvent::UpdateModelAndReasoning {
                 model,
                 model_provider: Some(model_provider),
+                ..
             } if model == "deepseek-v4-pro" && model_provider == "deepseek"
         )),
         "expected provider-aware model update event: {events:?}"

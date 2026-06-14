@@ -173,6 +173,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration as StdDuration;
+use wiremock::Mock;
+use wiremock::ResponseTemplate;
+use wiremock::matchers::method;
+use wiremock::matchers::path;
 
 mod guardian_tests;
 
@@ -3793,6 +3797,134 @@ async fn session_settings_model_provider_update_changes_provider_snapshot() {
 }
 
 #[tokio::test]
+async fn session_settings_model_provider_update_changes_effective_config() {
+    let mut session_configuration = make_session_configuration_for_tests().await;
+    let provider_id = "provider-b".to_string();
+    let provider =
+        create_oss_provider_with_base_url("http://127.0.0.1:9876/v1", WireApi::ChatCompletions);
+    let mut config = (*session_configuration.original_config_do_not_use).clone();
+    config
+        .model_providers
+        .insert(provider_id.clone(), provider.clone());
+    session_configuration.original_config_do_not_use = Arc::new(config);
+
+    let updated = session_configuration
+        .apply(&SessionSettingsUpdate {
+            model_provider: Some(provider_id.clone()),
+            ..Default::default()
+        })
+        .expect("model provider update should apply");
+
+    let effective_config = Session::build_effective_session_config(&updated);
+    assert_eq!(effective_config.model_provider_id, provider_id);
+    assert_eq!(effective_config.model_provider, provider);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn user_turn_model_provider_update_streams_with_updated_provider() -> anyhow::Result<()> {
+    let provider_a_server = wiremock::MockServer::start().await;
+    let provider_b_server = wiremock::MockServer::start().await;
+    mount_chat_completions_provider(&provider_a_server, "provider-a reply").await;
+    mount_chat_completions_provider(&provider_b_server, "provider-b reply").await;
+
+    let provider_a = create_oss_provider_with_base_url(
+        &format!("{}/v1", provider_a_server.uri()),
+        WireApi::ChatCompletions,
+    );
+    let provider_b = create_oss_provider_with_base_url(
+        &format!("{}/v1", provider_b_server.uri()),
+        WireApi::ChatCompletions,
+    );
+    let provider_a_id = "mimo".to_string();
+    let provider_b_id = "deepseek".to_string();
+    let model_a = "mimo-v2.5-pro".to_string();
+    let model_b = "deepseek-v4-pro".to_string();
+
+    let (session, _turn_context, rx) = make_session_and_context_with_auth_and_config_and_rx(
+        CodexAuth::from_api_key("Test API Key"),
+        Vec::new(),
+        |config| {
+            config.model = Some(model_a.clone());
+            config.model_provider_id = provider_a_id.clone();
+            config.model_provider = provider_a.clone();
+            config
+                .model_providers
+                .insert(provider_a_id.clone(), provider_a.clone());
+            config
+                .model_providers
+                .insert(provider_b_id.clone(), provider_b.clone());
+        },
+    )
+    .await;
+
+    handlers::user_input_or_turn(
+        &session,
+        "turn-1".to_string(),
+        Op::UserInput {
+            items: vec![UserInput::Text {
+                text: "first turn".to_string(),
+                text_elements: Vec::new(),
+            }],
+            final_output_json_schema: None,
+            responsesapi_client_metadata: None,
+            additional_context: Default::default(),
+            thread_settings: ThreadSettingsOverrides::default(),
+        },
+        /*client_user_message_id*/ None,
+    )
+    .await;
+    wait_for_turn_complete_from_rx(&rx).await;
+
+    handlers::user_input_or_turn(
+        &session,
+        "turn-2".to_string(),
+        Op::UserInput {
+            items: vec![UserInput::Text {
+                text: "second turn".to_string(),
+                text_elements: Vec::new(),
+            }],
+            final_output_json_schema: None,
+            responsesapi_client_metadata: None,
+            additional_context: Default::default(),
+            thread_settings: ThreadSettingsOverrides {
+                model: Some(model_b.clone()),
+                model_provider: Some(provider_b_id.clone()),
+                ..Default::default()
+            },
+        },
+        /*client_user_message_id*/ None,
+    )
+    .await;
+    wait_for_turn_complete_from_rx(&rx).await;
+
+    let provider_a_requests = provider_a_server
+        .received_requests()
+        .await
+        .unwrap_or_default();
+    let provider_b_requests = provider_b_server
+        .received_requests()
+        .await
+        .unwrap_or_default();
+    let provider_a_chat_request_count = provider_a_requests
+        .iter()
+        .filter(|request| request.url.path() == "/v1/chat/completions")
+        .count();
+    let provider_b_chat_requests: Vec<_> = provider_b_requests
+        .iter()
+        .filter(|request| request.url.path() == "/v1/chat/completions")
+        .collect();
+
+    assert_eq!(provider_a_chat_request_count, 1);
+    assert_eq!(provider_b_chat_requests.len(), 1);
+    let provider_b_body: serde_json::Value = provider_b_chat_requests[0]
+        .body_json()
+        .expect("request body json");
+    assert_eq!(provider_b_body["model"], model_b);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn session_settings_model_provider_update_rejects_unknown_provider() {
     let session_configuration = make_session_configuration_for_tests().await;
 
@@ -3804,6 +3936,64 @@ async fn session_settings_model_provider_update_rejects_unknown_provider() {
     };
 
     assert!(err.to_string().contains("model_provider"));
+}
+
+async fn wait_for_turn_complete_from_rx(rx: &async_channel::Receiver<Event>) {
+    let deadline = StdDuration::from_secs(10);
+    let start = std::time::Instant::now();
+    loop {
+        let remaining = deadline.saturating_sub(start.elapsed());
+        let evt = tokio::time::timeout(remaining, rx.recv())
+            .await
+            .expect("timeout waiting for event")
+            .expect("event");
+        match evt.msg {
+            EventMsg::TurnComplete(_) => return,
+            EventMsg::Error(payload) => panic!("turn failed: {payload:?}"),
+            _ => continue,
+        }
+    }
+}
+
+async fn mount_chat_completions_provider(server: &wiremock::MockServer, reply: &str) {
+    Mock::given(method("GET"))
+        .and(path("/v1/models"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "object": "list",
+            "data": [],
+        })))
+        .mount(server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(chat_completions_text_sse(reply)),
+        )
+        .mount(server)
+        .await;
+}
+
+fn chat_completions_text_sse(text: &str) -> String {
+    let chunk = json!({
+        "id": "chatcmpl-provider-switch",
+        "model": "astral-test-model",
+        "choices": [{
+            "delta": {
+                "role": "assistant",
+                "content": text,
+            },
+            "finish_reason": "stop",
+        }],
+        "usage": {
+            "prompt_tokens": 13,
+            "completion_tokens": 5,
+            "prompt_tokens_details": { "cached_tokens": 0 },
+        },
+    });
+    format!("data: {chunk}\n\n")
 }
 
 pub(crate) async fn make_session_configuration_for_tests() -> SessionConfiguration {
