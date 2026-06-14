@@ -25,6 +25,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use super::append_sandbox_intervention_hint;
 use super::format_exec_output_str;
 
 #[derive(Clone, Copy)]
@@ -377,7 +378,8 @@ impl ToolEmitter {
                 (event, result)
             }
             Err(ToolError::Codex(CodexErr::Sandbox(SandboxErr::Denied { output, .. }))) => {
-                let response = self.format_exec_output_for_model(&output, ctx);
+                let mut response = self.format_exec_output_for_model(&output, ctx);
+                append_sandbox_intervention_hint(&mut response);
                 // apply_patch can be denied after it has already committed a
                 // known prefix. Reuse the output-bearing path so the visible
                 // item still fails while the turn diff consumes that prefix.
@@ -626,6 +628,7 @@ mod tests {
     use codex_protocol::error::CodexErr;
     use codex_protocol::error::SandboxErr;
     use codex_protocol::exec_output::ExecToolCallOutput;
+    use codex_protocol::exec_output::StreamOutput;
     use codex_protocol::items::TurnItem;
     use codex_protocol::protocol::PatchApplyStatus;
     use codex_utils_absolute_path::AbsolutePathBuf;
@@ -717,5 +720,76 @@ mod tests {
             PatchApplyStatus::Declined,
         )
         .await;
+    }
+
+    #[tokio::test]
+    async fn sandbox_denied_response_includes_intervention_hint() {
+        let (session, turn, _rx_event) =
+            make_session_and_context_with_dynamic_tools_and_rx(Vec::new()).await;
+        let dir = tempdir().expect("tempdir");
+        let cwd = AbsolutePathBuf::from_absolute_path(dir.path()).expect("absolute cwd");
+        let output = ExecToolCallOutput {
+            exit_code: 1,
+            aggregated_output: StreamOutput::new("operation not permitted".to_string()),
+            ..Default::default()
+        };
+
+        let Err(crate::function_tool::FunctionCallError::RespondToModel(response)) =
+            ToolEmitter::shell(
+                vec![
+                    "sh".to_string(),
+                    "-lc".to_string(),
+                    "touch /private/x".to_string(),
+                ],
+                cwd,
+                ExecCommandSource::Agent,
+            )
+            .finish(
+                ToolEventCtx::new(session.as_ref(), turn.as_ref(), "call-id", None),
+                Err(ToolError::Codex(CodexErr::Sandbox(SandboxErr::Denied {
+                    output: Box::new(output),
+                    network_policy_decision: None,
+                }))),
+                None,
+            )
+            .await
+        else {
+            panic!("sandbox denied should respond to model");
+        };
+
+        assert!(response.contains("operation not permitted"));
+        assert!(response.contains(crate::tools::SANDBOX_INTERVENTION_HINT));
+    }
+
+    #[tokio::test]
+    async fn normal_exec_failure_does_not_include_intervention_hint() {
+        let (session, turn, _rx_event) =
+            make_session_and_context_with_dynamic_tools_and_rx(Vec::new()).await;
+        let dir = tempdir().expect("tempdir");
+        let cwd = AbsolutePathBuf::from_absolute_path(dir.path()).expect("absolute cwd");
+        let output = ExecToolCallOutput {
+            exit_code: 1,
+            aggregated_output: StreamOutput::new("test failed".to_string()),
+            ..Default::default()
+        };
+
+        let Err(crate::function_tool::FunctionCallError::RespondToModel(response)) =
+            ToolEmitter::shell(
+                vec!["sh".to_string(), "-lc".to_string(), "false".to_string()],
+                cwd,
+                ExecCommandSource::Agent,
+            )
+            .finish(
+                ToolEventCtx::new(session.as_ref(), turn.as_ref(), "call-id", None),
+                Ok(output),
+                None,
+            )
+            .await
+        else {
+            panic!("nonzero exit should respond to model");
+        };
+
+        assert!(response.contains("test failed"));
+        assert!(!response.contains("[Sandbox Intervention]"));
     }
 }

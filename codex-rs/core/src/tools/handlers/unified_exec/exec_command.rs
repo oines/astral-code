@@ -2,6 +2,8 @@ use std::sync::Arc;
 
 use crate::function_tool::FunctionCallError;
 use crate::maybe_emit_implicit_skill_invocation;
+use crate::tools::SANDBOX_INTERVENTION_HINT;
+use crate::tools::append_sandbox_intervention_hint;
 use crate::tools::context::ExecCommandToolOutput;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
@@ -25,12 +27,15 @@ use crate::unified_exec::UnifiedExecContext;
 use crate::unified_exec::UnifiedExecError;
 use crate::unified_exec::UnifiedExecProcessManager;
 use crate::unified_exec::generate_chunk_id;
+use crate::unified_exec::resolve_max_tokens;
 use codex_features::Feature;
 use codex_otel::SessionTelemetry;
 use codex_otel::TOOL_CALL_UNIFIED_EXEC_METRIC;
 use codex_tools::ToolName;
 use codex_tools::ToolSpec;
+use codex_utils_output_truncation::TruncationPolicy;
 use codex_utils_output_truncation::approx_token_count;
+use codex_utils_output_truncation::formatted_truncate_text;
 
 use super::super::shell_spec::CommandToolOptions;
 use super::super::shell_spec::create_exec_command_tool_with_environment_id;
@@ -285,15 +290,27 @@ impl ToolExecutor<ToolInvocation> for ExecCommandHandler {
         {
             Ok(response) => Ok(boxed_tool_output(response)),
             Err(UnifiedExecError::SandboxDenied { output, .. }) => {
-                let output_text = output.aggregated_output.text;
-                let original_token_count = approx_token_count(&output_text);
+                let original_token_count = approx_token_count(&output.aggregated_output.text);
+                let hint_token_count =
+                    approx_token_count(SANDBOX_INTERVENTION_HINT).saturating_add(8);
+                let model_output_max_tokens = resolve_max_tokens(max_output_tokens)
+                    .max(hint_token_count.saturating_add(16))
+                    .min(turn.truncation_policy.token_budget());
+                let output_max_tokens = model_output_max_tokens
+                    .saturating_sub(hint_token_count)
+                    .max(1);
+                let mut output_text = formatted_truncate_text(
+                    &output.aggregated_output.text,
+                    TruncationPolicy::Tokens(output_max_tokens),
+                );
+                append_sandbox_intervention_hint(&mut output_text);
                 Ok(boxed_tool_output(ExecCommandToolOutput {
                     event_call_id: context.call_id.clone(),
                     chunk_id: generate_chunk_id(),
                     wall_time: output.duration,
                     raw_output: output_text.into_bytes(),
                     truncation_policy: turn.truncation_policy,
-                    max_output_tokens,
+                    max_output_tokens: Some(model_output_max_tokens),
                     // Sandbox denial is terminal, so there is no live
                     // process for write_stdin to resume.
                     process_id: None,

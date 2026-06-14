@@ -2,6 +2,8 @@ use super::*;
 use codex_protocol::approvals::ElicitationRequest as CoreElicitationRequest;
 use codex_protocol::items::AgentMessageContent;
 use codex_protocol::items::AgentMessageItem;
+use codex_protocol::items::CoreToolCallItem;
+use codex_protocol::items::CoreToolCallStatus as CoreCoreToolCallStatus;
 use codex_protocol::items::FileChangeItem;
 use codex_protocol::items::ImageViewItem;
 use codex_protocol::items::McpToolCallItem;
@@ -2602,6 +2604,29 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
             })),
             error: None,
             duration_ms: Some(42),
+        }
+    );
+
+    let core_tool_call_item = TurnItem::CoreToolCall(CoreToolCallItem {
+        id: "core-tool-1".to_string(),
+        tool: "Glob".to_string(),
+        arguments: json!({"pattern": "*.toml"}),
+        status: CoreCoreToolCallStatus::Completed,
+        result: Some("config.toml\n".to_string()),
+        error: None,
+        duration: Some(Duration::from_millis(7)),
+    });
+
+    assert_eq!(
+        ThreadItem::from(core_tool_call_item),
+        ThreadItem::CoreToolCall {
+            id: "core-tool-1".to_string(),
+            tool: "Glob".to_string(),
+            arguments: json!({"pattern": "*.toml"}),
+            status: CoreToolCallStatus::Completed,
+            result: Some("config.toml\n".to_string()),
+            error: None,
+            duration_ms: Some(7),
         }
     );
 }

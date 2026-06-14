@@ -18,6 +18,9 @@ use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
+use crate::tools::core_tool_lifecycle::maybe_emit_core_tool_completed;
+use crate::tools::core_tool_lifecycle::maybe_emit_core_tool_failed;
+use crate::tools::core_tool_lifecycle::maybe_emit_core_tool_started;
 use crate::tools::flat_tool_name;
 use crate::tools::handlers::multi_agents_spec::MULTI_AGENT_V1_NAMESPACE;
 use crate::tools::hook_names::HookToolName;
@@ -582,6 +585,7 @@ impl ToolRegistry {
             }
         }
 
+        let core_tool_call_tracker = maybe_emit_core_tool_started(&invocation).await;
         let response_cell = tokio::sync::Mutex::new(None);
         let invocation_for_tool = invocation.clone();
         let log_payload = invocation.payload.log_payload();
@@ -696,6 +700,33 @@ impl ToolRegistry {
             lifecycle_outcome,
         )
         .await;
+
+        match &result {
+            Ok(_) => {
+                let completion = {
+                    let guard = response_cell.lock().await;
+                    guard.as_ref().map(|result| {
+                        (
+                            result.result.success_for_logging(),
+                            result.result.log_preview(),
+                        )
+                    })
+                };
+                if let Some((success, preview)) = completion {
+                    maybe_emit_core_tool_completed(
+                        core_tool_call_tracker.as_ref(),
+                        &invocation,
+                        success,
+                        preview,
+                    )
+                    .await;
+                }
+            }
+            Err(err) => {
+                maybe_emit_core_tool_failed(core_tool_call_tracker.as_ref(), &invocation, err)
+                    .await;
+            }
+        }
 
         match result {
             Ok(_) => {

@@ -1,6 +1,7 @@
 pub(crate) mod astral_tool_bridge;
 pub(crate) mod code_mode;
 pub(crate) mod context;
+pub(crate) mod core_tool_lifecycle;
 pub(crate) mod events;
 pub(crate) mod handlers;
 pub(crate) mod hook_names;
@@ -29,6 +30,22 @@ pub(crate) const TELEMETRY_PREVIEW_MAX_BYTES: usize = 2 * 1024; // 2 KiB
 pub(crate) const TELEMETRY_PREVIEW_MAX_LINES: usize = 64; // lines
 pub(crate) const TELEMETRY_PREVIEW_TRUNCATION_NOTICE: &str =
     "[... telemetry preview truncated ...]";
+
+pub(crate) const SANDBOX_INTERVENTION_HINT: &str = "\
+[Sandbox Intervention] This action was blocked by the environment permission policy.
+
+To proceed, call RequestPermissions to request the exact filesystem or network permissions needed. Wait for approval, then retry the original action.
+Do not retry the blocked action before permission is granted.";
+
+pub(crate) fn append_sandbox_intervention_hint(output: &mut String) {
+    if !output.is_empty() {
+        if !output.ends_with('\n') {
+            output.push('\n');
+        }
+        output.push('\n');
+    }
+    output.push_str(SANDBOX_INTERVENTION_HINT);
+}
 
 /// Legacy boundaries such as hook payloads, telemetry tags, and Responses tool
 /// names still require a single flattened string. Keep comparisons and sorting
@@ -108,3 +125,7 @@ fn build_content_with_timeout(exec_output: &ExecToolCallOutput) -> String {
         exec_output.aggregated_output.text.clone()
     }
 }
+
+#[cfg(test)]
+#[path = "sandbox_intervention_tests.rs"]
+mod sandbox_intervention_tests;

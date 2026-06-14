@@ -157,6 +157,50 @@ fn render_lines(lines: &[Line<'static>]) -> Vec<String> {
         .collect()
 }
 
+#[test]
+fn core_tool_call_cell_summarizes_completed_glob() {
+    let cell = new_core_tool_call_cell(codex_app_server_protocol::ThreadItem::CoreToolCall {
+        id: "core-tool-1".to_string(),
+        tool: "Glob".to_string(),
+        arguments: json!({"pattern": "*.toml", "path": "/tmp/project"}),
+        status: codex_app_server_protocol::CoreToolCallStatus::Completed,
+        result: Some("Cargo.toml\nconfig.toml\n".to_string()),
+        error: None,
+        duration_ms: Some(12),
+    })
+    .expect("core tool cell");
+
+    insta::assert_snapshot!(
+        render_lines(&cell.display_lines(/*width*/ 80)).join("\n"),
+        @r###"
+• Called Glob(*.toml, path=/tmp/project)
+  └ 2 files in 12ms
+"###
+    );
+}
+
+#[test]
+fn core_tool_call_cell_summarizes_failed_edit() {
+    let cell = new_core_tool_call_cell(codex_app_server_protocol::ThreadItem::CoreToolCall {
+        id: "core-tool-2".to_string(),
+        tool: "Edit".to_string(),
+        arguments: json!({"file_path": "src/lib.rs"}),
+        status: codex_app_server_protocol::CoreToolCallStatus::Failed,
+        result: None,
+        error: Some("old_string not found".to_string()),
+        duration_ms: Some(8),
+    })
+    .expect("core tool cell");
+
+    insta::assert_snapshot!(
+        render_lines(&cell.display_lines(/*width*/ 80)).join("\n"),
+        @r###"
+• Called Edit(src/lib.rs)
+  └ Error: old_string not found
+"###
+    );
+}
+
 fn render_transcript(cell: &dyn HistoryCell) -> Vec<String> {
     render_lines(&cell.transcript_lines(u16::MAX))
 }

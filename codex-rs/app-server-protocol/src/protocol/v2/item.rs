@@ -14,6 +14,7 @@ use codex_protocol::approvals::GuardianAssessmentAction as CoreGuardianAssessmen
 use codex_protocol::approvals::GuardianAssessmentDecisionSource as CoreGuardianAssessmentDecisionSource;
 use codex_protocol::approvals::GuardianCommandSource as CoreGuardianCommandSource;
 use codex_protocol::items::AgentMessageContent as CoreAgentMessageContent;
+use codex_protocol::items::CoreToolCallStatus as CoreCoreToolCallStatus;
 use codex_protocol::items::McpToolCallStatus as CoreMcpToolCallStatus;
 use codex_protocol::items::TurnItem as CoreTurnItem;
 use codex_protocol::memory_citation::MemoryCitation as CoreMemoryCitation;
@@ -313,6 +314,19 @@ pub enum ThreadItem {
     },
     #[serde(rename_all = "camelCase")]
     #[ts(rename_all = "camelCase")]
+    CoreToolCall {
+        id: String,
+        tool: String,
+        arguments: JsonValue,
+        status: CoreToolCallStatus,
+        result: Option<String>,
+        error: Option<String>,
+        /// The duration of the core tool call in milliseconds.
+        #[ts(type = "number | null")]
+        duration_ms: Option<i64>,
+    },
+    #[serde(rename_all = "camelCase")]
+    #[ts(rename_all = "camelCase")]
     CollabAgentToolCall {
         /// Unique identifier for this collab tool call.
         id: String,
@@ -386,6 +400,7 @@ impl ThreadItem {
             | ThreadItem::FileChange { id, .. }
             | ThreadItem::McpToolCall { id, .. }
             | ThreadItem::DynamicToolCall { id, .. }
+            | ThreadItem::CoreToolCall { id, .. }
             | ThreadItem::CollabAgentToolCall { id, .. }
             | ThreadItem::WebSearch { id, .. }
             | ThreadItem::ImageView { id, .. }
@@ -858,6 +873,21 @@ impl From<CoreTurnItem> for ThreadItem {
                     duration_ms,
                 }
             }
+            CoreTurnItem::CoreToolCall(tool) => {
+                let duration_ms = tool
+                    .duration
+                    .and_then(|duration| i64::try_from(duration.as_millis()).ok());
+
+                ThreadItem::CoreToolCall {
+                    id: tool.id,
+                    tool: tool.tool,
+                    arguments: tool.arguments,
+                    status: CoreToolCallStatus::from(tool.status),
+                    result: tool.result,
+                    error: tool.error,
+                    duration_ms,
+                }
+            }
             CoreTurnItem::ContextCompaction(compaction) => {
                 ThreadItem::ContextCompaction { id: compaction.id }
             }
@@ -882,6 +912,27 @@ pub enum CommandExecutionStatus {
     Completed,
     Failed,
     Declined,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", export_to = "v2/")]
+pub enum CoreToolCallStatus {
+    InProgress,
+    Completed,
+    Failed,
+    Interrupted,
+}
+
+impl From<CoreCoreToolCallStatus> for CoreToolCallStatus {
+    fn from(value: CoreCoreToolCallStatus) -> Self {
+        match value {
+            CoreCoreToolCallStatus::InProgress => Self::InProgress,
+            CoreCoreToolCallStatus::Completed => Self::Completed,
+            CoreCoreToolCallStatus::Failed => Self::Failed,
+            CoreCoreToolCallStatus::Interrupted => Self::Interrupted,
+        }
+    }
 }
 
 impl From<CoreExecCommandStatus> for CommandExecutionStatus {
