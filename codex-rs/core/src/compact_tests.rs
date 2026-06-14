@@ -153,6 +153,29 @@ fn collect_user_messages_filters_legacy_warnings() {
 }
 
 #[test]
+fn collect_user_messages_filters_claude_style_compaction_summaries() {
+    let summary = compact_user_summary_message(
+        "<summary>\n1. Primary Request and Intent:\n   Keep working.\n</summary>",
+        true,
+    );
+    let items = vec![
+        user_message("real user message"),
+        user_message(&summary),
+        user_message("next user message"),
+    ];
+
+    let collected = collect_user_messages(&items);
+
+    assert_eq!(
+        vec![
+            "real user message".to_string(),
+            "next user message".to_string()
+        ],
+        collected
+    );
+}
+
+#[test]
 fn build_token_limited_compacted_history_truncates_overlong_user_messages() {
     // Use a small truncation limit so the test remains fast while still validating
     // that oversized user content is truncated.
