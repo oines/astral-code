@@ -6616,3 +6616,633 @@ P0 验收目标。
 2. 增加 trajectory capture proxy 到 `astral_swe_smoke.py`，拿到模型 API 真实请求形状，而不是只看 CLI JSONL。
 3. 改善 Astral `exec --json` 对文件编辑类 tool/event 的可见性，方便与 Claude Code stream-json 对比。
 4. 在磁盘空间更充足时，再跑官方 SWE-bench Lite/Verified 小样本或接入现成 harness。
+
+### 最新补充 96：Claude Code compact 实测对照
+
+根据用户要求，直接运行本机 `claude` CLI，对同类小型 coding task 强制触发 Claude Code 自己的
+auto compact，观察它是否会出现 Astral 先前发现的 compact 后任务失忆/伪 tool-call 污染问题。
+
+实验设置：
+
+- 临时仓库：`/tmp/claude-compact-e2e.1x3kiU`
+- 模型：Claude Code 当前配置的 `deepseek-v4-pro`
+- 输出：`--verbose --output-format stream-json --include-partial-messages`
+- 权限：`--dangerously-skip-permissions`
+- 为触发 compact，临时设置：
+  - `CLAUDE_CODE_AUTO_COMPACT_WINDOW=60000`
+  - `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=10`
+- 任务：修复 `text_tools.py` 中 3 个 failing unittest，并在 compact 后继续任务。
+
+真实结果：
+
+- Claude Code 触发了 3 次 auto compact：
+  - `pre_tokens=27288 -> post_tokens=1615`
+  - `pre_tokens=27033 -> post_tokens=2355`
+  - `pre_tokens=28001 -> post_tokens=2362`
+- compact 后 Claude Code 没有失忆：
+  - 第一次 compact 后继续读源文件。
+  - 第二次 compact 后继续写修复。
+  - 第三次 compact 后继续跑测试。
+- 最终测试已经通过：
+  - `test_parse_int_list_ignores_empty_parts ... ok`
+  - `test_slugify_collapses_noise ... ok`
+  - `test_summarize_counts_normalizes_keys ... ok`
+- 因为阈值被人为压得过低，Claude Code 最后触发自身保护：
+  - `terminal_reason=rapid_refill_breaker`
+  - 报错文案：`Autocompact is thrashing...`
+  - 这是阈值实验造成的“频繁 compact 保护”，不是任务连续性失败。
+- 本次总成本：约 `$0.572`。
+
+compact 形状观察：
+
+- Claude Code compact 注入的是 synthetic user message：
+  - `This session is being continued from a previous conversation that ran out of context...`
+  - 后接结构化 `Summary:`。
+- 摘要固定包含：
+  - `Primary Request and Intent`
+  - `Key Technical Concepts`
+  - `Files and Code Sections`
+  - `Errors and fixes`
+  - `Problem Solving`
+  - `All user messages`
+  - `Pending Tasks`
+  - `Current Work`
+  - `Optional Next Step`
+- 3 个 synthetic summary 都没有发现 Astral 先前那种 DSML/伪 tool-call 污染：
+  - 不含 `<tool_use_error>`。
+  - 不含 `<tool_use>` / `<tool_result>` / `function_call` 风格伪协议块。
+  - 工具错误被自然语言总结为“Glob 被并行工具错误取消”，没有把原始 tool XML 塞进摘要。
+
+对 Astral 的结论：
+
+- compact prompt/外层形状应对标 Claude Code 的结构化 summary，而不是保留当前过松的本地 compact prompt。
+- 核心必须强化这几类字段：
+  - 原始用户目标和约束。
+  - 当前工作阶段。
+  - 已改/未改文件状态。
+  - 已验证/未验证状态。
+  - Pending Tasks 和唯一明确下一步。
+- 需要避免把工具协议、伪 XML、DSML、raw tool_result 直接复制进摘要。
+- 还需要实现或继承类似 `rapid_refill_breaker` 的保护语义：当 compact 在很短 turn 数内连续触发时，应该明确停止或提示，而不是无限压缩。
+
+### 最新补充 97：Astral compact prompt 复刻 Claude Code
+
+根据用户确认授权，Astral compact 不再仅“参考”Claude Code，而是复刻 Claude Code compact 的主路径 prompt
+和续接外壳。
+
+已完成：
+
+- `codex-rs/prompts/templates/compact/prompt.md` 替换为 Claude Code `getCompactPrompt()` 无 custom
+  instructions 时的完整输出。
+- 已用脚本从 `/Users/oines/project/claude-code/services/compact/prompt.ts` 抽取源模板并比对：
+  - Astral prompt 与 Claude Code prompt byte-for-byte 一致。
+  - 长度：5581 bytes。
+- `summary_prefix.md` 替换为 Claude Code compact synthetic user message 的首句：
+  - `This session is being continued from a previous conversation that ran out of context...`
+- `codex-prompts` 新增 Claude Code 等价 summary formatter：
+  - 移除 `<analysis>...</analysis>`。
+  - 将 `<summary>...</summary>` 转成 `Summary:\n...`。
+  - 折叠多余空行并 trim。
+  - 自动 compact 时追加 Claude Code 原文 continuation 指令：
+    `Continue the conversation from where it left off...`
+- `codex-core` local compact 替换为使用新的 Claude-style wrapper，不再把最后 assistant 文本原样拼旧
+  `SUMMARY_PREFIX`。
+- 保留 Codex/Astral 骨架不动：local compact、Plan/Goal、exec-server、PTY、sandbox、approval 均未重写。
+
+额外修复：
+
+- core test 编译暴露之前 provider capability 改造留下的测试初始化缺字段：
+  - `ModelProviderInfo.provider_flavor`
+  - `AgentRequestBuildParams.provider_flavor`
+- 已在测试初始化器中补 `None`，不改变运行时行为。
+
+验证：
+
+- `just fmt` 已运行。
+- `just test -p codex-prompts`：30 passed。
+- `just test -p codex-core compact::tests::collect_user_messages_filters_claude_style_compaction_summaries`：
+  1 passed，2650 skipped。
+- byte-for-byte prompt check 通过。
+
+后续独立项：
+
+- `rapid_refill_breaker` / compact thrashing 保护尚未实现，建议作为单独小 diff 处理。
+
+### 最新补充 98：Core Tool Prompt 对标 Claude Code
+
+根据用户锁定的“楚门世界”原则，Astral 模型侧工具 prompt 不再主动暴露远程/exec-server/PTY 等底层抽象；
+核心工具尽量还原 Claude Code 原文，只有和 Astral 真实 runtime 冲突的部分才单独改成 Astral-native 语义。
+
+已完成：
+
+- 新增 `codex-rs/tools/src/astral_prompts.rs`，集中承载 Astral core tool descriptions。
+- `astral_flavor.rs` 改为引用 prompt module，避免长 prompt 继续散落在 schema 定义里。
+- `Read` 改为 Claude Code 风格：
+  - 保留 `Reads a file from the local filesystem`。
+  - 保留 absolute path、2000 行默认读取、cat -n 行号、截图读取、空文件 reminder 等原文结构。
+  - 未暴露 PDF/pages/notebook 文案，因为当前 Astral `Read` schema 不支持 `pages`，运行时也会拒绝 PDF。
+- `Write / Edit / Glob / Grep / TodoWrite` 改为 Claude Code 原文优先：
+  - `Edit` 使用 Claude Code 的 exact string replacement 主 prompt，包括 pre-read 要求、line number prefix 警告、唯一匹配、emoji、replace_all。
+  - `Edit.old_string/new_string` 参数描述继续保留短防呆警告，作为 DeepSeek 等模型的 schema 级保险。
+  - `TodoWrite` 迁入 Claude Code 长 prompt，包括使用/不使用场景、示例、状态机、`activeForm` 规则。
+- `Bash` 改为 Claude-style semantic port：
+  - 保留专用工具优先、多命令并行、`&&`、git safety、少 `cd`、避免无意义 `sleep` 等 Claude Code 行为骨架。
+  - 删除/不引入 Claude-only 语义：`dangerouslyDisableSandbox`、`Monitor`、Claude 的后台自动通知假设。
+  - 明确 Astral 后台任务链路：`run_in_background`、`tty`、`ReadTaskOutput`、`SendTaskInput`、`ListBackgroundTasks`、`StopBackgroundTask`。
+- `ReadTaskOutput / SendTaskInput / ListBackgroundTasks / StopBackgroundTask / RequestPermissions` 保持 Astral-native 短 prompt。
+
+验证：
+
+- `just fmt` 已运行。
+- `cargo check -p codex-tools --lib` 通过，耗时约 23 分钟。
+- 尝试 `just test -p codex-tools --lib astral_flavor`：
+  - 第一次冷编译在 `codex-api` / `codex-code-mode` 链路沉默过久后中断。
+  - 第二次编译完成，但 `cargo-nextest` 在没有测试子进程时仍长时间不返回，已中断。
+  - 结论：本次代码已完成 Rust 类型检查；`nextest` 卡住需要后续单独排查，不继续消耗本轮时间。
+
+### 最新补充 99：Sandbox Intervention 提权恢复轨迹
+
+根据用户确认，sandbox / permission 拦截必须作为标准 tool_result 历史事件进入模型上下文，而不是动态注入
+system prompt 或每轮 prompt，避免破坏缓存前缀。
+
+已完成：
+
+- 新增固定英文 Sandbox Intervention 文案：
+  - `[Sandbox Intervention] This action was blocked by the environment permission policy.`
+  - 引导模型调用 `RequestPermissions` 申请精确 filesystem/network 权限。
+  - 明确等待 approval 后重试 original action。
+  - 不提供 safe alternative / 绕路暗示。
+- unified exec 的 `SandboxDenied` 返回模型路径会保留原始输出，并在末尾追加 intervention 文案。
+- 通用 tool event 的 `SandboxErr::Denied` 返回模型路径也接入同一固定文案，覆盖 legacy shell / apply_patch 等明确
+  sandbox denial。
+- 普通命令失败、测试失败、编译失败、文件不存在、普通非 0 exit code 不追加 intervention 文案。
+- `RequestPermissions` 模型侧 schema 改为以 `permissions + reason` 为主路径：
+  - `permissions.file_system.read/write` 使用绝对路径数组。
+  - `permissions.network.enabled` 使用布尔开关。
+  - handler 继续兼容旧 `input.permissions` / `input.additional_permissions` 形状。
+- `Bash` 固定工具说明补充 sandbox block 后调用 `RequestPermissions`，approval 后重试原动作。
+
+验证：
+
+- `just fmt` 已运行通过。
+- 尝试 `just test -p codex-tools --lib astral_flavor`：进入 `cargo nextest` 后长时间停留在
+  `Compiling codex-tools`，90 秒无新增输出后中断，避免继续消耗时间。
+- 尝试 `cargo check -p codex-tools --lib`：同样停留在 `Checking codex-tools`，90 秒无新增输出后中断。
+- 未跑全量 workspace；本轮按用户要求优先推进功能，不继续被编译/测试矩阵拖住。
+
+### 最新补充 100：重新编译 Astral 并完成 200K compact 复测
+
+用户要求必须编译出当前源码对应的 `astral`，不能继续用旧 binary 做 compact 验收。
+
+编译诊断：
+
+- 旧 `codex-rs/target/debug/astral` 时间戳为 2026-06-13 20:25，确认是旧产物。
+- 直接在旧 target 中编译多次卡在 `codex-api`：
+  - `rustc` 长时间 `CPU 0`、无输出、无子进程。
+  - `cargo clean -p codex-api` 后仍复现。
+- 仓库 `rust-toolchain.toml` 声明 Rust `1.95.0`，但当时 PATH 实际走 Homebrew Rust `1.96.0`。
+- 安装/启用 rustup 后拉取 Rust `1.95.0`，但在旧 target 中仍复现卡住。
+- 最终使用 Rust `1.95.0` + fresh target `.cache/cargo-target-1.95` 成功编译。
+
+编译结果：
+
+- 命令：`CARGO_TARGET_DIR=/Users/oines/project/astral-code/.cache/cargo-target-1.95 cargo +1.95.0 build -p codex-cli --bin astral -j 1`
+- 耗时：15m59s。
+- 新 binary：`/Users/oines/project/astral-code/.cache/cargo-target-1.95/debug/astral`
+- 标准路径：`/Users/oines/project/astral-code/codex-rs/target/debug/astral` 已改为 symlink，指向新 binary。
+- 旧 `codex-rs/target` 删除后，磁盘可用空间从约 `16Gi` 恢复到约 `172Gi`。
+
+200K compact gauntlet 复测：
+
+- 使用新编译 `astral`、MiMo `mimo-v2.5-pro`、`model_context_window = 200000`、`model_auto_compact_token_limit = 150000`。
+- 临时任务：修复 `.cache/compact-gauntlet-200k/repo/ledger/reconciler.py`，保留 Decimal/退款/void/reversal/API 约束。
+- Agent exit：0。
+- Test exit：0。
+- 耗时：63.84s。
+- 最终 diff 只修改两处：
+  - `Decimal(str(float(value)))` -> `Decimal(str(value))`
+  - `refund` 从加法改为减法。
+- `python3 -m unittest discover -s tests -v` 通过 3 个测试。
+- 最终回复包含 `COMPACT_GAUNTLET_DONE`。
+
+真实 API 轨迹结论：
+
+- `000003` compact 请求使用 Claude-style prompt：
+  - 包含 `CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.`
+  - 包含 `<analysis>` / `<summary>` 输出要求。
+- `000004` compact 后继续请求使用 Claude-style synthetic user wrapper：
+  - `This session is being continued from a previous conversation that ran out of context...`
+- 旧 Codex compact 文案已消失：
+  - 未发现 `CONTEXT CHECKPOINT COMPACTION`。
+  - 未发现 `Another language model started...`。
+- compact 后历史没有 raw `<analysis>`。
+- compact 后历史没有 `<tool_call>` / `<function=...>` 伪 tool XML。
+
+剩余观察：
+
+- MiMo 在 summary 的 `All user messages` 段落中把 compact 请求本身摘要成一句
+  `Message 2: "CRITICAL: Respond with TEXT ONLY..."`。
+- 本地 Claude Code 源码 `services/compact/prompt.ts` 的 `formatCompactSummary()` 也只清理 `<analysis>`、替换
+  `<summary>`，没有过滤这类 summary 句子。
+- 当前结论：这是 MiMo 对 Claude Code 原文 prompt 的 summary 行为差异，不在本轮自创 sanitizer，避免偏离“复刻
+  Claude Code compact prompt/formatter”的锁定决策。
+
+报告位置：
+
+- `/Users/oines/project/astral-code/.cache/compact-gauntlet-200k/compact-gauntlet-report.md`
+
+### 最新补充 101：200K SWE-bench Lite 小样本对比与 compact 观察
+
+用户要求两边都切到 200K context，继续比较 Astral 和 Claude Code，并顺便观察 compact。
+
+配置：
+
+- 模型：MiMo `mimo-v2.5-pro`。
+- Claude Code 使用 200K 版本 `mimo-v2.5-pro`，不使用 `mimo-v2.5-pro[1M]`。
+- Astral 使用 `model_context_window = 200000`、`model_auto_compact_token_limit = 150000`。
+- Astral 主协议走 `/v1/chat/completions`。
+- 两边 thinking 都开启：Astral 请求体含 `thinking.type = "enabled"`；Claude Code 使用 `--effort max`。
+
+修正 benchmark runner：
+
+- 原 runner 从 hidden test patch 提取被修改的测试文件后直接跑整文件 pytest。
+- 这会污染老项目，例如 Requests 的 `test_requests.py` 包含大量历史/网络/环境敏感测试。
+- 已改为优先解析 patch 新增的 pytest node：
+  - `test_requests.py::TestRedirects::test_requests_are_updated_each_time`
+  - `sympy/printing/tests/test_ccode.py::test_ccode_Relational`
+  - `sympy/printing/tests/test_ccode.py::test_ccode_sinc`
+- runner 每次 agent run 前清空对应 capture/outdir，避免旧请求混入 compact 统计。
+
+SWE-bench Lite R0 结果：
+
+| Task | Astral | Claude Code | 结论 |
+| --- | --- | --- | --- |
+| `psf__requests-1963` | PASS，136.65s，diff 666 chars | PASS，107.21s，diff 508 chars | 双方都修对 |
+| `sympy__sympy-11400` | FAIL，80.42s，diff 604 chars | FAIL，76.96s，diff 634 chars | 双方同类漏修 |
+
+Requests 任务观察：
+
+- Astral 把 `method = req.method` 移到 redirect loop 之前，让 method 在多次 redirect 之间持续携带。
+- Claude Code 在每次 `self.send(...)` 后追加 `req = prepared_request`。
+- 两个解法都通过同一个 hidden test。
+- Astral 第一次跑 `python` 失败后自动改用 `python3`。
+- Astral 识别整文件 Requests 测试中的历史失败，并用 `git stash` 验证该失败是 pre-existing。
+- 没看到 Read 行号污染 Edit 的问题。
+- 没看到后台任务或 PTY 卡死问题。
+
+Sympy 任务观察：
+
+- Astral 和 Claude Code 都只加了 `_print_sinc`。
+- 双方都没有补 Relational 打印，所以 `ccode(Eq(x, y))` 仍输出 `Eq(x, y)`。
+- `sinc` 输出仍是 `((Ne(x, 0)) ? ...`，hidden test 期望 `((x != 0) ? ...`。
+- Claude Code stdout 明确显示模型把 issue 示例里的 `Ne(theta, 0)` 误判为 expected format。
+- 当前结论：这是 MiMo 在两个 harness 中共同的任务理解漏洞，不是 Astral 工具 schema/runtime 特有问题。
+
+Astral API 轨迹：
+
+- raw HTTP capture 成功。
+- 路径：`/v1/chat/completions`。
+- roles：`system` / `user` / `assistant` / `tool`。
+- `tool_choice = "auto"`。
+- `parallel_tool_calls = false`。
+- `thinking.type = "enabled"`。
+- Requests 任务：14 次请求，最大 body 约 102,254 chars，最大 messages 27。
+- Sympy 任务：14 次请求，最大 body 约 106,278 chars，最大 messages 29。
+
+Claude Code API 轨迹：
+
+- runner 设置 `ANTHROPIC_BASE_URL` 指向 capture proxy，但 Claude Code MiMo 配置没有走该 proxy。
+- 因此本轮未捕获 Claude Code raw HTTP 请求体。
+- 可用 Claude Code `--output-format json --verbose` stdout 分析工具轨迹。
+- stdout 显示工具循环正常，主要使用 `Bash` / `Read` / `Edit`。
+
+Compact 观察：
+
+- 本轮 SWE 小样本没有触发 compact。
+- Astral 两题最大请求体只有约 102K/106K 字符，远低于 150K token compact 阈值。
+- capture 中没有 Claude-style compact prompt marker：`CRITICAL: Respond with TEXT ONLY`。
+- capture 中没有 continuation wrapper：`This session is being continued from a previous conversation...`。
+- capture 中没有旧 Codex compact 文案：`CONTEXT CHECKPOINT COMPACTION` / `Another language model started...`。
+- capture 中没有 raw `<analysis>` 或 pseudo tool XML 泄漏。
+- 200K compact 行为仍以独立 gauntlet 为准：该 gauntlet 已真实触发 compact，任务继续成功并测试通过。
+
+报告位置：
+
+- `/Users/oines/project/astral-code/.cache/mimo-200k-benchmark/swe-lite-r0/benchmark-report.md`
+- `/Users/oines/project/astral-code/.cache/mimo-200k-benchmark/swe-lite-r0/report.md`
+- `/Users/oines/project/astral-code/.cache/mimo-200k-benchmark/swe-lite-r0/summary.json`
+
+### 最新补充 102：DeepSeek v4 Pro 200K SWE-bench Lite 小样本复测
+
+用户要求把同一套 200K 小样本切到 DeepSeek 官方 `deepseek-v4-pro` 再跑。
+
+API smoke：
+
+- DeepSeek 官方 `/v1/models` 正常，返回 `deepseek-v4-flash` 和 `deepseek-v4-pro`。
+- `/v1/chat/completions` 正常。
+- `/v1/chat/completions` 接受 `thinking = { type = "enabled" }`。
+- `/anthropic/v1/messages` 和 `/anthropic/messages` 的最小 Anthropic Messages 请求均能返回 200。
+- Claude Code 2.1.142 通过本轮 runner 调 DeepSeek 时第一轮返回 `400 Param Incorrect`，没有进入解题。
+
+配置：
+
+- Provider：DeepSeek 官方。
+- Astral API：`https://api.deepseek.com/v1`。
+- Claude Code API 尝试：`https://api.deepseek.com/anthropic`。
+- 模型：`deepseek-v4-pro`。
+- 上下文：200K。
+- Astral：`model_context_window = 200000`、`model_auto_compact_token_limit = 150000`。
+- Astral thinking：请求体含 `thinking.type = "enabled"`。
+
+SWE-bench Lite R0 结果：
+
+| Task | Astral | Claude Code | 结论 |
+| --- | --- | --- | --- |
+| `psf__requests-1963` | PASS，84.79s，diff 666 chars | API 400，empty diff | Astral 通过；Claude 对照未接通 |
+| `sympy__sympy-11400` | FAIL，95.36s，diff 687 chars | API 400，empty diff | Astral 同 MiMo 一样漏 hidden test；Claude 对照未接通 |
+
+Requests 任务观察：
+
+- Astral 解法仍是把 `method = req.method` 移到 redirect loop 之前。
+- 精确 hidden test `test_requests.py::TestRedirects::test_requests_are_updated_each_time` 通过。
+- DeepSeek 首次尝试 `python` 失败后，Astral 自动查找并改用 `python3`。
+- Astral 识别整文件 Requests 测试里的旧失败，没有被带偏。
+- 没看到 Read/Edit 行号污染、后台任务卡死或 PTY 变哑巴。
+
+Sympy 任务观察：
+
+- Astral 只加了 `_print_sinc`。
+- 没有补 Relational 打印，所以 `ccode(Eq(x, y))` 仍输出 `Eq(x, y)`。
+- `sinc` 输出仍是 `((Ne(x, 0)) ? ...`，hidden test 期望 `((x != 0) ? ...`。
+- 失败模式与 MiMo 轮次高度一致，当前判断是模型任务理解/hidden coverage 漏洞，不是 Astral runtime 特有问题。
+
+Astral API 轨迹：
+
+- raw HTTP capture 成功。
+- 路径：`/v1/chat/completions`。
+- roles：`system` / `user` / `assistant` / `tool`。
+- `tool_choice = "auto"`。
+- `parallel_tool_calls = false`。
+- `thinking.type = "enabled"`。
+- Requests：20 次请求，最大 body 约 109,115 chars，最大 messages 39。
+- Sympy：30 次请求，最大 body 约 162,732 chars，最大 messages 65。
+
+Cache：
+
+- Requests final usage：`input_tokens = 399024`，`cached_input_tokens = 381568`，约 95.6%。
+- Sympy final usage：`input_tokens = 914934`，`cached_input_tokens = 882432`，约 96.4%。
+- 这里是 turn 内累计 usage，不是单次请求上下文长度。
+
+Claude Code 对照状态：
+
+- Claude Code 启动成功，stdout 显示 model 为 `deepseek-v4-pro`，apiKeySource 为 `ANTHROPIC_API_KEY`。
+- 首轮即返回 `API Error: 400 Param Incorrect`。
+- capture proxy 没有捕到 Claude Code 请求文件，说明 Claude Code 没有走 runner 注入的 proxy，或在自身 provider 路由层处理。
+- 因此 DeepSeek 这轮不能作为 Claude Code vs Astral 的公平对照，只能作为 Astral DeepSeek `/v1` 主线验收。
+
+Compact 观察：
+
+- 本轮 SWE 小样本没有触发 compact。
+- Requests 最大 body 约 109K chars。
+- Sympy 最大 body 约 163K chars。
+- capture 中没有 Claude-style compact prompt marker，也没有旧 Codex compact 文案。
+- capture 中没有 raw `<analysis>` 或 pseudo tool XML 泄漏。
+- compact 正常性仍以独立 200K compact gauntlet 为准。
+
+报告位置：
+
+- `/Users/oines/project/astral-code/.cache/deepseek-200k-benchmark/swe-lite-r0/benchmark-report.md`
+- `/Users/oines/project/astral-code/.cache/deepseek-200k-benchmark/swe-lite-r0/report.md`
+- `/Users/oines/project/astral-code/.cache/deepseek-200k-benchmark/swe-lite-r0/summary.json`
+
+## 2026-06-14 Harness-Bench DeepSeek 公平 smoke
+
+用户要求切到 Harness-Bench，并强调必须公平。已改用论文官方对应的 `Qihoo360/harness-bench` 本地 clone，而不是继续跑 SWE-Lite runner。
+
+公平性修正：
+
+- Claude Code 必须走 `/anthropic`，不能走 `/v1`；已确认通过 `--setting-sources local --settings <benchmark-local settings>` 让 Claude Code 2.1.142 走 DeepSeek `/anthropic/v1/messages`，并绕开全局 `~/.claude/settings.json`。
+- Astral 使用 DeepSeek `/v1/chat/completions`。
+- 两边同模型：`deepseek-v4-pro`。
+- 两边均开 thinking。
+- 两边均禁用 session persistence / 外部 steering：
+  - Astral：干净 `ASTRAL_HOME`、`project_doc_max_bytes = 0`、关闭 apps/skills/collaboration extra instructions、`--ephemeral`。
+  - Claude Code：`--bare`、`--no-session-persistence`、`--setting-sources local`。
+- Harness-Bench usage proxy 成功抓到两边真实 API request/response。
+- 精确检查通过：fair run 的 request body 中没有实际 `# AGENTS.md instructions for ...`、`<INSTRUCTIONS>`、`Rust/codex-rs` 外部项目指令。
+
+本地 benchmark 接入：
+
+- Harness-Bench clone：`/Users/oines/project/astral-code/.cache/harness-bench-official`。
+- Run 目录：`/Users/oines/project/astral-code/.cache/harness-bench-runs/official-deepseek-fair`。
+- Wrapper：
+  - `scripts/bench-astral-deepseek.sh`
+  - `scripts/bench-claude-deepseek.sh`
+- Model config：
+  - `astral-deepseek`
+  - `claude-code-deepseek`
+
+任务结果：
+
+| Task | Astral | Claude Code | 备注 |
+| --- | --- | --- | --- |
+| `01-file` | PASS，score 1.0，4 requests，约 8.0s | PASS，score 1.0，4 requests，约 8.0s | 公平重跑后两边均正确 |
+| `02-exec` | PASS，score 1.0，4 requests，约 9.5s | PASS，score 1.0，7 requests，约 17.5s | Astral 终端路径更短 |
+| `25-code-repair-pytest` | PASS，excellent/1.0，7 requests，约 20.4s | PASS，excellent/1.0，8 requests，约 26.4s | 上游任务路径 bug 本地修正后计分 |
+
+`25-code-repair-pytest` 注意事项：
+
+- 上游任务 copy 后实际文件在 `workspace/app/...`。
+- 原 prompt/oracle/hooks 写的是 `fixtures/app/...`，导致两边首次都修复成功但 oracle 去不存在路径评分失败。
+- 本地 clone 已统一修正为 `app/...`，再重跑后两边均通过。
+
+轨迹观察：
+
+- Astral wire：OpenAI-compatible chat completions，roles 为 `system/user/assistant/tool`。
+- Claude Code wire：Anthropic Messages，content block 为 text/thinking/tool_use/tool_result。
+- Astral 暴露工具面明显更大：`Bash`、后台任务工具、`Read/Write/Edit/Glob/Grep`、`TodoWrite`、`Skill`、`AskUserQuestion`、subagent tools。
+- Claude Code bare 实际暴露工具为 `Bash/Edit/Read`。
+- 这说明两边已经是同模型、同任务、公平外部输入，但不是等宽工具面；这是 harness 差异本身，也是 Astral token/cache 更重的重要原因。
+- 本样本未发现 Read/Edit 行号陷阱、PTY 卡死、后台任务失忆、compact 中断问题。
+- 本样本没有触发 compact。
+
+报告位置：
+
+- `/Users/oines/project/astral-code/.cache/harness-bench-runs/official-deepseek-fair/harness-bench-report.md`
+
+## 2026-06-14 Terminal Agentic Harness-Bench 补充
+
+用户要求继续跑 terminal agentic 公平对比。已在同一个 fair Harness-Bench 环境下补充终端任务：
+
+- `02-exec`：基础 shell 执行（沿用前一轮结果）。
+- `30-terminal-progress`：持续输出进度，要求完整捕获 stdout。
+- `31-terminal-silent-wait`：静默 7 秒后写 marker，测试无输出长任务等待。
+- `32-terminal-interactive-confirm`：交互式 `Proceed? [y/N]`，测试 stdin。
+- `20-heartbeat-escalation`：异步注入邮件，持续观察、去重、升级。
+
+公平性：
+
+- 两边同模型 `deepseek-v4-pro`。
+- Astral 走 DeepSeek `/v1/chat/completions`。
+- Claude Code 走 DeepSeek `/anthropic/v1/messages`。
+- 两边均开 thinking。
+- 两边都使用 benchmark-local settings，无 session persistence，无外部 project steering。
+- request body 精确检查无实际 `# AGENTS.md instructions for ...`、`<INSTRUCTIONS>`、`Rust/codex-rs` 污染。
+
+结果：
+
+| Task | Astral | Claude Code | 结论 |
+| --- | --- | --- | --- |
+| `02-exec` | PASS，1.0，4 requests，约 9.5s | PASS，1.0，7 requests，约 17.5s | Astral shell 轨迹更短 |
+| `30-terminal-progress` | PASS，1.0，9 requests，约 26.0s | PASS，1.0，6 requests，约 19.9s | 两边完整捕获 16 行输出 |
+| `31-terminal-silent-wait` | PASS，1.0，6 requests，约 19.4s | PASS，1.0，6 requests，约 23.5s | 两边都等过无输出窗口 |
+| `32-terminal-interactive-confirm` | PASS，1.0，7 requests，约 17.2s | PASS，1.0，7 requests，约 15.5s | Astral 实际用了 `SendTaskInput` |
+| `20-heartbeat-escalation` | GOOD，0.875，20 requests，约 103.8s | EXCELLENT，0.9，10 requests，约 103.4s | 两边功能正确；官方 timing 子项都失败 |
+
+观察：
+
+- Astral 的增强终端工具确实被真实轨迹使用：
+  - `32-terminal-interactive-confirm` 使用 `SendTaskInput`。
+  - `20-heartbeat-escalation` 使用 `ReadTaskOutput`。
+- Astral 在 `02-exec` 上明显更短。
+- Astral 在复杂 heartbeat 上请求数更多，且 token/cache footprint 大很多，主要来自更宽工具面、Todo/task bookkeeping 和更大的系统/tool schema。
+- Claude Code bare 暴露工具更窄（`Bash/Edit/Read`），benchmark 任务中更省 prompt，但这不等价于真实交互 UX 更好；benchmark 只看最终 artifact。
+- 没发现 PTY 卡死、交互输入丢失、无输出长任务被提前杀掉等终端 correctness 问题。
+
+本地 benchmark caveat：
+
+- `31-terminal-silent-wait` 初次两边均因 oracle 未 strip newline 而只得 0.6；oracle 已修正后重跑，两边均 PASS。
+- `20-heartbeat-escalation` timing 子项用文件 mtime 与 workspace ctime 判断，macOS temp workspace 下不稳定；两边的通知、state、summary 功能项均正确。
+
+报告位置：
+
+- `/Users/oines/project/astral-code/.cache/harness-bench-runs/official-deepseek-fair/terminal-agentic-report.md`
+
+## 2026-06-14 Terminal Agentic Full-Tools 公平重跑
+
+用户指出上一轮 “Claude Code bare vs Astral full” 不公平；确认新的公平口径为：**双方都 full tool，只要不读到外部上下文污染即可**。
+
+修正：
+
+- 新建外部 run root，避免 benchmark workspace 位于 Astral repo 内导致 parent git status / project context 污染：
+  - `/Users/oines/project/astral-harness-bench-runs/official-deepseek-fulltools`
+- Claude Code 改为非 bare：
+  - 不使用 `--bare`
+  - 使用 `--tools default`
+  - 仍保留 `--no-session-persistence`
+  - 使用 `--setting-sources local --settings <benchmark-local settings>`
+  - 使用 `--strict-mcp-config --mcp-config <empty config>`
+  - 使用 DeepSeek `/anthropic/v1/messages`
+- Astral 仍为 full tool，DeepSeek `/v1/chat/completions`。
+- 两边均开 thinking。
+- request body 精确检查无实际 `# AGENTS.md instructions for ...`、`<INSTRUCTIONS>`、`Rust/codex-rs`、`/Users/oines/project/astral-code`、parent `gitStatus`。
+
+实际工具面：
+
+- Astral 暴露 18 个工具：
+  `Bash`、`ReadTaskOutput`、`SendTaskInput`、`ListBackgroundTasks`、`StopBackgroundTask`、`Read`、`Write`、`Edit`、`Glob`、`Grep`、`TodoWrite`、`Skill`、`AskUserQuestion`、`close_agent`、`resume_agent`、`send_input`、`spawn_agent`、`wait_agent`。
+- Claude Code full tools 暴露 26 个工具：
+  `Agent`、`AskUserQuestion`、`Bash`、`CronCreate`、`CronDelete`、`CronList`、`Edit`、`EnterPlanMode`、`EnterWorktree`、`ExitPlanMode`、`ExitWorktree`、`Glob`、`Grep`、`NotebookEdit`、`Read`、`ScheduleWakeup`、`Skill`、`TaskCreate`、`TaskGet`、`TaskList`、`TaskOutput`、`TaskStop`、`TaskUpdate`、`WebFetch`、`WebSearch`、`Write`。
+
+结果：
+
+| Task | Astral | Claude Code Full Tools | 结论 |
+| --- | --- | --- | --- |
+| `02-exec` | PASS，1.0，4 requests，约 11.5s | PASS，1.0，3 requests，约 11.1s | 双方都稳 |
+| `30-terminal-progress` | PASS，1.0，6 requests，约 16.7s | PASS，1.0，5 requests，约 20.8s | 双方完整捕获持续输出 |
+| `31-terminal-silent-wait` | PASS，1.0，5 requests，约 16.4s | PASS，1.0，6 requests，约 22.9s | 双方都等过无输出窗口 |
+| `32-terminal-interactive-confirm` | PASS，1.0，7 requests，约 15.7s | PASS，1.0，4 requests，约 11.5s | 双方都能处理 y/n |
+| `20-heartbeat-escalation` | EXCELLENT，0.95，27 requests，约 131.0s | EXCELLENT，0.9，16 requests，约 131.7s | 双方都处理异步注入/去重/升级；Astral 分数略高 |
+
+轨迹观察：
+
+- 这轮才是 full-tools 公平对比，上一轮 bare 对比只能作为模式差异参考，不作为公平成本结论。
+- Claude full tools 不再是极窄 `Bash/Edit/Read`，而是 26 工具大工具面。
+- Astral 在 heartbeat 中实际使用了 `ReadTaskOutput` / `ListBackgroundTasks`。
+- Claude full tools 在 heartbeat 中实际使用了 `TaskCreate` / `TaskUpdate`。
+- 双方都没有 terminal correctness failure。
+- Astral 在长观察任务中 request 数和 cached context 更大，优化方向是减少长任务 monitoring 时的 Todo/tool bookkeeping 和无必要轮询，而不是改 PTY/exec-server 骨架。
+
+报告位置：
+
+- `/Users/oines/project/astral-harness-bench-runs/official-deepseek-fulltools/terminal-agentic-fulltools-report.md`
+
+## 2026-06-14 Astral Core Tool TUI 与 Glob 收口
+
+本轮目标：
+
+- 修复 `Glob` 在 `~/.astral-code` 这类目录下卡死的问题。
+- 让 Astral-native core tools 在 TUI/transcript/resume 中可见。
+- 不重复渲染 Codex 已有原生通道：`Bash`、patch/file change、MCP、approval、Plan/Goal、compact、native user input 都保持原路径。
+- `AskUserQuestion` 确认继续走 Codex 原生 `request_user_input` UI，不降级成普通工具文本。
+
+已完成：
+
+- `Glob` 从“全量递归 path 后过滤”改为 pattern-aware 遍历：
+  - `*.toml` 只查当前层。
+  - `src/*.rs` 从字面目录前缀 `src` 开始，固定深度搜索。
+  - `src/**/*.rs` / `**/*.rs` 才递归。
+  - 遍历过程中边匹配、边限流、边计入 scan cap；scan cap 现在覆盖目录和文件 entry，不再只数目录。
+  - 继续走 `ExecutorFileSystem`，不 shell out 到本地 `find` / `rg`，因此仍保留远程/容器 exec-server 抽象。
+- 新增协议层 `CoreToolCall` item：
+  - 支持 `inProgress/completed/failed/interrupted` 状态。
+  - 记录 tool name、bounded arguments、bounded result/error summary、duration。
+  - 通过 `ItemStarted/ItemCompleted` 进入 app-server thread history 和 resume。
+- registry 分发层新增 Astral core tool lifecycle：
+  - 仅覆盖 `Read`、`Write`、`Edit`、`Glob`、`Grep`、`TodoWrite`、`ReadTaskOutput`、`SendTaskInput`、`ListBackgroundTasks`、`StopBackgroundTask`。
+  - 显式不覆盖 `Bash`、MCP、approval、`AskUserQuestion`、`RequestPermissions`、subagent 原生通道，避免重复显示。
+- TUI 新增 CoreToolCall history cell：
+  - 风格遵循 Codex/Astral：简洁 `Calling/Called Tool(args)` 行 + 一行结果/错误摘要。
+  - 不引入 Claude Code spinner/Ink 皮肤。
+  - `Read` 显示读行数，`Glob/Grep` 显示命中数，`Edit/Write` 显示完成/错误摘要，后台任务工具显示 task id 相关摘要。
+- resume picker transcript 也能显示 `core tool: ...`。
+
+验证：
+
+- `just fmt` 通过。
+- `just test -p codex-core astral_file_tools` 通过：
+  - 12 tests passed。
+  - 覆盖 `*.toml` 不递归、`src/*.rs` 固定深度、`src/**/*.rs` 递归。
+- `just test -p codex-app-server-protocol core_turn_item_into_thread_item_converts_supported_variants` 通过。
+- `just test -p codex-tui core_tool_call_cell` 通过：
+  - 覆盖 completed `Glob` 和 failed `Edit` 的 TUI 摘要展示。
+
+注意：
+
+- `git diff --check` 当前仍会报告早先 compact prompt 原文文件中的 trailing whitespace：
+  - `codex-rs/prompts/templates/compact/prompt.md`
+  - 该文件属于 Claude Code compact prompt 复刻任务，用户要求 prompt 原文保持不改；本轮未触碰。
+
+## 2026-06-14 `/model` 配置模型列表收口
+
+问题：
+
+- TUI `/model` 仍带 Codex catalog/browser 语义，会把 `Providers` 当成模型列表项显示。
+- `model/list` 会从 catalog/cache/远端 provider 模型列表取数，导致已配置的 MiMo 这类模型不稳定出现，而未配置模型可能污染列表。
+- 单一 reasoning option 会被自动应用，用户按 Enter 后看不到第二步 reasoning/effort 选择。
+
+已完成：
+
+- app-server `model/list` 改为 configured-only：
+  - 候选来源为 raw merged config 中的 `[model_capabilities."provider/model"]` key 加当前 active `model/model_provider`。
+  - `$ASTRAL_HOME/model-capabilities.toml` / LiteLLM 大 cache 只作为能力补全，不再扩展 `/model` 候选集合。
+  - `model_provider` 参数只过滤已配置模型，不再触发 provider `/models` 拉取。
+  - `include_hidden` 不再把 catalog hidden models 混进 Astral v1 主列表。
+- TUI `/model` 改为只展示配置好的模型：
+  - 删除主列表中的 `Providers` 项。
+  - 删除 TUI provider browser 事件链路，避免把 provider 当模型。
+  - 空态文案改为 `No configured models are available right now.`。
+  - 选中任何模型后都进入 reasoning level 二级确认，即使只有一个 reasoning option。
+- 快照更新：
+  - `model_picker_filters_hidden_models` 不再显示 `Providers`，subtitle 改为 configured-models 语义。
+
+验证：
+
+- `just fmt` 通过。
+- `just test -p codex-app-server model_list` 通过：
+  - 5 tests passed。
+  - 覆盖大 catalog cache 不污染 configured-only 列表、provider filter、pagination、invalid cursor。
+- `just test -p codex-tui model_picker single_reasoning_option_still_opens_selection reasoning_popup_shows_extra_high_with_space` 通过：
+  - 5 tests passed。
+  - 覆盖 `/model` 不显示 `Providers`、单 option 仍打开 reasoning popup、快照更新。
+- `cargo build -p codex-cli --bin astral` 通过，`codex-rs/target/debug/astral` 已刷新。
