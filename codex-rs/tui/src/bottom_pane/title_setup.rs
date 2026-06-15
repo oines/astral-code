@@ -60,6 +60,8 @@ pub(crate) enum TerminalTitleItem {
     /// Percentage of context window used.
     #[strum(to_string = "context-used", serialize = "context-usage")]
     ContextUsed,
+    /// Latest prompt cache hit rate.
+    CacheHitRate,
     /// Remaining usage on the primary rate limit.
     FiveHourLimit,
     /// Remaining usage on the secondary rate limit.
@@ -108,6 +110,9 @@ impl TerminalTitleItem {
             TerminalTitleItem::ContextUsed => {
                 "Percentage of context window used (omitted when unknown)"
             }
+            TerminalTitleItem::CacheHitRate => {
+                "Latest prompt cache hit rate (omitted when unknown)"
+            }
             TerminalTitleItem::FiveHourLimit => {
                 "Remaining usage on the primary usage limit (omitted when unavailable)"
             }
@@ -142,6 +147,7 @@ impl TerminalTitleItem {
             TerminalTitleItem::GitBranch => Some(StatusSurfacePreviewItem::GitBranch),
             TerminalTitleItem::ContextRemaining => Some(StatusSurfacePreviewItem::ContextRemaining),
             TerminalTitleItem::ContextUsed => Some(StatusSurfacePreviewItem::ContextUsed),
+            TerminalTitleItem::CacheHitRate => Some(StatusSurfacePreviewItem::CacheHitRate),
             TerminalTitleItem::FiveHourLimit => Some(StatusSurfacePreviewItem::FiveHourLimit),
             TerminalTitleItem::WeeklyLimit => Some(StatusSurfacePreviewItem::WeeklyLimit),
             TerminalTitleItem::CodexVersion => Some(StatusSurfacePreviewItem::CodexVersion),
@@ -530,12 +536,25 @@ mod tests {
     }
 
     #[test]
+    fn cache_hit_rate_is_selectable_id() {
+        assert_eq!(
+            TerminalTitleItem::CacheHitRate.to_string(),
+            "cache-hit-rate"
+        );
+        assert_eq!(
+            "cache-hit-rate".parse::<TerminalTitleItem>(),
+            Ok(TerminalTitleItem::CacheHitRate)
+        );
+    }
+
+    #[test]
     fn parse_terminal_title_items_accepts_kebab_case_variants() {
         let items = parse_terminal_title_items(
             [
                 "app-name",
                 "context-remaining",
                 "context-used",
+                "cache-hit-rate",
                 "five-hour-limit",
                 "git-branch",
                 "activity",
@@ -560,6 +579,7 @@ mod tests {
                 TerminalTitleItem::AppName,
                 TerminalTitleItem::ContextRemaining,
                 TerminalTitleItem::ContextUsed,
+                TerminalTitleItem::CacheHitRate,
                 TerminalTitleItem::FiveHourLimit,
                 TerminalTitleItem::GitBranch,
                 TerminalTitleItem::Spinner,

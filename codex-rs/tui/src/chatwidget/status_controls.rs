@@ -364,6 +364,18 @@ impl ChatWidget {
         Some((100 - remaining).clamp(0, 100))
     }
 
+    pub(super) fn status_line_cache_hit_rate_percent(&self) -> Option<i64> {
+        let usage = &self.token_info.as_ref()?.last_token_usage;
+        let input_tokens = usage.input_tokens.max(0);
+        if input_tokens == 0 {
+            return None;
+        }
+
+        let cached_input_tokens = usage.cached_input_tokens.clamp(0, input_tokens);
+        let numerator = i128::from(cached_input_tokens) * 100 + i128::from(input_tokens / 2);
+        Some((numerator / i128::from(input_tokens)) as i64)
+    }
+
     pub(super) fn status_line_total_usage(&self) -> TokenUsage {
         self.token_info
             .as_ref()
