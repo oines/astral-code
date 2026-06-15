@@ -103,6 +103,9 @@ pub(crate) enum StatusLineItem {
     #[strum(to_string = "context-used", serialize = "context-usage")]
     ContextUsed,
 
+    /// Latest prompt cache hit rate.
+    CacheHitRate,
+
     /// Remaining usage on the primary rate limit.
     FiveHourLimit,
 
@@ -166,6 +169,7 @@ impl StatusLineItem {
             StatusLineItem::ContextUsed => {
                 "Percentage of context window used (omitted when unknown)"
             }
+            StatusLineItem::CacheHitRate => "Latest prompt cache hit rate (omitted when unknown)",
             StatusLineItem::FiveHourLimit => {
                 "Remaining usage on the primary usage limit (omitted when unavailable)"
             }
@@ -206,6 +210,7 @@ impl StatusLineItem {
             StatusLineItem::ApprovalMode => StatusSurfacePreviewItem::ApprovalMode,
             StatusLineItem::ContextRemaining => StatusSurfacePreviewItem::ContextRemaining,
             StatusLineItem::ContextUsed => StatusSurfacePreviewItem::ContextUsed,
+            StatusLineItem::CacheHitRate => StatusSurfacePreviewItem::CacheHitRate,
             StatusLineItem::FiveHourLimit => StatusSurfacePreviewItem::FiveHourLimit,
             StatusLineItem::WeeklyLimit => StatusSurfacePreviewItem::WeeklyLimit,
             StatusLineItem::CodexVersion => StatusSurfacePreviewItem::CodexVersion,
@@ -461,6 +466,15 @@ mod tests {
         assert_eq!(
             "reasoning".parse::<StatusLineItem>(),
             Ok(StatusLineItem::Reasoning)
+        );
+    }
+
+    #[test]
+    fn cache_hit_rate_is_selectable_id() {
+        assert_eq!(StatusLineItem::CacheHitRate.to_string(), "cache-hit-rate");
+        assert_eq!(
+            "cache-hit-rate".parse::<StatusLineItem>(),
+            Ok(StatusLineItem::CacheHitRate)
         );
     }
 

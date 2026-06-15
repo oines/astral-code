@@ -13,6 +13,14 @@ fn enable_test_ambient_pet(chat: &mut ChatWidget) {
     chat.install_test_ambient_pet_for_tests(/*animations_enabled*/ false);
 }
 
+fn token_info_with_last_usage(last_token_usage: TokenUsage) -> TokenUsageInfo {
+    TokenUsageInfo {
+        total_token_usage: TokenUsage::default(),
+        last_token_usage,
+        model_context_window: None,
+    }
+}
+
 /// Receiving a token usage update without usage clears the context indicator.
 #[tokio::test]
 async fn token_count_none_resets_context_indicator() {
@@ -1755,6 +1763,61 @@ async fn status_line_legacy_context_usage_renders_context_used_percent() {
     assert!(
         drain_insert_history(&mut rx).is_empty(),
         "legacy context-usage should remain a valid status line item"
+    );
+}
+
+#[tokio::test]
+async fn status_line_cache_hit_rate_renders_latest_usage_percent() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.thread_id = Some(ThreadId::new());
+    chat.config.tui_status_line = Some(vec!["cache-hit-rate".to_string()]);
+    chat.set_token_info(Some(token_info_with_last_usage(TokenUsage {
+        input_tokens: 1000,
+        cached_input_tokens: 250,
+        ..TokenUsage::default()
+    })));
+
+    chat.refresh_status_line();
+
+    assert_eq!(status_line_text(&chat), Some("Cache 25%".to_string()));
+    assert!(
+        drain_insert_history(&mut rx).is_empty(),
+        "cache-hit-rate should remain a valid status line item"
+    );
+}
+
+#[tokio::test]
+async fn status_line_cache_hit_rate_omits_when_usage_is_missing_or_input_is_zero() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+
+    assert_eq!(
+        chat.status_line_value_for_item(crate::bottom_pane::StatusLineItem::CacheHitRate),
+        None
+    );
+
+    chat.set_token_info(Some(token_info_with_last_usage(TokenUsage {
+        cached_input_tokens: 250,
+        ..TokenUsage::default()
+    })));
+
+    assert_eq!(
+        chat.status_line_value_for_item(crate::bottom_pane::StatusLineItem::CacheHitRate),
+        None
+    );
+}
+
+#[tokio::test]
+async fn status_line_cache_hit_rate_clamps_to_one_hundred_percent() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.set_token_info(Some(token_info_with_last_usage(TokenUsage {
+        input_tokens: 1000,
+        cached_input_tokens: 1200,
+        ..TokenUsage::default()
+    })));
+
+    assert_eq!(
+        chat.status_line_value_for_item(crate::bottom_pane::StatusLineItem::CacheHitRate),
+        Some("Cache 100%".to_string())
     );
 }
 
