@@ -53,7 +53,7 @@ async fn retries_on_early_close() {
         experimental_bearer_token: None,
         auth: None,
         aws: None,
-        wire_api: WireApi::Responses,
+        wire_api: WireApi::ChatCompletions,
         provider_flavor: None,
         query_params: None,
         request_body: None,
@@ -84,7 +84,7 @@ async fn retries_on_early_close() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })

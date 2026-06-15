@@ -393,21 +393,6 @@ fn slack_feedback_url(_thread_id: &str) -> String {
     CODEX_FEEDBACK_INTERNAL_URL.to_string()
 }
 
-/// Build the selection popup params shown when feedback is disabled.
-pub(crate) fn feedback_disabled_params() -> super::SelectionViewParams {
-    super::SelectionViewParams {
-        title: Some("Feedback upload is disabled".to_string()),
-        subtitle: Some("Astral does not upload logs or feedback reports.".to_string()),
-        footer_hint: Some(standard_popup_hint_line()),
-        items: vec![super::SelectionItem {
-            name: "Close".to_string(),
-            dismiss_on_select: true,
-            ..Default::default()
-        }],
-        ..Default::default()
-    }
-}
-
 /// Build the upload consent popup params for a given feedback category.
 #[allow(dead_code)]
 pub(crate) fn feedback_upload_consent_params(

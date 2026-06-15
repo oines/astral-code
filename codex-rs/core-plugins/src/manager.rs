@@ -109,9 +109,6 @@ impl PluginsConfigInput {
 #[derive(Clone, PartialEq, Eq)]
 struct FeaturedPluginIdsCacheKey {
     hosted_base_url: String,
-    account_id: Option<String>,
-    legacy_user_id: Option<String>,
-    is_workspace_account: bool,
 }
 
 #[derive(Clone)]
@@ -193,13 +190,10 @@ fn remote_plugin_service_config(config: &PluginsConfigInput) -> RemotePluginServ
 
 fn featured_plugin_ids_cache_key(
     config: &PluginsConfigInput,
-    auth: Option<&CodexAuth>,
+    _auth: Option<&CodexAuth>,
 ) -> FeaturedPluginIdsCacheKey {
     FeaturedPluginIdsCacheKey {
         hosted_base_url: config.hosted_base_url.clone(),
-        account_id: auth.and_then(CodexAuth::get_account_id),
-        legacy_user_id: auth.and_then(CodexAuth::get_chatgpt_user_id),
-        is_workspace_account: auth.is_some_and(CodexAuth::is_workspace_account),
     }
 }
 

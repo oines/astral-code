@@ -123,9 +123,7 @@ async fn token_usage_update_uses_runtime_context_window() {
     );
     assert_eq!(chat.bottom_pane.context_window_percent(), Some(100));
 
-    chat.add_status_output(
-        /*refreshing_rate_limits*/ false, /*request_id*/ None,
-    );
+    chat.add_status_output();
 
     let cells = drain_insert_history(&mut rx);
     let context_line = cells
@@ -433,7 +431,6 @@ async fn configured_pet_load_is_deferred_until_after_construction() {
         is_first_run: true,
         status_account_display: None,
         runtime_model_provider_base_url: None,
-        initial_plan_type: None,
         model: Some(resolved_model),
         startup_tooltip_override: None,
         status_line_invalid_items_warned: Arc::new(AtomicBool::new(false)),
@@ -455,22 +452,6 @@ async fn configured_pet_load_is_deferred_until_after_construction() {
             assert!(result.unwrap().is_some());
         }
     );
-}
-
-#[tokio::test]
-async fn prefetch_rate_limits_is_gated_on_chatgpt_auth_provider() {
-    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-
-    assert!(!chat.should_prefetch_rate_limits());
-
-    set_chatgpt_auth(&mut chat);
-    assert!(chat.should_prefetch_rate_limits());
-
-    chat.config.model_provider.requires_astral_auth = false;
-    assert!(!chat.should_prefetch_rate_limits());
-
-    chat.prefetch_rate_limits();
-    assert!(!chat.should_prefetch_rate_limits());
 }
 
 #[tokio::test]
@@ -589,7 +570,6 @@ async fn status_line_uses_secondary_fallback_for_unsupported_window() {
         }),
         credits: None,
         individual_limit: None,
-        plan_type: None,
         rate_limit_reached_type: None,
     }));
 
@@ -618,7 +598,6 @@ async fn status_line_legacy_limit_items_prefer_matching_windows() {
         }),
         credits: None,
         individual_limit: None,
-        plan_type: None,
         rate_limit_reached_type: None,
     }));
 
@@ -651,7 +630,6 @@ async fn status_line_shows_secondary_non_weekly_when_primary_is_weekly() {
         }),
         credits: None,
         individual_limit: None,
-        plan_type: None,
         rate_limit_reached_type: None,
     }));
 
@@ -680,7 +658,6 @@ async fn status_line_five_hour_item_omits_weekly_only_limit() {
         secondary: None,
         credits: None,
         individual_limit: None,
-        plan_type: None,
         rate_limit_reached_type: None,
     }));
 
@@ -709,7 +686,6 @@ async fn status_line_single_monthly_primary_omits_weekly_limit_item() {
         secondary: None,
         credits: None,
         individual_limit: None,
-        plan_type: None,
         rate_limit_reached_type: None,
     }));
 
@@ -738,7 +714,6 @@ async fn status_line_secondary_only_non_weekly_limit_omits_primary_limit_item() 
         }),
         credits: None,
         individual_limit: None,
-        plan_type: None,
         rate_limit_reached_type: None,
     }));
 
@@ -767,7 +742,6 @@ async fn rate_limit_snapshot_keeps_prior_credits_when_missing_from_headers() {
             balance: Some("17.5".to_string()),
         }),
         individual_limit: None,
-        plan_type: None,
         rate_limit_reached_type: None,
     }));
     let initial_balance = chat
@@ -788,7 +762,6 @@ async fn rate_limit_snapshot_keeps_prior_credits_when_missing_from_headers() {
         secondary: None,
         credits: None,
         individual_limit: None,
-        plan_type: None,
         rate_limit_reached_type: None,
     }));
 
@@ -844,71 +817,6 @@ async fn rolling_rate_limit_snapshot_preserves_prior_individual_limit() {
 }
 
 #[tokio::test]
-async fn rate_limit_snapshot_updates_and_retains_plan_type() {
-    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-
-    chat.on_rate_limit_snapshot(Some(RateLimitSnapshot {
-        limit_id: None,
-        limit_name: None,
-        primary: Some(RateLimitWindow {
-            used_percent: 10,
-            window_duration_mins: Some(60),
-            resets_at: None,
-        }),
-        secondary: Some(RateLimitWindow {
-            used_percent: 5,
-            window_duration_mins: Some(300),
-            resets_at: None,
-        }),
-        credits: None,
-        individual_limit: None,
-        plan_type: Some(PlanType::Plus),
-        rate_limit_reached_type: None,
-    }));
-    assert_eq!(chat.plan_type, Some(PlanType::Plus));
-
-    chat.on_rate_limit_snapshot(Some(RateLimitSnapshot {
-        limit_id: None,
-        limit_name: None,
-        primary: Some(RateLimitWindow {
-            used_percent: 25,
-            window_duration_mins: Some(30),
-            resets_at: Some(123),
-        }),
-        secondary: Some(RateLimitWindow {
-            used_percent: 15,
-            window_duration_mins: Some(300),
-            resets_at: Some(234),
-        }),
-        credits: None,
-        individual_limit: None,
-        plan_type: Some(PlanType::Pro),
-        rate_limit_reached_type: None,
-    }));
-    assert_eq!(chat.plan_type, Some(PlanType::Pro));
-
-    chat.on_rate_limit_snapshot(Some(RateLimitSnapshot {
-        limit_id: None,
-        limit_name: None,
-        primary: Some(RateLimitWindow {
-            used_percent: 30,
-            window_duration_mins: Some(60),
-            resets_at: Some(456),
-        }),
-        secondary: Some(RateLimitWindow {
-            used_percent: 18,
-            window_duration_mins: Some(300),
-            resets_at: Some(567),
-        }),
-        credits: None,
-        individual_limit: None,
-        plan_type: None,
-        rate_limit_reached_type: None,
-    }));
-    assert_eq!(chat.plan_type, Some(PlanType::Pro));
-}
-
-#[tokio::test]
 async fn rate_limit_snapshots_keep_separate_entries_per_limit_id() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 
@@ -927,7 +835,6 @@ async fn rate_limit_snapshots_keep_separate_entries_per_limit_id() {
             balance: Some("5.00".to_string()),
         }),
         individual_limit: None,
-        plan_type: Some(PlanType::Pro),
         rate_limit_reached_type: None,
     }));
 
@@ -942,7 +849,6 @@ async fn rate_limit_snapshots_keep_separate_entries_per_limit_id() {
         secondary: None,
         credits: None,
         individual_limit: None,
-        plan_type: Some(PlanType::Pro),
         rate_limit_reached_type: None,
     }));
 
@@ -1057,11 +963,8 @@ async fn missing_rate_limit_reached_type_does_not_prompt_or_refresh() {
 fn assert_no_owner_nudge_or_rate_limit_refresh(
     rx: &mut tokio::sync::mpsc::UnboundedReceiver<AppEvent>,
 ) {
-    while let Ok(event) = rx.try_recv() {
-        assert!(
-            !matches!(event, AppEvent::RefreshRateLimits { .. }),
-            "unexpected event: {event:?}"
-        );
+    if let Ok(event) = rx.try_recv() {
+        panic!("unexpected event: {event:?}");
     }
 }
 
@@ -2491,52 +2394,6 @@ fn test_thread_goal(
         created_at: 0,
         updated_at: 0,
     }
-}
-
-#[tokio::test]
-async fn runtime_metrics_websocket_timing_logs_and_final_separator_sums_totals() {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    chat.set_feature_enabled(Feature::RuntimeMetrics, /*enabled*/ true);
-
-    chat.on_task_started();
-    chat.apply_runtime_metrics_delta(RuntimeMetricsSummary {
-        responses_api_engine_iapi_ttft_ms: 120,
-        responses_api_engine_service_tbt_ms: 50,
-        ..RuntimeMetricsSummary::default()
-    });
-
-    let first_log = drain_insert_history(&mut rx)
-        .iter()
-        .map(|lines| lines_to_single_string(lines))
-        .find(|line| line.contains("WebSocket timing:"))
-        .expect("expected websocket timing log");
-    assert!(first_log.contains("TTFT: 120ms (iapi)"));
-    assert!(first_log.contains("TBT: 50ms (service)"));
-
-    chat.apply_runtime_metrics_delta(RuntimeMetricsSummary {
-        responses_api_engine_iapi_ttft_ms: 80,
-        ..RuntimeMetricsSummary::default()
-    });
-
-    let second_log = drain_insert_history(&mut rx)
-        .iter()
-        .map(|lines| lines_to_single_string(lines))
-        .find(|line| line.contains("WebSocket timing:"))
-        .expect("expected websocket timing log");
-    assert!(second_log.contains("TTFT: 80ms (iapi)"));
-
-    chat.on_task_complete(
-        /*last_agent_message*/ None, /*duration_ms*/ None, /*from_replay*/ false,
-    );
-    let mut final_separator = None;
-    while let Ok(event) = rx.try_recv() {
-        if let AppEvent::InsertHistoryCell(cell) = event {
-            final_separator = Some(lines_to_single_string(&cell.display_lines(/*width*/ 300)));
-        }
-    }
-    let final_separator = final_separator.expect("expected final separator with runtime metrics");
-    assert!(final_separator.contains("TTFT: 80ms (iapi)"));
-    assert!(final_separator.contains("TBT: 50ms (service)"));
 }
 
 #[tokio::test]

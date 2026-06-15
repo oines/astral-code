@@ -908,8 +908,7 @@ pub struct Config {
     /// Optional absolute path to patched zsh used by zsh-exec-bridge-backed shell execution.
     pub zsh_path: Option<PathBuf>,
 
-    /// Value to use for `reasoning.effort` when making a request using the
-    /// Responses API.
+    /// Value to use for provider reasoning effort when the configured model supports it.
     pub model_reasoning_effort: Option<ReasoningEffort>,
     /// Optional Plan-mode-specific reasoning effort override used by the TUI.
     ///
@@ -919,8 +918,8 @@ pub struct Config {
     /// global default").
     pub plan_mode_reasoning_effort: Option<ReasoningEffort>,
 
-    /// Optional value to use for `reasoning.summary` when making a request
-    /// using the Responses API. When unset, the model catalog default is used.
+    /// Optional value to use for reasoning summary when the configured model supports it.
+    /// When unset, the model catalog default is used.
     pub model_reasoning_summary: Option<ReasoningSummary>,
 
     /// Optional override to force-enable reasoning summaries for the configured model.
@@ -933,7 +932,7 @@ pub struct Config {
     /// Optional local model capability hints loaded from `model-capabilities.toml`.
     pub model_capabilities: Option<ModelCapabilitiesCache>,
 
-    /// Optional verbosity control for GPT-5 models (Responses API `text.verbosity`).
+    /// Optional verbosity control for models that support provider-side verbosity hints.
     pub model_verbosity: Option<Verbosity>,
 
     /// Base URL for hosted Astral apps/plugins control-plane requests.

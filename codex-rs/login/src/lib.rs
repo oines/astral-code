@@ -1,6 +1,5 @@
 pub mod auth;
 pub mod auth_env_telemetry;
-pub mod token_data;
 
 pub use codex_client::BuildCustomCaTransportError as BuildLoginHttpClientError;
 pub use codex_config::types::AuthCredentialsStoreMode;
@@ -18,11 +17,9 @@ pub use auth::RefreshTokenError;
 pub use auth::UnauthorizedRecovery;
 pub use auth::default_client;
 pub use auth::load_auth_dot_json;
-pub use auth::login_with_api_key;
 pub use auth::logout;
 pub use auth::logout_with_revoke;
 pub use auth::read_astral_api_key_from_env;
 pub use auth::save_auth;
 pub use auth_env_telemetry::AuthEnvTelemetry;
 pub use auth_env_telemetry::collect_auth_env_telemetry;
-pub use token_data::TokenData;

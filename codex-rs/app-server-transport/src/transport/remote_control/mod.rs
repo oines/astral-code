@@ -890,5 +890,7 @@ pub async fn start_remote_control(
 
 #[cfg(test)]
 mod segment_tests;
-#[cfg(test)]
+// Astral disables the legacy hosted remote-control flow; keep the low-level
+// unit tests above, but do not compile the old enrollment integration suite.
+#[cfg(all(test, any()))]
 mod tests;

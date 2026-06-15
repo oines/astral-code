@@ -1,12 +1,12 @@
 ---
 source: tui/src/onboarding/auth.rs
-assertion_line: 675
+assertion_line: 632
 expression: terminal.backend()
 ---
-  Connect a provider API key to use astral-code.
-  The key is stored locally in auth.json.
+  Configure a provider API key to use astral-code.
+  API keys are read from provider config or environment.
 
-> 1. Provide your own API key
-     Use the model provider configured for this workspace
+> 1. Use provider configuration
+     Set ASTRAL_API_KEY or the provider auth env var
 
   Press enter to continue

@@ -5,24 +5,23 @@ use std::time::Duration;
 use anyhow::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
+use codex_api::AgentClient;
+use codex_api::AgentOptions;
 use codex_api::ApiError;
 use codex_api::AuthError;
 use codex_api::AuthProvider;
-use codex_api::Compression;
 use codex_api::Provider;
-use codex_api::ResponsesApiRequest;
-use codex_api::ResponsesClient;
-use codex_api::ResponsesOptions;
+use codex_api::agent_adapters::chat_completions::ChatCompletionsOptions;
+use codex_api::agent_protocol::AgentMessage;
+use codex_api::agent_protocol::AgentRequest;
+use codex_api::agent_protocol::ContentBlock;
+use codex_api::agent_protocol::MessageRole;
 use codex_client::HttpTransport;
 use codex_client::Request;
 use codex_client::RequestBody;
 use codex_client::Response;
 use codex_client::StreamResponse;
 use codex_client::TransportError;
-use codex_protocol::models::ContentItem;
-use codex_protocol::models::ResponseItem;
-use codex_protocol::protocol::SessionSource;
-use codex_protocol::protocol::SubAgentSource;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::StatusCode;
@@ -99,14 +98,12 @@ impl AuthProvider for NoAuth {
 #[derive(Clone)]
 struct StaticAuth {
     token: String,
-    account_id: String,
 }
 
 impl StaticAuth {
-    fn new(token: &str, account_id: &str) -> Self {
+    fn new(token: &str) -> Self {
         Self {
             token: token.to_string(),
-            account_id: account_id.to_string(),
         }
     }
 }
@@ -116,9 +113,6 @@ impl AuthProvider for StaticAuth {
         let token = &self.token;
         if let Ok(header) = HeaderValue::from_str(&format!("Bearer {token}")) {
             headers.insert(http::header::AUTHORIZATION, header);
-        }
-        if let Ok(header) = HeaderValue::from_str(&self.account_id) {
-            headers.insert("ChatGPT-Account-ID", header);
         }
     }
 }
@@ -237,8 +231,11 @@ impl HttpTransport for FlakyTransport {
         }
 
         let stream = futures::stream::iter(vec![Ok(Bytes::from(
-            r#"event: message
-data: {"id":"resp-1","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hi"}]}]}
+            r#"data: {"id":"chatcmpl-1","model":"gpt-test","choices":[{"delta":{"role":"assistant"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-1","choices":[{"delta":{"content":"hi"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-1","choices":[{"delta":{},"finish_reason":"stop"}]}
 
 "#,
         ))]);
@@ -251,43 +248,54 @@ data: {"id":"resp-1","output":[{"type":"message","role":"assistant","content":[{
     }
 }
 
+fn agent_request() -> AgentRequest {
+    AgentRequest {
+        model: "gpt-test".to_string(),
+        messages: vec![AgentMessage {
+            role: MessageRole::User,
+            content: vec![ContentBlock::Text {
+                text: "hi".to_string(),
+            }],
+            id: None,
+        }],
+        ..Default::default()
+    }
+}
+
+async fn stream_chat_completions<T: HttpTransport>(
+    client: &AgentClient<T>,
+    options: AgentOptions,
+) -> std::result::Result<codex_api::ResponseStream, ApiError> {
+    client
+        .stream_chat_completions(
+            agent_request(),
+            ChatCompletionsOptions { max_tokens: None },
+            options,
+        )
+        .await
+}
+
 #[tokio::test]
-async fn responses_client_uses_responses_path() -> Result<()> {
+async fn agent_client_uses_chat_completions_path() -> Result<()> {
     let state = RecordingState::default();
     let transport = RecordingTransport::new(state.clone());
-    let client = ResponsesClient::new(transport, provider("openai"), Arc::new(NoAuth));
+    let client = AgentClient::new(transport, provider("openai"), Arc::new(NoAuth));
 
-    let body = serde_json::json!({ "echo": true });
-    let _stream = client
-        .stream(
-            body,
-            HeaderMap::new(),
-            Compression::None,
-            /*turn_state*/ None,
-        )
-        .await?;
+    let _stream = stream_chat_completions(&client, AgentOptions::default()).await?;
 
     let requests = state.take_stream_requests();
-    assert_path_ends_with(&requests, "/responses");
+    assert_path_ends_with(&requests, "/chat/completions");
     Ok(())
 }
 
 #[tokio::test]
-async fn streaming_client_adds_auth_headers() -> Result<()> {
+async fn streaming_agent_client_adds_auth_headers() -> Result<()> {
     let state = RecordingState::default();
     let transport = RecordingTransport::new(state.clone());
-    let auth = Arc::new(StaticAuth::new("secret-token", "acct-1"));
-    let client = ResponsesClient::new(transport, provider("openai"), auth);
+    let auth = Arc::new(StaticAuth::new("secret-token"));
+    let client = AgentClient::new(transport, provider("openai"), auth);
 
-    let body = serde_json::json!({ "model": "gpt-test" });
-    let _stream = client
-        .stream(
-            body,
-            HeaderMap::new(),
-            Compression::None,
-            /*turn_state*/ None,
-        )
-        .await?;
+    let _stream = stream_chat_completions(&client, AgentOptions::default()).await?;
 
     let requests = state.take_stream_requests();
     assert_eq!(requests.len(), 1);
@@ -300,10 +308,6 @@ async fn streaming_client_adds_auth_headers() -> Result<()> {
         Some("Bearer secret-token")
     );
 
-    let account_header = req.headers.get("ChatGPT-Account-ID");
-    assert!(account_header.is_some(), "missing account header");
-    assert_eq!(account_header.unwrap().to_str().ok(), Some("acct-1"));
-
     let accept_header = req.headers.get(http::header::ACCEPT);
     assert!(accept_header.is_some(), "missing Accept header");
     assert_eq!(
@@ -314,45 +318,21 @@ async fn streaming_client_adds_auth_headers() -> Result<()> {
 }
 
 #[tokio::test]
-async fn streaming_client_retries_on_transport_error() -> Result<()> {
+async fn streaming_agent_client_retries_on_transport_error() -> Result<()> {
     let transport = FlakyTransport::new();
 
     let mut provider = provider("openai");
     provider.retry.max_attempts = 2;
 
-    let request = ResponsesApiRequest {
-        model: "gpt-test".into(),
-        instructions: "Say hi".into(),
-        input: Vec::new(),
-        tools: Vec::new(),
-        tool_choice: "auto".into(),
-        parallel_tool_calls: false,
-        reasoning: None,
-        store: false,
-        stream: true,
-        include: Vec::new(),
-        service_tier: None,
-        prompt_cache_key: None,
-        text: None,
-        client_metadata: None,
-    };
-    let client = ResponsesClient::new(transport.clone(), provider, Arc::new(NoAuth));
+    let client = AgentClient::new(transport.clone(), provider, Arc::new(NoAuth));
 
-    let _stream = client
-        .stream_request(
-            request,
-            ResponsesOptions {
-                compression: Compression::None,
-                ..Default::default()
-            },
-        )
-        .await?;
+    let _stream = stream_chat_completions(&client, AgentOptions::default()).await?;
     assert_eq!(transport.attempts(), 2);
     Ok(())
 }
 
 #[tokio::test]
-async fn streaming_client_retries_on_transient_auth_error() -> Result<()> {
+async fn streaming_agent_client_retries_on_transient_auth_error() -> Result<()> {
     let state = RecordingState::default();
     let transport = RecordingTransport::new(state.clone());
     let auth = FailsOnceAuth::transient();
@@ -360,16 +340,8 @@ async fn streaming_client_retries_on_transient_auth_error() -> Result<()> {
     let mut provider = provider("openai");
     provider.retry.max_attempts = 2;
 
-    let client = ResponsesClient::new(transport, provider, Arc::new(auth.clone()));
-    let body = serde_json::json!({ "model": "gpt-test" });
-    let _stream = client
-        .stream(
-            body,
-            HeaderMap::new(),
-            Compression::None,
-            /*turn_state*/ None,
-        )
-        .await?;
+    let client = AgentClient::new(transport, provider, Arc::new(auth.clone()));
+    let _stream = stream_chat_completions(&client, AgentOptions::default()).await?;
 
     assert_eq!(auth.attempts(), 2);
     assert_eq!(state.take_stream_requests().len(), 1);
@@ -377,7 +349,7 @@ async fn streaming_client_retries_on_transient_auth_error() -> Result<()> {
 }
 
 #[tokio::test]
-async fn streaming_client_does_not_retry_auth_build_error() -> Result<()> {
+async fn streaming_agent_client_does_not_retry_auth_build_error() -> Result<()> {
     let state = RecordingState::default();
     let transport = RecordingTransport::new(state.clone());
     let auth = FailsOnceAuth::build();
@@ -385,16 +357,8 @@ async fn streaming_client_does_not_retry_auth_build_error() -> Result<()> {
     let mut provider = provider("openai");
     provider.retry.max_attempts = 2;
 
-    let client = ResponsesClient::new(transport, provider, Arc::new(auth.clone()));
-    let body = serde_json::json!({ "model": "gpt-test" });
-    let result = client
-        .stream(
-            body,
-            HeaderMap::new(),
-            Compression::None,
-            /*turn_state*/ None,
-        )
-        .await;
+    let client = AgentClient::new(transport, provider, Arc::new(auth.clone()));
+    let result = stream_chat_completions(&client, AgentOptions::default()).await;
     let err = match result {
         Ok(_) => panic!("auth build errors should fail without retry"),
         Err(err) => err,
@@ -411,73 +375,19 @@ async fn streaming_client_does_not_retry_auth_build_error() -> Result<()> {
 }
 
 #[tokio::test]
-async fn azure_default_store_attaches_ids_and_headers() -> Result<()> {
+async fn streaming_agent_client_attaches_extra_headers_and_chat_body() -> Result<()> {
     let state = RecordingState::default();
     let transport = RecordingTransport::new(state.clone());
-    let client = ResponsesClient::new(transport, provider("azure"), Arc::new(NoAuth));
-
-    let request = ResponsesApiRequest {
-        model: "gpt-test".into(),
-        instructions: "Say hi".into(),
-        input: vec![ResponseItem::Message {
-            id: Some("msg_1".into()),
-            role: "user".into(),
-            content: vec![ContentItem::InputText { text: "hi".into() }],
-            phase: None,
-        }],
-        tools: Vec::new(),
-        tool_choice: "auto".into(),
-        parallel_tool_calls: false,
-        reasoning: None,
-        store: true,
-        stream: true,
-        include: Vec::new(),
-        service_tier: None,
-        prompt_cache_key: None,
-        text: None,
-        client_metadata: None,
-    };
+    let client = AgentClient::new(transport, provider("openai"), Arc::new(NoAuth));
 
     let mut extra_headers = HeaderMap::new();
     extra_headers.insert("x-test-header", HeaderValue::from_static("present"));
-    let _stream = client
-        .stream_request(
-            request,
-            ResponsesOptions {
-                session_id: Some("sess_123".into()),
-                thread_id: Some("thread_123".into()),
-                session_source: Some(SessionSource::SubAgent(SubAgentSource::Review)),
-                extra_headers,
-                compression: Compression::None,
-                turn_state: None,
-            },
-        )
-        .await?;
+    let _stream = stream_chat_completions(&client, AgentOptions { extra_headers }).await?;
 
     let requests = state.take_stream_requests();
     assert_eq!(requests.len(), 1);
     let req = &requests[0];
 
-    assert_eq!(
-        req.headers.get("session-id").and_then(|v| v.to_str().ok()),
-        Some("sess_123")
-    );
-    assert_eq!(
-        req.headers.get("thread-id").and_then(|v| v.to_str().ok()),
-        Some("thread_123")
-    );
-    assert_eq!(
-        req.headers
-            .get("x-client-request-id")
-            .and_then(|v| v.to_str().ok()),
-        Some("thread_123")
-    );
-    assert_eq!(
-        req.headers
-            .get("x-astral-subagent")
-            .and_then(|v| v.to_str().ok()),
-        Some("review")
-    );
     assert_eq!(
         req.headers
             .get("x-test-header")
@@ -485,15 +395,27 @@ async fn azure_default_store_attaches_ids_and_headers() -> Result<()> {
         Some("present")
     );
 
-    let input_id = req
+    let body = req
         .body
         .as_ref()
         .and_then(RequestBody::json)
-        .and_then(|body| body.get("input"))
-        .and_then(|input| input.get(0))
-        .and_then(|item| item.get("id"))
-        .and_then(|id| id.as_str());
-    assert_eq!(input_id, Some("msg_1"));
+        .expect("chat completions body should be JSON");
+    assert_eq!(
+        body.get("model").and_then(|model| model.as_str()),
+        Some("gpt-test")
+    );
+    assert_eq!(
+        body.get("stream").and_then(|stream| stream.as_bool()),
+        Some(true)
+    );
+    assert_eq!(
+        body.get("messages")
+            .and_then(|messages| messages.as_array())
+            .and_then(|messages| messages.first())
+            .and_then(|message| message.get("role"))
+            .and_then(|role| role.as_str()),
+        Some("user")
+    );
 
     Ok(())
 }

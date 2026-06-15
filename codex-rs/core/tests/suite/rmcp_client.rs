@@ -130,7 +130,7 @@ fn user_turn_with_permission_profile(
             text_elements: Vec::new(),
         }],
         final_output_json_schema: None,
-        responsesapi_client_metadata: None,
+        model_client_metadata: None,
         additional_context: Default::default(),
         thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
             environments: Some(local_selections(cwd)),
@@ -1381,7 +1381,7 @@ async fn stdio_image_responses_are_sanitized_for_text_only_model() -> anyhow::Re
     let rmcp_test_server_bin = remote_aware_stdio_server_bin()?;
 
     let fixture = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+        .with_auth(CodexAuth::create_dummy_api_key_auth_for_testing())
         .with_config(move |config| {
             insert_mcp_server(
                 config,

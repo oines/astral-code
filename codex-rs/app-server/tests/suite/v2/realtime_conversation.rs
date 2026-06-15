@@ -10,7 +10,6 @@ use codex_app_server_protocol::ItemCompletedNotification;
 use codex_app_server_protocol::ItemStartedNotification;
 use codex_app_server_protocol::JSONRPCError;
 use codex_app_server_protocol::JSONRPCResponse;
-use codex_app_server_protocol::LoginAccountResponse;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::ThreadRealtimeAppendAudioParams;
@@ -178,7 +177,7 @@ struct StartedWebrtcRealtime {
 }
 
 // Scripted SSE responses for the normal background agent loop. Realtime can ask for a delegated
-// background agent turn; that turn talks to this mock `/responses` endpoint and may request
+// background agent turn; that turn talks to this mock `/chat/completions` endpoint and may request
 // ordinary tools.
 struct MainLoopResponsesScript {
     responses: Vec<String>,
@@ -280,9 +279,12 @@ impl RealtimeE2eHarness {
             sandbox,
         )?;
 
-        let mut mcp = TestAppServer::new(codex_home.path()).await?;
+        let mut mcp = TestAppServer::new_with_env(
+            codex_home.path(),
+            &[("ASTRAL_API_KEY", Some("sk-test-key"))],
+        )
+        .await?;
         timeout(DEFAULT_TIMEOUT, mcp.initialize()).await??;
-        login_with_api_key(&mut mcp, "sk-test-key").await?;
 
         let thread_start_request_id = mcp
             .send_thread_start_request(ThreadStartParams::default())
@@ -539,9 +541,12 @@ async fn realtime_conversation_streams_v2_notifications() -> Result<()> {
         StartupContextConfig::Generated,
     )?;
 
-    let mut mcp = TestAppServer::new(codex_home.path()).await?;
+    let mut mcp = TestAppServer::new_with_env(
+        codex_home.path(),
+        &[("ASTRAL_API_KEY", Some("sk-test-key"))],
+    )
+    .await?;
     timeout(DEFAULT_TIMEOUT, mcp.initialize()).await??;
-    login_with_api_key(&mut mcp, "sk-test-key").await?;
 
     let thread_start_request_id = mcp
         .send_thread_start_request(ThreadStartParams::default())
@@ -788,9 +793,12 @@ async fn realtime_text_output_modality_requests_text_output_and_final_transcript
         StartupContextConfig::Generated,
     )?;
 
-    let mut mcp = TestAppServer::new(codex_home.path()).await?;
+    let mut mcp = TestAppServer::new_with_env(
+        codex_home.path(),
+        &[("ASTRAL_API_KEY", Some("sk-test-key"))],
+    )
+    .await?;
     timeout(DEFAULT_TIMEOUT, mcp.initialize()).await??;
-    login_with_api_key(&mut mcp, "sk-test-key").await?;
 
     let thread_start_request_id = mcp
         .send_thread_start_request(ThreadStartParams::default())
@@ -962,9 +970,12 @@ async fn realtime_conversation_stop_emits_closed_notification() -> Result<()> {
         StartupContextConfig::Generated,
     )?;
 
-    let mut mcp = TestAppServer::new(codex_home.path()).await?;
+    let mut mcp = TestAppServer::new_with_env(
+        codex_home.path(),
+        &[("ASTRAL_API_KEY", Some("sk-test-key"))],
+    )
+    .await?;
     timeout(DEFAULT_TIMEOUT, mcp.initialize()).await??;
-    login_with_api_key(&mut mcp, "sk-test-key").await?;
 
     let thread_start_request_id = mcp
         .send_thread_start_request(ThreadStartParams::default())
@@ -1058,9 +1069,12 @@ async fn realtime_webrtc_start_emits_sdp_notification() -> Result<()> {
         StartupContextConfig::Override("startup context"),
     )?;
 
-    let mut mcp = TestAppServer::new(codex_home.path()).await?;
+    let mut mcp = TestAppServer::new_with_env(
+        codex_home.path(),
+        &[("ASTRAL_API_KEY", Some("sk-test-key"))],
+    )
+    .await?;
     timeout(DEFAULT_TIMEOUT, mcp.initialize()).await??;
-    login_with_api_key(&mut mcp, "sk-test-key").await?;
 
     let thread_start_request_id = mcp
         .send_thread_start_request(ThreadStartParams::default())
@@ -1656,7 +1670,7 @@ async fn webrtc_v2_background_agent_tool_call_delegates_and_returns_function_out
 async fn webrtc_v2_background_agent_steering_ack_requests_response_create() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
-    // Phase 1: gate the delegated Responses turn from the first tool call so
+    // Phase 1: gate the delegated model turn from the first tool call so
     // the background-agent handoff stays active while realtime sends a second
     // tool call that should steer the active task.
     let main_loop_responses_server = responses::start_mock_server().await;
@@ -1667,7 +1681,7 @@ async fn webrtc_v2_background_agent_steering_ack_requests_response_create() -> R
         responses::ev_completed("resp-1"),
     ]);
     Mock::given(method("POST"))
-        .and(path_regex(".*/responses$"))
+        .and(path_regex(".*/chat/completions$"))
         .respond_with(GatedSseResponse {
             gate_rx: Mutex::new(Some(gate_completed_rx)),
             response: gated_response,
@@ -1875,7 +1889,7 @@ async fn webrtc_v2_tool_call_delegated_turn_can_execute_shell_tool() -> Result<(
 async fn webrtc_v2_tool_call_does_not_block_sideband_audio() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
-    // Phase 1: gate the delegated Responses stream so the sideband can send audio while the tool
+    // Phase 1: gate the delegated model stream so the sideband can send audio while the tool
     // call is still waiting on its delegated turn.
     let main_loop_responses_server = responses::start_mock_server().await;
     let (gate_completed_tx, gate_completed_rx) = mpsc::channel();
@@ -1885,7 +1899,7 @@ async fn webrtc_v2_tool_call_does_not_block_sideband_audio() -> Result<()> {
         responses::ev_completed("resp-1"),
     ]);
     Mock::given(method("POST"))
-        .and(path_regex(".*/responses$"))
+        .and(path_regex(".*/chat/completions$"))
         .respond_with(GatedSseResponse {
             gate_rx: Mutex::new(Some(gate_completed_rx)),
             response: gated_response,
@@ -1973,9 +1987,12 @@ async fn realtime_webrtc_start_surfaces_backend_error() -> Result<()> {
         StartupContextConfig::Override("startup context"),
     )?;
 
-    let mut mcp = TestAppServer::new(codex_home.path()).await?;
+    let mut mcp = TestAppServer::new_with_env(
+        codex_home.path(),
+        &[("ASTRAL_API_KEY", Some("sk-test-key"))],
+    )
+    .await?;
     timeout(DEFAULT_TIMEOUT, mcp.initialize()).await??;
-    login_with_api_key(&mut mcp, "sk-test-key").await?;
 
     // Phase 2: start a normal app-server thread and request realtime over WebRTC.
     let thread_start_request_id = mcp
@@ -2089,19 +2106,6 @@ async fn read_notification<T: DeserializeOwned>(
     Ok(serde_json::from_value(params)?)
 }
 
-async fn login_with_api_key(mcp: &mut TestAppServer, api_key: &str) -> Result<()> {
-    let request_id = mcp.send_login_account_api_key_request(api_key).await?;
-    let response: JSONRPCResponse = timeout(
-        DEFAULT_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
-    )
-    .await??;
-    let login: LoginAccountResponse = to_response(response)?;
-    assert_eq!(login, LoginAccountResponse::ApiKey {});
-
-    Ok(())
-}
-
 async fn wait_for_started_command_execution(
     mcp: &mut TestAppServer,
 ) -> Result<ItemStartedNotification> {
@@ -2131,7 +2135,7 @@ async fn responses_requests(server: &MockServer) -> Result<Vec<Value>> {
         .await
         .context("failed to fetch received requests")?
         .into_iter()
-        .filter(|request| request.url.path().ends_with("/responses"))
+        .filter(|request| request.url.path().ends_with("/chat/completions"))
         .map(|request| {
             request
                 .body_json::<Value>()
@@ -2382,7 +2386,7 @@ type = "conversational"
 [model_providers.mock_provider]
 name = "Mock provider for test"
 base_url = "{responses_server_uri}/v1"
-wire_api = "responses"
+wire_api = "chat_completions"
 request_max_retries = 0
 stream_max_retries = 0
 "#

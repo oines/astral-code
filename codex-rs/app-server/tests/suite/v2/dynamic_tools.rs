@@ -275,7 +275,12 @@ async fn thread_start_rejects_dynamic_tools_not_supported_by_responses() -> Resu
     )
     .await??;
     assert_eq!(error.error.code, -32600);
-    assert!(error.error.message.contains("Responses API"));
+    assert!(
+        error
+            .error
+            .message
+            .contains("Astral dynamic tool identifier")
+    );
     assert!(error.error.message.contains("lookup.ticket"));
 
     Ok(())
@@ -671,7 +676,7 @@ async fn responses_bodies(server: &MockServer) -> Result<Vec<Value>> {
 
     requests
         .into_iter()
-        .filter(|req| req.url.path().ends_with("/responses"))
+        .filter(|req| req.url.path().ends_with("/chat/completions"))
         .map(|req| {
             req.body_json::<Value>()
                 .context("request body should be JSON")
@@ -762,7 +767,7 @@ model_provider = "mock_provider"
 [model_providers.mock_provider]
 name = "Mock provider for test"
 base_url = "{server_uri}/v1"
-wire_api = "responses"
+wire_api = "chat_completions"
 request_max_retries = 0
 stream_max_retries = 0
 "#

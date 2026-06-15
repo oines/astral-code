@@ -10,7 +10,7 @@ use wiremock::matchers::method;
 use wiremock::matchers::path_regex;
 
 /// Create a mock server that will provide the responses, in order, for
-/// requests to the `/v1/responses` endpoint.
+/// requests to the `/v1/chat/completions` endpoint.
 pub async fn create_mock_responses_server_sequence(responses: Vec<String>) -> MockServer {
     let server = responses::start_mock_server().await;
 
@@ -21,7 +21,7 @@ pub async fn create_mock_responses_server_sequence(responses: Vec<String>) -> Mo
     };
 
     Mock::given(method("POST"))
-        .and(path_regex(".*/responses$"))
+        .and(path_regex(".*/chat/completions$"))
         .respond_with(seq_responder)
         .expect(num_calls as u64)
         .mount(&server)
@@ -41,7 +41,7 @@ pub async fn create_mock_responses_server_sequence_unchecked(responses: Vec<Stri
     };
 
     Mock::given(method("POST"))
-        .and(path_regex(".*/responses$"))
+        .and(path_regex(".*/chat/completions$"))
         .respond_with(seq_responder)
         .mount(&server)
         .await;
@@ -64,7 +64,7 @@ impl Respond for SeqResponder {
     }
 }
 
-/// Create a mock responses API server that returns the same assistant message for every request.
+/// Create a mock model server that returns the same assistant message for every request.
 pub async fn create_mock_responses_server_repeating_assistant(message: &str) -> MockServer {
     let server = responses::start_mock_server().await;
     let body = responses::sse(vec![
@@ -73,7 +73,7 @@ pub async fn create_mock_responses_server_repeating_assistant(message: &str) -> 
         responses::ev_completed("resp-1"),
     ]);
     Mock::given(method("POST"))
-        .and(path_regex(".*/responses$"))
+        .and(path_regex(".*/chat/completions$"))
         .respond_with(responses::sse_response(body))
         .mount(&server)
         .await;

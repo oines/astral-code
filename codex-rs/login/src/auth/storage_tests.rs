@@ -1,9 +1,6 @@
 use super::*;
-use crate::token_data::IdTokenInfo;
 use anyhow::Context;
-use base64::Engine;
 use pretty_assertions::assert_eq;
-use serde_json::json;
 use tempfile::tempdir;
 
 use codex_keyring_store::tests::MockKeyringStore;
@@ -14,12 +11,9 @@ async fn file_storage_load_returns_auth_dot_json() -> anyhow::Result<()> {
     let codex_home = tempdir()?;
     let storage = FileAuthStorage::new(codex_home.path().to_path_buf());
     let auth_dot_json = AuthDotJson {
-        auth_mode: Some(AuthMode::ApiKey),
+        auth_mode: Some("apikey".to_string()),
         api_key: Some("test-key".to_string()),
-        tokens: None,
         last_refresh: Some(Utc::now()),
-        agent_identity: None,
-        personal_access_token: None,
     };
 
     storage
@@ -36,12 +30,9 @@ async fn file_storage_save_persists_auth_dot_json() -> anyhow::Result<()> {
     let codex_home = tempdir()?;
     let storage = FileAuthStorage::new(codex_home.path().to_path_buf());
     let auth_dot_json = AuthDotJson {
-        auth_mode: Some(AuthMode::ApiKey),
+        auth_mode: Some("apikey".to_string()),
         api_key: Some("test-key".to_string()),
-        tokens: None,
         last_refresh: Some(Utc::now()),
-        agent_identity: None,
-        personal_access_token: None,
     };
 
     let file = get_auth_file(codex_home.path());
@@ -56,96 +47,13 @@ async fn file_storage_save_persists_auth_dot_json() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-async fn file_storage_round_trips_agent_identity_auth() -> anyhow::Result<()> {
-    let codex_home = tempdir()?;
-    let storage = FileAuthStorage::new(codex_home.path().to_path_buf());
-    let agent_identity = jwt_with_payload(json!({
-        "agent_runtime_id": "agent-runtime-id",
-        "agent_private_key": "private-key",
-        "account_id": "account-id",
-        "chatgpt_user_id": "user-id",
-        "email": "user@example.com",
-        "plan_type": "pro",
-        "chatgpt_account_is_fedramp": false,
-    }));
-    let auth_dot_json = AuthDotJson {
-        auth_mode: Some(AuthMode::AgentIdentity),
-        api_key: None,
-        tokens: None,
-        last_refresh: None,
-        agent_identity: Some(agent_identity),
-        personal_access_token: None,
-    };
-
-    storage.save(&auth_dot_json)?;
-
-    let loaded = storage.load()?;
-    assert_eq!(Some(auth_dot_json), loaded);
-    Ok(())
-}
-
-#[tokio::test]
-async fn file_storage_round_trips_personal_access_token_auth() -> anyhow::Result<()> {
-    let codex_home = tempdir()?;
-    let storage = FileAuthStorage::new(codex_home.path().to_path_buf());
-    let auth_dot_json = AuthDotJson {
-        auth_mode: Some(AuthMode::PersonalAccessToken),
-        api_key: None,
-        tokens: None,
-        last_refresh: None,
-        agent_identity: None,
-        personal_access_token: Some("at-example".to_string()),
-    };
-
-    storage.save(&auth_dot_json)?;
-
-    let loaded = storage.load()?;
-    assert_eq!(Some(auth_dot_json), loaded);
-    Ok(())
-}
-
-#[tokio::test]
-async fn file_storage_loads_agent_identity_as_jwt() -> anyhow::Result<()> {
-    let codex_home = tempdir()?;
-    let storage = FileAuthStorage::new(codex_home.path().to_path_buf());
-    let agent_identity_jwt = jwt_with_payload(json!({
-        "agent_runtime_id": "agent-runtime-id",
-        "agent_private_key": "private-key",
-        "account_id": "account-id",
-        "chatgpt_user_id": "user-id",
-        "email": "user@example.com",
-        "plan_type": "pro",
-        "chatgpt_account_is_fedramp": false,
-    }));
-    let auth_file = get_auth_file(codex_home.path());
-    std::fs::write(
-        &auth_file,
-        serde_json::to_string_pretty(&json!({
-            "auth_mode": "agentIdentity",
-            "agent_identity": agent_identity_jwt,
-        }))?,
-    )?;
-
-    let loaded = storage.load()?;
-
-    assert_eq!(
-        loaded.expect("auth should load").agent_identity.as_deref(),
-        Some(agent_identity_jwt.as_str())
-    );
-    Ok(())
-}
-
 #[test]
 fn file_storage_delete_removes_auth_file() -> anyhow::Result<()> {
     let dir = tempdir()?;
     let auth_dot_json = AuthDotJson {
-        auth_mode: Some(AuthMode::ApiKey),
+        auth_mode: Some("apikey".to_string()),
         api_key: Some("sk-test-key".to_string()),
-        tokens: None,
         last_refresh: None,
-        agent_identity: None,
-        personal_access_token: None,
     };
     let storage = create_auth_storage(dir.path().to_path_buf(), AuthCredentialsStoreMode::File);
     storage.save(&auth_dot_json)?;
@@ -165,12 +73,9 @@ fn ephemeral_storage_save_load_delete_is_in_memory_only() -> anyhow::Result<()> 
         AuthCredentialsStoreMode::Ephemeral,
     );
     let auth_dot_json = AuthDotJson {
-        auth_mode: Some(AuthMode::ApiKey),
+        auth_mode: Some("apikey".to_string()),
         api_key: Some("sk-ephemeral".to_string()),
-        tokens: None,
         last_refresh: Some(Utc::now()),
-        agent_identity: None,
-        personal_access_token: None,
     };
 
     storage.save(&auth_dot_json)?;
@@ -232,54 +137,12 @@ fn assert_keyring_saved_auth_and_removed_fallback(
     );
 }
 
-fn id_token_with_prefix(prefix: &str) -> IdTokenInfo {
-    #[derive(Serialize)]
-    struct Header {
-        alg: &'static str,
-        typ: &'static str,
-    }
-
-    let header = Header {
-        alg: "none",
-        typ: "JWT",
-    };
-    let payload = json!({
-        "email": format!("{prefix}@example.com"),
-        "https://api.openai.com/auth": {
-            "chatgpt_account_id": format!("{prefix}-account"),
-        },
-    });
-    let encode = |bytes: &[u8]| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
-    let header_b64 = encode(&serde_json::to_vec(&header).expect("serialize header"));
-    let payload_b64 = encode(&serde_json::to_vec(&payload).expect("serialize payload"));
-    let signature_b64 = encode(b"sig");
-    let fake_jwt = format!("{header_b64}.{payload_b64}.{signature_b64}");
-
-    crate::token_data::parse_chatgpt_jwt_claims(&fake_jwt).expect("fake JWT should parse")
-}
-
 fn auth_with_prefix(prefix: &str) -> AuthDotJson {
     AuthDotJson {
-        auth_mode: Some(AuthMode::ApiKey),
+        auth_mode: Some("apikey".to_string()),
         api_key: Some(format!("{prefix}-api-key")),
-        tokens: Some(TokenData {
-            id_token: id_token_with_prefix(prefix),
-            access_token: format!("{prefix}-access"),
-            refresh_token: format!("{prefix}-refresh"),
-            account_id: Some(format!("{prefix}-account-id")),
-        }),
         last_refresh: None,
-        agent_identity: None,
-        personal_access_token: None,
     }
-}
-
-fn jwt_with_payload(payload: serde_json::Value) -> String {
-    let encode = |bytes: &[u8]| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
-    let header_b64 = encode(br#"{"alg":"EdDSA","typ":"JWT"}"#);
-    let payload_b64 = encode(&serde_json::to_vec(&payload).expect("payload should serialize"));
-    let signature_b64 = encode(b"sig");
-    format!("{header_b64}.{payload_b64}.{signature_b64}")
 }
 
 #[test]
@@ -291,12 +154,9 @@ fn keyring_auth_storage_load_returns_deserialized_auth() -> anyhow::Result<()> {
         Arc::new(mock_keyring.clone()),
     );
     let expected = AuthDotJson {
-        auth_mode: Some(AuthMode::ApiKey),
+        auth_mode: Some("apikey".to_string()),
         api_key: Some("sk-test".to_string()),
-        tokens: None,
         last_refresh: None,
-        agent_identity: None,
-        personal_access_token: None,
     };
     seed_keyring_with_auth(
         &mock_keyring,
@@ -330,17 +190,9 @@ fn keyring_auth_storage_save_persists_and_removes_fallback_file() -> anyhow::Res
     let auth_file = get_auth_file(codex_home.path());
     std::fs::write(&auth_file, "stale")?;
     let auth = AuthDotJson {
-        auth_mode: Some(AuthMode::Chatgpt),
-        api_key: None,
-        tokens: Some(TokenData {
-            id_token: Default::default(),
-            access_token: "access".to_string(),
-            refresh_token: "refresh".to_string(),
-            account_id: Some("account".to_string()),
-        }),
+        auth_mode: Some("apikey".to_string()),
+        api_key: Some("sk-test".to_string()),
         last_refresh: Some(Utc::now()),
-        agent_identity: None,
-        personal_access_token: None,
     };
 
     storage.save(&auth)?;

@@ -24,7 +24,6 @@ impl ChatWidget {
             is_first_run,
             status_account_display,
             runtime_model_provider_base_url,
-            initial_plan_type,
             model,
             startup_tooltip_override,
             status_line_invalid_items_warned,
@@ -122,9 +121,6 @@ impl ChatWidget {
             remote_connection: None,
             token_info: None,
             rate_limit_snapshots_by_limit_id: BTreeMap::new(),
-            refreshing_status_outputs: Vec::new(),
-            next_status_refresh_request_id: 0,
-            plan_type: initial_plan_type,
             codex_rate_limit_reached_type: None,
             rate_limit_warnings: RateLimitWarningState::default(),
             warning_display_state: WarningDisplayState::default(),
@@ -220,7 +216,6 @@ impl ChatWidget {
             last_non_retry_error: None,
         };
 
-        widget.prefetch_rate_limits();
         if let Some(keymap) = runtime_keymap {
             widget.bottom_pane.set_keymap_bindings(&keymap);
         }

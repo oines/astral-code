@@ -18,45 +18,22 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use tracing::warn;
 
-use crate::token_data::TokenData;
-use codex_app_server_protocol::AuthMode;
 use codex_config::types::AuthCredentialsStoreMode;
 use codex_keyring_store::DefaultKeyringStore;
 use codex_keyring_store::KeyringStore;
-use codex_protocol::account::PlanType as AccountPlanType;
 use once_cell::sync::Lazy;
 
 /// Expected structure for $ASTRAL_HOME/auth.json.
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
 pub struct AuthDotJson {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub auth_mode: Option<AuthMode>,
+    pub auth_mode: Option<String>,
 
     #[serde(rename = "ASTRAL_API_KEY")]
     pub api_key: Option<String>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tokens: Option<TokenData>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_refresh: Option<DateTime<Utc>>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent_identity: Option<String>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub personal_access_token: Option<String>,
-}
-
-#[derive(Deserialize, Serialize, Clone, Debug, PartialEq, Eq)]
-pub struct AgentIdentityAuthRecord {
-    pub agent_runtime_id: String,
-    pub agent_private_key: String,
-    pub account_id: String,
-    pub chatgpt_user_id: String,
-    pub email: String,
-    pub plan_type: AccountPlanType,
-    pub chatgpt_account_is_fedramp: bool,
 }
 
 pub(super) fn get_auth_file(codex_home: &Path) -> PathBuf {
@@ -184,10 +161,7 @@ impl KeyringAuthStorage {
         match self.keyring_store.save(KEYRING_SERVICE, key, value) {
             Ok(()) => Ok(()),
             Err(error) => {
-                let message = format!(
-                    "failed to write OAuth tokens to keyring: {}",
-                    error.message()
-                );
+                let message = format!("failed to write auth data to keyring: {}", error.message());
                 warn!("{message}");
                 Err(std::io::Error::other(message))
             }

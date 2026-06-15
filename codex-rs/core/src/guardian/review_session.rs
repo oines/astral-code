@@ -735,7 +735,7 @@ async fn run_review_on_session(
         Box::pin(review_session.codex.submit(Op::UserInput {
             items: prompt_items.items,
             final_output_json_schema: Some(params.schema.clone()),
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
                 environments: Some(codex_protocol::protocol::TurnEnvironmentSelections::new(
@@ -1195,7 +1195,7 @@ mod tests {
         assert_eq!(key, format!("guardian:{parent_thread_id}"));
         assert!(
             key.len() <= 64,
-            "guardian prompt cache key should fit the Responses API limit"
+            "guardian prompt cache key should fit the provider limit"
         );
         assert_eq!(
             key,

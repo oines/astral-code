@@ -52,8 +52,10 @@ pub const AMAZON_BEDROCK_DEFAULT_BASE_URL: &str =
     "https://bedrock-mantle.us-east-1.api.aws/openai/v1";
 const AMAZON_BEDROCK_MANTLE_CLIENT_AGENT_HEADER: &str = "x-amzn-mantle-client-agent";
 const AMAZON_BEDROCK_MANTLE_CLIENT_AGENT_VALUE: &str = "codex";
+const OPENAI_API_KEY_ENV_VAR: &str = "OPENAI_API_KEY";
 const CHAT_WIRE_API_REMOVED_ERROR: &str = "`wire_api = \"chat\"` is no longer supported.\nHow to fix: set `wire_api = \"chat_completions\"` in your provider config.";
-const WIRE_API_VARIANTS: &[&str] = &["responses", "anthropic_messages", "chat_completions"];
+const RESPONSES_WIRE_API_REMOVED_ERROR: &str = "`wire_api = \"responses\"` is no longer supported.\nHow to fix: set `wire_api = \"chat_completions\"` and use a standard OpenAI-compatible `/v1/chat/completions` endpoint.";
+const WIRE_API_VARIANTS: &[&str] = &["anthropic_messages", "chat_completions"];
 const PROVIDER_FLAVOR_VARIANTS: &[&str] = &[
     "generic_openai",
     "deepseek",
@@ -69,7 +71,8 @@ pub const OLLAMA_CHAT_PROVIDER_REMOVED_ERROR: &str = "`ollama-chat` is no longer
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum WireApi {
-    /// The Responses API exposed by OpenAI at `/v1/responses`.
+    /// Legacy OpenAI Responses API. This variant remains only for internal
+    /// migration code; external provider config rejects `wire_api = "responses"`.
     Responses,
     /// Anthropic Messages API exposed at `/v1/messages`.
     AnthropicMessages,
@@ -96,7 +99,7 @@ impl<'de> Deserialize<'de> for WireApi {
     {
         let value = String::deserialize(deserializer)?;
         match value.as_str() {
-            "responses" => Ok(Self::Responses),
+            "responses" => Err(serde::de::Error::custom(RESPONSES_WIRE_API_REMOVED_ERROR)),
             "anthropic_messages" => Ok(Self::AnthropicMessages),
             "chat_completions" => Ok(Self::ChatCompletions),
             "chat" => Err(serde::de::Error::custom(CHAT_WIRE_API_REMOVED_ERROR)),
@@ -231,14 +234,13 @@ pub struct ModelProviderInfo {
     /// Maximum time (in milliseconds) to wait for a websocket connection attempt before treating
     /// it as failed.
     pub websocket_connect_timeout_ms: Option<u64>,
-    /// Does this provider require Astral-managed credentials? If true, the user
-    /// is presented with the login screen on first run, and credentials are
-    /// stored in auth.json. If false (which is the default), the login screen is
-    /// skipped, and API keys (if needed) come from provider-specific auth such
-    /// as "env_key" or "auth".
+    /// Legacy Astral-managed credential flag. Hosted credentials are no longer
+    /// supported; provider validation rejects this when true. Configure
+    /// provider-specific BYOK auth instead.
     #[serde(default)]
     pub requires_astral_auth: bool,
-    /// Whether this provider supports the Responses API WebSocket transport.
+    /// Legacy Responses API WebSocket transport flag. Astral no longer supports
+    /// Responses transports; use streaming Chat Completions over HTTP instead.
     #[serde(default)]
     pub supports_websockets: bool,
 }
@@ -255,14 +257,21 @@ pub struct ModelProviderAwsAuthInfo {
 
 impl ModelProviderInfo {
     pub fn validate(&self) -> std::result::Result<(), String> {
-        if self.aws.is_some() {
-            if self.supports_websockets {
-                // TODO(celia-oai): Support AWS SigV4 signing for WebSocket
-                // upgrade requests before allowing AWS-authenticated providers
-                // to enable Responses-over-WebSocket.
-                return Err("provider aws cannot be combined with supports_websockets".to_string());
-            }
+        if self.requires_astral_auth {
+            return Err(
+                "provider requires_astral_auth is no longer supported; configure provider BYOK auth with env_key, auth, or experimental_bearer_token"
+                    .to_string(),
+            );
+        }
 
+        if self.supports_websockets {
+            return Err(
+                "provider supports_websockets is no longer supported because Responses API transports have been removed"
+                    .to_string(),
+            );
+        }
+
+        if self.aws.is_some() {
             let mut conflicts = Vec::new();
             if self.env_key.is_some() {
                 conflicts.push("env_key");
@@ -272,9 +281,6 @@ impl ModelProviderInfo {
             }
             if self.auth.is_some() {
                 conflicts.push("auth");
-            }
-            if self.requires_astral_auth {
-                conflicts.push("requires_astral_auth");
             }
 
             if !conflicts.is_empty() {
@@ -299,9 +305,6 @@ impl ModelProviderInfo {
         }
         if self.experimental_bearer_token.is_some() {
             conflicts.push("experimental_bearer_token");
-        }
-        if self.requires_astral_auth {
-            conflicts.push("requires_astral_auth");
         }
 
         if conflicts.is_empty() {
@@ -501,12 +504,14 @@ impl ModelProviderInfo {
         ModelProviderInfo {
             name: OPENAI_PROVIDER_NAME.into(),
             base_url,
-            env_key: None,
-            env_key_instructions: None,
+            env_key: Some(OPENAI_API_KEY_ENV_VAR.to_string()),
+            env_key_instructions: Some(format!(
+                "Set {OPENAI_API_KEY_ENV_VAR} for the OpenAI-compatible Chat Completions provider."
+            )),
             experimental_bearer_token: None,
             auth: None,
             aws: None,
-            wire_api: WireApi::Responses,
+            wire_api: WireApi::ChatCompletions,
             provider_flavor: None,
             query_params: None,
             request_body: None,
@@ -575,7 +580,7 @@ impl ModelProviderInfo {
                 profile: None,
                 region: None,
             })),
-            wire_api: WireApi::Responses,
+            wire_api: WireApi::ChatCompletions,
             provider_flavor: None,
             query_params: None,
             request_body: None,

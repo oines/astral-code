@@ -256,10 +256,32 @@ fn write_permissions_for_paths(
 
 /// Extracts the raw patch text used as the command-shaped hook input for apply_patch.
 fn apply_patch_payload_command(payload: &ToolPayload) -> Option<String> {
+    apply_patch_input_from_payload(payload).ok()
+}
+
+fn apply_patch_input_from_payload(payload: &ToolPayload) -> Result<String, FunctionCallError> {
     match payload {
-        ToolPayload::Custom { input } => Some(input.clone()),
-        _ => None,
+        ToolPayload::Custom { input } => Ok(input.clone()),
+        ToolPayload::Function { arguments } => apply_patch_input_from_function_arguments(arguments),
+        ToolPayload::ToolSearch { .. } => Err(FunctionCallError::RespondToModel(
+            "apply_patch handler received unsupported payload".to_string(),
+        )),
     }
+}
+
+fn apply_patch_input_from_function_arguments(arguments: &str) -> Result<String, FunctionCallError> {
+    let value: serde_json::Value = serde_json::from_str(arguments).map_err(|err| {
+        FunctionCallError::RespondToModel(format!("failed to parse apply_patch arguments: {err}"))
+    })?;
+    if let Some(input) = value.as_str() {
+        return Ok(input.to_string());
+    }
+    if let Some(input) = value.get("input").and_then(serde_json::Value::as_str) {
+        return Ok(input.to_string());
+    }
+    Err(FunctionCallError::RespondToModel(
+        "apply_patch handler received invalid function arguments".to_string(),
+    ))
 }
 
 async fn effective_patch_permissions(
@@ -329,11 +351,7 @@ impl ToolExecutor<ToolInvocation> for ApplyPatchHandler {
             ..
         } = invocation;
 
-        let ToolPayload::Custom { input: patch_input } = payload else {
-            return Err(FunctionCallError::RespondToModel(
-                "apply_patch handler received unsupported payload".to_string(),
-            ));
-        };
+        let patch_input = apply_patch_input_from_payload(&payload)?;
         let args = match codex_apply_patch::parse_patch(&patch_input) {
             Ok(args) => args,
             Err(parse_error) => {
@@ -458,7 +476,10 @@ impl ToolExecutor<ToolInvocation> for ApplyPatchHandler {
 
 impl CoreToolRuntime for ApplyPatchHandler {
     fn matches_kind(&self, payload: &ToolPayload) -> bool {
-        matches!(payload, ToolPayload::Custom { .. })
+        matches!(
+            payload,
+            ToolPayload::Custom { .. } | ToolPayload::Function { .. }
+        )
     }
 
     fn create_diff_consumer(&self) -> Option<Box<dyn ToolArgumentDiffConsumer>> {
@@ -481,6 +502,9 @@ impl CoreToolRuntime for ApplyPatchHandler {
         invocation.payload = match invocation.payload {
             ToolPayload::Custom { .. } => ToolPayload::Custom {
                 input: patch.to_string(),
+            },
+            ToolPayload::Function { .. } => ToolPayload::Function {
+                arguments: serde_json::json!({ "input": patch }).to_string(),
             },
             payload => payload,
         };

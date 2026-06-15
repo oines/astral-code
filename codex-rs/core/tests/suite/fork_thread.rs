@@ -12,12 +12,13 @@ use codex_protocol::user_input::UserInput;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_response_created;
 use core_test_support::responses::sse;
+use core_test_support::responses::sse_response;
 use core_test_support::skip_if_no_network;
+use core_test_support::test_codex::responses_mock_model_provider;
 use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
 use wiremock::Mock;
 use wiremock::MockServer;
-use wiremock::ResponseTemplate;
 use wiremock::matchers::method;
 use wiremock::matchers::path;
 
@@ -28,19 +29,21 @@ async fn fork_thread_twice_drops_to_first_message() {
     // Start a mock server that completes three turns.
     let server = MockServer::start().await;
     let sse = sse(vec![ev_response_created("resp"), ev_completed("resp")]);
-    let first = ResponseTemplate::new(200)
-        .insert_header("content-type", "text/event-stream")
-        .set_body_raw(sse.clone(), "text/event-stream");
+    let first = sse_response(sse.clone());
 
-    // Expect three calls to /v1/responses – one per user input.
+    // Expect three calls to /v1/chat/completions - one per user input.
     Mock::given(method("POST"))
-        .and(path("/v1/responses"))
+        .and(path("/v1/chat/completions"))
         .respond_with(first)
         .expect(3)
         .mount(&server)
         .await;
 
-    let mut builder = test_codex();
+    let model_provider = responses_mock_model_provider(format!("{}/v1", server.uri()));
+    let mut builder = test_codex().with_config(move |config| {
+        config.model = Some("mock-model".to_string());
+        config.model_provider = model_provider;
+    });
     let test = builder.build(&server).await.expect("create conversation");
     let codex = test.codex.clone();
     let thread_manager = test.thread_manager.clone();
@@ -55,7 +58,7 @@ async fn fork_thread_twice_drops_to_first_message() {
                     text_elements: Vec::new(),
                 }],
                 final_output_json_schema: None,
-                responsesapi_client_metadata: None,
+                model_client_metadata: None,
                 additional_context: Default::default(),
                 thread_settings: Default::default(),
             })
@@ -155,17 +158,17 @@ async fn fork_thread_from_history_does_not_require_source_rollout_path() {
     let server = MockServer::start().await;
     let sse = sse(vec![ev_response_created("resp"), ev_completed("resp")]);
     Mock::given(method("POST"))
-        .and(path("/v1/responses"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .insert_header("content-type", "text/event-stream")
-                .set_body_raw(sse, "text/event-stream"),
-        )
+        .and(path("/v1/chat/completions"))
+        .respond_with(sse_response(sse))
         .expect(1)
         .mount(&server)
         .await;
 
-    let mut builder = test_codex();
+    let model_provider = responses_mock_model_provider(format!("{}/v1", server.uri()));
+    let mut builder = test_codex().with_config(move |config| {
+        config.model = Some("mock-model".to_string());
+        config.model_provider = model_provider;
+    });
     let test = builder.build(&server).await.expect("create conversation");
     let codex = test.codex.clone();
     let thread_manager = test.thread_manager.clone();
@@ -177,7 +180,7 @@ async fn fork_thread_from_history_does_not_require_source_rollout_path() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })

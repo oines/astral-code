@@ -15,12 +15,7 @@ approvals_reviewer = "auto_review"
     )?;
 
     let server = responses::start_mock_server().await;
-    let body = responses::sse(vec![
-        responses::ev_response_created("response_1"),
-        responses::ev_assistant_message("response_1", "done"),
-        responses::ev_completed("response_1"),
-    ]);
-    responses::mount_sse_once(&server, body).await;
+    responses::mount_chat_completions_text_once(&server, "done").await;
 
     let mut cmd = test.cmd_with_server(&server);
     let output = cmd

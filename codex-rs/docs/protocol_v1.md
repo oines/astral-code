@@ -98,7 +98,7 @@ Valid `personality` values are `friendly`, `pragmatic`, and `none`. When `none` 
 
 Note: For v1 wire compatibility, `EventMsg::TurnStarted` and `EventMsg::TurnComplete` serialize as `task_started` / `task_complete`. The deserializer accepts both `task_*` and `turn_*` tags.
 
-The `response_id` returned from each turn matches the OpenAI `response_id` stored in the API's `/responses` endpoint. It can be stored and used in future `Sessions` to resume threads of work.
+The `response_id` returned from each turn is the provider response identifier recorded for that model request. It can be stored and used in future `Sessions` to resume threads of work when the active provider supports that continuity.
 
 ## Transport
 

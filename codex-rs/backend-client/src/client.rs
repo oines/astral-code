@@ -11,7 +11,6 @@ use codex_api::SharedAuthProvider;
 use codex_client::build_reqwest_client_with_custom_ca;
 use codex_login::CodexAuth;
 use codex_login::default_client::get_astral_user_agent;
-use codex_protocol::account::PlanType as AccountPlanType;
 use codex_protocol::protocol::CreditsSnapshot;
 use codex_protocol::protocol::RateLimitReachedType;
 use codex_protocol::protocol::RateLimitSnapshot;
@@ -20,7 +19,6 @@ use codex_protocol::protocol::SpendControlLimitSnapshot;
 use reqwest::StatusCode;
 use reqwest::header::CONTENT_TYPE;
 use reqwest::header::HeaderMap;
-use reqwest::header::HeaderName;
 use reqwest::header::HeaderValue;
 use reqwest::header::USER_AGENT;
 use serde::de::DeserializeOwned;
@@ -104,7 +102,6 @@ pub struct Client {
     http: reqwest::Client,
     auth_provider: SharedAuthProvider,
     user_agent: Option<HeaderValue>,
-    hosted_account_id: Option<String>,
     path_style: PathStyle,
 }
 
@@ -114,7 +111,6 @@ impl fmt::Debug for Client {
             .field("base_url", &self.base_url)
             .field("auth_provider", &"<provider>")
             .field("user_agent", &self.user_agent)
-            .field("hosted_account_id", &self.hosted_account_id)
             .field("path_style", &self.path_style)
             .finish_non_exhaustive()
     }
@@ -135,7 +131,6 @@ impl Client {
             http,
             auth_provider: codex_model_provider::unauthenticated_auth_provider(),
             user_agent: None,
-            hosted_account_id: None,
             path_style,
         })
     }
@@ -158,11 +153,6 @@ impl Client {
         self
     }
 
-    pub fn with_hosted_account_id(mut self, account_id: impl Into<String>) -> Self {
-        self.hosted_account_id = Some(account_id.into());
-        self
-    }
-
     pub fn with_path_style(mut self, style: PathStyle) -> Self {
         self.path_style = style;
         self
@@ -176,12 +166,6 @@ impl Client {
             h.insert(USER_AGENT, HeaderValue::from_static("astral"));
         }
         self.auth_provider.add_auth_headers(&mut h);
-        if let Some(acc) = &self.hosted_account_id
-            && let Ok(name) = HeaderName::from_bytes(b"Astral-Account-Id")
-            && let Ok(hv) = HeaderValue::from_str(acc)
-        {
-            h.insert(name, hv);
-        }
         h
     }
 
@@ -417,7 +401,6 @@ impl Client {
     fn rate_limit_snapshots_from_payload(
         payload: RateLimitStatusPayload,
     ) -> Vec<RateLimitSnapshot> {
-        let plan_type = Some(Self::map_plan_type(payload.plan_type));
         let rate_limit_reached_type = payload
             .rate_limit_reached_type
             .flatten()
@@ -433,7 +416,6 @@ impl Client {
             payload.rate_limit.flatten().map(|details| *details),
             payload.credits.flatten().map(|details| *details),
             individual_limit,
-            plan_type,
             rate_limit_reached_type,
         )];
         if let Some(additional) = payload.additional_rate_limits.flatten() {
@@ -444,7 +426,6 @@ impl Client {
                     details.rate_limit.flatten().map(|rate_limit| *rate_limit),
                     /*credits*/ None,
                     /*individual_limit*/ None,
-                    plan_type,
                     /*rate_limit_reached_type*/ None,
                 )
             }));
@@ -458,7 +439,6 @@ impl Client {
         rate_limit: Option<crate::types::RateLimitStatusDetails>,
         credits: Option<crate::types::CreditStatusDetails>,
         individual_limit: Option<SpendControlLimitSnapshot>,
-        plan_type: Option<AccountPlanType>,
         rate_limit_reached_type: Option<RateLimitReachedType>,
     ) -> RateLimitSnapshot {
         let (primary, secondary) = match rate_limit {
@@ -475,7 +455,6 @@ impl Client {
             secondary,
             credits: Self::map_credits(credits),
             individual_limit,
-            plan_type,
             rate_limit_reached_type,
         }
     }
@@ -539,31 +518,6 @@ impl Client {
         }
     }
 
-    fn map_plan_type(plan_type: crate::types::PlanType) -> AccountPlanType {
-        match plan_type {
-            crate::types::PlanType::Free => AccountPlanType::Free,
-            crate::types::PlanType::Go => AccountPlanType::Go,
-            crate::types::PlanType::Plus => AccountPlanType::Plus,
-            crate::types::PlanType::Pro => AccountPlanType::Pro,
-            crate::types::PlanType::ProLite => AccountPlanType::ProLite,
-            crate::types::PlanType::Team => AccountPlanType::Team,
-            crate::types::PlanType::SelfServeBusinessUsageBased => {
-                AccountPlanType::SelfServeBusinessUsageBased
-            }
-            crate::types::PlanType::Business => AccountPlanType::Business,
-            crate::types::PlanType::EnterpriseCbpUsageBased => {
-                AccountPlanType::EnterpriseCbpUsageBased
-            }
-            crate::types::PlanType::Enterprise => AccountPlanType::Enterprise,
-            crate::types::PlanType::Edu | crate::types::PlanType::Education => AccountPlanType::Edu,
-            crate::types::PlanType::Guest
-            | crate::types::PlanType::FreeWorkspace
-            | crate::types::PlanType::Quorum
-            | crate::types::PlanType::K12
-            | crate::types::PlanType::Unknown => AccountPlanType::Unknown,
-        }
-    }
-
     fn window_minutes_from_seconds(seconds: i32) -> Option<i64> {
         if seconds <= 0 {
             return None;
@@ -583,21 +537,9 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     #[test]
-    fn map_plan_type_supports_usage_based_business_variants() {
-        assert_eq!(
-            Client::map_plan_type(crate::types::PlanType::SelfServeBusinessUsageBased),
-            AccountPlanType::SelfServeBusinessUsageBased
-        );
-        assert_eq!(
-            Client::map_plan_type(crate::types::PlanType::EnterpriseCbpUsageBased),
-            AccountPlanType::EnterpriseCbpUsageBased
-        );
-    }
-
-    #[test]
     fn usage_payload_maps_primary_and_additional_rate_limits() {
         let payload = RateLimitStatusPayload {
-            plan_type: crate::types::PlanType::Pro,
+            plan_type: Default::default(),
             rate_limit: Some(Some(Box::new(crate::types::RateLimitStatusDetails {
                 primary_window: Some(Some(Box::new(crate::types::RateLimitWindowSnapshot {
                     used_percent: 42,
@@ -676,7 +618,6 @@ mod tests {
                 balance: Some("9.99".to_string()),
             })
         );
-        assert_eq!(snapshots[0].plan_type, Some(AccountPlanType::Pro));
         assert_eq!(
             snapshots[0].rate_limit_reached_type,
             Some(RateLimitReachedType::WorkspaceMemberCreditsDepleted)
@@ -699,14 +640,13 @@ mod tests {
         );
         assert_eq!(snapshots[1].credits, None);
         assert_eq!(snapshots[1].individual_limit, None);
-        assert_eq!(snapshots[1].plan_type, Some(AccountPlanType::Pro));
         assert_eq!(snapshots[1].rate_limit_reached_type, None);
     }
 
     #[test]
     fn usage_payload_maps_zero_rate_limit_when_primary_absent() {
         let payload = RateLimitStatusPayload {
-            plan_type: crate::types::PlanType::Plus,
+            plan_type: Default::default(),
             rate_limit: None,
             additional_rate_limits: Some(Some(vec![AdditionalRateLimitDetails {
                 limit_name: "codex_other".to_string(),
@@ -741,7 +681,6 @@ mod tests {
                 secondary: None,
                 credits: None,
                 individual_limit: None,
-                plan_type: Some(AccountPlanType::Pro),
                 rate_limit_reached_type: None,
             },
             RateLimitSnapshot {
@@ -755,7 +694,6 @@ mod tests {
                 secondary: None,
                 credits: None,
                 individual_limit: None,
-                plan_type: Some(AccountPlanType::Pro),
                 rate_limit_reached_type: None,
             },
         ];
@@ -796,7 +734,7 @@ mod tests {
 
         for (kind, expected) in cases {
             let payload = RateLimitStatusPayload {
-                plan_type: crate::types::PlanType::Plus,
+                plan_type: Default::default(),
                 rate_limit: None,
                 credits: None,
                 spend_control: None,
@@ -812,7 +750,7 @@ mod tests {
     #[test]
     fn usage_payload_preserves_absent_rate_limit_reached_type() {
         let payload = RateLimitStatusPayload {
-            plan_type: crate::types::PlanType::Plus,
+            plan_type: Default::default(),
             rate_limit: None,
             credits: None,
             spend_control: None,
@@ -853,7 +791,6 @@ mod tests {
             http: reqwest::Client::new(),
             auth_provider: codex_model_provider::unauthenticated_auth_provider(),
             user_agent: None,
-            hosted_account_id: None,
             path_style,
         }
     }

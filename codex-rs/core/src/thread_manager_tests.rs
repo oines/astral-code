@@ -393,7 +393,7 @@ async fn resume_and_fork_do_not_restore_thread_environments_from_rollout() {
     std::fs::create_dir_all(&config.codex_home).expect("create codex home");
 
     let auth_manager =
-        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_api_key_auth_for_testing());
     let manager = ThreadManager::new(
         &config,
         auth_manager.clone(),
@@ -506,7 +506,7 @@ async fn explicit_installation_id_skips_codex_home_file() {
     std::fs::create_dir_all(&config.codex_home).expect("create codex home");
 
     let auth_manager =
-        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_api_key_auth_for_testing());
     let installation_id = uuid::Uuid::new_v4().to_string();
     let state_db = init_state_db(&config).await;
     let thread_store = thread_store_from_config(&config, state_db.clone());
@@ -548,7 +548,7 @@ async fn resume_active_thread_from_rollout_returns_running_thread() {
     std::fs::create_dir_all(&config.codex_home).expect("create codex home");
 
     let auth_manager =
-        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_api_key_auth_for_testing());
     let manager = ThreadManager::new(
         &config,
         auth_manager.clone(),
@@ -605,7 +605,7 @@ async fn resume_stopped_thread_from_rollout_spawns_new_thread() {
     std::fs::create_dir_all(&config.codex_home).expect("create codex home");
 
     let auth_manager =
-        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_api_key_auth_for_testing());
     let manager = ThreadManager::new(
         &config,
         auth_manager.clone(),
@@ -667,7 +667,7 @@ async fn resume_stopped_thread_from_rollout_preserves_thread_source() {
     std::fs::create_dir_all(&config.codex_home).expect("create codex home");
 
     let auth_manager =
-        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_api_key_auth_for_testing());
     let state_db = init_state_db(&config).await;
     let thread_store = thread_store_from_config(&config, state_db.clone());
     let manager = ThreadManager::new(
@@ -752,7 +752,7 @@ async fn rollout_path_resume_and_fork_read_history_through_thread_store() {
     std::fs::create_dir_all(&config.codex_home).expect("create codex home");
 
     let auth_manager =
-        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_api_key_auth_for_testing());
     let state_db = init_state_db(&config).await;
     let thread_store = thread_store_from_config(&config, state_db.clone());
     let in_memory_store = thread_store
@@ -859,7 +859,7 @@ async fn new_uses_active_provider_for_model_refresh() {
     config.model_provider.base_url = Some(server.uri());
 
     let auth_manager =
-        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_api_key_auth_for_testing());
     let manager = ThreadManager::new(
         &config,
         auth_manager,
@@ -1078,7 +1078,7 @@ async fn interrupted_fork_snapshot_does_not_synthesize_turn_id_for_legacy_histor
     std::fs::create_dir_all(&config.codex_home).expect("create codex home");
 
     let auth_manager =
-        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_api_key_auth_for_testing());
     let state_db = init_state_db(&config).await;
     let manager = ThreadManager::new(
         &config,
@@ -1184,7 +1184,7 @@ async fn interrupted_fork_snapshot_preserves_explicit_turn_id() {
     std::fs::create_dir_all(&config.codex_home).expect("create codex home");
 
     let auth_manager =
-        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_api_key_auth_for_testing());
     let state_db = init_state_db(&config).await;
     let manager = ThreadManager::new(
         &config,
@@ -1280,7 +1280,7 @@ async fn interrupted_fork_snapshot_uses_persisted_mid_turn_history_without_live_
     std::fs::create_dir_all(&config.codex_home).expect("create codex home");
 
     let auth_manager =
-        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_api_key_auth_for_testing());
     let state_db = init_state_db(&config).await;
     let manager = ThreadManager::new(
         &config,

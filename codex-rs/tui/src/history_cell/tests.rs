@@ -14,7 +14,6 @@ use codex_config::types::McpServerConfig;
 use codex_otel::RuntimeMetricTotals;
 use codex_otel::RuntimeMetricsSummary;
 use codex_protocol::ThreadId;
-use codex_protocol::account::PlanType;
 use codex_protocol::parse_command::ParsedCommand;
 use dirs::home_dir;
 use pretty_assertions::assert_eq;
@@ -601,12 +600,6 @@ fn final_message_separator_hides_short_worked_label_and_includes_runtime_metrics
             count: 4,
             duration_ms: 1_200,
         },
-        responses_api_overhead_ms: 650,
-        responses_api_inference_time_ms: 1_940,
-        responses_api_engine_iapi_ttft_ms: 410,
-        responses_api_engine_service_ttft_ms: 460,
-        responses_api_engine_iapi_tbt_ms: 1_180,
-        responses_api_engine_service_tbt_ms: 1_240,
         turn_ttft_ms: 0,
         turn_ttfm_ms: 0,
     };
@@ -620,10 +613,6 @@ fn final_message_separator_hides_short_worked_label_and_includes_runtime_metrics
     assert!(rendered[0].contains("WebSocket: 1 events send (700ms)"));
     assert!(rendered[0].contains("Streams: 6 events (900ms)"));
     assert!(rendered[0].contains("4 events received (1.2s)"));
-    assert!(rendered[0].contains("Responses API overhead: 650ms"));
-    assert!(rendered[0].contains("Responses API inference: 1.9s"));
-    assert!(rendered[0].contains("TTFT: 410ms (iapi) 460ms (service)"));
-    assert!(rendered[0].contains("TBT: 1.2s (iapi) 1.2s (service)"));
 }
 
 #[test]
@@ -651,7 +640,6 @@ async fn session_info_uses_availability_nux_tooltip_override() {
         &session_configured_event("gpt-5"),
         /*is_first_event*/ false,
         Some("Model just became available".to_string()),
-        Some(PlanType::Free),
         /*show_fast_status*/ false,
     );
 
@@ -673,7 +661,6 @@ async fn session_info_availability_nux_tooltip_snapshot() {
         &session_configured_event("gpt-5"),
         /*is_first_event*/ false,
         Some("Model just became available".to_string()),
-        Some(PlanType::Free),
         /*show_fast_status*/ false,
     );
 
@@ -690,7 +677,6 @@ async fn session_info_first_event_suppresses_tooltips_and_nux() {
         &session_configured_event("gpt-5"),
         /*is_first_event*/ true,
         Some("Model just became available".to_string()),
-        Some(PlanType::Free),
         /*show_fast_status*/ false,
     );
 
@@ -709,7 +695,6 @@ async fn session_info_hides_tooltips_when_disabled() {
         &session_configured_event("gpt-5"),
         /*is_first_event*/ false,
         Some("Model just became available".to_string()),
-        Some(PlanType::Free),
         /*show_fast_status*/ false,
     );
 

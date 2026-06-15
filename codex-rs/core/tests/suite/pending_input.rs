@@ -51,6 +51,21 @@ fn sse_event(event: Value) -> String {
 }
 
 fn message_input_texts(body: &Value, role: &str) -> Vec<String> {
+    if let Some(messages) = body.get("messages").and_then(Value::as_array) {
+        return messages
+            .iter()
+            .filter(|message| message.get("role").and_then(Value::as_str) == Some(role))
+            .flat_map(|message| match message.get("content") {
+                Some(Value::String(text)) => vec![text.clone()],
+                Some(Value::Array(content)) => content
+                    .iter()
+                    .filter_map(|span| span.get("text").and_then(Value::as_str).map(str::to_owned))
+                    .collect(),
+                _ => Vec::new(),
+            })
+            .collect();
+    }
+
     body.get("input")
         .and_then(Value::as_array)
         .into_iter()
@@ -62,6 +77,96 @@ fn message_input_texts(body: &Value, role: &str) -> Vec<String> {
         .filter(|span| span.get("type").and_then(Value::as_str) == Some("input_text"))
         .filter_map(|span| span.get("text").and_then(Value::as_str).map(str::to_owned))
         .collect()
+}
+
+fn request_items_for_snapshot(body: &Value) -> Vec<Value> {
+    if let Some(items) = body.get("input").and_then(Value::as_array) {
+        return items.clone();
+    }
+
+    body.get("messages")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .flat_map(chat_message_items_for_snapshot)
+        .collect()
+}
+
+fn chat_message_items_for_snapshot(message: &Value) -> Vec<Value> {
+    let role = message
+        .get("role")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+
+    if role == "tool" {
+        return vec![json!({
+            "type": "function_call_output",
+            "call_id": message.get("tool_call_id").and_then(Value::as_str).unwrap_or(""),
+            "output": message.get("content").and_then(Value::as_str).unwrap_or("")
+        })];
+    }
+
+    let mut items = Vec::new();
+    if let Some(reasoning) = message
+        .get("reasoning_content")
+        .and_then(Value::as_str)
+        .filter(|text| !text.is_empty())
+    {
+        items.push(json!({
+            "type": "reasoning",
+            "summary": [{"type": "summary_text", "text": reasoning}],
+            "encrypted_content": "redacted"
+        }));
+    }
+
+    if let Some(tool_calls) = message.get("tool_calls").and_then(Value::as_array) {
+        items.extend(tool_calls.iter().map(|tool_call| {
+            json!({
+                "type": "function_call",
+                "call_id": tool_call.get("id").and_then(Value::as_str).unwrap_or(""),
+                "name": tool_call.pointer("/function/name").and_then(Value::as_str).unwrap_or("unknown"),
+                "arguments": tool_call.pointer("/function/arguments").and_then(Value::as_str).unwrap_or("")
+            })
+        }));
+    }
+
+    let text_items = if role == "system" {
+        chat_system_texts_for_snapshot(message)
+    } else {
+        chat_message_texts(message)
+    };
+    for text in text_items {
+        items.push(json!({
+            "type": "message",
+            "role": if role == "system" { "developer" } else { role },
+            "content": [{"type": if role == "assistant" { "output_text" } else { "input_text" }, "text": text}]
+        }));
+    }
+
+    items
+}
+
+fn chat_message_texts(message: &Value) -> Vec<String> {
+    match message.get("content") {
+        Some(Value::String(text)) if !text.is_empty() => vec![text.clone()],
+        Some(Value::Array(content)) => content
+            .iter()
+            .filter_map(|span| span.get("text").and_then(Value::as_str).map(str::to_owned))
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn chat_system_texts_for_snapshot(message: &Value) -> Vec<String> {
+    let text = chat_message_texts(message).join("\n\n");
+    let Some(start) = text.find("<permissions instructions>") else {
+        return vec![text];
+    };
+    let end = text[start..]
+        .find("</permissions instructions>")
+        .map(|end| start + end + "</permissions instructions>".len())
+        .unwrap_or(text.len());
+    vec![text[start..end].to_string()]
 }
 
 fn chunk(event: Value) -> StreamingSseChunk {
@@ -102,7 +207,7 @@ async fn submit_user_input(codex: &CodexThread, text: &str) {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -120,7 +225,7 @@ async fn submit_danger_full_access_user_turn(test: &TestCodex, text: &str) {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
                 environments: Some(local_selections(test.config.cwd.clone())),
@@ -152,7 +257,7 @@ async fn steer_user_input(codex: &CodexThread, text: &str) {
             /*additional_context*/ Default::default(),
             /*expected_turn_id*/ None,
             /*client_user_message_id*/ None,
-            /*responsesapi_client_metadata*/ None,
+            /*model_client_metadata*/ None,
         )
         .await
         .unwrap_or_else(|err| panic!("steer user input: {err:?}"));
@@ -202,27 +307,30 @@ async fn wait_for_agent_message(codex: &CodexThread, text: &str) {
     assert!(matches!(final_message, EventMsg::AgentMessage(_)));
 }
 
+async fn wait_for_agent_message_delta(codex: &CodexThread, text: &str) {
+    let delta = wait_for_event(
+        codex,
+        |event| matches!(event, EventMsg::AgentMessageContentDelta(delta) if delta.delta == text),
+    )
+    .await;
+    assert!(matches!(delta, EventMsg::AgentMessageContentDelta(_)));
+}
+
 async fn wait_for_turn_complete(codex: &CodexThread) {
     wait_for_event(codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
 }
 
-fn assert_two_responses_input_snapshot(snapshot_name: &str, requests: &[Vec<u8>]) {
+fn assert_two_chat_completions_messages_snapshot(snapshot_name: &str, requests: &[Vec<u8>]) {
     assert_eq!(requests.len(), 2);
     let options = ContextSnapshotOptions::default().strip_capability_instructions();
     let first: Value =
         from_slice(&requests[0]).unwrap_or_else(|err| panic!("parse first request: {err}"));
     let second: Value =
         from_slice(&requests[1]).unwrap_or_else(|err| panic!("parse second request: {err}"));
-    let first_items = first["input"]
-        .as_array()
-        .unwrap_or_else(|| panic!("first request input"))
-        .clone();
-    let second_items = second["input"]
-        .as_array()
-        .unwrap_or_else(|| panic!("second request input"))
-        .clone();
+    let first_items = request_items_for_snapshot(&first);
+    let second_items = request_items_for_snapshot(&second);
     let snapshot = context_snapshot::format_labeled_items_snapshot(
-        "/responses POST bodies (input only, redacted like other suite snapshots)",
+        "/chat/completions POST bodies (messages only, redacted like other suite snapshots)",
         &[
             ("First request", first_items.as_slice()),
             ("Second request", second_items.as_slice()),
@@ -292,7 +400,7 @@ async fn injected_user_input_triggers_follow_up_request_with_deltas() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -311,7 +419,7 @@ async fn injected_user_input_triggers_follow_up_request_with_deltas() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -379,71 +487,10 @@ async fn queued_inter_agent_mail_triggers_follow_up_after_reasoning_item() {
     wait_for_turn_complete(&codex).await;
 
     let requests = server.requests().await;
-    assert_two_responses_input_snapshot("pending_input_queued_mail_after_reasoning", &requests);
-
-    server.shutdown().await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn queued_inter_agent_mail_triggers_follow_up_after_commentary_message_item() {
-    let (gate_message_done_tx, gate_message_done_rx) = oneshot::channel();
-
-    let first_chunks = vec![
-        chunk(ev_response_created("resp-1")),
-        chunk(ev_message_item_added("msg-1", "")),
-        gated_chunk(
-            gate_message_done_rx,
-            vec![
-                ev_output_text_delta("first answer"),
-                json!({
-                    "type": "response.output_item.done",
-                    "item": {
-                        "type": "message",
-                        "role": "assistant",
-                        "id": "msg-1",
-                        "content": [{"type": "output_text", "text": "first answer"}],
-                        "phase": "commentary",
-                    }
-                }),
-                ev_function_call(
-                    "call-stale",
-                    "shell",
-                    r#"{"command":"echo stale tool call"}"#,
-                ),
-                ev_message_item_added("msg-stale", ""),
-                ev_output_text_delta("stale final"),
-                ev_message_item_done("msg-stale", "stale final"),
-                ev_completed("resp-1"),
-            ],
-        ),
-    ];
-
-    let (server, _completions) =
-        start_streaming_sse_server(vec![first_chunks, response_completed_chunks("resp-2")]).await;
-
-    let codex = build_codex(&server).await;
-
-    submit_user_input(&codex, "first prompt").await;
-
-    wait_for_event(&codex, |event| {
-        matches!(
-            event,
-            EventMsg::ItemStarted(item_started)
-                if matches!(&item_started.item, TurnItem::AgentMessage(_))
-        )
-    })
-    .await;
-
-    submit_queue_only_agent_mail(&codex, "queued child update").await;
-
-    let _ = gate_message_done_tx.send(());
-
-    wait_for_agent_message(&codex, "first answer").await;
-
-    wait_for_turn_complete(&codex).await;
-
-    let requests = server.requests().await;
-    assert_two_responses_input_snapshot("pending_input_queued_mail_after_commentary", &requests);
+    assert_two_chat_completions_messages_snapshot(
+        "pending_input_queued_mail_after_reasoning",
+        &requests,
+    );
 
     server.shutdown().await;
 }
@@ -490,7 +537,7 @@ async fn user_input_does_not_preempt_after_reasoning_item() {
     wait_for_turn_complete(&codex).await;
 
     let requests = server.requests().await;
-    assert_two_responses_input_snapshot(
+    assert_two_chat_completions_messages_snapshot(
         "pending_input_user_input_no_preempt_after_reasoning",
         &requests,
     );
@@ -648,7 +695,7 @@ async fn steered_user_input_follows_compact_when_only_the_steer_needs_follow_up(
         .codex;
 
     submit_user_input(&codex, "first prompt").await;
-    wait_for_agent_message(&codex, "first answer").await;
+    wait_for_agent_message_delta(&codex, "first answer").await;
     steer_user_input(&codex, "second prompt").await;
     let _ = gate_first_completed_tx.send(());
 
@@ -700,11 +747,7 @@ async fn steered_user_input_waits_when_tool_output_triggers_compact_before_next_
 
     let first_chunks = vec![
         chunk(ev_response_created("resp-1")),
-        chunk(ev_function_call(
-            "call-1",
-            "shell_command",
-            &large_output_args,
-        )),
+        chunk(ev_function_call("call-1", "Bash", &large_output_args)),
         gated_chunk(
             gate_first_completed_rx,
             vec![ev_completed_with_tokens(

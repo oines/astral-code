@@ -55,9 +55,6 @@ impl From<codex_app_server_protocol::AuthMode> for TelemetryAuthMode {
     fn from(mode: codex_app_server_protocol::AuthMode) -> Self {
         match mode {
             codex_app_server_protocol::AuthMode::ApiKey => Self::ApiKey,
-            codex_app_server_protocol::AuthMode::Chatgpt
-            | codex_app_server_protocol::AuthMode::AgentIdentity
-            | codex_app_server_protocol::AuthMode::PersonalAccessToken => Self::Chatgpt,
         }
     }
 }

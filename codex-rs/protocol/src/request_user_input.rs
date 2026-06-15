@@ -45,7 +45,7 @@ pub struct RequestUserInputResponse {
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
 pub struct RequestUserInputEvent {
-    /// Responses API call id for the associated tool call, if available.
+    /// Model tool-call id for the associated tool call, if available.
     pub call_id: String,
     /// Turn ID that this request belongs to.
     /// Uses `#[serde(default)]` for backwards compatibility.

@@ -9,9 +9,6 @@
 
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_protocol::AccountUpdatedNotification;
-use codex_app_server_protocol::ClientRequest;
-use codex_app_server_protocol::LoginAccountParams;
-use codex_app_server_protocol::LoginAccountResponse;
 use codex_login::read_astral_api_key_from_env;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
@@ -37,7 +34,6 @@ use ratatui::widgets::Wrap;
 use std::cell::Cell;
 use std::sync::Arc;
 use std::sync::RwLock;
-use uuid::Uuid;
 
 use crate::LoginStatus;
 use crate::key_hint::KeyBinding;
@@ -64,10 +60,6 @@ pub(crate) enum SignInState {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SignInOption {
     ApiKey,
-}
-
-fn onboarding_request_id() -> codex_app_server_protocol::RequestId {
-    codex_app_server_protocol::RequestId::String(Uuid::new_v4().to_string())
 }
 
 #[derive(Clone, Default)]
@@ -225,11 +217,11 @@ impl AuthModeWidget {
         let mut lines: Vec<Line> = vec![
             Line::from(vec![
                 "  ".into(),
-                "Connect a provider API key to use astral-code.".into(),
+                "Configure a provider API key to use astral-code.".into(),
             ]),
             Line::from(vec![
                 "  ".into(),
-                "The key is stored locally in auth.json.".into(),
+                "API keys are read from provider config or environment.".into(),
             ]),
             "".into(),
         ];
@@ -269,8 +261,8 @@ impl AuthModeWidget {
                     lines.extend(create_mode_item(
                         idx,
                         option,
-                        "Provide your own API key",
-                        "Use the model provider configured for this workspace",
+                        "Use provider configuration",
+                        "Set ASTRAL_API_KEY or the provider auth env var",
                     ));
                 }
             }
@@ -315,13 +307,14 @@ impl AuthModeWidget {
         let mut intro_lines: Vec<Line> = vec![
             Line::from(vec!["> ".into(), "Use a provider API key".bold()]),
             "".into(),
-            "  Paste or type your API key below. It will be stored locally in auth.json.".into(),
+            "  API keys are no longer saved by the TUI.".into(),
+            "  Configure ASTRAL_API_KEY or the provider auth env var.".into(),
             "".into(),
         ];
         if state.prepopulated_from_env {
             intro_lines.push("  Detected ASTRAL_API_KEY environment variable.".into());
             intro_lines.push(
-                "  Paste a different key if you prefer to use another account."
+                "  This session will use provider configuration."
                     .dim()
                     .into(),
             );
@@ -351,7 +344,7 @@ impl AuthModeWidget {
             Line::from(vec![
                 "  Press ".dim(),
                 self.confirm_binding().into(),
-                " to save".dim(),
+                " to continue".dim(),
             ]),
             Line::from(vec![
                 "  Press ".dim(),
@@ -481,35 +474,21 @@ impl AuthModeWidget {
     }
 
     fn save_api_key(&mut self, api_key: String) {
-        self.set_error(/*message*/ None);
-        let request_handle = self.app_server_request_handle.clone();
-        let sign_in_state = self.sign_in_state.clone();
-        let error = self.error.clone();
-        let request_frame = self.request_frame.clone();
-        tokio::spawn(async move {
-            match request_handle
-                .request_typed::<LoginAccountResponse>(ClientRequest::LoginAccount {
-                    request_id: onboarding_request_id(),
-                    params: LoginAccountParams::ApiKey {
-                        api_key: api_key.clone(),
-                    },
-                })
-                .await
-            {
-                Ok(LoginAccountResponse::ApiKey {}) => {
-                    *error.write().unwrap() = None;
-                    *sign_in_state.write().unwrap() = SignInState::ApiKeyConfigured;
-                }
-                Err(err) => {
-                    *error.write().unwrap() = Some(format!("Failed to save API key: {err}"));
-                    *sign_in_state.write().unwrap() = SignInState::ApiKeyEntry(ApiKeyInputState {
-                        value: api_key,
-                        prepopulated_from_env: false,
-                    });
-                }
-            }
-            request_frame.schedule_frame();
-        });
+        let prepopulated_from_env = read_astral_api_key_from_env()
+            .as_deref()
+            .is_some_and(|env_key| env_key == api_key);
+        if prepopulated_from_env {
+            self.set_error(/*message*/ None);
+            *self.sign_in_state.write().unwrap() = SignInState::ApiKeyConfigured;
+        } else {
+            self.set_error(Some(
+                "Configure API keys through config.toml or provider auth env vars.".to_string(),
+            ));
+            *self.sign_in_state.write().unwrap() = SignInState::ApiKeyEntry(ApiKeyInputState {
+                value: api_key,
+                prepopulated_from_env: false,
+            });
+        }
         self.request_frame.schedule_frame();
     }
 

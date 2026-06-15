@@ -74,7 +74,6 @@ use crate::session_state::SessionNetworkProxyRuntime;
 use crate::session_state::ThreadSessionState;
 use crate::status::RateLimitWindowDisplay;
 use crate::status::StatusAccountDisplay;
-use crate::status::StatusHistoryHandle;
 use crate::status::format_directory_display;
 use crate::status::format_tokens_compact;
 use crate::status::rate_limit_snapshot_display_for_limit;
@@ -142,7 +141,6 @@ use codex_otel::RuntimeMetricsSummary;
 use codex_otel::SessionTelemetry;
 use codex_plugin::PluginCapabilitySummary;
 use codex_protocol::ThreadId;
-use codex_protocol::account::PlanType;
 use codex_protocol::approvals::GuardianAssessmentAction;
 use codex_protocol::approvals::GuardianAssessmentDecisionSource;
 use codex_protocol::approvals::GuardianAssessmentEvent;
@@ -260,7 +258,6 @@ fn queued_message_edit_hint_binding(
 use crate::app_event::AppEvent;
 use crate::app_event::ExitMode;
 use crate::app_event::PermissionProfileSelection;
-use crate::app_event::RateLimitRefreshOrigin;
 #[cfg(any(target_os = "windows", test))]
 use crate::app_event::WindowsSandboxEnableMode;
 use crate::app_event_sender::AppEventSender;
@@ -492,7 +489,6 @@ pub(crate) struct ChatWidgetInit {
     pub(crate) is_first_run: bool,
     pub(crate) status_account_display: Option<StatusAccountDisplay>,
     pub(crate) runtime_model_provider_base_url: Option<String>,
-    pub(crate) initial_plan_type: Option<PlanType>,
     pub(crate) model: Option<String>,
     pub(crate) startup_tooltip_override: Option<String>,
     // Shared latch so we only warn once about invalid status-line item IDs.
@@ -547,10 +543,8 @@ pub(crate) struct ChatWidget {
     pub(crate) remote_connection: Option<RemoteConnectionStatus>,
     token_info: Option<TokenUsageInfo>,
     rate_limit_snapshots_by_limit_id: BTreeMap<String, RateLimitSnapshotDisplay>,
-    refreshing_status_outputs: Vec<(u64, StatusHistoryHandle)>,
-    next_status_refresh_request_id: u64,
-    plan_type: Option<PlanType>,
     codex_rate_limit_reached_type: Option<RateLimitReachedType>,
+    #[cfg_attr(not(test), allow(dead_code))]
     rate_limit_warnings: RateLimitWarningState,
     warning_display_state: WarningDisplayState,
     adaptive_chunking: AdaptiveChunkingPolicy,
@@ -1953,19 +1947,9 @@ impl ChatWidget {
     }
 }
 
-fn has_websocket_timing_metrics(summary: RuntimeMetricsSummary) -> bool {
-    summary.responses_api_overhead_ms > 0
-        || summary.responses_api_inference_time_ms > 0
-        || summary.responses_api_engine_iapi_ttft_ms > 0
-        || summary.responses_api_engine_service_ttft_ms > 0
-        || summary.responses_api_engine_iapi_tbt_ms > 0
-        || summary.responses_api_engine_service_tbt_ms > 0
-}
-
 impl Drop for ChatWidget {
     fn drop(&mut self) {
         self.reset_realtime_conversation_state();
-        self.stop_rate_limit_poller();
     }
 }
 

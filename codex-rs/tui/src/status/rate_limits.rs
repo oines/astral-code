@@ -75,6 +75,7 @@ pub(crate) struct RateLimitWindowDisplay {
     pub window_minutes: Option<i64>,
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 impl RateLimitWindowDisplay {
     fn from_window(window: &RateLimitWindow, captured_at: DateTime<Local>) -> Self {
         let resets_at_utc = window
@@ -141,6 +142,7 @@ pub(crate) fn rate_limit_snapshot_display(
     rate_limit_snapshot_display_for_limit(snapshot, "codex".to_string(), captured_at)
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn rate_limit_snapshot_display_for_limit(
     snapshot: &RateLimitSnapshot,
     limit_name: String,
@@ -175,6 +177,7 @@ impl From<&CoreCreditsSnapshot> for CreditsSnapshotDisplay {
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 impl SpendControlLimitSnapshotDisplay {
     fn from_limit(
         value: &CoreSpendControlLimitSnapshot,
@@ -401,6 +404,7 @@ fn format_credit_balance(raw: &str) -> Option<String> {
     None
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn format_credit_amount(raw: &str) -> Option<String> {
     let value = raw.trim().parse::<f64>().ok()?;
     if !value.is_finite() || value < 0.0 {

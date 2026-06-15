@@ -489,7 +489,7 @@ fn turn_metadata_state_ignores_client_reserved_metadata_before_start() {
         WindowsSandboxLevel::Disabled,
         /*enforce_managed_network*/ false,
     );
-    state.set_responsesapi_client_metadata(HashMap::from([
+    state.set_model_client_metadata(HashMap::from([
         (
             "turn_started_at_unix_ms".to_string(),
             "client-supplied".to_string(),
@@ -543,7 +543,7 @@ fn turn_metadata_state_merges_client_metadata_without_replacing_reserved_fields(
         WindowsSandboxLevel::Disabled,
         /*enforce_managed_network*/ false,
     );
-    state.set_responsesapi_client_metadata(HashMap::from([
+    state.set_model_client_metadata(HashMap::from([
         ("fiber_run_id".to_string(), "fiber-123".to_string()),
         ("origin".to_string(), "東京".to_string()),
         ("workspace_kind".to_string(), "projectless".to_string()),
@@ -642,7 +642,7 @@ fn turn_metadata_state_overlays_compaction_only_on_compaction_requests() {
         WindowsSandboxLevel::Disabled,
         /*enforce_managed_network*/ false,
     );
-    state.set_responsesapi_client_metadata(HashMap::from([(
+    state.set_model_client_metadata(HashMap::from([(
         "compaction".to_string(),
         "client-supplied".to_string(),
     )]));

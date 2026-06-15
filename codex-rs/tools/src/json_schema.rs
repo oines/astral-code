@@ -710,7 +710,7 @@ fn parse_local_definition_ref(schema_ref: &str) -> Option<DefinitionPointer> {
         .into_iter()
         .find(|candidate| table.as_ref() == *candidate)?;
 
-    // Responses API non-strict mode accepts nested local refs such as
+    // Non-strict provider schemas can accept nested local refs such as
     // `#/$defs/User/properties/name`, so keep the parent definition reachable.
     let (name, _) = pointer.split_front()?;
     Some(DefinitionPointer {

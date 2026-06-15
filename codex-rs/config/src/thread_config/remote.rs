@@ -152,7 +152,11 @@ fn model_provider_from_proto(
     }
     let id = provider.id;
     let wire_api = match proto::WireApi::try_from(provider.wire_api) {
-        Ok(proto::WireApi::Responses) => WireApi::Responses,
+        Ok(proto::WireApi::Responses) => {
+            return Err(parse_error(
+                "remote thread config returned unsupported wire_api: responses",
+            ));
+        }
         Ok(proto::WireApi::AnthropicMessages) => WireApi::AnthropicMessages,
         Ok(proto::WireApi::ChatCompletions) => WireApi::ChatCompletions,
         Ok(proto::WireApi::Unspecified) => {
@@ -190,6 +194,11 @@ fn model_provider_from_proto(
         requires_astral_auth: provider.requires_astral_auth,
         supports_websockets: provider.supports_websockets,
     };
+    info.validate().map_err(|err| {
+        parse_error(format!(
+            "remote thread config returned invalid provider: {err}"
+        ))
+    })?;
     Ok((id, info))
 }
 
@@ -230,7 +239,6 @@ fn model_provider_to_proto(
         experimental_bearer_token,
         auth: auth.map(model_provider_auth_to_proto),
         wire_api: proto_wire_api(wire_api).into(),
-        provider_flavor: None,
         query_params: query_params.map(proto_string_map),
         http_headers: http_headers.map(proto_string_map),
         env_http_headers: env_http_headers.map(proto_string_map),
@@ -405,11 +413,7 @@ mod tests {
 
     #[test]
     fn model_provider_proto_roundtrips_through_domain_type() {
-        for wire_api in [
-            WireApi::Responses,
-            WireApi::AnthropicMessages,
-            WireApi::ChatCompletions,
-        ] {
+        for wire_api in [WireApi::AnthropicMessages, WireApi::ChatCompletions] {
             let expected = ModelProviderInfo {
                 wire_api,
                 ..expected_provider()
@@ -443,8 +447,7 @@ mod tests {
                                 refresh_interval_ms: 300_000,
                                 cwd: workspace_cwd,
                             }),
-                            wire_api: proto::WireApi::Responses.into(),
-                            provider_flavor: None,
+                            wire_api: proto::WireApi::ChatCompletions.into(),
                             query_params: Some(proto::StringMap {
                                 values: HashMap::from([(
                                     "api-version".to_string(),
@@ -468,7 +471,7 @@ mod tests {
                             stream_idle_timeout_ms: Some(9_000),
                             websocket_connect_timeout_ms: Some(10_000),
                             requires_astral_auth: false,
-                            supports_websockets: true,
+                            supports_websockets: false,
                         }],
                         features: HashMap::from([
                             ("plugins".to_string(), false),
@@ -513,7 +516,7 @@ mod tests {
                 refresh_interval_ms: 300_000,
                 cwd: workspace_dir(),
             }),
-            wire_api: WireApi::Responses,
+            wire_api: WireApi::ChatCompletions,
             provider_flavor: None,
             query_params: Some(HashMap::from([(
                 "api-version".to_string(),
@@ -534,7 +537,7 @@ mod tests {
             stream_idle_timeout_ms: Some(9_000),
             websocket_connect_timeout_ms: Some(10_000),
             requires_astral_auth: false,
-            supports_websockets: true,
+            supports_websockets: false,
             aws: None,
         }
     }

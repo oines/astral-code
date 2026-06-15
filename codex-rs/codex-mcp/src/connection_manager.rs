@@ -225,7 +225,7 @@ impl McpConnectionManager {
         prefix_mcp_tool_names: bool,
         client_elicitation_capability: ElicitationCapability,
         tool_plugin_provenance: ToolPluginProvenance,
-        auth: Option<&CodexAuth>,
+        _auth: Option<&CodexAuth>,
         elicitation_reviewer: Option<ElicitationReviewerHandle>,
     ) -> (Self, CancellationToken) {
         let cancel_token = CancellationToken::new();
@@ -239,9 +239,7 @@ impl McpConnectionManager {
         );
         let tool_plugin_provenance = Arc::new(tool_plugin_provenance);
         let startup_submit_id = submit_id.clone();
-        let codex_apps_auth_provider = auth
-            .filter(|auth| auth.uses_hosted_backend())
-            .map(codex_model_provider::auth_provider_from_auth);
+        let codex_apps_auth_provider = None;
         let mcp_servers = mcp_servers.clone();
         for (server_name, server) in mcp_servers
             .into_iter()

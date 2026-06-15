@@ -16,36 +16,11 @@ use strum_macros::Display;
 use ts_rs::TS;
 
 /// Authentication mode for Astral-managed credentials.
-///
-/// Astral actively supports API-key auth. Token-backed variants are retained
-/// only so legacy payloads can be identified and rejected cleanly.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Display, JsonSchema, TS)]
 #[serde(rename_all = "lowercase")]
 pub enum AuthMode {
     /// Provider API key supplied by the caller and stored locally.
     ApiKey,
-    /// Legacy ChatGPT OAuth mode; not accepted by Astral.
-    Chatgpt,
-    /// Legacy Agent Identity mode; not accepted by Astral.
-    #[serde(rename = "agentIdentity")]
-    #[ts(rename = "agentIdentity")]
-    #[strum(serialize = "agentIdentity")]
-    AgentIdentity,
-    /// Legacy personal access token mode; not accepted by Astral.
-    #[serde(rename = "personalAccessToken")]
-    #[ts(rename = "personalAccessToken")]
-    #[strum(serialize = "personalAccessToken")]
-    PersonalAccessToken,
-}
-
-impl AuthMode {
-    /// Returns whether this legacy mode represented an upstream hosted account.
-    pub fn has_legacy_hosted_account(self) -> bool {
-        match self {
-            Self::Chatgpt | Self::PersonalAccessToken => true,
-            Self::ApiKey | Self::AgentIdentity => false,
-        }
-    }
 }
 
 macro_rules! experimental_reason_expr {
@@ -609,7 +584,7 @@ client_request_definitions! {
         serialization: None,
         response: v2::ThreadTurnsItemsListResponse,
     },
-    /// Append raw Responses API items to the thread history without starting a user turn.
+    /// Append raw model history items to the thread history without starting a user turn.
     ThreadInjectItems => "thread/inject_items" {
         params: v2::ThreadInjectItemsParams,
         serialization: thread_id(params.thread_id),
@@ -938,36 +913,6 @@ client_request_definitions! {
         params: #[ts(type = "undefined")] #[serde(skip_serializing_if = "Option::is_none")] Option<()>,
         serialization: global("config"),
         response: v2::WindowsSandboxReadinessResponse,
-    },
-
-    LoginAccount => "account/login/start" {
-        params: v2::LoginAccountParams,
-        serialization: global("account-auth"),
-        response: v2::LoginAccountResponse,
-    },
-
-    CancelLoginAccount => "account/login/cancel" {
-        params: v2::CancelLoginAccountParams,
-        serialization: global("account-auth"),
-        response: v2::CancelLoginAccountResponse,
-    },
-
-    LogoutAccount => "account/logout" {
-        params: #[ts(type = "undefined")] #[serde(skip_serializing_if = "Option::is_none")] Option<()>,
-        serialization: global("account-auth"),
-        response: v2::LogoutAccountResponse,
-    },
-
-    GetAccountRateLimits => "account/rateLimits/read" {
-        params: #[ts(type = "undefined")] #[serde(skip_serializing_if = "Option::is_none")] Option<()>,
-        serialization: None,
-        response: v2::GetAccountRateLimitsResponse,
-    },
-
-    GetAccountTokenUsage => "account/usage/read" {
-        params: #[ts(type = "undefined")] #[serde(skip_serializing_if = "Option::is_none")] Option<()>,
-        serialization: None,
-        response: v2::GetAccountTokenUsageResponse,
     },
 
     FeedbackUpload => "feedback/upload" {
@@ -1547,7 +1492,6 @@ server_notification_definitions! {
     McpServerOauthLoginCompleted => "mcpServer/oauthLogin/completed" (v2::McpServerOauthLoginCompletedNotification),
     McpServerStatusUpdated => "mcpServer/startupStatus/updated" (v2::McpServerStatusUpdatedNotification),
     AccountUpdated => "account/updated" (v2::AccountUpdatedNotification),
-    AccountRateLimitsUpdated => "account/rateLimits/updated" (v2::AccountRateLimitsUpdatedNotification),
     AppListUpdated => "app/list/updated" (v2::AppListUpdatedNotification),
     RemoteControlStatusChanged => "remoteControl/status/changed" (v2::RemoteControlStatusChangedNotification),
     ExternalAgentConfigImportCompleted => "externalAgentConfig/import/completed" (v2::ExternalAgentConfigImportCompletedNotification),
@@ -1587,11 +1531,6 @@ server_notification_definitions! {
     /// Notifies the user of world-writable directories on Windows, which cannot be protected by the sandbox.
     WindowsWorldWritableWarning => "windows/worldWritableWarning" (v2::WindowsWorldWritableWarningNotification),
     WindowsSandboxSetupCompleted => "windowsSandbox/setupCompleted" (v2::WindowsSandboxSetupCompletedNotification),
-
-    #[serde(rename = "account/login/completed")]
-    #[ts(rename = "account/login/completed")]
-    #[strum(serialize = "account/login/completed")]
-    AccountLoginCompleted(v2::AccountLoginCompletedNotification),
 
 }
 
@@ -2343,42 +2282,6 @@ mod tests {
     }
 
     #[test]
-    fn serialize_get_account_rate_limits() -> Result<()> {
-        let request = ClientRequest::GetAccountRateLimits {
-            request_id: RequestId::Integer(1),
-            params: None,
-        };
-        assert_eq!(request.id(), &RequestId::Integer(1));
-        assert_eq!(request.method(), "account/rateLimits/read");
-        assert_eq!(
-            json!({
-                "method": "account/rateLimits/read",
-                "id": 1,
-            }),
-            serde_json::to_value(&request)?,
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn serialize_get_account_token_usage() -> Result<()> {
-        let request = ClientRequest::GetAccountTokenUsage {
-            request_id: RequestId::Integer(1),
-            params: None,
-        };
-        assert_eq!(request.id(), &RequestId::Integer(1));
-        assert_eq!(request.method(), "account/usage/read");
-        assert_eq!(
-            json!({
-                "method": "account/usage/read",
-                "id": 1,
-            }),
-            serde_json::to_value(&request)?,
-        );
-        Ok(())
-    }
-
-    #[test]
     fn serialize_client_response() -> Result<()> {
         let cwd = absolute_path("/tmp");
         let response = ClientResponse::ThreadStart {
@@ -2481,44 +2384,6 @@ mod tests {
             json!({
                 "method": "configRequirements/read",
                 "id": 1,
-            }),
-            serde_json::to_value(&request)?,
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn serialize_account_login_api_key() -> Result<()> {
-        let request = ClientRequest::LoginAccount {
-            request_id: RequestId::Integer(2),
-            params: v2::LoginAccountParams::ApiKey {
-                api_key: "secret".to_string(),
-            },
-        };
-        assert_eq!(
-            json!({
-                "method": "account/login/start",
-                "id": 2,
-                "params": {
-                    "type": "apiKey",
-                    "apiKey": "secret"
-                }
-            }),
-            serde_json::to_value(&request)?,
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn serialize_account_logout() -> Result<()> {
-        let request = ClientRequest::LogoutAccount {
-            request_id: RequestId::Integer(5),
-            params: None,
-        };
-        assert_eq!(
-            json!({
-                "method": "account/logout",
-                "id": 5,
             }),
             serde_json::to_value(&request)?,
         );

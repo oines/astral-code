@@ -32,7 +32,6 @@ mod abort_tasks;
 mod additional_context;
 mod agent_execution;
 mod agent_jobs;
-mod agent_websocket;
 mod agents_md;
 mod apply_patch_cli;
 #[cfg(not(target_os = "windows"))]
@@ -40,7 +39,6 @@ mod approvals;
 mod auto_review;
 mod cli_stream;
 mod client;
-mod client_websockets;
 mod code_mode;
 mod codex_delegate;
 mod collaboration_instructions;
@@ -118,7 +116,6 @@ mod unstable_features_warning;
 mod user_notification;
 mod user_shell_cmd;
 mod view_image;
-mod websocket_fallback;
 mod window_headers;
 #[cfg(target_os = "windows")]
 mod windows_sandbox;

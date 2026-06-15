@@ -18,7 +18,6 @@ use std::ffi::OsStr;
 use std::future::Future;
 use std::io::IsTerminal;
 use std::io::Read;
-use std::net::IpAddr;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
@@ -28,9 +27,6 @@ use std::time::Instant;
 
 use anyhow::Context;
 use clap::Parser;
-use codex_api::ApiError;
-use codex_api::ResponsesWebsocketClient;
-use codex_api::is_azure_responses_provider;
 use codex_arg0::Arg0DispatchPaths;
 use codex_config::types::McpServerConfig;
 use codex_config::types::McpServerTransportConfig;
@@ -46,11 +42,8 @@ use codex_install_context::StandalonePlatform;
 use codex_login::ASTRAL_API_KEY_ENV_VAR;
 use codex_login::AuthDotJson;
 use codex_login::AuthManager;
-use codex_login::CodexAuth;
 use codex_login::default_client::build_reqwest_client;
-use codex_login::default_client::default_headers;
 use codex_login::load_auth_dot_json;
-use codex_model_provider::create_model_provider;
 use codex_protocol::protocol::AskForApproval;
 use codex_terminal_detection::Multiplexer;
 use codex_terminal_detection::TerminalInfo;
@@ -58,8 +51,6 @@ use codex_terminal_detection::TerminalName;
 use codex_terminal_detection::terminal_info;
 use codex_tui::Cli as TuiCli;
 use codex_utils_cli::CliConfigOverrides;
-use http::HeaderMap;
-use http::HeaderValue;
 use serde::Serialize;
 use supports_color::Stream;
 
@@ -87,10 +78,7 @@ use thread_inventory::thread_inventory_check;
 use title::terminal_title_check;
 use updates::updates_check;
 
-const OPENAI_BETA_HEADER: &str = "OpenAI-Beta";
 const DEFAULT_ASTRAL_PROVIDER_BASE_URL: &str = "http://localhost:8000/v1";
-const RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE: &str = "responses_websockets=2026-02-06";
-const WEBSOCKET_IMMEDIATE_CLOSE_GRACE: Duration = Duration::from_millis(250);
 const SLOW_CHECK_PROGRESS_THRESHOLD: Duration = Duration::from_secs(2);
 const SLOW_CHECK_PROGRESS_INTERVAL: Duration = Duration::from_secs(1);
 const PROXY_ENV_VARS: &[&str] = &[
@@ -1194,13 +1182,8 @@ fn auth_check(config: &Config) -> DoctorCheck {
         Ok(Some(auth)) => {
             details.push(format!("stored auth mode: {}", stored_auth_mode(&auth)));
             details.push(format!("stored API key: {}", auth.api_key.is_some()));
-            details.push(format!(
-                "stored legacy credential material: {}",
-                stored_legacy_credential_material_present(&auth)
-            ));
             let auth_issues = stored_auth_issues(&auth, env_var_present);
-            let legacy_auth =
-                stored_auth_mode_value(&auth) != codex_app_server_protocol::AuthMode::ApiKey;
+            let legacy_auth = stored_auth_mode_value(&auth) != StoredAuthMode::ApiKey;
             details.extend(
                 auth_issues
                     .iter()
@@ -1233,9 +1216,9 @@ fn auth_check(config: &Config) -> DoctorCheck {
                 DoctorCheck::new("auth.credentials", "auth", status, summary).details(details);
             if status == CheckStatus::Fail {
                 let remediation = if legacy_auth {
-                    "Run astral logout, then configure ASTRAL_API_KEY or a provider-specific auth env var."
+                    "Remove the legacy auth.json file, then configure ASTRAL_API_KEY or a provider-specific auth env var."
                 } else {
-                    "Pipe an API key to astral login --with-api-key, or set ASTRAL_API_KEY."
+                    "Set ASTRAL_API_KEY or the active provider's configured auth env var."
                 };
                 check = check.remediation(remediation);
             }
@@ -1255,7 +1238,7 @@ fn auth_check(config: &Config) -> DoctorCheck {
         "no Astral credentials were found",
     )
     .details(details)
-    .remediation("Pipe an API key to astral login --with-api-key, or set ASTRAL_API_KEY."),
+    .remediation("Set ASTRAL_API_KEY or the active provider's configured auth env var."),
         Err(err) => DoctorCheck::new(
             "auth.credentials",
             "auth",
@@ -1264,7 +1247,7 @@ fn auth_check(config: &Config) -> DoctorCheck {
         )
         .detail(err.to_string())
         .remediation(
-            "Fix auth storage access, then pipe an API key to astral login --with-api-key or set ASTRAL_API_KEY.",
+            "Fix auth storage access, then set ASTRAL_API_KEY or the active provider's configured auth env var.",
         ),
     }
 }
@@ -1276,9 +1259,7 @@ fn provider_specific_auth_check(
     mut details: Vec<String>,
     env_var_present: impl Fn(&str) -> bool,
 ) -> Option<DoctorCheck> {
-    details.push(format!(
-        "model provider uses Astral auth manager: {requires_astral_auth}"
-    ));
+    details.push(format!("legacy Astral auth flag: {requires_astral_auth}"));
     if requires_astral_auth {
         return None;
     }
@@ -1291,7 +1272,7 @@ fn provider_specific_auth_check(
                     "auth.credentials",
                     "auth",
                     CheckStatus::Ok,
-                    "auth is provided by the active model provider",
+                    "provider auth env var is configured",
                 )
                 .details(details),
             )
@@ -1306,7 +1287,7 @@ fn provider_specific_auth_check(
                     "auth.credentials",
                     "auth",
                     CheckStatus::Fail,
-                    "active model provider auth env var is missing",
+                    "provider auth env var is missing",
                 )
                 .details(details)
                 .remediation(remediation),
@@ -1317,7 +1298,7 @@ fn provider_specific_auth_check(
                 "auth.credentials",
                 "auth",
                 CheckStatus::Ok,
-                "Astral-managed auth is not required for the active model provider",
+                "no provider auth env var is required",
             )
             .details(details),
         ),
@@ -1326,23 +1307,28 @@ fn provider_specific_auth_check(
 
 fn stored_auth_mode(auth: &codex_login::AuthDotJson) -> &'static str {
     match stored_auth_mode_value(auth) {
-        codex_app_server_protocol::AuthMode::ApiKey => "api_key",
-        codex_app_server_protocol::AuthMode::Chatgpt
-        | codex_app_server_protocol::AuthMode::AgentIdentity
-        | codex_app_server_protocol::AuthMode::PersonalAccessToken => "unsupported_legacy",
+        StoredAuthMode::ApiKey => "api_key",
+        StoredAuthMode::LegacyHosted => "unsupported_legacy",
     }
 }
 
-fn stored_auth_mode_value(auth: &AuthDotJson) -> codex_app_server_protocol::AuthMode {
-    if let Some(mode) = auth.auth_mode {
-        return mode;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StoredAuthMode {
+    ApiKey,
+    LegacyHosted,
+}
+
+fn stored_auth_mode_value(auth: &AuthDotJson) -> StoredAuthMode {
+    if let Some(mode) = auth.auth_mode.as_deref() {
+        return match mode {
+            "apikey" | "api_key" | "apiKey" => StoredAuthMode::ApiKey,
+            _ => StoredAuthMode::LegacyHosted,
+        };
     }
     if auth.api_key.is_some() {
-        codex_app_server_protocol::AuthMode::ApiKey
-    } else if auth.personal_access_token.is_some() {
-        codex_app_server_protocol::AuthMode::PersonalAccessToken
+        StoredAuthMode::ApiKey
     } else {
-        codex_app_server_protocol::AuthMode::Chatgpt
+        StoredAuthMode::LegacyHosted
     }
 }
 
@@ -1352,7 +1338,7 @@ fn stored_auth_issues(
 ) -> Vec<&'static str> {
     let mut issues = Vec::new();
     match stored_auth_mode_value(auth) {
-        codex_app_server_protocol::AuthMode::ApiKey => {
+        StoredAuthMode::ApiKey => {
             let stored_key_present = auth
                 .api_key
                 .as_deref()
@@ -1362,17 +1348,11 @@ fn stored_auth_issues(
                 issues.push("API key auth is missing an API key");
             }
         }
-        codex_app_server_protocol::AuthMode::Chatgpt
-        | codex_app_server_protocol::AuthMode::AgentIdentity
-        | codex_app_server_protocol::AuthMode::PersonalAccessToken => {
+        StoredAuthMode::LegacyHosted => {
             issues.push("stored legacy credentials are not supported by Astral");
         }
     }
     issues
-}
-
-fn stored_legacy_credential_material_present(auth: &AuthDotJson) -> bool {
-    auth.tokens.is_some() || auth.agent_identity.is_some() || auth.personal_access_token.is_some()
 }
 
 fn network_check() -> DoctorCheck {
@@ -2228,6 +2208,7 @@ async fn websocket_reachability_check(
     config: &Config,
     auth_manager: Option<Arc<AuthManager>>,
 ) -> DoctorCheck {
+    let _ = auth_manager;
     let provider = &config.model_provider;
     let mut details = vec![
         format!("model provider: {}", config.model_provider_id),
@@ -2236,198 +2217,15 @@ async fn websocket_reachability_check(
         format!("supports websockets: {}", provider.supports_websockets),
     ];
     push_proxy_env_details(&mut details);
+    details.push("Responses WebSocket transport has been removed.".to_string());
 
-    if !provider.supports_websockets {
-        return DoctorCheck::new(
-            "network.websocket_reachability",
-            "websocket",
-            CheckStatus::Ok,
-            "Responses WebSocket is not enabled for the active provider",
-        )
-        .details(details);
-    }
-
-    details.push(format!(
-        "connect timeout: {} ms",
-        provider.websocket_connect_timeout().as_millis()
-    ));
-
-    let runtime_provider = create_model_provider(provider.clone(), auth_manager);
-    let auth = runtime_provider.auth().await;
-    details.push(format!(
-        "auth mode: {}",
-        auth.as_ref().map(auth_mode_name).unwrap_or("none")
-    ));
-
-    let api_provider = match runtime_provider.api_provider().await {
-        Ok(api_provider) => api_provider,
-        Err(err) => {
-            return websocket_probe_warning(
-                "Responses WebSocket provider setup failed",
-                details,
-                format!("provider setup failed: {err}"),
-            );
-        }
-    };
-    match api_provider.websocket_url_for_path("responses") {
-        Ok(url) => {
-            details.push(format!("endpoint: {url}"));
-            if let Some(host) = url.host_str()
-                && let Some(port) = url.port_or_known_default()
-            {
-                details.extend(dns_address_family_details(host, port).await);
-            }
-        }
-        Err(err) => {
-            return websocket_probe_warning(
-                "Responses WebSocket endpoint could not be built",
-                details,
-                format!("endpoint build failed: {err}"),
-            );
-        }
-    }
-
-    let api_auth = match runtime_provider.api_auth().await {
-        Ok(api_auth) => api_auth,
-        Err(err) => {
-            return websocket_probe_warning(
-                "Responses WebSocket auth could not be resolved",
-                details,
-                format!("auth resolution failed: {err}"),
-            );
-        }
-    };
-
-    let mut extra_headers = HeaderMap::new();
-    extra_headers.insert(
-        OPENAI_BETA_HEADER,
-        HeaderValue::from_static(RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE),
-    );
-    let client = ResponsesWebsocketClient::new(api_provider, api_auth);
-    match tokio::time::timeout(
-        provider.websocket_connect_timeout(),
-        client.probe_handshake(
-            extra_headers,
-            default_headers(),
-            WEBSOCKET_IMMEDIATE_CLOSE_GRACE,
-        ),
-    )
-    .await
-    {
-        Ok(Ok(probe)) => {
-            details.push(format!("handshake result: HTTP {}", probe.status));
-            details.push(format!("reasoning header: {}", probe.reasoning_included));
-            details.push(format!(
-                "models etag present: {}",
-                probe.models_etag_present
-            ));
-            details.push(format!(
-                "server model present: {}",
-                probe.server_model_present
-            ));
-            if let Some(close) = probe.immediate_close {
-                details.push(format!("immediate close code: {}", close.code));
-                details.push(format!("immediate close reason: {}", close.reason));
-                return DoctorCheck::new(
-                    "network.websocket_reachability",
-                    "websocket",
-                    CheckStatus::Warning,
-                    "Responses WebSocket closed immediately after handshake",
-                )
-                .details(details)
-                .remediation(
-                    "Check proxy, VPN, firewall, DNS, custom CA, and WebSocket policy support.",
-                );
-            }
-            DoctorCheck::new(
-                "network.websocket_reachability",
-                "websocket",
-                CheckStatus::Ok,
-                "Responses WebSocket handshake succeeded",
-            )
-            .details(details)
-        }
-        Ok(Err(err)) => websocket_probe_warning(
-            "Responses WebSocket failed; HTTPS fallback may still work",
-            details,
-            websocket_error_detail(&err),
-        ),
-        Err(_) => websocket_probe_warning(
-            "Responses WebSocket timed out; HTTPS fallback may still work",
-            details,
-            "handshake timed out".to_string(),
-        ),
-    }
-}
-
-fn websocket_probe_warning(
-    summary: &'static str,
-    mut details: Vec<String>,
-    error_detail: String,
-) -> DoctorCheck {
-    details.push(error_detail);
     DoctorCheck::new(
         "network.websocket_reachability",
         "websocket",
-        CheckStatus::Warning,
-        summary,
+        CheckStatus::Ok,
+        "Responses WebSocket transport is removed",
     )
     .details(details)
-    .remediation("Check proxy, VPN, firewall, DNS, custom CA, and WebSocket policy support.")
-}
-
-fn websocket_error_detail(err: &ApiError) -> String {
-    match err {
-        ApiError::Transport(transport) => format!("handshake transport error: {transport}"),
-        ApiError::Api { status, message } => {
-            format!("handshake API error: {status} {message}")
-        }
-        ApiError::Stream(message) => format!("handshake stream error: {message}"),
-        ApiError::ContextWindowExceeded
-        | ApiError::QuotaExceeded
-        | ApiError::UsageNotIncluded
-        | ApiError::Retryable { .. }
-        | ApiError::RateLimit(_)
-        | ApiError::InvalidRequest { .. }
-        | ApiError::CyberPolicy { .. }
-        | ApiError::ServerOverloaded => format!("handshake error: {err}"),
-    }
-}
-
-fn auth_mode_name(auth: &CodexAuth) -> &'static str {
-    match auth.auth_mode() {
-        codex_app_server_protocol::AuthMode::ApiKey => "api_key",
-        codex_app_server_protocol::AuthMode::Chatgpt => "chatgpt",
-        codex_app_server_protocol::AuthMode::AgentIdentity => "agent_identity",
-        codex_app_server_protocol::AuthMode::PersonalAccessToken => "personal_access_token",
-    }
-}
-
-async fn dns_address_family_details(host: &str, port: u16) -> Vec<String> {
-    match tokio::net::lookup_host((host, port)).await {
-        Ok(addresses) => {
-            let addresses = addresses.collect::<Vec<_>>();
-            let ipv4_count = addresses
-                .iter()
-                .filter(|address| matches!(address.ip(), IpAddr::V4(_)))
-                .count();
-            let ipv6_count = addresses
-                .iter()
-                .filter(|address| matches!(address.ip(), IpAddr::V6(_)))
-                .count();
-            let first_family = addresses
-                .first()
-                .map(|address| match address.ip() {
-                    IpAddr::V4(_) => "IPv4",
-                    IpAddr::V6(_) => "IPv6",
-                })
-                .unwrap_or("none");
-            vec![format!(
-                "DNS: {ipv4_count} IPv4, {ipv6_count} IPv6, first {first_family}"
-            )]
-        }
-        Err(err) => vec![format!("DNS: lookup failed ({err})")],
-    }
 }
 
 fn fallback_state_check() -> DoctorCheck {
@@ -2522,13 +2320,9 @@ fn provider_auth_reachability_mode_from_auth(
         return ProviderAuthReachabilityMode::ApiKey;
     }
     match stored_auth.map(stored_auth_mode_value) {
-        Some(codex_app_server_protocol::AuthMode::ApiKey) => ProviderAuthReachabilityMode::ApiKey,
-        Some(
-            codex_app_server_protocol::AuthMode::Chatgpt
-            | codex_app_server_protocol::AuthMode::AgentIdentity
-            | codex_app_server_protocol::AuthMode::PersonalAccessToken,
-        )
-        | None => ProviderAuthReachabilityMode::ApiKey,
+        Some(StoredAuthMode::ApiKey) | Some(StoredAuthMode::LegacyHosted) | None => {
+            ProviderAuthReachabilityMode::ApiKey
+        }
     }
 }
 
@@ -2575,7 +2369,8 @@ fn provider_reachability_plan_from_parts(
 }
 
 fn should_probe_models_route(provider_name: &str, base_url: &str, is_amazon_bedrock: bool) -> bool {
-    !is_amazon_bedrock && !is_azure_responses_provider(provider_name, Some(base_url))
+    let _ = (provider_name, base_url);
+    !is_amazon_bedrock
 }
 
 fn provider_url_for_path(
@@ -3382,10 +3177,7 @@ mod tests {
         .expect("non-OpenAI provider should produce a provider-specific check");
 
         assert_eq!(check.status, CheckStatus::Ok);
-        assert_eq!(
-            check.summary,
-            "Astral-managed auth is not required for the active model provider"
-        );
+        assert_eq!(check.summary, "no provider auth env var is required");
     }
 
     #[test]
@@ -3400,10 +3192,7 @@ mod tests {
         .expect("non-OpenAI provider should produce a provider-specific check");
 
         assert_eq!(check.status, CheckStatus::Fail);
-        assert_eq!(
-            check.summary,
-            "active model provider auth env var is missing"
-        );
+        assert_eq!(check.summary, "provider auth env var is missing");
         assert_eq!(
             check.remediation,
             Some("Set PROVIDER_API_KEY before running Codex.".to_string())
@@ -3413,12 +3202,9 @@ mod tests {
     #[test]
     fn stored_auth_validation_rejects_missing_api_key() {
         let auth = AuthDotJson {
-            auth_mode: Some(codex_app_server_protocol::AuthMode::ApiKey),
+            auth_mode: Some("apikey".to_string()),
             api_key: None,
-            tokens: None,
             last_refresh: None,
-            agent_identity: None,
-            personal_access_token: None,
         };
 
         assert_eq!(
@@ -3433,10 +3219,7 @@ mod tests {
         let auth = AuthDotJson {
             auth_mode: None,
             api_key: None,
-            tokens: None,
             last_refresh: None,
-            agent_identity: None,
-            personal_access_token: None,
         };
 
         assert_eq!(
@@ -3444,18 +3227,14 @@ mod tests {
             vec!["stored legacy credentials are not supported by Astral"]
         );
         assert_eq!(stored_auth_mode(&auth), "unsupported_legacy");
-        assert!(!stored_legacy_credential_material_present(&auth));
     }
 
     #[test]
-    fn stored_auth_validation_rejects_personal_access_token() {
-        let mut auth = AuthDotJson {
+    fn stored_auth_validation_rejects_explicit_legacy_mode() {
+        let auth = AuthDotJson {
             auth_mode: None,
             api_key: None,
-            tokens: None,
             last_refresh: None,
-            agent_identity: None,
-            personal_access_token: Some("at-test".to_string()),
         };
 
         assert_eq!(stored_auth_mode(&auth), "unsupported_legacy");
@@ -3463,10 +3242,12 @@ mod tests {
             stored_auth_issues(&auth, |_| false),
             vec!["stored legacy credentials are not supported by Astral"]
         );
-        assert!(stored_legacy_credential_material_present(&auth));
 
-        auth.auth_mode = Some(codex_app_server_protocol::AuthMode::PersonalAccessToken);
-        auth.personal_access_token = None;
+        let auth = AuthDotJson {
+            auth_mode: Some("personalAccessToken".to_string()),
+            api_key: None,
+            last_refresh: None,
+        };
         assert_eq!(
             stored_auth_issues(&auth, |_| false),
             vec!["stored legacy credentials are not supported by Astral"]
@@ -3476,12 +3257,9 @@ mod tests {
     #[test]
     fn provider_reachability_mode_uses_api_key_auth() {
         let api_key_auth = AuthDotJson {
-            auth_mode: Some(codex_app_server_protocol::AuthMode::ApiKey),
+            auth_mode: Some("apikey".to_string()),
             api_key: Some("sk-test".to_string()),
-            tokens: None,
             last_refresh: None,
-            agent_identity: None,
-            personal_access_token: None,
         };
 
         assert_eq!(

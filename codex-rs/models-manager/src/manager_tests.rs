@@ -203,7 +203,7 @@ fn openai_manager_for_tests(
         codex_home,
         endpoint_client,
         Some(AuthManager::from_auth_for_testing(
-            CodexAuth::create_dummy_chatgpt_auth_for_testing(),
+            CodexAuth::create_dummy_api_key_auth_for_testing(),
         )),
     )
 }
@@ -834,7 +834,7 @@ async fn refresh_available_models_skips_network_when_external_api_key_overrides_
     let dynamic_slug = "dynamic-model-only-for-test-external-api-key";
     let codex_home = tempdir().expect("temp dir");
     let auth_manager =
-        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_api_key_auth_for_testing());
     auth_manager.set_external_auth(Arc::new(TestExternalApiKeyAuth));
     let endpoint = TestNoRefreshAuthModelsEndpoint::new(vec![vec![remote_model(
         dynamic_slug,
@@ -871,7 +871,7 @@ async fn refresh_available_models_skips_network_when_external_api_key_is_unresol
     let dynamic_slug = "dynamic-model-only-for-test-unresolved-external-api-key";
     let codex_home = tempdir().expect("temp dir");
     let auth_manager =
-        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_api_key_auth_for_testing());
     auth_manager.set_external_auth(Arc::new(TestUnresolvedExternalApiKeyAuth));
     let endpoint = TestNoRefreshAuthModelsEndpoint::new(vec![vec![remote_model(
         dynamic_slug,
@@ -960,7 +960,7 @@ fn build_available_models_picks_default_after_hiding_hidden_models() {
 #[tokio::test]
 async fn static_manager_hides_models_not_supported_in_api_even_with_cached_hosted_auth() {
     let auth_manager =
-        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_api_key_auth_for_testing());
     let hosted_only_model = {
         let mut model = remote_model("hosted-only", "Hosted Only", /*priority*/ 0);
         model.supported_in_api = false;

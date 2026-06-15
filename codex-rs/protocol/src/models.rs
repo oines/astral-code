@@ -785,7 +785,7 @@ pub enum ResponseItem {
         #[serde(default, skip_serializing)]
         #[ts(skip)]
         id: Option<String>,
-        /// Set when using the Responses API.
+        /// Model-assigned call id when available.
         call_id: Option<String>,
         status: LocalShellStatus,
         action: LocalShellAction,
@@ -798,8 +798,8 @@ pub enum ResponseItem {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         namespace: Option<String>,
-        // The Responses API returns the function call arguments as a *string* that contains
-        // JSON, not as an already‑parsed object. We keep it as a raw string here and let
+        // OpenAI-compatible tool calls carry function arguments as a string that contains
+        // JSON, not as an already-parsed object. We keep it as a raw string here and let
         // Session::handle_function_call parse it into a Value.
         arguments: String,
         call_id: String,
@@ -858,8 +858,8 @@ pub enum ResponseItem {
         #[ts(type = "unknown[]")]
         tools: Vec<serde_json::Value>,
     },
-    // Emitted by the Responses API when the agent triggers a web search.
-    // Example payload (from SSE `response.output_item.done`):
+    // Emitted when the agent triggers a web search.
+    // Example normalized payload:
     // {
     //   "id":"ws_...",
     //   "type":"web_search_call",
@@ -877,7 +877,7 @@ pub enum ResponseItem {
         #[ts(optional)]
         action: Option<WebSearchAction>,
     },
-    // Emitted by the Responses API when the agent triggers image generation.
+    // Emitted when the agent triggers image generation.
     // Example payload:
     // {
     //   "id":"ig_123",
@@ -1306,16 +1306,16 @@ pub struct ShellCommandToolCallParams {
     pub justification: Option<String>,
 }
 
-/// Responses API compatible content items that can be returned by a tool call.
+/// Structured content items that can be returned by a tool call.
 /// This is a subset of ContentItem with the types we support as function call outputs.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum FunctionCallOutputContentItem {
-    // Do not rename, these are serialized and used directly in the responses API.
+    // Do not rename, these are serialized wire values.
     InputText {
         text: String,
     },
-    // Do not rename, these are serialized and used directly in the responses API.
+    // Do not rename, these are serialized wire values.
     InputImage {
         image_url: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]

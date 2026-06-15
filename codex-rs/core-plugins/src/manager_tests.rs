@@ -2411,7 +2411,7 @@ enabled = true
 }
 
 #[tokio::test]
-async fn list_marketplaces_includes_curated_repo_marketplace() {
+async fn list_marketplaces_does_not_auto_include_curated_repo_marketplace() {
     let tmp = tempfile::tempdir().unwrap();
     let curated_root = curated_plugins_repo_path(tmp.path());
     let plugin_root = curated_root.join("plugins/linear");
@@ -2452,37 +2452,10 @@ plugins = true
         .unwrap()
         .marketplaces;
 
-    let curated_marketplace = marketplaces
-        .into_iter()
-        .find(|marketplace| marketplace.name == "openai-curated")
-        .expect("curated marketplace should be listed");
-
-    assert_eq!(
-        curated_marketplace,
-        ConfiguredMarketplace {
-            name: "openai-curated".to_string(),
-            path: AbsolutePathBuf::try_from(curated_root.join(".agents/plugins/marketplace.json"))
-                .unwrap(),
-            interface: None,
-            plugins: vec![ConfiguredMarketplacePlugin {
-                id: "linear@openai-curated".to_string(),
-                name: "linear".to_string(),
-                local_version: None,
-                installed_version: None,
-                source: MarketplacePluginSource::Local {
-                    path: AbsolutePathBuf::try_from(curated_root.join("plugins/linear")).unwrap(),
-                },
-                policy: MarketplacePluginPolicy {
-                    installation: MarketplacePluginInstallPolicy::Available,
-                    authentication: MarketplacePluginAuthPolicy::OnInstall,
-                    products: None,
-                },
-                interface: None,
-                keywords: Vec::new(),
-                installed: false,
-                enabled: false,
-            }],
-        }
+    assert!(
+        marketplaces
+            .iter()
+            .all(|marketplace| marketplace.name != "openai-curated")
     );
 }
 
@@ -2921,7 +2894,7 @@ plugins = true
     let featured_plugin_ids = manager
         .featured_plugin_ids_for_config(
             &config,
-            Some(&CodexAuth::create_dummy_chatgpt_auth_for_testing()),
+            Some(&CodexAuth::create_dummy_api_key_auth_for_testing()),
         )
         .await
         .unwrap();

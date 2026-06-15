@@ -63,7 +63,7 @@ pub enum NonSteerableTurnKind {
 
 /// This translation layer make sure that we expose codex error code in camel case.
 ///
-/// When an upstream HTTP status is available (for example, from the Responses API or a provider),
+/// When an upstream HTTP status is available (for example, from a provider),
 /// it is forwarded in `httpStatusCode` on the relevant `codexErrorInfo` variant.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]

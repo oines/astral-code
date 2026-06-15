@@ -1,8 +1,15 @@
 #![allow(clippy::expect_used)]
 use codex_login::ASTRAL_API_KEY_ENV_VAR;
+use codex_model_provider_info::ASTRAL_BASE_URL_ENV_VAR;
+use codex_protocol::openai_models::ApplyPatchToolType;
+use codex_protocol::openai_models::ModelsResponse;
+use std::fs;
 use std::path::Path;
+use std::path::PathBuf;
 use tempfile::TempDir;
 use wiremock::MockServer;
+
+pub const TEST_MODEL: &str = "astral-test-model";
 
 pub struct TestCodexExecBuilder {
     home: TempDir,
@@ -24,8 +31,13 @@ impl TestCodexExecBuilder {
     pub fn cmd_with_server(&self, server: &MockServer) -> assert_cmd::Command {
         let mut cmd = self.cmd();
         let base = format!("{}/v1", server.uri());
-        cmd.arg("-c")
-            .arg(format!("openai_base_url={}", toml_string_literal(&base)));
+        cmd.env(ASTRAL_BASE_URL_ENV_VAR, base)
+            .arg("-c")
+            .arg(format!("model={}", toml_string_literal(TEST_MODEL)));
+        cmd.arg("-c").arg(format!(
+            "model_catalog_json={}",
+            toml_string_literal(&self.write_test_model_catalog().display().to_string())
+        ));
         cmd
     }
 
@@ -35,6 +47,31 @@ impl TestCodexExecBuilder {
     pub fn home_path(&self) -> &Path {
         self.home.path()
     }
+
+    fn write_test_model_catalog(&self) -> PathBuf {
+        let catalog_path = self.home.path().join("exec-test-models.json");
+        let response = exec_test_model_catalog();
+        let contents =
+            serde_json::to_vec(&response).expect("test model catalog should serialize to JSON");
+        fs::write(&catalog_path, contents).expect("write exec test model catalog");
+        catalog_path
+    }
+}
+
+pub fn exec_test_model_catalog() -> ModelsResponse {
+    let mut response =
+        codex_models_manager::bundled_models_response().expect("bundled models.json should parse");
+    let mut model = response
+        .models
+        .iter()
+        .find(|model| model.slug == "gpt-5.2")
+        .cloned()
+        .expect("bundled models.json should contain gpt-5.2");
+    model.slug = TEST_MODEL.to_string();
+    model.display_name = TEST_MODEL.to_string();
+    model.apply_patch_tool_type = Some(ApplyPatchToolType::Freeform);
+    response.models = vec![model];
+    response
 }
 
 fn toml_string_literal(value: &str) -> String {

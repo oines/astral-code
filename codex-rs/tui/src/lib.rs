@@ -2023,14 +2023,8 @@ fn should_show_onboarding(
     should_show_login_screen(login_status, config)
 }
 
-fn should_show_login_screen(login_status: LoginStatus, config: &Config) -> bool {
-    // Only show the login screen for providers that explicitly opt into
-    // managed auth. The default Astral provider reads provider-local API keys.
-    if !config.model_provider.requires_astral_auth {
-        return false;
-    }
-
-    login_status == LoginStatus::NotAuthenticated
+fn should_show_login_screen(_login_status: LoginStatus, _config: &Config) -> bool {
+    false
 }
 
 #[cfg(test)]

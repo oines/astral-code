@@ -1,4 +1,4 @@
-//! Verifies that parent and spawned subagent Responses API requests carry the expected window,
+//! Verifies that parent and spawned subagent model requests carry the expected window,
 //! parent-thread, and subagent identity headers.
 
 use anyhow::Result;
@@ -33,7 +33,7 @@ const SPAWN_CALL_ID: &str = "spawn-call-1";
 const REQUEST_POLL_INTERVAL: Duration = Duration::from_millis(/*millis*/ 20);
 const TURN_TIMEOUT: Duration = Duration::from_secs(/*secs*/ 60);
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn responses_api_parent_and_subagent_requests_include_identity_headers() -> Result<()> {
+async fn parent_and_subagent_requests_include_identity_headers() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
@@ -152,7 +152,7 @@ async fn submit_turn_with_timeout(test: &TestCodex, prompt: &str) -> Result<()> 
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
                 environments: Some(local_selections(cwd)),

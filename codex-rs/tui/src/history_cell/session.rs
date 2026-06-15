@@ -143,7 +143,6 @@ pub(crate) fn new_session_info(
     session: &ThreadSessionState,
     is_first_event: bool,
     tooltip_override: Option<String>,
-    auth_plan: Option<PlanType>,
     show_fast_status: bool,
 ) -> SessionInfoCell {
     // Header box rendered as history (so it appears at the very top)
@@ -198,7 +197,7 @@ pub(crate) fn new_session_info(
     } else {
         if config.show_tooltips
             && let Some(tooltips) = tooltip_override
-                .or_else(|| tooltips::get_tooltip(auth_plan, show_fast_status))
+                .or_else(|| tooltips::get_tooltip(show_fast_status))
                 .map(|tip| TooltipHistoryCell::new(tip, &config.cwd))
         {
             parts.push(Box::new(tooltips));

@@ -284,6 +284,38 @@ fn create_agent_tools_converts_tool_search() {
 }
 
 #[test]
+fn create_agent_tools_converts_apply_patch_freeform_tool() {
+    assert_eq!(
+        create_agent_tools_for_provider_neutral_request(&[ToolSpec::Freeform(FreeformTool {
+            name: "apply_patch".to_string(),
+            description: "Apply a patch".to_string(),
+            format: FreeformToolFormat {
+                r#type: "grammar".to_string(),
+                syntax: "lark".to_string(),
+                definition: "start: \"patch\"".to_string(),
+            },
+        })])
+        .expect("apply_patch freeform should convert to provider-neutral function"),
+        vec![AgentTool {
+            name: "apply_patch".to_string(),
+            description: "Apply a patch".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "input": {
+                        "type": "string",
+                        "description": "The raw apply_patch patch body.",
+                    },
+                },
+                "required": ["input"],
+                "additionalProperties": false,
+            }),
+            metadata: BTreeMap::new(),
+        }]
+    );
+}
+
+#[test]
 fn create_agent_tools_rejects_duplicate_names() {
     assert_eq!(
         create_agent_tools_for_provider_neutral_request(&[

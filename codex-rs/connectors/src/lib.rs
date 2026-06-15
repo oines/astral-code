@@ -24,24 +24,11 @@ pub const CONNECTORS_CACHE_TTL: Duration = Duration::from_secs(3600);
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConnectorDirectoryCacheKey {
     hosted_base_url: String,
-    account_id: Option<String>,
-    legacy_user_id: Option<String>,
-    is_workspace_account: bool,
 }
 
 impl ConnectorDirectoryCacheKey {
-    pub fn new(
-        hosted_base_url: String,
-        account_id: Option<String>,
-        legacy_user_id: Option<String>,
-        is_workspace_account: bool,
-    ) -> Self {
-        Self {
-            hosted_base_url,
-            account_id,
-            legacy_user_id,
-            is_workspace_account,
-        }
+    pub fn new(hosted_base_url: String) -> Self {
+        Self { hosted_base_url }
     }
 }
 
@@ -128,7 +115,6 @@ fn unexpired_directory_connectors_in_memory(
 
 pub async fn list_all_connectors_with_options<F, Fut>(
     cache_context: ConnectorDirectoryCacheContext,
-    is_workspace_account: bool,
     force_refetch: bool,
     mut fetch_page: F,
 ) -> anyhow::Result<Vec<AppInfo>>
@@ -143,11 +129,7 @@ where
         return Ok(cached_connectors);
     }
 
-    let mut apps = list_directory_connectors(&mut fetch_page).await?;
-    if is_workspace_account {
-        apps.extend(list_workspace_connectors(&mut fetch_page).await?);
-    }
-
+    let apps = list_directory_connectors(&mut fetch_page).await?;
     let mut connectors = merge_directory_apps(apps)
         .into_iter()
         .map(directory_app_to_app_info)
@@ -224,23 +206,6 @@ where
         }
     }
     Ok(apps)
-}
-
-async fn list_workspace_connectors<F, Fut>(fetch_page: &mut F) -> anyhow::Result<Vec<DirectoryApp>>
-where
-    F: FnMut(String) -> Fut,
-    Fut: Future<Output = anyhow::Result<DirectoryListResponse>>,
-{
-    let response =
-        fetch_page("/connectors/directory/list_workspace?external_logos=true".to_string()).await;
-    match response {
-        Ok(response) => Ok(response
-            .apps
-            .into_iter()
-            .filter(|app| !is_hidden_directory_app(app))
-            .collect()),
-        Err(_) => Ok(Vec::new()),
-    }
 }
 
 fn merge_directory_apps(apps: Vec<DirectoryApp>) -> Vec<DirectoryApp> {
@@ -447,12 +412,7 @@ mod tests {
         LazyLock::new(|| tokio::sync::Mutex::new(()));
 
     fn cache_key(id: &str) -> ConnectorDirectoryCacheKey {
-        ConnectorDirectoryCacheKey::new(
-            "https://chatgpt.example".to_string(),
-            Some(format!("account-{id}")),
-            Some(format!("user-{id}")),
-            /*is_workspace_account*/ true,
-        )
+        ConnectorDirectoryCacheKey::new(format!("https://directory-{id}.example"))
     }
 
     fn cache_context(codex_home: &TempDir, id: &str) -> ConnectorDirectoryCacheContext {
@@ -496,7 +456,6 @@ mod tests {
 
         let first = list_all_connectors_with_options(
             cache_context.clone(),
-            /*is_workspace_account*/ false,
             /*force_refetch*/ false,
             move |_path| {
                 let call_counter = Arc::clone(&call_counter);
@@ -513,7 +472,6 @@ mod tests {
 
         let second = list_all_connectors_with_options(
             cache_context,
-            /*is_workspace_account*/ false,
             /*force_refetch*/ false,
             move |_path| async move {
                 anyhow::bail!("cache should have been used");
@@ -541,46 +499,41 @@ mod tests {
 
         let connectors = list_all_connectors_with_options(
             cache_context,
-            /*is_workspace_account*/ true,
             /*force_refetch*/ true,
             move |path| {
                 let call_counter = Arc::clone(&call_counter);
                 async move {
                     call_counter.fetch_add(1, Ordering::SeqCst);
-                    if path.starts_with("/connectors/directory/list_workspace") {
-                        Ok(DirectoryListResponse {
-                            apps: vec![
-                                DirectoryApp {
-                                    description: Some("Merged description".to_string()),
-                                    branding: Some(AppBranding {
-                                        category: Some("calendar".to_string()),
-                                        developer: None,
-                                        website: None,
-                                        privacy_policy: None,
-                                        terms_of_service: None,
-                                        is_discoverable_app: true,
-                                    }),
-                                    ..app("alpha", "")
-                                },
-                                DirectoryApp {
-                                    visibility: Some("HIDDEN".to_string()),
-                                    ..app("hidden", "Hidden")
-                                },
-                            ],
-                            next_token: None,
-                        })
-                    } else {
-                        Ok(DirectoryListResponse {
-                            apps: vec![app("alpha", " Alpha "), app("beta", "Beta")],
-                            next_token: None,
-                        })
-                    }
+                    assert_eq!(path, "/connectors/directory/list?external_logos=true");
+                    Ok(DirectoryListResponse {
+                        apps: vec![
+                            app("alpha", " Alpha "),
+                            DirectoryApp {
+                                description: Some("Merged description".to_string()),
+                                branding: Some(AppBranding {
+                                    category: Some("calendar".to_string()),
+                                    developer: None,
+                                    website: None,
+                                    privacy_policy: None,
+                                    terms_of_service: None,
+                                    is_discoverable_app: true,
+                                }),
+                                ..app("alpha", "")
+                            },
+                            app("beta", "Beta"),
+                            DirectoryApp {
+                                visibility: Some("HIDDEN".to_string()),
+                                ..app("hidden", "Hidden")
+                            },
+                        ],
+                        next_token: None,
+                    })
                 }
             },
         )
         .await?;
 
-        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert_eq!(connectors.len(), 2);
         assert_eq!(connectors[0].id, "alpha");
         assert_eq!(connectors[0].name, "Alpha");
@@ -616,7 +569,6 @@ mod tests {
 
         let first = list_all_connectors_with_options(
             cache_context.clone(),
-            /*is_workspace_account*/ false,
             /*force_refetch*/ false,
             move |_path| {
                 let call_counter = Arc::clone(&call_counter);
@@ -656,7 +608,6 @@ mod tests {
 
         list_all_connectors_with_options(
             cache_context.clone(),
-            /*is_workspace_account*/ false,
             /*force_refetch*/ false,
             move |_path| {
                 let call_counter = Arc::clone(&call_counter);
@@ -681,7 +632,6 @@ mod tests {
 
         let refreshed = list_all_connectors_with_options(
             cache_context,
-            /*is_workspace_account*/ false,
             /*force_refetch*/ false,
             move |_path| {
                 let call_counter = Arc::clone(&refreshed_calls);

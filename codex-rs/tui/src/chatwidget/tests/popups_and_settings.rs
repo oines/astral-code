@@ -83,7 +83,6 @@ async fn experimental_mode_plan_is_ignored_on_startup() {
         is_first_run: true,
         status_account_display: None,
         runtime_model_provider_base_url: None,
-        initial_plan_type: None,
         model: Some(resolved_model.clone()),
         startup_tooltip_override: None,
         status_line_invalid_items_warned: Arc::new(AtomicBool::new(false)),
@@ -2756,16 +2755,6 @@ async fn reasoning_selection_preserves_model_provider() {
         )),
         "expected provider-aware model persistence event: {events:?}"
     );
-}
-
-#[tokio::test]
-async fn feedback_disabled_popup_snapshot() {
-    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-
-    chat.dispatch_command(SlashCommand::Feedback);
-
-    let popup = render_bottom_popup(&chat, /*width*/ 80);
-    assert_chatwidget_snapshot!("feedback_disabled_popup", popup);
 }
 
 #[tokio::test]

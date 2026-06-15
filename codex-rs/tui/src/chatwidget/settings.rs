@@ -214,10 +214,6 @@ impl ChatWidget {
         self.model_catalog.clone()
     }
 
-    pub(crate) fn current_plan_type(&self) -> Option<PlanType> {
-        self.plan_type
-    }
-
     pub(crate) fn has_chatgpt_account(&self) -> bool {
         self.has_chatgpt_account
     }
@@ -225,11 +221,9 @@ impl ChatWidget {
     pub(crate) fn update_account_state(
         &mut self,
         status_account_display: Option<StatusAccountDisplay>,
-        plan_type: Option<PlanType>,
         has_chatgpt_account: bool,
     ) {
         self.status_account_display = status_account_display;
-        self.plan_type = plan_type;
         self.has_chatgpt_account = has_chatgpt_account;
         self.bottom_pane
             .set_connectors_enabled(self.connectors_enabled());

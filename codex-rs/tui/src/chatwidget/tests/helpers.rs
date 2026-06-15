@@ -113,7 +113,6 @@ pub(super) fn snapshot(percent: f64) -> RateLimitSnapshot {
         secondary: None,
         credits: None,
         individual_limit: None,
-        plan_type: None,
         rate_limit_reached_type: None,
     }
 }
@@ -173,7 +172,6 @@ pub(super) async fn make_chatwidget_manual(
         is_first_run: true,
         status_account_display: None,
         runtime_model_provider_base_url: None,
-        initial_plan_type: None,
         model: Some(resolved_model.clone()),
         startup_tooltip_override: None,
         status_line_invalid_items_warned: Arc::new(AtomicBool::new(false)),
@@ -252,7 +250,7 @@ fn test_model_info(slug: &str, priority: i32, supports_fast_mode: bool) -> Model
         service_tiers.push(json!({
             "id": ServiceTier::Fast.request_value(),
             "name": "fast",
-            "description": "Fastest inference with increased plan usage"
+            "description": "Fastest inference with priority routing"
         }));
     }
     serde_json::from_value(json!({

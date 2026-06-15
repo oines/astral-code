@@ -18,8 +18,7 @@ use thiserror::Error;
 
 const PROVIDER_NEUTRAL_TOOL_NAME_DELIMITER: &str = "__";
 
-/// When serialized as JSON, this produces a valid "Tool" in the OpenAI
-/// Responses API.
+/// When serialized as JSON, this produces a valid OpenAI-compatible tool.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(tag = "type")]
 pub enum ToolSpec {
@@ -35,9 +34,8 @@ pub enum ToolSpec {
     },
     #[serde(rename = "image_generation")]
     ImageGeneration { output_format: String },
-    // TODO: Understand why we get an error on web_search although the API docs
-    // say it's supported.
-    // https://platform.openai.com/docs/guides/tools-web-search?api-mode=responses#:~:text=%7B%20type%3A%20%22web_search%22%20%7D%2C
+    // TODO: Understand why some OpenAI-compatible providers reject
+    // `web_search` although the API docs say it's supported.
     // The `external_web_access` field determines whether the web search is over
     // cached or live content.
     // https://platform.openai.com/docs/guides/tools-web-search#live-internet-access
@@ -80,9 +78,7 @@ impl From<LoadableToolSpec> for ToolSpec {
     }
 }
 
-/// Returns JSON values that are compatible with Function Calling in the
-/// Responses API:
-/// https://platform.openai.com/docs/guides/function-calling?api-mode=responses
+/// Returns JSON values that are compatible with provider function calling.
 pub fn create_tools_json_for_responses_api(
     tools: &[ToolSpec],
 ) -> Result<Vec<Value>, serde_json::Error> {
@@ -171,9 +167,19 @@ pub fn create_agent_tools_for_provider_neutral_request(
                 };
                 push_agent_tool(&mut agent_tools, &mut seen_names, agent_tool)?;
             }
-            ToolSpec::ImageGeneration { .. }
-            | ToolSpec::WebSearch { .. }
-            | ToolSpec::Freeform(_) => {
+            ToolSpec::Freeform(tool) if tool.name == "apply_patch" => {
+                push_agent_tool(
+                    &mut agent_tools,
+                    &mut seen_names,
+                    apply_patch_freeform_tool_to_agent_tool(tool),
+                )?;
+            }
+            ToolSpec::ImageGeneration { .. } | ToolSpec::WebSearch { .. } => {
+                return Err(AgentToolSpecError::UnsupportedTool {
+                    name: spec.name().to_string(),
+                });
+            }
+            ToolSpec::Freeform(_) => {
                 return Err(AgentToolSpecError::UnsupportedTool {
                     name: spec.name().to_string(),
                 });
@@ -202,6 +208,25 @@ fn responses_api_tool_to_agent_tool(
     metadata: BTreeMap<String, Value>,
 ) -> Result<AgentTool, AgentToolSpecError> {
     responses_api_tool_to_agent_tool_with_name(tool, tool.name.clone(), metadata)
+}
+
+fn apply_patch_freeform_tool_to_agent_tool(tool: &FreeformTool) -> AgentTool {
+    AgentTool {
+        name: tool.name.clone(),
+        description: tool.description.clone(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "input": {
+                    "type": "string",
+                    "description": "The raw apply_patch patch body."
+                }
+            },
+            "required": ["input"],
+            "additionalProperties": false
+        }),
+        metadata: BTreeMap::new(),
+    }
 }
 
 fn responses_api_tool_to_agent_tool_with_name(

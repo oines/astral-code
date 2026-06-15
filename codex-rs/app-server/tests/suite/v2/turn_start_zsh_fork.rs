@@ -83,7 +83,7 @@ async fn turn_start_shell_zsh_fork_executes_command_v2() -> Result<()> {
     // Interrupting after the shell item starts can race with the follow-up
     // model request that reports the aborted tool call. This test only cares
     // that zsh-fork launches the expected command, so allow one extra no-op
-    // `/responses` POST instead of asserting an exact request count.
+    // `/chat/completions` POST instead of asserting an exact request count.
     let server =
         create_mock_responses_server_sequence_unchecked(vec![response, no_op_response]).await;
     create_config_toml(
@@ -491,7 +491,7 @@ async fn turn_start_shell_zsh_fork_subcommand_decline_marks_parent_declined_v2()
         responses::ev_response_created("resp-2"),
         responses::ev_completed("resp-2"),
     ]);
-    // Linux CI has occasionally issued a second `/responses` POST after the
+    // Linux CI has occasionally issued a second `/chat/completions` POST after the
     // subcommand-decline flow. This test is about approval/decline behavior in
     // the zsh fork, not exact model request count, so allow an extra request
     // and return a harmless no-op response if it arrives.
@@ -832,7 +832,7 @@ model_provider = "mock_provider"
 [model_providers.mock_provider]
 name = "Mock provider for test"
 base_url = "{server_uri}/v1"
-wire_api = "responses"
+wire_api = "chat_completions"
 request_max_retries = 0
 stream_max_retries = 0
 "#

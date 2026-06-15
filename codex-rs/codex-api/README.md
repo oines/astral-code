@@ -2,7 +2,8 @@
 
 Typed clients for Codex/OpenAI APIs built on top of the generic transport in `codex-client`.
 
-- Hosts the request/response models and request builders for Responses APIs.
+- Hosts the request/response models and request builders for provider-neutral
+  agent requests.
 - Owns provider configuration (base URLs, headers, query params), auth header injection, retry tuning, and stream idle settings.
 - Parses SSE streams into `ResponseEvent`/`ResponseStream`, including rate-limit snapshots and API-specific error mapping.
 - Serves as the wire-level layer consumed by `codex-core`; higher layers handle auth refresh and business logic.
@@ -11,10 +12,10 @@ Typed clients for Codex/OpenAI APIs built on top of the generic transport in `co
 
 The public interface of this crate is intentionally small and uniform:
 
-- **Responses endpoint**
+- **Agent endpoint**
   - Input:
-    - `ResponsesApiRequest` for the request body (`model`, `instructions`, `input`, `tools`, `parallel_tool_calls`, reasoning/text controls).
-    - `ResponsesOptions` for transport/header concerns (`conversation_id`, `session_source`, `extra_headers`, `compression`, `turn_state`).
+    - `AgentRequest` for provider-neutral model turns.
+    - `AgentOptions` for transport/header concerns.
   - Output: a `ResponseStream` of `ResponseEvent` (both re-exported from `common`).
 
 - **Memory summarize endpoint**

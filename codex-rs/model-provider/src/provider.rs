@@ -169,7 +169,9 @@ impl ModelProvider for ConfiguredModelProvider {
     }
 
     fn account_state(&self) -> ProviderAccountState {
-        let account = if self.info.requires_astral_auth {
+        let account = if self.info.api_key().ok().flatten().is_some() {
+            Some(ProviderAccount::ApiKey)
+        } else {
             self.auth_manager
                 .as_ref()
                 .and_then(|auth_manager| {
@@ -181,12 +183,7 @@ impl ModelProvider for ConfiguredModelProvider {
                 })
                 .and_then(|auth| match auth {
                     CodexAuth::ApiKey(_) => Some(ProviderAccount::ApiKey),
-                    CodexAuth::Chatgpt(_)
-                    | CodexAuth::AgentIdentity(_)
-                    | CodexAuth::PersonalAccessToken(_) => None,
                 })
-        } else {
-            None
         };
 
         ProviderAccountState {
@@ -271,7 +268,7 @@ mod tests {
             experimental_bearer_token: None,
             auth: None,
             aws: None,
-            wire_api: WireApi::Responses,
+            wire_api: WireApi::ChatCompletions,
             provider_flavor: None,
             query_params: None,
             request_body: None,
@@ -437,7 +434,7 @@ mod tests {
         let provider = create_model_provider(
             ModelProviderInfo::create_openai_provider(/*base_url*/ None),
             Some(AuthManager::from_auth_for_testing(
-                CodexAuth::create_dummy_chatgpt_auth_for_testing(),
+                CodexAuth::create_dummy_api_key_auth_for_testing(),
             )),
         );
 
@@ -456,7 +453,7 @@ mod tests {
             ModelProviderInfo {
                 name: "Custom".to_string(),
                 base_url: Some("http://localhost:1234/v1".to_string()),
-                wire_api: WireApi::Responses,
+                wire_api: WireApi::ChatCompletions,
                 requires_astral_auth: false,
                 ..Default::default()
             },
@@ -574,7 +571,7 @@ mod tests {
         let provider = create_model_provider(
             provider_info,
             Some(AuthManager::from_auth_for_testing(
-                CodexAuth::create_dummy_chatgpt_auth_for_testing(),
+                CodexAuth::create_dummy_api_key_auth_for_testing(),
             )),
         );
 

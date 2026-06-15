@@ -30,10 +30,8 @@ pub fn write_mock_responses_config_toml(
         .collect::<Vec<_>>()
         .join("\n");
     // Phase 2: build provider-specific config bits.
-    let requires_line = match requires_astral_auth {
-        Some(true) => "requires_astral_auth = true\n".to_string(),
-        Some(false) | None => String::new(),
-    };
+    let _ = requires_astral_auth;
+    let requires_line = String::new();
     let provider_name = if matches!(requires_astral_auth, Some(true)) {
         "OpenAI"
     } else {
@@ -44,7 +42,7 @@ pub fn write_mock_responses_config_toml(
 [model_providers.{model_provider_id}]
 name = "{provider_name}"
 base_url = "{server_uri}/v1"
-wire_api = "responses"
+wire_api = "chat_completions"
 request_max_retries = 0
 stream_max_retries = 0
 supports_websockets = false
@@ -99,7 +97,7 @@ model_provider = "mock_provider"
 [model_providers.mock_provider]
 name = "Mock provider for test"
 base_url = "{server_uri}/v1"
-wire_api = "responses"
+wire_api = "chat_completions"
 request_max_retries = 0
 stream_max_retries = 0
 "#

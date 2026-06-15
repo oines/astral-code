@@ -2293,7 +2293,7 @@ async fn guardian_mode_skips_auto_when_annotations_do_not_require_approval() {
 
     let server = start_mock_server().await;
     Mock::given(method("POST"))
-        .and(path("/v1/responses"))
+        .and(path("/v1/chat/completions"))
         .respond_with(ResponseTemplate::new(200))
         .expect(0)
         .mount(&server)
@@ -2641,7 +2641,7 @@ async fn guardian_mode_mcp_denial_returns_rationale_message() {
     assert!(message.contains("policy circumvention"));
     assert_eq!(
         guardian_request_log.single_request().path(),
-        "/v1/responses"
+        "/v1/chat/completions"
     );
 }
 
@@ -2756,7 +2756,7 @@ async fn approve_mode_skips_guardian_in_every_permission_mode() {
 
     let server = start_mock_server().await;
     Mock::given(method("POST"))
-        .and(path("/v1/responses"))
+        .and(path("/v1/chat/completions"))
         .respond_with(ResponseTemplate::new(200))
         .expect(0)
         .mount(&server)
@@ -2794,7 +2794,7 @@ async fn approve_mode_skips_guardian_in_every_permission_mode() {
     ] {
         let (mut session, mut turn_context) = make_session_and_context().await;
         turn_context.auth_manager = Some(crate::test_support::auth_manager_from_auth(
-            codex_login::CodexAuth::create_dummy_chatgpt_auth_for_testing(),
+            codex_login::CodexAuth::create_dummy_api_key_auth_for_testing(),
         ));
         turn_context
             .approval_policy

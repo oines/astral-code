@@ -10,12 +10,6 @@ use crate::metrics::MetricsConfig;
 use crate::metrics::MetricsError;
 use crate::metrics::PLUGIN_INSTALL_ELICITATION_SENT_METRIC;
 use crate::metrics::PLUGIN_INSTALL_SUGGESTION_METRIC;
-use crate::metrics::RESPONSES_API_ENGINE_IAPI_TBT_DURATION_METRIC;
-use crate::metrics::RESPONSES_API_ENGINE_IAPI_TTFT_DURATION_METRIC;
-use crate::metrics::RESPONSES_API_ENGINE_SERVICE_TBT_DURATION_METRIC;
-use crate::metrics::RESPONSES_API_ENGINE_SERVICE_TTFT_DURATION_METRIC;
-use crate::metrics::RESPONSES_API_INFERENCE_TIME_DURATION_METRIC;
-use crate::metrics::RESPONSES_API_OVERHEAD_DURATION_METRIC;
 use crate::metrics::Result as MetricsResult;
 use crate::metrics::SSE_EVENT_COUNT_METRIC;
 use crate::metrics::SSE_EVENT_DURATION_METRIC;
@@ -57,14 +51,6 @@ use tracing::Span;
 
 const SSE_UNKNOWN_KIND: &str = "unknown";
 const WEBSOCKET_UNKNOWN_KIND: &str = "unknown";
-const RESPONSES_WEBSOCKET_TIMING_KIND: &str = "responsesapi.websocket_timing";
-const RESPONSES_WEBSOCKET_TIMING_METRICS_FIELD: &str = "timing_metrics";
-const RESPONSES_API_OVERHEAD_FIELD: &str = "responses_duration_excl_engine_and_client_tool_time_ms";
-const RESPONSES_API_INFERENCE_FIELD: &str = "engine_service_total_ms";
-const RESPONSES_API_ENGINE_IAPI_TTFT_FIELD: &str = "engine_iapi_ttft_total_ms";
-const RESPONSES_API_ENGINE_SERVICE_TTFT_FIELD: &str = "engine_service_ttft_total_ms";
-const RESPONSES_API_ENGINE_IAPI_TBT_FIELD: &str = "engine_iapi_tbt_across_engine_calls_ms";
-const RESPONSES_API_ENGINE_SERVICE_TBT_FIELD: &str = "engine_service_tbt_across_engine_calls_ms";
 
 fn trace_field_value<'a>(fields: &'a [(&str, &str)], key: &str) -> Option<&'a str> {
     fields
@@ -714,9 +700,6 @@ impl SessionTelemetry {
                                 .get("type")
                                 .and_then(|value| value.as_str())
                                 .map(std::string::ToString::to_string);
-                            if kind.as_deref() == Some(RESPONSES_WEBSOCKET_TIMING_KIND) {
-                                self.record_responses_websocket_timing_metrics(&value);
-                            }
                             if kind.as_deref() == Some("response.failed") {
                                 success = false;
                                 error_message = value
@@ -1135,58 +1118,6 @@ impl SessionTelemetry {
         );
     }
 
-    fn record_responses_websocket_timing_metrics(&self, value: &serde_json::Value) {
-        let timing_metrics = value.get(RESPONSES_WEBSOCKET_TIMING_METRICS_FIELD);
-
-        let overhead_value =
-            timing_metrics.and_then(|value| value.get(RESPONSES_API_OVERHEAD_FIELD));
-        if let Some(duration) = duration_from_ms_value(overhead_value) {
-            self.record_duration(RESPONSES_API_OVERHEAD_DURATION_METRIC, duration, &[]);
-        }
-
-        let inference_value =
-            timing_metrics.and_then(|value| value.get(RESPONSES_API_INFERENCE_FIELD));
-        if let Some(duration) = duration_from_ms_value(inference_value) {
-            self.record_duration(RESPONSES_API_INFERENCE_TIME_DURATION_METRIC, duration, &[]);
-        }
-
-        let engine_iapi_ttft_value =
-            timing_metrics.and_then(|value| value.get(RESPONSES_API_ENGINE_IAPI_TTFT_FIELD));
-        if let Some(duration) = duration_from_ms_value(engine_iapi_ttft_value) {
-            self.record_duration(
-                RESPONSES_API_ENGINE_IAPI_TTFT_DURATION_METRIC,
-                duration,
-                &[],
-            );
-        }
-
-        let engine_service_ttft_value =
-            timing_metrics.and_then(|value| value.get(RESPONSES_API_ENGINE_SERVICE_TTFT_FIELD));
-        if let Some(duration) = duration_from_ms_value(engine_service_ttft_value) {
-            self.record_duration(
-                RESPONSES_API_ENGINE_SERVICE_TTFT_DURATION_METRIC,
-                duration,
-                &[],
-            );
-        }
-
-        let engine_iapi_tbt_value =
-            timing_metrics.and_then(|value| value.get(RESPONSES_API_ENGINE_IAPI_TBT_FIELD));
-        if let Some(duration) = duration_from_ms_value(engine_iapi_tbt_value) {
-            self.record_duration(RESPONSES_API_ENGINE_IAPI_TBT_DURATION_METRIC, duration, &[]);
-        }
-
-        let engine_service_tbt_value =
-            timing_metrics.and_then(|value| value.get(RESPONSES_API_ENGINE_SERVICE_TBT_FIELD));
-        if let Some(duration) = duration_from_ms_value(engine_service_tbt_value) {
-            self.record_duration(
-                RESPONSES_API_ENGINE_SERVICE_TBT_DURATION_METRIC,
-                duration,
-                &[],
-            );
-        }
-    }
-
     fn responses_type(event: &ResponseEvent) -> String {
         match event {
             ResponseEvent::Created => "created".into(),
@@ -1230,17 +1161,4 @@ impl SessionTelemetry {
             ResponseItem::Other => "other".into(),
         }
     }
-}
-
-fn duration_from_ms_value(value: Option<&serde_json::Value>) -> Option<Duration> {
-    let value = value?;
-    let ms = value
-        .as_f64()
-        .or_else(|| value.as_i64().map(|v| v as f64))
-        .or_else(|| value.as_u64().map(|v| v as f64))?;
-    if !ms.is_finite() || ms < 0.0 {
-        return None;
-    }
-    let clamped = ms.min(u64::MAX as f64);
-    Some(Duration::from_millis(clamped.round() as u64))
 }

@@ -128,8 +128,8 @@ pub struct McpConfig {
     pub use_legacy_landlock: bool,
     /// Whether the app MCP integration is enabled by config.
     ///
-    /// ChatGPT auth is checked separately at runtime before the host-owned apps
-    /// MCP server is added.
+    /// Astral does not inject the legacy host-owned apps MCP server from auth;
+    /// use explicit MCP/plugin configuration instead.
     pub apps_enabled: bool,
     /// Whether model-visible MCP tool namespaces should keep the legacy
     /// `mcp__` prefix.
@@ -229,8 +229,8 @@ pub fn with_codex_apps_mcp(
     servers
 }
 
-pub fn host_owned_codex_apps_enabled(config: &McpConfig, auth: Option<&CodexAuth>) -> bool {
-    config.apps_enabled && auth.is_some_and(CodexAuth::uses_hosted_backend)
+pub fn host_owned_codex_apps_enabled(_config: &McpConfig, _auth: Option<&CodexAuth>) -> bool {
+    false
 }
 
 pub fn configured_mcp_servers(config: &McpConfig) -> HashMap<String, McpServerConfig> {
@@ -388,7 +388,7 @@ pub(crate) fn codex_apps_mcp_url(config: &McpConfig) -> String {
     )
 }
 
-/// The Responses API requires tool names to match `^[a-zA-Z0-9_-]+$`.
+/// Provider tool names must match `^[a-zA-Z0-9_-]+$`.
 /// MCP server/tool names are user-controlled, so sanitize the fully-qualified
 /// name we expose to the model by replacing any disallowed character with `_`.
 pub(crate) fn sanitize_responses_api_tool_name(name: &str) -> String {

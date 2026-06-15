@@ -106,7 +106,7 @@ async fn build_analytics_plugin_test_codex(
     let hosted_base_url = server.uri();
     let mut builder = test_codex()
         .with_home(codex_home)
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+        .with_auth(CodexAuth::create_dummy_api_key_auth_for_testing())
         .with_model("gpt-5.2")
         .with_config(move |config| {
             config.hosted_base_url = hosted_base_url;
@@ -124,7 +124,7 @@ async fn build_apps_enabled_plugin_test_codex(
 ) -> Result<TestCodex> {
     let mut builder = test_codex()
         .with_home(codex_home)
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+        .with_auth(CodexAuth::create_dummy_api_key_auth_for_testing())
         .with_config(move |config| {
             config
                 .features
@@ -185,7 +185,7 @@ async fn capability_sections_render_in_developer_message_in_order() -> Result<()
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -265,7 +265,7 @@ async fn explicit_plugin_mentions_inject_plugin_guidance() -> Result<()> {
                 path: format!("plugin://{SAMPLE_PLUGIN_CONFIG_NAME}"),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -348,7 +348,7 @@ async fn explicit_plugin_mentions_track_plugin_used_analytics() -> Result<()> {
                 path: format!("plugin://{SAMPLE_PLUGIN_CONFIG_NAME}"),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })

@@ -64,6 +64,7 @@ use core_test_support::responses::mount_sse_once_match;
 use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::sse;
 use core_test_support::responses::sse_failed;
+use core_test_support::responses::sse_response;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::TestCodex;
 use core_test_support::test_codex::local_selections;
@@ -93,18 +94,44 @@ use wiremock::matchers::query_param;
 const INSTALLATION_ID_FILENAME: &str = "installation_id";
 
 #[expect(clippy::unwrap_used)]
-fn assert_message_role(request_body: &serde_json::Value, role: &str) {
-    assert_eq!(request_body["role"].as_str().unwrap(), role);
+fn message_input_texts(item: &serde_json::Value) -> Vec<&str> {
+    match &item["content"] {
+        serde_json::Value::String(text) => vec![text.as_str()],
+        serde_json::Value::Array(content) => content
+            .iter()
+            .filter_map(|entry| entry.get("text").and_then(|text| text.as_str()))
+            .collect(),
+        _ => Vec::new(),
+    }
 }
 
-#[expect(clippy::unwrap_used)]
-fn message_input_texts(item: &serde_json::Value) -> Vec<&str> {
-    item["content"]
+fn request_message_items(request_body: &serde_json::Value) -> Vec<&serde_json::Value> {
+    if let Some(messages) = request_body["messages"].as_array() {
+        return messages.iter().collect();
+    }
+
+    request_body["input"]
         .as_array()
-        .unwrap()
+        .expect("input array")
         .iter()
-        .filter_map(|entry| entry.get("text").and_then(|text| text.as_str()))
         .collect()
+}
+
+fn request_text_messages(request_body: &serde_json::Value) -> Vec<(String, String)> {
+    let mut messages = Vec::new();
+    for item in request_message_items(request_body) {
+        let Some(role) = item.get("role").and_then(|role| role.as_str()) else {
+            continue;
+        };
+        for text in message_input_texts(item) {
+            messages.push((role.to_string(), text.to_string()));
+        }
+    }
+    messages
+}
+
+fn role_is_developer_or_system(role: &str) -> bool {
+    matches!(role, "developer" | "system")
 }
 
 fn message_input_text_contains(request: &ResponsesRequest, role: &str, needle: &str) -> bool {
@@ -120,7 +147,6 @@ fn message_input_text_contains(request: &ResponsesRequest, role: &str, needle: &
 fn write_auth_json(
     codex_home: &TempDir,
     openai_api_key: Option<&str>,
-    chatgpt_plan_type: &str,
     access_token: &str,
     account_id: Option<&str>,
 ) -> String {
@@ -130,7 +156,6 @@ fn write_auth_json(
     let payload = json!({
         "email": "user@example.com",
         "https://api.openai.com/auth": {
-            "chatgpt_plan_type": chatgpt_plan_type,
             "chatgpt_account_id": account_id.unwrap_or("acc-123")
         }
     });
@@ -366,6 +391,7 @@ async fn resume_includes_initial_messages_and_sends_prior_items() {
     let mut builder = test_codex()
         .with_home(codex_home.clone())
         .with_config(|config| {
+            config.model = Some("mock-model".to_string());
             // Ensure user instructions are NOT delivered on resume.
             config.user_instructions = Some(LoadedAgentsMd::from_text_for_testing("be nice"));
         });
@@ -393,7 +419,7 @@ async fn resume_includes_initial_messages_and_sends_prior_items() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -403,16 +429,7 @@ async fn resume_includes_initial_messages_and_sends_prior_items() {
 
     let request = resp_mock.single_request();
     let request_body = request.body_json();
-    let input = request_body["input"].as_array().expect("input array");
-    let mut messages: Vec<(String, String)> = Vec::new();
-    for item in input {
-        let Some(role) = item.get("role").and_then(|role| role.as_str()) else {
-            continue;
-        };
-        for text in message_input_texts(item) {
-            messages.push((role.to_string(), text.to_string()));
-        }
-    }
+    let messages = request_text_messages(&request_body);
     let pos_prior_user = messages
         .iter()
         .position(|(role, text)| role == "user" && text == "resumed user message")
@@ -421,28 +438,11 @@ async fn resume_includes_initial_messages_and_sends_prior_items() {
         .iter()
         .position(|(role, text)| role == "assistant" && text == "resumed assistant message")
         .expect("prior assistant message");
-    let prior_assistant = input
-        .iter()
-        .find(|item| {
-            item.get("role").and_then(|role| role.as_str()) == Some("assistant")
-                && item
-                    .get("content")
-                    .and_then(|content| content.as_array())
-                    .and_then(|content| content.first())
-                    .and_then(|entry| entry.get("text"))
-                    .and_then(|text| text.as_str())
-                    == Some("resumed assistant message")
-        })
-        .expect("resumed assistant message request item");
-    assert_eq!(
-        prior_assistant
-            .get("phase")
-            .and_then(|phase| phase.as_str()),
-        Some("commentary")
-    );
     let pos_permissions = messages
         .iter()
-        .position(|(role, text)| role == "developer" && text.contains("<permissions instructions>"))
+        .position(|(role, text)| {
+            role_is_developer_or_system(role) && text.contains("<permissions instructions>")
+        })
         .expect("permissions message");
     let pos_user_instructions = messages
         .iter()
@@ -461,10 +461,20 @@ async fn resume_includes_initial_messages_and_sends_prior_items() {
         .position(|(role, text)| role == "user" && text == "hello")
         .expect("new user message");
 
+    assert!(
+        messages
+            .iter()
+            .all(|(_, text)| !text.contains("resumed system instruction")),
+        "system rollout item should not be sent as conversation history: {messages:?}"
+    );
     assert!(pos_prior_user < pos_prior_assistant);
-    assert!(pos_prior_assistant < pos_permissions);
-    assert!(pos_permissions < pos_user_instructions);
-    assert!(pos_user_instructions < pos_environment);
+    if request_body["messages"].is_array() {
+        assert!(pos_permissions < pos_prior_user);
+    } else {
+        assert!(pos_prior_assistant < pos_permissions);
+    }
+    assert!(pos_prior_assistant < pos_user_instructions);
+    assert!(pos_user_instructions <= pos_environment);
     assert!(pos_environment < pos_new_user);
 }
 
@@ -761,7 +771,7 @@ async fn includes_session_id_thread_id_and_model_headers_in_request() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -771,14 +781,13 @@ async fn includes_session_id_thread_id_and_model_headers_in_request() {
     wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let request = resp_mock.single_request();
-    assert_eq!(request.path(), "/v1/responses");
+    assert_eq!(request.path(), "/v1/chat/completions");
     let request_session_id = request.header("session-id").expect("session-id header");
     let request_thread_id = request.header("thread-id").expect("thread-id header");
     let request_authorization = request
         .header("authorization")
         .expect("authorization header");
     let request_originator = request.header("originator").expect("originator header");
-    let request_body = request.body_json();
     let installation_id =
         std::fs::read_to_string(test.codex_home_path().join(INSTALLATION_ID_FILENAME))
             .expect("read installation id");
@@ -789,11 +798,7 @@ async fn includes_session_id_thread_id_and_model_headers_in_request() {
     assert_eq!(request_originator, originator().value);
     assert_eq!(request_authorization, "Bearer Test API Key");
     assert_eq!(
-        request_body["prompt_cache_key"].as_str(),
-        Some(thread_id_string.as_str())
-    );
-    assert_eq!(
-        request_body["client_metadata"]["x-astral-installation-id"].as_str(),
+        request.header("x-astral-installation-id").as_deref(),
         Some(installation_id.as_str())
     );
 }
@@ -822,23 +827,19 @@ async fn provider_auth_command_refreshes_after_401() {
     let auth_fixture = ProviderAuthCommandFixture::new(&["first-token", "second-token"]).unwrap();
 
     Mock::given(method("POST"))
-        .and(path("/v1/responses"))
+        .and(path("/v1/chat/completions"))
         .and(header_regex("Authorization", "Bearer first-token"))
         .respond_with(ResponseTemplate::new(401).set_body_string("unauthorized"))
         .expect(1)
         .mount(&server)
         .await;
     Mock::given(method("POST"))
-        .and(path("/v1/responses"))
+        .and(path("/v1/chat/completions"))
         .and(header_regex("Authorization", "Bearer second-token"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .insert_header("content-type", "text/event-stream")
-                .set_body_raw(
-                    sse(vec![ev_response_created("resp1"), ev_completed("resp1")]),
-                    "text/event-stream",
-                ),
-        )
+        .respond_with(sse_response(sse(vec![
+            ev_response_created("resp1"),
+            ev_completed("resp1"),
+        ])))
         .expect(1)
         .mount(&server)
         .await;
@@ -860,7 +861,7 @@ async fn send_provider_auth_request(server: &MockServer, auth: ModelProviderAuth
         experimental_bearer_token: None,
         auth: Some(auth),
         aws: None,
-        wire_api: WireApi::Responses,
+        wire_api: WireApi::ChatCompletions,
         provider_flavor: None,
         query_params: None,
         request_body: None,
@@ -945,7 +946,7 @@ async fn send_provider_auth_request(server: &MockServer, auth: ModelProviderAuth
             &codex_rollout_trace::InferenceTraceContext::disabled(),
         )
         .await
-        .expect("responses stream to start");
+        .expect("chat completions stream to start");
 
     while let Some(event) = stream.next().await {
         if let Ok(ResponseEvent::Completed { .. }) = event {
@@ -968,6 +969,7 @@ async fn includes_base_instructions_override_in_request() {
     let mut builder = test_codex()
         .with_auth(CodexAuth::from_api_key("Test API Key"))
         .with_config(|config| {
+            config.model = Some("mock-model".to_string());
             config.base_instructions = Some("test instructions".to_string());
         });
     let codex = builder
@@ -983,7 +985,7 @@ async fn includes_base_instructions_override_in_request() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -993,85 +995,8 @@ async fn includes_base_instructions_override_in_request() {
     wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let request = resp_mock.single_request();
-    let request_body = request.body_json();
 
-    assert!(
-        request_body["instructions"]
-            .as_str()
-            .unwrap()
-            .contains("test instructions")
-    );
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn managed_auth_sends_authorized_responses_request() {
-    skip_if_no_network!();
-
-    // Mock server
-    let server = MockServer::start().await;
-
-    let resp_mock = mount_sse_once(
-        &server,
-        sse(vec![ev_response_created("resp1"), ev_completed("resp1")]),
-    )
-    .await;
-
-    let mut model_provider =
-        ModelProviderInfo::create_openai_provider(Some(format!("{}/api/codex", server.uri())));
-    model_provider.supports_websockets = false;
-    let mut builder = test_codex()
-        .with_auth(create_dummy_codex_auth())
-        .with_config(move |config| {
-            config.model_provider = model_provider;
-        });
-    let test = builder
-        .build(&server)
-        .await
-        .expect("create new conversation");
-    let codex = test.codex.clone();
-    let expected_session_id = test.session_configured.session_id;
-    let expected_thread_id = test.session_configured.thread_id;
-
-    codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
-                text: "hello".into(),
-                text_elements: Vec::new(),
-            }],
-            final_output_json_schema: None,
-            responsesapi_client_metadata: None,
-            additional_context: Default::default(),
-            thread_settings: Default::default(),
-        })
-        .await
-        .unwrap();
-
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
-
-    let request = resp_mock.single_request();
-    assert_eq!(request.path(), "/api/codex/responses");
-    let request_authorization = request
-        .header("authorization")
-        .expect("authorization header");
-    let request_originator = request.header("originator").expect("originator header");
-    let request_body = request.body_json();
-
-    let request_session_id = request.header("session-id").expect("session-id header");
-    let request_thread_id = request.header("thread-id").expect("thread-id header");
-    let installation_id =
-        std::fs::read_to_string(test.codex_home_path().join(INSTALLATION_ID_FILENAME))
-            .expect("read installation id");
-    assert_eq!(request_session_id, expected_session_id.to_string());
-    assert_eq!(request_thread_id, expected_thread_id.to_string());
-
-    assert_eq!(request_originator, originator().value);
-    assert_eq!(request_authorization, "Bearer Access Token");
-    assert_eq!(request.header("chatgpt-account-id"), None);
-    assert_eq!(
-        request_body["client_metadata"]["x-astral-installation-id"].as_str(),
-        Some(installation_id.as_str())
-    );
-    assert!(request_body["stream"].as_bool().unwrap());
+    assert!(request.instructions_text().contains("test instructions"));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1081,16 +1006,14 @@ async fn prefers_apikey_when_config_prefers_apikey_even_with_chatgpt_tokens() {
     // Mock server
     let server = MockServer::start().await;
 
-    let first = ResponseTemplate::new(200)
-        .insert_header("content-type", "text/event-stream")
-        .set_body_raw(
-            sse(vec![ev_response_created("resp1"), ev_completed("resp1")]),
-            "text/event-stream",
-        );
+    let first = sse_response(sse(vec![
+        ev_response_created("resp1"),
+        ev_completed("resp1"),
+    ]));
 
     // Expect API key header, no ChatGPT account header required.
     Mock::given(method("POST"))
-        .and(path("/v1/responses"))
+        .and(path("/v1/chat/completions"))
         .and(header_regex("Authorization", r"Bearer sk-test-key"))
         .respond_with(first)
         .expect(1)
@@ -1103,12 +1026,11 @@ async fn prefers_apikey_when_config_prefers_apikey_even_with_chatgpt_tokens() {
 
     // Init session
     let codex_home = TempDir::new().unwrap();
-    // Write auth.json that contains both API key and ChatGPT tokens for a plan that should prefer ChatGPT,
-    // but config will force API key preference.
+    // Write auth.json that contains both API key and legacy hosted tokens, but
+    // config will force API key preference.
     let _jwt = write_auth_json(
         &codex_home,
         Some("sk-test-key"),
-        "pro",
         "Access-123",
         Some("acc-123"),
     );
@@ -1150,7 +1072,7 @@ async fn prefers_apikey_when_config_prefers_apikey_even_with_chatgpt_tokens() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -1174,6 +1096,7 @@ async fn includes_user_instructions_message_in_request() {
     let mut builder = test_codex()
         .with_auth(CodexAuth::from_api_key("Test API Key"))
         .with_config(|config| {
+            config.model = Some("mock-model".to_string());
             config.user_instructions = Some(LoadedAgentsMd::from_text_for_testing("be nice"));
         });
     let codex = builder
@@ -1189,7 +1112,7 @@ async fn includes_user_instructions_message_in_request() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -1199,25 +1122,20 @@ async fn includes_user_instructions_message_in_request() {
     wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let request = resp_mock.single_request();
-    let request_body = request.body_json();
 
     assert!(
-        !request_body["instructions"]
-            .as_str()
-            .unwrap()
-            .contains("be nice")
+        !request.instructions_text().contains("be nice"),
+        "user instructions should not be sent as system instructions"
     );
-    assert_message_role(&request_body["input"][0], "developer");
-    let permissions_text = request_body["input"][0]["content"][0]["text"]
-        .as_str()
-        .expect("invalid permissions message content");
+    let developer_messages = request.message_input_texts("developer");
     assert!(
-        permissions_text.contains("`sandbox_mode`"),
-        "expected permissions message to mention sandbox_mode, got {permissions_text:?}"
+        developer_messages
+            .iter()
+            .any(|text| text.contains("`sandbox_mode`")),
+        "expected permissions message to mention sandbox_mode, got {developer_messages:?}"
     );
 
-    assert_message_role(&request_body["input"][1], "user");
-    let user_context_texts = message_input_texts(&request_body["input"][1]);
+    let user_context_texts = request.message_input_texts("user");
     assert!(
         user_context_texts
             .iter()
@@ -1226,7 +1144,6 @@ async fn includes_user_instructions_message_in_request() {
     );
     let ui_text = user_context_texts
         .iter()
-        .copied()
         .find(|text| text.contains("<INSTRUCTIONS>"))
         .expect("invalid message content");
     assert!(ui_text.contains("<INSTRUCTIONS>"));
@@ -1234,8 +1151,8 @@ async fn includes_user_instructions_message_in_request() {
     assert!(
         user_context_texts
             .iter()
-            .any(|text| text.starts_with("<environment_context>")
-                && text.ends_with("</environment_context>")),
+            .any(|text| text.contains("<environment_context>")
+                && text.contains("</environment_context>")),
         "expected environment context in contextual user message, got {user_context_texts:?}"
     );
 }
@@ -1277,7 +1194,7 @@ async fn includes_apps_guidance_as_developer_message_for_chatgpt_auth() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -1340,7 +1257,7 @@ async fn omits_apps_guidance_for_api_key_auth_even_when_feature_enabled() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -1399,7 +1316,7 @@ async fn omits_apps_guidance_when_configured_off() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -1441,7 +1358,7 @@ async fn omits_environment_context_when_configured_off() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -1498,7 +1415,7 @@ async fn skills_append_to_developer_message() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -1581,7 +1498,7 @@ async fn skills_use_aliases_in_developer_message_under_budget_pressure() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -1642,7 +1559,7 @@ async fn includes_configured_effort_in_request() -> anyhow::Result<()> {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -1684,7 +1601,7 @@ async fn includes_no_effort_in_request() -> anyhow::Result<()> {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -1727,7 +1644,7 @@ async fn includes_default_reasoning_effort_in_request_when_defined_by_model_info
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -1778,7 +1695,7 @@ async fn user_turn_collaboration_mode_overrides_model_and_effort() -> anyhow::Re
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
                 environments: Some(local_selections(config.cwd.clone())),
@@ -1834,7 +1751,7 @@ async fn configured_reasoning_summary_is_sent() -> anyhow::Result<()> {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -1889,7 +1806,7 @@ async fn responses_lite_flag_does_not_change_request_shape() -> anyhow::Result<(
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -1952,7 +1869,7 @@ async fn user_turn_explicit_reasoning_summary_overrides_model_catalog_default() 
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
                 environments: Some(local_selections(config.cwd.clone())),
@@ -2012,7 +1929,7 @@ async fn reasoning_summary_is_omitted_when_disabled() -> anyhow::Result<()> {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -2071,7 +1988,7 @@ async fn reasoning_summary_none_overrides_model_catalog_default() -> anyhow::Res
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -2110,7 +2027,7 @@ async fn includes_default_verbosity_in_request() -> anyhow::Result<()> {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -2158,7 +2075,7 @@ async fn configured_verbosity_not_sent_for_models_without_support() -> anyhow::R
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -2205,7 +2122,7 @@ async fn configured_verbosity_is_sent() -> anyhow::Result<()> {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -2241,6 +2158,7 @@ async fn includes_developer_instructions_message_in_request() {
     let mut builder = test_codex()
         .with_auth(CodexAuth::from_api_key("Test API Key"))
         .with_config(|config| {
+            config.model = Some("mock-model".to_string());
             config.user_instructions = Some(LoadedAgentsMd::from_text_for_testing("be nice"));
             config.developer_instructions = Some("be useful".to_string());
         });
@@ -2257,7 +2175,7 @@ async fn includes_developer_instructions_message_in_request() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -2267,40 +2185,27 @@ async fn includes_developer_instructions_message_in_request() {
     wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let request = resp_mock.single_request();
-    let request_body = request.body_json();
-
-    let permissions_text = request_body["input"][0]["content"][0]["text"]
-        .as_str()
-        .expect("invalid permissions message content");
 
     assert!(
-        !request_body["instructions"]
-            .as_str()
-            .unwrap()
-            .contains("be nice")
+        !request.instructions_text().contains("be nice"),
+        "user instructions should not be sent as system instructions"
     );
-    assert_message_role(&request_body["input"][0], "developer");
-    assert!(
-        permissions_text.contains("`sandbox_mode`"),
-        "expected permissions message to mention sandbox_mode, got {permissions_text:?}"
-    );
-
-    let developer_messages: Vec<&serde_json::Value> = request_body["input"]
-        .as_array()
-        .expect("input array")
-        .iter()
-        .filter(|item| item.get("role").and_then(|role| role.as_str()) == Some("developer"))
-        .collect();
+    let developer_messages = request.message_input_texts("developer");
     assert!(
         developer_messages
             .iter()
-            .any(|item| message_input_texts(item).contains(&"be useful")),
+            .any(|text| text.contains("`sandbox_mode`")),
+        "expected permissions message to mention sandbox_mode, got {developer_messages:?}"
+    );
+    assert!(
+        developer_messages
+            .iter()
+            .any(|text| text.contains("be useful")),
         "expected developer instructions in a developer message, got {:?}",
-        request_body["input"]
+        request.body_json()
     );
 
-    assert_message_role(&request_body["input"][1], "user");
-    let user_context_texts = message_input_texts(&request_body["input"][1]);
+    let user_context_texts = request.message_input_texts("user");
     assert!(
         user_context_texts
             .iter()
@@ -2309,7 +2214,6 @@ async fn includes_developer_instructions_message_in_request() {
     );
     let ui_text = user_context_texts
         .iter()
-        .copied()
         .find(|text| text.contains("<INSTRUCTIONS>"))
         .expect("invalid message content");
     assert!(ui_text.contains("<INSTRUCTIONS>"));
@@ -2317,14 +2221,14 @@ async fn includes_developer_instructions_message_in_request() {
     assert!(
         user_context_texts
             .iter()
-            .any(|text| text.starts_with("<environment_context>")
-                && text.ends_with("</environment_context>")),
+            .any(|text| text.contains("<environment_context>")
+                && text.contains("</environment_context>")),
         "expected environment context in contextual user message, got {user_context_texts:?}"
     );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn azure_responses_request_includes_store_and_reasoning_ids() {
+async fn azure_chat_completions_request_serializes_model_context() {
     skip_if_no_network!();
 
     let server = MockServer::start().await;
@@ -2343,7 +2247,7 @@ async fn azure_responses_request_includes_store_and_reasoning_ids() {
         experimental_bearer_token: None,
         auth: None,
         aws: None,
-        wire_api: WireApi::Responses,
+        wire_api: WireApi::ChatCompletions,
         provider_flavor: None,
         query_params: None,
         request_body: None,
@@ -2478,7 +2382,7 @@ async fn azure_responses_request_includes_store_and_reasoning_ids() {
             &codex_rollout_trace::InferenceTraceContext::disabled(),
         )
         .await
-        .expect("responses stream to start");
+        .expect("chat completions stream to start");
 
     while let Some(event) = stream.next().await {
         if let Ok(ResponseEvent::Completed { .. }) = event {
@@ -2487,25 +2391,62 @@ async fn azure_responses_request_includes_store_and_reasoning_ids() {
     }
 
     let request = resp_mock.single_request();
-    assert_eq!(request.path(), "/openai/responses");
+    assert_eq!(request.path(), "/openai/chat/completions");
     let body = request.body_json();
 
-    assert_eq!(body["store"], serde_json::Value::Bool(true));
     assert_eq!(body["stream"], serde_json::Value::Bool(true));
-    assert_eq!(body["input"].as_array().map(Vec::len), Some(8));
-    assert_eq!(body["input"][0]["id"].as_str(), Some("reasoning-id"));
-    assert_eq!(body["input"][1]["id"].as_str(), Some("message-id"));
-    assert_eq!(body["input"][2]["id"].as_str(), Some("web-search-id"));
-    assert_eq!(body["input"][3]["id"].as_str(), Some("function-id"));
-    assert_eq!(
-        body["input"][4]["call_id"].as_str(),
-        Some("function-call-id")
+    let messages = body["messages"].as_array().expect("messages array");
+    assert!(
+        messages.iter().any(|message| {
+            message["role"].as_str() == Some("assistant")
+                && message["content"]
+                    .as_str()
+                    .is_some_and(|text| text.contains("message"))
+                && message["reasoning_content"]
+                    .as_str()
+                    .is_some_and(|text| text.contains("summary") && text.contains("content"))
+        }),
+        "expected assistant message and reasoning content, got {messages:?}"
     );
-    assert_eq!(body["input"][5]["id"].as_str(), Some("local-shell-id"));
-    assert_eq!(body["input"][6]["id"].as_str(), Some("custom-tool-id"));
-    assert_eq!(
-        body["input"][7]["call_id"].as_str(),
-        Some("custom-tool-call-id")
+    assert!(
+        messages.iter().any(|message| {
+            message["role"].as_str() == Some("assistant")
+                && message["tool_calls"].as_array().is_some_and(|tool_calls| {
+                    tool_calls.iter().any(|tool_call| {
+                        tool_call["id"].as_str() == Some("function-call-id")
+                            && tool_call["function"]["name"].as_str() == Some("do_thing")
+                    })
+                })
+        }),
+        "expected function tool call, got {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|message| {
+            message["role"].as_str() == Some("assistant")
+                && message["tool_calls"].as_array().is_some_and(|tool_calls| {
+                    tool_calls.iter().any(|tool_call| {
+                        tool_call["id"].as_str() == Some("custom-tool-call-id")
+                            && tool_call["function"]["name"].as_str() == Some("custom_tool")
+                    })
+                })
+        }),
+        "expected custom tool call, got {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|message| {
+            message["role"].as_str() == Some("tool")
+                && message["tool_call_id"].as_str() == Some("function-call-id")
+                && message["content"].as_str() == Some("ok")
+        }),
+        "expected function call output, got {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|message| {
+            message["role"].as_str() == Some("tool")
+                && message["tool_call_id"].as_str() == Some("custom-tool-call-id")
+                && message["content"].as_str() == Some("ok")
+        }),
+        "expected custom tool call output, got {messages:?}"
     );
 }
 
@@ -2519,18 +2460,16 @@ async fn token_count_includes_rate_limits_snapshot() {
         /*total_tokens*/ 123,
     )]);
 
-    let response = ResponseTemplate::new(200)
-        .insert_header("content-type", "text/event-stream")
+    let response = sse_response(sse_body.to_string())
         .insert_header("x-codex-primary-used-percent", "12.5")
         .insert_header("x-codex-secondary-used-percent", "40.0")
         .insert_header("x-codex-primary-window-minutes", "10")
         .insert_header("x-codex-secondary-window-minutes", "60")
         .insert_header("x-codex-primary-reset-at", "1704069000")
-        .insert_header("x-codex-secondary-reset-at", "1704074400")
-        .set_body_raw(sse_body, "text/event-stream");
+        .insert_header("x-codex-secondary-reset-at", "1704074400");
 
     Mock::given(method("POST"))
-        .and(path("/v1/responses"))
+        .and(path("/v1/chat/completions"))
         .respond_with(response)
         .expect(1)
         .mount(&server)
@@ -2556,7 +2495,7 @@ async fn token_count_includes_rate_limits_snapshot() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -2610,7 +2549,6 @@ async fn token_count_includes_rate_limits_snapshot() {
                 },
                 "credits": null,
                 "individual_limit": null,
-                "plan_type": null,
                 "rate_limit_reached_type": null
             }
         })
@@ -2655,13 +2593,12 @@ async fn usage_limit_error_emits_rate_limit_event() -> anyhow::Result<()> {
             "error": {
                 "type": "usage_limit_reached",
                 "message": "limit reached",
-                "resets_at": 1704067242,
-                "plan_type": "pro"
+                "resets_at": 1704067242
             }
         }));
 
     Mock::given(method("POST"))
-        .and(path("/v1/responses"))
+        .and(path("/v1/chat/completions"))
         .respond_with(response)
         .expect(1)
         .mount(&server)
@@ -2686,7 +2623,6 @@ async fn usage_limit_error_emits_rate_limit_event() -> anyhow::Result<()> {
         },
         "credits": null,
         "individual_limit": null,
-        "plan_type": null,
         "rate_limit_reached_type": null
     });
 
@@ -2697,7 +2633,7 @@ async fn usage_limit_error_emits_rate_limit_event() -> anyhow::Result<()> {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -2774,7 +2710,7 @@ async fn context_window_error_sets_total_tokens_to_model_window() -> anyhow::Res
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -2789,7 +2725,7 @@ async fn context_window_error_sets_total_tokens_to_model_window() -> anyhow::Res
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -2874,7 +2810,7 @@ async fn incomplete_response_emits_content_filter_error_message() -> anyhow::Res
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -2907,23 +2843,21 @@ async fn incomplete_response_emits_content_filter_error_message() -> anyhow::Res
 const EXISTING_ENV_VAR_WITH_NON_EMPTY_VALUE: &str = "PATH";
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn azure_overrides_assign_properties_used_for_responses_url() {
+async fn azure_overrides_assign_properties_used_for_chat_completions_url() {
     skip_if_no_network!();
 
     // Mock server
     let server = MockServer::start().await;
 
     // First request – must NOT include `previous_response_id`.
-    let first = ResponseTemplate::new(200)
-        .insert_header("content-type", "text/event-stream")
-        .set_body_raw(
-            sse(vec![ev_response_created("resp1"), ev_completed("resp1")]),
-            "text/event-stream",
-        );
+    let first = sse_response(sse(vec![
+        ev_response_created("resp1"),
+        ev_completed("resp1"),
+    ]));
 
-    // Expect POST to /openai/responses with api-version query param
+    // Expect POST to /openai/chat/completions with api-version query param
     Mock::given(method("POST"))
-        .and(path("/openai/responses"))
+        .and(path("/openai/chat/completions"))
         .and(query_param("api-version", "2025-04-01-preview"))
         .and(header_regex("Custom-Header", "Value"))
         .and(header(
@@ -2954,7 +2888,7 @@ async fn azure_overrides_assign_properties_used_for_responses_url() {
         request_body: None,
         request_body_remove: Vec::new(),
         env_key_instructions: None,
-        wire_api: WireApi::Responses,
+        wire_api: WireApi::ChatCompletions,
         provider_flavor: None,
         http_headers: Some(std::collections::HashMap::from([(
             "Custom-Header".to_string(),
@@ -2973,6 +2907,7 @@ async fn azure_overrides_assign_properties_used_for_responses_url() {
     let mut builder = test_codex()
         .with_auth(create_dummy_codex_auth())
         .with_config(move |config| {
+            config.model = Some("mock-model".to_string());
             config.model_provider = provider;
         });
     let codex = builder
@@ -2988,7 +2923,7 @@ async fn azure_overrides_assign_properties_used_for_responses_url() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -3006,16 +2941,14 @@ async fn env_var_overrides_loaded_auth() {
     let server = MockServer::start().await;
 
     // First request – must NOT include `previous_response_id`.
-    let first = ResponseTemplate::new(200)
-        .insert_header("content-type", "text/event-stream")
-        .set_body_raw(
-            sse(vec![ev_response_created("resp1"), ev_completed("resp1")]),
-            "text/event-stream",
-        );
+    let first = sse_response(sse(vec![
+        ev_response_created("resp1"),
+        ev_completed("resp1"),
+    ]));
 
-    // Expect POST to /openai/responses with api-version query param
+    // Expect POST to /openai/chat/completions with api-version query param
     Mock::given(method("POST"))
-        .and(path("/openai/responses"))
+        .and(path("/openai/chat/completions"))
         .and(query_param("api-version", "2025-04-01-preview"))
         .and(header_regex("Custom-Header", "Value"))
         .and(header(
@@ -3046,7 +2979,7 @@ async fn env_var_overrides_loaded_auth() {
         experimental_bearer_token: None,
         auth: None,
         aws: None,
-        wire_api: WireApi::Responses,
+        wire_api: WireApi::ChatCompletions,
         provider_flavor: None,
         http_headers: Some(std::collections::HashMap::from([(
             "Custom-Header".to_string(),
@@ -3065,6 +2998,7 @@ async fn env_var_overrides_loaded_auth() {
     let mut builder = test_codex()
         .with_auth(create_dummy_codex_auth())
         .with_config(move |config| {
+            config.model = Some("mock-model".to_string());
             config.model_provider = provider;
         });
     let codex = builder
@@ -3080,7 +3014,7 @@ async fn env_var_overrides_loaded_auth() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -3091,7 +3025,7 @@ async fn env_var_overrides_loaded_auth() {
 }
 
 fn create_dummy_codex_auth() -> CodexAuth {
-    CodexAuth::create_dummy_chatgpt_auth_for_testing()
+    CodexAuth::create_dummy_api_key_auth_for_testing()
 }
 
 /// Scenario:
@@ -3137,7 +3071,7 @@ async fn history_dedupes_streamed_and_final_messages_across_turns() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -3153,7 +3087,7 @@ async fn history_dedupes_streamed_and_final_messages_across_turns() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -3169,7 +3103,7 @@ async fn history_dedupes_streamed_and_final_messages_across_turns() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -3181,7 +3115,7 @@ async fn history_dedupes_streamed_and_final_messages_across_turns() {
     let requests = request_log.requests();
     assert_eq!(requests.len(), 3, "expected 3 requests (one per turn)");
     for request in &requests {
-        assert_eq!(request.path(), "/v1/responses");
+        assert_eq!(request.path(), "/v1/chat/completions");
     }
 
     // Replace full-array compare with tail-only raw JSON compare using a single hard-coded value.

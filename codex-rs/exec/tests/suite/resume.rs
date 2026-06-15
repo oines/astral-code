@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use anyhow::Context;
+use codex_model_provider_info::ASTRAL_BASE_URL_ENV_VAR;
 use core_test_support::responses;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex_exec::test_codex_exec;
@@ -111,20 +112,18 @@ fn exec_repo_root() -> anyhow::Result<std::path::PathBuf> {
 }
 
 fn exec_sse_response(index: usize) -> String {
-    let response_id = format!("resp-exec-{index}");
-    let message_id = format!("msg-exec-{index}");
-    responses::sse(vec![
-        responses::ev_response_created(&response_id),
-        responses::ev_assistant_message(&message_id, "exec response"),
-        responses::ev_completed(&response_id),
-    ])
+    responses::chat_completions_text_sse(&format!("exec response {index}"))
 }
 
 async fn mount_exec_responses(
     server: &MockServer,
     count: usize,
 ) -> core_test_support::responses::ResponseMock {
-    responses::mount_sse_sequence(server, (0..count).map(exec_sse_response).collect()).await
+    responses::mount_chat_completions_sse_sequence(
+        server,
+        (0..count).map(exec_sse_response).collect(),
+    )
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -355,12 +354,10 @@ async fn exec_resume_accepts_global_flags_after_subcommand() -> anyhow::Result<(
 
     // Resume while passing global flags after the subcommand to ensure clap accepts them.
     let base = format!("{}/v1", server.uri());
-    let base_config = format!("openai_base_url={}", serde_json::to_string(&base)?);
     test.cmd()
+        .env(ASTRAL_BASE_URL_ENV_VAR, base)
         .arg("resume")
         .arg("--last")
-        .arg("--config")
-        .arg(base_config)
         .arg("--json")
         .arg("--model")
         .arg("gpt-5.2-codex")
@@ -414,17 +411,18 @@ async fn exec_resume_includes_output_schema_in_request() -> anyhow::Result<()> {
     let requests = response_mock.requests();
     assert_eq!(requests.len(), 2);
     let payload: Value = requests[1].body_json();
-    let text = payload.get("text").expect("request missing text field");
-    let format = text
-        .get("format")
-        .expect("request missing text.format field");
+    let format = payload
+        .get("response_format")
+        .expect("request missing response_format field");
     assert_eq!(
         format,
         &serde_json::json!({
-            "name": "codex_output_schema",
             "type": "json_schema",
-            "strict": true,
-            "schema": schema_contents,
+            "json_schema": {
+                "name": "codex_output_schema",
+                "strict": true,
+                "schema": schema_contents,
+            },
         })
     );
 

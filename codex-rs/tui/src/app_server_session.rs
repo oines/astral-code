@@ -10,7 +10,6 @@ use crate::service_tier_resolution;
 use crate::session_state::MessageHistoryMetadata;
 use crate::session_state::ThreadSessionState;
 use crate::status::StatusAccountDisplay;
-use crate::status::plan_type_display_name;
 use crate::terminal_visualization_instructions::with_terminal_visualization_instructions;
 use codex_app_server_client::AppServerClient;
 use codex_app_server_client::AppServerEvent;
@@ -28,15 +27,12 @@ use codex_app_server_protocol::ExternalAgentConfigImportParams;
 use codex_app_server_protocol::ExternalAgentConfigImportResponse;
 use codex_app_server_protocol::ExternalAgentConfigMigrationItem;
 use codex_app_server_protocol::GetAccountParams;
-use codex_app_server_protocol::GetAccountRateLimitsResponse;
 use codex_app_server_protocol::GetAccountResponse;
 use codex_app_server_protocol::JSONRPCErrorError;
-use codex_app_server_protocol::LogoutAccountResponse;
 use codex_app_server_protocol::MemoryResetResponse;
 use codex_app_server_protocol::Model as ApiModel;
 use codex_app_server_protocol::ModelListParams;
 use codex_app_server_protocol::ModelListResponse;
-use codex_app_server_protocol::RateLimitSnapshot;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ReviewDelivery;
 use codex_app_server_protocol::ReviewStartParams;
@@ -147,21 +143,12 @@ fn is_thread_settings_update_unsupported(source: &JSONRPCErrorError) -> bool {
 }
 
 /// Data collected during the TUI bootstrap phase that the main event loop
-/// needs to configure the UI, telemetry, and initial rate-limit prefetch.
-///
-/// Rate-limit snapshots are intentionally **not** included here; they are
-/// fetched asynchronously after bootstrap returns so that the TUI can render
-/// its first frame without waiting for the rate-limit round-trip.
+/// needs to configure the UI, telemetry, and initial model state.
 pub(crate) struct AppServerBootstrap {
     pub(crate) duration: Duration,
     pub(crate) account_email: Option<String>,
     pub(crate) auth_mode: Option<TelemetryAuthMode>,
     pub(crate) status_account_display: Option<StatusAccountDisplay>,
-    pub(crate) plan_type: Option<codex_protocol::account::PlanType>,
-    /// Whether the configured model provider needs OpenAI-style auth. Combined
-    /// with `has_chatgpt_account` to decide if a startup rate-limit prefetch
-    /// should be fired.
-    pub(crate) requires_astral_auth: bool,
     pub(crate) default_model: String,
     pub(crate) feedback_audience: FeedbackAudience,
     pub(crate) has_chatgpt_account: bool,
@@ -284,7 +271,6 @@ impl AppServerSession {
             account_email,
             auth_mode,
             status_account_display,
-            plan_type,
             feedback_audience,
             has_chatgpt_account,
         ) = match account.account {
@@ -292,22 +278,19 @@ impl AppServerSession {
                 None,
                 Some(TelemetryAuthMode::ApiKey),
                 Some(StatusAccountDisplay::ApiKey),
-                None,
                 FeedbackAudience::External,
                 false,
             ),
             Some(Account::AmazonBedrock {}) => {
-                (None, None, None, None, FeedbackAudience::External, false)
+                (None, None, None, FeedbackAudience::External, false)
             }
-            None => (None, None, None, None, FeedbackAudience::External, false),
+            None => (None, None, None, FeedbackAudience::External, false),
         };
         Ok(AppServerBootstrap {
             duration: started_at.elapsed(),
             account_email,
             auth_mode,
             status_account_display,
-            plan_type,
-            requires_astral_auth: account.requires_astral_auth,
             default_model,
             feedback_audience,
             has_chatgpt_account,
@@ -694,7 +677,7 @@ impl AppServerSession {
                     thread_id: thread_id.to_string(),
                     client_user_message_id: None,
                     input: items,
-                    responsesapi_client_metadata: None,
+                    model_client_metadata: None,
                     additional_context: None,
                     environments: None,
                     cwd: Some(cwd),
@@ -755,7 +738,7 @@ impl AppServerSession {
                     thread_id: thread_id.to_string(),
                     client_user_message_id: None,
                     input: items,
-                    responsesapi_client_metadata: None,
+                    model_client_metadata: None,
                     additional_context: None,
                     expected_turn_id: turn_id,
                 },
@@ -868,19 +851,6 @@ impl AppServerSession {
             })
             .await
             .wrap_err("thread/goal/clear failed in TUI")
-    }
-
-    pub(crate) async fn logout_account(&mut self) -> Result<()> {
-        let request_id = self.next_request_id();
-        let _: LogoutAccountResponse = self
-            .client
-            .request_typed(ClientRequest::LogoutAccount {
-                request_id,
-                params: None,
-            })
-            .await
-            .wrap_err("account/logout failed in TUI")?;
-        Ok(())
     }
 
     pub(crate) async fn thread_unsubscribe(&mut self, thread_id: ThreadId) -> Result<()> {
@@ -1171,18 +1141,8 @@ fn thread_realtime_start_params(
 
 pub(crate) fn status_account_display_from_auth_mode(
     auth_mode: Option<AuthMode>,
-    plan_type: Option<codex_protocol::account::PlanType>,
 ) -> Option<StatusAccountDisplay> {
-    match auth_mode {
-        Some(AuthMode::ApiKey) => Some(StatusAccountDisplay::ApiKey),
-        Some(AuthMode::Chatgpt)
-        | Some(AuthMode::AgentIdentity)
-        | Some(AuthMode::PersonalAccessToken) => Some(StatusAccountDisplay::ChatGpt {
-            email: None,
-            plan: plan_type.map(plan_type_display_name),
-        }),
-        None => None,
-    }
+    auth_mode.map(|AuthMode::ApiKey| StatusAccountDisplay::ApiKey)
 }
 
 fn model_preset_from_api_model(model: ApiModel) -> ModelPreset {
@@ -1717,26 +1677,6 @@ async fn thread_session_state_from_thread_response(
     })
 }
 
-pub(crate) fn app_server_rate_limit_snapshots(
-    response: GetAccountRateLimitsResponse,
-) -> Vec<RateLimitSnapshot> {
-    let primary_limit_id = response.rate_limits.limit_id.clone();
-    let mut snapshots = vec![response.rate_limits];
-    if let Some(by_limit_id) = response.rate_limits_by_limit_id {
-        snapshots.extend(by_limit_id.into_iter().filter_map(|(limit_id, snapshot)| {
-            if primary_limit_id.as_deref().is_some_and(|primary_limit_id| {
-                primary_limit_id == limit_id
-                    || Some(primary_limit_id) == snapshot.limit_id.as_deref()
-            }) {
-                None
-            } else {
-                Some(snapshot)
-            }
-        }));
-    }
-    snapshots
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1771,44 +1711,6 @@ mod tests {
             .build()
             .await
             .expect("config should build")
-    }
-
-    fn rate_limit_snapshot(limit_id: &str) -> RateLimitSnapshot {
-        RateLimitSnapshot {
-            limit_id: Some(limit_id.to_string()),
-            limit_name: None,
-            primary: Some(codex_app_server_protocol::RateLimitWindow {
-                used_percent: 0,
-                window_duration_mins: Some(10_080),
-                resets_at: None,
-            }),
-            secondary: None,
-            credits: None,
-            individual_limit: None,
-            plan_type: None,
-            rate_limit_reached_type: None,
-        }
-    }
-
-    #[test]
-    fn app_server_rate_limit_snapshots_deduplicates_top_level_limit_from_map() {
-        let response = GetAccountRateLimitsResponse {
-            rate_limits: rate_limit_snapshot("codex"),
-            rate_limits_by_limit_id: Some(HashMap::from([
-                ("codex".to_string(), rate_limit_snapshot("codex")),
-                ("other".to_string(), rate_limit_snapshot("other")),
-            ])),
-        };
-
-        let snapshots = app_server_rate_limit_snapshots(response);
-
-        assert_eq!(
-            snapshots
-                .iter()
-                .map(|snapshot| snapshot.limit_id.as_deref())
-                .collect::<Vec<_>>(),
-            vec![Some("codex"), Some("other")]
-        );
     }
 
     #[test]
@@ -2549,32 +2451,5 @@ mod tests {
         .expect("session should map");
 
         assert_eq!(session.forked_from_id, Some(forked_from_id));
-    }
-
-    #[test]
-    fn status_account_display_from_auth_mode_uses_remapped_plan_labels() {
-        let business = status_account_display_from_auth_mode(
-            Some(AuthMode::Chatgpt),
-            Some(codex_protocol::account::PlanType::EnterpriseCbpUsageBased),
-        );
-        assert!(matches!(
-            business,
-            Some(StatusAccountDisplay::ChatGpt {
-                email: None,
-                plan: Some(ref plan),
-            }) if plan == "Enterprise"
-        ));
-
-        let team = status_account_display_from_auth_mode(
-            Some(AuthMode::Chatgpt),
-            Some(codex_protocol::account::PlanType::SelfServeBusinessUsageBased),
-        );
-        assert!(matches!(
-            team,
-            Some(StatusAccountDisplay::ChatGpt {
-                email: None,
-                plan: Some(ref plan),
-            }) if plan == "Business"
-        ));
     }
 }

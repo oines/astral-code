@@ -520,7 +520,7 @@ fn otel_export_routing_policy_routes_api_request_auth_observability() {
             /*retry_after_unauthorized*/ true,
             Some("managed"),
             Some("refresh_token"),
-            "/responses",
+            "/chat/completions",
             Some("req-401"),
             Some("ray-401"),
             Some("missing_authorization_header"),
@@ -574,7 +574,7 @@ fn otel_export_routing_policy_routes_api_request_auth_observability() {
     );
     assert_eq!(
         request_log_attrs.get("endpoint").map(String::as_str),
-        Some("/responses")
+        Some("/chat/completions")
     );
     assert_eq!(
         request_log_attrs.get("auth.error").map(String::as_str),
@@ -626,7 +626,7 @@ fn otel_export_routing_policy_routes_api_request_auth_observability() {
     );
     assert_eq!(
         request_trace_attrs.get("endpoint").map(String::as_str),
-        Some("/responses")
+        Some("/chat/completions")
     );
 }
 
@@ -681,7 +681,7 @@ fn otel_export_routing_policy_routes_websocket_connect_auth_observability() {
             /*retry_after_unauthorized*/ true,
             Some("managed"),
             Some("reload"),
-            "/responses",
+            "/realtime",
             /*connection_reused*/ false,
             Some("req-ws-401"),
             Some("ray-ws-401"),
@@ -714,7 +714,7 @@ fn otel_export_routing_policy_routes_websocket_connect_auth_observability() {
     );
     assert_eq!(
         connect_log_attrs.get("endpoint").map(String::as_str),
-        Some("/responses")
+        Some("/realtime")
     );
     assert_eq!(
         connect_log_attrs

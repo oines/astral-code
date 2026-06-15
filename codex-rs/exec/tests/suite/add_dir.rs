@@ -11,12 +11,7 @@ async fn accepts_add_dir_flag() -> anyhow::Result<()> {
     let test = test_codex_exec();
 
     let server = responses::start_mock_server().await;
-    let body = responses::sse(vec![
-        responses::ev_response_created("response_1"),
-        responses::ev_assistant_message("response_1", "Task completed"),
-        responses::ev_completed("response_1"),
-    ]);
-    responses::mount_sse_once(&server, body).await;
+    responses::mount_chat_completions_text_once(&server, "Task completed").await;
 
     // Create temporary directories to use with --add-dir
     let temp_dir1 = tempfile::tempdir()?;
@@ -43,12 +38,7 @@ async fn accepts_multiple_add_dir_flags() -> anyhow::Result<()> {
     let test = test_codex_exec();
 
     let server = responses::start_mock_server().await;
-    let body = responses::sse(vec![
-        responses::ev_response_created("response_1"),
-        responses::ev_assistant_message("response_1", "Multiple directories accepted"),
-        responses::ev_completed("response_1"),
-    ]);
-    responses::mount_sse_once(&server, body).await;
+    responses::mount_chat_completions_text_once(&server, "Multiple directories accepted").await;
 
     let temp_dir1 = tempfile::tempdir()?;
     let temp_dir2 = tempfile::tempdir()?;

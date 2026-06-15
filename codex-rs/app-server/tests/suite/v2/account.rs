@@ -1,21 +1,15 @@
 use anyhow::Result;
-use anyhow::bail;
 use app_test_support::TestAppServer;
 use app_test_support::to_response;
 
 use app_test_support::ChatGptAuthFixture;
 use app_test_support::write_chatgpt_auth;
 use codex_app_server_protocol::Account;
-use codex_app_server_protocol::AuthMode;
 use codex_app_server_protocol::GetAccountParams;
 use codex_app_server_protocol::GetAccountResponse;
 use codex_app_server_protocol::JSONRPCResponse;
-use codex_app_server_protocol::LoginAccountResponse;
-use codex_app_server_protocol::LogoutAccountResponse;
 use codex_app_server_protocol::RequestId;
-use codex_app_server_protocol::ServerNotification;
 use codex_config::types::AuthCredentialsStoreMode;
-use codex_login::login_with_api_key;
 use pretty_assertions::assert_eq;
 use std::path::Path;
 use tempfile::TempDir;
@@ -26,7 +20,7 @@ const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 // Helper to create a minimal config.toml for the app server
 #[derive(Default)]
 struct CreateConfigTomlParams {
-    requires_astral_auth: Option<bool>,
+    include_env_key: bool,
     base_url: Option<String>,
     model_provider_id: Option<String>,
     extra_provider_config: Option<String>,
@@ -37,10 +31,10 @@ fn create_config_toml(codex_home: &Path, params: CreateConfigTomlParams) -> std:
     let base_url = params
         .base_url
         .unwrap_or_else(|| "http://127.0.0.1:0/v1".to_string());
-    let requires_line = match params.requires_astral_auth {
-        Some(true) => "requires_astral_auth = true\n".to_string(),
-        Some(false) => String::new(),
-        None => String::new(),
+    let env_key_line = if params.include_env_key {
+        "env_key = \"ASTRAL_API_KEY\"\n"
+    } else {
+        ""
     };
     let model_provider_id = params
         .model_provider_id
@@ -50,10 +44,10 @@ fn create_config_toml(codex_home: &Path, params: CreateConfigTomlParams) -> std:
             r#"[model_providers.mock_provider]
 name = "Mock provider for test"
 base_url = "{base_url}"
-wire_api = "responses"
+wire_api = "chat_completions"
 request_max_retries = 0
 stream_max_retries = 0
-{requires_line}
+{env_key_line}
 "#
         )
     } else {
@@ -77,119 +71,12 @@ shell_snapshot = false
 }
 
 #[tokio::test]
-async fn logout_account_removes_auth_and_notifies() -> Result<()> {
-    let codex_home = TempDir::new()?;
-    create_config_toml(codex_home.path(), CreateConfigTomlParams::default())?;
-
-    login_with_api_key(
-        codex_home.path(),
-        "sk-test-key",
-        AuthCredentialsStoreMode::File,
-    )?;
-    assert!(codex_home.path().join("auth.json").exists());
-
-    let mut mcp =
-        TestAppServer::new_with_env(codex_home.path(), &[("ASTRAL_API_KEY", None)]).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
-
-    let id = mcp.send_logout_account_request().await?;
-    let resp: JSONRPCResponse = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(id)),
-    )
-    .await??;
-    let _ok: LogoutAccountResponse = to_response(resp)?;
-
-    let note = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("account/updated"),
-    )
-    .await??;
-    let parsed: ServerNotification = note.try_into()?;
-    let ServerNotification::AccountUpdated(payload) = parsed else {
-        bail!("unexpected notification: {parsed:?}");
-    };
-    assert!(
-        payload.auth_mode.is_none(),
-        "auth_method should be None after logout"
-    );
-    assert_eq!(payload.plan_type, None);
-
-    assert!(
-        !codex_home.path().join("auth.json").exists(),
-        "auth.json should be deleted"
-    );
-
-    let get_id = mcp
-        .send_get_account_request(GetAccountParams {
-            refresh_token: false,
-        })
-        .await?;
-    let get_resp: JSONRPCResponse = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(get_id)),
-    )
-    .await??;
-    let account: GetAccountResponse = to_response(get_resp)?;
-    assert_eq!(account.account, None);
-    Ok(())
-}
-
-#[tokio::test]
-async fn login_account_api_key_succeeds_and_notifies() -> Result<()> {
-    let codex_home = TempDir::new()?;
-    create_config_toml(codex_home.path(), CreateConfigTomlParams::default())?;
-
-    let mut mcp = TestAppServer::new(codex_home.path()).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
-
-    let req_id = mcp
-        .send_login_account_api_key_request("sk-test-key")
-        .await?;
-    let resp: JSONRPCResponse = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(req_id)),
-    )
-    .await??;
-    let login: LoginAccountResponse = to_response(resp)?;
-    assert_eq!(login, LoginAccountResponse::ApiKey {});
-
-    let note = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("account/login/completed"),
-    )
-    .await??;
-    let parsed: ServerNotification = note.try_into()?;
-    let ServerNotification::AccountLoginCompleted(payload) = parsed else {
-        bail!("unexpected notification: {parsed:?}");
-    };
-    pretty_assertions::assert_eq!(payload.login_id, None);
-    pretty_assertions::assert_eq!(payload.success, true);
-    pretty_assertions::assert_eq!(payload.error, None);
-
-    let note = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("account/updated"),
-    )
-    .await??;
-    let parsed: ServerNotification = note.try_into()?;
-    let ServerNotification::AccountUpdated(payload) = parsed else {
-        bail!("unexpected notification: {parsed:?}");
-    };
-    pretty_assertions::assert_eq!(payload.auth_mode, Some(AuthMode::ApiKey));
-    pretty_assertions::assert_eq!(payload.plan_type, None);
-
-    assert!(codex_home.path().join("auth.json").exists());
-    Ok(())
-}
-
-#[tokio::test]
 async fn get_account_no_auth() -> Result<()> {
     let codex_home = TempDir::new()?;
     create_config_toml(
         codex_home.path(),
         CreateConfigTomlParams {
-            requires_astral_auth: Some(true),
+            include_env_key: true,
             ..Default::default()
         },
     )?;
@@ -211,7 +98,7 @@ async fn get_account_no_auth() -> Result<()> {
     let account: GetAccountResponse = to_response(resp)?;
 
     assert_eq!(account.account, None, "expected no account");
-    assert_eq!(account.requires_astral_auth, true);
+    assert_eq!(account.requires_astral_auth, false);
     Ok(())
 }
 
@@ -221,23 +108,17 @@ async fn get_account_with_api_key() -> Result<()> {
     create_config_toml(
         codex_home.path(),
         CreateConfigTomlParams {
-            requires_astral_auth: Some(true),
+            include_env_key: true,
             ..Default::default()
         },
     )?;
 
-    let mut mcp = TestAppServer::new(codex_home.path()).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
-
-    let req_id = mcp
-        .send_login_account_api_key_request("sk-test-key")
-        .await?;
-    let resp: JSONRPCResponse = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(req_id)),
+    let mut mcp = TestAppServer::new_with_env(
+        codex_home.path(),
+        &[("ASTRAL_API_KEY", Some("sk-test-key"))],
     )
-    .await??;
-    let _login_ok = to_response::<LoginAccountResponse>(resp)?;
+    .await?;
+    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
 
     let params = GetAccountParams {
         refresh_token: false,
@@ -253,7 +134,7 @@ async fn get_account_with_api_key() -> Result<()> {
 
     let expected = GetAccountResponse {
         account: Some(Account::ApiKey {}),
-        requires_astral_auth: true,
+        requires_astral_auth: false,
     };
     assert_eq!(received, expected);
     Ok(())
@@ -265,7 +146,6 @@ async fn get_account_when_auth_not_required() -> Result<()> {
     create_config_toml(
         codex_home.path(),
         CreateConfigTomlParams {
-            requires_astral_auth: Some(false),
             ..Default::default()
         },
     )?;
@@ -327,7 +207,7 @@ region = "us-west-2"
     let received: GetAccountResponse = to_response(resp)?;
 
     let expected = GetAccountResponse {
-        account: Some(Account::AmazonBedrock {}),
+        account: None,
         requires_astral_auth: false,
     };
     assert_eq!(received, expected);
@@ -340,15 +220,13 @@ async fn get_account_omits_managed_auth() -> Result<()> {
     create_config_toml(
         codex_home.path(),
         CreateConfigTomlParams {
-            requires_astral_auth: Some(true),
+            include_env_key: true,
             ..Default::default()
         },
     )?;
     write_chatgpt_auth(
         codex_home.path(),
-        ChatGptAuthFixture::new("access-chatgpt")
-            .email("user@example.com")
-            .plan_type("pro"),
+        ChatGptAuthFixture::new("access-chatgpt").email("user@example.com"),
         AuthCredentialsStoreMode::File,
     )?;
 
@@ -370,7 +248,7 @@ async fn get_account_omits_managed_auth() -> Result<()> {
 
     let expected = GetAccountResponse {
         account: None,
-        requires_astral_auth: true,
+        requires_astral_auth: false,
     };
     assert_eq!(received, expected);
     Ok(())

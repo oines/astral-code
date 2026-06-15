@@ -10,9 +10,7 @@ use crate::version::CODEX_CLI_VERSION;
 use chrono::DateTime;
 use chrono::Local;
 use codex_app_server_protocol::AskForApproval;
-use codex_model_provider_info::WireApi;
 use codex_protocol::ThreadId;
-use codex_protocol::account::PlanType;
 use codex_protocol::config_types::ApprovalsReviewer;
 use codex_protocol::models::ActivePermissionProfile;
 use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_DANGER_FULL_ACCESS;
@@ -72,32 +70,6 @@ struct StatusRateLimitState {
     refreshing_rate_limits: bool,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct StatusHistoryHandle {
-    rate_limit_state: Arc<RwLock<StatusRateLimitState>>,
-}
-
-impl StatusHistoryHandle {
-    pub(crate) fn finish_rate_limit_refresh(
-        &self,
-        rate_limits: &[RateLimitSnapshotDisplay],
-        now: DateTime<Local>,
-    ) {
-        let rate_limits = if rate_limits.len() <= 1 {
-            compose_rate_limit_data(rate_limits.first(), now)
-        } else {
-            compose_rate_limit_data_many(rate_limits, now)
-        };
-        #[expect(clippy::expect_used)]
-        let mut state = self
-            .rate_limit_state
-            .write()
-            .expect("status history rate-limit state poisoned");
-        state.rate_limits = rate_limits;
-        state.refreshing_rate_limits = false;
-    }
-}
-
 #[derive(Debug)]
 struct StatusHistoryCell {
     model_name: String,
@@ -127,7 +99,6 @@ pub(crate) fn new_status_output(
     thread_name: Option<String>,
     forked_from: Option<ThreadId>,
     rate_limits: Option<&RateLimitSnapshotDisplay>,
-    _plan_type: Option<PlanType>,
     now: DateTime<Local>,
     model_name: &str,
     collaboration_mode: Option<&str>,
@@ -143,7 +114,6 @@ pub(crate) fn new_status_output(
         thread_name,
         forked_from,
         snapshots,
-        _plan_type,
         now,
         model_name,
         collaboration_mode,
@@ -163,14 +133,13 @@ pub(crate) fn new_status_output_with_rate_limits(
     thread_name: Option<String>,
     forked_from: Option<ThreadId>,
     rate_limits: &[RateLimitSnapshotDisplay],
-    _plan_type: Option<PlanType>,
     now: DateTime<Local>,
     model_name: &str,
     collaboration_mode: Option<&str>,
     reasoning_effort_override: Option<Option<ReasoningEffort>>,
     refreshing_rate_limits: bool,
 ) -> CompositeHistoryCell {
-    new_status_output_with_rate_limits_handle(
+    new_status_output_with_context(
         config,
         /*runtime_model_provider_base_url*/ None,
         /*remote_connection*/ None,
@@ -181,7 +150,6 @@ pub(crate) fn new_status_output_with_rate_limits(
         thread_name,
         forked_from,
         rate_limits,
-        _plan_type,
         now,
         model_name,
         collaboration_mode,
@@ -189,11 +157,10 @@ pub(crate) fn new_status_output_with_rate_limits(
         "<none>".to_string(),
         refreshing_rate_limits,
     )
-    .0
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn new_status_output_with_rate_limits_handle(
+pub(crate) fn new_status_output_with_context(
     config: &Config,
     runtime_model_provider_base_url: Option<&str>,
     remote_connection: Option<&RemoteConnectionStatus>,
@@ -204,16 +171,15 @@ pub(crate) fn new_status_output_with_rate_limits_handle(
     thread_name: Option<String>,
     forked_from: Option<ThreadId>,
     rate_limits: &[RateLimitSnapshotDisplay],
-    _plan_type: Option<PlanType>,
     now: DateTime<Local>,
     model_name: &str,
     collaboration_mode: Option<&str>,
     reasoning_effort_override: Option<Option<ReasoningEffort>>,
     agents_summary: String,
     refreshing_rate_limits: bool,
-) -> (CompositeHistoryCell, StatusHistoryHandle) {
+) -> CompositeHistoryCell {
     let command = PlainHistoryCell::new(vec!["/status".magenta().into()]);
-    let (card, handle) = StatusHistoryCell::new(
+    let card = StatusHistoryCell::new(
         config,
         runtime_model_provider_base_url,
         remote_connection,
@@ -224,7 +190,6 @@ pub(crate) fn new_status_output_with_rate_limits_handle(
         thread_name,
         forked_from,
         rate_limits,
-        _plan_type,
         now,
         model_name,
         collaboration_mode,
@@ -233,10 +198,7 @@ pub(crate) fn new_status_output_with_rate_limits_handle(
         refreshing_rate_limits,
     );
 
-    (
-        CompositeHistoryCell::new(vec![Box::new(command), Box::new(card)]),
-        handle,
-    )
+    CompositeHistoryCell::new(vec![Box::new(command), Box::new(card)])
 }
 
 impl StatusHistoryCell {
@@ -252,18 +214,17 @@ impl StatusHistoryCell {
         thread_name: Option<String>,
         forked_from: Option<ThreadId>,
         rate_limits: &[RateLimitSnapshotDisplay],
-        _plan_type: Option<PlanType>,
         now: DateTime<Local>,
         model_name: &str,
         collaboration_mode: Option<&str>,
-        reasoning_effort_override: Option<Option<ReasoningEffort>>,
+        _reasoning_effort_override: Option<Option<ReasoningEffort>>,
         agents_summary: String,
         refreshing_rate_limits: bool,
-    ) -> (Self, StatusHistoryHandle) {
+    ) -> Self {
         let approval_policy = AskForApproval::from(config.permissions.approval_policy.value());
         let permission_profile = config.permissions.effective_permission_profile();
         let workspace_roots = config.effective_workspace_roots();
-        let mut config_entries = vec![
+        let config_entries = vec![
             ("workdir", config.cwd.display().to_string()),
             ("model", model_name.to_string()),
             ("provider", config.model_provider_id.clone()),
@@ -280,20 +241,6 @@ impl StatusHistoryCell {
                 ),
             ),
         ];
-        if config.model_provider.wire_api == WireApi::Responses {
-            let effort_value = reasoning_effort_override
-                .unwrap_or_else(|| config.model_reasoning_effort.clone())
-                .map(|effort| effort.to_string())
-                .unwrap_or_else(|| "none".to_string());
-            config_entries.push(("reasoning effort", effort_value));
-            config_entries.push((
-                "reasoning summaries",
-                config
-                    .model_reasoning_summary
-                    .map(|summary| summary.to_string())
-                    .unwrap_or_else(|| "auto".to_string()),
-            ));
-        }
         let (model_name, model_details) = compose_model_display(model_name, &config_entries);
         let approval = config_entries
             .iter()
@@ -345,25 +292,22 @@ impl StatusHistoryCell {
         }));
         let agents_summary = Arc::new(RwLock::new(agents_summary));
 
-        (
-            Self {
-                model_name,
-                model_details,
-                directory: config.cwd.to_path_buf(),
-                permissions,
-                collaboration_mode: collaboration_mode.map(ToString::to_string),
-                model_provider,
-                remote_connection: remote_connection.cloned(),
-                account,
-                thread_name,
-                session_id,
-                forked_from,
-                token_usage,
-                agents_summary,
-                rate_limit_state: rate_limit_state.clone(),
-            },
-            StatusHistoryHandle { rate_limit_state },
-        )
+        Self {
+            model_name,
+            model_details,
+            directory: config.cwd.to_path_buf(),
+            permissions,
+            collaboration_mode: collaboration_mode.map(ToString::to_string),
+            model_provider,
+            remote_connection: remote_connection.cloned(),
+            account,
+            thread_name,
+            session_id,
+            forked_from,
+            token_usage,
+            agents_summary,
+            rate_limit_state,
+        }
     }
 
     fn token_usage_spans(&self) -> Vec<Span<'static>> {
@@ -714,12 +658,6 @@ impl HistoryCell for StatusHistoryCell {
         }
 
         let account_value = self.account.as_ref().map(|account| match account {
-            StatusAccountDisplay::ChatGpt { email, plan } => match (email, plan) {
-                (Some(email), Some(plan)) => format!("{email} ({plan})"),
-                (Some(email), None) => email.clone(),
-                (None, Some(plan)) => plan.clone(),
-                (None, None) => "Hosted account".to_string(),
-            },
             StatusAccountDisplay::ApiKey => "API key configured".to_string(),
         });
 
@@ -825,10 +763,7 @@ impl HistoryCell for StatusHistoryCell {
         }
 
         lines.push(Line::from(Vec::<Span<'static>>::new()));
-        // Hosted account limits can make local token totals less useful.
-        if !matches!(self.account, Some(StatusAccountDisplay::ChatGpt { .. })) {
-            lines.push(formatter.line("Token usage", self.token_usage_spans()));
-        }
+        lines.push(formatter.line("Token usage", self.token_usage_spans()));
 
         if let Some(spans) = self.context_window_spans() {
             lines.push(formatter.line("Context window", spans));

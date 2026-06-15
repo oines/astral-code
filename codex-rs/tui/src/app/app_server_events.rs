@@ -10,7 +10,6 @@ use crate::app_event::ConnectorsSnapshot;
 use crate::app_server_session::AppServerSession;
 use crate::app_server_session::status_account_display_from_auth_mode;
 use codex_app_server_client::AppServerEvent;
-use codex_app_server_protocol::AuthMode;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ServerRequest;
 
@@ -74,21 +73,10 @@ impl App {
             ServerNotification::McpServerStatusUpdated(_) => {
                 self.refresh_mcp_startup_expected_servers_from_config();
             }
-            ServerNotification::AccountRateLimitsUpdated(notification) => {
-                self.chat_widget
-                    .on_rolling_rate_limit_snapshot(notification.rate_limits.clone());
-                return;
-            }
             ServerNotification::AccountUpdated(notification) => {
                 self.chat_widget.update_account_state(
-                    status_account_display_from_auth_mode(
-                        notification.auth_mode,
-                        notification.plan_type,
-                    ),
-                    notification.plan_type,
-                    notification
-                        .auth_mode
-                        .is_some_and(AuthMode::has_legacy_hosted_account),
+                    status_account_display_from_auth_mode(notification.auth_mode),
+                    /*uses_chatgpt_auth*/ false,
                 );
                 return;
             }

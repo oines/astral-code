@@ -244,7 +244,7 @@ pub fn format_labeled_items_snapshot(
     format!("Scenario: {scenario}\n\n{sections}")
 }
 
-/// Render changed JSON lines between two captured `/responses` request bodies.
+/// Render changed JSON lines between two captured model request bodies.
 ///
 /// Request-parity tests use this to compare the entire JSON payload while showing only fields that
 /// changed, with the same redactions as the other context snapshots.

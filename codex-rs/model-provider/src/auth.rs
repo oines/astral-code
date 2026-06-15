@@ -1,49 +1,13 @@
 use std::sync::Arc;
 
-use codex_agent_identity::AgentIdentityKey;
-use codex_agent_identity::AgentTaskAuthorizationTarget;
-use codex_agent_identity::authorization_header_for_agent_task;
 use codex_api::AuthProvider;
 use codex_api::SharedAuthProvider;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
 use codex_model_provider_info::ModelProviderInfo;
 use http::HeaderMap;
-use http::HeaderValue;
 
 use crate::bearer_auth_provider::BearerAuthProvider;
-
-#[derive(Clone, Debug)]
-struct AgentIdentityAuthProvider {
-    auth: codex_login::auth::AgentIdentityAuth,
-}
-
-impl AuthProvider for AgentIdentityAuthProvider {
-    fn add_auth_headers(&self, headers: &mut HeaderMap) {
-        let record = self.auth.record();
-        let header_value = authorization_header_for_agent_task(
-            AgentIdentityKey {
-                agent_runtime_id: &record.agent_runtime_id,
-                private_key_pkcs8_base64: &record.agent_private_key,
-            },
-            AgentTaskAuthorizationTarget {
-                agent_runtime_id: &record.agent_runtime_id,
-                task_id: self.auth.process_task_id(),
-            },
-        )
-        .map_err(std::io::Error::other);
-
-        if let Ok(header_value) = header_value
-            && let Ok(header) = HeaderValue::from_str(&header_value)
-        {
-            let _ = headers.insert(http::header::AUTHORIZATION, header);
-        }
-
-        // Astral request auth is provider-neutral. Agent identity still signs the
-        // request, but ChatGPT workspace/routing headers are intentionally not
-        // emitted on model-provider traffic.
-    }
-}
 
 // Some providers are meant to send no auth headers. Examples include local OSS
 // providers and custom test providers with `requires_astral_auth = false`.
@@ -58,7 +22,7 @@ pub fn unauthenticated_auth_provider() -> SharedAuthProvider {
     Arc::new(UnauthenticatedAuthProvider)
 }
 
-/// Returns the provider-scoped auth manager when this provider uses managed auth.
+/// Returns the provider-scoped auth manager for legacy managed-auth providers.
 ///
 /// Provider-local API keys and unauthenticated providers intentionally do not
 /// inherit the caller-supplied base manager.
@@ -101,20 +65,13 @@ fn bearer_auth_for_provider(
     Ok(None)
 }
 
-/// Builds request-header auth for a first-party Codex auth snapshot.
+/// Builds request-header auth for an Astral API-key auth snapshot.
 pub fn auth_provider_from_auth(auth: &CodexAuth) -> SharedAuthProvider {
-    match auth {
-        CodexAuth::AgentIdentity(auth) => {
-            Arc::new(AgentIdentityAuthProvider { auth: auth.clone() })
-        }
-        CodexAuth::ApiKey(_) | CodexAuth::Chatgpt(_) | CodexAuth::PersonalAccessToken(_) => {
-            Arc::new(BearerAuthProvider {
-                token: auth.get_token().ok(),
-                account_id: auth.get_account_id(),
-                is_fedramp_account: auth.is_fedramp_account(),
-            })
-        }
-    }
+    Arc::new(BearerAuthProvider {
+        token: auth.get_token().ok(),
+        account_id: None,
+        is_fedramp_account: false,
+    })
 }
 
 #[cfg(test)]
@@ -126,8 +83,10 @@ mod tests {
 
     #[test]
     fn unauthenticated_auth_provider_adds_no_headers() {
-        let provider =
-            create_oss_provider_with_base_url("http://localhost:11434/v1", WireApi::Responses);
+        let provider = create_oss_provider_with_base_url(
+            "http://localhost:11434/v1",
+            WireApi::ChatCompletions,
+        );
         let auth = resolve_provider_auth(/*auth*/ None, &provider).expect("auth should resolve");
 
         assert!(auth.to_auth_headers().is_empty());

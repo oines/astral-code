@@ -25,19 +25,7 @@ impl ChatWidget {
     }
 
     pub(super) fn apply_runtime_metrics_delta(&mut self, delta: RuntimeMetricsSummary) {
-        let should_log_timing = has_websocket_timing_metrics(delta);
         self.turn_runtime_metrics.merge(delta);
-        if should_log_timing {
-            self.log_websocket_timing_totals(delta);
-        }
-    }
-
-    pub(super) fn log_websocket_timing_totals(&mut self, delta: RuntimeMetricsSummary) {
-        if let Some(label) = history_cell::runtime_metrics_label(delta.responses_api_summary()) {
-            self.add_plain_history_lines(vec![
-                vec!["• ".dim(), format!("WebSocket timing: {label}").dark_gray()].into(),
-            ]);
-        }
     }
 
     pub(super) fn refresh_runtime_metrics(&mut self) {

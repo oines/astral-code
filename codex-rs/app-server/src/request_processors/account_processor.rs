@@ -9,47 +9,15 @@ enum RefreshTokenRequestOutcome {
 #[derive(Clone)]
 pub(crate) struct AccountRequestProcessor {
     auth_manager: Arc<AuthManager>,
-    outgoing: Arc<OutgoingMessageSender>,
     config: Arc<Config>,
 }
 
-const ACCOUNT_BACKEND_DISABLED_MESSAGE: &str = "Astral-managed account usage and rate-limit APIs are unavailable for the active model provider.";
-
 impl AccountRequestProcessor {
-    pub(crate) fn new(
-        auth_manager: Arc<AuthManager>,
-        outgoing: Arc<OutgoingMessageSender>,
-        config: Arc<Config>,
-    ) -> Self {
+    pub(crate) fn new(auth_manager: Arc<AuthManager>, config: Arc<Config>) -> Self {
         Self {
             auth_manager,
-            outgoing,
             config,
         }
-    }
-
-    pub(crate) async fn login_account(
-        &self,
-        request_id: ConnectionRequestId,
-        params: LoginAccountParams,
-    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
-        self.login_v2(request_id, params).await.map(|()| None)
-    }
-
-    pub(crate) async fn logout_account(
-        &self,
-        request_id: ConnectionRequestId,
-    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
-        self.logout_v2(request_id).await.map(|()| None)
-    }
-
-    pub(crate) async fn cancel_login_account(
-        &self,
-        params: CancelLoginAccountParams,
-    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
-        self.cancel_login_response(params)
-            .await
-            .map(|response| Some(response.into()))
     }
 
     pub(crate) async fn get_account(
@@ -70,161 +38,13 @@ impl AccountRequestProcessor {
             .map(|response| Some(response.into()))
     }
 
-    pub(crate) async fn get_account_rate_limits(
-        &self,
-    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
-        self.get_account_rate_limits_response()
-            .await
-            .map(|response| Some(response.into()))
-    }
-
-    pub(crate) async fn get_account_token_usage(
-        &self,
-    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
-        self.get_account_token_usage_response()
-            .await
-            .map(|response| Some(response.into()))
-    }
-
     pub(crate) async fn cancel_active_login(&self) {}
 
     pub(crate) fn clear_external_auth(&self) {
         self.auth_manager.clear_external_auth();
     }
 
-    fn current_account_updated_notification(&self) -> AccountUpdatedNotification {
-        let auth = self.auth_manager.auth_cached();
-        let supported_auth = auth.as_ref().filter(|auth| !auth.uses_hosted_backend());
-        AccountUpdatedNotification {
-            auth_mode: supported_auth.map(CodexAuth::api_auth_mode),
-            plan_type: supported_auth.and_then(CodexAuth::account_plan_type),
-        }
-    }
-
-    async fn login_v2(
-        &self,
-        request_id: ConnectionRequestId,
-        params: LoginAccountParams,
-    ) -> Result<(), JSONRPCErrorError> {
-        match params {
-            LoginAccountParams::ApiKey { api_key } => {
-                self.login_api_key_v2(request_id, LoginApiKeyParams { api_key })
-                    .await;
-            }
-        }
-        Ok(())
-    }
-
-    async fn login_api_key_common(
-        &self,
-        params: &LoginApiKeyParams,
-    ) -> std::result::Result<(), JSONRPCErrorError> {
-        match login_with_api_key(
-            &self.config.codex_home,
-            &params.api_key,
-            self.config.cli_auth_credentials_store_mode,
-        ) {
-            Ok(()) => {
-                self.auth_manager.reload().await;
-                Ok(())
-            }
-            Err(err) => Err(internal_error(format!("failed to save api key: {err}"))),
-        }
-    }
-
-    async fn login_api_key_v2(&self, request_id: ConnectionRequestId, params: LoginApiKeyParams) {
-        let result = self
-            .login_api_key_common(&params)
-            .await
-            .map(|()| LoginAccountResponse::ApiKey {});
-        let logged_in = result.is_ok();
-        self.outgoing.send_result(request_id, result).await;
-
-        if logged_in {
-            self.send_login_success_notifications(/*login_id*/ None)
-                .await;
-        }
-    }
-
-    async fn cancel_login_response(
-        &self,
-        params: CancelLoginAccountParams,
-    ) -> Result<CancelLoginAccountResponse, JSONRPCErrorError> {
-        let login_id = params.login_id;
-        let _uuid = Uuid::parse_str(&login_id)
-            .map_err(|_| invalid_request(format!("invalid login id: {login_id}")))?;
-        Ok(CancelLoginAccountResponse {
-            status: CancelLoginAccountStatus::NotFound,
-        })
-    }
-
-    async fn send_login_success_notifications(&self, login_id: Option<Uuid>) {
-        let payload_login_completed = AccountLoginCompletedNotification {
-            login_id: login_id.map(|id| id.to_string()),
-            success: true,
-            error: None,
-        };
-        self.outgoing
-            .send_server_notification(ServerNotification::AccountLoginCompleted(
-                payload_login_completed,
-            ))
-            .await;
-
-        self.outgoing
-            .send_server_notification(ServerNotification::AccountUpdated(
-                self.current_account_updated_notification(),
-            ))
-            .await;
-    }
-
-    async fn logout_common(&self) -> std::result::Result<Option<AuthMode>, JSONRPCErrorError> {
-        match self.auth_manager.logout_with_revoke().await {
-            Ok(_) => {}
-            Err(err) => {
-                return Err(internal_error(format!("logout failed: {err}")));
-            }
-        }
-
-        // Reflect the current auth method after logout (likely None).
-        Ok(self
-            .auth_manager
-            .auth_cached()
-            .as_ref()
-            .map(CodexAuth::api_auth_mode))
-    }
-
-    async fn logout_v2(&self, request_id: ConnectionRequestId) -> Result<(), JSONRPCErrorError> {
-        let result = self.logout_common().await;
-        let account_updated =
-            result
-                .as_ref()
-                .ok()
-                .cloned()
-                .map(|auth_mode| AccountUpdatedNotification {
-                    auth_mode,
-                    plan_type: None,
-                });
-        self.outgoing
-            .send_result(request_id, result.map(|_| LogoutAccountResponse {}))
-            .await;
-
-        if let Some(payload) = account_updated {
-            self.outgoing
-                .send_server_notification(ServerNotification::AccountUpdated(payload))
-                .await;
-        }
-        Ok(())
-    }
-
     async fn refresh_token_if_requested(&self, do_refresh: bool) -> RefreshTokenRequestOutcome {
-        if self
-            .auth_manager
-            .auth_cached()
-            .as_ref()
-            .is_some_and(CodexAuth::uses_hosted_backend)
-        {
-            return RefreshTokenRequestOutcome::NotAttemptedOrSucceeded;
-        }
         if do_refresh && let Err(err) = self.auth_manager.refresh_token().await {
             let failed_reason = err.failed_reason();
             if failed_reason.is_none() {
@@ -245,41 +65,27 @@ impl AccountRequestProcessor {
 
         self.refresh_token_if_requested(do_refresh).await;
 
-        // Determine whether auth is required based on the active model provider.
-        // If a custom provider is configured with `requires_astral_auth == false`,
-        // then no auth step is required; otherwise, default to requiring auth.
         let requires_astral_auth = self.config.model_provider.requires_astral_auth;
+        if let Ok(Some(api_key)) = self.config.model_provider.api_key() {
+            return Ok(GetAuthStatusResponse {
+                auth_method: Some(AuthMode::ApiKey),
+                auth_token: include_token.then_some(api_key),
+                requires_astral_auth: Some(requires_astral_auth),
+            });
+        }
 
-        let response = if !requires_astral_auth {
-            GetAuthStatusResponse {
-                auth_method: None,
-                auth_token: None,
-                requires_astral_auth: Some(false),
-            }
+        let auth = if do_refresh {
+            self.auth_manager.auth_cached()
         } else {
-            let auth = if do_refresh {
-                self.auth_manager.auth_cached()
-            } else {
-                self.auth_manager.auth().await
-            };
-            match auth {
-                Some(auth) if auth.uses_hosted_backend() => GetAuthStatusResponse {
-                    auth_method: None,
-                    auth_token: None,
-                    requires_astral_auth: Some(true),
-                },
-                Some(auth) => {
-                    let permanent_refresh_failure =
-                        self.auth_manager.refresh_failure_for_auth(&auth).is_some();
-                    let auth_mode = auth.api_auth_mode();
-                    let (reported_auth_method, token_opt) = if matches!(
-                        auth,
-                        CodexAuth::AgentIdentity(_) | CodexAuth::PersonalAccessToken(_)
-                    ) || include_token
-                        && permanent_refresh_failure
-                    {
-                        // This response cannot represent the metadata needed to reuse these
-                        // credentials.
+            self.auth_manager.auth().await
+        };
+        let response = match auth {
+            Some(auth) => {
+                let permanent_refresh_failure =
+                    self.auth_manager.refresh_failure_for_auth(&auth).is_some();
+                let auth_mode = auth.api_auth_mode();
+                let (reported_auth_method, token_opt) =
+                    if include_token && permanent_refresh_failure {
                         (Some(auth_mode), None)
                     } else {
                         match auth.get_token() {
@@ -294,18 +100,17 @@ impl AccountRequestProcessor {
                             }
                         }
                     };
-                    GetAuthStatusResponse {
-                        auth_method: reported_auth_method,
-                        auth_token: token_opt,
-                        requires_astral_auth: Some(true),
-                    }
+                GetAuthStatusResponse {
+                    auth_method: reported_auth_method,
+                    auth_token: token_opt,
+                    requires_astral_auth: Some(requires_astral_auth),
                 }
-                None => GetAuthStatusResponse {
-                    auth_method: None,
-                    auth_token: None,
-                    requires_astral_auth: Some(true),
-                },
             }
+            None => GetAuthStatusResponse {
+                auth_method: None,
+                auth_token: None,
+                requires_astral_auth: Some(requires_astral_auth),
+            },
         };
 
         Ok(response)
@@ -330,17 +135,5 @@ impl AccountRequestProcessor {
             account,
             requires_astral_auth: account_state.requires_astral_auth,
         })
-    }
-
-    async fn get_account_rate_limits_response(
-        &self,
-    ) -> Result<GetAccountRateLimitsResponse, JSONRPCErrorError> {
-        Err(invalid_request(ACCOUNT_BACKEND_DISABLED_MESSAGE))
-    }
-
-    async fn get_account_token_usage_response(
-        &self,
-    ) -> Result<GetAccountTokenUsageResponse, JSONRPCErrorError> {
-        Err(invalid_request(ACCOUNT_BACKEND_DISABLED_MESSAGE))
     }
 }

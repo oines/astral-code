@@ -34,7 +34,7 @@ pub struct Prompt {
     /// Optional the output schema for the model's response.
     pub output_schema: Option<Value>,
 
-    /// Whether the Responses API should strictly validate `output_schema`.
+    /// Whether the provider should strictly validate `output_schema` when supported.
     pub output_schema_strict: bool,
 }
 
@@ -93,7 +93,3 @@ impl Drop for ResponseStream {
         self.consumer_dropped.cancel();
     }
 }
-
-#[cfg(test)]
-#[path = "client_common_tests.rs"]
-mod tests;

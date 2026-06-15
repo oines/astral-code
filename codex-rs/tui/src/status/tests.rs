@@ -1,6 +1,6 @@
 use super::new_status_output;
+use super::new_status_output_with_context;
 use super::new_status_output_with_rate_limits;
-use super::new_status_output_with_rate_limits_handle;
 use super::rate_limit_snapshot_display;
 use super::rate_limits::RateLimitSnapshotDisplay;
 use super::rate_limits::RateLimitWindowDisplay;
@@ -222,7 +222,6 @@ fn permissions_text_for(config: &Config) -> Option<String> {
         /*thread_name*/ None,
         /*forked_from*/ None,
         /*rate_limits*/ None,
-        None,
         captured_at,
         &model_slug,
         /*collaboration_mode*/ None,
@@ -282,7 +281,6 @@ async fn status_snapshot_includes_reasoning_details() {
         }),
         credits: None,
         individual_limit: None,
-        plan_type: None,
         rate_limit_reached_type: None,
     };
     let rate_display = rate_limit_snapshot_display(&snapshot, captured_at);
@@ -300,7 +298,6 @@ async fn status_snapshot_includes_reasoning_details() {
         /*thread_name*/ None,
         /*forked_from*/ None,
         Some(&rate_display),
-        None,
         captured_at,
         &model_slug,
         /*collaboration_mode*/ None,
@@ -615,7 +612,6 @@ async fn status_snapshot_shows_active_user_defined_profile() {
         /*thread_name*/ None,
         /*forked_from*/ None,
         /*rate_limits*/ None,
-        None,
         captured_at,
         &model_slug,
         /*collaboration_mode*/ None,
@@ -651,7 +647,7 @@ async fn status_model_provider_uses_bedrock_runtime_base_url_and_hides_chatgpt_u
     let model_slug = crate::legacy_core::test_support::get_model_offline(config.model.as_deref());
     let runtime_base_url = "https://bedrock-mantle.eu-west-1.api.aws/openai/v1";
 
-    let (composite, _handle) = new_status_output_with_rate_limits_handle(
+    let composite = new_status_output_with_context(
         &config,
         Some(runtime_base_url),
         /*remote_connection*/ None,
@@ -662,7 +658,6 @@ async fn status_model_provider_uses_bedrock_runtime_base_url_and_hides_chatgpt_u
         /*thread_name*/ None,
         /*forked_from*/ None,
         /*rate_limits*/ &[],
-        None,
         captured_at,
         &model_slug,
         /*collaboration_mode*/ None,
@@ -692,7 +687,7 @@ async fn status_model_provider_uses_bedrock_runtime_base_url_and_hides_chatgpt_u
         requires_astral_auth: true,
         ..ModelProviderInfo::default()
     };
-    let (composite, _handle) = new_status_output_with_rate_limits_handle(
+    let composite = new_status_output_with_context(
         &config,
         /*runtime_model_provider_base_url*/ None,
         /*remote_connection*/ None,
@@ -703,7 +698,6 @@ async fn status_model_provider_uses_bedrock_runtime_base_url_and_hides_chatgpt_u
         /*thread_name*/ None,
         /*forked_from*/ None,
         /*rate_limits*/ &[],
-        None,
         captured_at,
         &model_slug,
         /*collaboration_mode*/ None,
@@ -767,7 +761,6 @@ async fn status_snapshot_shows_auto_review_permissions() {
         /*thread_name*/ None,
         /*forked_from*/ None,
         /*rate_limits*/ None,
-        None,
         captured_at,
         &model_slug,
         /*collaboration_mode*/ None,
@@ -867,7 +860,6 @@ async fn status_snapshot_includes_forked_from() {
         /*thread_name*/ None,
         Some(forked_from),
         /*rate_limits*/ None,
-        None,
         captured_at,
         &model_slug,
         /*collaboration_mode*/ None,
@@ -915,7 +907,6 @@ async fn status_snapshot_includes_monthly_limit() {
         secondary: None,
         credits: None,
         individual_limit: None,
-        plan_type: None,
         rate_limit_reached_type: None,
     };
     let rate_display = rate_limit_snapshot_display(&snapshot, captured_at);
@@ -931,7 +922,6 @@ async fn status_snapshot_includes_monthly_limit() {
         /*thread_name*/ None,
         /*forked_from*/ None,
         Some(&rate_display),
-        None,
         captured_at,
         &model_slug,
         /*collaboration_mode*/ None,
@@ -979,7 +969,6 @@ async fn status_snapshot_includes_enterprise_monthly_credit_limit() {
             remaining_percent: 68,
             resets_at: reset_at_from(&captured_at, /*seconds*/ 86_400),
         }),
-        plan_type: None,
         rate_limit_reached_type: None,
     };
     let rate_display = rate_limit_snapshot_display(&snapshot, captured_at);
@@ -995,7 +984,6 @@ async fn status_snapshot_includes_enterprise_monthly_credit_limit() {
         /*thread_name*/ None,
         /*forked_from*/ None,
         Some(&rate_display),
-        None,
         captured_at,
         &model_slug,
         /*collaboration_mode*/ None,
@@ -1059,7 +1047,6 @@ async fn status_snapshot_uses_generic_limit_labels_for_unsupported_windows() {
         }),
         credits: None,
         individual_limit: None,
-        plan_type: None,
         rate_limit_reached_type: None,
     };
     let rate_display = rate_limit_snapshot_display(&snapshot, captured_at);
@@ -1075,7 +1062,6 @@ async fn status_snapshot_uses_generic_limit_labels_for_unsupported_windows() {
         /*thread_name*/ None,
         /*forked_from*/ None,
         Some(&rate_display),
-        None,
         captured_at,
         &model_slug,
         /*collaboration_mode*/ None,
@@ -1112,7 +1098,6 @@ async fn status_snapshot_shows_unlimited_credits() {
             balance: None,
         }),
         individual_limit: None,
-        plan_type: None,
         rate_limit_reached_type: None,
     };
     let rate_display = rate_limit_snapshot_display(&snapshot, captured_at);
@@ -1127,7 +1112,6 @@ async fn status_snapshot_shows_unlimited_credits() {
         /*thread_name*/ None,
         /*forked_from*/ None,
         Some(&rate_display),
-        None,
         captured_at,
         &model_slug,
         /*collaboration_mode*/ None,
@@ -1163,7 +1147,6 @@ async fn status_snapshot_shows_positive_credits() {
             balance: Some("12.5".to_string()),
         }),
         individual_limit: None,
-        plan_type: None,
         rate_limit_reached_type: None,
     };
     let rate_display = rate_limit_snapshot_display(&snapshot, captured_at);
@@ -1178,7 +1161,6 @@ async fn status_snapshot_shows_positive_credits() {
         /*thread_name*/ None,
         /*forked_from*/ None,
         Some(&rate_display),
-        None,
         captured_at,
         &model_slug,
         /*collaboration_mode*/ None,
@@ -1214,7 +1196,6 @@ async fn status_snapshot_hides_zero_credits() {
             balance: Some("0".to_string()),
         }),
         individual_limit: None,
-        plan_type: None,
         rate_limit_reached_type: None,
     };
     let rate_display = rate_limit_snapshot_display(&snapshot, captured_at);
@@ -1229,7 +1210,6 @@ async fn status_snapshot_hides_zero_credits() {
         /*thread_name*/ None,
         /*forked_from*/ None,
         Some(&rate_display),
-        None,
         captured_at,
         &model_slug,
         /*collaboration_mode*/ None,
@@ -1263,7 +1243,6 @@ async fn status_snapshot_hides_when_has_no_credits_flag() {
             balance: None,
         }),
         individual_limit: None,
-        plan_type: None,
         rate_limit_reached_type: None,
     };
     let rate_display = rate_limit_snapshot_display(&snapshot, captured_at);
@@ -1278,7 +1257,6 @@ async fn status_snapshot_hides_when_has_no_credits_flag() {
         /*thread_name*/ None,
         /*forked_from*/ None,
         Some(&rate_display),
-        None,
         captured_at,
         &model_slug,
         /*collaboration_mode*/ None,
@@ -1323,7 +1301,6 @@ async fn status_card_token_usage_excludes_cached_tokens() {
         /*thread_name*/ None,
         /*forked_from*/ None,
         /*rate_limits*/ None,
-        None,
         now,
         &model_slug,
         /*collaboration_mode*/ None,
@@ -1370,7 +1347,6 @@ async fn status_snapshot_truncates_in_narrow_terminal() {
         secondary: None,
         credits: None,
         individual_limit: None,
-        plan_type: None,
         rate_limit_reached_type: None,
     };
     let rate_display = rate_limit_snapshot_display(&snapshot, captured_at);
@@ -1387,7 +1363,6 @@ async fn status_snapshot_truncates_in_narrow_terminal() {
         /*thread_name*/ None,
         /*forked_from*/ None,
         Some(&rate_display),
-        None,
         captured_at,
         &model_slug,
         /*collaboration_mode*/ None,
@@ -1436,7 +1411,6 @@ async fn status_snapshot_shows_missing_limits_message() {
         /*thread_name*/ None,
         /*forked_from*/ None,
         /*rate_limits*/ None,
-        None,
         now,
         &model_slug,
         /*collaboration_mode*/ None,
@@ -1479,7 +1453,7 @@ async fn status_snapshot_uses_default_reasoning_when_config_empty() {
 
     let model_slug = crate::legacy_core::test_support::get_model_offline(config.model.as_deref());
     let token_info = token_info_for(&model_slug, &config, &usage);
-    let (composite, _) = new_status_output_with_rate_limits_handle(
+    let composite = new_status_output_with_context(
         &config,
         /*runtime_model_provider_base_url*/ None,
         Some(&remote_connection),
@@ -1490,7 +1464,6 @@ async fn status_snapshot_uses_default_reasoning_when_config_empty() {
         /*thread_name*/ None,
         /*forked_from*/ None,
         &[],
-        None,
         now,
         &model_slug,
         /*collaboration_mode*/ None,
@@ -1541,7 +1514,6 @@ async fn status_snapshot_shows_refreshing_limits_notice() {
         }),
         credits: None,
         individual_limit: None,
-        plan_type: None,
         rate_limit_reached_type: None,
     };
     let rate_display = rate_limit_snapshot_display(&snapshot, captured_at);
@@ -1557,7 +1529,6 @@ async fn status_snapshot_shows_refreshing_limits_notice() {
         /*thread_name*/ None,
         /*forked_from*/ None,
         std::slice::from_ref(&rate_display),
-        None,
         captured_at,
         &model_slug,
         /*collaboration_mode*/ None,
@@ -1613,7 +1584,6 @@ async fn status_snapshot_includes_credits_and_limits() {
             balance: Some("37.5".to_string()),
         }),
         individual_limit: None,
-        plan_type: None,
         rate_limit_reached_type: None,
     };
     let rate_display = rate_limit_snapshot_display(&snapshot, captured_at);
@@ -1629,7 +1599,6 @@ async fn status_snapshot_includes_credits_and_limits() {
         /*thread_name*/ None,
         /*forked_from*/ None,
         Some(&rate_display),
-        None,
         captured_at,
         &model_slug,
         /*collaboration_mode*/ None,
@@ -1668,7 +1637,6 @@ async fn status_snapshot_shows_unavailable_limits_message() {
         secondary: None,
         credits: None,
         individual_limit: None,
-        plan_type: None,
         rate_limit_reached_type: None,
     };
     let captured_at = chrono::Local
@@ -1688,7 +1656,6 @@ async fn status_snapshot_shows_unavailable_limits_message() {
         /*thread_name*/ None,
         /*forked_from*/ None,
         Some(&rate_display),
-        None,
         captured_at,
         &model_slug,
         /*collaboration_mode*/ None,
@@ -1726,7 +1693,6 @@ async fn status_snapshot_treats_refreshing_empty_limits_as_unavailable() {
         secondary: None,
         credits: None,
         individual_limit: None,
-        plan_type: None,
         rate_limit_reached_type: None,
     };
     let captured_at = chrono::Local
@@ -1746,7 +1712,6 @@ async fn status_snapshot_treats_refreshing_empty_limits_as_unavailable() {
         /*thread_name*/ None,
         /*forked_from*/ None,
         std::slice::from_ref(&rate_display),
-        None,
         captured_at,
         &model_slug,
         /*collaboration_mode*/ None,
@@ -1798,7 +1763,6 @@ async fn status_snapshot_shows_stale_limits_message() {
         }),
         credits: None,
         individual_limit: None,
-        plan_type: None,
         rate_limit_reached_type: None,
     };
     let rate_display = rate_limit_snapshot_display(&snapshot, captured_at);
@@ -1815,7 +1779,6 @@ async fn status_snapshot_shows_stale_limits_message() {
         /*thread_name*/ None,
         /*forked_from*/ None,
         Some(&rate_display),
-        None,
         now,
         &model_slug,
         /*collaboration_mode*/ None,
@@ -1870,7 +1833,6 @@ async fn status_snapshot_cached_limits_hide_credits_without_flag() {
             balance: Some("80".to_string()),
         }),
         individual_limit: None,
-        plan_type: None,
         rate_limit_reached_type: None,
     };
     let rate_display = rate_limit_snapshot_display(&snapshot, captured_at);
@@ -1887,7 +1849,6 @@ async fn status_snapshot_cached_limits_hide_credits_without_flag() {
         /*thread_name*/ None,
         /*forked_from*/ None,
         Some(&rate_display),
-        None,
         now,
         &model_slug,
         /*collaboration_mode*/ None,
@@ -1945,7 +1906,6 @@ async fn status_context_window_uses_last_usage() {
         /*thread_name*/ None,
         /*forked_from*/ None,
         /*rate_limits*/ None,
-        None,
         now,
         &model_slug,
         /*collaboration_mode*/ None,

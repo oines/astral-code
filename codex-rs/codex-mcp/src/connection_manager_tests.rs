@@ -71,16 +71,12 @@ fn create_test_tool_with_connector(
 
 fn create_codex_apps_tools_cache_context(
     codex_home: PathBuf,
-    account_id: Option<&str>,
-    chatgpt_user_id: Option<&str>,
+    _account_id: Option<&str>,
+    _chatgpt_user_id: Option<&str>,
 ) -> CodexAppsToolsCacheContext {
     CodexAppsToolsCacheContext {
         codex_home,
-        user_key: CodexAppsToolsCacheKey {
-            account_id: account_id.map(ToOwned::to_owned),
-            chatgpt_user_id: chatgpt_user_id.map(ToOwned::to_owned),
-            is_workspace_account: false,
-        },
+        user_key: CodexAppsToolsCacheKey {},
     }
 }
 
@@ -551,14 +547,14 @@ fn codex_apps_tools_cache_is_overwritten_by_last_write() {
 }
 
 #[test]
-fn codex_apps_tools_cache_is_scoped_per_user() {
+fn codex_apps_tools_cache_uses_single_astral_cache_key() {
     let codex_home = tempdir().expect("tempdir");
-    let cache_context_user_1 = create_codex_apps_tools_cache_context(
+    let cache_context_1 = create_codex_apps_tools_cache_context(
         codex_home.path().to_path_buf(),
         Some("account-one"),
         Some("user-one"),
     );
-    let cache_context_user_2 = create_codex_apps_tools_cache_context(
+    let cache_context_2 = create_codex_apps_tools_cache_context(
         codex_home.path().to_path_buf(),
         Some("account-two"),
         Some("user-two"),
@@ -566,20 +562,18 @@ fn codex_apps_tools_cache_is_scoped_per_user() {
     let tools_user_1 = vec![create_test_tool(CODEX_APPS_MCP_SERVER_NAME, "one")];
     let tools_user_2 = vec![create_test_tool(CODEX_APPS_MCP_SERVER_NAME, "two")];
 
-    write_cached_codex_apps_tools(&cache_context_user_1, &tools_user_1);
-    write_cached_codex_apps_tools(&cache_context_user_2, &tools_user_2);
+    write_cached_codex_apps_tools(&cache_context_1, &tools_user_1);
+    write_cached_codex_apps_tools(&cache_context_2, &tools_user_2);
 
-    let read_user_1 =
-        read_cached_codex_apps_tools(&cache_context_user_1).expect("cache entry for user one");
-    let read_user_2 =
-        read_cached_codex_apps_tools(&cache_context_user_2).expect("cache entry for user two");
+    let read_1 = read_cached_codex_apps_tools(&cache_context_1).expect("cache entry one");
+    let read_2 = read_cached_codex_apps_tools(&cache_context_2).expect("cache entry two");
 
-    assert_eq!(read_user_1[0].callable_name, "one");
-    assert_eq!(read_user_2[0].callable_name, "two");
-    assert_ne!(
-        cache_context_user_1.tools_cache_path(),
-        cache_context_user_2.tools_cache_path(),
-        "each user should get an isolated cache file"
+    assert_eq!(read_1[0].callable_name, "two");
+    assert_eq!(read_2[0].callable_name, "two");
+    assert_eq!(
+        cache_context_1.tools_cache_path(),
+        cache_context_2.tools_cache_path(),
+        "Astral no longer scopes the host-owned apps cache by account"
     );
 }
 
@@ -1161,11 +1155,7 @@ async fn no_local_runtime_fails_local_stdio_but_keeps_local_http_server() {
             PathBuf::from("/tmp"),
         ),
         codex_home.path().to_path_buf(),
-        CodexAppsToolsCacheKey {
-            account_id: None,
-            chatgpt_user_id: None,
-            is_workspace_account: false,
-        },
+        CodexAppsToolsCacheKey {},
         /*host_owned_codex_apps_enabled*/ false,
         /*prefix_mcp_tool_names*/ true,
         ElicitationCapability::default(),

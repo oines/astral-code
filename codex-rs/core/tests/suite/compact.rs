@@ -104,7 +104,7 @@ fn disabled_permission_user_turn(text: impl Into<String>, cwd: PathBuf, model: S
             text_elements: Vec::new(),
         }],
         final_output_json_schema: None,
-        responsesapi_client_metadata: None,
+        model_client_metadata: None,
         additional_context: Default::default(),
         thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
             environments: Some(local_selections(cwd.abs())),
@@ -289,7 +289,7 @@ fn responses_mock_model_provider(server: &MockServer) -> ModelProviderInfo {
     ModelProviderInfo {
         name: "Responses mock".into(),
         base_url: Some(format!("{}/v1", server.uri())),
-        wire_api: WireApi::Responses,
+        wire_api: WireApi::ChatCompletions,
         supports_websockets: false,
         ..ModelProviderInfo::default()
     }
@@ -618,7 +618,7 @@ async fn summarize_context_three_requests_and_instructions() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -643,7 +643,7 @@ async fn summarize_context_three_requests_and_instructions() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -926,7 +926,7 @@ async fn manual_pre_compact_block_decision_does_not_block_compaction() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -999,7 +999,7 @@ async fn compact_hooks_respect_matchers_and_post_runs_after_compaction() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -1069,7 +1069,7 @@ async fn manual_compact_uses_custom_prompt() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -1216,7 +1216,7 @@ async fn manual_compact_emits_context_compaction_items() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -1382,7 +1382,7 @@ async fn multiple_auto_compact_per_task_runs_after_token_limit_hit() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -1854,7 +1854,7 @@ async fn auto_compact_runs_after_token_limit_hit() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -1870,7 +1870,7 @@ async fn auto_compact_runs_after_token_limit_hit() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -1886,7 +1886,7 @@ async fn auto_compact_runs_after_token_limit_hit() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -2057,7 +2057,7 @@ async fn auto_compact_emits_context_compaction_items() {
                     text_elements: Vec::new(),
                 }],
                 final_output_json_schema: None,
-                responsesapi_client_metadata: None,
+                model_client_metadata: None,
                 additional_context: Default::default(),
                 thread_settings: Default::default(),
             })
@@ -2138,7 +2138,7 @@ async fn auto_compact_starts_after_turn_started() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -2153,7 +2153,7 @@ async fn auto_compact_starts_after_turn_started() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -2168,7 +2168,7 @@ async fn auto_compact_starts_after_turn_started() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -2329,7 +2329,7 @@ async fn pre_sampling_compact_runs_on_switch_to_smaller_context_model() {
 
     let model_provider = responses_mock_model_provider(&server);
     let mut builder = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+        .with_auth(CodexAuth::create_dummy_api_key_auth_for_testing())
         .with_model(previous_model)
         .with_config(move |config| {
             config.model_provider = model_provider;
@@ -2431,7 +2431,7 @@ async fn body_after_prefix_model_switch_budget_compacts_with_next_model() {
 
     let model_provider = responses_mock_model_provider(&server);
     let mut builder = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+        .with_auth(CodexAuth::create_dummy_api_key_auth_for_testing())
         .with_model(previous_model)
         .with_config(move |config| {
             config.model_provider = model_provider;
@@ -2525,7 +2525,7 @@ async fn pre_sampling_compact_runs_after_resume_and_switch_to_smaller_model() {
 
     let model_provider = responses_mock_model_provider(&server);
     let mut initial_builder = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+        .with_auth(CodexAuth::create_dummy_api_key_auth_for_testing())
         .with_model(previous_model)
         .with_config(move |config| {
             config.model_provider = model_provider;
@@ -2568,7 +2568,7 @@ async fn pre_sampling_compact_runs_after_resume_and_switch_to_smaller_model() {
 
     let model_provider = responses_mock_model_provider(&server);
     let mut resumed_builder = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+        .with_auth(CodexAuth::create_dummy_api_key_auth_for_testing())
         .with_model(previous_model)
         .with_config(move |config| {
             config.model_provider = model_provider;
@@ -2678,7 +2678,7 @@ async fn auto_compact_persists_rollout_entries() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -2693,7 +2693,7 @@ async fn auto_compact_persists_rollout_entries() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -2708,7 +2708,7 @@ async fn auto_compact_persists_rollout_entries() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -2797,7 +2797,7 @@ async fn manual_compact_retries_after_context_window_error() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -2901,7 +2901,7 @@ async fn manual_compact_non_context_failure_retries_then_emits_task_error() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -2996,7 +2996,7 @@ async fn manual_compact_twice_preserves_latest_user_messages() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -3014,7 +3014,7 @@ async fn manual_compact_twice_preserves_latest_user_messages() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -3032,7 +3032,7 @@ async fn manual_compact_twice_preserves_latest_user_messages() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -3243,7 +3243,7 @@ async fn auto_compact_allows_multiple_attempts_when_interleaved_with_other_turn_
                     text_elements: Vec::new(),
                 }],
                 final_output_json_schema: None,
-                responsesapi_client_metadata: None,
+                model_client_metadata: None,
                 additional_context: Default::default(),
                 thread_settings: Default::default(),
             })
@@ -3348,7 +3348,7 @@ async fn snapshot_request_shape_mid_turn_continuation_compaction() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -3748,7 +3748,7 @@ async fn auto_compact_counts_encrypted_reasoning_before_last_user() {
     let hosted_base_url = format!("{}/backend-api", server.uri());
 
     let codex = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+        .with_auth(CodexAuth::create_dummy_api_key_auth_for_testing())
         .with_config(move |config| {
             config.hosted_base_url = hosted_base_url;
             set_test_compact_prompt(config);
@@ -3767,7 +3767,7 @@ async fn auto_compact_counts_encrypted_reasoning_before_last_user() {
                     text_elements: Vec::new(),
                 }],
                 final_output_json_schema: None,
-                responsesapi_client_metadata: None,
+                model_client_metadata: None,
                 additional_context: Default::default(),
                 thread_settings: Default::default(),
             })
@@ -3838,7 +3838,7 @@ async fn auto_compact_runs_when_reasoning_header_clears_between_turns() {
     let request_log = mount_response_sequence(&server, responses).await;
 
     let codex = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+        .with_auth(CodexAuth::create_dummy_api_key_auth_for_testing())
         .with_config(|config| {
             set_test_compact_prompt(config);
             config.model_auto_compact_token_limit = Some(300);
@@ -3856,7 +3856,7 @@ async fn auto_compact_runs_when_reasoning_header_clears_between_turns() {
                     text_elements: Vec::new(),
                 }],
                 final_output_json_schema: None,
-                responsesapi_client_metadata: None,
+                model_client_metadata: None,
                 additional_context: Default::default(),
                 thread_settings: Default::default(),
             })
@@ -3922,7 +3922,7 @@ async fn snapshot_request_shape_pre_turn_compaction_including_incoming_user_mess
                     text_elements: Vec::new(),
                 }],
                 final_output_json_schema: None,
-                responsesapi_client_metadata: None,
+                model_client_metadata: None,
                 additional_context: Default::default(),
                 thread_settings: Default::default(),
             })
@@ -3956,7 +3956,7 @@ async fn snapshot_request_shape_pre_turn_compaction_including_incoming_user_mess
                 },
             ],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -4029,7 +4029,7 @@ async fn snapshot_request_shape_pre_turn_compaction_strips_incoming_model_switch
 
     let model_provider = responses_mock_model_provider(&server);
     let test = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+        .with_auth(CodexAuth::create_dummy_api_key_auth_for_testing())
         .with_model(previous_model)
         .with_config(move |config| {
             config.model_provider = model_provider;
@@ -4145,7 +4145,7 @@ async fn snapshot_request_shape_pre_turn_compaction_context_window_exceeded() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -4160,7 +4160,7 @@ async fn snapshot_request_shape_pre_turn_compaction_context_window_exceeded() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -4233,7 +4233,7 @@ async fn snapshot_request_shape_manual_compact_without_previous_user_messages() 
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })

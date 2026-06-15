@@ -566,12 +566,6 @@
             "request_rule": {
               "type": "boolean"
             },
-            "responses_websockets": {
-              "type": "boolean"
-            },
-            "responses_websockets_v2": {
-              "type": "boolean"
-            },
             "runtime_metrics": {
               "type": "boolean"
             },
@@ -1515,6 +1509,14 @@
           "description": "Friendly display name.",
           "type": "string"
         },
+        "provider_flavor": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ProviderFlavor"
+            }
+          ],
+          "description": "Optional provider dialect within the selected wire protocol."
+        },
         "query_params": {
           "additionalProperties": {
             "type": "string"
@@ -1542,7 +1544,7 @@
         },
         "requires_astral_auth": {
           "default": false,
-          "description": "Does this provider require Astral-managed credentials? If true, the user is presented with the login screen on first run, and credentials are stored in auth.json. If false (which is the default), the login screen is skipped, and API keys (if needed) come from provider-specific auth such as \"env_key\" or \"auth\".",
+          "description": "Legacy Astral-managed credential flag. Hosted credentials are no longer supported; provider validation rejects this when true. Configure provider-specific BYOK auth instead.",
           "type": "boolean"
         },
         "stream_idle_timeout_ms": {
@@ -1559,7 +1561,7 @@
         },
         "supports_websockets": {
           "default": false,
-          "description": "Whether this provider supports the Responses API WebSocket transport.",
+          "description": "Legacy Responses API WebSocket transport flag. Astral no longer supports Responses transports; use streaming Chat Completions over HTTP instead.",
           "type": "boolean"
         },
         "websocket_connect_timeout_ms": {
@@ -2294,6 +2296,53 @@
       },
       "type": "object"
     },
+    "ProviderFlavor": {
+      "description": "OpenAI-compatible `/v1/chat/completions` provider dialect.\n\n`wire_api` selects the outer protocol. `ProviderFlavor` selects the small provider-specific request/stream differences inside that protocol, such as reasoning controls and usage accounting.",
+      "oneOf": [
+        {
+          "description": "Plain OpenAI-compatible provider. Astral does not send private reasoning fields.",
+          "enum": [
+            "generic_openai"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "DeepSeek-compatible reasoning fields and cache usage.",
+          "enum": [
+            "deepseek"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "OpenRouter gateway-specific reasoning object.",
+          "enum": [
+            "openrouter"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Providers such as DashScope/Qwen that use an `enable_thinking` switch.",
+          "enum": [
+            "enable_thinking"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Providers that use a `thinking.type` switch.",
+          "enum": [
+            "thinking_type"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "MiniMax-compatible reasoning fields.",
+          "enum": [
+            "minimax"
+          ],
+          "type": "string"
+        }
+      ]
+    },
     "RawMcpServerConfig": {
       "additionalProperties": false,
       "description": "Raw MCP config shape used for deserialization and supported-field JSON Schema generation.\n\nFields that are accepted only to produce targeted validation errors should be skipped in the generated schema.\n\nKeep `TryFrom<RawMcpServerConfig> for McpServerConfig` exhaustively destructuring this struct so new TOML fields cannot be added here without updating the validation/mapping logic that produces [`McpServerConfig`].",
@@ -2514,7 +2563,7 @@
       "type": "string"
     },
     "ReasoningSummary": {
-      "description": "A summary of the reasoning performed by the model. This can be useful for debugging and understanding the model's reasoning process. See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#reasoning-summaries",
+      "description": "A summary of the reasoning performed by the model. This can be useful for debugging and understanding the model's reasoning process. See https://platform.openai.com/docs/guides/reasoning#reasoning-summaries",
       "oneOf": [
         {
           "enum": [
@@ -4264,7 +4313,7 @@
       ]
     },
     "Verbosity": {
-      "description": "Controls output length/detail on GPT-5 models via the Responses API. Serialized with lowercase values to match the OpenAI API.",
+      "description": "Controls output length/detail on models that support verbosity hints. Serialized with lowercase values to match the OpenAI API.",
       "enum": [
         "low",
         "medium",
@@ -4348,7 +4397,7 @@
       "description": "Wire protocol that the provider speaks.",
       "oneOf": [
         {
-          "description": "The Responses API exposed by OpenAI at `/v1/responses`.",
+          "description": "Legacy OpenAI Responses API. This variant remains only for internal migration code; external provider config rejects `wire_api = \"responses\"`.",
           "enum": [
             "responses"
           ],
@@ -4708,12 +4757,6 @@
         "request_rule": {
           "type": "boolean"
         },
-        "responses_websockets": {
-          "type": "boolean"
-        },
-        "responses_websockets_v2": {
-          "type": "boolean"
-        },
         "runtime_metrics": {
           "type": "boolean"
         },
@@ -5002,7 +5045,7 @@
           "$ref": "#/definitions/Verbosity"
         }
       ],
-      "description": "Optional verbosity control for GPT-5 models (Responses API `text.verbosity`)."
+      "description": "Optional verbosity control for models that support provider-side verbosity hints."
     },
     "notice": {
       "allOf": [

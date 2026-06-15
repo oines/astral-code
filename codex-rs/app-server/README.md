@@ -157,7 +157,7 @@ Example with notification opt-out:
 - `thread/backgroundTerminals/clean` — terminate all running background terminals for a thread (experimental; requires `capabilities.experimentalApi`); returns `{}` when the cleanup request is accepted.
 - `thread/rollback` — drop the last N turns from the agent’s in-memory context and persist a rollback marker in the rollout so future resumes see the pruned history; returns the updated `thread` (with `turns` populated) on success.
 - `turn/start` — add user input to a thread and begin Codex generation; responds with the initial `turn` object and streams `turn/started`, `item/*`, and `turn/completed` notifications. `clientUserMessageId` is optional; when supplied, the corresponding `userMessage` item echoes it as `clientId`. Experimental `runtimeWorkspaceRoots` replaces the thread-scoped runtime workspace roots used to materialize `:workspace_roots`; paths must be absolute. Prefer experimental `permissions` profile selection by id for permission overrides; the legacy `sandboxPolicy` field is still accepted but cannot be combined with `permissions`. For `collaborationMode`, `settings.developer_instructions: null` means "use built-in instructions for the selected mode".
-- `thread/inject_items` — append raw Responses API items to a loaded thread’s model-visible history without starting a user turn; returns `{}` on success.
+- `thread/inject_items` — append raw model history items to a loaded thread’s model-visible history without starting a user turn; returns `{}` on success.
 - `turn/steer` — add user input to an already in-flight regular turn without starting a new turn; returns the active `turnId` that accepted the input. `clientUserMessageId` is optional; when supplied, the corresponding `userMessage` item echoes it as `clientId`. Review and manual compaction turns reject `turn/steer`.
 - `turn/interrupt` — request cancellation of an in-flight turn by `(thread_id, turn_id)`; success is an empty `{}` response and the turn finishes with `status: "interrupted"`.
 - `thread/realtime/start` — start a thread-scoped realtime session (experimental); pass `outputModality: "text"` or `outputModality: "audio"` to choose model output, returns `{}` and streams `thread/realtime/*` notifications. Omit `transport` for the websocket transport, or pass `{ "type": "webrtc", "sdp": "..." }` to create a WebRTC session from a browser-generated SDP offer; the remote answer SDP is emitted as `thread/realtime/sdp`.
@@ -766,7 +766,7 @@ Invoke a plugin by including a UI mention token such as `@sample` in the text in
 
 ### Example: Inject raw history items
 
-Use `thread/inject_items` to append prebuilt Responses API items to a loaded thread’s prompt history without starting a user turn. These items are persisted to the rollout and included in subsequent model requests.
+Use `thread/inject_items` to append prebuilt model history items to a loaded thread’s prompt history without starting a user turn. These items are persisted to the rollout and included in subsequent model requests.
 
 ```json
 { "method": "thread/inject_items", "id": 36, "params": {
@@ -1259,7 +1259,7 @@ Today both notifications carry an empty `items` array even when item events were
 - `fileChange` — `{id, changes, status}` describing proposed edits; `changes` list `{path, kind, diff}` and `status` is `inProgress`, `completed`, `failed`, or `declined`.
 - `mcpToolCall` — `{id, server, tool, status, arguments, mcpAppResourceUri?, pluginId, result?, error?}` describing MCP calls; `status` is `inProgress`, `completed`, or `failed`.
 - `collabToolCall` — `{id, tool, status, senderThreadId, receiverThreadId?, newThreadId?, prompt?, agentStatus?}` describing collab tool calls (`spawn_agent`, `send_input`, `resume_agent`, `wait`, `close_agent`); `status` is `inProgress`, `completed`, or `failed`.
-- `webSearch` — `{id, query, action?}` for a web search request issued by the agent; `action` mirrors the Responses API web_search action payload (`search`, `open_page`, `find_in_page`) and may be omitted until completion.
+- `webSearch` — `{id, query, action?}` for a web search request issued by the agent; `action` describes the web-search operation (`search`, `open_page`, `find_in_page`) and may be omitted until completion.
 - `imageView` — `{id, path}` emitted when the agent invokes the image viewer tool.
 - `enteredReviewMode` — `{id, review}` sent when the reviewer starts; `review` is a short user-facing label such as `"current changes"` or the requested target description.
 - `exitedReviewMode` — `{id, review}` emitted when the reviewer finishes; `review` is the full plain-text review (usually, overall notes plus bullet point findings).
@@ -1321,7 +1321,7 @@ There are additional item-specific events:
 - `InternalServerError`
 - `Other`: all unclassified errors
 
-When an upstream HTTP status is available (for example, from the Responses API or a provider), it is forwarded in `httpStatusCode` on the relevant `codexErrorInfo` variant.
+When an upstream HTTP status is available from a provider, it is forwarded in `httpStatusCode` on the relevant `codexErrorInfo` variant.
 
 ## Approvals
 
@@ -1760,26 +1760,25 @@ $demo-app Pull the latest updates from the team.
 
 ## Auth endpoints
 
-The JSON-RPC auth/account surface exposes request/response methods plus server-initiated notifications (no `id`). Use these to determine Astral auth state, store an API key, cancel a pending login request, or logout.
+The JSON-RPC auth/account surface exposes read-only account state. Astral is
+BYOK: provider API keys come from `config.toml`, `ASTRAL_API_KEY`, or the active
+provider's configured auth environment. The app-server does not expose login,
+logout, billing-plan, or API-key storage endpoints.
 
 ### Authentication modes
 
-Astral actively supports API-key auth for provider-managed credentials. The current mode is surfaced in `account/updated` (`authMode`) and can be inferred from `account/read`.
+Astral supports API-key auth for provider-managed credentials. The current mode
+is surfaced in `account/updated` (`authMode`) and can be inferred from
+`account/read`.
 
-- **API key (`apiKey`)**: Caller supplies a provider API key via `account/login/start` with `type: "apiKey"`. The API key is saved locally and used for API requests when the active provider requires Astral-managed auth.
-- Legacy ChatGPT OAuth, ChatGPT device-code login, Agent Identity, and personal-access-token modes are not accepted by Astral.
+- **API key (`apiKey`)**: The active provider found an API key in configuration
+  or environment.
+- Legacy OpenAI account auth modes are not accepted by Astral.
 
 ### API Overview
 
 - `account/read` — fetch current account info; optionally refresh tokens.
-- `account/login/start` — store an API key (`apiKey`).
-- `account/login/completed` (notify) — emitted when a login attempt finishes (success or error).
-- `account/login/cancel` — cancel a pending login by `loginId`; API-key login completes synchronously, so unknown IDs return `notFound`.
-- `account/logout` — sign out; triggers `account/updated`.
 - `account/updated` (notify) — emitted whenever auth mode changes (`authMode`: `apikey` or `null`).
-- `account/rateLimits/read` — account-backend rate limits are unavailable for Astral-managed providers.
-- `account/usage/read` — account-backend token usage is unavailable for Astral-managed providers.
-- `account/rateLimits/updated` (notify) — sparse rolling rate-limit updates only when a provider supplies them.
 - `mcpServer/oauthLogin/completed` (notify) — emitted after a `mcpServer/oauth/login` flow finishes for a server; payload includes `{ name, success, error? }`.
 - `mcpServer/startupStatus/updated` (notify) — emitted when a configured MCP server's startup status changes; payload includes `{ threadId, name, status, error }`, where `threadId` is the owning thread when startup is thread-scoped and `null` when it is app-scoped, and `status` is `starting`, `ready`, `failed`, or `cancelled`.
 
@@ -1794,61 +1793,14 @@ Request:
 Response examples:
 
 ```json
-{ "id": 1, "result": { "account": null, "requiresAstralAuth": false } } // Provider manages auth externally
-{ "id": 1, "result": { "account": null, "requiresAstralAuth": true } }  // Astral-managed auth required
-{ "id": 1, "result": { "account": { "type": "apiKey" }, "requiresAstralAuth": true } }
+{ "id": 1, "result": { "account": null, "requiresAstralAuth": false } } // Provider auth is not configured
+{ "id": 1, "result": { "account": { "type": "apiKey" }, "requiresAstralAuth": false } } // API key present via config or environment
 ```
 
 Field notes:
 
 - `refreshToken` (bool): set `true` to force a token refresh.
-- `requiresAstralAuth` reflects the active provider; when `false`, Astral can run without credentials in Astral's auth store.
-
-### 2) Log in with an API key
-
-1. Send:
-   ```json
-   {
-     "method": "account/login/start",
-     "id": 2,
-     "params": { "type": "apiKey", "apiKey": "sk-…" }
-   }
-   ```
-2. Expect:
-   ```json
-   { "id": 2, "result": { "type": "apiKey" } }
-   ```
-3. Notifications:
-   ```json
-   { "method": "account/login/completed", "params": { "loginId": null, "success": true, "error": null } }
-   { "method": "account/updated", "params": { "authMode": "apikey", "planType": null } }
-   ```
-
-### 3) Cancel a login
-
-```json
-{ "method": "account/login/cancel", "id": 5, "params": { "loginId": "<uuid>" } }
-{ "id": 5, "result": { "status": "notFound" } }
-```
-
-### 4) Logout
-
-```json
-{ "method": "account/logout", "id": 6 }
-{ "id": 6, "result": {} }
-{ "method": "account/updated", "params": { "authMode": null, "planType": null } }
-```
-
-### 5) Rate limits and token usage
-
-```json
-{ "method": "account/rateLimits/read", "id": 7 }
-{ "id": 7, "error": { "code": -32600, "message": "Astral-managed account usage and rate-limit APIs are unavailable for the active model provider." } }
-```
-
-`account/usage/read` returns the same `invalid_request` error unless a future provider-neutral account backend supplies usage data.
-- `rateLimitReachedType` identifies the backend-classified limit state when one has been reached.
-- `individualLimit` describes the effective monthly credit limit when available. In an `account/rateLimits/read` response, `null` means no monthly limit is available. In a sparse `account/rateLimits/updated` notification, nullable account metadata may be unavailable and does not clear a previously observed value.
+- `requiresAstralAuth` is retained for compatibility. Astral is BYOK-only, and new provider configs should report `false`; legacy configs that request Astral-managed credentials are rejected during provider validation.
 
 ## Experimental API Opt-in
 

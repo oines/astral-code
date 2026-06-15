@@ -44,7 +44,7 @@ fn disabled_text_turn(test: &TestCodex, text: &str) -> Op {
             text_elements: Vec::new(),
         }],
         final_output_json_schema: None,
-        responsesapi_client_metadata: None,
+        model_client_metadata: None,
         additional_context: Default::default(),
         thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
             environments: Some(local_selections(test.config.cwd.clone())),

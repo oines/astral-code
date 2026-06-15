@@ -5,7 +5,6 @@ use codex_app_server_protocol::AuthMode;
 use codex_app_server_protocol::GetAuthStatusParams;
 use codex_app_server_protocol::GetAuthStatusResponse;
 use codex_app_server_protocol::JSONRPCResponse;
-use codex_app_server_protocol::LoginAccountResponse;
 use codex_app_server_protocol::RequestId;
 use pretty_assertions::assert_eq;
 use std::path::Path;
@@ -18,11 +17,11 @@ const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 
 fn create_config_toml_custom_provider(
     codex_home: &Path,
-    requires_astral_auth: bool,
+    include_env_key: bool,
 ) -> std::io::Result<()> {
     let config_toml = codex_home.join("config.toml");
-    let requires_line = if requires_astral_auth {
-        "requires_astral_auth = true\n"
+    let env_key_line = if include_env_key {
+        "env_key = \"ASTRAL_API_KEY\"\n"
     } else {
         ""
     };
@@ -40,10 +39,10 @@ shell_snapshot = false
 [model_providers.mock_provider]
 name = "Mock provider for test"
 base_url = "http://127.0.0.1:0/v1"
-wire_api = "responses"
+wire_api = "chat_completions"
 request_max_retries = 0
 stream_max_retries = 0
-{requires_line}
+{env_key_line}
 "#
     );
     std::fs::write(config_toml, contents)
@@ -62,19 +61,6 @@ sandbox_mode = "danger-full-access"
 shell_snapshot = false
 "#,
     )
-}
-
-async fn login_with_api_key_via_request(mcp: &mut TestAppServer, api_key: &str) -> Result<()> {
-    let request_id = mcp.send_login_account_api_key_request(api_key).await?;
-
-    let resp: JSONRPCResponse = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
-    )
-    .await??;
-    let response: LoginAccountResponse = to_response(resp)?;
-    assert_eq!(response, LoginAccountResponse::ApiKey {});
-    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -107,12 +93,14 @@ async fn get_auth_status_no_auth() -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn get_auth_status_with_api_key() -> Result<()> {
     let codex_home = TempDir::new()?;
-    create_config_toml_custom_provider(codex_home.path(), /*requires_astral_auth*/ true)?;
+    create_config_toml_custom_provider(codex_home.path(), /*include_env_key*/ true)?;
 
-    let mut mcp = TestAppServer::new(codex_home.path()).await?;
+    let mut mcp = TestAppServer::new_with_env(
+        codex_home.path(),
+        &[("ASTRAL_API_KEY", Some("sk-test-key"))],
+    )
+    .await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
-
-    login_with_api_key_via_request(&mut mcp, "sk-test-key").await?;
 
     let request_id = mcp
         .send_get_auth_status_request(GetAuthStatusParams {
@@ -135,12 +123,14 @@ async fn get_auth_status_with_api_key() -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn get_auth_status_with_api_key_when_auth_not_required() -> Result<()> {
     let codex_home = TempDir::new()?;
-    create_config_toml_custom_provider(codex_home.path(), /*requires_astral_auth*/ false)?;
+    create_config_toml_custom_provider(codex_home.path(), /*include_env_key*/ false)?;
 
-    let mut mcp = TestAppServer::new(codex_home.path()).await?;
+    let mut mcp = TestAppServer::new_with_env(
+        codex_home.path(),
+        &[("ASTRAL_API_KEY", Some("sk-test-key"))],
+    )
+    .await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
-
-    login_with_api_key_via_request(&mut mcp, "sk-test-key").await?;
 
     let request_id = mcp
         .send_get_auth_status_request(GetAuthStatusParams {
@@ -168,12 +158,14 @@ async fn get_auth_status_with_api_key_when_auth_not_required() -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn get_auth_status_with_api_key_no_include_token() -> Result<()> {
     let codex_home = TempDir::new()?;
-    create_config_toml_custom_provider(codex_home.path(), /*requires_astral_auth*/ true)?;
+    create_config_toml_custom_provider(codex_home.path(), /*include_env_key*/ true)?;
 
-    let mut mcp = TestAppServer::new(codex_home.path()).await?;
+    let mut mcp = TestAppServer::new_with_env(
+        codex_home.path(),
+        &[("ASTRAL_API_KEY", Some("sk-test-key"))],
+    )
+    .await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
-
-    login_with_api_key_via_request(&mut mcp, "sk-test-key").await?;
 
     // Build params via struct so None field is omitted in wire JSON.
     let params = GetAuthStatusParams {
@@ -196,12 +188,14 @@ async fn get_auth_status_with_api_key_no_include_token() -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn get_auth_status_with_api_key_refresh_requested() -> Result<()> {
     let codex_home = TempDir::new()?;
-    create_config_toml_custom_provider(codex_home.path(), /*requires_astral_auth*/ true)?;
+    create_config_toml_custom_provider(codex_home.path(), /*include_env_key*/ true)?;
 
-    let mut mcp = TestAppServer::new(codex_home.path()).await?;
+    let mut mcp = TestAppServer::new_with_env(
+        codex_home.path(),
+        &[("ASTRAL_API_KEY", Some("sk-test-key"))],
+    )
+    .await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
-
-    login_with_api_key_via_request(&mut mcp, "sk-test-key").await?;
 
     let request_id = mcp
         .send_get_auth_status_request(GetAuthStatusParams {
@@ -221,7 +215,7 @@ async fn get_auth_status_with_api_key_refresh_requested() -> Result<()> {
         GetAuthStatusResponse {
             auth_method: Some(AuthMode::ApiKey),
             auth_token: Some("sk-test-key".to_string()),
-            requires_astral_auth: Some(true),
+            requires_astral_auth: Some(false),
         }
     );
     Ok(())

@@ -17,12 +17,7 @@ async fn exits_non_zero_when_required_mcp_server_fails_to_initialize() -> anyhow
     std::fs::write(test.home_path().join("config.toml"), config_toml)?;
 
     let server = responses::start_mock_server().await;
-    let body = responses::sse(vec![
-        responses::ev_response_created("resp_1"),
-        responses::ev_assistant_message("msg_1", "hello"),
-        responses::ev_completed("resp_1"),
-    ]);
-    responses::mount_sse_once(&server, body).await;
+    responses::mount_chat_completions_text_once(&server, "hello").await;
 
     test.cmd_with_server(&server)
         .arg("--skip-git-repo-check")

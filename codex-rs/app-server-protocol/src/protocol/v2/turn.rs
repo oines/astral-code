@@ -68,10 +68,10 @@ pub struct TurnStartParams {
     #[ts(optional = nullable)]
     pub client_user_message_id: Option<String>,
     pub input: Vec<UserInput>,
-    /// Optional turn-scoped Responses API client metadata.
-    #[experimental("turn/start.responsesapiClientMetadata")]
+    /// Optional turn-scoped model client metadata.
+    #[experimental("turn/start.modelClientMetadata")]
     #[ts(optional = nullable)]
-    pub responsesapi_client_metadata: Option<HashMap<String, String>>,
+    pub model_client_metadata: Option<HashMap<String, String>>,
     /// Optional client-provided context fragments keyed by an opaque source identifier.
     #[experimental("turn/start.additionalContext")]
     #[ts(optional = nullable)]
@@ -164,10 +164,10 @@ pub struct TurnSteerParams {
     #[ts(optional = nullable)]
     pub client_user_message_id: Option<String>,
     pub input: Vec<UserInput>,
-    /// Optional turn-scoped Responses API client metadata.
-    #[experimental("turn/steer.responsesapiClientMetadata")]
+    /// Optional turn-scoped model client metadata.
+    #[experimental("turn/steer.modelClientMetadata")]
     #[ts(optional = nullable)]
-    pub responsesapi_client_metadata: Option<HashMap<String, String>>,
+    pub model_client_metadata: Option<HashMap<String, String>>,
     /// Optional client-provided context fragments keyed by an opaque source identifier.
     #[experimental("turn/steer.additionalContext")]
     #[ts(optional = nullable)]

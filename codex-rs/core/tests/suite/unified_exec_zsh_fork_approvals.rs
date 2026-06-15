@@ -408,7 +408,7 @@ async fn submit_turn_with_session_permissions(
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: ThreadSettingsOverrides {
                 environments: Some(local_selections(test.config.cwd.clone())),

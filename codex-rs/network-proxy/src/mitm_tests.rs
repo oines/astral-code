@@ -65,7 +65,7 @@ async fn mitm_policy_blocks_disallowed_method_and_records_telemetry() {
     );
     let req = Request::builder()
         .method(Method::POST)
-        .uri("/v1/responses?api_key=secret")
+        .uri("/v1/chat/completions?api_key=secret")
         .header(HOST, "example.com")
         .body(Body::empty())
         .unwrap();

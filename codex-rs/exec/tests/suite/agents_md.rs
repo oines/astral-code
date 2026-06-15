@@ -9,12 +9,7 @@ async fn exec_includes_workspace_agents_md_in_request() -> anyhow::Result<()> {
     std::fs::write(test.cwd_path().join("AGENTS.md"), "workspace instructions")?;
 
     let server = responses::start_mock_server().await;
-    let body = responses::sse(vec![
-        responses::ev_response_created("resp1"),
-        responses::ev_assistant_message("m1", "fixture hello"),
-        responses::ev_completed("resp1"),
-    ]);
-    let response_mock = responses::mount_sse_once(&server, body).await;
+    let response_mock = responses::mount_chat_completions_text_once(&server, "fixture hello").await;
 
     test.cmd_with_server(&server)
         .arg("--skip-git-repo-check")
@@ -43,12 +38,7 @@ async fn exec_prefers_workspace_agents_override_md() -> anyhow::Result<()> {
     )?;
 
     let server = responses::start_mock_server().await;
-    let body = responses::sse(vec![
-        responses::ev_response_created("resp1"),
-        responses::ev_assistant_message("m1", "fixture hello"),
-        responses::ev_completed("resp1"),
-    ]);
-    let response_mock = responses::mount_sse_once(&server, body).await;
+    let response_mock = responses::mount_chat_completions_text_once(&server, "fixture hello").await;
 
     test.cmd_with_server(&server)
         .arg("--skip-git-repo-check")

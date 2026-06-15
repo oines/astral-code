@@ -8132,7 +8132,7 @@ mod tests {
         composer.set_service_tier_commands(vec![ServiceTierCommand {
             id: "priority".to_string(),
             name: "fast".to_string(),
-            description: "Fastest inference with increased plan usage".to_string(),
+            description: "Fastest inference with priority routing".to_string(),
         }]);
         type_chars_humanlike(&mut composer, &['/', 'f', 'a', 's', 't']);
 
@@ -8144,7 +8144,7 @@ mod tests {
             InputResult::ServiceTierCommand(ServiceTierCommand {
                 id: "priority".to_string(),
                 name: "fast".to_string(),
-                description: "Fastest inference with increased plan usage".to_string(),
+                description: "Fastest inference with priority routing".to_string(),
             })
         );
     }
@@ -10625,7 +10625,7 @@ mod tests {
             "'/re' should activate slash popup via prefix match"
         );
 
-        // Case 3: fuzzy match "/ac" (subsequence of /compact and /feedback)
+        // Case 3: fuzzy match "/ac" (subsequence of /compact)
         composer.set_text_content("/ac".to_string(), Vec::new(), Vec::new());
         assert!(
             matches!(composer.popups.active, ActivePopup::Command(_)),

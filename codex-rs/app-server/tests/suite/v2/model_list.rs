@@ -298,7 +298,7 @@ openai_base_url = "{server_uri}/v1"
     )?;
     write_chatgpt_auth(
         codex_home.path(),
-        ChatGptAuthFixture::new("chatgpt-access-token").plan_type("pro"),
+        ChatGptAuthFixture::new("chatgpt-access-token"),
         AuthCredentialsStoreMode::File,
     )?;
 

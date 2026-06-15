@@ -16,7 +16,6 @@ Use /personality to customize how Codex communicates.
 Use /rename to rename your threads for easier thread resuming.
 Use /mcp to manage provider docs and project-specific MCP servers.
 Use the project repository for issues, releases, and setup notes.
-Configure ASTRAL_BASE_URL and ASTRAL_API_KEY for your model provider.
 You can run any shell command from Astral using `!` (e.g. `!ls`)
 Type / to open the command popup; Tab autocompletes slash commands.
 When the composer is empty, press Esc to step back and edit your last message; Enter confirms.

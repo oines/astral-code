@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use chrono::Utc;
 #[cfg(test)]
 use serial_test::serial;
 use std::env;
@@ -7,7 +6,6 @@ use std::fmt::Debug;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::sync::RwLock;
 use tokio::sync::Semaphore;
 use tokio::sync::watch;
@@ -17,14 +15,9 @@ use codex_app_server_protocol::AuthMode as ApiAuthMode;
 use codex_protocol::config_types::ModelProviderAuthInfo;
 
 use super::external_bearer::BearerTokenRefresher;
-pub use crate::auth::agent_identity::AgentIdentityAuth;
-pub use crate::auth::personal_access_token::PersonalAccessTokenAuth;
-pub use crate::auth::storage::AgentIdentityAuthRecord;
 pub use crate::auth::storage::AuthDotJson;
 use crate::auth::storage::create_auth_storage;
-use crate::token_data::TokenData;
 use codex_config::types::AuthCredentialsStoreMode;
-use codex_protocol::account::PlanType as AccountPlanType;
 use codex_protocol::auth::RefreshTokenFailedError;
 use codex_protocol::auth::RefreshTokenFailedReason;
 use thiserror::Error;
@@ -33,16 +26,12 @@ use thiserror::Error;
 #[derive(Debug, Clone)]
 pub enum CodexAuth {
     ApiKey(ApiKeyAuth),
-    Chatgpt(ChatgptAuth),
-    AgentIdentity(AgentIdentityAuth),
-    PersonalAccessToken(PersonalAccessTokenAuth),
 }
 
 impl PartialEq for CodexAuth {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::PersonalAccessToken(a), Self::PersonalAccessToken(b)) => a == b,
-            _ => self.api_auth_mode() == other.api_auth_mode(),
+            (Self::ApiKey(a), Self::ApiKey(b)) => a.api_key == b.api_key,
         }
     }
 }
@@ -50,16 +39,6 @@ impl PartialEq for CodexAuth {
 #[derive(Debug, Clone)]
 pub struct ApiKeyAuth {
     api_key: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct ChatgptAuth {
-    state: ChatgptAuthState,
-}
-
-#[derive(Debug, Clone)]
-struct ChatgptAuthState {
-    auth_dot_json: Arc<Mutex<Option<AuthDotJson>>>,
 }
 
 const UNSUPPORTED_LEGACY_HOSTED_AUTH_MESSAGE: &str =
@@ -144,20 +123,16 @@ impl CodexAuth {
         _auth_credentials_store_mode: AuthCredentialsStoreMode,
     ) -> std::io::Result<Self> {
         let auth_mode = auth_dot_json.resolved_mode();
-        if auth_mode == ApiAuthMode::ApiKey {
-            let Some(api_key) = auth_dot_json.api_key.as_deref() else {
-                return Err(std::io::Error::other("API key auth is missing a key."));
-            };
-            return Ok(Self::from_api_key(api_key));
-        }
-
         match auth_mode {
-            ApiAuthMode::Chatgpt
-            | ApiAuthMode::AgentIdentity
-            | ApiAuthMode::PersonalAccessToken => Err(std::io::Error::other(
+            StoredAuthMode::ApiKey => {
+                let Some(api_key) = auth_dot_json.api_key.as_deref() else {
+                    return Err(std::io::Error::other("API key auth is missing a key."));
+                };
+                Ok(Self::from_api_key(api_key))
+            }
+            StoredAuthMode::LegacyHosted => Err(std::io::Error::other(
                 UNSUPPORTED_LEGACY_HOSTED_AUTH_MESSAGE.to_string(),
             )),
-            ApiAuthMode::ApiKey => unreachable!("api key mode is handled above"),
         }
     }
 
@@ -173,33 +148,15 @@ impl CodexAuth {
         .await
     }
 
-    pub async fn from_agent_identity_jwt(_jwt: &str) -> std::io::Result<Self> {
-        Err(std::io::Error::other(
-            UNSUPPORTED_LEGACY_HOSTED_AUTH_MESSAGE.to_string(),
-        ))
-    }
-
-    pub async fn from_personal_access_token(_access_token: &str) -> std::io::Result<Self> {
-        Err(std::io::Error::other(
-            UNSUPPORTED_LEGACY_HOSTED_AUTH_MESSAGE.to_string(),
-        ))
-    }
-
     pub fn auth_mode(&self) -> AuthMode {
         match self {
             Self::ApiKey(_) => AuthMode::ApiKey,
-            Self::Chatgpt(_) => AuthMode::Chatgpt,
-            Self::AgentIdentity(_) => AuthMode::AgentIdentity,
-            Self::PersonalAccessToken(_) => AuthMode::PersonalAccessToken,
         }
     }
 
     pub fn api_auth_mode(&self) -> ApiAuthMode {
         match self {
             Self::ApiKey(_) => ApiAuthMode::ApiKey,
-            Self::Chatgpt(_) => ApiAuthMode::Chatgpt,
-            Self::AgentIdentity(_) => ApiAuthMode::AgentIdentity,
-            Self::PersonalAccessToken(_) => ApiAuthMode::PersonalAccessToken,
         }
     }
 
@@ -207,39 +164,10 @@ impl CodexAuth {
         self.auth_mode() == AuthMode::ApiKey
     }
 
-    pub fn is_personal_access_token_auth(&self) -> bool {
-        self.auth_mode() == AuthMode::PersonalAccessToken
-    }
-
-    pub fn is_legacy_hosted_account_auth(&self) -> bool {
-        self.api_auth_mode().has_legacy_hosted_account()
-    }
-
-    pub fn uses_hosted_backend(&self) -> bool {
-        matches!(
-            self,
-            Self::Chatgpt(_) | Self::AgentIdentity(_) | Self::PersonalAccessToken(_)
-        )
-    }
-
     /// Returns `None` if `auth_mode() != AuthMode::ApiKey`.
     pub fn api_key(&self) -> Option<&str> {
         match self {
             Self::ApiKey(auth) => Some(auth.api_key.as_str()),
-            Self::Chatgpt(_) | Self::AgentIdentity(_) | Self::PersonalAccessToken(_) => None,
-        }
-    }
-
-    /// Returns `Err` if token-backed legacy hosted auth is unavailable.
-    pub fn get_token_data(&self) -> Result<TokenData, std::io::Error> {
-        let auth_dot_json: Option<AuthDotJson> = self.get_current_auth_json();
-        match auth_dot_json {
-            Some(AuthDotJson {
-                tokens: Some(tokens),
-                last_refresh: Some(_),
-                ..
-            }) => Ok(tokens),
-            _ => Err(std::io::Error::other("Token data is not available.")),
         }
     }
 
@@ -247,116 +175,12 @@ impl CodexAuth {
     pub fn get_token(&self) -> Result<String, std::io::Error> {
         match self {
             Self::ApiKey(auth) => Ok(auth.api_key.clone()),
-            Self::Chatgpt(_) => {
-                let access_token = self.get_token_data()?.access_token;
-                Ok(access_token)
-            }
-            Self::AgentIdentity(_) => Err(std::io::Error::other(
-                "agent identity auth does not expose a bearer token",
-            )),
-            Self::PersonalAccessToken(auth) => Ok(auth.access_token().to_string()),
         }
-    }
-
-    /// Returns `None` if hosted backend auth does not expose an account id.
-    pub fn get_account_id(&self) -> Option<String> {
-        match self {
-            Self::AgentIdentity(auth) => Some(auth.account_id().to_string()),
-            Self::PersonalAccessToken(auth) => Some(auth.account_id().to_string()),
-            _ => self.get_current_token_data().and_then(|t| t.account_id),
-        }
-    }
-
-    /// Returns false if hosted backend auth omits the legacy FedRAMP claim.
-    pub fn is_fedramp_account(&self) -> bool {
-        match self {
-            Self::AgentIdentity(auth) => auth.is_fedramp_account(),
-            Self::PersonalAccessToken(auth) => auth.is_fedramp_account(),
-            _ => self
-                .get_current_token_data()
-                .is_some_and(|t| t.id_token.is_fedramp_account()),
-        }
-    }
-
-    /// Returns `None` if hosted backend auth does not expose an account email.
-    pub fn get_account_email(&self) -> Option<String> {
-        match self {
-            Self::AgentIdentity(auth) => Some(auth.email().to_string()),
-            Self::PersonalAccessToken(auth) => Some(auth.email().to_string()),
-            _ => self.get_current_token_data().and_then(|t| t.id_token.email),
-        }
-    }
-
-    /// Returns `None` if hosted backend auth does not expose a legacy user id.
-    pub fn get_chatgpt_user_id(&self) -> Option<String> {
-        match self {
-            Self::AgentIdentity(auth) => Some(auth.chatgpt_user_id().to_string()),
-            Self::PersonalAccessToken(auth) => Some(auth.chatgpt_user_id().to_string()),
-            _ => self
-                .get_current_token_data()
-                .and_then(|t| t.id_token.chatgpt_user_id),
-        }
-    }
-
-    /// Account-facing plan classification derived from the current auth.
-    /// Returns a high-level `AccountPlanType` (e.g., Free/Plus/Pro/Team/…)
-    /// for UI or product decisions based on the user's subscription.
-    pub fn account_plan_type(&self) -> Option<AccountPlanType> {
-        if let Self::AgentIdentity(auth) = self {
-            return Some(auth.plan_type());
-        }
-        if let Self::PersonalAccessToken(auth) = self {
-            return Some(auth.plan_type());
-        }
-
-        self.get_current_token_data().map(|t| {
-            t.id_token
-                .chatgpt_plan_type
-                .map(AccountPlanType::from)
-                .unwrap_or(AccountPlanType::Unknown)
-        })
-    }
-
-    pub fn is_workspace_account(&self) -> bool {
-        self.account_plan_type()
-            .is_some_and(AccountPlanType::is_workspace_account)
-    }
-
-    /// Returns `None` if token-backed legacy hosted auth is unavailable.
-    fn get_current_auth_json(&self) -> Option<AuthDotJson> {
-        let state = match self {
-            Self::Chatgpt(auth) => &auth.state,
-            Self::ApiKey(_) | Self::AgentIdentity(_) | Self::PersonalAccessToken(_) => return None,
-        };
-        #[expect(clippy::unwrap_used)]
-        state.auth_dot_json.lock().unwrap().clone()
-    }
-
-    /// Returns `None` if token-backed legacy hosted auth is unavailable.
-    fn get_current_token_data(&self) -> Option<TokenData> {
-        self.get_current_auth_json().and_then(|t| t.tokens)
     }
 
     /// Consider this private to integration tests.
-    pub fn create_dummy_chatgpt_auth_for_testing() -> Self {
-        let auth_dot_json = AuthDotJson {
-            auth_mode: Some(ApiAuthMode::Chatgpt),
-            api_key: None,
-            tokens: Some(TokenData {
-                id_token: Default::default(),
-                access_token: "Access Token".to_string(),
-                refresh_token: "test".to_string(),
-                account_id: Some("account_id".to_string()),
-            }),
-            last_refresh: Some(Utc::now()),
-            agent_identity: None,
-            personal_access_token: None,
-        };
-
-        let state = ChatgptAuthState {
-            auth_dot_json: Arc::new(Mutex::new(Some(auth_dot_json))),
-        };
-        Self::Chatgpt(ChatgptAuth { state })
+    pub fn create_dummy_api_key_auth_for_testing() -> Self {
+        Self::from_api_key("test-api-key")
     }
 
     pub fn from_api_key(api_key: &str) -> Self {
@@ -401,23 +225,6 @@ pub async fn logout_with_revoke(
     .await
     .logout()
     .await
-}
-
-/// Writes an `auth.json` that contains only the API key.
-pub fn login_with_api_key(
-    codex_home: &Path,
-    api_key: &str,
-    auth_credentials_store_mode: AuthCredentialsStoreMode,
-) -> std::io::Result<()> {
-    let auth_dot_json = AuthDotJson {
-        auth_mode: Some(ApiAuthMode::ApiKey),
-        api_key: Some(api_key.to_string()),
-        tokens: None,
-        last_refresh: None,
-        agent_identity: None,
-        personal_access_token: None,
-    };
-    save_auth(codex_home, &auth_dot_json, auth_credentials_store_mode)
 }
 
 /// Persist the provided auth payload using the specified backend.
@@ -483,24 +290,26 @@ async fn load_auth(
     Ok(Some(auth))
 }
 
+const API_KEY_AUTH_MODE: &str = "apikey";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StoredAuthMode {
+    ApiKey,
+    LegacyHosted,
+}
+
 impl AuthDotJson {
-    fn resolved_mode(&self) -> ApiAuthMode {
-        if let Some(mode) = self.auth_mode {
-            return mode;
+    fn resolved_mode(&self) -> StoredAuthMode {
+        if let Some(mode) = self.auth_mode.as_deref() {
+            return match mode {
+                API_KEY_AUTH_MODE | "api_key" | "apiKey" => StoredAuthMode::ApiKey,
+                _ => StoredAuthMode::LegacyHosted,
+            };
         }
         if self.api_key.is_some() {
-            return ApiAuthMode::ApiKey;
+            return StoredAuthMode::ApiKey;
         }
-        if self.personal_access_token.is_some() {
-            return ApiAuthMode::PersonalAccessToken;
-        }
-        if self.agent_identity.is_some() {
-            return ApiAuthMode::AgentIdentity;
-        }
-        if self.tokens.is_some() {
-            return ApiAuthMode::Chatgpt;
-        }
-        ApiAuthMode::ApiKey
+        StoredAuthMode::ApiKey
     }
 }
 
@@ -595,14 +404,6 @@ impl UnauthorizedRecovery {
                 "ready"
             }
             UnauthorizedRecoveryMode::Managed => {
-                if self
-                    .manager
-                    .auth_cached()
-                    .as_ref()
-                    .is_some_and(CodexAuth::is_personal_access_token_auth)
-                {
-                    return "not_refreshable_auth";
-                }
                 if matches!(self.step, UnauthorizedRecoveryStep::Done) {
                     return "recovery_exhausted";
                 }
@@ -809,17 +610,6 @@ impl AuthManager {
             (None, None) => true,
             (Some(a), Some(b)) => match (a.api_auth_mode(), b.api_auth_mode()) {
                 (ApiAuthMode::ApiKey, ApiAuthMode::ApiKey) => a.api_key() == b.api_key(),
-                (ApiAuthMode::Chatgpt, ApiAuthMode::Chatgpt) => {
-                    a.get_current_auth_json() == b.get_current_auth_json()
-                }
-                (ApiAuthMode::AgentIdentity, ApiAuthMode::AgentIdentity) => match (a, b) {
-                    (CodexAuth::AgentIdentity(a), CodexAuth::AgentIdentity(b)) => {
-                        a.record() == b.record()
-                    }
-                    _ => false,
-                },
-                (ApiAuthMode::PersonalAccessToken, ApiAuthMode::PersonalAccessToken) => a == b,
-                _ => false,
             },
             _ => false,
         }
@@ -1002,13 +792,9 @@ impl AuthManager {
                 "external auth is not configured",
             )));
         };
-        let previous_account_id = self
-            .auth_cached()
-            .as_ref()
-            .and_then(CodexAuth::get_account_id);
         let context = ExternalAuthRefreshContext {
             reason,
-            previous_account_id,
+            previous_account_id: None,
         };
 
         let _refreshed = external_auth

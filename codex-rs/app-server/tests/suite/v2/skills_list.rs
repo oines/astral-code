@@ -335,8 +335,7 @@ async fn skills_list_excludes_plugin_skills_when_workspace_codex_plugins_disable
         ChatGptAuthFixture::new("chatgpt-token")
             .account_id("account-123")
             .chatgpt_user_id("user-123")
-            .chatgpt_account_id("account-123")
-            .plan_type("team"),
+            .chatgpt_account_id("account-123"),
         AuthCredentialsStoreMode::File,
     )?;
     Mock::given(method("GET"))

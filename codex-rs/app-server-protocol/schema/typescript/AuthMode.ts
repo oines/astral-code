@@ -4,8 +4,5 @@
 
 /**
  * Authentication mode for Astral-managed credentials.
- *
- * Astral actively supports API-key auth. Token-backed variants are retained
- * only so legacy payloads can be identified and rejected cleanly.
  */
-export type AuthMode = "apikey" | "chatgpt" | "agentIdentity" | "personalAccessToken";
+export type AuthMode = "apikey";
