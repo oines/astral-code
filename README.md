@@ -1,59 +1,74 @@
 # Astral Code
 
-A provider-neutral coding agent harness built on the Codex runtime architecture. The CLI command is `astral`.
+A **provider-neutral** coding agent harness forked from [OpenAI Codex CLI](https://github.com/openai/codex). The CLI command is `astral`.
 
-Astral is a standalone project with its own configuration and state namespace (`ASTRAL_HOME`, defaulting to `~/.astral-code`). It does not read or migrate `~/.codex` data.
+Astral strips the OpenAI-hosted dependencies and re-tools the runtime so it works with **any** LLM provider — local or remote — while keeping Codex's proven Rust core, cross-platform sandbox, and TUI intact.
+
+---
+
+## Astral vs. Codex
+
+Astral diverges from upstream Codex in the following ways:
+
+| Dimension | Codex (upstream) | Astral |
+|---|---|---|
+| **CLI binary** | `codex` | `astral` |
+| **State directory** | `~/.codex` (`CODEX_HOME`) | `~/.astral-code` (`ASTRAL_HOME`) |
+| **Authentication** | ChatGPT sign-in, PKCE, device-code OAuth, `OPENAI_API_KEY` | API key only (`ASTRAL_API_KEY`); no hosted OAuth |
+| **Hosted services** | Responses API proxy, remote compaction, hosted auth | All removed; runs fully offline-capable |
+| **Tool flavor** | OpenAI Codex tool schemas | Claude Code–compatible tool schemas (`Bash`, `Read`, `Edit`, `Write`, `Glob`, `Grep`, `TodoWrite`, `Skill`, etc.) |
+| **Provider support** | OpenAI API (primary) | OpenAI, Bedrock, Ollama, LM Studio, LiteLLM, custom endpoints |
+| **Agent identity crate** | `codex-agent-identity` | `codex-agent-protocol` — generic agent protocol |
+| **Capability sync** | N/A | `astral sync-caps` — pull model capabilities from LiteLLM |
+| **Glob / Grep** | Codex-native search | Aligned with Claude Code behavior and output format |
+| **Upstream CI** | Full GitHub Actions matrix | Disabled; Astral CI runs independently |
+
+In short: **same Rust engine, different soul.** Astral is designed for developers who want the Codex runtime power without vendor lock-in.
 
 ---
 
 ## Architecture
 
-Astral is organized as a Rust monorepo with Python and TypeScript SDKs:
-
 ```
 astral-code/
-├── codex-rs/           # Rust workspace — the core engine (90+ crates)
-│   ├── cli/            #   `astral` binary entry point
-│   ├── core/           #   Business logic, LLM orchestration, sandboxing
-│   ├── tui/            #   Terminal UI (Ratatui-based)
-│   ├── tools/          #   Tool definitions, discovery, and execution
-│   ├── app-server/     #   JSON-RPC server for IDE/desktop integration
-│   ├── app-server-protocol/  # Wire protocol + TypeScript codegen
-│   ├── exec/           #   Non-interactive exec mode (`astral exec`)
-│   ├── exec-server/    #   Headless exec server
-│   ├── mcp-server/     #   MCP (Model Context Protocol) server
-│   ├── config/         #   TOML config loading, schema, merging
-│   ├── sandboxing/     #   Cross-platform sandbox (Seatbelt, Landlock, bwrap)
-│   ├── linux-sandbox/  #   Linux bubblewrap/landlock sandbox helper
-│   ├── model-provider/ #   LLM provider abstraction (OpenAI, Bedrock, etc.)
-│   ├── network-proxy/  #   HTTP/SOCKS5 network proxy with MITM support
-│   ├── state/          #   SQLite-backed session state and logs
-│   ├── hooks/          #   Pre/post command hooks
-│   ├── file-search/    #   Ripgrep-based file search
-│   ├── file-system/    #   Filesystem operations
-│   ├── skills/         #   Skill system
-│   ├── plugin/         #   Plugin system
-│   ├── memories/       #   Persistent memory read/write
-│   ├── login/          #   Authentication flows
-│   └── utils/          #   Shared utilities (path, cache, PTY, etc.)
-├── codex-cli/          # Legacy Node.js CLI wrapper
+├── codex-rs/                # Rust workspace — the core engine (90+ crates)
+│   ├── cli/                 #   `astral` binary entry point
+│   ├── core/                #   LLM conversation loop, tool orchestration, sandbox policy
+│   ├── tui/                 #   Terminal UI (Ratatui-based)
+│   ├── tools/               #   Astral-flavored tool definitions (Bash, Read, Edit, Write, Glob, Grep …)
+│   ├── app-server/          #   JSON-RPC server for IDE / desktop integration
+│   ├── app-server-protocol/ #   Wire protocol + TypeScript codegen
+│   ├── exec/                #   Non-interactive exec mode (`astral exec`)
+│   ├── exec-server/         #   Headless exec server
+│   ├── mcp-server/          #   MCP (Model Context Protocol) server
+│   ├── config/              #   TOML config loading, layered merging, schema
+│   ├── sandboxing/          #   Cross-platform sandbox (Seatbelt / Landlock / bwrap)
+│   ├── model-provider/      #   Provider abstraction (OpenAI, Bedrock, Ollama, LM Studio …)
+│   ├── network-proxy/       #   HTTP/SOCKS5 proxy with policy-based connect control
+│   ├── login/               #   Astral API key authentication
+│   ├── state/               #   SQLite-backed session state and logs
+│   ├── hooks/               #   Pre/post command hook system
+│   ├── skills/              #   Skill system
+│   ├── plugin/              #   Plugin system
+│   ├── memories/            #   Persistent memory read/write
+│   └── utils/               #   Shared utilities (path, cache, PTY, etc.)
 ├── sdk/
-│   ├── python/         # Python SDK
-│   └── typescript/     # TypeScript SDK
-├── docs/               # Project documentation
-├── scripts/            # Build, CI, and formatting scripts
-├── tools/              # Development tools (lint, etc.)
-├── patches/            # Bazel dependency patches
-└── justfile            # Task runner recipes
+│   ├── python/              # Python SDK
+│   └── typescript/          # TypeScript SDK
+├── docs/                    # Project documentation
+├── scripts/                 # Build, CI, and formatting scripts
+├── tools/                   # Development tools (argument-comment lint, etc.)
+├── patches/                 # Bazel dependency patches
+└── justfile                 # Task runner recipes
 ```
 
 ### Key Design Decisions
 
 - **Rust-first**: The entire runtime is written in Rust for performance, memory safety, and cross-platform sandboxing.
-- **Crate-per-concern**: Each crate in `codex-rs/` owns a single responsibility. Crate names are prefixed with `codex-` (e.g., `codex-core`, `codex-tui`).
-- **Multi-platform sandboxing**: macOS uses Seatbelt (`sandbox-exec`), Linux uses Landlock + bubblewrap, and Windows uses restricted tokens.
-- **Provider-neutral**: LLM provider abstraction in `codex-model-provider` supports OpenAI, Amazon Bedrock, Ollama, LM Studio, and custom endpoints.
-- **App-server protocol**: JSON-RPC protocol over Unix domain sockets for IDE and desktop app integration, with TypeScript type generation.
+- **Crate-per-concern**: Each crate in `codex-rs/` owns a single responsibility. Crate names retain the `codex-` prefix for workspace compatibility.
+- **Multi-platform sandboxing**: macOS uses Seatbelt (`sandbox-exec`), Linux uses Landlock + bubblewrap, Windows uses restricted tokens.
+- **Provider-neutral**: `codex-model-provider` abstracts over OpenAI, Amazon Bedrock, Ollama, LM Studio, and any OpenAI-compatible endpoint.
+- **Claude Code–compatible tools**: Tool schemas and prompts (`astral_flavor.rs`) are aligned with Claude Code's tool definitions, enabling a familiar agentic coding experience across providers.
 
 ---
 
@@ -70,11 +85,10 @@ astral-code/
 ### Build from Source
 
 ```bash
-# Clone the repository
 git clone https://github.com/oines/astral-code.git
 cd astral-code/codex-rs
 
-# Install Rust toolchain (if not already installed)
+# Install Rust toolchain (if needed)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source "$HOME/.cargo/env"
 rustup component add rustfmt clippy
@@ -83,18 +97,37 @@ rustup component add rustfmt clippy
 cargo install --locked just
 cargo install --locked cargo-nextest
 
-# Build
+# Build & run
 cargo build
-
-# Run
 cargo run --bin astral -- "explain this codebase to me"
 ```
 
 ### Non-Interactive Mode
 
 ```bash
-# Run a single prompt without the TUI
 cargo run --bin astral -- exec "list files in this directory"
+```
+
+---
+
+## Configuration
+
+Astral uses its own TOML config at `~/.astral-code/config.toml`. It does not read `~/.codex`.
+
+```bash
+# Set an API key (example for OpenAI-compatible providers)
+export ASTRAL_API_KEY="sk-..."
+
+# Or configure in config.toml
+# See docs/config.md for the full reference
+```
+
+Generate the config JSON schema:
+
+```bash
+just write-config-schema
+just write-app-server-schema
+just write-hooks-schema
 ```
 
 ---
@@ -103,7 +136,7 @@ cargo run --bin astral -- exec "list files in this directory"
 
 ### Task Runner
 
-Astral uses [just](https://github.com/casey/just) for common development tasks. The default working directory is `codex-rs/`:
+Astral uses [just](https://github.com/casey/just). Default working directory is `codex-rs/`:
 
 ```bash
 just fmt              # Format code (Rust, Python, JS, Markdown)
@@ -118,34 +151,22 @@ just mcp-server-run   # Start the MCP server
 
 ### Bazel
 
-The project also supports Bazel for reproducible builds and CI:
-
 ```bash
-just bazel-codex                      # Build and run via Bazel
-just bazel-test                       # Run all Bazel tests
-just bazel-clippy                     # Run Clippy via Bazel
-just bazel-lock-update                # Refresh MODULE.bazel.lock
-just build-for-release                # Build release binaries
-```
-
-### Configuration
-
-Astral uses TOML configuration. Generate the JSON schema:
-
-```bash
-just write-config-schema              # Regenerate config.schema.json
-just write-app-server-schema          # Regenerate app-server protocol schemas
-just write-hooks-schema               # Regenerate hooks schema
+just bazel-codex         # Build and run via Bazel
+just bazel-test          # Run all Bazel tests
+just bazel-clippy        # Run Clippy via Bazel
+just bazel-lock-update   # Refresh MODULE.bazel.lock
+just build-for-release   # Build release binaries
 ```
 
 ### Verbose Logging
 
 ```bash
-# TUI logging
+# TUI mode
 astral -c log_dir=./.astral-log
 tail -F ./.astral-log/astral-tui.log
 
-# Non-interactive mode uses RUST_LOG
+# Non-interactive mode
 RUST_LOG=debug astral exec "hello"
 ```
 
@@ -153,24 +174,9 @@ RUST_LOG=debug astral exec "hello"
 
 ## SDKs
 
-### Python
+**Python** — `sdk/python/` (see [sdk/python/README.md](sdk/python/README.md))
 
-```bash
-cd sdk/python
-pip install -e .
-```
-
-See `sdk/python/README.md` for usage.
-
-### TypeScript
-
-```bash
-cd sdk/typescript
-pnpm install
-pnpm build
-```
-
-See `sdk/typescript/README.md` for usage.
+**TypeScript** — `sdk/typescript/` (see [sdk/typescript/README.md](sdk/typescript/README.md))
 
 ---
 
@@ -192,47 +198,6 @@ See `sdk/typescript/README.md` for usage.
 
 ---
 
-## Project Layout
-
-### Core Crates
-
-- **`codex-core`** — Central business logic: LLM conversation loop, tool execution, sandbox policy resolution, and session management.
-- **`codex-tui`** — Full-featured terminal UI built on Ratatui with markdown rendering, diff display, file search, and multi-agent orchestration.
-- **`codex-tools`** — Tool definitions (shell, apply_patch, etc.), dynamic tool discovery, MCP tool integration, and tool search.
-- **`codex-config`** — TOML-based configuration with layered merging (defaults → global → project → thread), schema validation, and cloud config support.
-- **`codex-sandboxing`** — Cross-platform sandbox enforcement using Seatbelt (macOS), Landlock + bubblewrap (Linux), and restricted tokens (Windows).
-
-### Server Crates
-
-- **`codex-app-server`** — JSON-RPC server exposing thread, config, and session management over Unix domain sockets.
-- **`codex-app-server-protocol`** — Wire protocol definitions with `ts-rs` TypeScript codegen for client integration.
-- **`codex-mcp-server`** — MCP (Model Context Protocol) server for tool exposure to external clients.
-- **`codex-exec-server`** — Headless execution server for programmatic access.
-
-### Infrastructure Crates
-
-- **`codex-model-provider`** — Provider abstraction supporting OpenAI, Amazon Bedrock, Ollama, LM Studio, and custom backends.
-- **`codex-network-proxy`** — HTTP/SOCKS5 proxy with policy-based connect control and optional MITM.
-- **`codex-state`** — SQLite-backed persistence for session history, logs, and analytics.
-- **`codex-login`** — Authentication and credential management.
-- **`codex-hooks`** — Pre/post command hook system with JSON schema.
-
----
-
-## CI
-
-The project runs extensive CI via GitHub Actions:
-
-- **`ci.yml`** — Main CI pipeline
-- **`rust-ci.yml`** / **`rust-ci-full.yml`** — Rust compilation and test matrix
-- **`bazel.yml`** — Bazel build and test
-- **`cargo-deny.yml`** — Dependency auditing
-- **`codespell.yml`** — Spell checking
-- **`sdk.yml`** — SDK tests (Python + TypeScript)
-- **Release workflows** — Multi-platform release builds (macOS, Linux, Windows)
-
----
-
 ## Contributing
 
 See [docs/contributing.md](docs/contributing.md) for the development workflow, PR guidelines, and community values.
@@ -241,10 +206,12 @@ See [docs/contributing.md](docs/contributing.md) for the development workflow, P
 
 ## Security
 
-See [SECURITY.md](SECURITY.md) for vulnerability reporting and safe operation guidelines.
+See [SECURITY.md](SECURITY.md) for vulnerability reporting guidelines.
 
 ---
 
 ## License
 
 Licensed under the [Apache-2.0 License](LICENSE).
+
+Astral Code includes code derived from [Ratatui](https://github.com/ratatui/ratatui) (MIT License). See [NOTICE](NOTICE) for details.
