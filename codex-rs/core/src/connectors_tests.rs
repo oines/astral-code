@@ -224,7 +224,7 @@ async fn refresh_accessible_connectors_cache_from_mcp_tools_writes_latest_instal
         .await
         .expect("config should load");
     let _ = config.features.set_enabled(Feature::Apps, /*enabled*/ true);
-    let cache_key = accessible_connectors_cache_key(&config, /*auth*/ None);
+    let cache_key = accessible_connectors_cache_key(&config);
     let tools = vec![
         codex_app_tool(
             "calendar_list_events",

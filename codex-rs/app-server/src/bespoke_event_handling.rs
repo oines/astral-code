@@ -11,7 +11,6 @@ use crate::thread_state::TurnSummary;
 use crate::thread_state::resolve_server_request_on_thread_listener;
 use crate::thread_status::ThreadWatchActiveGuard;
 use crate::thread_status::ThreadWatchManager;
-use codex_app_server_protocol::AccountRateLimitsUpdatedNotification;
 use codex_app_server_protocol::AdditionalPermissionProfile as V2AdditionalPermissionProfile;
 use codex_app_server_protocol::CodexErrorInfo as V2CodexErrorInfo;
 use codex_app_server_protocol::CommandAction as V2ParsedCommand;
@@ -1590,7 +1589,10 @@ async fn handle_token_count_event(
     token_count_event: TokenCountEvent,
     outgoing: &ThreadScopedOutgoingMessageSender,
 ) {
-    let TokenCountEvent { info, rate_limits } = token_count_event;
+    let TokenCountEvent {
+        info,
+        rate_limits: _,
+    } = token_count_event;
     if let Some(token_usage) = info.map(ThreadTokenUsage::from) {
         let notification = ThreadTokenUsageUpdatedNotification {
             thread_id: conversation_id.to_string(),
@@ -1599,15 +1601,6 @@ async fn handle_token_count_event(
         };
         outgoing
             .send_server_notification(ServerNotification::ThreadTokenUsageUpdated(notification))
-            .await;
-    }
-    if let Some(rate_limits) = rate_limits {
-        outgoing
-            .send_server_notification(ServerNotification::AccountRateLimitsUpdated(
-                AccountRateLimitsUpdatedNotification {
-                    rate_limits: rate_limits.into(),
-                },
-            ))
             .await;
     }
 }
@@ -2639,7 +2632,7 @@ mod tests {
         let config = load_default_config_for_test(&codex_home).await;
         let thread_manager = Arc::new(
             codex_core::test_support::thread_manager_with_models_provider_and_home(
-                CodexAuth::create_dummy_chatgpt_auth_for_testing(),
+                CodexAuth::create_dummy_api_key_auth_for_testing(),
                 config.model_provider.clone(),
                 config.codex_home.to_path_buf(),
                 Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
@@ -3217,7 +3210,7 @@ mod tests {
         let config = load_default_config_for_test(&codex_home).await;
         let thread_manager = Arc::new(
             codex_core::test_support::thread_manager_with_models_provider_and_home(
-                CodexAuth::create_dummy_chatgpt_auth_for_testing(),
+                CodexAuth::create_dummy_api_key_auth_for_testing(),
                 config.model_provider.clone(),
                 config.codex_home.to_path_buf(),
                 Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
@@ -3515,7 +3508,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_handle_token_count_event_emits_usage_and_rate_limits() -> Result<()> {
+    async fn test_handle_token_count_event_emits_usage() -> Result<()> {
         let conversation_id = ThreadId::new();
         let turn_id = "turn-123".to_string();
         let (tx, mut rx) = mpsc::channel(CHANNEL_CAPACITY);
@@ -3561,7 +3554,6 @@ mod tests {
                 balance: Some("5".to_string()),
             }),
             individual_limit: None,
-            plan_type: None,
             rate_limit_reached_type: None,
         };
 
@@ -3591,19 +3583,8 @@ mod tests {
             }
             other => bail!("unexpected notification: {other:?}"),
         }
+        assert!(rx.try_recv().is_err());
 
-        let second = recv_broadcast_message(&mut rx).await?;
-        match second {
-            OutgoingMessage::AppServerNotification(
-                ServerNotification::AccountRateLimitsUpdated(payload),
-            ) => {
-                assert_eq!(payload.rate_limits.limit_id.as_deref(), Some("codex"));
-                assert_eq!(payload.rate_limits.limit_name, None);
-                assert!(payload.rate_limits.primary.is_some());
-                assert!(payload.rate_limits.credits.is_some());
-            }
-            other => bail!("unexpected notification: {other:?}"),
-        }
         Ok(())
     }
 

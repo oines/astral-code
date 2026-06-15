@@ -1,5 +1,5 @@
-//! Shared tool definitions and Responses API tool primitives that can live
-//! outside `codex-core`.
+//! Shared tool definitions and provider tool primitives that can live outside
+//! `codex-core`.
 
 mod astral_flavor;
 mod astral_prompts;

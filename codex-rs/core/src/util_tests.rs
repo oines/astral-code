@@ -87,7 +87,7 @@ fn emit_feedback_request_tags_records_sentry_feedback_fields() {
 
     emit_feedback_request_tags_with_auth_env(
         &FeedbackRequestTags {
-            endpoint: "/responses",
+            endpoint: "/chat/completions",
             auth_header_attached: true,
             auth_header_name: Some("authorization"),
             auth_mode: Some("chatgpt"),
@@ -108,7 +108,7 @@ fn emit_feedback_request_tags_records_sentry_feedback_fields() {
     let tags = tags.lock().unwrap().clone();
     assert_eq!(
         tags.get("endpoint").map(String::as_str),
-        Some("\"/responses\"")
+        Some("\"/chat/completions\"")
     );
     assert_eq!(
         tags.get("auth_header_attached").map(String::as_str),
@@ -263,7 +263,7 @@ fn emit_feedback_request_tags_preserves_latest_auth_fields_after_unauthorized() 
         .set_default();
 
     emit_feedback_request_tags(&FeedbackRequestTags {
-        endpoint: "/responses",
+        endpoint: "/chat/completions",
         auth_header_attached: true,
         auth_header_name: Some("authorization"),
         auth_mode: Some("chatgpt"),
@@ -325,7 +325,7 @@ fn emit_feedback_request_tags_preserves_auth_env_fields_for_legacy_emitters() {
 
     emit_feedback_request_tags_with_auth_env(
         &FeedbackRequestTags {
-            endpoint: "/responses",
+            endpoint: "/chat/completions",
             auth_header_attached: true,
             auth_header_name: Some("authorization"),
             auth_mode: Some("chatgpt"),
@@ -343,7 +343,7 @@ fn emit_feedback_request_tags_preserves_auth_env_fields_for_legacy_emitters() {
         &auth_env,
     );
     emit_feedback_request_tags(&FeedbackRequestTags {
-        endpoint: "/responses",
+        endpoint: "/chat/completions",
         auth_header_attached: true,
         auth_header_name: None,
         auth_mode: None,

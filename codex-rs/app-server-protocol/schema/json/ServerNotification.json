@@ -5,57 +5,12 @@
       "description": "A path that is guaranteed to be absolute and normalized (though it is not guaranteed to be canonicalized or exist on the filesystem).\n\nIMPORTANT: When deserializing an `AbsolutePathBuf`, a base path must be set using [AbsolutePathBufGuard::new]. If no base path is set, the deserialization will fail unless the path being deserialized is already absolute.",
       "type": "string"
     },
-    "AccountLoginCompletedNotification": {
-      "properties": {
-        "error": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "loginId": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "success": {
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "success"
-      ],
-      "type": "object"
-    },
-    "AccountRateLimitsUpdatedNotification": {
-      "description": "Sparse rolling rate-limit update.\n\nClients should merge available values into the most recent `account/rateLimits/read` response or refetch that snapshot. Nullable account metadata may be unavailable in a rolling update and does not clear a previously observed value.",
-      "properties": {
-        "rateLimits": {
-          "$ref": "#/definitions/RateLimitSnapshot"
-        }
-      },
-      "required": [
-        "rateLimits"
-      ],
-      "type": "object"
-    },
     "AccountUpdatedNotification": {
       "properties": {
         "authMode": {
           "anyOf": [
             {
               "$ref": "#/definitions/AuthMode"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "planType": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/PlanType"
             },
             {
               "type": "null"
@@ -496,33 +451,12 @@
       ]
     },
     "AuthMode": {
-      "description": "Authentication mode for Astral-managed credentials.\n\nAstral actively supports API-key auth. Token-backed variants are retained only so legacy payloads can be identified and rejected cleanly.",
+      "description": "Authentication mode for Astral-managed credentials.",
       "oneOf": [
         {
           "description": "Provider API key supplied by the caller and stored locally.",
           "enum": [
             "apikey"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Legacy ChatGPT OAuth mode; not accepted by Astral.",
-          "enum": [
-            "chatgpt"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Legacy Agent Identity mode; not accepted by Astral.",
-          "enum": [
-            "agentIdentity"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Legacy personal access token mode; not accepted by Astral.",
-          "enum": [
-            "personalAccessToken"
           ],
           "type": "string"
         }
@@ -555,7 +489,7 @@
       "type": "object"
     },
     "CodexErrorInfo": {
-      "description": "This translation layer make sure that we expose codex error code in camel case.\n\nWhen an upstream HTTP status is available (for example, from the Responses API or a provider), it is forwarded in `httpStatusCode` on the relevant `codexErrorInfo` variant.",
+      "description": "This translation layer make sure that we expose codex error code in camel case.\n\nWhen an upstream HTTP status is available (for example, from a provider), it is forwarded in `httpStatusCode` on the relevant `codexErrorInfo` variant.",
       "oneOf": [
         {
           "enum": [
@@ -1009,26 +943,14 @@
       ],
       "type": "object"
     },
-    "CreditsSnapshot": {
-      "properties": {
-        "balance": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "hasCredits": {
-          "type": "boolean"
-        },
-        "unlimited": {
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "hasCredits",
-        "unlimited"
+    "CoreToolCallStatus": {
+      "enum": [
+        "inProgress",
+        "completed",
+        "failed",
+        "interrupted"
       ],
-      "type": "object"
+      "type": "string"
     },
     "DeprecationNoticeNotification": {
       "properties": {
@@ -2556,23 +2478,6 @@
       ],
       "type": "object"
     },
-    "PlanType": {
-      "enum": [
-        "free",
-        "go",
-        "plus",
-        "pro",
-        "prolite",
-        "team",
-        "self_serve_business_usage_based",
-        "business",
-        "enterprise_cbp_usage_based",
-        "enterprise",
-        "edu",
-        "unknown"
-      ],
-      "type": "string"
-    },
     "ProcessExitedNotification": {
       "description": "Final process exit notification for `process/spawn`.",
       "properties": {
@@ -2663,119 +2568,6 @@
         }
       ]
     },
-    "RateLimitReachedType": {
-      "enum": [
-        "rate_limit_reached",
-        "workspace_owner_credits_depleted",
-        "workspace_member_credits_depleted",
-        "workspace_owner_usage_limit_reached",
-        "workspace_member_usage_limit_reached"
-      ],
-      "type": "string"
-    },
-    "RateLimitSnapshot": {
-      "properties": {
-        "credits": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/CreditsSnapshot"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "individualLimit": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/SpendControlLimitSnapshot"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "limitId": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "limitName": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "planType": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/PlanType"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "primary": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/RateLimitWindow"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "rateLimitReachedType": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/RateLimitReachedType"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "secondary": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/RateLimitWindow"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "type": "object"
-    },
-    "RateLimitWindow": {
-      "properties": {
-        "resetsAt": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "usedPercent": {
-          "format": "int32",
-          "type": "integer"
-        },
-        "windowDurationMins": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "usedPercent"
-      ],
-      "type": "object"
-    },
     "RealtimeConversationVersion": {
       "enum": [
         "v1",
@@ -2789,7 +2581,7 @@
       "type": "string"
     },
     "ReasoningSummary": {
-      "description": "A summary of the reasoning performed by the model. This can be useful for debugging and understanding the model's reasoning process. See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#reasoning-summaries",
+      "description": "A summary of the reasoning performed by the model. This can be useful for debugging and understanding the model's reasoning process. See https://platform.openai.com/docs/guides/reasoning#reasoning-summaries",
       "oneOf": [
         {
           "enum": [
@@ -3144,31 +2936,6 @@
     },
     "SkillsChangedNotification": {
       "description": "Notification emitted when watched local skill files change.\n\nTreat this as an invalidation signal and re-run `skills/list` with the client's current parameters when refreshed skill metadata is needed.",
-      "type": "object"
-    },
-    "SpendControlLimitSnapshot": {
-      "properties": {
-        "limit": {
-          "type": "string"
-        },
-        "remainingPercent": {
-          "format": "int32",
-          "type": "integer"
-        },
-        "resetsAt": {
-          "format": "int64",
-          "type": "integer"
-        },
-        "used": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "limit",
-        "remainingPercent",
-        "resetsAt",
-        "used"
-      ],
       "type": "object"
     },
     "SubAgentSource": {
@@ -4014,6 +3781,56 @@
             "type"
           ],
           "title": "DynamicToolCallThreadItem",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "arguments": true,
+            "durationMs": {
+              "description": "The duration of the core tool call in milliseconds.",
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "error": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "result": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "$ref": "#/definitions/CoreToolCallStatus"
+            },
+            "tool": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "coreToolCall"
+              ],
+              "title": "CoreToolCallThreadItemType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "arguments",
+            "id",
+            "status",
+            "tool",
+            "type"
+          ],
+          "title": "CoreToolCallThreadItem",
           "type": "object"
         },
         {
@@ -6055,26 +5872,6 @@
       "properties": {
         "method": {
           "enum": [
-            "account/rateLimits/updated"
-          ],
-          "title": "Account/rateLimits/updatedNotificationMethod",
-          "type": "string"
-        },
-        "params": {
-          "$ref": "#/definitions/AccountRateLimitsUpdatedNotification"
-        }
-      },
-      "required": [
-        "method",
-        "params"
-      ],
-      "title": "Account/rateLimits/updatedNotification",
-      "type": "object"
-    },
-    {
-      "properties": {
-        "method": {
-          "enum": [
             "app/list/updated"
           ],
           "title": "App/list/updatedNotificationMethod",
@@ -6611,26 +6408,6 @@
         "params"
       ],
       "title": "WindowsSandbox/setupCompletedNotification",
-      "type": "object"
-    },
-    {
-      "properties": {
-        "method": {
-          "enum": [
-            "account/login/completed"
-          ],
-          "title": "Account/login/completedNotificationMethod",
-          "type": "string"
-        },
-        "params": {
-          "$ref": "#/definitions/AccountLoginCompletedNotification"
-        }
-      },
-      "required": [
-        "method",
-        "params"
-      ],
-      "title": "Account/login/completedNotification",
       "type": "object"
     }
   ],

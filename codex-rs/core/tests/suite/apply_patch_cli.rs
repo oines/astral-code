@@ -103,7 +103,7 @@ async fn submit_without_wait_with_turn_permissions(
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
                 environments: Some(local_selections(harness.cwd_abs())),
@@ -1136,7 +1136,7 @@ async fn apply_patch_cli_can_use_shell_command_output_as_patch_input() -> Result
         apply_call_id: apply_call_id.to_string(),
     };
     Mock::given(method("POST"))
-        .and(path_regex(".*/responses$"))
+        .and(path_regex(".*/chat/completions$"))
         .respond_with(responder)
         .expect(3)
         .mount(harness.server())
@@ -1646,7 +1646,7 @@ async fn apply_patch_turn_diff_tracks_local_and_remote_environment_paths() -> Re
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
                 environments: Some(codex_protocol::protocol::TurnEnvironmentSelections::new(

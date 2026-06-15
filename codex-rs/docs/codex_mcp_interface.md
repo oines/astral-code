@@ -8,14 +8,14 @@ This document describes Codex's experimental MCP server interface: a JSON-RPC AP
 
 ## Overview
 
-Codex exposes MCP-compatible methods to manage threads, turns, accounts, config, and approvals. The types live in `app-server-protocol/src/protocol/{common,v1,v2}.rs` and are consumed by the app server implementation in `app-server/`.
+Codex exposes MCP-compatible methods to manage threads, turns, account status, config, and approvals. The types live in `app-server-protocol/src/protocol/{common,v1,v2}.rs` and are consumed by the app server implementation in `app-server/`.
 
 At a glance:
 
 - Primary v2 RPCs
   - `thread/start`, `thread/resume`, `thread/fork`, `thread/read`, `thread/list`
   - `turn/start`, `turn/steer`, `turn/interrupt`
-  - `account/read`, `account/login/start`, `account/login/cancel`, `account/logout`, `account/rateLimits/read`
+  - `account/read`
   - `config/read`, `config/value/write`, `config/batchWrite`
   - `model/list`, `app/list`, `collaborationMode/list`
 - Remaining v1 compatibility RPCs
@@ -24,7 +24,7 @@ At a glance:
   - `gitDiffToRemote`
   - `fuzzyFileSearch`, `fuzzyFileSearch/sessionStart`, `fuzzyFileSearch/sessionUpdate`, `fuzzyFileSearch/sessionStop`
 - Notifications
-  - v2 typed notifications such as `thread/started`, `turn/completed`, `account/login/completed`
+  - v2 typed notifications such as `thread/started`, `turn/completed`
   - `codex/event/*` stream notifications for live agent events
   - `fuzzyFileSearch/sessionUpdated`, `fuzzyFileSearch/sessionCompleted`
 - Approvals (server -> client requests)

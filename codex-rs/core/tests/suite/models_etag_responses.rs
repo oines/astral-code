@@ -46,7 +46,7 @@ async fn refresh_models_on_models_etag_mismatch_and_avoid_duplicate_models_fetch
     )
     .await;
 
-    let auth = CodexAuth::create_dummy_chatgpt_auth_for_testing();
+    let auth = CodexAuth::create_dummy_api_key_auth_for_testing();
     let mut builder = test_codex()
         .with_auth(auth)
         .with_model("gpt-5.2")
@@ -71,7 +71,8 @@ async fn refresh_models_on_models_etag_mismatch_and_avoid_duplicate_models_fetch
     assert_eq!(spawn_models_mock.requests().len(), 1);
     assert_eq!(spawn_models_mock.single_request_path(), "/v1/models");
 
-    // 2) If the server sends a different X-Models-Etag on /responses, Codex refreshes /models.
+    // 2) If the server sends a different X-Models-Etag on the model stream,
+    // Codex refreshes /models.
     let refresh_models_mock = responses::mount_models_once_with_etag(
         &server,
         ModelsResponse { models: Vec::new() },
@@ -79,7 +80,7 @@ async fn refresh_models_on_models_etag_mismatch_and_avoid_duplicate_models_fetch
     )
     .await;
 
-    // First /responses request (user message) succeeds and returns a tool call.
+    // First model request (user message) succeeds and returns a tool call.
     // It also includes a mismatched X-Models-Etag, which should trigger a /models refresh.
     let first_response_body = sse(vec![
         ev_response_created("resp-1"),
@@ -92,7 +93,7 @@ async fn refresh_models_on_models_etag_mismatch_and_avoid_duplicate_models_fetch
     )
     .await;
 
-    // Second /responses request (tool output) includes the same X-Models-Etag; Codex should not
+    // Second model request (tool output) includes the same X-Models-Etag; Codex should not
     // refetch /models again after it has already refreshed the catalog.
     let completion_response_body = sse(vec![
         ev_response_created("resp-2"),
@@ -112,7 +113,7 @@ async fn refresh_models_on_models_etag_mismatch_and_avoid_duplicate_models_fetch
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
                 environments: Some(local_selections(cwd_path)),
@@ -156,7 +157,7 @@ async fn refresh_models_on_models_etag_mismatch_and_avoid_duplicate_models_fetch
         "expected /models refresh to include client_version query param"
     );
 
-    // Assert the tool output /responses request succeeded and did not trigger another /models fetch.
+    // Assert the tool output model request succeeded and did not trigger another /models fetch.
     let tool_req = tool_output_mock.single_request();
     let _ = tool_req.function_call_output(CALL_ID);
     assert_eq!(refresh_models_mock.requests().len(), 1);

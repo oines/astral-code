@@ -609,7 +609,7 @@ fn reasoning_body_matches(left: &ConversationBody, right: &ConversationBody) -> 
         return true;
     }
 
-    // The Responses API may return readable reasoning on completion, but later
+    // Providers may return readable reasoning on completion, but later
     // request snapshots often replay only the encrypted blob. Treat the blob as
     // stable model-visible identity and merge readable text as best-effort
     // evidence, because request/response serialization can observe different

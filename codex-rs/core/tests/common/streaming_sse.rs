@@ -10,6 +10,8 @@ use tokio::sync::Mutex as TokioMutex;
 use tokio::sync::Notify;
 use tokio::sync::oneshot;
 
+use crate::responses::ResponsesSseToChatCompletionsConverter;
+
 /// Streaming SSE chunk payload gated by a per-chunk signal.
 #[derive(Debug)]
 pub struct StreamingSseChunk {
@@ -52,7 +54,7 @@ impl StreamingSseServer {
 
 /// Starts a lightweight HTTP server that supports:
 /// - GET /v1/models -> empty models response
-/// - POST /v1/responses -> SSE stream gated per-chunk, served in order
+/// - POST /v1/chat/completions -> SSE stream gated per-chunk, served in order
 ///
 /// Returns the server handle and a list of receivers that fire when each
 /// response stream finishes sending its final chunk.
@@ -116,7 +118,7 @@ pub async fn start_streaming_sse_server(
                             return;
                         }
 
-                        if method == "POST" && path == "/v1/responses" {
+                        if method == "POST" && path == "/v1/chat/completions" {
                             let body = match read_request_body(&mut stream, &request, body_prefix)
                                 .await
                             {
@@ -137,15 +139,25 @@ pub async fn start_streaming_sse_server(
                                 return;
                             }
 
+                            let mut responses_sse_converter =
+                                ResponsesSseToChatCompletionsConverter::new();
                             for chunk in chunks {
                                 if let Some(gate) = chunk.gate
                                     && gate.await.is_err() {
                                         return;
                                     }
-                                if stream.write_all(chunk.body.as_bytes()).await.is_err() {
+                                let body = responses_sse_converter
+                                    .convert_chunk(&chunk.body)
+                                    .unwrap_or(chunk.body);
+                                if stream.write_all(body.as_bytes()).await.is_err() {
                                     return;
                                 }
                                 let _ = stream.flush().await;
+                            }
+                            if responses_sse_converter.converted_responses_event()
+                                && stream.write_all(b"data: [DONE]\n\n").await.is_err()
+                            {
+                                return;
                             }
 
                             let _ = completion.send(unix_ms_now());
@@ -388,7 +400,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn post_responses_streams_in_order_and_closes() {
+    async fn post_chat_completions_streams_in_order_and_closes() {
         let chunks = vec![
             StreamingSseChunk {
                 gate: None,
@@ -403,7 +415,7 @@ mod tests {
         let mut stream = connect(server.uri()).await;
         send_request(
             &mut stream,
-            "POST /v1/responses HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\n\r\n",
+            "POST /v1/chat/completions HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\n\r\n",
         )
         .await;
         let response = read_to_end(&mut stream).await;
@@ -433,7 +445,7 @@ mod tests {
         let mut stream = connect(server.uri()).await;
         send_request(
             &mut stream,
-            "POST /v1/responses HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\n\r\n",
+            "POST /v1/chat/completions HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\n\r\n",
         )
         .await;
         let (headers, remainder) = read_until(&mut stream, "\r\n\r\n").await;
@@ -445,12 +457,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn post_responses_with_no_queue_returns_500() {
+    async fn post_chat_completions_with_no_queue_returns_500() {
         let (server, _) = start_streaming_sse_server(Vec::new()).await;
         let mut stream = connect(server.uri()).await;
         send_request(
             &mut stream,
-            "POST /v1/responses HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\n\r\n",
+            "POST /v1/chat/completions HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\n\r\n",
         )
         .await;
         let response = read_to_end(&mut stream).await;
@@ -479,7 +491,7 @@ mod tests {
         let mut stream = connect(server.uri()).await;
         send_request(
             &mut stream,
-            "POST /v1/responses HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\n\r\n",
+            "POST /v1/chat/completions HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\n\r\n",
         )
         .await;
         let (headers, remainder) = read_until(&mut stream, "\r\n\r\n").await;
@@ -514,7 +526,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn multiple_responses_are_fifo_and_completion_timestamps_monotonic() {
+    async fn multiple_chat_completions_are_fifo_and_completion_timestamps_monotonic() {
         let first_chunks = vec![StreamingSseChunk {
             gate: None,
             body: "event: first\n\n".to_string(),
@@ -529,7 +541,7 @@ mod tests {
         let mut first_stream = connect(server.uri()).await;
         send_request(
             &mut first_stream,
-            "POST /v1/responses HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\n\r\n",
+            "POST /v1/chat/completions HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\n\r\n",
         )
         .await;
         let first_response = read_to_end(&mut first_stream).await;
@@ -539,7 +551,7 @@ mod tests {
         let mut second_stream = connect(server.uri()).await;
         send_request(
             &mut second_stream,
-            "POST /v1/responses HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\n\r\n",
+            "POST /v1/chat/completions HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\n\r\n",
         )
         .await;
         let second_response = read_to_end(&mut second_stream).await;
@@ -588,7 +600,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn responses_post_drains_request_body() {
+    async fn chat_completions_post_drains_request_body() {
         let response_body = r#"event: response.completed
 data: {"type":"response.completed","response":{"id":"resp-1"}}
 
@@ -599,11 +611,13 @@ data: {"type":"response.completed","response":{"id":"resp-1"}}
         }]])
         .await;
 
-        let url = format!("{}/v1/responses", server.uri());
+        let url = format!("{}/v1/chat/completions", server.uri());
         let payload = serde_json::json!({
             "model": "gpt-5.4",
-            "instructions": "test",
-            "input": [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hello"}]}],
+            "messages": [
+                {"role": "system", "content": "test"},
+                {"role": "user", "content": "hello"}
+            ],
             "stream": true
         });
 

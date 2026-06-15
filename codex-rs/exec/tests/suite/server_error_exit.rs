@@ -10,17 +10,14 @@ use core_test_support::test_codex_exec::test_codex_exec;
 async fn exits_non_zero_when_server_reports_error() -> anyhow::Result<()> {
     let test = test_codex_exec();
 
-    // Mock a simple Responses API SSE stream that immediately reports a
-    // `response.failed` event with an error message.
+    // Mock a simple Chat Completions SSE stream that immediately reports an
+    // error message.
     let server = responses::start_mock_server().await;
-    let body = responses::sse(vec![serde_json::json!({
-        "type": "response.failed",
-        "response": {
-            "id": "resp_err_1",
-            "error": {"code": "rate_limit_exceeded", "message": "synthetic server error"}
-        }
-    })]);
-    responses::mount_sse_once(&server, body).await;
+    responses::mount_chat_completions_sse_once(
+        &server,
+        responses::chat_completions_error_sse("synthetic server error"),
+    )
+    .await;
 
     test.cmd_with_server(&server)
         .arg("--skip-git-repo-check")

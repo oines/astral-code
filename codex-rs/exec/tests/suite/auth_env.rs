@@ -1,7 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-use core_test_support::responses::ev_completed;
-use core_test_support::responses::mount_sse_once_match;
-use core_test_support::responses::sse;
+use core_test_support::responses::chat_completions_completed_sse;
+use core_test_support::responses::mount_chat_completions_sse_once_match;
 use core_test_support::responses::start_mock_server;
 use core_test_support::test_codex_exec::test_codex_exec;
 use wiremock::matchers::header;
@@ -12,10 +11,10 @@ async fn exec_uses_astral_api_key_env_var() -> anyhow::Result<()> {
     let server = start_mock_server().await;
     let repo_root = codex_utils_cargo_bin::repo_root()?;
 
-    mount_sse_once_match(
+    mount_chat_completions_sse_once_match(
         &server,
         header("Authorization", "Bearer dummy"),
-        sse(vec![ev_completed("request_0")]),
+        chat_completions_completed_sse(),
     )
     .await;
 

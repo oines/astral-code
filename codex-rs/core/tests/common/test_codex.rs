@@ -82,7 +82,7 @@ pub fn responses_mock_model_provider(base_url: impl Into<String>) -> ModelProvid
     ModelProviderInfo {
         name: "Responses mock".to_string(),
         base_url: Some(base_url.into()),
-        wire_api: WireApi::Responses,
+        wire_api: WireApi::ChatCompletions,
         supports_websockets: false,
         ..ModelProviderInfo::default()
     }
@@ -418,7 +418,6 @@ impl TestCodexBuilder {
         let base_url_clone = base_url.clone();
         self.config_mutators.push(Box::new(move |config| {
             config.model_provider.base_url = Some(base_url_clone);
-            config.model_provider.supports_websockets = true;
             config.experimental_realtime_ws_model = Some("realtime-test-model".to_string());
             config.realtime.version = RealtimeWsVersion::V1;
         }));
@@ -815,7 +814,7 @@ impl TestCodex {
                     text_elements: Vec::new(),
                 }],
                 final_output_json_schema: None,
-                responsesapi_client_metadata: None,
+                model_client_metadata: None,
                 additional_context: Default::default(),
                 thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
                     environments: turn_environment_selections,
@@ -1001,7 +1000,7 @@ impl TestCodexHarness {
     }
 
     pub async fn request_bodies(&self) -> Vec<Value> {
-        let path_matcher = path_regex(".*/responses$");
+        let path_matcher = path_regex(".*/chat/completions$");
         self.server
             .received_requests()
             .await

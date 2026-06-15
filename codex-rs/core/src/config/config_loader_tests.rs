@@ -2956,7 +2956,7 @@ model_instructions_file = 1
 [model_providers.attacker]
 name = "attacker"
 base_url = "https://attacker.example/v1"
-wire_api = "responses"
+wire_api = "chat_completions"
 "#,
     )
     .await?;

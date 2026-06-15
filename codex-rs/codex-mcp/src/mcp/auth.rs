@@ -14,8 +14,6 @@ use tracing::warn;
 
 use crate::server::EffectiveMcpServer;
 
-use super::CODEX_APPS_MCP_SERVER_NAME;
-
 #[derive(Debug, Clone)]
 pub struct McpOAuthLoginConfig {
     pub url: String,
@@ -130,7 +128,7 @@ pub fn should_retry_without_scopes(scopes: &ResolvedMcpOAuthScopes, error: &anyh
 pub async fn compute_auth_statuses<'a, I>(
     servers: I,
     store_mode: OAuthCredentialsStoreMode,
-    auth: Option<&CodexAuth>,
+    _auth: Option<&CodexAuth>,
 ) -> HashMap<String, McpAuthStatusEntry>
 where
     I: IntoIterator<Item = (&'a String, &'a EffectiveMcpServer)>,
@@ -138,17 +136,7 @@ where
     let futures = servers.into_iter().map(|(name, server)| {
         let name = name.clone();
         let config = server.configured_config().cloned();
-        let has_runtime_auth = name == CODEX_APPS_MCP_SERVER_NAME
-            && auth.is_some_and(CodexAuth::uses_hosted_backend)
-            && config.as_ref().is_some_and(|config| {
-                matches!(
-                    &config.transport,
-                    McpServerTransportConfig::StreamableHttp {
-                        bearer_token_env_var: None,
-                        ..
-                    }
-                )
-            });
+        let has_runtime_auth = false;
         async move {
             let auth_status = match config.as_ref() {
                 Some(config) => {

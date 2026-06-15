@@ -246,7 +246,7 @@ async fn report_agent_job_result_rejects_wrong_thread() -> Result<()> {
 
     let responder = AgentJobsResponder::new(args_json);
     Mock::given(method("POST"))
-        .and(path_regex(".*/responses$"))
+        .and(path_regex(".*/chat/completions$"))
         .respond_with(responder)
         .mount(&server)
         .await;
@@ -312,7 +312,7 @@ async fn spawn_agents_on_csv_runs_and_exports() -> Result<()> {
 
     let responder = AgentJobsResponder::new(args_json);
     Mock::given(method("POST"))
-        .and(path_regex(".*/responses$"))
+        .and(path_regex(".*/chat/completions$"))
         .respond_with(responder)
         .mount(&server)
         .await;
@@ -356,7 +356,7 @@ async fn spawn_agents_on_csv_dedupes_item_ids() -> Result<()> {
 
     let responder = AgentJobsResponder::new(args_json);
     Mock::given(method("POST"))
-        .and(path_regex(".*/responses$"))
+        .and(path_regex(".*/chat/completions$"))
         .respond_with(responder)
         .mount(&server)
         .await;
@@ -415,7 +415,7 @@ async fn spawn_agents_on_csv_stop_halts_future_items() -> Result<()> {
     let worker_calls = Arc::new(AtomicUsize::new(0));
     let responder = StopAfterFirstResponder::new(args_json, worker_calls.clone());
     Mock::given(method("POST"))
-        .and(path_regex(".*/responses$"))
+        .and(path_regex(".*/chat/completions$"))
         .respond_with(responder)
         .mount(&server)
         .await;

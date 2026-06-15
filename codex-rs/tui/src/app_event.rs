@@ -21,7 +21,6 @@ use codex_app_server_protocol::PluginListResponse;
 use codex_app_server_protocol::PluginReadParams;
 use codex_app_server_protocol::PluginReadResponse;
 use codex_app_server_protocol::PluginUninstallResponse;
-use codex_app_server_protocol::RateLimitSnapshot;
 use codex_app_server_protocol::SkillsListResponse;
 use codex_app_server_protocol::ThreadGoalStatus;
 use codex_file_search::FileMatch;
@@ -105,23 +104,6 @@ pub(crate) enum WindowsSandboxEnableMode {
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub(crate) struct ConnectorsSnapshot {
     pub(crate) connectors: Vec<AppInfo>,
-}
-
-/// Distinguishes why a rate-limit refresh was requested so the completion
-/// handler can route the result correctly.
-///
-/// A `StartupPrefetch` fires once, concurrently with the rest of TUI init, and
-/// only updates the cached snapshots (no status card to finalize). A
-/// `StatusCommand` is tied to a specific `/status` invocation and must call
-/// `finish_status_rate_limit_refresh` when done so the card stops showing a
-/// "refreshing" state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RateLimitRefreshOrigin {
-    /// Eagerly fetched after bootstrap so the first `/status` already has data.
-    StartupPrefetch,
-    /// User-initiated via `/status`; the `request_id` correlates with the
-    /// status card that should be updated when the fetch completes.
-    StatusCommand { request_id: u64 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -221,9 +203,6 @@ pub(crate) enum AppEvent {
     /// background tasks, rollout flush, or child process cleanup).
     Exit(ExitMode),
 
-    /// Request app-server account logout, then exit after it succeeds.
-    Logout,
-
     /// Request to exit the application due to a fatal error.
     #[allow(dead_code)]
     FatalExitRequest(String),
@@ -254,11 +233,6 @@ pub(crate) enum AppEvent {
         matches: Vec<FileMatch>,
     },
 
-    /// Refresh account rate limits in the background.
-    RefreshRateLimits {
-        origin: RateLimitRefreshOrigin,
-    },
-
     /// Open the current thread goal summary/action menu.
     OpenThreadGoalMenu {
         thread_id: ThreadId,
@@ -285,12 +259,6 @@ pub(crate) enum AppEvent {
     /// Clear the current thread goal.
     ClearThreadGoal {
         thread_id: ThreadId,
-    },
-
-    /// Result of refreshing rate limits.
-    RateLimitsLoaded {
-        origin: RateLimitRefreshOrigin,
-        result: Result<Vec<RateLimitSnapshot>, String>,
     },
 
     /// Result of prefetching connectors.

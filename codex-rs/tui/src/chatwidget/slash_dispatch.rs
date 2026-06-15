@@ -148,11 +148,6 @@ impl ChatWidget {
         }
 
         match cmd {
-            SlashCommand::Feedback => {
-                let params = crate::bottom_pane::feedback_disabled_params();
-                self.bottom_pane.show_selection_view(params);
-                self.request_redraw();
-            }
             SlashCommand::New => {
                 self.app_event_tx.send(AppEvent::NewSession);
             }
@@ -356,9 +351,6 @@ impl ChatWidget {
             SlashCommand::Quit | SlashCommand::Exit => {
                 self.request_quit_without_confirmation();
             }
-            SlashCommand::Logout => {
-                self.app_event_tx.send(AppEvent::Logout);
-            }
             SlashCommand::Copy => {
                 self.copy_last_agent_markdown();
             }
@@ -402,19 +394,7 @@ impl ChatWidget {
                 self.add_hooks_output();
             }
             SlashCommand::Status => {
-                if self.should_prefetch_rate_limits() {
-                    let request_id = self.next_status_refresh_request_id;
-                    self.next_status_refresh_request_id =
-                        self.next_status_refresh_request_id.wrapping_add(1);
-                    self.add_status_output(/*refreshing_rate_limits*/ true, Some(request_id));
-                    self.app_event_tx.send(AppEvent::RefreshRateLimits {
-                        origin: RateLimitRefreshOrigin::StatusCommand { request_id },
-                    });
-                } else {
-                    self.add_status_output(
-                        /*refreshing_rate_limits*/ false, /*request_id*/ None,
-                    );
-                }
+                self.add_status_output();
             }
             SlashCommand::Ide => {
                 self.handle_ide_command();
@@ -979,8 +959,7 @@ impl ChatWidget {
             | SlashCommand::App
             | SlashCommand::Rename
             | SlashCommand::TestApproval => QueueDrain::Continue,
-            SlashCommand::Feedback
-            | SlashCommand::New
+            SlashCommand::New
             | SlashCommand::Archive
             | SlashCommand::Clear
             | SlashCommand::Resume
@@ -1007,7 +986,6 @@ impl ChatWidget {
             | SlashCommand::Memories
             | SlashCommand::Quit
             | SlashCommand::Exit
-            | SlashCommand::Logout
             | SlashCommand::Mention
             | SlashCommand::Skills
             | SlashCommand::Hooks

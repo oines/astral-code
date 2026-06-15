@@ -158,7 +158,7 @@ pub struct ThreadStartParams {
     #[experimental("thread/start.mockExperimentalField")]
     #[ts(optional = nullable)]
     pub mock_experimental_field: Option<String>,
-    /// If true, opt into emitting raw Responses API items on the event stream.
+    /// If true, opt into emitting raw model history items on the event stream.
     /// This is for internal use only (e.g. Codex Cloud).
     #[experimental("thread/start.experimentalRawEvents")]
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -1173,7 +1173,7 @@ pub struct ThreadReadResponse {
 #[ts(export_to = "v2/")]
 pub struct ThreadInjectItemsParams {
     pub thread_id: String,
-    /// Raw Responses API items to append to the thread's model-visible history.
+    /// Raw model history items to append to the thread's model-visible history.
     pub items: Vec<JsonValue>,
 }
 

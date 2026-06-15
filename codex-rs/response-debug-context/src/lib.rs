@@ -135,7 +135,7 @@ mod tests {
     fn telemetry_error_messages_omit_http_bodies() {
         let transport = TransportError::Http {
             status: StatusCode::UNAUTHORIZED,
-            url: Some("https://hosted.example/backend-api/codex/responses".to_string()),
+            url: Some("https://hosted.example/backend-api/codex/chat/completions".to_string()),
             headers: None,
             body: Some(r#"{"error":{"message":"secret token leaked"}}"#.to_string()),
         };

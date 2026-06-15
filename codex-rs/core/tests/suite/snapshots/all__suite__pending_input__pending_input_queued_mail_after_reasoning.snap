@@ -2,7 +2,7 @@
 source: core/tests/suite/pending_input.rs
 expression: snapshot
 ---
-Scenario: /responses POST bodies (input only, redacted like other suite snapshots)
+Scenario: /chat/completions POST bodies (messages only, redacted like other suite snapshots)
 
 ## First request
 00:message/developer:<PERMISSIONS_INSTRUCTIONS>

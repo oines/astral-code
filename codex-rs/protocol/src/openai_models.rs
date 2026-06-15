@@ -35,7 +35,7 @@ use crate::protocol::MultiAgentVersion;
 const PERSONALITY_PLACEHOLDER: &str = "{{ personality }}";
 pub const SPEED_TIER_FAST: &str = "fast";
 
-/// See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning
+/// See https://platform.openai.com/docs/guides/reasoning#get-started-with-reasoning
 #[derive(Debug, Default, Clone, PartialEq, Eq, TS, Hash)]
 #[ts(type = "string")]
 pub enum ReasoningEffort {

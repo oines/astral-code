@@ -67,7 +67,7 @@ fn read_only_text_turn_with_personality(
             text_elements: Vec::new(),
         }],
         final_output_json_schema: None,
-        responsesapi_client_metadata: None,
+        model_client_metadata: None,
         additional_context: Default::default(),
         thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
             environments: Some(local_selections(test.config.cwd.clone())),
@@ -609,7 +609,7 @@ async fn remote_model_friendly_personality_instructions_with_feature() -> anyhow
     let resp_mock = mount_sse_once(&server, sse_completed("resp-1")).await;
 
     let mut builder = test_codex()
-        .with_auth(codex_login::CodexAuth::create_dummy_chatgpt_auth_for_testing())
+        .with_auth(codex_login::CodexAuth::create_dummy_api_key_auth_for_testing())
         .with_config(|config| {
             config
                 .features
@@ -727,7 +727,7 @@ async fn user_turn_personality_remote_model_template_includes_update_message() -
     .await;
 
     let mut builder = test_codex()
-        .with_auth(codex_login::CodexAuth::create_dummy_chatgpt_auth_for_testing())
+        .with_auth(codex_login::CodexAuth::create_dummy_api_key_auth_for_testing())
         .with_config(|config| {
             config
                 .features

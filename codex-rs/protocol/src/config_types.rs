@@ -38,7 +38,7 @@ pub enum AutoCompactTokenLimitScope {
 
 /// A summary of the reasoning performed by the model. This can be useful for
 /// debugging and understanding the model's reasoning process.
-/// See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#reasoning-summaries
+/// See https://platform.openai.com/docs/guides/reasoning#reasoning-summaries
 #[derive(
     Debug, Serialize, Deserialize, Default, Clone, Copy, PartialEq, Eq, Display, JsonSchema, TS,
 )]
@@ -53,7 +53,7 @@ pub enum ReasoningSummary {
     None,
 }
 
-/// Controls output length/detail on GPT-5 models via the Responses API.
+/// Controls output length/detail on models that support verbosity hints.
 /// Serialized with lowercase values to match the OpenAI API.
 #[derive(
     Hash,

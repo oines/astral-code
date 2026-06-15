@@ -226,6 +226,7 @@ fn build_agent_request_maps_prompt_history_tools_and_metadata() {
             metadata: RequestMetadata {
                 service_tier: Some("priority".to_string()),
                 prompt_cache_key: Some("thread-1".to_string()),
+                response_format: None,
                 provider: BTreeMap::from([
                     ("stream_options".to_string(), serde_json::Value::Null),
                     ("temperature".to_string(), json!(0.2)),

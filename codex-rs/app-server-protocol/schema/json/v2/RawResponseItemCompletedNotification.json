@@ -113,7 +113,7 @@
       ]
     },
     "FunctionCallOutputContentItem": {
-      "description": "Responses API compatible content items that can be returned by a tool call. This is a subset of ContentItem with the types we support as function call outputs.",
+      "description": "Structured content items that can be returned by a tool call. This is a subset of ContentItem with the types we support as function call outputs.",
       "oneOf": [
         {
           "properties": {
@@ -469,7 +469,7 @@
               "$ref": "#/definitions/LocalShellAction"
             },
             "call_id": {
-              "description": "Set when using the Responses API.",
+              "description": "Model-assigned call id when available.",
               "type": [
                 "string",
                 "null"

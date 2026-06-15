@@ -216,14 +216,14 @@ fn with_codex_apps_mcp_requires_hosted_auth() {
 }
 
 #[test]
-fn with_codex_apps_mcp_injects_host_owned_apps_for_hosted_auth() {
+fn with_codex_apps_mcp_does_not_inject_host_owned_apps_for_api_key_auth() {
     let mut config = test_mcp_config(PathBuf::from("/tmp"));
     config.apps_enabled = true;
-    let auth = CodexAuth::create_dummy_chatgpt_auth_for_testing();
+    let auth = CodexAuth::create_dummy_api_key_auth_for_testing();
 
     let servers = with_codex_apps_mcp(HashMap::new(), Some(&auth), &config);
 
-    assert!(servers.contains_key(CODEX_APPS_MCP_SERVER_NAME));
+    assert!(!servers.contains_key(CODEX_APPS_MCP_SERVER_NAME));
 }
 
 #[tokio::test]

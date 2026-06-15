@@ -3,16 +3,19 @@
 use super::*;
 use codex_app_server_protocol::CodexErrorInfo as AppServerCodexErrorInfo;
 
+#[cfg_attr(not(test), allow(dead_code))]
 const RATE_LIMIT_WARNING_THRESHOLDS: [f64; 3] = [75.0, 90.0, 95.0];
 const PRIMARY_LIMIT_FALLBACK_LABEL: &str = "usage";
 const SECONDARY_LIMIT_FALLBACK_LABEL: &str = "secondary usage";
 
 #[derive(Default)]
+#[cfg_attr(not(test), allow(dead_code))]
 pub(super) struct RateLimitWarningState {
     pub(super) secondary_index: usize,
     pub(super) primary_index: usize,
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 impl RateLimitWarningState {
     pub(super) fn take_warnings(
         &mut self,
@@ -140,11 +143,13 @@ pub(super) fn is_app_server_cyber_policy_error(info: &AppServerCodexErrorInfo) -
 }
 
 #[derive(Clone, Copy)]
+#[cfg_attr(not(test), allow(dead_code))]
 enum RateLimitSnapshotSource {
     AccountUsage,
     RollingUpdate,
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 impl ChatWidget {
     pub(crate) fn on_rate_limit_snapshot(&mut self, snapshot: Option<RateLimitSnapshot>) {
         self.on_rate_limit_snapshot_from(snapshot, RateLimitSnapshotSource::AccountUsage);
@@ -190,8 +195,6 @@ impl ChatWidget {
                 } else {
                     None
                 };
-            self.plan_type = snapshot.plan_type.or(self.plan_type);
-
             let is_codex_limit = limit_id.eq_ignore_ascii_case("codex");
             if is_codex_limit
                 && let Some(rate_limit_reached_type) = snapshot.rate_limit_reached_type
@@ -240,17 +243,5 @@ impl ChatWidget {
             self.codex_rate_limit_reached_type = None;
         }
         self.refresh_status_line();
-    }
-
-    pub(super) fn stop_rate_limit_poller(&mut self) {}
-
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(super) fn prefetch_rate_limits(&mut self) {
-        self.stop_rate_limit_poller();
-    }
-
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(super) fn should_prefetch_rate_limits(&self) -> bool {
-        self.config.model_provider.requires_astral_auth && self.has_chatgpt_account
     }
 }

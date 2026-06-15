@@ -16,7 +16,6 @@ use crate::transport::CHANNEL_CAPACITY;
 use crate::transport::ConnectionOrigin;
 use crate::transport::TransportEvent;
 use base64::Engine;
-use codex_app_server_protocol::AuthMode;
 use codex_app_server_protocol::ConfigWarningNotification;
 use codex_app_server_protocol::JSONRPCMessage;
 use codex_app_server_protocol::RemoteControlConnectionStatus;
@@ -31,8 +30,6 @@ use codex_login::AuthDotJson;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
 use codex_login::save_auth;
-use codex_login::token_data::TokenData;
-use codex_login::token_data::parse_chatgpt_jwt_claims;
 use codex_state::StateRuntime;
 use futures::SinkExt;
 use futures::StreamExt;
@@ -70,52 +67,22 @@ const TEST_REFRESHED_REMOTE_CONTROL_SERVER_TOKEN: &str = "Refreshed Remote Contr
 const TEST_REMOTE_CONTROL_SERVER_TOKEN_EXPIRES_AT: &str = "2999-01-01T00:00:00Z";
 
 fn remote_control_auth_manager() -> Arc<AuthManager> {
-    auth_manager_from_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+    auth_manager_from_auth(CodexAuth::create_dummy_api_key_auth_for_testing())
 }
 
 fn remote_control_auth_manager_with_home(codex_home: &TempDir) -> Arc<AuthManager> {
     auth_manager_from_auth_with_home(
-        CodexAuth::create_dummy_chatgpt_auth_for_testing(),
+        CodexAuth::create_dummy_api_key_auth_for_testing(),
         codex_home.path().to_path_buf(),
     )
 }
 
 fn remote_control_auth_dot_json(account_id: Option<&str>) -> AuthDotJson {
-    #[derive(serde::Serialize)]
-    struct Header {
-        alg: &'static str,
-        typ: &'static str,
-    }
-
-    let header = Header {
-        alg: "none",
-        typ: "JWT",
-    };
-    let payload = serde_json::json!({
-        "email": "user@example.com",
-        "https://api.openai.com/auth": {
-            "chatgpt_user_id": "user-12345",
-            "user_id": "user-12345",
-            "chatgpt_account_id": "account_id"
-        }
-    });
-    let b64 = |bytes: &[u8]| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
-    let header_b64 = b64(&serde_json::to_vec(&header).expect("header should serialize"));
-    let payload_b64 = b64(&serde_json::to_vec(&payload).expect("payload should serialize"));
-    let fake_jwt = format!("{header_b64}.{payload_b64}.sig");
-
+    let _ = account_id;
     AuthDotJson {
-        auth_mode: Some(AuthMode::Chatgpt),
+        auth_mode: Some("chatgpt".to_string()),
         api_key: None,
-        tokens: Some(TokenData {
-            id_token: parse_chatgpt_jwt_claims(&fake_jwt).expect("fake jwt should parse"),
-            access_token: "Access Token".to_string(),
-            refresh_token: "refresh-token".to_string(),
-            account_id: account_id.map(str::to_string),
-        }),
         last_refresh: Some(chrono::Utc::now()),
-        agent_identity: None,
-        personal_access_token: None,
     }
 }
 
@@ -760,7 +727,7 @@ async fn remote_control_start_allows_missing_auth_when_enabled() {
         /*initial_enabled*/ true,
     )
     .await
-    .expect("remote control should start before hosted account auth is available");
+    .expect("remote control should start before remote auth availability is known");
 
     timeout(Duration::from_millis(100), listener.accept())
         .await

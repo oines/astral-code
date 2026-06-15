@@ -436,7 +436,7 @@ impl ToolRegistry {
         terminal_outcome_reached: Option<Arc<AtomicBool>>,
     ) -> Result<AnyToolResult, FunctionCallError> {
         let (tool_name, payload) =
-            canonicalize_astral_tool_call(invocation.tool_name, invocation.payload)?;
+            canonicalize_astral_tool_call(invocation.tool_name, invocation.payload);
         invocation.tool_name = self.canonical_runtime_tool_name(tool_name);
         invocation.payload = payload;
 
@@ -492,7 +492,13 @@ impl ToolRegistry {
                 return Err(err);
             }
         };
-        if tool.exposure() == ToolExposure::Hidden {
+        if tool.exposure() == ToolExposure::Hidden
+            && !(tool_name.name == "apply_patch"
+                && matches!(
+                    invocation.payload,
+                    ToolPayload::Custom { .. } | ToolPayload::Function { .. }
+                ))
+        {
             let message = match tool_name.name.as_str() {
                 "exec_command" | "shell_command" => {
                     "Bash is the public command execution tool in Astral; call Bash instead of internal shell tools.".to_string()
@@ -871,6 +877,7 @@ fn unsupported_tool_call_message(payload: &ToolPayload, tool_name: &ToolName) ->
         _ => format!("unsupported call: {tool_name}"),
     }
 }
+
 #[cfg(test)]
 #[path = "registry_tests.rs"]
 mod tests;

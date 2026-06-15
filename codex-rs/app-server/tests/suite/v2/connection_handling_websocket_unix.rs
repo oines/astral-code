@@ -172,7 +172,7 @@ async fn start_ctrl_c_restart_fixture(turn_delay: Duration) -> Result<GracefulCt
     let server = responses::start_mock_server().await;
     let delayed_turn_response = create_final_assistant_message_sse_response("Done")?;
     Mock::given(method("POST"))
-        .and(path_regex(".*/responses$"))
+        .and(path_regex(".*/chat/completions$"))
         .respond_with(responses::sse_response(delayed_turn_response).set_delay(turn_delay))
         .up_to_n_times(1)
         .mount(&server)
@@ -196,7 +196,7 @@ async fn start_ctrl_c_restart_fixture(turn_delay: Duration) -> Result<GracefulCt
     let turn_start_response = read_response_for_id(&mut ws, /*id*/ 3).await?;
     assert_eq!(turn_start_response.id, RequestId::Integer(3));
 
-    wait_for_responses_post(&server, Duration::from_secs(5)).await?;
+    wait_for_chat_completions_post(&server, Duration::from_secs(5)).await?;
 
     Ok(GracefulCtrlCFixture {
         _codex_home: codex_home,
@@ -237,21 +237,23 @@ async fn send_turn_start_request(stream: &mut WsClient, id: i64, thread_id: &str
     .await
 }
 
-async fn wait_for_responses_post(server: &wiremock::MockServer, wait_for: Duration) -> Result<()> {
+async fn wait_for_chat_completions_post(
+    server: &wiremock::MockServer,
+    wait_for: Duration,
+) -> Result<()> {
     let deadline = Instant::now() + wait_for;
     loop {
         let requests = server
             .received_requests()
             .await
             .context("failed to read mock server requests")?;
-        if requests
-            .iter()
-            .any(|request| request.method == "POST" && request.url.path().ends_with("/responses"))
-        {
+        if requests.iter().any(|request| {
+            request.method == "POST" && request.url.path().ends_with("/chat/completions")
+        }) {
             return Ok(());
         }
         if Instant::now() >= deadline {
-            bail!("timed out waiting for /responses request");
+            bail!("timed out waiting for /chat/completions request");
         }
         sleep(Duration::from_millis(10)).await;
     }

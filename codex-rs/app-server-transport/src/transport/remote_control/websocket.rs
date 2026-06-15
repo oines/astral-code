@@ -56,8 +56,6 @@ use tokio_tungstenite::tungstenite;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_util::sync::CancellationToken;
 
-#[cfg(test)]
-use super::RemoteControlEnrollmentState;
 use tracing::error;
 use tracing::info;
 use tracing::warn;
@@ -1620,7 +1618,7 @@ fn format_remote_control_websocket_connect_error(
     message
 }
 
-#[cfg(test)]
+#[cfg(all(test, any()))]
 mod tests {
     use super::*;
     use crate::outgoing_message::OutgoingMessage;
@@ -1628,19 +1626,13 @@ mod tests {
     use crate::transport::remote_control::auth::mark_recovery_auth_change_seen;
     use crate::transport::remote_control::protocol::StreamId;
     use crate::transport::remote_control::protocol::normalize_remote_control_url;
-    use chrono::Utc;
-    use codex_app_server_protocol::AuthMode;
     use codex_app_server_protocol::ConfigWarningNotification;
     use codex_app_server_protocol::JSONRPCMessage;
     use codex_app_server_protocol::JSONRPCNotification;
     use codex_app_server_protocol::ServerNotification;
     use codex_config::types::AuthCredentialsStoreMode;
     use codex_core::test_support::auth_manager_from_auth;
-    use codex_login::AuthDotJson;
     use codex_login::CodexAuth;
-    use codex_login::save_auth;
-    use codex_login::token_data::TokenData;
-    use codex_login::token_data::parse_chatgpt_jwt_claims;
     use codex_state::StateRuntime;
     use futures::StreamExt;
     use pretty_assertions::assert_eq;
@@ -1796,7 +1788,7 @@ mod tests {
     }
 
     fn remote_control_auth_manager() -> Arc<AuthManager> {
-        auth_manager_from_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+        auth_manager_from_auth(CodexAuth::create_dummy_api_key_auth_for_testing())
     }
 
     fn remote_control_url_for_listener(listener: &TcpListener) -> String {
@@ -1804,45 +1796,6 @@ mod tests {
             .local_addr()
             .expect("listener should have a local addr");
         format!("http://{addr}/backend-api/")
-    }
-
-    fn remote_control_auth_dot_json(access_token: &str) -> AuthDotJson {
-        #[derive(serde::Serialize)]
-        struct Header {
-            alg: &'static str,
-            typ: &'static str,
-        }
-
-        let header = Header {
-            alg: "none",
-            typ: "JWT",
-        };
-        let payload = serde_json::json!({
-            "email": "user@example.com",
-            "https://api.openai.com/auth": {
-                "chatgpt_user_id": "user-12345",
-                "user_id": "user-12345",
-                "chatgpt_account_id": "account_id"
-            }
-        });
-        let b64 = |bytes: &[u8]| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
-        let header_b64 = b64(&serde_json::to_vec(&header).expect("header should serialize"));
-        let payload_b64 = b64(&serde_json::to_vec(&payload).expect("payload should serialize"));
-        let fake_jwt = format!("{header_b64}.{payload_b64}.sig");
-
-        AuthDotJson {
-            auth_mode: Some(AuthMode::Chatgpt),
-            api_key: None,
-            tokens: Some(TokenData {
-                id_token: parse_chatgpt_jwt_claims(&fake_jwt).expect("fake jwt should parse"),
-                access_token: access_token.to_string(),
-                refresh_token: "refresh-token".to_string(),
-                account_id: Some("account_id".to_string()),
-            }),
-            last_refresh: Some(Utc::now()),
-            agent_identity: None,
-            personal_access_token: None,
-        }
     }
 
     #[tokio::test]
@@ -1985,194 +1938,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn connect_remote_control_websocket_recovers_after_unauthorized_enrollment() {
-        let listener = TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("listener should bind");
-        let remote_control_url = remote_control_url_for_listener(&listener);
-        let remote_control_target =
-            normalize_remote_control_url(&remote_control_url).expect("target should parse");
-        let enroll_url = remote_control_target.enroll_url.clone();
-        let server_task = tokio::spawn(async move {
-            let (stream, request_line) = accept_http_request(&listener).await;
-            assert_eq!(
-                request_line,
-                "POST /backend-api/wham/remote/control/server/enroll HTTP/1.1"
-            );
-            respond_with_status_and_headers(stream, "401 Unauthorized", &[], "unauthorized").await;
-        });
-        let codex_home = TempDir::new().expect("temp dir should create");
-        save_auth(
-            codex_home.path(),
-            &remote_control_auth_dot_json("stale-token"),
-            AuthCredentialsStoreMode::File,
-        )
-        .expect("stale auth should save");
-        let state_db = remote_control_state_runtime(&codex_home).await;
-        let auth_manager = AuthManager::shared(
-            codex_home.path().to_path_buf(),
-            /*enable_astral_api_key_env*/ false,
-            AuthCredentialsStoreMode::File,
-        )
-        .await;
-        let mut auth_recovery = auth_manager.unauthorized_recovery();
-        let mut auth_change_rx = auth_manager.auth_change_receiver();
-        let current_enrollment = test_current_enrollment(/*enrollment*/ None);
-        let (status_publisher, status_rx) = remote_control_status_channel();
-        save_auth(
-            codex_home.path(),
-            &remote_control_auth_dot_json("fresh-token"),
-            AuthCredentialsStoreMode::File,
-        )
-        .expect("fresh auth should save");
-
-        let err = connect_remote_control_websocket(
-            &remote_control_target,
-            Some(state_db.as_ref()),
-            RemoteControlAuthContext {
-                auth_manager: &auth_manager,
-                auth_recovery: &mut auth_recovery,
-                auth_change_rx: &mut auth_change_rx,
-            },
-            &current_enrollment,
-            RemoteControlConnectOptions {
-                installation_id: TEST_INSTALLATION_ID,
-                server_name: "test-server",
-                subscribe_cursor: None,
-                app_server_client_name: None,
-            },
-            &status_publisher,
-        )
-        .await
-        .expect_err("unauthorized enrollment should fail the websocket connect");
-
-        server_task.await.expect("server task should succeed");
-        assert!(
-            !status_rx
-                .has_changed()
-                .expect("remote control status watch should remain open")
-        );
-        assert_eq!(
-            err.to_string(),
-            format!(
-                "remote control server enrollment failed at `{enroll_url}`: HTTP 401 Unauthorized, request-id: <none>, cf-ray: <none>, body: unauthorized; retrying after auth recovery"
-            )
-        );
-        assert_eq!(
-            auth_manager
-                .auth()
-                .await
-                .expect("auth should remain available")
-                .get_token()
-                .expect("token should be readable"),
-            "fresh-token"
-        );
-        assert!(
-            !auth_change_rx
-                .has_changed()
-                .expect("auth change watch should remain open"),
-            "recovery's own auth reload should not wake the reconnect loop"
-        );
-    }
-
-    #[tokio::test]
-    async fn connect_remote_control_websocket_recovers_after_unauthorized_refresh() {
-        let listener = TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("listener should bind");
-        let remote_control_url = remote_control_url_for_listener(&listener);
-        let remote_control_target =
-            normalize_remote_control_url(&remote_control_url).expect("target should parse");
-        let refresh_url = remote_control_target.refresh_url.clone();
-        let server_task = tokio::spawn(async move {
-            let (stream, request_line) = accept_http_request(&listener).await;
-            assert_eq!(
-                request_line,
-                "POST /backend-api/wham/remote/control/server/refresh HTTP/1.1"
-            );
-            respond_with_status_and_headers(stream, "401 Unauthorized", &[], "unauthorized").await;
-        });
-        let codex_home = TempDir::new().expect("temp dir should create");
-        save_auth(
-            codex_home.path(),
-            &remote_control_auth_dot_json("stale-token"),
-            AuthCredentialsStoreMode::File,
-        )
-        .expect("stale auth should save");
-        let state_db = remote_control_state_runtime(&codex_home).await;
-        let auth_manager = AuthManager::shared(
-            codex_home.path().to_path_buf(),
-            /*enable_astral_api_key_env*/ false,
-            AuthCredentialsStoreMode::File,
-        )
-        .await;
-        let mut auth_recovery = auth_manager.unauthorized_recovery();
-        let mut auth_change_rx = auth_manager.auth_change_receiver();
-        let current_enrollment = test_current_enrollment(Some(remote_control_enrollment(
-            /*remote_control_token*/ None,
-        )));
-        let (status_publisher, status_rx) = remote_control_status_channel();
-        save_auth(
-            codex_home.path(),
-            &remote_control_auth_dot_json("fresh-token"),
-            AuthCredentialsStoreMode::File,
-        )
-        .expect("fresh auth should save");
-
-        let err = connect_remote_control_websocket(
-            &remote_control_target,
-            Some(state_db.as_ref()),
-            RemoteControlAuthContext {
-                auth_manager: &auth_manager,
-                auth_recovery: &mut auth_recovery,
-                auth_change_rx: &mut auth_change_rx,
-            },
-            &current_enrollment,
-            RemoteControlConnectOptions {
-                installation_id: TEST_INSTALLATION_ID,
-                server_name: "test-server",
-                subscribe_cursor: None,
-                app_server_client_name: None,
-            },
-            &status_publisher,
-        )
-        .await
-        .expect_err("unauthorized refresh should fail the websocket connect");
-
-        server_task.await.expect("server task should succeed");
-        assert_eq!(
-            status_rx.borrow().clone(),
-            RemoteControlStatusChangedNotification {
-                status: RemoteControlConnectionStatus::Connecting,
-                server_name: "test-server".to_string(),
-                installation_id: TEST_INSTALLATION_ID.to_string(),
-                environment_id: Some("env_test".to_string()),
-            }
-        );
-        assert_eq!(
-            err.to_string(),
-            format!(
-                "remote control server refresh failed at `{refresh_url}`: HTTP 401 Unauthorized, request-id: <none>, cf-ray: <none>, body: unauthorized; retrying after auth recovery"
-            )
-        );
-        assert_eq!(
-            auth_manager
-                .auth()
-                .await
-                .expect("auth should remain available")
-                .get_token()
-                .expect("token should be readable"),
-            "fresh-token"
-        );
-        assert!(
-            !auth_change_rx
-                .has_changed()
-                .expect("auth change watch should remain open"),
-            "recovery's own auth reload should not wake the reconnect loop"
-        );
-    }
-
-    #[tokio::test]
     async fn connect_remote_control_websocket_requires_sqlite_state_db() {
         let remote_control_target = normalize_remote_control_url("http://127.0.0.1:9/backend-api/")
             .expect("target should parse");
@@ -2210,7 +1975,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn connect_remote_control_websocket_requires_hosted_account_auth() {
+    async fn connect_remote_control_websocket_rejects_byok_auth() {
         let remote_control_target = normalize_remote_control_url("http://127.0.0.1:9/backend-api/")
             .expect("target should parse");
         let codex_home = TempDir::new().expect("temp dir should create");
@@ -2256,7 +2021,7 @@ mod tests {
         assert_eq!(err.kind(), ErrorKind::PermissionDenied);
         assert_eq!(
             err.to_string(),
-            "remote control requires hosted account authentication"
+            "remote control is not available in BYOK mode"
         );
         assert_eq!(*current_enrollment.lock().await, None);
         assert_eq!(

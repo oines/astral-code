@@ -176,7 +176,7 @@ async fn received_response_input_images(server: &wiremock::MockServer) -> Result
     let mut input_images = Vec::new();
 
     for request in requests {
-        if !request.url.path().ends_with("/responses") {
+        if !request.url.path().ends_with("/chat/completions") {
             continue;
         }
         let body = request
@@ -282,26 +282,25 @@ async fn turn_start_with_empty_input_runs_model_request() -> Result<()> {
         .context("failed to fetch received requests")?;
     let response_requests = requests
         .iter()
-        .filter(|request| request.url.path().ends_with("/responses"))
+        .filter(|request| request.url.path().ends_with("/chat/completions"))
         .collect::<Vec<_>>();
     assert_eq!(response_requests.len(), 1);
     let body = response_requests[0]
         .body_json::<Value>()
         .context("request body should be JSON")?;
-    let input = body
-        .get("input")
+    let messages = body
+        .get("messages")
         .and_then(Value::as_array)
-        .context("request body should include input array")?;
+        .context("request body should include messages array")?;
     assert!(
-        !input.iter().any(|item| {
-            item.get("type").and_then(Value::as_str) == Some("message")
-                && item.get("role").and_then(Value::as_str) == Some("user")
-                && item
+        !messages.iter().any(|message| {
+            message.get("role").and_then(Value::as_str) == Some("user")
+                && message
                     .get("content")
                     .and_then(Value::as_array)
                     .is_some_and(Vec::is_empty)
         }),
-        "empty turn/start should not synthesize an empty user message: {input:?}"
+        "empty turn/start should not synthesize an empty user message: {messages:?}"
     );
 
     Ok(())
@@ -371,7 +370,7 @@ async fn turn_start_additional_context_flows_to_model_input() -> Result<()> {
         .context("failed to fetch received requests")?;
     let request = requests
         .iter()
-        .find(|request| request.url.path().ends_with("/responses"))
+        .find(|request| request.url.path().ends_with("/chat/completions"))
         .context("expected model request")?;
     let body = request
         .body_json::<Value>()
@@ -874,7 +873,7 @@ async fn turn_start_tracks_turn_event_analytics() -> Result<()> {
                 url: "https://example.com/a.png".to_string(),
                 detail: None,
             }],
-            responsesapi_client_metadata: Some(HashMap::from([(
+            model_client_metadata: Some(HashMap::from([(
                 "workspace_kind".to_string(),
                 "projectless".to_string(),
             )])),
@@ -2329,7 +2328,7 @@ async fn turn_start_updates_sandbox_and_cwd_between_turns_v2() -> Result<()> {
                 text: "first turn".to_string(),
                 text_elements: Vec::new(),
             }],
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: None,
             cwd: Some(first_cwd.clone()),
             runtime_workspace_roots: None,
@@ -2374,7 +2373,7 @@ async fn turn_start_updates_sandbox_and_cwd_between_turns_v2() -> Result<()> {
                 text: "second turn".to_string(),
                 text_elements: Vec::new(),
             }],
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: None,
             cwd: Some(second_cwd.clone()),
             runtime_workspace_roots: None,
@@ -2486,7 +2485,7 @@ model_provider = "mock_provider"
 [model_providers.mock_provider]
 name = "Mock provider for test"
 base_url = "{server_uri}/v1"
-wire_api = "responses"
+wire_api = "chat_completions"
 request_max_retries = 0
 stream_max_retries = 0
 
@@ -2561,7 +2560,7 @@ stream_max_retries = 0
     .await??;
 
     let requests = response_mock.requests();
-    assert_eq!(requests.len(), 2, "expected two Responses API requests");
+    assert_eq!(requests.len(), 2, "expected two model API requests");
     let latest_permissions_instructions =
         |request: &core_test_support::responses::ResponsesRequest| {
             request
@@ -4149,7 +4148,7 @@ model_provider = "mock_provider"
 [model_providers.mock_provider]
 name = "Mock provider for test"
 base_url = "{server_uri}/v1"
-wire_api = "responses"
+wire_api = "chat_completions"
 request_max_retries = 0
 stream_max_retries = 0
 "#

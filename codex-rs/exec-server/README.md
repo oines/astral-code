@@ -26,14 +26,9 @@ The CLI entrypoint supports:
 
 Remote mode registers the local exec-server with the environment registry,
 then reconnects to the service-provided rendezvous websocket as the environment.
-It uses the standard Astral sign-in state; run `astral login` first when
-remote registration needs authentication. Containerized callers that receive an
-Agent Identity JWT in `ASTRAL_ACCESS_TOKEN` can opt into that auth path with
-`--use-agent-identity-auth`; Astral then registers an Agent task and sends the
-derived AgentAssertion headers on the registry request.
-
-Alternatively, API users can instead use `ASTRAL_API_KEY`;
-Astral sends it as a bearer token on the registration request. For example:
+Remote registration reads the active provider API key from configuration or
+environment. Astral sends it as a bearer token on the registration request. For
+example:
 
 ```sh
 ASTRAL_API_KEY="$PROVIDER_API_KEY" \

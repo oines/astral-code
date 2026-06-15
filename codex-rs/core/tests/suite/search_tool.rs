@@ -529,7 +529,7 @@ async fn tool_search_returns_deferred_tools_without_follow_up_tool_injection() -
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -938,7 +938,7 @@ async fn tool_search_returns_deferred_dynamic_tool_and_routes_follow_up_call() -
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -1248,7 +1248,7 @@ async fn tool_search_surfaced_mcp_tool_errors_are_returned_to_model() -> Result<
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -1565,7 +1565,7 @@ async fn tool_search_matches_dynamic_tools_by_name_description_namespace_and_sch
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })

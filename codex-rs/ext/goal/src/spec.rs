@@ -1,4 +1,4 @@
-//! Responses API tool definitions for persisted thread goals.
+//! Tool definitions for persisted thread goals.
 
 use codex_tools::JsonSchema;
 use codex_tools::ResponsesApiTool;

@@ -1,5 +1,4 @@
 use super::*;
-use crate::auth::KnownPlan;
 use crate::exec_output::StreamOutput;
 use crate::protocol::RateLimitWindow;
 use chrono::DateTime;
@@ -37,7 +36,6 @@ fn rate_limit_snapshot() -> RateLimitSnapshot {
         }),
         credits: None,
         individual_limit: None,
-        plan_type: None,
         rate_limit_reached_type: None,
     }
 }
@@ -54,7 +52,6 @@ fn with_now_override<T>(now: DateTime<Utc>, f: impl FnOnce() -> T) -> T {
 #[test]
 fn usage_limit_reached_error_formats_plus_plan() {
     let err = UsageLimitReachedError {
-        plan_type: Some(PlanType::Known(KnownPlan::Plus)),
         resets_at: None,
         rate_limits: Some(Box::new(rate_limit_snapshot())),
         promo_message: None,
@@ -93,7 +90,6 @@ fn usage_limit_reached_error_formats_rate_limit_reached_types() {
 
     for (rate_limit_reached_type, expected) in cases {
         let err = UsageLimitReachedError {
-            plan_type: Some(PlanType::Known(KnownPlan::Plus)),
             resets_at: None,
             rate_limits: Some(Box::new(rate_limit_snapshot())),
             promo_message: None,
@@ -214,7 +210,6 @@ fn sandbox_denied_reports_exit_code_when_no_output_available() {
 #[test]
 fn usage_limit_reached_error_formats_free_plan() {
     let err = UsageLimitReachedError {
-        plan_type: Some(PlanType::Known(KnownPlan::Free)),
         resets_at: None,
         rate_limits: Some(Box::new(rate_limit_snapshot())),
         promo_message: None,
@@ -229,7 +224,6 @@ fn usage_limit_reached_error_formats_free_plan() {
 #[test]
 fn usage_limit_reached_error_formats_go_plan() {
     let err = UsageLimitReachedError {
-        plan_type: Some(PlanType::Known(KnownPlan::Go)),
         resets_at: None,
         rate_limits: Some(Box::new(rate_limit_snapshot())),
         promo_message: None,
@@ -244,7 +238,6 @@ fn usage_limit_reached_error_formats_go_plan() {
 #[test]
 fn usage_limit_reached_error_formats_default_when_none() {
     let err = UsageLimitReachedError {
-        plan_type: None,
         resets_at: None,
         rate_limits: Some(Box::new(rate_limit_snapshot())),
         promo_message: None,
@@ -263,7 +256,6 @@ fn usage_limit_reached_error_formats_team_plan() {
     with_now_override(base, move || {
         let expected_time = format_retry_timestamp(&resets_at);
         let err = UsageLimitReachedError {
-            plan_type: Some(PlanType::Known(KnownPlan::Team)),
             resets_at: Some(resets_at),
             rate_limits: Some(Box::new(rate_limit_snapshot())),
             promo_message: None,
@@ -279,7 +271,6 @@ fn usage_limit_reached_error_formats_team_plan() {
 #[test]
 fn usage_limit_reached_error_formats_business_plan_without_reset() {
     let err = UsageLimitReachedError {
-        plan_type: Some(PlanType::Known(KnownPlan::Business)),
         resets_at: None,
         rate_limits: Some(Box::new(rate_limit_snapshot())),
         promo_message: None,
@@ -294,7 +285,6 @@ fn usage_limit_reached_error_formats_business_plan_without_reset() {
 #[test]
 fn usage_limit_reached_error_formats_self_serve_business_usage_based_plan() {
     let err = UsageLimitReachedError {
-        plan_type: Some(PlanType::Known(KnownPlan::SelfServeBusinessUsageBased)),
         resets_at: None,
         rate_limits: Some(Box::new(rate_limit_snapshot())),
         promo_message: None,
@@ -309,7 +299,6 @@ fn usage_limit_reached_error_formats_self_serve_business_usage_based_plan() {
 #[test]
 fn usage_limit_reached_error_formats_enterprise_cbp_usage_based_plan() {
     let err = UsageLimitReachedError {
-        plan_type: Some(PlanType::Known(KnownPlan::EnterpriseCbpUsageBased)),
         resets_at: None,
         rate_limits: Some(Box::new(rate_limit_snapshot())),
         promo_message: None,
@@ -324,7 +313,6 @@ fn usage_limit_reached_error_formats_enterprise_cbp_usage_based_plan() {
 #[test]
 fn usage_limit_reached_error_formats_default_for_other_plans() {
     let err = UsageLimitReachedError {
-        plan_type: Some(PlanType::Known(KnownPlan::Enterprise)),
         resets_at: None,
         rate_limits: Some(Box::new(rate_limit_snapshot())),
         promo_message: None,
@@ -343,7 +331,6 @@ fn usage_limit_reached_error_formats_pro_plan_with_reset() {
     with_now_override(base, move || {
         let expected_time = format_retry_timestamp(&resets_at);
         let err = UsageLimitReachedError {
-            plan_type: Some(PlanType::Known(KnownPlan::Pro)),
             resets_at: Some(resets_at),
             rate_limits: Some(Box::new(rate_limit_snapshot())),
             promo_message: None,
@@ -363,7 +350,6 @@ fn usage_limit_reached_error_hides_upsell_for_non_codex_limit_name() {
     with_now_override(base, move || {
         let expected_time = format_retry_timestamp(&resets_at);
         let err = UsageLimitReachedError {
-            plan_type: Some(PlanType::Known(KnownPlan::Plus)),
             resets_at: Some(resets_at),
             rate_limits: Some(Box::new(RateLimitSnapshot {
                 limit_id: Some("codex_other".to_string()),
@@ -387,7 +373,6 @@ fn usage_limit_reached_includes_minutes_when_available() {
     with_now_override(base, move || {
         let expected_time = format_retry_timestamp(&resets_at);
         let err = UsageLimitReachedError {
-            plan_type: None,
             resets_at: Some(resets_at),
             rate_limits: Some(Box::new(rate_limit_snapshot())),
             promo_message: None,
@@ -445,7 +430,7 @@ fn unexpected_status_prefers_error_message_when_present() {
         status: StatusCode::UNAUTHORIZED,
         body: r#"{"error":{"message":"Workspace is not authorized in this region."},"status":401}"#
             .to_string(),
-        url: Some("https://provider.example/api/astral/responses".to_string()),
+        url: Some("https://provider.example/api/astral/chat/completions".to_string()),
         cf_ray: None,
         request_id: Some("req-123".to_string()),
         identity_authorization_error: None,
@@ -455,7 +440,7 @@ fn unexpected_status_prefers_error_message_when_present() {
     assert_eq!(
         err.to_string(),
         format!(
-            "unexpected status {status}: Workspace is not authorized in this region., url: https://provider.example/api/astral/responses, request id: req-123"
+            "unexpected status {status}: Workspace is not authorized in this region., url: https://provider.example/api/astral/chat/completions, request id: req-123"
         )
     );
 }
@@ -487,7 +472,7 @@ fn unexpected_status_includes_cf_ray_and_request_id() {
     let err = UnexpectedResponseError {
         status: StatusCode::UNAUTHORIZED,
         body: "plain text error".to_string(),
-        url: Some("https://provider.example/api/astral/responses".to_string()),
+        url: Some("https://provider.example/api/astral/chat/completions".to_string()),
         cf_ray: Some("9c81f9f18f2fa49d-LHR".to_string()),
         request_id: Some("req-xyz".to_string()),
         identity_authorization_error: None,
@@ -497,7 +482,7 @@ fn unexpected_status_includes_cf_ray_and_request_id() {
     assert_eq!(
         err.to_string(),
         format!(
-            "unexpected status {status}: plain text error, url: https://provider.example/api/astral/responses, cf-ray: 9c81f9f18f2fa49d-LHR, request id: req-xyz"
+            "unexpected status {status}: plain text error, url: https://provider.example/api/astral/chat/completions, cf-ray: 9c81f9f18f2fa49d-LHR, request id: req-xyz"
         )
     );
 }
@@ -529,7 +514,6 @@ fn usage_limit_reached_includes_hours_and_minutes() {
     with_now_override(base, move || {
         let expected_time = format_retry_timestamp(&resets_at);
         let err = UsageLimitReachedError {
-            plan_type: Some(PlanType::Known(KnownPlan::Plus)),
             resets_at: Some(resets_at),
             rate_limits: Some(Box::new(rate_limit_snapshot())),
             promo_message: None,
@@ -550,7 +534,6 @@ fn usage_limit_reached_includes_days_hours_minutes() {
     with_now_override(base, move || {
         let expected_time = format_retry_timestamp(&resets_at);
         let err = UsageLimitReachedError {
-            plan_type: None,
             resets_at: Some(resets_at),
             rate_limits: Some(Box::new(rate_limit_snapshot())),
             promo_message: None,
@@ -570,7 +553,6 @@ fn usage_limit_reached_less_than_minute() {
     with_now_override(base, move || {
         let expected_time = format_retry_timestamp(&resets_at);
         let err = UsageLimitReachedError {
-            plan_type: None,
             resets_at: Some(resets_at),
             rate_limits: Some(Box::new(rate_limit_snapshot())),
             promo_message: None,
@@ -590,7 +572,6 @@ fn usage_limit_reached_with_promo_message() {
     with_now_override(base, move || {
         let expected_time = format_retry_timestamp(&resets_at);
         let err = UsageLimitReachedError {
-            plan_type: None,
             resets_at: Some(resets_at),
             rate_limits: Some(Box::new(rate_limit_snapshot())),
             promo_message: Some("Use hosted billing to upgrade this account".to_string()),

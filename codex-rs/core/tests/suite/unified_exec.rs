@@ -221,7 +221,7 @@ async fn submit_unified_exec_turn(
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
                 environments: Some(local_selections(test.config.cwd.clone())),
@@ -312,7 +312,7 @@ async fn unified_exec_intercepts_apply_patch_exec_command() -> Result<()> {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
                 environments: Some(local_selections(cwd)),
@@ -2337,7 +2337,7 @@ async fn unified_exec_keeps_long_running_session_after_turn_end() -> Result<()> 
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
                 environments: Some(local_selections(turn_cwd)),
@@ -2440,7 +2440,7 @@ async fn unified_exec_interrupt_preserves_long_running_session() -> Result<()> {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
                 environments: Some(local_selections(turn_cwd)),
@@ -2989,7 +2989,7 @@ async fn unified_exec_runs_under_sandbox() -> Result<()> {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
                 environments: Some(local_selections(turn_cwd)),
@@ -3111,7 +3111,7 @@ async fn unified_exec_enforces_glob_deny_read_policy() -> Result<()> {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
                 environments: Some(local_selections(turn_cwd)),
@@ -3249,7 +3249,7 @@ async fn unified_exec_python_prompt_under_seatbelt() -> Result<()> {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
                 environments: Some(local_selections(turn_cwd)),

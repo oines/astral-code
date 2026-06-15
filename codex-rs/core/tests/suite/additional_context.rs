@@ -42,7 +42,7 @@ async fn additional_context_is_model_visible_but_not_a_user_message_item() -> Re
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: BTreeMap::from([
                 (
                     "browser_info".to_string(),
@@ -137,7 +137,7 @@ async fn external_context_like_user_text_remains_a_user_message_item() -> Result
         .submit(Op::UserInput {
             items: vec![user_input.clone()],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: BTreeMap::new(),
             thread_settings: Default::default(),
         })
@@ -185,7 +185,7 @@ async fn additional_context_trust_controls_message_role() -> Result<()> {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: BTreeMap::from([
                 (
                     "browser_info".to_string(),
@@ -265,7 +265,7 @@ async fn additional_context_is_deduplicated_between_turns_while_retained() -> Re
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: additional_context.clone(),
             thread_settings: Default::default(),
         })
@@ -282,7 +282,7 @@ async fn additional_context_is_deduplicated_between_turns_while_retained() -> Re
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context,
             thread_settings: Default::default(),
         })
@@ -343,7 +343,7 @@ async fn additional_context_removes_one_value_while_adding_another() -> Result<(
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: BTreeMap::from([
                 (
                     "automation_info".to_string(),
@@ -375,7 +375,7 @@ async fn additional_context_removes_one_value_while_adding_another() -> Result<(
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: BTreeMap::from([
                 (
                     "automation_info".to_string(),
@@ -407,7 +407,7 @@ async fn additional_context_removes_one_value_while_adding_another() -> Result<(
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: BTreeMap::from([
                 (
                     "automation_info".to_string(),
@@ -503,7 +503,7 @@ async fn additional_context_values_are_truncated_before_model_input() -> Result<
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: BTreeMap::from([
                 (
                     "automation_info".to_string(),

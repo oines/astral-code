@@ -425,7 +425,7 @@ if (!tool) {
 
     let apps_base_url = apps_server.hosted_base_url.clone();
     let mut builder = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+        .with_auth(CodexAuth::create_dummy_api_key_auth_for_testing())
         .with_config(move |config| {
             config
                 .features
@@ -3081,7 +3081,7 @@ text(
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
                 environments: Some(codex_protocol::protocol::TurnEnvironmentSelections::new(

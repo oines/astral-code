@@ -83,8 +83,8 @@ impl MemoryStartupContext {
         let auth = auth_manager.auth_cached();
         let auth = auth.as_ref();
         let auth_mode = auth.map(CodexAuth::auth_mode).map(TelemetryAuthMode::from);
-        let account_id = auth.and_then(CodexAuth::get_account_id);
-        let account_email = auth.and_then(CodexAuth::get_account_email);
+        let account_id: Option<String> = None;
+        let account_email: Option<String> = None;
         let model = config.model.as_deref().unwrap_or("unknown");
         let auth_env_telemetry = collect_auth_env_telemetry(
             &config.model_provider,
@@ -261,7 +261,7 @@ impl MemoryStartupContext {
             .submit(Op::UserInput {
                 items: prompt,
                 final_output_json_schema: None,
-                responsesapi_client_metadata: None,
+                model_client_metadata: None,
                 additional_context: Default::default(),
                 thread_settings: Default::default(),
             })

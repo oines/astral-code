@@ -102,7 +102,7 @@ pub enum RawTraceEventPayload {
     },
     InferenceCompleted {
         inference_call_id: InferenceCallId,
-        /// Responses API `response.id`; used by `previous_response_id`.
+        /// Provider response id, when one is available.
         response_id: Option<String>,
         /// Provider transport request id, such as `x-request-id`.
         upstream_request_id: Option<String>,

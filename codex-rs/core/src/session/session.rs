@@ -779,8 +779,8 @@ impl Session {
 
             let auth = auth.as_ref();
             let auth_mode = auth.map(CodexAuth::auth_mode).map(TelemetryAuthMode::from);
-            let account_id = auth.and_then(CodexAuth::get_account_id);
-            let account_email = auth.and_then(CodexAuth::get_account_email);
+            let account_id: Option<String> = None;
+            let account_email: Option<String> = None;
             let originator = originator().value;
             let terminal_type = user_agent();
             let session_model = session_configuration.collaboration_mode.model().to_string();
@@ -1238,8 +1238,6 @@ impl Session {
                     anyhow::bail!("required MCP servers failed to initialize: {details}");
                 }
             }
-            sess.schedule_startup_prewarm(session_configuration.base_instructions.clone())
-                .await;
             let session_start_source = match &initial_history {
                 InitialHistory::Resumed(_) => codex_hooks::SessionStartSource::Resume,
                 InitialHistory::New | InitialHistory::Forked(_) => {

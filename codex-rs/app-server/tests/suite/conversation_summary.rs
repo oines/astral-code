@@ -259,7 +259,7 @@ model_provider = "mock_provider"
 [model_providers.mock_provider]
 name = "Mock provider for test"
 base_url = "http://127.0.0.1:1/v1"
-wire_api = "responses"
+wire_api = "chat_completions"
 request_max_retries = 0
 stream_max_retries = 0
 "#

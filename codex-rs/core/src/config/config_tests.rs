@@ -67,7 +67,6 @@ use codex_features::Feature;
 use codex_features::FeaturesToml;
 use codex_model_provider_info::LMSTUDIO_OSS_PROVIDER_ID;
 use codex_model_provider_info::OLLAMA_OSS_PROVIDER_ID;
-use codex_model_provider_info::WireApi;
 use codex_models_manager::bundled_models_response;
 use codex_network_proxy::NetworkMode;
 use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
@@ -640,8 +639,6 @@ model_provider = "amazon-bedrock"
 [model_providers.amazon-bedrock]
 name = "Custom Bedrock"
 base_url = "https://bedrock.example.com/v1"
-requires_astral_auth = true
-supports_websockets = true
 
 [model_providers.amazon-bedrock.aws]
 profile = "codex-bedrock"
@@ -664,8 +661,7 @@ region = "us-west-2"
         config.model_provider.base_url.as_deref(),
         Some("https://bedrock.example.com/v1")
     );
-    assert!(config.model_provider.requires_astral_auth);
-    assert!(config.model_provider.supports_websockets);
+    assert!(!config.model_provider.requires_astral_auth);
 }
 
 #[test]
@@ -5098,30 +5094,6 @@ async fn legacy_toggles_map_to_features() -> std::io::Result<()> {
 }
 
 #[tokio::test]
-async fn responses_websocket_features_do_not_change_wire_api() -> std::io::Result<()> {
-    for feature_key in ["responses_websockets", "responses_websockets_v2"] {
-        let codex_home = TempDir::new()?;
-        let mut entries = BTreeMap::new();
-        entries.insert(feature_key.to_string(), true);
-        let cfg = ConfigToml {
-            features: Some(FeaturesToml::from(entries)),
-            ..Default::default()
-        };
-
-        let config = Config::load_from_base_config_with_overrides(
-            cfg,
-            ConfigOverrides::default(),
-            codex_home.abs(),
-        )
-        .await?;
-
-        assert_eq!(config.model_provider.wire_api, WireApi::ChatCompletions);
-    }
-
-    Ok(())
-}
-
-#[tokio::test]
 async fn config_honors_explicit_file_oauth_store_mode() -> std::io::Result<()> {
     let codex_home = TempDir::new()?;
     let cfg = ConfigToml {
@@ -7906,7 +7878,7 @@ enabled = true
 name = "OpenAI custom"
 base_url = "https://api.openai.com/v1"
 env_key = "OPENAI_API_KEY"
-wire_api = "responses"
+wire_api = "chat_completions"
 request_max_retries = 4            # retry failed HTTP requests
 stream_max_retries = 10            # retry dropped SSE streams
 stream_idle_timeout_ms = 300000    # 5m idle timeout

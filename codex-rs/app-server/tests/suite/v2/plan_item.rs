@@ -59,7 +59,7 @@ async fn plan_mode_uses_proposed_plan_block_for_plan_item() -> Result<()> {
     let turn = start_plan_mode_turn(&mut mcp).await?;
     let (_, completed_items, plan_deltas, turn_completed) =
         collect_turn_notifications(&mut mcp).await?;
-    wait_for_responses_request_count(&server, /*expected_count*/ 1).await?;
+    wait_for_chat_completions_request_count(&server, /*expected_count*/ 1).await?;
 
     assert_eq!(turn_completed.turn.id, turn.id);
     assert_eq!(turn_completed.turn.status, TurnStatus::Completed);
@@ -116,7 +116,7 @@ async fn plan_mode_without_proposed_plan_does_not_emit_plan_item() -> Result<()>
 
     let _turn = start_plan_mode_turn(&mut mcp).await?;
     let (_, completed_items, plan_deltas, _) = collect_turn_notifications(&mut mcp).await?;
-    wait_for_responses_request_count(&server, /*expected_count*/ 1).await?;
+    wait_for_chat_completions_request_count(&server, /*expected_count*/ 1).await?;
 
     let has_plan_item = completed_items
         .iter()
@@ -220,7 +220,7 @@ async fn collect_turn_notifications(
     }
 }
 
-async fn wait_for_responses_request_count(
+async fn wait_for_chat_completions_request_count(
     server: &MockServer,
     expected_count: usize,
 ) -> Result<()> {
@@ -229,18 +229,18 @@ async fn wait_for_responses_request_count(
             let Some(requests) = server.received_requests().await else {
                 bail!("wiremock did not record requests");
             };
-            let responses_request_count = requests
+            let chat_completions_request_count = requests
                 .iter()
                 .filter(|request| {
-                    request.method == "POST" && request.url.path().ends_with("/responses")
+                    request.method == "POST" && request.url.path().ends_with("/chat/completions")
                 })
                 .count();
-            if responses_request_count == expected_count {
+            if chat_completions_request_count == expected_count {
                 return Ok::<(), anyhow::Error>(());
             }
-            if responses_request_count > expected_count {
+            if chat_completions_request_count > expected_count {
                 bail!(
-                    "expected exactly {expected_count} /responses requests, got {responses_request_count}"
+                    "expected exactly {expected_count} /chat/completions requests, got {chat_completions_request_count}"
                 );
             }
             sleep(std::time::Duration::from_millis(10)).await;
@@ -281,7 +281,7 @@ model_provider = "mock_provider"
 [model_providers.mock_provider]
 name = "Mock provider for test"
 base_url = "{server_uri}/v1"
-wire_api = "responses"
+wire_api = "chat_completions"
 request_max_retries = 0
 stream_max_retries = 0
 "#

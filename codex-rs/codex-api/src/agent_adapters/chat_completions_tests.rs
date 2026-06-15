@@ -192,6 +192,57 @@ fn request_collapses_system_and_developer_messages_to_head_system_message() {
 }
 
 #[test]
+fn request_maps_response_format_metadata() {
+    let request = AgentRequest {
+        model: "astral-large".to_string(),
+        metadata: RequestMetadata {
+            response_format: Some(json!({
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "codex_output_schema",
+                    "strict": true,
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "answer": { "type": "string" }
+                        },
+                        "required": ["answer"],
+                        "additionalProperties": false
+                    }
+                }
+            })),
+            ..RequestMetadata::default()
+        },
+        ..AgentRequest::default()
+    };
+
+    assert_eq!(
+        to_chat_completions_request(&request, ChatCompletionsOptions { max_tokens: None }),
+        json!({
+            "model": "astral-large",
+            "stream": true,
+            "stream_options": { "include_usage": true },
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "codex_output_schema",
+                    "strict": true,
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "answer": { "type": "string" }
+                        },
+                        "required": ["answer"],
+                        "additionalProperties": false
+                    }
+                }
+            },
+            "messages": []
+        })
+    );
+}
+
+#[test]
 fn request_drops_tool_control_fields_when_provider_override_clears_tools() {
     let request = AgentRequest {
         model: "astral-large".to_string(),

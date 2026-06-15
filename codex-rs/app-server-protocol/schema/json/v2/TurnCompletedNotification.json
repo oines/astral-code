@@ -25,7 +25,7 @@
       "type": "object"
     },
     "CodexErrorInfo": {
-      "description": "This translation layer make sure that we expose codex error code in camel case.\n\nWhen an upstream HTTP status is available (for example, from the Responses API or a provider), it is forwarded in `httpStatusCode` on the relevant `codexErrorInfo` variant.",
+      "description": "This translation layer make sure that we expose codex error code in camel case.\n\nWhen an upstream HTTP status is available (for example, from a provider), it is forwarded in `httpStatusCode` on the relevant `codexErrorInfo` variant.",
       "oneOf": [
         {
           "enum": [
@@ -333,6 +333,15 @@
         "completed",
         "failed",
         "declined"
+      ],
+      "type": "string"
+    },
+    "CoreToolCallStatus": {
+      "enum": [
+        "inProgress",
+        "completed",
+        "failed",
+        "interrupted"
       ],
       "type": "string"
     },
@@ -1046,6 +1055,56 @@
             "type"
           ],
           "title": "DynamicToolCallThreadItem",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "arguments": true,
+            "durationMs": {
+              "description": "The duration of the core tool call in milliseconds.",
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "error": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "result": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "$ref": "#/definitions/CoreToolCallStatus"
+            },
+            "tool": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "coreToolCall"
+              ],
+              "title": "CoreToolCallThreadItemType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "arguments",
+            "id",
+            "status",
+            "tool",
+            "type"
+          ],
+          "title": "CoreToolCallThreadItem",
           "type": "object"
         },
         {

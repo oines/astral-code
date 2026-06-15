@@ -8,11 +8,6 @@ use codex_app_server_daemon::LifecycleCommand as AppServerLifecycleCommand;
 use codex_app_server_daemon::RemoteControlMode as AppServerRemoteControlMode;
 use codex_arg0::Arg0DispatchPaths;
 use codex_arg0::arg0_dispatch_or_else;
-use codex_cli::read_api_key_from_stdin;
-use codex_cli::run_login_status;
-use codex_cli::run_login_with_api_key;
-use codex_cli::run_login_without_credentials;
-use codex_cli::run_logout;
 use codex_exec::Cli as ExecCli;
 use codex_exec::Command as ExecCommand;
 use codex_exec::ReviewArgs;
@@ -118,12 +113,6 @@ enum Subcommand {
 
     /// Run a code review non-interactively.
     Review(ReviewCommand),
-
-    /// Manage login.
-    Login(LoginCommand),
-
-    /// Remove stored authentication credentials.
-    Logout(LogoutCommand),
 
     /// Manage external MCP servers for Astral.
     Mcp(McpCli),
@@ -423,43 +412,6 @@ enum ExecpolicySubcommand {
     /// Check execpolicy files against a command.
     #[clap(name = "check")]
     Check(ExecPolicyCheckCommand),
-}
-
-#[derive(Debug, Parser)]
-struct LoginCommand {
-    #[clap(skip)]
-    config_overrides: CliConfigOverrides,
-
-    #[arg(
-        long = "with-api-key",
-        help = "Store an API key for Astral API-key auth. The default model provider reads ASTRAL_API_KEY directly."
-    )]
-    with_api_key: bool,
-
-    #[arg(
-        long = "api-key",
-        num_args = 0..=1,
-        default_missing_value = "",
-        value_name = "API_KEY",
-        help = "(deprecated) Previously accepted the API key directly; now exits with guidance to use --with-api-key",
-        hide = true
-    )]
-    api_key: Option<String>,
-
-    #[command(subcommand)]
-    action: Option<LoginSubcommand>,
-}
-
-#[derive(Debug, clap::Subcommand)]
-enum LoginSubcommand {
-    /// Show login status.
-    Status,
-}
-
-#[derive(Debug, Parser)]
-struct LogoutCommand {
-    #[clap(skip)]
-    config_overrides: CliConfigOverrides,
 }
 
 #[derive(Debug, Parser)]
@@ -1247,47 +1199,6 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
             .await?;
             handle_app_exit(exit_info)?;
         }
-        Some(Subcommand::Login(mut login_cli)) => {
-            reject_remote_mode_for_subcommand(
-                root_remote.as_deref(),
-                root_remote_auth_token_env.as_deref(),
-                "login",
-            )?;
-            prepend_config_flags(
-                &mut login_cli.config_overrides,
-                root_config_overrides.clone(),
-            );
-            match login_cli.action {
-                Some(LoginSubcommand::Status) => {
-                    run_login_status(login_cli.config_overrides).await;
-                }
-                None => {
-                    if login_cli.api_key.is_some() {
-                        eprintln!(
-                            "The --api-key flag is no longer supported. Set ASTRAL_API_KEY for the default model provider."
-                        );
-                        std::process::exit(1);
-                    } else if login_cli.with_api_key {
-                        let api_key = read_api_key_from_stdin();
-                        run_login_with_api_key(login_cli.config_overrides, api_key).await;
-                    } else {
-                        run_login_without_credentials(login_cli.config_overrides).await;
-                    }
-                }
-            }
-        }
-        Some(Subcommand::Logout(mut logout_cli)) => {
-            reject_remote_mode_for_subcommand(
-                root_remote.as_deref(),
-                root_remote_auth_token_env.as_deref(),
-                "logout",
-            )?;
-            prepend_config_flags(
-                &mut logout_cli.config_overrides,
-                root_config_overrides.clone(),
-            );
-            run_logout(logout_cli.config_overrides).await;
-        }
         Some(Subcommand::Completion(completion_cli)) => {
             reject_remote_mode_for_subcommand(
                 root_remote.as_deref(),
@@ -1598,7 +1509,7 @@ async fn load_exec_server_remote_auth_provider(
 ) -> anyhow::Result<codex_api::SharedAuthProvider> {
     let auth = load_exec_server_remote_auth(
         config,
-        "remote exec-server registration requires API-key authentication; set ASTRAL_API_KEY or run `astral login --with-api-key` for Astral API-key auth",
+        "remote exec-server registration requires API-key authentication; set ASTRAL_API_KEY for Astral API-key auth",
     )
     .await?;
 
@@ -1954,8 +1865,6 @@ fn unsupported_subcommand_name_for_strict_config(
         Some(Subcommand::Plugin(_)) => Some("plugin"),
         #[cfg(any(target_os = "macos", target_os = "windows"))]
         Some(Subcommand::App(_)) => Some("app"),
-        Some(Subcommand::Login(_)) => Some("login"),
-        Some(Subcommand::Logout(_)) => Some("logout"),
         Some(Subcommand::Completion(_)) => Some("completion"),
         Some(Subcommand::Update) => Some("update"),
         Some(Subcommand::Sandbox(_)) => Some("sandbox"),
@@ -2334,13 +2243,6 @@ mod tests {
     }
 
     #[test]
-    fn exec_server_remote_auth_rejects_chatgpt_auth() {
-        let auth = CodexAuth::create_dummy_chatgpt_auth_for_testing();
-
-        assert!(!is_supported_exec_server_remote_auth(&auth));
-    }
-
-    #[test]
     fn exec_server_remote_api_key_auth_accepts_https_hosts() {
         for base_url in [
             "https://api.deepseek.com/v1",
@@ -2654,7 +2556,7 @@ mod tests {
 
     #[test]
     fn version_output_uses_astral_command_name() {
-        let version = MultitoolCli::command().render_version().to_string();
+        let version = MultitoolCli::command().render_version();
         assert_eq!(version, format!("astral {}\n", env!("CARGO_PKG_VERSION")));
     }
 

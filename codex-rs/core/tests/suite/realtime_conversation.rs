@@ -838,7 +838,7 @@ async fn conversation_start_uses_astral_env_key_fallback_with_chatgpt_auth() -> 
     ])
     .await;
 
-    let mut builder = test_codex().with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+    let mut builder = test_codex().with_auth(CodexAuth::create_dummy_api_key_auth_for_testing());
     let test = builder.build_with_websocket_server(&server).await?;
     assert!(
         server
@@ -999,7 +999,7 @@ async fn conversation_start_preflight_failure_emits_realtime_error_only() -> Res
     skip_if_no_network!(Ok(()));
 
     let server = start_websocket_server(vec![]).await;
-    let mut builder = test_codex().with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+    let mut builder = test_codex().with_auth(CodexAuth::create_dummy_api_key_auth_for_testing());
     let test = builder.build_with_websocket_server(&server).await?;
 
     test.codex
@@ -2163,7 +2163,7 @@ async fn conversation_user_text_turn_is_sent_to_realtime_when_active() -> Result
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -2298,7 +2298,7 @@ async fn conversation_user_text_turn_is_capped_when_mirrored_to_realtime() -> Re
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -3494,7 +3494,7 @@ async fn inbound_handoff_request_steers_active_turn() -> Result<()> {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })

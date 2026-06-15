@@ -59,6 +59,7 @@ fn agent_request_serializes_tool_use_and_tool_result_blocks() {
         metadata: RequestMetadata {
             service_tier: None,
             prompt_cache_key: Some("astral:test".to_string()),
+            response_format: None,
             provider: BTreeMap::new(),
         },
     };

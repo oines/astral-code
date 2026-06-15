@@ -241,16 +241,14 @@ pub struct LiteLlmModelHint {
 
 impl LiteLlmModelHint {
     fn is_language_model_hint(&self) -> bool {
-        let language_mode = self.mode.as_deref().is_some_and(|mode| {
-            matches!(
-                mode,
-                "chat" | "completion" | "responses" | "text_completion"
-            )
-        });
+        let language_mode = self
+            .mode
+            .as_deref()
+            .is_some_and(|mode| matches!(mode, "chat" | "completion" | "text_completion"));
         let language_endpoint = self.supported_endpoints.as_ref().is_some_and(|endpoints| {
-            endpoints.iter().any(|endpoint| {
-                matches!(endpoint.as_str(), "/v1/chat/completions" | "/v1/responses")
-            })
+            endpoints
+                .iter()
+                .any(|endpoint| matches!(endpoint.as_str(), "/v1/chat/completions"))
         });
         language_mode
             || language_endpoint

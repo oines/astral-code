@@ -6,7 +6,7 @@ Astral Doctor v0.0.0
 
 Notes
    ⚠ terminal     narrow terminal
-   ✗ auth         token expired - Pipe an API key to `astral login --with-api-key`.
+   ✗ auth         token expired - Set ASTRAL_API_KEY or the active provider's configured auth env var.
 ─────────────────────────────────────────────────────────────
 
 Environment
@@ -35,7 +35,7 @@ Environment
   ✓ state        state paths inspectable
 
 Configuration
-  ✗ auth         token expired — Pipe an API key to `astral login --with-api-key`.
+  ✗ auth         token expired — Set ASTRAL_API_KEY or the active provider's configured auth env var.
       ASTRAL_API_KEY           present
 
 Updates
@@ -43,7 +43,7 @@ Updates
 
 Connectivity
   ✓ network      network environment readable
-  ✓ websocket    Responses WebSocket handshake succeeded
+  ✓ websocket    Responses WebSocket transport is removed
   ✓ reachability active provider endpoints are reachable over HTTP
 
 Background Server

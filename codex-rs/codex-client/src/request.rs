@@ -160,8 +160,11 @@ mod tests {
 
     #[test]
     fn prepare_body_for_send_serializes_json_and_sets_content_type() {
-        let request = Request::new(Method::POST, "https://example.com/v1/responses".to_string())
-            .with_json(&json!({"model": "test-model"}));
+        let request = Request::new(
+            Method::POST,
+            "https://example.com/v1/chat/completions".to_string(),
+        )
+        .with_json(&json!({"model": "test-model"}));
 
         let prepared = request
             .prepare_body_for_send()
@@ -187,10 +190,12 @@ mod tests {
 
     #[test]
     fn prepare_body_for_send_rejects_existing_content_encoding_when_compressing() {
-        let mut request =
-            Request::new(Method::POST, "https://example.com/v1/responses".to_string())
-                .with_json(&json!({"model": "test-model"}))
-                .with_compression(RequestCompression::Zstd);
+        let mut request = Request::new(
+            Method::POST,
+            "https://example.com/v1/chat/completions".to_string(),
+        )
+        .with_json(&json!({"model": "test-model"}))
+        .with_compression(RequestCompression::Zstd);
         request.headers.insert(
             http::header::CONTENT_ENCODING,
             HeaderValue::from_static("gzip"),

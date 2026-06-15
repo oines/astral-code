@@ -1,7 +1,6 @@
 mod account;
 mod analytics;
 mod app_list;
-mod attestation;
 mod client_metadata;
 mod collaboration_mode_list;
 #[cfg(unix)]
@@ -39,7 +38,6 @@ mod plugin_read;
 mod plugin_share;
 mod plugin_uninstall;
 mod process_exec;
-mod rate_limits;
 mod realtime_conversation;
 mod remote_control;
 #[cfg(debug_assertions)]

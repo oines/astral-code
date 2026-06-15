@@ -24,9 +24,9 @@ fn cli_sse_response() -> String {
     ])
 }
 
-/// Tests streaming the Responses API through the CLI using a mock server.
+/// Tests streaming Chat Completions through the CLI using a mock server.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn responses_mode_stream_cli() {
+async fn chat_completions_mode_stream_cli() {
     skip_if_no_network!();
 
     let server = MockServer::start().await;
@@ -40,7 +40,7 @@ async fn responses_mode_stream_cli() {
 
     let home = TempDir::new().unwrap();
     let provider_override = format!(
-        "model_providers.mock={{ name = \"mock\", base_url = \"{}/v1\", env_key = \"PATH\", wire_api = \"responses\" }}",
+        "model_providers.mock={{ name = \"mock\", base_url = \"{}/v1\", env_key = \"PATH\", wire_api = \"chat_completions\" }}",
         server.uri()
     );
     let bin = codex_utils_cargo_bin::cargo_bin("astral").unwrap();
@@ -68,12 +68,12 @@ async fn responses_mode_stream_cli() {
     assert_eq!(hi_lines, 1, "Expected exactly one line with 'hi'");
 
     let request = resp_mock.single_request();
-    assert_eq!(request.path(), "/v1/responses");
+    assert_eq!(request.path(), "/v1/chat/completions");
 }
 
 /// Ensures `openai_base_url` config override routes built-in openai provider requests.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn responses_mode_stream_cli_supports_openai_base_url_config_override() {
+async fn chat_completions_mode_stream_cli_supports_openai_base_url_config_override() {
     skip_if_no_network!();
 
     let server = MockServer::start().await;
@@ -103,12 +103,12 @@ async fn responses_mode_stream_cli_supports_openai_base_url_config_override() {
     assert!(output.status.success());
 
     let request = resp_mock.single_request();
-    assert_eq!(request.path(), "/v1/responses");
+    assert_eq!(request.path(), "/v1/chat/completions");
 }
 
 /// Verify that passing `-c model_instructions_file=...` to the CLI
 /// overrides the built-in base instructions by inspecting the request body
-/// received by a mock OpenAI Responses endpoint.
+/// received by a mock OpenAI-compatible endpoint.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn exec_cli_applies_model_instructions_file() {
     skip_if_no_network!();
@@ -130,10 +130,10 @@ async fn exec_cli_applies_model_instructions_file() {
     std::fs::write(&custom_path, marker).unwrap();
     let custom_path_str = custom_path.to_string_lossy().replace('\\', "/");
 
-    // Build a provider override that points at the mock server and instructs
-    // Codex to use the Responses API with the dummy env var.
+    // Build a provider override that points at the mock server and uses the
+    // dummy env var for authentication.
     let provider_override = format!(
-        "model_providers.mock={{ name = \"mock\", base_url = \"{}/v1\", env_key = \"PATH\", wire_api = \"responses\" }}",
+        "model_providers.mock={{ name = \"mock\", base_url = \"{}/v1\", env_key = \"PATH\", wire_api = \"chat_completions\" }}",
         server.uri()
     );
 
@@ -197,7 +197,7 @@ async fn exec_cli_profile_applies_model_instructions_file() {
     let custom_path_str = custom_path.to_string_lossy().replace('\\', "/");
 
     let provider_override = format!(
-        "model_providers.mock={{ name = \"mock\", base_url = \"{}/v1\", env_key = \"PATH\", wire_api = \"responses\" }}",
+        "model_providers.mock={{ name = \"mock\", base_url = \"{}/v1\", env_key = \"PATH\", wire_api = \"chat_completions\" }}",
         server.uri()
     );
 
@@ -244,9 +244,9 @@ async fn exec_cli_profile_applies_model_instructions_file() {
     );
 }
 
-/// Tests streaming responses through the CLI using a local Responses API server.
+/// Tests streaming model responses through the CLI using a local mock server.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn responses_api_stream_cli() {
+async fn chat_completions_stream_cli() {
     skip_if_no_network!();
 
     let server = MockServer::start().await;
@@ -273,7 +273,7 @@ async fn responses_api_stream_cli() {
     assert!(stdout.contains("fixture hello"));
 
     let request = resp_mock.single_request();
-    assert_eq!(request.path(), "/v1/responses");
+    assert_eq!(request.path(), "/v1/chat/completions");
 }
 
 /// End-to-end: create a session (writes rollout), verify the file, then resume and confirm append.

@@ -153,7 +153,7 @@ async fn prompt_tools_are_consistent_across_requests() -> anyhow::Result<()> {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -167,7 +167,7 @@ async fn prompt_tools_are_consistent_across_requests() -> anyhow::Result<()> {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -248,7 +248,7 @@ async fn gpt_5_tools_without_apply_patch_append_apply_patch_instructions() -> an
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -262,7 +262,7 @@ async fn gpt_5_tools_without_apply_patch_append_apply_patch_instructions() -> an
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -329,7 +329,7 @@ async fn prefixes_context_and_instructions_once_and_consistently_across_requests
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -343,7 +343,7 @@ async fn prefixes_context_and_instructions_once_and_consistently_across_requests
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -428,7 +428,7 @@ async fn overrides_turn_context_but_keeps_cached_prefix_and_key_constant() -> an
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -466,7 +466,7 @@ async fn overrides_turn_context_but_keeps_cached_prefix_and_key_constant() -> an
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -563,7 +563,7 @@ async fn override_before_first_turn_emits_environment_context() -> anyhow::Resul
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -719,7 +719,7 @@ async fn per_turn_overrides_keep_cached_prefix_and_key_constant() -> anyhow::Res
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -744,7 +744,7 @@ async fn per_turn_overrides_keep_cached_prefix_and_key_constant() -> anyhow::Res
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
                 environments: Some(local_selections(new_cwd.abs())),
@@ -860,7 +860,7 @@ async fn send_user_turn_with_no_changes_does_not_send_environment_context() -> a
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
                 environments: Some(local_selections(default_cwd.clone())),
@@ -888,7 +888,7 @@ async fn send_user_turn_with_no_changes_does_not_send_environment_context() -> a
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
                 environments: Some(local_selections(default_cwd.clone())),
@@ -1001,7 +1001,7 @@ async fn send_user_turn_with_changes_sends_environment_context() -> anyhow::Resu
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
                 environments: Some(local_selections(default_cwd.clone())),
@@ -1031,7 +1031,7 @@ async fn send_user_turn_with_changes_sends_environment_context() -> anyhow::Resu
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
                 environments: Some(local_selections(default_cwd.clone())),

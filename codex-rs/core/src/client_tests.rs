@@ -72,7 +72,8 @@ fn test_model_client_with_parent(
     session_source: SessionSource,
     parent_thread_id: Option<ThreadId>,
 ) -> ModelClient {
-    let provider = create_oss_provider_with_base_url("https://example.com/v1", WireApi::Responses);
+    let provider =
+        create_oss_provider_with_base_url("https://example.com/v1", WireApi::ChatCompletions);
     let thread_id = ThreadId::new();
     ModelClient::new(
         /*auth_manager*/ None,
@@ -404,8 +405,8 @@ impl futures::Stream for NotifyAfterEventStream {
     }
 }
 
-#[test]
-fn build_ws_client_metadata_includes_window_lineage_and_turn_metadata() {
+#[tokio::test]
+async fn build_agent_headers_includes_window_lineage_and_turn_metadata() {
     let parent_thread_id = ThreadId::new();
     let client = test_model_client_with_parent(
         SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
@@ -420,28 +421,35 @@ fn build_ws_client_metadata_includes_window_lineage_and_turn_metadata() {
 
     client.advance_window_generation();
 
-    let client_metadata = client.build_ws_client_metadata(Some(r#"{"turn_id":"turn-123"}"#));
+    let headers = client
+        .build_agent_headers(&client.state.provider, Some(r#"{"turn_id":"turn-123"}"#))
+        .await;
     let thread_id = client.state.thread_id;
     assert_eq!(
-        client_metadata,
-        std::collections::HashMap::from([
-            (
-                X_ASTRAL_INSTALLATION_ID_HEADER.to_string(),
-                "11111111-1111-4111-8111-111111111111".to_string(),
-            ),
-            (
-                X_ASTRAL_WINDOW_ID_HEADER.to_string(),
-                format!("{thread_id}:1"),
-            ),
-            (
-                X_ASTRAL_PARENT_THREAD_ID_HEADER.to_string(),
-                parent_thread_id.to_string(),
-            ),
-            (
-                X_ASTRAL_TURN_METADATA_HEADER.to_string(),
-                r#"{"turn_id":"turn-123"}"#.to_string(),
-            ),
-        ])
+        headers
+            .get(X_ASTRAL_INSTALLATION_ID_HEADER)
+            .and_then(|value| value.to_str().ok()),
+        Some("11111111-1111-4111-8111-111111111111")
+    );
+    assert_eq!(
+        headers
+            .get(X_ASTRAL_WINDOW_ID_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string),
+        Some(format!("{thread_id}:1"))
+    );
+    assert_eq!(
+        headers
+            .get(X_ASTRAL_PARENT_THREAD_ID_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string),
+        Some(parent_thread_id.to_string())
+    );
+    assert_eq!(
+        headers
+            .get(X_ASTRAL_TURN_METADATA_HEADER)
+            .and_then(|value| value.to_str().ok()),
+        Some(r#"{"turn_id":"turn-123"}"#)
     );
 }
 
@@ -475,7 +483,7 @@ async fn dropped_response_stream_traces_cancelled_partial_output() -> anyhow::Re
     let item = output_message("msg-1", "partial answer");
     let api_stream = futures::stream::iter([Ok(ResponseEvent::OutputItemDone(item))])
         .chain(futures::stream::pending());
-    let (mut stream, _) = super::map_response_events(
+    let mut stream = super::map_response_events(
         /*upstream_request_id*/ None,
         api_stream,
         test_session_telemetry(),
@@ -524,7 +532,7 @@ async fn response_stream_records_last_model_feedback_ids() {
             end_turn: Some(true),
         }),
     ]);
-    let (mut stream, _) = super::map_response_events(
+    let mut stream = super::map_response_events(
         Some("req-123".to_string()),
         api_stream,
         test_session_telemetry(),
@@ -565,7 +573,7 @@ async fn dropped_backpressured_response_stream_traces_cancelled_partial_output()
         notify: Arc::clone(&backpressured_item_yielded),
     };
 
-    let (stream, _) = super::map_response_events(
+    let stream = super::map_response_events(
         /*upstream_request_id*/ None,
         api_stream,
         test_session_telemetry(),
@@ -596,7 +604,7 @@ async fn dropped_backpressured_response_stream_traces_cancelled_partial_output()
 #[test]
 fn auth_request_telemetry_context_tracks_attached_auth_and_retry_phase() {
     let auth_context = AuthRequestTelemetryContext::new(
-        Some(AuthMode::Chatgpt),
+        Some(AuthMode::ApiKey),
         &BearerAuthProvider::for_test(Some("access-token"), Some("workspace-123")),
         PendingUnauthorizedRetry::from_recovery(UnauthorizedRecoveryExecution {
             mode: "managed",
@@ -604,7 +612,7 @@ fn auth_request_telemetry_context_tracks_attached_auth_and_retry_phase() {
         }),
     );
 
-    assert_eq!(auth_context.auth_mode, Some("Chatgpt"));
+    assert_eq!(auth_context.auth_mode, Some("ApiKey"));
     assert!(auth_context.auth_header_attached);
     assert_eq!(auth_context.auth_header_name, Some("authorization"));
     assert!(auth_context.retry_after_unauthorized);
@@ -637,16 +645,16 @@ fn model_client_with_counting_attestation(
     let (auth_manager, provider) = if include_attestation {
         (
             Some(AuthManager::from_auth_for_testing(
-                CodexAuth::create_dummy_chatgpt_auth_for_testing(),
+                CodexAuth::create_dummy_api_key_auth_for_testing(),
             )),
             ModelProviderInfo::create_openai_provider(Some(
-                "https://example.com/legacy-responses".to_string(),
+                "https://example.com/openai".to_string(),
             )),
         )
     } else {
         (
             None,
-            create_oss_provider_with_base_url("https://example.com/v1", WireApi::Responses),
+            create_oss_provider_with_base_url("https://example.com/v1", WireApi::ChatCompletions),
         )
     };
     let model_client = ModelClient::new(
@@ -669,14 +677,13 @@ fn model_client_with_counting_attestation(
 }
 
 #[tokio::test]
-async fn websocket_handshake_includes_attestation_for_managed_responses_provider() {
+async fn agent_headers_include_attestation_for_managed_provider() {
     let (model_client, attestation_calls) =
         model_client_with_counting_attestation(/*include_attestation*/ true);
 
     let headers = model_client
-        .build_websocket_headers(
+        .build_agent_headers(
             &model_client.state.provider,
-            /*turn_state*/ None,
             /*turn_metadata_header*/ None,
         )
         .await;

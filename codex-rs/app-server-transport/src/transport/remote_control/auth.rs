@@ -14,48 +14,12 @@ pub(super) struct RemoteControlConnectionAuth {
 }
 
 pub(super) async fn load_remote_control_auth(
-    auth_manager: &Arc<AuthManager>,
+    _auth_manager: &Arc<AuthManager>,
 ) -> io::Result<RemoteControlConnectionAuth> {
-    let mut reloaded = false;
-    let auth = loop {
-        let Some(auth) = auth_manager.auth().await else {
-            if reloaded {
-                return Err(io::Error::new(
-                    ErrorKind::PermissionDenied,
-                    "remote control requires hosted account authentication",
-                ));
-            }
-            auth_manager.reload().await;
-            reloaded = true;
-            continue;
-        };
-        if !auth.uses_hosted_backend() {
-            break auth;
-        }
-        if auth.get_account_id().is_none() && !reloaded {
-            auth_manager.reload().await;
-            reloaded = true;
-            continue;
-        }
-        break auth;
-    };
-
-    if !auth.uses_hosted_backend() {
-        return Err(io::Error::new(
-            ErrorKind::PermissionDenied,
-            "remote control requires hosted account authentication; provider API key auth is not supported",
-        ));
-    }
-
-    Ok(RemoteControlConnectionAuth {
-        auth_provider: codex_model_provider::auth_provider_from_auth(&auth),
-        account_id: auth.get_account_id().ok_or_else(|| {
-            io::Error::new(
-                ErrorKind::WouldBlock,
-                "remote control enrollment is waiting for a hosted account id",
-            )
-        })?,
-    })
+    Err(io::Error::new(
+        ErrorKind::PermissionDenied,
+        "remote control is not available in BYOK mode",
+    ))
 }
 
 pub(super) async fn recover_remote_control_auth(

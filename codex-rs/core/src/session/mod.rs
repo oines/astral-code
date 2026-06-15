@@ -291,7 +291,6 @@ use crate::guardian::GuardianReviewSessionManager;
 use crate::mcp::McpManager;
 use crate::network_policy_decision::execpolicy_network_rule_amendment;
 use crate::rollout::map_session_init_error;
-use crate::session_startup_prewarm::SessionStartupPrewarmHandle;
 use crate::shell;
 use crate::shell_snapshot::ShellSnapshot;
 use crate::state::AutoCompactWindowSnapshot;
@@ -767,7 +766,7 @@ impl Codex {
         additional_context: BTreeMap<String, AdditionalContextEntry>,
         expected_turn_id: Option<&str>,
         client_user_message_id: Option<String>,
-        responsesapi_client_metadata: Option<HashMap<String, String>>,
+        model_client_metadata: Option<HashMap<String, String>>,
     ) -> Result<String, SteerInputError> {
         self.session
             .steer_input(
@@ -775,7 +774,7 @@ impl Codex {
                 additional_context,
                 expected_turn_id,
                 client_user_message_id,
-                responsesapi_client_metadata,
+                model_client_metadata,
             )
             .await
     }
@@ -1127,7 +1126,7 @@ impl Session {
                     text_elements: Vec::new(),
                 }],
                 final_output_json_schema: None,
-                responsesapi_client_metadata: None,
+                model_client_metadata: None,
                 additional_context: Default::default(),
                 thread_settings: Default::default(),
             },
@@ -1460,19 +1459,6 @@ impl Session {
             .session_configuration
             .apply(updates)
             .map(|configuration| configuration.thread_config_snapshot())
-    }
-
-    pub(crate) async fn set_session_startup_prewarm(
-        &self,
-        startup_prewarm: SessionStartupPrewarmHandle,
-    ) {
-        let mut state = self.state.lock().await;
-        state.set_session_startup_prewarm(startup_prewarm);
-    }
-
-    pub(crate) async fn take_session_startup_prewarm(&self) -> Option<SessionStartupPrewarmHandle> {
-        let mut state = self.state.lock().await;
-        state.take_session_startup_prewarm()
     }
 
     pub(crate) async fn get_config(&self) -> std::sync::Arc<Config> {
@@ -3233,7 +3219,7 @@ impl Session {
         additional_context: BTreeMap<String, AdditionalContextEntry>,
         expected_turn_id: Option<&str>,
         client_user_message_id: Option<String>,
-        responsesapi_client_metadata: Option<HashMap<String, String>>,
+        model_client_metadata: Option<HashMap<String, String>>,
     ) -> Result<String, SteerInputError> {
         let mut active = self.active_turn.lock().await;
         let Some(active_turn) = active.as_mut() else {
@@ -3277,11 +3263,11 @@ impl Session {
             state.additional_context.merge(additional_context)
         };
 
-        if let Some(responsesapi_client_metadata) = responsesapi_client_metadata {
+        if let Some(model_client_metadata) = model_client_metadata {
             active_task
                 .turn_context
                 .turn_metadata_state
-                .set_responsesapi_client_metadata(responsesapi_client_metadata);
+                .set_model_client_metadata(model_client_metadata);
         }
 
         let mut pending_input = additional_context_input

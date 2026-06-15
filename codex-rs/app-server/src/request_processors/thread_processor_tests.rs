@@ -606,7 +606,7 @@ mod thread_processor_behavior_tests {
             experimental_bearer_token: None,
             auth: None,
             aws: None,
-            wire_api: WireApi::Responses,
+            wire_api: WireApi::ChatCompletions,
             provider_flavor: None,
             query_params: None,
             request_body: None,
@@ -618,7 +618,7 @@ mod thread_processor_behavior_tests {
             stream_idle_timeout_ms: None,
             websocket_connect_timeout_ms: None,
             requires_astral_auth: false,
-            supports_websockets: true,
+            supports_websockets: false,
         };
         let config_manager = ConfigManager::new(
             temp_dir.path().to_path_buf(),
@@ -649,7 +649,7 @@ mod thread_processor_behavior_tests {
                         json!({
                             "name": "request",
                             "base_url": "http://127.0.0.1:9999/api/codex",
-                            "wire_api": "responses",
+                            "wire_api": "chat_completions",
                         }),
                     ),
                 ])),

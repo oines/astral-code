@@ -162,17 +162,6 @@
       ],
       "type": "object"
     },
-    "CancelLoginAccountParams": {
-      "properties": {
-        "loginId": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "loginId"
-      ],
-      "type": "object"
-    },
     "ClientInfo": {
       "properties": {
         "name": {
@@ -970,7 +959,7 @@
       ]
     },
     "FunctionCallOutputContentItem": {
-      "description": "Responses API compatible content items that can be returned by a tool call. This is a subset of ContentItem with the types we support as function call outputs.",
+      "description": "Structured content items that can be returned by a tool call. This is a subset of ContentItem with the types we support as function call outputs.",
       "oneOf": [
         {
           "properties": {
@@ -1257,30 +1246,6 @@
         "incomplete"
       ],
       "type": "string"
-    },
-    "LoginAccountParams": {
-      "oneOf": [
-        {
-          "properties": {
-            "apiKey": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "apiKey"
-              ],
-              "title": "ApiKeyLoginAccountParamsType",
-              "type": "string"
-            }
-          },
-          "required": [
-            "apiKey",
-            "type"
-          ],
-          "title": "ApiKeyLoginAccountParams",
-          "type": "object"
-        }
-      ]
     },
     "MarketplaceAddParams": {
       "properties": {
@@ -1999,7 +1964,7 @@
       ]
     },
     "ReasoningSummary": {
-      "description": "A summary of the reasoning performed by the model. This can be useful for debugging and understanding the model's reasoning process. See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#reasoning-summaries",
+      "description": "A summary of the reasoning performed by the model. This can be useful for debugging and understanding the model's reasoning process. See https://platform.openai.com/docs/guides/reasoning#reasoning-summaries",
       "oneOf": [
         {
           "enum": [
@@ -2151,7 +2116,7 @@
               "$ref": "#/definitions/LocalShellAction"
             },
             "call_id": {
-              "description": "Set when using the Responses API.",
+              "description": "Model-assigned call id when available.",
               "type": [
                 "string",
                 "null"
@@ -3235,7 +3200,7 @@
     "ThreadInjectItemsParams": {
       "properties": {
         "items": {
-          "description": "Raw Responses API items to append to the thread's model-visible history.",
+          "description": "Raw model history items to append to the thread's model-visible history.",
           "items": true,
           "type": "array"
         },
@@ -4724,7 +4689,7 @@
       "type": "object"
     },
     {
-      "description": "Append raw Responses API items to the thread history without starting a user turn.",
+      "description": "Append raw model history items to the thread history without starting a user turn.",
       "properties": {
         "id": {
           "$ref": "#/definitions/RequestId"
@@ -5800,123 +5765,6 @@
         "method"
       ],
       "title": "WindowsSandbox/readinessRequest",
-      "type": "object"
-    },
-    {
-      "properties": {
-        "id": {
-          "$ref": "#/definitions/RequestId"
-        },
-        "method": {
-          "enum": [
-            "account/login/start"
-          ],
-          "title": "Account/login/startRequestMethod",
-          "type": "string"
-        },
-        "params": {
-          "$ref": "#/definitions/LoginAccountParams"
-        }
-      },
-      "required": [
-        "id",
-        "method",
-        "params"
-      ],
-      "title": "Account/login/startRequest",
-      "type": "object"
-    },
-    {
-      "properties": {
-        "id": {
-          "$ref": "#/definitions/RequestId"
-        },
-        "method": {
-          "enum": [
-            "account/login/cancel"
-          ],
-          "title": "Account/login/cancelRequestMethod",
-          "type": "string"
-        },
-        "params": {
-          "$ref": "#/definitions/CancelLoginAccountParams"
-        }
-      },
-      "required": [
-        "id",
-        "method",
-        "params"
-      ],
-      "title": "Account/login/cancelRequest",
-      "type": "object"
-    },
-    {
-      "properties": {
-        "id": {
-          "$ref": "#/definitions/RequestId"
-        },
-        "method": {
-          "enum": [
-            "account/logout"
-          ],
-          "title": "Account/logoutRequestMethod",
-          "type": "string"
-        },
-        "params": {
-          "type": "null"
-        }
-      },
-      "required": [
-        "id",
-        "method"
-      ],
-      "title": "Account/logoutRequest",
-      "type": "object"
-    },
-    {
-      "properties": {
-        "id": {
-          "$ref": "#/definitions/RequestId"
-        },
-        "method": {
-          "enum": [
-            "account/rateLimits/read"
-          ],
-          "title": "Account/rateLimits/readRequestMethod",
-          "type": "string"
-        },
-        "params": {
-          "type": "null"
-        }
-      },
-      "required": [
-        "id",
-        "method"
-      ],
-      "title": "Account/rateLimits/readRequest",
-      "type": "object"
-    },
-    {
-      "properties": {
-        "id": {
-          "$ref": "#/definitions/RequestId"
-        },
-        "method": {
-          "enum": [
-            "account/usage/read"
-          ],
-          "title": "Account/usage/readRequestMethod",
-          "type": "string"
-        },
-        "params": {
-          "type": "null"
-        }
-      },
-      "required": [
-        "id",
-        "method"
-      ],
-      "title": "Account/usage/readRequest",
       "type": "object"
     },
     {

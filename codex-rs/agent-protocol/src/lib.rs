@@ -9,10 +9,10 @@ pub const PROVIDER_FLAVOR_METADATA_KEY: &str = "astral_provider_flavor";
 /// Provider-neutral request shape used between Astral's agent runtime and
 /// provider-specific wire adapters.
 ///
-/// The runtime should build this structure once per model turn. OpenAI
-/// Responses, Anthropic Messages, and OpenAI-compatible chat adapters then own
-/// the lossy details of translating it to their respective wire protocols.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+/// The runtime should build this structure once per model turn. Provider
+/// adapters then own the lossy details of translating it to their respective
+/// wire protocols.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentRequest {
     pub model: String,
@@ -36,6 +36,22 @@ pub struct AgentRequest {
 
 fn default_stream() -> bool {
     true
+}
+
+impl Default for AgentRequest {
+    fn default() -> Self {
+        Self {
+            model: String::new(),
+            instructions: Vec::new(),
+            messages: Vec::new(),
+            tools: Vec::new(),
+            tool_choice: ToolChoice::default(),
+            parallel_tool_calls: bool::default(),
+            stream: default_stream(),
+            reasoning: None,
+            metadata: RequestMetadata::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -138,13 +154,18 @@ pub struct RequestMetadata {
     pub service_tier: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_cache_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_format: Option<Value>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub provider: BTreeMap<String, Value>,
 }
 
 impl RequestMetadata {
     pub fn is_empty(&self) -> bool {
-        self.service_tier.is_none() && self.prompt_cache_key.is_none() && self.provider.is_empty()
+        self.service_tier.is_none()
+            && self.prompt_cache_key.is_none()
+            && self.response_format.is_none()
+            && self.provider.is_empty()
     }
 }
 

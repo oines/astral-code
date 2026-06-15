@@ -1,9 +1,9 @@
 //! Codex Apps support for the host-owned apps MCP server.
 //!
-//! This module owns the pieces that are unique to ChatGPT-hosted app
-//! connectors: cache scoping by authenticated user, disk cache reads/writes,
-//! connector allow-list filtering, and the normalization that turns app
-//! connector/tool metadata into model-visible MCP callable names.
+//! This module owns the pieces that are unique to the host-owned apps MCP
+//! server: disk cache reads/writes, connector allow-list filtering, and the
+//! normalization that turns app connector/tool metadata into model-visible MCP
+//! callable names.
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -23,18 +23,10 @@ use sha1::Digest;
 use sha1::Sha1;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CodexAppsToolsCacheKey {
-    pub(crate) account_id: Option<String>,
-    pub(crate) chatgpt_user_id: Option<String>,
-    pub(crate) is_workspace_account: bool,
-}
+pub struct CodexAppsToolsCacheKey {}
 
-pub fn codex_apps_tools_cache_key(auth: Option<&CodexAuth>) -> CodexAppsToolsCacheKey {
-    CodexAppsToolsCacheKey {
-        account_id: auth.and_then(CodexAuth::get_account_id),
-        chatgpt_user_id: auth.and_then(CodexAuth::get_chatgpt_user_id),
-        is_workspace_account: auth.is_some_and(CodexAuth::is_workspace_account),
-    }
+pub fn codex_apps_tools_cache_key(_auth: Option<&CodexAuth>) -> CodexAppsToolsCacheKey {
+    CodexAppsToolsCacheKey {}
 }
 
 #[derive(Clone)]

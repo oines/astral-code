@@ -658,7 +658,7 @@ async fn turn_start_jsonrpc_span_parents_core_turn_spans() -> Result<()> {
                         text: "hello".to_string(),
                         text_elements: Vec::new(),
                     }],
-                    responsesapi_client_metadata: None,
+                    model_client_metadata: None,
                     additional_context: None,
                     cwd: None,
                     runtime_workspace_roots: None,

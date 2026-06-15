@@ -63,7 +63,6 @@ use codex_config::types::McpServerTransportConfig;
 #[cfg(test)]
 use codex_mcp::qualified_mcp_tool_name_prefix;
 use codex_otel::RuntimeMetricsSummary;
-use codex_protocol::account::PlanType;
 use codex_protocol::approvals::ExecPolicyAmendment;
 use codex_protocol::approvals::NetworkPolicyAmendment;
 #[cfg(test)]

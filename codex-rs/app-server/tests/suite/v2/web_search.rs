@@ -306,11 +306,10 @@ standalone_web_search = true
 [model_providers.openai-custom]
 name = "OpenAI"
 base_url = "{server_uri}/api/codex"
-wire_api = "responses"
+wire_api = "chat_completions"
 request_max_retries = 0
 stream_max_retries = 0
 supports_websockets = false
-requires_astral_auth = true
 "#
         ),
     )

@@ -9,7 +9,6 @@ use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::ThreadTokenUsage;
 use codex_app_server_protocol::TurnStatus;
 use codex_core::config::Config;
-use codex_model_provider_info::WireApi;
 use codex_protocol::num_format::format_with_separators;
 use codex_protocol::protocol::SessionConfiguredEvent;
 use codex_utils_sandbox_summary::summarize_permission_profile;
@@ -441,23 +440,6 @@ fn config_summary_entries(
             ),
         ),
     ];
-    if config.model_provider.wire_api == WireApi::Responses {
-        entries.push((
-            "reasoning effort",
-            config
-                .model_reasoning_effort
-                .as_ref()
-                .map(std::string::ToString::to_string)
-                .unwrap_or_else(|| "none".to_string()),
-        ));
-        entries.push((
-            "reasoning summaries",
-            config
-                .model_reasoning_summary
-                .map(|summary| summary.to_string())
-                .unwrap_or_else(|| "none".to_string()),
-        ));
-    }
     entries.push((
         "session id",
         session_configured_event.session_id.to_string(),

@@ -77,7 +77,6 @@ pub(crate) mod mentions {
 mod sandbox_tags;
 pub mod sandboxing;
 mod session_prefix;
-mod session_startup_prewarm;
 pub mod skills;
 pub(crate) use skills::SkillInjections;
 pub(crate) use skills::SkillLoadOutcome;
@@ -97,7 +96,6 @@ pub use stream_events_utils::image_generation_artifact_path;
 pub mod test_support;
 mod unified_exec;
 pub mod windows_sandbox;
-pub use client::X_RESPONSESAPI_INCLUDE_TIMING_METRICS_HEADER;
 pub use codex_protocol::config_types::ModelProviderAuthInfo;
 mod event_mapping;
 pub mod review_format;

@@ -480,8 +480,7 @@ async fn plugin_list_returns_empty_when_workspace_codex_plugins_disabled() -> Re
         ChatGptAuthFixture::new("chatgpt-token")
             .account_id("account-123")
             .chatgpt_user_id("user-123")
-            .chatgpt_account_id("account-123")
-            .plan_type("team"),
+            .chatgpt_account_id("account-123"),
         AuthCredentialsStoreMode::File,
     )?;
 
@@ -565,8 +564,7 @@ async fn plugin_list_reuses_cached_workspace_codex_plugins_setting() -> Result<(
         ChatGptAuthFixture::new("chatgpt-token")
             .account_id("account-123")
             .chatgpt_user_id("user-123")
-            .chatgpt_account_id("account-123")
-            .plan_type("team"),
+            .chatgpt_account_id("account-123"),
         AuthCredentialsStoreMode::File,
     )?;
 

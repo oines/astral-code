@@ -63,9 +63,6 @@ impl Default for AppToolPolicy {
 #[derive(Clone, PartialEq, Eq)]
 struct AccessibleConnectorsCacheKey {
     hosted_base_url: String,
-    account_id: Option<String>,
-    legacy_user_id: Option<String>,
-    is_workspace_account: bool,
 }
 
 #[derive(Clone)]
@@ -243,10 +240,7 @@ pub async fn list_cached_accessible_connectors_from_mcp_tools(
     if !config.features.apps_enabled() {
         return Some(Vec::new());
     }
-    let auth_manager =
-        AuthManager::shared_from_config(config, /*enable_astral_api_key_env*/ false).await;
-    let auth = auth_manager.auth().await;
-    let cache_key = accessible_connectors_cache_key(config, auth.as_ref());
+    let cache_key = accessible_connectors_cache_key(config);
     read_cached_accessible_connectors(&cache_key).map(|connectors| {
         codex_connectors::filter::filter_disallowed_connectors(
             connectors,
@@ -257,14 +251,14 @@ pub async fn list_cached_accessible_connectors_from_mcp_tools(
 
 pub(crate) fn refresh_accessible_connectors_cache_from_mcp_tools(
     config: &Config,
-    auth: Option<&CodexAuth>,
+    _auth: Option<&CodexAuth>,
     mcp_tools: &[ToolInfo],
 ) {
     if !config.features.enabled(Feature::Apps) {
         return;
     }
 
-    let cache_key = accessible_connectors_cache_key(config, auth);
+    let cache_key = accessible_connectors_cache_key(config);
     let accessible_connectors = codex_connectors::filter::filter_disallowed_connectors(
         accessible_connectors_from_mcp_tools(mcp_tools),
         originator().value.as_str(),
@@ -319,7 +313,7 @@ pub async fn list_accessible_connectors_from_mcp_tools_with_environment_manager(
     let auth_manager =
         AuthManager::shared_from_config(config, /*enable_astral_api_key_env*/ false).await;
     let auth = auth_manager.auth().await;
-    let cache_key = accessible_connectors_cache_key(config, auth.as_ref());
+    let cache_key = accessible_connectors_cache_key(config);
     let plugins_manager = Arc::new(PluginsManager::new(config.codex_home.to_path_buf()));
     let mcp_manager = McpManager::new(Arc::clone(&plugins_manager));
     let tool_plugin_provenance = mcp_manager.tool_plugin_provenance(config).await;
@@ -449,18 +443,9 @@ pub async fn list_accessible_connectors_from_mcp_tools_with_environment_manager(
     })
 }
 
-fn accessible_connectors_cache_key(
-    config: &Config,
-    auth: Option<&CodexAuth>,
-) -> AccessibleConnectorsCacheKey {
-    let account_id = auth.and_then(CodexAuth::get_account_id);
-    let legacy_user_id = auth.and_then(CodexAuth::get_chatgpt_user_id);
-    let is_workspace_account = auth.is_some_and(CodexAuth::is_workspace_account);
+fn accessible_connectors_cache_key(config: &Config) -> AccessibleConnectorsCacheKey {
     AccessibleConnectorsCacheKey {
         hosted_base_url: config.hosted_base_url.clone(),
-        account_id,
-        legacy_user_id,
-        is_workspace_account,
     }
 }
 

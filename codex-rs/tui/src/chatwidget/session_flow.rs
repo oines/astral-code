@@ -118,7 +118,6 @@ impl ChatWidget {
                 &session,
                 self.show_welcome_banner,
                 startup_tooltip_override,
-                self.plan_type,
                 show_fast_status,
             );
             self.apply_session_info_cell(session_info_cell);

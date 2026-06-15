@@ -114,42 +114,6 @@ pub(crate) fn runtime_metrics_label(summary: RuntimeMetricsSummary) -> Option<St
             summary.websocket_events.count
         ));
     }
-    if summary.responses_api_overhead_ms > 0 {
-        let duration = format_duration_ms(summary.responses_api_overhead_ms);
-        parts.push(format!("Responses API overhead: {duration}"));
-    }
-    if summary.responses_api_inference_time_ms > 0 {
-        let duration = format_duration_ms(summary.responses_api_inference_time_ms);
-        parts.push(format!("Responses API inference: {duration}"));
-    }
-    if summary.responses_api_engine_iapi_ttft_ms > 0
-        || summary.responses_api_engine_service_ttft_ms > 0
-    {
-        let mut ttft_parts = Vec::new();
-        if summary.responses_api_engine_iapi_ttft_ms > 0 {
-            let duration = format_duration_ms(summary.responses_api_engine_iapi_ttft_ms);
-            ttft_parts.push(format!("{duration} (iapi)"));
-        }
-        if summary.responses_api_engine_service_ttft_ms > 0 {
-            let duration = format_duration_ms(summary.responses_api_engine_service_ttft_ms);
-            ttft_parts.push(format!("{duration} (service)"));
-        }
-        parts.push(format!("TTFT: {}", ttft_parts.join(" ")));
-    }
-    if summary.responses_api_engine_iapi_tbt_ms > 0
-        || summary.responses_api_engine_service_tbt_ms > 0
-    {
-        let mut tbt_parts = Vec::new();
-        if summary.responses_api_engine_iapi_tbt_ms > 0 {
-            let duration = format_duration_ms(summary.responses_api_engine_iapi_tbt_ms);
-            tbt_parts.push(format!("{duration} (iapi)"));
-        }
-        if summary.responses_api_engine_service_tbt_ms > 0 {
-            let duration = format_duration_ms(summary.responses_api_engine_service_tbt_ms);
-            tbt_parts.push(format!("{duration} (service)"));
-        }
-        parts.push(format!("TBT: {}", tbt_parts.join(" ")));
-    }
     if parts.is_empty() {
         None
     } else {

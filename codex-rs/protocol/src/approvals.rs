@@ -372,7 +372,7 @@ pub enum ElicitationAction {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]
 pub struct ApplyPatchApprovalRequestEvent {
-    /// Responses API call id for the associated patch apply call, if available.
+    /// Model tool-call id for the associated patch apply call, if available.
     pub call_id: String,
     /// Turn ID that this patch belongs to.
     /// Uses `#[serde(default)]` for backwards compatibility with older senders.

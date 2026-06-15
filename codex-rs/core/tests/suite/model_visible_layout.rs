@@ -126,7 +126,7 @@ async fn snapshot_model_visible_layout_turn_overrides() -> Result<()> {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
                 environments: Some(local_selections(first_turn_cwd)),
@@ -161,7 +161,7 @@ async fn snapshot_model_visible_layout_turn_overrides() -> Result<()> {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
                 environments: Some(local_selections(preturn_context_diff_cwd)),
@@ -252,7 +252,7 @@ async fn snapshot_model_visible_layout_cwd_change_does_not_refresh_agents() -> R
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
                 environments: Some(local_selections(cwd_one.clone())),
@@ -285,7 +285,7 @@ async fn snapshot_model_visible_layout_cwd_change_does_not_refresh_agents() -> R
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
                 environments: Some(local_selections(cwd_two)),
@@ -368,7 +368,7 @@ async fn snapshot_model_visible_layout_resume_with_personality_change() -> Resul
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -410,7 +410,7 @@ async fn snapshot_model_visible_layout_resume_with_personality_change() -> Resul
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
                 environments: Some(local_selections(resume_override_cwd)),
@@ -483,7 +483,7 @@ async fn snapshot_model_visible_layout_resume_override_matches_rollout_model() -
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -525,7 +525,7 @@ async fn snapshot_model_visible_layout_resume_override_matches_rollout_model() -
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })

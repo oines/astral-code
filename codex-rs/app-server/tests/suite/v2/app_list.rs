@@ -26,7 +26,6 @@ use codex_app_server_protocol::AppReview;
 use codex_app_server_protocol::AppScreenshot;
 use codex_app_server_protocol::AppsListParams;
 use codex_app_server_protocol::AppsListResponse;
-use codex_app_server_protocol::AuthMode;
 use codex_app_server_protocol::JSONRPCError;
 use codex_app_server_protocol::JSONRPCResponse;
 use codex_app_server_protocol::RequestId;
@@ -113,12 +112,9 @@ async fn list_apps_returns_empty_with_api_key_auth() -> Result<()> {
     save_auth(
         codex_home.path(),
         &AuthDotJson {
-            auth_mode: Some(AuthMode::ApiKey),
+            auth_mode: Some("apikey".to_string()),
             api_key: Some("test-api-key".to_string()),
-            tokens: None,
             last_refresh: None,
-            agent_identity: None,
-            personal_access_token: None,
         },
         AuthCredentialsStoreMode::File,
     )?;
@@ -180,8 +176,7 @@ async fn list_apps_returns_empty_when_workspace_codex_plugins_disabled() -> Resu
         ChatGptAuthFixture::new("chatgpt-token")
             .account_id("account-123")
             .chatgpt_user_id("user-123")
-            .chatgpt_account_id("account-123")
-            .plan_type("team"),
+            .chatgpt_account_id("account-123"),
         AuthCredentialsStoreMode::File,
     )?;
 

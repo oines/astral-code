@@ -42,7 +42,7 @@ async fn review_op_emits_lifecycle_and_review_output() {
     // Skip under Codex sandbox network restrictions.
     skip_if_no_network!();
 
-    // Start mock Responses API server. Return a single assistant message whose
+    // Start mock model server. Return a single assistant message whose
     // text is a JSON-encoded ReviewOutputEvent.
     let review_json = serde_json::json!({
         "findings": [
@@ -431,7 +431,7 @@ async fn review_uses_custom_review_model_from_config() {
 
     // Assert the request body model equals the configured review model
     let request = request_log.single_request();
-    assert_eq!(request.path(), "/v1/responses");
+    assert_eq!(request.path(), "/v1/chat/completions");
     let body = request.body_json();
     assert_eq!(body["model"].as_str().unwrap(), "gpt-5.4");
 
@@ -479,7 +479,7 @@ async fn review_uses_session_model_when_review_model_unset() {
     let _complete = wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let request = request_log.single_request();
-    assert_eq!(request.path(), "/v1/responses");
+    assert_eq!(request.path(), "/v1/chat/completions");
     let body = request.body_json();
     assert_eq!(body["model"].as_str().unwrap(), "gpt-4.1");
 
@@ -593,7 +593,7 @@ async fn review_input_isolated_from_parent_history() {
 
     // Assert the request `input` contains the environment context followed by the user review prompt.
     let request = request_log.single_request();
-    assert_eq!(request.path(), "/v1/responses");
+    assert_eq!(request.path(), "/v1/chat/completions");
     let body = request.body_json();
     let input = body["input"].as_array().expect("input array");
     assert!(
@@ -711,7 +711,7 @@ async fn review_history_surfaces_in_parent_session() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -725,7 +725,7 @@ async fn review_history_surfaces_in_parent_session() {
     let requests = request_log.requests();
     assert_eq!(requests.len(), 2);
     for request in &requests {
-        assert_eq!(request.path(), "/v1/responses");
+        assert_eq!(request.path(), "/v1/chat/completions");
     }
     let body = requests[1].body_json();
     let input = body["input"].as_array().expect("input array");
@@ -846,7 +846,7 @@ async fn review_uses_overridden_cwd_for_base_branch_merge_base() {
     let requests = request_log.requests();
     assert_eq!(requests.len(), 1);
     for request in &requests {
-        assert_eq!(request.path(), "/v1/responses");
+        assert_eq!(request.path(), "/v1/chat/completions");
     }
     let body = requests[0].body_json();
     let input = body["input"].as_array().expect("input array");
@@ -875,7 +875,7 @@ fn completed_sse() -> Vec<serde_json::Value> {
     vec![responses::ev_completed("resp-1")]
 }
 
-/// Start a mock Responses API server and mount the given SSE events.
+/// Start a mock model server and mount the given SSE events.
 async fn start_responses_server_with_sse(
     events: Vec<serde_json::Value>,
     expected_requests: usize,

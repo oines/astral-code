@@ -10,17 +10,6 @@ pub const WEBSOCKET_REQUEST_COUNT_METRIC: &str = "codex.websocket.request";
 pub const WEBSOCKET_REQUEST_DURATION_METRIC: &str = "codex.websocket.request.duration_ms";
 pub const WEBSOCKET_EVENT_COUNT_METRIC: &str = "codex.websocket.event";
 pub const WEBSOCKET_EVENT_DURATION_METRIC: &str = "codex.websocket.event.duration_ms";
-pub const RESPONSES_API_OVERHEAD_DURATION_METRIC: &str = "codex.responses_api_overhead.duration_ms";
-pub const RESPONSES_API_INFERENCE_TIME_DURATION_METRIC: &str =
-    "codex.responses_api_inference_time.duration_ms";
-pub const RESPONSES_API_ENGINE_IAPI_TTFT_DURATION_METRIC: &str =
-    "codex.responses_api_engine_iapi_ttft.duration_ms";
-pub const RESPONSES_API_ENGINE_SERVICE_TTFT_DURATION_METRIC: &str =
-    "codex.responses_api_engine_service_ttft.duration_ms";
-pub const RESPONSES_API_ENGINE_IAPI_TBT_DURATION_METRIC: &str =
-    "codex.responses_api_engine_iapi_tbt.duration_ms";
-pub const RESPONSES_API_ENGINE_SERVICE_TBT_DURATION_METRIC: &str =
-    "codex.responses_api_engine_service_tbt.duration_ms";
 pub const TURN_E2E_DURATION_METRIC: &str = "codex.turn.e2e_duration_ms";
 pub const TURN_TTFT_DURATION_METRIC: &str = "codex.turn.ttft.duration_ms";
 pub const TURN_TTFM_DURATION_METRIC: &str = "codex.turn.ttfm.duration_ms";
@@ -48,11 +37,6 @@ pub const HOOK_RUN_METRIC: &str = "codex.hooks.run";
 pub const HOOK_RUN_DURATION_METRIC: &str = "codex.hooks.run.duration_ms";
 /// Duration for coarse startup phases, tagged by low-cardinality phase and status.
 pub const STARTUP_PHASE_DURATION_METRIC: &str = "codex.startup.phase.duration_ms";
-/// Total runtime of a startup prewarm attempt until it completes, tagged by final status.
-pub const STARTUP_PREWARM_DURATION_METRIC: &str = "codex.startup_prewarm.duration_ms";
-/// Age of the startup prewarm attempt when the first real turn resolves it, tagged by outcome.
-pub const STARTUP_PREWARM_AGE_AT_FIRST_TURN_METRIC: &str =
-    "codex.startup_prewarm.age_at_first_turn_ms";
 pub const THREAD_STARTED_METRIC: &str = "codex.thread.started";
 pub const THREAD_SKILLS_ENABLED_TOTAL_METRIC: &str = "codex.thread.skills.enabled_total";
 pub const THREAD_SKILLS_KEPT_TOTAL_METRIC: &str = "codex.thread.skills.kept_total";

@@ -28,6 +28,7 @@ use codex_tools::ResponsesApiNamespaceTool;
 use codex_tools::ToolName;
 use codex_tools::ToolSpec;
 use serde_json::Value;
+use serde_json::json;
 
 use crate::client_common::Prompt;
 
@@ -82,8 +83,28 @@ pub(crate) fn build_agent_request(params: AgentRequestBuildParams<'_>) -> Result
                 .model_info
                 .service_tier_for_request(params.service_tier),
             prompt_cache_key: Some(params.prompt_cache_key),
+            response_format: response_format_for_output_schema(
+                &params.prompt.output_schema,
+                params.prompt.output_schema_strict,
+            ),
             provider,
         },
+    })
+}
+
+fn response_format_for_output_schema(
+    output_schema: &Option<Value>,
+    output_schema_strict: bool,
+) -> Option<Value> {
+    output_schema.as_ref().map(|schema| {
+        json!({
+            "type": "json_schema",
+            "json_schema": {
+                "name": "codex_output_schema",
+                "strict": output_schema_strict,
+                "schema": schema,
+            },
+        })
     })
 }
 

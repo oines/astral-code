@@ -58,7 +58,7 @@ fn disabled_plan_turn(
             text_elements: Vec::new(),
         }],
         final_output_json_schema: None,
-        responsesapi_client_metadata: None,
+        model_client_metadata: None,
         additional_context: Default::default(),
         thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
             environments: Some(local_selections(cwd)),
@@ -119,7 +119,7 @@ async fn user_message_item_is_emitted() -> anyhow::Result<()> {
         .submit(Op::UserInput {
             items: vec![expected_input.clone()],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -178,7 +178,7 @@ async fn assistant_message_item_is_emitted() -> anyhow::Result<()> {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -239,7 +239,7 @@ async fn reasoning_item_is_emitted() -> anyhow::Result<()> {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -301,7 +301,7 @@ async fn web_search_item_is_emitted() -> anyhow::Result<()> {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -381,7 +381,7 @@ async fn image_generation_call_event_is_emitted() -> anyhow::Result<()> {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -468,7 +468,7 @@ async fn image_generation_call_event_is_emitted_when_image_save_fails() -> anyho
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -524,7 +524,7 @@ async fn agent_message_content_delta_has_item_metadata() -> anyhow::Result<()> {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -1108,7 +1108,7 @@ async fn reasoning_content_delta_has_item_metadata() -> anyhow::Result<()> {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -1163,7 +1163,7 @@ async fn reasoning_raw_content_delta_respects_flag() -> anyhow::Result<()> {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })

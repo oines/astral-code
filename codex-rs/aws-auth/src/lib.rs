@@ -167,7 +167,7 @@ mod tests {
         headers.insert("x-test-header", http::HeaderValue::from_static("present"));
         AwsRequestToSign {
             method: Method::POST,
-            url: "https://bedrock-runtime.us-east-1.amazonaws.com/v1/responses".to_string(),
+            url: "https://bedrock-runtime.us-east-1.amazonaws.com/v1/chat/completions".to_string(),
             headers,
             body: Bytes::from_static(br#"{"model":"openai.gpt-oss-120b-1:0"}"#),
         }
@@ -193,7 +193,7 @@ mod tests {
         );
         assert_eq!(
             signed.url,
-            "https://bedrock-runtime.us-east-1.amazonaws.com/v1/responses"
+            "https://bedrock-runtime.us-east-1.amazonaws.com/v1/chat/completions"
         );
         assert!(
             signing::header_value(&signed.headers, http::header::AUTHORIZATION.as_str())

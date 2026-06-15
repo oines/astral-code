@@ -517,8 +517,7 @@ async fn plugin_install_rejects_when_workspace_codex_plugins_disabled() -> Resul
         ChatGptAuthFixture::new("chatgpt-token")
             .account_id("account-123")
             .chatgpt_user_id("user-123")
-            .chatgpt_account_id("account-123")
-            .plan_type("team"),
+            .chatgpt_account_id("account-123"),
         AuthCredentialsStoreMode::File,
     )?;
     write_plugin_marketplace(

@@ -133,11 +133,9 @@ pub(crate) async fn run_turn(
     turn_context: Arc<TurnContext>,
     turn_extension_data: Arc<codex_extension_api::ExtensionData>,
     input: Vec<TurnInput>,
-    prewarmed_client_session: Option<ModelClientSession>,
     cancellation_token: CancellationToken,
 ) -> Option<String> {
-    let mut client_session =
-        prewarmed_client_session.unwrap_or_else(|| sess.services.model_client.new_session());
+    let mut client_session = sess.services.model_client.new_session();
     // TODO(ccunningham): Pre-turn compaction runs before context updates and the
     // new user message are recorded. Estimate pending incoming items (context
     // diffs/full reinjection + user input) and trigger compaction preemptively
@@ -188,8 +186,8 @@ pub(crate) async fn run_turn(
         ),
     ));
 
-    // `ModelClientSession` is turn-scoped and caches WebSocket + sticky routing state, so we reuse
-    // one instance across retries within this turn.
+    // `ModelClientSession` is turn-scoped and caches sticky routing state, so we reuse one
+    // instance across retries within this turn.
     // Pending input is drained into history before building the next model request.
     // However, we defer that drain until after sampling in two cases:
     // 1. At the start of a turn, so the fresh turn input in `input` gets sampled first.
@@ -712,8 +710,9 @@ async fn auto_compact_token_status(
             AutoCompactTokenLimitScope::Total => (
                 active_context_tokens,
                 turn_context
-                    .model_info
-                    .auto_compact_token_limit()
+                    .config
+                    .model_auto_compact_token_limit
+                    .or_else(|| turn_context.model_info.auto_compact_token_limit())
                     .unwrap_or(i64::MAX),
                 None,
             ),

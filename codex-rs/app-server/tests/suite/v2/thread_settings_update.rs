@@ -377,7 +377,7 @@ async fn received_response_bodies(server: &wiremock::MockServer) -> Result<Vec<V
         .context("failed to fetch received requests")?;
     let mut bodies = Vec::new();
     for request in requests {
-        if request.url.path().ends_with("/responses") {
+        if request.url.path().ends_with("/chat/completions") {
             bodies.push(request.body_json::<Value>()?);
         }
     }

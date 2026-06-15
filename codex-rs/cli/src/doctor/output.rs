@@ -604,9 +604,7 @@ fn auth_reachability_note(report: &DoctorReport) -> Option<DoctorNote> {
     let reachability_mode = detail::detail_value(reachability, "reachability mode")?;
     let auth_mode_lower = auth_mode.to_ascii_lowercase();
     let reachability_mode_lower = reachability_mode.to_ascii_lowercase();
-    let legacy_auth_mode = ["chatgpt", "agent_identity", "personal_access_token"]
-        .iter()
-        .any(|mode| auth_mode_lower.contains(mode));
+    let legacy_auth_mode = auth_mode_lower.contains("chatgpt");
     if legacy_auth_mode && reachability_mode_lower.contains("api key") {
         return Some(DoctorNote {
             status: DisplayStatus::Warning,
@@ -1198,7 +1196,7 @@ mod tests {
                 "token expired",
             )
             .detail("ASTRAL_API_KEY: present")
-            .remediation("Pipe an API key to `astral login --with-api-key`."),
+            .remediation("Set ASTRAL_API_KEY or the active provider's configured auth env var."),
             DoctorCheck::new(
                 "updates.status",
                 "updates",
@@ -1215,7 +1213,7 @@ mod tests {
                 "network.websocket_reachability",
                 "websocket",
                 CheckStatus::Ok,
-                "Responses WebSocket handshake succeeded",
+                "Responses WebSocket transport is removed",
             ),
             DoctorCheck::new(
                 "app_server.status",
@@ -1248,7 +1246,7 @@ Astral Doctor v0.0.0
 
 Notes
    ⚠ terminal     narrow terminal
-   ✗ auth         token expired - Pipe an API key to `astral login --with-api-key`.
+   ✗ auth         token expired - Set ASTRAL_API_KEY or the active provider's configured auth env var.
 ─────────────────────────────────────────────────────────────
 
 Environment
@@ -1277,7 +1275,7 @@ Environment
   ✓ state        state paths inspectable
 
 Configuration
-  ✗ auth         token expired — Pipe an API key to `astral login --with-api-key`.
+  ✗ auth         token expired — Set ASTRAL_API_KEY or the active provider's configured auth env var.
       ASTRAL_API_KEY           present
 
 Updates
@@ -1285,7 +1283,7 @@ Updates
 
 Connectivity
   ✓ network      network environment readable
-  ✓ websocket    Responses WebSocket handshake succeeded
+  ✓ websocket    Responses WebSocket transport is removed
   ✓ reachability active provider endpoints are reachable over HTTP
 
 Background Server
@@ -1319,7 +1317,7 @@ Astral Doctor v0.0.0
 
 Notes
    ⚠ terminal     narrow terminal
-   ✗ auth         token expired - Pipe an API key to `astral login --with-api-key`.
+   ✗ auth         token expired - Set ASTRAL_API_KEY or the active provider's configured auth env var.
 ─────────────────────────────────────────────────────────────
 
 Environment
@@ -1333,14 +1331,14 @@ Environment
   ✓ state        state paths inspectable
 
 Configuration
-  ✗ auth         token expired — Pipe an API key to `astral login --with-api-key`.
+  ✗ auth         token expired — Set ASTRAL_API_KEY or the active provider's configured auth env var.
 
 Updates
   ✓ updates      update configuration is locally consistent
 
 Connectivity
   ✓ network      network environment readable
-  ✓ websocket    Responses WebSocket handshake succeeded
+  ✓ websocket    Responses WebSocket transport is removed
   ✓ reachability active provider endpoints are reachable over HTTP
 
 Background Server
@@ -1427,7 +1425,7 @@ Astral Doctor v0.0.0
 
 Notes
    [!!] terminal     narrow terminal
-   [XX] auth         token expired - Pipe an API key to `astral login --with-api-key`.
+   [XX] auth         token expired - Set ASTRAL_API_KEY or the active provider's configured auth env var.
 -------------------------------------------------------------
 
 Environment
@@ -1441,14 +1439,14 @@ Environment
   [ok] state        state paths inspectable
 
 Configuration
-  [XX] auth         token expired - Pipe an API key to `astral login --with-api-key`.
+  [XX] auth         token expired - Set ASTRAL_API_KEY or the active provider's configured auth env var.
 
 Updates
   [ok] updates      update configuration is locally consistent
 
 Connectivity
   [ok] network      network environment readable
-  [ok] websocket    Responses WebSocket handshake succeeded
+  [ok] websocket    Responses WebSocket transport is removed
   [ok] reachability active provider endpoints are reachable over HTTP
 
 Background Server
@@ -1560,10 +1558,10 @@ Run astral doctor without --summary for detailed diagnostics.
                 DoctorCheck::new(
                     "network.websocket_reachability",
                     "websocket",
-                    CheckStatus::Ok,
-                    "Responses WebSocket handshake succeeded",
-                )
-                .detail("auth mode: chatgpt"),
+                CheckStatus::Ok,
+                "Responses WebSocket transport is removed",
+            )
+            .detail("Responses WebSocket transport has been removed."),
                 DoctorCheck::new(
                     "network.provider_reachability",
                     "reachability",

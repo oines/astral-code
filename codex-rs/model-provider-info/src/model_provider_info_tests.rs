@@ -327,11 +327,27 @@ fn test_deserialize_websocket_connect_timeout() {
 name = "OpenAI"
 base_url = "https://api.openai.com/v1"
 websocket_connect_timeout_ms = 15000
-supports_websockets = true
         "#;
 
     let provider: ModelProviderInfo = toml::from_str(provider_toml).unwrap();
     assert_eq!(provider.websocket_connect_timeout_ms, Some(15_000));
+}
+
+#[test]
+fn test_deserialize_responses_wire_api_is_rejected() {
+    let provider_toml = r#"
+name = "OpenAI"
+base_url = "https://api.openai.com/v1"
+wire_api = "responses"
+        "#;
+
+    let err = toml::from_str::<ModelProviderInfo>(provider_toml)
+        .expect_err("responses wire API should be rejected");
+
+    assert!(
+        err.to_string().contains("chat_completions"),
+        "unexpected error: {err}"
+    );
 }
 
 #[test]
@@ -354,9 +370,7 @@ fn test_custom_provider_without_base_url_returns_configuration_error() {
 fn test_auth_mode_does_not_route_provider_to_chatgpt_codex_backend() {
     let api_provider =
         ModelProviderInfo::create_openai_provider(Some("https://models.example/v1".to_string()))
-            .to_api_provider(Some(
-                codex_app_server_protocol::AuthMode::PersonalAccessToken,
-            ))
+            .to_api_provider(Some(codex_app_server_protocol::AuthMode::ApiKey))
             .expect("provider should build API provider");
 
     assert_eq!(api_provider.base_url, "https://models.example/v1");
@@ -427,7 +441,7 @@ fn test_create_amazon_bedrock_provider() {
                 profile: None,
                 region: None,
             }),
-            wire_api: WireApi::Responses,
+            wire_api: WireApi::ChatCompletions,
             provider_flavor: None,
             query_params: None,
             request_body: None,
@@ -587,7 +601,10 @@ fn test_validate_provider_aws_rejects_websockets() {
 
     assert_eq!(
         provider.validate(),
-        Err("provider aws cannot be combined with supports_websockets".to_string())
+        Err(
+            "provider supports_websockets is no longer supported because Responses API transports have been removed"
+                .to_string()
+        )
     );
 }
 

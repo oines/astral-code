@@ -8,11 +8,7 @@ use walkdir::WalkDir;
 use wiremock::MockServer;
 
 fn exec_sse_response() -> String {
-    responses::sse(vec![
-        responses::ev_response_created("resp-ephemeral"),
-        responses::ev_assistant_message("msg-ephemeral", "ephemeral response"),
-        responses::ev_completed("resp-ephemeral"),
-    ])
+    responses::chat_completions_text_sse("ephemeral response")
 }
 
 fn session_rollout_count(home_path: &std::path::Path) -> usize {
@@ -35,7 +31,8 @@ async fn persists_rollout_file_by_default() -> anyhow::Result<()> {
 
     let test = test_codex_exec();
     let server = MockServer::start().await;
-    let _response_mock = responses::mount_sse_once(&server, exec_sse_response()).await;
+    let _response_mock =
+        responses::mount_chat_completions_sse_once(&server, exec_sse_response()).await;
 
     test.cmd_with_server(&server)
         .arg("--skip-git-repo-check")
@@ -53,7 +50,8 @@ async fn does_not_persist_rollout_file_in_ephemeral_mode() -> anyhow::Result<()>
 
     let test = test_codex_exec();
     let server = MockServer::start().await;
-    let _response_mock = responses::mount_sse_once(&server, exec_sse_response()).await;
+    let _response_mock =
+        responses::mount_chat_completions_sse_once(&server, exec_sse_response()).await;
 
     test.cmd_with_server(&server)
         .arg("--skip-git-repo-check")

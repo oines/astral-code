@@ -13,12 +13,12 @@ async fn send_astral_exec_originator() -> anyhow::Result<()> {
     let test = test_codex_exec();
 
     let server = responses::start_mock_server().await;
-    let body = responses::sse(vec![
-        responses::ev_response_created("response_1"),
-        responses::ev_assistant_message("response_1", "Hello, world!"),
-        responses::ev_completed("response_1"),
-    ]);
-    responses::mount_sse_once_match(&server, header("Originator", "astral_exec"), body).await;
+    responses::mount_chat_completions_sse_once_match(
+        &server,
+        header("Originator", "astral_exec"),
+        responses::chat_completions_text_sse("Hello, world!"),
+    )
+    .await;
 
     test.cmd_with_server(&server)
         .env_remove(ASTRAL_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR)
@@ -35,13 +35,12 @@ async fn supports_originator_override() -> anyhow::Result<()> {
     let test = test_codex_exec();
 
     let server = responses::start_mock_server().await;
-    let body = responses::sse(vec![
-        responses::ev_response_created("response_1"),
-        responses::ev_assistant_message("response_1", "Hello, world!"),
-        responses::ev_completed("response_1"),
-    ]);
-    responses::mount_sse_once_match(&server, header("Originator", "astral_exec_override"), body)
-        .await;
+    responses::mount_chat_completions_sse_once_match(
+        &server,
+        header("Originator", "astral_exec_override"),
+        responses::chat_completions_text_sse("Hello, world!"),
+    )
+    .await;
 
     test.cmd_with_server(&server)
         .env(

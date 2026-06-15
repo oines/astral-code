@@ -53,11 +53,7 @@ async fn turn_start_forwards_client_metadata_to_responses_request_v2() -> Result
     .await;
 
     let codex_home = TempDir::new()?;
-    create_config_toml(
-        codex_home.path(),
-        &server.uri(),
-        /*supports_websockets*/ false,
-    )?;
+    create_config_toml(codex_home.path(), &server.uri())?;
 
     let mut mcp = TestAppServer::new(codex_home.path()).await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
@@ -85,7 +81,7 @@ async fn turn_start_forwards_client_metadata_to_responses_request_v2() -> Result
                 text: "Hello".to_string(),
                 text_elements: Vec::new(),
             }],
-            responsesapi_client_metadata: Some(client_metadata.clone()),
+            model_client_metadata: Some(client_metadata.clone()),
             ..Default::default()
         })
         .await?;
@@ -137,11 +133,7 @@ async fn turn_start_sends_fork_lineage_in_turn_metadata_for_thread_fork_v2() -> 
     .await;
 
     let codex_home = TempDir::new()?;
-    create_config_toml(
-        codex_home.path(),
-        &server.uri(),
-        /*supports_websockets*/ false,
-    )?;
+    create_config_toml(codex_home.path(), &server.uri())?;
 
     let source_thread_id = create_fake_rollout(
         codex_home.path(),
@@ -221,11 +213,7 @@ async fn review_start_sends_parent_lineage_in_turn_metadata_for_thread_fork_v2()
     .await;
 
     let codex_home = TempDir::new()?;
-    create_config_toml(
-        codex_home.path(),
-        &server.uri(),
-        /*supports_websockets*/ false,
-    )?;
+    create_config_toml(codex_home.path(), &server.uri())?;
 
     let source_thread_id = create_fake_rollout(
         codex_home.path(),
@@ -314,11 +302,7 @@ async fn turn_start_sends_other_subagent_lineage_after_cold_thread_resume_v2() -
     .await;
 
     let codex_home = TempDir::new()?;
-    create_config_toml(
-        codex_home.path(),
-        &server.uri(),
-        /*supports_websockets*/ false,
-    )?;
+    create_config_toml(codex_home.path(), &server.uri())?;
 
     let parent_thread_id = CoreThreadId::new();
     let parent_thread_id_str = parent_thread_id.to_string();
@@ -417,11 +401,7 @@ async fn turn_steer_updates_client_metadata_on_follow_up_responses_request_v2() 
     let request_log =
         responses::mount_response_sequence(&server, vec![first_response, second_response]).await;
 
-    create_config_toml(
-        codex_home.path(),
-        &server.uri(),
-        /*supports_websockets*/ false,
-    )?;
+    create_config_toml(codex_home.path(), &server.uri())?;
 
     let mut mcp = TestAppServer::new(codex_home.path()).await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
@@ -446,7 +426,7 @@ async fn turn_steer_updates_client_metadata_on_follow_up_responses_request_v2() 
                 text: "Run sleep".to_string(),
                 text_elements: Vec::new(),
             }],
-            responsesapi_client_metadata: Some(start_metadata.clone()),
+            model_client_metadata: Some(start_metadata.clone()),
             ..Default::default()
         })
         .await?;
@@ -477,7 +457,7 @@ async fn turn_steer_updates_client_metadata_on_follow_up_responses_request_v2() 
                 text: "Focus on the failure".to_string(),
                 text_elements: Vec::new(),
             }],
-            responsesapi_client_metadata: Some(steer_metadata.clone()),
+            model_client_metadata: Some(steer_metadata.clone()),
             additional_context: None,
             expected_turn_id: turn_id.clone(),
         })
@@ -523,109 +503,7 @@ async fn turn_steer_updates_client_metadata_on_follow_up_responses_request_v2() 
     Ok(())
 }
 
-#[tokio::test]
-async fn turn_start_forwards_client_metadata_to_responses_websocket_request_body_v2() -> Result<()>
-{
-    skip_if_no_network!(Ok(()));
-
-    let websocket_server = responses::start_websocket_server(vec![vec![
-        vec![
-            responses::ev_response_created("warm-1"),
-            responses::ev_completed("warm-1"),
-        ],
-        vec![
-            responses::ev_response_created("resp-1"),
-            responses::ev_assistant_message("msg-1", "Done"),
-            responses::ev_completed("resp-1"),
-        ],
-    ]])
-    .await;
-
-    let codex_home = TempDir::new()?;
-    create_config_toml(
-        codex_home.path(),
-        &websocket_server.uri().replacen("ws://", "http://", 1),
-        /*supports_websockets*/ true,
-    )?;
-
-    let mut mcp = TestAppServer::new(codex_home.path()).await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
-
-    let thread_req = mcp
-        .send_thread_start_request(ThreadStartParams::default())
-        .await?;
-    let thread_resp: JSONRPCResponse = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(thread_req)),
-    )
-    .await??;
-    let ThreadStartResponse { thread, .. } = to_response::<ThreadStartResponse>(thread_resp)?;
-
-    let client_metadata = HashMap::from([
-        ("fiber_run_id".to_string(), "fiber-start-123".to_string()),
-        ("origin".to_string(), "gaas".to_string()),
-    ]);
-    let turn_req = mcp
-        .send_turn_start_request(TurnStartParams {
-            thread_id: thread.id,
-            client_user_message_id: None,
-            input: vec![V2UserInput::Text {
-                text: "Hello".to_string(),
-                text_elements: Vec::new(),
-            }],
-            responsesapi_client_metadata: Some(client_metadata),
-            ..Default::default()
-        })
-        .await?;
-    let turn_resp: JSONRPCResponse = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(turn_req)),
-    )
-    .await??;
-    let TurnStartResponse { turn } = to_response::<TurnStartResponse>(turn_resp)?;
-
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
-
-    let warmup = websocket_server
-        .wait_for_request(/*connection_index*/ 0, /*request_index*/ 0)
-        .await
-        .body_json();
-    let request = websocket_server
-        .wait_for_request(/*connection_index*/ 0, /*request_index*/ 1)
-        .await
-        .body_json();
-
-    assert_eq!(warmup["type"].as_str(), Some("response.create"));
-    assert_eq!(warmup["generate"].as_bool(), Some(false));
-    assert_eq!(request["type"].as_str(), Some("response.create"));
-    assert_eq!(request["previous_response_id"].as_str(), Some("warm-1"));
-
-    let metadata = request["client_metadata"]["x-astral-turn-metadata"]
-        .as_str()
-        .map(parse_json_header)
-        .unwrap_or_else(|| panic!("missing websocket x-astral-turn-metadata client metadata"));
-    assert_eq!(metadata["fiber_run_id"].as_str(), Some("fiber-start-123"));
-    assert_eq!(metadata["origin"].as_str(), Some("gaas"));
-    assert_eq!(metadata["turn_id"].as_str(), Some(turn.id.as_str()));
-    assert!(metadata.get("session_id").is_some());
-    assert_eq!(
-        metadata["window_id"].as_str(),
-        request["client_metadata"]["x-astral-window-id"].as_str()
-    );
-
-    websocket_server.shutdown().await;
-    Ok(())
-}
-
-fn create_config_toml(
-    codex_home: &Path,
-    server_uri: &str,
-    supports_websockets: bool,
-) -> std::io::Result<()> {
+fn create_config_toml(codex_home: &Path, server_uri: &str) -> std::io::Result<()> {
     let config_toml = codex_home.join("config.toml");
     std::fs::write(
         config_toml,
@@ -640,10 +518,9 @@ model_provider = "mock_provider"
 [model_providers.mock_provider]
 name = "Mock provider for test"
 base_url = "{server_uri}/v1"
-wire_api = "responses"
+wire_api = "chat_completions"
 request_max_retries = 0
 stream_max_retries = 0
-supports_websockets = {supports_websockets}
 "#
         ),
     )

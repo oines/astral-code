@@ -316,7 +316,7 @@ remote_plugin = true
         .mount(&server)
         .await;
 
-    let auth = CodexAuth::create_dummy_chatgpt_auth_for_testing();
+    let auth = CodexAuth::create_dummy_api_key_auth_for_testing();
     let mut config = load_plugins_config(codex_home.path()).await;
     config.hosted_base_url = format!("{}/backend-api", server.uri());
     let plugins_manager = PluginsManager::new(config.codex_home.to_path_buf());

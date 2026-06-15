@@ -26,7 +26,6 @@ use core_test_support::test_codex::local_selections;
 
 use codex_features::Feature;
 use codex_login::CodexAuth;
-use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::WireApi;
 use codex_model_provider_info::create_oss_provider_with_base_url;
 use codex_models_manager::bundled_models_response;
@@ -130,9 +129,7 @@ use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::protocol::TokenCountEvent;
 use codex_protocol::protocol::TokenUsage;
 use codex_protocol::protocol::TokenUsageInfo;
-use codex_protocol::protocol::TurnAbortedEvent;
 use codex_protocol::protocol::TurnCompleteEvent;
-use codex_protocol::protocol::TurnStartedEvent;
 use codex_protocol::protocol::UserMessageEvent;
 use codex_protocol::protocol::W3cTraceContext;
 use codex_rmcp_client::ElicitationAction;
@@ -267,59 +264,6 @@ fn skill_message(text: &str) -> ResponseItem {
 }
 
 #[tokio::test]
-async fn regular_turn_emits_turn_started_with_trace_id_without_waiting_for_startup_prewarm() {
-    let _trace_test_context = install_test_tracing("codex-core-tests");
-    let request_parent = W3cTraceContext {
-        traceparent: Some("00-00000000000000000000000000000011-0000000000000022-01".into()),
-        tracestate: Some("vendor=value".into()),
-    };
-    let request_span = info_span!("app_server.request");
-    assert!(set_parent_from_w3c_trace_context(
-        &request_span,
-        &request_parent
-    ));
-    let (sess, tc, rx) = make_session_and_context_with_rx()
-        .instrument(request_span)
-        .await;
-    assert_eq!(
-        tc.trace_id.as_deref(),
-        Some("00000000000000000000000000000011")
-    );
-    let (_tx, startup_prewarm_rx) = tokio::sync::oneshot::channel::<()>();
-    let handle = tokio::spawn(async move {
-        let _ = startup_prewarm_rx.await;
-        Ok(test_model_client_session())
-    });
-
-    sess.set_session_startup_prewarm(
-        crate::session_startup_prewarm::SessionStartupPrewarmHandle::new(
-            handle,
-            std::time::Instant::now(),
-            crate::client::WEBSOCKET_CONNECT_TIMEOUT,
-        ),
-    )
-    .await;
-    sess.spawn_task(
-        Arc::clone(&tc),
-        Vec::new(),
-        crate::tasks::RegularTask::new(),
-    )
-    .await;
-
-    let first = tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv())
-        .await
-        .expect("expected turn started event without waiting for startup prewarm")
-        .expect("channel open");
-    let EventMsg::TurnStarted(turn_started) = first.msg else {
-        panic!("expected turn started event");
-    };
-    assert_eq!(turn_started.turn_id, tc.sub_id);
-    assert_eq!(turn_started.trace_id, tc.trace_id);
-
-    sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
-}
-
-#[tokio::test]
 async fn request_mcp_server_elicitation_auto_accepts_when_auto_deny_is_enabled() {
     let (session, turn_context, rx) = make_session_and_context_with_rx().await;
     session
@@ -361,86 +305,6 @@ async fn request_mcp_server_elicitation_auto_accepts_when_auto_deny_is_enabled()
     );
     assert!(!response.sent);
     assert!(rx.try_recv().is_err());
-}
-
-#[tokio::test]
-async fn interrupting_regular_turn_waiting_on_startup_prewarm_emits_turn_aborted() {
-    let (sess, tc, rx) = make_session_and_context_with_rx().await;
-    let (_tx, startup_prewarm_rx) = tokio::sync::oneshot::channel::<()>();
-    let handle = tokio::spawn(async move {
-        let _ = startup_prewarm_rx.await;
-        Ok(test_model_client_session())
-    });
-
-    sess.set_session_startup_prewarm(
-        crate::session_startup_prewarm::SessionStartupPrewarmHandle::new(
-            handle,
-            std::time::Instant::now(),
-            crate::client::WEBSOCKET_CONNECT_TIMEOUT,
-        ),
-    )
-    .await;
-    sess.spawn_task(
-        Arc::clone(&tc),
-        Vec::new(),
-        crate::tasks::RegularTask::new(),
-    )
-    .await;
-
-    let first = tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv())
-        .await
-        .expect("expected turn started event without waiting for startup prewarm")
-        .expect("channel open");
-    assert!(matches!(
-        first.msg,
-        EventMsg::TurnStarted(TurnStartedEvent { turn_id, .. }) if turn_id == tc.sub_id
-    ));
-
-    sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
-
-    let marker_evt = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
-        .await
-        .expect("expected turn aborted marker event")
-        .expect("channel open");
-    assert!(matches!(marker_evt.msg, EventMsg::RawResponseItem(_)));
-
-    let second = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
-        .await
-        .expect("expected turn aborted event")
-        .expect("channel open");
-    let EventMsg::TurnAborted(TurnAbortedEvent {
-        turn_id,
-        reason,
-        completed_at,
-        duration_ms,
-    }) = second.msg
-    else {
-        panic!("expected turn aborted event");
-    };
-    assert_eq!(turn_id, Some(tc.sub_id.clone()));
-    assert_eq!(reason, TurnAbortReason::Interrupted);
-    assert!(completed_at.is_some());
-    assert!(duration_ms.is_some());
-}
-
-fn test_model_client_session() -> crate::client::ModelClientSession {
-    let thread_id = ThreadId::try_from("00000000-0000-4000-8000-000000000001")
-        .expect("test thread id should be valid");
-    crate::client::ModelClient::new(
-        /*auth_manager*/ None,
-        thread_id.into(),
-        thread_id,
-        /*installation_id*/ "11111111-1111-4111-8111-111111111111".to_string(),
-        ModelProviderInfo::create_openai_provider(/* base_url */ /*base_url*/ None),
-        codex_protocol::protocol::SessionSource::Exec,
-        /*parent_thread_id*/ None,
-        /*model_verbosity*/ None,
-        /*enable_request_compression*/ false,
-        /*include_timing_metrics*/ false,
-        /*beta_features_header*/ None,
-        /*attestation_provider*/ None,
-    )
-    .new_session()
 }
 
 fn developer_input_texts(items: &[ResponseItem]) -> Vec<&str> {
@@ -2452,7 +2316,7 @@ async fn fork_startup_context_then_first_turn_diff_snapshot() -> anyhow::Result<
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -2497,7 +2361,7 @@ async fn fork_startup_context_then_first_turn_diff_snapshot() -> anyhow::Result<
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: ThreadSettingsOverrides {
                 approval_policy: Some(AskForApproval::Never),
@@ -3198,7 +3062,6 @@ async fn set_rate_limits_retains_previous_credits() {
             balance: Some("10.00".to_string()),
         }),
         individual_limit: None,
-        plan_type: Some(codex_protocol::account::PlanType::Plus),
         rate_limit_reached_type: None,
     };
     state.set_rate_limits(initial.clone());
@@ -3218,7 +3081,6 @@ async fn set_rate_limits_retains_previous_credits() {
         }),
         credits: None,
         individual_limit: None,
-        plan_type: None,
         rate_limit_reached_type: None,
     };
     state.set_rate_limits(update.clone());
@@ -3232,114 +3094,6 @@ async fn set_rate_limits_retains_previous_credits() {
             secondary: update.secondary,
             credits: initial.credits,
             individual_limit: initial.individual_limit,
-            plan_type: initial.plan_type,
-            rate_limit_reached_type: None,
-        })
-    );
-}
-
-#[tokio::test]
-async fn set_rate_limits_updates_plan_type_when_present() {
-    let codex_home = tempfile::tempdir().expect("create temp dir");
-    let config = build_test_config(codex_home.path()).await;
-    let config = Arc::new(config);
-    let model = get_model_offline_for_tests(config.model.as_deref());
-    let model_info =
-        construct_model_info_offline_for_tests(model.as_str(), &config.to_models_manager_config());
-    let reasoning_effort = config.model_reasoning_effort.clone();
-    let collaboration_mode = CollaborationMode {
-        mode: ModeKind::Default,
-        settings: Settings {
-            model,
-            reasoning_effort,
-            developer_instructions: None,
-        },
-    };
-    let session_configuration = SessionConfiguration {
-        provider: config.model_provider.clone(),
-        collaboration_mode,
-        model_reasoning_summary: config.model_reasoning_summary,
-        developer_instructions: config.developer_instructions.clone(),
-        user_instructions: config.user_instructions.clone(),
-        service_tier: None,
-        personality: config.personality,
-        base_instructions: config
-            .base_instructions
-            .clone()
-            .unwrap_or_else(|| model_info.get_model_instructions(config.personality)),
-        compact_prompt: config.compact_prompt.clone(),
-        approval_policy: config.permissions.approval_policy.clone(),
-        approvals_reviewer: config.approvals_reviewer,
-        permission_profile_state: config.permissions.permission_profile_state().clone(),
-        windows_sandbox_level: WindowsSandboxLevel::from_config(&config),
-        environments: TurnEnvironmentSelections::new(config.cwd.clone(), Vec::new()),
-        workspace_roots: config.workspace_roots.clone(),
-        codex_home: config.codex_home.clone(),
-        thread_name: None,
-        original_config_do_not_use: Arc::clone(&config),
-        metrics_service_name: None,
-        app_server_client_name: None,
-        app_server_client_version: None,
-        session_source: SessionSource::Exec,
-        forked_from_thread_id: None,
-        parent_thread_id: None,
-        thread_source: None,
-        dynamic_tools: Vec::new(),
-        inherited_shell_snapshot: None,
-        user_shell_override: None,
-    };
-
-    let mut state = SessionState::new(session_configuration);
-    let initial = RateLimitSnapshot {
-        limit_id: None,
-        limit_name: None,
-        primary: Some(RateLimitWindow {
-            used_percent: 15.0,
-            window_minutes: Some(20),
-            resets_at: Some(1_600),
-        }),
-        secondary: Some(RateLimitWindow {
-            used_percent: 5.0,
-            window_minutes: Some(45),
-            resets_at: Some(1_650),
-        }),
-        credits: Some(CreditsSnapshot {
-            has_credits: true,
-            unlimited: false,
-            balance: Some("15.00".to_string()),
-        }),
-        individual_limit: None,
-        plan_type: Some(codex_protocol::account::PlanType::Plus),
-        rate_limit_reached_type: None,
-    };
-    state.set_rate_limits(initial.clone());
-
-    let update = RateLimitSnapshot {
-        limit_id: None,
-        limit_name: None,
-        primary: Some(RateLimitWindow {
-            used_percent: 35.0,
-            window_minutes: Some(25),
-            resets_at: Some(1_700),
-        }),
-        secondary: None,
-        credits: None,
-        individual_limit: None,
-        plan_type: Some(codex_protocol::account::PlanType::Pro),
-        rate_limit_reached_type: None,
-    };
-    state.set_rate_limits(update.clone());
-
-    assert_eq!(
-        state.latest_rate_limits,
-        Some(RateLimitSnapshot {
-            limit_id: Some("codex".to_string()),
-            limit_name: None,
-            primary: update.primary,
-            secondary: update.secondary,
-            credits: initial.credits,
-            individual_limit: initial.individual_limit,
-            plan_type: update.plan_type,
             rate_limit_reached_type: None,
         })
     );
@@ -3866,7 +3620,7 @@ async fn user_turn_model_provider_update_streams_with_updated_provider() -> anyh
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: ThreadSettingsOverrides::default(),
         },
@@ -3884,7 +3638,7 @@ async fn user_turn_model_provider_update_streams_with_updated_provider() -> anyh
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: ThreadSettingsOverrides {
                 model: Some(model_b.clone()),
@@ -6103,7 +5857,7 @@ fn op_kind_for_input_and_context_ops() {
         Op::UserInput {
             items: vec![],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         }
@@ -6133,7 +5887,7 @@ async fn user_turn_updates_approvals_reviewer() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
                 environments: Some(local_selections(config.cwd.clone())),
@@ -8746,7 +8500,7 @@ async fn task_finish_emits_turn_item_lifecycle_for_leftover_pending_user_input()
         /*additional_context*/ Default::default(),
         Some(&tc.sub_id),
         /*client_user_message_id*/ None,
-        /*responsesapi_client_metadata*/ None,
+        /*model_client_metadata*/ None,
     )
     .await
     .expect("steer pending input into active turn");
@@ -9037,7 +8791,7 @@ async fn steer_input_requires_active_turn() {
             /*additional_context*/ Default::default(),
             /*expected_turn_id*/ None,
             /*client_user_message_id*/ None,
-            /*responsesapi_client_metadata*/ None,
+            /*model_client_metadata*/ None,
         )
         .await
         .expect_err("steering without active turn should fail");
@@ -9075,7 +8829,7 @@ async fn steer_input_enforces_expected_turn_id() {
             /*additional_context*/ Default::default(),
             Some("different-turn-id"),
             /*client_user_message_id*/ None,
-            /*responsesapi_client_metadata*/ None,
+            /*model_client_metadata*/ None,
         )
         .await
         .expect_err("mismatched expected turn id should fail");
@@ -9126,7 +8880,7 @@ async fn steer_input_rejects_non_regular_turns() {
                 /*additional_context*/ Default::default(),
                 /*expected_turn_id*/ None,
                 /*client_user_message_id*/ None,
-                /*responsesapi_client_metadata*/ None,
+                /*model_client_metadata*/ None,
             )
             .await
             .expect_err("steering a non-regular turn should fail");
@@ -9167,7 +8921,7 @@ async fn steer_input_returns_active_turn_id() {
             /*additional_context*/ Default::default(),
             Some(&tc.sub_id),
             /*client_user_message_id*/ None,
-            /*responsesapi_client_metadata*/ None,
+            /*model_client_metadata*/ None,
         )
         .await
         .expect("steering with matching expected turn id should succeed");
@@ -9335,7 +9089,7 @@ async fn steered_input_reopens_mailbox_delivery_for_current_turn() {
         /*additional_context*/ Default::default(),
         Some(&tc.sub_id),
         /*client_user_message_id*/ None,
-        /*responsesapi_client_metadata*/ None,
+        /*model_client_metadata*/ None,
     )
     .await
     .expect("steered input should be accepted");
@@ -9389,7 +9143,7 @@ async fn stale_defer_mailbox_delivery_does_not_override_steered_input() {
         /*additional_context*/ Default::default(),
         Some(&tc.sub_id),
         /*client_user_message_id*/ None,
-        /*responsesapi_client_metadata*/ None,
+        /*model_client_metadata*/ None,
     )
     .await
     .expect("steered input should be accepted");

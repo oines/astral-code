@@ -28,7 +28,7 @@ async fn request_body_is_zstd_compressed_for_codex_backend_when_enabled() -> any
 
     let base_url = format!("{}/backend-api/codex/v1", server.uri());
     let mut builder = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+        .with_auth(CodexAuth::create_dummy_api_key_auth_for_testing())
         .with_config(move |config| {
             config
                 .features
@@ -45,7 +45,7 @@ async fn request_body_is_zstd_compressed_for_codex_backend_when_enabled() -> any
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -61,7 +61,7 @@ async fn request_body_is_zstd_compressed_for_codex_backend_when_enabled() -> any
     let json: serde_json::Value = serde_json::from_slice(&decompressed)?;
     assert!(
         json.get("input").is_some(),
-        "expected request body to decode as Responses API JSON"
+        "expected request body to decode as model request JSON"
     );
 
     Ok(())
@@ -95,7 +95,7 @@ async fn request_body_is_not_compressed_for_api_key_auth_even_when_enabled() -> 
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -112,7 +112,7 @@ async fn request_body_is_not_compressed_for_api_key_auth_even_when_enabled() -> 
     let json: serde_json::Value = serde_json::from_slice(&request.body_bytes())?;
     assert!(
         json.get("input").is_some(),
-        "expected request body to be plain Responses API JSON"
+        "expected request body to be plain model request JSON"
     );
 
     Ok(())

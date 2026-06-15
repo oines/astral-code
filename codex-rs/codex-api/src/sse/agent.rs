@@ -77,6 +77,7 @@ pub fn spawn_agent_stream(
 struct AgentStreamMapper {
     response_id: Option<String>,
     blocks: BTreeMap<usize, BlockState>,
+    block_order: Vec<usize>,
 }
 
 #[derive(Debug)]
@@ -140,6 +141,9 @@ impl AgentStreamMapper {
     }
 
     fn start_block(&mut self, index: usize, block: ContentBlock, events: &mut Vec<ResponseEvent>) {
+        if !self.blocks.contains_key(&index) {
+            self.block_order.push(index);
+        }
         match block {
             ContentBlock::Text { text } => {
                 let id = block_item_id("agent-message", index);
@@ -274,16 +278,21 @@ impl AgentStreamMapper {
     }
 
     fn finish_block(&mut self, index: usize) -> Option<ResponseEvent> {
+        self.block_order.retain(|block_index| *block_index != index);
         self.blocks
             .remove(&index)
             .map(block_state_to_output_item_done)
     }
 
     fn finish_all_blocks(&mut self) -> Vec<ResponseEvent> {
-        std::mem::take(&mut self.blocks)
-            .into_values()
+        let mut blocks = std::mem::take(&mut self.blocks);
+        let mut events = std::mem::take(&mut self.block_order)
+            .into_iter()
+            .filter_map(|index| blocks.remove(&index))
             .map(block_state_to_output_item_done)
-            .collect()
+            .collect::<Vec<_>>();
+        events.extend(blocks.into_values().map(block_state_to_output_item_done));
+        events
     }
 }
 

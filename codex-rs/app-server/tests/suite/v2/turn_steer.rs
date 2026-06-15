@@ -75,7 +75,7 @@ async fn turn_steer_requires_active_turn() -> Result<()> {
                 text: "steer".to_string(),
                 text_elements: Vec::new(),
             }],
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: None,
             expected_turn_id: "turn-does-not-exist".to_string(),
         })
@@ -187,7 +187,7 @@ async fn turn_steer_rejects_oversized_text_input() -> Result<()> {
                 text: oversized_input.clone(),
                 text_elements: Vec::new(),
             }],
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: None,
             expected_turn_id: turn.id.clone(),
         })
@@ -301,7 +301,7 @@ async fn turn_steer_returns_active_turn_id() -> Result<()> {
                 text: "steer".to_string(),
                 text_elements: Vec::new(),
             }],
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: None,
             expected_turn_id: turn.id.clone(),
         })
@@ -441,7 +441,7 @@ async fn turn_steer_rejects_context_only_input_without_merging_context() -> Resu
             thread_id: thread.id.clone(),
             client_user_message_id: None,
             input: Vec::new(),
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context,
             expected_turn_id: turn.id,
         })
@@ -466,7 +466,7 @@ async fn turn_steer_rejects_context_only_input_without_merging_context() -> Resu
         .context("failed to fetch received requests")?;
     let response_requests = requests
         .iter()
-        .filter(|request| request.url.path().ends_with("/responses"))
+        .filter(|request| request.url.path().ends_with("/chat/completions"))
         .collect::<Vec<_>>();
     assert_eq!(response_requests.len(), 2);
     let body = response_requests[1]

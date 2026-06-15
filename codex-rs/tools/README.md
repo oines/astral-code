@@ -29,7 +29,7 @@ multiple consumers, for example:
 
 - host-visible aggregate tool models
 - tool-set planning and discovery helpers
-- MCP and dynamic-tool adaptation into Responses API shapes
+- MCP and dynamic-tool adaptation into OpenAI-compatible tool shapes
 - code-mode compatibility shims that do not depend on `codex-core`
 - other narrowly scoped host utilities that multiple crates need
 

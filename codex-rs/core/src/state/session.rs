@@ -13,7 +13,6 @@ use super::auto_compact_window::AutoCompactWindowSnapshot;
 use crate::context_manager::ContextManager;
 use crate::session::PreviousTurnSettings;
 use crate::session::session::SessionConfiguration;
-use crate::session_startup_prewarm::SessionStartupPrewarmHandle;
 use codex_protocol::protocol::RateLimitSnapshot;
 use codex_protocol::protocol::TokenUsage;
 use codex_protocol::protocol::TokenUsageInfo;
@@ -34,8 +33,6 @@ pub(crate) struct SessionState {
     previous_turn_settings: Option<PreviousTurnSettings>,
     /// Runtime accounting state for the active auto-compaction window.
     auto_compact_window: AutoCompactWindow,
-    /// Startup prewarmed session prepared during session initialization.
-    pub(crate) startup_prewarm: Option<SessionStartupPrewarmHandle>,
     pub(crate) active_connector_selection: HashSet<String>,
     pub(crate) pending_session_start_sources: VecDeque<codex_hooks::SessionStartSource>,
     granted_permissions_by_environment_id: HashMap<String, AdditionalPermissionProfile>,
@@ -55,7 +52,6 @@ impl SessionState {
             additional_context: AdditionalContextStore::default(),
             previous_turn_settings: None,
             auto_compact_window: AutoCompactWindow::new(),
-            startup_prewarm: None,
             active_connector_selection: HashSet::new(),
             pending_session_start_sources: VecDeque::new(),
             granted_permissions_by_environment_id: HashMap::new(),
@@ -193,17 +189,6 @@ impl SessionState {
         self.mcp_dependency_prompted.clone()
     }
 
-    pub(crate) fn set_session_startup_prewarm(
-        &mut self,
-        startup_prewarm: SessionStartupPrewarmHandle,
-    ) {
-        self.startup_prewarm = Some(startup_prewarm);
-    }
-
-    pub(crate) fn take_session_startup_prewarm(&mut self) -> Option<SessionStartupPrewarmHandle> {
-        self.startup_prewarm.take()
-    }
-
     // Adds connector IDs to the active set and returns the merged selection.
     pub(crate) fn merge_connector_selection<I>(&mut self, connector_ids: I) -> HashSet<String>
     where
@@ -262,7 +247,7 @@ impl SessionState {
     }
 }
 
-// Sometimes new snapshots don't include credits or plan information.
+// Sometimes new snapshots don't include credits information.
 // Preserve those from the previous snapshot when missing. For `limit_id`, treat
 // missing values as the default `"codex"` bucket.
 fn merge_rate_limit_fields(
@@ -277,9 +262,6 @@ fn merge_rate_limit_fields(
     }
     if snapshot.individual_limit.is_none() {
         snapshot.individual_limit = previous.and_then(|prior| prior.individual_limit.clone());
-    }
-    if snapshot.plan_type.is_none() {
-        snapshot.plan_type = previous.and_then(|prior| prior.plan_type);
     }
     snapshot
 }

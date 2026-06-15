@@ -77,7 +77,6 @@ impl CompactionTurnMetadata {
 #[serde(rename_all = "snake_case")]
 enum TurnMetadataRequestKind {
     Turn,
-    Prewarm,
     Compaction,
     Memory,
 }
@@ -120,9 +119,8 @@ impl From<WorkspaceGitMetadata> for TurnMetadataWorkspace {
 /// Base payload for the outbound model request `x-astral-turn-metadata` header.
 ///
 /// Turn-owned state populates identity fields, including optional fork and subagent lineage. A
-/// concrete request kind is added at outbound model dispatch so turns, startup prewarm, and
-/// compaction remain distinguishable. Detached memory requests are constructed as `memory`
-/// directly.
+/// concrete request kind is added at outbound model dispatch so turns, compaction, and detached
+/// memory requests remain distinguishable.
 #[derive(Clone, Debug, Serialize)]
 pub(crate) struct TurnMetadataBag {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -170,9 +168,9 @@ impl TurnMetadataBag {
 fn merge_turn_metadata(
     header: &str,
     turn_started_at_unix_ms: Option<i64>,
-    responsesapi_client_metadata: Option<&HashMap<String, String>>,
+    model_client_metadata: Option<&HashMap<String, String>>,
 ) -> Option<String> {
-    if turn_started_at_unix_ms.is_none() && responsesapi_client_metadata.is_none() {
+    if turn_started_at_unix_ms.is_none() && model_client_metadata.is_none() {
         return None;
     }
 
@@ -183,8 +181,8 @@ fn merge_turn_metadata(
             Value::Number(turn_started_at_unix_ms.into()),
         );
     }
-    if let Some(responsesapi_client_metadata) = responsesapi_client_metadata {
-        for (key, value) in responsesapi_client_metadata {
+    if let Some(model_client_metadata) = model_client_metadata {
+        for (key, value) in model_client_metadata {
             if matches!(
                 key.as_str(),
                 "session_id"
@@ -251,7 +249,7 @@ pub(crate) struct TurnMetadataState {
     base_header: Option<String>,
     enriched_header: Arc<RwLock<Option<String>>>,
     turn_started_at_unix_ms: Arc<RwLock<Option<i64>>>,
-    responsesapi_client_metadata: Arc<RwLock<Option<HashMap<String, String>>>>,
+    model_client_metadata: Arc<RwLock<Option<HashMap<String, String>>>>,
     user_input_requested_during_turn: Arc<AtomicBool>,
     enrichment_task: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
@@ -311,7 +309,7 @@ impl TurnMetadataState {
             base_header,
             enriched_header: Arc::new(RwLock::new(None)),
             turn_started_at_unix_ms: Arc::new(RwLock::new(None)),
-            responsesapi_client_metadata: Arc::new(RwLock::new(None)),
+            model_client_metadata: Arc::new(RwLock::new(None)),
             user_input_requested_during_turn: Arc::new(AtomicBool::new(false)),
             enrichment_task: Arc::new(Mutex::new(None)),
         }
@@ -333,15 +331,15 @@ impl TurnMetadataState {
             .turn_started_at_unix_ms
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let responsesapi_client_metadata = self
-            .responsesapi_client_metadata
+        let model_client_metadata = self
+            .model_client_metadata
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
         merge_turn_metadata(
             &header,
             turn_started_at_unix_ms,
-            responsesapi_client_metadata.as_ref(),
+            model_client_metadata.as_ref(),
         )
         .or(Some(header))
     }
@@ -404,13 +402,6 @@ impl TurnMetadataState {
         self.current_header_value_for_model_request_kind(window_id, TurnMetadataRequestKind::Turn)
     }
 
-    pub(crate) fn current_header_value_for_prewarm(&self, window_id: &str) -> Option<String> {
-        self.current_header_value_for_model_request_kind(
-            window_id,
-            TurnMetadataRequestKind::Prewarm,
-        )
-    }
-
     pub(crate) fn current_header_value_for_compaction(
         &self,
         window_id: &str,
@@ -433,19 +424,15 @@ impl TurnMetadataState {
             .store(true, Ordering::Relaxed);
     }
 
-    pub(crate) fn set_responsesapi_client_metadata(
-        &self,
-        responsesapi_client_metadata: HashMap<String, String>,
-    ) {
+    pub(crate) fn set_model_client_metadata(&self, model_client_metadata: HashMap<String, String>) {
         *self
-            .responsesapi_client_metadata
+            .model_client_metadata
             .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) =
-            Some(responsesapi_client_metadata);
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(model_client_metadata);
     }
 
     pub(crate) fn workspace_kind(&self) -> Option<String> {
-        self.responsesapi_client_metadata
+        self.model_client_metadata
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .as_ref()

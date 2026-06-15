@@ -18,7 +18,7 @@ fn map_api_error_maps_server_overloaded_from_503_body() {
     .to_string();
     let err = map_api_error(ApiError::Transport(TransportError::Http {
         status: http::StatusCode::SERVICE_UNAVAILABLE,
-        url: Some("http://example.com/v1/responses".to_string()),
+        url: Some("http://example.com/v1/chat/completions".to_string()),
         headers: None,
         body: Some(body),
     }));
@@ -39,7 +39,7 @@ fn map_api_error_maps_cyber_policy_from_400_body() {
     .to_string();
     let err = map_api_error(ApiError::Transport(TransportError::Http {
         status: http::StatusCode::BAD_REQUEST,
-        url: Some("http://example.com/v1/responses".to_string()),
+        url: Some("http://example.com/v1/chat/completions".to_string()),
         headers: None,
         body: Some(body),
     }));
@@ -67,7 +67,7 @@ fn map_api_error_maps_wrapped_websocket_cyber_policy_from_400_body() {
     .to_string();
     let err = map_api_error(ApiError::Transport(TransportError::Http {
         status: http::StatusCode::BAD_REQUEST,
-        url: Some("ws://example.com/v1/responses".to_string()),
+        url: Some("wss://example.com/realtime".to_string()),
         headers: None,
         body: Some(body),
     }));
@@ -88,7 +88,7 @@ fn map_api_error_uses_cyber_policy_fallback_for_missing_message() {
     .to_string();
     let err = map_api_error(ApiError::Transport(TransportError::Http {
         status: http::StatusCode::BAD_REQUEST,
-        url: Some("http://example.com/v1/responses".to_string()),
+        url: Some("http://example.com/v1/chat/completions".to_string()),
         headers: None,
         body: Some(body),
     }));
@@ -113,7 +113,7 @@ fn map_api_error_keeps_unknown_400_errors_generic() {
     .to_string();
     let err = map_api_error(ApiError::Transport(TransportError::Http {
         status: http::StatusCode::BAD_REQUEST,
-        url: Some("http://example.com/v1/responses".to_string()),
+        url: Some("http://example.com/v1/chat/completions".to_string()),
         headers: None,
         body: Some(body.clone()),
     }));
@@ -138,13 +138,12 @@ fn map_api_error_maps_usage_limit_limit_name_header() {
     let body = serde_json::json!({
         "error": {
             "type": "usage_limit_reached",
-            "plan_type": "pro",
         }
     })
     .to_string();
     let err = map_api_error(ApiError::Transport(TransportError::Http {
         status: http::StatusCode::TOO_MANY_REQUESTS,
-        url: Some("http://example.com/v1/responses".to_string()),
+        url: Some("http://example.com/v1/chat/completions".to_string()),
         headers: Some(headers),
         body: Some(body),
     }));
@@ -171,13 +170,12 @@ fn map_api_error_does_not_fallback_limit_name_to_limit_id() {
     let body = serde_json::json!({
         "error": {
             "type": "usage_limit_reached",
-            "plan_type": "pro",
         }
     })
     .to_string();
     let err = map_api_error(ApiError::Transport(TransportError::Http {
         status: http::StatusCode::TOO_MANY_REQUESTS,
-        url: Some("http://example.com/v1/responses".to_string()),
+        url: Some("http://example.com/v1/chat/completions".to_string()),
         headers: Some(headers),
         body: Some(body),
     }));
@@ -207,13 +205,12 @@ fn map_api_error_ignores_unparseable_rate_limit_reached_type_headers() {
         let body = serde_json::json!({
             "error": {
                 "type": "usage_limit_reached",
-                "plan_type": "pro",
             }
         })
         .to_string();
         let err = map_api_error(ApiError::Transport(TransportError::Http {
             status: http::StatusCode::TOO_MANY_REQUESTS,
-            url: Some("http://example.com/v1/responses".to_string()),
+            url: Some("http://example.com/v1/chat/completions".to_string()),
             headers: Some(headers),
             body: Some(body),
         }));

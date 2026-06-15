@@ -8,7 +8,7 @@ use pretty_assertions::assert_eq;
 use std::collections::BTreeMap;
 
 // Tests in this section exercise normalization transforms that mutate badly
-// formed JSON for consumption by the Responses API.
+// formed JSON for model tool-schema consumption.
 
 #[test]
 fn parse_tool_input_schema_coerces_boolean_schemas() {
@@ -531,7 +531,7 @@ fn parse_tool_input_schema_fills_default_items_for_nullable_array_union() {
     );
 }
 
-// Schemas that should be preserved for Responses API compatibility rather than
+// Schemas that should be preserved for downstream tool-schema compatibility rather than
 // being rewritten into a different shape.
 
 #[test]
@@ -1697,7 +1697,7 @@ fn parse_tool_input_schema_handles_cyclic_local_refs() {
     // Expected normalization behavior:
     // - Recursive refs are preserved.
     // - Pruning traversal terminates after visiting each local target once.
-    // - Responses API handles this recursive local-ref shape correctly.
+    // - Downstream model providers handle this recursive local-ref shape correctly.
     let schema = parse_tool_input_schema(&serde_json::json!({
         "type": "object",
         "properties": {
@@ -1841,7 +1841,7 @@ fn parse_tool_input_schema_preserves_unresolved_and_external_refs() {
     // Expected normalization behavior:
     // - Unresolved local refs and external refs are preserved.
     // - Unreachable local definitions are still pruned.
-    // - Responses API handles these refs correctly during downstream validation.
+    // - Downstream model providers handle these refs during validation.
     let schema = parse_tool_input_schema(&serde_json::json!({
         "type": "object",
         "properties": {

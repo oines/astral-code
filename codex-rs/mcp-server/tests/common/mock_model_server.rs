@@ -1,6 +1,7 @@
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
+use core_test_support::responses::sse_response;
 use wiremock::Mock;
 use wiremock::MockServer;
 use wiremock::Respond;
@@ -9,7 +10,7 @@ use wiremock::matchers::method;
 use wiremock::matchers::path;
 
 /// Create a mock server that will provide the responses, in order, for
-/// requests to the `/v1/responses` endpoint.
+/// requests to the `/v1/chat/completions` endpoint.
 pub async fn create_mock_responses_server(responses: Vec<String>) -> MockServer {
     let server = MockServer::start().await;
 
@@ -20,7 +21,7 @@ pub async fn create_mock_responses_server(responses: Vec<String>) -> MockServer 
     };
 
     Mock::given(method("POST"))
-        .and(path("/v1/responses"))
+        .and(path("/v1/chat/completions"))
         .respond_with(seq_responder)
         .expect(num_calls as u64)
         .mount(&server)
@@ -38,9 +39,7 @@ impl Respond for SeqResponder {
     fn respond(&self, _: &wiremock::Request) -> ResponseTemplate {
         let call_num = self.num_calls.fetch_add(1, Ordering::SeqCst);
         match self.responses.get(call_num) {
-            Some(response) => ResponseTemplate::new(200)
-                .insert_header("content-type", "text/event-stream")
-                .set_body_raw(response.clone(), "text/event-stream"),
+            Some(response) => sse_response(response.clone()),
             None => panic!("no response for {call_num}"),
         }
     }

@@ -346,7 +346,7 @@ mod tests {
             vec![ServiceTierCommand {
                 id: "priority".to_string(),
                 name: "fast".to_string(),
-                description: "Fastest inference with increased plan usage".to_string(),
+                description: "Fastest inference with priority routing".to_string(),
             }],
         );
         popup.on_composer_text_change("/fa".to_string());
@@ -357,7 +357,7 @@ mod tests {
                 ServiceTierCommand {
                     id: "priority".to_string(),
                     name: "fast".to_string(),
-                    description: "Fastest inference with increased plan usage".to_string(),
+                    description: "Fastest inference with priority routing".to_string(),
                 }
             ),
             other => panic!("expected fast service tier to be selected, got {other:?}"),
@@ -365,7 +365,7 @@ mod tests {
         let rows = popup.rows_from_matches(popup.filtered());
         assert_eq!(
             rows.first().and_then(|row| row.description.as_deref()),
-            Some("Fastest inference with increased plan usage")
+            Some("Fastest inference with priority routing")
         );
     }
 

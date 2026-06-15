@@ -1828,7 +1828,7 @@ async fn blocked_queued_prompt_does_not_strand_earlier_accepted_prompt() -> Resu
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -1847,7 +1847,7 @@ async fn blocked_queued_prompt_does_not_strand_earlier_accepted_prompt() -> Resu
                     text_elements: Vec::new(),
                 }],
                 final_output_json_schema: None,
-                responsesapi_client_metadata: None,
+                model_client_metadata: None,
                 additional_context: Default::default(),
                 thread_settings: Default::default(),
             })

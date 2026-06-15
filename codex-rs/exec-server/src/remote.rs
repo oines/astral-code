@@ -268,8 +268,8 @@ mod tests {
                 HeaderValue::from_static("Bearer registry-token"),
             );
             let _ = headers.insert(
-                "ChatGPT-Account-ID",
-                HeaderValue::from_static("workspace-123"),
+                "X-Astral-Registry-Context",
+                HeaderValue::from_static("test"),
             );
         }
     }
@@ -290,7 +290,7 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/cloud/environment/environment-requested/register"))
             .and(header("authorization", "Bearer registry-token"))
-            .and(header("chatgpt-account-id", "workspace-123"))
+            .and(header("x-astral-registry-context", "test"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "environment_id": "env-1",
                 "url": "wss://rendezvous.test/cloud-agent/default/ws/environment/env-1?role=environment&sig=abc"

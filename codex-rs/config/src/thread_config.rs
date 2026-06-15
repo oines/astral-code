@@ -282,9 +282,9 @@ mod tests {
                     [model_providers.local]
                     name = "local"
                     base_url = "http://127.0.0.1:8061/api/codex"
-                    wire_api = "responses"
+                    wire_api = "chat_completions"
                     requires_astral_auth = false
-                    supports_websockets = true
+                    supports_websockets = false
 
                     [features]
                     plugins = false
@@ -303,7 +303,7 @@ mod tests {
             experimental_bearer_token: None,
             auth: None,
             aws: None,
-            wire_api: WireApi::Responses,
+            wire_api: WireApi::ChatCompletions,
             provider_flavor: None,
             query_params: None,
             request_body: None,
@@ -315,7 +315,7 @@ mod tests {
             stream_idle_timeout_ms: None,
             websocket_connect_timeout_ms: None,
             requires_astral_auth: false,
-            supports_websockets: true,
+            supports_websockets: false,
         }
     }
 }

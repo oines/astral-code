@@ -1,7 +1,7 @@
 //! Background app-server requests launched by the TUI app.
 //!
-//! This module owns fire-and-forget fetch/write helpers for MCP inventory, skills, plugins, rate
-//! limits, and feedback uploads. Results are routed back through `AppEvent` so
+//! This module owns fire-and-forget fetch/write helpers for MCP inventory, skills, plugins,
+//! and feedback uploads. Results are routed back through `AppEvent` so
 //! the main event loop remains single-threaded.
 
 use super::plugin_mentions::fetch_plugin_mentions;
@@ -54,28 +54,6 @@ impl App {
                     .get(thread_id)
                     .is_none_or(|entry| !entry.is_closed)
         })
-    }
-
-    /// Spawns a background task to fetch account rate limits and deliver the
-    /// result as a `RateLimitsLoaded` event.
-    ///
-    /// The `origin` is forwarded to the completion handler so it can distinguish
-    /// a startup prefetch (which only updates cached snapshots and schedules a
-    /// frame) from a `/status`-triggered refresh (which must finalize the
-    /// corresponding status card).
-    pub(super) fn refresh_rate_limits(
-        &mut self,
-        app_server: &AppServerSession,
-        origin: RateLimitRefreshOrigin,
-    ) {
-        let request_handle = app_server.request_handle();
-        let app_event_tx = self.app_event_tx.clone();
-        tokio::spawn(async move {
-            let result = fetch_account_rate_limits(request_handle)
-                .await
-                .map_err(|err| err.to_string());
-            app_event_tx.send(AppEvent::RateLimitsLoaded { origin, result });
-        });
     }
 
     /// Starts the initial skills refresh without delaying the first interactive frame.
@@ -620,21 +598,6 @@ pub(super) async fn fetch_all_mcp_server_statuses(
     }
 
     Ok(statuses)
-}
-
-pub(super) async fn fetch_account_rate_limits(
-    request_handle: AppServerRequestHandle,
-) -> Result<Vec<RateLimitSnapshot>> {
-    let request_id = RequestId::String(format!("account-rate-limits-{}", Uuid::new_v4()));
-    let response: GetAccountRateLimitsResponse = request_handle
-        .request_typed(ClientRequest::GetAccountRateLimits {
-            request_id,
-            params: None,
-        })
-        .await
-        .wrap_err("account/rateLimits/read failed in TUI")?;
-
-    Ok(app_server_rate_limit_snapshots(response))
 }
 
 pub(super) async fn fetch_skills_list(

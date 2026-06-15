@@ -3,11 +3,12 @@
 use anyhow::Context;
 use assert_cmd::prelude::*;
 use codex_apply_patch::CODEX_CORE_APPLY_PATCH_ARG1;
-use core_test_support::responses::ev_apply_patch_custom_tool_call;
-use core_test_support::responses::ev_completed;
-use core_test_support::responses::mount_sse_sequence;
-use core_test_support::responses::sse;
+use core_test_support::responses::chat_completions_apply_patch_tool_call_sse;
+use core_test_support::responses::chat_completions_completed_sse;
+use core_test_support::responses::mount_chat_completions_sse_sequence;
+use core_test_support::responses::mount_models_once;
 use core_test_support::responses::start_mock_server;
+use core_test_support::test_codex_exec::exec_test_model_catalog;
 use std::fs;
 use std::process::Command;
 use tempfile::tempdir;
@@ -65,26 +66,31 @@ async fn test_apply_patch_tool() -> anyhow::Result<()> {
 +Final text
 *** End Patch"#;
     let response_streams = vec![
-        sse(vec![
-            ev_apply_patch_custom_tool_call("request_0", add_patch),
-            ev_completed("request_0"),
-        ]),
-        sse(vec![
-            ev_apply_patch_custom_tool_call("request_1", update_patch),
-            ev_completed("request_1"),
-        ]),
-        sse(vec![ev_completed("request_2")]),
+        chat_completions_apply_patch_tool_call_sse("request_0", add_patch),
+        chat_completions_apply_patch_tool_call_sse("request_1", update_patch),
+        chat_completions_completed_sse(),
     ];
     let server = start_mock_server().await;
-    mount_sse_sequence(&server, response_streams).await;
+    mount_models_once(&server, exec_test_model_catalog()).await;
+    let response_mock = mount_chat_completions_sse_sequence(&server, response_streams).await;
 
     test.cmd_with_server(&server)
         .arg("--skip-git-repo-check")
-        .arg("-s")
-        .arg("danger-full-access")
+        .arg("--dangerously-bypass-approvals-and-sandbox")
         .arg("foo")
         .assert()
         .success();
+
+    let requests = response_mock.requests();
+    assert_eq!(
+        requests.len(),
+        3,
+        "expected apply_patch turn to continue after tool calls, got requests: {:#?}",
+        requests
+            .iter()
+            .map(|request| request.body_json())
+            .collect::<Vec<_>>()
+    );
 
     let final_path = tmp_path.join("test.md");
     let contents = std::fs::read_to_string(&final_path)
@@ -116,26 +122,31 @@ async fn test_apply_patch_freeform_tool() -> anyhow::Result<()> {
 +    return True
 *** End Patch"#;
     let response_streams = vec![
-        sse(vec![
-            ev_apply_patch_custom_tool_call("request_0", freeform_add_patch),
-            ev_completed("request_0"),
-        ]),
-        sse(vec![
-            ev_apply_patch_custom_tool_call("request_1", freeform_update_patch),
-            ev_completed("request_1"),
-        ]),
-        sse(vec![ev_completed("request_2")]),
+        chat_completions_apply_patch_tool_call_sse("request_0", freeform_add_patch),
+        chat_completions_apply_patch_tool_call_sse("request_1", freeform_update_patch),
+        chat_completions_completed_sse(),
     ];
     let server = start_mock_server().await;
-    mount_sse_sequence(&server, response_streams).await;
+    mount_models_once(&server, exec_test_model_catalog()).await;
+    let response_mock = mount_chat_completions_sse_sequence(&server, response_streams).await;
 
     test.cmd_with_server(&server)
         .arg("--skip-git-repo-check")
-        .arg("-s")
-        .arg("danger-full-access")
+        .arg("--dangerously-bypass-approvals-and-sandbox")
         .arg("foo")
         .assert()
         .success();
+
+    let requests = response_mock.requests();
+    assert_eq!(
+        requests.len(),
+        3,
+        "expected apply_patch turn to continue after tool calls, got requests: {:#?}",
+        requests
+            .iter()
+            .map(|request| request.body_json())
+            .collect::<Vec<_>>()
+    );
 
     // Verify final file contents
     let final_path = test.cwd_path().join("app.py");

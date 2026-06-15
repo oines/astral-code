@@ -52,6 +52,9 @@ pub fn to_chat_completions_request(
             json!({ "include_usage": true }),
         );
     }
+    if let Some(response_format) = &request.metadata.response_format {
+        body.insert("response_format".to_string(), response_format.clone());
+    }
 
     let mut messages = request
         .instructions

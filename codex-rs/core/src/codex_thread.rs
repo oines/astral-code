@@ -266,7 +266,7 @@ impl CodexThread {
         additional_context: BTreeMap<String, AdditionalContextEntry>,
         expected_turn_id: Option<&str>,
         client_user_message_id: Option<String>,
-        responsesapi_client_metadata: Option<HashMap<String, String>>,
+        model_client_metadata: Option<HashMap<String, String>>,
     ) -> Result<String, SteerInputError> {
         self.codex
             .steer_input(
@@ -274,7 +274,7 @@ impl CodexThread {
                 additional_context,
                 expected_turn_id,
                 client_user_message_id,
-                responsesapi_client_metadata,
+                model_client_metadata,
             )
             .await
     }
@@ -428,7 +428,7 @@ impl CodexThread {
             .await;
     }
 
-    /// Record raw Responses API items without starting a new turn.
+    /// Record raw model history items without starting a new turn.
     pub async fn inject_response_items(&self, items: Vec<ResponseItem>) -> CodexResult<()> {
         if items.is_empty() {
             return Err(CodexErr::InvalidRequest(

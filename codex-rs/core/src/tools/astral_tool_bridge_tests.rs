@@ -19,7 +19,7 @@ fn canonicalize_function(name: &str, arguments: Value) -> anyhow::Result<(ToolNa
         ToolPayload::Function {
             arguments: arguments.to_string(),
         },
-    )?;
+    );
     let ToolPayload::Function { arguments } = payload else {
         panic!("expected function payload for {name}");
     };
@@ -252,6 +252,49 @@ fn leaves_request_permissions_native_for_astral_handler() -> anyhow::Result<()> 
             }
         })
     );
+    Ok(())
+}
+
+#[test]
+fn leaves_apply_patch_string_function_arguments_native() -> anyhow::Result<()> {
+    let patch = "*** Begin Patch\n*** Add File: test.md\n+hello\n*** End Patch";
+    let (tool_name, payload) = canonicalize_astral_tool_call(
+        ToolName::plain("apply_patch"),
+        ToolPayload::Function {
+            arguments: json!(patch).to_string(),
+        },
+    );
+
+    assert_eq!(tool_name, ToolName::plain("apply_patch"));
+    match payload {
+        ToolPayload::Function { arguments } => {
+            assert_eq!(serde_json::from_str::<Value>(&arguments)?, json!(patch));
+        }
+        other => panic!("expected function payload, got {other:?}"),
+    }
+    Ok(())
+}
+
+#[test]
+fn leaves_apply_patch_input_object_function_arguments_native() -> anyhow::Result<()> {
+    let patch = "*** Begin Patch\n*** Add File: test.md\n+hello\n*** End Patch";
+    let (tool_name, payload) = canonicalize_astral_tool_call(
+        ToolName::plain("apply_patch"),
+        ToolPayload::Function {
+            arguments: json!({ "input": patch }).to_string(),
+        },
+    );
+
+    assert_eq!(tool_name, ToolName::plain("apply_patch"));
+    match payload {
+        ToolPayload::Function { arguments } => {
+            assert_eq!(
+                serde_json::from_str::<Value>(&arguments)?,
+                json!({ "input": patch })
+            );
+        }
+        other => panic!("expected function payload, got {other:?}"),
+    }
     Ok(())
 }
 

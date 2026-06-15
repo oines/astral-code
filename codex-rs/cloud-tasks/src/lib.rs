@@ -83,7 +83,7 @@ async fn init_backend(user_agent_suffix: &str) -> anyhow::Result<BackendContext>
         Some(auth) => auth,
         None => {
             eprintln!(
-                "Not signed in. Please run 'astral login --with-api-key', then re-run 'astral cloud'."
+                "No Astral API key configured. Set ASTRAL_API_KEY or the active provider's configured auth environment, then re-run 'astral cloud'."
             );
             std::process::exit(1);
         }

@@ -57,7 +57,7 @@ async fn renews_cache_ttl_on_matching_models_etag() -> Result<()> {
     )
     .await;
 
-    let mut builder = test_codex().with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+    let mut builder = test_codex().with_auth(CodexAuth::create_dummy_api_key_auth_for_testing());
     builder = builder.with_config(|config| {
         config.model = Some("gpt-5.2".to_string());
         config.model_provider.request_max_retries = Some(0);
@@ -99,7 +99,7 @@ async fn renews_cache_ttl_on_matching_models_etag() -> Result<()> {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
                 environments: Some(local_selections(test.config.cwd.clone())),
@@ -159,7 +159,7 @@ async fn uses_cache_when_version_matches() -> Result<()> {
     )
     .await;
 
-    let mut builder = test_codex().with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+    let mut builder = test_codex().with_auth(CodexAuth::create_dummy_api_key_auth_for_testing());
     builder = builder
         .with_pre_build_hook(move |home| {
             let cache = ModelsCache {
@@ -206,7 +206,7 @@ async fn refreshes_when_cache_version_missing() -> Result<()> {
     )
     .await;
 
-    let mut builder = test_codex().with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+    let mut builder = test_codex().with_auth(CodexAuth::create_dummy_api_key_auth_for_testing());
     builder = builder
         .with_pre_build_hook(move |home| {
             let cache = ModelsCache {
@@ -253,7 +253,7 @@ async fn refreshes_when_cache_version_differs() -> Result<()> {
         models_mocks.push(responses::mount_models_once(&server, models_response.clone()).await);
     }
 
-    let mut builder = test_codex().with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+    let mut builder = test_codex().with_auth(CodexAuth::create_dummy_api_key_auth_for_testing());
     builder = builder
         .with_pre_build_hook(move |home| {
             let client_version = client_version_to_whole();

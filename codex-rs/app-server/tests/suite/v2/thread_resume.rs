@@ -99,13 +99,11 @@ use super::analytics::wait_for_analytics_payload;
 const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(25);
 #[cfg(not(windows))]
 const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
-const CODEX_5_2_INSTRUCTIONS_TEMPLATE_DEFAULT: &str = "You are Codex, a coding agent based on GPT-5. You and the user share the same workspace and collaborate to achieve the user's goals.";
-
 fn normalized_existing_path(path: impl AsRef<Path>) -> Result<PathBuf> {
     Ok(AbsolutePathBuf::from_absolute_path(path.as_ref().canonicalize()?)?.into_path_buf())
 }
 
-async fn wait_for_responses_request_count(
+async fn wait_for_chat_completions_request_count(
     server: &wiremock::MockServer,
     expected_count: usize,
 ) -> Result<()> {
@@ -114,18 +112,18 @@ async fn wait_for_responses_request_count(
             let Some(requests) = server.received_requests().await else {
                 anyhow::bail!("wiremock did not record requests");
             };
-            let responses_request_count = requests
+            let chat_completions_request_count = requests
                 .iter()
                 .filter(|request| {
-                    request.method == "POST" && request.url.path().ends_with("/responses")
+                    request.method == "POST" && request.url.path().ends_with("/chat/completions")
                 })
                 .count();
-            if responses_request_count == expected_count {
+            if chat_completions_request_count == expected_count {
                 return Ok::<(), anyhow::Error>(());
             }
-            if responses_request_count > expected_count {
+            if chat_completions_request_count > expected_count {
                 anyhow::bail!(
-                    "expected exactly {expected_count} /responses requests, got {responses_request_count}"
+                    "expected exactly {expected_count} /chat/completions requests, got {chat_completions_request_count}"
                 );
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -1795,7 +1793,7 @@ sqlite = true
 [model_providers.mock_provider]
 name = "Mock provider for test"
 base_url = "{}/v1"
-wire_api = "responses"
+wire_api = "chat_completions"
 request_max_retries = 0
 stream_max_retries = 0
 "#,
@@ -2913,7 +2911,7 @@ async fn thread_resume_replays_pending_command_execution_request_approval() -> R
         primary.read_stream_until_notification_message("turn/completed"),
     )
     .await??;
-    wait_for_responses_request_count(&server, /*expected_count*/ 3).await?;
+    wait_for_chat_completions_request_count(&server, /*expected_count*/ 3).await?;
 
     Ok(())
 }
@@ -3081,7 +3079,7 @@ async fn thread_resume_replays_pending_file_change_request_approval() -> Result<
         primary.read_stream_until_notification_message("turn/completed"),
     )
     .await??;
-    wait_for_responses_request_count(&server, /*expected_count*/ 3).await?;
+    wait_for_chat_completions_request_count(&server, /*expected_count*/ 3).await?;
 
     Ok(())
 }
@@ -3513,7 +3511,7 @@ async fn thread_resume_accepts_personality_override() -> Result<()> {
     );
     let instructions_text = request.instructions_text();
     assert!(
-        instructions_text.contains(CODEX_5_2_INSTRUCTIONS_TEMPLATE_DEFAULT),
+        instructions_text.contains("You are Astral, an agentic coding assistant"),
         "expected default base instructions from history, got {instructions_text:?}"
     );
 
@@ -3539,7 +3537,7 @@ personality = true
 [model_providers.mock_provider]
 name = "Mock provider for test"
 base_url = "{server_uri}/v1"
-wire_api = "responses"
+wire_api = "chat_completions"
 request_max_retries = 0
 stream_max_retries = 0
 "#
@@ -3570,7 +3568,7 @@ personality = true
 [model_providers.mock_provider]
 name = "Mock provider for test"
 base_url = "{server_uri}/v1"
-wire_api = "responses"
+wire_api = "chat_completions"
 request_max_retries = 0
 stream_max_retries = 0
 "#
@@ -3599,7 +3597,7 @@ personality = true
 [model_providers.mock_provider]
 name = "Mock provider for test"
 base_url = "{server_uri}/v1"
-wire_api = "responses"
+wire_api = "chat_completions"
 request_max_retries = 0
 stream_max_retries = 0
 

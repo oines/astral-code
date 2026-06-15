@@ -36,7 +36,6 @@ use codex_app_server_protocol::DynamicToolSpec;
 use codex_app_server_protocol::FileChangeApprovalDecision;
 use codex_app_server_protocol::FileChangeRequestApprovalParams;
 use codex_app_server_protocol::FileChangeRequestApprovalResponse;
-use codex_app_server_protocol::GetAccountRateLimitsResponse;
 use codex_app_server_protocol::InitializeCapabilities;
 use codex_app_server_protocol::InitializeParams;
 use codex_app_server_protocol::InitializeResponse;
@@ -221,8 +220,6 @@ enum CliCommand {
         #[arg(long)]
         abort_on: Option<usize>,
     },
-    /// Fetch the current account rate limits from the Astral app-server.
-    GetAccountRateLimits,
     /// List the available models from the Astral app-server.
     #[command(name = "model-list")]
     ModelList,
@@ -366,11 +363,6 @@ pub async fn run() -> Result<()> {
                 &dynamic_tools,
             )
             .await
-        }
-        CliCommand::GetAccountRateLimits => {
-            ensure_dynamic_tools_unused(&dynamic_tools, "get-account-rate-limits")?;
-            let endpoint = resolve_endpoint(astral_bin, url)?;
-            get_account_rate_limits(&endpoint, &config_overrides).await
         }
         CliCommand::ModelList => {
             ensure_dynamic_tools_unused(&dynamic_tools, "model-list")?;
@@ -1022,24 +1014,6 @@ async fn send_follow_up_v2(
     .await
 }
 
-async fn get_account_rate_limits(endpoint: &Endpoint, config_overrides: &[String]) -> Result<()> {
-    with_client(
-        "get-account-rate-limits",
-        endpoint,
-        config_overrides,
-        |client| {
-            let initialize = client.initialize()?;
-            println!("< initialize response: {initialize:?}");
-
-            let response = client.get_account_rate_limits()?;
-            println!("< account/rateLimits/read response: {response:?}");
-
-            Ok(())
-        },
-    )
-    .await
-}
-
 async fn model_list(endpoint: &Endpoint, config_overrides: &[String]) -> Result<()> {
     with_client("model-list", endpoint, config_overrides, |client| {
         let initialize = client.initialize()?;
@@ -1545,16 +1519,6 @@ impl CodexClient {
         };
 
         self.send_request(request, request_id, "turn/start")
-    }
-
-    fn get_account_rate_limits(&mut self) -> Result<GetAccountRateLimitsResponse> {
-        let request_id = self.request_id();
-        let request = ClientRequest::GetAccountRateLimits {
-            request_id: request_id.clone(),
-            params: None,
-        };
-
-        self.send_request(request, request_id, "account/rateLimits/read")
     }
 
     fn model_list(&mut self, params: ModelListParams) -> Result<ModelListResponse> {

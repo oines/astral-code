@@ -204,7 +204,7 @@ pub(super) async fn user_input_or_turn_inner(
     let Op::UserInput {
         items,
         final_output_json_schema,
-        responsesapi_client_metadata,
+        model_client_metadata,
         additional_context,
         thread_settings,
     } = op
@@ -238,7 +238,7 @@ pub(super) async fn user_input_or_turn_inner(
             additional_context.clone(),
             /*expected_turn_id*/ None,
             client_user_message_id.clone(),
-            responsesapi_client_metadata.clone(),
+            model_client_metadata.clone(),
         )
         .await
     {
@@ -247,10 +247,10 @@ pub(super) async fn user_input_or_turn_inner(
             Some(items)
         }
         Err(SteerInputError::NoActiveTurn(items)) => {
-            if let Some(responsesapi_client_metadata) = responsesapi_client_metadata {
+            if let Some(model_client_metadata) = model_client_metadata {
                 current_context
                     .turn_metadata_state
-                    .set_responsesapi_client_metadata(responsesapi_client_metadata);
+                    .set_model_client_metadata(model_client_metadata);
             }
             current_context.session_telemetry.user_prompt(&items);
             sess.refresh_mcp_servers_if_requested(

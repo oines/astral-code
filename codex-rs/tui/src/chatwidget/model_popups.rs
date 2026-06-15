@@ -109,7 +109,7 @@ impl ChatWidget {
                     should_prompt_plan_mode_scope,
                 );
                 SelectionItem {
-                    name: model.clone(),
+                    name: model,
                     description,
                     is_current: self.preset_matches_current_model(&preset),
                     is_default: preset.is_default,
@@ -170,7 +170,7 @@ impl ChatWidget {
         let provider_matches = preset
             .model_provider
             .as_deref()
-            .map_or(true, |provider| provider == self.config.model_provider_id);
+            .is_none_or(|provider| provider == self.config.model_provider_id);
         preset.model.as_str() == self.current_model() && provider_matches
     }
 
@@ -412,7 +412,7 @@ impl ChatWidget {
             .or(Some(default_effort));
 
         let model_slug = preset.model.to_string();
-        let model_provider = preset.model_provider.clone();
+        let model_provider = preset.model_provider;
         let highlight_choice = if is_current_model {
             if in_plan_mode {
                 self.config

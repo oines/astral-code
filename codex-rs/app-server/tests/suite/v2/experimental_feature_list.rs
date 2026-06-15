@@ -118,8 +118,7 @@ async fn experimental_feature_list_ignores_openai_workspace_plugin_policy() -> R
         ChatGptAuthFixture::new("chatgpt-token")
             .account_id("account-123")
             .chatgpt_user_id("user-123")
-            .chatgpt_account_id("account-123")
-            .plan_type("team"),
+            .chatgpt_account_id("account-123"),
         AuthCredentialsStoreMode::File,
     )?;
     Mock::given(method("GET"))
@@ -179,7 +178,7 @@ trust_level = "trusted"
 [model_providers.mock_provider]
 name = "Mock provider for test"
 base_url = "{server_uri}/v1"
-wire_api = "responses"
+wire_api = "chat_completions"
 request_max_retries = 0
 stream_max_retries = 0
 "#

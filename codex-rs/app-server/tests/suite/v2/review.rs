@@ -515,7 +515,7 @@ shell_snapshot = false
 [model_providers.mock_provider]
 name = "Mock provider"
 base_url = "{server_uri}/v1"
-wire_api = "responses"
+wire_api = "chat_completions"
 request_max_retries = 0
 stream_max_retries = 0
 "#

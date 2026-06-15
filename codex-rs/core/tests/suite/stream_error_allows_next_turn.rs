@@ -6,6 +6,7 @@ use codex_protocol::user_input::UserInput;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_response_created;
 use core_test_support::responses::sse;
+use core_test_support::responses::sse_response;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::TestCodex;
 use core_test_support::test_codex::test_codex;
@@ -35,32 +36,27 @@ async fn continue_after_stream_error() {
     // The provider below disables request retries (request_max_retries = 0),
     // so the failing request should only occur once.
     Mock::given(method("POST"))
-        .and(path("/v1/responses"))
+        .and(path("/v1/chat/completions"))
         .and(body_string_contains("first message"))
         .respond_with(fail)
         .up_to_n_times(2)
         .mount(&server)
         .await;
 
-    let ok = ResponseTemplate::new(200)
-        .insert_header("content-type", "text/event-stream")
-        .set_body_raw(
-            sse(vec![
-                ev_response_created("resp_ok2"),
-                ev_completed("resp_ok2"),
-            ]),
-            "text/event-stream",
-        );
+    let ok = sse_response(sse(vec![
+        ev_response_created("resp_ok2"),
+        ev_completed("resp_ok2"),
+    ]));
 
     Mock::given(method("POST"))
-        .and(path("/v1/responses"))
+        .and(path("/v1/chat/completions"))
         .and(body_string_contains("follow up"))
         .respond_with(ok)
         .expect(1)
         .mount(&server)
         .await;
 
-    // Configure a provider that uses the Responses API and points at our mock
+    // Configure a provider that uses Chat Completions and points at our mock
     // server. Use an existing env var (PATH) to satisfy the auth plumbing
     // without requiring a real secret.
     let provider = ModelProviderInfo {
@@ -71,7 +67,7 @@ async fn continue_after_stream_error() {
         experimental_bearer_token: None,
         auth: None,
         aws: None,
-        wire_api: WireApi::Responses,
+        wire_api: WireApi::ChatCompletions,
         provider_flavor: None,
         query_params: None,
         request_body: None,
@@ -89,6 +85,7 @@ async fn continue_after_stream_error() {
     let TestCodex { codex, .. } = test_codex()
         .with_config(move |config| {
             config.base_instructions = Some("You are a helpful assistant".to_string());
+            config.model = Some("mock-model".to_string());
             config.model_provider = provider;
         })
         .build(&server)
@@ -102,7 +99,7 @@ async fn continue_after_stream_error() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })
@@ -124,7 +121,7 @@ async fn continue_after_stream_error() {
                 text_elements: Vec::new(),
             }],
             final_output_json_schema: None,
-            responsesapi_client_metadata: None,
+            model_client_metadata: None,
             additional_context: Default::default(),
             thread_settings: Default::default(),
         })

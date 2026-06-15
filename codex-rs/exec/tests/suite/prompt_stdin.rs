@@ -9,12 +9,7 @@ use predicates::str::contains;
 async fn exec_appends_piped_stdin_to_prompt_argument() -> anyhow::Result<()> {
     let test = test_codex_exec();
     let server = responses::start_mock_server().await;
-    let body = responses::sse(vec![
-        responses::ev_response_created("resp1"),
-        responses::ev_assistant_message("m1", "fixture hello"),
-        responses::ev_completed("resp1"),
-    ]);
-    let response_mock = responses::mount_sse_once(&server, body).await;
+    let response_mock = responses::mount_chat_completions_text_once(&server, "fixture hello").await;
 
     // echo "my output" | codex exec --skip-git-repo-check -C <cwd> -m gpt-5.1 "Summarize this concisely"
     test.cmd_with_server(&server)
@@ -43,12 +38,7 @@ async fn exec_appends_piped_stdin_to_prompt_argument() -> anyhow::Result<()> {
 async fn exec_ignores_empty_piped_stdin_when_prompt_argument_is_present() -> anyhow::Result<()> {
     let test = test_codex_exec();
     let server = responses::start_mock_server().await;
-    let body = responses::sse(vec![
-        responses::ev_response_created("resp1"),
-        responses::ev_assistant_message("m1", "fixture hello"),
-        responses::ev_completed("resp1"),
-    ]);
-    let response_mock = responses::mount_sse_once(&server, body).await;
+    let response_mock = responses::mount_chat_completions_text_once(&server, "fixture hello").await;
 
     // printf "" | codex exec --skip-git-repo-check -C <cwd> -m gpt-5.1 "Summarize this concisely"
     test.cmd_with_server(&server)
@@ -76,12 +66,7 @@ async fn exec_ignores_empty_piped_stdin_when_prompt_argument_is_present() -> any
 async fn exec_dash_prompt_reads_stdin_as_the_prompt() -> anyhow::Result<()> {
     let test = test_codex_exec();
     let server = responses::start_mock_server().await;
-    let body = responses::sse(vec![
-        responses::ev_response_created("resp1"),
-        responses::ev_assistant_message("m1", "fixture hello"),
-        responses::ev_completed("resp1"),
-    ]);
-    let response_mock = responses::mount_sse_once(&server, body).await;
+    let response_mock = responses::mount_chat_completions_text_once(&server, "fixture hello").await;
 
     // echo "prompt from stdin" | codex exec --skip-git-repo-check -C <cwd> -m gpt-5.1 -
     test.cmd_with_server(&server)
@@ -110,12 +95,7 @@ async fn exec_dash_prompt_reads_stdin_as_the_prompt() -> anyhow::Result<()> {
 async fn exec_without_prompt_argument_reads_piped_stdin_as_the_prompt() -> anyhow::Result<()> {
     let test = test_codex_exec();
     let server = responses::start_mock_server().await;
-    let body = responses::sse(vec![
-        responses::ev_response_created("resp1"),
-        responses::ev_assistant_message("m1", "fixture hello"),
-        responses::ev_completed("resp1"),
-    ]);
-    let response_mock = responses::mount_sse_once(&server, body).await;
+    let response_mock = responses::mount_chat_completions_text_once(&server, "fixture hello").await;
 
     // echo "prompt from stdin" | codex exec --skip-git-repo-check -C <cwd> -m gpt-5.1
     test.cmd_with_server(&server)

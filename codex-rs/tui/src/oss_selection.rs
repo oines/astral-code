@@ -73,7 +73,7 @@ static OSS_SELECT_OPTIONS: LazyLock<Vec<SelectOption>> = LazyLock::new(|| {
         },
         SelectOption {
             label: Line::from(vec!["O".underlined(), "llama".into()]),
-            description: "Local Ollama server (Responses API, default port 11434)",
+            description: "Local Ollama server (OpenAI-compatible, default port 11434)",
             key: KeyCode::Char('o'),
             provider_id: OLLAMA_OSS_PROVIDER_ID,
         },

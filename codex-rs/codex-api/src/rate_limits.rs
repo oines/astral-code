@@ -1,10 +1,8 @@
-use codex_protocol::account::PlanType;
 use codex_protocol::protocol::CreditsSnapshot;
 use codex_protocol::protocol::RateLimitReachedType;
 use codex_protocol::protocol::RateLimitSnapshot;
 use codex_protocol::protocol::RateLimitWindow;
 use http::HeaderMap;
-use serde::Deserialize;
 use std::collections::BTreeSet;
 use std::fmt::Display;
 
@@ -94,82 +92,7 @@ pub fn parse_rate_limit_for_limit(
         secondary,
         credits,
         individual_limit: None,
-        plan_type: None,
         rate_limit_reached_type: None,
-    })
-}
-
-#[derive(Debug, Deserialize)]
-struct RateLimitEventWindow {
-    used_percent: f64,
-    window_minutes: Option<i64>,
-    reset_at: Option<i64>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RateLimitEventDetails {
-    primary: Option<RateLimitEventWindow>,
-    secondary: Option<RateLimitEventWindow>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RateLimitEventCredits {
-    has_credits: bool,
-    unlimited: bool,
-    balance: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RateLimitEvent {
-    #[serde(rename = "type")]
-    kind: String,
-    plan_type: Option<PlanType>,
-    rate_limits: Option<RateLimitEventDetails>,
-    credits: Option<RateLimitEventCredits>,
-    metered_limit_name: Option<String>,
-    limit_name: Option<String>,
-}
-
-pub fn parse_rate_limit_event(payload: &str) -> Option<RateLimitSnapshot> {
-    let event: RateLimitEvent = serde_json::from_str(payload).ok()?;
-    if event.kind != "codex.rate_limits" {
-        return None;
-    }
-    let (primary, secondary) = if let Some(details) = event.rate_limits.as_ref() {
-        (
-            map_event_window(details.primary.as_ref()),
-            map_event_window(details.secondary.as_ref()),
-        )
-    } else {
-        (None, None)
-    };
-    let credits = event.credits.map(|credits| CreditsSnapshot {
-        has_credits: credits.has_credits,
-        unlimited: credits.unlimited,
-        balance: credits.balance,
-    });
-    let limit_id = event
-        .metered_limit_name
-        .or(event.limit_name)
-        .map(normalize_limit_id);
-    Some(RateLimitSnapshot {
-        limit_id: Some(limit_id.unwrap_or_else(|| "codex".to_string())),
-        limit_name: None,
-        primary,
-        secondary,
-        credits,
-        individual_limit: None,
-        plan_type: event.plan_type,
-        rate_limit_reached_type: None,
-    })
-}
-
-fn map_event_window(window: Option<&RateLimitEventWindow>) -> Option<RateLimitWindow> {
-    let window = window?;
-    Some(RateLimitWindow {
-        used_percent: window.used_percent,
-        window_minutes: window.window_minutes,
-        resets_at: window.reset_at,
     })
 }
 

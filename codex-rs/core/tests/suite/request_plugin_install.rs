@@ -107,7 +107,7 @@ async fn request_plugin_install_is_available_without_search_tool_after_discovery
     .await;
 
     let mut builder = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+        .with_auth(CodexAuth::create_dummy_api_key_auth_for_testing())
         .with_config(move |config| {
             configure_apps_without_search_tool(config, apps_server.hosted_base_url.as_str())
         });

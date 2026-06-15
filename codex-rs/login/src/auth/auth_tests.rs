@@ -1,45 +1,15 @@
 use super::*;
-use crate::auth::storage::FileAuthStorage;
 use crate::auth::storage::get_auth_file;
 use codex_app_server_protocol::AuthMode;
 
 use base64::Engine;
+use chrono::Utc;
 use codex_protocol::config_types::ModelProviderAuthInfo;
 use pretty_assertions::assert_eq;
 use serde::Serialize;
 use serde_json::json;
 use tempfile::TempDir;
 use tempfile::tempdir;
-
-#[test]
-fn login_with_api_key_overwrites_existing_auth_json() {
-    let dir = tempdir().unwrap();
-    let auth_path = dir.path().join("auth.json");
-    let stale_auth = json!({
-        "ASTRAL_API_KEY": "sk-old",
-        "tokens": {
-            "id_token": "stale.header.payload",
-            "access_token": "stale-access",
-            "refresh_token": "stale-refresh",
-            "account_id": "stale-acc"
-        }
-    });
-    std::fs::write(
-        &auth_path,
-        serde_json::to_string_pretty(&stale_auth).unwrap(),
-    )
-    .unwrap();
-
-    super::login_with_api_key(dir.path(), "sk-new", AuthCredentialsStoreMode::File)
-        .expect("login_with_api_key should succeed");
-
-    let storage = FileAuthStorage::new(dir.path().to_path_buf());
-    let auth = storage
-        .try_read_auth_json(&auth_path)
-        .expect("auth.json should parse");
-    assert_eq!(auth.api_key.as_deref(), Some("sk-new"));
-    assert!(auth.tokens.is_none(), "tokens should be cleared");
-}
 
 #[tokio::test]
 #[serial(codex_auth_env)]
@@ -53,12 +23,11 @@ async fn missing_auth_json_returns_none() {
 
 #[tokio::test]
 #[serial(codex_auth_env)]
-async fn stored_chatgpt_auth_without_api_key_is_rejected() {
+async fn stored_legacy_hosted_auth_without_api_key_is_rejected() {
     let codex_home = tempdir().unwrap();
     write_auth_file(
         AuthFileParams {
             api_key: None,
-            chatgpt_plan_type: Some("pro".to_string()),
             chatgpt_account_id: None,
         },
         codex_home.path(),
@@ -71,9 +40,9 @@ async fn stored_chatgpt_auth_without_api_key_is_rejected() {
         AuthCredentialsStoreMode::File,
     )
     .await
-    .expect_err("stored ChatGPT auth should be rejected");
+    .expect_err("stored legacy hosted auth should be rejected");
 
-    assert_eq!(err.to_string(), UNSUPPORTED_LEGACY_HOSTED_AUTH_MESSAGE);
+    assert_eq!(err.to_string(), "API key auth is missing a key.");
 }
 
 #[tokio::test]
@@ -97,20 +66,15 @@ async fn loads_api_key_from_auth_json() {
     .unwrap();
     assert_eq!(auth.auth_mode(), AuthMode::ApiKey);
     assert_eq!(auth.api_key(), Some("sk-test-key"));
-
-    assert!(auth.get_token_data().is_err());
 }
 
 #[test]
 fn logout_removes_auth_file() -> Result<(), std::io::Error> {
     let dir = tempdir()?;
     let auth_dot_json = AuthDotJson {
-        auth_mode: Some(ApiAuthMode::ApiKey),
+        auth_mode: Some("apikey".to_string()),
         api_key: Some("sk-test-key".to_string()),
-        tokens: None,
         last_refresh: None,
-        agent_identity: None,
-        personal_access_token: None,
     };
     super::save_auth(dir.path(), &auth_dot_json, AuthCredentialsStoreMode::File)?;
     let auth_file = get_auth_file(dir.path());
@@ -361,7 +325,6 @@ exit 1
 
 struct AuthFileParams {
     api_key: Option<String>,
-    chatgpt_plan_type: Option<String>,
     chatgpt_account_id: Option<String>,
 }
 
@@ -397,10 +360,6 @@ fn fake_jwt_for_auth_file_params(params: &AuthFileParams) -> std::io::Result<Str
         "chatgpt_user_id": "user-12345",
         "user_id": "user-12345",
     });
-
-    if let Some(chatgpt_plan_type) = params.chatgpt_plan_type.as_ref() {
-        auth_payload["chatgpt_plan_type"] = serde_json::Value::String(chatgpt_plan_type.clone());
-    }
 
     if let Some(chatgpt_account_id) = params.chatgpt_account_id.as_ref() {
         auth_payload["chatgpt_account_id"] = serde_json::Value::String(chatgpt_account_id.clone());

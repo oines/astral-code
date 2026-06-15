@@ -34,7 +34,7 @@ pub struct ToolInfo {
     /// MCP server origin used for telemetry and diagnostics, when known.
     #[serde(default)]
     pub server_origin: Option<String>,
-    /// Model-visible tool name used in Responses API tool declarations.
+    /// Model-visible tool name used in provider tool declarations.
     #[serde(rename = "tool_name", alias = "callable_name")]
     pub callable_name: String,
     /// Model-visible namespace used for deferred tool loading.
