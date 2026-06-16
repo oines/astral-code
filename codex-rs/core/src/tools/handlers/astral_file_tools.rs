@@ -1,6 +1,9 @@
+use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Mutex;
+use std::sync::PoisonError;
 
 use crate::function_tool::FunctionCallError;
 use crate::tools::context::FunctionToolOutput;
@@ -13,6 +16,7 @@ use crate::tools::handlers::resolve_tool_environment;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::ToolExecutor;
 use codex_exec_server::ExecutorFileSystem;
+use codex_exec_server::FileMetadata;
 use codex_exec_server::FileSystemSandboxContext;
 use codex_exec_server::GlobSearchRequest;
 use codex_exec_server::GrepOutputMode;
@@ -35,6 +39,12 @@ use serde_json::json;
 const DEFAULT_READ_LINE_LIMIT: usize = 2_000;
 const DEFAULT_GLOB_RESULT_LIMIT: usize = 100;
 const DEFAULT_GREP_HEAD_LIMIT: usize = 250;
+const FILE_UNCHANGED_STUB: &str = "File unchanged since last read. The content from the earlier Read tool_result in this conversation is still current — refer to that instead of re-reading.";
+const EMPTY_FILE_REMINDER: &str =
+    "<system-reminder>Warning: the file exists but the contents are empty.</system-reminder>";
+const FILE_HAS_NOT_BEEN_READ_ERROR: &str =
+    "File has not been read yet. Read it first before writing to it.";
+const FILE_MODIFIED_SINCE_READ_ERROR: &str = "File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.";
 const BLOCKED_DEVICE_PATHS: &[&str] = &[
     "/dev/zero",
     "/dev/random",
@@ -61,6 +71,40 @@ pub(crate) enum AstralFileToolKind {
 
 pub(crate) struct AstralFileToolHandler {
     kind: AstralFileToolKind,
+}
+
+#[derive(Clone, Debug)]
+struct FileReadState {
+    content: String,
+    modified_at_ms: i64,
+    offset: Option<usize>,
+    limit: Option<usize>,
+    is_partial_view: bool,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct FileReadStateKey {
+    environment_id: Option<String>,
+    path: String,
+}
+
+#[derive(Debug, Default)]
+struct FileReadStateStore {
+    entries: Mutex<HashMap<FileReadStateKey, FileReadState>>,
+}
+
+impl FileReadStateStore {
+    fn get(&self, key: &FileReadStateKey) -> Option<FileReadState> {
+        self.entries().get(key).cloned()
+    }
+
+    fn insert(&self, key: FileReadStateKey, state: FileReadState) {
+        self.entries().insert(key, state);
+    }
+
+    fn entries(&self) -> std::sync::MutexGuard<'_, HashMap<FileReadStateKey, FileReadState>> {
+        self.entries.lock().unwrap_or_else(PoisonError::into_inner)
+    }
 }
 
 impl AstralFileToolHandler {
@@ -111,6 +155,7 @@ impl ToolExecutor<ToolInvocation> for AstralFileToolHandler {
         }
 
         let ToolInvocation {
+            session,
             turn,
             payload,
             tracker,
@@ -138,16 +183,36 @@ impl ToolExecutor<ToolInvocation> for AstralFileToolHandler {
         let cwd = turn_environment.cwd.clone();
         let fs = turn_environment.environment.get_filesystem();
         let sandbox = turn.file_system_sandbox_context(/*additional_permissions*/ None, &cwd);
+        let read_state = session
+            .services
+            .session_extension_data
+            .get_or_init(FileReadStateStore::default);
 
         let text = match self.kind {
             AstralFileToolKind::Read => unreachable!("Read is handled before generic file tools"),
             AstralFileToolKind::Write => {
-                let output = write_file(arguments, fs.as_ref(), &sandbox, &cwd).await?;
+                let output = write_file(
+                    arguments,
+                    fs.as_ref(),
+                    &sandbox,
+                    &cwd,
+                    environment_id.clone(),
+                    read_state.as_ref(),
+                )
+                .await?;
                 tracker.lock().await.invalidate();
                 output
             }
             AstralFileToolKind::Edit => {
-                let output = edit_file(arguments, fs.as_ref(), &sandbox, &cwd).await?;
+                let output = edit_file(
+                    arguments,
+                    fs.as_ref(),
+                    &sandbox,
+                    &cwd,
+                    environment_id.clone(),
+                    read_state.as_ref(),
+                )
+                .await?;
                 tracker.lock().await.invalidate();
                 output
             }
@@ -173,7 +238,7 @@ fn astral_file_tool_spec(name: &str) -> ToolSpec {
     ToolSpec::Function(ResponsesApiTool {
         name: tool.name,
         description: tool.description,
-        strict: false,
+        strict: true,
         defer_loading: None,
         parameters,
         output_schema: None,
@@ -189,8 +254,6 @@ struct ReadArgs {
     offset: Option<usize>,
     #[serde(default)]
     limit: Option<usize>,
-    #[serde(default)]
-    pages: Option<String>,
 }
 
 async fn read_file(
@@ -198,14 +261,8 @@ async fn read_file(
     fs: &dyn ExecutorFileSystem,
     sandbox: &FileSystemSandboxContext,
     cwd: &AbsolutePathBuf,
+    read_state: &FileReadStateStore,
 ) -> Result<String, FunctionCallError> {
-    if args.pages.is_some() {
-        return Err(FunctionCallError::RespondToModel(
-            "Read pages are not supported yet; read PDFs through Bash or a dedicated reader"
-                .to_string(),
-        ));
-    }
-
     let path = resolve_path(cwd, &args.file_path);
     if is_blocked_device_path(&path) {
         return Err(FunctionCallError::RespondToModel(format!(
@@ -220,9 +277,7 @@ async fn read_file(
         ));
     }
 
-    let metadata = fs.get_metadata(&path, Some(sandbox)).await.map_err(|err| {
-        FunctionCallError::RespondToModel(format!("unable to read `{}`: {err}", path.display()))
-    })?;
+    let metadata = read_metadata(fs, sandbox, cwd, &path).await?;
     if !metadata.is_file {
         return Err(FunctionCallError::RespondToModel(format!(
             "`{}` is not a file",
@@ -235,24 +290,45 @@ async fn read_file(
     })?;
     let text = String::from_utf8_lossy(&bytes);
     let lines = split_lines_preserving_newline(&text);
-    let start = args.offset.unwrap_or(1).saturating_sub(1).min(lines.len());
+    let start_line = args.offset.unwrap_or(1).max(1);
+    let start = start_line.saturating_sub(1).min(lines.len());
     let requested_limit = args.limit.unwrap_or(DEFAULT_READ_LINE_LIMIT);
     let end = start.saturating_add(requested_limit).min(lines.len());
-    let mut output = add_line_numbers(&lines[start..end], start + 1);
+    let requested_offset = Some(start_line);
+    let state_key = read_state_key(fs, sandbox, args.environment_id.clone(), &path).await?;
+    let is_partial_view = args.offset.is_some() || args.limit.is_some() || end < lines.len();
 
-    if end < lines.len() {
-        if !output.ends_with('\n') {
-            output.push('\n');
-        }
-        output.push_str(&format!(
-            "[Showing lines {}-{} of {}; pass offset/limit to read more]\n",
-            start + 1,
-            end,
+    if let Some(previous) = read_state.get(&state_key)
+        && !previous.is_partial_view
+        && previous.offset == requested_offset
+        && previous.limit == args.limit
+        && previous.content == text
+    {
+        return Ok(FILE_UNCHANGED_STUB.to_string());
+    }
+
+    read_state.insert(
+        state_key,
+        FileReadState {
+            content: text.to_string(),
+            modified_at_ms: metadata.modified_at_ms,
+            offset: requested_offset,
+            limit: args.limit,
+            is_partial_view,
+        },
+    );
+
+    if lines.is_empty() {
+        return Ok(EMPTY_FILE_REMINDER.to_string());
+    }
+    if start_line > lines.len() {
+        return Ok(format!(
+            "<system-reminder>Warning: the file exists but is shorter than the provided offset ({start_line}). The file has {} lines.</system-reminder>",
             lines.len()
         ));
     }
 
-    Ok(output)
+    Ok(add_line_numbers(&lines[start..end], start + 1))
 }
 
 fn is_blocked_device_path(path: &Path) -> bool {
@@ -299,8 +375,13 @@ async fn handle_read_invocation(
     let sandbox = invocation
         .turn
         .file_system_sandbox_context(/*additional_permissions*/ None, &cwd);
+    let read_state = invocation
+        .session
+        .services
+        .session_extension_data
+        .get_or_init(FileReadStateStore::default);
 
-    let text = read_file(args, fs.as_ref(), &sandbox, &cwd).await?;
+    let text = read_file(args, fs.as_ref(), &sandbox, &cwd, read_state.as_ref()).await?;
     Ok(boxed_tool_output(FunctionToolOutput::from_text(
         text,
         Some(true),
@@ -329,11 +410,38 @@ async fn write_file(
     fs: &dyn ExecutorFileSystem,
     sandbox: &FileSystemSandboxContext,
     cwd: &AbsolutePathBuf,
+    environment_id: Option<String>,
+    read_state: &FileReadStateStore,
 ) -> Result<String, FunctionCallError> {
     let args: WriteArgs = parse_arguments(&arguments)?;
     let path = resolve_path(cwd, &args.file_path);
-    write_file_contents(fs, sandbox, &path, args.content.into_bytes()).await?;
-    Ok(format!("Wrote {}", display_path(&path, cwd)))
+    let existing_metadata = optional_file_metadata(fs, sandbox, &path).await?;
+    if let Some(metadata) = existing_metadata.as_ref() {
+        if !metadata.is_file {
+            return Err(FunctionCallError::RespondToModel(format!(
+                "`{}` is not a file",
+                path.display()
+            )));
+        }
+        let current_text = read_text_lossy(fs, sandbox, &path).await?;
+        let state_key = read_state_key(fs, sandbox, environment_id.clone(), &path).await?;
+        validate_full_read_state(
+            read_state,
+            &state_key,
+            &current_text,
+            metadata.modified_at_ms,
+        )?;
+        write_file_contents(fs, sandbox, &path, args.content.clone().into_bytes()).await?;
+        record_full_file_state(fs, sandbox, read_state, environment_id, &path, args.content).await;
+        Ok(format!(
+            "The file {} has been updated successfully.",
+            path.display()
+        ))
+    } else {
+        write_file_contents(fs, sandbox, &path, args.content.clone().into_bytes()).await?;
+        record_full_file_state(fs, sandbox, read_state, environment_id, &path, args.content).await;
+        Ok(format!("File created successfully at: {}", path.display()))
+    }
 }
 
 #[derive(Deserialize)]
@@ -350,38 +458,48 @@ async fn edit_file(
     fs: &dyn ExecutorFileSystem,
     sandbox: &FileSystemSandboxContext,
     cwd: &AbsolutePathBuf,
+    environment_id: Option<String>,
+    read_state: &FileReadStateStore,
 ) -> Result<String, FunctionCallError> {
     let args: EditArgs = parse_arguments(&arguments)?;
     if args.old_string == args.new_string {
         return Err(FunctionCallError::RespondToModel(
-            "new_string must be different from old_string".to_string(),
+            "No changes to make: old_string and new_string are exactly the same.".to_string(),
         ));
     }
 
     let path = resolve_path(cwd, &args.file_path);
+    let current = read_existing_text(fs, sandbox, cwd, &path).await?;
     if args.old_string.is_empty() {
-        return edit_empty_old_string(args, fs, sandbox, cwd, &path).await;
+        return edit_empty_old_string(
+            args,
+            fs,
+            sandbox,
+            read_state,
+            environment_id,
+            &path,
+            current,
+        )
+        .await;
     }
 
-    let bytes = fs.read_file(&path, Some(sandbox)).await.map_err(|err| {
-        FunctionCallError::RespondToModel(format!("unable to read `{}`: {err}", path.display()))
-    })?;
-    let text = String::from_utf8(bytes).map_err(|err| {
-        FunctionCallError::RespondToModel(format!(
-            "unable to edit `{}` because it is not valid UTF-8: {err}",
-            path.display()
-        ))
-    })?;
+    let Some((text, metadata)) = current else {
+        return Err(file_does_not_exist_error(cwd));
+    };
+    let state_key = read_state_key(fs, sandbox, environment_id.clone(), &path).await?;
+    validate_full_read_state(read_state, &state_key, &text, metadata.modified_at_ms)?;
     let occurrences = text.matches(&args.old_string).count();
     if occurrences == 0 {
-        return Err(FunctionCallError::RespondToModel(
-            "old_string not found".to_string(),
-        ));
+        return Err(FunctionCallError::RespondToModel(format!(
+            "String to replace not found in file.\nString: {}",
+            args.old_string
+        )));
     }
     if occurrences > 1 && !args.replace_all {
-        return Err(FunctionCallError::RespondToModel(
-            "old_string appears multiple times; set replace_all to true".to_string(),
-        ));
+        return Err(FunctionCallError::RespondToModel(format!(
+            "Found {occurrences} matches of the string to replace, but replace_all is false. To replace all occurrences, set replace_all to true. To replace only one occurrence, please provide more context to uniquely identify the instance.\nString: {}",
+            args.old_string
+        )));
     }
 
     let updated = if args.replace_all {
@@ -389,47 +507,224 @@ async fn edit_file(
     } else {
         text.replacen(&args.old_string, &args.new_string, 1)
     };
-    write_file_contents(fs, sandbox, &path, updated.into_bytes()).await?;
+    write_file_contents(fs, sandbox, &path, updated.clone().into_bytes()).await?;
+    record_full_file_state(fs, sandbox, read_state, environment_id, &path, updated).await;
 
-    Ok(format!(
-        "Updated {} ({} replacement{})",
-        display_path(&path, cwd),
-        if args.replace_all { occurrences } else { 1 },
-        if args.replace_all && occurrences != 1 {
-            "s"
-        } else {
-            ""
-        }
-    ))
+    if args.replace_all {
+        Ok(format!(
+            "The file {} has been updated. All occurrences were successfully replaced.",
+            path.display()
+        ))
+    } else {
+        Ok(format!(
+            "The file {} has been updated successfully.",
+            path.display()
+        ))
+    }
 }
 
 async fn edit_empty_old_string(
     args: EditArgs,
     fs: &dyn ExecutorFileSystem,
     sandbox: &FileSystemSandboxContext,
-    cwd: &AbsolutePathBuf,
+    read_state: &FileReadStateStore,
+    environment_id: Option<String>,
     path: &AbsolutePathBuf,
+    current: Option<(String, FileMetadata)>,
 ) -> Result<String, FunctionCallError> {
-    match fs.read_file(path, Some(sandbox)).await {
-        Ok(bytes) if !bytes.is_empty() => {
-            return Err(FunctionCallError::RespondToModel(
-                "Cannot create new file - file already exists.".to_string(),
-            ));
-        }
-        Ok(_) => {}
-        Err(err) if err.kind() == ErrorKind::NotFound => {}
-        Err(err) => {
-            return Err(FunctionCallError::RespondToModel(format!(
-                "unable to read `{}`: {err}",
-                path.display()
-            )));
-        }
+    if let Some((text, _metadata)) = current
+        && !text.trim().is_empty()
+    {
+        return Err(FunctionCallError::RespondToModel(
+            "Cannot create new file - file already exists.".to_string(),
+        ));
     }
 
-    write_file_contents(fs, sandbox, path, args.new_string.into_bytes()).await?;
+    write_file_contents(fs, sandbox, path, args.new_string.clone().into_bytes()).await?;
+    record_full_file_state(
+        fs,
+        sandbox,
+        read_state,
+        environment_id,
+        path,
+        args.new_string,
+    )
+    .await;
     Ok(format!(
         "The file {} has been updated successfully.",
-        display_path(path, cwd)
+        path.display()
+    ))
+}
+
+async fn read_metadata(
+    fs: &dyn ExecutorFileSystem,
+    sandbox: &FileSystemSandboxContext,
+    cwd: &AbsolutePathBuf,
+    path: &AbsolutePathBuf,
+) -> Result<FileMetadata, FunctionCallError> {
+    fs.get_metadata(path, Some(sandbox)).await.map_err(|err| {
+        if err.kind() == ErrorKind::NotFound {
+            file_does_not_exist_error(cwd)
+        } else {
+            FunctionCallError::RespondToModel(format!("unable to read `{}`: {err}", path.display()))
+        }
+    })
+}
+
+async fn optional_file_metadata(
+    fs: &dyn ExecutorFileSystem,
+    sandbox: &FileSystemSandboxContext,
+    path: &AbsolutePathBuf,
+) -> Result<Option<FileMetadata>, FunctionCallError> {
+    fs.get_metadata(path, Some(sandbox))
+        .await
+        .map(Some)
+        .or_else(|err| {
+            if err.kind() == ErrorKind::NotFound {
+                Ok(None)
+            } else {
+                Err(FunctionCallError::RespondToModel(format!(
+                    "unable to inspect `{}`: {err}",
+                    path.display()
+                )))
+            }
+        })
+}
+
+async fn read_existing_text(
+    fs: &dyn ExecutorFileSystem,
+    sandbox: &FileSystemSandboxContext,
+    cwd: &AbsolutePathBuf,
+    path: &AbsolutePathBuf,
+) -> Result<Option<(String, FileMetadata)>, FunctionCallError> {
+    let metadata = match optional_file_metadata(fs, sandbox, path).await? {
+        Some(metadata) => metadata,
+        None => return Ok(None),
+    };
+    if !metadata.is_file {
+        return Err(FunctionCallError::RespondToModel(format!(
+            "`{}` is not a file",
+            path.display()
+        )));
+    }
+    let bytes = fs.read_file(path, Some(sandbox)).await.map_err(|err| {
+        if err.kind() == ErrorKind::NotFound {
+            file_does_not_exist_error(cwd)
+        } else {
+            FunctionCallError::RespondToModel(format!("unable to read `{}`: {err}", path.display()))
+        }
+    })?;
+    let text = String::from_utf8(bytes).map_err(|err| {
+        FunctionCallError::RespondToModel(format!(
+            "unable to edit `{}` because it is not valid UTF-8: {err}",
+            path.display()
+        ))
+    })?;
+    Ok(Some((text, metadata)))
+}
+
+async fn read_text_lossy(
+    fs: &dyn ExecutorFileSystem,
+    sandbox: &FileSystemSandboxContext,
+    path: &AbsolutePathBuf,
+) -> Result<String, FunctionCallError> {
+    let bytes = fs.read_file(path, Some(sandbox)).await.map_err(|err| {
+        FunctionCallError::RespondToModel(format!("unable to read `{}`: {err}", path.display()))
+    })?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+async fn read_state_key(
+    fs: &dyn ExecutorFileSystem,
+    sandbox: &FileSystemSandboxContext,
+    environment_id: Option<String>,
+    path: &AbsolutePathBuf,
+) -> Result<FileReadStateKey, FunctionCallError> {
+    let canonical = fs.canonicalize(path, Some(sandbox)).await.map_err(|err| {
+        FunctionCallError::RespondToModel(format!(
+            "unable to canonicalize `{}`: {err}",
+            path.display()
+        ))
+    })?;
+    Ok(FileReadStateKey {
+        environment_id,
+        path: canonical.to_string_lossy().into_owned(),
+    })
+}
+
+async fn best_effort_read_state_key(
+    fs: &dyn ExecutorFileSystem,
+    sandbox: &FileSystemSandboxContext,
+    environment_id: Option<String>,
+    path: &AbsolutePathBuf,
+) -> FileReadStateKey {
+    let canonical = fs
+        .canonicalize(path, Some(sandbox))
+        .await
+        .unwrap_or_else(|_| path.clone());
+    FileReadStateKey {
+        environment_id,
+        path: canonical.to_string_lossy().into_owned(),
+    }
+}
+
+fn validate_full_read_state(
+    read_state: &FileReadStateStore,
+    key: &FileReadStateKey,
+    current_text: &str,
+    current_modified_at_ms: i64,
+) -> Result<(), FunctionCallError> {
+    let Some(state) = read_state.get(key) else {
+        return Err(FunctionCallError::RespondToModel(
+            FILE_HAS_NOT_BEEN_READ_ERROR.to_string(),
+        ));
+    };
+    if state.is_partial_view {
+        return Err(FunctionCallError::RespondToModel(
+            FILE_HAS_NOT_BEEN_READ_ERROR.to_string(),
+        ));
+    }
+    if state.modified_at_ms < current_modified_at_ms && state.content == current_text {
+        return Ok(());
+    }
+    if state.content != current_text {
+        return Err(FunctionCallError::RespondToModel(
+            FILE_MODIFIED_SINCE_READ_ERROR.to_string(),
+        ));
+    }
+    Ok(())
+}
+
+async fn record_full_file_state(
+    fs: &dyn ExecutorFileSystem,
+    sandbox: &FileSystemSandboxContext,
+    read_state: &FileReadStateStore,
+    environment_id: Option<String>,
+    path: &AbsolutePathBuf,
+    content: String,
+) {
+    let key = best_effort_read_state_key(fs, sandbox, environment_id, path).await;
+    let modified_at_ms = fs
+        .get_metadata(path, Some(sandbox))
+        .await
+        .map(|metadata| metadata.modified_at_ms)
+        .unwrap_or(0);
+    read_state.insert(
+        key,
+        FileReadState {
+            content,
+            modified_at_ms,
+            offset: None,
+            limit: None,
+            is_partial_view: false,
+        },
+    );
+}
+
+fn file_does_not_exist_error(cwd: &AbsolutePathBuf) -> FunctionCallError {
+    FunctionCallError::RespondToModel(format!(
+        "File does not exist. Note: your current working directory is {}.",
+        cwd.display()
     ))
 }
 

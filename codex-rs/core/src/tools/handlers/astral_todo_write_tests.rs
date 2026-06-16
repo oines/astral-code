@@ -32,8 +32,16 @@ fn rewrites_claudeish_todos_to_plan_update() -> anyhow::Result<()> {
         json!({
             "explanation": null,
             "plan": [
-                { "step": "Map Bash to unified exec", "status": "completed" },
-                { "step": "Harden TodoWrite", "status": "in_progress" }
+                {
+                    "step": "Map Bash to unified exec",
+                    "status": "completed",
+                    "activeForm": "Mapping Bash"
+                },
+                {
+                    "step": "Harden TodoWrite",
+                    "status": "in_progress",
+                    "activeForm": "Hardening TodoWrite"
+                }
             ]
         })
     );
@@ -58,7 +66,11 @@ fn preserves_optional_explanation_for_internal_plan_updates() -> anyhow::Result<
         json!({
             "explanation": "Switching implementation focus",
             "plan": [
-                { "step": "Run focused checks", "status": "pending" }
+                {
+                    "step": "Run focused checks",
+                    "status": "pending",
+                    "activeForm": "Running checks"
+                }
             ]
         })
     );

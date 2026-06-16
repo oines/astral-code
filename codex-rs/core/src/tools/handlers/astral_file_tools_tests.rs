@@ -26,15 +26,23 @@ use codex_protocol::models::PermissionProfile;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use core_test_support::PathExt;
 
+use super::EMPTY_FILE_REMINDER;
+use super::FILE_HAS_NOT_BEEN_READ_ERROR;
+use super::FILE_MODIFIED_SINCE_READ_ERROR;
+use super::FILE_UNCHANGED_STUB;
+use super::FileReadStateStore;
 use super::GrepArgs;
+use super::ReadArgs;
 use super::add_line_numbers;
 use super::edit_file;
 use super::file_environment_id;
 use super::glob_files;
 use super::grep_files;
 use super::is_blocked_device_path;
+use super::read_file;
 use super::split_lines_preserving_newline;
 use super::write_file;
+use crate::function_tool::FunctionCallError;
 
 #[derive(Default)]
 struct RecordingFileSystem {
@@ -83,6 +91,103 @@ impl RecordingFileSystem {
 
 fn path_key(path: &AbsolutePathBuf) -> String {
     path.to_string_lossy().into_owned()
+}
+
+fn read_args(file_path: &str) -> ReadArgs {
+    ReadArgs {
+        file_path: file_path.to_string(),
+        environment_id: None,
+        offset: None,
+        limit: None,
+    }
+}
+
+fn model_error(error: FunctionCallError) -> String {
+    let FunctionCallError::RespondToModel(message) = error else {
+        panic!("expected model-facing error");
+    };
+    message
+}
+
+struct FileToolFixture {
+    _temp_dir: tempfile::TempDir,
+    cwd: AbsolutePathBuf,
+    path: AbsolutePathBuf,
+    fs: RecordingFileSystem,
+    sandbox: FileSystemSandboxContext,
+    read_state: FileReadStateStore,
+}
+
+impl FileToolFixture {
+    async fn with_file(file_name: &str, contents: impl Into<Vec<u8>>) -> Self {
+        let fixture = Self::without_file(file_name);
+        fixture.fs.insert_file(&fixture.path, contents).await;
+        fixture
+    }
+
+    fn without_file(file_name: &str) -> Self {
+        let temp_dir = tempfile::TempDir::new().expect("temp dir");
+        let cwd = temp_dir.path().abs();
+        let path = cwd.join(file_name);
+        Self {
+            _temp_dir: temp_dir,
+            cwd,
+            path,
+            fs: RecordingFileSystem::default(),
+            sandbox: FileSystemSandboxContext::from_permission_profile(PermissionProfile::Disabled),
+            read_state: FileReadStateStore::default(),
+        }
+    }
+
+    async fn read_full(&self, file_name: &str) {
+        read_file(
+            read_args(file_name),
+            &self.fs,
+            &self.sandbox,
+            &self.cwd,
+            &self.read_state,
+        )
+        .await
+        .expect("read succeeds");
+    }
+}
+
+async fn write_remote(
+    fixture: &FileToolFixture,
+    content: &str,
+) -> Result<String, FunctionCallError> {
+    write_file(
+        json!({ "file_path": "remote.txt", "content": content }).to_string(),
+        &fixture.fs,
+        &fixture.sandbox,
+        &fixture.cwd,
+        None,
+        &fixture.read_state,
+    )
+    .await
+}
+
+async fn edit_remote(
+    fixture: &FileToolFixture,
+    old_string: &str,
+    new_string: &str,
+    replace_all: bool,
+) -> Result<String, FunctionCallError> {
+    edit_file(
+        json!({
+            "file_path": "remote.txt",
+            "old_string": old_string,
+            "new_string": new_string,
+            "replace_all": replace_all,
+        })
+        .to_string(),
+        &fixture.fs,
+        &fixture.sandbox,
+        &fixture.cwd,
+        None,
+        &fixture.read_state,
+    )
+    .await
 }
 
 #[async_trait::async_trait]
@@ -321,10 +426,111 @@ fn read_blocks_device_paths_that_can_hang() {
 }
 
 #[tokio::test]
+async fn read_file_formats_text_like_cat_n() {
+    let fixture = FileToolFixture::with_file("sample.txt", b"alpha\nbeta\n").await;
+
+    let output = read_file(
+        read_args("sample.txt"),
+        &fixture.fs,
+        &fixture.sandbox,
+        &fixture.cwd,
+        &fixture.read_state,
+    )
+    .await
+    .expect("read succeeds");
+
+    assert_eq!(output, "1\talpha\n2\tbeta\n");
+}
+
+#[tokio::test]
+async fn read_file_reports_empty_and_offset_past_end_like_claude() {
+    let temp_dir = tempfile::TempDir::new().expect("temp dir");
+    let cwd = temp_dir.path().abs();
+    let empty_path = cwd.join("empty.txt");
+    let short_path = cwd.join("short.txt");
+    let fs = RecordingFileSystem::default();
+    fs.insert_file(&empty_path, b"").await;
+    fs.insert_file(&short_path, b"one\ntwo\n").await;
+    let sandbox = FileSystemSandboxContext::from_permission_profile(PermissionProfile::Disabled);
+    let read_state = FileReadStateStore::default();
+
+    let empty = read_file(read_args("empty.txt"), &fs, &sandbox, &cwd, &read_state)
+        .await
+        .expect("read empty succeeds");
+    let past_end = read_file(
+        ReadArgs {
+            offset: Some(5),
+            ..read_args("short.txt")
+        },
+        &fs,
+        &sandbox,
+        &cwd,
+        &read_state,
+    )
+    .await
+    .expect("read past end succeeds");
+
+    assert_eq!(empty, EMPTY_FILE_REMINDER);
+    assert_eq!(
+        past_end,
+        "<system-reminder>Warning: the file exists but is shorter than the provided offset (5). The file has 2 lines.</system-reminder>"
+    );
+}
+
+#[tokio::test]
+async fn read_file_repeated_unchanged_full_read_returns_stub() {
+    let fixture = FileToolFixture::with_file("sample.txt", b"alpha\nbeta\n").await;
+
+    let first = read_file(
+        read_args("sample.txt"),
+        &fixture.fs,
+        &fixture.sandbox,
+        &fixture.cwd,
+        &fixture.read_state,
+    )
+    .await
+    .expect("first read succeeds");
+    let second = read_file(
+        read_args("sample.txt"),
+        &fixture.fs,
+        &fixture.sandbox,
+        &fixture.cwd,
+        &fixture.read_state,
+    )
+    .await
+    .expect("second read succeeds");
+
+    assert_eq!(first, "1\talpha\n2\tbeta\n");
+    assert_eq!(second, FILE_UNCHANGED_STUB);
+}
+
+#[tokio::test]
+async fn read_file_partial_output_omits_astral_footer() {
+    let fixture = FileToolFixture::with_file("sample.txt", b"one\ntwo\nthree\n").await;
+
+    let output = read_file(
+        ReadArgs {
+            limit: Some(2),
+            ..read_args("sample.txt")
+        },
+        &fixture.fs,
+        &fixture.sandbox,
+        &fixture.cwd,
+        &fixture.read_state,
+    )
+    .await
+    .expect("read succeeds");
+
+    assert_eq!(output, "1\tone\n2\ttwo\n");
+    assert!(!output.contains("[Showing lines"));
+}
+
+#[tokio::test]
 async fn edit_empty_old_string_creates_missing_file() {
     let temp_dir = tempfile::TempDir::new().expect("temp dir");
     let cwd = temp_dir.path().abs();
     let sandbox = FileSystemSandboxContext::from_permission_profile(PermissionProfile::Disabled);
+    let read_state = FileReadStateStore::default();
     let arguments = json!({
         "file_path": "created.txt",
         "old_string": "",
@@ -332,13 +538,23 @@ async fn edit_empty_old_string_creates_missing_file() {
     })
     .to_string();
 
-    let output = edit_file(arguments, LOCAL_FS.as_ref(), &sandbox, &cwd)
-        .await
-        .expect("edit succeeds");
+    let output = edit_file(
+        arguments,
+        LOCAL_FS.as_ref(),
+        &sandbox,
+        &cwd,
+        None,
+        &read_state,
+    )
+    .await
+    .expect("edit succeeds");
 
     assert_eq!(
         output,
-        "The file created.txt has been updated successfully."
+        format!(
+            "The file {} has been updated successfully.",
+            cwd.join("created.txt").display()
+        )
     );
     assert_eq!(
         std::fs::read_to_string(temp_dir.path().join("created.txt")).expect("created file"),
@@ -347,66 +563,304 @@ async fn edit_empty_old_string_creates_missing_file() {
 }
 
 #[tokio::test]
+async fn edit_empty_old_string_rejects_existing_nonempty_file() {
+    let fixture = FileToolFixture::with_file("remote.txt", b"already here\n").await;
+
+    let error = edit_file(
+        json!({
+            "file_path": "remote.txt",
+            "old_string": "",
+            "new_string": "created\n"
+        })
+        .to_string(),
+        &fixture.fs,
+        &fixture.sandbox,
+        &fixture.cwd,
+        None,
+        &fixture.read_state,
+    )
+    .await
+    .expect_err("creating existing file should fail");
+
+    assert_eq!(
+        model_error(error),
+        "Cannot create new file - file already exists."
+    );
+}
+
+#[tokio::test]
 async fn write_uses_executor_file_system() {
-    let temp_dir = tempfile::TempDir::new().expect("temp dir");
-    let cwd = temp_dir.path().abs();
-    let path = cwd.join("remote.txt");
-    let fs = RecordingFileSystem::default();
-    let sandbox = FileSystemSandboxContext::from_permission_profile(PermissionProfile::Disabled);
+    let fixture = FileToolFixture::without_file("remote.txt");
     let arguments = json!({
         "file_path": "remote.txt",
         "content": "written through backend\n"
     })
     .to_string();
 
-    let output = write_file(arguments, &fs, &sandbox, &cwd)
-        .await
-        .expect("write succeeds");
+    let output = write_file(
+        arguments,
+        &fixture.fs,
+        &fixture.sandbox,
+        &fixture.cwd,
+        None,
+        &fixture.read_state,
+    )
+    .await
+    .expect("write succeeds");
 
-    assert_eq!(output, "Wrote remote.txt");
     assert_eq!(
-        fs.file_contents(&path).await.expect("recorded file"),
+        output,
+        format!("File created successfully at: {}", fixture.path.display())
+    );
+    assert_eq!(
+        fixture
+            .fs
+            .file_contents(&fixture.path)
+            .await
+            .expect("recorded file"),
         b"written through backend\n"
     );
     assert_eq!(
-        fs.calls().await,
-        vec![format!("write_file:{}", path.display())]
+        fixture.fs.calls().await,
+        vec![format!("write_file:{}", fixture.path.display())]
     );
-    assert!(!temp_dir.path().join("remote.txt").exists());
+    assert!(!fixture.path.exists());
+}
+
+#[tokio::test]
+async fn write_existing_file_requires_full_read() {
+    let fixture = FileToolFixture::with_file("remote.txt", b"before\n").await;
+
+    let error = write_remote(&fixture, "after\n")
+        .await
+        .expect_err("unread write should fail");
+
+    assert_eq!(model_error(error), FILE_HAS_NOT_BEEN_READ_ERROR);
+    assert_eq!(
+        fixture
+            .fs
+            .file_contents(&fixture.path)
+            .await
+            .expect("recorded file"),
+        b"before\n"
+    );
+}
+
+#[tokio::test]
+async fn write_existing_file_succeeds_after_full_read() {
+    let fixture = FileToolFixture::with_file("remote.txt", b"before\n").await;
+    fixture.read_full("remote.txt").await;
+    let output = write_remote(&fixture, "after\n")
+        .await
+        .expect("write succeeds");
+
+    assert_eq!(
+        output,
+        format!(
+            "The file {} has been updated successfully.",
+            fixture.path.display()
+        )
+    );
+    assert_eq!(
+        fixture
+            .fs
+            .file_contents(&fixture.path)
+            .await
+            .expect("recorded file"),
+        b"after\n"
+    );
+}
+
+#[tokio::test]
+async fn write_existing_file_rejects_partial_read_state() {
+    let fixture = FileToolFixture::with_file("remote.txt", b"before\nsecond\n").await;
+
+    read_file(
+        ReadArgs {
+            limit: Some(1),
+            ..read_args("remote.txt")
+        },
+        &fixture.fs,
+        &fixture.sandbox,
+        &fixture.cwd,
+        &fixture.read_state,
+    )
+    .await
+    .expect("partial read succeeds");
+    let error = write_remote(&fixture, "after\n")
+        .await
+        .expect_err("partial-read write should fail");
+
+    assert_eq!(model_error(error), FILE_HAS_NOT_BEEN_READ_ERROR);
+    assert_eq!(
+        fixture
+            .fs
+            .file_contents(&fixture.path)
+            .await
+            .expect("recorded file"),
+        b"before\nsecond\n"
+    );
+}
+
+#[tokio::test]
+async fn write_existing_file_rejects_external_modification_after_read() {
+    let fixture = FileToolFixture::with_file("remote.txt", b"before\n").await;
+    fixture.read_full("remote.txt").await;
+    fixture
+        .fs
+        .insert_file(&fixture.path, b"user changed\n")
+        .await;
+    let error = write_remote(&fixture, "after\n")
+        .await
+        .expect_err("stale write should fail");
+
+    assert_eq!(model_error(error), FILE_MODIFIED_SINCE_READ_ERROR);
+    assert_eq!(
+        fixture
+            .fs
+            .file_contents(&fixture.path)
+            .await
+            .expect("recorded file"),
+        b"user changed\n"
+    );
 }
 
 #[tokio::test]
 async fn edit_uses_executor_file_system() {
-    let temp_dir = tempfile::TempDir::new().expect("temp dir");
-    let cwd = temp_dir.path().abs();
-    let path = cwd.join("remote.txt");
-    let fs = RecordingFileSystem::default();
-    fs.insert_file(&path, b"before\n").await;
-    let sandbox = FileSystemSandboxContext::from_permission_profile(PermissionProfile::Disabled);
-    let arguments = json!({
-        "file_path": "remote.txt",
-        "old_string": "before",
-        "new_string": "after"
-    })
-    .to_string();
+    let fixture = FileToolFixture::with_file("remote.txt", b"before\n").await;
 
-    let output = edit_file(arguments, &fs, &sandbox, &cwd)
+    fixture.read_full("remote.txt").await;
+    let output = edit_remote(&fixture, "before", "after", false)
         .await
         .expect("edit succeeds");
 
-    assert_eq!(output, "Updated remote.txt (1 replacement)");
     assert_eq!(
-        fs.file_contents(&path).await.expect("recorded file"),
+        output,
+        format!(
+            "The file {} has been updated successfully.",
+            fixture.path.display()
+        )
+    );
+    assert_eq!(
+        fixture
+            .fs
+            .file_contents(&fixture.path)
+            .await
+            .expect("recorded file"),
         b"after\n"
     );
     assert_eq!(
-        fs.calls().await,
+        fixture.fs.calls().await,
         vec![
-            format!("read_file:{}", path.display()),
-            format!("write_file:{}", path.display())
+            format!("read_file:{}", fixture.path.display()),
+            format!("read_file:{}", fixture.path.display()),
+            format!("write_file:{}", fixture.path.display())
         ]
     );
-    assert!(!temp_dir.path().join("remote.txt").exists());
+    assert!(!fixture.path.exists());
+}
+
+#[tokio::test]
+async fn edit_requires_full_read_for_existing_file() {
+    let fixture = FileToolFixture::with_file("remote.txt", b"before\n").await;
+
+    let unread_error = edit_remote(&fixture, "before", "after", false)
+        .await
+        .expect_err("unread edit should fail");
+    read_file(
+        ReadArgs {
+            limit: Some(1),
+            ..read_args("remote.txt")
+        },
+        &fixture.fs,
+        &fixture.sandbox,
+        &fixture.cwd,
+        &fixture.read_state,
+    )
+    .await
+    .expect("partial read succeeds");
+    let partial_error = edit_remote(&fixture, "before", "after", false)
+        .await
+        .expect_err("partial-read edit should fail");
+
+    assert_eq!(model_error(unread_error), FILE_HAS_NOT_BEEN_READ_ERROR);
+    assert_eq!(model_error(partial_error), FILE_HAS_NOT_BEEN_READ_ERROR);
+}
+
+#[tokio::test]
+async fn edit_reports_claude_style_validation_errors() {
+    let fixture = FileToolFixture::with_file("remote.txt", b"alpha\nbeta\nbeta\n").await;
+    fixture.read_full("remote.txt").await;
+    let same = edit_remote(&fixture, "alpha", "alpha", false)
+        .await
+        .expect_err("same edit should fail");
+    let missing = edit_remote(&fixture, "gamma", "delta", false)
+        .await
+        .expect_err("missing old_string should fail");
+    let multiple = edit_remote(&fixture, "beta", "delta", false)
+        .await
+        .expect_err("multi match should fail");
+
+    assert_eq!(
+        model_error(same),
+        "No changes to make: old_string and new_string are exactly the same."
+    );
+    assert_eq!(
+        model_error(missing),
+        "String to replace not found in file.\nString: gamma"
+    );
+    assert_eq!(
+        model_error(multiple),
+        "Found 2 matches of the string to replace, but replace_all is false. To replace all occurrences, set replace_all to true. To replace only one occurrence, please provide more context to uniquely identify the instance.\nString: beta"
+    );
+}
+
+#[tokio::test]
+async fn edit_replace_all_uses_claude_success_message() {
+    let fixture = FileToolFixture::with_file("remote.txt", b"beta\nbeta\n").await;
+    fixture.read_full("remote.txt").await;
+    let output = edit_remote(&fixture, "beta", "delta", true)
+        .await
+        .expect("replace_all succeeds");
+
+    assert_eq!(
+        output,
+        format!(
+            "The file {} has been updated. All occurrences were successfully replaced.",
+            fixture.path.display()
+        )
+    );
+    assert_eq!(
+        fixture
+            .fs
+            .file_contents(&fixture.path)
+            .await
+            .expect("recorded file"),
+        b"delta\ndelta\n"
+    );
+}
+
+#[tokio::test]
+async fn edit_rejects_external_modification_after_read() {
+    let fixture = FileToolFixture::with_file("remote.txt", b"before\n").await;
+    fixture.read_full("remote.txt").await;
+    fixture
+        .fs
+        .insert_file(&fixture.path, b"user changed\n")
+        .await;
+    let error = edit_remote(&fixture, "before", "after", false)
+        .await
+        .expect_err("stale edit should fail");
+
+    assert_eq!(model_error(error), FILE_MODIFIED_SINCE_READ_ERROR);
+    assert_eq!(
+        fixture
+            .fs
+            .file_contents(&fixture.path)
+            .await
+            .expect("recorded file"),
+        b"user changed\n"
+    );
 }
 
 #[tokio::test]

@@ -51,7 +51,7 @@ impl ToolExecutor<ToolInvocation> for AstralTodoWriteHandler {
         ToolSpec::Function(ResponsesApiTool {
             name: tool.name,
             description: tool.description,
-            strict: false,
+            strict: true,
             defer_loading: None,
             parameters,
             output_schema: None,
@@ -87,6 +87,8 @@ struct TodoWriteArgs {
 struct TodoWriteItem {
     content: String,
     status: String,
+    #[serde(rename = "activeForm")]
+    active_form: String,
 }
 
 fn to_plan_invocation(mut invocation: ToolInvocation) -> Result<ToolInvocation, FunctionCallError> {
@@ -108,7 +110,13 @@ fn rewrite_todo_write_arguments(arguments: &str) -> Result<String, FunctionCallE
     let plan = args
         .todos
         .into_iter()
-        .map(|todo| json!({ "step": todo.content, "status": todo.status }))
+        .map(|todo| {
+            json!({
+                "step": todo.content,
+                "status": todo.status,
+                "activeForm": todo.active_form,
+            })
+        })
         .collect::<Vec<_>>();
 
     serde_json::to_string(&json!({

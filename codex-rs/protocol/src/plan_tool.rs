@@ -17,6 +17,9 @@ pub enum StepStatus {
 pub struct PlanItemArg {
     pub step: String,
     pub status: StepStatus,
+    #[serde(default, rename = "activeForm")]
+    #[ts(optional, rename = "activeForm")]
+    pub active_form: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]

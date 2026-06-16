@@ -102,6 +102,7 @@ impl ChatWidget {
                                 TurnPlanStepStatus::InProgress => UpdatePlanItemStatus::InProgress,
                                 TurnPlanStepStatus::Completed => UpdatePlanItemStatus::Completed,
                             },
+                            active_form: None,
                         })
                         .collect(),
                 })

@@ -153,6 +153,9 @@ fn file_and_search_tools_expose_expected_required_fields() {
         read.description
             .contains("If the user provides a path to a screenshot, ALWAYS use this tool")
     );
+    assert!(!read.description.contains("PDF"));
+    assert!(!read.description.contains("Notebook"));
+    assert!(!read.description.contains("Jupyter"));
     assert!(
         write
             .description

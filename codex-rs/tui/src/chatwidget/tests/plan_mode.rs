@@ -974,6 +974,7 @@ async fn plan_implementation_popup_skips_without_proposed_plan() {
         plan: vec![PlanItemArg {
             step: "First".to_string(),
             status: StepStatus::Pending,
+            active_form: None,
         }],
     });
     chat.on_task_complete(
@@ -1640,14 +1641,17 @@ async fn plan_update_renders_history_cell() {
             PlanItemArg {
                 step: "Explore codebase".into(),
                 status: StepStatus::Completed,
+                active_form: None,
             },
             PlanItemArg {
                 step: "Implement feature".into(),
                 status: StepStatus::InProgress,
+                active_form: None,
             },
             PlanItemArg {
                 step: "Write tests".into(),
                 status: StepStatus::Pending,
+                active_form: None,
             },
         ],
     };

@@ -3477,10 +3477,12 @@ mod tests {
                 PlanItemArg {
                     step: "first".to_string(),
                     status: StepStatus::Pending,
+                    active_form: None,
                 },
                 PlanItemArg {
                     step: "second".to_string(),
                     status: StepStatus::Completed,
+                    active_form: None,
                 },
             ],
         };
