@@ -22,7 +22,14 @@ use codex_exec_server::GrepSearchResponse;
 use codex_exec_server::LOCAL_FS;
 use codex_exec_server::ReadDirectoryEntry;
 use codex_exec_server::RemoveOptions;
+use codex_protocol::models::AdditionalPermissionProfile;
+use codex_protocol::models::FileSystemPermissions;
 use codex_protocol::models::PermissionProfile;
+use codex_protocol::permissions::FileSystemAccessMode;
+use codex_protocol::permissions::FileSystemPath;
+use codex_protocol::permissions::FileSystemSandboxEntry;
+use codex_protocol::permissions::FileSystemSandboxPolicy;
+use codex_protocol::protocol::AskForApproval;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use core_test_support::PathExt;
 
@@ -36,6 +43,8 @@ use super::ReadArgs;
 use super::add_line_numbers;
 use super::edit_file;
 use super::file_environment_id;
+use super::file_tool_exec_approval_requirement;
+use super::file_tool_permission_targets;
 use super::glob_files;
 use super::grep_files;
 use super::is_blocked_device_path;
@@ -43,6 +52,8 @@ use super::read_file;
 use super::split_lines_preserving_newline;
 use super::write_file;
 use crate::function_tool::FunctionCallError;
+use crate::tools::handlers::AstralFileToolKind;
+use crate::tools::sandboxing::ExecApprovalRequirement;
 
 #[derive(Default)]
 struct RecordingFileSystem {
@@ -672,7 +683,7 @@ async fn write_existing_file_succeeds_after_full_read() {
 }
 
 #[tokio::test]
-async fn write_existing_file_rejects_partial_read_state() {
+async fn write_existing_file_succeeds_after_limited_read() {
     let fixture = FileToolFixture::with_file("remote.txt", b"before\nsecond\n").await;
 
     read_file(
@@ -686,19 +697,25 @@ async fn write_existing_file_rejects_partial_read_state() {
         &fixture.read_state,
     )
     .await
-    .expect("partial read succeeds");
-    let error = write_remote(&fixture, "after\n")
+    .expect("limited read succeeds");
+    let output = write_remote(&fixture, "after\n")
         .await
-        .expect_err("partial-read write should fail");
+        .expect("write succeeds");
 
-    assert_eq!(model_error(error), FILE_HAS_NOT_BEEN_READ_ERROR);
+    assert_eq!(
+        output,
+        format!(
+            "The file {} has been updated successfully.",
+            fixture.path.display()
+        )
+    );
     assert_eq!(
         fixture
             .fs
             .file_contents(&fixture.path)
             .await
             .expect("recorded file"),
-        b"before\nsecond\n"
+        b"after\n"
     );
 }
 
@@ -761,8 +778,8 @@ async fn edit_uses_executor_file_system() {
 }
 
 #[tokio::test]
-async fn edit_requires_full_read_for_existing_file() {
-    let fixture = FileToolFixture::with_file("remote.txt", b"before\n").await;
+async fn edit_requires_read_but_allows_limited_read_for_existing_file() {
+    let fixture = FileToolFixture::with_file("remote.txt", b"before\nsecond\n").await;
 
     let unread_error = edit_remote(&fixture, "before", "after", false)
         .await
@@ -778,13 +795,27 @@ async fn edit_requires_full_read_for_existing_file() {
         &fixture.read_state,
     )
     .await
-    .expect("partial read succeeds");
-    let partial_error = edit_remote(&fixture, "before", "after", false)
+    .expect("limited read succeeds");
+    let output = edit_remote(&fixture, "before", "after", false)
         .await
-        .expect_err("partial-read edit should fail");
+        .expect("edit succeeds");
 
     assert_eq!(model_error(unread_error), FILE_HAS_NOT_BEEN_READ_ERROR);
-    assert_eq!(model_error(partial_error), FILE_HAS_NOT_BEEN_READ_ERROR);
+    assert_eq!(
+        output,
+        format!(
+            "The file {} has been updated successfully.",
+            fixture.path.display()
+        )
+    );
+    assert_eq!(
+        fixture
+            .fs
+            .file_contents(&fixture.path)
+            .await
+            .expect("recorded file"),
+        b"after\nsecond\n"
+    );
 }
 
 #[tokio::test]
@@ -893,10 +924,11 @@ async fn grep_excludes_vcs_directories_but_not_generated_directories() {
     .await
     .expect("grep succeeds");
 
-    assert_eq!(
-        output,
-        "Found 2 files\ntarget/debug/generated.rs\nsrc/lib.rs"
-    );
+    let mut lines = output.lines();
+    assert_eq!(lines.next(), Some("Found 2 files"));
+    let mut files = lines.collect::<Vec<_>>();
+    files.sort();
+    assert_eq!(files, vec!["src/lib.rs", "target/debug/generated.rs"]);
 }
 
 #[tokio::test]
@@ -1199,4 +1231,149 @@ async fn grep_glob_pattern_without_slash_recurses() {
     .expect("grep succeeds");
 
     assert_eq!(output, "Found 2 files\nnested/child.md\nroot.md");
+}
+
+#[test]
+fn read_permission_targets_skip_when_policy_already_allows_read() {
+    let temp_dir = tempfile::TempDir::new().expect("temp dir");
+    let cwd = temp_dir.path().abs();
+    let policy = FileSystemSandboxPolicy::read_only();
+
+    let plan = file_tool_permission_targets(
+        AstralFileToolKind::Read,
+        &json!({ "file_path": "notes.txt" }).to_string(),
+        &policy,
+        &cwd,
+    )
+    .expect("permission targets");
+
+    assert_eq!(
+        plan.approval_command,
+        vec![
+            "Read".to_string(),
+            cwd.join("notes.txt").display().to_string()
+        ]
+    );
+    assert_eq!(plan.additional_permissions, None);
+}
+
+#[test]
+fn read_permission_targets_request_read_when_policy_denies_path() {
+    let temp_dir = tempfile::TempDir::new().expect("temp dir");
+    let cwd = temp_dir.path().abs();
+    let path = cwd.join("secret.txt");
+    let policy = FileSystemSandboxPolicy::restricted(vec![]);
+
+    let plan = file_tool_permission_targets(
+        AstralFileToolKind::Read,
+        &json!({ "file_path": "secret.txt" }).to_string(),
+        &policy,
+        &cwd,
+    )
+    .expect("permission targets");
+
+    assert_eq!(
+        plan.additional_permissions,
+        Some(AdditionalPermissionProfile {
+            file_system: Some(FileSystemPermissions::from_read_write_roots(
+                Some(vec![path]),
+                Some(vec![]),
+            )),
+            ..Default::default()
+        })
+    );
+}
+
+#[test]
+fn write_permission_targets_skip_when_parent_is_writable() {
+    let temp_dir = tempfile::TempDir::new().expect("temp dir");
+    let cwd = temp_dir.path().abs();
+    let policy = FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
+        path: FileSystemPath::Path { path: cwd.clone() },
+        access: FileSystemAccessMode::Write,
+    }]);
+
+    let plan = file_tool_permission_targets(
+        AstralFileToolKind::Write,
+        &json!({ "file_path": "notes.txt", "content": "hello" }).to_string(),
+        &policy,
+        &cwd,
+    )
+    .expect("permission targets");
+
+    assert_eq!(plan.additional_permissions, None);
+}
+
+#[test]
+fn write_permission_targets_request_parent_write_when_policy_denies_path() {
+    let temp_dir = tempfile::TempDir::new().expect("temp dir");
+    let cwd = temp_dir.path().join("workspace").abs();
+    let outside_dir = temp_dir.path().join("outside").abs();
+    let outside_file = outside_dir.join("notes.txt");
+    let policy = FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
+        path: FileSystemPath::Path { path: cwd.clone() },
+        access: FileSystemAccessMode::Write,
+    }]);
+
+    let plan = file_tool_permission_targets(
+        AstralFileToolKind::Write,
+        &json!({ "file_path": outside_file.to_string_lossy(), "content": "hello" }).to_string(),
+        &policy,
+        &cwd,
+    )
+    .expect("permission targets");
+
+    assert_eq!(
+        plan.additional_permissions,
+        Some(AdditionalPermissionProfile {
+            file_system: Some(FileSystemPermissions::from_read_write_roots(
+                Some(vec![]),
+                Some(vec![outside_dir]),
+            )),
+            ..Default::default()
+        })
+    );
+}
+
+#[test]
+fn permission_prompt_policy_rejects_when_approval_is_disabled() {
+    let permissions = AdditionalPermissionProfile {
+        file_system: Some(FileSystemPermissions::from_read_write_roots(
+            Some(vec![std::env::temp_dir().abs()]),
+            Some(vec![]),
+        )),
+        ..Default::default()
+    };
+
+    let requirement =
+        file_tool_exec_approval_requirement(AskForApproval::Never, Some(&permissions), false);
+
+    assert_eq!(
+        requirement,
+        ExecApprovalRequirement::Forbidden {
+            reason: "approval policy disallowed filesystem permission prompt".to_string(),
+        }
+    );
+}
+
+#[test]
+fn permission_prompt_policy_skips_when_permissions_are_preapproved() {
+    let permissions = AdditionalPermissionProfile {
+        file_system: Some(FileSystemPermissions::from_read_write_roots(
+            Some(vec![std::env::temp_dir().abs()]),
+            Some(vec![]),
+        )),
+        ..Default::default()
+    };
+
+    let requirement =
+        file_tool_exec_approval_requirement(AskForApproval::Never, Some(&permissions), true);
+
+    assert_eq!(
+        requirement,
+        ExecApprovalRequirement::Skip {
+            bypass_sandbox: false,
+            proposed_execpolicy_amendment: None,
+        }
+    );
 }

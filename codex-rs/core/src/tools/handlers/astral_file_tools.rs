@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::path::Path;
@@ -6,15 +7,29 @@ use std::sync::Mutex;
 use std::sync::PoisonError;
 
 use crate::function_tool::FunctionCallError;
+use crate::sandboxing::SandboxPermissions;
+use crate::session::session::Session;
+use crate::session::turn_context::TurnContext;
+use crate::tools::append_sandbox_intervention_hint;
 use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
 use crate::tools::context::boxed_tool_output;
-use crate::tools::handlers::ViewImageHandler;
+use crate::tools::format_exec_output_for_model;
+use crate::tools::handlers::ViewImageOutput;
+use crate::tools::handlers::apply_granted_turn_permissions;
+use crate::tools::handlers::load_view_image_output;
+use crate::tools::handlers::merge_permission_profiles;
 use crate::tools::handlers::parse_arguments;
 use crate::tools::handlers::resolve_tool_environment;
+use crate::tools::orchestrator::ToolOrchestrator;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::ToolExecutor;
+use crate::tools::runtimes::astral_file_tools::AstralFileToolRequest;
+use crate::tools::runtimes::astral_file_tools::AstralFileToolRuntime;
+use crate::tools::sandboxing::ExecApprovalRequirement;
+use crate::tools::sandboxing::ToolCtx;
+use crate::tools::sandboxing::ToolError;
 use codex_exec_server::ExecutorFileSystem;
 use codex_exec_server::FileMetadata;
 use codex_exec_server::FileSystemSandboxContext;
@@ -22,6 +37,15 @@ use codex_exec_server::GlobSearchRequest;
 use codex_exec_server::GrepOutputMode;
 use codex_exec_server::GrepSearchRequest;
 use codex_exec_server::GrepSearchResponse;
+use codex_protocol::error::CodexErr;
+use codex_protocol::error::SandboxErr;
+use codex_protocol::models::AdditionalPermissionProfile;
+use codex_protocol::models::FileSystemPermissions;
+use codex_protocol::models::PermissionProfile;
+use codex_protocol::permissions::FileSystemSandboxPolicy;
+use codex_protocol::protocol::AskForApproval;
+use codex_sandboxing::policy_transforms::effective_file_system_sandbox_policy;
+use codex_sandboxing::policy_transforms::normalize_additional_permissions;
 use codex_tools::EDIT_TOOL_NAME;
 use codex_tools::GLOB_TOOL_NAME;
 use codex_tools::GREP_TOOL_NAME;
@@ -34,7 +58,7 @@ use codex_tools::astral_core_tool_by_name;
 use codex_tools::parse_tool_input_schema_without_compaction;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::Value;
 
 const DEFAULT_READ_LINE_LIMIT: usize = 2_000;
 const DEFAULT_GLOB_RESULT_LIMIT: usize = 100;
@@ -89,7 +113,7 @@ struct FileReadStateKey {
 }
 
 #[derive(Debug, Default)]
-struct FileReadStateStore {
+pub(crate) struct FileReadStateStore {
     entries: Mutex<HashMap<FileReadStateKey, FileReadState>>,
 }
 
@@ -107,6 +131,11 @@ impl FileReadStateStore {
     }
 }
 
+pub(crate) enum AstralFileToolExecutionOutput {
+    Text(String),
+    Image(ViewImageOutput),
+}
+
 impl AstralFileToolHandler {
     pub(crate) fn new(kind: AstralFileToolKind) -> Self {
         Self { kind }
@@ -118,7 +147,7 @@ impl AstralFileToolHandler {
 }
 
 impl AstralFileToolKind {
-    fn name(self) -> &'static str {
+    pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Read => READ_TOOL_NAME,
             Self::Write => WRITE_TOOL_NAME,
@@ -150,15 +179,13 @@ impl ToolExecutor<ToolInvocation> for AstralFileToolHandler {
         &self,
         invocation: ToolInvocation,
     ) -> Result<Box<dyn crate::tools::context::ToolOutput>, FunctionCallError> {
-        if self.kind == AstralFileToolKind::Read {
-            return handle_read_invocation(invocation).await;
-        }
-
         let ToolInvocation {
             session,
             turn,
             payload,
             tracker,
+            call_id,
+            tool_name,
             ..
         } = invocation;
         let arguments = match payload {
@@ -171,6 +198,7 @@ impl ToolExecutor<ToolInvocation> for AstralFileToolHandler {
             }
         };
 
+        let hook_input = parse_arguments::<Value>(&arguments)?;
         let environment_id = file_environment_id(&arguments)?;
         let Some(turn_environment) =
             resolve_tool_environment(turn.as_ref(), environment_id.as_deref())?
@@ -181,49 +209,67 @@ impl ToolExecutor<ToolInvocation> for AstralFileToolHandler {
             )));
         };
         let cwd = turn_environment.cwd.clone();
-        let fs = turn_environment.environment.get_filesystem();
-        let sandbox = turn.file_system_sandbox_context(/*additional_permissions*/ None, &cwd);
         let read_state = session
             .services
             .session_extension_data
             .get_or_init(FileReadStateStore::default);
-
-        let text = match self.kind {
-            AstralFileToolKind::Read => unreachable!("Read is handled before generic file tools"),
-            AstralFileToolKind::Write => {
-                let output = write_file(
-                    arguments,
-                    fs.as_ref(),
-                    &sandbox,
-                    &cwd,
-                    environment_id.clone(),
-                    read_state.as_ref(),
-                )
-                .await?;
-                tracker.lock().await.invalidate();
-                output
-            }
-            AstralFileToolKind::Edit => {
-                let output = edit_file(
-                    arguments,
-                    fs.as_ref(),
-                    &sandbox,
-                    &cwd,
-                    environment_id.clone(),
-                    read_state.as_ref(),
-                )
-                .await?;
-                tracker.lock().await.invalidate();
-                output
-            }
-            AstralFileToolKind::Glob => glob_files(arguments, fs.as_ref(), &sandbox, &cwd).await?,
-            AstralFileToolKind::Grep => grep_files(arguments, fs.as_ref(), &sandbox, &cwd).await?,
+        let permission_plan = file_tool_permission_plan(
+            session.as_ref(),
+            turn.as_ref(),
+            self.kind,
+            &arguments,
+            &turn_environment.environment_id,
+            &cwd,
+        )
+        .await?;
+        let req = AstralFileToolRequest {
+            kind: self.kind,
+            arguments,
+            approval_command: permission_plan.approval_command,
+            hook_input,
+            turn_environment: turn_environment.clone(),
+            cwd,
+            environment_id,
+            read_state,
+            sandbox_permissions: permission_plan.sandbox_permissions,
+            additional_permissions: permission_plan.additional_permissions,
+            permissions_preapproved: permission_plan.permissions_preapproved,
+            exec_approval_requirement: permission_plan.exec_approval_requirement,
         };
 
-        Ok(boxed_tool_output(FunctionToolOutput::from_text(
-            text,
-            Some(true),
-        )))
+        let mut orchestrator = ToolOrchestrator::new();
+        let mut runtime = AstralFileToolRuntime::new();
+        let tool_ctx = ToolCtx {
+            session: session.clone(),
+            turn: turn.clone(),
+            call_id: call_id.clone(),
+            tool_name,
+        };
+        let output = orchestrator
+            .run(
+                &mut runtime,
+                &req,
+                &tool_ctx,
+                turn.as_ref(),
+                turn.approval_policy.value(),
+            )
+            .await
+            .map_err(|err| file_tool_error_to_function_call(err, turn.as_ref()))?
+            .output?;
+
+        if matches!(
+            self.kind,
+            AstralFileToolKind::Write | AstralFileToolKind::Edit
+        ) {
+            tracker.lock().await.invalidate();
+        }
+
+        match output {
+            AstralFileToolExecutionOutput::Text(text) => Ok(boxed_tool_output(
+                FunctionToolOutput::from_text(text, Some(true)),
+            )),
+            AstralFileToolExecutionOutput::Image(output) => Ok(boxed_tool_output(output)),
+        }
     }
 }
 
@@ -296,7 +342,6 @@ async fn read_file(
     let end = start.saturating_add(requested_limit).min(lines.len());
     let requested_offset = Some(start_line);
     let state_key = read_state_key(fs, sandbox, args.environment_id.clone(), &path).await?;
-    let is_partial_view = args.offset.is_some() || args.limit.is_some() || end < lines.len();
 
     if let Some(previous) = read_state.get(&state_key)
         && !previous.is_partial_view
@@ -314,7 +359,7 @@ async fn read_file(
             modified_at_ms: metadata.modified_at_ms,
             offset: requested_offset,
             limit: args.limit,
-            is_partial_view,
+            is_partial_view: false,
         },
     );
 
@@ -341,51 +386,325 @@ fn is_blocked_device_path(path: &Path) -> bool {
         && (path.ends_with("/fd/0") || path.ends_with("/fd/1") || path.ends_with("/fd/2"))
 }
 
-async fn handle_read_invocation(
-    mut invocation: ToolInvocation,
-) -> Result<Box<dyn crate::tools::context::ToolOutput>, FunctionCallError> {
-    let ToolPayload::Function { arguments } = &invocation.payload else {
-        return Err(FunctionCallError::RespondToModel(
-            "Read handler received unsupported payload".to_string(),
-        ));
+pub(crate) async fn execute_astral_file_tool(
+    req: &AstralFileToolRequest,
+    sandbox: Option<&FileSystemSandboxContext>,
+    ctx: &ToolCtx,
+) -> Result<AstralFileToolExecutionOutput, FunctionCallError> {
+    let disabled_sandbox;
+    let sandbox = match sandbox {
+        Some(sandbox) => sandbox,
+        None => {
+            disabled_sandbox =
+                FileSystemSandboxContext::from_permission_profile(PermissionProfile::Disabled);
+            &disabled_sandbox
+        }
     };
-    let args: ReadArgs = parse_arguments(arguments)?;
+    let fs = req.turn_environment.environment.get_filesystem();
+    let text = match req.kind {
+        AstralFileToolKind::Read => {
+            let args: ReadArgs = parse_arguments(&req.arguments)?;
+            if is_image_path(Path::new(&args.file_path)) {
+                let path = resolve_path(&req.cwd, &args.file_path);
+                let output = load_view_image_output(
+                    ctx.session.as_ref(),
+                    ctx.turn.as_ref(),
+                    ctx.call_id.as_str(),
+                    fs.as_ref(),
+                    sandbox,
+                    path,
+                    /*detail*/ None,
+                )
+                .await?;
+                return Ok(AstralFileToolExecutionOutput::Image(output));
+            }
+            read_file(
+                args,
+                fs.as_ref(),
+                sandbox,
+                &req.cwd,
+                req.read_state.as_ref(),
+            )
+            .await?
+        }
+        AstralFileToolKind::Write => {
+            write_file(
+                req.arguments.clone(),
+                fs.as_ref(),
+                sandbox,
+                &req.cwd,
+                req.environment_id.clone(),
+                req.read_state.as_ref(),
+            )
+            .await?
+        }
+        AstralFileToolKind::Edit => {
+            edit_file(
+                req.arguments.clone(),
+                fs.as_ref(),
+                sandbox,
+                &req.cwd,
+                req.environment_id.clone(),
+                req.read_state.as_ref(),
+            )
+            .await?
+        }
+        AstralFileToolKind::Glob => {
+            glob_files(req.arguments.clone(), fs.as_ref(), sandbox, &req.cwd).await?
+        }
+        AstralFileToolKind::Grep => {
+            grep_files(req.arguments.clone(), fs.as_ref(), sandbox, &req.cwd).await?
+        }
+    };
+    Ok(AstralFileToolExecutionOutput::Text(text))
+}
 
-    if is_image_path(Path::new(&args.file_path)) {
-        invocation.tool_name = ToolName::plain("view_image");
-        invocation.payload = ToolPayload::Function {
-            arguments: json!({
-                "path": args.file_path,
-                "environment_id": args.environment_id,
+struct FileToolPermissionPlan {
+    approval_command: Vec<String>,
+    sandbox_permissions: SandboxPermissions,
+    additional_permissions: Option<AdditionalPermissionProfile>,
+    permissions_preapproved: bool,
+    exec_approval_requirement: ExecApprovalRequirement,
+}
+
+async fn file_tool_permission_plan(
+    session: &Session,
+    turn: &TurnContext,
+    kind: AstralFileToolKind,
+    arguments: &str,
+    environment_id: &str,
+    cwd: &AbsolutePathBuf,
+) -> Result<FileToolPermissionPlan, FunctionCallError> {
+    let granted_permissions = merge_permission_profiles(
+        session
+            .granted_session_permissions(environment_id)
+            .await
+            .as_ref(),
+        session
+            .granted_turn_permissions(environment_id)
+            .await
+            .as_ref(),
+    );
+    let base_policy = turn.file_system_sandbox_policy();
+    let file_system_sandbox_policy =
+        effective_file_system_sandbox_policy(&base_policy, granted_permissions.as_ref());
+    let target_plan =
+        file_tool_permission_targets(kind, arguments, &file_system_sandbox_policy, cwd)?;
+    let effective_additional_permissions = apply_granted_turn_permissions(
+        session,
+        environment_id,
+        cwd.as_path(),
+        SandboxPermissions::UseDefault,
+        target_plan.additional_permissions,
+    )
+    .await;
+    let exec_approval_requirement = file_tool_exec_approval_requirement(
+        turn.approval_policy.value(),
+        effective_additional_permissions
+            .additional_permissions
+            .as_ref(),
+        effective_additional_permissions.permissions_preapproved,
+    );
+    Ok(FileToolPermissionPlan {
+        approval_command: target_plan.approval_command,
+        sandbox_permissions: effective_additional_permissions.sandbox_permissions,
+        additional_permissions: effective_additional_permissions.additional_permissions,
+        permissions_preapproved: effective_additional_permissions.permissions_preapproved,
+        exec_approval_requirement,
+    })
+}
+
+struct FileToolPermissionTargets {
+    approval_command: Vec<String>,
+    additional_permissions: Option<AdditionalPermissionProfile>,
+}
+
+fn file_tool_permission_targets(
+    kind: AstralFileToolKind,
+    arguments: &str,
+    file_system_sandbox_policy: &FileSystemSandboxPolicy,
+    cwd: &AbsolutePathBuf,
+) -> Result<FileToolPermissionTargets, FunctionCallError> {
+    match kind {
+        AstralFileToolKind::Read => {
+            let args: ReadArgs = parse_arguments(arguments)?;
+            let path = resolve_path(cwd, &args.file_path);
+            let additional_permissions = if is_blocked_device_path(&path) || is_pdf_path(&path) {
+                None
+            } else {
+                read_permissions_for_paths(
+                    std::slice::from_ref(&path),
+                    file_system_sandbox_policy,
+                    cwd,
+                )
+            };
+            Ok(FileToolPermissionTargets {
+                approval_command: vec![kind.name().to_string(), path.display().to_string()],
+                additional_permissions,
             })
-            .to_string(),
+        }
+        AstralFileToolKind::Write => {
+            let args: WriteArgs = parse_arguments(arguments)?;
+            let path = resolve_path(cwd, &args.file_path);
+            Ok(FileToolPermissionTargets {
+                approval_command: vec![kind.name().to_string(), path.display().to_string()],
+                additional_permissions: write_permissions_for_paths(
+                    &[path],
+                    file_system_sandbox_policy,
+                    cwd,
+                ),
+            })
+        }
+        AstralFileToolKind::Edit => {
+            let args: EditArgs = parse_arguments(arguments)?;
+            let path = resolve_path(cwd, &args.file_path);
+            let additional_permissions = if args.old_string == args.new_string {
+                None
+            } else {
+                write_permissions_for_paths(
+                    std::slice::from_ref(&path),
+                    file_system_sandbox_policy,
+                    cwd,
+                )
+            };
+            Ok(FileToolPermissionTargets {
+                approval_command: vec![kind.name().to_string(), path.display().to_string()],
+                additional_permissions,
+            })
+        }
+        AstralFileToolKind::Glob => {
+            let args: GlobArgs = parse_arguments(arguments)?;
+            let root = resolve_path(cwd, args.path.as_deref().unwrap_or("."));
+            Ok(FileToolPermissionTargets {
+                approval_command: vec![kind.name().to_string(), root.display().to_string()],
+                additional_permissions: read_permissions_for_paths(
+                    &[root],
+                    file_system_sandbox_policy,
+                    cwd,
+                ),
+            })
+        }
+        AstralFileToolKind::Grep => {
+            let args: GrepArgs = parse_arguments(arguments)?;
+            grep_output_mode(args.output_mode.as_deref())?;
+            let root = resolve_path(cwd, args.path.as_deref().unwrap_or("."));
+            Ok(FileToolPermissionTargets {
+                approval_command: vec![kind.name().to_string(), root.display().to_string()],
+                additional_permissions: read_permissions_for_paths(
+                    &[root],
+                    file_system_sandbox_policy,
+                    cwd,
+                ),
+            })
+        }
+    }
+}
+
+fn file_tool_exec_approval_requirement(
+    approval_policy: AskForApproval,
+    additional_permissions: Option<&AdditionalPermissionProfile>,
+    permissions_preapproved: bool,
+) -> ExecApprovalRequirement {
+    if additional_permissions.is_none() || permissions_preapproved {
+        return ExecApprovalRequirement::Skip {
+            bypass_sandbox: false,
+            proposed_execpolicy_amendment: None,
         };
-        return ViewImageHandler::default().handle(invocation).await;
     }
 
-    let Some(turn_environment) =
-        resolve_tool_environment(invocation.turn.as_ref(), args.environment_id.as_deref())?
-    else {
-        return Err(FunctionCallError::RespondToModel(
-            "Read is unavailable in this session".to_string(),
-        ));
-    };
-    let cwd = turn_environment.cwd.clone();
-    let fs = turn_environment.environment.get_filesystem();
-    let sandbox = invocation
-        .turn
-        .file_system_sandbox_context(/*additional_permissions*/ None, &cwd);
-    let read_state = invocation
-        .session
-        .services
-        .session_extension_data
-        .get_or_init(FileReadStateStore::default);
+    if !file_tool_approval_policy_allows_prompt(approval_policy) {
+        return ExecApprovalRequirement::Forbidden {
+            reason: "approval policy disallowed filesystem permission prompt".to_string(),
+        };
+    }
 
-    let text = read_file(args, fs.as_ref(), &sandbox, &cwd, read_state.as_ref()).await?;
-    Ok(boxed_tool_output(FunctionToolOutput::from_text(
-        text,
-        Some(true),
-    )))
+    ExecApprovalRequirement::NeedsApproval {
+        reason: Some("additional filesystem permissions are required".to_string()),
+        proposed_execpolicy_amendment: None,
+    }
+}
+
+fn file_tool_approval_policy_allows_prompt(approval_policy: AskForApproval) -> bool {
+    match approval_policy {
+        AskForApproval::Never => false,
+        AskForApproval::Granular(granular_config) => granular_config.allows_sandbox_approval(),
+        AskForApproval::OnFailure | AskForApproval::OnRequest | AskForApproval::UnlessTrusted => {
+            true
+        }
+    }
+}
+
+fn read_permissions_for_paths(
+    paths: &[AbsolutePathBuf],
+    file_system_sandbox_policy: &FileSystemSandboxPolicy,
+    cwd: &AbsolutePathBuf,
+) -> Option<AdditionalPermissionProfile> {
+    let read_paths = paths
+        .iter()
+        .filter(|path| !file_system_sandbox_policy.can_read_path_with_cwd(path.as_path(), cwd))
+        .cloned()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    additional_file_permissions(read_paths, Vec::new())
+}
+
+fn write_permissions_for_paths(
+    file_paths: &[AbsolutePathBuf],
+    file_system_sandbox_policy: &FileSystemSandboxPolicy,
+    cwd: &AbsolutePathBuf,
+) -> Option<AdditionalPermissionProfile> {
+    let write_paths = file_paths
+        .iter()
+        .map(|path| {
+            path.parent()
+                .unwrap_or_else(|| path.clone())
+                .into_path_buf()
+        })
+        .filter(|path| !file_system_sandbox_policy.can_write_path_with_cwd(path.as_path(), cwd))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .map(AbsolutePathBuf::from_absolute_path)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+    additional_file_permissions(Vec::new(), write_paths)
+}
+
+fn additional_file_permissions(
+    read_paths: Vec<AbsolutePathBuf>,
+    write_paths: Vec<AbsolutePathBuf>,
+) -> Option<AdditionalPermissionProfile> {
+    if read_paths.is_empty() && write_paths.is_empty() {
+        return None;
+    }
+    normalize_additional_permissions(AdditionalPermissionProfile {
+        file_system: Some(FileSystemPermissions::from_read_write_roots(
+            Some(read_paths),
+            Some(write_paths),
+        )),
+        ..Default::default()
+    })
+    .ok()
+}
+
+fn file_tool_error_to_function_call(error: ToolError, turn: &TurnContext) -> FunctionCallError {
+    match error {
+        ToolError::Rejected(message) => FunctionCallError::RespondToModel(message),
+        ToolError::Codex(CodexErr::Sandbox(SandboxErr::Denied { output, .. })) => {
+            let mut response = format_exec_output_for_model(&output, turn.truncation_policy);
+            append_sandbox_intervention_hint(&mut response);
+            FunctionCallError::RespondToModel(response)
+        }
+        ToolError::Codex(CodexErr::Sandbox(SandboxErr::Timeout { output })) => {
+            FunctionCallError::RespondToModel(format_exec_output_for_model(
+                &output,
+                turn.truncation_policy,
+            ))
+        }
+        ToolError::Codex(error) => {
+            FunctionCallError::RespondToModel(format!("execution error: {error:?}"))
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -684,8 +1003,13 @@ fn validate_full_read_state(
             FILE_HAS_NOT_BEEN_READ_ERROR.to_string(),
         ));
     }
-    if state.modified_at_ms < current_modified_at_ms && state.content == current_text {
-        return Ok(());
+    if state.modified_at_ms < current_modified_at_ms {
+        if state.offset.is_none() && state.limit.is_none() && state.content == current_text {
+            return Ok(());
+        }
+        return Err(FunctionCallError::RespondToModel(
+            FILE_MODIFIED_SINCE_READ_ERROR.to_string(),
+        ));
     }
     if state.content != current_text {
         return Err(FunctionCallError::RespondToModel(

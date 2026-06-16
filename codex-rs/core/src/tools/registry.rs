@@ -498,6 +498,8 @@ impl ToolRegistry {
                     invocation.payload,
                     ToolPayload::Custom { .. } | ToolPayload::Function { .. }
                 ))
+            && !(tool_name.name == "view_image"
+                && matches!(invocation.payload, ToolPayload::Function { .. }))
         {
             let message = match tool_name.name.as_str() {
                 "exec_command" | "shell_command" => {

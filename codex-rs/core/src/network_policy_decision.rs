@@ -66,9 +66,21 @@ pub(crate) fn denied_network_policy_message(blocked: &BlockedRequest) -> Option<
         _ => "request is blocked by network policy",
     };
 
-    Some(format!(
-        "Network access to \"{host}\" was blocked: {detail}."
-    ))
+    let requestable = matches!(blocked.reason.as_str(), "not_allowed" | "not_allowed_local");
+
+    if requestable {
+        Some(format!(
+            "Network access to \"{host}\" was blocked: {detail}.\n\n\
+             [Sandbox Intervention] To proceed, call RequestPermissions to request \
+             network access ({{\"network\": {{\"enabled\": true}}}}). \
+             Wait for approval, then retry the original action.\n\
+             Do not retry the blocked action before permission is granted."
+        ))
+    } else {
+        Some(format!(
+            "Network access to \"{host}\" was blocked: {detail}."
+        ))
+    }
 }
 
 pub(crate) fn execpolicy_network_rule_amendment(

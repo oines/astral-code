@@ -7,12 +7,15 @@ use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::ImageDetail;
 use codex_protocol::models::ResponseInputItem;
 use codex_protocol::openai_models::InputModality;
+use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_image::PromptImageMode;
 use codex_utils_image::load_for_prompt_bytes;
 use serde::Deserialize;
 
 use crate::function_tool::FunctionCallError;
 use crate::original_image_detail::can_request_original_image_detail;
+use crate::session::session::Session;
+use crate::session::turn_context::TurnContext;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
@@ -23,6 +26,8 @@ use crate::tools::handlers::view_image_spec::ViewImageToolOptions;
 use crate::tools::handlers::view_image_spec::create_view_image_tool;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::ToolExecutor;
+use codex_exec_server::ExecutorFileSystem;
+use codex_exec_server::FileSystemSandboxContext;
 use codex_tools::ToolName;
 use codex_tools::ToolSpec;
 
@@ -59,9 +64,104 @@ struct ViewImageArgs {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
-enum ViewImageDetail {
+pub(crate) enum ViewImageDetail {
     High,
     Original,
+}
+
+fn parse_view_image_detail(
+    detail: Option<&str>,
+) -> Result<Option<ViewImageDetail>, FunctionCallError> {
+    match detail {
+        None => Ok(None),
+        Some("high") => Ok(Some(ViewImageDetail::High)),
+        Some("original") => Ok(Some(ViewImageDetail::Original)),
+        Some(detail) => Err(FunctionCallError::RespondToModel(format!(
+            "view_image.detail only supports `high` or `original`; omit `detail` for default high resized behavior, got `{detail}`"
+        ))),
+    }
+}
+
+pub(crate) async fn load_view_image_output(
+    session: &Session,
+    turn: &TurnContext,
+    call_id: &str,
+    fs: &dyn ExecutorFileSystem,
+    sandbox: &FileSystemSandboxContext,
+    abs_path: AbsolutePathBuf,
+    detail: Option<ViewImageDetail>,
+) -> Result<ViewImageOutput, FunctionCallError> {
+    if !turn
+        .model_info
+        .input_modalities
+        .contains(&InputModality::Image)
+    {
+        return Err(FunctionCallError::RespondToModel(
+            VIEW_IMAGE_UNSUPPORTED_MESSAGE.to_string(),
+        ));
+    }
+
+    let metadata = fs
+        .get_metadata(&abs_path, Some(sandbox))
+        .await
+        .map_err(|error| {
+            FunctionCallError::RespondToModel(format!(
+                "unable to locate image at `{}`: {error}",
+                abs_path.display()
+            ))
+        })?;
+
+    if !metadata.is_file {
+        return Err(FunctionCallError::RespondToModel(format!(
+            "image path `{}` is not a file",
+            abs_path.display()
+        )));
+    }
+    let file_bytes = fs
+        .read_file(&abs_path, Some(sandbox))
+        .await
+        .map_err(|error| {
+            FunctionCallError::RespondToModel(format!(
+                "unable to read image at `{}`: {error}",
+                abs_path.display()
+            ))
+        })?;
+    let event_path = abs_path.clone();
+
+    let can_request_original_detail = can_request_original_image_detail(&turn.model_info);
+    let use_original_detail =
+        can_request_original_detail && matches!(detail, Some(ViewImageDetail::Original));
+    let image_mode = if use_original_detail {
+        PromptImageMode::Original
+    } else {
+        PromptImageMode::ResizeToFit
+    };
+    let image_detail = if use_original_detail {
+        ImageDetail::Original
+    } else {
+        DEFAULT_IMAGE_DETAIL
+    };
+
+    let image =
+        load_for_prompt_bytes(abs_path.as_path(), file_bytes, image_mode).map_err(|error| {
+            FunctionCallError::RespondToModel(format!(
+                "unable to process image at `{}`: {error}",
+                abs_path.display()
+            ))
+        })?;
+    let image_url = image.into_data_url();
+
+    let item = TurnItem::ImageView(ImageViewItem {
+        id: call_id.to_string(),
+        path: event_path,
+    });
+    session.emit_turn_item_started(turn, &item).await;
+    session.emit_turn_item_completed(turn, item).await;
+
+    Ok(ViewImageOutput {
+        image_url,
+        image_detail,
+    })
 }
 
 #[async_trait::async_trait]
@@ -82,17 +182,6 @@ impl ToolExecutor<ToolInvocation> for ViewImageHandler {
         &self,
         invocation: ToolInvocation,
     ) -> Result<Box<dyn crate::tools::context::ToolOutput>, FunctionCallError> {
-        if !invocation
-            .turn
-            .model_info
-            .input_modalities
-            .contains(&InputModality::Image)
-        {
-            return Err(FunctionCallError::RespondToModel(
-                VIEW_IMAGE_UNSUPPORTED_MESSAGE.to_string(),
-            ));
-        }
-
         let ToolInvocation {
             session,
             turn,
@@ -117,16 +206,7 @@ impl ToolExecutor<ToolInvocation> for ViewImageHandler {
         } = parse_arguments(&arguments)?;
         // `high` is the explicit spelling of the default resized path.
         // Other string values remain invalid rather than being silently reinterpreted.
-        let detail = match detail.as_deref() {
-            None => None,
-            Some("high") => Some(ViewImageDetail::High),
-            Some("original") => Some(ViewImageDetail::Original),
-            Some(detail) => {
-                return Err(FunctionCallError::RespondToModel(format!(
-                    "view_image.detail only supports `high` or `original`; omit `detail` for default high resized behavior, got `{detail}`"
-                )));
-            }
-        };
+        let detail = parse_view_image_detail(detail.as_deref())?;
 
         let Some(turn_environment) =
             resolve_tool_environment(turn.as_ref(), environment_id.as_deref())?
@@ -140,67 +220,18 @@ impl ToolExecutor<ToolInvocation> for ViewImageHandler {
         let sandbox = turn.file_system_sandbox_context(/*additional_permissions*/ None, &cwd);
         let fs = turn_environment.environment.get_filesystem();
 
-        let metadata = fs
-            .get_metadata(&abs_path, Some(&sandbox))
-            .await
-            .map_err(|error| {
-                FunctionCallError::RespondToModel(format!(
-                    "unable to locate image at `{}`: {error}",
-                    abs_path.display()
-                ))
-            })?;
-
-        if !metadata.is_file {
-            return Err(FunctionCallError::RespondToModel(format!(
-                "image path `{}` is not a file",
-                abs_path.display()
-            )));
-        }
-        let file_bytes = fs
-            .read_file(&abs_path, Some(&sandbox))
-            .await
-            .map_err(|error| {
-                FunctionCallError::RespondToModel(format!(
-                    "unable to read image at `{}`: {error}",
-                    abs_path.display()
-                ))
-            })?;
-        let event_path = abs_path.clone();
-
-        let can_request_original_detail = can_request_original_image_detail(&turn.model_info);
-        let use_original_detail =
-            can_request_original_detail && matches!(detail, Some(ViewImageDetail::Original));
-        let image_mode = if use_original_detail {
-            PromptImageMode::Original
-        } else {
-            PromptImageMode::ResizeToFit
-        };
-        let image_detail = if use_original_detail {
-            ImageDetail::Original
-        } else {
-            DEFAULT_IMAGE_DETAIL
-        };
-
-        let image =
-            load_for_prompt_bytes(abs_path.as_path(), file_bytes, image_mode).map_err(|error| {
-                FunctionCallError::RespondToModel(format!(
-                    "unable to process image at `{}`: {error}",
-                    abs_path.display()
-                ))
-            })?;
-        let image_url = image.into_data_url();
-
-        let item = TurnItem::ImageView(ImageViewItem {
-            id: call_id,
-            path: event_path,
-        });
-        session.emit_turn_item_started(turn.as_ref(), &item).await;
-        session.emit_turn_item_completed(turn.as_ref(), item).await;
-
-        Ok(boxed_tool_output(ViewImageOutput {
-            image_url,
-            image_detail,
-        }))
+        Ok(boxed_tool_output(
+            load_view_image_output(
+                session.as_ref(),
+                turn.as_ref(),
+                &call_id,
+                fs.as_ref(),
+                &sandbox,
+                abs_path,
+                detail,
+            )
+            .await?,
+        ))
     }
 }
 

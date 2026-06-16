@@ -30,6 +30,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 pub(crate) mod apply_patch;
+pub(crate) mod astral_file_tools;
 pub(crate) mod shell;
 pub(crate) mod unified_exec;
 

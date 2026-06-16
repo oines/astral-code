@@ -5,7 +5,7 @@ pub(crate) mod apply_patch_spec;
 mod astral_ask_user_question;
 mod astral_background_tasks;
 mod astral_bash;
-mod astral_file_tools;
+pub(crate) mod astral_file_tools;
 mod astral_mcp_resource;
 mod astral_request_permissions;
 mod astral_skill;
@@ -89,6 +89,8 @@ pub use unified_exec::ExecCommandHandler;
 pub(crate) use unified_exec::ExecCommandHandlerOptions;
 pub use unified_exec::WriteStdinHandler;
 pub use view_image::ViewImageHandler;
+pub(crate) use view_image::ViewImageOutput;
+pub(crate) use view_image::load_view_image_output;
 
 pub(crate) fn parse_arguments<T>(arguments: &str) -> Result<T, FunctionCallError>
 where

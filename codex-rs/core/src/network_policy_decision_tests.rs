@@ -190,3 +190,71 @@ fn denied_network_policy_message_for_denylist_block_is_explicit() {
             )
         );
 }
+
+#[test]
+fn denied_network_policy_message_for_not_allowed_includes_intervention_hint() {
+    let blocked = BlockedRequest {
+        host: "example.com".to_string(),
+        reason: "not_allowed".to_string(),
+        client: None,
+        method: Some("GET".to_string()),
+        mode: None,
+        protocol: "http".to_string(),
+        decision: Some("deny".to_string()),
+        source: Some("baseline_policy".to_string()),
+        port: Some(80),
+        timestamp: 0,
+    };
+    let msg = denied_network_policy_message(&blocked).expect("should produce a message");
+    assert!(
+        msg.contains("[Sandbox Intervention]"),
+        "message should include intervention hint"
+    );
+    assert!(
+        msg.contains("RequestPermissions"),
+        "message should mention RequestPermissions"
+    );
+    assert!(msg.contains("network"), "message should mention network");
+}
+
+#[test]
+fn denied_network_policy_message_for_not_allowed_local_includes_intervention_hint() {
+    let blocked = BlockedRequest {
+        host: "192.168.1.1".to_string(),
+        reason: "not_allowed_local".to_string(),
+        client: None,
+        method: Some("GET".to_string()),
+        mode: None,
+        protocol: "http".to_string(),
+        decision: Some("deny".to_string()),
+        source: Some("baseline_policy".to_string()),
+        port: Some(80),
+        timestamp: 0,
+    };
+    let msg = denied_network_policy_message(&blocked).expect("should produce a message");
+    assert!(
+        msg.contains("[Sandbox Intervention]"),
+        "message should include intervention hint"
+    );
+}
+
+#[test]
+fn denied_network_policy_message_for_method_not_allowed_has_no_hint() {
+    let blocked = BlockedRequest {
+        host: "example.com".to_string(),
+        reason: "method_not_allowed".to_string(),
+        client: None,
+        method: Some("CONNECT".to_string()),
+        mode: None,
+        protocol: "http".to_string(),
+        decision: Some("deny".to_string()),
+        source: Some("baseline_policy".to_string()),
+        port: Some(80),
+        timestamp: 0,
+    };
+    let msg = denied_network_policy_message(&blocked).expect("should produce a message");
+    assert!(
+        !msg.contains("[Sandbox Intervention]"),
+        "hard-denied reason should not include intervention hint"
+    );
+}
