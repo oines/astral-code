@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::io;
 use std::path::Path;
 use std::time::Duration;
@@ -38,6 +39,7 @@ use super::write_file;
 #[derive(Default)]
 struct RecordingFileSystem {
     files: Mutex<HashMap<String, Vec<u8>>>,
+    directories: Mutex<HashSet<String>>,
     calls: Mutex<Vec<String>>,
     glob_response: Mutex<Option<GlobSearchResponse>>,
     grep_response: Mutex<Option<GrepSearchResponse>>,
@@ -49,6 +51,10 @@ impl RecordingFileSystem {
             .lock()
             .await
             .insert(path_key(path), contents.into());
+    }
+
+    async fn insert_directory(&self, path: &AbsolutePathBuf) {
+        self.directories.lock().await.insert(path_key(path));
     }
 
     async fn file_contents(&self, path: &AbsolutePathBuf) -> Option<Vec<u8>> {
@@ -140,7 +146,15 @@ impl ExecutorFileSystem for RecordingFileSystem {
         path: &AbsolutePathBuf,
         _sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<FileMetadata> {
-        if self.file_contents(path).await.is_some() {
+        if self.directories.lock().await.contains(&path_key(path)) {
+            Ok(FileMetadata {
+                is_directory: true,
+                is_file: false,
+                is_symlink: false,
+                created_at_ms: 0,
+                modified_at_ms: 0,
+            })
+        } else if self.file_contents(path).await.is_some() {
             Ok(FileMetadata {
                 is_directory: false,
                 is_file: true,
@@ -396,7 +410,7 @@ async fn edit_uses_executor_file_system() {
 }
 
 #[tokio::test]
-async fn grep_prunes_generated_and_vcs_directories() {
+async fn grep_excludes_vcs_directories_but_not_generated_directories() {
     let temp_dir = tempfile::TempDir::new().expect("temp dir");
     let cwd = temp_dir.path().abs();
     std::fs::create_dir_all(temp_dir.path().join("src")).expect("create src");
@@ -425,7 +439,10 @@ async fn grep_prunes_generated_and_vcs_directories() {
     .await
     .expect("grep succeeds");
 
-    assert_eq!(output, "Found 1 file\nsrc/lib.rs");
+    assert_eq!(
+        output,
+        "Found 2 files\ntarget/debug/generated.rs\nsrc/lib.rs"
+    );
 }
 
 #[tokio::test]
@@ -433,6 +450,7 @@ async fn glob_uses_executor_search_backend() {
     let temp_dir = tempfile::TempDir::new().expect("temp dir");
     let cwd = temp_dir.path().abs();
     let fs = RecordingFileSystem::default();
+    fs.insert_directory(&cwd.join("src")).await;
     fs.set_glob_response(GlobSearchResponse {
         matches: vec![GlobSearchMatch {
             path: cwd.join("src/lib.rs"),
@@ -464,6 +482,7 @@ async fn grep_uses_executor_search_backend() {
     let temp_dir = tempfile::TempDir::new().expect("temp dir");
     let cwd = temp_dir.path().abs();
     let fs = RecordingFileSystem::default();
+    fs.insert_directory(&cwd.join("src")).await;
     fs.set_grep_response(GrepSearchResponse {
         lines: vec!["lib.rs:1:needle".to_string()],
         num_files: 0,

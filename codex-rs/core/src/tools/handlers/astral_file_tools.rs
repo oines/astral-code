@@ -464,6 +464,9 @@ async fn glob_files(
 ) -> Result<String, FunctionCallError> {
     let args: GlobArgs = parse_arguments(&arguments)?;
     let root = resolve_path(cwd, args.path.as_deref().unwrap_or("."));
+    if let Some(path) = args.path.as_deref() {
+        validate_glob_path(fs, sandbox, &root, path, cwd).await?;
+    }
     let response = fs
         .glob_search(
             GlobSearchRequest {
@@ -517,6 +520,9 @@ async fn grep_files(
 ) -> Result<String, FunctionCallError> {
     let args: GrepArgs = parse_arguments(&arguments)?;
     let root = resolve_path(cwd, args.path.as_deref().unwrap_or("."));
+    if let Some(path) = args.path.as_deref() {
+        validate_grep_path(fs, sandbox, &root, path, cwd).await?;
+    }
     let output_mode = grep_output_mode(args.output_mode.as_deref())?;
     let (context_before, context_after) = if let Some(context) = args.context {
         (context, context)
@@ -553,7 +559,68 @@ async fn grep_files(
 }
 
 fn resolve_path(cwd: &AbsolutePathBuf, path: &str) -> AbsolutePathBuf {
-    cwd.join(path)
+    cwd.join(path.trim())
+}
+
+async fn validate_glob_path(
+    fs: &dyn ExecutorFileSystem,
+    sandbox: &FileSystemSandboxContext,
+    root: &AbsolutePathBuf,
+    path: &str,
+    cwd: &AbsolutePathBuf,
+) -> Result<(), FunctionCallError> {
+    if is_unc_path(path) {
+        return Ok(());
+    }
+    let metadata = fs.get_metadata(root, Some(sandbox)).await.map_err(|err| {
+        if err.kind() == ErrorKind::NotFound {
+            FunctionCallError::RespondToModel(format!(
+                "Directory does not exist: {path}. Note: your current working directory is {}.",
+                cwd.display()
+            ))
+        } else {
+            FunctionCallError::RespondToModel(format!(
+                "unable to inspect `{}`: {err}",
+                root.display()
+            ))
+        }
+    })?;
+    if !metadata.is_directory {
+        return Err(FunctionCallError::RespondToModel(format!(
+            "Path is not a directory: {path}"
+        )));
+    }
+    Ok(())
+}
+
+async fn validate_grep_path(
+    fs: &dyn ExecutorFileSystem,
+    sandbox: &FileSystemSandboxContext,
+    root: &AbsolutePathBuf,
+    path: &str,
+    cwd: &AbsolutePathBuf,
+) -> Result<(), FunctionCallError> {
+    if is_unc_path(path) {
+        return Ok(());
+    }
+    fs.get_metadata(root, Some(sandbox)).await.map_err(|err| {
+        if err.kind() == ErrorKind::NotFound {
+            FunctionCallError::RespondToModel(format!(
+                "Path does not exist: {path}. Note: your current working directory is {}.",
+                cwd.display()
+            ))
+        } else {
+            FunctionCallError::RespondToModel(format!(
+                "unable to inspect `{}`: {err}",
+                root.display()
+            ))
+        }
+    })?;
+    Ok(())
+}
+
+fn is_unc_path(path: &str) -> bool {
+    path.starts_with(r"\\") || path.starts_with("//")
 }
 
 fn grep_output_mode(output_mode: Option<&str>) -> Result<GrepOutputMode, FunctionCallError> {
@@ -586,11 +653,31 @@ fn format_grep_line(line: String, output_mode: GrepOutputMode, prefix: Option<&s
         GrepOutputMode::FilesWithMatches => prefix_relative_path(&line, prefix),
         GrepOutputMode::Count | GrepOutputMode::Content => {
             let Some((path, rest)) = line.split_once(':') else {
-                return prefix_relative_path(&line, prefix);
+                return format_grep_context_line(&line, prefix);
             };
             format!("{}:{rest}", prefix_relative_path(path, prefix))
         }
     }
+}
+
+fn format_grep_context_line(line: &str, prefix: Option<&str>) -> String {
+    if line == "--" {
+        return line.to_string();
+    }
+    let Some((path, rest)) = split_context_line(line) else {
+        return prefix_relative_path(line, prefix);
+    };
+    format!("{}-{rest}", prefix_relative_path(path, prefix))
+}
+
+fn split_context_line(line: &str) -> Option<(&str, &str)> {
+    let (path_and_line, _text) = line.rsplit_once('-')?;
+    let (path, line_number) = path_and_line.rsplit_once('-')?;
+    if !line_number.chars().all(|char| char.is_ascii_digit()) {
+        return None;
+    }
+    let rest = &line[path.len() + 1..];
+    Some((path, rest))
 }
 
 fn prefix_relative_path(path: &str, prefix: Option<&str>) -> String {

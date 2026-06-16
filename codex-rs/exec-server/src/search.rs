@@ -2,6 +2,8 @@ use std::io;
 use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
@@ -11,38 +13,34 @@ use codex_file_system::GlobSearchResponse;
 use codex_file_system::GrepOutputMode;
 use codex_file_system::GrepSearchRequest;
 use codex_file_system::GrepSearchResponse;
-use globset::GlobBuilder;
-use globset::GlobSet;
-use globset::GlobSetBuilder;
+use grep_regex::RegexMatcher;
+use grep_regex::RegexMatcherBuilder;
+use grep_searcher::BinaryDetection;
+use grep_searcher::Searcher;
+use grep_searcher::SearcherBuilder;
+use grep_searcher::Sink;
+use grep_searcher::SinkContext;
+use grep_searcher::SinkMatch;
+use ignore::DirEntry;
 use ignore::WalkBuilder;
-use regex_lite::Regex;
-use regex_lite::RegexBuilder;
+use ignore::WalkState;
+use ignore::overrides::Override;
+use ignore::overrides::OverrideBuilder;
+use ignore::types::Types;
+use ignore::types::TypesBuilder;
 
-const SEARCH_PRUNED_DIRECTORY_NAMES: &[&str] = &[
-    ".git",
-    ".svn",
-    ".hg",
-    ".bzr",
-    ".jj",
-    ".cache",
-    ".next",
-    ".turbo",
-    "build",
-    "dist",
-    "node_modules",
-    "target",
-];
+const GREP_EXCLUDED_DIRECTORY_GLOBS: &[&str] = &["!.git", "!.svn", "!.hg", "!.bzr", "!.jj", "!.sl"];
+const MAX_COLUMNS: usize = 500;
+
+#[derive(Clone, Debug)]
+struct SearchCandidate {
+    path: PathBuf,
+    relative_slash_path: String,
+}
 
 #[derive(Debug)]
 struct GlobCandidate {
     path: codex_utils_absolute_path::AbsolutePathBuf,
-    relative_slash_path: String,
-    modified_at_ms: i64,
-}
-
-#[derive(Debug)]
-struct GrepCandidate {
-    path: PathBuf,
     relative_slash_path: String,
     modified_at_ms: i64,
 }
@@ -53,6 +51,12 @@ struct LimitedLines {
     truncated: bool,
     applied_limit: Option<usize>,
     applied_offset: Option<usize>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct WalkConfig {
+    include_hidden: bool,
+    respect_ignore_files: bool,
 }
 
 pub(crate) async fn glob_search(request: GlobSearchRequest) -> io::Result<GlobSearchResponse> {
@@ -69,8 +73,8 @@ pub(crate) async fn grep_search(request: GrepSearchRequest) -> io::Result<GrepSe
 
 fn glob_search_blocking(request: GlobSearchRequest) -> io::Result<GlobSearchResponse> {
     let (root, pattern) = glob_root_and_pattern(request.root.as_path(), &request.pattern);
-    let matcher = compile_glob_set(&pattern)?;
-    let candidates = glob_candidates(root.as_path(), &pattern, &matcher)?;
+    let override_matcher = build_overrides(root.as_path(), &[pattern])?;
+    let candidates = glob_candidates(root.as_path(), &override_matcher)?;
     let max_results = request.max_results;
     let truncated = candidates.len() > max_results;
     let matches = candidates
@@ -85,40 +89,62 @@ fn glob_search_blocking(request: GlobSearchRequest) -> io::Result<GlobSearchResp
     Ok(GlobSearchResponse { matches, truncated })
 }
 
-fn glob_candidates(
-    root: &Path,
-    pattern: &str,
-    matcher: &GlobSet,
-) -> io::Result<Vec<GlobCandidate>> {
-    let prefix = glob_literal_directory_prefix(pattern);
-    let Some(start_dir) = resolve_glob_start_dir(root, &prefix)? else {
+fn glob_candidates(root: &Path, override_matcher: &Override) -> io::Result<Vec<GlobCandidate>> {
+    let metadata = std::fs::metadata(root)?;
+    if metadata.is_file() {
+        if !path_matches_overrides(override_matcher, root, false) {
+            return Ok(Vec::new());
+        }
+        let path = codex_utils_absolute_path::AbsolutePathBuf::from_absolute_path(root)?;
+        return Ok(vec![GlobCandidate {
+            path,
+            relative_slash_path: root
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            modified_at_ms: metadata.modified().ok().map_or(0, system_time_to_unix_ms),
+        }]);
+    }
+    if !metadata.is_dir() {
         return Ok(Vec::new());
-    };
-    let match_basename = !pattern.contains('/');
-    let mut candidates = Vec::new();
-    for entry in search_walker(start_dir.as_path()) {
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(_) => continue,
-        };
-        let file_type = entry.file_type();
-        if !file_type.is_some_and(|file_type| file_type.is_file()) {
-            continue;
-        }
-        let relative_slash_path = relative_slash_path(entry.path(), root);
-        if !glob_path_matches(matcher, match_basename, &relative_slash_path, entry.path()) {
-            continue;
-        }
-        candidates.push(GlobCandidate {
-            path: codex_utils_absolute_path::AbsolutePathBuf::from_absolute_path(entry.path())?,
-            modified_at_ms: std::fs::metadata(entry.path())
-                .ok()
-                .and_then(|metadata| metadata.modified().ok())
-                .map_or(0, system_time_to_unix_ms),
-            relative_slash_path,
-        });
     }
 
+    let candidates = Arc::new(Mutex::new(Vec::new()));
+    let mut builder = walk_builder(root, glob_walk_config());
+    builder.overrides(override_matcher.clone());
+    builder.build_parallel().run(|| {
+        let candidates = Arc::clone(&candidates);
+        Box::new(move |result| {
+            let Ok(entry) = result else {
+                return WalkState::Continue;
+            };
+            if !entry_is_file(&entry) {
+                return WalkState::Continue;
+            }
+            let relative_slash_path = relative_slash_path(entry.path(), root);
+            let Ok(path) =
+                codex_utils_absolute_path::AbsolutePathBuf::from_absolute_path(entry.path())
+            else {
+                return WalkState::Continue;
+            };
+            let modified_at_ms = entry
+                .metadata()
+                .ok()
+                .and_then(|metadata| metadata.modified().ok())
+                .map_or(0, system_time_to_unix_ms);
+            let Ok(mut candidates) = candidates.lock() else {
+                return WalkState::Quit;
+            };
+            candidates.push(GlobCandidate {
+                path,
+                relative_slash_path,
+                modified_at_ms,
+            });
+            WalkState::Continue
+        })
+    });
+
+    let mut candidates = into_inner_vec(candidates, "glob candidates lock")?;
     candidates.sort_by(|left, right| {
         left.modified_at_ms
             .cmp(&right.modified_at_ms)
@@ -128,65 +154,17 @@ fn glob_candidates(
 }
 
 fn grep_search_blocking(request: GrepSearchRequest) -> io::Result<GrepSearchResponse> {
-    let mut regex_builder = RegexBuilder::new(&request.pattern);
-    regex_builder
-        .case_insensitive(request.ignore_case)
-        .dot_matches_new_line(request.multiline);
-    let regex = regex_builder.build().map_err(invalid_pattern_error)?;
-    let candidates = grep_candidates(&request)?;
-    let mut output = Vec::new();
-    let mut files_with_matches = Vec::new();
-
-    for candidate in candidates {
-        if !type_filter_matches(candidate.path.as_path(), request.file_type.as_deref()) {
-            continue;
+    let matcher = grep_matcher(&request)?;
+    let overrides = grep_overrides(&request)?;
+    let type_matcher = grep_type_matcher(request.file_type.as_deref())?;
+    let output = match request.output_mode {
+        GrepOutputMode::FilesWithMatches => {
+            grep_files_with_matches(&request, &matcher, &overrides, type_matcher.as_ref())?
         }
-
-        let bytes = match std::fs::read(candidate.path.as_path()) {
-            Ok(bytes) => bytes,
-            Err(_) => continue,
-        };
-        if bytes.contains(&0) {
-            continue;
+        GrepOutputMode::Count | GrepOutputMode::Content => {
+            grep_count_or_content(&request, &matcher, &overrides, type_matcher.as_ref())?
         }
-        let text = String::from_utf8_lossy(&bytes);
-        let lines = split_lines_preserving_newline(&text);
-        let matched_lines = matching_line_indexes(&regex, &lines, request.multiline, &text);
-        if matched_lines.is_empty() {
-            continue;
-        }
-
-        match request.output_mode {
-            GrepOutputMode::FilesWithMatches => {
-                files_with_matches.push((candidate.relative_slash_path, candidate.modified_at_ms));
-            }
-            GrepOutputMode::Count => {
-                output.push(format!(
-                    "{}:{}",
-                    candidate.relative_slash_path,
-                    matched_lines.len()
-                ));
-            }
-            GrepOutputMode::Content => push_content_matches(
-                &mut output,
-                &candidate.relative_slash_path,
-                &lines,
-                &matched_lines,
-                request.line_numbers,
-                request.context_before,
-                request.context_after,
-            ),
-        }
-    }
-
-    if request.output_mode == GrepOutputMode::FilesWithMatches {
-        files_with_matches
-            .sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
-        output = files_with_matches
-            .into_iter()
-            .map(|(path, _modified_at_ms)| path)
-            .collect();
-    }
+    };
 
     let LimitedLines {
         lines,
@@ -203,6 +181,308 @@ fn grep_search_blocking(request: GrepSearchRequest) -> io::Result<GrepSearchResp
         applied_offset,
         truncated,
     })
+}
+
+fn grep_matcher(request: &GrepSearchRequest) -> io::Result<RegexMatcher> {
+    let mut builder = RegexMatcherBuilder::new();
+    builder
+        .case_insensitive(request.ignore_case)
+        .multi_line(request.multiline)
+        .dot_matches_new_line(request.multiline);
+    builder
+        .build(&request.pattern)
+        .map_err(invalid_pattern_error)
+}
+
+fn grep_overrides(request: &GrepSearchRequest) -> io::Result<Override> {
+    let mut patterns = GREP_EXCLUDED_DIRECTORY_GLOBS
+        .iter()
+        .map(|pattern| (*pattern).to_string())
+        .collect::<Vec<_>>();
+    if let Some(glob) = request.glob.as_deref() {
+        patterns.extend(split_grep_globs(glob).into_iter().map(|pattern| {
+            if let Some(exclusion) = pattern.strip_prefix('!') {
+                format!("!{}", normalize_pattern(exclusion))
+            } else {
+                normalize_pattern(&pattern)
+            }
+        }));
+    }
+    build_overrides(request.root.as_path(), &patterns)
+}
+
+fn grep_type_matcher(file_type: Option<&str>) -> io::Result<Option<Types>> {
+    let Some(file_type) = file_type else {
+        return Ok(None);
+    };
+    let mut builder = TypesBuilder::new();
+    builder.add_defaults();
+    builder.select(file_type);
+    builder.build().map(Some).map_err(invalid_pattern_error)
+}
+
+fn grep_files_with_matches(
+    request: &GrepSearchRequest,
+    matcher: &RegexMatcher,
+    overrides: &Override,
+    type_matcher: Option<&Types>,
+) -> io::Result<Vec<String>> {
+    let metadata = std::fs::metadata(request.root.as_path())?;
+    if metadata.is_file() {
+        let mut searcher = files_with_matches_searcher();
+        if !path_has_match(&mut searcher, matcher, request.root.as_path()) {
+            return Ok(Vec::new());
+        }
+        return Ok(vec![String::new()]);
+    }
+    if !metadata.is_dir() {
+        return Ok(Vec::new());
+    }
+
+    let matches = Arc::new(Mutex::new(Vec::new()));
+    let builder = grep_walk_builder(request.root.as_path(), overrides, type_matcher);
+    builder.build_parallel().run(|| {
+        let matches = Arc::clone(&matches);
+        let mut searcher = files_with_matches_searcher();
+        Box::new(move |result| {
+            let Ok(entry) = result else {
+                return WalkState::Continue;
+            };
+            if !entry_is_file(&entry) {
+                return WalkState::Continue;
+            }
+            if !path_has_match(&mut searcher, matcher, entry.path()) {
+                return WalkState::Continue;
+            }
+            let relative_slash_path = relative_slash_path(entry.path(), request.root.as_path());
+            let modified_at_ms = entry
+                .metadata()
+                .ok()
+                .and_then(|metadata| metadata.modified().ok())
+                .map_or(0, system_time_to_unix_ms);
+            let Ok(mut matches) = matches.lock() else {
+                return WalkState::Quit;
+            };
+            matches.push((relative_slash_path, modified_at_ms));
+            WalkState::Continue
+        })
+    });
+
+    let mut matches = into_inner_vec(matches, "grep matches lock")?;
+    matches.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+    Ok(matches
+        .into_iter()
+        .map(|(relative_slash_path, _modified_at_ms)| relative_slash_path)
+        .collect())
+}
+
+fn grep_count_or_content(
+    request: &GrepSearchRequest,
+    matcher: &RegexMatcher,
+    overrides: &Override,
+    type_matcher: Option<&Types>,
+) -> io::Result<Vec<String>> {
+    let candidates = grep_candidates(request.root.as_path(), overrides, type_matcher)?;
+    let mut output = Vec::new();
+    let mut searcher = count_or_content_searcher(request);
+    for candidate in candidates {
+        match request.output_mode {
+            GrepOutputMode::Count => {
+                let mut sink = CountSink::default();
+                if searcher
+                    .search_path(matcher, candidate.path.as_path(), &mut sink)
+                    .is_err()
+                    || sink.count == 0
+                {
+                    continue;
+                }
+                output.push(format!("{}:{}", candidate.relative_slash_path, sink.count));
+            }
+            GrepOutputMode::Content => {
+                let mut sink =
+                    ContentSink::new(candidate.relative_slash_path.clone(), request.line_numbers);
+                if searcher
+                    .search_path(matcher, candidate.path.as_path(), &mut sink)
+                    .is_err()
+                    || sink.lines.is_empty()
+                {
+                    continue;
+                }
+                output.extend(sink.lines);
+            }
+            GrepOutputMode::FilesWithMatches => {}
+        }
+    }
+    Ok(output)
+}
+
+fn grep_candidates(
+    root: &Path,
+    overrides: &Override,
+    type_matcher: Option<&Types>,
+) -> io::Result<Vec<SearchCandidate>> {
+    let metadata = std::fs::metadata(root)?;
+    if metadata.is_file() {
+        return Ok(vec![SearchCandidate {
+            path: root.to_path_buf(),
+            relative_slash_path: String::new(),
+        }]);
+    }
+    if !metadata.is_dir() {
+        return Ok(Vec::new());
+    }
+
+    let mut candidates = Vec::new();
+    let builder = grep_walk_builder(root, overrides, type_matcher);
+    for entry in builder.build() {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(_) => continue,
+        };
+        if !entry_is_file(&entry) {
+            continue;
+        }
+        candidates.push(SearchCandidate {
+            path: entry.path().to_path_buf(),
+            relative_slash_path: relative_slash_path(entry.path(), root),
+        });
+    }
+    Ok(candidates)
+}
+
+fn files_with_matches_searcher() -> Searcher {
+    let mut builder = SearcherBuilder::new();
+    builder
+        .binary_detection(BinaryDetection::quit(0))
+        .line_number(false)
+        .max_matches(Some(1));
+    builder.build()
+}
+
+fn count_or_content_searcher(request: &GrepSearchRequest) -> Searcher {
+    let mut builder = SearcherBuilder::new();
+    builder
+        .binary_detection(BinaryDetection::quit(0))
+        .multi_line(request.multiline)
+        .line_number(request.output_mode == GrepOutputMode::Content && request.line_numbers);
+    if request.output_mode == GrepOutputMode::Content {
+        builder
+            .before_context(request.context_before)
+            .after_context(request.context_after);
+    }
+    builder.build()
+}
+
+fn path_has_match(searcher: &mut Searcher, matcher: &RegexMatcher, path: &Path) -> bool {
+    let mut sink = HasMatchSink::default();
+    searcher.search_path(matcher, path, &mut sink).is_ok() && sink.matched
+}
+
+#[derive(Default)]
+struct HasMatchSink {
+    matched: bool,
+}
+
+impl Sink for HasMatchSink {
+    type Error = io::Error;
+
+    fn matched(&mut self, _searcher: &Searcher, _mat: &SinkMatch<'_>) -> io::Result<bool> {
+        self.matched = true;
+        Ok(false)
+    }
+}
+
+#[derive(Default)]
+struct CountSink {
+    count: usize,
+}
+
+impl Sink for CountSink {
+    type Error = io::Error;
+
+    fn matched(&mut self, _searcher: &Searcher, _mat: &SinkMatch<'_>) -> io::Result<bool> {
+        self.count += 1;
+        Ok(true)
+    }
+}
+
+struct ContentSink {
+    path: String,
+    line_numbers: bool,
+    lines: Vec<String>,
+}
+
+impl ContentSink {
+    fn new(path: String, line_numbers: bool) -> Self {
+        Self {
+            path,
+            line_numbers,
+            lines: Vec::new(),
+        }
+    }
+
+    fn push_match(&mut self, mat: &SinkMatch<'_>) {
+        let mut line_number = mat.line_number();
+        for line in mat.lines() {
+            self.push_line(':', line_number, line, "matching");
+            line_number = line_number.map(|line_number| line_number + 1);
+        }
+    }
+
+    fn push_context(&mut self, context: &SinkContext<'_>) {
+        self.push_line('-', context.line_number(), context.bytes(), "context");
+    }
+
+    fn push_line(&mut self, separator: char, line_number: Option<u64>, line: &[u8], kind: &str) {
+        let line = format_line_bytes(line, kind);
+        if self.line_numbers
+            && let Some(line_number) = line_number
+        {
+            self.lines.push(format!(
+                "{}{separator}{line_number}{separator}{line}",
+                self.path
+            ));
+            return;
+        }
+        self.lines.push(format!("{}{separator}{line}", self.path));
+    }
+}
+
+impl Sink for ContentSink {
+    type Error = io::Error;
+
+    fn matched(&mut self, _searcher: &Searcher, mat: &SinkMatch<'_>) -> io::Result<bool> {
+        self.push_match(mat);
+        Ok(true)
+    }
+
+    fn context(&mut self, _searcher: &Searcher, context: &SinkContext<'_>) -> io::Result<bool> {
+        self.push_context(context);
+        Ok(true)
+    }
+
+    fn context_break(&mut self, _searcher: &Searcher) -> io::Result<bool> {
+        self.lines.push("--".to_string());
+        Ok(true)
+    }
+}
+
+fn format_line_bytes(line: &[u8], kind: &str) -> String {
+    let line = trim_line_terminator(line);
+    if line.len() > MAX_COLUMNS {
+        return format!("[Omitted long {kind} line]");
+    }
+    String::from_utf8_lossy(line).into_owned()
+}
+
+fn trim_line_terminator(mut line: &[u8]) -> &[u8] {
+    if let Some(stripped) = line.strip_suffix(b"\n") {
+        line = stripped;
+    }
+    if let Some(stripped) = line.strip_suffix(b"\r") {
+        line = stripped;
+    }
+    line
 }
 
 fn apply_head_limit(
@@ -245,76 +525,93 @@ fn grep_result_counts(output_mode: GrepOutputMode, lines: &[String]) -> (usize, 
     }
 }
 
-fn grep_candidates(request: &GrepSearchRequest) -> io::Result<Vec<GrepCandidate>> {
-    let metadata = std::fs::metadata(request.root.as_path())?;
-    if metadata.is_file() {
-        return Ok(vec![GrepCandidate {
-            path: request.root.to_path_buf(),
-            relative_slash_path: String::new(),
-            modified_at_ms: metadata.modified().ok().map_or(0, system_time_to_unix_ms),
-        }]);
-    }
-    if !metadata.is_dir() {
-        return Ok(Vec::new());
-    }
-
-    let glob = request.glob.as_deref().map(normalize_pattern);
-    let matcher = glob.as_deref().map(compile_glob_set).transpose()?;
-    let match_basename = glob.as_deref().is_some_and(|glob| !glob.contains('/'));
-    let prefix = glob
-        .as_deref()
-        .map(glob_literal_directory_prefix)
-        .unwrap_or_default();
-    let Some(start_dir) = resolve_glob_start_dir(request.root.as_path(), &prefix)? else {
-        return Ok(Vec::new());
-    };
-
-    let mut candidates = Vec::new();
-    for entry in search_walker(start_dir.as_path()) {
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(_) => continue,
-        };
-        let file_type = entry.file_type();
-        if !file_type.is_some_and(|file_type| file_type.is_file()) {
-            continue;
+fn into_inner_vec<T>(items: Arc<Mutex<Vec<T>>>, lock_name: &'static str) -> io::Result<Vec<T>> {
+    match Arc::try_unwrap(items) {
+        Ok(items) => items
+            .into_inner()
+            .map_err(|_err| io::Error::other(format!("{lock_name} poisoned"))),
+        Err(items) => {
+            let mut items = items
+                .lock()
+                .map_err(|_err| io::Error::other(format!("{lock_name} poisoned")))?;
+            Ok(std::mem::take(&mut *items))
         }
-        let relative_slash_path = relative_slash_path(entry.path(), request.root.as_path());
-        if let Some(matcher) = &matcher
-            && !glob_path_matches(matcher, match_basename, &relative_slash_path, entry.path())
-        {
-            continue;
-        }
-        candidates.push(GrepCandidate {
-            path: entry.path().to_path_buf(),
-            relative_slash_path,
-            modified_at_ms: std::fs::metadata(entry.path())
-                .ok()
-                .and_then(|metadata| metadata.modified().ok())
-                .map_or(0, system_time_to_unix_ms),
-        });
     }
-    Ok(candidates)
 }
 
-fn search_walker(root: &Path) -> ignore::Walk {
+fn glob_walk_config() -> WalkConfig {
+    WalkConfig {
+        include_hidden: env_truthy_or_default("CLAUDE_CODE_GLOB_HIDDEN", true),
+        respect_ignore_files: !env_truthy_or_default("CLAUDE_CODE_GLOB_NO_IGNORE", true),
+    }
+}
+
+fn grep_walk_config() -> WalkConfig {
+    WalkConfig {
+        include_hidden: true,
+        respect_ignore_files: true,
+    }
+}
+
+fn walk_builder(root: &Path, config: WalkConfig) -> WalkBuilder {
     let mut builder = WalkBuilder::new(root);
     builder
         .follow_links(false)
-        .hidden(false)
-        .ignore(false)
-        .git_ignore(false)
-        .git_global(false)
-        .git_exclude(false)
-        .parents(false)
-        .filter_entry(|entry| entry.depth() == 0 || !is_pruned_directory(entry.path()));
-    builder.build()
+        .hidden(!config.include_hidden)
+        .ignore(config.respect_ignore_files)
+        .git_ignore(config.respect_ignore_files)
+        .git_global(config.respect_ignore_files)
+        .git_exclude(config.respect_ignore_files)
+        .parents(config.respect_ignore_files);
+    builder
 }
 
-fn is_pruned_directory(path: &Path) -> bool {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| SEARCH_PRUNED_DIRECTORY_NAMES.contains(&name))
+fn grep_walk_builder(
+    root: &Path,
+    overrides: &Override,
+    type_matcher: Option<&Types>,
+) -> WalkBuilder {
+    let mut builder = walk_builder(root, grep_walk_config());
+    builder.overrides(overrides.clone());
+    if let Some(type_matcher) = type_matcher {
+        builder.types(type_matcher.clone());
+    }
+    builder
+}
+
+fn build_overrides(root: &Path, patterns: &[String]) -> io::Result<Override> {
+    let mut builder = OverrideBuilder::new(root);
+    for pattern in patterns {
+        builder.add(pattern).map_err(invalid_pattern_error)?;
+    }
+    builder.build().map_err(invalid_pattern_error)
+}
+
+fn path_matches_overrides(overrides: &Override, path: &Path, is_dir: bool) -> bool {
+    !overrides.matched(path, is_dir).is_ignore()
+}
+
+fn entry_is_file(entry: &DirEntry) -> bool {
+    entry
+        .file_type()
+        .is_some_and(|file_type| file_type.is_file())
+}
+
+fn split_grep_globs(glob: &str) -> Vec<String> {
+    let mut glob_patterns = Vec::new();
+    for raw_pattern in glob.split_whitespace() {
+        if raw_pattern.contains('{') && raw_pattern.contains('}') {
+            glob_patterns.push(raw_pattern.to_string());
+        } else {
+            glob_patterns.extend(
+                raw_pattern
+                    .split(',')
+                    .filter(|pattern| !pattern.is_empty())
+                    .map(str::to_string),
+            );
+        }
+    }
+    glob_patterns
 }
 
 fn glob_root_and_pattern(root: &Path, pattern: &str) -> (PathBuf, String) {
@@ -357,78 +654,6 @@ fn normalize_pattern(pattern: &str) -> String {
         .replace('\\', "/")
 }
 
-fn compile_glob_set(pattern: &str) -> io::Result<GlobSet> {
-    let mut builder = GlobSetBuilder::new();
-    for pattern in expanded_glob_patterns(pattern) {
-        let glob = GlobBuilder::new(&pattern)
-            .literal_separator(true)
-            .build()
-            .map_err(invalid_pattern_error)?;
-        builder.add(glob);
-    }
-    builder.build().map_err(invalid_pattern_error)
-}
-
-fn expanded_glob_patterns(pattern: &str) -> Vec<String> {
-    let mut patterns = vec![pattern.to_string()];
-    let mut index = 0;
-    while let Some(relative_pos) = pattern[index..].find("**/") {
-        let pos = index + relative_pos;
-        let mut alternative = String::new();
-        alternative.push_str(&pattern[..pos]);
-        alternative.push_str(&pattern[pos + 3..]);
-        patterns.push(alternative);
-        index = pos + 3;
-    }
-    patterns.sort();
-    patterns.dedup();
-    patterns
-}
-
-fn glob_literal_directory_prefix(pattern: &str) -> Vec<&str> {
-    let segments = pattern.split('/').collect::<Vec<_>>();
-    let mut prefix = Vec::new();
-    for segment in segments.iter().take(segments.len().saturating_sub(1)) {
-        if *segment == "**" || has_glob_meta(segment) {
-            break;
-        }
-        prefix.push(*segment);
-    }
-    prefix
-}
-
-fn has_glob_meta(segment: &str) -> bool {
-    segment.contains('*') || segment.contains('?') || segment.contains('[') || segment.contains('{')
-}
-
-fn resolve_glob_start_dir(root: &Path, prefix: &[&str]) -> io::Result<Option<PathBuf>> {
-    let mut dir = root.to_path_buf();
-    for segment in prefix {
-        dir.push(segment);
-    }
-    match std::fs::metadata(dir.as_path()) {
-        Ok(metadata) if metadata.is_dir() => Ok(Some(dir)),
-        Ok(_) => Ok(None),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(err) => Err(err),
-    }
-}
-
-fn glob_path_matches(
-    matcher: &GlobSet,
-    match_basename: bool,
-    relative_slash_path: &str,
-    path: &Path,
-) -> bool {
-    if !match_basename {
-        return matcher.is_match(relative_slash_path);
-    }
-
-    path.file_name()
-        .and_then(|file_name| file_name.to_str())
-        .is_some_and(|file_name| matcher.is_match(file_name))
-}
-
 fn relative_slash_path(path: &Path, root: &Path) -> String {
     let relative = path.strip_prefix(root).unwrap_or(path);
     relative
@@ -447,77 +672,18 @@ fn normal_component_text(component: Component<'_>) -> Option<String> {
     }
 }
 
-fn type_filter_matches(path: &Path, file_type: Option<&str>) -> bool {
-    let Some(file_type) = file_type else {
-        return true;
+fn env_truthy_or_default(name: &str, default: bool) -> bool {
+    let Some(value) = std::env::var_os(name) else {
+        return default;
     };
-    let extension = match file_type {
-        "rust" => "rs",
-        "python" | "py" => "py",
-        "javascript" | "js" => "js",
-        "typescript" | "ts" => "ts",
-        "tsx" => "tsx",
-        "go" => "go",
-        "java" => "java",
-        "markdown" | "md" => "md",
-        "json" => "json",
-        other => other,
-    };
-    path.extension()
-        .and_then(|value| value.to_str())
-        .is_some_and(|value| value.eq_ignore_ascii_case(extension))
-}
-
-fn split_lines_preserving_newline(text: &str) -> Vec<&str> {
-    if text.is_empty() {
-        return Vec::new();
+    let value = value.to_string_lossy();
+    if value.is_empty() {
+        return default;
     }
-    text.split_inclusive('\n').collect()
-}
-
-fn matching_line_indexes(
-    regex: &Regex,
-    lines: &[&str],
-    multiline: bool,
-    full_text: &str,
-) -> Vec<usize> {
-    if multiline && regex.is_match(full_text) && !lines.is_empty() {
-        return (0..lines.len()).collect();
-    }
-
-    lines
-        .iter()
-        .enumerate()
-        .filter_map(|(index, line)| regex.is_match(line).then_some(index))
-        .collect()
-}
-
-fn push_content_matches(
-    output: &mut Vec<String>,
-    display: &str,
-    lines: &[&str],
-    matched_lines: &[usize],
-    line_numbers: bool,
-    context_before: usize,
-    context_after: usize,
-) {
-    let mut last_pushed = None;
-    for line_index in matched_lines {
-        let start = line_index.saturating_sub(context_before);
-        let end = (line_index + context_after + 1).min(lines.len());
-        for (index, line) in lines.iter().enumerate().take(end).skip(start) {
-            if last_pushed.is_some_and(|last| index <= last) {
-                continue;
-            }
-            last_pushed = Some(index);
-            let line = line.trim_end_matches(['\r', '\n']);
-            if line_numbers {
-                output.push(format!("{display}:{}:{line}", index + 1));
-            } else {
-                output.push(format!("{display}:{line}"));
-            }
-        }
-    }
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
 }
 
 fn invalid_pattern_error(error: impl std::fmt::Display) -> io::Error {

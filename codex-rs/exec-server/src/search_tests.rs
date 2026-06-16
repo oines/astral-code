@@ -118,7 +118,7 @@ async fn glob_double_star_recurses_under_literal_prefix() -> io::Result<()> {
 }
 
 #[tokio::test]
-async fn grep_prunes_generated_and_vcs_directories() -> io::Result<()> {
+async fn grep_excludes_vcs_directories_but_not_generated_directories() -> io::Result<()> {
     let temp_dir = tempfile::TempDir::new()?;
     let root = AbsolutePathBuf::from_absolute_path(temp_dir.path())?;
     std::fs::create_dir_all(temp_dir.path().join("src"))?;
@@ -147,7 +147,10 @@ async fn grep_prunes_generated_and_vcs_directories() -> io::Result<()> {
     })
     .await?;
 
-    assert_eq!(response.lines, vec!["src/lib.rs"]);
+    assert_eq!(
+        response.lines,
+        vec!["target/debug/generated.rs", "src/lib.rs"]
+    );
     Ok(())
 }
 
@@ -200,7 +203,7 @@ async fn grep_supports_count_content_context_and_glob_filters() -> io::Result<()
     .await?;
     assert_eq!(
         content.lines,
-        vec!["root.md:1:alpha", "root.md:2:needle", "root.md:3:omega"]
+        vec!["root.md-1-alpha", "root.md:2:needle", "root.md-3-omega"]
     );
     Ok(())
 }
