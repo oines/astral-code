@@ -30,6 +30,7 @@ use tracing::trace;
 
 const REQUEST_ID_HEADER: &str = "x-request-id";
 const ANTHROPIC_REQUEST_ID_HEADER: &str = "request-id";
+const MODELS_ETAG_HEADER: &str = "x-models-etag";
 const DEFAULT_RESPONSE_ID: &str = "agent-response";
 
 #[derive(Debug, Clone, Copy)]
@@ -51,11 +52,19 @@ pub fn spawn_agent_stream(
         .or_else(|| stream_response.headers.get(ANTHROPIC_REQUEST_ID_HEADER))
         .and_then(|value| value.to_str().ok())
         .map(str::to_string);
+    let models_etag = stream_response
+        .headers
+        .get(MODELS_ETAG_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
     let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent, ApiError>>(1600);
 
     tokio::spawn(async move {
         for snapshot in rate_limit_snapshots {
             let _ = tx_event.send(Ok(ResponseEvent::RateLimits(snapshot))).await;
+        }
+        if let Some(etag) = models_etag {
+            let _ = tx_event.send(Ok(ResponseEvent::ModelsEtag(etag))).await;
         }
         process_sse(
             stream_response.bytes,
@@ -462,9 +471,16 @@ pub async fn process_sse(
             {
                 Ok(events) => events,
                 Err(error) => {
-                    let _ = tx_event
-                        .send(Err(ApiError::Stream(error.to_string())))
-                        .await;
+                    let api_error = match error {
+                        chat_completions::ChatCompletionsStreamError::ContextWindowExceeded => {
+                            ApiError::ContextWindowExceeded
+                        }
+                        chat_completions::ChatCompletionsStreamError::QuotaExceeded => {
+                            ApiError::QuotaExceeded
+                        }
+                        error => ApiError::Stream(error.to_string()),
+                    };
+                    let _ = tx_event.send(Err(api_error)).await;
                     return;
                 }
             },

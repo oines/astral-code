@@ -180,19 +180,19 @@ async fn execpolicy_blocks_shell_invocation() -> Result<()> {
     let call_id = "shell-forbidden";
     let args = json!({
         "command": "echo blocked",
-        "timeout_ms": 1_000,
+        "timeout": 1_000,
     });
 
     mount_sse_once(
         &server,
         sse(vec![
             ev_response_created("resp-1"),
-            ev_function_call(call_id, "shell_command", &serde_json::to_string(&args)?),
+            ev_function_call(call_id, "Bash", &serde_json::to_string(&args)?),
             ev_completed("resp-1"),
         ]),
     )
     .await;
-    mount_sse_once(
+    let results_mock = mount_sse_once(
         &server,
         sse(vec![
             ev_assistant_message("msg-1", "done"),
@@ -231,23 +231,18 @@ async fn execpolicy_blocks_shell_invocation() -> Result<()> {
         })
         .await?;
 
-    let EventMsg::ExecCommandEnd(end) = wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::ExecCommandEnd(_))
-    })
-    .await
-    else {
-        unreachable!()
-    };
     wait_for_event(&test.codex, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
 
+    let output_item = results_mock.single_request().function_call_output(call_id);
+    let Some(output) = output_item.get("output").and_then(Value::as_str) else {
+        panic!("function_call_output should include string output payload: {output_item:?}");
+    };
     assert!(
-        end.aggregated_output
-            .contains("policy forbids commands starting with `echo`"),
-        "unexpected output: {}",
-        end.aggregated_output
+        output.contains("policy forbids commands starting with `echo`"),
+        "unexpected output: {output}",
     );
 
     Ok(())

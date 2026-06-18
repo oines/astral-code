@@ -3,6 +3,7 @@ use codex_features::Feature;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_function_call;
 use core_test_support::responses::ev_response_created;
+use core_test_support::responses::request_input_items;
 use core_test_support::responses::sse;
 use core_test_support::responses::sse_response;
 use core_test_support::responses::start_mock_server;
@@ -167,12 +168,48 @@ fn decode_body_bytes(request: &wiremock::Request) -> Vec<u8> {
 }
 
 fn has_function_call_output(body: &Value) -> bool {
-    body.get("input")
-        .and_then(Value::as_array)
-        .is_some_and(|items| {
-            items.iter().any(|item| {
-                item.get("type").and_then(Value::as_str) == Some("function_call_output")
+    request_input_items(body).iter().any(|item| {
+        item.get("type")
+            .and_then(Value::as_str)
+            .is_some_and(|item_type| {
+                matches!(
+                    item_type,
+                    "function_call_output" | "custom_tool_call_output"
+                )
             })
+    })
+}
+
+fn message_input_texts(body: &Value) -> Vec<String> {
+    request_input_items(body)
+        .iter()
+        .filter(|item| item.get("type").and_then(Value::as_str) == Some("message"))
+        .filter_map(|item| item.get("content").and_then(Value::as_array))
+        .flatten()
+        .filter(|span| span.get("type").and_then(Value::as_str) == Some("input_text"))
+        .filter_map(|span| span.get("text").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect()
+}
+
+fn csv_records(content: &str) -> Result<(csv::StringRecord, Vec<csv::StringRecord>)> {
+    let mut reader = csv::ReaderBuilder::new()
+        .has_headers(true)
+        .from_reader(content.as_bytes());
+    let headers = reader.headers()?.clone();
+    let rows = reader.records().collect::<Result<Vec<_>, _>>()?;
+    Ok((headers, rows))
+}
+
+fn csv_column_index(headers: &csv::StringRecord, column: &str) -> usize {
+    headers
+        .iter()
+        .position(|header| header == column)
+        .unwrap_or_else(|| {
+            panic!(
+                "expected column {column} in headers: {:?}",
+                headers.iter().collect::<Vec<_>>()
+            )
         })
 }
 
@@ -197,21 +234,6 @@ fn extract_job_and_item(body: &Value) -> Option<(String, String)> {
         .and_then(|caps| caps.get(1))
         .map(|m| m.as_str().trim().to_string())?;
     Some((job_id, item_id))
-}
-
-fn message_input_texts(body: &Value) -> Vec<String> {
-    let Some(items) = body.get("input").and_then(Value::as_array) else {
-        return Vec::new();
-    };
-    items
-        .iter()
-        .filter(|item| item.get("type").and_then(Value::as_str) == Some("message"))
-        .filter_map(|item| item.get("content").and_then(Value::as_array))
-        .flatten()
-        .filter(|span| span.get("type").and_then(Value::as_str) == Some("input_text"))
-        .filter_map(|span| span.get("text").and_then(Value::as_str))
-        .map(str::to_string)
-        .collect()
 }
 
 fn parse_simple_csv_line(line: &str) -> Vec<String> {
@@ -320,9 +342,18 @@ async fn spawn_agents_on_csv_runs_and_exports() -> Result<()> {
     test.submit_turn("run batch job").await?;
 
     let output = fs::read_to_string(&output_path)?;
-    assert!(output.contains("result_json"));
-    assert!(output.contains("item_id"));
-    assert!(output.contains("\"item_id\""));
+    let (headers, records) = csv_records(output.as_str())?;
+    let item_id_index = csv_column_index(&headers, "item_id");
+    let result_json_index = csv_column_index(&headers, "result_json");
+    assert_eq!(records.len(), 2);
+    for record in records {
+        assert!(!record[item_id_index].is_empty());
+        let result: Value = serde_json::from_str(&record[result_json_index])?;
+        assert!(
+            result.get("item_id").is_some(),
+            "expected item_id in result_json: {result}"
+        );
+    }
     Ok(())
 }
 
@@ -436,13 +467,18 @@ async fn spawn_agents_on_csv_stop_halts_future_items() -> Result<()> {
         .expect("job_id from csv");
     let db = test.codex.state_db().expect("state db");
     let job = db.get_agent_job(job_id.as_str()).await?.expect("job");
-    assert_eq!(job.status, codex_state::AgentJobStatus::Cancelled);
     let progress = db.get_agent_job_progress(job_id.as_str()).await?;
+    let worker_call_count = worker_calls.load(Ordering::SeqCst);
+    assert_eq!(
+        job.status,
+        codex_state::AgentJobStatus::Cancelled,
+        "progress: {progress:?}; worker_calls: {worker_call_count}"
+    );
     assert_eq!(progress.total_items, 3);
     assert_eq!(progress.completed_items, 1);
     assert_eq!(progress.failed_items, 0);
     assert_eq!(progress.running_items, 0);
     assert_eq!(progress.pending_items, 2);
-    assert_eq!(worker_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(worker_call_count, 1);
     Ok(())
 }

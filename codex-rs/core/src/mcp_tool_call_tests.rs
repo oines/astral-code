@@ -20,6 +20,7 @@ use codex_features::Features;
 use codex_hooks::Hooks;
 use codex_hooks::HooksConfig;
 use codex_model_provider::create_model_provider;
+use codex_model_provider_info::WireApi;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
@@ -1226,13 +1227,22 @@ fn codex_apps_auth_failure_result() -> CallToolResult {
 }
 
 fn codex_apps_auth_failure_metadata() -> McpToolApprovalMetadata {
-    approval_metadata(
+    let mut metadata = approval_metadata(
         Some("connector_calendar"),
         Some("Google Calendar"),
         Some("Manage events and schedules."),
         Some("Create Event"),
         Some("Create a calendar event."),
-    )
+    );
+    metadata.codex_apps_meta = Some(
+        serde_json::json!({
+            "install_url": "https://apps.example/google-calendar/connector_calendar",
+        })
+        .as_object()
+        .cloned()
+        .expect("_codex_apps metadata should be an object"),
+    );
+    metadata
 }
 
 async fn install_host_owned_codex_apps_manager(session: &Session, turn_context: &TurnContext) {
@@ -2306,6 +2316,10 @@ async fn guardian_mode_skips_auto_when_annotations_do_not_require_approval() {
         .expect("test setup should allow updating approval policy");
     let mut config = (*turn_context.config).clone();
     config.model_provider.base_url = Some(format!("{}/v1", server.uri()));
+    config.model_provider.env_key = None;
+    config.model_provider.env_key_instructions = None;
+    config.model_provider.wire_api = WireApi::ChatCompletions;
+    config.model_provider.requires_astral_auth = false;
     config.approvals_reviewer = ApprovalsReviewer::AutoReview;
     let config = Arc::new(config);
     let models_manager = models_manager_with_provider(
@@ -2587,6 +2601,10 @@ async fn guardian_mode_mcp_denial_returns_rationale_message() {
         .expect("test setup should allow updating approval policy");
     let mut config = (*turn_context.config).clone();
     config.model_provider.base_url = Some(format!("{}/v1", server.uri()));
+    config.model_provider.env_key = None;
+    config.model_provider.env_key_instructions = None;
+    config.model_provider.wire_api = WireApi::ChatCompletions;
+    config.model_provider.requires_astral_auth = false;
     config.approvals_reviewer = ApprovalsReviewer::AutoReview;
     let config = Arc::new(config);
     let models_manager = models_manager_with_provider(
@@ -2637,8 +2655,14 @@ async fn guardian_mode_mcp_denial_returns_rationale_message() {
     else {
         panic!("guardian-denied MCP approval should carry a rejection message");
     };
-    assert!(message.contains("Reason: The tool call would expose private calendar data"));
-    assert!(message.contains("policy circumvention"));
+    assert!(
+        message.contains("The tool call would expose private calendar data"),
+        "message was: {message}"
+    );
+    assert!(
+        message.contains("policy circumvention"),
+        "message was: {message}"
+    );
     assert_eq!(
         guardian_request_log.single_request().path(),
         "/v1/chat/completions"

@@ -6,7 +6,16 @@
 use super::*;
 
 impl ChatWidget {
-    pub(super) fn on_patch_apply_begin(&mut self, changes: HashMap<PathBuf, FileChange>) {
+    pub(super) fn on_patch_apply_begin_with_id(
+        &mut self,
+        id: Option<String>,
+        changes: HashMap<PathBuf, FileChange>,
+    ) {
+        if let Some(id) = id
+            && self.pending_file_tool_call_ids.contains(&id)
+        {
+            self.file_tool_change_ids.insert(id);
+        }
         self.record_visible_turn_activity();
         self.add_to_history(history_cell::new_patch_event(changes, &self.config.cwd));
     }
@@ -263,6 +272,12 @@ impl ChatWidget {
 
     pub(crate) fn handle_core_tool_call_started_now(&mut self, item: ThreadItem) {
         self.record_visible_turn_activity();
+        if let Some(id) = file_tool_call_id(&item) {
+            self.pending_file_tool_call_ids.insert(id.to_string());
+        }
+        if should_suppress_core_tool_start(&item, &self.live_activities) {
+            return;
+        }
         let Some(cell) = history_cell::new_core_tool_call_cell(item) else {
             return;
         };
@@ -275,6 +290,14 @@ impl ChatWidget {
 
     pub(crate) fn handle_core_tool_call_completed_now(&mut self, item: ThreadItem) {
         self.flush_answer_stream_with_separator();
+        if self.should_suppress_successful_file_tool(&item) {
+            return;
+        }
+        if self.live_activities.attach_core_tool_call(&item) {
+            self.transcript.had_work_activity = true;
+            self.sync_live_activity_cell();
+            return;
+        }
         let id = item.id().to_string();
         let mut handled = false;
         if let Some(cell) = self
@@ -325,4 +348,49 @@ impl ChatWidget {
             _ => {}
         }
     }
+
+    fn should_suppress_successful_file_tool(&mut self, item: &ThreadItem) -> bool {
+        let Some(id) = file_tool_call_id(item) else {
+            return false;
+        };
+        self.pending_file_tool_call_ids.remove(id);
+        let ThreadItem::CoreToolCall { status, error, .. } = item else {
+            return false;
+        };
+        if matches!(
+            status,
+            codex_app_server_protocol::CoreToolCallStatus::Completed
+        ) && error.is_none()
+        {
+            return self.file_tool_change_ids.remove(id);
+        }
+        self.file_tool_change_ids.remove(id);
+        false
+    }
+}
+
+fn should_suppress_core_tool_start(item: &ThreadItem, live_activities: &LiveActivityStore) -> bool {
+    let ThreadItem::CoreToolCall {
+        tool, arguments, ..
+    } = item
+    else {
+        return false;
+    };
+    match tool.as_str() {
+        "Edit" | "Write" => true,
+        "ListBackgroundTasks" => live_activities.has_any_background_task(),
+        "ReadTaskOutput" | "SendTaskInput" | "StopBackgroundTask" => arguments
+            .get("task_id")
+            .or_else(|| arguments.get("taskId"))
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|task_id| live_activities.has_background_task(task_id)),
+        _ => false,
+    }
+}
+
+fn file_tool_call_id(item: &ThreadItem) -> Option<&str> {
+    let ThreadItem::CoreToolCall { id, tool, .. } = item else {
+        return None;
+    };
+    matches!(tool.as_str(), "Edit" | "Write").then_some(id.as_str())
 }

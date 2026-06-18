@@ -52,6 +52,75 @@ fn leaves_bash_native_for_astral_handler() -> anyhow::Result<()> {
 }
 
 #[test]
+fn maps_legacy_shell_tools_to_bash_handler() -> anyhow::Result<()> {
+    let (tool_name, arguments) = canonicalize_function(
+        "exec_command",
+        json!({
+            "cmd": "npm test",
+            "workdir": "/workspace/app",
+            "timeout_ms": 120000
+        }),
+    )?;
+
+    assert_eq!(tool_name, ToolName::plain(BASH_TOOL_NAME));
+    assert_eq!(
+        arguments,
+        json!({
+            "command": "npm test",
+            "cwd": "/workspace/app",
+            "timeout": 120000
+        })
+    );
+
+    let (tool_name, arguments) = canonicalize_function(
+        "shell_command",
+        json!({
+            "command": "npm test",
+            "workdir": "/workspace/app",
+            "timeout_ms": 120000
+        }),
+    )?;
+
+    assert_eq!(tool_name, ToolName::plain(BASH_TOOL_NAME));
+    assert_eq!(
+        arguments,
+        json!({
+            "command": "npm test",
+            "cwd": "/workspace/app",
+            "timeout": 120000
+        })
+    );
+    Ok(())
+}
+
+#[test]
+fn leaves_chat_completions_exec_function_payload_for_code_mode_handler() -> anyhow::Result<()> {
+    let (tool_name, payload) = canonicalize_astral_tool_call(
+        ToolName::plain(codex_code_mode::PUBLIC_TOOL_NAME),
+        ToolPayload::Function {
+            arguments: json!({ "input": "text(\"hi\")" }).to_string(),
+        },
+    );
+
+    assert_eq!(
+        tool_name,
+        ToolName::plain(codex_code_mode::PUBLIC_TOOL_NAME)
+    );
+    match payload {
+        ToolPayload::Function { arguments } => {
+            assert_eq!(
+                serde_json::from_str::<Value>(&arguments)?,
+                json!({
+                    "input": "text(\"hi\")"
+                })
+            );
+        }
+        other => panic!("expected function payload, got {other:?}"),
+    }
+    Ok(())
+}
+
+#[test]
 fn leaves_send_task_input_native_for_astral_handler() -> anyhow::Result<()> {
     let (tool_name, arguments) = canonicalize_function(
         SEND_TASK_INPUT_TOOL_NAME,

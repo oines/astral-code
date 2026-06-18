@@ -238,13 +238,19 @@ async fn thread_inject_items_adds_raw_response_items_after_a_turn() -> Result<()
 
     let requests = response_mock.requests();
     assert_eq!(requests.len(), 2);
+    let first_input = requests[0].input();
+    let second_input = requests[1].input();
     assert!(
-        !requests[0].input().contains(&injected_value),
+        response_item_text_position(&first_input, "Injected after first turn").is_none(),
         "injected item should not be sent before it is injected"
     );
+    let injected_index = response_item_text_position(&second_input, "Injected after first turn")
+        .expect("injected item should be sent after being injected into existing history");
+    let second_user_prompt_index = response_item_text_position(&second_input, "Second turn")
+        .expect("second user prompt should be sent in the follow-up request");
     assert!(
-        requests[1].input().contains(&injected_value),
-        "injected item should be sent after being injected into existing history"
+        injected_index < second_user_prompt_index,
+        "injected item should be sent before the next user prompt"
     );
 
     Ok(())

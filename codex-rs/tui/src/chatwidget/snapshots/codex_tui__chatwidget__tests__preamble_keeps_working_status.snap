@@ -1,12 +1,11 @@
 ---
 source: tui/src/chatwidget/tests/exec_flow.rs
-assertion_line: 241
 expression: normalized_backend_snapshot(terminal.backend())
 ---
 "                                                                                "
 "• Working (0s • esc to interrupt)                                               "
 "                                                                                "
 "                                                                                "
-"› Ask Astral-Code to do anything                                                      "
+"› Ask Astral-Code to do anything                                                "
 "                                                                                "
 "  deepseek-v4-pro default · /tmp/project                                        "

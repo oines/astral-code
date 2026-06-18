@@ -15,7 +15,6 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 use super::ExecContext;
-use super::PUBLIC_TOOL_NAME;
 use super::call_nested_tool;
 use crate::tools::ToolRouter;
 use crate::tools::context::SharedTurnDiffTracker;
@@ -298,9 +297,8 @@ impl CoreTurnHost {
         }
         self.exec
             .session
-            .inject_if_running(vec![ResponseItem::CustomToolCallOutput {
+            .inject_if_running(vec![ResponseItem::FunctionCallOutput {
                 call_id,
-                name: Some(PUBLIC_TOOL_NAME.to_string()),
                 output: FunctionCallOutputPayload::from_text(text),
             }])
             .await

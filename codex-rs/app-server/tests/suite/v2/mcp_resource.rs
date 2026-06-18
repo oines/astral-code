@@ -2,10 +2,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use app_test_support::ChatGptAuthFixture;
 use app_test_support::TestAppServer;
 use app_test_support::to_response;
-use app_test_support::write_chatgpt_auth;
+use app_test_support::write_mock_responses_config_toml;
 use axum::Router;
 use codex_app_server::in_process;
 use codex_app_server::in_process::InProcessStartArgs;
@@ -22,7 +21,6 @@ use codex_app_server_protocol::ThreadStartResponse;
 use codex_arg0::Arg0DispatchPaths;
 use codex_config::CloudConfigBundleLoader;
 use codex_config::LoaderOverrides;
-use codex_config::types::AuthCredentialsStoreMode;
 use codex_core::config::ConfigBuilder;
 use codex_exec_server::EnvironmentManager;
 use codex_feedback::CodexFeedback;
@@ -41,6 +39,7 @@ use rmcp::service::RoleServer;
 use rmcp::transport::StreamableHttpServerConfig;
 use rmcp::transport::StreamableHttpService;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
+use std::collections::BTreeMap;
 use tempfile::TempDir;
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
@@ -51,46 +50,24 @@ const TEST_RESOURCE_URI: &str = "test://codex/resource";
 const TEST_BLOB_RESOURCE_URI: &str = "test://codex/resource.bin";
 const TEST_RESOURCE_BLOB: &str = "YmluYXJ5LXJlc291cmNl";
 const TEST_RESOURCE_TEXT: &str = "Resource body from the MCP server.";
+const TEST_SERVER_NAME: &str = "resource_server";
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn mcp_resource_read_returns_resource_contents() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
-    let (apps_server_url, apps_server_handle) = start_resource_apps_mcp_server().await?;
+    let (mcp_server_url, mcp_server_handle) = start_resource_mcp_server().await?;
 
     let codex_home = TempDir::new()?;
-    let responses_server_uri = responses_server.uri();
-    std::fs::write(
-        codex_home.path().join("config.toml"),
-        format!(
-            r#"
-model = "mock-model"
-approval_policy = "untrusted"
-sandbox_mode = "read-only"
-
-model_provider = "mock_provider"
-hosted_base_url = "{apps_server_url}"
-mcp_oauth_credentials_store = "file"
-
-[features]
-apps = true
-
-[model_providers.mock_provider]
-name = "Mock provider for test"
-base_url = "{responses_server_uri}/v1"
-wire_api = "chat_completions"
-request_max_retries = 0
-stream_max_retries = 0
-"#
-        ),
-    )?;
-    write_chatgpt_auth(
+    write_mock_responses_config_toml(
         codex_home.path(),
-        ChatGptAuthFixture::new("chatgpt-token")
-            .account_id("account-123")
-            .chatgpt_user_id("user-123")
-            .chatgpt_account_id("account-123"),
-        AuthCredentialsStoreMode::File,
+        &responses_server.uri(),
+        &BTreeMap::new(),
+        /*auto_compact_limit*/ 1024,
+        /*requires_astral_auth*/ None,
+        "mock_provider",
+        "compact",
     )?;
+    append_mcp_server_config(codex_home.path(), &mcp_server_url)?;
 
     let mut mcp = TestAppServer::new(codex_home.path()).await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
@@ -111,7 +88,7 @@ stream_max_retries = 0
     let read_request_id = mcp
         .send_mcp_resource_read_request(McpResourceReadParams {
             thread_id: Some(thread.id),
-            server: "codex_apps".to_string(),
+            server: TEST_SERVER_NAME.to_string(),
             uri: TEST_RESOURCE_URI.to_string(),
         })
         .await?;
@@ -126,35 +103,24 @@ stream_max_retries = 0
         expected_resource_read_response()
     );
 
-    apps_server_handle.abort();
-    let _ = apps_server_handle.await;
+    mcp_server_handle.abort();
+    let _ = mcp_server_handle.await;
     Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn mcp_resource_read_returns_resource_contents_without_thread() -> Result<()> {
-    let (apps_server_url, apps_server_handle) = start_resource_apps_mcp_server().await?;
+    let (mcp_server_url, mcp_server_handle) = start_resource_mcp_server().await?;
 
     let codex_home = TempDir::new()?;
     std::fs::write(
         codex_home.path().join("config.toml"),
         format!(
             r#"
-hosted_base_url = "{apps_server_url}"
-mcp_oauth_credentials_store = "file"
-
-[features]
-apps = true
+[mcp_servers.{TEST_SERVER_NAME}]
+url = "{mcp_server_url}/mcp"
 "#
         ),
-    )?;
-    write_chatgpt_auth(
-        codex_home.path(),
-        ChatGptAuthFixture::new("chatgpt-token")
-            .account_id("account-123")
-            .chatgpt_user_id("user-123")
-            .chatgpt_account_id("account-123"),
-        AuthCredentialsStoreMode::File,
     )?;
 
     let mut mcp = TestAppServer::new(codex_home.path()).await?;
@@ -163,7 +129,7 @@ apps = true
     let read_request_id = mcp
         .send_mcp_resource_read_request(McpResourceReadParams {
             thread_id: None,
-            server: "codex_apps".to_string(),
+            server: TEST_SERVER_NAME.to_string(),
             uri: TEST_RESOURCE_URI.to_string(),
         })
         .await?;
@@ -178,8 +144,8 @@ apps = true
         expected_resource_read_response()
     );
 
-    apps_server_handle.abort();
-    let _ = apps_server_handle.await;
+    mcp_server_handle.abort();
+    let _ = mcp_server_handle.await;
     Ok(())
 }
 
@@ -227,7 +193,7 @@ async fn mcp_resource_read_returns_error_for_unknown_thread() -> Result<()> {
             request_id: RequestId::Integer(1),
             params: McpResourceReadParams {
                 thread_id: Some("00000000-0000-4000-8000-000000000000".to_string()),
-                server: "codex_apps".to_string(),
+                server: TEST_SERVER_NAME.to_string(),
                 uri: TEST_RESOURCE_URI.to_string(),
             },
         })
@@ -246,22 +212,35 @@ async fn mcp_resource_read_returns_error_for_unknown_thread() -> Result<()> {
     Ok(())
 }
 
-async fn start_resource_apps_mcp_server() -> Result<(String, JoinHandle<()>)> {
+async fn start_resource_mcp_server() -> Result<(String, JoinHandle<()>)> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let addr = listener.local_addr()?;
-    let apps_server_url = format!("http://{addr}");
+    let mcp_server_url = format!("http://{addr}");
 
     let mcp_service = StreamableHttpService::new(
         move || Ok(ResourceAppsMcpServer),
         Arc::new(LocalSessionManager::default()),
         StreamableHttpServerConfig::default(),
     );
-    let router = Router::new().nest_service("/api/codex/apps", mcp_service);
-    let apps_server_handle = tokio::spawn(async move {
+    let router = Router::new().nest_service("/mcp", mcp_service);
+    let mcp_server_handle = tokio::spawn(async move {
         let _ = axum::serve(listener, router).await;
     });
 
-    Ok((apps_server_url, apps_server_handle))
+    Ok((mcp_server_url, mcp_server_handle))
+}
+
+fn append_mcp_server_config(codex_home: &std::path::Path, mcp_server_url: &str) -> Result<()> {
+    let config_path = codex_home.join("config.toml");
+    let mut config_toml = std::fs::read_to_string(&config_path)?;
+    config_toml.push_str(&format!(
+        r#"
+[mcp_servers.{TEST_SERVER_NAME}]
+url = "{mcp_server_url}/mcp"
+"#
+    ));
+    std::fs::write(config_path, config_toml)?;
+    Ok(())
 }
 
 fn expected_resource_read_response() -> McpResourceReadResponse {

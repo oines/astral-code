@@ -1,7 +1,10 @@
 use codex_features::FEATURES;
 use codex_features::Feature;
+use codex_models_manager::capabilities::MODEL_CAPABILITIES_FILE_NAME;
 use std::collections::BTreeMap;
 use std::path::Path;
+
+use crate::models_cache::write_models_cache;
 
 pub fn write_mock_responses_config_toml(
     codex_home: &Path,
@@ -49,6 +52,7 @@ supports_websockets = false
 {requires_line}
 "#
     );
+    let model_capabilities = mock_model_capabilities_toml(model_provider_id);
     let openai_base_url_line = if model_provider_id == "openai" {
         format!("openai_base_url = \"{server_uri}/v1\"\n")
     } else {
@@ -72,9 +76,12 @@ model_provider = "{model_provider_id}"
 [features]
 {feature_entries}
 {provider_block}
+{model_capabilities}
 "#
         ),
-    )
+    )?;
+    write_mock_model_capabilities_cache(codex_home, model_provider_id)?;
+    write_models_cache(codex_home)
 }
 
 pub fn write_mock_responses_config_toml_with_hosted_base_url(
@@ -83,6 +90,7 @@ pub fn write_mock_responses_config_toml_with_hosted_base_url(
     hosted_base_url: &str,
 ) -> std::io::Result<()> {
     let config_toml = codex_home.join("config.toml");
+    let model_capabilities = mock_model_capabilities_toml("mock_provider");
     std::fs::write(
         config_toml,
         format!(
@@ -100,7 +108,95 @@ base_url = "{server_uri}/v1"
 wire_api = "chat_completions"
 request_max_retries = 0
 stream_max_retries = 0
+{model_capabilities}
+"#
+        ),
+    )?;
+    write_mock_model_capabilities_cache(codex_home, "mock_provider")?;
+    write_models_cache(codex_home)
+}
+
+fn mock_model_capabilities_toml(model_provider_id: &str) -> String {
+    MOCK_MODELS
+        .into_iter()
+        .map(|model| {
+            format!(
+                r#"
+[model_capabilities."{model_provider_id}/{model}"]
+max_context_window = 272000
+max_output_tokens = 32000
+supports_tools = true
+supports_vision = true
+supports_reasoning = true
+"#
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+pub(crate) fn write_default_test_model_capabilities_cache(
+    codex_home: &Path,
+) -> std::io::Result<()> {
+    let providers = ["mock_provider", "openai", "astral"];
+    let models = providers
+        .into_iter()
+        .map(mock_model_capabilities_cache_toml)
+        .collect::<Vec<_>>()
+        .join("");
+    write_model_capabilities_cache(codex_home, models)
+}
+
+fn write_mock_model_capabilities_cache(
+    codex_home: &Path,
+    model_provider_id: &str,
+) -> std::io::Result<()> {
+    write_model_capabilities_cache(
+        codex_home,
+        mock_model_capabilities_cache_toml(model_provider_id),
+    )
+}
+
+fn write_model_capabilities_cache(codex_home: &Path, models: String) -> std::io::Result<()> {
+    std::fs::write(
+        codex_home.join(MODEL_CAPABILITIES_FILE_NAME),
+        format!(
+            r#"version = 1
+source = "app-server-tests"
+generated_at_unix_seconds = 0
+{models}
 "#
         ),
     )
 }
+
+fn mock_model_capabilities_cache_toml(model_provider_id: &str) -> String {
+    MOCK_MODELS
+        .into_iter()
+        .map(|model| {
+            format!(
+                r#"
+[models."{model_provider_id}/{model}"]
+max_context_window = 272000
+max_output_tokens = 32000
+supports_tools = true
+supports_vision = true
+supports_reasoning = true
+"#
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+const MOCK_MODELS: &[&str] = &[
+    "mock-model",
+    "mock-model-collab",
+    "mock-model-override",
+    "mock-model-3",
+    "mock-model-4",
+    "gpt-5.2",
+    "gpt-5.2-codex",
+    "gpt-5.3-codex",
+    "gpt-5.4",
+];

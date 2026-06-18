@@ -10,6 +10,29 @@ fn all_model_presets() -> Vec<ModelPreset> {
     crate::legacy_core::test_support::all_model_presets().clone()
 }
 
+fn model_presets_with_test_upgrade() -> (Vec<ModelPreset>, ModelPreset, ModelUpgrade) {
+    let mut presets = all_model_presets();
+    let mut current = presets
+        .iter()
+        .find(|preset| preset.model == "gpt-5.4-mini")
+        .cloned()
+        .expect("base preset present");
+    let upgrade = ModelUpgrade {
+        id: "gpt-5.4".to_string(),
+        migration_config_key: HIDE_GPT5_1_MIGRATION_PROMPT_CONFIG.to_string(),
+        model_link: None,
+        upgrade_copy: None,
+        migration_markdown: None,
+    };
+    current.id = "legacy-test-model".to_string();
+    current.model = "legacy-test-model".to_string();
+    current.display_name = "Legacy Test Model".to_string();
+    current.show_in_picker = false;
+    current.upgrade = Some(upgrade.clone());
+    presets.push(current.clone());
+    (presets, current, upgrade)
+}
+
 fn model_availability_nux_config(shown_count: &[(&str, u32)]) -> ModelAvailabilityNuxConfig {
     ModelAvailabilityNuxConfig {
         shown_count: shown_count
@@ -41,23 +64,18 @@ fn model_migration_copy_to_plain_text(copy: &crate::model_migration::ModelMigrat
 #[tokio::test]
 async fn model_migration_prompt_only_shows_for_deprecated_models() {
     let seen = BTreeMap::new();
+    let (models, current, upgrade) = model_presets_with_test_upgrade();
     assert!(should_show_model_migration_prompt(
-        "gpt-5.2",
-        "gpt-5.4",
+        &current.model,
+        &upgrade.id,
         &seen,
-        &all_model_presets()
-    ));
-    assert!(should_show_model_migration_prompt(
-        "gpt-5.3-codex",
-        "gpt-5.4",
-        &seen,
-        &all_model_presets()
+        &models
     ));
     assert!(!should_show_model_migration_prompt(
-        "gpt-5.3-codex",
-        "gpt-5.3-codex",
+        &current.model,
+        &current.model,
         &seen,
-        &all_model_presets()
+        &models
     ));
 }
 
@@ -300,19 +318,20 @@ async fn accepted_model_migration_persists_target_default_reasoning_effort() {
 
 #[tokio::test]
 async fn model_migration_prompt_respects_hide_flag_and_self_target() {
+    let (models, current, upgrade) = model_presets_with_test_upgrade();
     let mut seen = BTreeMap::new();
-    seen.insert("gpt-5.2".to_string(), "gpt-5.4".to_string());
+    seen.insert(current.model.clone(), upgrade.id.clone());
     assert!(!should_show_model_migration_prompt(
-        "gpt-5.2",
-        "gpt-5.4",
+        &current.model,
+        &upgrade.id,
         &seen,
-        &all_model_presets()
+        &models
     ));
     assert!(!should_show_model_migration_prompt(
-        "gpt-5.4",
-        "gpt-5.4",
+        &upgrade.id,
+        &upgrade.id,
         &seen,
-        &all_model_presets()
+        &models
     ));
 }
 
@@ -343,20 +362,20 @@ async fn model_migration_prompt_skips_when_target_missing_or_hidden() {
 
     assert!(target_preset_for_upgrade(&available, "missing-target").is_none());
 
-    let mut with_hidden_target = all_model_presets();
+    let (mut with_hidden_target, current, upgrade) = model_presets_with_test_upgrade();
     let target = with_hidden_target
         .iter_mut()
-        .find(|preset| preset.model == "gpt-5.4")
+        .find(|preset| preset.model == upgrade.id)
         .expect("target preset present");
     target.show_in_picker = false;
 
     assert!(!should_show_model_migration_prompt(
-        "gpt-5.2",
-        "gpt-5.4",
+        &current.model,
+        &upgrade.id,
         &BTreeMap::new(),
         &with_hidden_target,
     ));
-    assert!(target_preset_for_upgrade(&with_hidden_target, "gpt-5.4").is_none());
+    assert!(target_preset_for_upgrade(&with_hidden_target, &upgrade.id).is_none());
 }
 
 #[tokio::test]
@@ -368,24 +387,12 @@ async fn model_migration_prompt_shows_for_hidden_model() {
         .await
         .expect("config");
 
-    let mut available_models = all_model_presets();
-    let current = available_models
-        .iter_mut()
-        .find(|preset| preset.model == "gpt-5.3-codex")
-        .expect("gpt-5.3-codex preset present");
-    current.show_in_picker = false;
-    let current = current.clone();
+    let (available_models, current, upgrade) = model_presets_with_test_upgrade();
     assert!(
         !current.show_in_picker,
-        "expected gpt-5.3-codex to be hidden from picker for this test"
+        "expected current model to be hidden from picker for this test"
     );
 
-    let upgrade = current.upgrade.as_ref().expect("upgrade configured");
-    available_models
-        .iter_mut()
-        .find(|preset| preset.model == upgrade.id)
-        .expect("upgrade target present")
-        .show_in_picker = true;
     assert!(
         should_show_model_migration_prompt(
             &current.model,

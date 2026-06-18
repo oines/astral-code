@@ -13,13 +13,10 @@ use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
-use codex_protocol::protocol::McpInvocation;
 use codex_protocol::protocol::Op;
 use codex_protocol::user_input::UserInput;
 use core_test_support::apps_test_server::AppsTestServer;
 use core_test_support::apps_test_server::AppsTestToolLoading;
-use core_test_support::apps_test_server::CALENDAR_CREATE_EVENT_MCP_APP_RESOURCE_URI;
-use core_test_support::apps_test_server::CALENDAR_CREATE_EVENT_RESOURCE_URI;
 use core_test_support::apps_test_server::DIRECT_CALENDAR_CREATE_EVENT_TOOL as CALENDAR_CREATE_TOOL;
 use core_test_support::apps_test_server::DIRECT_CALENDAR_LIST_EVENTS_TOOL as CALENDAR_LIST_TOOL;
 use core_test_support::apps_test_server::SEARCH_CALENDAR_APP_ONLY_TOOL;
@@ -29,7 +26,6 @@ use core_test_support::apps_test_server::SEARCH_CALENDAR_NAMESPACE;
 use core_test_support::apps_test_server::apps_enabled_builder;
 use core_test_support::apps_test_server::configure_search_capable_apps;
 use core_test_support::apps_test_server::configure_search_capable_model;
-use core_test_support::apps_test_server::recorded_apps_tool_call_by_call_id;
 use core_test_support::apps_test_server::recorded_apps_tool_calls;
 use core_test_support::apps_test_server::search_capable_apps_builder as configured_builder;
 use core_test_support::responses::ResponsesRequest;
@@ -41,6 +37,9 @@ use core_test_support::responses::ev_tool_search_call;
 use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::namespace_child_tool;
+use core_test_support::responses::request_tool_description;
+use core_test_support::responses::request_tool_name;
+use core_test_support::responses::request_tool_names;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
@@ -56,25 +55,12 @@ use std::time::Duration;
 
 const SEARCH_TOOL_DESCRIPTION_SNIPPETS: [&str; 2] = [
     "You have access to tools from the following sources",
-    "- Calendar: Plan events and manage your calendar.",
+    "- Multi-agent tools: Spawn and manage sub-agents.",
 ];
 const TOOL_SEARCH_TOOL_NAME: &str = "tool_search";
 
 fn tool_names(body: &Value) -> Vec<String> {
-    body.get("tools")
-        .and_then(Value::as_array)
-        .map(|tools| {
-            tools
-                .iter()
-                .filter_map(|tool| {
-                    tool.get("name")
-                        .or_else(|| tool.get("type"))
-                        .and_then(Value::as_str)
-                        .map(str::to_string)
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+    request_tool_names(body)
 }
 
 fn tool_search_description(body: &Value) -> Option<String> {
@@ -82,10 +68,8 @@ fn tool_search_description(body: &Value) -> Option<String> {
         .and_then(Value::as_array)
         .and_then(|tools| {
             tools.iter().find_map(|tool| {
-                if tool.get("type").and_then(Value::as_str) == Some(TOOL_SEARCH_TOOL_NAME) {
-                    tool.get("description")
-                        .and_then(Value::as_str)
-                        .map(str::to_string)
+                if request_tool_name(tool) == Some(TOOL_SEARCH_TOOL_NAME) {
+                    request_tool_description(tool).map(str::to_string)
                 } else {
                     None
                 }
@@ -150,27 +134,28 @@ async fn search_tool_enabled_by_default_adds_tool_search() -> Result<()> {
         .expect("tools array should exist");
     let tool_search = tools
         .iter()
-        .find(|tool| tool.get("type").and_then(Value::as_str) == Some(TOOL_SEARCH_TOOL_NAME))
+        .find(|tool| request_tool_name(tool) == Some(TOOL_SEARCH_TOOL_NAME))
         .cloned()
         .expect("tool_search should be present");
 
+    let description = request_tool_description(&tool_search).expect("description should exist");
+    let parameters = tool_search
+        .pointer("/function/parameters")
+        .or_else(|| tool_search.get("parameters"))
+        .expect("parameters should exist");
     assert_eq!(
-        tool_search,
-        json!({
-            "type": "tool_search",
-            "execution": "client",
-            "description": tool_search["description"].as_str().expect("description should exist"),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Search query for deferred tools."},
-                    "limit": {"type": "number", "description": "Maximum number of tools to return. Defaults to 8."},
-                },
-                "required": ["query"],
-                "additionalProperties": false,
-            }
+        parameters,
+        &json!({
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search query for deferred tools."},
+                "limit": {"type": "number", "description": "Maximum number of tools to return. Defaults to 8."},
+            },
+            "required": ["query"],
+            "additionalProperties": false,
         })
     );
+    assert!(!description.is_empty());
 
     Ok(())
 }
@@ -267,8 +252,8 @@ async fn app_only_tools_are_not_visible_or_runnable_by_direct_model_calls() -> R
             SEARCH_CALENDAR_NAMESPACE,
             SEARCH_CALENDAR_CREATE_TOOL
         )
-        .is_some(),
-        "visible tool from the app-only tool's connector should be declared"
+        .is_none(),
+        "host-owned app tools should not be declared when Codex Apps MCP is disabled"
     );
     assert!(
         namespace_child_tool(
@@ -474,7 +459,8 @@ async fn explicit_app_mentions_respect_always_defer() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn tool_search_returns_deferred_tools_without_follow_up_tool_injection() -> Result<()> {
+async fn tool_search_does_not_enable_host_owned_app_follow_up_calls_when_apps_mcp_disabled()
+-> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
@@ -535,57 +521,6 @@ async fn tool_search_returns_deferred_tools_without_follow_up_tool_injection() -
         })
         .await?;
 
-    let EventMsg::McpToolCallBegin(begin) = wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::McpToolCallBegin(_))
-    })
-    .await
-    else {
-        unreachable!("event guard guarantees McpToolCallBegin");
-    };
-    assert_eq!(begin.call_id, "calendar-call-1");
-    assert_eq!(
-        begin.mcp_app_resource_uri.as_deref(),
-        Some(CALENDAR_CREATE_EVENT_MCP_APP_RESOURCE_URI)
-    );
-
-    let EventMsg::McpToolCallEnd(end) = wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::McpToolCallEnd(_))
-    })
-    .await
-    else {
-        unreachable!("event guard guarantees McpToolCallEnd");
-    };
-    assert_eq!(end.call_id, "calendar-call-1");
-    assert_eq!(
-        end.mcp_app_resource_uri.as_deref(),
-        Some(CALENDAR_CREATE_EVENT_MCP_APP_RESOURCE_URI)
-    );
-    assert_eq!(
-        end.invocation,
-        McpInvocation {
-            server: "codex_apps".to_string(),
-            tool: "calendar_create_event".to_string(),
-            arguments: Some(json!({
-                "title": "Lunch",
-                "starts_at": "2026-03-10T12:00:00Z"
-            })),
-        }
-    );
-    assert_eq!(
-        end.result
-            .as_ref()
-            .expect("tool call should succeed")
-            .structured_content,
-        Some(json!({
-            "_codex_apps": {
-                "call_id": "calendar-call-1",
-                "resource_uri": CALENDAR_CREATE_EVENT_RESOURCE_URI,
-                "contains_mcp_source": true,
-                "connector_id": "calendar",
-            },
-        }))
-    );
-
     wait_for_event(&test.codex, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
@@ -594,70 +529,6 @@ async fn tool_search_returns_deferred_tools_without_follow_up_tool_injection() -
     let requests = mock.requests();
     assert_eq!(requests.len(), 3);
     let first_request_body = requests[0].body_json();
-
-    let apps_tool_call = recorded_apps_tool_call_by_call_id(&server, "calendar-call-1").await;
-
-    assert_eq!(
-        apps_tool_call.pointer("/params/_meta/_codex_apps"),
-        Some(&json!({
-            "call_id": "calendar-call-1",
-            "resource_uri": CALENDAR_CREATE_EVENT_RESOURCE_URI,
-            "contains_mcp_source": true,
-            "connector_id": "calendar",
-        }))
-    );
-    assert_eq!(
-        apps_tool_call.pointer("/params/_meta/x-astral-turn-metadata/session_id"),
-        Some(&json!(test.session_configured.session_id.to_string()))
-    );
-    assert_eq!(
-        apps_tool_call.pointer("/params/_meta/x-astral-turn-metadata/thread_id"),
-        Some(&json!(test.session_configured.thread_id.to_string()))
-    );
-    assert!(
-        apps_tool_call
-            .pointer("/params/_meta/x-astral-turn-metadata/turn_id")
-            .and_then(Value::as_str)
-            .is_some_and(|turn_id| !turn_id.is_empty()),
-        "apps tools/call should include turn metadata turn_id: {apps_tool_call:?}"
-    );
-    assert_eq!(
-        apps_tool_call
-            .pointer("/params/_meta/x-astral-turn-metadata/model")
-            .and_then(Value::as_str),
-        Some("gpt-5.4")
-    );
-    let first_request_reasoning_effort = first_request_body
-        .pointer("/reasoning/effort")
-        .and_then(Value::as_str)
-        .expect("first response request should include reasoning effort");
-    assert_eq!(
-        apps_tool_call
-            .pointer("/params/_meta/x-astral-turn-metadata/reasoning_effort")
-            .and_then(Value::as_str),
-        Some(first_request_reasoning_effort)
-    );
-    let mcp_turn_started_at_unix_ms = apps_tool_call
-        .pointer("/params/_meta/x-astral-turn-metadata/turn_started_at_unix_ms")
-        .and_then(Value::as_i64)
-        .expect("apps tools/call should include turn_started_at_unix_ms");
-    assert!(
-        mcp_turn_started_at_unix_ms > 0,
-        "apps tools/call should include a positive turn_started_at_unix_ms: {apps_tool_call:?}"
-    );
-
-    let first_request_turn_metadata: Value = serde_json::from_str(
-        &requests[0]
-            .header("x-astral-turn-metadata")
-            .expect("first response request should include turn metadata"),
-    )
-    .expect("first response request turn metadata should be valid JSON");
-    assert_eq!(
-        first_request_turn_metadata
-            .get("turn_started_at_unix_ms")
-            .and_then(Value::as_i64),
-        Some(mcp_turn_started_at_unix_ms)
-    );
 
     let first_request_tools = tool_names(&first_request_body);
     assert!(
@@ -690,32 +561,9 @@ async fn tool_search_returns_deferred_tools_without_follow_up_tool_injection() -
     );
 
     let tools = tool_search_output_tools(&requests[1], call_id);
-    assert_eq!(
-        tools,
-        vec![json!({
-            "type": "namespace",
-            "name": SEARCH_CALENDAR_NAMESPACE,
-            "description": "Plan events and manage your calendar.",
-            "tools": [
-                {
-                    "type": "function",
-                    "name": SEARCH_CALENDAR_CREATE_TOOL,
-                    "description": "Create a calendar event.",
-                    "strict": false,
-                    "defer_loading": true,
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "starts_at": {"type": "string"},
-                            "timezone": {"type": "string"},
-                            "title": {"type": "string"},
-                        },
-                        "required": ["title", "starts_at"],
-                        "additionalProperties": false,
-                    }
-                }
-            ]
-        })]
+    assert!(
+        tools.is_empty(),
+        "host-owned app MCP is disabled, so app tools should not be searchable: {tools:?}"
     );
 
     let second_request_tools = tool_names(&requests[1].body_json());
@@ -737,6 +585,13 @@ async fn tool_search_returns_deferred_tools_without_follow_up_tool_injection() -
         output_item.get("call_id").and_then(Value::as_str),
         Some("calendar-call-1")
     );
+    assert!(
+        output_item
+            .get("output")
+            .and_then(Value::as_str)
+            .is_some_and(|output| output.contains("unsupported call")),
+        "forced app follow-up call should not dispatch: {output_item:?}"
+    );
 
     let third_request_tools = tool_names(&requests[2].body_json());
     assert!(
@@ -750,6 +605,10 @@ async fn tool_search_returns_deferred_tools_without_follow_up_tool_injection() -
             .iter()
             .any(|name| name == SEARCH_CALENDAR_NAMESPACE),
         "post-tool follow-up should still rely on tool_search_output history, not namespace injection: {third_request_tools:?}"
+    );
+    assert!(
+        recorded_apps_tool_calls(&server).await.is_empty(),
+        "forced app follow-up call should not reach the MCP server"
     );
 
     Ok(())
@@ -1413,7 +1272,7 @@ async fn tool_search_uses_non_app_mcp_server_instructions_as_namespace_descripti
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn tool_search_matches_mcp_tools_by_distinct_name_description_and_schema_terms() -> Result<()>
+async fn tool_search_does_not_index_host_owned_app_mcp_tools_when_apps_mcp_disabled() -> Result<()>
 {
     skip_if_no_network!(Ok(()));
 
@@ -1428,7 +1287,7 @@ async fn tool_search_matches_mcp_tools_by_distinct_name_description_and_schema_t
         &server,
         vec![
             sse(std::iter::once(ev_response_created("resp-1"))
-                .chain(query_cases.into_iter().map(|(call_id, query)| {
+                .chain(query_cases.iter().copied().map(|(call_id, query)| {
                     ev_tool_search_call(
                         call_id,
                         &json!({
@@ -1461,36 +1320,13 @@ async fn tool_search_matches_mcp_tools_by_distinct_name_description_and_schema_t
     let requests = mock.requests();
     assert_eq!(requests.len(), 2);
 
-    assert!(
-        tool_search_output_has_namespace_child(
-            &requests[1],
-            "tool-search-mcp-raw-name",
-            SEARCH_CALENDAR_NAMESPACE,
-            "_timezone_option_99"
-        ),
-        "expected raw MCP tool-name query to surface _timezone_option_99: {:?}",
-        tool_search_output_tools(&requests[1], "tool-search-mcp-raw-name")
-    );
-    assert!(
-        tool_search_output_has_namespace_child(
-            &requests[1],
-            "tool-search-mcp-description",
-            SEARCH_CALENDAR_NAMESPACE,
-            "_extract_text"
-        ),
-        "expected MCP description query to surface _extract_text: {:?}",
-        tool_search_output_tools(&requests[1], "tool-search-mcp-description")
-    );
-    assert!(
-        tool_search_output_has_namespace_child(
-            &requests[1],
-            "tool-search-mcp-schema",
-            SEARCH_CALENDAR_NAMESPACE,
-            SEARCH_CALENDAR_CREATE_TOOL
-        ),
-        "expected MCP schema query to surface {SEARCH_CALENDAR_CREATE_TOOL}: {:?}",
-        tool_search_output_tools(&requests[1], "tool-search-mcp-schema")
-    );
+    for (call_id, _) in query_cases {
+        let tools = tool_search_output_tools(&requests[1], call_id);
+        assert!(
+            tools.is_empty(),
+            "host-owned app MCP is disabled, so app query {call_id} should not surface tools: {tools:?}"
+        );
+    }
 
     Ok(())
 }

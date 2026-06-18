@@ -1,8 +1,14 @@
 ---
-source: tui/src/chatwidget/tests.rs
-expression: combined
+source: tui/src/chatwidget/tests/exec_flow.rs
+expression: normalize_snapshot_paths(rendered)
 ---
-• Waited for background terminal · just fix
+• Bash task proc-2 running · 0s
+  └ just fix
+    ls
 
-↳ Interacted with background terminal · just fix
-  └ ls
+• Working (0s • esc to interrupt) · 1 backgroun…
+
+
+› Ask Astral-Code to do anything
+
+  deepseek-v4-pro default · /tmp/project

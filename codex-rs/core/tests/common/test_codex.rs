@@ -55,6 +55,7 @@ use crate::load_default_config_for_test;
 use crate::load_default_config_for_test_with_cloud_config_bundle;
 use crate::responses::WebSocketTestServer;
 use crate::responses::output_value_to_text;
+use crate::responses::request_input_items;
 use crate::responses::start_mock_server;
 use crate::streaming_sse::StreamingSseServer;
 use crate::wait_for_event_match;
@@ -84,8 +85,15 @@ pub fn responses_mock_model_provider(base_url: impl Into<String>) -> ModelProvid
         base_url: Some(base_url.into()),
         wire_api: WireApi::ChatCompletions,
         supports_websockets: false,
+        requires_astral_auth: true,
         ..ModelProviderInfo::default()
     }
+}
+
+pub fn responses_api_model_provider(base_url: impl Into<String>) -> ModelProviderInfo {
+    let mut provider = responses_mock_model_provider(base_url);
+    provider.wire_api = WireApi::Responses;
+    provider
 }
 
 pub fn local_selections(cwd: AbsolutePathBuf) -> TurnEnvironmentSelections {
@@ -418,15 +426,18 @@ impl TestCodexBuilder {
         let base_url_clone = base_url.clone();
         self.config_mutators.push(Box::new(move |config| {
             config.model_provider.base_url = Some(base_url_clone);
+            config.model_provider.supports_websockets = true;
             config.experimental_realtime_ws_model = Some("realtime-test-model".to_string());
             config.realtime.version = RealtimeWsVersion::V1;
         }));
         let test_env = TestEnv::local().await?;
-        Box::pin(self.build_with_home_and_base_url(
+        let test = Box::pin(self.build_with_home_and_base_url(
             base_url, home, /*resume_from*/ None, test_env,
             /*include_local_environment*/ false,
         ))
-        .await
+        .await?;
+        server.connect_preflight_if_first_connection_empty().await;
+        Ok(test)
     }
 
     pub async fn resume(
@@ -628,9 +639,34 @@ impl TestCodexBuilder {
 }
 
 fn ensure_test_model_catalog(config: &mut Config) -> Result<()> {
-    if config.model.as_deref() != Some(TEST_MODEL_WITH_EXPERIMENTAL_TOOLS)
-        || config.model_catalog.is_some()
-    {
+    if config.model.as_deref() == Some(crate::test_codex_exec::TEST_MODEL) {
+        if config.model_catalog.as_ref().is_some_and(|catalog| {
+            catalog
+                .models
+                .iter()
+                .any(|model| model.slug == crate::test_codex_exec::TEST_MODEL)
+        }) {
+            return Ok(());
+        }
+
+        config
+            .model_catalog
+            .get_or_insert_with(|| ModelsResponse { models: Vec::new() })
+            .models
+            .extend(crate::test_codex_exec::exec_test_model_catalog().models);
+        return Ok(());
+    }
+
+    if config.model.as_deref() != Some(TEST_MODEL_WITH_EXPERIMENTAL_TOOLS) {
+        return Ok(());
+    }
+
+    if config.model_catalog.as_ref().is_some_and(|catalog| {
+        catalog
+            .models
+            .iter()
+            .any(|model| model.slug == TEST_MODEL_WITH_EXPERIMENTAL_TOOLS)
+    }) {
         return Ok(());
     }
 
@@ -645,9 +681,11 @@ fn ensure_test_model_catalog(config: &mut Config) -> Result<()> {
     model.slug = TEST_MODEL_WITH_EXPERIMENTAL_TOOLS.to_string();
     model.display_name = TEST_MODEL_WITH_EXPERIMENTAL_TOOLS.to_string();
     model.experimental_supported_tools = vec!["test_sync_tool".to_string()];
-    config.model_catalog = Some(ModelsResponse {
-        models: vec![model],
-    });
+    config
+        .model_catalog
+        .get_or_insert_with(|| ModelsResponse { models: Vec::new() })
+        .models
+        .push(model);
     Ok(())
 }
 
@@ -1016,7 +1054,7 @@ impl TestCodexHarness {
 
     pub async fn function_call_output_value(&self, call_id: &str) -> Value {
         let bodies = self.request_bodies().await;
-        function_call_output(&bodies, call_id).clone()
+        function_call_output(&bodies, call_id)
     }
 
     pub async fn function_call_stdout(&self, call_id: &str) -> String {
@@ -1038,15 +1076,13 @@ impl TestCodexHarness {
     }
 }
 
-fn custom_tool_call_output<'a>(bodies: &'a [Value], call_id: &str) -> &'a Value {
+fn custom_tool_call_output(bodies: &[Value], call_id: &str) -> Value {
     for body in bodies {
-        if let Some(items) = body.get("input").and_then(Value::as_array) {
-            for item in items {
-                if item.get("type").and_then(Value::as_str) == Some("custom_tool_call_output")
-                    && item.get("call_id").and_then(Value::as_str) == Some(call_id)
-                {
-                    return item;
-                }
+        for item in request_input_items(body) {
+            if item.get("type").and_then(Value::as_str) == Some("custom_tool_call_output")
+                && item.get("call_id").and_then(Value::as_str) == Some(call_id)
+            {
+                return item;
             }
         }
     }
@@ -1054,22 +1090,21 @@ fn custom_tool_call_output<'a>(bodies: &'a [Value], call_id: &str) -> &'a Value 
 }
 
 fn custom_tool_call_output_text(bodies: &[Value], call_id: &str) -> String {
-    let output = custom_tool_call_output(bodies, call_id)
+    let output_item = custom_tool_call_output(bodies, call_id);
+    let output = output_item
         .get("output")
         .unwrap_or_else(|| panic!("custom_tool_call_output {call_id} missing output"));
     output_value_to_text(output)
         .unwrap_or_else(|| panic!("custom_tool_call_output {call_id} missing text output"))
 }
 
-fn function_call_output<'a>(bodies: &'a [Value], call_id: &str) -> &'a Value {
+fn function_call_output(bodies: &[Value], call_id: &str) -> Value {
     for body in bodies {
-        if let Some(items) = body.get("input").and_then(Value::as_array) {
-            for item in items {
-                if item.get("type").and_then(Value::as_str) == Some("function_call_output")
-                    && item.get("call_id").and_then(Value::as_str) == Some(call_id)
-                {
-                    return item;
-                }
+        for item in request_input_items(body) {
+            if item.get("type").and_then(Value::as_str) == Some("function_call_output")
+                && item.get("call_id").and_then(Value::as_str) == Some(call_id)
+            {
+                return item;
             }
         }
     }

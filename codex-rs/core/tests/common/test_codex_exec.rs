@@ -2,6 +2,7 @@
 use codex_login::ASTRAL_API_KEY_ENV_VAR;
 use codex_model_provider_info::ASTRAL_BASE_URL_ENV_VAR;
 use codex_protocol::openai_models::ApplyPatchToolType;
+use codex_protocol::openai_models::InputModality;
 use codex_protocol::openai_models::ModelsResponse;
 use std::fs;
 use std::path::Path;
@@ -61,16 +62,32 @@ impl TestCodexExecBuilder {
 pub fn exec_test_model_catalog() -> ModelsResponse {
     let mut response =
         codex_models_manager::bundled_models_response().expect("bundled models.json should parse");
-    let mut model = response
+    let base_model = response
         .models
         .iter()
         .find(|model| model.slug == "gpt-5.2")
         .cloned()
         .expect("bundled models.json should contain gpt-5.2");
-    model.slug = TEST_MODEL.to_string();
-    model.display_name = TEST_MODEL.to_string();
-    model.apply_patch_tool_type = Some(ApplyPatchToolType::Freeform);
-    response.models = vec![model];
+    response.models = [
+        TEST_MODEL,
+        "mock-model",
+        "mock-model-collab",
+        "mock-model-override",
+        "mock-model-3",
+        "mock-model-4",
+        "gpt-5.2",
+        "gpt-5.3-codex",
+    ]
+    .into_iter()
+    .map(|slug| {
+        let mut model = base_model.clone();
+        model.slug = slug.to_string();
+        model.display_name = slug.to_string();
+        model.apply_patch_tool_type = Some(ApplyPatchToolType::Freeform);
+        model.input_modalities = vec![InputModality::Text, InputModality::Image];
+        model
+    })
+    .collect();
     response
 }
 

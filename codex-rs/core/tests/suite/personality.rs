@@ -41,6 +41,8 @@ use wiremock::MockServer;
 const LOCAL_FRIENDLY_TEMPLATE: &str =
     "You optimize for team morale and being a supportive teammate as much as code quality.";
 const LOCAL_PRAGMATIC_TEMPLATE: &str = "You are a deeply pragmatic, effective software engineer.";
+const BUNDLED_FRIENDLY_TEMPLATE_SNIPPET: &str =
+    "You have a vivid inner life as Astral: intelligent, playful, curious, and deeply present.";
 
 fn read_only_text_turn(
     test: &TestCodex,
@@ -98,7 +100,8 @@ async fn personality_does_not_mutate_base_instructions_without_template() {
         .expect("test config should allow feature update");
     config.personality = Some(Personality::Friendly);
 
-    let model_info = codex_core::test_support::construct_model_info_offline("gpt-5.4", &config);
+    let model_info =
+        codex_core::test_support::construct_model_info_offline("unlisted-model", &config);
     assert_eq!(
         model_info.get_model_instructions(config.personality),
         model_info.base_instructions
@@ -197,8 +200,8 @@ async fn config_personality_some_sets_instructions_template() -> anyhow::Result<
     let instructions_text = request.instructions_text();
 
     assert!(
-        instructions_text.contains(LOCAL_FRIENDLY_TEMPLATE),
-        "expected personality update to include the local friendly template, got: {instructions_text:?}"
+        instructions_text.contains(BUNDLED_FRIENDLY_TEMPLATE_SNIPPET),
+        "expected personality update to include the bundled friendly template, got: {instructions_text:?}"
     );
 
     let developer_texts = request.message_input_texts("developer");

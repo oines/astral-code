@@ -261,10 +261,8 @@ async fn review_start_sends_parent_lineage_in_turn_metadata_for_thread_fork_v2()
         .as_deref()
         .map(parse_json_header)
         .unwrap_or_else(|| panic!("missing x-astral-turn-metadata header"));
-    assert_eq!(
-        request.header("x-astral-subagent").as_deref(),
-        Some("review")
-    );
+    assert_eq!(request.header("x-astral-subagent"), None);
+    assert_eq!(metadata["subagent_kind"].as_str(), Some("review"));
     assert!(metadata.get("forked_from_thread_id").is_none());
     assert_eq!(
         metadata["parent_thread_id"].as_str(),

@@ -12,15 +12,15 @@ Scenario: rollback past compaction replay after rollback
 04:message/user:<SUMMARIZATION_PROMPT>
 
 ## before rollback
-00:message/user:hello world
-01:message/user:<COMPACTION_SUMMARY>\nSUMMARY_ONLY_CONTEXT
-02:message/developer:<PERMISSIONS_INSTRUCTIONS>
+00:message/developer:<PERMISSIONS_INSTRUCTIONS>
+01:message/user:hello world
+02:message/user:<COMPACTION_SUMMARY>\nSUMMARY_ONLY_CONTEXT
 03:message/user:<ENVIRONMENT_CONTEXT:cwd=<CWD>>
 04:message/user:EDITED_AFTER_COMPACT
 
 ## after rollback
-00:message/user:hello world
-01:message/user:<COMPACTION_SUMMARY>\nSUMMARY_ONLY_CONTEXT
-02:message/developer:<PERMISSIONS_INSTRUCTIONS>
+00:message/developer:<PERMISSIONS_INSTRUCTIONS>
+01:message/user:hello world
+02:message/user:<COMPACTION_SUMMARY>\nSUMMARY_ONLY_CONTEXT
 03:message/user:<ENVIRONMENT_CONTEXT:cwd=<CWD>>
 04:message/user:AFTER_ROLLBACK

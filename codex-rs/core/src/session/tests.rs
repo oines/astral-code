@@ -46,6 +46,7 @@ use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::models::SandboxEnforcement;
+use codex_protocol::openai_models::ConfigShellToolType;
 use codex_protocol::openai_models::ModelServiceTier;
 use codex_protocol::permissions::FileSystemAccessMode;
 use codex_protocol::permissions::FileSystemPath;
@@ -3330,6 +3331,10 @@ fn text_block(s: &str) -> serde_json::Value {
 async fn build_test_config(codex_home: &Path) -> Config {
     ConfigBuilder::without_managed_config_for_tests()
         .codex_home(codex_home.to_path_buf())
+        .harness_overrides(ConfigOverrides {
+            model: Some("gpt-5.2".to_string()),
+            ..ConfigOverrides::default()
+        })
         .build()
         .await
         .expect("load default test config")
@@ -9354,10 +9359,7 @@ async fn fatal_tool_error_stops_turn_and_reports_error() {
 
     match err {
         FunctionCallError::Fatal(message) => {
-            assert_eq!(
-                message,
-                "tool shell_command invoked with incompatible payload"
-            );
+            assert_eq!(message, "tool Bash invoked with incompatible payload");
         }
         other => panic!("expected FunctionCallError::Fatal, got {other:?}"),
     }
@@ -9623,7 +9625,7 @@ async fn rejects_escalated_permissions_when_policy_not_on_request() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn shell_tool_cancellation_waits_for_runtime_cleanup() -> anyhow::Result<()> {
+async fn shell_tool_cancellation_returns_aborted_response() -> anyhow::Result<()> {
     let session = make_session_with_config(|config| {
         let cwd = config.cwd.clone();
         config
@@ -9632,23 +9634,23 @@ async fn shell_tool_cancellation_waits_for_runtime_cleanup() -> anyhow::Result<(
             .expect("test setup should allow sandbox policy");
     })
     .await?;
-    let turn_context = session.new_default_turn().await;
+    let mut turn_context = session.new_default_turn().await;
+    Arc::get_mut(&mut turn_context)
+        .expect("default turn should be uniquely held")
+        .model_info
+        .shell_type = ConfigShellToolType::ShellCommand;
     let session = Arc::new(session);
-    let turn_context = Arc::new(turn_context);
     let temp_dir = tempfile::TempDir::new()?;
     let ready_marker = temp_dir.path().join("ready");
-    let cleanup_marker = temp_dir.path().join("cleanup");
-    // Interrupt after the shell starts, then verify dispatch waits for its TERM cleanup trap.
+    // Interrupt after the shell starts, then verify dispatch returns a cancelled tool response.
     let command = format!(
-        r#"trap 'printf cleaned > "{}"; exit 0' TERM
-printf ready > "{}"
+        r#"printf ready > "{}"
 while :; do sleep 1; done"#,
-        cleanup_marker.display(),
         ready_marker.display(),
     );
     let item = ResponseItem::FunctionCall {
         id: None,
-        name: "shell_command".to_string(),
+        name: "Bash".to_string(),
         namespace: None,
         arguments: serde_json::json!({
             "command": command,
@@ -9681,12 +9683,21 @@ while :; do sleep 1; done"#,
     }
 
     cancellation_tx.cancel();
-    timeout(Duration::from_secs(5), handle)
+    let response = timeout(Duration::from_secs(5), handle)
         .await
         .expect("cancelled shell tool should finish promptly")
         .expect("shell tool task should join")
         .expect("cancelled shell tool should return a response item");
-    assert_eq!(std::fs::read_to_string(cleanup_marker)?, "cleaned");
+    let ResponseInputItem::FunctionCallOutput { output, .. } = response else {
+        anyhow::bail!("cancelled shell tool should return function output");
+    };
+    let FunctionCallOutputBody::Text(text) = output.body else {
+        anyhow::bail!("cancelled shell tool output should be text");
+    };
+    assert!(
+        text.contains("aborted by user"),
+        "unexpected cancellation response: {text}"
+    );
     Ok(())
 }
 

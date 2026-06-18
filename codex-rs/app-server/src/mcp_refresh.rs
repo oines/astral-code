@@ -154,6 +154,7 @@ mod tests {
         Arc<CountingThreadConfigLoader>,
     )> {
         let temp_dir = TempDir::new()?;
+        write_mock_config(temp_dir.path())?;
         let good_cwd = temp_dir.path().join("good");
         let bad_cwd = temp_dir.path().join("bad");
         std::fs::create_dir_all(&good_cwd)?;
@@ -222,6 +223,27 @@ mod tests {
         );
 
         Ok((temp_dir, thread_manager, config_manager, loader))
+    }
+
+    fn write_mock_config(codex_home: &std::path::Path) -> std::io::Result<()> {
+        std::fs::write(
+            codex_home.join("config.toml"),
+            r#"
+model = "mock-model"
+model_provider = "mock_provider"
+
+[model_providers.mock_provider]
+name = "Mock provider for test"
+base_url = "http://127.0.0.1:9/v1"
+wire_api = "chat_completions"
+
+[model_capabilities."mock_provider/mock-model"]
+max_context_window = 272000
+max_output_tokens = 32000
+supports_tools = true
+supports_vision = true
+"#,
+        )
     }
 
     struct CountingThreadConfigLoader {

@@ -6,6 +6,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
+mod argument_delta;
+
 use crate::apply_patch;
 use crate::apply_patch::InternalApplyPatchInvocation;
 use crate::apply_patch::convert_apply_patch_to_protocol;
@@ -53,6 +55,8 @@ use codex_tools::ToolName;
 use codex_tools::ToolSpec;
 use codex_utils_absolute_path::AbsolutePathBuf;
 
+use argument_delta::ApplyPatchArgumentDeltaNormalizer;
+
 const APPLY_PATCH_ARGUMENT_DIFF_BUFFER_INTERVAL: Duration = Duration::from_millis(500);
 /// Handles freeform `apply_patch` requests and routes verified patches to the
 /// selected environment filesystem.
@@ -70,6 +74,7 @@ impl ApplyPatchHandler {
 #[derive(Default)]
 struct ApplyPatchArgumentDiffConsumer {
     parser: StreamingPatchParser,
+    argument_delta: ApplyPatchArgumentDeltaNormalizer,
     last_sent_at: Option<Instant>,
     pending: Option<PatchApplyUpdatedEvent>,
 }
@@ -97,10 +102,21 @@ impl ToolArgumentDiffConsumer for ApplyPatchArgumentDiffConsumer {
 
 impl ApplyPatchArgumentDiffConsumer {
     fn push_delta(&mut self, call_id: String, delta: &str) -> Option<PatchApplyUpdatedEvent> {
+        let mut event = None;
+        for delta in self.argument_delta.push_delta(delta) {
+            if let Some(update) = self.push_patch_delta(call_id.clone(), &delta) {
+                event = Some(update);
+            }
+        }
+        event
+    }
+
+    fn push_patch_delta(&mut self, call_id: String, delta: &str) -> Option<PatchApplyUpdatedEvent> {
         let hunks = self.parser.push_delta(delta).ok()?;
         if hunks.is_empty() {
             return None;
         }
+
         let changes = convert_apply_patch_hunks_to_protocol(&hunks);
         let event = PatchApplyUpdatedEvent { call_id, changes };
         let now = Instant::now();

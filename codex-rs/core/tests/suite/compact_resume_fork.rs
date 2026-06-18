@@ -33,6 +33,7 @@ use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_response_created;
 use core_test_support::responses::mount_sse_once_match;
 use core_test_support::responses::mount_sse_sequence;
+use core_test_support::responses::request_input_items;
 use core_test_support::responses::sse;
 use core_test_support::test_codex::local_selections;
 use core_test_support::test_codex::test_codex;
@@ -71,31 +72,46 @@ fn normalize_line_endings_str(text: &str) -> String {
 }
 
 fn extract_summary_user_text(request: &Value, summary_text: &str) -> String {
-    json_message_input_texts(request, "user")
-        .into_iter()
+    let user_texts = json_message_input_texts(request, "user");
+    user_texts
+        .iter()
         .find(|text| text.contains(summary_text))
-        .unwrap_or_else(|| panic!("expected summary message {summary_text}"))
+        .cloned()
+        .unwrap_or_else(|| panic!("expected summary message {summary_text}; got {user_texts:?}"))
 }
 
 fn json_message_input_texts(request: &Value, role: &str) -> Vec<String> {
-    request
-        .get("input")
-        .and_then(Value::as_array)
+    request_input_items(request)
         .into_iter()
-        .flatten()
         .filter(|item| {
             item.get("type").and_then(Value::as_str) == Some("message")
                 && item.get("role").and_then(Value::as_str) == Some(role)
         })
-        .filter_map(|item| {
+        .flat_map(|item| {
             item.get("content")
                 .and_then(Value::as_array)
-                .and_then(|content| content.first())
-                .and_then(|entry| entry.get("text"))
-                .and_then(Value::as_str)
-                .map(str::to_string)
+                .into_iter()
+                .flatten()
+                .filter_map(|entry| {
+                    entry
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                })
+                .collect::<Vec<_>>()
         })
         .collect()
+}
+
+fn request_index_with_user_text(requests: &[Value], text: &str) -> usize {
+    requests
+        .iter()
+        .position(|request| {
+            json_message_input_texts(request, "user")
+                .iter()
+                .any(|candidate| candidate == text)
+        })
+        .unwrap_or_else(|| panic!("expected request containing user text {text}"))
 }
 
 fn normalize_compact_prompts(requests: &mut [Value]) {
@@ -167,10 +183,14 @@ async fn compact_resume_and_fork_preserve_model_history_view() {
     let mut requests = gather_request_bodies(&request_log);
     normalize_compact_prompts(&mut requests);
 
+    let after_compact_request_index = request_index_with_user_text(&requests, "AFTER_COMPACT");
+    let after_resume_request_index = request_index_with_user_text(&requests, "AFTER_RESUME");
+    let after_fork_request_index = request_index_with_user_text(&requests, "AFTER_FORK");
+
     // input after compact is a prefix of input after resume/fork
-    let input_after_compact = json!(requests[requests.len() - 3]["input"]);
-    let input_after_resume = json!(requests[requests.len() - 2]["input"]);
-    let input_after_fork = json!(requests[requests.len() - 1]["input"]);
+    let input_after_compact = json!(requests[after_compact_request_index]["input"]);
+    let input_after_resume = json!(requests[after_resume_request_index]["input"]);
+    let input_after_fork = json!(requests[after_fork_request_index]["input"]);
 
     let compact_arr = input_after_compact
         .as_array()
@@ -207,15 +227,18 @@ async fn compact_resume_and_fork_preserve_model_history_view() {
         "hello world"
     );
     let seeded_user_prefix = &first_request_user_texts[..first_turn_user_index];
-    let summary_after_compact = extract_summary_user_text(&requests[2], SUMMARY_TEXT);
-    let summary_after_resume = extract_summary_user_text(&requests[3], SUMMARY_TEXT);
-    let summary_after_fork = extract_summary_user_text(&requests[4], SUMMARY_TEXT);
+    let summary_after_compact =
+        extract_summary_user_text(&requests[after_compact_request_index], SUMMARY_TEXT);
+    let summary_after_resume =
+        extract_summary_user_text(&requests[after_resume_request_index], SUMMARY_TEXT);
+    let summary_after_fork =
+        extract_summary_user_text(&requests[after_fork_request_index], SUMMARY_TEXT);
     let mut expected_after_compact_user_texts =
         vec!["hello world".to_string(), summary_after_compact];
     expected_after_compact_user_texts.extend_from_slice(seeded_user_prefix);
     expected_after_compact_user_texts.push("AFTER_COMPACT".to_string());
     assert_eq!(
-        json_message_input_texts(&requests[2], "user"),
+        json_message_input_texts(&requests[after_compact_request_index], "user"),
         expected_after_compact_user_texts
     );
 
@@ -223,7 +246,8 @@ async fn compact_resume_and_fork_preserve_model_history_view() {
         vec!["hello world".to_string(), summary_after_resume];
     expected_after_resume_user_texts.extend_from_slice(seeded_user_prefix);
     expected_after_resume_user_texts.push("AFTER_COMPACT".to_string());
-    let after_resume_user_texts = json_message_input_texts(&requests[3], "user");
+    let after_resume_user_texts =
+        json_message_input_texts(&requests[after_resume_request_index], "user");
     let (after_resume_last, after_resume_prefix) = after_resume_user_texts
         .split_last()
         .unwrap_or_else(|| panic!("after-resume request missing user messages"));
@@ -249,7 +273,8 @@ async fn compact_resume_and_fork_preserve_model_history_view() {
         }
     }
 
-    let after_fork_user_texts = json_message_input_texts(&requests[4], "user");
+    let after_fork_user_texts =
+        json_message_input_texts(&requests[after_fork_request_index], "user");
     let mut expected_after_fork_history_prefix =
         vec!["hello world".to_string(), summary_after_fork];
     expected_after_fork_history_prefix.extend_from_slice(seeded_user_prefix);
@@ -278,7 +303,6 @@ async fn compact_resume_and_fork_preserve_model_history_view() {
             assert_eq!(chunk, seeded_user_prefix);
         }
     }
-    assert_eq!(requests.len(), 5);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

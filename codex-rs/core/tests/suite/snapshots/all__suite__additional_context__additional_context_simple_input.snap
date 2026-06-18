@@ -1,6 +1,6 @@
 ---
 source: core/tests/suite/additional_context.rs
-expression: "context_snapshot::format_labeled_requests_snapshot(\"additional context is inserted before the user turn input.\",\n&[(\"Request\", &request)], &additional_context_snapshot_options(),)"
+expression: "context_snapshot::format_labeled_requests_snapshot(\"additional context is inserted before the user turn input.\",\n&[(\"Request\", &request)],\n&ContextSnapshotOptions::default().strip_capability_instructions().render_mode(ContextSnapshotRenderMode::KindWithTextPrefix\n{ max_chars: 160 }),)"
 ---
 Scenario: additional context is inserted before the user turn input.
 

@@ -5,6 +5,8 @@ use codex_protocol::protocol::GitInfo;
 use core_test_support::fs_wait;
 use core_test_support::responses;
 use core_test_support::skip_if_no_network;
+use core_test_support::test_codex_exec::TEST_MODEL;
+use core_test_support::test_codex_exec::exec_test_model_catalog;
 use pretty_assertions::assert_eq;
 use std::time::Duration;
 use tempfile::TempDir;
@@ -24,6 +26,32 @@ fn cli_sse_response() -> String {
     ])
 }
 
+fn mock_provider_override(server: &MockServer) -> String {
+    format!(
+        "model_providers.mock={{ name = \"mock\", base_url = \"{}/v1\", env_key = \"PATH\", wire_api = \"chat_completions\" }}",
+        server.uri()
+    )
+}
+
+fn toml_string_literal(value: &str) -> String {
+    serde_json::to_string(value).expect("serialize TOML string literal")
+}
+
+fn add_test_model_catalog_args(cmd: &mut AssertCommand, home: &TempDir) {
+    let catalog_path = home.path().join("cli-stream-models.json");
+    let catalog = exec_test_model_catalog();
+    let contents = serde_json::to_vec(&catalog).expect("test model catalog serializes");
+    std::fs::write(&catalog_path, contents).expect("write CLI stream test model catalog");
+
+    cmd.arg("-c")
+        .arg(format!("model={}", toml_string_literal(TEST_MODEL)))
+        .arg("-c")
+        .arg(format!(
+            "model_catalog_json={}",
+            toml_string_literal(&catalog_path.display().to_string())
+        ));
+}
+
 /// Tests streaming Chat Completions through the CLI using a mock server.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn chat_completions_mode_stream_cli() {
@@ -39,10 +67,7 @@ async fn chat_completions_mode_stream_cli() {
     let resp_mock = responses::mount_sse_once(&server, sse).await;
 
     let home = TempDir::new().unwrap();
-    let provider_override = format!(
-        "model_providers.mock={{ name = \"mock\", base_url = \"{}/v1\", env_key = \"PATH\", wire_api = \"chat_completions\" }}",
-        server.uri()
-    );
+    let provider_override = mock_provider_override(&server);
     let bin = codex_utils_cargo_bin::cargo_bin("astral").unwrap();
     let mut cmd = AssertCommand::new(bin);
     cmd.timeout(Duration::from_secs(30));
@@ -51,10 +76,9 @@ async fn chat_completions_mode_stream_cli() {
         .arg("-c")
         .arg(&provider_override)
         .arg("-c")
-        .arg("model_provider=\"mock\"")
-        .arg("-C")
-        .arg(&repo_root)
-        .arg("hello?");
+        .arg("model_provider=\"mock\"");
+    add_test_model_catalog_args(&mut cmd, &home);
+    cmd.arg("-C").arg(&repo_root).arg("hello?");
     cmd.env("ASTRAL_HOME", home.path())
         .env(ASTRAL_API_KEY_ENV_VAR, "dummy");
 
@@ -71,9 +95,9 @@ async fn chat_completions_mode_stream_cli() {
     assert_eq!(request.path(), "/v1/chat/completions");
 }
 
-/// Ensures `openai_base_url` config override routes built-in openai provider requests.
+/// Ensures a configured Chat Completions provider routes requests to its base URL.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn chat_completions_mode_stream_cli_supports_openai_base_url_config_override() {
+async fn chat_completions_mode_stream_cli_supports_configured_provider_base_url() {
     skip_if_no_network!();
 
     let server = MockServer::start().await;
@@ -92,10 +116,11 @@ async fn chat_completions_mode_stream_cli_supports_openai_base_url_config_overri
     cmd.arg("exec")
         .arg("--skip-git-repo-check")
         .arg("-c")
-        .arg(format!("openai_base_url=\"{}/v1\"", server.uri()))
-        .arg("-C")
-        .arg(&repo_root)
-        .arg("hello?");
+        .arg(mock_provider_override(&server))
+        .arg("-c")
+        .arg("model_provider=\"mock\"");
+    add_test_model_catalog_args(&mut cmd, &home);
+    cmd.arg("-C").arg(&repo_root).arg("hello?");
     cmd.env("ASTRAL_HOME", home.path())
         .env(ASTRAL_API_KEY_ENV_VAR, "dummy");
 
@@ -132,10 +157,7 @@ async fn exec_cli_applies_model_instructions_file() {
 
     // Build a provider override that points at the mock server and uses the
     // dummy env var for authentication.
-    let provider_override = format!(
-        "model_providers.mock={{ name = \"mock\", base_url = \"{}/v1\", env_key = \"PATH\", wire_api = \"chat_completions\" }}",
-        server.uri()
-    );
+    let provider_override = mock_provider_override(&server);
 
     let home = TempDir::new().unwrap();
     let repo_root = repo_root();
@@ -148,10 +170,9 @@ async fn exec_cli_applies_model_instructions_file() {
         .arg("-c")
         .arg("model_provider=\"mock\"")
         .arg("-c")
-        .arg(format!("model_instructions_file=\"{custom_path_str}\""))
-        .arg("-C")
-        .arg(&repo_root)
-        .arg("hello?\n");
+        .arg(format!("model_instructions_file=\"{custom_path_str}\""));
+    add_test_model_catalog_args(&mut cmd, &home);
+    cmd.arg("-C").arg(&repo_root).arg("hello?\n");
     cmd.env("ASTRAL_HOME", home.path())
         .env(ASTRAL_API_KEY_ENV_VAR, "dummy");
 
@@ -164,12 +185,7 @@ async fn exec_cli_applies_model_instructions_file() {
     // Inspect the captured request and verify our custom base instructions were
     // included in the `instructions` field.
     let request = resp_mock.single_request();
-    let body = request.body_json();
-    let instructions = body
-        .get("instructions")
-        .and_then(|v| v.as_str())
-        .unwrap_or_default()
-        .to_string();
+    let instructions = request.instructions_text();
     assert!(
         instructions.contains(marker),
         "instructions did not contain custom marker; got: {instructions}"
@@ -196,10 +212,7 @@ async fn exec_cli_profile_applies_model_instructions_file() {
     std::fs::write(&custom_path, marker).unwrap();
     let custom_path_str = custom_path.to_string_lossy().replace('\\', "/");
 
-    let provider_override = format!(
-        "model_providers.mock={{ name = \"mock\", base_url = \"{}/v1\", env_key = \"PATH\", wire_api = \"chat_completions\" }}",
-        server.uri()
-    );
+    let provider_override = mock_provider_override(&server);
 
     let home = TempDir::new().unwrap();
     std::fs::write(
@@ -218,10 +231,9 @@ async fn exec_cli_profile_applies_model_instructions_file() {
         .arg("-c")
         .arg(&provider_override)
         .arg("-c")
-        .arg("model_provider=\"mock\"")
-        .arg("-C")
-        .arg(&repo_root)
-        .arg("hello?\n");
+        .arg("model_provider=\"mock\"");
+    add_test_model_catalog_args(&mut cmd, &home);
+    cmd.arg("-C").arg(&repo_root).arg("hello?\n");
     cmd.env("ASTRAL_HOME", home.path())
         .env(ASTRAL_API_KEY_ENV_VAR, "dummy");
 
@@ -232,12 +244,7 @@ async fn exec_cli_profile_applies_model_instructions_file() {
     assert!(output.status.success());
 
     let request = resp_mock.single_request();
-    let body = request.body_json();
-    let instructions = body
-        .get("instructions")
-        .and_then(|v| v.as_str())
-        .unwrap_or_default()
-        .to_string();
+    let instructions = request.instructions_text();
     assert!(
         instructions.contains(marker),
         "instructions did not contain profile marker; got: {instructions}"
@@ -260,10 +267,11 @@ async fn chat_completions_stream_cli() {
     cmd.arg("exec")
         .arg("--skip-git-repo-check")
         .arg("-c")
-        .arg(format!("openai_base_url=\"{}/v1\"", server.uri()))
-        .arg("-C")
-        .arg(&repo_root)
-        .arg("hello?");
+        .arg(mock_provider_override(&server))
+        .arg("-c")
+        .arg("model_provider=\"mock\"");
+    add_test_model_catalog_args(&mut cmd, &home);
+    cmd.arg("-C").arg(&repo_root).arg("hello?");
     cmd.env("ASTRAL_HOME", home.path())
         .env(ASTRAL_API_KEY_ENV_VAR, "dummy");
 
@@ -302,10 +310,11 @@ async fn integration_creates_and_checks_session_file() -> anyhow::Result<()> {
     cmd.arg("exec")
         .arg("--skip-git-repo-check")
         .arg("-c")
-        .arg(format!("openai_base_url=\"{}/v1\"", server.uri()))
-        .arg("-C")
-        .arg(&repo_root)
-        .arg(&prompt);
+        .arg(mock_provider_override(&server))
+        .arg("-c")
+        .arg("model_provider=\"mock\"");
+    add_test_model_catalog_args(&mut cmd, &home);
+    cmd.arg("-C").arg(&repo_root).arg(&prompt);
     cmd.env("ASTRAL_HOME", home.path())
         .env(ASTRAL_API_KEY_ENV_VAR, "dummy");
 
@@ -423,8 +432,11 @@ async fn integration_creates_and_checks_session_file() -> anyhow::Result<()> {
     cmd2.arg("exec")
         .arg("--skip-git-repo-check")
         .arg("-c")
-        .arg(format!("openai_base_url=\"{}/v1\"", server.uri()))
-        .arg("-C")
+        .arg(mock_provider_override(&server))
+        .arg("-c")
+        .arg("model_provider=\"mock\"");
+    add_test_model_catalog_args(&mut cmd2, &home);
+    cmd2.arg("-C")
         .arg(&repo_root)
         .arg(&prompt2)
         .arg("resume")

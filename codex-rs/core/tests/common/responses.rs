@@ -110,11 +110,26 @@ impl ResponsesRequest {
                 .get("content-encoding")
                 .and_then(|value| value.to_str().ok()),
         );
-        serde_json::from_slice(&body).unwrap()
+        let mut body: Value = serde_json::from_slice(&body).unwrap();
+        add_responses_compat_fields(&mut body);
+        body
     }
 
     pub fn body_bytes(&self) -> Vec<u8> {
         self.0.body.clone()
+    }
+
+    pub fn body_text(&self) -> String {
+        let body = decode_body_bytes(
+            &self.0.body,
+            self.0
+                .headers
+                .get("content-encoding")
+                .and_then(|value| value.to_str().ok()),
+        );
+        String::from_utf8(body).unwrap_or_else(|err| {
+            panic!("request body should be UTF-8 JSON: {err}");
+        })
     }
 
     pub fn body_contains_text(&self, text: &str) -> bool {
@@ -145,42 +160,26 @@ impl ResponsesRequest {
     pub fn message_input_texts(&self, role: &str) -> Vec<String> {
         let body = self.body_json();
         if body.get("messages").is_some() {
-            let role = if role == "developer" { "system" } else { role };
-            return chat_message_text_groups(&body, role)
+            return message_input_text_groups_from_items(&request_input_items(&body), role)
                 .into_iter()
                 .flatten()
                 .collect();
+        } else {
+            message_input_text_groups_from_items(&self.input(), role)
+                .into_iter()
+                .flatten()
+                .collect()
         }
-
-        self.inputs_of_type("message")
-            .into_iter()
-            .filter(|item| item.get("role").and_then(Value::as_str) == Some(role))
-            .filter_map(|item| item.get("content").and_then(Value::as_array).cloned())
-            .flatten()
-            .filter(|span| span.get("type").and_then(Value::as_str) == Some("input_text"))
-            .filter_map(|span| span.get("text").and_then(Value::as_str).map(str::to_owned))
-            .collect()
     }
 
     /// Returns `input_text` spans grouped by `message` input for the provided role.
     pub fn message_input_text_groups(&self, role: &str) -> Vec<Vec<String>> {
         let body = self.body_json();
         if body.get("messages").is_some() {
-            return chat_message_text_groups(&body, role);
+            return message_input_text_groups_from_items(&request_input_items(&body), role);
         }
 
-        self.inputs_of_type("message")
-            .into_iter()
-            .filter(|item| item.get("role").and_then(Value::as_str) == Some(role))
-            .filter_map(|item| item.get("content").and_then(Value::as_array).cloned())
-            .map(|content| {
-                content
-                    .into_iter()
-                    .filter(|span| span.get("type").and_then(Value::as_str) == Some("input_text"))
-                    .filter_map(|span| span.get("text").and_then(Value::as_str).map(str::to_owned))
-                    .collect()
-            })
-            .collect()
+        message_input_text_groups_from_items(&self.input(), role)
     }
 
     pub fn has_message_with_input_texts(
@@ -195,6 +194,11 @@ impl ResponsesRequest {
 
     /// Returns all `input_image` `image_url` spans from `message` inputs for the provided role.
     pub fn message_input_image_urls(&self, role: &str) -> Vec<String> {
+        let body = self.body_json();
+        if body.get("messages").is_some() {
+            return chat_message_image_urls(&body, role);
+        }
+
         self.inputs_of_type("message")
             .into_iter()
             .filter(|item| item.get("role").and_then(Value::as_str) == Some(role))
@@ -210,10 +214,7 @@ impl ResponsesRequest {
     }
 
     pub fn input(&self) -> Vec<Value> {
-        self.body_json()["input"]
-            .as_array()
-            .expect("input array not found in request")
-            .clone()
+        request_input_items(&self.body_json())
     }
 
     pub fn inputs_of_type(&self, ty: &str) -> Vec<Value> {
@@ -229,11 +230,53 @@ impl ResponsesRequest {
     }
 
     pub fn custom_tool_call_output(&self, call_id: &str) -> Value {
-        self.call_output(call_id, "custom_tool_call_output")
+        let input = self.input();
+        input
+            .iter()
+            .find(|item| {
+                item.get("type").and_then(Value::as_str) == Some("custom_tool_call_output")
+                    && item.get("call_id").and_then(Value::as_str) == Some(call_id)
+            })
+            .or_else(|| {
+                input.iter().find(|item| {
+                    item.get("type").and_then(Value::as_str) == Some("function_call_output")
+                        && item.get("call_id").and_then(Value::as_str) == Some(call_id)
+                })
+            })
+            .cloned()
+            .unwrap_or_else(|| {
+                panic!("custom tool call output {call_id} item not found in request")
+            })
     }
 
     pub fn tool_search_output(&self, call_id: &str) -> Value {
-        self.call_output(call_id, "tool_search_output")
+        let output_item = self.call_output(call_id, "tool_search_output");
+        let parsed = match output_item.get("output") {
+            Some(Value::String(output_text)) => match serde_json::from_str::<Value>(output_text) {
+                Ok(Value::Object(parsed)) => parsed,
+                Ok(_) | Err(_) => return output_item,
+            },
+            Some(Value::Object(parsed)) => parsed.clone(),
+            Some(Value::Array(_))
+            | Some(Value::Number(_))
+            | Some(Value::Bool(_))
+            | Some(Value::Null)
+            | None => return output_item,
+        };
+        let mut parsed = parsed;
+        parsed
+            .entry("type".to_string())
+            .or_insert_with(|| Value::String("tool_search_output".to_string()));
+        parsed
+            .entry("call_id".to_string())
+            .or_insert_with(|| Value::String(call_id.to_string()));
+        parsed
+            .entry("status".to_string())
+            .or_insert_with(|| Value::String("completed".to_string()));
+        parsed
+            .entry("execution".to_string())
+            .or_insert_with(|| Value::String("client".to_string()));
+        Value::Object(parsed)
     }
 
     pub fn call_output(&self, call_id: &str, call_type: &str) -> Value {
@@ -280,6 +323,7 @@ impl ResponsesRequest {
         call_id: &str,
     ) -> Option<(Option<String>, Option<bool>)> {
         self.call_output_content_and_success(call_id, "custom_tool_call_output")
+            .or_else(|| self.call_output_content_and_success(call_id, "function_call_output"))
     }
 
     fn call_output_content_and_success(
@@ -295,9 +339,11 @@ impl ResponsesRequest {
         match output {
             Value::String(_) | Value::Array(_) => Some((output_value_to_text(&output), None)),
             Value::Object(obj) => Some((
-                obj.get("content")
-                    .and_then(Value::as_str)
-                    .map(str::to_string),
+                obj.get("content").and_then(|content| match content {
+                    Value::String(text) => Some(text.clone()),
+                    Value::Array(_) => output_value_to_text(content),
+                    Value::Object(_) | Value::Number(_) | Value::Bool(_) | Value::Null => None,
+                }),
                 obj.get("success").and_then(Value::as_bool),
             )),
             _ => Some((None, None)),
@@ -325,6 +371,69 @@ impl ResponsesRequest {
     }
 }
 
+fn add_responses_compat_fields(body: &mut Value) {
+    let Some(object) = body.as_object_mut() else {
+        return;
+    };
+    let Some(messages) = object.get("messages").and_then(Value::as_array).cloned() else {
+        return;
+    };
+
+    if !object.contains_key("input") {
+        object.insert(
+            "input".to_string(),
+            Value::Array(chat_messages_to_response_input(&messages)),
+        );
+    }
+
+    if !object.contains_key("instructions") {
+        let instructions = chat_message_text_groups_from_messages(&messages, "system")
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        if !instructions.is_empty() {
+            object.insert("instructions".to_string(), Value::String(instructions));
+        }
+    }
+}
+
+pub fn request_input_items(body: &Value) -> Vec<Value> {
+    if let Some(input) = body.get("input").and_then(Value::as_array) {
+        return input.clone();
+    }
+    if let Some(messages) = body.get("messages").and_then(Value::as_array) {
+        return chat_messages_to_response_input(messages);
+    }
+    panic!("input or messages array not found in request")
+}
+
+pub fn request_tool_name(tool: &Value) -> Option<&str> {
+    tool.pointer("/function/name")
+        .or_else(|| tool.get("name"))
+        .or_else(|| tool.get("type"))
+        .and_then(Value::as_str)
+}
+
+pub fn request_tool_description(tool: &Value) -> Option<&str> {
+    tool.pointer("/function/description")
+        .or_else(|| tool.get("description"))
+        .and_then(Value::as_str)
+}
+
+pub fn request_tool_names(body: &Value) -> Vec<String> {
+    body.get("tools")
+        .and_then(Value::as_array)
+        .map(|tools| {
+            tools
+                .iter()
+                .filter_map(request_tool_name)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn chat_message_text_groups(body: &Value, role: &str) -> Vec<Vec<String>> {
     body.get("messages")
         .and_then(Value::as_array)
@@ -332,6 +441,30 @@ fn chat_message_text_groups(body: &Value, role: &str) -> Vec<Vec<String>> {
         .flatten()
         .filter(|message| message.get("role").and_then(Value::as_str) == Some(role))
         .map(chat_message_texts)
+        .collect()
+}
+
+fn chat_message_text_groups_from_messages(messages: &[Value], role: &str) -> Vec<Vec<String>> {
+    messages
+        .iter()
+        .filter(|message| message.get("role").and_then(Value::as_str) == Some(role))
+        .map(chat_message_texts)
+        .collect()
+}
+
+fn message_input_text_groups_from_items(items: &[Value], role: &str) -> Vec<Vec<String>> {
+    items
+        .iter()
+        .filter(|item| item.get("type").and_then(Value::as_str) == Some("message"))
+        .filter(|item| item.get("role").and_then(Value::as_str) == Some(role))
+        .filter_map(|item| item.get("content").and_then(Value::as_array).cloned())
+        .map(|content| {
+            content
+                .into_iter()
+                .filter(|span| span.get("type").and_then(Value::as_str) == Some("input_text"))
+                .filter_map(|span| span.get("text").and_then(Value::as_str).map(str::to_owned))
+                .collect()
+        })
         .collect()
 }
 
@@ -356,7 +489,360 @@ fn chat_message_texts(message: &Value) -> Vec<String> {
     }
 }
 
-pub(crate) fn output_value_to_text(value: &Value) -> Option<String> {
+fn chat_message_image_urls(body: &Value, role: &str) -> Vec<String> {
+    let role = if role == "developer" { "system" } else { role };
+    body.get("messages")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|message| message.get("role").and_then(Value::as_str) == Some(role))
+        .flat_map(chat_message_content_parts)
+        .filter_map(chat_content_part_image_url)
+        .collect()
+}
+
+fn chat_messages_to_response_input(messages: &[Value]) -> Vec<Value> {
+    let mut items = Vec::new();
+    let mut call_names = HashMap::new();
+
+    for message in messages {
+        if message.get("type").and_then(Value::as_str) == Some("agent_message") {
+            items.push(message.clone());
+            continue;
+        }
+
+        match message.get("role").and_then(Value::as_str) {
+            Some("system") | Some("developer") | Some("user") => {
+                let source_role = message
+                    .get("role")
+                    .and_then(Value::as_str)
+                    .unwrap_or("user");
+                let role = if source_role == "system" {
+                    "developer"
+                } else {
+                    source_role
+                };
+                let mut content = chat_message_content_parts(message)
+                    .into_iter()
+                    .filter_map(chat_content_part_to_input_content)
+                    .collect::<Vec<Value>>();
+                if source_role == "system" {
+                    content = extract_contextual_system_content(content);
+                }
+                if !content.is_empty() {
+                    if source_role == "system" {
+                        items.extend(content.into_iter().map(|part| {
+                            serde_json::json!({
+                                "type": "message",
+                                "role": role,
+                                "content": [part],
+                            })
+                        }));
+                    } else {
+                        items.push(serde_json::json!({
+                            "type": "message",
+                            "role": role,
+                            "content": content,
+                        }));
+                    }
+                }
+            }
+            Some("assistant") => {
+                let content = chat_message_content_parts(message)
+                    .into_iter()
+                    .filter_map(chat_content_part_to_output_content)
+                    .collect::<Vec<Value>>();
+                if !content.is_empty() {
+                    items.push(serde_json::json!({
+                        "type": "message",
+                        "role": "assistant",
+                        "content": content,
+                    }));
+                }
+
+                for tool_call in message
+                    .get("tool_calls")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                {
+                    let Some(call_id) = tool_call.get("id").and_then(Value::as_str) else {
+                        continue;
+                    };
+                    let name = tool_call
+                        .pointer("/function/name")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    let arguments = tool_call
+                        .pointer("/function/arguments")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    call_names.insert(call_id.to_string(), name.to_string());
+                    items.push(serde_json::json!({
+                        "type": chat_tool_call_item_type(name),
+                        "call_id": call_id,
+                        "name": name,
+                        "arguments": arguments,
+                    }));
+                }
+            }
+            Some("tool") => {
+                let Some(call_id) = message.get("tool_call_id").and_then(Value::as_str) else {
+                    continue;
+                };
+                let call_type = call_names
+                    .get(call_id)
+                    .map(|name| chat_tool_output_item_type(name))
+                    .unwrap_or("function_call_output");
+                items.push(serde_json::json!({
+                    "type": call_type,
+                    "call_id": call_id,
+                    "output": chat_tool_message_output(message),
+                }));
+            }
+            Some(_) | None => {}
+        }
+    }
+
+    items
+}
+
+fn extract_contextual_system_content(content: Vec<Value>) -> Vec<Value> {
+    content
+        .into_iter()
+        .flat_map(|part| {
+            let Some(text) = part.get("text").and_then(Value::as_str) else {
+                return Vec::new();
+            };
+            split_chat_text_content(text)
+                .into_iter()
+                .filter(|part| {
+                    is_contextual_system_paragraph(part) || !is_base_system_instruction_text(part)
+                })
+                .map(|part| serde_json::json!({ "type": "input_text", "text": part }))
+                .collect()
+        })
+        .collect()
+}
+
+fn is_contextual_system_paragraph(paragraph: &str) -> bool {
+    paragraph.starts_with("<permissions instructions>")
+        || (paragraph.starts_with('<') && paragraph.contains("</"))
+}
+
+fn is_base_system_instruction_text(paragraph: &str) -> bool {
+    paragraph.starts_with("You are ")
+        || paragraph.starts_with("Knowledge cutoff:")
+        || paragraph.starts_with("Current date:")
+}
+
+fn chat_tool_call_item_type(name: &str) -> &'static str {
+    if is_custom_tool_name(name) {
+        "custom_tool_call"
+    } else if name == "tool_search" {
+        "tool_search_call"
+    } else {
+        "function_call"
+    }
+}
+
+fn chat_tool_output_item_type(name: &str) -> &'static str {
+    if is_custom_tool_name(name) {
+        "custom_tool_call_output"
+    } else if name == "tool_search" {
+        "tool_search_output"
+    } else {
+        "function_call_output"
+    }
+}
+
+fn is_custom_tool_name(name: &str) -> bool {
+    name == "apply_patch"
+}
+
+fn chat_message_content_parts(message: &Value) -> Vec<Value> {
+    match message.get("content") {
+        Some(Value::String(text)) if !text.is_empty() => split_chat_text_content(text)
+            .into_iter()
+            .map(|text| serde_json::json!({ "type": "text", "text": text }))
+            .collect(),
+        Some(Value::Array(parts)) => parts.clone(),
+        Some(Value::Object(_))
+        | Some(Value::Number(_))
+        | Some(Value::Bool(_))
+        | Some(Value::Null)
+        | None
+        | Some(Value::String(_)) => Vec::new(),
+    }
+}
+
+fn split_chat_text_content(text: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut cursor = 0;
+
+    while let Some((relative_start, open_tag, close_tag)) =
+        find_next_contextual_text_block(&text[cursor..])
+    {
+        let start = cursor + relative_start;
+        push_trimmed_text_part(&mut parts, &text[cursor..start]);
+
+        let content_start = start + open_tag.len();
+        let end = text[content_start..]
+            .find(close_tag)
+            .map(|relative_end| content_start + relative_end + close_tag.len())
+            .unwrap_or(text.len());
+        push_trimmed_text_part(&mut parts, &text[start..end]);
+        cursor = end;
+    }
+
+    push_trimmed_text_part(&mut parts, &text[cursor..]);
+    parts
+}
+
+fn find_next_contextual_text_block(text: &str) -> Option<(usize, &'static str, &'static str)> {
+    contextual_text_blocks()
+        .iter()
+        .filter_map(|(open_tag, close_tag)| {
+            text.find(open_tag)
+                .map(|start| (start, *open_tag, *close_tag))
+        })
+        .min_by_key(|(start, _, _)| *start)
+}
+
+fn contextual_text_blocks() -> &'static [(&'static str, &'static str)] {
+    &[
+        ("<permissions instructions>", "</permissions instructions>"),
+        ("<user_instructions>", "</user_instructions>"),
+        ("<environment_context>", "</environment_context>"),
+        ("<apps_instructions>", "</apps_instructions>"),
+        ("<skills_instructions>", "</skills_instructions>"),
+        ("<plugins_instructions>", "</plugins_instructions>"),
+        ("<collaboration_mode>", "</collaboration_mode>"),
+        ("<realtime_conversation>", "</realtime_conversation>"),
+        ("<model_switch>", "</model_switch>"),
+        ("<turn_aborted>", "</turn_aborted>"),
+    ]
+}
+
+fn push_trimmed_text_part(parts: &mut Vec<String>, text: &str) {
+    let text = text.trim();
+    if !text.is_empty() {
+        parts.push(text.to_string());
+    }
+}
+
+fn chat_content_part_to_input_content(part: Value) -> Option<Value> {
+    match part.get("type").and_then(Value::as_str) {
+        Some("text" | "input_text") => {
+            let text = part.get("text").and_then(Value::as_str)?;
+            Some(serde_json::json!({ "type": "input_text", "text": text }))
+        }
+        Some("image_url" | "input_image") => {
+            let image_url = chat_content_part_image_url(part.clone())?;
+            let mut content = serde_json::json!({
+                "type": "input_image",
+                "image_url": image_url,
+            });
+            if let Some(detail) = chat_content_part_image_detail(&part) {
+                content["detail"] = detail;
+            }
+            Some(content)
+        }
+        Some(_) | None => None,
+    }
+}
+
+fn chat_content_part_to_output_content(part: Value) -> Option<Value> {
+    match part.get("type").and_then(Value::as_str) {
+        Some("text" | "output_text" | "input_text") => {
+            let text = part.get("text").and_then(Value::as_str)?;
+            Some(serde_json::json!({ "type": "output_text", "text": text }))
+        }
+        Some(_) | None => None,
+    }
+}
+
+fn chat_content_part_image_url(part: Value) -> Option<String> {
+    part.get("image_url")
+        .and_then(|image_url| {
+            image_url.as_str().map(str::to_string).or_else(|| {
+                image_url
+                    .get("url")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+        })
+        .or_else(|| part.get("data").and_then(Value::as_str).map(str::to_string))
+}
+
+fn chat_content_part_image_detail(part: &Value) -> Option<Value> {
+    part.get("detail")
+        .cloned()
+        .or_else(|| part.pointer("/image_url/detail").cloned())
+}
+
+fn chat_tool_message_output(message: &Value) -> Value {
+    match message.get("content") {
+        Some(Value::String(text)) => serde_json::from_str::<Value>(text)
+            .unwrap_or_else(|_| chat_tool_text_output(text).unwrap_or(Value::String(text.clone()))),
+        Some(Value::Array(parts)) => Value::Array(
+            parts
+                .iter()
+                .filter_map(|part| match part.get("type").and_then(Value::as_str) {
+                    Some("text" | "input_text") => part
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .map(|text| serde_json::json!({ "type": "input_text", "text": text })),
+                    Some("image_url" | "input_image") => chat_content_part_image_url(part.clone())
+                        .map(|image_url| {
+                            let mut content = serde_json::json!({
+                                "type": "input_image",
+                                "image_url": image_url,
+                            });
+                            if let Some(detail) = chat_content_part_image_detail(part) {
+                                content["detail"] = detail;
+                            }
+                            content
+                        }),
+                    Some(_) | None => None,
+                })
+                .collect(),
+        ),
+        Some(Value::Object(_))
+        | Some(Value::Number(_))
+        | Some(Value::Bool(_))
+        | Some(Value::Null)
+        | None => Value::String(String::new()),
+    }
+}
+
+fn chat_tool_text_output(text: &str) -> Option<Value> {
+    if text.starts_with("data:image/") {
+        return Some(Value::Array(vec![serde_json::json!({
+            "type": "input_image",
+            "image_url": text,
+        })]));
+    }
+
+    let (header, image_url) = text.split_once("\nOutput:\n")?;
+    if !header.starts_with("Wall time: ") || !image_url.starts_with("data:image/") {
+        return None;
+    }
+
+    Some(Value::Array(vec![
+        serde_json::json!({
+            "type": "input_text",
+            "text": format!("{header}\nOutput:"),
+        }),
+        serde_json::json!({
+            "type": "input_image",
+            "image_url": image_url,
+            "detail": "high",
+        }),
+    ]))
+}
+
+pub fn output_value_to_text(value: &Value) -> Option<String> {
     match value {
         Value::String(text) => Some(text.clone()),
         Value::Array(items) => match items.as_slice() {
@@ -375,19 +861,25 @@ pub fn namespace_child_tool<'a>(
     tool_name: &str,
 ) -> Option<&'a Value> {
     let tools = body.get("tools")?.as_array()?;
+    let provider_neutral_name = format!("{namespace}__{tool_name}");
+    let legacy_provider_neutral_name = format!("{namespace}___{tool_name}");
     for tool in tools {
-        if tool.get("name").and_then(Value::as_str) != Some(namespace)
-            || tool.get("type").and_then(Value::as_str) != Some("namespace")
+        if request_tool_name(tool) == Some(provider_neutral_name.as_str())
+            || request_tool_name(tool) == Some(legacy_provider_neutral_name.as_str())
         {
-            continue;
+            return Some(tool);
         }
 
-        let child_tools = tool.get("tools")?.as_array()?;
-        if let Some(child_tool) = child_tools
-            .iter()
-            .find(|tool| tool.get("name").and_then(Value::as_str) == Some(tool_name))
+        if tool.get("name").and_then(Value::as_str) == Some(namespace)
+            && tool.get("type").and_then(Value::as_str) == Some("namespace")
         {
-            return Some(child_tool);
+            let child_tools = tool.get("tools")?.as_array()?;
+            if let Some(child_tool) = child_tools
+                .iter()
+                .find(|tool| tool.get("name").and_then(Value::as_str) == Some(tool_name))
+            {
+                return Some(child_tool);
+            }
         }
     }
 
@@ -460,6 +952,29 @@ mod tests {
             Some((None, None))
         );
     }
+
+    #[test]
+    fn custom_tool_call_response_sse_converts_to_chat_tool_call() {
+        let converted = responses_sse_to_chat_completions_sse(&sse(vec![
+            ev_response_created("resp-1"),
+            ev_custom_tool_call("call-1", "exec", "text(\"hi\")"),
+            ev_completed("resp-1"),
+        ]))
+        .expect("responses SSE should convert");
+
+        assert!(
+            converted.contains(r#""tool_calls""#),
+            "converted SSE should include chat tool calls: {converted}"
+        );
+        assert!(
+            converted.contains(r#""finish_reason":"tool_calls""#),
+            "converted SSE should preserve tool-use stop reason: {converted}"
+        );
+        assert!(
+            converted.contains(r#""arguments":"{\"input\":\"text(\\\"hi\\\")\"}""#),
+            "converted SSE should carry custom input as function arguments: {converted}"
+        );
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -513,6 +1028,7 @@ pub struct WebSocketTestServer {
     connections: Arc<Mutex<Vec<Vec<WebSocketRequest>>>>,
     handshakes: Arc<Mutex<Vec<WebSocketHandshake>>>,
     request_log_updated: Arc<Notify>,
+    preflight_connection_available: bool,
     shutdown: oneshot::Sender<()>,
     task: tokio::task::JoinHandle<()>,
 }
@@ -556,6 +1072,15 @@ impl WebSocketTestServer {
 
     pub fn handshakes(&self) -> Vec<WebSocketHandshake> {
         self.handshakes.lock().unwrap().clone()
+    }
+
+    pub async fn connect_preflight_if_first_connection_empty(&self) {
+        if !self.preflight_connection_available {
+            return;
+        }
+        if let Ok((mut stream, _)) = tokio_tungstenite::connect_async(self.uri.as_str()).await {
+            let _ = stream.close(None).await;
+        }
     }
 
     /// Waits until at least `expected` websocket handshakes have been observed or timeout elapses.
@@ -1128,6 +1653,7 @@ pub fn responses_sse_to_chat_completions_sse_chunk(body: &str) -> Option<String>
 #[derive(Debug)]
 pub struct ResponsesSseToChatCompletionsConverter {
     response_id: String,
+    model: Option<String>,
     message_started: bool,
     text_delta_seen: bool,
     pending_tool_call: bool,
@@ -1142,6 +1668,7 @@ impl ResponsesSseToChatCompletionsConverter {
     pub fn new() -> Self {
         Self {
             response_id: "chatcmpl-test".to_string(),
+            model: None,
             message_started: false,
             text_delta_seen: false,
             pending_tool_call: false,
@@ -1192,19 +1719,32 @@ impl ResponsesSseToChatCompletionsConverter {
                         .and_then(Value::as_str)
                         .unwrap_or(self.response_id.as_str())
                         .to_string();
+                    if let Some(model) = response_model_from_event(&event) {
+                        self.model = Some(model);
+                    }
                     self.push_message_start(&mut chunks);
                 }
                 "response.output_text.delta" => {
                     self.push_message_start(&mut chunks);
                     if let Some(delta) = event.get("delta").and_then(Value::as_str) {
-                        push_text_chunk(&mut chunks, &self.response_id, delta);
+                        push_text_chunk(
+                            &mut chunks,
+                            &self.response_id,
+                            self.model.as_deref(),
+                            delta,
+                        );
                         self.text_delta_seen = true;
                     }
                 }
                 "response.reasoning_summary_text.delta" | "response.reasoning_text.delta" => {
                     self.push_message_start(&mut chunks);
                     if let Some(delta) = event.get("delta").and_then(Value::as_str) {
-                        push_reasoning_chunk(&mut chunks, &self.response_id, delta);
+                        push_reasoning_chunk(
+                            &mut chunks,
+                            &self.response_id,
+                            self.model.as_deref(),
+                            delta,
+                        );
                     }
                 }
                 "response.output_item.added" => {
@@ -1215,7 +1755,12 @@ impl ResponsesSseToChatCompletionsConverter {
                         Some("message") => {
                             self.push_message_start(&mut chunks);
                             if let Some(text) = message_item_text(item) {
-                                push_text_chunk(&mut chunks, &self.response_id, &text);
+                                push_text_chunk(
+                                    &mut chunks,
+                                    &self.response_id,
+                                    self.model.as_deref(),
+                                    &text,
+                                );
                                 self.text_delta_seen = true;
                             }
                         }
@@ -1247,7 +1792,12 @@ impl ResponsesSseToChatCompletionsConverter {
                             if !self.text_delta_seen
                                 && let Some(text) = message_item_text(item)
                             {
-                                push_text_chunk(&mut chunks, &self.response_id, &text);
+                                push_text_chunk(
+                                    &mut chunks,
+                                    &self.response_id,
+                                    self.model.as_deref(),
+                                    &text,
+                                );
                             }
                         }
                         Some("reasoning") => {
@@ -1267,11 +1817,29 @@ impl ResponsesSseToChatCompletionsConverter {
                         .pointer("/response/error/message")
                         .and_then(Value::as_str)
                         .unwrap_or("response failed");
+                    let code = event
+                        .pointer("/response/error/code")
+                        .and_then(Value::as_str)
+                        .unwrap_or("response_failed");
                     chunks.push(serde_json::json!({
-                        "error": { "message": message },
+                        "error": { "code": code, "message": message },
+                    }));
+                }
+                "response.incomplete" => {
+                    let reason = event
+                        .pointer("/response/incomplete_details/reason")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown");
+                    chunks.push(serde_json::json!({
+                        "error": {
+                            "message": format!("Incomplete response returned, reason: {reason}"),
+                        },
                     }));
                 }
                 "response.completed" => {
+                    if let Some(model) = response_model_from_event(&event) {
+                        self.model = Some(model);
+                    }
                     self.push_message_start(&mut chunks);
                     let finish_reason = if self.pending_tool_call {
                         "tool_calls"
@@ -1280,6 +1848,7 @@ impl ResponsesSseToChatCompletionsConverter {
                     };
                     chunks.push(chat_chunk(
                         &self.response_id,
+                        self.model.as_deref(),
                         serde_json::json!({}),
                         Some(finish_reason),
                         chat_usage_from_response_completed(&event),
@@ -1296,7 +1865,12 @@ impl ResponsesSseToChatCompletionsConverter {
     }
 
     fn push_message_start(&mut self, chunks: &mut Vec<Value>) {
-        push_message_start(chunks, &self.response_id, &mut self.message_started);
+        push_message_start(
+            chunks,
+            &self.response_id,
+            self.model.as_deref(),
+            &mut self.message_started,
+        );
     }
 
     fn push_reasoning_item_texts(&mut self, chunks: &mut Vec<Value>, item: &Value) {
@@ -1311,7 +1885,7 @@ impl ResponsesSseToChatCompletionsConverter {
                     continue;
                 }
             }
-            push_reasoning_chunk(chunks, &self.response_id, &text);
+            push_reasoning_chunk(chunks, &self.response_id, self.model.as_deref(), &text);
         }
     }
 
@@ -1323,6 +1897,7 @@ impl ResponsesSseToChatCompletionsConverter {
         let state = ensure_tool_state(
             chunks,
             &self.response_id,
+            self.model.as_deref(),
             &mut self.tool_states,
             &mut self.next_tool_index,
             &call_id,
@@ -1332,7 +1907,13 @@ impl ResponsesSseToChatCompletionsConverter {
             self.item_id_to_call_id.insert(item_id, call_id.clone());
         }
         if !arguments.is_empty() {
-            push_tool_arguments_chunk(chunks, &self.response_id, state.index, &arguments);
+            push_tool_arguments_chunk(
+                chunks,
+                &self.response_id,
+                self.model.as_deref(),
+                state.index,
+                &arguments,
+            );
             state.has_argument_delta = true;
         }
         self.pending_tool_call = true;
@@ -1365,7 +1946,13 @@ impl ResponsesSseToChatCompletionsConverter {
         };
         let arguments = if event_type == "response.custom_tool_call_input.delta" {
             if !state.custom_input_open {
-                push_tool_arguments_chunk(chunks, &self.response_id, state.index, "\"");
+                push_tool_arguments_chunk(
+                    chunks,
+                    &self.response_id,
+                    self.model.as_deref(),
+                    state.index,
+                    "\"",
+                );
                 state.custom_input_open = true;
             }
             state.custom_input_saw_delta = true;
@@ -1373,7 +1960,13 @@ impl ResponsesSseToChatCompletionsConverter {
         } else {
             delta.to_string()
         };
-        push_tool_arguments_chunk(chunks, &self.response_id, state.index, &arguments);
+        push_tool_arguments_chunk(
+            chunks,
+            &self.response_id,
+            self.model.as_deref(),
+            state.index,
+            &arguments,
+        );
         state.has_argument_delta = true;
         self.pending_tool_call = true;
     }
@@ -1386,6 +1979,7 @@ impl ResponsesSseToChatCompletionsConverter {
         let state = ensure_tool_state(
             chunks,
             &self.response_id,
+            self.model.as_deref(),
             &mut self.tool_states,
             &mut self.next_tool_index,
             &call_id,
@@ -1400,13 +1994,31 @@ impl ResponsesSseToChatCompletionsConverter {
                 && !input.is_empty()
             {
                 let input = json_string_fragment(input);
-                push_tool_arguments_chunk(chunks, &self.response_id, state.index, &input);
+                push_tool_arguments_chunk(
+                    chunks,
+                    &self.response_id,
+                    self.model.as_deref(),
+                    state.index,
+                    &input,
+                );
             }
-            push_tool_arguments_chunk(chunks, &self.response_id, state.index, "\"");
+            push_tool_arguments_chunk(
+                chunks,
+                &self.response_id,
+                self.model.as_deref(),
+                state.index,
+                "\"",
+            );
             state.custom_input_open = false;
             state.has_argument_delta = true;
         } else if !state.has_argument_delta && !arguments.is_empty() {
-            push_tool_arguments_chunk(chunks, &self.response_id, state.index, &arguments);
+            push_tool_arguments_chunk(
+                chunks,
+                &self.response_id,
+                self.model.as_deref(),
+                state.index,
+                &arguments,
+            );
             state.has_argument_delta = true;
         }
         self.pending_tool_call = true;
@@ -1457,12 +2069,27 @@ fn flush_sse_data(values: &mut Vec<Value>, data_lines: &mut Vec<String>) {
     }
 }
 
-fn push_message_start(chunks: &mut Vec<Value>, response_id: &str, message_started: &mut bool) {
+fn response_model_from_event(event: &Value) -> Option<String> {
+    event
+        .pointer("/response/model")
+        .or_else(|| event.pointer("/response/headers/OpenAI-Model"))
+        .or_else(|| event.pointer("/response/headers/openai-model"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+fn push_message_start(
+    chunks: &mut Vec<Value>,
+    response_id: &str,
+    model: Option<&str>,
+    message_started: &mut bool,
+) {
     if *message_started {
         return;
     }
     chunks.push(chat_chunk(
         response_id,
+        model,
         serde_json::json!({ "role": "assistant" }),
         None,
         None,
@@ -1470,24 +2097,31 @@ fn push_message_start(chunks: &mut Vec<Value>, response_id: &str, message_starte
     *message_started = true;
 }
 
-fn push_text_chunk(chunks: &mut Vec<Value>, response_id: &str, text: &str) {
+fn push_text_chunk(chunks: &mut Vec<Value>, response_id: &str, model: Option<&str>, text: &str) {
     if text.is_empty() {
         return;
     }
     chunks.push(chat_chunk(
         response_id,
+        model,
         serde_json::json!({ "content": text }),
         None,
         None,
     ));
 }
 
-fn push_reasoning_chunk(chunks: &mut Vec<Value>, response_id: &str, text: &str) {
+fn push_reasoning_chunk(
+    chunks: &mut Vec<Value>,
+    response_id: &str,
+    model: Option<&str>,
+    text: &str,
+) {
     if text.is_empty() {
         return;
     }
     chunks.push(chat_chunk(
         response_id,
+        model,
         serde_json::json!({ "reasoning_content": text }),
         None,
         None,
@@ -1497,12 +2131,14 @@ fn push_reasoning_chunk(chunks: &mut Vec<Value>, response_id: &str, text: &str) 
 fn push_tool_start_chunk(
     chunks: &mut Vec<Value>,
     response_id: &str,
+    model: Option<&str>,
     index: u64,
     call_id: &str,
     name: &str,
 ) {
     chunks.push(chat_chunk(
         response_id,
+        model,
         serde_json::json!({
             "tool_calls": [{
                 "index": index,
@@ -1519,6 +2155,7 @@ fn push_tool_start_chunk(
 fn push_tool_arguments_chunk(
     chunks: &mut Vec<Value>,
     response_id: &str,
+    model: Option<&str>,
     index: u64,
     arguments: &str,
 ) {
@@ -1527,6 +2164,7 @@ fn push_tool_arguments_chunk(
     }
     chunks.push(chat_chunk(
         response_id,
+        model,
         serde_json::json!({
             "tool_calls": [{
                 "index": index,
@@ -1540,18 +2178,21 @@ fn push_tool_arguments_chunk(
 
 fn chat_chunk(
     response_id: &str,
+    model: Option<&str>,
     delta: Value,
     finish_reason: Option<&str>,
     usage: Option<Value>,
 ) -> Value {
     let mut chunk = serde_json::json!({
         "id": response_id,
-        "model": "astral-test-model",
         "choices": [{
             "delta": delta,
             "finish_reason": finish_reason,
         }],
     });
+    if let Some(model) = model {
+        chunk["model"] = Value::String(model.to_string());
+    }
     if let Some(usage) = usage {
         chunk["usage"] = usage;
     }
@@ -1569,6 +2210,7 @@ struct ToolCallState {
 fn ensure_tool_state<'a>(
     chunks: &mut Vec<Value>,
     response_id: &str,
+    model: Option<&str>,
     states: &'a mut std::collections::HashMap<String, ToolCallState>,
     next_tool_index: &mut u64,
     call_id: &str,
@@ -1577,7 +2219,7 @@ fn ensure_tool_state<'a>(
     if !states.contains_key(call_id) {
         let index = *next_tool_index;
         *next_tool_index += 1;
-        push_tool_start_chunk(chunks, response_id, index, call_id, name);
+        push_tool_start_chunk(chunks, response_id, model, index, call_id, name);
         states.insert(
             call_id.to_string(),
             ToolCallState {
@@ -1621,7 +2263,11 @@ fn tool_call_from_item(item: &Value) -> Option<(String, String, String, Option<S
                 .get("input")
                 .and_then(Value::as_str)
                 .unwrap_or_default();
-            let arguments = serde_json::to_string(&serde_json::json!({ "input": input })).ok()?;
+            let arguments = if input.is_empty() {
+                String::new()
+            } else {
+                serde_json::to_string(&serde_json::json!({ "input": input })).ok()?
+            };
             let item_id = item.get("id").and_then(Value::as_str).map(str::to_string);
             Some((call_id, name, arguments, item_id))
         }
@@ -1688,7 +2334,7 @@ fn chat_usage_from_response_completed(event: &Value) -> Option<Value> {
     if usage.is_null() {
         return None;
     }
-    Some(serde_json::json!({
+    let mut chat_usage = serde_json::json!({
         "prompt_tokens": usage
             .get("input_tokens")
             .and_then(Value::as_u64)
@@ -1701,7 +2347,14 @@ fn chat_usage_from_response_completed(event: &Value) -> Option<Value> {
             .get("total_tokens")
             .and_then(Value::as_u64)
             .unwrap_or_default(),
-    }))
+    });
+    if let Some(cached_tokens) = usage
+        .pointer("/input_tokens_details/cached_tokens")
+        .and_then(Value::as_u64)
+    {
+        chat_usage["prompt_tokens_details"] = serde_json::json!({ "cached_tokens": cached_tokens });
+    }
+    Some(chat_usage)
 }
 
 pub async fn mount_chat_completions_sse_once_match<M>(
@@ -1741,6 +2394,107 @@ pub async fn mount_sse_once(server: &MockServer, body: String) -> ResponseMock {
         .mount(server)
         .await;
     response_mock
+}
+
+pub async fn mount_responses_sse_once(server: &MockServer, body: String) -> ResponseMock {
+    let response_mock = ResponseMock::new();
+    Mock::given(method("POST"))
+        .and(path_regex(".*/responses$"))
+        .and(response_mock.clone())
+        .respond_with(raw_sse_response(body))
+        .up_to_n_times(1)
+        .mount(server)
+        .await;
+    response_mock
+}
+
+/// Mounts a sequence of raw Responses SSE bodies and serves them in order for
+/// each POST to `/v1/responses`.
+pub async fn mount_responses_sse_sequence(
+    server: &MockServer,
+    bodies: Vec<String>,
+) -> ResponseMock {
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
+
+    struct SeqResponder {
+        num_calls: AtomicUsize,
+        responses: Vec<String>,
+    }
+
+    impl Respond for SeqResponder {
+        fn respond(&self, _: &wiremock::Request) -> ResponseTemplate {
+            let call_num = self.num_calls.fetch_add(1, Ordering::SeqCst);
+            match self.responses.get(call_num) {
+                Some(body) => raw_sse_response(body.clone()),
+                None => panic!("no response for {call_num}"),
+            }
+        }
+    }
+
+    let num_calls = bodies.len();
+    let responder = SeqResponder {
+        num_calls: AtomicUsize::new(0),
+        responses: bodies,
+    };
+
+    let response_mock = ResponseMock::new();
+    Mock::given(method("POST"))
+        .and(path_regex(".*/responses$"))
+        .and(response_mock.clone())
+        .respond_with(responder)
+        .up_to_n_times(num_calls as u64)
+        .expect(num_calls as u64)
+        .mount(server)
+        .await;
+    response_mock
+}
+
+/// Mounts a sequence of response templates for each POST to `/v1/responses`.
+pub async fn mount_responses_sequence(
+    server: &MockServer,
+    responses: Vec<ResponseTemplate>,
+) -> ResponseMock {
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
+
+    struct SeqResponder {
+        num_calls: AtomicUsize,
+        responses: Vec<ResponseTemplate>,
+    }
+
+    impl Respond for SeqResponder {
+        fn respond(&self, _: &wiremock::Request) -> ResponseTemplate {
+            let call_num = self.num_calls.fetch_add(1, Ordering::SeqCst);
+            self.responses
+                .get(call_num)
+                .unwrap_or_else(|| panic!("no response for {call_num}"))
+                .clone()
+        }
+    }
+
+    let num_calls = responses.len();
+    let responder = SeqResponder {
+        num_calls: AtomicUsize::new(0),
+        responses,
+    };
+
+    let response_mock = ResponseMock::new();
+    Mock::given(method("POST"))
+        .and(path_regex(".*/responses$"))
+        .and(response_mock.clone())
+        .respond_with(responder)
+        .up_to_n_times(num_calls as u64)
+        .expect(num_calls as u64)
+        .mount(server)
+        .await;
+    response_mock
+}
+
+pub fn raw_sse_response(body: String) -> ResponseTemplate {
+    ResponseTemplate::new(200)
+        .insert_header("content-type", "text/event-stream")
+        .set_body_raw(body, "text/event-stream")
 }
 
 pub async fn mount_models_once(server: &MockServer, body: ModelsResponse) -> ModelsMock {
@@ -1800,7 +2554,7 @@ pub async fn start_mock_server() -> MockServer {
         .await;
 
     // Provide a default `/models` response so tests remain hermetic when the client queries it.
-    let _ = mount_models_once(&server, ModelsResponse { models: Vec::new() }).await;
+    let _ = mount_models_once(&server, crate::test_codex_exec::exec_test_model_catalog()).await;
 
     server
 }
@@ -1838,6 +2592,9 @@ pub async fn start_websocket_server_with_headers(
     let requests = Arc::clone(&connections_log);
     let handshakes = Arc::clone(&handshakes_log);
     let request_log = Arc::clone(&request_log_updated);
+    let preflight_connection_available = connections
+        .first()
+        .is_some_and(|connection| connection.requests.is_empty());
     let connections = Arc::new(Mutex::new(VecDeque::from(connections)));
     let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
 
@@ -1993,6 +2750,7 @@ pub async fn start_websocket_server_with_headers(
         connections: connections_log,
         handshakes: handshakes_log,
         request_log_updated,
+        preflight_connection_available,
         shutdown: shutdown_tx,
         task,
     }
@@ -2192,10 +2950,11 @@ fn validate_request_body_invariants(request: &wiremock::Request) {
     use std::collections::HashSet;
 
     if let Some(messages) = body.get("messages").and_then(Value::as_array) {
-        let mut pending_tool_calls = HashSet::new();
+        let mut tool_calls = HashSet::new();
+        let mut tool_outputs = HashSet::new();
         for message in messages {
-            if let Some(tool_calls) = message.get("tool_calls").and_then(Value::as_array) {
-                for tool_call in tool_calls {
+            if let Some(message_tool_calls) = message.get("tool_calls").and_then(Value::as_array) {
+                for tool_call in message_tool_calls {
                     let Some(id) = tool_call
                         .get("id")
                         .and_then(Value::as_str)
@@ -2203,7 +2962,7 @@ fn validate_request_body_invariants(request: &wiremock::Request) {
                     else {
                         panic!("assistant tool call with empty id should be dropped");
                     };
-                    pending_tool_calls.insert(id.to_string());
+                    tool_calls.insert(id.to_string());
                 }
             }
 
@@ -2216,15 +2975,20 @@ fn validate_request_body_invariants(request: &wiremock::Request) {
                     panic!("tool output with empty tool_call_id should be dropped");
                 };
                 assert!(
-                    pending_tool_calls.remove(id),
+                    tool_calls.contains(id),
                     "tool output without matching assistant tool call: {id}",
                 );
+                tool_outputs.insert(id.to_string());
             }
         }
 
+        let missing_outputs = tool_calls
+            .difference(&tool_outputs)
+            .cloned()
+            .collect::<HashSet<_>>();
         assert!(
-            pending_tool_calls.is_empty(),
-            "Tool call output is missing for call ids: {pending_tool_calls:?}",
+            missing_outputs.is_empty(),
+            "Tool call output is missing for call ids: {missing_outputs:?}",
         );
         return;
     }

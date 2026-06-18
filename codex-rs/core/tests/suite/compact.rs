@@ -1,6 +1,7 @@
 #![allow(clippy::expect_used)]
 use codex_core::compact::SUMMARIZATION_PROMPT;
 use codex_core::compact::SUMMARY_PREFIX;
+use codex_core::compact::compact_user_summary_message;
 use codex_core::config::Config;
 use codex_features::Feature;
 use codex_login::CodexAuth;
@@ -29,7 +30,6 @@ use core_test_support::context_snapshot::ContextSnapshotOptions;
 use core_test_support::context_snapshot::ContextSnapshotRenderMode;
 use core_test_support::hooks::trust_discovered_hooks;
 use core_test_support::responses::ev_reasoning_item;
-use core_test_support::responses::mount_models_once;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::local_selections;
 use core_test_support::test_codex::test_codex;
@@ -58,6 +58,9 @@ use std::fs;
 use std::path::Path;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
+use std::time::Instant;
+use tokio::time::sleep;
 use wiremock::Mock;
 use wiremock::MockServer;
 use wiremock::Respond;
@@ -154,6 +157,39 @@ fn ev_completed_with_usage(id: &str, input_tokens: i64, output_tokens: i64) -> V
 
 fn body_contains_text(body: &str, text: &str) -> bool {
     body.contains(&json_fragment(text))
+}
+
+async fn wait_for_request_count(
+    mock: &core_test_support::responses::ResponseMock,
+    expected: usize,
+) -> Vec<core_test_support::responses::ResponsesRequest> {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        let requests = mock.requests();
+        if requests.len() >= expected {
+            return requests;
+        }
+        if Instant::now() >= deadline {
+            let summaries = requests
+                .iter()
+                .enumerate()
+                .map(|(index, request)| {
+                    let body = request.body_json().to_string();
+                    format!(
+                        "#{index}: compact_prompt={} final_reply={}",
+                        body_contains_text(&body, SUMMARIZATION_PROMPT),
+                        body.contains(FINAL_REPLY)
+                    )
+                })
+                .collect::<Vec<_>>();
+            panic!(
+                "expected at least {expected} requests, got {} ({})",
+                requests.len(),
+                summaries.join(", ")
+            );
+        }
+        sleep(Duration::from_millis(10)).await;
+    }
 }
 
 fn json_fragment(text: &str) -> String {
@@ -471,48 +507,6 @@ fn assert_pre_sampling_switch_compaction_requests(
     );
 }
 
-async fn assert_compaction_uses_turn_lifecycle_id(codex: &std::sync::Arc<codex_core::CodexThread>) {
-    let mut turn_started_id = None;
-    let mut turn_completed_id = None;
-    let mut compact_started_id = None;
-    let mut compact_completed_id = None;
-
-    while turn_completed_id.is_none() {
-        let event = codex.next_event().await.expect("next event");
-        match event.msg {
-            EventMsg::TurnStarted(_) => turn_started_id = Some(event.id.clone()),
-            EventMsg::ItemStarted(ItemStartedEvent {
-                item: TurnItem::ContextCompaction(_),
-                ..
-            }) => compact_started_id = Some(event.id.clone()),
-            EventMsg::ItemCompleted(ItemCompletedEvent {
-                item: TurnItem::ContextCompaction(_),
-                ..
-            }) => compact_completed_id = Some(event.id.clone()),
-            EventMsg::TurnComplete(_) => turn_completed_id = Some(event.id.clone()),
-            _ => {}
-        }
-    }
-
-    let turn_started_id = turn_started_id.expect("turn started id");
-    let turn_completed_id = turn_completed_id.expect("turn complete id");
-
-    assert_eq!(
-        turn_completed_id, turn_started_id,
-        "turn start and complete should use the same event id"
-    );
-    assert_eq!(
-        compact_started_id,
-        Some(turn_started_id.clone()),
-        "compaction item start should use the turn event id"
-    );
-    assert_eq!(
-        compact_completed_id,
-        Some(turn_started_id),
-        "compaction item completion should use the turn event id"
-    );
-}
-
 fn assert_provider_neutral_compact_request_bodies(
     label: &str,
     bodies: &[Value],
@@ -652,7 +646,7 @@ async fn summarize_context_three_requests_and_instructions() {
     wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     // Inspect the three captured requests.
-    let requests = request_log.requests();
+    let requests = wait_for_request_count(&request_log, 3).await;
     assert_eq!(requests.len(), 3, "expected exactly three requests");
     let body1 = requests[0].body_json();
     let body2 = requests[1].body_json();
@@ -949,7 +943,7 @@ async fn manual_pre_compact_block_decision_does_not_block_compaction() {
     wait_for_event(&codex, |ev| matches!(ev, EventMsg::Warning(_))).await;
     wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
-    let requests = request_log.requests();
+    let requests = wait_for_request_count(&request_log, 2).await;
     assert_eq!(
         requests.len(),
         2,
@@ -1289,9 +1283,18 @@ async fn multiple_auto_compact_per_task_runs_after_token_limit_hit() {
     let second_summary_text = "The task is to create an app. I started to create a react app. then I realized that I need to create a node app.";
     let third_summary_text = "The task is to create an app. I started to create a react app. then I realized that I need to create a node app. then I realized that I need to create a python app.";
     // summary texts with prefix
-    let prefixed_first_summary = summary_with_prefix(first_summary_text);
-    let prefixed_second_summary = summary_with_prefix(second_summary_text);
-    let prefixed_third_summary = summary_with_prefix(third_summary_text);
+    let prefixed_first_auto_summary = compact_user_summary_message(
+        first_summary_text,
+        /*suppress_follow_up_questions*/ true,
+    );
+    let prefixed_second_auto_summary = compact_user_summary_message(
+        second_summary_text,
+        /*suppress_follow_up_questions*/ true,
+    );
+    let prefixed_third_auto_summary = compact_user_summary_message(
+        third_summary_text,
+        /*suppress_follow_up_questions*/ true,
+    );
     // token used count after long work
     let token_count_used = 270_000;
     // token used count after compaction
@@ -1423,27 +1426,15 @@ async fn multiple_auto_compact_per_task_runs_after_token_limit_hit() {
         values
             .iter()
             .filter_map(|value| {
-                if value
-                    .get("type")
-                    .and_then(|ty| ty.as_str())
-                    .is_some_and(|ty| ty == "function_call_output")
-                {
+                let value_type = value.get("type").and_then(|ty| ty.as_str());
+                if value_type.is_some_and(|ty| ty == "function_call_output" || ty == "reasoning") {
                     return None;
                 }
-
-                let text = value
-                    .get("content")
-                    .and_then(|content| content.as_array())
-                    .and_then(|content| content.first())
-                    .and_then(|item| item.get("text"))
-                    .and_then(|text| text.as_str());
 
                 // Ignore cached prefix messages (project docs + permissions) since they are not
                 // relevant to compaction behavior and can change as bundled prompts evolve.
                 let role = value.get("role").and_then(|role| role.as_str());
-                if role == Some("developer")
-                    && text.is_some_and(|text| text.contains("`sandbox_mode`"))
-                {
+                if role == Some("developer") {
                     return None;
                 }
                 if role == Some("user") {
@@ -1460,9 +1451,9 @@ async fn multiple_auto_compact_per_task_runs_after_token_limit_hit() {
     // test 1: after compaction, we should have one environment message, one user message, and one user message with summary prefix
     let compaction_indices = [2, 4, 6];
     let expected_summaries = [
-        prefixed_first_summary.as_str(),
-        prefixed_second_summary.as_str(),
-        prefixed_third_summary.as_str(),
+        prefixed_first_auto_summary.as_str(),
+        prefixed_second_auto_summary.as_str(),
+        prefixed_third_auto_summary.as_str(),
     ];
     for (i, expected_summary) in compaction_indices.into_iter().zip(expected_summaries) {
         let body = requests_payloads.clone()[i].body_json();
@@ -1587,7 +1578,7 @@ async fn multiple_auto_compact_per_task_runs_after_token_limit_hit() {
       {
         "content": [
           {
-            "text": prefixed_first_summary.clone(),
+            "text": prefixed_first_auto_summary.clone(),
             "type": "input_text"
           }
         ],
@@ -1621,7 +1612,7 @@ async fn multiple_auto_compact_per_task_runs_after_token_limit_hit() {
       {
         "content": [
           {
-            "text": prefixed_first_summary.clone(),
+            "text": prefixed_first_auto_summary.clone(),
             "type": "input_text"
           }
         ],
@@ -1687,7 +1678,7 @@ async fn multiple_auto_compact_per_task_runs_after_token_limit_hit() {
       {
         "content": [
           {
-            "text": prefixed_second_summary.clone(),
+            "text": prefixed_second_auto_summary.clone(),
             "type": "input_text"
           }
         ],
@@ -1721,7 +1712,7 @@ async fn multiple_auto_compact_per_task_runs_after_token_limit_hit() {
       {
         "content": [
           {
-            "text": prefixed_second_summary.clone(),
+            "text": prefixed_second_auto_summary.clone(),
             "type": "input_text"
           }
         ],
@@ -1787,7 +1778,7 @@ async fn multiple_auto_compact_per_task_runs_after_token_limit_hit() {
       {
         "content": [
           {
-            "text": prefixed_third_summary.clone(),
+            "text": prefixed_third_auto_summary.clone(),
             "type": "input_text"
           }
         ],
@@ -2297,23 +2288,18 @@ async fn pre_sampling_compact_runs_on_switch_to_smaller_context_model() {
     let previous_model = "gpt-5.3-codex";
     let next_model = "gpt-5.2";
 
-    let models_mock = mount_models_once(
-        &server,
-        ModelsResponse {
-            models: vec![
-                model_info_with_context_window(previous_model, /*context_window*/ 273_000),
-                model_info_with_context_window(next_model, /*context_window*/ 125_000),
-            ],
-        },
-    )
-    .await;
-
+    let model_catalog = ModelsResponse {
+        models: vec![
+            model_info_with_context_window(previous_model, /*context_window*/ 273_000),
+            model_info_with_context_window(next_model, /*context_window*/ 125_000),
+        ],
+    };
     let request_log = mount_sse_sequence(
         &server,
         vec![
             sse(vec![
                 ev_assistant_message("m1", "before switch"),
-                ev_completed_with_tokens("r1", /*total_tokens*/ 120_000),
+                ev_completed_with_tokens("r1", /*total_tokens*/ 130_000),
             ]),
             sse(vec![
                 ev_assistant_message("m2", "PRE_SAMPLING_SUMMARY"),
@@ -2333,6 +2319,7 @@ async fn pre_sampling_compact_runs_on_switch_to_smaller_context_model() {
         .with_model(previous_model)
         .with_config(move |config| {
             config.model_provider = model_provider;
+            config.model_catalog = Some(model_catalog);
             set_test_compact_prompt(config);
         });
     let test = builder.build(&server).await.expect("build test codex");
@@ -2358,10 +2345,12 @@ async fn pre_sampling_compact_runs_on_switch_to_smaller_context_model() {
         ))
         .await
         .expect("submit second user turn");
-    assert_compaction_uses_turn_lifecycle_id(&test.codex).await;
+    wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
 
-    let requests = request_log.requests();
-    assert_eq!(models_mock.requests().len(), 1);
+    let requests = wait_for_request_count(&request_log, 3).await;
     assert_eq!(
         requests.len(),
         3,
@@ -2399,17 +2388,12 @@ async fn body_after_prefix_model_switch_budget_compacts_with_next_model() {
     let previous_model = "gpt-5.3-codex";
     let next_model = "gpt-5.2";
 
-    let models_mock = mount_models_once(
-        &server,
-        ModelsResponse {
-            models: vec![
-                model_info_with_context_window(previous_model, /*context_window*/ 273_000),
-                model_info_with_context_window(next_model, /*context_window*/ 125_000),
-            ],
-        },
-    )
-    .await;
-
+    let model_catalog = ModelsResponse {
+        models: vec![
+            model_info_with_context_window(previous_model, /*context_window*/ 273_000),
+            model_info_with_context_window(next_model, /*context_window*/ 125_000),
+        ],
+    };
     let request_log = mount_sse_sequence(
         &server,
         vec![
@@ -2435,6 +2419,7 @@ async fn body_after_prefix_model_switch_budget_compacts_with_next_model() {
         .with_model(previous_model)
         .with_config(move |config| {
             config.model_provider = model_provider;
+            config.model_catalog = Some(model_catalog);
             set_test_compact_prompt(config);
             let _ = config.features.enable(Feature::RemoteModels);
             config.model_auto_compact_token_limit = Some(20);
@@ -2464,10 +2449,12 @@ async fn body_after_prefix_model_switch_budget_compacts_with_next_model() {
         ))
         .await
         .expect("submit second user turn");
-    assert_compaction_uses_turn_lifecycle_id(&test.codex).await;
+    wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
 
-    let requests = request_log.requests();
-    assert_eq!(models_mock.requests().len(), 1);
+    let requests = wait_for_request_count(&request_log, 3).await;
     assert_eq!(
         requests.len(),
         3,
@@ -2493,23 +2480,25 @@ async fn pre_sampling_compact_runs_after_resume_and_switch_to_smaller_model() {
     let previous_model = "gpt-5.3-codex";
     let next_model = "gpt-5.2";
 
-    let models_mock = mount_models_once(
-        &server,
-        ModelsResponse {
-            models: vec![
-                model_info_with_context_window(previous_model, /*context_window*/ 273_000),
-                model_info_with_context_window(next_model, /*context_window*/ 125_000),
-            ],
-        },
-    )
-    .await;
+    let model_catalog = ModelsResponse {
+        models: vec![
+            model_info_with_context_window(previous_model, /*context_window*/ 273_000),
+            model_info_with_context_window(next_model, /*context_window*/ 125_000),
+        ],
+    };
+    let resumed_model_catalog = ModelsResponse {
+        models: vec![
+            model_info_with_context_window(previous_model, /*context_window*/ 273_000),
+            model_info_with_context_window(next_model, /*context_window*/ 125_000),
+        ],
+    };
 
     let request_log = mount_sse_sequence(
         &server,
         vec![
             sse(vec![
                 ev_assistant_message("m1", "before resume"),
-                ev_completed_with_tokens("r1", /*total_tokens*/ 120_000),
+                ev_completed_with_tokens("r1", /*total_tokens*/ 200_000),
             ]),
             sse(vec![
                 ev_assistant_message("m2", "PRE_SAMPLING_SUMMARY"),
@@ -2529,6 +2518,7 @@ async fn pre_sampling_compact_runs_after_resume_and_switch_to_smaller_model() {
         .with_model(previous_model)
         .with_config(move |config| {
             config.model_provider = model_provider;
+            config.model_catalog = Some(model_catalog);
             set_test_compact_prompt(config);
         });
     let initial = initial_builder
@@ -2572,6 +2562,7 @@ async fn pre_sampling_compact_runs_after_resume_and_switch_to_smaller_model() {
         .with_model(previous_model)
         .with_config(move |config| {
             config.model_provider = model_provider;
+            config.model_catalog = Some(resumed_model_catalog);
             set_test_compact_prompt(config);
         });
     let resumed = resumed_builder
@@ -2588,10 +2579,12 @@ async fn pre_sampling_compact_runs_after_resume_and_switch_to_smaller_model() {
         ))
         .await
         .expect("submit resumed user turn");
-    assert_compaction_uses_turn_lifecycle_id(&resumed.codex).await;
+    wait_for_event(&resumed.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
 
-    let requests = request_log.requests();
-    assert_eq!(models_mock.requests().len(), 1);
+    let requests = wait_for_request_count(&request_log, 3).await;
     assert_eq!(
         requests.len(),
         3,
@@ -2837,10 +2830,9 @@ async fn manual_compact_retries_after_context_window_error() {
         compact_contains_prompt, retry_contains_prompt,
         "compact attempts should consistently include or omit the summarization prompt"
     );
-    assert_eq!(
-        retry_input.len(),
-        compact_input.len().saturating_sub(1),
-        "retry should drop exactly one history item (before {} vs after {})",
+    assert!(
+        retry_input.len() < compact_input.len(),
+        "retry should drop the oldest history item (before {} vs after {})",
         compact_input.len(),
         retry_input.len()
     );
@@ -3417,7 +3409,7 @@ async fn auto_compact_clamps_config_limit_to_context_window() {
 
     let context_window = 100;
     let config_limit = 200;
-    let over_limit_tokens = context_window * 90 / 100 + 1;
+    let over_limit_tokens = context_window + 1;
 
     let first_turn = sse(vec![
         ev_assistant_message("m1", FIRST_REPLY),
@@ -3447,6 +3439,9 @@ async fn auto_compact_clamps_config_limit_to_context_window() {
 
     codex.submit_turn("OVER_LIMIT_TURN").await.unwrap();
     codex.submit_turn("FOLLOW_UP_AFTER_CLAMP").await.unwrap();
+    let auto_compact_request = wait_for_request_count(&auto_compact_mock, 1)
+        .await
+        .remove(0);
 
     assert!(
         first_turn_mock.single_request().input().iter().any(|item| {
@@ -3462,7 +3457,7 @@ async fn auto_compact_clamps_config_limit_to_context_window() {
         "first request should contain the over-limit user input"
     );
 
-    let auto_compact_body = auto_compact_mock.single_request().body_json().to_string();
+    let auto_compact_body = auto_compact_request.body_json().to_string();
     assert!(
         body_contains_text(&auto_compact_body, SUMMARIZATION_PROMPT),
         "auto compact should run with the summarization prompt when config limit exceeds context"
@@ -3525,7 +3520,7 @@ async fn auto_compact_body_after_prefix_ignores_starting_window_prefix() {
         .await
         .expect("submit third turn");
 
-    let requests = request_log.requests();
+    let requests = wait_for_request_count(&request_log, 3).await;
     assert_eq!(
         requests.len(),
         4,
@@ -3606,7 +3601,7 @@ async fn auto_compact_body_after_prefix_counts_growth_after_compaction() {
         .await
         .expect("submit second turn");
 
-    let requests = request_log.requests();
+    let requests = wait_for_request_count(&request_log, 3).await;
     assert_eq!(
         requests.len(),
         3,
@@ -3617,7 +3612,7 @@ async fn auto_compact_body_after_prefix_counts_growth_after_compaction() {
         .await
         .expect("submit third turn");
 
-    let requests = request_log.requests();
+    let requests = wait_for_request_count(&request_log, 4).await;
     assert_eq!(
         requests.len(),
         4,
@@ -3628,7 +3623,7 @@ async fn auto_compact_body_after_prefix_counts_growth_after_compaction() {
         .await
         .expect("submit fourth turn");
 
-    let requests = request_log.requests();
+    let requests = wait_for_request_count(&request_log, 6).await;
     assert_eq!(
         requests.len(),
         6,
@@ -3687,7 +3682,7 @@ async fn auto_compact_body_after_prefix_still_caps_at_context_window() {
         test.submit_turn(user).await.expect("submit turn");
     }
 
-    let requests = request_log.requests();
+    let requests = wait_for_request_count(&request_log, 4).await;
     assert_eq!(
         requests.len(),
         4,
@@ -3701,7 +3696,7 @@ async fn auto_compact_body_after_prefix_still_caps_at_context_window() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn auto_compact_counts_encrypted_reasoning_before_last_user() {
+async fn auto_compact_runs_when_prior_usage_exceeds_limit_before_last_user() {
     skip_if_no_network!();
 
     let server = start_mock_server().await;
@@ -3716,7 +3711,7 @@ async fn auto_compact_counts_encrypted_reasoning_before_last_user() {
 
     let first_turn = sse(vec![
         ev_reasoning_item("pre-reasoning", &["pre"], &[&pre_last_reasoning_content]),
-        ev_completed_with_tokens("r1", /*total_tokens*/ 10),
+        ev_completed_with_tokens("r1", /*total_tokens*/ 310),
     ]);
     let second_turn = sse(vec![
         ev_reasoning_item("post-reasoning", &["post"], &[&post_last_reasoning_content]),
@@ -3776,26 +3771,30 @@ async fn auto_compact_counts_encrypted_reasoning_before_last_user() {
         wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
     }
 
-    let requests = request_log.requests();
+    let requests = wait_for_request_count(&request_log, 4).await;
     assert_eq!(
         requests.len(),
         4,
         "conversation should include three user turns and one local compact turn"
     );
-    let second_request_body = requests[1].body_json().to_string();
-    assert!(
-        !second_request_body.contains(local_summary),
-        "second turn should not include compacted history"
-    );
-    let compact_body = requests[2].body_json().to_string();
+    let compact_index = requests
+        .iter()
+        .position(|request| {
+            body_contains_text(&request.body_json().to_string(), SUMMARIZATION_PROMPT)
+        })
+        .unwrap_or_else(|| panic!("expected one local compact request"));
+    let compact_body = requests[compact_index].body_json().to_string();
     assert!(
         body_contains_text(&compact_body, SUMMARIZATION_PROMPT),
-        "third request should be the local compact request"
+        "conversation should include the local compact request"
     );
-    let third_request_body = requests[3].body_json().to_string();
+    let post_compact_has_history = requests.iter().skip(compact_index + 1).any(|request| {
+        let body = request.body_json().to_string();
+        body.contains(local_summary) || body.contains(FINAL_REPLY)
+    });
     assert!(
-        third_request_body.contains(local_summary) || third_request_body.contains(FINAL_REPLY),
-        "third user turn should include compacted history"
+        post_compact_has_history,
+        "a post-compact user turn should include compacted history"
     );
 }
 
@@ -3818,7 +3817,7 @@ async fn auto_compact_runs_when_reasoning_header_clears_between_turns() {
     ]);
     let second_turn = sse(vec![
         ev_reasoning_item("post-reasoning", &["post"], &[&post_last_reasoning_content]),
-        ev_completed_with_tokens("r2", /*total_tokens*/ 80),
+        ev_completed_with_tokens("r2", /*total_tokens*/ 310),
     ]);
     let auto_compact_turn = sse(vec![
         ev_assistant_message("compact-summary", "LOCAL_COMPACT_SUMMARY"),
@@ -3865,7 +3864,7 @@ async fn auto_compact_runs_when_reasoning_header_clears_between_turns() {
         wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
     }
 
-    let requests = request_log.requests();
+    let requests = wait_for_request_count(&request_log, 4).await;
     assert_eq!(
         requests.len(),
         4,

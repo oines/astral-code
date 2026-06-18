@@ -2,10 +2,13 @@
 source: tui/src/chatwidget/tests/exec_flow.rs
 expression: normalize_snapshot_paths(rendered)
 ---
-• Waiting for background terminal (0s • esc to …
-  └ cargo test -p codex-core -- --exact…
+• Bash task proc-ui running · 0s
+  └ cargo test -p codex-core -- --exact
+some::very::long::test::name
+
+• Working (0s • esc to interrupt) · 1 backgroun…
 
 
 › Ask Astral-Code to do anything
 
-  gpt-5.5 default · /tmp/project
+  deepseek-v4-pro default · /tmp/project

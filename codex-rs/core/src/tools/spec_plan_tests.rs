@@ -676,7 +676,7 @@ async fn zsh_fork_unified_exec_keeps_shell_parameter_when_remote_environment_ava
         "ListBackgroundTasks",
         "StopBackgroundTask",
     ]);
-    assert!(has_parameter(plan.visible_spec("Bash"), "environment_id"));
+    assert!(!has_parameter(plan.visible_spec("Bash"), "environment_id"));
 }
 
 #[tokio::test]
@@ -731,7 +731,7 @@ async fn environment_count_controls_environment_backed_tools() {
         multiple_environments.exposure("view_image"),
         ToolExposure::Hidden
     );
-    assert!(has_parameter(
+    assert!(!has_parameter(
         multiple_environments.visible_spec("Bash"),
         "environment_id"
     ));
@@ -1050,7 +1050,7 @@ async fn excluded_deferred_namespaces_do_not_enable_nested_tool_guidance() {
     )
     .await;
 
-    let ToolSpec::Freeform(exec) = plan.visible_spec(codex_code_mode::PUBLIC_TOOL_NAME) else {
+    let ToolSpec::Function(exec) = plan.visible_spec(codex_code_mode::PUBLIC_TOOL_NAME) else {
         panic!("expected code mode exec tool");
     };
     assert!(
@@ -1067,6 +1067,7 @@ async fn excluded_deferred_namespaces_do_not_enable_nested_tool_guidance() {
 #[tokio::test]
 async fn multi_agent_feature_selects_one_agent_tool_family() {
     let v1 = probe(|turn| {
+        turn.model_info.supports_search_tool = false;
         set_feature(turn, Feature::Collab, /*enabled*/ true);
         set_feature(turn, Feature::MultiAgentV2, /*enabled*/ false);
     })

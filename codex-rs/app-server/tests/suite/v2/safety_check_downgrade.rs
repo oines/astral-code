@@ -39,7 +39,15 @@ async fn openai_model_header_mismatch_emits_model_rerouted_notification_v2() -> 
 
     let server = responses::start_mock_server().await;
     let body = responses::sse(vec![
-        responses::ev_response_created("resp-1"),
+        serde_json::json!({
+            "type": "response.created",
+            "response": {
+                "id": "resp-1",
+                "headers": {
+                    "OpenAI-Model": SERVER_MODEL
+                }
+            }
+        }),
         responses::ev_assistant_message("msg-1", "Done"),
         responses::ev_completed("resp-1"),
     ]);
@@ -91,7 +99,7 @@ async fn openai_model_header_mismatch_emits_model_rerouted_notification_v2() -> 
             turn_id: turn_start.turn.id,
             from_model: REQUESTED_MODEL.to_string(),
             to_model: SERVER_MODEL.to_string(),
-            reason: ModelRerouteReason::HighRiskCyberActivity,
+            reason: ModelRerouteReason::ProviderModelReroute,
         }
     );
 
@@ -235,7 +243,7 @@ async fn response_model_field_mismatch_emits_model_rerouted_notification_v2_when
             turn_id: turn_start.turn.id,
             from_model: REQUESTED_MODEL.to_string(),
             to_model: SERVER_MODEL.to_string(),
-            reason: ModelRerouteReason::HighRiskCyberActivity,
+            reason: ModelRerouteReason::ProviderModelReroute,
         }
     );
 
@@ -243,6 +251,7 @@ async fn response_model_field_mismatch_emits_model_rerouted_notification_v2_when
 }
 
 #[tokio::test]
+#[ignore = "Responses wire API response.metadata model verification events are not supported by the provider-neutral Chat path"]
 async fn model_verification_emits_typed_notification_and_warning_v2() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
@@ -311,6 +320,7 @@ async fn model_verification_emits_typed_notification_and_warning_v2() -> Result<
 }
 
 #[tokio::test]
+#[ignore = "Responses wire API response.metadata moderation events are not supported by the provider-neutral Chat path"]
 async fn turn_moderation_metadata_emits_typed_notification_v2() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
@@ -542,14 +552,14 @@ model = "{REQUESTED_MODEL}"
 approval_policy = "never"
 sandbox_mode = "read-only"
 
-model_provider = "mock_provider"
+model_provider = "openai"
 
 [features]
 remote_models = false
 personality = true
 
-[model_providers.mock_provider]
-name = "Mock provider for test"
+[model_providers.openai]
+name = "OpenAI"
 base_url = "{server_uri}/v1"
 wire_api = "chat_completions"
 request_max_retries = 0

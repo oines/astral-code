@@ -107,6 +107,8 @@ use codex_app_server_protocol::WindowsSandboxSetupStartParams;
 use codex_login::default_client::ASTRAL_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR;
 use tokio::process::Command;
 
+use crate::config::write_default_test_model_capabilities_cache;
+
 pub struct TestAppServer {
     next_request_id: AtomicI64,
     /// Retain this child process until the client is dropped. The Tokio runtime
@@ -205,6 +207,9 @@ impl TestAppServer {
         env_overrides: &[(&str, Option<&str>)],
         args: &[&str],
     ) -> anyhow::Result<Self> {
+        write_default_test_model_capabilities_cache(codex_home)
+            .context("write default test model capabilities cache")?;
+
         let mut cmd = Command::new(program);
 
         cmd.stdin(Stdio::piped());

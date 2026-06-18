@@ -138,3 +138,17 @@ pub fn write_chatgpt_auth(
 
     save_auth(codex_home, &auth, cli_auth_credentials_store_mode).context("write auth.json")
 }
+
+pub fn write_api_key_auth(
+    codex_home: &Path,
+    api_key: impl Into<String>,
+    cli_auth_credentials_store_mode: AuthCredentialsStoreMode,
+) -> Result<()> {
+    let auth = AuthDotJson {
+        auth_mode: Some("apikey".to_string()),
+        api_key: Some(api_key.into()),
+        last_refresh: None,
+    };
+
+    save_auth(codex_home, &auth, cli_auth_credentials_store_mode).context("write auth.json")
+}

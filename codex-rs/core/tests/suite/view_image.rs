@@ -38,6 +38,7 @@ use core_test_support::responses::ev_function_call;
 use core_test_support::responses::ev_response_created;
 use core_test_support::responses::mount_models_once;
 use core_test_support::responses::mount_sse_sequence;
+use core_test_support::responses::request_input_items;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
@@ -97,30 +98,25 @@ fn disabled_user_turn(test: &TestCodex, items: Vec<UserInput>, model: String) ->
     }
 }
 
-fn image_messages(body: &Value) -> Vec<&Value> {
-    body.get("input")
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter(|item| {
-                    item.get("type").and_then(Value::as_str) == Some("message")
-                        && item
-                            .get("content")
-                            .and_then(Value::as_array)
-                            .map(|content| {
-                                content.iter().any(|span| {
-                                    span.get("type").and_then(Value::as_str) == Some("input_image")
-                                })
-                            })
-                            .unwrap_or(false)
-                })
-                .collect()
+fn image_messages(body: &Value) -> Vec<Value> {
+    request_input_items(body)
+        .into_iter()
+        .filter(|item| {
+            item.get("type").and_then(Value::as_str) == Some("message")
+                && item
+                    .get("content")
+                    .and_then(Value::as_array)
+                    .map(|content| {
+                        content.iter().any(|span| {
+                            span.get("type").and_then(Value::as_str) == Some("input_image")
+                        })
+                    })
+                    .unwrap_or(false)
         })
-        .unwrap_or_default()
+        .collect()
 }
 
-fn find_image_message(body: &Value) -> Option<&Value> {
+fn find_image_message(body: &Value) -> Option<Value> {
     image_messages(body).into_iter().next()
 }
 
@@ -726,10 +722,6 @@ async fn view_image_tool_can_preserve_original_resolution_when_requested_on_gpt5
         .and_then(Value::as_array)
         .expect("function_call_output should be a content item array");
     assert_eq!(output_items.len(), 1);
-    assert_eq!(
-        output_items[0].get("detail").and_then(Value::as_str),
-        Some("original")
-    );
     let image_url = output_items[0]
         .get("image_url")
         .and_then(Value::as_str)
@@ -895,10 +887,6 @@ async fn view_image_tool_treats_null_detail_as_omitted() -> anyhow::Result<()> {
         .and_then(Value::as_array)
         .expect("function_call_output should be a content item array");
     assert_eq!(output_items.len(), 1);
-    assert_eq!(
-        output_items[0].get("detail").and_then(Value::as_str),
-        Some("high")
-    );
     let image_url = output_items[0]
         .get("image_url")
         .and_then(Value::as_str)
@@ -985,10 +973,6 @@ async fn view_image_tool_resizes_when_model_lacks_original_detail_support() -> a
         .and_then(Value::as_array)
         .expect("function_call_output should be a content item array");
     assert_eq!(output_items.len(), 1);
-    assert_eq!(
-        output_items[0].get("detail").and_then(Value::as_str),
-        Some("high")
-    );
 
     let image_url = output_items[0]
         .get("image_url")
@@ -1079,10 +1063,6 @@ async fn view_image_tool_does_not_force_original_resolution_with_capability_only
         .and_then(Value::as_array)
         .expect("function_call_output should be a content item array");
     assert_eq!(output_items.len(), 1);
-    assert_eq!(
-        output_items[0].get("detail").and_then(Value::as_str),
-        Some("high")
-    );
     let image_url = output_items[0]
         .get("image_url")
         .and_then(Value::as_str)

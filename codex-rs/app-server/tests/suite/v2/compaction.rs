@@ -205,7 +205,7 @@ async fn auto_compaction_local_emits_compaction_turn_metadata() -> Result<()> {
         serde_json::json!({
             "trigger": "auto",
             "reason": "context_limit",
-            "implementation": "responses",
+            "implementation": "local_model",
             "phase": "pre_turn",
             "strategy": "memento",
         })

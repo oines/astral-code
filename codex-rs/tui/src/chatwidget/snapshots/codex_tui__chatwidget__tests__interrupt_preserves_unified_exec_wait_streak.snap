@@ -1,6 +1,10 @@
 ---
-source: tui/src/chatwidget/tests.rs
+source: tui/src/chatwidget/tests/exec_flow.rs
 expression: snapshot
 ---
-cells=1
+cells=2
+• Bash task process-1 running · 0s
+  └ just fix
+
+
 ■ Conversation interrupted - tell the model what to do differently.

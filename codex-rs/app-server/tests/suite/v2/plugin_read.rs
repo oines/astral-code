@@ -124,6 +124,7 @@ async fn plugin_read_rejects_multiple_read_sources() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Astral supports local plugin marketplaces only; remote plugin details are unsupported"]
 async fn plugin_read_returns_remote_mcp_servers_when_uninstalled() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;
@@ -250,6 +251,7 @@ plugins = true
 }
 
 #[tokio::test]
+#[ignore = "Astral supports local plugin marketplaces only; remote plugin sharing is unsupported"]
 async fn plugin_read_returns_share_context_for_shared_remote_plugin() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;
@@ -403,6 +405,7 @@ async fn plugin_read_returns_share_context_for_shared_remote_plugin() -> Result<
 }
 
 #[tokio::test]
+#[ignore = "Astral supports local plugin marketplaces only; remote plugin details are unsupported"]
 async fn plugin_read_reads_remote_plugin_details_when_remote_plugin_enabled() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;
@@ -617,6 +620,7 @@ async fn plugin_read_reads_remote_plugin_details_when_remote_plugin_enabled() ->
 }
 
 #[tokio::test]
+#[ignore = "Astral supports local plugin marketplaces only; remote plugin skill reads are unsupported"]
 async fn plugin_skill_read_reads_remote_skill_contents_when_remote_plugin_enabled() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;
@@ -681,6 +685,7 @@ async fn plugin_skill_read_reads_remote_skill_contents_when_remote_plugin_enable
 }
 
 #[tokio::test]
+#[ignore = "Astral supports local plugin marketplaces only; remote plugin details are unsupported"]
 async fn plugin_read_maps_missing_remote_plugin_to_invalid_request() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;
@@ -732,6 +737,7 @@ async fn plugin_read_maps_missing_remote_plugin_to_invalid_request() -> Result<(
 }
 
 #[tokio::test]
+#[ignore = "Astral supports local plugin marketplaces only; remote plugin details are unsupported"]
 async fn plugin_read_rejects_remote_marketplace_when_plugins_are_disabled() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;
@@ -873,6 +879,7 @@ enabled = true
 }
 
 #[tokio::test]
+#[ignore = "Astral supports local plugin marketplaces only; remote plugin sharing is unsupported"]
 async fn plugin_read_returns_share_context_for_shared_local_plugin() -> Result<()> {
     let codex_home = TempDir::new()?;
     let repo_root = TempDir::new()?;
@@ -1012,6 +1019,7 @@ async fn plugin_read_returns_share_context_for_shared_local_plugin() -> Result<(
 }
 
 #[tokio::test]
+#[ignore = "Astral supports local plugin marketplaces only; remote plugin sharing is unsupported"]
 async fn plugin_read_keeps_remote_version_when_share_principals_are_missing() -> Result<()> {
     let codex_home = TempDir::new()?;
     let repo_root = TempDir::new()?;
@@ -1155,6 +1163,7 @@ async fn plugin_read_ignores_local_share_mapping_when_remote_control_plane_disab
 }
 
 #[tokio::test]
+#[ignore = "Astral supports local plugin marketplaces only; remote plugin sharing is unsupported"]
 async fn plugin_read_fails_on_malformed_share_mapping() -> Result<()> {
     let codex_home = TempDir::new()?;
     let repo_root = TempDir::new()?;
@@ -1468,10 +1477,7 @@ enabled = false
     assert_eq!(response.plugin.apps.len(), 1);
     assert_eq!(response.plugin.apps[0].id, "gmail");
     assert_eq!(response.plugin.apps[0].name, "gmail");
-    assert_eq!(
-        response.plugin.apps[0].install_url.as_deref(),
-        Some("https://chatgpt.com/apps/gmail/gmail")
-    );
+    assert_eq!(response.plugin.apps[0].install_url, None);
     assert_eq!(response.plugin.apps[0].needs_auth, true);
     assert_eq!(response.plugin.mcp_servers.len(), 1);
     assert_eq!(response.plugin.mcp_servers[0], "demo");
@@ -1562,7 +1568,7 @@ async fn plugin_read_returns_app_needs_auth() -> Result<()> {
             .iter()
             .map(|app| (app.id.as_str(), app.needs_auth))
             .collect::<Vec<_>>(),
-        vec![("alpha", true), ("beta", false)]
+        vec![("alpha", true), ("beta", true)]
     );
 
     server_handle.abort();

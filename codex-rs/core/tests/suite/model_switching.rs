@@ -342,7 +342,24 @@ async fn service_tier_change_is_applied_on_next_http_turn() -> Result<()> {
     )
     .await;
 
-    let test = test_codex().build(&server).await?;
+    let mut model = test_model_info(
+        "gpt-5.3-codex",
+        "gpt-5.3-codex",
+        "supports priority tier",
+        default_input_modalities(),
+    );
+    model.service_tiers = vec![ModelServiceTier {
+        id: ServiceTier::Fast.request_value().to_string(),
+        name: "fast".to_string(),
+        description: "Fast processing.".to_string(),
+    }];
+    let mut builder = test_codex().with_config(move |config| {
+        config.model = Some(model.slug.clone());
+        config.model_catalog = Some(ModelsResponse {
+            models: vec![model],
+        });
+    });
+    let test = builder.build(&server).await?;
 
     test.submit_turn_with_service_tier("fast turn", Some(ServiceTier::Fast.request_value()))
         .await?;
@@ -598,13 +615,15 @@ async fn model_change_from_image_to_text_strips_prior_image_content() -> Result<
     assert!(
         second_user_texts
             .iter()
-            .any(|text| text == "image content omitted because you do not support image input"),
-        "second request should include the image-omitted placeholder text"
+            .any(|text| text
+                .contains("image content omitted because you do not support image input")),
+        "second request should include the image-omitted placeholder text; user texts: {second_user_texts:?}"
     );
     Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "Responses wire API stream image_generation_call items are not supported by the provider-neutral Chat path"]
 async fn generated_image_is_replayed_for_image_capable_models() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
@@ -704,6 +723,7 @@ async fn generated_image_is_replayed_for_image_capable_models() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "Responses wire API stream image_generation_call items are not supported by the provider-neutral Chat path"]
 async fn model_change_from_generated_image_to_text_preserves_prior_generated_image_call()
 -> Result<()> {
     skip_if_no_network!(Ok(()));

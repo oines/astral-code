@@ -81,7 +81,7 @@ pub fn create_request_user_input_sse_response(call_id: &str) -> anyhow::Result<S
 
     Ok(responses::sse(vec![
         responses::ev_response_created("resp-1"),
-        responses::ev_function_call(call_id, "request_user_input", &tool_call_arguments),
+        responses::ev_function_call(call_id, "AskUserQuestion", &tool_call_arguments),
         responses::ev_completed("resp-1"),
     ]))
 }
@@ -101,7 +101,7 @@ pub fn create_request_permissions_sse_response(call_id: &str) -> anyhow::Result<
 
     Ok(responses::sse(vec![
         responses::ev_response_created("resp-1"),
-        responses::ev_function_call(call_id, "request_permissions", &tool_call_arguments),
+        responses::ev_function_call(call_id, "RequestPermissions", &tool_call_arguments),
         responses::ev_completed("resp-1"),
     ]))
 }

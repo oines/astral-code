@@ -174,6 +174,91 @@ fn diff_consumer_streams_apply_patch_changes() {
 }
 
 #[test]
+fn diff_consumer_streams_json_string_apply_patch_arguments() {
+    let mut consumer = ApplyPatchArgumentDiffConsumer::default();
+    assert!(consumer.push_delta("call-1".to_string(), "\"").is_none());
+    assert!(
+        consumer
+            .push_delta("call-1".to_string(), "*** Begin Patch\\n")
+            .is_none()
+    );
+
+    let event = consumer
+        .push_delta("call-1".to_string(), "*** Add File: hello.txt\\n+hello")
+        .expect("progress event");
+    assert_eq!(
+        event.changes,
+        HashMap::from([(
+            PathBuf::from("hello.txt"),
+            FileChange::Add {
+                content: String::new(),
+            },
+        )])
+    );
+
+    assert!(
+        consumer
+            .push_delta("call-1".to_string(), "\\n+world\\n*** End Patch\"")
+            .is_none()
+    );
+    let event = consumer
+        .finish_update_on_complete()
+        .expect("finish parser")
+        .expect("progress event");
+    assert_eq!(
+        event.changes,
+        HashMap::from([(
+            PathBuf::from("hello.txt"),
+            FileChange::Add {
+                content: "hello\nworld\n".to_string(),
+            },
+        )])
+    );
+}
+
+#[test]
+fn diff_consumer_streams_json_object_apply_patch_arguments() {
+    let mut consumer = ApplyPatchArgumentDiffConsumer::default();
+    assert!(
+        consumer
+            .push_delta("call-1".to_string(), "{\"input\":\"*** Begin Patch\\n")
+            .is_none()
+    );
+
+    let event = consumer
+        .push_delta("call-1".to_string(), "*** Add File: hello.txt\\n+hello")
+        .expect("progress event");
+    assert_eq!(
+        event.changes,
+        HashMap::from([(
+            PathBuf::from("hello.txt"),
+            FileChange::Add {
+                content: String::new(),
+            },
+        )])
+    );
+
+    assert!(
+        consumer
+            .push_delta("call-1".to_string(), "\\n+world\\n*** End Patch\"}")
+            .is_none()
+    );
+    let event = consumer
+        .finish_update_on_complete()
+        .expect("finish parser")
+        .expect("progress event");
+    assert_eq!(
+        event.changes,
+        HashMap::from([(
+            PathBuf::from("hello.txt"),
+            FileChange::Add {
+                content: "hello\nworld\n".to_string(),
+            },
+        )])
+    );
+}
+
+#[test]
 fn diff_consumer_streams_apply_patch_changes_with_environment_header() {
     let mut consumer = ApplyPatchArgumentDiffConsumer::default();
     assert!(

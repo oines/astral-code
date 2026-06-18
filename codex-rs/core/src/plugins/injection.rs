@@ -38,7 +38,7 @@ pub(crate) fn build_plugin_injections(
                 .collect::<BTreeSet<String>>()
                 .into_iter()
                 .collect::<Vec<_>>();
-            let available_apps = available_connectors
+            let mut available_apps = available_connectors
                 .iter()
                 .filter(|connector| {
                     connector.is_enabled
@@ -48,9 +48,20 @@ pub(crate) fn build_plugin_injections(
                             .any(|plugin_name| plugin_name == &plugin.display_name)
                 })
                 .map(connector_display_label)
-                .collect::<BTreeSet<String>>()
-                .into_iter()
-                .collect::<Vec<_>>();
+                .collect::<BTreeSet<String>>();
+            available_apps.extend(
+                mcp_tools
+                    .iter()
+                    .filter(|tool| {
+                        tool.server_name == CODEX_APPS_MCP_SERVER_NAME
+                            && tool
+                                .plugin_display_names
+                                .iter()
+                                .any(|plugin_name| plugin_name == &plugin.display_name)
+                    })
+                    .filter_map(|tool| tool.connector_name.clone().or(tool.connector_id.clone())),
+            );
+            let available_apps = available_apps.into_iter().collect::<Vec<_>>();
             render_explicit_plugin_instructions(plugin, &available_mcp_servers, &available_apps)
                 .map(PluginInstructions::new)
                 .map(ContextualUserFragment::into)

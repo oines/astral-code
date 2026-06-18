@@ -288,11 +288,11 @@ async fn record_blocked_request_sets_policy_outcome_for_owner_call() {
 
     assert!(cancellation_token.is_cancelled());
     assert_eq!(
-            service.take_call_outcome("registration-1").await,
-            Some(NetworkApprovalOutcome::DeniedByPolicy(
-                "Network access to \"example.com\" was blocked: domain is not on the allowlist for the current sandbox mode.".to_string()
-            ))
-        );
+        service.take_call_outcome("registration-1").await,
+        Some(NetworkApprovalOutcome::DeniedByPolicy(
+            "Network access to \"example.com\" was blocked: domain is not on the allowlist for the current sandbox mode.\n\n[Sandbox Intervention] To proceed, call RequestPermissions to request network access ({\"network\": {\"enabled\": true}}). Wait for approval, then retry the original action.\nDo not retry the blocked action before permission is granted.".to_string()
+        ))
+    );
 }
 
 #[tokio::test]

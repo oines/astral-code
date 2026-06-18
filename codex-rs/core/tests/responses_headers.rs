@@ -22,7 +22,6 @@ use core_test_support::test_codex::test_codex;
 use futures::StreamExt;
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;
-use wiremock::matchers::header;
 
 fn normalize_git_remote_url(url: &str) -> String {
     let normalized = url.trim().trim_end_matches('/');
@@ -35,7 +34,7 @@ fn normalize_git_remote_url(url: &str) -> String {
 const TEST_INSTALLATION_ID: &str = "11111111-1111-4111-8111-111111111111";
 
 #[tokio::test]
-async fn responses_stream_includes_subagent_header_on_review() {
+async fn chat_stream_includes_session_context_headers_on_review() {
     core_test_support::skip_if_no_network!();
 
     let server = responses::start_mock_server().await;
@@ -44,12 +43,7 @@ async fn responses_stream_includes_subagent_header_on_review() {
         responses::ev_completed("resp-1"),
     ]);
 
-    let request_recorder = responses::mount_sse_once_match(
-        &server,
-        header("x-astral-subagent", "review"),
-        response_body,
-    )
-    .await;
+    let request_recorder = responses::mount_sse_once(&server, response_body).await;
 
     let provider = ModelProviderInfo {
         name: "mock".into(),
@@ -151,28 +145,22 @@ async fn responses_stream_includes_subagent_header_on_review() {
 
     let request = request_recorder.single_request();
     let expected_window_id = format!("{thread_id}:0");
-    assert_eq!(
-        request.header("x-astral-subagent").as_deref(),
-        Some("review")
-    );
+    assert_eq!(request.header("x-astral-subagent"), None);
     assert_eq!(
         request.header("x-astral-window-id").as_deref(),
         Some(expected_window_id.as_str())
     );
     assert_eq!(request.header("x-astral-parent-thread-id"), None);
     assert_eq!(
-        request.body_json()["client_metadata"]["x-astral-installation-id"].as_str(),
+        request.header("x-astral-installation-id").as_deref(),
         Some(TEST_INSTALLATION_ID)
     );
-    assert_eq!(
-        request.body_json()["client_metadata"]["x-astral-window-id"].as_str(),
-        Some(expected_window_id.as_str())
-    );
+    assert!(request.body_json().get("client_metadata").is_none());
     assert_eq!(request.header("x-codex-sandbox"), None);
 }
 
 #[tokio::test]
-async fn responses_stream_includes_subagent_header_on_other() {
+async fn chat_stream_includes_session_context_headers_on_other_subagent() {
     core_test_support::skip_if_no_network!();
 
     let server = responses::start_mock_server().await;
@@ -181,12 +169,7 @@ async fn responses_stream_includes_subagent_header_on_other() {
         responses::ev_completed("resp-1"),
     ]);
 
-    let request_recorder = responses::mount_sse_once_match(
-        &server,
-        header("x-astral-subagent", "my-task"),
-        response_body,
-    )
-    .await;
+    let request_recorder = responses::mount_sse_once(&server, response_body).await;
 
     let provider = ModelProviderInfo {
         name: "mock".into(),
@@ -288,14 +271,17 @@ async fn responses_stream_includes_subagent_header_on_other() {
     }
 
     let request = request_recorder.single_request();
+    let expected_window_id = format!("{thread_id}:0");
+    assert_eq!(request.header("x-astral-subagent"), None);
     assert_eq!(
-        request.header("x-astral-subagent").as_deref(),
-        Some("my-task")
+        request.header("x-astral-window-id").as_deref(),
+        Some(expected_window_id.as_str())
     );
+    assert_eq!(request.header("x-astral-parent-thread-id"), None);
 }
 
 #[tokio::test]
-async fn responses_respects_model_info_overrides_from_config() {
+async fn generic_chat_stream_omits_private_reasoning_fields() {
     core_test_support::skip_if_no_network!();
 
     let server = responses::start_mock_server().await;
@@ -412,22 +398,14 @@ async fn responses_respects_model_info_overrides_from_config() {
 
     let request = request_recorder.single_request();
     let body = request.body_json();
-    let reasoning = body
-        .get("reasoning")
-        .and_then(|value| value.as_object())
-        .cloned();
-
     assert!(
-        reasoning.is_some(),
-        "reasoning should be present when config enables summaries"
+        body.get("reasoning").is_none(),
+        "generic OpenAI chat requests should not include private reasoning fields: {body:?}"
     );
-
     assert_eq!(
-        reasoning
-            .as_ref()
-            .and_then(|value| value.get("summary"))
-            .and_then(|value| value.as_str()),
-        Some("detailed")
+        body.get("reasoning_effort"),
+        None,
+        "generic OpenAI chat requests should not include private reasoning effort"
     );
 }
 

@@ -176,7 +176,7 @@ fn write_auth_json(
     }
 
     let auth_json = json!({
-        "OPENAI_API_KEY": openai_api_key,
+        "ASTRAL_API_KEY": openai_api_key,
         "tokens": tokens,
         // RFC3339 datetime; value doesn't matter for these tests
         "last_refresh": chrono::Utc::now(),
@@ -566,8 +566,10 @@ async fn resume_replays_legacy_js_repl_image_rollout_shapes() {
     let legacy_output_index = input
         .iter()
         .position(|item| {
-            item.get("type").and_then(|value| value.as_str()) == Some("custom_tool_call_output")
-                && item.get("call_id").and_then(|value| value.as_str()) == Some("legacy-js-call")
+            matches!(
+                item.get("type").and_then(|value| value.as_str()),
+                Some("custom_tool_call_output" | "function_call_output")
+            ) && item.get("call_id").and_then(|value| value.as_str()) == Some("legacy-js-call")
         })
         .expect("legacy custom tool output should be replayed");
     assert_eq!(
@@ -784,9 +786,6 @@ async fn includes_session_id_thread_id_and_model_headers_in_request() {
     assert_eq!(request.path(), "/v1/chat/completions");
     let request_session_id = request.header("session-id").expect("session-id header");
     let request_thread_id = request.header("thread-id").expect("thread-id header");
-    let request_authorization = request
-        .header("authorization")
-        .expect("authorization header");
     let request_originator = request.header("originator").expect("originator header");
     let installation_id =
         std::fs::read_to_string(test.codex_home_path().join(INSTALLATION_ID_FILENAME))
@@ -796,7 +795,6 @@ async fn includes_session_id_thread_id_and_model_headers_in_request() {
     assert_eq!(request_session_id, expected_session_id.to_string());
     assert_eq!(request_thread_id, thread_id_string.as_str());
     assert_eq!(request_originator, originator().value);
-    assert_eq!(request_authorization, "Bearer Test API Key");
     assert_eq!(
         request.header("x-astral-installation-id").as_deref(),
         Some(installation_id.as_str())
@@ -1000,7 +998,7 @@ async fn includes_base_instructions_override_in_request() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn prefers_apikey_when_config_prefers_apikey_even_with_chatgpt_tokens() {
+async fn uses_provider_bearer_token_even_with_stored_auth_json() {
     skip_if_no_network!();
 
     // Mock server
@@ -1011,7 +1009,7 @@ async fn prefers_apikey_when_config_prefers_apikey_even_with_chatgpt_tokens() {
         ev_completed("resp1"),
     ]));
 
-    // Expect API key header, no ChatGPT account header required.
+    // Expect provider-local bearer auth, no stored account header required.
     Mock::given(method("POST"))
         .and(path("/v1/chat/completions"))
         .and(header_regex("Authorization", r"Bearer sk-test-key"))
@@ -1022,12 +1020,15 @@ async fn prefers_apikey_when_config_prefers_apikey_even_with_chatgpt_tokens() {
 
     let mut model_provider =
         ModelProviderInfo::create_openai_provider(Some(format!("{}/v1", server.uri())));
+    model_provider.env_key = None;
+    model_provider.env_key_instructions = None;
+    model_provider.experimental_bearer_token = Some("sk-test-key".to_string());
     model_provider.supports_websockets = false;
 
     // Init session
     let codex_home = TempDir::new().unwrap();
-    // Write auth.json that contains both API key and legacy hosted tokens, but
-    // config will force API key preference.
+    // Write auth.json that contains stored credentials, but provider-local
+    // bearer auth should take precedence.
     let _jwt = write_auth_json(
         &codex_home,
         Some("sk-test-key"),
@@ -1158,7 +1159,7 @@ async fn includes_user_instructions_message_in_request() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn includes_apps_guidance_as_developer_message_for_chatgpt_auth() {
+async fn omits_apps_guidance_without_enabled_connectors() {
     skip_if_no_network!();
     let server = MockServer::start().await;
     let apps_server = AppsTestServer::mount(&server)
@@ -1208,15 +1209,10 @@ async fn includes_apps_guidance_as_developer_message_for_chatgpt_auth() {
         "Apps (Connectors) can be explicitly triggered in user messages in the format";
 
     assert!(
-        message_input_text_contains(&request, "developer", apps_snippet),
-        "expected apps guidance in a developer message, got {:?}",
-        request.body_json()["input"]
-    );
-
-    assert!(
-        !message_input_text_contains(&request, "user", apps_snippet),
-        "did not expect apps guidance in user messages, got {:?}",
-        request.body_json()["input"]
+        !message_input_text_contains(&request, "developer", apps_snippet)
+            && !message_input_text_contains(&request, "user", apps_snippet),
+        "did not expect apps guidance without enabled connectors, got {:?}",
+        request.input()
     );
 }
 
@@ -1274,7 +1270,7 @@ async fn omits_apps_guidance_for_api_key_auth_even_when_feature_enabled() {
         !message_input_text_contains(&request, "developer", apps_snippet)
             && !message_input_text_contains(&request, "user", apps_snippet),
         "did not expect apps guidance for API key auth, got {:?}",
-        request.body_json()["input"]
+        request.input()
     );
 }
 
@@ -1329,7 +1325,7 @@ async fn omits_apps_guidance_when_configured_off() {
     assert!(
         !message_input_text_contains(&request, "developer", "<apps_instructions>"),
         "did not expect apps instructions when include_apps_instructions = false, got {:?}",
-        request.body_json()["input"]
+        request.input()
     );
 }
 
@@ -1535,7 +1531,7 @@ async fn skills_use_aliases_in_developer_message_under_budget_pressure() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn includes_configured_effort_in_request() -> anyhow::Result<()> {
+async fn configured_effort_is_not_sent_for_generic_openai_chat() -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
     let server = MockServer::start().await;
 
@@ -1576,14 +1572,14 @@ async fn includes_configured_effort_in_request() -> anyhow::Result<()> {
             .get("reasoning")
             .and_then(|t| t.get("effort"))
             .and_then(|v| v.as_str()),
-        Some("medium")
+        None
     );
 
     Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn includes_no_effort_in_request() -> anyhow::Result<()> {
+async fn default_effort_is_not_sent_for_generic_openai_chat() -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
     let server = MockServer::start().await;
 
@@ -1618,15 +1614,14 @@ async fn includes_no_effort_in_request() -> anyhow::Result<()> {
             .get("reasoning")
             .and_then(|t| t.get("effort"))
             .and_then(|v| v.as_str()),
-        Some("medium")
+        None
     );
 
     Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn includes_default_reasoning_effort_in_request_when_defined_by_model_info()
--> anyhow::Result<()> {
+async fn default_reasoning_effort_is_not_sent_for_generic_openai_chat() -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
     let server = MockServer::start().await;
 
@@ -1661,7 +1656,7 @@ async fn includes_default_reasoning_effort_in_request_when_defined_by_model_info
             .get("reasoning")
             .and_then(|t| t.get("effort"))
             .and_then(|v| v.as_str()),
-        Some("medium")
+        None
     );
 
     Ok(())
@@ -1721,14 +1716,14 @@ async fn user_turn_collaboration_mode_overrides_model_and_effort() -> anyhow::Re
             .get("reasoning")
             .and_then(|t| t.get("effort"))
             .and_then(|v| v.as_str()),
-        Some("high")
+        None
     );
 
     Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn configured_reasoning_summary_is_sent() -> anyhow::Result<()> {
+async fn configured_reasoning_summary_is_not_sent_for_generic_openai_chat() -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
     let server = MockServer::start().await;
 
@@ -1768,7 +1763,7 @@ async fn configured_reasoning_summary_is_sent() -> anyhow::Result<()> {
             .get("reasoning")
             .and_then(|reasoning| reasoning.get("summary"))
             .and_then(|value| value.as_str()),
-        Some("concise")
+        None
     );
     pretty_assertions::assert_eq!(
         request_body
@@ -1899,7 +1894,7 @@ async fn user_turn_explicit_reasoning_summary_overrides_model_catalog_default() 
             .get("reasoning")
             .and_then(|reasoning| reasoning.get("summary"))
             .and_then(|value| value.as_str()),
-        Some("concise")
+        None
     );
 
     Ok(())
@@ -2009,7 +2004,7 @@ async fn reasoning_summary_none_overrides_model_catalog_default() -> anyhow::Res
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn includes_default_verbosity_in_request() -> anyhow::Result<()> {
+async fn default_verbosity_is_not_sent_for_generic_openai_chat() -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
     let server = MockServer::start().await;
 
@@ -2044,7 +2039,7 @@ async fn includes_default_verbosity_in_request() -> anyhow::Result<()> {
             .get("text")
             .and_then(|t| t.get("verbosity"))
             .and_then(|v| v.as_str()),
-        Some("low")
+        None
     );
 
     Ok(())
@@ -2098,7 +2093,7 @@ async fn configured_verbosity_not_sent_for_models_without_support() -> anyhow::R
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn configured_verbosity_is_sent() -> anyhow::Result<()> {
+async fn configured_verbosity_is_not_sent_for_generic_openai_chat() -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
     let server = MockServer::start().await;
 
@@ -2139,7 +2134,7 @@ async fn configured_verbosity_is_sent() -> anyhow::Result<()> {
             .get("text")
             .and_then(|t| t.get("verbosity"))
             .and_then(|v| v.as_str()),
-        Some("high")
+        None
     );
 
     Ok(())
@@ -3128,7 +3123,7 @@ async fn history_dedupes_streamed_and_final_messages_across_turns() {
         {
             "type": "message",
             "role": "assistant",
-            "content": [{"type":"output_text","text":"Hey there!\n"}]
+            "content": [{"type":"output_text","text":"Hey there!"}]
         },
         {
             "type": "message",
@@ -3138,7 +3133,7 @@ async fn history_dedupes_streamed_and_final_messages_across_turns() {
         {
             "type": "message",
             "role": "assistant",
-            "content": [{"type":"output_text","text":"Hey there!\n"}]
+            "content": [{"type":"output_text","text":"Hey there!"}]
         },
         {
             "type": "message",
@@ -3147,12 +3142,7 @@ async fn history_dedupes_streamed_and_final_messages_across_turns() {
         }
     ]);
 
-    let r3_input_array = requests[2]
-        .body_json()
-        .get("input")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .expect("r3 missing input array");
+    let r3_input_array = requests[2].input();
     // skipping earlier context and developer messages
     let tail_len = r3_tail_expected.as_array().unwrap().len();
     let actual_tail = &r3_input_array[r3_input_array.len() - tail_len..];

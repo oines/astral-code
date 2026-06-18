@@ -155,7 +155,13 @@ pub fn search_capable_apps_builder(apps_base_url: impl Into<String>) -> TestCode
     let apps_base_url = apps_base_url.into();
     test_codex()
         .with_auth(CodexAuth::create_dummy_api_key_auth_for_testing())
-        .with_config(move |config| configure_search_capable_apps(config, apps_base_url.as_str()))
+        .with_config(move |config| {
+            configure_search_capable_apps(config, apps_base_url.as_str());
+            config
+                .features
+                .enable(Feature::ToolSearchAlwaysDeferMcpTools)
+                .expect("test config should allow feature update");
+        })
 }
 
 fn apps_tool_call_id(body: &Value) -> Option<&str> {
@@ -335,6 +341,9 @@ impl Respond for CodexAppsJsonRpcResponder {
                         "tools": [
                             {
                                 "name": CALENDAR_CREATE_EVENT_TOOL_NAME,
+                                "connector_id": CONNECTOR_ID,
+                                "connector_name": self.connector_name.clone(),
+                                "connector_description": self.connector_description.clone(),
                                 "description": "Create a calendar event.",
                                 "annotations": {
                                     "readOnlyHint": false,
@@ -365,6 +374,9 @@ impl Respond for CodexAppsJsonRpcResponder {
                             },
                             {
                                 "name": CALENDAR_LIST_EVENTS_TOOL_NAME,
+                                "connector_id": CONNECTOR_ID,
+                                "connector_name": self.connector_name.clone(),
+                                "connector_description": self.connector_description.clone(),
                                 "description": "List calendar events.",
                                 "annotations": {
                                     "readOnlyHint": true
@@ -390,6 +402,9 @@ impl Respond for CodexAppsJsonRpcResponder {
                             },
                             {
                                 "name": CALENDAR_EXTRACT_TEXT_TOOL_NAME,
+                                "connector_id": CONNECTOR_ID,
+                                "connector_name": self.connector_name.clone(),
+                                "connector_description": self.connector_description.clone(),
                                 "description": "Extract text from an uploaded document.",
                                 "annotations": {
                                     "readOnlyHint": false
@@ -433,6 +448,9 @@ impl Respond for CodexAppsJsonRpcResponder {
                     for index in 3..SEARCHABLE_TOOL_COUNT {
                         tools.push(json!({
                             "name": format!("calendar_timezone_option_{index}"),
+                            "connector_id": CONNECTOR_ID,
+                            "connector_name": self.connector_name.clone(),
+                            "connector_description": self.connector_description.clone(),
                             "description": format!("Read timezone option {index}."),
                             "annotations": {
                                 "readOnlyHint": true
@@ -459,6 +477,9 @@ impl Respond for CodexAppsJsonRpcResponder {
                 {
                     tools.push(json!({
                         "name": CALENDAR_APP_ONLY_TOOL_NAME,
+                        "connector_id": CONNECTOR_ID,
+                        "connector_name": self.connector_name.clone(),
+                        "connector_description": self.connector_description.clone(),
                         "description": "Open a calendar app-only action.",
                         "inputSchema": {
                             "type": "object",

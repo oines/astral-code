@@ -43,13 +43,17 @@ fn call_output(req: &ResponsesRequest, call_id: &str) -> String {
         Some(call_id),
         "mismatched call_id in function_call_output"
     );
-    let (content_opt, _success) = match req.function_call_output_content_and_success(call_id) {
-        Some(values) => values,
-        None => panic!("function_call_output present"),
-    };
-    match content_opt {
-        Some(content) => content,
-        None => panic!("function_call_output content present"),
+    let output = raw
+        .get("output")
+        .cloned()
+        .unwrap_or_else(|| panic!("function_call_output output present"));
+    match output {
+        Value::String(content) => content,
+        Value::Object(_) | Value::Array(_) => serde_json::to_string(&output)
+            .unwrap_or_else(|err| panic!("function_call_output output serializes: {err}")),
+        Value::Number(_) | Value::Bool(_) | Value::Null => {
+            panic!("function_call_output output is text or JSON")
+        }
     }
 }
 
@@ -122,7 +126,7 @@ async fn request_user_input_round_trip_for_mode(mode: ModeKind) -> anyhow::Resul
 
     let first_response = sse(vec![
         ev_response_created("resp-1"),
-        ev_function_call(call_id, "request_user_input", &request_args),
+        ev_function_call(call_id, "AskUserQuestion", &request_args),
         ev_rate_limits(),
         ev_completed("resp-1"),
     ]);
@@ -272,7 +276,7 @@ async fn request_user_input_interrupt_emits_deferred_token_count() -> anyhow::Re
 
     let response = sse(vec![
         ev_response_created("resp-interrupt"),
-        ev_function_call(call_id, "request_user_input", &request_args),
+        ev_function_call(call_id, "AskUserQuestion", &request_args),
         ev_completed_with_tokens("resp-interrupt", /*total_tokens*/ 77),
     ]);
     responses::mount_sse_once(&server, response).await;
@@ -410,7 +414,7 @@ where
     assert_eq!(success, None);
     assert_eq!(
         output,
-        format!("request_user_input is unavailable in {mode_name} mode")
+        "request_user_input is internal in Astral; call AskUserQuestion when you need a user clarification."
     );
 
     Ok(())

@@ -393,7 +393,31 @@ async fn exec_end_without_begin_does_not_flush_unrelated_running_exploring_cell(
 
     let orphan =
         begin_unified_exec_startup(&mut chat, "call-orphan", "proc-1", "echo repro-marker");
-    assert!(drain_insert_history(&mut rx).is_empty());
+    let flushed = drain_insert_history(&mut rx);
+    assert_eq!(
+        flushed.len(),
+        1,
+        "starting a background task should finalize the prior exploring cell"
+    );
+    let flushed_blob = lines_to_single_string(&flushed[0]);
+    assert!(
+        flushed_blob.contains("• Exploring"),
+        "expected exploring cell to flush: {flushed_blob:?}"
+    );
+    assert!(
+        flushed_blob.contains("Read null"),
+        "expected exploring command to flush: {flushed_blob:?}"
+    );
+
+    let active = active_blob(&chat);
+    assert!(
+        active.contains("Bash task proc-1 running"),
+        "expected background task to become the live activity: {active:?}"
+    );
+    assert!(
+        active.contains("echo repro-marker"),
+        "expected background command in live activity: {active:?}"
+    );
 
     end_exec(
         &mut chat,
@@ -404,24 +428,18 @@ async fn exec_end_without_begin_does_not_flush_unrelated_running_exploring_cell(
     );
 
     let cells = drain_insert_history(&mut rx);
-    assert_eq!(cells.len(), 1, "only the orphan end should be inserted");
-    let orphan_blob = lines_to_single_string(&cells[0]);
     assert!(
-        orphan_blob.contains("• Ran echo repro-marker"),
-        "expected orphan end to render a standalone entry: {orphan_blob:?}"
+        cells.is_empty(),
+        "background task completion should update the live card until turn end"
     );
     let active = active_blob(&chat);
     assert!(
-        active.contains("• Exploring"),
-        "expected unrelated exploring call to remain active: {active:?}"
+        active.contains("Bash task proc-1 completed"),
+        "expected completed background task in live activity: {active:?}"
     );
     assert!(
-        active.contains("Read null"),
-        "expected active exploring command to remain visible: {active:?}"
-    );
-    assert!(
-        !active.contains("echo repro-marker"),
-        "orphaned end should not replace the active exploring cell: {active:?}"
+        active.contains("repro-marker"),
+        "expected background output in live activity: {active:?}"
     );
 }
 
@@ -436,16 +454,13 @@ async fn exec_end_without_begin_flushes_completed_unrelated_exploring_cell() {
     assert!(active_blob(&chat).contains("ls -la"));
 
     let orphan = begin_unified_exec_startup(&mut chat, "call-after", "proc-1", "echo after");
-    end_exec(&mut chat, orphan, "after\n", "", /*exit_code*/ 0);
-
     let cells = drain_insert_history(&mut rx);
     assert_eq!(
         cells.len(),
-        2,
-        "completed exploring cell should flush before the orphan entry"
+        1,
+        "completed exploring cell should flush before the background live activity"
     );
     let first = lines_to_single_string(&cells[0]);
-    let second = lines_to_single_string(&cells[1]);
     assert!(
         first.contains("• Explored"),
         "expected flushed exploring cell: {first:?}"
@@ -454,13 +469,22 @@ async fn exec_end_without_begin_flushes_completed_unrelated_exploring_cell() {
         first.contains("List ls -la"),
         "expected flushed exploring cell: {first:?}"
     );
+
+    end_exec(&mut chat, orphan, "after\n", "", /*exit_code*/ 0);
+
+    let cells = drain_insert_history(&mut rx);
     assert!(
-        second.contains("• Ran echo after"),
-        "expected orphan end entry after flush: {second:?}"
+        cells.is_empty(),
+        "background task completion should stay on the live activity"
+    );
+    let active = active_blob(&chat);
+    assert!(
+        active.contains("Bash task proc-1 completed"),
+        "expected completed background live activity: {active:?}"
     );
     assert!(
-        chat.transcript.active_cell.is_none(),
-        "both entries should be finalized"
+        active.contains("after"),
+        "expected background output in live activity: {active:?}"
     );
 }
 
@@ -661,6 +685,112 @@ async fn unified_exec_wait_before_streamed_agent_message_snapshot() {
 }
 
 #[tokio::test]
+async fn background_task_live_activity_orders_polling_tools_snapshot() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    handle_turn_started(&mut chat, "turn-1");
+
+    let begin = begin_unified_exec_startup(
+        &mut chat,
+        "call-bash",
+        "5665",
+        "for i in $(seq 1 10); do echo \"Step $i/10\"; sleep 1; done",
+    );
+    let started = active_blob(&chat);
+
+    handle_core_tool_begin(&mut chat, "call-list", "ListBackgroundTasks", json!({}));
+    handle_core_tool_end(
+        &mut chat,
+        "call-list",
+        "ListBackgroundTasks",
+        json!({}),
+        Some(
+            json!({
+                "tasks": [{
+                    "task_id": "5665",
+                    "status": "running",
+                    "command": "for i in $(seq 1 10); do echo \"Step $i/10\"; sleep 1; done"
+                }]
+            })
+            .to_string(),
+        ),
+        None,
+    );
+    handle_core_tool_begin(
+        &mut chat,
+        "call-read",
+        "ReadTaskOutput",
+        json!({ "task_id": "5665" }),
+    );
+    handle_core_tool_end(
+        &mut chat,
+        "call-read",
+        "ReadTaskOutput",
+        json!({ "task_id": "5665" }),
+        Some("Step 2/10\nStep 3/10\n".to_string()),
+        None,
+    );
+    let polled = active_blob(&chat);
+
+    end_exec(
+        &mut chat,
+        begin,
+        "Step 8/10\nStep 9/10\nStep 10/10\nDone!\n",
+        "",
+        /*exit_code*/ 0,
+    );
+    let completed = active_blob(&chat);
+    let pre_turn_history = drain_insert_history(&mut rx);
+    assert!(
+        pre_turn_history.is_empty(),
+        "polling tools should update the live card without history rows"
+    );
+
+    handle_turn_completed(&mut chat, "turn-1", Some(10_000));
+    let history = drain_insert_history(&mut rx)
+        .iter()
+        .map(|lines| lines_to_single_string(lines))
+        .collect::<String>();
+    assert!(!history.contains("Called ListBackgroundTasks"));
+    assert!(!history.contains("Called ReadTaskOutput"));
+    assert!(!history.contains("Ran for i in"));
+
+    assert_chatwidget_snapshot!(
+        "background_task_live_activity_orders_polling_tools",
+        format!(
+            "Started:\n{started}\nPolled:\n{polled}\nCompleted:\n{completed}\nHistory:\n{history}"
+        )
+    );
+}
+
+#[tokio::test]
+async fn unknown_background_task_tool_keeps_fallback_history() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.on_task_started();
+
+    handle_core_tool_begin(
+        &mut chat,
+        "call-read",
+        "ReadTaskOutput",
+        json!({ "task_id": "missing" }),
+    );
+    handle_core_tool_end(
+        &mut chat,
+        "call-read",
+        "ReadTaskOutput",
+        json!({ "task_id": "missing" }),
+        Some("No such task".to_string()),
+        None,
+    );
+
+    let history = drain_insert_history(&mut rx)
+        .iter()
+        .map(|lines| lines_to_single_string(lines))
+        .collect::<String>();
+    assert!(history.contains("Called ReadTaskOutput(task_id=missing)"));
+    assert!(history.contains("No such task"));
+}
+
+#[tokio::test]
 async fn final_worked_for_uses_cumulative_turn_duration_snapshot() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     handle_turn_started(&mut chat, "turn-1");
@@ -743,16 +873,13 @@ async fn unified_exec_waiting_multiple_empty_snapshots() {
 
     terminal_interaction(&mut chat, "call-wait-1a", "proc-1", "");
     terminal_interaction(&mut chat, "call-wait-1b", "proc-1", "");
-    assert_eq!(
-        chat.status_state.current_status.header,
-        "Waiting for background terminal"
-    );
+    assert_eq!(chat.status_state.current_status.header, "Working");
     let status = chat
         .bottom_pane
         .status_widget()
         .expect("status indicator should be visible");
-    assert_eq!(status.header(), "Waiting for background terminal");
-    assert_eq!(status.details(), Some("just fix"));
+    assert_eq!(status.header(), "Working");
+    assert_eq!(status.details(), None);
 
     handle_turn_completed(&mut chat, "turn-wait-3", /*duration_ms*/ None);
 
@@ -794,11 +921,15 @@ async fn unified_exec_empty_then_non_empty_snapshot() {
     terminal_interaction(&mut chat, "call-wait-2b", "proc-2", "ls\n");
 
     let cells = drain_insert_history(&mut rx);
-    let combined = cells
-        .iter()
-        .map(|lines| lines_to_single_string(lines))
-        .collect::<String>();
-    assert_chatwidget_snapshot!("unified_exec_empty_then_non_empty_after", combined);
+    assert!(
+        cells.is_empty(),
+        "terminal interactions should update live activity without history rows"
+    );
+    let rendered = render_bottom_popup(&chat, /*width*/ 48);
+    assert_chatwidget_snapshot!(
+        "unified_exec_empty_then_non_empty_after",
+        normalize_snapshot_paths(rendered)
+    );
 }
 
 #[tokio::test]
@@ -809,38 +940,31 @@ async fn unified_exec_non_empty_then_empty_snapshots() {
 
     terminal_interaction(&mut chat, "call-wait-3a", "proc-3", "pwd\n");
     terminal_interaction(&mut chat, "call-wait-3b", "proc-3", "");
-    assert_eq!(
-        chat.status_state.current_status.header,
-        "Waiting for background terminal"
-    );
+    assert_eq!(chat.status_state.current_status.header, "Working");
     let status = chat
         .bottom_pane
         .status_widget()
         .expect("status indicator should be visible");
-    assert_eq!(status.header(), "Waiting for background terminal");
-    assert_eq!(status.details(), Some("just fix"));
+    assert_eq!(status.header(), "Working");
+    assert_eq!(status.details(), None);
     let pre_cells = drain_insert_history(&mut rx);
-    let active_combined = pre_cells
-        .iter()
-        .map(|lines| lines_to_single_string(lines))
-        .collect::<String>();
-    assert_chatwidget_snapshot!("unified_exec_non_empty_then_empty_active", active_combined);
+    assert!(
+        pre_cells.is_empty(),
+        "terminal interactions should update live activity without history rows"
+    );
+    let active_rendered = render_bottom_popup(&chat, /*width*/ 48);
+    assert_chatwidget_snapshot!(
+        "unified_exec_non_empty_then_empty_active",
+        normalize_snapshot_paths(active_rendered)
+    );
 
     handle_turn_completed(&mut chat, "turn-1", /*duration_ms*/ None);
 
     let post_cells = drain_insert_history(&mut rx);
-    let mut combined = pre_cells
+    let combined = post_cells
         .iter()
         .map(|lines| lines_to_single_string(lines))
         .collect::<String>();
-    let post = post_cells
-        .iter()
-        .map(|lines| lines_to_single_string(lines))
-        .collect::<String>();
-    if !combined.is_empty() && !post.is_empty() {
-        combined.push('\n');
-    }
-    combined.push_str(&post);
     assert_chatwidget_snapshot!("unified_exec_non_empty_then_empty_after", combined);
 }
 
@@ -1489,6 +1613,99 @@ async fn apply_patch_manual_flow_snapshot() {
         "apply_patch_manual_flow_history_approved",
         lines_to_single_string(&approved_lines)
     );
+}
+
+#[tokio::test]
+async fn successful_write_renders_diff_without_tool_noise_snapshot() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.on_task_started();
+
+    handle_core_tool_begin(
+        &mut chat,
+        "call-write",
+        "Write",
+        json!({ "file_path": "foo.txt" }),
+    );
+    let mut changes = HashMap::new();
+    changes.insert(
+        PathBuf::from("foo.txt"),
+        FileChange::Add {
+            content: "hello\n".to_string(),
+        },
+    );
+    handle_patch_apply_begin(&mut chat, "call-write", "turn-1", changes);
+    handle_core_tool_end(
+        &mut chat,
+        "call-write",
+        "Write",
+        json!({ "file_path": "foo.txt" }),
+        Some("File created successfully at: /tmp/project/foo.txt".to_string()),
+        None,
+    );
+
+    let history = drain_insert_history(&mut rx)
+        .iter()
+        .map(|lines| lines_to_single_string(lines))
+        .collect::<String>();
+    assert!(!history.contains("Called Write"));
+    assert!(history.contains("Added foo.txt"));
+    assert_chatwidget_snapshot!("successful_write_renders_diff_without_tool_noise", history);
+}
+
+#[tokio::test]
+async fn successful_write_without_diff_keeps_tool_fallback_history() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.on_task_started();
+
+    handle_core_tool_begin(
+        &mut chat,
+        "call-write",
+        "Write",
+        json!({ "file_path": "foo.txt" }),
+    );
+    handle_core_tool_end(
+        &mut chat,
+        "call-write",
+        "Write",
+        json!({ "file_path": "foo.txt" }),
+        Some("File created successfully at: /tmp/project/foo.txt".to_string()),
+        None,
+    );
+
+    let history = drain_insert_history(&mut rx)
+        .iter()
+        .map(|lines| lines_to_single_string(lines))
+        .collect::<String>();
+    assert!(history.contains("Called Write(foo.txt)"));
+    assert!(history.contains("File created successfully"));
+}
+
+#[tokio::test]
+async fn failed_edit_keeps_tool_fallback_history() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.on_task_started();
+
+    handle_core_tool_begin(
+        &mut chat,
+        "call-edit",
+        "Edit",
+        json!({ "file_path": "foo.txt" }),
+    );
+    handle_core_tool_end(
+        &mut chat,
+        "call-edit",
+        "Edit",
+        json!({ "file_path": "foo.txt" }),
+        None,
+        Some("String to replace not found".to_string()),
+    );
+
+    let history = drain_insert_history(&mut rx)
+        .iter()
+        .map(|lines| lines_to_single_string(lines))
+        .collect::<String>();
+    assert!(history.contains("Called Edit(foo.txt)"));
+    assert!(history.contains("String to replace not found"));
 }
 
 #[tokio::test]

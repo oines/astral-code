@@ -154,6 +154,7 @@ async fn plugin_uninstall_tracks_analytics_event() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Astral supports local plugin marketplaces only; remote plugin uninstall is unsupported"]
 async fn plugin_uninstall_rejects_remote_plugin_when_plugins_are_disabled() -> Result<()> {
     let codex_home = TempDir::new()?;
     std::fs::write(
@@ -187,6 +188,7 @@ plugins = false
 }
 
 #[tokio::test]
+#[ignore = "Astral supports local plugin marketplaces only; remote plugin uninstall is unsupported"]
 async fn plugin_uninstall_writes_remote_plugin_to_cloud_when_remote_plugin_enabled() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;
@@ -260,6 +262,7 @@ async fn plugin_uninstall_writes_remote_plugin_to_cloud_when_remote_plugin_enabl
 }
 
 #[tokio::test]
+#[ignore = "Astral supports local plugin marketplaces only; remote plugin uninstall is unsupported"]
 async fn plugin_uninstall_uses_detail_scope_for_cache_namespace() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;
@@ -332,6 +335,7 @@ async fn plugin_uninstall_uses_detail_scope_for_cache_namespace() -> Result<()> 
 }
 
 #[tokio::test]
+#[ignore = "Astral supports local plugin marketplaces only; remote plugin uninstall is unsupported"]
 async fn plugin_uninstall_accepts_workspace_remote_plugin_id_shape() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;
@@ -405,6 +409,7 @@ async fn plugin_uninstall_accepts_workspace_remote_plugin_id_shape() -> Result<(
 }
 
 #[tokio::test]
+#[ignore = "Astral supports local plugin marketplaces only; remote plugin uninstall is unsupported"]
 async fn plugin_uninstall_rejects_before_post_when_remote_detail_fetch_fails() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;

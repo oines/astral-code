@@ -2,8 +2,11 @@ use assert_matches::assert_matches;
 use std::sync::Arc;
 use std::time::Duration;
 
+use codex_protocol::models::PermissionProfile;
+use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::Op;
+use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::user_input::UserInput;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_function_call;
@@ -12,10 +15,34 @@ use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
+use core_test_support::test_codex::TestCodex;
+use core_test_support::test_codex::local_selections;
 use core_test_support::test_codex::test_codex;
+use core_test_support::test_codex::turn_permission_fields;
 use core_test_support::wait_for_event;
 use regex_lite::Regex;
 use serde_json::json;
+
+fn local_thread_settings(test: &TestCodex) -> ThreadSettingsOverrides {
+    let session_model = test.session_configured.model.clone();
+    let (sandbox_policy, permission_profile) =
+        turn_permission_fields(PermissionProfile::Disabled, test.config.cwd.as_path());
+    ThreadSettingsOverrides {
+        environments: Some(local_selections(test.config.cwd.clone())),
+        approval_policy: Some(AskForApproval::Never),
+        sandbox_policy: Some(sandbox_policy),
+        permission_profile,
+        collaboration_mode: Some(codex_protocol::config_types::CollaborationMode {
+            mode: codex_protocol::config_types::ModeKind::Default,
+            settings: codex_protocol::config_types::Settings {
+                model: session_model,
+                reasoning_effort: None,
+                developer_instructions: None,
+            },
+        }),
+        ..Default::default()
+    }
+}
 
 /// Integration test: spawn a long-running shell_command tool via a mocked SSE
 /// function call, then interrupt the session and expect TurnAborted.
@@ -29,19 +56,20 @@ async fn interrupt_long_running_tool_emits_turn_aborted() {
     })
     .to_string();
     let body = sse(vec![
+        ev_response_created("resp-sleep"),
         ev_function_call("call_sleep", "shell_command", &args),
-        ev_completed("done"),
+        ev_completed("resp-sleep"),
     ]);
 
     let server = start_mock_server().await;
     mount_sse_once(&server, body).await;
 
-    let codex = test_codex()
+    let fixture = test_codex()
         .with_model("gpt-5.4")
         .build(&server)
         .await
-        .unwrap()
-        .codex;
+        .unwrap();
+    let codex = Arc::clone(&fixture.codex);
 
     // Kick off a turn that triggers the function call.
     codex
@@ -53,7 +81,7 @@ async fn interrupt_long_running_tool_emits_turn_aborted() {
             final_output_json_schema: None,
             model_client_metadata: None,
             additional_context: Default::default(),
-            thread_settings: Default::default(),
+            thread_settings: local_thread_settings(&fixture),
         })
         .await
         .unwrap();
@@ -110,7 +138,7 @@ async fn interrupt_tool_records_history_entries() {
             final_output_json_schema: None,
             model_client_metadata: None,
             additional_context: Default::default(),
-            thread_settings: Default::default(),
+            thread_settings: local_thread_settings(&fixture),
         })
         .await
         .unwrap();
@@ -131,7 +159,7 @@ async fn interrupt_tool_records_history_entries() {
             final_output_json_schema: None,
             model_client_metadata: None,
             additional_context: Default::default(),
-            thread_settings: Default::default(),
+            thread_settings: local_thread_settings(&fixture),
         })
         .await
         .unwrap();
@@ -214,7 +242,7 @@ async fn interrupt_persists_turn_aborted_marker_in_next_request() {
             final_output_json_schema: None,
             model_client_metadata: None,
             additional_context: Default::default(),
-            thread_settings: Default::default(),
+            thread_settings: local_thread_settings(&fixture),
         })
         .await
         .unwrap();
@@ -235,7 +263,7 @@ async fn interrupt_persists_turn_aborted_marker_in_next_request() {
             final_output_json_schema: None,
             model_client_metadata: None,
             additional_context: Default::default(),
-            thread_settings: Default::default(),
+            thread_settings: local_thread_settings(&fixture),
         })
         .await
         .unwrap();

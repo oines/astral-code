@@ -34,6 +34,7 @@ use core_test_support::responses::ev_output_text_delta;
 use core_test_support::responses::ev_response_created;
 use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::mount_sse_sequence;
+use core_test_support::responses::request_input_items;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
@@ -899,8 +900,31 @@ fn request_hook_prompt_texts(
     request
         .message_input_texts("user")
         .into_iter()
-        .filter_map(|text| parse_hook_prompt_fragment(&text).map(|fragment| fragment.text))
+        .flat_map(|text| hook_prompt_texts_from_text(&text))
         .collect()
+}
+
+fn hook_prompt_texts_from_text(text: &str) -> Vec<String> {
+    let mut fragments = Vec::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("<hook_prompt") {
+        let candidate = &rest[start..];
+        let Some(end) = candidate.find("</hook_prompt>") else {
+            break;
+        };
+        let end = end + "</hook_prompt>".len();
+        if let Some(fragment) = parse_hook_prompt_fragment(&candidate[..end]) {
+            fragments.push(fragment.text);
+        }
+        rest = &candidate[end..];
+    }
+
+    if fragments.is_empty()
+        && let Some(fragment) = parse_hook_prompt_fragment(text)
+    {
+        fragments.push(fragment.text);
+    }
+    fragments
 }
 
 fn spilled_hook_output_path(text: &str) -> Option<&str> {
@@ -1027,16 +1051,18 @@ fn request_message_input_texts(body: &[u8], role: &str) -> Vec<String> {
         Ok(body) => body,
         Err(error) => panic!("parse request body: {error}"),
     };
-    body.get("input")
-        .and_then(Value::as_array)
+    request_input_items(&body)
         .into_iter()
-        .flatten()
         .filter(|item| item.get("type").and_then(Value::as_str) == Some("message"))
         .filter(|item| item.get("role").and_then(Value::as_str) == Some(role))
-        .filter_map(|item| item.get("content").and_then(Value::as_array))
+        .filter_map(|item| item.get("content").and_then(Value::as_array).cloned())
         .flatten()
         .filter(|span| span.get("type").and_then(Value::as_str) == Some("input_text"))
-        .filter_map(|span| span.get("text").and_then(Value::as_str).map(str::to_owned))
+        .filter_map(|span| {
+            span.get("text")
+                .and_then(Value::as_str)
+                .map(ToString::to_string)
+        })
         .collect()
 }
 
@@ -1493,13 +1519,13 @@ async fn resumed_thread_runs_resume_then_compact_session_start_hooks() -> Result
     assert!(
         developer_messages
             .iter()
-            .any(|message| message == resume_context),
+            .any(|message| message.contains(resume_context)),
         "resume matcher should inject additional context before the next model turn",
     );
     assert!(
         developer_messages
             .iter()
-            .any(|message| message == compact_context),
+            .any(|message| message.contains(compact_context)),
         "compact matcher should inject additional context before the next model turn",
     );
 
@@ -3931,7 +3957,7 @@ async fn post_tool_use_spills_large_feedback_message() -> Result<()> {
 }
 
 #[tokio::test]
-async fn post_tool_use_blocks_when_exec_session_completes_via_write_stdin() -> Result<()> {
+async fn post_tool_use_blocks_when_exec_session_completes_via_read_task_output() -> Result<()> {
     skip_if_no_network!(Ok(()));
     skip_if_windows!(Ok(()));
 
@@ -3947,8 +3973,7 @@ async fn post_tool_use_blocks_when_exec_session_completes_via_write_stdin() -> R
         "yield_time_ms": 250,
     });
     let poll_args = serde_json::json!({
-        "session_id": 1000,
-        "chars": "",
+        "task_id": 1000,
         "yield_time_ms": 5_000,
     });
     let feedback = "blocked by session post hook";
@@ -3968,7 +3993,7 @@ async fn post_tool_use_blocks_when_exec_session_completes_via_write_stdin() -> R
                 ev_response_created("resp-2"),
                 core_test_support::responses::ev_function_call(
                     poll_call_id,
-                    "write_stdin",
+                    "ReadTaskOutput",
                     &serde_json::to_string(&poll_args)?,
                 ),
                 ev_completed("resp-2"),
@@ -4007,7 +4032,7 @@ async fn post_tool_use_blocks_when_exec_session_completes_via_write_stdin() -> R
     let output = output_item
         .get("output")
         .and_then(Value::as_str)
-        .expect("write_stdin output string");
+        .expect("ReadTaskOutput output string");
     assert_eq!(output, feedback);
 
     let pre_hook_inputs = read_pre_tool_use_hook_inputs(test.codex_home_path())?;

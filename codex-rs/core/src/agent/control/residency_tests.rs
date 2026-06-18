@@ -21,6 +21,7 @@ use std::sync::Arc;
 #[tokio::test]
 async fn residency_slot_reservation_unloads_oldest_idle_v2_agent() {
     let mut config = test_config().await;
+    config.model = Some("gpt-5.2".to_string());
     let _ = config.features.enable(Feature::MultiAgentV2);
     config.multi_agent_v2.max_concurrent_threads_per_session = 2;
     let temp_home = tempfile::tempdir().expect("create temp home");
@@ -67,6 +68,7 @@ async fn residency_slot_reservation_unloads_oldest_idle_v2_agent() {
 #[tokio::test]
 async fn interrupted_v2_agent_is_lost_after_residency_eviction() {
     let mut config = test_config().await;
+    config.model = Some("gpt-5.2".to_string());
     let _ = config.features.enable(Feature::MultiAgentV2);
     config.multi_agent_v2.max_concurrent_threads_per_session = 2;
     let temp_home = tempfile::tempdir().expect("create temp home");

@@ -117,6 +117,7 @@ impl ChatWidget {
             }
         }
         self.flush_unified_exec_wait_streak();
+        self.commit_live_activity_summaries();
         if !from_replay {
             self.collect_runtime_metrics_delta();
             let runtime_metrics =

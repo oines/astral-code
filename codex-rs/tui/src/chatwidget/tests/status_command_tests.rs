@@ -29,6 +29,7 @@ async fn status_command_uses_cached_limits() {
     set_chatgpt_auth(&mut chat);
 
     chat.on_rate_limit_snapshot(Some(snapshot(/*percent*/ 92.0)));
+    drain_insert_history(&mut rx);
 
     chat.dispatch_command(SlashCommand::Status);
     let refreshed = match rx.try_recv() {
@@ -44,8 +45,9 @@ async fn status_command_uses_cached_limits() {
 }
 
 #[tokio::test]
-async fn status_command_uses_catalog_default_reasoning_when_config_empty() {
+async fn status_command_omits_reasoning_when_config_empty() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.4")).await;
+    set_chatgpt_auth(&mut chat);
     chat.config.model_reasoning_effort = None;
 
     chat.dispatch_command(SlashCommand::Status);
@@ -57,8 +59,12 @@ async fn status_command_uses_catalog_default_reasoning_when_config_empty() {
         other => panic!("expected status output, got {other:?}"),
     };
     assert!(
-        rendered.contains("gpt-5.4 (reasoning medium, summaries auto)"),
-        "expected /status to render the catalog default reasoning effort, got: {rendered}"
+        rendered.contains("Model:                gpt-5.4"),
+        "expected /status to render the configured model, got: {rendered}"
+    );
+    assert!(
+        !rendered.contains("reasoning medium"),
+        "expected /status to omit reasoning details, got: {rendered}"
     );
 }
 

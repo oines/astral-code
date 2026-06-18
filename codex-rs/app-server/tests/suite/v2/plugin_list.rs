@@ -127,6 +127,7 @@ async fn plugin_list_skips_invalid_marketplace_file_and_reports_error() -> Resul
 }
 
 #[tokio::test]
+#[ignore = "Astral does not load install suggestions from the bundled OpenAI curated marketplace"]
 async fn plugin_installed_includes_installed_plugins_and_explicit_install_suggestions() -> Result<()>
 {
     let codex_home = TempDir::new()?;
@@ -180,6 +181,7 @@ enabled = true
 }
 
 #[tokio::test]
+#[ignore = "Astral supports local plugin marketplaces only; remote plugin catalogs are unsupported"]
 async fn plugin_installed_prefers_remote_curated_conflicts_when_remote_plugin_enabled() -> Result<()>
 {
     let codex_home = TempDir::new()?;
@@ -465,6 +467,7 @@ async fn plugin_list_keeps_valid_marketplaces_when_another_marketplace_fails_to_
 }
 
 #[tokio::test]
+#[ignore = "Astral local plugin listing does not consult hosted workspace plugin policy"]
 async fn plugin_list_returns_empty_when_workspace_codex_plugins_disabled() -> Result<()> {
     let codex_home = TempDir::new()?;
     let repo_root = TempDir::new()?;
@@ -548,6 +551,7 @@ async fn plugin_list_returns_empty_when_workspace_codex_plugins_disabled() -> Re
 }
 
 #[tokio::test]
+#[ignore = "Astral local plugin listing does not consult hosted workspace plugin policy"]
 async fn plugin_list_reuses_cached_workspace_codex_plugins_setting() -> Result<()> {
     let codex_home = TempDir::new()?;
     let repo_root = TempDir::new()?;
@@ -1511,6 +1515,7 @@ async fn app_server_startup_does_not_sync_remote_installed_plugin_bundles() -> R
 }
 
 #[tokio::test]
+#[ignore = "Astral supports local plugin marketplaces only; remote plugin catalogs are unsupported"]
 async fn plugin_list_sync_upgrades_and_removes_remote_installed_plugin_bundles() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;
@@ -1606,6 +1611,7 @@ async fn plugin_list_sync_upgrades_and_removes_remote_installed_plugin_bundles()
 }
 
 #[tokio::test]
+#[ignore = "Astral supports local plugin marketplaces only; remote plugin catalogs are unsupported"]
 async fn plugin_list_includes_remote_marketplaces_when_remote_plugin_enabled() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;
@@ -1838,6 +1844,7 @@ async fn plugin_list_includes_remote_marketplaces_when_remote_plugin_enabled() -
 }
 
 #[tokio::test]
+#[ignore = "Astral supports local plugin marketplaces only; remote plugin catalogs are unsupported"]
 async fn plugin_list_uses_cached_global_remote_catalog_without_background_refresh() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;
@@ -1937,6 +1944,7 @@ async fn plugin_list_uses_cached_global_remote_catalog_without_background_refres
 }
 
 #[tokio::test]
+#[ignore = "Astral supports local plugin marketplaces only; remote plugin catalogs are unsupported"]
 async fn plugin_list_includes_openai_curated_remote_collection_when_requested() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;
@@ -2248,6 +2256,7 @@ async fn plugin_list_does_not_append_global_remote_when_marketplace_kinds_are_ex
 }
 
 #[tokio::test]
+#[ignore = "Astral supports local plugin marketplaces only; remote plugin sharing is unsupported"]
 async fn plugin_installed_includes_remote_shared_with_me_plugins() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;
@@ -2422,6 +2431,7 @@ plugin_sharing = false
 }
 
 #[tokio::test]
+#[ignore = "Astral supports local plugin marketplaces only; remote plugin catalogs are unsupported"]
 async fn plugin_list_fetches_workspace_directory_kind_without_remote_plugin_flag() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;
@@ -2509,6 +2519,7 @@ async fn plugin_list_fetches_workspace_directory_kind_without_remote_plugin_flag
 }
 
 #[tokio::test]
+#[ignore = "Astral supports local plugin marketplaces only; remote plugin sharing is unsupported"]
 async fn plugin_list_fetches_shared_with_me_kind() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;
@@ -2769,6 +2780,7 @@ plugin_sharing = false
 }
 
 #[tokio::test]
+#[ignore = "Astral supports local plugin marketplaces only; remote plugin catalogs are unsupported"]
 async fn plugin_list_marks_remote_plugin_disabled_by_admin() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;

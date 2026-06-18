@@ -26,6 +26,9 @@ use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::FunctionCallOutputPayload;
 use core_test_support::responses;
+use core_test_support::responses::request_input_items;
+use core_test_support::responses::request_tool_description;
+use core_test_support::responses::request_tool_name;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 use serde_json::json;
@@ -119,10 +122,14 @@ async fn thread_start_injects_dynamic_tools_into_model_requests() -> Result<()> 
         .context("expected dynamic tool to be injected into request")?;
 
     assert_eq!(
-        tool.get("description"),
-        Some(&Value::String(dynamic_tool.description.clone()))
+        request_tool_description(tool),
+        Some(dynamic_tool.description.as_str())
     );
-    assert_eq!(tool.get("parameters"), Some(&input_schema));
+    assert_eq!(
+        tool.pointer("/function/parameters")
+            .or_else(|| tool.get("parameters")),
+        Some(&input_schema)
+    );
 
     Ok(())
 }
@@ -690,7 +697,7 @@ fn find_tool<'a>(body: &'a Value, name: &str) -> Option<&'a Value> {
         .and_then(|tools| {
             tools
                 .iter()
-                .find(|tool| tool.get("name").and_then(Value::as_str) == Some(name))
+                .find(|tool| request_tool_name(tool) == Some(name))
         })
 }
 
@@ -700,16 +707,13 @@ fn function_call_output_payload(body: &Value, call_id: &str) -> Option<FunctionC
 }
 
 fn function_call_output_raw_output(body: &Value, call_id: &str) -> Option<Value> {
-    body.get("input")
-        .and_then(Value::as_array)
-        .and_then(|items| {
-            items.iter().find(|item| {
-                item.get("type").and_then(Value::as_str) == Some("function_call_output")
-                    && item.get("call_id").and_then(Value::as_str) == Some(call_id)
-            })
+    request_input_items(body)
+        .into_iter()
+        .find(|item| {
+            item.get("type").and_then(Value::as_str) == Some("function_call_output")
+                && item.get("call_id").and_then(Value::as_str) == Some(call_id)
         })
-        .and_then(|item| item.get("output"))
-        .cloned()
+        .and_then(|item| item.get("output").cloned())
 }
 
 async fn wait_for_dynamic_tool_started(

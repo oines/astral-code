@@ -48,6 +48,7 @@ pub(super) use codex_app_server_protocol::CommandExecutionSource as ExecCommandS
 pub(super) use codex_app_server_protocol::CommandExecutionSource as AppServerCommandExecutionSource;
 pub(super) use codex_app_server_protocol::CommandExecutionStatus as AppServerCommandExecutionStatus;
 pub(super) use codex_app_server_protocol::ConfigWarningNotification;
+pub(super) use codex_app_server_protocol::CoreToolCallStatus as AppServerCoreToolCallStatus;
 pub(super) use codex_app_server_protocol::CreditsSnapshot;
 pub(super) use codex_app_server_protocol::ErrorNotification;
 pub(super) use codex_app_server_protocol::ExecPolicyAmendment;

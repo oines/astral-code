@@ -5,6 +5,7 @@ use app_test_support::TestAppServer;
 use app_test_support::create_final_assistant_message_sse_response;
 use app_test_support::create_mock_responses_server_sequence_unchecked;
 use app_test_support::to_response;
+use app_test_support::write_mock_responses_config_toml;
 use codex_app_server_protocol::ConfigBatchWriteParams;
 use codex_app_server_protocol::ConfigEdit;
 use codex_app_server_protocol::HookEventName;
@@ -23,11 +24,13 @@ use codex_app_server_protocol::ThreadStartResponse;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::UserInput as V2UserInput;
 use codex_core::config::set_project_trust_level;
+use codex_features::Feature;
 use codex_protocol::config_types::TrustLevel;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use core_test_support::skip_if_windows;
 use pretty_assertions::assert_eq;
 use serde::Serialize;
+use std::collections::BTreeMap;
 use tempfile::TempDir;
 use tokio::time::timeout;
 
@@ -93,16 +96,28 @@ fn write_plugin_hook_config(codex_home: &std::path::Path, hooks_json: &str) -> R
         r#"{"name":"demo"}"#,
     )?;
     std::fs::write(plugin_root.join("hooks/hooks.json"), hooks_json)?;
-    std::fs::write(
-        codex_home.join("config.toml"),
+    let config_path = codex_home.join("config.toml");
+    let plugin_config = if config_path.exists() {
+        r#"
+[plugins."demo@test"]
+enabled = true
+"#
+    } else {
         r#"[features]
 plugins = true
 hooks = true
 
 [plugins."demo@test"]
 enabled = true
-"#,
-    )?;
+"#
+    };
+    if config_path.exists() {
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new().append(true).open(config_path)?;
+        file.write_all(plugin_config.as_bytes())?;
+    } else {
+        std::fs::write(config_path, plugin_config)?;
+    }
     Ok(())
 }
 
@@ -268,6 +283,19 @@ async fn hooks_list_shows_discovered_plugin_hook() -> Result<()> {
 async fn hooks_list_warms_plugin_capabilities_for_thread_start() -> Result<()> {
     let codex_home = TempDir::new()?;
     let cwd = TempDir::new()?;
+    let server = create_mock_responses_server_sequence_unchecked(vec![
+        create_final_assistant_message_sse_response("ready")?,
+    ])
+    .await;
+    write_mock_responses_config_toml(
+        codex_home.path(),
+        &server.uri(),
+        &BTreeMap::from([(Feature::Plugins, true), (Feature::CodexHooks, true)]),
+        i64::MAX,
+        None,
+        "mock_provider",
+        "compact",
+    )?;
     write_plugin_hook_config(
         codex_home.path(),
         r#"{
