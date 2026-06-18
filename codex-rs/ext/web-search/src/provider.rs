@@ -1,0 +1,424 @@
+use std::cmp::Ordering;
+use std::collections::HashSet;
+
+use codex_config::config_toml::WebSearchProvider;
+use codex_config::config_toml::WebSearchRuntimeConfig;
+use reqwest::header::ACCEPT;
+use serde_json::Value;
+use serde_json::json;
+use url::Url;
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct WebSearchRequest {
+    pub(crate) query: String,
+    pub(crate) limit: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct WebSearchResult {
+    pub(crate) title: String,
+    pub(crate) url: String,
+    pub(crate) snippet: Option<String>,
+    pub(crate) published_at: Option<String>,
+    pub(crate) score: Option<f64>,
+}
+
+pub(crate) async fn search(
+    client: &reqwest::Client,
+    config: &WebSearchRuntimeConfig,
+    request: WebSearchRequest,
+) -> Result<Vec<WebSearchResult>, String> {
+    let value = match config.provider {
+        WebSearchProvider::Tavily => tavily_search(client, config, &request).await?,
+        WebSearchProvider::Exa => exa_search(client, config, &request).await?,
+        WebSearchProvider::Jina => jina_search(client, config, &request).await?,
+        WebSearchProvider::Brave => brave_search(client, config, &request).await?,
+        WebSearchProvider::SerpApi => serpapi_search(client, config, &request).await?,
+    };
+
+    let results = match config.provider {
+        WebSearchProvider::Tavily => parse_tavily_results(&value),
+        WebSearchProvider::Exa => parse_exa_results(&value),
+        WebSearchProvider::Jina => parse_jina_results(&value),
+        WebSearchProvider::Brave => parse_brave_results(&value),
+        WebSearchProvider::SerpApi => parse_serpapi_results(&value),
+    };
+
+    Ok(normalize_results(results, request.limit))
+}
+
+async fn tavily_search(
+    client: &reqwest::Client,
+    config: &WebSearchRuntimeConfig,
+    request: &WebSearchRequest,
+) -> Result<Value, String> {
+    let response = client
+        .post("https://api.tavily.com/search")
+        .bearer_auth(config.api_key.expose_secret())
+        .json(&tavily_body(request))
+        .send()
+        .await
+        .map_err(|err| request_error("Tavily", err))?;
+
+    response_json(response, "Tavily").await
+}
+
+async fn exa_search(
+    client: &reqwest::Client,
+    config: &WebSearchRuntimeConfig,
+    request: &WebSearchRequest,
+) -> Result<Value, String> {
+    let response = client
+        .post("https://api.exa.ai/search")
+        .header("x-api-key", config.api_key.expose_secret())
+        .json(&exa_body(request))
+        .send()
+        .await
+        .map_err(|err| request_error("Exa", err))?;
+
+    response_json(response, "Exa").await
+}
+
+async fn jina_search(
+    client: &reqwest::Client,
+    config: &WebSearchRuntimeConfig,
+    request: &WebSearchRequest,
+) -> Result<Value, String> {
+    let url = jina_url(request)?;
+
+    let response = client
+        .get(url)
+        .bearer_auth(config.api_key.expose_secret())
+        .header(ACCEPT, "application/json")
+        .send()
+        .await
+        .map_err(|err| request_error("Jina", err))?;
+
+    response_json(response, "Jina").await
+}
+
+async fn brave_search(
+    client: &reqwest::Client,
+    config: &WebSearchRuntimeConfig,
+    request: &WebSearchRequest,
+) -> Result<Value, String> {
+    let response = client
+        .get("https://api.search.brave.com/res/v1/web/search")
+        .header("X-Subscription-Token", config.api_key.expose_secret())
+        .header(ACCEPT, "application/json")
+        .query(&brave_query(request))
+        .send()
+        .await
+        .map_err(|err| request_error("Brave", err))?;
+
+    response_json(response, "Brave").await
+}
+
+async fn serpapi_search(
+    client: &reqwest::Client,
+    config: &WebSearchRuntimeConfig,
+    request: &WebSearchRequest,
+) -> Result<Value, String> {
+    let response = client
+        .get("https://serpapi.com/search.json")
+        .query(&serpapi_query(request, config.api_key.expose_secret()))
+        .send()
+        .await
+        .map_err(|err| request_error("SerpAPI", err))?;
+
+    response_json(response, "SerpAPI").await
+}
+
+async fn response_json(response: reqwest::Response, provider: &str) -> Result<Value, String> {
+    let status = response.status();
+    let text = response
+        .text()
+        .await
+        .map_err(|err| format!("{provider} search response read failed: {err}"))?;
+    if !status.is_success() {
+        return Err(format!(
+            "{provider} search returned HTTP {status}: {}",
+            truncate_for_error(&text)
+        ));
+    }
+
+    serde_json::from_str(&text).map_err(|err| {
+        format!(
+            "{provider} search returned invalid JSON: {err}; body: {}",
+            truncate_for_error(&text)
+        )
+    })
+}
+
+fn request_error(provider: &str, error: reqwest::Error) -> String {
+    format!("{provider} search request failed: {}", error.without_url())
+}
+
+fn tavily_body(request: &WebSearchRequest) -> Value {
+    json!({
+        "query": request.query,
+        "max_results": request.limit,
+    })
+}
+
+fn exa_body(request: &WebSearchRequest) -> Value {
+    json!({
+        "query": request.query,
+        "numResults": request.limit,
+    })
+}
+
+fn jina_url(request: &WebSearchRequest) -> Result<Url, String> {
+    let mut url =
+        Url::parse("https://s.jina.ai/").map_err(|err| format!("invalid Jina URL: {err}"))?;
+    url.query_pairs_mut().append_pair("q", &request.query);
+    Ok(url)
+}
+
+fn brave_query(request: &WebSearchRequest) -> Vec<(&'static str, String)> {
+    vec![
+        ("q", request.query.clone()),
+        ("count", request.limit.to_string()),
+    ]
+}
+
+fn serpapi_query(request: &WebSearchRequest, api_key: &str) -> Vec<(&'static str, String)> {
+    vec![
+        ("engine", "google".to_string()),
+        ("q", request.query.clone()),
+        ("num", request.limit.to_string()),
+        ("api_key", api_key.to_string()),
+    ]
+}
+
+pub(crate) fn parse_tavily_results(value: &Value) -> Vec<WebSearchResult> {
+    value
+        .get("results")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|item| {
+            result_from_fields(
+                item,
+                &["title"],
+                &["url"],
+                &["content", "snippet"],
+                &["published_date", "publishedDate", "date"],
+                &["score"],
+            )
+        })
+        .collect()
+}
+
+pub(crate) fn parse_exa_results(value: &Value) -> Vec<WebSearchResult> {
+    value
+        .get("results")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|item| {
+            let snippet = string_field(item, &["summary", "text"])
+                .or_else(|| first_string_in_array(item.get("highlights")));
+            result_from_parts(
+                string_field(item, &["title"])?,
+                string_field(item, &["url"])?,
+                snippet,
+                string_field(item, &["publishedDate", "published_date", "date"]),
+                item.get("highlightScores")
+                    .and_then(Value::as_array)
+                    .and_then(|scores| scores.first())
+                    .and_then(Value::as_f64),
+            )
+        })
+        .collect()
+}
+
+pub(crate) fn parse_jina_results(value: &Value) -> Vec<WebSearchResult> {
+    let results = value
+        .as_array()
+        .or_else(|| value.get("data").and_then(Value::as_array))
+        .or_else(|| value.get("results").and_then(Value::as_array));
+
+    results
+        .into_iter()
+        .flatten()
+        .filter_map(|item| {
+            result_from_fields(
+                item,
+                &["title"],
+                &["url", "source"],
+                &["content", "description", "snippet"],
+                &["timestamp", "published_at", "publishedDate", "date"],
+                &["score"],
+            )
+        })
+        .collect()
+}
+
+pub(crate) fn parse_brave_results(value: &Value) -> Vec<WebSearchResult> {
+    value
+        .pointer("/web/results")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .enumerate()
+        .filter_map(|(index, item)| {
+            result_from_parts(
+                string_field(item, &["title"])?,
+                string_field(item, &["url"])?,
+                string_field(item, &["description", "snippet"]),
+                string_field(item, &["age", "page_age", "published"]),
+                Some(1.0 / (index + 1) as f64),
+            )
+        })
+        .collect()
+}
+
+pub(crate) fn parse_serpapi_results(value: &Value) -> Vec<WebSearchResult> {
+    value
+        .get("organic_results")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .enumerate()
+        .filter_map(|(index, item)| {
+            result_from_parts(
+                string_field(item, &["title"])?,
+                string_field(item, &["link", "url"])?,
+                string_field(item, &["snippet"]),
+                string_field(item, &["date"]),
+                Some(
+                    item.get("position")
+                        .and_then(Value::as_u64)
+                        .map(|position| 1.0 / position.max(1) as f64)
+                        .unwrap_or_else(|| 1.0 / (index + 1) as f64),
+                ),
+            )
+        })
+        .collect()
+}
+
+fn result_from_fields(
+    value: &Value,
+    title_fields: &[&str],
+    url_fields: &[&str],
+    snippet_fields: &[&str],
+    published_fields: &[&str],
+    score_fields: &[&str],
+) -> Option<WebSearchResult> {
+    result_from_parts(
+        string_field(value, title_fields)?,
+        string_field(value, url_fields)?,
+        string_field(value, snippet_fields),
+        string_field(value, published_fields),
+        number_field(value, score_fields),
+    )
+}
+
+fn result_from_parts(
+    title: String,
+    url: String,
+    snippet: Option<String>,
+    published_at: Option<String>,
+    score: Option<f64>,
+) -> Option<WebSearchResult> {
+    let title = clean_inline_text(&title);
+    let url = clean_inline_text(&url);
+    if title.is_empty() || url.is_empty() {
+        return None;
+    }
+
+    Some(WebSearchResult {
+        title,
+        url,
+        snippet: snippet
+            .map(|snippet| truncate_chars(&clean_inline_text(&snippet), 900))
+            .filter(|snippet| !snippet.is_empty()),
+        published_at: published_at
+            .map(|published_at| truncate_chars(&clean_inline_text(&published_at), 120))
+            .filter(|published_at| !published_at.is_empty()),
+        score,
+    })
+}
+
+fn normalize_results(mut results: Vec<WebSearchResult>, limit: usize) -> Vec<WebSearchResult> {
+    let mut seen = HashSet::new();
+    results.retain(|result| {
+        let Some(key) = normalize_url_key(&result.url) else {
+            return false;
+        };
+        seen.insert(key)
+    });
+
+    if results.iter().any(|result| result.score.is_some()) {
+        let mut indexed = results.into_iter().enumerate().collect::<Vec<_>>();
+        indexed.sort_by(|left, right| {
+            score_order(right.1.score, left.1.score).then_with(|| left.0.cmp(&right.0))
+        });
+        results = indexed.into_iter().map(|(_, result)| result).collect();
+    }
+
+    results.truncate(limit);
+    results
+}
+
+fn score_order(left: Option<f64>, right: Option<f64>) -> Ordering {
+    match (left, right) {
+        (Some(left), Some(right)) => left.partial_cmp(&right).unwrap_or(Ordering::Equal),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
+}
+
+fn normalize_url_key(url: &str) -> Option<String> {
+    let mut parsed = Url::parse(url).ok()?;
+    parsed.set_fragment(None);
+    Some(parsed.to_string())
+}
+
+fn string_field(value: &Value, fields: &[&str]) -> Option<String> {
+    fields
+        .iter()
+        .filter_map(|field| value.get(*field))
+        .find_map(|value| match value {
+            Value::String(value) => Some(value.clone()),
+            Value::Number(value) => Some(value.to_string()),
+            _ => None,
+        })
+}
+
+fn number_field(value: &Value, fields: &[&str]) -> Option<f64> {
+    fields
+        .iter()
+        .filter_map(|field| value.get(*field))
+        .find_map(Value::as_f64)
+}
+
+fn first_string_in_array(value: Option<&Value>) -> Option<String> {
+    value
+        .and_then(Value::as_array)
+        .and_then(|items| items.first())
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+fn clean_inline_text(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn truncate_for_error(value: &str) -> String {
+    truncate_chars(&clean_inline_text(value), 500)
+}
+
+fn truncate_chars(value: &str, max_chars: usize) -> String {
+    let mut iter = value.char_indices();
+    let Some((index, _)) = iter.nth(max_chars) else {
+        return value.to_string();
+    };
+    value[..index].to_string()
+}
+
+#[cfg(test)]
+#[path = "provider_tests.rs"]
+mod tests;

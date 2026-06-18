@@ -1,0 +1,7 @@
+---
+source: tui/src/history_cell/tests.rs
+expression: rendered
+---
+• Failed to fetch http://127.0.0.1:8080
+  └ Web fetch failed: refusing to fetch private address
+        `127.0.0.1`

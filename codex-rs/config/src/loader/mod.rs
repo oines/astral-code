@@ -1099,15 +1099,27 @@ pub fn resolve_relative_paths_in_config_toml(
 /// the fields that we "removed" during the serialize/deserialize round-trip in
 /// `resolve_config_paths` are preserved, out of an abundance of caution.
 fn copy_shape_from_original(original: &TomlValue, resolved: &TomlValue) -> TomlValue {
+    copy_shape_from_original_at_path(original, resolved, &mut Vec::new())
+}
+
+fn copy_shape_from_original_at_path(
+    original: &TomlValue,
+    resolved: &TomlValue,
+    path: &mut Vec<String>,
+) -> TomlValue {
+    if is_secret_config_path(path) {
+        return original.clone();
+    }
+
     match (original, resolved) {
         (TomlValue::Table(original_table), TomlValue::Table(resolved_table)) => {
             let mut table = toml::map::Map::new();
             for (key, original_value) in original_table {
                 let resolved_value = resolved_table.get(key).unwrap_or(original_value);
-                table.insert(
-                    key.clone(),
-                    copy_shape_from_original(original_value, resolved_value),
-                );
+                path.push(key.clone());
+                let value = copy_shape_from_original_at_path(original_value, resolved_value, path);
+                path.pop();
+                table.insert(key.clone(), value);
             }
             TomlValue::Table(table)
         }
@@ -1115,12 +1127,26 @@ fn copy_shape_from_original(original: &TomlValue, resolved: &TomlValue) -> TomlV
             let mut items = Vec::new();
             for (index, original_value) in original_array.iter().enumerate() {
                 let resolved_value = resolved_array.get(index).unwrap_or(original_value);
-                items.push(copy_shape_from_original(original_value, resolved_value));
+                path.push(index.to_string());
+                items.push(copy_shape_from_original_at_path(
+                    original_value,
+                    resolved_value,
+                    path,
+                ));
+                path.pop();
             }
             TomlValue::Array(items)
         }
         (_, resolved_value) => resolved_value.clone(),
     }
+}
+
+fn is_secret_config_path(path: &[String]) -> bool {
+    matches!(
+        path,
+        [tools, web_search, api_key]
+            if tools == "tools" && web_search == "web_search" && api_key == "api_key"
+    )
 }
 
 async fn find_project_root(
@@ -1430,6 +1456,34 @@ foo = "xyzzy"
         );
         expected_toml_value.insert("foo".to_string(), TomlValue::String("xyzzy".to_string()));
         assert_eq!(normalized_toml_value, TomlValue::Table(expected_toml_value));
+        Ok(())
+    }
+
+    #[test]
+    fn resolve_relative_paths_in_config_toml_preserves_web_search_api_key() -> anyhow::Result<()> {
+        let tmp = tempdir()?;
+        let base_dir = tmp.path();
+        let user_config: TomlValue = toml::from_str(
+            r#"
+web_search = "live"
+
+[tools.web_search]
+provider = "tavily"
+api_key = "tvly-dev-secret"
+default_limit = 5
+max_limit = 20
+"#,
+        )?;
+
+        let normalized_toml_value = resolve_relative_paths_in_config_toml(user_config, base_dir)?;
+
+        assert_eq!(
+            normalized_toml_value
+                .get("tools")
+                .and_then(|tools| tools.get("web_search"))
+                .and_then(|web_search| web_search.get("api_key")),
+            Some(&TomlValue::String("tvly-dev-secret".to_string()))
+        );
         Ok(())
     }
 

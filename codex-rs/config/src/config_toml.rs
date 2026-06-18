@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::fmt;
 use std::path::Path;
 
 use crate::HooksToml;
@@ -41,8 +42,9 @@ use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::config_types::SandboxMode;
 use codex_protocol::config_types::TrustLevel;
 use codex_protocol::config_types::Verbosity;
+use codex_protocol::config_types::WebSearchContextSize;
+use codex_protocol::config_types::WebSearchLocation;
 use codex_protocol::config_types::WebSearchMode;
-use codex_protocol::config_types::WebSearchToolConfig;
 use codex_protocol::config_types::WindowsSandboxLevel;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::openai_models::InputModality;
@@ -55,6 +57,8 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
+use serde::Serializer;
+use serde::de::Error as SerdeDeError;
 use serde_json::Value as JsonValue;
 
 const RESERVED_MODEL_PROVIDER_IDS: [&str; 4] = [
@@ -574,6 +578,95 @@ pub struct ToolsToml {
     )]
     pub web_search: Option<WebSearchToolConfig>,
     pub experimental_request_user_input: Option<ExperimentalRequestUserInput>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum WebSearchProvider {
+    Tavily,
+    Exa,
+    Jina,
+    Brave,
+    SerpApi,
+}
+
+impl fmt::Display for WebSearchProvider {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let provider = match self {
+            Self::Tavily => "tavily",
+            Self::Exa => "exa",
+            Self::Jina => "jina",
+            Self::Brave => "brave",
+            Self::SerpApi => "serpapi",
+        };
+        f.write_str(provider)
+    }
+}
+
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct SecretString(String);
+
+impl SecretString {
+    pub fn new(value: String) -> Option<Self> {
+        (!value.trim().is_empty()).then_some(Self(value))
+    }
+
+    pub fn expose_secret(&self) -> &str {
+        &self.0
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.trim().is_empty()
+    }
+}
+
+impl fmt::Debug for SecretString {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("\"[redacted]\"")
+    }
+}
+
+impl Serialize for SecretString {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str("[redacted]")
+    }
+}
+
+impl<'de> Deserialize<'de> for SecretString {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        let Some(secret) = Self::new(value) else {
+            return Err(D::Error::custom("secret value cannot be empty"));
+        };
+        Ok(secret)
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct WebSearchToolConfig {
+    pub provider: Option<WebSearchProvider>,
+    #[schemars(skip)]
+    pub api_key: Option<SecretString>,
+    pub default_limit: Option<usize>,
+    pub max_limit: Option<usize>,
+    pub context_size: Option<WebSearchContextSize>,
+    pub allowed_domains: Option<Vec<String>>,
+    pub location: Option<WebSearchLocation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WebSearchRuntimeConfig {
+    pub provider: WebSearchProvider,
+    pub api_key: SecretString,
+    pub default_limit: usize,
+    pub max_limit: usize,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]

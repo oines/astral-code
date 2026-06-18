@@ -4355,6 +4355,16 @@
       ],
       "type": "string"
     },
+    "WebSearchProvider": {
+      "enum": [
+        "tavily",
+        "exa",
+        "jina",
+        "brave",
+        "serpapi"
+      ],
+      "type": "string"
+    },
     "WebSearchToolConfig": {
       "additionalProperties": false,
       "properties": {
@@ -4367,8 +4377,21 @@
         "context_size": {
           "$ref": "#/definitions/WebSearchContextSize"
         },
+        "default_limit": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "location": {
           "$ref": "#/definitions/WebSearchLocation"
+        },
+        "max_limit": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "provider": {
+          "$ref": "#/definitions/WebSearchProvider"
         }
       },
       "type": "object"
