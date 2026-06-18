@@ -1,9 +1,4 @@
-use codex_api::ReqwestTransport;
-use codex_api::SearchClient;
-use codex_api::SearchCommands;
-use codex_api::SearchQuery;
-use codex_api::SearchRequest;
-use codex_api::SearchSettings;
+use codex_config::config_toml::WebSearchRuntimeConfig;
 use codex_core::web_search_action_detail;
 use codex_extension_api::ExtensionTurnItem;
 use codex_extension_api::FunctionCallError;
@@ -13,57 +8,54 @@ use codex_extension_api::ToolExecutor;
 use codex_extension_api::ToolName;
 use codex_extension_api::ToolOutput;
 use codex_extension_api::ToolSpec;
-use codex_extension_api::parse_tool_input_schema_without_compaction;
-use codex_login::default_client::build_reqwest_client;
-use codex_model_provider::SharedModelProvider;
+use codex_extension_api::parse_tool_input_schema;
 use codex_protocol::items::WebSearchItem;
 use codex_protocol::models::WebSearchAction;
 use codex_tools::ResponsesApiNamespace;
 use codex_tools::ResponsesApiNamespaceTool;
 use codex_tools::ToolExposure;
 use codex_tools::default_namespace_description;
-use http::HeaderMap;
-use url::Url;
+use schemars::JsonSchema;
+use schemars::schema_for;
+use serde::Deserialize;
+use serde::de::DeserializeOwned;
 
-use crate::history::recent_input;
-use crate::output::SearchOutput;
-use crate::schema::commands_schema;
+use crate::fetch;
+use crate::fetch::WebFetchInput;
+use crate::output::WebToolOutput;
+use crate::provider;
+use crate::provider::WebSearchRequest;
+use crate::provider::WebSearchResult;
 
 pub(crate) const WEB_NAMESPACE: &str = "web";
-pub(crate) const RUN_TOOL_NAME: &str = "run";
-const WEB_RUN_DESCRIPTION: &str = include_str!("../web_run_description.md");
+pub(crate) const SEARCH_TOOL_NAME: &str = "search";
+pub(crate) const FETCH_TOOL_NAME: &str = "fetch";
+
+const WEB_SEARCH_DESCRIPTION: &str = "Search the web and return a concise list of relevant results with titles, URLs, snippets, and dates when available.";
+const WEB_FETCH_DESCRIPTION: &str =
+    "Fetch a web page by URL and return cleaned markdown or text content with noisy data removed.";
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+struct WebSearchInput {
+    query: String,
+    #[schemars(range(min = 1, max = 20))]
+    limit: Option<usize>,
+}
 
 pub(crate) struct WebSearchTool {
-    pub(crate) session_id: String,
-    pub(crate) provider: SharedModelProvider,
-    pub(crate) settings: SearchSettings,
+    pub(crate) client: reqwest::Client,
+    pub(crate) config: WebSearchRuntimeConfig,
 }
 
 #[async_trait::async_trait]
 impl ToolExecutor<ToolCall> for WebSearchTool {
     fn tool_name(&self) -> ToolName {
-        ToolName::namespaced(WEB_NAMESPACE, RUN_TOOL_NAME)
+        ToolName::namespaced(WEB_NAMESPACE, SEARCH_TOOL_NAME)
     }
 
     fn spec(&self) -> ToolSpec {
-        // parse schema without compaction that removes field metadata/descriptions to match hosted tool definition
-        let parameters = match parse_tool_input_schema_without_compaction(&commands_schema()) {
-            Ok(parameters) => parameters,
-            Err(err) => panic!("search command schema should parse: {err}"),
-        };
-
-        ToolSpec::Namespace(ResponsesApiNamespace {
-            name: WEB_NAMESPACE.to_string(),
-            description: default_namespace_description(WEB_NAMESPACE),
-            tools: vec![ResponsesApiNamespaceTool::Function(ResponsesApiTool {
-                name: RUN_TOOL_NAME.to_string(),
-                description: WEB_RUN_DESCRIPTION.to_string(),
-                strict: false,
-                parameters,
-                output_schema: None,
-                defer_loading: None,
-            })],
-        })
+        web_tool_spec::<WebSearchInput>(SEARCH_TOOL_NAME, WEB_SEARCH_DESCRIPTION)
     }
 
     fn exposure(&self) -> ToolExposure {
@@ -75,104 +67,136 @@ impl ToolExecutor<ToolCall> for WebSearchTool {
     }
 
     async fn handle(&self, call: ToolCall) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
-        let commands = parse_commands(&call)?;
-        let command_action = command_action(&commands);
-        let provider = self
-            .provider
-            .api_provider()
-            .await
-            .map_err(|err| FunctionCallError::Fatal(err.to_string()))?;
-        let auth = self
-            .provider
-            .api_auth()
-            .await
-            .map_err(|err| FunctionCallError::Fatal(err.to_string()))?;
-        let client = SearchClient::new(
-            ReqwestTransport::new(build_reqwest_client()),
-            provider,
-            auth,
-        );
-        let request = SearchRequest {
-            id: self.session_id.clone(),
-            model: call.model.clone(),
-            reasoning: None,
-            input: recent_input(call.conversation_history.items()),
-            commands: Some(commands),
-            settings: Some(self.settings.clone()),
-            max_output_tokens: Some(
-                u64::try_from(call.truncation_policy.token_budget()).unwrap_or(u64::MAX),
-            ),
+        let input: WebSearchInput = parse_input(&call)?;
+        let query = input.query.trim();
+        if query.is_empty() {
+            return Err(FunctionCallError::RespondToModel(
+                "query must not be empty".to_string(),
+            ));
+        }
+
+        let limit = input
+            .limit
+            .unwrap_or(self.config.default_limit)
+            .clamp(1, self.config.max_limit);
+        let action = WebSearchAction::Search {
+            query: Some(query.to_string()),
+            queries: None,
         };
         call.turn_item_emitter
-            .emit_started(web_search_item(&call.call_id, WebSearchAction::Other))
+            .emit_started(web_search_item(&call.call_id, action.clone()))
             .await;
-        let response = client
-            .search(&request, HeaderMap::new())
-            .await
-            .map_err(|err| FunctionCallError::Fatal(err.to_string()))?;
+        let search_result = provider::search(
+            &self.client,
+            &self.config,
+            WebSearchRequest {
+                query: query.to_string(),
+                limit,
+            },
+        )
+        .await;
         call.turn_item_emitter
-            .emit_completed(web_search_item(&call.call_id, command_action))
+            .emit_completed(web_search_item(&call.call_id, action))
             .await;
+        let results = match search_result {
+            Ok(results) => results,
+            Err(error) => {
+                return Ok(Box::new(WebToolOutput::failure(format!(
+                    "Web search failed for query \"{query}\": {error}"
+                ))));
+            }
+        };
 
-        Ok(Box::new(SearchOutput::new(response.output)))
+        Ok(Box::new(WebToolOutput::new(format_search_results(
+            query, &results,
+        ))))
     }
 }
 
-fn parse_commands(call: &ToolCall) -> Result<SearchCommands, FunctionCallError> {
-    let arguments = call.function_arguments()?;
-    if arguments.trim().is_empty() {
-        return Ok(SearchCommands::default());
+pub(crate) struct WebFetchTool {
+    pub(crate) client: reqwest::Client,
+}
+
+#[async_trait::async_trait]
+impl ToolExecutor<ToolCall> for WebFetchTool {
+    fn tool_name(&self) -> ToolName {
+        ToolName::namespaced(WEB_NAMESPACE, FETCH_TOOL_NAME)
     }
 
+    fn spec(&self) -> ToolSpec {
+        web_tool_spec::<WebFetchInput>(FETCH_TOOL_NAME, WEB_FETCH_DESCRIPTION)
+    }
+
+    fn exposure(&self) -> ToolExposure {
+        ToolExposure::Direct
+    }
+
+    fn supports_parallel_tool_calls(&self) -> bool {
+        true
+    }
+
+    async fn handle(&self, call: ToolCall) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
+        let input: WebFetchInput = parse_input(&call)?;
+        let action = WebSearchAction::OpenPage {
+            url: Some(visible_fetch_url(&input.url)),
+        };
+        let fetch_result = fetch::fetch(&self.client, input).await;
+        call.turn_item_emitter
+            .emit_completed(web_search_item(&call.call_id, action))
+            .await;
+        let output = match fetch_result {
+            Ok(output) => WebToolOutput::new(output),
+            Err(error) => WebToolOutput::failure(format!("Web fetch failed: {error}")),
+        };
+
+        Ok(Box::new(output))
+    }
+}
+
+fn visible_fetch_url(url: &str) -> String {
+    const MAX_VISIBLE_URL_CHARS: usize = 512;
+    let trimmed = url.trim();
+    if trimmed.chars().count() <= MAX_VISIBLE_URL_CHARS {
+        return trimmed.to_string();
+    }
+    let prefix = trimmed
+        .chars()
+        .take(MAX_VISIBLE_URL_CHARS)
+        .collect::<String>();
+    format!("{prefix}...")
+}
+
+fn parse_input<T>(call: &ToolCall) -> Result<T, FunctionCallError>
+where
+    T: DeserializeOwned,
+{
+    let arguments = call.function_arguments()?;
     serde_json::from_str(arguments)
         .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))
 }
 
-fn command_action(commands: &SearchCommands) -> WebSearchAction {
-    commands
-        .search_query
-        .as_deref()
-        .and_then(query_action)
-        .or_else(|| commands.image_query.as_deref().and_then(query_action))
-        .or_else(|| {
-            commands
-                .open
-                .as_deref()
-                .and_then(|operations| operations.first())
-                .and_then(|operation| {
-                    literal_url(&operation.ref_id)
-                        .map(|url| WebSearchAction::OpenPage { url: Some(url) })
-                })
-        })
-        .or_else(|| {
-            commands
-                .find
-                .as_deref()
-                .and_then(|operations| operations.first())
-                .map(|operation| WebSearchAction::FindInPage {
-                    url: literal_url(&operation.ref_id),
-                    pattern: Some(operation.pattern.clone()),
-                })
-        })
-        .unwrap_or(WebSearchAction::Other)
-}
+fn web_tool_spec<T>(name: &str, description: &str) -> ToolSpec
+where
+    T: JsonSchema,
+{
+    let schema = schema_for!(T);
+    let schema_value = serde_json::to_value(schema)
+        .unwrap_or_else(|err| panic!("{name} schema should serialize to JSON: {err}"));
+    let parameters = parse_tool_input_schema(&schema_value)
+        .unwrap_or_else(|err| panic!("{name} schema should parse: {err}"));
 
-fn query_action(queries: &[SearchQuery]) -> Option<WebSearchAction> {
-    match queries {
-        [] => None,
-        [query] => Some(WebSearchAction::Search {
-            query: Some(query.q.clone()),
-            queries: None,
-        }),
-        queries => Some(WebSearchAction::Search {
-            query: None,
-            queries: Some(queries.iter().map(|query| query.q.clone()).collect()),
-        }),
-    }
-}
-
-fn literal_url(ref_id: &str) -> Option<String> {
-    Url::parse(ref_id).is_ok().then(|| ref_id.to_string())
+    ToolSpec::Namespace(ResponsesApiNamespace {
+        name: WEB_NAMESPACE.to_string(),
+        description: default_namespace_description(WEB_NAMESPACE),
+        tools: vec![ResponsesApiNamespaceTool::Function(ResponsesApiTool {
+            name: name.to_string(),
+            description: description.to_string(),
+            strict: true,
+            parameters,
+            output_schema: None,
+            defer_loading: None,
+        })],
+    })
 }
 
 fn web_search_item(call_id: &str, action: WebSearchAction) -> ExtensionTurnItem {
@@ -183,54 +207,29 @@ fn web_search_item(call_id: &str, action: WebSearchAction) -> ExtensionTurnItem 
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use codex_api::SearchCommands;
-    use codex_protocol::models::WebSearchAction;
-    use pretty_assertions::assert_eq;
+pub(crate) fn format_search_results(query: &str, results: &[WebSearchResult]) -> String {
+    if results.is_empty() {
+        return format!("Search query: \"{query}\"\nNo search results found.");
+    }
 
-    use super::command_action;
-
-    #[test]
-    fn command_action_reports_queries_and_navigation_detail() {
-        let cases = [
-            (
-                r#"{"image_query":[{"q":"waterfalls"},{"q":"mountains"}]}"#,
-                WebSearchAction::Search {
-                    query: None,
-                    queries: Some(vec!["waterfalls".to_string(), "mountains".to_string()]),
-                },
-            ),
-            (
-                r#"{"open":[{"ref_id":"https://example.com/docs"}]}"#,
-                WebSearchAction::OpenPage {
-                    url: Some("https://example.com/docs".to_string()),
-                },
-            ),
-            (
-                r#"{"find":[{"ref_id":"https://example.com/docs","pattern":"install"}]}"#,
-                WebSearchAction::FindInPage {
-                    url: Some("https://example.com/docs".to_string()),
-                    pattern: Some("install".to_string()),
-                },
-            ),
-            (
-                r#"{"find":[{"ref_id":"turn0search0","pattern":"install"}]}"#,
-                WebSearchAction::FindInPage {
-                    url: None,
-                    pattern: Some("install".to_string()),
-                },
-            ),
-            (
-                r#"{"open":[{"ref_id":"turn0search0"}]}"#,
-                WebSearchAction::Other,
-            ),
-        ];
-
-        for (arguments, expected) in cases {
-            let commands: SearchCommands =
-                serde_json::from_str(arguments).expect("valid search command arguments");
-            assert_eq!(command_action(&commands), expected);
+    let mut output = format!(
+        "Search query: \"{query}\"\nResults returned: {}\n",
+        results.len()
+    );
+    for (index, result) in results.iter().enumerate() {
+        output.push('\n');
+        output.push_str(&format!("{}. Title: {}\n", index + 1, result.title));
+        output.push_str(&format!("   URL: {}\n", result.url));
+        if let Some(published_at) = &result.published_at {
+            output.push_str(&format!("   Published: {published_at}\n"));
+        }
+        if let Some(snippet) = &result.snippet {
+            output.push_str(&format!("   Snippet: {snippet}\n"));
         }
     }
+    output
 }
+
+#[cfg(test)]
+#[path = "tool_tests.rs"]
+mod tests;

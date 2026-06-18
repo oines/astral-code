@@ -1,0 +1,6 @@
+---
+source: tui/src/history_cell/tests.rs
+expression: rendered
+---
+• Fetched
+  https://example.com/a/very/long/path/that/exercises/wrapping

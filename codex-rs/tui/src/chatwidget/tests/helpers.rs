@@ -769,6 +769,70 @@ pub(super) fn handle_core_tool_end(
     );
 }
 
+pub(super) fn handle_dynamic_tool_begin(
+    chat: &mut ChatWidget,
+    call_id: impl Into<String>,
+    namespace: Option<&str>,
+    tool: impl Into<String>,
+    arguments: serde_json::Value,
+) {
+    chat.handle_server_notification(
+        ServerNotification::ItemStarted(ItemStartedNotification {
+            thread_id: thread_id(chat),
+            turn_id: "turn-1".to_string(),
+            started_at_ms: 0,
+            item: AppServerThreadItem::DynamicToolCall {
+                id: call_id.into(),
+                namespace: namespace.map(str::to_string),
+                tool: tool.into(),
+                arguments,
+                status: codex_app_server_protocol::DynamicToolCallStatus::InProgress,
+                content_items: None,
+                success: None,
+                duration_ms: None,
+            },
+        }),
+        /*replay_kind*/ None,
+    );
+}
+
+pub(super) fn handle_dynamic_tool_end(
+    chat: &mut ChatWidget,
+    call_id: impl Into<String>,
+    namespace: Option<&str>,
+    tool: impl Into<String>,
+    arguments: serde_json::Value,
+    output: Option<String>,
+    success: bool,
+) {
+    let status = if success {
+        codex_app_server_protocol::DynamicToolCallStatus::Completed
+    } else {
+        codex_app_server_protocol::DynamicToolCallStatus::Failed
+    };
+    let content_items = output.map(|text| {
+        vec![codex_app_server_protocol::DynamicToolCallOutputContentItem::InputText { text }]
+    });
+    chat.handle_server_notification(
+        ServerNotification::ItemCompleted(ItemCompletedNotification {
+            thread_id: thread_id(chat),
+            turn_id: "turn-1".to_string(),
+            completed_at_ms: 0,
+            item: AppServerThreadItem::DynamicToolCall {
+                id: call_id.into(),
+                namespace: namespace.map(str::to_string),
+                tool: tool.into(),
+                arguments,
+                status,
+                content_items,
+                success: Some(success),
+                duration_ms: Some(9),
+            },
+        }),
+        /*replay_kind*/ None,
+    );
+}
+
 pub(super) fn replay_user_message_inputs(
     chat: &mut ChatWidget,
     item_id: &str,

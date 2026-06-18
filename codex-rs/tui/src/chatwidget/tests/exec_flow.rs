@@ -791,6 +791,47 @@ async fn unknown_background_task_tool_keeps_fallback_history() {
 }
 
 #[tokio::test]
+async fn web_fetch_dynamic_tool_call_renders_history_cell() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.on_task_started();
+    let arguments = json!({
+        "url": "https://example.com",
+        "format": "markdown",
+    });
+
+    handle_dynamic_tool_begin(
+        &mut chat,
+        "call-fetch",
+        Some("web"),
+        "fetch",
+        arguments.clone(),
+    );
+    assert!(drain_insert_history(&mut rx).is_empty());
+    assert!(
+        active_blob(&chat).contains("Fetching https://example.com"),
+        "web.fetch should render as the active TUI cell"
+    );
+
+    handle_dynamic_tool_end(
+        &mut chat,
+        "call-fetch",
+        Some("web"),
+        "fetch",
+        arguments,
+        Some("URL: https://example.com\nContent: Example Domain".to_string()),
+        /*success*/ true,
+    );
+
+    let cells = drain_insert_history(&mut rx);
+    assert_eq!(cells.len(), 1, "expected finalized web.fetch cell");
+    let blob = lines_to_single_string(&cells[0]);
+    assert!(
+        blob.contains("Fetched https://example.com"),
+        "expected web.fetch completion to render: {blob:?}"
+    );
+}
+
+#[tokio::test]
 async fn final_worked_for_uses_cumulative_turn_duration_snapshot() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     handle_turn_started(&mut chat, "turn-1");

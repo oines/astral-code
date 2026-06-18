@@ -1197,6 +1197,83 @@ fn web_search_history_cell_transcript_snapshot() {
 }
 
 #[test]
+fn web_fetch_open_page_history_cell_snapshot() {
+    let cell = new_web_search_call(
+        "call-fetch".to_string(),
+        "https://example.com/a/very/long/path/that/exercises/wrapping".to_string(),
+        WebSearchAction::OpenPage {
+            url: Some("https://example.com/a/very/long/path/that/exercises/wrapping".to_string()),
+        },
+    );
+    let rendered = render_lines(&cell.display_lines(/*width*/ 64)).join("\n");
+
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
+fn web_fetch_history_cell_snapshot() {
+    let cell = new_dynamic_tool_call_cell(codex_app_server_protocol::ThreadItem::DynamicToolCall {
+        id: "call-fetch".to_string(),
+        namespace: Some("web".to_string()),
+        tool: "fetch".to_string(),
+        arguments: json!({
+            "url": "https://example.com/a/very/long/path/that/exercises/wrapping",
+            "format": "markdown",
+        }),
+        status: codex_app_server_protocol::DynamicToolCallStatus::Completed,
+        content_items: Some(vec![
+            codex_app_server_protocol::DynamicToolCallOutputContentItem::InputText {
+                text: "URL: https://example.com\nContent: Example Domain".to_string(),
+            },
+        ]),
+        success: Some(true),
+        duration_ms: Some(42),
+    })
+    .expect("web fetch cell");
+    let rendered = render_lines(&cell.display_lines(/*width*/ 64)).join("\n");
+
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
+fn web_fetch_history_cell_failed_snapshot() {
+    let cell = new_dynamic_tool_call_cell(codex_app_server_protocol::ThreadItem::DynamicToolCall {
+        id: "call-fetch".to_string(),
+        namespace: Some("web".to_string()),
+        tool: "fetch".to_string(),
+        arguments: json!({"url": "http://127.0.0.1:8080"}),
+        status: codex_app_server_protocol::DynamicToolCallStatus::Failed,
+        content_items: Some(vec![
+            codex_app_server_protocol::DynamicToolCallOutputContentItem::InputText {
+                text: "Web fetch failed: refusing to fetch private address `127.0.0.1`".to_string(),
+            },
+        ]),
+        success: Some(false),
+        duration_ms: Some(3),
+    })
+    .expect("web fetch cell");
+    let rendered = render_lines(&cell.display_lines(/*width*/ 64)).join("\n");
+
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
+fn dynamic_web_search_history_cell_is_suppressed() {
+    let cell = new_dynamic_tool_call_cell(codex_app_server_protocol::ThreadItem::DynamicToolCall {
+        id: "call-search".to_string(),
+        namespace: Some("web".to_string()),
+        tool: "search".to_string(),
+        arguments: json!({"query": "today news", "limit": 5}),
+        status: codex_app_server_protocol::DynamicToolCallStatus::Completed,
+        content_items: None,
+        success: Some(true),
+        duration_ms: Some(7),
+    });
+
+    assert!(cell.is_none());
+}
+
+#[test]
 fn active_mcp_tool_call_snapshot() {
     let invocation = McpInvocation {
         server: "search".into(),

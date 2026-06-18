@@ -19,7 +19,10 @@ use codex_config::config_toml::RealtimeToml;
 use codex_config::config_toml::RealtimeTransport;
 use codex_config::config_toml::RealtimeWsMode;
 use codex_config::config_toml::RealtimeWsVersion;
+use codex_config::config_toml::SecretString;
 use codex_config::config_toml::ToolsToml;
+use codex_config::config_toml::WebSearchProvider;
+use codex_config::config_toml::WebSearchToolConfig;
 use codex_config::loader::project_trust_key;
 use codex_config::permissions_toml::FilesystemPermissionToml;
 use codex_config::permissions_toml::FilesystemPermissionsToml;
@@ -4950,6 +4953,64 @@ fn web_search_mode_disabled_overrides_legacy_request() {
         resolve_web_search_mode(&cfg, &features),
         Some(WebSearchMode::Disabled)
     );
+}
+
+#[tokio::test]
+async fn web_search_runtime_config_loads_provider_key_and_limits() -> anyhow::Result<()> {
+    let codex_home = tempdir()?;
+    let cfg = ConfigToml {
+        web_search: Some(WebSearchMode::Live),
+        tools: Some(ToolsToml {
+            web_search: Some(WebSearchToolConfig {
+                provider: Some(WebSearchProvider::Exa),
+                api_key: Some(SecretString::new("exa-key".to_string()).expect("valid secret")),
+                default_limit: Some(50),
+                max_limit: Some(100),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let config = Config::load_from_base_config_with_overrides(
+        cfg,
+        ConfigOverrides::default(),
+        codex_home.abs(),
+    )
+    .await?;
+
+    let runtime = config
+        .web_search_runtime_config
+        .expect("runtime config should be present");
+    assert_eq!(
+        (
+            runtime.provider,
+            runtime.api_key.expose_secret(),
+            runtime.default_limit,
+            runtime.max_limit,
+        ),
+        (WebSearchProvider::Exa, "exa-key", 20, 20)
+    );
+
+    Ok(())
+}
+
+#[test]
+fn web_search_api_key_is_redacted_for_debug_and_serialization() {
+    let config = WebSearchToolConfig {
+        provider: Some(WebSearchProvider::Tavily),
+        api_key: Some(SecretString::new("secret-key".to_string()).expect("valid secret")),
+        ..Default::default()
+    };
+
+    let debug = format!("{config:?}");
+    let serialized = serde_json::to_string(&config).expect("serialize config");
+
+    assert!(!debug.contains("secret-key"));
+    assert!(!serialized.contains("secret-key"));
+    assert!(debug.contains("[redacted]"));
+    assert!(serialized.contains("[redacted]"));
 }
 
 #[test]

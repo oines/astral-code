@@ -31,6 +31,7 @@ use codex_config::config_toml::ProjectConfig;
 use codex_config::config_toml::RealtimeAudioConfig;
 use codex_config::config_toml::RealtimeConfig;
 use codex_config::config_toml::ThreadStoreToml;
+use codex_config::config_toml::WebSearchRuntimeConfig;
 use codex_config::config_toml::validate_model_providers;
 use codex_config::loader::load_config_layers_state;
 use codex_config::loader::project_trust_key;
@@ -93,7 +94,9 @@ use codex_protocol::config_types::ShellEnvironmentPolicy;
 use codex_protocol::config_types::TrustLevel;
 use codex_protocol::config_types::Verbosity;
 use codex_protocol::config_types::WebSearchConfig;
+use codex_protocol::config_types::WebSearchFilters;
 use codex_protocol::config_types::WebSearchMode;
+use codex_protocol::config_types::WebSearchUserLocation;
 use codex_protocol::config_types::WindowsSandboxLevel;
 use codex_protocol::models::ActivePermissionProfile;
 use codex_protocol::models::PermissionProfile;
@@ -982,6 +985,9 @@ pub struct Config {
 
     /// Additional parameters for the web search tool when it is enabled.
     pub web_search_config: Option<WebSearchConfig>,
+
+    /// Provider credentials and limits for the provider-neutral web tools.
+    pub web_search_runtime_config: Option<WebSearchRuntimeConfig>,
 
     /// Whether to register the experimental request_user_input tool.
     pub experimental_request_user_input_enabled: bool,
@@ -2317,12 +2323,52 @@ fn resolve_web_search_mode(config_toml: &ConfigToml, features: &Features) -> Opt
 }
 
 fn resolve_web_search_config(config_toml: &ConfigToml) -> Option<WebSearchConfig> {
-    config_toml
+    let tool_config = config_toml
         .tools
         .as_ref()
         .and_then(|tools| tools.web_search.as_ref())
-        .cloned()
-        .map(Into::into)
+        .cloned()?;
+
+    Some(WebSearchConfig {
+        filters: tool_config
+            .allowed_domains
+            .map(|allowed_domains| WebSearchFilters {
+                allowed_domains: Some(allowed_domains),
+            }),
+        user_location: tool_config.location.map(WebSearchUserLocation::from),
+        search_context_size: tool_config.context_size,
+    })
+}
+
+const DEFAULT_WEB_SEARCH_LIMIT: usize = 5;
+const MAX_WEB_SEARCH_LIMIT: usize = 20;
+
+fn resolve_web_search_runtime_config(config_toml: &ConfigToml) -> Option<WebSearchRuntimeConfig> {
+    let tool_config = config_toml
+        .tools
+        .as_ref()
+        .and_then(|tools| tools.web_search.as_ref())?;
+    let provider = tool_config.provider?;
+    let api_key = tool_config.api_key.clone()?;
+    if api_key.is_empty() {
+        return None;
+    }
+
+    let max_limit = tool_config
+        .max_limit
+        .unwrap_or(MAX_WEB_SEARCH_LIMIT)
+        .clamp(1, MAX_WEB_SEARCH_LIMIT);
+    let default_limit = tool_config
+        .default_limit
+        .unwrap_or(DEFAULT_WEB_SEARCH_LIMIT)
+        .clamp(1, max_limit);
+
+    Some(WebSearchRuntimeConfig {
+        provider,
+        api_key,
+        default_limit,
+        max_limit,
+    })
 }
 
 fn resolve_experimental_request_user_input_enabled(config_toml: &ConfigToml) -> bool {
@@ -3066,6 +3112,7 @@ impl Config {
         let web_search_mode =
             resolve_web_search_mode(&cfg, &features).unwrap_or(WebSearchMode::Cached);
         let web_search_config = resolve_web_search_config(&cfg);
+        let web_search_runtime_config = resolve_web_search_runtime_config(&cfg);
         let experimental_request_user_input_enabled =
             resolve_experimental_request_user_input_enabled(&cfg);
         let code_mode = resolve_code_mode_config(&cfg);
@@ -3589,6 +3636,7 @@ impl Config {
             experimental_thread_store: thread_store_config(cfg.experimental_thread_store),
             web_search_mode: constrained_web_search_mode.value,
             web_search_config,
+            web_search_runtime_config,
             experimental_request_user_input_enabled,
             code_mode,
             use_experimental_unified_exec_tool,

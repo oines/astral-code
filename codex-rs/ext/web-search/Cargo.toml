@@ -14,18 +14,21 @@ workspace = true
 
 [dependencies]
 async-trait = { workspace = true }
-codex-api = { workspace = true }
+codex-config = { workspace = true }
 codex-core = { workspace = true }
 codex-extension-api = { workspace = true }
 codex-login = { workspace = true }
-codex-model-provider = { workspace = true }
-codex-model-provider-info = { workspace = true }
 codex-protocol = { workspace = true }
 codex-tools = { workspace = true }
-http = { workspace = true }
+html-to-markdown-rs = { workspace = true }
+regex = { workspace = true }
+reqwest = { workspace = true, features = ["json", "stream"] }
 schemars = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+tracing = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

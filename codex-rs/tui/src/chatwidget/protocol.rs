@@ -303,6 +303,7 @@ impl ChatWidget {
             }
             item @ ThreadItem::McpToolCall { .. } => self.on_mcp_tool_call_started(item),
             item @ ThreadItem::CoreToolCall { .. } => self.on_core_tool_call_started(item),
+            item @ ThreadItem::DynamicToolCall { .. } => self.on_dynamic_tool_call_started(item),
             ThreadItem::WebSearch { id, .. } => {
                 self.on_web_search_begin(id);
             }

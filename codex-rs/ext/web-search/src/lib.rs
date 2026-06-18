@@ -1,7 +1,7 @@
 mod extension;
-mod history;
+mod fetch;
 mod output;
-mod schema;
+mod provider;
 mod tool;
 
 pub use extension::install;

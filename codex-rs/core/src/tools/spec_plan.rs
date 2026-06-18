@@ -65,6 +65,7 @@ use crate::tools::router::ToolRouter;
 use crate::tools::router::ToolRouterParams;
 use codex_features::Feature;
 use codex_mcp::ToolInfo;
+use codex_protocol::config_types::WebSearchMode;
 use codex_protocol::dynamic_tools::DynamicToolSpec;
 use codex_protocol::openai_models::ConfigShellToolType;
 use codex_protocol::openai_models::ToolMode;
@@ -653,8 +654,8 @@ fn add_astral_file_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut 
     }
 }
 
-fn standalone_web_search_enabled(_turn_context: &TurnContext) -> bool {
-    false
+fn provider_neutral_web_tools_enabled(turn_context: &TurnContext) -> bool {
+    turn_context.config.web_search_mode.value() == WebSearchMode::Live
 }
 
 fn add_shell_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut PlannedTools) {
@@ -997,11 +998,14 @@ fn append_extension_tool_executors(
         reserved_tool_names.insert(ToolName::plain(TOOL_SEARCH_TOOL_NAME));
     }
 
-    let standalone_web_search_enabled = standalone_web_search_enabled(turn_context);
+    let provider_neutral_web_tools_enabled = provider_neutral_web_tools_enabled(turn_context);
 
     for executor in executors.iter().cloned() {
         let tool_name = executor.tool_name();
-        if tool_name == ToolName::namespaced("web", "run") && !standalone_web_search_enabled {
+        if tool_name == ToolName::namespaced("web", "run") {
+            continue;
+        }
+        if is_provider_neutral_web_tool(&tool_name) && !provider_neutral_web_tools_enabled {
             continue;
         }
         if tool_name == ToolName::namespaced(IMAGE_GEN_NAMESPACE, IMAGEGEN_TOOL_NAME)
@@ -1015,6 +1019,13 @@ fn append_extension_tool_executors(
         }
         planned_tools.add(ExtensionToolAdapter::new(executor));
     }
+}
+
+fn is_provider_neutral_web_tool(tool_name: &ToolName) -> bool {
+    matches!(
+        (tool_name.namespace.as_deref(), tool_name.name.as_str()),
+        (Some("web"), "search" | "fetch")
+    )
 }
 
 fn multi_agent_v2_handler(

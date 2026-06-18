@@ -28,7 +28,7 @@ use crate::thread_state::ThreadStateManager;
 pub(crate) fn thread_extensions<S>(
     guardian_agent_spawner: S,
     event_sink: Arc<dyn ExtensionEventSink>,
-    _auth_manager: Arc<AuthManager>,
+    auth_manager: Arc<AuthManager>,
     state_db: Option<StateDbHandle>,
     thread_manager: Weak<ThreadManager>,
     goal_service: Arc<GoalService>,
@@ -49,6 +49,7 @@ where
     }
     codex_guardian::install(&mut builder, guardian_agent_spawner);
     codex_memories_extension::install(&mut builder, codex_otel::global());
+    codex_web_search_extension::install(&mut builder, auth_manager);
     Arc::new(builder.build())
 }
 
@@ -132,6 +133,12 @@ mod tests {
     use std::time::Duration;
 
     use codex_analytics::AnalyticsEventsClient;
+    use codex_extension_api::ExtensionData;
+    use codex_extension_api::NoopExtensionEventSink;
+    use codex_extension_api::ThreadStartInput;
+    use codex_extension_api::ToolName;
+    use codex_login::CodexAuth;
+    use codex_protocol::protocol::SessionSource;
     use codex_protocol::protocol::ThreadGoal as CoreThreadGoal;
     use codex_protocol::protocol::ThreadGoalStatus;
     use codex_protocol::protocol::ThreadGoalUpdatedEvent;
@@ -186,6 +193,63 @@ mod tests {
             ],
             observed
         );
+    }
+
+    #[tokio::test]
+    async fn thread_extensions_include_live_web_tools() -> anyhow::Result<()> {
+        let codex_home = tempfile::tempdir()?;
+        let config = Config::load_default_with_cli_overrides_for_codex_home(
+            codex_home.path().to_path_buf(),
+            vec![
+                (
+                    "web_search".to_string(),
+                    toml::Value::String("live".to_string()),
+                ),
+                (
+                    "tools.web_search.provider".to_string(),
+                    toml::Value::String("tavily".to_string()),
+                ),
+                (
+                    "tools.web_search.api_key".to_string(),
+                    toml::Value::String("secret".to_string()),
+                ),
+            ],
+        )
+        .await?;
+        let registry = thread_extensions(
+            guardian_agent_spawner(Weak::new()),
+            Arc::new(NoopExtensionEventSink),
+            AuthManager::from_auth_for_testing(CodexAuth::from_api_key("dummy")),
+            None,
+            Weak::new(),
+            Arc::new(GoalService::new()),
+        );
+        let session_store = ExtensionData::new("session");
+        let thread_store = ExtensionData::new("11111111-1111-4111-8111-111111111111");
+
+        for contributor in registry.thread_lifecycle_contributors() {
+            contributor
+                .on_thread_start(ThreadStartInput {
+                    config: &config,
+                    session_source: &SessionSource::Mcp,
+                    persistent_thread_state_available: true,
+                    session_store: &session_store,
+                    thread_store: &thread_store,
+                })
+                .await;
+        }
+
+        let tool_names = registry
+            .tool_contributors()
+            .iter()
+            .flat_map(|contributor| contributor.tools(&session_store, &thread_store))
+            .map(|tool| tool.tool_name())
+            .collect::<Vec<_>>();
+
+        assert!(tool_names.contains(&ToolName::namespaced("web", "search")));
+        assert!(tool_names.contains(&ToolName::namespaced("web", "fetch")));
+
+        Ok(())
     }
 
     fn thread_goal_updated_event(thread_id: ThreadId, turn_id: &str) -> Event {
