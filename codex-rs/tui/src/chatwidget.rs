@@ -334,6 +334,9 @@ use self::exec_state::UnifiedExecWaitStreak;
 use self::exec_state::command_execution_command_and_parsed;
 use self::exec_state::is_standard_tool_call;
 use self::exec_state::is_unified_exec_source;
+mod live_activity;
+use self::live_activity::LiveActivitiesCell;
+use self::live_activity::LiveActivityStore;
 mod goal_status;
 use self::goal_status::GoalStatusState;
 #[cfg(test)]
@@ -566,6 +569,9 @@ pub(crate) struct ChatWidget {
     turn_lifecycle: TurnLifecycleState,
     task_complete_pending: bool,
     unified_exec_processes: Vec<UnifiedExecProcessSummary>,
+    live_activities: LiveActivityStore,
+    pending_file_tool_call_ids: HashSet<String>,
+    file_tool_change_ids: HashSet<String>,
     /// Tracks per-server MCP startup state while startup is in progress.
     ///
     /// The map is `Some(_)` from the first startup status update until the
@@ -1148,6 +1154,15 @@ impl ChatWidget {
     }
 
     fn flush_active_cell(&mut self) {
+        if self
+            .transcript
+            .active_cell
+            .as_ref()
+            .is_some_and(|cell| cell.as_any().is::<LiveActivitiesCell>())
+        {
+            self.commit_live_activity_summaries();
+            return;
+        }
         if let Some(active) = self.transcript.active_cell.take() {
             self.transcript.needs_final_message_separator = true;
             self.app_event_tx.send(AppEvent::InsertHistoryCell(active));

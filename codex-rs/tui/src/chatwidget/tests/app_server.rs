@@ -963,7 +963,7 @@ async fn live_app_server_cyber_policy_error_renders_dedicated_notice() {
     assert_eq!(cells.len(), 1);
     let rendered = lines_to_single_string(&cells[0]);
     assert!(rendered.contains("The provider requested an additional safety review"));
-    assert!(rendered.contains("active provider's safety policy"));
+    assert!(rendered.contains("provider's safety policy"));
     assert!(!rendered.contains("server fallback message"));
     assert!(!chat.bottom_pane.is_task_running());
 }
@@ -986,7 +986,7 @@ async fn live_app_server_model_verification_renders_warning() {
     let rendered = lines_to_single_string(&cells[0]);
     assert!(rendered.contains("additional safety verification"));
     assert!(rendered.contains("provider reviews it"));
-    assert!(rendered.contains("active provider's safety policy"));
+    assert!(rendered.contains("provider's safety policy"));
     assert!(!rendered.contains("chatgpt.com/cyber"));
 }
 

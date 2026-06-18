@@ -53,7 +53,7 @@ async fn app_server_cyber_policy_error_renders_dedicated_notice() {
     assert_eq!(cells.len(), 1);
     let rendered = lines_to_single_string(&cells[0]);
     assert!(rendered.contains("The provider requested an additional safety review"));
-    assert!(rendered.contains("active provider's safety policy"));
+    assert!(rendered.contains("provider's safety policy"));
     assert!(!rendered.contains("server fallback message"));
 }
 
@@ -71,7 +71,7 @@ async fn app_server_model_verification_renders_warning() {
     let rendered = lines_to_single_string(&cells[0]);
     assert!(rendered.contains("additional safety verification"));
     assert!(rendered.contains("provider reviews it"));
-    assert!(rendered.contains("active provider's safety policy"));
+    assert!(rendered.contains("provider's safety policy"));
     assert!(!rendered.contains("chatgpt.com/cyber"));
 }
 
@@ -963,8 +963,10 @@ async fn missing_rate_limit_reached_type_does_not_prompt_or_refresh() {
 fn assert_no_owner_nudge_or_rate_limit_refresh(
     rx: &mut tokio::sync::mpsc::UnboundedReceiver<AppEvent>,
 ) {
-    if let Ok(event) = rx.try_recv() {
-        panic!("unexpected event: {event:?}");
+    while let Ok(event) = rx.try_recv() {
+        if !matches!(event, AppEvent::InsertHistoryCell(_)) {
+            panic!("unexpected event: {event:?}");
+        }
     }
 }
 
@@ -1824,8 +1826,10 @@ async fn interrupted_turn_clears_visible_running_hook() {
 
 #[tokio::test]
 async fn status_line_fast_mode_renders_on_and_off() {
-    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.4")).await;
+    set_fast_mode_test_catalog(&mut chat);
     chat.config.tui_status_line = Some(vec!["fast-mode".to_string()]);
+    chat.set_service_tier(Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string()));
 
     chat.refresh_status_line();
     assert_eq!(status_line_text(&chat), Some("Fast off".to_string()));

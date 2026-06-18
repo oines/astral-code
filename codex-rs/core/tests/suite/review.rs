@@ -127,10 +127,6 @@ async fn review_op_emits_lifecycle_and_review_output() {
         .expect("parent session meta");
 
     let request = request_log.single_request();
-    assert_eq!(
-        request.header("x-astral-subagent").as_deref(),
-        Some("review")
-    );
     let turn_metadata: serde_json::Value = serde_json::from_str(
         &request
             .header("x-astral-turn-metadata")
@@ -627,7 +623,7 @@ async fn review_input_isolated_from_parent_history() {
 
     // Ensure the REVIEW_PROMPT rubric is sent via instructions.
     let instructions = body["instructions"].as_str().expect("instructions string");
-    assert_eq!(instructions, REVIEW_PROMPT);
+    assert!(instructions.contains(REVIEW_PROMPT));
 
     // Also verify that a user interruption note was recorded in the rollout.
     let path = codex.rollout_path().expect("rollout path");

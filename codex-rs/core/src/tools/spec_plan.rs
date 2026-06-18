@@ -497,15 +497,21 @@ fn build_code_mode_executors(
     let deferred_tools_guidance_enabled = search_tool_enabled(turn_context);
     for executor in executors {
         let exposure = executor.exposure();
+        let tool_name = executor.tool_name();
         if exposure == ToolExposure::DirectModelOnly {
             continue;
         }
 
         if exposure == ToolExposure::Hidden {
+            if tool_name.namespace.is_none()
+                && matches!(tool_name.name.as_str(), "exec_command" | "shell_command")
+            {
+                code_mode_nested_tool_specs.push(executor.spec());
+            }
             continue;
         }
 
-        if is_excluded_from_code_mode(turn_context, &executor.tool_name()) {
+        if is_excluded_from_code_mode(turn_context, &tool_name) {
             continue;
         }
 

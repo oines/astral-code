@@ -7,6 +7,7 @@ use chrono::DateTime;
 use chrono::TimeZone;
 use chrono::Utc;
 use codex_login::CodexAuth;
+use codex_model_provider_info::ModelProviderInfo;
 use codex_models_manager::client_version_to_whole;
 use codex_models_manager::manager::RefreshStrategy;
 use codex_protocol::config_types::ReasoningSummary;
@@ -34,10 +35,14 @@ use core_test_support::wait_for_event;
 use pretty_assertions::assert_eq;
 use serde::Deserialize;
 use serde::Serialize;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::Hash;
+use std::hash::Hasher;
+use std::path::PathBuf;
 use wiremock::MockServer;
 
 const ETAG: &str = "\"models-etag-ttl\"";
-const CACHE_FILE: &str = "models_cache.json";
+const MODEL_CACHE_DIR: &str = "models_cache";
 const REMOTE_MODEL: &str = "codex-test-ttl";
 const VERSIONED_MODEL: &str = "codex-test-versioned";
 const MISSING_VERSION_MODEL: &str = "codex-test-missing-version";
@@ -74,7 +79,7 @@ async fn renews_cache_ttl_on_matching_models_etag() -> Result<()> {
         .list_models(RefreshStrategy::OnlineIfUncached)
         .await;
 
-    let cache_path = config.codex_home.join(CACHE_FILE);
+    let cache_path = model_cache_path(config.codex_home.as_path(), &config.model_provider);
     let stale_time = Utc.timestamp_opt(0, 0).single().expect("valid epoch");
     rewrite_cache_timestamp(&cache_path, stale_time).await?;
 
@@ -160,6 +165,7 @@ async fn uses_cache_when_version_matches() -> Result<()> {
     .await;
 
     let mut builder = test_codex().with_auth(CodexAuth::create_dummy_api_key_auth_for_testing());
+    let base_url = format!("{}/v1", server.uri());
     builder = builder
         .with_pre_build_hook(move |home| {
             let cache = ModelsCache {
@@ -168,14 +174,18 @@ async fn uses_cache_when_version_matches() -> Result<()> {
                 client_version: Some(client_version_to_whole()),
                 models: vec![cached_model],
             };
-            let cache_path = home.join(CACHE_FILE);
+            let provider = core_test_support::test_codex::responses_mock_model_provider(base_url);
+            let cache_path = model_cache_path(home, &provider);
             write_cache_sync(&cache_path, &cache).expect("write cache");
         })
         .with_config(|config| {
+            config.model = None;
+            config.model_catalog = None;
             config.model_provider.request_max_retries = Some(0);
         });
 
     let test = builder.build(&server).await?;
+
     let models_manager = test.thread_manager.get_models_manager();
     let models = models_manager
         .list_models(RefreshStrategy::OnlineIfUncached)
@@ -183,7 +193,8 @@ async fn uses_cache_when_version_matches() -> Result<()> {
 
     assert!(
         models.iter().any(|preset| preset.model == VERSIONED_MODEL),
-        "expected cached model"
+        "expected cached model, got {models:#?}; /models requests: {}",
+        models_mock.requests().len()
     );
     assert_eq!(
         models_mock.requests().len(),
@@ -207,6 +218,7 @@ async fn refreshes_when_cache_version_missing() -> Result<()> {
     .await;
 
     let mut builder = test_codex().with_auth(CodexAuth::create_dummy_api_key_auth_for_testing());
+    let base_url = format!("{}/v1", server.uri());
     builder = builder
         .with_pre_build_hook(move |home| {
             let cache = ModelsCache {
@@ -215,14 +227,18 @@ async fn refreshes_when_cache_version_missing() -> Result<()> {
                 client_version: None,
                 models: vec![cached_model],
             };
-            let cache_path = home.join(CACHE_FILE);
+            let provider = core_test_support::test_codex::responses_mock_model_provider(base_url);
+            let cache_path = model_cache_path(home, &provider);
             write_cache_sync(&cache_path, &cache).expect("write cache");
         })
         .with_config(|config| {
+            config.model = None;
+            config.model_catalog = None;
             config.model_provider.request_max_retries = Some(0);
         });
 
     let test = builder.build(&server).await?;
+
     let models_manager = test.thread_manager.get_models_manager();
     let models = models_manager
         .list_models(RefreshStrategy::OnlineIfUncached)
@@ -254,6 +270,7 @@ async fn refreshes_when_cache_version_differs() -> Result<()> {
     }
 
     let mut builder = test_codex().with_auth(CodexAuth::create_dummy_api_key_auth_for_testing());
+    let base_url = format!("{}/v1", server.uri());
     builder = builder
         .with_pre_build_hook(move |home| {
             let client_version = client_version_to_whole();
@@ -263,14 +280,18 @@ async fn refreshes_when_cache_version_differs() -> Result<()> {
                 client_version: Some(format!("{client_version}-diff")),
                 models: vec![cached_model],
             };
-            let cache_path = home.join(CACHE_FILE);
+            let provider = core_test_support::test_codex::responses_mock_model_provider(base_url);
+            let cache_path = model_cache_path(home, &provider);
             write_cache_sync(&cache_path, &cache).expect("write cache");
         })
         .with_config(|config| {
+            config.model = None;
+            config.model_catalog = None;
             config.model_provider.request_max_retries = Some(0);
         });
 
     let test = builder.build(&server).await?;
+
     let models_manager = test.thread_manager.get_models_manager();
     let models = models_manager
         .list_models(RefreshStrategy::OnlineIfUncached)
@@ -305,15 +326,41 @@ async fn read_cache(path: &Path) -> Result<ModelsCache> {
 }
 
 async fn write_cache(path: &Path, cache: &ModelsCache) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
     let contents = serde_json::to_vec_pretty(cache)?;
     tokio::fs::write(path, contents).await?;
     Ok(())
 }
 
 fn write_cache_sync(path: &Path, cache: &ModelsCache) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     let contents = serde_json::to_vec_pretty(cache)?;
     std::fs::write(path, contents)?;
     Ok(())
+}
+
+fn model_cache_path(codex_home: &Path, provider: &ModelProviderInfo) -> PathBuf {
+    let mut hasher = DefaultHasher::new();
+    provider_cache_key(provider).hash(&mut hasher);
+    codex_home
+        .join(MODEL_CACHE_DIR)
+        .join(format!("{:016x}.json", hasher.finish()))
+}
+
+fn provider_cache_key(provider: &ModelProviderInfo) -> String {
+    format!(
+        "name={};base_url={};wire_api={};env_key={};auth={};aws={}",
+        provider.name,
+        provider.base_url.as_deref().unwrap_or_default(),
+        provider.wire_api,
+        provider.env_key.as_deref().unwrap_or_default(),
+        provider.auth.is_some(),
+        provider.aws.is_some()
+    )
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

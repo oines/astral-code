@@ -132,28 +132,30 @@ async fn openpty_works_under_real_exec_seatbelt_path() {
         return;
     }
 
-    let python = match which::which("python3") {
+    let script = match which::which("script") {
         Ok(path) => path,
         Err(_) => {
-            eprintln!("python3 not found in PATH, skipping test.");
+            eprintln!("script not found in PATH, skipping test.");
             return;
         }
     };
 
     let tmp = TempDir::new().expect("should be able to create temp dir");
     let cmd = vec![
-        python.to_string_lossy().into_owned(),
+        script.to_string_lossy().into_owned(),
+        "-q".to_string(),
+        "/dev/null".to_string(),
+        "/bin/sh".to_string(),
         "-c".to_string(),
-        r#"import os
-
-master, slave = os.openpty()
-os.write(slave, b"ping")
-assert os.read(master, 4) == b"ping""#
-            .to_string(),
+        "printf ping".to_string(),
     ];
 
     let output = run_test_cmd(tmp, cmd).await.unwrap();
-    assert_eq!(output.stdout.text, "");
+    assert!(
+        output.stdout.text.contains("ping"),
+        "stdout missing pty payload: {:?}",
+        output.stdout.text
+    );
     assert_eq!(output.stderr.text, "");
 }
 

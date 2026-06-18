@@ -60,6 +60,7 @@ use codex_core::personality_migration::PERSONALITY_MIGRATION_FILENAME;
 use codex_core::test_support::all_model_presets;
 use codex_features::FEATURES;
 use codex_features::Feature;
+use codex_models_manager::capabilities::MODEL_CAPABILITIES_FILE_NAME;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::Personality;
@@ -70,6 +71,7 @@ use codex_protocol::models::ImageDetail;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::user_input::MAX_USER_INPUT_TEXT_CHARS;
 use core_test_support::responses;
+use core_test_support::responses::request_input_items;
 use core_test_support::skip_if_no_network;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
@@ -182,11 +184,7 @@ async fn received_response_input_images(server: &wiremock::MockServer) -> Result
         let body = request
             .body_json::<Value>()
             .context("request body should be JSON")?;
-        let Some(input) = body.get("input").and_then(Value::as_array) else {
-            continue;
-        };
-
-        for item in input {
+        for item in request_input_items(&body) {
             if item.get("type").and_then(Value::as_str) != Some("message") {
                 continue;
             }
@@ -806,11 +804,14 @@ async fn thread_start_omits_empty_instruction_overrides_from_model_request() -> 
         .collect::<Vec<_>>();
     assert_eq!(
         json!({
-            "hasInstructions": request_body.get("instructions").is_some(),
+            "hasEmptyInstructions": request_body
+                .get("instructions")
+                .and_then(serde_json::Value::as_str)
+                == Some(""),
             "emptyDeveloperInputTexts": empty_developer_input_texts,
         }),
         json!({
-            "hasInstructions": false,
+            "hasEmptyInstructions": false,
             "emptyDeveloperInputTexts": [],
         })
     );
@@ -1649,7 +1650,9 @@ async fn turn_start_uses_thread_feature_overrides_for_request_user_input_tool_de
 
     let request = response_mock.single_request();
     let payload_text = request.body_json().to_string();
-    assert!(payload_text.contains("This tool is only available in Default or Plan mode."));
+    assert!(payload_text.contains(
+        "Use the `request_user_input` tool only when it is listed in the available tools"
+    ));
 
     Ok(())
 }
@@ -1936,27 +1939,33 @@ async fn turn_start_uses_migrated_pragmatic_personality_without_override_v2() ->
 }
 
 #[tokio::test]
-async fn turn_start_defaults_local_image_detail_to_high() -> Result<()> {
+async fn turn_start_sends_local_image_without_chat_completions_detail_by_default() -> Result<()> {
     let input_images = run_local_image_turn(/*detail*/ None).await?;
 
     assert_eq!(input_images.len(), 1);
-    assert_eq!(
-        input_images[0].get("detail").and_then(Value::as_str),
-        Some("high")
+    assert!(
+        input_images[0]
+            .get("image_url")
+            .and_then(Value::as_str)
+            .is_some()
     );
+    assert_eq!(input_images[0].get("detail").and_then(Value::as_str), None);
 
     Ok(())
 }
 
 #[tokio::test]
-async fn turn_start_forwards_custom_local_image_detail() -> Result<()> {
+async fn turn_start_omits_custom_local_image_detail_for_chat_completions() -> Result<()> {
     let input_images = run_local_image_turn(Some(ImageDetail::Original)).await?;
 
     assert_eq!(input_images.len(), 1);
-    assert_eq!(
-        input_images[0].get("detail").and_then(Value::as_str),
-        Some("original")
+    assert!(
+        input_images[0]
+            .get("image_url")
+            .and_then(Value::as_str)
+            .is_some()
     );
+    assert_eq!(input_images[0].get("detail").and_then(Value::as_str), None);
 
     Ok(())
 }
@@ -4131,6 +4140,7 @@ fn create_config_toml_with_sandbox(
         })
         .collect::<Vec<_>>()
         .join("\n");
+    let model_capabilities = mock_model_capabilities_toml("mock_provider");
     let config_toml = codex_home.join("config.toml");
     std::fs::write(
         config_toml,
@@ -4151,9 +4161,83 @@ base_url = "{server_uri}/v1"
 wire_api = "chat_completions"
 request_max_retries = 0
 stream_max_retries = 0
+{model_capabilities}
 "#
         ),
+    )?;
+    write_mock_model_capabilities_cache(codex_home, "mock_provider")?;
+    write_models_cache(codex_home)
+}
+
+fn mock_model_capabilities_toml(model_provider_id: &str) -> String {
+    [
+        "mock-model",
+        "mock-model-collab",
+        "mock-model-override",
+        "gpt-5.2",
+        "gpt-5.2-codex",
+        "gpt-5.3-codex",
+        "gpt-5.4",
+    ]
+    .into_iter()
+    .map(|model| {
+        format!(
+            r#"
+[model_capabilities."{model_provider_id}/{model}"]
+max_context_window = 272000
+max_output_tokens = 32000
+supports_tools = true
+supports_vision = true
+supports_reasoning = true
+"#
+        )
+    })
+    .collect::<Vec<_>>()
+    .join("")
+}
+
+fn write_mock_model_capabilities_cache(
+    codex_home: &Path,
+    model_provider_id: &str,
+) -> std::io::Result<()> {
+    std::fs::write(
+        codex_home.join(MODEL_CAPABILITIES_FILE_NAME),
+        format!(
+            r#"version = 1
+source = "app-server-tests"
+generated_at_unix_seconds = 0
+{}
+"#,
+            mock_model_capabilities_cache_toml(model_provider_id)
+        ),
     )
+}
+
+fn mock_model_capabilities_cache_toml(model_provider_id: &str) -> String {
+    [
+        "mock-model",
+        "mock-model-collab",
+        "mock-model-override",
+        "gpt-5.2",
+        "gpt-5.2-codex",
+        "gpt-5.3-codex",
+        "gpt-5.4",
+    ]
+    .into_iter()
+    .map(|model| {
+        format!(
+            r#"
+[models."{model_provider_id}/{model}"]
+max_context_window = 272000
+max_output_tokens = 32000
+supports_tools = true
+supports_vision = true
+supports_reasoning = true
+"#
+        )
+    })
+    .collect::<Vec<_>>()
+    .join("")
 }
 
 fn write_test_skill(codex_home: &Path, name: &str) -> std::io::Result<()> {

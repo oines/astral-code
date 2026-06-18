@@ -7,6 +7,7 @@ use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::ToolExecutor;
 use codex_tools::ToolName;
 use codex_tools::ToolSpec;
+use serde::Deserialize;
 
 use super::ExecContext;
 use super::PUBLIC_TOOL_NAME;
@@ -16,6 +17,11 @@ use super::is_exec_tool_name;
 pub struct CodeModeExecuteHandler {
     spec: ToolSpec,
     nested_tool_specs: Vec<ToolSpec>,
+}
+
+#[derive(Deserialize)]
+struct ExecFunctionArguments {
+    input: String,
 }
 
 impl CodeModeExecuteHandler {
@@ -119,6 +125,18 @@ impl ToolExecutor<ToolInvocation> for CodeModeExecuteHandler {
                 .execute(session, turn, call_id, input)
                 .await
                 .map(boxed_tool_output),
+            ToolPayload::Function { arguments } if is_exec_tool_name(&tool_name) => {
+                let ExecFunctionArguments { input } = serde_json::from_str(&arguments).map_err(
+                    |err| {
+                        FunctionCallError::RespondToModel(format!(
+                            "{PUBLIC_TOOL_NAME} expects JSON arguments with an `input` string: {err}"
+                        ))
+                    },
+                )?;
+                self.execute(session, turn, call_id, input)
+                    .await
+                    .map(boxed_tool_output)
+            }
             _ => Err(FunctionCallError::RespondToModel(format!(
                 "{PUBLIC_TOOL_NAME} expects raw JavaScript source text"
             ))),
@@ -128,6 +146,9 @@ impl ToolExecutor<ToolInvocation> for CodeModeExecuteHandler {
 
 impl CoreToolRuntime for CodeModeExecuteHandler {
     fn matches_kind(&self, payload: &ToolPayload) -> bool {
-        matches!(payload, ToolPayload::Custom { .. })
+        matches!(
+            payload,
+            ToolPayload::Custom { .. } | ToolPayload::Function { .. }
+        )
     }
 }

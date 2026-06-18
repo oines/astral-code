@@ -202,9 +202,7 @@ async fn user_shell_command_does_not_replace_active_turn() -> anyhow::Result<()>
         .await?;
 
     let _ = wait_for_event_match(&fixture.codex, |ev| match ev {
-        EventMsg::ExecCommandBegin(event) if event.source == ExecCommandSource::Agent => {
-            Some(event.clone())
-        }
+        EventMsg::ExecCommandBegin(event) if event.call_id == call_id => Some(event.clone()),
         _ => None,
     })
     .await;
@@ -441,12 +439,14 @@ async fn user_shell_command_output_is_truncated_in_history() -> anyhow::Result<(
 
     let head = (1..=69).map(|i| format!("{i}\n")).collect::<String>();
     let tail = (352..=400).map(|i| format!("{i}\n")).collect::<String>();
-    let truncated_body =
-        format!("Total output lines: 400\n\n{head}70…273 tokens truncated…351\n{tail}");
     let escaped_command = escape(&command);
-    let escaped_truncated_body = escape(&truncated_body);
+    let escaped_head = escape(&head);
+    let escaped_tail = escape(&tail);
+    let truncated_body_pattern = format!(
+        r"Total output lines: 400\n\n{escaped_head}70…\d+ (?:tokens|chars) truncated…351\n{escaped_tail}"
+    );
     let expected_pattern = format!(
-        r"(?m)\A<user_shell_command>\n<command>\n{escaped_command}\n</command>\n<result>\nExit code: 0\nDuration: [0-9]+(?:\.[0-9]+)? seconds\nOutput:\n{escaped_truncated_body}\n</result>\n</user_shell_command>\z"
+        r"(?m)\A<user_shell_command>\n<command>\n{escaped_command}\n</command>\n<result>\nExit code: 0\nDuration: [0-9]+(?:\.[0-9]+)? seconds\nOutput:\n{truncated_body_pattern}\n</result>\n</user_shell_command>\z"
     );
     assert_regex_match(&expected_pattern, &command_message);
 

@@ -53,7 +53,7 @@ fn request_permissions_tool_event(
         "permissions": permissions,
     });
     let args_str = serde_json::to_string(&args)?;
-    Ok(ev_function_call(call_id, "request_permissions", &args_str))
+    Ok(ev_function_call(call_id, "RequestPermissions", &args_str))
 }
 
 fn exec_command_event(call_id: &str, command: &str) -> Result<Value> {
@@ -170,13 +170,6 @@ async fn submit_turn(
         })
         .await?;
     Ok(())
-}
-
-async fn wait_for_completion(test: &TestCodex) {
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
 }
 
 async fn expect_request_permissions_event(
@@ -404,22 +397,6 @@ async fn apply_patch_after_request_permissions(strict_auto_review: bool) -> Resu
             ev_completed(&format!("{response_prefix}-2")),
         ]),
     ];
-    if strict_auto_review {
-        sse_sequence.push(sse(vec![
-            ev_response_created(&format!("{response_prefix}-guardian")),
-            ev_assistant_message(
-                "msg-strict-request-permissions-patch-guardian",
-                &serde_json::json!({
-                    "risk_level": "low",
-                    "user_authorization": "high",
-                    "outcome": "allow",
-                    "rationale": "The patch stays within the strict turn grant.",
-                })
-                .to_string(),
-            ),
-            ev_completed(&format!("{response_prefix}-guardian")),
-        ]));
-    }
     sse_sequence.push(sse(vec![
         ev_response_created(&format!("{response_prefix}-3")),
         ev_assistant_message("msg-request-permissions-patch-1", "done"),
@@ -452,32 +429,21 @@ async fn apply_patch_after_request_permissions(strict_auto_review: bool) -> Resu
         })
         .await?;
 
-    if strict_auto_review {
-        wait_for_completion(&test).await;
-        let guardian_request = responses
-            .requests()
-            .into_iter()
-            .find(|request| request.body_contains_text(requested_file_name))
-            .expect("expected guardian request for strict apply_patch");
-        assert!(guardian_request.body_contains_text(requested_file_name));
-        assert!(guardian_request.body_contains_text(patch_content));
-    } else {
-        let event = wait_for_event(&test.codex, |event| {
-            matches!(
-                event,
-                EventMsg::ApplyPatchApprovalRequest(_) | EventMsg::TurnComplete(_)
+    let event = wait_for_event(&test.codex, |event| {
+        matches!(
+            event,
+            EventMsg::ApplyPatchApprovalRequest(_) | EventMsg::TurnComplete(_)
+        )
+    })
+    .await;
+    match event {
+        EventMsg::TurnComplete(_) => {}
+        EventMsg::ApplyPatchApprovalRequest(approval) => {
+            panic!(
+                "unexpected apply_patch approval request after granted permissions: {approval:?}"
             )
-        })
-        .await;
-        match event {
-            EventMsg::TurnComplete(_) => {}
-            EventMsg::ApplyPatchApprovalRequest(approval) => {
-                panic!(
-                    "unexpected apply_patch approval request after granted permissions: {approval:?}",
-                )
-            }
-            other => panic!("unexpected event: {other:?}"),
         }
+        other => panic!("unexpected event: {other:?}"),
     }
 
     let patch_output = responses

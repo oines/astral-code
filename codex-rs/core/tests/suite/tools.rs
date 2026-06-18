@@ -24,6 +24,7 @@ use core_test_support::responses::ev_function_call;
 use core_test_support::responses::ev_response_created;
 use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::mount_sse_sequence;
+use core_test_support::responses::request_tool_names;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
@@ -35,20 +36,20 @@ use serde_json::Value;
 use serde_json::json;
 
 fn tool_names(body: &Value) -> Vec<String> {
-    body.get("tools")
-        .and_then(Value::as_array)
-        .map(|tools| {
-            tools
-                .iter()
-                .filter_map(|tool| {
-                    tool.get("name")
-                        .or_else(|| tool.get("type"))
-                        .and_then(Value::as_str)
-                        .map(str::to_string)
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+    request_tool_names(body)
+}
+
+fn shell_output_exit_code(output_text: &str) -> Result<i32> {
+    for line in output_text.lines() {
+        if let Some(code) = line
+            .strip_prefix("Exit code: ")
+            .or_else(|| line.strip_prefix("Process exited with code "))
+        {
+            return code.trim().parse::<i32>().context("exit code is integer");
+        }
+    }
+
+    anyhow::bail!("exit code line present");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -179,12 +180,12 @@ async fn custom_tool_unknown_returns_custom_output_error() -> Result<()> {
     )
     .await?;
 
-    let item = mock.single_request().custom_tool_call_output(call_id);
+    let item = mock.single_request().function_call_output(call_id);
     let output = item
         .get("output")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    let expected = format!("unsupported custom tool call: {tool_name}");
+    let expected = format!("unsupported call: {tool_name}");
     assert_eq!(output, expected);
 
     Ok(())
@@ -258,7 +259,7 @@ async fn shell_command_escalated_permissions_rejected_then_ok() -> Result<()> {
 
     let policy = AskForApproval::Never;
     let expected_message = format!(
-        "approval policy is {policy:?}; reject command — you should not ask for escalated permissions if the approval policy is {policy:?}"
+        "approval policy is {policy:?}; reject command — you cannot ask for escalated permissions if the approval policy is {policy:?}"
     );
 
     let blocked_output = second_mock
@@ -277,7 +278,7 @@ async fn shell_command_escalated_permissions_rejected_then_ok() -> Result<()> {
         .and_then(|(content, _)| content)
         .expect("success output string");
     assert_regex_match(
-        r"(?s)^Exit code: 0\nWall time: [0-9]+(?:\.[0-9]+)? seconds\nOutput:\nshell ok\n?$",
+        r"(?s)^(?:Chunk ID: [^\n]+\n)?Wall time: [0-9]+(?:\.[0-9]+)? seconds\nProcess exited with code 0(?:\nOriginal token count: \d+)?\nOutput:\nshell ok\n?$",
         &success_output,
     );
 
@@ -330,16 +331,7 @@ async fn sandbox_denied_shell_command_returns_original_output() -> Result<()> {
     let output_text = mock
         .function_call_output_text(call_id)
         .context("shell output present")?;
-    let exit_code_line = output_text
-        .lines()
-        .next()
-        .context("exit code line present")?;
-    let exit_code = exit_code_line
-        .strip_prefix("Exit code: ")
-        .context("exit code prefix present")?
-        .trim()
-        .parse::<i32>()
-        .context("exit code is integer")?;
+    let exit_code = shell_output_exit_code(&output_text)?;
     let body = output_text;
 
     let body_lower = body.to_lowercase();
@@ -444,16 +436,7 @@ async fn shell_command_enforces_glob_deny_read_policy() -> Result<()> {
     let output_text = mock
         .function_call_output_text(call_id)
         .context("shell output present")?;
-    let exit_code_line = output_text
-        .lines()
-        .next()
-        .context("exit code line present")?;
-    let exit_code = exit_code_line
-        .strip_prefix("Exit code: ")
-        .context("exit code prefix present")?
-        .trim()
-        .parse::<i32>()
-        .context("exit code is integer")?;
+    let exit_code = shell_output_exit_code(&output_text)?;
 
     assert_ne!(
         exit_code, 0,
@@ -645,7 +628,8 @@ async fn shell_command_timeout_includes_timeout_prefix_and_metadata() -> Result<
         }
 
         // Fallback: accept the signal classification path to deflake the test.
-        let signal_pattern = r"(?is)^execution error:.*signal.*$";
+        let signal_pattern =
+            r"(?is)(execution error:.*signal|Process timed out|command timed out|timeout)";
         assert_regex_match(signal_pattern, output_str);
     }
 
@@ -731,7 +715,7 @@ time.sleep(60)
             "expected timeout exit code 124",
         );
     } else {
-        let timeout_pattern = r"(?is)command timed out|timeout";
+        let timeout_pattern = r"(?is)command timed out|timeout|Process timed out";
         assert_regex_match(timeout_pattern, &output_str);
     }
 

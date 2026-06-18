@@ -630,7 +630,9 @@ data: {"type":"response.completed","response":{"id":"resp-1"}}
         assert_eq!(resp.status(), StatusCode::OK);
 
         let bytes = resp.bytes().await.expect("read response body");
-        assert_eq!(bytes, response_body.as_bytes());
+        let expected_body = crate::responses::responses_sse_to_chat_completions_sse(response_body)
+            .expect("responses SSE should convert to chat completions SSE");
+        assert_eq!(bytes, expected_body.as_bytes());
 
         let completion = completions.remove(0);
         let completed_at = completion.await.expect("completion timestamp");

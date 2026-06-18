@@ -39,11 +39,15 @@ use codex_exec_server::GrepSearchRequest;
 use codex_exec_server::GrepSearchResponse;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::SandboxErr;
+use codex_protocol::items::FileChangeItem;
+use codex_protocol::items::TurnItem;
 use codex_protocol::models::AdditionalPermissionProfile;
 use codex_protocol::models::FileSystemPermissions;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::permissions::FileSystemSandboxPolicy;
 use codex_protocol::protocol::AskForApproval;
+use codex_protocol::protocol::FileChange;
+use codex_protocol::protocol::PatchApplyStatus;
 use codex_sandboxing::policy_transforms::effective_file_system_sandbox_policy;
 use codex_sandboxing::policy_transforms::normalize_additional_permissions;
 use codex_tools::EDIT_TOOL_NAME;
@@ -132,8 +136,14 @@ impl FileReadStateStore {
 }
 
 pub(crate) enum AstralFileToolExecutionOutput {
-    Text(String),
+    Text(AstralFileToolTextOutput),
     Image(ViewImageOutput),
+}
+
+#[derive(Debug)]
+pub(crate) struct AstralFileToolTextOutput {
+    text: String,
+    file_changes: Option<HashMap<PathBuf, FileChange>>,
 }
 
 impl AstralFileToolHandler {
@@ -265,15 +275,52 @@ impl ToolExecutor<ToolInvocation> for AstralFileToolHandler {
         }
 
         match output {
-            AstralFileToolExecutionOutput::Text(text) => Ok(boxed_tool_output(
-                FunctionToolOutput::from_text(text, Some(true)),
-            )),
+            AstralFileToolExecutionOutput::Text(output) => {
+                if let Some(file_changes) = output.file_changes.clone() {
+                    emit_file_tool_change(session.as_ref(), turn.as_ref(), &call_id, file_changes)
+                        .await;
+                }
+                Ok(boxed_tool_output(FunctionToolOutput::from_text(
+                    output.text,
+                    Some(true),
+                )))
+            }
             AstralFileToolExecutionOutput::Image(output) => Ok(boxed_tool_output(output)),
         }
     }
 }
 
 impl CoreToolRuntime for AstralFileToolHandler {}
+
+async fn emit_file_tool_change(
+    session: &Session,
+    turn: &TurnContext,
+    call_id: &str,
+    changes: HashMap<PathBuf, FileChange>,
+) {
+    let started = TurnItem::FileChange(FileChangeItem {
+        id: call_id.to_string(),
+        changes: changes.clone(),
+        status: None,
+        auto_approved: None,
+        stdout: None,
+        stderr: None,
+    });
+    session.emit_turn_item_started(turn, &started).await;
+    session
+        .emit_turn_item_completed(
+            turn,
+            TurnItem::FileChange(FileChangeItem {
+                id: call_id.to_string(),
+                changes,
+                status: Some(PatchApplyStatus::Completed),
+                auto_approved: None,
+                stdout: None,
+                stderr: None,
+            }),
+        )
+        .await;
+}
 
 fn astral_file_tool_spec(name: &str) -> ToolSpec {
     let tool = astral_core_tool_by_name(name).unwrap_or_else(|| {
@@ -401,7 +448,7 @@ pub(crate) async fn execute_astral_file_tool(
         }
     };
     let fs = req.turn_environment.environment.get_filesystem();
-    let text = match req.kind {
+    let output = match req.kind {
         AstralFileToolKind::Read => {
             let args: ReadArgs = parse_arguments(&req.arguments)?;
             if is_image_path(Path::new(&args.file_path)) {
@@ -425,7 +472,8 @@ pub(crate) async fn execute_astral_file_tool(
                 &req.cwd,
                 req.read_state.as_ref(),
             )
-            .await?
+            .await
+            .map(text_output)?
         }
         AstralFileToolKind::Write => {
             write_file(
@@ -450,13 +498,35 @@ pub(crate) async fn execute_astral_file_tool(
             .await?
         }
         AstralFileToolKind::Glob => {
-            glob_files(req.arguments.clone(), fs.as_ref(), sandbox, &req.cwd).await?
+            glob_files(req.arguments.clone(), fs.as_ref(), sandbox, &req.cwd)
+                .await
+                .map(text_output)?
         }
         AstralFileToolKind::Grep => {
-            grep_files(req.arguments.clone(), fs.as_ref(), sandbox, &req.cwd).await?
+            grep_files(req.arguments.clone(), fs.as_ref(), sandbox, &req.cwd)
+                .await
+                .map(text_output)?
         }
     };
-    Ok(AstralFileToolExecutionOutput::Text(text))
+    Ok(AstralFileToolExecutionOutput::Text(output))
+}
+
+fn text_output(text: String) -> AstralFileToolTextOutput {
+    AstralFileToolTextOutput {
+        text,
+        file_changes: None,
+    }
+}
+
+fn file_change_output(
+    text: String,
+    path: &AbsolutePathBuf,
+    change: FileChange,
+) -> AstralFileToolTextOutput {
+    AstralFileToolTextOutput {
+        text,
+        file_changes: Some(HashMap::from([(path.to_path_buf(), change)])),
+    }
 }
 
 struct FileToolPermissionPlan {
@@ -731,7 +801,7 @@ async fn write_file(
     cwd: &AbsolutePathBuf,
     environment_id: Option<String>,
     read_state: &FileReadStateStore,
-) -> Result<String, FunctionCallError> {
+) -> Result<AstralFileToolTextOutput, FunctionCallError> {
     let args: WriteArgs = parse_arguments(&arguments)?;
     let path = resolve_path(cwd, &args.file_path);
     let existing_metadata = optional_file_metadata(fs, sandbox, &path).await?;
@@ -751,15 +821,38 @@ async fn write_file(
             metadata.modified_at_ms,
         )?;
         write_file_contents(fs, sandbox, &path, args.content.clone().into_bytes()).await?;
-        record_full_file_state(fs, sandbox, read_state, environment_id, &path, args.content).await;
-        Ok(format!(
-            "The file {} has been updated successfully.",
-            path.display()
+        record_full_file_state(
+            fs,
+            sandbox,
+            read_state,
+            environment_id,
+            &path,
+            args.content.clone(),
+        )
+        .await;
+        Ok(file_change_output(
+            format!("The file {} has been updated successfully.", path.display()),
+            &path,
+            update_file_change(&path, &current_text, &args.content),
         ))
     } else {
         write_file_contents(fs, sandbox, &path, args.content.clone().into_bytes()).await?;
-        record_full_file_state(fs, sandbox, read_state, environment_id, &path, args.content).await;
-        Ok(format!("File created successfully at: {}", path.display()))
+        record_full_file_state(
+            fs,
+            sandbox,
+            read_state,
+            environment_id,
+            &path,
+            args.content.clone(),
+        )
+        .await;
+        Ok(file_change_output(
+            format!("File created successfully at: {}", path.display()),
+            &path,
+            FileChange::Add {
+                content: args.content,
+            },
+        ))
     }
 }
 
@@ -779,7 +872,7 @@ async fn edit_file(
     cwd: &AbsolutePathBuf,
     environment_id: Option<String>,
     read_state: &FileReadStateStore,
-) -> Result<String, FunctionCallError> {
+) -> Result<AstralFileToolTextOutput, FunctionCallError> {
     let args: EditArgs = parse_arguments(&arguments)?;
     if args.old_string == args.new_string {
         return Err(FunctionCallError::RespondToModel(
@@ -827,19 +920,29 @@ async fn edit_file(
         text.replacen(&args.old_string, &args.new_string, 1)
     };
     write_file_contents(fs, sandbox, &path, updated.clone().into_bytes()).await?;
-    record_full_file_state(fs, sandbox, read_state, environment_id, &path, updated).await;
+    record_full_file_state(
+        fs,
+        sandbox,
+        read_state,
+        environment_id,
+        &path,
+        updated.clone(),
+    )
+    .await;
 
-    if args.replace_all {
-        Ok(format!(
+    let text_output = if args.replace_all {
+        format!(
             "The file {} has been updated. All occurrences were successfully replaced.",
             path.display()
-        ))
+        )
     } else {
-        Ok(format!(
-            "The file {} has been updated successfully.",
-            path.display()
-        ))
-    }
+        format!("The file {} has been updated successfully.", path.display())
+    };
+    Ok(file_change_output(
+        text_output,
+        &path,
+        update_file_change(&path, &text, &updated),
+    ))
 }
 
 async fn edit_empty_old_string(
@@ -850,7 +953,7 @@ async fn edit_empty_old_string(
     environment_id: Option<String>,
     path: &AbsolutePathBuf,
     current: Option<(String, FileMetadata)>,
-) -> Result<String, FunctionCallError> {
+) -> Result<AstralFileToolTextOutput, FunctionCallError> {
     if let Some((text, _metadata)) = current
         && !text.trim().is_empty()
     {
@@ -866,13 +969,31 @@ async fn edit_empty_old_string(
         read_state,
         environment_id,
         path,
-        args.new_string,
+        args.new_string.clone(),
     )
     .await;
-    Ok(format!(
-        "The file {} has been updated successfully.",
-        path.display()
+    Ok(file_change_output(
+        format!("The file {} has been updated successfully.", path.display()),
+        path,
+        FileChange::Add {
+            content: args.new_string,
+        },
     ))
+}
+
+fn update_file_change(path: &AbsolutePathBuf, old_content: &str, new_content: &str) -> FileChange {
+    let display_path = path.display();
+    let old_header = format!("a/{display_path}");
+    let new_header = format!("b/{display_path}");
+    let unified_diff = similar::TextDiff::from_lines(old_content, new_content)
+        .unified_diff()
+        .context_radius(3)
+        .header(&old_header, &new_header)
+        .to_string();
+    FileChange::Update {
+        unified_diff,
+        move_path: None,
+    }
 }
 
 async fn read_metadata(

@@ -111,9 +111,17 @@ pub enum ImageSource {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ToolResultContent {
-    Text { text: String },
-    Json { value: Value },
-    Image { source: ImageSource },
+    Text {
+        text: String,
+    },
+    Json {
+        value: Value,
+    },
+    Image {
+        source: ImageSource,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -25,6 +25,7 @@ use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
 use codex_tools::LoadableToolSpec;
 use codex_tools::ResponsesApiNamespaceTool;
+use codex_tools::TOOL_SEARCH_TOOL_NAME;
 use codex_tools::ToolName;
 use codex_tools::ToolSpec;
 use serde_json::Value;
@@ -263,6 +264,19 @@ fn response_item_to_agent_message(item: &ResponseItem) -> Option<AgentMessage> {
             }],
             id: None,
         }),
+        ResponseItem::ToolSearchCall {
+            call_id: Some(call_id),
+            arguments,
+            ..
+        } => Some(AgentMessage {
+            role: MessageRole::Assistant,
+            content: vec![ContentBlock::ToolUse {
+                id: call_id.clone(),
+                name: TOOL_SEARCH_TOOL_NAME.to_string(),
+                input: arguments.clone(),
+            }],
+            id: None,
+        }),
         ResponseItem::FunctionCallOutput { call_id, output }
         | ResponseItem::CustomToolCallOutput {
             call_id, output, ..
@@ -297,7 +311,7 @@ fn response_item_to_agent_message(item: &ResponseItem) -> Option<AgentMessage> {
         }),
         ResponseItem::AgentMessage { .. }
         | ResponseItem::LocalShellCall { .. }
-        | ResponseItem::ToolSearchCall { .. }
+        | ResponseItem::ToolSearchCall { call_id: None, .. }
         | ResponseItem::WebSearchCall { .. }
         | ResponseItem::ImageGenerationCall { .. }
         | ResponseItem::Compaction { .. }
@@ -388,9 +402,14 @@ fn tool_result_content_item(item: &FunctionCallOutputContentItem) -> Option<Tool
         FunctionCallOutputContentItem::InputText { text } => {
             Some(ToolResultContent::Text { text: text.clone() })
         }
-        FunctionCallOutputContentItem::InputImage { image_url, .. } => {
+        FunctionCallOutputContentItem::InputImage { image_url, detail } => {
             Some(ToolResultContent::Image {
                 source: image_source(image_url),
+                detail: detail.as_ref().and_then(|detail| {
+                    serde_json::to_value(detail)
+                        .ok()
+                        .and_then(|value| value.as_str().map(str::to_string))
+                }),
             })
         }
         FunctionCallOutputContentItem::EncryptedContent { .. } => None,

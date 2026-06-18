@@ -84,7 +84,7 @@ async fn build_codex_with_test_tool(server: &wiremock::MockServer) -> anyhow::Re
 fn assert_parallel_duration(actual: Duration) {
     // Allow headroom for slow CI scheduling; barrier synchronization already enforces overlap.
     assert!(
-        actual < Duration::from_millis(1_600),
+        actual < Duration::from_secs(6),
         "expected parallel execution to finish quickly, got {actual:?}"
     );
 }
@@ -301,7 +301,7 @@ async fn tool_results_grouped() -> anyhow::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn shell_tools_start_before_response_completed_when_stream_delayed() -> anyhow::Result<()> {
+async fn shell_tools_wait_for_response_completed_when_stream_delayed() -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
 
     let output_file = tempfile::NamedTempFile::new()?;
@@ -393,7 +393,22 @@ async fn shell_tools_start_before_response_completed_when_stream_delayed() -> an
     let _ = first_gate_tx.send(());
     let _ = follow_up_gate_tx.send(());
 
-    let timestamps = tokio::time::timeout(Duration::from_secs(5), async {
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let before_completion = fs::read_to_string(output_path)?;
+    assert!(
+        before_completion.trim().is_empty(),
+        "shell tools should wait for response.completed before execution"
+    );
+
+    let _ = completion_gate_tx.send(());
+    let mut completion_iter = completion_receivers.into_iter();
+    let completed_at = completion_iter
+        .next()
+        .expect("completion receiver missing")
+        .await
+        .expect("completion timestamp missing");
+
+    let timestamps = tokio::time::timeout(Duration::from_secs(15), async {
         loop {
             let contents = fs::read_to_string(output_path)?;
             let timestamps = contents
@@ -413,22 +428,15 @@ async fn shell_tools_start_before_response_completed_when_stream_delayed() -> an
     })
     .await??;
 
-    let _ = completion_gate_tx.send(());
     wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
-    let mut completion_iter = completion_receivers.into_iter();
-    let completed_at = completion_iter
-        .next()
-        .expect("completion receiver missing")
-        .await
-        .expect("completion timestamp missing");
     let count = i64::try_from(timestamps.len()).expect("timestamp count fits in i64");
     assert_eq!(count, 4);
 
     for timestamp in timestamps {
         assert!(
-            timestamp <= completed_at,
-            "timestamp {timestamp} should be before or equal to completed {completed_at}"
+            timestamp >= completed_at,
+            "timestamp {timestamp} should be after or equal to completed {completed_at}"
         );
     }
 

@@ -8,5 +8,5 @@ Config layer stack (lowest precedence first):
   <none>
 
 Requirements:
-  - allowed_sandbox_modes: read-only, workspace-write (source: /etc/codex/requirements.toml)
-  - permissions.filesystem.deny_read: /home/alice/.gitconfig (source: /etc/codex/requirements.toml)
+  - allowed_sandbox_modes: read-only, workspace-write (source: /etc/astral-code/requirements.toml)
+  - permissions.filesystem.deny_read: /home/alice/.gitconfig (source: /etc/astral-code/requirements.toml)

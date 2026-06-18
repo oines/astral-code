@@ -762,6 +762,7 @@ mod tests {
         channel_capacity: usize,
     ) -> InProcessClientHandle {
         let codex_home = TempDir::new().expect("temp dir");
+        write_mock_config(codex_home.path()).expect("mock config should write");
         let config = Arc::new(build_test_config(codex_home.path()).await);
         let state_db = codex_rollout::state_db::try_init(config.as_ref())
             .await
@@ -794,6 +795,27 @@ mod tests {
         let mut client = start(args).await.expect("in-process runtime should start");
         client._test_codex_home = Some(codex_home);
         client
+    }
+
+    fn write_mock_config(codex_home: &Path) -> std::io::Result<()> {
+        std::fs::write(
+            codex_home.join("config.toml"),
+            r#"
+model = "mock-model"
+model_provider = "mock_provider"
+
+[model_providers.mock_provider]
+name = "Mock provider for test"
+base_url = "http://127.0.0.1:9/v1"
+wire_api = "chat_completions"
+
+[model_capabilities."mock_provider/mock-model"]
+max_context_window = 272000
+max_output_tokens = 32000
+supports_tools = true
+supports_vision = true
+"#,
+        )
     }
 
     async fn start_test_client(session_source: SessionSource) -> InProcessClientHandle {

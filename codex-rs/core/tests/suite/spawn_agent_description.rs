@@ -16,13 +16,15 @@ use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::openai_models::ReasoningEffortPreset;
 use codex_protocol::openai_models::TruncationPolicyConfig;
 use codex_protocol::openai_models::default_input_modalities;
+use codex_protocol::protocol::MultiAgentVersion;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_response_created;
 use core_test_support::responses::mount_models_once;
 use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::namespace_child_tool;
+use core_test_support::responses::request_tool_description;
+use core_test_support::responses::request_tool_name;
 use core_test_support::responses::sse;
-use core_test_support::responses::start_mock_server;
 use core_test_support::test_codex::test_codex;
 use serde_json::Value;
 use std::time::Duration;
@@ -33,9 +35,17 @@ const MULTI_AGENT_V1_NAMESPACE: &str = "multi_agent_v1";
 const SPAWN_AGENT_TOOL_NAME: &str = "spawn_agent";
 
 fn spawn_agent_description(body: &Value) -> Option<String> {
+    let flattened_name = format!("{MULTI_AGENT_V1_NAMESPACE}__{SPAWN_AGENT_TOOL_NAME}");
     namespace_child_tool(body, MULTI_AGENT_V1_NAMESPACE, SPAWN_AGENT_TOOL_NAME)
-        .and_then(|tool| tool.get("description"))
-        .and_then(Value::as_str)
+        .or_else(|| {
+            body.get("tools")?.as_array()?.iter().find(|tool| {
+                matches!(
+                    request_tool_name(tool),
+                    Some(name) if name == SPAWN_AGENT_TOOL_NAME || name == flattened_name
+                )
+            })
+        })
+        .and_then(request_tool_description)
         .map(str::to_string)
 }
 
@@ -63,7 +73,7 @@ fn test_model_info(
         use_responses_lite: false,
         auto_review_model_override: None,
         tool_mode: None,
-        multi_agent_version: None,
+        multi_agent_version: Some(MultiAgentVersion::V1),
         priority: 1,
         additional_speed_tiers: Vec::new(),
         service_tiers,
@@ -105,7 +115,7 @@ async fn wait_for_model_available(manager: &SharedModelsManager, slug: &str) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn spawn_agent_description_lists_visible_models_and_reasoning_efforts() -> Result<()> {
-    let server = start_mock_server().await;
+    let server = wiremock::MockServer::start().await;
     mount_models_once(
         &server,
         ModelsResponse {

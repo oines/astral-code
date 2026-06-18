@@ -87,6 +87,7 @@ impl ModelsEndpointClient for OpenAiModelsEndpoint {
 
     fn has_provider_auth(&self) -> bool {
         self.provider_info.experimental_bearer_token.is_some()
+            || (self.provider_info.requires_astral_auth && self.auth_manager.is_some())
             || self
                 .provider_info
                 .env_key

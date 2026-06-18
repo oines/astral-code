@@ -93,6 +93,18 @@ pub fn parse_stream_chunk(
     let mut events = Vec::new();
 
     if let Some(error) = value.get("error") {
+        if matches!(
+            error.get("code").and_then(Value::as_str),
+            Some("context_length_exceeded")
+        ) {
+            return Err(ChatCompletionsStreamError::ContextWindowExceeded);
+        }
+        if matches!(
+            error.get("code").and_then(Value::as_str),
+            Some("insufficient_quota")
+        ) {
+            return Err(ChatCompletionsStreamError::QuotaExceeded);
+        }
         let message = error
             .get("message")
             .and_then(Value::as_str)
@@ -187,6 +199,8 @@ pub fn parse_stream_chunk(
 pub enum ChatCompletionsStreamError {
     MissingField(&'static str),
     InvalidField(&'static str),
+    ContextWindowExceeded,
+    QuotaExceeded,
 }
 
 impl std::fmt::Display for ChatCompletionsStreamError {
@@ -197,6 +211,12 @@ impl std::fmt::Display for ChatCompletionsStreamError {
             }
             ChatCompletionsStreamError::InvalidField(field) => {
                 write!(f, "chat completions stream chunk has invalid field {field}")
+            }
+            ChatCompletionsStreamError::ContextWindowExceeded => {
+                write!(f, "context window exceeded")
+            }
+            ChatCompletionsStreamError::QuotaExceeded => {
+                write!(f, "quota exceeded")
             }
         }
     }
@@ -469,7 +489,7 @@ fn tool_result_to_chat_message(block: &ContentBlock) -> Option<Value> {
     Some(json!({
         "role": "tool",
         "tool_call_id": tool_use_id,
-        "content": tool_result_content_text(content),
+        "content": tool_result_to_chat_content(content),
     }))
 }
 
@@ -690,10 +710,37 @@ fn tool_result_content_text(content: &[ToolResultContent]) -> String {
         .map(|content| match content {
             ToolResultContent::Text { text } => text.clone(),
             ToolResultContent::Json { value } => serde_json::to_string(value).unwrap_or_default(),
-            ToolResultContent::Image { source } => image_source_url(source),
+            ToolResultContent::Image { source, detail: _ } => image_source_url(source),
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn tool_result_to_chat_content(content: &[ToolResultContent]) -> Value {
+    let has_image = content
+        .iter()
+        .any(|content| matches!(content, ToolResultContent::Image { .. }));
+    if !has_image {
+        return Value::String(tool_result_content_text(content));
+    }
+
+    let parts = content
+        .iter()
+        .map(|content| match content {
+            ToolResultContent::Text { text } => json!({ "type": "text", "text": text }),
+            ToolResultContent::Json { value } => {
+                json!({ "type": "text", "text": serde_json::to_string(value).unwrap_or_default() })
+            }
+            ToolResultContent::Image { source, detail } => {
+                let mut image_url = json!({ "url": image_source_url(source) });
+                if let Some(detail) = detail {
+                    image_url["detail"] = Value::String(detail.clone());
+                }
+                json!({ "type": "image_url", "image_url": image_url })
+            }
+        })
+        .collect::<Vec<_>>();
+    Value::Array(parts)
 }
 
 fn image_source_url(source: &ImageSource) -> String {

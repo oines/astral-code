@@ -1,3 +1,4 @@
+use anyhow::Context;
 use anyhow::Result;
 use app_test_support::TestAppServer;
 use app_test_support::to_response;
@@ -11,6 +12,7 @@ use codex_app_server_protocol::UserInput as V2UserInput;
 use core_test_support::responses;
 use core_test_support::skip_if_no_network;
 use pretty_assertions::assert_eq;
+use serde_json::Value;
 use std::path::Path;
 use tempfile::TempDir;
 use tokio::time::timeout;
@@ -83,19 +85,7 @@ async fn turn_start_accepts_output_schema_v2() -> Result<()> {
 
     let request = response_mock.single_request();
     let payload = request.body_json();
-    let text = payload.get("text").expect("request missing text field");
-    let format = text
-        .get("format")
-        .expect("request missing text.format field");
-    assert_eq!(
-        format,
-        &serde_json::json!({
-            "name": "codex_output_schema",
-            "type": "json_schema",
-            "strict": true,
-            "schema": output_schema,
-        })
-    );
+    assert_output_schema_format(&payload, &output_schema)?;
 
     Ok(())
 }
@@ -165,15 +155,7 @@ async fn turn_start_output_schema_is_per_turn_v2() -> Result<()> {
     .await??;
 
     let payload1 = response_mock1.single_request().body_json();
-    assert_eq!(
-        payload1.pointer("/text/format"),
-        Some(&serde_json::json!({
-            "name": "codex_output_schema",
-            "type": "json_schema",
-            "strict": true,
-            "schema": output_schema,
-        }))
-    );
+    assert_output_schema_format(&payload1, &output_schema)?;
 
     let body2 = responses::sse(vec![
         responses::ev_response_created("resp-2"),
@@ -208,9 +190,31 @@ async fn turn_start_output_schema_is_per_turn_v2() -> Result<()> {
     .await??;
 
     let payload2 = response_mock2.single_request().body_json();
-    assert_eq!(payload2.pointer("/text/format"), None);
+    assert_eq!(output_schema_format(&payload2), None);
 
     Ok(())
+}
+
+fn assert_output_schema_format(payload: &Value, output_schema: &Value) -> Result<()> {
+    let format = output_schema_format(payload).context("request missing output schema format")?;
+    let schema_format = format.get("json_schema").unwrap_or(format);
+    assert_eq!(
+        format.get("type"),
+        Some(&Value::String("json_schema".to_string()))
+    );
+    assert_eq!(
+        schema_format.get("name"),
+        Some(&serde_json::json!("codex_output_schema"))
+    );
+    assert_eq!(schema_format.get("strict"), Some(&Value::Bool(true)));
+    assert_eq!(schema_format.get("schema"), Some(output_schema));
+    Ok(())
+}
+
+fn output_schema_format(payload: &Value) -> Option<&Value> {
+    payload
+        .get("response_format")
+        .or_else(|| payload.pointer("/text/format"))
 }
 
 fn create_config_toml(codex_home: &Path, server_uri: &str) -> std::io::Result<()> {

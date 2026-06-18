@@ -22,6 +22,9 @@ use codex_login::AuthManager;
 use codex_login::CodexAuth;
 use codex_model_provider::create_model_provider;
 use codex_model_provider_info::built_in_model_providers;
+use codex_models_manager::bundled_models_response;
+use codex_models_manager::manager::SharedModelsManager;
+use codex_models_manager::manager::StaticModelsManager;
 use codex_protocol::AgentPath;
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::ApprovalsReviewer;
@@ -101,6 +104,20 @@ fn thread_manager() -> ThreadManager {
         CodexAuth::from_api_key("dummy"),
         responses_mock_model_provider("http://127.0.0.1:9/v1"),
     )
+}
+
+fn bundled_models_manager() -> SharedModelsManager {
+    Arc::new(StaticModelsManager::new(
+        /*auth_manager*/ None,
+        bundled_models_response().expect("bundled models.json should parse"),
+    ))
+}
+
+async fn make_session_and_context_with_bundled_models()
+-> (crate::session::session::Session, TurnContext) {
+    let (mut session, turn) = make_session_and_context().await;
+    session.services.models_manager = bundled_models_manager();
+    (session, turn)
 }
 
 async fn install_role_with_model_override(turn: &mut TurnContext) -> String {
@@ -471,7 +488,7 @@ async fn spawn_agent_service_tier_override_validates_the_effective_child_model()
     }
 
     {
-        let (mut session, turn) = make_session_and_context().await;
+        let (mut session, turn) = make_session_and_context_with_bundled_models().await;
         let manager = thread_manager();
         let root = manager
             .start_thread((*turn.config).clone())
@@ -510,7 +527,7 @@ async fn spawn_agent_service_tier_override_validates_the_effective_child_model()
     }
 
     {
-        let (session, turn) = make_session_and_context().await;
+        let (session, turn) = make_session_and_context_with_bundled_models().await;
         let err = SpawnAgentHandler::default()
             .handle(invocation(
                 Arc::new(session),
@@ -536,7 +553,7 @@ async fn spawn_agent_service_tier_override_validates_the_effective_child_model()
     }
 
     {
-        let (session, turn) = make_session_and_context().await;
+        let (session, turn) = make_session_and_context_with_bundled_models().await;
         let err = SpawnAgentHandler::default()
             .handle(invocation(
                 Arc::new(session),
@@ -570,7 +587,7 @@ async fn spawn_agent_service_tier_inheritance_preserves_supported_or_configured_
     }
 
     {
-        let (mut session, turn) = make_session_and_context().await;
+        let (mut session, turn) = make_session_and_context_with_bundled_models().await;
         let mut turn = turn
             .with_model("gpt-5.4".to_string(), &session.services.models_manager)
             .await;
@@ -611,7 +628,7 @@ async fn spawn_agent_service_tier_inheritance_preserves_supported_or_configured_
     }
 
     {
-        let (mut session, turn) = make_session_and_context().await;
+        let (mut session, turn) = make_session_and_context_with_bundled_models().await;
         let mut turn = turn
             .with_model("gpt-5.4".to_string(), &session.services.models_manager)
             .await;
@@ -652,7 +669,7 @@ async fn spawn_agent_service_tier_inheritance_preserves_supported_or_configured_
     }
 
     {
-        let (mut session, mut turn) = make_session_and_context().await;
+        let (mut session, mut turn) = make_session_and_context_with_bundled_models().await;
         tokio::fs::create_dir_all(&turn.config.codex_home)
             .await
             .expect("codex home should be created");
@@ -4498,7 +4515,10 @@ async fn build_agent_spawn_config_uses_turn_context_values() {
     expected.base_instructions = Some(base_instructions.text);
     expected.model = Some(turn.model_info.slug.clone());
     expected.model_provider = turn.provider.info().clone();
-    expected.model_reasoning_effort = turn.reasoning_effort.clone();
+    expected.model_reasoning_effort = turn
+        .reasoning_effort
+        .clone()
+        .or_else(|| turn.model_info.default_reasoning_level.clone());
     expected.model_reasoning_summary = Some(turn.reasoning_summary);
     expected.developer_instructions = turn.developer_instructions.clone();
     expected.compact_prompt = turn.compact_prompt.clone();
@@ -4555,7 +4575,10 @@ async fn build_agent_resume_config_clears_base_instructions() {
     expected.base_instructions = None;
     expected.model = Some(turn.model_info.slug.clone());
     expected.model_provider = turn.provider.info().clone();
-    expected.model_reasoning_effort = turn.reasoning_effort.clone();
+    expected.model_reasoning_effort = turn
+        .reasoning_effort
+        .clone()
+        .or_else(|| turn.model_info.default_reasoning_level.clone());
     expected.model_reasoning_summary = Some(turn.reasoning_summary);
     expected.developer_instructions = turn.developer_instructions.clone();
     expected.compact_prompt = turn.compact_prompt.clone();

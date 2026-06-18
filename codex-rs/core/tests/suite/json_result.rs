@@ -56,17 +56,18 @@ async fn codex_returns_json_result(model: String) -> anyhow::Result<()> {
     let expected_schema: serde_json::Value = serde_json::from_str(SCHEMA)?;
     let match_json_text_param = move |req: &wiremock::Request| {
         let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap_or_default();
-        let Some(text) = body.get("text") else {
+        let Some(format) = body
+            .get("response_format")
+            .or_else(|| body.pointer("/text/format"))
+        else {
             return false;
         };
-        let Some(format) = text.get("format") else {
-            return false;
-        };
+        let format_schema = format.get("json_schema").unwrap_or(format);
 
-        format.get("name") == Some(&serde_json::Value::String("codex_output_schema".into()))
+        format_schema.get("name") == Some(&serde_json::Value::String("codex_output_schema".into()))
             && format.get("type") == Some(&serde_json::Value::String("json_schema".into()))
-            && format.get("strict") == Some(&serde_json::Value::Bool(true))
-            && format.get("schema") == Some(&expected_schema)
+            && format_schema.get("strict") == Some(&serde_json::Value::Bool(true))
+            && format_schema.get("schema") == Some(&expected_schema)
     };
     responses::mount_sse_once_match(&server, match_json_text_param, sse1).await;
 

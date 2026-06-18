@@ -15,6 +15,9 @@ use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_response_created;
 use core_test_support::responses::mount_sse_once;
+use core_test_support::responses::request_tool_description;
+use core_test_support::responses::request_tool_name;
+use core_test_support::responses::request_tool_names;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
@@ -27,20 +30,7 @@ const REQUEST_PLUGIN_INSTALL_TOOL_NAME: &str = "request_plugin_install";
 const DISCOVERABLE_GMAIL_ID: &str = "connector_68df038e0ba48191908c8434991bbac2";
 
 fn tool_names(body: &Value) -> Vec<String> {
-    body.get("tools")
-        .and_then(Value::as_array)
-        .map(|tools| {
-            tools
-                .iter()
-                .filter_map(|tool| {
-                    tool.get("name")
-                        .or_else(|| tool.get("type"))
-                        .and_then(Value::as_str)
-                        .map(str::to_string)
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+    request_tool_names(body)
 }
 
 fn function_tool_description(body: &Value, name: &str) -> Option<String> {
@@ -48,10 +38,8 @@ fn function_tool_description(body: &Value, name: &str) -> Option<String> {
         .and_then(Value::as_array)
         .and_then(|tools| {
             tools.iter().find_map(|tool| {
-                if tool.get("name").and_then(Value::as_str) == Some(name) {
-                    tool.get("description")
-                        .and_then(Value::as_str)
-                        .map(str::to_string)
+                if request_tool_name(tool) == Some(name) {
+                    request_tool_description(tool).map(str::to_string)
                 } else {
                     None
                 }

@@ -1,12 +1,14 @@
 ---
 source: tui/src/chatwidget/tests/exec_flow.rs
-assertion_line: 283
 expression: normalized_backend_snapshot(terminal.backend())
 ---
+"                                                                                "
+"• Bash task proc-1 running · 0s                                                 "
+"  └ sleep 2                                                                     "
 "                                                                                "
 "• Working (0s • esc to interrupt) · 1 background terminal running · /ps to view…"
 "                                                                                "
 "                                                                                "
-"› Ask Astral-Code to do anything                                                      "
+"› Ask Astral-Code to do anything                                                "
 "                                                                                "
 "  deepseek-v4-pro default · /tmp/project                                        "

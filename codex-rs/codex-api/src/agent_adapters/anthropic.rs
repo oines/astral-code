@@ -330,7 +330,7 @@ fn tool_result_content_to_anthropic(content: &ToolResultContent) -> Value {
         ToolResultContent::Json { value } => {
             json!({ "type": "text", "text": serde_json::to_string(value).unwrap_or_default() })
         }
-        ToolResultContent::Image { source } => {
+        ToolResultContent::Image { source, detail: _ } => {
             json!({ "type": "image", "source": image_source(source) })
         }
     }

@@ -1,0 +1,31 @@
+---
+source: tui/src/chatwidget/tests/exec_flow.rs
+expression: "format!(\"Started:\\n{started}\\nPolled:\\n{polled}\\nCompleted:\\n{completed}\\nHistory:\\n{history}\")"
+---
+Started:
+• Bash task 5665 running · 0s
+  └ for i in $(seq 1 10); do echo "Step $i/10"; sleep 1; done
+
+Polled:
+• Bash task 5665 running · 0s
+  └ for i in $(seq 1 10); do echo "Step $i/10"; sleep 1; done
+    Step 2/10
+    Step 3/10
+
+Completed:
+✓ Bash task 5665 completed in 0s
+  └ for i in $(seq 1 10); do echo "Step $i/10"; sleep 1; done
+    Step 9/10
+    Step 10/10
+    Done!
+    ... +3 lines (ctrl+t to view transcript)
+
+History:
+✓ Bash task 5665 completed in 0s
+  └ for i in $(seq 1 10); do echo "Step $i/10"; sleep 1; done
+    Step 9/10
+    Step 10/10
+    Done!
+    ... +3 lines (ctrl+t to view transcript)
+
+────────────────────────────────────────────────────────────────────────────────

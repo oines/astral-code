@@ -63,8 +63,35 @@ pub fn format_request_input_snapshot(
 }
 
 pub fn format_response_items_snapshot(items: &[Value], options: &ContextSnapshotOptions) -> String {
+    let should_strip_text = |role: &str, text: &str| {
+        (options.strip_capability_instructions
+            && role == "developer"
+            && is_capability_instruction_text(text))
+            || (options.strip_agents_md_user_context
+                && role == "user"
+                && text.starts_with("# AGENTS.md instructions for "))
+    };
+
     items
         .iter()
+        .filter(|item| {
+            if !options.strip_capability_instructions && !options.strip_agents_md_user_context {
+                return true;
+            }
+            if item.get("type").and_then(Value::as_str) != Some("message") {
+                return true;
+            }
+            let role = item.get("role").and_then(Value::as_str).unwrap_or("unknown");
+            let Some(content) = item.get("content").and_then(Value::as_array) else {
+                return true;
+            };
+            content.iter().any(|entry| {
+                entry
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .is_none_or(|text| !should_strip_text(role, text))
+            })
+        })
         .enumerate()
         .map(|(idx, item)| {
             let Some(item_type) = item.get("type").and_then(Value::as_str) else {
@@ -91,16 +118,7 @@ pub fn format_response_items_snapshot(items: &[Value], options: &ContextSnapshot
                                 .iter()
                                 .filter_map(|entry| {
                                     if let Some(text) = entry.get("text").and_then(Value::as_str) {
-                                        if options.strip_capability_instructions
-                                            && role == "developer"
-                                            && is_capability_instruction_text(text)
-                                        {
-                                            return None;
-                                        }
-                                        if options.strip_agents_md_user_context
-                                            && role == "user"
-                                            && text.starts_with("# AGENTS.md instructions for ")
-                                        {
+                                        if should_strip_text(role, text) {
                                             return None;
                                         }
                                         return Some(format_snapshot_text(text, options));
@@ -412,12 +430,16 @@ fn canonicalize_snapshot_text(text: &str) -> String {
             "<ENVIRONMENT_CONTEXT>".to_string()
         };
     }
-    if text.starts_with("You are performing a CONTEXT CHECKPOINT COMPACTION.") {
+    if text.starts_with("You are performing a CONTEXT CHECKPOINT COMPACTION.")
+        || text.starts_with("CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.")
+    {
         return "<SUMMARIZATION_PROMPT>".to_string();
     }
-    if text.starts_with("Another language model started to solve this problem")
+    if (text.starts_with("Another language model started to solve this problem")
+        || text.starts_with("This session is being continued from a previous conversation"))
         && let Some((_, summary)) = text.split_once('\n')
     {
+        let summary = summary.trim_start_matches('\n');
         return format!("<COMPACTION_SUMMARY>\n{summary}");
     }
     normalize_dynamic_snapshot_paths(text)

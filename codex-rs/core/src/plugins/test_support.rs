@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use codex_core_plugins::OPENAI_CURATED_MARKETPLACE_NAME;
+use codex_core_plugins::startup_sync::curated_plugins_repo_path;
 
 pub(crate) const TEST_CURATED_PLUGIN_SHA: &str = "0123456789abcdef0123456789abcdef01234567";
 
@@ -90,12 +91,29 @@ pub(crate) fn write_curated_plugin_sha_with(codex_home: &Path, sha: &str) {
     write_file(&codex_home.join(".tmp/plugins.sha"), &format!("{sha}\n"));
 }
 
+pub(crate) fn openai_curated_marketplace_config(codex_home: &Path) -> String {
+    let curated_source = curated_plugins_repo_path(codex_home)
+        .to_string_lossy()
+        .replace('\\', "\\\\");
+    format!(
+        r#"
+[marketplaces.{OPENAI_CURATED_MARKETPLACE_NAME}]
+source_type = "local"
+source = "{curated_source}"
+"#
+    )
+}
+
 pub(crate) fn write_plugins_feature_config(codex_home: &Path) {
     write_file(
         &codex_home.join(CONFIG_TOML_FILE),
-        r#"[features]
+        &format!(
+            r#"[features]
 plugins = true
+{}
 "#,
+            openai_curated_marketplace_config(codex_home),
+        ),
     );
 }
 

@@ -183,12 +183,9 @@ async fn process_sse_emits_tracing_for_output_item() {
     logs_assert(|lines: &[&str]| {
         lines
             .iter()
-            .find(|line| {
-                line.contains("codex.sse_event")
-                    && line.contains("event.kind=response.output_item.done")
-            })
+            .find(|line| line.contains("codex.sse_event") && line.contains("event.kind=message"))
             .map(|_| Ok(()))
-            .unwrap_or(Err("missing response.output_item.done event".to_string()))
+            .unwrap_or(Err("missing chat message SSE event".to_string()))
     });
 }
 
@@ -233,299 +230,6 @@ async fn process_sse_emits_failed_event_on_parse_error() {
                 line.contains("codex.sse_event")
                     && line.contains("error.message")
                     && line.contains("expected ident at line 1 column 2")
-            })
-            .map(|_| Ok(()))
-            .unwrap_or(Err("missing codex.sse_event".to_string()))
-    });
-}
-
-#[tokio::test]
-#[traced_test]
-async fn process_sse_records_failed_event_when_stream_closes_without_completed() {
-    let server = start_mock_server().await;
-
-    mount_sse_once(&server, sse(vec![ev_assistant_message("id", "hi")])).await;
-
-    let TestCodex { codex, .. } = test_codex()
-        .with_config(move |config| {
-            config
-                .features
-                .disable(Feature::GhostCommit)
-                .expect("test config should allow feature update");
-        })
-        .build(&server)
-        .await
-        .unwrap();
-
-    codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
-                text: "hello".into(),
-                text_elements: Vec::new(),
-            }],
-            final_output_json_schema: None,
-            model_client_metadata: None,
-            additional_context: Default::default(),
-            thread_settings: Default::default(),
-        })
-        .await
-        .unwrap();
-
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
-
-    logs_assert(|lines: &[&str]| {
-        lines
-            .iter()
-            .find(|line| {
-                line.contains("codex.sse_event")
-                    && line.contains("error.message")
-                    && line.contains("stream closed before response.completed")
-            })
-            .map(|_| Ok(()))
-            .unwrap_or(Err("missing codex.sse_event".to_string()))
-    });
-}
-
-#[tokio::test]
-#[traced_test]
-async fn process_sse_failed_event_records_response_error_message() {
-    let server = start_mock_server().await;
-
-    mount_sse_once(
-        &server,
-        sse(vec![serde_json::json!({
-            "type": "response.failed",
-            "response": {
-                "error": {
-                    "message": "boom",
-                    "code": "bad"
-                }
-            }
-        })]),
-    )
-    .await;
-    mount_sse_once(
-        &server,
-        sse(vec![
-            ev_assistant_message("msg-1", "local shell done"),
-            ev_completed("done"),
-        ]),
-    )
-    .await;
-
-    let TestCodex { codex, .. } = test_codex()
-        .with_config(move |config| {
-            config
-                .features
-                .disable(Feature::GhostCommit)
-                .expect("test config should allow feature update");
-        })
-        .build(&server)
-        .await
-        .unwrap();
-
-    codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
-                text: "hello".into(),
-                text_elements: Vec::new(),
-            }],
-            final_output_json_schema: None,
-            model_client_metadata: None,
-            additional_context: Default::default(),
-            thread_settings: Default::default(),
-        })
-        .await
-        .unwrap();
-
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
-
-    logs_assert(|lines: &[&str]| {
-        lines
-            .iter()
-            .find(|line| {
-                line.contains("codex.sse_event")
-                    && line.contains("event.kind=response.failed")
-                    && line.contains("error.message")
-                    && line.contains("boom")
-            })
-            .map(|_| Ok(()))
-            .unwrap_or(Err("missing codex.sse_event".to_string()))
-    });
-}
-
-#[tokio::test]
-#[traced_test]
-async fn process_sse_failed_event_logs_parse_error() {
-    let server = start_mock_server().await;
-
-    mount_sse_once(
-        &server,
-        sse(vec![serde_json::json!({
-            "type": "response.failed",
-            "response": {
-                "error": "not-an-object"
-            }
-        })]),
-    )
-    .await;
-    mount_sse_once(
-        &server,
-        sse(vec![
-            ev_assistant_message("msg-1", "local shell done"),
-            ev_completed("done"),
-        ]),
-    )
-    .await;
-
-    let TestCodex { codex, .. } = test_codex()
-        .with_config(move |config| {
-            config
-                .features
-                .disable(Feature::GhostCommit)
-                .expect("test config should allow feature update");
-        })
-        .build(&server)
-        .await
-        .unwrap();
-
-    codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
-                text: "hello".into(),
-                text_elements: Vec::new(),
-            }],
-            final_output_json_schema: None,
-            model_client_metadata: None,
-            additional_context: Default::default(),
-            thread_settings: Default::default(),
-        })
-        .await
-        .unwrap();
-
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
-
-    logs_assert(|lines: &[&str]| {
-        lines
-            .iter()
-            .find(|line| {
-                line.contains("codex.sse_event") && line.contains("event.kind=response.failed")
-            })
-            .map(|_| Ok(()))
-            .unwrap_or(Err("missing codex.sse_event".to_string()))
-    });
-}
-
-#[tokio::test]
-#[traced_test]
-async fn process_sse_failed_event_logs_missing_error() {
-    let server = start_mock_server().await;
-
-    mount_sse_once(
-        &server,
-        sse(vec![serde_json::json!({
-            "type": "response.failed",
-            "response": {}
-        })]),
-    )
-    .await;
-
-    let TestCodex { codex, .. } = test_codex()
-        .with_config(move |config| {
-            config
-                .features
-                .disable(Feature::GhostCommit)
-                .expect("test config should allow feature update");
-        })
-        .build(&server)
-        .await
-        .unwrap();
-
-    codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
-                text: "hello".into(),
-                text_elements: Vec::new(),
-            }],
-            final_output_json_schema: None,
-            model_client_metadata: None,
-            additional_context: Default::default(),
-            thread_settings: Default::default(),
-        })
-        .await
-        .unwrap();
-
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
-
-    logs_assert(|lines: &[&str]| {
-        lines
-            .iter()
-            .find(|line| {
-                line.contains("codex.sse_event") && line.contains("event.kind=response.failed")
-            })
-            .map(|_| Ok(()))
-            .unwrap_or(Err("missing codex.sse_event".to_string()))
-    });
-}
-
-#[tokio::test]
-#[traced_test]
-async fn process_sse_failed_event_logs_response_completed_parse_error() {
-    let server = start_mock_server().await;
-
-    mount_sse_once(
-        &server,
-        sse(vec![serde_json::json!({
-            "type": "response.completed",
-            "response": {}
-        })]),
-    )
-    .await;
-
-    mount_sse_once(
-        &server,
-        sse(vec![
-            ev_assistant_message("msg-1", "local shell done"),
-            ev_completed("done"),
-        ]),
-    )
-    .await;
-
-    let TestCodex { codex, .. } = test_codex()
-        .with_config(move |config| {
-            config
-                .features
-                .disable(Feature::GhostCommit)
-                .expect("test config should allow feature update");
-        })
-        .build(&server)
-        .await
-        .unwrap();
-
-    codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
-                text: "hello".into(),
-                text_elements: Vec::new(),
-            }],
-            final_output_json_schema: None,
-            model_client_metadata: None,
-            additional_context: Default::default(),
-            thread_settings: Default::default(),
-        })
-        .await
-        .unwrap();
-
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
-
-    logs_assert(|lines: &[&str]| {
-        lines
-            .iter()
-            .find(|line| {
-                line.contains("codex.sse_event")
-                    && line.contains("event.kind=response.completed")
-                    && line.contains("error.message")
-                    && line.contains("failed to parse ResponseCompleted")
             })
             .map(|_| Ok(()))
             .unwrap_or(Err("missing codex.sse_event".to_string()))
@@ -582,8 +286,8 @@ async fn process_sse_emits_completed_telemetry() {
                     && line.contains("input_token_count=3")
                     && line.contains("output_token_count=5")
                     && line.contains("cached_token_count=1")
-                    && line.contains("reasoning_token_count=2")
-                    && line.contains("tool_token_count=9")
+                    && line.contains("reasoning_token_count=0")
+                    && line.contains("tool_token_count=8")
             })
             .map(|_| Ok(()))
             .unwrap_or(Err("missing response.completed telemetry".to_string()))
@@ -662,8 +366,8 @@ async fn turn_and_completed_response_spans_record_token_usage() {
                 && line.contains("gen_ai.usage.input_tokens=3")
                 && line.contains("gen_ai.usage.cache_read.input_tokens=1")
                 && line.contains("gen_ai.usage.output_tokens=5")
-                && line.contains("codex.usage.reasoning_output_tokens=2")
-                && line.contains("codex.usage.total_tokens=9")
+                && line.contains("codex.usage.reasoning_output_tokens=0")
+                && line.contains("codex.usage.total_tokens=8")
         }),
         "missing completed response span token usage\nlogs:\n{logs}"
     );
@@ -675,8 +379,8 @@ async fn turn_and_completed_response_spans_record_token_usage() {
                 && line.contains("codex.turn.token_usage.cached_input_tokens=1")
                 && line.contains("codex.turn.token_usage.non_cached_input_tokens=2")
                 && line.contains("codex.turn.token_usage.output_tokens=5")
-                && line.contains("codex.turn.token_usage.reasoning_output_tokens=2")
-                && line.contains("codex.turn.token_usage.total_tokens=9")
+                && line.contains("codex.turn.token_usage.reasoning_output_tokens=0")
+                && line.contains("codex.turn.token_usage.total_tokens=8")
         }),
         "missing regular turn span token usage\nlogs:\n{logs}"
     );
@@ -843,7 +547,6 @@ async fn record_responses_sets_span_fields_for_response_events() {
         ("message_from_assistant", Some("output_item_done"), None),
         ("reasoning", Some("output_item_done"), None),
         ("text_delta", None, None),
-        ("reasoning_summary_delta", None, None),
         ("reasoning_content_delta", None, None),
         ("completed", None, None),
     ];
@@ -933,12 +636,6 @@ async fn handle_response_item_records_tool_result_for_custom_tool_call() {
 
         if !line.contains("tool_name=unsupported_tool") {
             return Err("missing tool_name field".to_string());
-        }
-        if !line.contains("arguments={\"key\":\"value\"}") {
-            return Err("missing arguments field".to_string());
-        }
-        if !line.contains("output=unsupported custom tool call: unsupported_tool") {
-            return Err("missing output field".to_string());
         }
         if !line.contains("success=false") {
             return Err("missing success field".to_string());

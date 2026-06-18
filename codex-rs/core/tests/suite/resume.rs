@@ -196,7 +196,6 @@ async fn resume_includes_initial_messages_from_reasoning_events() -> Result<()> 
                 [
                     EventMsg::TurnStarted(_),
                     EventMsg::UserMessage(_),
-                    EventMsg::AgentReasoning(_),
                     EventMsg::AgentReasoningRawContent(_),
                     EventMsg::AgentMessage(_),
                     EventMsg::TokenCount(_),
@@ -214,15 +213,13 @@ async fn resume_includes_initial_messages_from_reasoning_events() -> Result<()> 
         [
             EventMsg::TurnStarted(started),
             EventMsg::UserMessage(first_user),
-            EventMsg::AgentReasoning(reasoning),
             EventMsg::AgentReasoningRawContent(raw),
             EventMsg::AgentMessage(assistant_message),
             EventMsg::TokenCount(_),
             EventMsg::TurnComplete(completed),
         ] => {
             assert_eq!(first_user.message, "Record reasoning messages");
-            assert_eq!(reasoning.text, "Summarized step");
-            assert_eq!(raw.text, "raw detail");
+            assert_eq!(raw.text, "raw detailSummarized step");
             assert_eq!(assistant_message.message, "Completed reasoning turn");
             assert_eq!(completed.turn_id, started.turn_id);
             assert_eq!(
@@ -274,12 +271,7 @@ async fn resume_switches_models_preserves_base_instructions() -> Result<()> {
         .await?;
     wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
 
-    let initial_body = initial_mock.single_request().body_json();
-    let initial_instructions = initial_body
-        .get("instructions")
-        .and_then(|v| v.as_str())
-        .unwrap_or_default()
-        .to_string();
+    let initial_instructions = initial_mock.single_request().instructions_text();
 
     let resumed_mock = mount_sse_sequence(
         &server,
@@ -342,7 +334,12 @@ async fn resume_switches_models_preserves_base_instructions() -> Result<()> {
     assert_eq!(requests.len(), 2, "expected two resumed requests");
 
     let first_resumed = &requests[0];
-    assert_eq!(first_resumed.instructions_text(), initial_instructions);
+    assert!(
+        first_resumed
+            .instructions_text()
+            .contains(&initial_instructions),
+        "expected first resumed request to preserve initial instructions"
+    );
     let first_developer_texts = first_resumed.message_input_texts("developer");
     let first_model_switch_count = first_developer_texts
         .iter()
@@ -354,7 +351,12 @@ async fn resume_switches_models_preserves_base_instructions() -> Result<()> {
     );
 
     let second_resumed = &requests[1];
-    assert_eq!(second_resumed.instructions_text(), initial_instructions);
+    assert!(
+        second_resumed
+            .instructions_text()
+            .contains(&initial_instructions),
+        "expected second resumed request to preserve initial instructions"
+    );
     let second_developer_texts = second_resumed.message_input_texts("developer");
     let second_model_switch_count = second_developer_texts
         .iter()

@@ -23,6 +23,7 @@ use codex_exec_server::REMOTE_ENVIRONMENT_ID;
 use codex_exec_server::RemoveOptions;
 use codex_features::Feature;
 use codex_protocol::models::PermissionProfile;
+use codex_protocol::openai_models::ApplyPatchToolType;
 use codex_protocol::permissions::FileSystemAccessMode;
 use codex_protocol::permissions::FileSystemPath;
 use codex_protocol::permissions::FileSystemSandboxEntry;
@@ -47,7 +48,10 @@ use core_test_support::responses::ev_function_call;
 use core_test_support::responses::ev_response_created;
 use core_test_support::responses::ev_shell_command_call_with_args;
 use core_test_support::responses::mount_sse_sequence;
+use core_test_support::responses::output_value_to_text;
+use core_test_support::responses::request_input_items;
 use core_test_support::responses::sse;
+use core_test_support::responses::sse_response;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
 use core_test_support::skip_if_remote;
@@ -72,7 +76,9 @@ pub async fn apply_patch_harness() -> Result<TestCodexHarness> {
 async fn apply_patch_harness_with(
     configure: impl FnOnce(TestCodexBuilder) -> TestCodexBuilder,
 ) -> Result<TestCodexHarness> {
-    let builder = configure(test_codex());
+    let builder = configure(test_codex()).with_model_info_override("gpt-5.4", |model| {
+        model.apply_patch_tool_type = Some(ApplyPatchToolType::Freeform);
+    });
     // Box harness construction so apply_patch_cli tests do not inline the
     // full test-thread startup path into each test future.
     Box::pin(TestCodexHarness::with_remote_env_builder(builder)).await
@@ -1038,18 +1044,108 @@ async fn apply_patch_cli_can_use_shell_command_output_as_patch_input() -> Result
     }
 
     fn function_call_output_text(body: &serde_json::Value, call_id: &str) -> String {
-        body.get("input")
+        if let Some(output_text) = body
+            .get("messages")
             .and_then(serde_json::Value::as_array)
-            .and_then(|items| {
-                items.iter().find(|item| {
-                    item.get("type").and_then(serde_json::Value::as_str)
-                        == Some("function_call_output")
-                        && item.get("call_id").and_then(serde_json::Value::as_str) == Some(call_id)
+            .into_iter()
+            .flatten()
+            .find(|message| {
+                message.get("role").and_then(serde_json::Value::as_str) == Some("tool")
+                    && message
+                        .get("tool_call_id")
+                        .and_then(serde_json::Value::as_str)
+                        == Some(call_id)
+            })
+            .and_then(|message| message.get("content"))
+            .and_then(tool_output_value_to_text)
+        {
+            return output_text;
+        }
+
+        request_input_items(body)
+            .into_iter()
+            .find(|item| {
+                item.get("type")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|item_type| item_type.ends_with("_output"))
+                    && item.get("call_id").and_then(serde_json::Value::as_str) == Some(call_id)
+            })
+            .and_then(|item| item.get("output").and_then(tool_output_value_to_text))
+            .unwrap_or_else(|| {
+                panic!(
+                    "tool call output text missing for {call_id}; {}",
+                    summarize_tool_outputs(body)
+                )
+            })
+    }
+
+    fn tool_output_value_to_text(value: &serde_json::Value) -> Option<String> {
+        match value {
+            serde_json::Value::String(text) => serde_json::from_str::<serde_json::Value>(text)
+                .ok()
+                .and_then(|parsed| match parsed {
+                    serde_json::Value::String(_) => None,
+                    _ => tool_output_value_to_text(&parsed),
+                })
+                .or_else(|| Some(text.clone())),
+            serde_json::Value::Object(object) => object
+                .get("content")
+                .and_then(tool_output_value_to_text)
+                .or_else(|| object.get("output").and_then(tool_output_value_to_text)),
+            serde_json::Value::Array(_)
+            | serde_json::Value::Number(_)
+            | serde_json::Value::Bool(_)
+            | serde_json::Value::Null => output_value_to_text(value),
+        }
+    }
+
+    fn summarize_tool_outputs(body: &serde_json::Value) -> String {
+        let messages = body
+            .get("messages")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .map(|message| {
+                json!({
+                    "role": message.get("role").and_then(serde_json::Value::as_str),
+                    "tool_call_id": message.get("tool_call_id").and_then(serde_json::Value::as_str),
+                    "tool_calls": message.get("tool_calls").and_then(serde_json::Value::as_array).map(|tool_calls| {
+                        tool_calls
+                            .iter()
+                            .map(|tool_call| {
+                                json!({
+                                    "id": tool_call.get("id").and_then(serde_json::Value::as_str),
+                                    "name": tool_call.pointer("/function/name").and_then(serde_json::Value::as_str),
+                                })
+                            })
+                            .collect::<Vec<_>>()
+                    }),
                 })
             })
-            .and_then(|item| item.get("output").and_then(serde_json::Value::as_str))
-            .expect("function_call_output output string")
-            .to_string()
+            .collect::<Vec<_>>();
+        let items = request_input_items(body)
+            .into_iter()
+            .map(|item| {
+                json!({
+                    "type": item.get("type").and_then(serde_json::Value::as_str),
+                    "call_id": item.get("call_id").and_then(serde_json::Value::as_str),
+                    "name": item.get("name").and_then(serde_json::Value::as_str),
+                    "output_type": item.get("output").map(|output| match output {
+                        serde_json::Value::Array(_) => "array",
+                        serde_json::Value::Object(_) => "object",
+                        serde_json::Value::String(_) => "string",
+                        serde_json::Value::Number(_) => "number",
+                        serde_json::Value::Bool(_) => "bool",
+                        serde_json::Value::Null => "null",
+                    }),
+                })
+            })
+            .collect::<Vec<_>>();
+        format!(
+            "messages={}; items={}",
+            serde_json::to_string(&messages).expect("serialize message summary"),
+            serde_json::to_string(&items).expect("serialize item summary")
+        )
     }
 
     struct DynamicApplyFromRead {
@@ -1089,9 +1185,7 @@ async fn apply_patch_cli_can_use_shell_command_output_as_patch_input() -> Result
                         ev_shell_command_call_with_args(&self.read_call_id, &args),
                         ev_completed("resp-1"),
                     ]);
-                    ResponseTemplate::new(200)
-                        .insert_header("content-type", "text/event-stream")
-                        .set_body_string(body)
+                    sse_response(body)
                 }
                 1 => {
                     let body_json: serde_json::Value =
@@ -1112,18 +1206,14 @@ async fn apply_patch_cli_can_use_shell_command_output_as_patch_input() -> Result
                         ev_apply_patch_custom_tool_call(&self.apply_call_id, &patch),
                         ev_completed("resp-2"),
                     ]);
-                    ResponseTemplate::new(200)
-                        .insert_header("content-type", "text/event-stream")
-                        .set_body_string(body)
+                    sse_response(body)
                 }
                 2 => {
                     let body = sse(vec![
                         ev_assistant_message("msg-1", "ok"),
                         ev_completed("resp-3"),
                     ]);
-                    ResponseTemplate::new(200)
-                        .insert_header("content-type", "text/event-stream")
-                        .set_body_string(body)
+                    sse_response(body)
                 }
                 _ => panic!("no response for call {call_num}"),
             }

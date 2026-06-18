@@ -1,29 +1,14 @@
 use std::borrow::Cow;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use anyhow::Result;
-use app_test_support::ChatGptAuthFixture;
 use app_test_support::TestAppServer;
 use app_test_support::to_response;
-use app_test_support::write_chatgpt_auth;
-use axum::Json;
+use app_test_support::write_mock_responses_config_toml;
 use axum::Router;
-use axum::extract::State;
-use axum::http::HeaderMap;
-use axum::http::StatusCode;
-use axum::http::Uri;
-use axum::http::header::AUTHORIZATION;
-use axum::routing::get;
-use codex_app_server_protocol::JSONRPCMessage;
 use codex_app_server_protocol::JSONRPCResponse;
-use codex_app_server_protocol::McpElicitationSchema;
-use codex_app_server_protocol::McpServerElicitationAction;
-use codex_app_server_protocol::McpServerElicitationRequest;
-use codex_app_server_protocol::McpServerElicitationRequestParams;
-use codex_app_server_protocol::McpServerElicitationRequestResponse;
 use codex_app_server_protocol::RequestId;
-use codex_app_server_protocol::ServerRequest;
-use codex_app_server_protocol::ServerRequestResolvedNotification;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
 use codex_app_server_protocol::TurnCompletedNotification;
@@ -31,7 +16,6 @@ use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::TurnStatus;
 use codex_app_server_protocol::UserInput as V2UserInput;
-use codex_config::types::AuthCredentialsStoreMode;
 use core_test_support::assert_regex_match;
 use core_test_support::responses;
 use pretty_assertions::assert_eq;
@@ -66,14 +50,14 @@ use tokio::time::timeout;
 const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 const CONNECTOR_ID: &str = "calendar";
 const CONNECTOR_NAME: &str = "Calendar";
-const TOOL_NAMESPACE: &str = "mcp__codex_apps__calendar";
-const CALLABLE_TOOL_NAME: &str = "_confirm_action";
+const TEST_SERVER_NAME: &str = "calendar_server";
+const TOOL_NAMESPACE: &str = "mcp__calendar_server";
 const TOOL_NAME: &str = "calendar_confirm_action";
 const TOOL_CALL_ID: &str = "call-calendar-confirm";
 const ELICITATION_MESSAGE: &str = "Allow this request?";
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn mcp_server_elicitation_round_trip() -> Result<()> {
+async fn model_initiated_mcp_elicitation_is_declined() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
     let tool_call_arguments = serde_json::to_string(&json!({}))?;
     let response_mock = responses::mount_sse_sequence(
@@ -89,7 +73,7 @@ async fn mcp_server_elicitation_round_trip() -> Result<()> {
                 responses::ev_function_call_with_namespace(
                     TOOL_CALL_ID,
                     TOOL_NAMESPACE,
-                    CALLABLE_TOOL_NAME,
+                    TOOL_NAME,
                     &tool_call_arguments,
                 ),
                 responses::ev_completed("resp-1"),
@@ -103,18 +87,19 @@ async fn mcp_server_elicitation_round_trip() -> Result<()> {
     )
     .await;
 
-    let (apps_server_url, apps_server_handle) = start_apps_server().await?;
+    let (mcp_server_url, mcp_server_handle) = start_mcp_server().await?;
 
     let codex_home = TempDir::new()?;
-    write_config_toml(codex_home.path(), &responses_server.uri(), &apps_server_url)?;
-    write_chatgpt_auth(
+    write_mock_responses_config_toml(
         codex_home.path(),
-        ChatGptAuthFixture::new("chatgpt-token")
-            .account_id("account-123")
-            .chatgpt_user_id("user-123")
-            .chatgpt_account_id("account-123"),
-        AuthCredentialsStoreMode::File,
+        &responses_server.uri(),
+        &BTreeMap::new(),
+        /*auto_compact_limit*/ 1024,
+        /*requires_astral_auth*/ None,
+        "mock_provider",
+        "compact",
     )?;
+    append_mcp_server_config(codex_home.path(), &mcp_server_url)?;
 
     let mut mcp = TestAppServer::new(codex_home.path()).await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
@@ -184,85 +169,16 @@ async fn mcp_server_elicitation_round_trip() -> Result<()> {
     .await??;
     let TurnStartResponse { turn } = to_response(turn_start_resp)?;
 
-    let server_req = timeout(
+    let completed = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_request_message(),
+        mcp.read_stream_until_notification_message("turn/completed"),
     )
     .await??;
-    let ServerRequest::McpServerElicitationRequest { request_id, params } = server_req else {
-        panic!("expected McpServerElicitationRequest request, got: {server_req:?}");
-    };
-    let requested_schema: McpElicitationSchema = serde_json::from_value(serde_json::to_value(
-        ElicitationSchema::builder()
-            .required_property("confirmed", PrimitiveSchema::Boolean(BooleanSchema::new()))
-            .build()
-            .map_err(anyhow::Error::msg)?,
-    )?)?;
-
-    assert_eq!(
-        params,
-        McpServerElicitationRequestParams {
-            thread_id: thread.id.clone(),
-            turn_id: Some(turn.id.clone()),
-            server_name: "codex_apps".to_string(),
-            request: McpServerElicitationRequest::Form {
-                meta: None,
-                message: ELICITATION_MESSAGE.to_string(),
-                requested_schema,
-            },
-        }
-    );
-
-    let resolved_request_id = request_id.clone();
-    mcp.send_response(
-        request_id,
-        serde_json::to_value(McpServerElicitationRequestResponse {
-            action: McpServerElicitationAction::Accept,
-            content: Some(json!({
-                "confirmed": true,
-            })),
-            meta: None,
-        })?,
-    )
-    .await?;
-
-    let mut saw_resolved = false;
-    loop {
-        let message = timeout(DEFAULT_READ_TIMEOUT, mcp.read_next_message()).await??;
-        let JSONRPCMessage::Notification(notification) = message else {
-            continue;
-        };
-
-        match notification.method.as_str() {
-            "serverRequest/resolved" => {
-                let resolved: ServerRequestResolvedNotification = serde_json::from_value(
-                    notification
-                        .params
-                        .clone()
-                        .expect("serverRequest/resolved params"),
-                )?;
-                assert_eq!(
-                    resolved,
-                    ServerRequestResolvedNotification {
-                        thread_id: thread.id.clone(),
-                        request_id: resolved_request_id.clone(),
-                    }
-                );
-                saw_resolved = true;
-            }
-            "turn/completed" => {
-                let completed: TurnCompletedNotification = serde_json::from_value(
-                    notification.params.clone().expect("turn/completed params"),
-                )?;
-                assert!(saw_resolved, "serverRequest/resolved should arrive first");
-                assert_eq!(completed.thread_id, thread.id);
-                assert_eq!(completed.turn.id, turn.id);
-                assert_eq!(completed.turn.status, TurnStatus::Completed);
-                break;
-            }
-            _ => {}
-        }
-    }
+    let completed: TurnCompletedNotification =
+        serde_json::from_value(completed.params.clone().expect("turn/completed params"))?;
+    assert_eq!(completed.thread_id, thread.id);
+    assert_eq!(completed.turn.id, turn.id);
+    assert_eq!(completed.turn.status, TurnStatus::Completed);
 
     let requests = response_mock.requests();
     assert_eq!(requests.len(), 3);
@@ -286,23 +202,14 @@ async fn mcp_server_elicitation_round_trip() -> Result<()> {
     .get(1)
     .expect("wall-time wrapped output should include payload")
     .as_str();
-    assert_eq!(
-        serde_json::from_str::<Value>(payload)?,
-        json!([{
-            "type": "text",
-            "text": "accepted"
-        }])
+    assert!(
+        payload.contains("declined"),
+        "unexpected tool output: {payload}"
     );
 
-    apps_server_handle.abort();
-    let _ = apps_server_handle.await;
+    mcp_server_handle.abort();
+    let _ = mcp_server_handle.await;
     Ok(())
-}
-
-#[derive(Clone)]
-struct AppsServerState {
-    expected_bearer: String,
-    expected_account_id: String,
 }
 
 #[derive(Clone, Default)]
@@ -384,12 +291,7 @@ impl ServerHandler for ElicitationAppsMcpServer {
     }
 }
 
-async fn start_apps_server() -> Result<(String, JoinHandle<()>)> {
-    let state = Arc::new(AppsServerState {
-        expected_bearer: "Bearer chatgpt-token".to_string(),
-        expected_account_id: "account-123".to_string(),
-    });
-
+async fn start_mcp_server() -> Result<(String, JoinHandle<()>)> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let addr = listener.local_addr()?;
 
@@ -399,14 +301,7 @@ async fn start_apps_server() -> Result<(String, JoinHandle<()>)> {
         StreamableHttpServerConfig::default(),
     );
 
-    let router = Router::new()
-        .route("/connectors/directory/list", get(list_directory_connectors))
-        .route(
-            "/connectors/directory/list_workspace",
-            get(list_directory_connectors),
-        )
-        .with_state(state)
-        .nest_service("/api/codex/apps", mcp_service);
+    let router = Router::new().nest_service("/mcp", mcp_service);
 
     let handle = tokio::spawn(async move {
         let _ = axum::serve(listener, router).await;
@@ -415,75 +310,15 @@ async fn start_apps_server() -> Result<(String, JoinHandle<()>)> {
     Ok((format!("http://{addr}"), handle))
 }
 
-async fn list_directory_connectors(
-    State(state): State<Arc<AppsServerState>>,
-    headers: HeaderMap,
-    uri: Uri,
-) -> Result<Json<serde_json::Value>, StatusCode> {
-    let bearer_ok = headers
-        .get(AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| value == state.expected_bearer);
-    let account_ok = headers
-        .get("chatgpt-account-id")
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| value == state.expected_account_id);
-    let external_logos_ok = uri
-        .query()
-        .is_some_and(|query| query.split('&').any(|pair| pair == "external_logos=true"));
-
-    if !bearer_ok || !account_ok {
-        Err(StatusCode::UNAUTHORIZED)
-    } else if !external_logos_ok {
-        Err(StatusCode::BAD_REQUEST)
-    } else {
-        Ok(Json(json!({
-            "apps": [{
-                "id": CONNECTOR_ID,
-                "name": CONNECTOR_NAME,
-                "description": "Calendar connector",
-                "logo_url": null,
-                "logo_url_dark": null,
-                "distribution_channel": null,
-                "branding": null,
-                "app_metadata": null,
-                "labels": null,
-                "install_url": null,
-                "is_accessible": false,
-                "is_enabled": true
-            }],
-            "next_token": null
-        })))
-    }
-}
-
-fn write_config_toml(
-    codex_home: &std::path::Path,
-    responses_server_uri: &str,
-    apps_server_url: &str,
-) -> std::io::Result<()> {
-    std::fs::write(
-        codex_home.join("config.toml"),
-        format!(
-            r#"
-model = "mock-model"
-approval_policy = "untrusted"
-sandbox_mode = "read-only"
-
-model_provider = "mock_provider"
-hosted_base_url = "{apps_server_url}"
-mcp_oauth_credentials_store = "file"
-
-[features]
-apps = true
-
-[model_providers.mock_provider]
-name = "Mock provider for test"
-base_url = "{responses_server_uri}/v1"
-wire_api = "chat_completions"
-request_max_retries = 0
-stream_max_retries = 0
+fn append_mcp_server_config(codex_home: &std::path::Path, mcp_server_url: &str) -> Result<()> {
+    let config_path = codex_home.join("config.toml");
+    let mut config_toml = std::fs::read_to_string(&config_path)?;
+    config_toml.push_str(&format!(
+        r#"
+[mcp_servers.{TEST_SERVER_NAME}]
+url = "{mcp_server_url}/mcp"
 "#
-        ),
-    )
+    ));
+    std::fs::write(config_path, config_toml)?;
+    Ok(())
 }

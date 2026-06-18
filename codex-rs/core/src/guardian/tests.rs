@@ -25,6 +25,7 @@ use codex_model_provider::create_model_provider;
 use codex_model_provider_info::AMAZON_BEDROCK_GPT_5_4_MODEL_ID;
 use codex_model_provider_info::AMAZON_BEDROCK_PROVIDER_ID;
 use codex_model_provider_info::ModelProviderInfo;
+use codex_model_provider_info::WireApi;
 use codex_network_proxy::NetworkProxyConfig;
 use codex_protocol::ThreadId;
 use codex_protocol::approvals::NetworkApprovalProtocol;
@@ -58,6 +59,7 @@ use core_test_support::responses::ev_response_created;
 use core_test_support::responses::mount_response_once;
 use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::mount_sse_sequence;
+use core_test_support::responses::request_input_items;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
@@ -179,6 +181,10 @@ async fn guardian_test_session_and_turn_with_base_url(
     session.thread_id = fixed_guardian_parent_session_id();
     let mut config = (*turn.config).clone();
     config.model_provider.base_url = Some(format!("{base_url}/v1"));
+    config.model_provider.env_key = None;
+    config.model_provider.env_key_instructions = None;
+    config.model_provider.wire_api = WireApi::ChatCompletions;
+    config.model_provider.requires_astral_auth = false;
     config.user_instructions = None;
     let config = Arc::new(config);
     let models_manager = test_support::models_manager_with_provider(
@@ -288,18 +294,25 @@ fn guardian_prompt_text(items: &[codex_protocol::user_input::UserInput]) -> Stri
 }
 
 fn last_user_message_text_from_body(body: &serde_json::Value) -> String {
-    body["input"]
-        .as_array()
-        .expect("request input array")
-        .iter()
+    request_input_items(body)
+        .into_iter()
         .filter(|item| item.get("role").and_then(serde_json::Value::as_str) == Some("user"))
-        .filter_map(|item| item.get("content").and_then(serde_json::Value::as_array))
+        .filter_map(|item| {
+            item.get("content")
+                .and_then(serde_json::Value::as_array)
+                .cloned()
+        })
         .next_back()
         .expect("user message content")
-        .iter()
+        .into_iter()
         .filter(|span| span.get("type").and_then(serde_json::Value::as_str) == Some("input_text"))
-        .filter_map(|span| span.get("text").and_then(serde_json::Value::as_str))
-        .collect::<String>()
+        .filter_map(|span| {
+            span.get("text")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        })
+        .collect::<Vec<_>>()
+        .join("")
 }
 
 #[test]
@@ -1361,7 +1374,7 @@ async fn guardian_request_model_for_auto_review_override(
     )
     .await;
     let (GuardianReviewOutcome::Completed(_), _) = outcome else {
-        panic!("expected guardian assessment");
+        panic!("expected guardian assessment, got {outcome:?}");
     };
 
     let request_model = request_log
@@ -1431,6 +1444,10 @@ async fn guardian_review_request_layout_matches_model_visible_request_snapshot()
     let mut config = (*turn.config).clone();
     config.cwd = temp_cwd.abs();
     config.model_provider.base_url = Some(format!("{}/v1", server.uri()));
+    config.model_provider.env_key = None;
+    config.model_provider.env_key_instructions = None;
+    config.model_provider.wire_api = WireApi::ChatCompletions;
+    config.model_provider.requires_astral_auth = false;
     let config = Arc::new(config);
     let models_manager = test_support::models_manager_with_provider(
         config.codex_home.to_path_buf(),
@@ -1484,11 +1501,11 @@ async fn guardian_review_request_layout_matches_model_visible_request_snapshot()
     let request = request_log.single_request();
     let request_body = request.body_json();
     assert_eq!(
-        request_body.pointer("/text/format/strict"),
+        request_body.pointer("/response_format/json_schema/strict"),
         Some(&serde_json::json!(false))
     );
     assert_eq!(
-        request_body.pointer("/text/format/schema"),
+        request_body.pointer("/response_format/json_schema/schema"),
         Some(&serde_json::json!({
             "type": "object",
             "additionalProperties": false,
@@ -1516,15 +1533,9 @@ async fn guardian_review_request_layout_matches_model_visible_request_snapshot()
         .get("model")
         .and_then(|value| value.as_str())
         .expect("guardian request should include a model");
-    let request_reasoning_effort = request_body
-        .get("reasoning")
-        .and_then(|reasoning| reasoning.get("effort"))
-        .and_then(|value| value.as_str());
     assert_eq!(metadata.guardian_model.as_deref(), Some(request_model));
-    assert_eq!(
-        metadata.guardian_reasoning_effort.as_deref(),
-        request_reasoning_effort
-    );
+    assert_eq!(metadata.guardian_reasoning_effort.as_deref(), Some("low"));
+    assert_eq!(request_body.get("reasoning_effort"), None);
     assert_eq!(metadata.had_prior_review_context, Some(false));
     assert!(
         metadata.time_to_first_token_ms.is_some(),
@@ -1813,11 +1824,10 @@ async fn guardian_reuses_prompt_cache_key_and_appends_prior_reviews() -> anyhow:
         "guardian session should append earlier reviews into the follow-up request"
     );
     assert_eq!(
-        third_body
-            .to_string()
+        last_user_message_text_from_body(&third_body)
             .matches("Use prior reviews as context, not binding precedent.")
             .count(),
-        1,
+        0,
         "later follow-up guardian requests should not append the reminder again"
     );
     let committed_rollout_items = session
@@ -2005,6 +2015,10 @@ async fn guardian_review_surfaces_responses_api_errors_in_rejection_reason() -> 
         crate::session::tests::make_session_and_context_with_rx().await;
     let mut config = (*turn.config).clone();
     config.model_provider.base_url = Some(format!("{}/v1", server.uri()));
+    config.model_provider.env_key = None;
+    config.model_provider.env_key_instructions = None;
+    config.model_provider.wire_api = WireApi::ChatCompletions;
+    config.model_provider.requires_astral_auth = false;
     config.user_instructions = None;
     let config = Arc::new(config);
     let models_manager = test_support::models_manager_with_provider(

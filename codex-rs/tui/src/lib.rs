@@ -2038,15 +2038,58 @@ mod tests {
     use codex_app_server_protocol::ThreadStartParams;
     use codex_app_server_protocol::ThreadStartResponse;
     use codex_config::config_toml::ProjectConfig;
+    use codex_protocol::openai_models::ModelInfo;
+    use codex_protocol::openai_models::ModelsResponse;
     use pretty_assertions::assert_eq;
     use serial_test::serial;
     use tempfile::TempDir;
 
+    const DEFAULT_TEST_MODEL: &str = "astral-test-model";
+
     async fn build_config(temp_dir: &TempDir) -> std::io::Result<Config> {
-        ConfigBuilder::default()
+        let mut config = ConfigBuilder::default()
             .codex_home(temp_dir.path().to_path_buf())
+            .harness_overrides(ConfigOverrides {
+                model: Some(DEFAULT_TEST_MODEL.to_string()),
+                ..ConfigOverrides::default()
+            })
             .build()
-            .await
+            .await?;
+        config.model_catalog = Some(ModelsResponse {
+            models: vec![test_model_info()],
+        });
+        Ok(config)
+    }
+
+    fn test_model_info() -> ModelInfo {
+        serde_json::from_value(serde_json::json!({
+            "slug": DEFAULT_TEST_MODEL,
+            "display_name": DEFAULT_TEST_MODEL,
+            "description": "test model",
+            "default_reasoning_level": "medium",
+            "supported_reasoning_levels": [{"effort": "medium", "description": "medium"}],
+            "shell_type": "shell_command",
+            "visibility": "list",
+            "supported_in_api": true,
+            "priority": 0,
+            "additional_speed_tiers": [],
+            "service_tiers": [],
+            "default_service_tier": null,
+            "availability_nux": null,
+            "upgrade": null,
+            "base_instructions": "base instructions",
+            "supports_reasoning_summaries": false,
+            "default_reasoning_summary": "none",
+            "support_verbosity": false,
+            "default_verbosity": null,
+            "apply_patch_tool_type": null,
+            "truncation_policy": {"mode": "bytes", "limit": 10_000},
+            "supports_parallel_tool_calls": false,
+            "supports_image_detail_original": false,
+            "context_window": 272_000,
+            "experimental_supported_tools": [],
+        }))
+        .expect("valid test model info")
     }
 
     fn write_session_rollout(

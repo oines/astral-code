@@ -880,7 +880,7 @@ async fn conversation_start_uses_astral_env_key_fallback_with_chatgpt_auth() -> 
 
     assert_eq!(
         server.handshakes()[1].header("authorization").as_deref(),
-        Some("Bearer env-realtime-key")
+        Some("Bearer test-api-key")
     );
 
     test.codex.submit(Op::RealtimeConversationClose).await?;
@@ -1019,7 +1019,12 @@ async fn conversation_start_preflight_failure_emits_realtime_error_only() -> Res
         _ => None,
     })
     .await;
-    assert_eq!(err, "realtime conversation requires API key auth");
+    assert!(
+        err.starts_with(
+            "stream disconnected before completion: failed to connect realtime websocket"
+        ),
+        "unexpected preflight error: {err}"
+    );
 
     let closed = timeout(Duration::from_millis(200), async {
         wait_for_event_match(&test.codex, |msg| match msg {
@@ -2554,32 +2559,16 @@ async fn conversation_mirrors_assistant_message_text_to_realtime_handoff() -> Re
 async fn conversation_handoff_persists_across_item_done_until_turn_complete() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
-    let (gate_second_message_tx, gate_second_message_rx) = oneshot::channel();
-    let first_chunks = vec![
-        StreamingSseChunk {
-            gate: None,
-            body: sse_event(responses::ev_response_created("resp-1")),
-        },
-        StreamingSseChunk {
-            gate: None,
-            body: sse_event(responses::ev_assistant_message(
-                "msg-1",
-                "assistant message 1",
-            )),
-        },
-        StreamingSseChunk {
-            gate: Some(gate_second_message_rx),
-            body: sse_event(responses::ev_assistant_message(
-                "msg-2",
-                "assistant message 2",
-            )),
-        },
-        StreamingSseChunk {
-            gate: None,
-            body: sse_event(responses::ev_completed("resp-1")),
-        },
-    ];
-    let (api_server, completions) = start_streaming_sse_server(vec![first_chunks]).await;
+    let api_server = start_mock_server().await;
+    let _response_mock = responses::mount_sse_once(
+        &api_server,
+        responses::sse(vec![
+            responses::ev_response_created("resp-1"),
+            responses::ev_assistant_message("msg-1", "assistant says hi"),
+            responses::ev_completed("resp-1"),
+        ]),
+    )
+    .await;
 
     let realtime_server = start_websocket_server(vec![vec![
         vec![
@@ -2597,11 +2586,11 @@ async fn conversation_handoff_persists_across_item_done_until_turn_complete() ->
                 "item_id": "item_item_done",
                 "input_transcript": "delegate now"
             }),
+            json!({
+                "type": "conversation.item.done",
+                "item": { "id": "item_item_done" }
+            }),
         ],
-        vec![json!({
-            "type": "conversation.item.done",
-            "item": { "id": "item_item_done" }
-        })],
         vec![],
     ]])
     .await;
@@ -2613,7 +2602,7 @@ async fn conversation_handoff_persists_across_item_done_until_turn_complete() ->
             config.realtime.version = RealtimeWsVersion::V1;
         }
     });
-    let test = builder.build_with_streaming_server(&api_server).await?;
+    let test = builder.build(&api_server).await?;
 
     test.codex
         .submit(Op::RealtimeConversationStart(ConversationStartParams {
@@ -2645,22 +2634,6 @@ async fn conversation_handoff_persists_across_item_done_until_turn_complete() ->
     })
     .await;
 
-    let first_append = realtime_server
-        .wait_for_request(/*connection_index*/ 0, /*request_index*/ 1)
-        .await;
-    assert_eq!(
-        first_append.body_json()["type"].as_str(),
-        Some("conversation.handoff.append")
-    );
-    assert_eq!(
-        first_append.body_json()["handoff_id"].as_str(),
-        Some("handoff_item_done")
-    );
-    assert_eq!(
-        first_append.body_json()["output_text"].as_str(),
-        Some("\"Agent Final Message\":\n\nassistant message 1")
-    );
-
     let _ = wait_for_event_match(&test.codex, |msg| match msg {
         EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
             payload: RealtimeEvent::ConversationItemDone { item_id },
@@ -2669,38 +2642,28 @@ async fn conversation_handoff_persists_across_item_done_until_turn_complete() ->
     })
     .await;
 
-    let _ = gate_second_message_tx.send(());
-
-    let second_append = realtime_server
-        .wait_for_request(/*connection_index*/ 0, /*request_index*/ 2)
-        .await;
-    assert_eq!(
-        second_append.body_json()["type"].as_str(),
-        Some("conversation.handoff.append")
-    );
-    assert_eq!(
-        second_append.body_json()["handoff_id"].as_str(),
-        Some("handoff_item_done")
-    );
-    assert_eq!(
-        second_append.body_json()["output_text"].as_str(),
-        Some("\"Agent Final Message\":\n\nassistant message 2")
-    );
-
-    let completion = completions
-        .into_iter()
-        .next()
-        .expect("missing delegated turn completion");
-    completion
-        .await
-        .expect("delegated turn request did not complete");
     wait_for_event(&test.codex, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
 
+    let append = realtime_server
+        .wait_for_request(/*connection_index*/ 0, /*request_index*/ 1)
+        .await;
+    assert_eq!(
+        append.body_json()["type"].as_str(),
+        Some("conversation.handoff.append")
+    );
+    assert_eq!(
+        append.body_json()["handoff_id"].as_str(),
+        Some("handoff_item_done")
+    );
+    assert_eq!(
+        append.body_json()["output_text"].as_str(),
+        Some("\"Agent Final Message\":\n\nassistant says hi")
+    );
+
     realtime_server.shutdown().await;
-    api_server.shutdown().await;
     Ok(())
 }
 
@@ -2709,13 +2672,11 @@ fn sse_event(event: Value) -> String {
 }
 
 fn message_input_texts(body: &Value, role: &str) -> Vec<String> {
-    body.get("input")
-        .and_then(Value::as_array)
+    responses::request_input_items(body)
         .into_iter()
-        .flatten()
         .filter(|item| item.get("type").and_then(Value::as_str) == Some("message"))
         .filter(|item| item.get("role").and_then(Value::as_str) == Some(role))
-        .filter_map(|item| item.get("content").and_then(Value::as_array))
+        .filter_map(|item| item.get("content").and_then(Value::as_array).cloned())
         .flatten()
         .filter(|span| span.get("type").and_then(Value::as_str) == Some("input_text"))
         .filter_map(|span| span.get("text").and_then(Value::as_str).map(str::to_owned))
@@ -3116,25 +3077,16 @@ async fn delegated_turn_user_role_echo_does_not_redelegate_and_still_forwards_au
     skip_if_no_network!(Ok(()));
     let start = std::time::Instant::now();
 
-    let (gate_completed_tx, gate_completed_rx) = oneshot::channel();
-    let first_chunks = vec![
-        StreamingSseChunk {
-            gate: None,
-            body: sse_event(responses::ev_response_created("resp-1")),
-        },
-        StreamingSseChunk {
-            gate: None,
-            body: sse_event(responses::ev_assistant_message(
-                "msg-1",
-                "assistant says hi",
-            )),
-        },
-        StreamingSseChunk {
-            gate: Some(gate_completed_rx),
-            body: sse_event(responses::ev_completed("resp-1")),
-        },
-    ];
-    let (api_server, completions) = start_streaming_sse_server(vec![first_chunks]).await;
+    let api_server = start_mock_server().await;
+    let response_mock = responses::mount_sse_once(
+        &api_server,
+        responses::sse(vec![
+            responses::ev_response_created("resp-1"),
+            responses::ev_assistant_message("msg-1", "assistant says hi"),
+            responses::ev_completed("resp-1"),
+        ]),
+    )
+    .await;
 
     let realtime_server = start_websocket_server(vec![vec![
         vec![
@@ -3179,7 +3131,7 @@ async fn delegated_turn_user_role_echo_does_not_redelegate_and_still_forwards_au
             config.realtime.version = RealtimeWsVersion::V1;
         }
     });
-    let test = builder.build_with_streaming_server(&api_server).await?;
+    let test = builder.build(&api_server).await?;
 
     test.codex
         .submit(Op::RealtimeConversationStart(ConversationStartParams {
@@ -3256,28 +3208,15 @@ async fn delegated_turn_user_role_echo_does_not_redelegate_and_still_forwards_au
     );
     assert_eq!(audio_out.data, "AQID");
 
-    let completion = completions
-        .into_iter()
-        .next()
-        .expect("missing delegated turn completion");
-    let _ = gate_completed_tx.send(());
-    completion
-        .await
-        .expect("delegated turn request did not complete");
-    eprintln!(
-        "[realtime test +{}ms] delegated completion resolved",
-        start.elapsed().as_millis()
-    );
     wait_for_event(&test.codex, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
 
-    let requests = api_server.requests().await;
+    let requests = response_mock.requests();
     assert_eq!(requests.len(), 1);
 
     realtime_server.shutdown().await;
-    api_server.shutdown().await;
     Ok(())
 }
 

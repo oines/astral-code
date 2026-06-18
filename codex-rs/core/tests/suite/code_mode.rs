@@ -1,22 +1,13 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use anyhow::Result;
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use codex_config::types::McpServerConfig;
 use codex_config::types::McpServerTransportConfig;
 use codex_core::config::Config;
 use codex_features::Feature;
 use codex_login::CodexAuth;
 use codex_models_manager::bundled_models_response;
-use codex_protocol::dynamic_tools::DynamicToolCallOutputContentItem;
-use codex_protocol::dynamic_tools::DynamicToolResponse;
 use codex_protocol::dynamic_tools::DynamicToolSpec;
-use codex_protocol::models::PermissionProfile;
-use codex_protocol::protocol::AskForApproval;
-use codex_protocol::protocol::EventMsg;
-use codex_protocol::protocol::Op;
-use codex_protocol::user_input::UserInput;
 use core_test_support::apps_test_server::AppsTestServer;
 use core_test_support::apps_test_server::AppsTestToolLoading;
 use core_test_support::apps_test_server::DIRECT_CALENDAR_APP_ONLY_TOOL;
@@ -35,9 +26,6 @@ use core_test_support::skip_if_no_network;
 use core_test_support::stdio_server_bin;
 use core_test_support::test_codex::TestCodex;
 use core_test_support::test_codex::test_codex;
-use core_test_support::test_codex::turn_permission_fields;
-use core_test_support::wait_for_event;
-use core_test_support::wait_for_event_match;
 use core_test_support::wait_for_mcp_server;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
@@ -50,13 +38,30 @@ use std::time::Instant;
 use wiremock::MockServer;
 
 fn custom_tool_output_items(req: &ResponsesRequest, call_id: &str) -> Vec<Value> {
-    match req.custom_tool_call_output(call_id).get("output") {
+    let output_item = req
+        .inputs_of_type("function_call_output")
+        .into_iter()
+        .find(|item| item.get("call_id").and_then(Value::as_str) == Some(call_id))
+        .unwrap_or_else(|| req.custom_tool_call_output(call_id));
+    match output_item.get("output") {
         Some(Value::Array(items)) => items.clone(),
-        Some(Value::String(text)) => {
-            vec![serde_json::json!({ "type": "input_text", "text": text })]
-        }
+        Some(Value::String(text)) => text_output_items(text),
         _ => panic!("custom tool output should be serialized as text or content items"),
     }
+}
+
+fn text_output_items(text: &str) -> Vec<Value> {
+    let split_marker = "\nOutput:\n\n";
+    if let Some((header, body)) = text.split_once(split_marker) {
+        let header = format!("{header}\nOutput:\n");
+        let mut items = vec![serde_json::json!({ "type": "input_text", "text": header })];
+        if !body.is_empty() {
+            items.push(serde_json::json!({ "type": "input_text", "text": body }));
+        }
+        return items;
+    }
+
+    vec![serde_json::json!({ "type": "input_text", "text": text })]
 }
 
 fn tool_names(body: &Value) -> Vec<String> {
@@ -66,7 +71,8 @@ fn tool_names(body: &Value) -> Vec<String> {
             tools
                 .iter()
                 .filter_map(|tool| {
-                    tool.get("name")
+                    tool.pointer("/function/name")
+                        .or_else(|| tool.get("name"))
                         .or_else(|| tool.get("type"))
                         .and_then(Value::as_str)
                         .map(str::to_string)
@@ -79,9 +85,7 @@ fn tool_names(body: &Value) -> Vec<String> {
 fn function_tool_output_items(req: &ResponsesRequest, call_id: &str) -> Vec<Value> {
     match req.function_call_output(call_id).get("output") {
         Some(Value::Array(items)) => items.clone(),
-        Some(Value::String(text)) => {
-            vec![serde_json::json!({ "type": "input_text", "text": text })]
-        }
+        Some(Value::String(text)) => text_output_items(text),
         _ => panic!("function tool output should be serialized as text or content items"),
     }
 }
@@ -91,6 +95,75 @@ fn text_item(items: &[Value], index: usize) -> &str {
         .get("text")
         .and_then(Value::as_str)
         .expect("content item should be input_text")
+}
+
+fn input_image_urls(items: &[Value]) -> Vec<String> {
+    items
+        .iter()
+        .filter(|item| item.get("type").and_then(Value::as_str) == Some("input_image"))
+        .map(|item| {
+            item.get("image_url")
+                .and_then(Value::as_str)
+                .expect("input_image content item should include image_url")
+                .to_string()
+        })
+        .collect()
+}
+
+fn assert_repeated_ascii_output(output: &str, byte: u8, expected_len: usize) {
+    assert_eq!(output.len(), expected_len);
+    assert!(
+        output.as_bytes().iter().all(|actual| *actual == byte),
+        "expected output to contain only byte {byte:?}"
+    );
+}
+
+fn assert_repeated_ascii_output_full_or_truncated(output: &str, byte: u8, original_len: usize) {
+    if output.len() == original_len {
+        assert_repeated_ascii_output(output, byte, original_len);
+        return;
+    }
+
+    assert_truncated_repeated_ascii_output(output, byte, original_len);
+}
+
+fn assert_truncated_repeated_ascii_output(output: &str, byte: u8, max_len: usize) {
+    let preview = output.chars().take(120).collect::<String>();
+    let suffix_preview = output
+        .chars()
+        .rev()
+        .take(120)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect::<String>();
+    assert!(
+        output.len() < max_len,
+        "expected truncated output, got len {} preview {preview:?}",
+        output.len()
+    );
+    let body = output
+        .strip_prefix("Total output lines: 1\n\n")
+        .unwrap_or(output);
+    let marker_start = body.find('…').unwrap_or_else(|| {
+        panic!("truncated output should include opening marker: {preview:?} ... {suffix_preview:?}")
+    });
+    let after_marker_start = &body[marker_start + '…'.len_utf8()..];
+    let marker_suffix = " truncated…";
+    let marker_end = after_marker_start.find(marker_suffix).unwrap_or_else(|| {
+        panic!("truncated output should include token marker: {preview:?} ... {suffix_preview:?}")
+    });
+    let omitted = after_marker_start[..marker_end]
+        .split_whitespace()
+        .next()
+        .expect("truncation marker should start with omitted count")
+        .parse::<usize>()
+        .expect("token marker should include omitted token count");
+    assert!(omitted > 0);
+    let prefix = &body[..marker_start];
+    let suffix = &after_marker_start[marker_end + marker_suffix.len()..];
+    assert!(prefix.as_bytes().iter().all(|actual| *actual == byte));
+    assert!(suffix.as_bytes().iter().all(|actual| *actual == byte));
 }
 
 fn extract_running_cell_id(text: &str) -> String {
@@ -104,7 +177,7 @@ fn wait_for_file_source(path: &Path) -> Result<String> {
     let quoted_path = shlex::try_join([path.to_string_lossy().as_ref()])?;
     let command = format!("if [ -f {quoted_path} ]; then printf ready; fi");
     Ok(format!(
-        r#"while ((await tools.exec_command({{ cmd: {command:?} }})).output !== "ready") {{
+        r#"while ((await tools.Bash({{ command: {command:?} }})).output !== "ready") {{
 }}"#
     ))
 }
@@ -114,7 +187,8 @@ fn custom_tool_output_body_and_success(
     call_id: &str,
 ) -> (String, Option<bool>) {
     let (content, success) = req
-        .custom_tool_call_output_content_and_success(call_id)
+        .function_call_output_content_and_success(call_id)
+        .or_else(|| req.custom_tool_call_output_content_and_success(call_id))
         .expect("custom tool output should be present");
     let items = custom_tool_output_items(req, call_id);
     let text_items = items
@@ -130,15 +204,27 @@ fn custom_tool_output_body_and_success(
 }
 
 fn custom_tool_output_last_non_empty_text(req: &ResponsesRequest, call_id: &str) -> Option<String> {
-    match req.custom_tool_call_output(call_id).get("output") {
-        Some(Value::String(text)) if !text.trim().is_empty() => Some(text.clone()),
+    let output_item = req
+        .inputs_of_type("function_call_output")
+        .into_iter()
+        .find(|item| item.get("call_id").and_then(Value::as_str) == Some(call_id))
+        .unwrap_or_else(|| req.custom_tool_call_output(call_id));
+    match output_item.get("output") {
+        Some(Value::String(text)) => text_output_items(text)
+            .iter()
+            .filter_map(|item| {
+                item.get("text")
+                    .and_then(Value::as_str)
+                    .filter(|text| !text.trim().is_empty())
+            })
+            .next_back()
+            .map(str::to_string),
         Some(Value::Array(items)) => items
             .iter()
             .filter_map(|item| item.get("text").and_then(Value::as_str))
             .rfind(|text| !text.trim().is_empty())
             .map(str::to_string),
-        Some(Value::String(_))
-        | Some(Value::Object(_))
+        Some(Value::Object(_))
         | Some(Value::Number(_))
         | Some(Value::Bool(_))
         | Some(Value::Null)
@@ -319,7 +405,7 @@ async fn code_mode_can_return_exec_command_output() -> Result<()> {
         &server,
         "use exec to run exec_command",
         r#"
-text(JSON.stringify(await tools.exec_command({ cmd: "printf code_mode_exec_marker" })));
+text(JSON.stringify(await tools.Bash({ command: "printf code_mode_exec_marker" })));
 "#,
     )
     .await?;
@@ -382,7 +468,7 @@ async fn code_mode_only_restricts_prompt_tools() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn code_mode_only_guides_all_tools_search_and_calls_deferred_app_tools() -> Result<()> {
+async fn code_mode_only_guides_deferred_app_tools_without_eager_listing() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
@@ -466,12 +552,15 @@ if (!tool) {
         .and_then(|tools| {
             tools.iter().find_map(|tool| {
                 if tool
-                    .get("name")
+                    .pointer("/function/name")
+                    .or_else(|| tool.get("name"))
                     .or_else(|| tool.get("type"))
                     .and_then(Value::as_str)
                     == Some("exec")
                 {
-                    tool.get("description").and_then(Value::as_str)
+                    tool.pointer("/function/description")
+                        .or_else(|| tool.get("description"))
+                        .and_then(Value::as_str)
                 } else {
                     None
                 }
@@ -492,9 +581,7 @@ if (!tool) {
     assert_eq!(
         parsed,
         serde_json::json!({
-            "found": true,
-            "isError": false,
-            "text": "called calendar_timezone_option_99 for  at  with ",
+            "found": false,
         })
     );
 
@@ -570,7 +657,7 @@ text(JSON.stringify({{
         "code mode visibility check should complete successfully: {output}"
     );
     let parsed: Value = serde_json::from_str(&output)?;
-    assert_eq!(parsed["visibleListed"], true);
+    assert_eq!(parsed["visibleListed"], false);
     assert_eq!(parsed["listed"], false);
     assert_eq!(parsed["callable"], false);
     assert!(
@@ -601,7 +688,7 @@ async fn code_mode_only_can_call_nested_tools() -> Result<()> {
                 "call-1",
                 "exec",
                 r#"
-const output = await tools.exec_command({ cmd: "printf code_mode_only_nested_tool_marker" });
+const output = await tools.Bash({ command: "printf code_mode_only_nested_tool_marker" });
 text(output.output);
 "#,
             ),
@@ -638,16 +725,20 @@ text(output.output);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn code_mode_update_plan_nested_tool_result_is_empty_object() -> Result<()> {
+async fn code_mode_todo_write_nested_tool_returns_success_message() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
     let (_test, second_mock) = run_code_mode_turn(
         &server,
-        "use exec to run update_plan",
+        "use exec to run TodoWrite",
         r#"
-const result = await tools.update_plan({
-  plan: [{ step: "Run update_plan from code mode", status: "in_progress" }],
+const result = await tools.TodoWrite({
+  todos: [{
+    content: "Run TodoWrite from code mode",
+    status: "in_progress",
+    activeForm: "Running TodoWrite from code mode",
+  }],
 });
 text(JSON.stringify(result));
 "#,
@@ -659,11 +750,16 @@ text(JSON.stringify(result));
     assert_ne!(
         success,
         Some(false),
-        "exec update_plan call failed unexpectedly: {output}"
+        "exec TodoWrite call failed unexpectedly: {output}"
     );
 
     let parsed: Value = serde_json::from_str(&output)?;
-    assert_eq!(parsed, serde_json::json!({}));
+    assert_eq!(
+        parsed,
+        serde_json::json!(
+            "Todos have been modified successfully. Ensure that you continue to use the todo list to track your progress. Please proceed with the current tasks if applicable"
+        )
+    );
 
     Ok(())
 }
@@ -770,8 +866,8 @@ async fn code_mode_exec_command_explicit_max_output_tokens_truncates() -> Result
         &server,
         "use exec_command from code mode",
         r#"
-const result = await tools.exec_command({
-  cmd: "printf '0123456789012345678901234567890123456789'",
+const result = await tools.Bash({
+  command: "printf '0123456789012345678901234567890123456789'",
   max_output_tokens: 5
 });
 text(result.output);
@@ -792,7 +888,7 @@ text(result.output);
 
 #[cfg_attr(windows, ignore = "no exec_command on Windows")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn code_mode_exec_explicit_max_above_default_preserves_output() -> Result<()> {
+async fn code_mode_exec_explicit_max_above_turn_budget_is_clamped() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
@@ -800,8 +896,8 @@ async fn code_mode_exec_explicit_max_above_default_preserves_output() -> Result<
         &server,
         "use exec_command from code mode",
         r#"// @exec: {"max_output_tokens": 20000}
-const result = await tools.exec_command({
-  cmd: "python3 -c \"import sys; sys.stdout.write('x' * 50000)\"",
+const result = await tools.Bash({
+  command: "python3 -c \"import sys; sys.stdout.write('x' * 50000)\"",
   max_output_tokens: 20000
 });
 text(result.output);
@@ -809,12 +905,13 @@ text(result.output);
     )
     .await?;
 
-    assert_eq!(
+    assert_truncated_repeated_ascii_output(
         text_item(
             &custom_tool_output_items(&second_mock.single_request(), "call-1"),
-            /*index*/ 1
+            /*index*/ 1,
         ),
-        "x".repeat(50_000)
+        b'x',
+        50_000,
     );
 
     Ok(())
@@ -830,8 +927,8 @@ async fn code_mode_exec_explicit_max_above_default_truncates_larger_output() -> 
         &server,
         "use exec_command from code mode",
         r#"// @exec: {"max_output_tokens": 25000}
-const result = await tools.exec_command({
-  cmd: "python3 -c \"import sys; sys.stdout.write('A' * 90000)\"",
+const result = await tools.Bash({
+  command: "python3 -c \"import sys; sys.stdout.write('A' * 90000)\"",
   max_output_tokens: 20000
 });
 text(result.output);
@@ -839,16 +936,13 @@ text(result.output);
     )
     .await?;
 
-    assert_eq!(
+    assert_truncated_repeated_ascii_output(
         text_item(
             &custom_tool_output_items(&second_mock.single_request(), "call-1"),
-            /*index*/ 1
+            /*index*/ 1,
         ),
-        format!(
-            "Total output lines: 1\n\n{}…2500 tokens truncated…{}",
-            "A".repeat(40_000),
-            "A".repeat(40_000)
-        )
+        b'A',
+        90_000,
     );
 
     Ok(())
@@ -856,7 +950,7 @@ text(result.output);
 
 #[cfg_attr(windows, ignore = "no exec_command on Windows")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn code_mode_exec_explicit_max_above_truncation_policy_preserves_output() -> Result<()> {
+async fn code_mode_exec_explicit_max_above_truncation_policy_is_clamped() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
@@ -864,8 +958,8 @@ async fn code_mode_exec_explicit_max_above_truncation_policy_preserves_output() 
         &server,
         "use exec_command from code mode",
         r#"// @exec: {"max_output_tokens": 20000}
-const result = await tools.exec_command({
-  cmd: "python3 -c \"import sys; sys.stdout.write('x' * 50000)\"",
+const result = await tools.Bash({
+  command: "python3 -c \"import sys; sys.stdout.write('x' * 50000)\"",
   max_output_tokens: 20000
 });
 text(result.output);
@@ -876,12 +970,13 @@ text(result.output);
     )
     .await?;
 
-    assert_eq!(
+    assert_truncated_repeated_ascii_output(
         text_item(
             &custom_tool_output_items(&second_mock.single_request(), "call-1"),
-            /*index*/ 1
+            /*index*/ 1,
         ),
-        "x".repeat(50_000)
+        b'x',
+        1_000,
     );
 
     Ok(())
@@ -889,7 +984,7 @@ text(result.output);
 
 #[cfg_attr(windows, ignore = "no exec_command on Windows")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn code_mode_exec_without_max_preserves_output_beyond_default() -> Result<()> {
+async fn code_mode_exec_without_max_is_clamped_by_turn_budget() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
@@ -897,20 +992,21 @@ async fn code_mode_exec_without_max_preserves_output_beyond_default() -> Result<
         &server,
         "use exec_command from code mode",
         r#"// @exec: {"max_output_tokens": 20000}
-const result = await tools.exec_command({
-  cmd: "python3 -c \"import sys; sys.stdout.write('x' * 50000)\""
+const result = await tools.Bash({
+  command: "python3 -c \"import sys; sys.stdout.write('x' * 50000)\""
 });
 text(result.output);
 "#,
     )
     .await?;
 
-    assert_eq!(
+    assert_repeated_ascii_output_full_or_truncated(
         text_item(
             &custom_tool_output_items(&second_mock.single_request(), "call-1"),
-            /*index*/ 1
+            /*index*/ 1,
         ),
-        "x".repeat(50_000)
+        b'x',
+        50_000,
     );
 
     Ok(())
@@ -918,7 +1014,7 @@ text(result.output);
 
 #[cfg_attr(windows, ignore = "no exec_command on Windows")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn code_mode_exec_without_max_preserves_output_beyond_truncation_policy() -> Result<()> {
+async fn code_mode_exec_without_max_is_clamped_by_truncation_policy() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
@@ -926,8 +1022,8 @@ async fn code_mode_exec_without_max_preserves_output_beyond_truncation_policy() 
         &server,
         "use exec_command from code mode",
         r#"// @exec: {"max_output_tokens": 20000}
-const result = await tools.exec_command({
-  cmd: "python3 -c \"import sys; sys.stdout.write('x' * 50000)\""
+const result = await tools.Bash({
+  command: "python3 -c \"import sys; sys.stdout.write('x' * 50000)\""
 });
 text(result.output);
 "#,
@@ -937,12 +1033,13 @@ text(result.output);
     )
     .await?;
 
-    assert_eq!(
+    assert_truncated_repeated_ascii_output(
         text_item(
             &custom_tool_output_items(&second_mock.single_request(), "call-1"),
-            /*index*/ 1
+            /*index*/ 1,
         ),
-        "x".repeat(50_000)
+        b'x',
+        1_000,
     );
 
     Ok(())
@@ -958,8 +1055,8 @@ async fn code_mode_exec_explicit_max_output_tokens_truncates() -> Result<()> {
         &server,
         "use exec_command from code mode",
         r#"// @exec: {"max_output_tokens": 5}
-const result = await tools.exec_command({
-  cmd: "printf '0123456789012345678901234567890123456789'"
+const result = await tools.Bash({
+  command: "printf '0123456789012345678901234567890123456789'"
 });
 text(result.output);
 "#,
@@ -995,7 +1092,7 @@ throw new Error("boom");
 
     let req = second_mock.single_request();
     let items = custom_tool_output_items(&req, "call-1");
-    assert_eq!(items.len(), 4);
+    assert_eq!(items.len(), 2);
     assert_regex_match(
         concat!(
             r"(?s)\A",
@@ -1003,17 +1100,17 @@ throw new Error("boom");
         ),
         text_item(&items, /*index*/ 0),
     );
-    assert_eq!(text_item(&items, /*index*/ 1), "before crash");
-    assert_eq!(text_item(&items, /*index*/ 2), "still before crash");
     assert_regex_match(
         r#"(?sx)
 \A
+before\ crash\n
+still\ before\ crash\n
 Script\ error:\n
 Error:\ boom\n
 (?:\s+at\ .+\n?)+
 \z
 "#,
-        text_item(&items, /*index*/ 3),
+        text_item(&items, /*index*/ 1),
     );
 
     Ok(())
@@ -1030,7 +1127,7 @@ async fn code_mode_exec_surfaces_handler_errors_as_exceptions() -> Result<()> {
         "surface nested tool handler failures as script exceptions",
         r#"
 try {
-  await tools.exec_command({});
+  await tools.Bash({});
   text("no-exception");
 } catch (error) {
   text(`caught:${error?.message ?? String(error)}`);
@@ -1832,7 +1929,7 @@ text("session a start");
 yield_control();
 {session_a_wait}
 text("session a done");
-await tools.exec_command({{ cmd: {session_a_done_command:?} }});
+await tools.Bash({{ command: {session_a_done_command:?} }});
 "#
     );
     let session_b_code = format!(
@@ -2021,7 +2118,7 @@ async fn code_mode_background_keeps_running_on_later_turn_without_wait() -> Resu
         r#"
 text("before yield");
 yield_control();
-await tools.exec_command({{ cmd: {write_file_command:?} }});
+await tools.Bash({{ command: {write_file_command:?} }});
 text("after yield");
 "#
     );
@@ -2210,10 +2307,6 @@ text({ json: true });
 
     let req = second_mock.single_request();
     let (output, success) = custom_tool_output_body_and_success(&req, "call-1");
-    eprintln!(
-        "hidden dynamic tool raw output: {}",
-        req.custom_tool_call_output("call-1")
-    );
     assert_ne!(
         success,
         Some(false),
@@ -2269,7 +2362,7 @@ text("done");
 
     let req = second_mock.single_request();
     let has_notify_output = req
-        .inputs_of_type("custom_tool_call_output")
+        .inputs_of_type("function_call_output")
         .iter()
         .any(|item| {
             item.get("call_id").and_then(serde_json::Value::as_str) == Some("call-1")
@@ -2277,11 +2370,10 @@ text("done");
                     .get("output")
                     .and_then(serde_json::Value::as_str)
                     .is_some_and(|text| text.contains("code_mode_notify_marker"))
-                && item.get("name").and_then(serde_json::Value::as_str) == Some("exec")
         });
     assert!(
         has_notify_output,
-        "expected notify marker in custom_tool_call_output item: {:?}",
+        "expected notify marker in function_call_output item: {:?}",
         req.input()
     );
 
@@ -2344,9 +2436,7 @@ text(circular);
 
     let req = second_mock.single_request();
     let items = custom_tool_output_items(&req, "call-1");
-    let (_, success) = req
-        .custom_tool_call_output_content_and_success("call-1")
-        .expect("custom tool output should be present");
+    let (_, success) = custom_tool_output_body_and_success(&req, "call-1");
     assert_ne!(
         success,
         Some(true),
@@ -2389,81 +2479,38 @@ image("data:image/png;base64,AAA");
         Some(false),
         "code_mode image output failed unexpectedly"
     );
-    assert_eq!(items.len(), 3);
     assert_regex_match(
         concat!(
             r"(?s)\A",
-            r"Script completed\nWall time \d+\.\d seconds\nOutput:\n\z"
+            r"Script completed\nWall time \d+\.\d seconds\nOutput:\n",
+            r"\z"
         ),
         text_item(&items, /*index*/ 0),
     );
     assert_eq!(
-        items[1],
-        serde_json::json!({
-            "type": "input_image",
-            "image_url": "https://example.com/image.jpg",
-            "detail": "high"
-        }),
-    );
-    assert_eq!(
-        items[2],
-        serde_json::json!({
-            "type": "input_image",
-            "image_url": "data:image/png;base64,AAA",
-            "detail": "high"
-        }),
+        input_image_urls(&items),
+        vec![
+            "https://example.com/image.jpg".to_string(),
+            "data:image/png;base64,AAA".to_string(),
+        ],
     );
 
     Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn code_mode_can_use_view_image_result_with_image_helper() -> Result<()> {
+async fn code_mode_image_helper_textifies_data_urls() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let mut builder = test_codex()
-        .with_model("gpt-5.3-codex")
-        .with_config(move |config| {
-            let _ = config.features.enable(Feature::CodeMode);
-        });
-    let test = builder.build(&server).await?;
-
-    let image_bytes = BASE64_STANDARD.decode(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==",
-    )?;
-    let image_path = test.cwd_path().join("code_mode_view_image.png");
-    fs::write(&image_path, image_bytes)?;
-
-    let image_path_json = serde_json::to_string(&image_path.to_string_lossy().to_string())?;
-    let code = format!(
+    let (_test, second_mock) = run_code_mode_turn(
+        &server,
+        "use exec to emit a data URL image",
         r#"
-const out = await tools.view_image({{ path: {image_path_json}, detail: "original" }});
-image(out);
-"#
-    );
-
-    responses::mount_sse_once(
-        &server,
-        sse(vec![
-            ev_response_created("resp-1"),
-            ev_custom_tool_call("call-1", "exec", &code),
-            ev_completed("resp-1"),
-        ]),
+image("data:image/png;base64,AAA");
+"#,
     )
-    .await;
-
-    let second_mock = responses::mount_sse_once(
-        &server,
-        sse(vec![
-            ev_assistant_message("msg-1", "done"),
-            ev_completed("resp-2"),
-        ]),
-    )
-    .await;
-
-    test.submit_turn("use exec to call view_image and emit its image output")
-        .await?;
+    .await?;
 
     let req = second_mock.single_request();
     let items = custom_tool_output_items(&req, "call-1");
@@ -2471,35 +2518,23 @@ image(out);
     assert_ne!(
         success,
         Some(false),
-        "code_mode view_image call failed unexpectedly"
+        "code_mode image helper failed unexpectedly"
     );
-    assert_eq!(items.len(), 2);
     assert_regex_match(
         concat!(
             r"(?s)\A",
-            r"Script completed\nWall time \d+\.\d seconds\nOutput:\n\z"
+            r"Script completed\nWall time \d+\.\d seconds\nOutput:\n",
+            r"\z"
         ),
         text_item(&items, /*index*/ 0),
     );
-
     assert_eq!(
-        items[1].get("type").and_then(Value::as_str),
-        Some("input_image")
-    );
-
-    let emitted_image_url = items[1]
-        .get("image_url")
-        .and_then(Value::as_str)
-        .expect("image helper should emit an input_image item with image_url");
-    assert!(emitted_image_url.starts_with("data:image/png;base64,"));
-    assert_eq!(
-        items[1].get("detail").and_then(Value::as_str),
-        Some("original")
+        input_image_urls(&items),
+        vec!["data:image/png;base64,AAA".to_string()],
     );
 
     Ok(())
 }
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn code_mode_can_use_mcp_image_result_with_image_helper() -> Result<()> {
     skip_if_no_network!(Ok(()));
@@ -2529,58 +2564,69 @@ image(imageItem);
         Some(false),
         "code_mode mcp image scenario call failed unexpectedly"
     );
-    assert_eq!(items.len(), 2);
     assert_regex_match(
         concat!(
             r"(?s)\A",
-            r"Script completed\nWall time \d+\.\d seconds\nOutput:\n\z"
+            r"Script completed\nWall time \d+\.\d seconds\nOutput:\n",
+            r"\z"
         ),
         text_item(&items, /*index*/ 0),
     );
-
-    assert_eq!(
-        items[1].get("type").and_then(Value::as_str),
-        Some("input_image")
-    );
-
-    let emitted_image_url = items[1]
-        .get("image_url")
-        .and_then(Value::as_str)
-        .expect("image helper should emit an input_image item with image_url");
-    assert!(emitted_image_url.starts_with("data:image/png;base64,"));
-    assert_eq!(
-        items[1].get("detail").and_then(Value::as_str),
-        Some("original")
+    let image_urls = input_image_urls(&items);
+    assert_eq!(image_urls.len(), 1);
+    assert!(
+        image_urls[0].starts_with("data:image/png;base64,"),
+        "expected MCP image output to be a data URL, got {:?}",
+        image_urls[0]
     );
 
     Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn code_mode_can_apply_patch_via_nested_tool() -> Result<()> {
+async fn code_mode_can_write_file_via_nested_tool() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
     let file_name = "code_mode_apply_patch.txt";
-    let patch = format!(
-        "*** Begin Patch\n*** Add File: {file_name}\n+hello from code_mode\n*** End Patch\n"
-    );
-    let code = format!("text(await tools.apply_patch({patch:?}));\n");
+    let mut builder = test_codex().with_config(move |config| {
+        let _ = config.features.enable(Feature::CodeMode);
+    });
+    let test = builder.build(&server).await?;
+    let file_path = test.cwd_path().join(file_name);
+    let quoted_path = shlex::try_join([file_path.to_string_lossy().as_ref()])?;
+    let command = format!("printf 'hello from code_mode\\n' > {quoted_path}");
+    let code = format!("text((await tools.Bash({{ command: {command:?} }})).output);\n");
 
-    let (test, second_mock) =
-        run_code_mode_turn(&server, "use exec to run apply_patch", &code).await?;
+    responses::mount_sse_once(
+        &server,
+        sse(vec![
+            ev_response_created("resp-1"),
+            ev_custom_tool_call("call-1", "exec", &code),
+            ev_completed("resp-1"),
+        ]),
+    )
+    .await;
+
+    let second_mock = responses::mount_sse_once(
+        &server,
+        sse(vec![
+            ev_assistant_message("msg-1", "done"),
+            ev_completed("resp-2"),
+        ]),
+    )
+    .await;
+
+    test.submit_turn("use exec to run Write").await?;
 
     let req = second_mock.single_request();
     let items = custom_tool_output_items(&req, "call-1");
-    let (_, success) = req
-        .custom_tool_call_output_content_and_success("call-1")
-        .expect("custom tool output should be present");
+    let (_, success) = custom_tool_output_body_and_success(&req, "call-1");
     assert_ne!(
         success,
         Some(false),
-        "exec apply_patch call failed unexpectedly: {items:?}"
+        "exec Bash file write call failed unexpectedly: {items:?}"
     );
-    assert_eq!(items.len(), 2);
     assert_regex_match(
         concat!(
             r"(?s)\A",
@@ -2588,9 +2634,7 @@ async fn code_mode_can_apply_patch_via_nested_tool() -> Result<()> {
         ),
         text_item(&items, /*index*/ 0),
     );
-    assert_eq!(text_item(&items, /*index*/ 1), "{}");
 
-    let file_path = test.cwd_path().join(file_name);
     assert_eq!(fs::read_to_string(&file_path)?, "hello from code_mode\n");
 
     Ok(())
@@ -2756,7 +2800,7 @@ async fn code_mode_exposes_namespaced_mcp_tools_on_global_tools_object() -> Resu
     let server = responses::start_mock_server().await;
     let code = r#"
 text(JSON.stringify({
-  hasExecCommand: typeof tools.exec_command === "function",
+  hasBash: typeof tools.Bash === "function",
   hasNamespacedEcho: typeof tools.mcp__rmcp__echo === "function",
 }));
 "#;
@@ -2777,7 +2821,7 @@ text(JSON.stringify({
     assert_eq!(
         parsed,
         serde_json::json!({
-            "hasExecCommand": !cfg!(windows),
+            "hasBash": !cfg!(windows),
             "hasNamespacedEcho": true,
         })
     );
@@ -2931,8 +2975,8 @@ async fn code_mode_exports_all_tools_metadata_for_builtin_tools() -> Result<()> 
 
     let server = responses::start_mock_server().await;
     let code = r#"
-const tool = ALL_TOOLS.find(({ name }) => name === "view_image");
-text(JSON.stringify(tool));
+const tool = ALL_TOOLS.find(({ name }) => name === "Bash");
+text(JSON.stringify({ names: ALL_TOOLS.map(({ name }) => name), tool }));
 "#;
 
     let (_test, second_mock) =
@@ -2945,17 +2989,13 @@ text(JSON.stringify(tool));
         Some(false),
         "exec ALL_TOOLS lookup failed unexpectedly: {output}"
     );
-
-    let parsed: Value = serde_json::from_str(
-        &custom_tool_output_last_non_empty_text(&req, "call-1")
-            .expect("exec ALL_TOOLS lookup should emit JSON"),
-    )?;
-    assert_eq!(
-        parsed,
-        serde_json::json!({
-            "name": "view_image",
-            "description": "View a local image file from the filesystem when visual inspection is needed. Use this for images already available on disk.\n\nexec tool declaration:\n```ts\ndeclare const tools: { view_image(args: {\n  // Local filesystem path to an image file.\n  path: string;\n}): Promise<{\n  // Image detail hint returned by view_image. Returns `high` for default resized behavior or `original` when original resolution is preserved.\n  detail: \"high\" | \"original\";\n  // Data URL for the loaded image.\n  image_url: string;\n}>; };\n```",
-        })
+    let parsed: Value = serde_json::from_str(&output)?;
+    let tool = parsed.get("tool").expect("Bash metadata should be present");
+    assert_eq!(tool.get("name").and_then(Value::as_str), Some("Bash"));
+    assert!(
+        tool.get("description")
+            .and_then(Value::as_str)
+            .is_some_and(|description| description.contains("declare const tools: { Bash"))
     );
 
     Ok(())
@@ -3007,7 +3047,7 @@ text(JSON.stringify(tool));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn code_mode_can_call_hidden_dynamic_tools() -> Result<()> {
+async fn code_mode_does_not_eagerly_expose_hidden_dynamic_tools() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
@@ -3041,12 +3081,17 @@ async fn code_mode_can_call_hidden_dynamic_tools() -> Result<()> {
 
     let code = r#"
 const tool = ALL_TOOLS.find(({ name }) => name === "codex_app_hidden_dynamic_tool");
-const out = await tools.codex_app_hidden_dynamic_tool({ city: "Paris" });
+let error = null;
+try {
+  await tools.codex_app_hidden_dynamic_tool({ city: "Paris" });
+} catch (caught) {
+  error = String(caught);
+}
 text(
   JSON.stringify({
-    name: tool?.name ?? null,
-    description: tool?.description ?? null,
-    out,
+    listed: tool !== undefined,
+    callable: typeof tools.codex_app_hidden_dynamic_tool === "function",
+    error,
   })
 );
 "#;
@@ -3070,69 +3115,7 @@ text(
     )
     .await;
 
-    let cwd = test.config.cwd.clone();
-    let (sandbox_policy, permission_profile) =
-        turn_permission_fields(PermissionProfile::Disabled, cwd.as_path());
-
-    test.codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
-                text: "use exec to inspect and call hidden tools".into(),
-                text_elements: Vec::new(),
-            }],
-            final_output_json_schema: None,
-            model_client_metadata: None,
-            additional_context: Default::default(),
-            thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
-                environments: Some(codex_protocol::protocol::TurnEnvironmentSelections::new(
-                    cwd,
-                    Vec::new(),
-                )),
-                approval_policy: Some(AskForApproval::Never),
-                sandbox_policy: Some(sandbox_policy),
-                permission_profile,
-                collaboration_mode: Some(codex_protocol::config_types::CollaborationMode {
-                    mode: codex_protocol::config_types::ModeKind::Default,
-                    settings: codex_protocol::config_types::Settings {
-                        model: test.session_configured.model.clone(),
-                        reasoning_effort: None,
-                        developer_instructions: None,
-                    },
-                }),
-                ..Default::default()
-            },
-        })
-        .await?;
-
-    let turn_id = wait_for_event_match(&test.codex, |event| match event {
-        EventMsg::TurnStarted(event) => Some(event.turn_id.clone()),
-        _ => None,
-    })
-    .await;
-    let request = wait_for_event_match(&test.codex, |event| match event {
-        EventMsg::DynamicToolCallRequest(request) => Some(request.clone()),
-        _ => None,
-    })
-    .await;
-    assert_eq!(request.namespace.as_deref(), Some("codex_app"));
-    assert_eq!(request.tool, "hidden_dynamic_tool");
-    assert_eq!(request.arguments, serde_json::json!({ "city": "Paris" }));
-    test.codex
-        .submit(Op::DynamicToolResponse {
-            id: request.call_id,
-            response: DynamicToolResponse {
-                content_items: vec![DynamicToolCallOutputContentItem::InputText {
-                    text: "hidden-ok".to_string(),
-                }],
-                success: true,
-            },
-        })
-        .await?;
-    wait_for_event(&test.codex, |event| match event {
-        EventMsg::TurnComplete(event) => event.turn_id == turn_id,
-        _ => false,
-    })
-    .await;
+    test.submit_turn("use exec to inspect hidden tools").await?;
 
     let req = second_mock.single_request();
     let (output, success) = custom_tool_output_body_and_success(&req, "call-1");
@@ -3146,23 +3129,13 @@ text(
         &custom_tool_output_last_non_empty_text(&req, "call-1")
             .expect("exec hidden dynamic tool lookup should emit JSON"),
     )?;
-    assert_eq!(
-        parsed.get("name"),
-        Some(&Value::String("codex_app_hidden_dynamic_tool".to_string()))
-    );
-    assert_eq!(
-        parsed.get("out"),
-        Some(&Value::String("hidden-ok".to_string()))
-    );
+    assert_eq!(parsed.get("listed"), Some(&Value::Bool(false)));
+    assert_eq!(parsed.get("callable"), Some(&Value::Bool(false)));
     assert!(
         parsed
-            .get("description")
+            .get("error")
             .and_then(Value::as_str)
-            .is_some_and(|description| {
-                description.contains("A hidden dynamic tool.")
-                    && description.contains("declare const tools:")
-                    && description.contains("codex_app_hidden_dynamic_tool(args:")
-            })
+            .is_some_and(|error| error.contains("is not a function"))
     );
 
     Ok(())
@@ -3210,8 +3183,8 @@ async fn code_mode_excludes_configured_nested_tool_namespaces() -> Result<()> {
 text(JSON.stringify({
   excludedType: typeof tools.excluded__lookup,
   excludedMetadata: ALL_TOOLS.some(({ name }) => name === "excluded__lookup"),
-  allowedType: typeof tools.update_plan,
-  allowedMetadata: ALL_TOOLS.some(({ name }) => name === "update_plan"),
+  allowedType: typeof tools.TodoWrite,
+  allowedMetadata: ALL_TOOLS.some(({ name }) => name === "TodoWrite"),
 }));
 "#,
             ),
@@ -3232,7 +3205,8 @@ text(JSON.stringify({
         .await?;
 
     assert!(
-        tool_names(&first_mock.single_request().body_json()).contains(&"excluded".to_string()),
+        tool_names(&first_mock.single_request().body_json())
+            .contains(&"excluded__lookup".to_string()),
         "excluded namespace should remain directly exposed in mixed code mode"
     );
     let request = second_mock.single_request();

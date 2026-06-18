@@ -1,5 +1,5 @@
 use super::*;
-use crate::config::test_config;
+use crate::config::test_config as base_test_config;
 use crate::init_state_db;
 use crate::installation_id::INSTALLATION_ID_FILENAME;
 use crate::rollout::RolloutRecorder;
@@ -8,6 +8,7 @@ use crate::session::tests::make_session_and_context;
 use crate::tasks::InterruptedTurnHistoryMarker;
 use crate::tasks::interrupted_turn_history_marker;
 use codex_extension_api::empty_extension_registry;
+use codex_model_provider_info::ModelProviderInfo;
 use codex_models_manager::manager::RefreshStrategy;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ReasoningItemReasoningSummary;
@@ -30,6 +31,12 @@ use tempfile::tempdir;
 use wiremock::MockServer;
 
 const TEST_INSTALLATION_ID: &str = "11111111-1111-4111-8111-111111111111";
+
+async fn test_config() -> Config {
+    let mut config = base_test_config().await;
+    config.model = Some("gpt-5.2".to_string());
+    config
+}
 
 fn user_msg(text: &str) -> ResponseItem {
     ResponseItem::Message {
@@ -855,8 +862,13 @@ async fn new_uses_active_provider_for_model_refresh() {
     config.codex_home = temp_dir.path().join("codex-home").abs();
     config.cwd = config.codex_home.abs();
     std::fs::create_dir_all(&config.codex_home).expect("create codex home");
+    config.model = None;
     config.model_catalog = None;
-    config.model_provider.base_url = Some(server.uri());
+    config.model_provider =
+        ModelProviderInfo::create_openai_provider(Some(format!("{}/v1", server.uri())));
+    config.model_provider.env_key = None;
+    config.model_provider.experimental_bearer_token = Some("test-token".to_string());
+    config.model_provider.supports_websockets = false;
 
     let auth_manager =
         AuthManager::from_auth_for_testing(CodexAuth::create_dummy_api_key_auth_for_testing());

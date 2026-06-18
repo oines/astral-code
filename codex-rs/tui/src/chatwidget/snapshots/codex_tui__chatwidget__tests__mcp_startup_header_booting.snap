@@ -6,6 +6,6 @@ expression: normalized_backend_snapshot(terminal.backend())
 "• Booting MCP server: alpha (0s • esc to interrupt)                             "
 "                                                                                "
 "                                                                                "
-"› Ask Astral-Code to do anything                                                      "
+"› Ask Astral-Code to do anything                                                "
 "                                                                                "
-"  gpt-5.5 default · /tmp/project                                                "
+"  deepseek-v4-pro default · /tmp/project                                        "

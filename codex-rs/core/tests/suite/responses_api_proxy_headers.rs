@@ -13,7 +13,7 @@ use core_test_support::responses::ResponseMock;
 use core_test_support::responses::ResponsesRequest;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
-use core_test_support::responses::ev_function_call_with_namespace;
+use core_test_support::responses::ev_function_call;
 use core_test_support::responses::ev_response_created;
 use core_test_support::responses::mount_sse_once_match;
 use core_test_support::responses::sse;
@@ -31,14 +31,17 @@ const PARENT_PROMPT: &str = "spawn a subagent and report when it is started";
 const CHILD_PROMPT: &str = "child: say done";
 const SPAWN_CALL_ID: &str = "spawn-call-1";
 const REQUEST_POLL_INTERVAL: Duration = Duration::from_millis(/*millis*/ 20);
-const TURN_TIMEOUT: Duration = Duration::from_secs(/*secs*/ 60);
+const TURN_TIMEOUT: Duration = Duration::from_secs(/*secs*/ 20);
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn parent_and_subagent_requests_include_identity_headers() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
 
-    let spawn_args = serde_json::to_string(&json!({ "message": CHILD_PROMPT }))?;
+    let spawn_args = serde_json::to_string(&json!({
+        "message": CHILD_PROMPT,
+        "task_name": "worker",
+    }))?;
     let parent_mock = mount_sse_once_match(
         &server,
         |req: &wiremock::Request| {
@@ -47,23 +50,14 @@ async fn parent_and_subagent_requests_include_identity_headers() -> Result<()> {
         },
         sse(vec![
             ev_response_created("resp-parent-1"),
-            ev_function_call_with_namespace(
-                SPAWN_CALL_ID,
-                "multi_agent_v1",
-                "spawn_agent",
-                &spawn_args,
-            ),
+            ev_function_call(SPAWN_CALL_ID, "spawn_agent", &spawn_args),
             ev_completed("resp-parent-1"),
         ]),
     )
     .await;
     let child_mock = mount_sse_once_match(
         &server,
-        |req: &wiremock::Request| {
-            request_body_contains(req, CHILD_PROMPT)
-                && !request_body_contains(req, SPAWN_CALL_ID)
-                && request_header(req, "x-astral-subagent") == Some("collab_spawn")
-        },
+        |req: &wiremock::Request| request_header(req, "x-astral-parent-thread-id").is_some(),
         sse(vec![
             ev_response_created("resp-child-1"),
             ev_assistant_message("msg-child-1", "child done"),
@@ -71,7 +65,7 @@ async fn parent_and_subagent_requests_include_identity_headers() -> Result<()> {
         ]),
     )
     .await;
-    mount_sse_once_match(
+    let parent_followup_mock = mount_sse_once_match(
         &server,
         |req: &wiremock::Request| {
             request_body_contains(req, SPAWN_CALL_ID)
@@ -90,6 +84,14 @@ async fn parent_and_subagent_requests_include_identity_headers() -> Result<()> {
             .features
             .disable(Feature::EnableRequestCompression)
             .expect("test config should allow feature update");
+        config
+            .features
+            .enable(Feature::Collab)
+            .expect("test config should allow feature update");
+        config
+            .features
+            .enable(Feature::MultiAgentV2)
+            .expect("test config should allow feature update");
     });
     let test = builder.build(&server).await?;
     submit_turn_with_timeout(&test, PARENT_PROMPT).await?;
@@ -98,12 +100,23 @@ async fn parent_and_subagent_requests_include_identity_headers() -> Result<()> {
         request.body_contains_text(PARENT_PROMPT) && request.header("x-astral-subagent").is_none()
     })
     .await?;
-    let child = wait_for_matching_request(&child_mock, "child request", |request| {
-        request.body_contains_text(CHILD_PROMPT)
-            && !request.body_contains_text(SPAWN_CALL_ID)
-            && request.header("x-astral-subagent").as_deref() == Some("collab_spawn")
-    })
+    let _parent_followup = wait_for_matching_request(
+        &parent_followup_mock,
+        "parent follow-up request",
+        |request| {
+            request.body_contains_text(SPAWN_CALL_ID)
+                && request.header("x-astral-subagent").is_none()
+        },
+    )
     .await?;
+    let child = match wait_for_matching_request(&child_mock, "child request", |request| {
+        request.header("x-astral-parent-thread-id").is_some()
+    })
+    .await
+    {
+        Ok(child) => child,
+        Err(err) => return Err(err),
+    };
 
     let parent_window_id = parent
         .header("x-astral-window-id")
@@ -118,10 +131,7 @@ async fn parent_and_subagent_requests_include_identity_headers() -> Result<()> {
     assert_eq!(child_generation, 0);
     assert!(child_thread_id != parent_thread_id);
     assert_eq!(parent.header("x-astral-subagent"), None);
-    assert_eq!(
-        child.header("x-astral-subagent").as_deref(),
-        Some("collab_spawn")
-    );
+    assert_eq!(child.header("x-astral-subagent"), None);
     assert_eq!(
         child.header("x-astral-parent-thread-id").as_deref(),
         Some(parent_thread_id)
@@ -131,10 +141,17 @@ async fn parent_and_subagent_requests_include_identity_headers() -> Result<()> {
             .header("x-astral-turn-metadata")
             .ok_or_else(|| anyhow!("child request missing x-astral-turn-metadata"))?,
     )?;
-    assert!(child_turn_metadata.get("forked_from_thread_id").is_none());
+    assert_eq!(
+        child_turn_metadata["forked_from_thread_id"].as_str(),
+        Some(parent_thread_id)
+    );
     assert_eq!(
         child_turn_metadata["parent_thread_id"].as_str(),
         Some(parent_thread_id)
+    );
+    assert_eq!(
+        child_turn_metadata["subagent_kind"].as_str(),
+        Some("thread_spawn")
     );
 
     Ok(())

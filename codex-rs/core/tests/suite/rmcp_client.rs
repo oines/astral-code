@@ -27,17 +27,9 @@ use codex_exec_server::Environment;
 use codex_exec_server::HttpRequestParams;
 use codex_login::CodexAuth;
 use codex_mcp::MCP_SANDBOX_STATE_META_CAPABILITY;
-use codex_models_manager::manager::RefreshStrategy;
 
-use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::models::PermissionProfile;
-use codex_protocol::openai_models::ConfigShellToolType;
 use codex_protocol::openai_models::InputModality;
-use codex_protocol::openai_models::ModelInfo;
-use codex_protocol::openai_models::ModelVisibility;
-use codex_protocol::openai_models::ModelsResponse;
-use codex_protocol::openai_models::ReasoningEffortPreset;
-use codex_protocol::openai_models::TruncationPolicyConfig;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::McpInvocation;
@@ -48,7 +40,6 @@ use codex_utils_cargo_bin::cargo_bin;
 use core_test_support::assert_regex_match;
 use core_test_support::remote_env_env_var;
 use core_test_support::responses;
-use core_test_support::responses::mount_models_once;
 use core_test_support::responses::mount_sse_once;
 use core_test_support::skip_if_no_network;
 use core_test_support::stdio_server_bin;
@@ -1307,56 +1298,7 @@ async fn stdio_image_responses_are_sanitized_for_text_only_model() -> anyhow::Re
     let call_id = "img-text-only-1";
     let server_name = "rmcp";
     let namespace = format!("mcp__{server_name}");
-    let text_only_model_slug = "rmcp-text-only-model";
-
-    let models_mock = mount_models_once(
-        &server,
-        ModelsResponse {
-            models: vec![ModelInfo {
-                slug: text_only_model_slug.to_string(),
-                display_name: "RMCP Text Only".to_string(),
-                description: Some("Test model without image input support".to_string()),
-                default_reasoning_level: None,
-                supported_reasoning_levels: vec![ReasoningEffortPreset {
-                    effort: codex_protocol::openai_models::ReasoningEffort::Medium,
-                    description: "Medium".to_string(),
-                }],
-                shell_type: ConfigShellToolType::Default,
-                visibility: ModelVisibility::List,
-                supported_in_api: true,
-                priority: 1,
-                additional_speed_tiers: Vec::new(),
-                service_tiers: Vec::new(),
-                default_service_tier: None,
-                upgrade: None,
-                base_instructions: "base instructions".to_string(),
-                model_messages: None,
-                supports_reasoning_summaries: false,
-                default_reasoning_summary: ReasoningSummary::Auto,
-                support_verbosity: false,
-                default_verbosity: None,
-                availability_nux: None,
-                apply_patch_tool_type: None,
-                web_search_tool_type: Default::default(),
-                truncation_policy: TruncationPolicyConfig::bytes(/*limit*/ 10_000),
-                supports_parallel_tool_calls: false,
-                supports_image_detail_original: false,
-                context_window: Some(272_000),
-                max_context_window: None,
-                auto_compact_token_limit: None,
-                effective_context_window_percent: 95,
-                experimental_supported_tools: Vec::new(),
-                input_modalities: vec![InputModality::Text],
-                used_fallback_model_metadata: false,
-                supports_search_tool: false,
-                use_responses_lite: false,
-                auto_review_model_override: None,
-                tool_mode: None,
-                multi_agent_version: None,
-            }],
-        },
-    )
-    .await;
+    let text_only_model_slug = "gpt-5.4";
 
     // First stream: model decides to call the image tool.
     mount_sse_once(
@@ -1382,6 +1324,9 @@ async fn stdio_image_responses_are_sanitized_for_text_only_model() -> anyhow::Re
 
     let fixture = test_codex()
         .with_auth(CodexAuth::create_dummy_api_key_auth_for_testing())
+        .with_model_info_override(text_only_model_slug, |model_info| {
+            model_info.input_modalities = vec![InputModality::Text];
+        })
         .with_config(move |config| {
             insert_mcp_server(
                 config,
@@ -1403,13 +1348,6 @@ async fn stdio_image_responses_are_sanitized_for_text_only_model() -> anyhow::Re
         .build_with_remote_env(&server)
         .await?;
     wait_for_mcp_server(&fixture.codex, server_name).await?;
-
-    fixture
-        .thread_manager
-        .get_models_manager()
-        .list_models(RefreshStrategy::Online)
-        .await;
-    assert_eq!(models_mock.requests().len(), 1);
 
     fixture
         .codex

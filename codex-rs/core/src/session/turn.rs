@@ -714,7 +714,7 @@ async fn auto_compact_token_status(
                     .model_auto_compact_token_limit
                     .or_else(|| turn_context.model_info.auto_compact_token_limit())
                     .unwrap_or(i64::MAX),
-                None,
+                turn_context.model_context_window(),
             ),
             AutoCompactTokenLimitScope::BodyAfterPrefix => {
                 let window = sess.auto_compact_window_snapshot().await;
@@ -1905,13 +1905,16 @@ async fn try_run_sampling_request(
                 }
             }
             ResponseEvent::OutputItemAdded(item) => {
-                if let ResponseItem::CustomToolCall { call_id, name, .. } = &item {
+                let tool_call = match &item {
+                    ResponseItem::CustomToolCall { call_id, name, .. }
+                    | ResponseItem::FunctionCall { call_id, name, .. } => Some((call_id, name)),
+                    _ => None,
+                };
+                if let Some((call_id, name)) = tool_call {
                     let tool_name = ToolName::plain(name.as_str());
                     active_tool_argument_diff_consumer = tool_runtime
                         .create_diff_consumer(&tool_name)
                         .map(|consumer| (call_id.clone(), consumer));
-                } else if matches!(&item, ResponseItem::FunctionCall { .. }) {
-                    active_tool_argument_diff_consumer = None;
                 }
                 if let Some(turn_item) = handle_non_tool_response_item(
                     sess.as_ref(),

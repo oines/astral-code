@@ -712,6 +712,63 @@ pub(super) fn handle_image_generation_end(
     );
 }
 
+pub(super) fn handle_core_tool_begin(
+    chat: &mut ChatWidget,
+    call_id: impl Into<String>,
+    tool: impl Into<String>,
+    arguments: serde_json::Value,
+) {
+    chat.handle_server_notification(
+        ServerNotification::ItemStarted(ItemStartedNotification {
+            thread_id: thread_id(chat),
+            turn_id: "turn-1".to_string(),
+            started_at_ms: 0,
+            item: AppServerThreadItem::CoreToolCall {
+                id: call_id.into(),
+                tool: tool.into(),
+                arguments,
+                status: AppServerCoreToolCallStatus::InProgress,
+                result: None,
+                error: None,
+                duration_ms: None,
+            },
+        }),
+        /*replay_kind*/ None,
+    );
+}
+
+pub(super) fn handle_core_tool_end(
+    chat: &mut ChatWidget,
+    call_id: impl Into<String>,
+    tool: impl Into<String>,
+    arguments: serde_json::Value,
+    result: Option<String>,
+    error: Option<String>,
+) {
+    let status = if error.is_some() {
+        AppServerCoreToolCallStatus::Failed
+    } else {
+        AppServerCoreToolCallStatus::Completed
+    };
+    chat.handle_server_notification(
+        ServerNotification::ItemCompleted(ItemCompletedNotification {
+            thread_id: thread_id(chat),
+            turn_id: "turn-1".to_string(),
+            completed_at_ms: 0,
+            item: AppServerThreadItem::CoreToolCall {
+                id: call_id.into(),
+                tool: tool.into(),
+                arguments,
+                status,
+                result,
+                error,
+                duration_ms: Some(7),
+            },
+        }),
+        /*replay_kind*/ None,
+    );
+}
+
 pub(super) fn replay_user_message_inputs(
     chat: &mut ChatWidget,
     item_id: &str,

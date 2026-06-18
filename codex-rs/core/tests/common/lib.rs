@@ -34,6 +34,7 @@ pub mod tracing;
 pub mod zsh_fork;
 
 static TEST_ARG0_PATH_ENTRY: OnceLock<Option<Arg0PathEntryGuard>> = OnceLock::new();
+const DEFAULT_TEST_MODEL: &str = "astral-test-model";
 
 #[ctor]
 fn enable_deterministic_unified_exec_process_ids_for_tests() {
@@ -219,6 +220,7 @@ allow_local_binding = true
 #[cfg(target_os = "linux")]
 fn default_test_overrides() -> ConfigOverrides {
     ConfigOverrides {
+        model: Some(DEFAULT_TEST_MODEL.to_string()),
         codex_linux_sandbox_exe: Some(
             find_codex_linux_sandbox_exe().expect("should find binary for codex-linux-sandbox"),
         ),
@@ -228,7 +230,10 @@ fn default_test_overrides() -> ConfigOverrides {
 
 #[cfg(not(target_os = "linux"))]
 fn default_test_overrides() -> ConfigOverrides {
-    ConfigOverrides::default()
+    ConfigOverrides {
+        model: Some(DEFAULT_TEST_MODEL.to_string()),
+        ..ConfigOverrides::default()
+    }
 }
 
 #[cfg(target_os = "linux")]

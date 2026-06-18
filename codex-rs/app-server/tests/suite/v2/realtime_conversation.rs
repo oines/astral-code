@@ -5,6 +5,7 @@ use app_test_support::create_final_assistant_message_sse_response;
 use app_test_support::create_mock_responses_server_sequence_unchecked;
 use app_test_support::create_shell_command_sse_response;
 use app_test_support::to_response;
+use app_test_support::write_api_key_auth;
 use codex_app_server_protocol::CommandExecutionStatus;
 use codex_app_server_protocol::ItemCompletedNotification;
 use codex_app_server_protocol::ItemStartedNotification;
@@ -36,6 +37,7 @@ use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
 use codex_app_server_protocol::TurnCompletedNotification;
 use codex_app_server_protocol::TurnStartedNotification;
+use codex_config::types::AuthCredentialsStoreMode;
 use codex_features::FEATURES;
 use codex_features::Feature;
 use codex_protocol::protocol::RealtimeConversationVersion;
@@ -277,6 +279,11 @@ impl RealtimeE2eHarness {
             StartupContextConfig::Override("startup context"),
             realtime_version,
             sandbox,
+        )?;
+        write_api_key_auth(
+            codex_home.path(),
+            "sk-test-key",
+            AuthCredentialsStoreMode::File,
         )?;
 
         let mut mcp = TestAppServer::new_with_env(
@@ -540,6 +547,11 @@ async fn realtime_conversation_streams_v2_notifications() -> Result<()> {
         /*realtime_enabled*/ true,
         StartupContextConfig::Generated,
     )?;
+    write_api_key_auth(
+        codex_home.path(),
+        "sk-test-key",
+        AuthCredentialsStoreMode::File,
+    )?;
 
     let mut mcp = TestAppServer::new_with_env(
         codex_home.path(),
@@ -792,6 +804,11 @@ async fn realtime_text_output_modality_requests_text_output_and_final_transcript
         /*realtime_enabled*/ true,
         StartupContextConfig::Generated,
     )?;
+    write_api_key_auth(
+        codex_home.path(),
+        "sk-test-key",
+        AuthCredentialsStoreMode::File,
+    )?;
 
     let mut mcp = TestAppServer::new_with_env(
         codex_home.path(),
@@ -969,6 +986,11 @@ async fn realtime_conversation_stop_emits_closed_notification() -> Result<()> {
         /*realtime_enabled*/ true,
         StartupContextConfig::Generated,
     )?;
+    write_api_key_auth(
+        codex_home.path(),
+        "sk-test-key",
+        AuthCredentialsStoreMode::File,
+    )?;
 
     let mut mcp = TestAppServer::new_with_env(
         codex_home.path(),
@@ -1067,6 +1089,11 @@ async fn realtime_webrtc_start_emits_sdp_notification() -> Result<()> {
         realtime_server.uri(),
         /*realtime_enabled*/ true,
         StartupContextConfig::Override("startup context"),
+    )?;
+    write_api_key_auth(
+        codex_home.path(),
+        "sk-test-key",
+        AuthCredentialsStoreMode::File,
     )?;
 
     let mut mcp = TestAppServer::new_with_env(
@@ -1985,6 +2012,11 @@ async fn realtime_webrtc_start_surfaces_backend_error() -> Result<()> {
         realtime_server.uri(),
         /*realtime_enabled*/ true,
         StartupContextConfig::Override("startup context"),
+    )?;
+    write_api_key_auth(
+        codex_home.path(),
+        "sk-test-key",
+        AuthCredentialsStoreMode::File,
     )?;
 
     let mut mcp = TestAppServer::new_with_env(

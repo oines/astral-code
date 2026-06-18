@@ -34,6 +34,15 @@ impl ChatWidget {
         if is_unified_exec_source(*source) {
             if *source == ExecCommandSource::UnifiedExecStartup {
                 self.track_unified_exec_process_begin(id, process_id.as_deref(), command);
+                if let Some(process_id) = process_id.as_deref() {
+                    let command_display = strip_bash_lc_and_escape(&split_command_string(command));
+                    self.live_activities
+                        .start_background_task(id, process_id, command_display);
+                    self.bottom_pane.ensure_status_indicator();
+                    self.record_visible_turn_activity();
+                    self.sync_live_activity_cell();
+                    return;
+                }
             }
             if !self.bottom_pane.is_task_running() {
                 return;
@@ -53,6 +62,10 @@ impl ChatWidget {
 
     pub(super) fn on_exec_command_output_delta(&mut self, call_id: &str, delta: &str) {
         self.track_unified_exec_output_chunk(call_id, delta.as_bytes());
+        if self.live_activities.append_output_for_call(call_id, delta) {
+            self.sync_live_activity_cell();
+            return;
+        }
         if !self.bottom_pane.is_task_running() {
             return;
         }
@@ -73,6 +86,13 @@ impl ChatWidget {
     }
 
     pub(super) fn on_terminal_interaction(&mut self, process_id: String, stdin: String) {
+        let handled_live = self
+            .live_activities
+            .update_for_terminal_interaction(&process_id, &stdin);
+        if handled_live {
+            self.sync_live_activity_cell();
+            return;
+        }
         if !self.bottom_pane.is_task_running() {
             return;
         }
@@ -136,12 +156,22 @@ impl ChatWidget {
             id,
             process_id,
             source,
+            aggregated_output,
+            exit_code,
+            duration_ms,
             ..
         } = &item
         else {
             return;
         };
         if is_unified_exec_source(*source) {
+            let handled_live = self.live_activities.complete_background_task(
+                id,
+                process_id.as_deref(),
+                aggregated_output.as_deref().unwrap_or_default(),
+                *exit_code,
+                *duration_ms,
+            );
             if let Some(process_id) = process_id.as_deref()
                 && self
                     .unified_exec_wait_streak
@@ -151,6 +181,11 @@ impl ChatWidget {
                 self.flush_unified_exec_wait_streak();
             }
             self.track_unified_exec_process_end(id, process_id.as_deref());
+            if handled_live {
+                self.transcript.had_work_activity = true;
+                self.sync_live_activity_cell();
+                return;
+            }
             if !self.bottom_pane.is_task_running() {
                 return;
             }

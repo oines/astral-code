@@ -6,6 +6,7 @@ use crate::agent::agent_status_from_event;
 use crate::config::AgentRoleConfig;
 use crate::config::Config;
 use crate::config::ConfigBuilder;
+use crate::config::ConfigOverrides;
 use crate::context::ContextualUserFragment;
 use crate::context::SubagentNotification;
 use crate::init_state_db;
@@ -44,6 +45,10 @@ async fn test_config_with_cli_overrides(
     let home = TempDir::new().expect("create temp dir");
     let config = ConfigBuilder::without_managed_config_for_tests()
         .codex_home(home.path().to_path_buf())
+        .harness_overrides(ConfigOverrides {
+            model: Some("gpt-5.2".to_string()),
+            ..ConfigOverrides::default()
+        })
         .cli_overrides(cli_overrides)
         .build()
         .await

@@ -677,7 +677,7 @@ fn model_client_with_counting_attestation(
 }
 
 #[tokio::test]
-async fn agent_headers_include_attestation_for_managed_provider() {
+async fn agent_headers_omit_attestation_when_provider_does_not_support_it() {
     let (model_client, attestation_calls) =
         model_client_with_counting_attestation(/*include_attestation*/ true);
 
@@ -692,9 +692,9 @@ async fn agent_headers_include_attestation_for_managed_provider() {
         headers
             .get(crate::attestation::X_OAI_ATTESTATION_HEADER)
             .and_then(|value| value.to_str().ok()),
-        Some("v1.header-1"),
+        None,
     );
-    assert_eq!(attestation_calls.load(Ordering::Relaxed), 1);
+    assert_eq!(attestation_calls.load(Ordering::Relaxed), 0);
 }
 
 #[tokio::test]

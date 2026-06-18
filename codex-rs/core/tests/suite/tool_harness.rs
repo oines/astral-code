@@ -135,7 +135,7 @@ async fn shell_command_tool_executes_command_and_streams_output() -> anyhow::Res
     let req = second_mock.single_request();
     let (output_text, _) = call_output(&req, call_id);
     assert_regex_match(
-        r"(?s)^Exit code: 0\nWall time: [0-9]+(?:\.[0-9]+)? seconds\nOutput:\ntool harness\n?$",
+        r"(?s)^(?:Chunk ID: [^\n]+\n)?Wall time: [0-9]+(?:\.[0-9]+)? seconds\nProcess exited with code 0(?:\nOriginal token count: \d+)?\nOutput:\ntool harness\n?$",
         &output_text,
     );
 
@@ -159,16 +159,24 @@ async fn update_plan_tool_emits_plan_update_event() -> anyhow::Result<()> {
     let call_id = "plan-tool-call";
     let plan_args = json!({
         "explanation": "Tool harness check",
-        "plan": [
-            {"step": "Inspect workspace", "status": "in_progress"},
-            {"step": "Report results", "status": "pending"},
+        "todos": [
+            {
+                "content": "Inspect workspace",
+                "status": "in_progress",
+                "activeForm": "Inspecting workspace",
+            },
+            {
+                "content": "Report results",
+                "status": "pending",
+                "activeForm": "Reporting results",
+            },
         ],
     })
     .to_string();
 
     let first_response = sse(vec![
         ev_response_created("resp-1"),
-        ev_function_call(call_id, "update_plan", &plan_args),
+        ev_function_call(call_id, "TodoWrite", &plan_args),
         ev_completed("resp-1"),
     ]);
     responses::mount_sse_once(&server, first_response).await;
@@ -232,7 +240,10 @@ async fn update_plan_tool_emits_plan_update_event() -> anyhow::Result<()> {
 
     let req = second_mock.single_request();
     let (output_text, _success_flag) = call_output(&req, call_id);
-    assert_eq!(output_text, "Plan updated");
+    assert!(
+        output_text.contains("Todos have been modified successfully"),
+        "unexpected TodoWrite output: {output_text}"
+    );
 
     Ok(())
 }
@@ -259,7 +270,7 @@ async fn update_plan_tool_rejects_malformed_payload() -> anyhow::Result<()> {
 
     let first_response = sse(vec![
         ev_response_created("resp-1"),
-        ev_function_call(call_id, "update_plan", &invalid_args),
+        ev_function_call(call_id, "TodoWrite", &invalid_args),
         ev_completed("resp-1"),
     ]);
     responses::mount_sse_once(&server, first_response).await;

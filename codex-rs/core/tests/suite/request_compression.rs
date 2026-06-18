@@ -13,10 +13,10 @@ use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
-use pretty_assertions::assert_eq;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn request_body_is_zstd_compressed_for_codex_backend_when_enabled() -> anyhow::Result<()> {
+async fn request_body_is_not_compressed_for_codex_backend_even_when_enabled() -> anyhow::Result<()>
+{
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
@@ -55,12 +55,14 @@ async fn request_body_is_zstd_compressed_for_codex_backend_when_enabled() -> any
     wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let request = request_log.single_request();
-    assert_eq!(request.header("content-encoding").as_deref(), Some("zstd"));
-
-    let decompressed = zstd::stream::decode_all(std::io::Cursor::new(request.body_bytes()))?;
-    let json: serde_json::Value = serde_json::from_slice(&decompressed)?;
     assert!(
-        json.get("input").is_some(),
+        request.header("content-encoding").is_none(),
+        "did not expect request compression"
+    );
+
+    let json: serde_json::Value = serde_json::from_slice(&request.body_bytes())?;
+    assert!(
+        json.get("messages").is_some() || json.get("input").is_some(),
         "expected request body to decode as model request JSON"
     );
 
@@ -111,7 +113,7 @@ async fn request_body_is_not_compressed_for_api_key_auth_even_when_enabled() -> 
 
     let json: serde_json::Value = serde_json::from_slice(&request.body_bytes())?;
     assert!(
-        json.get("input").is_some(),
+        json.get("messages").is_some() || json.get("input").is_some(),
         "expected request body to be plain model request JSON"
     );
 

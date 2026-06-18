@@ -115,7 +115,7 @@ fn request_permissions_tool_event(
         "permissions": permissions,
     });
     let args_str = serde_json::to_string(&args)?;
-    Ok(ev_function_call(call_id, "request_permissions", &args_str))
+    Ok(ev_function_call(call_id, "RequestPermissions", &args_str))
 }
 
 fn shell_command_event(call_id: &str, command: &str) -> Result<Value> {
@@ -492,9 +492,14 @@ async fn request_permissions_tool_is_auto_denied_when_granular_request_permissio
         "request_permissions should not emit a prompt when granular.request_permissions is false: {event:?}"
     );
 
-    let call_output = results.single_request().function_call_output(call_id);
-    let result: RequestPermissionsResponse =
-        serde_json::from_str(call_output["output"].as_str().unwrap_or_default())?;
+    let result_request = results.single_request();
+    let raw_call_output = result_request.function_call_output(call_id);
+    let result: RequestPermissionsResponse = serde_json::from_value(
+        raw_call_output
+            .get("output")
+            .cloned()
+            .expect("request permissions output object"),
+    )?;
     assert_eq!(
         result,
         RequestPermissionsResponse {

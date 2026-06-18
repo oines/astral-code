@@ -16,12 +16,12 @@ use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::Op;
 use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::user_input::UserInput;
-use core_test_support::responses;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_response_created;
 use core_test_support::responses::mount_models_once;
 use core_test_support::responses::mount_sse_once;
+use core_test_support::responses::request_tool_names;
 use core_test_support::responses::sse;
 use core_test_support::skip_if_no_network;
 use core_test_support::submit_thread_settings;
@@ -46,20 +46,7 @@ fn remote_model(slug: &str) -> ModelInfo {
 }
 
 fn tool_names(body: &Value) -> Vec<String> {
-    body.get("tools")
-        .and_then(Value::as_array)
-        .map(|tools| {
-            tools
-                .iter()
-                .filter_map(|tool| {
-                    tool.get("name")
-                        .or_else(|| tool.get("type"))
-                        .and_then(Value::as_str)
-                        .map(str::to_string)
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+    request_tool_names(body)
 }
 
 async fn wait_for_model_available(manager: &SharedModelsManager, slug: &str) -> ModelPreset {
@@ -85,7 +72,7 @@ async fn response_body_for_remote_model(
     remote_model: ModelInfo,
     configure: impl FnOnce(&mut Config) + Send + 'static,
 ) -> Result<Value> {
-    let server = responses::start_mock_server().await;
+    let server = wiremock::MockServer::start().await;
     let model_slug = remote_model.slug.clone();
     let models_mock = mount_models_once(
         &server,
@@ -104,9 +91,13 @@ async fn response_body_for_remote_model(
     )
     .await;
 
+    let configured_model = model_slug.clone();
     let mut builder = test_codex()
         .with_auth(CodexAuth::create_dummy_api_key_auth_for_testing())
-        .with_config(configure);
+        .with_config(move |config| {
+            config.model = Some(configured_model.clone());
+            configure(config);
+        });
     let test = builder.build(&server).await?;
     let models_manager = test.thread_manager.get_models_manager();
     let available_model = wait_for_model_available(&models_manager, &model_slug).await;

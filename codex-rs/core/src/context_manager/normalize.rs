@@ -3,6 +3,7 @@ use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::InputModality;
+use codex_tools::TOOL_SEARCH_TOOL_NAME;
 use std::collections::HashSet;
 
 use crate::util::error_or_panic;
@@ -19,13 +20,28 @@ pub(crate) fn ensure_call_outputs_present(items: &mut Vec<ResponseItem>) {
 
     for (idx, item) in items.iter().enumerate() {
         match item {
-            ResponseItem::FunctionCall { call_id, .. } => {
-                let has_output = items.iter().any(|i| match i {
-                    ResponseItem::FunctionCallOutput {
-                        call_id: existing, ..
-                    } => existing == call_id,
-                    _ => false,
-                });
+            ResponseItem::FunctionCall {
+                call_id,
+                name,
+                namespace,
+                ..
+            } => {
+                let has_output = if namespace.is_none() && name == TOOL_SEARCH_TOOL_NAME {
+                    items.iter().any(|i| match i {
+                        ResponseItem::ToolSearchOutput {
+                            call_id: Some(existing),
+                            ..
+                        } => existing == call_id,
+                        _ => false,
+                    })
+                } else {
+                    items.iter().any(|i| match i {
+                        ResponseItem::FunctionCallOutput {
+                            call_id: existing, ..
+                        } => existing == call_id,
+                        _ => false,
+                    })
+                };
 
                 if !has_output {
                     info!("Function call output is missing for call id: {call_id}");
@@ -135,6 +151,12 @@ pub(crate) fn remove_orphan_outputs(items: &mut Vec<ResponseItem>) {
                 call_id: Some(call_id),
                 ..
             } => Some(call_id.clone()),
+            ResponseItem::FunctionCall {
+                call_id,
+                name,
+                namespace: None,
+                ..
+            } if name == TOOL_SEARCH_TOOL_NAME => Some(call_id.clone()),
             _ => None,
         })
         .collect();
@@ -244,6 +266,14 @@ pub(crate) fn remove_corresponding_for(items: &mut Vec<ResponseItem>, item: &Res
                             call_id: Some(existing),
                             ..
                         } if existing == call_id
+                    ) || matches!(
+                        i,
+                        ResponseItem::FunctionCall {
+                            call_id: existing,
+                            name,
+                            namespace: None,
+                            ..
+                        } if existing == call_id && name == TOOL_SEARCH_TOOL_NAME
                     )
                 },
             );

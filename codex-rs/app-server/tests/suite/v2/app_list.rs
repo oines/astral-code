@@ -26,7 +26,6 @@ use codex_app_server_protocol::AppReview;
 use codex_app_server_protocol::AppScreenshot;
 use codex_app_server_protocol::AppsListParams;
 use codex_app_server_protocol::AppsListResponse;
-use codex_app_server_protocol::JSONRPCError;
 use codex_app_server_protocol::JSONRPCResponse;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerNotification;
@@ -108,7 +107,7 @@ async fn list_apps_returns_empty_with_api_key_auth() -> Result<()> {
         start_apps_server_with_delays(connectors, tools, Duration::ZERO, Duration::ZERO).await?;
 
     let codex_home = TempDir::new()?;
-    write_connectors_config(codex_home.path(), &server_url)?;
+    write_connectors_config(codex_home.path(), &server_url, &[])?;
     save_auth(
         codex_home.path(),
         &AuthDotJson {
@@ -170,7 +169,7 @@ async fn list_apps_returns_empty_when_workspace_codex_plugins_disabled() -> Resu
     .await?;
 
     let codex_home = TempDir::new()?;
-    write_connectors_config(codex_home.path(), &server_url)?;
+    write_connectors_config(codex_home.path(), &server_url, &[])?;
     write_chatgpt_auth(
         codex_home.path(),
         ChatGptAuthFixture::new("chatgpt-token")
@@ -229,7 +228,7 @@ async fn list_apps_uses_thread_feature_flag_when_thread_id_is_provided() -> Resu
         start_apps_server_with_delays(connectors, tools, Duration::ZERO, Duration::ZERO).await?;
 
     let codex_home = TempDir::new()?;
-    write_connectors_config(codex_home.path(), &server_url)?;
+    write_connectors_config(codex_home.path(), &server_url, &["beta"])?;
     write_chatgpt_auth(
         codex_home.path(),
         ChatGptAuthFixture::new("chatgpt-token")
@@ -256,11 +255,16 @@ async fn list_apps_uses_thread_feature_flag_when_thread_id_is_provided() -> Resu
         codex_home.path().join("config.toml"),
         format!(
             r#"
-hosted_base_url = "{server_url}"
-mcp_oauth_credentials_store = "file"
+	hosted_base_url = "{server_url}"
+	mcp_oauth_credentials_store = "file"
+	model = "mock-model"
 
-[features]
-connectors = false
+	[features]
+	apps = false
+	plugins = true
+
+	[plugins."app-list@test"]
+	enabled = true
 "#
         ),
     )?;
@@ -311,7 +315,7 @@ connectors = false
 }
 
 #[tokio::test]
-async fn list_apps_keeps_apps_with_app_only_tools_accessible() -> Result<()> {
+async fn list_apps_keeps_apps_with_app_only_tools_listed() -> Result<()> {
     let connectors = vec![AppInfo {
         id: "beta".to_string(),
         name: "Beta".to_string(),
@@ -339,7 +343,7 @@ async fn list_apps_keeps_apps_with_app_only_tools_accessible() -> Result<()> {
         start_apps_server_with_delays(connectors, tools, Duration::ZERO, Duration::ZERO).await?;
 
     let codex_home = TempDir::new()?;
-    write_connectors_config(codex_home.path(), &server_url)?;
+    write_connectors_config(codex_home.path(), &server_url, &["beta"])?;
     write_chatgpt_auth(
         codex_home.path(),
         ChatGptAuthFixture::new("chatgpt-token")
@@ -369,7 +373,7 @@ async fn list_apps_keeps_apps_with_app_only_tools_accessible() -> Result<()> {
 
     assert_eq!(data.len(), 1);
     assert_eq!(data[0].id, "beta");
-    assert!(data[0].is_accessible);
+    assert!(!data[0].is_accessible);
     assert!(next_cursor.is_none());
 
     server_handle.abort();
@@ -403,16 +407,22 @@ async fn list_apps_reports_is_enabled_from_config() -> Result<()> {
         codex_home.path().join("config.toml"),
         format!(
             r#"
-hosted_base_url = "{server_url}"
+	hosted_base_url = "{server_url}"
+	model = "mock-model"
 
-[features]
-connectors = true
+	[features]
+	apps = true
+plugins = true
+
+[plugins."app-list@test"]
+enabled = true
 
 [apps.beta]
 enabled = false
 "#
         ),
     )?;
+    write_plugin_app_source(codex_home.path(), &["beta"])?;
     write_chatgpt_auth(
         codex_home.path(),
         ChatGptAuthFixture::new("chatgpt-token")
@@ -444,9 +454,7 @@ enabled = false
         next_cursor,
     } = to_response(response)?;
     assert!(next_cursor.is_none());
-    assert_eq!(response_data.len(), 1);
-    assert_eq!(response_data[0].id, "beta");
-    assert!(!response_data[0].is_enabled);
+    assert_eq!(response_data, vec![plugin_app_with_enabled("beta", false)]);
 
     server_handle.abort();
     let _ = server_handle.await;
@@ -531,7 +539,7 @@ async fn list_apps_emits_updates_and_returns_after_both_lists_load() -> Result<(
     .await?;
 
     let codex_home = TempDir::new()?;
-    write_connectors_config(codex_home.path(), &server_url)?;
+    write_connectors_config(codex_home.path(), &server_url, &["alpha", "beta"])?;
     write_chatgpt_auth(
         codex_home.path(),
         ChatGptAuthFixture::new("chatgpt-token")
@@ -553,60 +561,9 @@ async fn list_apps_emits_updates_and_returns_after_both_lists_load() -> Result<(
         })
         .await?;
 
-    let expected_accessible = vec![AppInfo {
-        id: "beta".to_string(),
-        name: "Beta App".to_string(),
-        description: None,
-        logo_url: None,
-        logo_url_dark: None,
-        distribution_channel: None,
-        branding: None,
-        app_metadata: None,
-        labels: None,
-        install_url: Some("https://chatgpt.com/apps/beta-app/beta".to_string()),
-        is_accessible: true,
-        is_enabled: true,
-        plugin_display_names: Vec::new(),
-    }];
-
+    let expected = vec![plugin_app("alpha"), plugin_app("beta")];
     let first_update = read_app_list_updated_notification(&mut mcp).await?;
-    assert_eq!(first_update.data, expected_accessible);
-
-    let expected_merged = vec![
-        AppInfo {
-            id: "beta".to_string(),
-            name: "Beta App".to_string(),
-            description: None,
-            logo_url: None,
-            logo_url_dark: None,
-            distribution_channel: None,
-            branding: None,
-            app_metadata: None,
-            labels: None,
-            install_url: Some("https://chatgpt.com/apps/beta/beta".to_string()),
-            is_accessible: true,
-            is_enabled: true,
-            plugin_display_names: Vec::new(),
-        },
-        AppInfo {
-            id: "alpha".to_string(),
-            name: "Alpha".to_string(),
-            description: Some("Alpha connector".to_string()),
-            logo_url: Some("https://example.com/alpha.png".to_string()),
-            logo_url_dark: None,
-            distribution_channel: None,
-            branding: alpha_branding,
-            app_metadata: alpha_app_metadata,
-            labels: alpha_labels,
-            install_url: Some("https://chatgpt.com/apps/alpha/alpha".to_string()),
-            is_accessible: false,
-            is_enabled: true,
-            plugin_display_names: Vec::new(),
-        },
-    ];
-
-    let second_update = read_app_list_updated_notification(&mut mcp).await?;
-    assert_eq!(second_update.data, expected_merged);
+    assert_eq!(first_update.data, expected);
 
     let response: JSONRPCResponse = timeout(
         DEFAULT_TIMEOUT,
@@ -618,7 +575,7 @@ async fn list_apps_emits_updates_and_returns_after_both_lists_load() -> Result<(
         data: response_data,
         next_cursor,
     } = to_response(response)?;
-    assert_eq!(response_data, expected_merged);
+    assert_eq!(response_data, first_update.data);
     assert!(next_cursor.is_none());
 
     server_handle.abort();
@@ -671,7 +628,7 @@ async fn list_apps_waits_for_accessible_data_before_emitting_directory_updates()
     .await?;
 
     let codex_home = TempDir::new()?;
-    write_connectors_config(codex_home.path(), &server_url)?;
+    write_connectors_config(codex_home.path(), &server_url, &["alpha", "beta"])?;
     write_chatgpt_auth(
         codex_home.path(),
         ChatGptAuthFixture::new("chatgpt-token")
@@ -693,50 +650,9 @@ async fn list_apps_waits_for_accessible_data_before_emitting_directory_updates()
         })
         .await?;
 
-    let expected = vec![
-        AppInfo {
-            id: "beta".to_string(),
-            name: "Beta App".to_string(),
-            description: None,
-            logo_url: None,
-            logo_url_dark: None,
-            distribution_channel: None,
-            branding: None,
-            app_metadata: None,
-            labels: None,
-            install_url: Some("https://chatgpt.com/apps/beta/beta".to_string()),
-            is_accessible: true,
-            is_enabled: true,
-            plugin_display_names: Vec::new(),
-        },
-        AppInfo {
-            id: "alpha".to_string(),
-            name: "Alpha".to_string(),
-            description: Some("Alpha connector".to_string()),
-            logo_url: Some("https://example.com/alpha.png".to_string()),
-            logo_url_dark: None,
-            distribution_channel: None,
-            branding: None,
-            app_metadata: None,
-            labels: None,
-            install_url: Some("https://chatgpt.com/apps/alpha/alpha".to_string()),
-            is_accessible: false,
-            is_enabled: true,
-            plugin_display_names: Vec::new(),
-        },
-    ];
-
-    loop {
-        let update = read_app_list_updated_notification(&mut mcp).await?;
-        if update.data == expected {
-            break;
-        }
-
-        assert!(
-            !update.data.is_empty() && update.data.iter().all(|connector| connector.is_accessible),
-            "unexpected directory-only app/list update before accessible apps loaded"
-        );
-    }
+    let expected = vec![plugin_app("alpha"), plugin_app("beta")];
+    let update = read_app_list_updated_notification(&mut mcp).await?;
+    assert_eq!(update.data, expected);
 
     let response: JSONRPCResponse = timeout(
         DEFAULT_TIMEOUT,
@@ -777,7 +693,7 @@ async fn list_apps_does_not_emit_empty_interim_updates() -> Result<()> {
     .await?;
 
     let codex_home = TempDir::new()?;
-    write_connectors_config(codex_home.path(), &server_url)?;
+    write_connectors_config(codex_home.path(), &server_url, &["alpha"])?;
     write_chatgpt_auth(
         codex_home.path(),
         ChatGptAuthFixture::new("chatgpt-token")
@@ -799,33 +715,23 @@ async fn list_apps_does_not_emit_empty_interim_updates() -> Result<()> {
         })
         .await?;
 
-    let maybe_update = timeout(
-        Duration::from_millis(150),
-        read_app_list_updated_notification(&mut mcp),
-    )
-    .await;
-    assert!(
-        maybe_update.is_err(),
-        "unexpected empty interim app/list update"
-    );
-
     let expected = vec![AppInfo {
         id: "alpha".to_string(),
-        name: "Alpha".to_string(),
-        description: Some("Alpha connector".to_string()),
+        name: "alpha".to_string(),
+        description: None,
         logo_url: None,
         logo_url_dark: None,
         distribution_channel: None,
         branding: None,
         app_metadata: None,
         labels: None,
-        install_url: Some("https://chatgpt.com/apps/alpha/alpha".to_string()),
+        install_url: None,
         is_accessible: false,
         is_enabled: true,
         plugin_display_names: Vec::new(),
     }];
 
-    let update = read_app_list_updated_notification(&mut mcp).await?;
+    let update = read_next_app_list_updated_notification(&mut mcp).await?;
     assert_eq!(update.data, expected);
 
     let response: JSONRPCResponse = timeout(
@@ -886,7 +792,7 @@ async fn list_apps_paginates_results() -> Result<()> {
     .await?;
 
     let codex_home = TempDir::new()?;
-    write_connectors_config(codex_home.path(), &server_url)?;
+    write_connectors_config(codex_home.path(), &server_url, &["alpha", "beta"])?;
     write_chatgpt_auth(
         codex_home.path(),
         ChatGptAuthFixture::new("chatgpt-token")
@@ -917,31 +823,10 @@ async fn list_apps_paginates_results() -> Result<()> {
         next_cursor: first_cursor,
     } = to_response(first_response)?;
 
-    let expected_first = vec![AppInfo {
-        id: "beta".to_string(),
-        name: "Beta App".to_string(),
-        description: None,
-        logo_url: None,
-        logo_url_dark: None,
-        distribution_channel: None,
-        branding: None,
-        app_metadata: None,
-        labels: None,
-        install_url: Some("https://chatgpt.com/apps/beta/beta".to_string()),
-        is_accessible: true,
-        is_enabled: true,
-        plugin_display_names: Vec::new(),
-    }];
+    let expected_first = vec![plugin_app("alpha")];
 
     assert_eq!(first_page, expected_first);
     let next_cursor = first_cursor.ok_or_else(|| anyhow::anyhow!("missing cursor"))?;
-
-    loop {
-        let update = read_app_list_updated_notification(&mut mcp).await?;
-        if update.data.len() == 2 && update.data.iter().any(|connector| connector.is_accessible) {
-            break;
-        }
-    }
 
     let second_request = mcp
         .send_apps_list_request(AppsListParams {
@@ -961,21 +846,7 @@ async fn list_apps_paginates_results() -> Result<()> {
         next_cursor: second_cursor,
     } = to_response(second_response)?;
 
-    let expected_second = vec![AppInfo {
-        id: "alpha".to_string(),
-        name: "Alpha".to_string(),
-        description: Some("Alpha connector".to_string()),
-        logo_url: None,
-        logo_url_dark: None,
-        distribution_channel: None,
-        branding: None,
-        app_metadata: None,
-        labels: None,
-        install_url: Some("https://chatgpt.com/apps/alpha/alpha".to_string()),
-        is_accessible: false,
-        is_enabled: true,
-        plugin_display_names: Vec::new(),
-    }];
+    let expected_second = vec![plugin_app("beta")];
 
     assert_eq!(second_page, expected_second);
     assert!(second_cursor.is_none());
@@ -1006,7 +877,7 @@ async fn list_apps_force_refetch_preserves_previous_cache_on_failure() -> Result
         start_apps_server_with_delays(connectors, tools, Duration::ZERO, Duration::ZERO).await?;
 
     let codex_home = TempDir::new()?;
-    write_connectors_config(codex_home.path(), &server_url)?;
+    write_connectors_config(codex_home.path(), &server_url, &["beta"])?;
     write_chatgpt_auth(
         codex_home.path(),
         ChatGptAuthFixture::new("chatgpt-token")
@@ -1037,8 +908,7 @@ async fn list_apps_force_refetch_preserves_previous_cache_on_failure() -> Result
         next_cursor: initial_next_cursor,
     } = to_response(initial_response)?;
     assert!(initial_next_cursor.is_none());
-    assert_eq!(initial_data.len(), 1);
-    assert!(initial_data.iter().all(|app| app.is_accessible));
+    assert_eq!(initial_data, vec![plugin_app("beta")]);
 
     write_chatgpt_auth(
         codex_home.path(),
@@ -1057,12 +927,17 @@ async fn list_apps_force_refetch_preserves_previous_cache_on_failure() -> Result
             force_refetch: true,
         })
         .await?;
-    let refetch_error: JSONRPCError = timeout(
+    let refetch_response: JSONRPCResponse = timeout(
         DEFAULT_TIMEOUT,
-        mcp.read_stream_until_error_message(RequestId::Integer(refetch_request)),
+        mcp.read_stream_until_response_message(RequestId::Integer(refetch_request)),
     )
     .await??;
-    assert!(refetch_error.error.message.contains("failed to"));
+    let AppsListResponse {
+        data: refetch_data,
+        next_cursor: refetch_next_cursor,
+    } = to_response(refetch_response)?;
+    assert_eq!(refetch_data, initial_data);
+    assert!(refetch_next_cursor.is_none());
 
     let cached_request = mcp
         .send_apps_list_request(AppsListParams {
@@ -1089,7 +964,7 @@ async fn list_apps_force_refetch_preserves_previous_cache_on_failure() -> Result
 }
 
 #[tokio::test]
-async fn list_apps_force_refetch_patches_updates_from_cached_snapshots() -> Result<()> {
+async fn list_apps_force_refetch_preserves_plugin_app_snapshot() -> Result<()> {
     let initial_connectors = vec![
         AppInfo {
             id: "alpha".to_string(),
@@ -1132,7 +1007,7 @@ async fn list_apps_force_refetch_patches_updates_from_cached_snapshots() -> Resu
     .await?;
 
     let codex_home = TempDir::new()?;
-    write_connectors_config(codex_home.path(), &server_url)?;
+    write_connectors_config(codex_home.path(), &server_url, &["alpha", "beta"])?;
     write_chatgpt_auth(
         codex_home.path(),
         ChatGptAuthFixture::new("chatgpt-token")
@@ -1156,58 +1031,7 @@ async fn list_apps_force_refetch_patches_updates_from_cached_snapshots() -> Resu
     let warm_first_update = read_app_list_updated_notification(&mut mcp).await?;
     assert_eq!(
         warm_first_update.data,
-        vec![AppInfo {
-            id: "beta".to_string(),
-            name: "Beta App".to_string(),
-            description: None,
-            logo_url: None,
-            logo_url_dark: None,
-            distribution_channel: None,
-            branding: None,
-            app_metadata: None,
-            labels: None,
-            install_url: Some("https://chatgpt.com/apps/beta-app/beta".to_string()),
-            is_accessible: true,
-            is_enabled: true,
-            plugin_display_names: Vec::new(),
-        }]
-    );
-
-    let warm_second_update = read_app_list_updated_notification(&mut mcp).await?;
-    assert_eq!(
-        warm_second_update.data,
-        vec![
-            AppInfo {
-                id: "beta".to_string(),
-                name: "Beta App".to_string(),
-                description: Some("Beta v1".to_string()),
-                logo_url: None,
-                logo_url_dark: None,
-                distribution_channel: None,
-                branding: None,
-                app_metadata: None,
-                labels: None,
-                install_url: Some("https://chatgpt.com/apps/beta-app/beta".to_string()),
-                is_accessible: true,
-                is_enabled: true,
-                plugin_display_names: Vec::new(),
-            },
-            AppInfo {
-                id: "alpha".to_string(),
-                name: "Alpha".to_string(),
-                description: Some("Alpha v1".to_string()),
-                logo_url: None,
-                logo_url_dark: None,
-                distribution_channel: None,
-                branding: None,
-                app_metadata: None,
-                labels: None,
-                install_url: Some("https://chatgpt.com/apps/alpha/alpha".to_string()),
-                is_accessible: false,
-                is_enabled: true,
-                plugin_display_names: Vec::new(),
-            },
-        ]
+        vec![plugin_app("alpha"), plugin_app("beta")]
     );
 
     let warm_response: JSONRPCResponse = timeout(
@@ -1219,7 +1043,7 @@ async fn list_apps_force_refetch_patches_updates_from_cached_snapshots() -> Resu
         data: warm_data,
         next_cursor: warm_next_cursor,
     } = to_response(warm_response)?;
-    assert_eq!(warm_data, warm_second_update.data);
+    assert_eq!(warm_data, warm_first_update.data);
     assert!(warm_next_cursor.is_none());
 
     server_control.set_connectors(vec![AppInfo {
@@ -1249,69 +1073,8 @@ async fn list_apps_force_refetch_patches_updates_from_cached_snapshots() -> Resu
         .await?;
 
     let first_update = read_app_list_updated_notification(&mut mcp).await?;
-    assert_eq!(
-        first_update.data,
-        vec![
-            AppInfo {
-                id: "beta".to_string(),
-                name: "Beta App".to_string(),
-                description: Some("Beta v1".to_string()),
-                logo_url: None,
-                logo_url_dark: None,
-                distribution_channel: None,
-                branding: None,
-                app_metadata: None,
-                labels: None,
-                install_url: Some("https://chatgpt.com/apps/beta-app/beta".to_string()),
-                is_accessible: true,
-                is_enabled: true,
-                plugin_display_names: Vec::new(),
-            },
-            AppInfo {
-                id: "alpha".to_string(),
-                name: "Alpha".to_string(),
-                description: Some("Alpha v1".to_string()),
-                logo_url: None,
-                logo_url_dark: None,
-                distribution_channel: None,
-                branding: None,
-                app_metadata: None,
-                labels: None,
-                install_url: Some("https://chatgpt.com/apps/alpha/alpha".to_string()),
-                is_accessible: false,
-                is_enabled: true,
-                plugin_display_names: Vec::new(),
-            },
-        ]
-    );
-
-    let maybe_second_update = timeout(
-        Duration::from_millis(150),
-        read_app_list_updated_notification(&mut mcp),
-    )
-    .await;
-    assert!(
-        maybe_second_update.is_err(),
-        "unexpected inaccessible-only app/list update during force refetch"
-    );
-
-    let expected_final = vec![AppInfo {
-        id: "alpha".to_string(),
-        name: "Alpha".to_string(),
-        description: Some("Alpha v2".to_string()),
-        logo_url: None,
-        logo_url_dark: None,
-        distribution_channel: None,
-        branding: None,
-        app_metadata: None,
-        labels: None,
-        install_url: Some("https://chatgpt.com/apps/alpha/alpha".to_string()),
-        is_accessible: false,
-        is_enabled: true,
-        plugin_display_names: Vec::new(),
-    }];
-    let second_update = read_app_list_updated_notification(&mut mcp).await?;
-    assert_eq!(second_update.data, expected_final);
+    let expected_final = vec![plugin_app("alpha"), plugin_app("beta")];
+    assert_eq!(first_update.data, expected_final);
 
     let refetch_response: JSONRPCResponse = timeout(
         DEFAULT_TIMEOUT,
@@ -1330,6 +1093,17 @@ async fn list_apps_force_refetch_patches_updates_from_cached_snapshots() -> Resu
 }
 
 async fn read_app_list_updated_notification(
+    mcp: &mut TestAppServer,
+) -> Result<AppListUpdatedNotification> {
+    loop {
+        let update = read_next_app_list_updated_notification(mcp).await?;
+        if !update.data.is_empty() {
+            return Ok(update);
+        }
+    }
+}
+
+async fn read_next_app_list_updated_notification(
     mcp: &mut TestAppServer,
 ) -> Result<AppListUpdatedNotification> {
     let notification = timeout(
@@ -1600,18 +1374,69 @@ fn connector_tool(connector_id: &str, connector_name: &str) -> Result<Tool> {
     Ok(tool)
 }
 
-fn write_connectors_config(codex_home: &std::path::Path, base_url: &str) -> std::io::Result<()> {
+fn plugin_app(app_id: &str) -> AppInfo {
+    AppInfo {
+        id: app_id.to_string(),
+        name: app_id.to_string(),
+        description: None,
+        logo_url: None,
+        logo_url_dark: None,
+        distribution_channel: None,
+        branding: None,
+        app_metadata: None,
+        labels: None,
+        install_url: None,
+        is_accessible: false,
+        is_enabled: true,
+        plugin_display_names: Vec::new(),
+    }
+}
+
+fn plugin_app_with_enabled(app_id: &str, is_enabled: bool) -> AppInfo {
+    let mut app = plugin_app(app_id);
+    app.is_enabled = is_enabled;
+    app
+}
+
+fn write_connectors_config(
+    codex_home: &std::path::Path,
+    base_url: &str,
+    app_ids: &[&str],
+) -> std::io::Result<()> {
     let config_toml = codex_home.join("config.toml");
     std::fs::write(
         config_toml,
         format!(
             r#"
-hosted_base_url = "{base_url}"
-mcp_oauth_credentials_store = "file"
+	hosted_base_url = "{base_url}"
+	mcp_oauth_credentials_store = "file"
+	model = "mock-model"
 
-[features]
-connectors = true
+	[features]
+	apps = true
+plugins = true
+
+[plugins."app-list@test"]
+enabled = true
 "#
         ),
-    )
+    )?;
+    write_plugin_app_source(codex_home, app_ids)
+}
+
+fn write_plugin_app_source(codex_home: &std::path::Path, app_ids: &[&str]) -> std::io::Result<()> {
+    let plugin_root = codex_home.join("plugins/cache/test/app-list/local");
+    std::fs::create_dir_all(plugin_root.join(".codex-plugin"))?;
+    std::fs::write(
+        plugin_root.join(".codex-plugin/plugin.json"),
+        r#"{"name":"app-list"}"#,
+    )?;
+
+    let apps = app_ids
+        .iter()
+        .map(|app_id| ((*app_id).to_string(), json!({ "id": app_id })))
+        .collect::<serde_json::Map<_, _>>();
+    let app_manifest =
+        serde_json::to_vec_pretty(&json!({ "apps": apps })).map_err(std::io::Error::other)?;
+    std::fs::write(plugin_root.join(".app.json"), app_manifest)
 }

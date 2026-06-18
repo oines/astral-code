@@ -1705,9 +1705,15 @@ mod tests {
     use pretty_assertions::assert_eq;
     use tempfile::TempDir;
 
+    const DEFAULT_TEST_MODEL: &str = "astral-test-model";
+
     async fn build_config(temp_dir: &TempDir) -> Config {
         ConfigBuilder::default()
             .codex_home(temp_dir.path().to_path_buf())
+            .harness_overrides(ConfigOverrides {
+                model: Some(DEFAULT_TEST_MODEL.to_string()),
+                ..ConfigOverrides::default()
+            })
             .build()
             .await
             .expect("config should build")

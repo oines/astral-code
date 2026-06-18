@@ -23,8 +23,6 @@ use axum::http::header::AUTHORIZATION;
 use axum::routing::get;
 use codex_app_server_protocol::AppInfo;
 use codex_app_server_protocol::AppSummary;
-use codex_app_server_protocol::AppsListParams;
-use codex_app_server_protocol::AppsListResponse;
 use codex_app_server_protocol::JSONRPCResponse;
 use codex_app_server_protocol::PluginAuthPolicy;
 use codex_app_server_protocol::PluginAvailability;
@@ -157,6 +155,7 @@ async fn plugin_install_rejects_multiple_install_sources() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Astral supports local plugin marketplaces only; remote plugin install is unsupported"]
 async fn plugin_install_rejects_remote_marketplace_when_plugins_are_disabled() -> Result<()> {
     let codex_home = TempDir::new()?;
     std::fs::write(
@@ -192,6 +191,7 @@ plugins = false
 }
 
 #[tokio::test]
+#[ignore = "Astral supports local plugin marketplaces only; remote plugin install is unsupported"]
 async fn plugin_install_writes_remote_plugin_to_cloud_and_cache() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;
@@ -289,6 +289,7 @@ async fn plugin_install_writes_remote_plugin_to_cloud_and_cache() -> Result<()> 
 }
 
 #[tokio::test]
+#[ignore = "Astral supports local plugin marketplaces only; remote plugin install is unsupported"]
 async fn plugin_install_rejects_missing_remote_bundle_url() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;
@@ -335,6 +336,7 @@ async fn plugin_install_rejects_missing_remote_bundle_url() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Astral supports local plugin marketplaces only; remote plugin install is unsupported"]
 async fn plugin_install_rejects_plain_http_remote_bundle_url() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;
@@ -376,6 +378,7 @@ async fn plugin_install_rejects_plain_http_remote_bundle_url() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Astral supports local plugin marketplaces only; remote plugin install is unsupported"]
 async fn plugin_install_rejects_invalid_remote_release_version() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;
@@ -444,6 +447,7 @@ async fn plugin_install_rejects_invalid_remote_plugin_name() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Astral supports local plugin marketplaces only; remote plugin install is unsupported"]
 async fn plugin_install_rejects_remote_plugin_disabled_by_admin_before_download() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;
@@ -504,6 +508,7 @@ async fn plugin_install_rejects_remote_plugin_disabled_by_admin_before_download(
 }
 
 #[tokio::test]
+#[ignore = "Astral local plugin install does not consult hosted workspace plugin policy"]
 async fn plugin_install_rejects_when_workspace_codex_plugins_disabled() -> Result<()> {
     let codex_home = TempDir::new()?;
     let repo_root = TempDir::new()?;
@@ -807,6 +812,7 @@ async fn plugin_install_tracks_remote_plugin_analytics_event() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "Astral supports local plugin marketplaces only; remote plugin install is unsupported"]
 async fn plugin_install_errors_when_remote_bundle_download_fails() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server = MockServer::start().await;
@@ -923,8 +929,6 @@ async fn plugin_install_returns_apps_needing_auth() -> Result<()> {
 
     let mut mcp = TestAppServer::new(codex_home.path()).await?;
     timeout(DEFAULT_TIMEOUT, mcp.initialize()).await??;
-    let directory_requests_before_install = server_control.directory_request_count();
-
     let request_id = mcp
         .send_plugin_install_request(PluginInstallParams {
             marketplace_path: Some(marketplace_path),
@@ -944,16 +948,25 @@ async fn plugin_install_returns_apps_needing_auth() -> Result<()> {
         response,
         PluginInstallResponse {
             auth_policy: PluginAuthPolicy::OnInstall,
-            apps_needing_auth: vec![AppSummary {
-                id: "alpha".to_string(),
-                name: "Alpha".to_string(),
-                description: Some("Alpha connector".to_string()),
-                install_url: Some("https://chatgpt.com/apps/alpha/alpha".to_string()),
-                needs_auth: true,
-            }],
+            apps_needing_auth: vec![
+                AppSummary {
+                    id: "alpha".to_string(),
+                    name: "alpha".to_string(),
+                    description: None,
+                    install_url: None,
+                    needs_auth: true,
+                },
+                AppSummary {
+                    id: "beta".to_string(),
+                    name: "beta".to_string(),
+                    description: None,
+                    install_url: None,
+                    needs_auth: true,
+                },
+            ],
         }
     );
-    assert!(server_control.directory_request_count() > directory_requests_before_install);
+    assert_eq!(server_control.directory_request_count(), 0);
 
     server_handle.abort();
     let _ = server_handle.await;
@@ -1010,9 +1023,6 @@ async fn plugin_install_filters_disallowed_apps_needing_auth() -> Result<()> {
 
     let mut mcp = TestAppServer::new(codex_home.path()).await?;
     timeout(DEFAULT_TIMEOUT, mcp.initialize()).await??;
-    let directory_requests_before_install =
-        warm_app_directory_cache(&mut mcp, &server_control, "Alpha").await?;
-
     let request_id = mcp
         .send_plugin_install_request(PluginInstallParams {
             marketplace_path: Some(marketplace_path),
@@ -1034,17 +1044,14 @@ async fn plugin_install_filters_disallowed_apps_needing_auth() -> Result<()> {
             auth_policy: PluginAuthPolicy::OnUse,
             apps_needing_auth: vec![AppSummary {
                 id: "alpha".to_string(),
-                name: "Alpha".to_string(),
-                description: Some("Alpha connector".to_string()),
-                install_url: Some("https://chatgpt.com/apps/alpha/alpha".to_string()),
+                name: "alpha".to_string(),
+                description: None,
+                install_url: None,
                 needs_auth: true,
             }],
         }
     );
-    assert_eq!(
-        server_control.directory_request_count(),
-        directory_requests_before_install
-    );
+    assert_eq!(server_control.directory_request_count(), 0);
 
     server_handle.abort();
     let _ = server_handle.await;
@@ -1139,34 +1146,6 @@ impl AppsServerControl {
     fn directory_request_count(&self) -> usize {
         self.directory_request_count.load(Ordering::SeqCst)
     }
-}
-
-async fn warm_app_directory_cache(
-    mcp: &mut TestAppServer,
-    server_control: &AppsServerControl,
-    expected_app_name: &str,
-) -> Result<usize> {
-    let app_list_request_id = mcp
-        .send_apps_list_request(AppsListParams {
-            force_refetch: true,
-            ..Default::default()
-        })
-        .await?;
-    let response: JSONRPCResponse = timeout(
-        DEFAULT_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(app_list_request_id)),
-    )
-    .await??;
-    let response: AppsListResponse = to_response(response)?;
-    assert!(
-        response
-            .data
-            .iter()
-            .any(|app| app.name == expected_app_name)
-    );
-    let directory_request_count = server_control.directory_request_count();
-    assert!(directory_request_count > 0);
-    Ok(directory_request_count)
 }
 
 #[derive(Clone)]

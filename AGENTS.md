@@ -2,6 +2,7 @@
 
 In the codex-rs folder where the rust code lives:
 
+- 这是个 100w 行级别的项目，无论什么改动都要先摸清楚相关数据流向、配置入口和投影链路，不要直接动手。
 - Crate names are prefixed with `codex-`. For example, the `core` folder's crate is named `codex-core`
 - When using format! and you can inline variables into {}, always do that.
 - Install any commands the repo relies on (for example `just`, `rg`, or `cargo-insta`) if they aren't already available before running instructions here.

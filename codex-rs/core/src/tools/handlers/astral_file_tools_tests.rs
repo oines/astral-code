@@ -30,9 +30,11 @@ use codex_protocol::permissions::FileSystemPath;
 use codex_protocol::permissions::FileSystemSandboxEntry;
 use codex_protocol::permissions::FileSystemSandboxPolicy;
 use codex_protocol::protocol::AskForApproval;
+use codex_protocol::protocol::FileChange;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use core_test_support::PathExt;
 
+use super::AstralFileToolTextOutput;
 use super::EMPTY_FILE_REMINDER;
 use super::FILE_HAS_NOT_BEEN_READ_ERROR;
 use super::FILE_MODIFIED_SINCE_READ_ERROR;
@@ -120,6 +122,17 @@ fn model_error(error: FunctionCallError) -> String {
     message
 }
 
+fn single_file_change<'a>(
+    output: &'a AstralFileToolTextOutput,
+    path: &AbsolutePathBuf,
+) -> &'a FileChange {
+    output
+        .file_changes
+        .as_ref()
+        .and_then(|changes| changes.get(&path.to_path_buf()))
+        .unwrap_or_else(|| panic!("expected file change for {}", path.display()))
+}
+
 struct FileToolFixture {
     _temp_dir: tempfile::TempDir,
     cwd: AbsolutePathBuf,
@@ -166,7 +179,7 @@ impl FileToolFixture {
 async fn write_remote(
     fixture: &FileToolFixture,
     content: &str,
-) -> Result<String, FunctionCallError> {
+) -> Result<AstralFileToolTextOutput, FunctionCallError> {
     write_file(
         json!({ "file_path": "remote.txt", "content": content }).to_string(),
         &fixture.fs,
@@ -183,7 +196,7 @@ async fn edit_remote(
     old_string: &str,
     new_string: &str,
     replace_all: bool,
-) -> Result<String, FunctionCallError> {
+) -> Result<AstralFileToolTextOutput, FunctionCallError> {
     edit_file(
         json!({
             "file_path": "remote.txt",
@@ -561,11 +574,17 @@ async fn edit_empty_old_string_creates_missing_file() {
     .expect("edit succeeds");
 
     assert_eq!(
-        output,
+        output.text,
         format!(
             "The file {} has been updated successfully.",
             cwd.join("created.txt").display()
         )
+    );
+    assert_eq!(
+        single_file_change(&output, &cwd.join("created.txt")),
+        &FileChange::Add {
+            content: "created content\n".to_string()
+        }
     );
     assert_eq!(
         std::fs::read_to_string(temp_dir.path().join("created.txt")).expect("created file"),
@@ -620,8 +639,14 @@ async fn write_uses_executor_file_system() {
     .expect("write succeeds");
 
     assert_eq!(
-        output,
+        output.text,
         format!("File created successfully at: {}", fixture.path.display())
+    );
+    assert_eq!(
+        single_file_change(&output, &fixture.path),
+        &FileChange::Add {
+            content: "written through backend\n".to_string()
+        }
     );
     assert_eq!(
         fixture
@@ -666,12 +691,22 @@ async fn write_existing_file_succeeds_after_full_read() {
         .expect("write succeeds");
 
     assert_eq!(
-        output,
+        output.text,
         format!(
             "The file {} has been updated successfully.",
             fixture.path.display()
         )
     );
+    let FileChange::Update {
+        unified_diff,
+        move_path,
+    } = single_file_change(&output, &fixture.path)
+    else {
+        panic!("expected update change");
+    };
+    assert_eq!(move_path, &None);
+    assert!(unified_diff.contains("-before"));
+    assert!(unified_diff.contains("+after"));
     assert_eq!(
         fixture
             .fs
@@ -703,7 +738,7 @@ async fn write_existing_file_succeeds_after_limited_read() {
         .expect("write succeeds");
 
     assert_eq!(
-        output,
+        output.text,
         format!(
             "The file {} has been updated successfully.",
             fixture.path.display()
@@ -752,12 +787,22 @@ async fn edit_uses_executor_file_system() {
         .expect("edit succeeds");
 
     assert_eq!(
-        output,
+        output.text,
         format!(
             "The file {} has been updated successfully.",
             fixture.path.display()
         )
     );
+    let FileChange::Update {
+        unified_diff,
+        move_path,
+    } = single_file_change(&output, &fixture.path)
+    else {
+        panic!("expected update change");
+    };
+    assert_eq!(move_path, &None);
+    assert!(unified_diff.contains("-before"));
+    assert!(unified_diff.contains("+after"));
     assert_eq!(
         fixture
             .fs
@@ -802,7 +847,7 @@ async fn edit_requires_read_but_allows_limited_read_for_existing_file() {
 
     assert_eq!(model_error(unread_error), FILE_HAS_NOT_BEEN_READ_ERROR);
     assert_eq!(
-        output,
+        output.text,
         format!(
             "The file {} has been updated successfully.",
             fixture.path.display()
@@ -855,7 +900,7 @@ async fn edit_replace_all_uses_claude_success_message() {
         .expect("replace_all succeeds");
 
     assert_eq!(
-        output,
+        output.text,
         format!(
             "The file {} has been updated. All occurrences were successfully replaced.",
             fixture.path.display()

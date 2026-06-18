@@ -11,6 +11,7 @@ use codex_protocol::approvals::NetworkApprovalProtocol;
 use codex_protocol::approvals::NetworkPolicyAmendment;
 use codex_protocol::approvals::NetworkPolicyRuleAction;
 use codex_protocol::models::PermissionProfile;
+use codex_protocol::openai_models::ApplyPatchToolType;
 use codex_protocol::permissions::FileSystemAccessMode;
 use codex_protocol::permissions::FileSystemPath;
 use codex_protocol::permissions::FileSystemSandboxEntry;
@@ -81,9 +82,18 @@ impl TargetPath {
                 (path, name.to_string())
             }
             TargetPath::OutsideWorkspace(name) => {
-                let path = env::current_dir()
-                    .expect("current dir should be available")
-                    .join(name);
+                let unique = test
+                    .cwd
+                    .path()
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("cwd");
+                let outside_root = if cfg!(windows) {
+                    env::temp_dir()
+                } else {
+                    PathBuf::from("/tmp")
+                };
+                let path = outside_root.join(format!(".codex-test-outside-{unique}-{name}"));
                 (path.clone(), path.display().to_string())
             }
         }
@@ -159,10 +169,12 @@ impl ActionKind {
                 let (path, _) = target.resolve_for_patch(test);
                 let _ = fs::remove_file(&path);
                 let path_str = path.display().to_string();
-                let script = format!(
-                    "from pathlib import Path; path = Path({path_str:?}); content = {content:?}; path.write_text(content, encoding='utf-8'); print(path.read_text(encoding='utf-8'), end='')",
+                let path_arg = shell_single_quote(&path_str);
+                let content_arg = shell_single_quote(content);
+                let script_arg = shell_single_quote(
+                    r#"open(my $fh, ">", $ARGV[0]) or die $!; print {$fh} $ARGV[1]; close($fh); open(my $rfh, "<", $ARGV[0]) or die $!; local $/; print <$rfh>;"#,
                 );
-                let command = format!("python3 -c {script:?}");
+                let command = format!("perl -e {script_arg} {path_arg} {content_arg}");
                 let event = shell_event(
                     call_id,
                     &command,
@@ -184,12 +196,7 @@ impl ActionKind {
                     .await;
 
                 let url = format!("{}{}", server.uri(), endpoint);
-                let escaped_url = url.replace('\'', "\\'");
-                let script = format!(
-                    "import sys\nimport urllib.request\nurl = '{escaped_url}'\ntry:\n    data = urllib.request.urlopen(url, timeout=2).read().decode()\n    print('OK:' + data.strip())\nexcept Exception as exc:\n    print('ERR:' + exc.__class__.__name__)\n    sys.exit(1)",
-                );
-
-                let command = format!("python3 -c \"{script}\"");
+                let command = curl_command(&url, /*no_proxy*/ false);
                 let event = shell_event(
                     call_id,
                     &command,
@@ -211,12 +218,7 @@ impl ActionKind {
                     .await;
 
                 let url = format!("{}{}", server.uri(), endpoint);
-                let escaped_url = url.replace('\'', "\\'");
-                let script = format!(
-                    "import sys\nimport urllib.request\nurl = '{escaped_url}'\nopener = urllib.request.build_opener(urllib.request.ProxyHandler({{}}))\ntry:\n    data = opener.open(url, timeout=2).read().decode()\n    print('OK:' + data.strip())\nexcept Exception as exc:\n    print('ERR:' + exc.__class__.__name__)\n    sys.exit(1)",
-                );
-
-                let command = format!("python3 -c \"{script}\"");
+                let command = curl_command(&url, /*no_proxy*/ true);
                 let event = shell_event(
                     call_id,
                     &command,
@@ -309,6 +311,18 @@ fn shell_apply_patch_command(patch: &str) -> String {
     }
     script.push_str("PATCH\n");
     script
+}
+
+fn curl_command(url: &str, no_proxy: bool) -> String {
+    let url_arg = shell_single_quote(url);
+    let no_proxy_arg = if no_proxy { " --noproxy '*'" } else { "" };
+    format!(
+        "if body=$(curl --fail --silent --show-error --max-time 2{no_proxy_arg} {url_arg}); then printf 'OK:%s' \"$body\"; else printf 'ERR:curl'; exit 1; fi"
+    )
+}
+
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn shell_event(
@@ -1018,7 +1032,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             model_override: Some("gpt-5.2"),
             outcome: Outcome::Auto,
             expectation: Expectation::CommandFailure {
-                output_contains: "you should not ask for escalated permissions",
+                output_contains: "you cannot ask for escalated permissions",
             },
         },
         ScenarioSpec {
@@ -1294,10 +1308,10 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
             expectation: Expectation::FileNotCreated {
                 target: TargetPath::Workspace("ro_on_request_denied.txt"),
-                message_contains: &["exec command rejected by user"],
+                message_contains: &["rejected by user"],
             },
         },
-        #[cfg(not(target_os = "linux"))] // TODO (pakrym): figure out why linux behaves differently
+        #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
         ScenarioSpec {
             name: "read_only_on_failure_escalates_after_sandbox_error",
             approval_policy: OnFailure,
@@ -1318,7 +1332,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
                 content: "read-only-on-failure",
             },
         },
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
         ScenarioSpec {
             name: "read_only_on_failure_escalates_after_sandbox_error_gpt_5_1_no_exit",
             approval_policy: OnFailure,
@@ -1531,7 +1545,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
         },
         ScenarioSpec {
-            name: "read_only_unless_trusted_requires_approval",
+            name: "read_only_unless_trusted_allows_after_approval",
             approval_policy: UnlessTrusted,
             sandbox_policy: SandboxPolicy::new_read_only_policy(),
             action: ActionKind::WriteFile {
@@ -1551,7 +1565,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
         },
         ScenarioSpec {
-            name: "read_only_unless_trusted_requires_approval_gpt_5_1_no_exit",
+            name: "read_only_unless_trusted_allows_after_approval_gpt_5_1_no_exit",
             approval_policy: UnlessTrusted,
             sandbox_policy: SandboxPolicy::new_read_only_policy(),
             action: ActionKind::WriteFile {
@@ -1676,7 +1690,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
                 body_contains: "workspace-network-ok",
             },
         },
-        #[cfg(not(target_os = "linux"))] // TODO (pakrym): figure out why linux behaves differently
+        #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
         ScenarioSpec {
             name: "workspace_write_on_failure_escalates_outside_workspace",
             approval_policy: OnFailure,
@@ -1698,7 +1712,7 @@ fn scenarios() -> Vec<ScenarioSpec> {
             },
         },
         ScenarioSpec {
-            name: "workspace_write_unless_trusted_requires_approval_outside_workspace",
+            name: "workspace_write_unless_trusted_allows_outside_workspace_after_approval",
             approval_policy: UnlessTrusted,
             sandbox_policy: workspace_write(false),
             action: ActionKind::WriteFile {
@@ -1896,18 +1910,23 @@ async fn run_scenario(scenario: &ScenarioSpec) -> Result<()> {
     let model = model_override.unwrap_or("gpt-5.4");
     let policy_src = scenario.action.policy_src();
 
-    let mut builder = test_codex().with_model(model).with_config(move |config| {
-        config.permissions.approval_policy = Constrained::allow_any(approval_policy);
-        config
-            .set_legacy_sandbox_policy(sandbox_policy.clone())
-            .expect("set sandbox policy");
-        for feature in features {
+    let mut builder = test_codex()
+        .with_model(model)
+        .with_model_info_override(model, |model| {
+            model.apply_patch_tool_type = Some(ApplyPatchToolType::Freeform);
+        })
+        .with_config(move |config| {
+            config.permissions.approval_policy = Constrained::allow_any(approval_policy);
             config
-                .features
-                .enable(feature)
-                .expect("test config should allow feature update");
-        }
-    });
+                .set_legacy_sandbox_policy(sandbox_policy.clone())
+                .expect("set sandbox policy");
+            for feature in features {
+                config
+                    .features
+                    .enable(feature)
+                    .expect("test config should allow feature update");
+            }
+        });
     if let Some(policy_src) = policy_src {
         builder = builder.with_pre_build_hook(move |home| {
             let rules_dir = home.join("rules");
@@ -2071,6 +2090,9 @@ async fn approving_apply_patch_for_session_skips_future_prompts_for_same_file() 
 
     let mut builder = test_codex()
         .with_model("gpt-5.4")
+        .with_model_info_override("gpt-5.4", |model| {
+            model.apply_patch_tool_type = Some(ApplyPatchToolType::Freeform);
+        })
         .with_config(move |config| {
             config.permissions.approval_policy = Constrained::allow_any(approval_policy);
             config

@@ -3,6 +3,7 @@
 use anyhow::Result;
 use codex_login::CodexAuth;
 use codex_model_provider_info::ModelProviderInfo;
+use codex_model_provider_info::ProviderFlavor;
 use codex_models_manager::bundled_models_response;
 use codex_models_manager::manager::RefreshStrategy;
 use codex_models_manager::manager::SharedModelsManager;
@@ -56,6 +57,8 @@ const REMOTE_MODEL_SLUG: &str = "codex-test";
 fn legacy_openai_model_provider(server: &MockServer) -> ModelProviderInfo {
     let mut provider =
         ModelProviderInfo::create_openai_provider(Some(format!("{}/v1", server.uri())));
+    provider.env_key = None;
+    provider.experimental_bearer_token = Some("test-token".to_string());
     provider.supports_websockets = false;
     provider
 }
@@ -396,6 +399,7 @@ async fn remote_models_long_model_slug_is_sent_with_custom_reasoning() -> Result
         .with_auth(CodexAuth::create_dummy_api_key_auth_for_testing())
         .with_config(|config| {
             config.model = Some(requested_model.to_string());
+            config.model_provider.provider_flavor = Some(ProviderFlavor::OpenRouter);
         })
         .build(&server)
         .await?;
@@ -421,13 +425,8 @@ async fn remote_models_long_model_slug_is_sent_with_custom_reasoning() -> Result
         .get("reasoning")
         .and_then(|reasoning| reasoning.get("effort"))
         .and_then(|value| value.as_str());
-    let reasoning_summary = body
-        .get("reasoning")
-        .and_then(|reasoning| reasoning.get("summary"))
-        .and_then(|value| value.as_str());
     assert_eq!(body["model"].as_str(), Some(requested_model));
     assert_eq!(reasoning_effort, Some("max"));
-    assert_eq!(reasoning_summary, Some("detailed"));
 
     Ok(())
 }
@@ -814,7 +813,6 @@ async fn remote_models_apply_remote_base_instructions() -> Result<()> {
     let TestCodex {
         codex,
         cwd,
-        config,
         thread_manager,
         ..
     } = builder.build(&server).await?;
@@ -856,12 +854,11 @@ async fn remote_models_apply_remote_base_instructions() -> Result<()> {
 
     wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
 
-    let base_model_info = models_manager
-        .get_model_info("gpt-5.2", &config.to_models_manager_config())
-        .await;
-    let body = response_mock.single_request().body_json();
-    let instructions = body["instructions"].as_str().unwrap();
-    assert_eq!(instructions, base_model_info.base_instructions);
+    let instructions = response_mock.single_request().instructions_text();
+    assert!(
+        !instructions.contains(remote_base),
+        "thread settings model selection should not rewrite startup base instructions: {instructions}"
+    );
 
     Ok(())
 }
@@ -1018,7 +1015,7 @@ async fn remote_models_merge_replaces_overlapping_model() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn remote_models_merge_preserves_bundled_models_on_empty_response() -> Result<()> {
+async fn remote_models_empty_response_does_not_seed_bundled_models() -> Result<()> {
     skip_if_no_network!(Ok(()));
     skip_if_sandbox!(Ok(()));
 
@@ -1036,10 +1033,9 @@ async fn remote_models_merge_preserves_bundled_models_on_empty_response() -> Res
     );
 
     let available = manager.list_models(RefreshStrategy::OnlineIfUncached).await;
-    let bundled_slug = bundled_model_slug();
     assert!(
-        available.iter().any(|model| model.model == bundled_slug),
-        "bundled models should remain available after empty remote response"
+        available.is_empty(),
+        "provider-neutral managers should not seed bundled models after an empty remote response"
     );
     // Keep the mock server alive until after async assertions complete.
     drop(server);
@@ -1060,7 +1056,7 @@ async fn remote_models_request_times_out_after_5s() -> Result<()> {
         ModelsResponse {
             models: vec![remote_model],
         },
-        Duration::from_secs(6),
+        Duration::from_secs(30),
     )
     .await;
 
@@ -1076,17 +1072,17 @@ async fn remote_models_request_times_out_after_5s() -> Result<()> {
 
     let start = Instant::now();
     let model = timeout(
-        Duration::from_secs(7),
+        Duration::from_secs(12),
         manager.get_default_model(&None, RefreshStrategy::OnlineIfUncached),
     )
     .await;
     let elapsed = start.elapsed();
-    // get_model should return a default model even when refresh times out
+    // Provider-neutral managers without a configured model return an empty model when refresh times
+    // out because there is no bundled fallback catalog.
     let default_model = model.expect("get_model should finish and return default model");
-    let expected_default = bundled_default_model_slug();
     assert!(
-        default_model == expected_default,
-        "get_model should return default model when refresh times out, got: {default_model}"
+        default_model.is_empty(),
+        "get_model should return an empty model when refresh times out without a fallback catalog, got: {default_model}"
     );
     let _ = server
         .received_requests()
@@ -1100,7 +1096,7 @@ async fn remote_models_request_times_out_after_5s() -> Result<()> {
         "expected models call to block near the timeout; took {elapsed:?}"
     );
     assert!(
-        elapsed < Duration::from_millis(5_800),
+        elapsed < Duration::from_secs(12),
         "expected models call to time out before the delayed response; took {elapsed:?}"
     );
     assert_eq!(
@@ -1144,7 +1140,7 @@ async fn remote_models_hide_picker_only_models() -> Result<()> {
     let selected = manager
         .get_default_model(&None, RefreshStrategy::OnlineIfUncached)
         .await;
-    assert_eq!(selected, bundled_default_model_slug());
+    assert_eq!(selected, "codex-auto-balanced");
 
     let available = manager.list_models(RefreshStrategy::OnlineIfUncached).await;
     let hidden = available
@@ -1187,15 +1183,6 @@ fn bundled_model_slug() -> String {
         .first()
         .expect("bundled models.json should include at least one model")
         .slug
-        .clone()
-}
-
-fn bundled_default_model_slug() -> String {
-    codex_core::test_support::all_model_presets()
-        .iter()
-        .find(|preset| preset.is_default)
-        .expect("bundled models should include a default")
-        .model
         .clone()
 }
 

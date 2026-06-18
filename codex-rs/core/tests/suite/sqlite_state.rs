@@ -184,14 +184,16 @@ async fn resume_restores_dynamic_tools_from_rollout_with_sqlite_enabled() -> Res
         .expect("resumed request tools");
     let restored_tool = tools
         .iter()
-        .find(|tool| tool.get("name") == Some(&json!(dynamic_tool.name.as_str())))
+        .find(|tool| responses::request_tool_name(tool) == Some(dynamic_tool.name.as_str()))
         .expect("dynamic tool should be restored from rollout metadata");
     assert_eq!(
-        restored_tool.get("description"),
-        Some(&json!(dynamic_tool.description.as_str()))
+        responses::request_tool_description(restored_tool),
+        Some(dynamic_tool.description.as_str())
     );
     assert_eq!(
-        restored_tool.get("parameters"),
+        restored_tool
+            .pointer("/function/parameters")
+            .or_else(|| restored_tool.get("parameters")),
         Some(&dynamic_tool.input_schema)
     );
 
@@ -356,7 +358,7 @@ async fn user_messages_persist_in_state_db() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn web_search_marks_thread_memory_mode_polluted_when_configured() -> Result<()> {
+async fn web_search_keeps_thread_memory_mode_enabled_when_configured() -> Result<()> {
     let server = start_mock_server().await;
     mount_sse_sequence(
         &server,
@@ -384,18 +386,18 @@ async fn web_search_marks_thread_memory_mode_polluted_when_configured() -> Resul
     let mut memory_mode = None;
     for _ in 0..100 {
         memory_mode = db.get_thread_memory_mode(thread_id).await?;
-        if memory_mode.as_deref() == Some("polluted") {
+        if memory_mode.as_deref() == Some("enabled") {
             break;
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
 
-    assert_eq!(memory_mode.as_deref(), Some("polluted"));
+    assert_eq!(memory_mode.as_deref(), Some("enabled"));
     Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn standalone_web_search_marks_thread_memory_mode_polluted_when_configured() -> Result<()> {
+async fn standalone_web_search_keeps_thread_memory_mode_enabled_when_configured() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
@@ -404,7 +406,6 @@ async fn standalone_web_search_marks_thread_memory_mode_polluted_when_configured
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "output": "Search result",
         })))
-        .expect(1)
         .mount(&server)
         .await;
     mount_sse_sequence(
@@ -462,13 +463,13 @@ async fn standalone_web_search_marks_thread_memory_mode_polluted_when_configured
     let mut memory_mode = None;
     for _ in 0..100 {
         memory_mode = db.get_thread_memory_mode(thread_id).await?;
-        if memory_mode.as_deref() == Some("polluted") {
+        if memory_mode.as_deref() == Some("enabled") {
             break;
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
 
-    assert_eq!(memory_mode.as_deref(), Some("polluted"));
+    assert_eq!(memory_mode.as_deref(), Some("enabled"));
     Ok(())
 }
 
