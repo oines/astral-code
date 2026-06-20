@@ -290,6 +290,8 @@ pub struct MemoriesToml {
     pub consolidation_model: Option<String>,
     /// Whether compact should trigger memory extraction for the current thread.
     pub compact_memory: Option<CompactMemoryMode>,
+    /// Sandbox policy used by memory phase 2 consolidation.
+    pub phase2_sandbox: Option<Phase2SandboxMode>,
 }
 
 /// Effective memories settings after defaults are applied.
@@ -308,6 +310,7 @@ pub struct MemoriesConfig {
     pub extract_model: Option<String>,
     pub consolidation_model: Option<String>,
     pub compact_memory: CompactMemoryMode,
+    pub phase2_sandbox: Phase2SandboxMode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -316,6 +319,13 @@ pub enum CompactMemoryMode {
     Off,
     Enqueue,
     Blocking,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Phase2SandboxMode {
+    WorkspaceWrite,
+    DangerFullAccess,
 }
 
 impl Default for MemoriesConfig {
@@ -334,6 +344,7 @@ impl Default for MemoriesConfig {
             extract_model: None,
             consolidation_model: None,
             compact_memory: CompactMemoryMode::Off,
+            phase2_sandbox: Phase2SandboxMode::WorkspaceWrite,
         }
     }
 }
@@ -381,6 +392,7 @@ impl From<MemoriesToml> for MemoriesConfig {
             extract_model: toml.extract_model,
             consolidation_model: toml.consolidation_model,
             compact_memory: toml.compact_memory.unwrap_or(defaults.compact_memory),
+            phase2_sandbox: toml.phase2_sandbox.unwrap_or(defaults.phase2_sandbox),
         }
     }
 }

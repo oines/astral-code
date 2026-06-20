@@ -14,6 +14,7 @@ use crate::workspace::prepare_memory_workspace;
 use crate::workspace::reset_memory_workspace_baseline;
 use crate::workspace::write_workspace_diff;
 use codex_config::Constrained;
+use codex_config::types::Phase2SandboxMode;
 use codex_core::config::Config;
 use codex_features::Feature;
 use codex_protocol::ThreadId;
@@ -370,14 +371,18 @@ mod agent {
             .features
             .disable(Feature::SkillMcpDependencyInstall);
 
-        // Sandbox policy
-        let writable_roots = vec![root];
-        // The consolidation agent only needs local memory-root write access and no network.
-        let consolidation_sandbox_policy = SandboxPolicy::WorkspaceWrite {
-            writable_roots,
-            network_access: false,
-            exclude_tmpdir_env_var: true,
-            exclude_slash_tmp: true,
+        let consolidation_sandbox_policy = match config.memories.phase2_sandbox {
+            Phase2SandboxMode::WorkspaceWrite => {
+                let writable_roots = vec![root];
+                // The consolidation agent only needs local memory-root write access and no network.
+                SandboxPolicy::WorkspaceWrite {
+                    writable_roots,
+                    network_access: false,
+                    exclude_tmpdir_env_var: true,
+                    exclude_slash_tmp: true,
+                }
+            }
+            Phase2SandboxMode::DangerFullAccess => SandboxPolicy::DangerFullAccess,
         };
         agent_config
             .permissions
