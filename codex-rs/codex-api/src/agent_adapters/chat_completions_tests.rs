@@ -135,6 +135,120 @@ fn request_maps_tool_use_and_tool_result_to_chat_shape() {
 }
 
 #[test]
+fn request_moves_read_image_tool_result_to_user_multimodal_message() {
+    let request = AgentRequest {
+        model: "mimo-v2.5".to_string(),
+        instructions: Vec::new(),
+        messages: vec![
+            AgentMessage {
+                role: MessageRole::User,
+                content: vec![ContentBlock::Text {
+                    text: "inspect image".to_string(),
+                }],
+                id: None,
+            },
+            AgentMessage {
+                role: MessageRole::Assistant,
+                content: vec![ContentBlock::ToolUse {
+                    id: "call_read".to_string(),
+                    name: "Read".to_string(),
+                    input: json!({ "file_path": "/tmp/test.png" }),
+                }],
+                id: None,
+            },
+            AgentMessage {
+                role: MessageRole::User,
+                content: vec![ContentBlock::ToolResult {
+                    tool_use_id: "call_read".to_string(),
+                    content: vec![ToolResultContent::Image {
+                        source: ImageSource::Base64 {
+                            media_type: "image/png".to_string(),
+                            data: "AAA".to_string(),
+                        },
+                        detail: Some("high".to_string()),
+                    }],
+                    is_error: false,
+                }],
+                id: None,
+            },
+        ],
+        tools: vec![AgentTool {
+            name: "Read".to_string(),
+            description: "Read a file".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": { "file_path": { "type": "string" } },
+                "required": ["file_path"]
+            }),
+            metadata: BTreeMap::new(),
+        }],
+        tool_choice: ToolChoice::Auto,
+        parallel_tool_calls: true,
+        stream: false,
+        reasoning: None,
+        metadata: RequestMetadata::default(),
+    };
+
+    assert_eq!(
+        to_chat_completions_request(&request, ChatCompletionsOptions { max_tokens: None }),
+        json!({
+            "model": "mimo-v2.5",
+            "stream": false,
+            "messages": [
+                { "role": "user", "content": "inspect image" },
+                {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_read",
+                        "type": "function",
+                        "function": {
+                            "name": "Read",
+                            "arguments": r#"{"file_path":"/tmp/test.png"}"#
+                        }
+                    }]
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_read",
+                    "content": "Read returned an image. The image is attached in the following user message."
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Image returned by Read tool call call_read."
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": "data:image/png;base64,AAA",
+                                "detail": "high"
+                            }
+                        }
+                    ]
+                }
+            ],
+            "tools": [{
+                "type": "function",
+                "function": {
+                    "name": "Read",
+                    "description": "Read a file",
+                    "parameters": {
+                        "type": "object",
+                        "properties": { "file_path": { "type": "string" } },
+                        "required": ["file_path"]
+                    }
+                }
+            }],
+            "tool_choice": "auto",
+            "parallel_tool_calls": true
+        })
+    );
+}
+
+#[test]
 fn request_collapses_system_and_developer_messages_to_head_system_message() {
     let request = AgentRequest {
         model: "astral-large".to_string(),
