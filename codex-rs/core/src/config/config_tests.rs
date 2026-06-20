@@ -54,6 +54,7 @@ use codex_config::types::NotificationMethod;
 use codex_config::types::Notifications;
 use codex_config::types::OtelConfigToml;
 use codex_config::types::OtelExporterKind;
+use codex_config::types::Phase2SandboxMode;
 use codex_config::types::SandboxWorkspaceWrite;
 use codex_config::types::SessionPickerViewMode;
 use codex_config::types::SkillsConfig;
@@ -323,6 +324,7 @@ min_rollout_idle_hours = 24
 	extract_model = "gpt-5-mini"
 	consolidation_model = "gpt-5.2"
 	compact_memory = "blocking"
+	phase2_sandbox = "danger_full_access"
 	"#;
     let memories_cfg =
         toml::from_str::<ConfigToml>(memories).expect("TOML deserialization should succeed");
@@ -341,6 +343,7 @@ min_rollout_idle_hours = 24
             extract_model: Some("gpt-5-mini".to_string()),
             consolidation_model: Some("gpt-5.2".to_string()),
             compact_memory: Some(CompactMemoryMode::Blocking),
+            phase2_sandbox: Some(Phase2SandboxMode::DangerFullAccess),
         }),
         memories_cfg.memories
     );
@@ -368,6 +371,7 @@ min_rollout_idle_hours = 24
             extract_model: Some("gpt-5-mini".to_string()),
             consolidation_model: Some("gpt-5.2".to_string()),
             compact_memory: CompactMemoryMode::Blocking,
+            phase2_sandbox: Phase2SandboxMode::DangerFullAccess,
         }
     );
 
