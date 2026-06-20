@@ -14,6 +14,7 @@ use codex_agent_protocol::ToolResultContent;
 use serde_json::Map;
 use serde_json::Value;
 use serde_json::json;
+use std::collections::HashMap;
 
 const TEXT_BLOCK_INDEX: usize = 0;
 const REASONING_BLOCK_INDEX: usize = 1;
@@ -56,11 +57,17 @@ pub fn to_chat_completions_request(
         body.insert("response_format".to_string(), response_format.clone());
     }
 
+    let tool_use_names = tool_use_names_by_id(&request.messages);
     let mut messages = request
         .instructions
         .iter()
         .map(instruction_to_chat_message)
-        .chain(request.messages.iter().flat_map(message_to_chat_messages))
+        .chain(
+            request
+                .messages
+                .iter()
+                .flat_map(|message| message_to_chat_messages(message, &tool_use_names)),
+        )
         .collect::<Vec<_>>();
     normalize_system_messages(&mut messages);
     merge_adjacent_assistant_messages(&mut messages);
@@ -231,13 +238,28 @@ fn instruction_to_chat_message(block: &ContentBlock) -> Value {
     })
 }
 
-fn message_to_chat_messages(message: &AgentMessage) -> Vec<Value> {
+fn tool_use_names_by_id(messages: &[AgentMessage]) -> HashMap<String, String> {
+    let mut names = HashMap::new();
+    for message in messages {
+        for block in &message.content {
+            if let ContentBlock::ToolUse { id, name, input: _ } = block {
+                names.insert(id.clone(), name.clone());
+            }
+        }
+    }
+    names
+}
+
+fn message_to_chat_messages(
+    message: &AgentMessage,
+    tool_use_names: &HashMap<String, String>,
+) -> Vec<Value> {
     match message.role {
         MessageRole::System | MessageRole::Developer => vec![json!({
             "role": "system",
             "content": content_blocks_text(&message.content),
         })],
-        MessageRole::User => user_message_to_chat_messages(message),
+        MessageRole::User => user_message_to_chat_messages(message, tool_use_names),
         MessageRole::Assistant => vec![assistant_message_to_chat(message)],
     }
 }
@@ -378,7 +400,10 @@ fn non_empty_string(value: &Value) -> Option<String> {
         .map(str::to_string)
 }
 
-fn user_message_to_chat_messages(message: &AgentMessage) -> Vec<Value> {
+fn user_message_to_chat_messages(
+    message: &AgentMessage,
+    tool_use_names: &HashMap<String, String>,
+) -> Vec<Value> {
     let mut messages = Vec::new();
     let user_blocks = message
         .content
@@ -420,7 +445,7 @@ fn user_message_to_chat_messages(message: &AgentMessage) -> Vec<Value> {
         message
             .content
             .iter()
-            .filter_map(tool_result_to_chat_message),
+            .flat_map(|block| tool_result_to_chat_messages(block, tool_use_names)),
     );
     messages
 }
@@ -476,21 +501,37 @@ fn assistant_message_to_chat(message: &AgentMessage) -> Value {
     Value::Object(value)
 }
 
-fn tool_result_to_chat_message(block: &ContentBlock) -> Option<Value> {
+fn tool_result_to_chat_messages(
+    block: &ContentBlock,
+    tool_use_names: &HashMap<String, String>,
+) -> Vec<Value> {
     let ContentBlock::ToolResult {
         tool_use_id,
         content,
         is_error: _,
     } = block
     else {
-        return None;
+        return Vec::new();
     };
 
-    Some(json!({
+    if is_read_image_tool_result(tool_use_id, content, tool_use_names) {
+        let mut messages = vec![json!({
+            "role": "tool",
+            "tool_call_id": tool_use_id,
+            "content": read_image_tool_result_text(content),
+        })];
+        messages.push(json!({
+            "role": "user",
+            "content": read_image_tool_result_user_content(tool_use_id, content),
+        }));
+        return messages;
+    }
+
+    vec![json!({
         "role": "tool",
         "tool_call_id": tool_use_id,
         "content": tool_result_to_chat_content(content),
-    }))
+    })]
 }
 
 fn tool_use_to_chat_tool_call(block: &ContentBlock) -> Option<Value> {
@@ -702,6 +743,60 @@ fn content_block_text(block: &ContentBlock) -> String {
             tool_result_content_text(content)
         ),
     }
+}
+
+fn is_read_image_tool_result(
+    tool_use_id: &str,
+    content: &[ToolResultContent],
+    tool_use_names: &HashMap<String, String>,
+) -> bool {
+    tool_use_names
+        .get(tool_use_id)
+        .is_some_and(|name| name == "Read")
+        && content
+            .iter()
+            .any(|content| matches!(content, ToolResultContent::Image { .. }))
+}
+
+fn read_image_tool_result_text(content: &[ToolResultContent]) -> String {
+    let text = content
+        .iter()
+        .filter_map(|content| match content {
+            ToolResultContent::Text { text } => Some(text.clone()),
+            ToolResultContent::Json { value } => serde_json::to_string(value).ok(),
+            ToolResultContent::Image { .. } => None,
+        })
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    if text.is_empty() {
+        "Read returned an image. The image is attached in the following user message.".to_string()
+    } else {
+        format!(
+            "{text}\n\nRead returned an image. The image is attached in the following user message."
+        )
+    }
+}
+
+fn read_image_tool_result_user_content(tool_use_id: &str, content: &[ToolResultContent]) -> Value {
+    let mut parts = vec![json!({
+        "type": "text",
+        "text": format!("Image returned by Read tool call {tool_use_id}."),
+    })];
+
+    parts.extend(content.iter().filter_map(|content| match content {
+        ToolResultContent::Image { source, detail } => {
+            let mut image_url = json!({ "url": image_source_url(source) });
+            if let Some(detail) = detail {
+                image_url["detail"] = Value::String(detail.clone());
+            }
+            Some(json!({ "type": "image_url", "image_url": image_url }))
+        }
+        ToolResultContent::Text { .. } | ToolResultContent::Json { .. } => None,
+    }));
+
+    Value::Array(parts)
 }
 
 fn tool_result_content_text(content: &[ToolResultContent]) -> String {
