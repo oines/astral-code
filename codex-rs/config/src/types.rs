@@ -288,6 +288,8 @@ pub struct MemoriesToml {
     pub extract_model: Option<String>,
     /// Model used for memory consolidation.
     pub consolidation_model: Option<String>,
+    /// Whether compact should trigger memory extraction for the current thread.
+    pub compact_memory: Option<CompactMemoryMode>,
 }
 
 /// Effective memories settings after defaults are applied.
@@ -305,6 +307,15 @@ pub struct MemoriesConfig {
     pub min_rate_limit_remaining_percent: i64,
     pub extract_model: Option<String>,
     pub consolidation_model: Option<String>,
+    pub compact_memory: CompactMemoryMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CompactMemoryMode {
+    Off,
+    Enqueue,
+    Blocking,
 }
 
 impl Default for MemoriesConfig {
@@ -322,6 +333,7 @@ impl Default for MemoriesConfig {
             min_rate_limit_remaining_percent: DEFAULT_MEMORIES_MIN_RATE_LIMIT_REMAINING_PERCENT,
             extract_model: None,
             consolidation_model: None,
+            compact_memory: CompactMemoryMode::Off,
         }
     }
 }
@@ -368,6 +380,7 @@ impl From<MemoriesToml> for MemoriesConfig {
                 .clamp(0, 100),
             extract_model: toml.extract_model,
             consolidation_model: toml.consolidation_model,
+            compact_memory: toml.compact_memory.unwrap_or(defaults.compact_memory),
         }
     }
 }

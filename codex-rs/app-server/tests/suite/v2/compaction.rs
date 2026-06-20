@@ -26,11 +26,17 @@ use codex_app_server_protocol::TurnCompletedNotification;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::UserInput as V2UserInput;
+use codex_features::Feature;
+use codex_protocol::ThreadId;
+use codex_state::StateRuntime;
 use core_test_support::responses;
 use core_test_support::skip_if_no_network;
 use pretty_assertions::assert_eq;
 use std::collections::BTreeMap;
+use std::fs::OpenOptions;
+use std::io::Write;
 use tempfile::TempDir;
+use tokio::time::sleep;
 use tokio::time::timeout;
 
 // macOS and Windows Bazel CI can spend tens of seconds starting app-server
@@ -274,6 +280,122 @@ async fn thread_compact_start_triggers_compaction_and_returns_empty_response() -
     assert_eq!(started.thread_id, thread_id);
     assert_eq!(completed.thread_id, thread_id);
     assert_eq!(started_id, completed_id);
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn thread_compact_start_enqueue_runs_memory_extraction() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    const USER_MESSAGE: &str = "remember compact memory should extract this rollout";
+    const TURN_REPLY: &str = "TURN_REPLY";
+    const COMPACT_SUMMARY: &str = "MANUAL_COMPACT_SUMMARY";
+    const RAW_MEMORY: &str = "The compact memory e2e test proved stage one extraction ran.";
+    const ROLLOUT_SUMMARY: &str = "Compact memory extraction ran";
+    const ROLLOUT_SLUG: &str = "compact-memory-extraction-ran";
+
+    let server = responses::start_mock_server().await;
+    let memory_payload = serde_json::json!({
+        "rollout_summary": ROLLOUT_SUMMARY,
+        "rollout_slug": ROLLOUT_SLUG,
+        "raw_memory": RAW_MEMORY,
+    })
+    .to_string();
+    let responses_log = responses::mount_sse_sequence(
+        &server,
+        vec![
+            responses::sse(vec![
+                responses::ev_assistant_message("turn-message", TURN_REPLY),
+                responses::ev_completed_with_tokens("turn-response", /*total_tokens*/ 200),
+            ]),
+            responses::sse(vec![
+                responses::ev_assistant_message("compact-message", COMPACT_SUMMARY),
+                responses::ev_completed_with_tokens("compact-response", /*total_tokens*/ 200),
+            ]),
+            responses::chat_completions_text_sse(&memory_payload),
+        ],
+    )
+    .await;
+
+    let codex_home = TempDir::new()?;
+    write_mock_responses_config_toml(
+        codex_home.path(),
+        &server.uri(),
+        &BTreeMap::from([(Feature::MemoryTool, true)]),
+        AUTO_COMPACT_LIMIT,
+        /*requires_astral_auth*/ None,
+        "mock_provider",
+        COMPACT_PROMPT,
+    )?;
+    let mut config_file = OpenOptions::new()
+        .append(true)
+        .open(codex_home.path().join("config.toml"))?;
+    writeln!(
+        config_file,
+        r#"
+[memories]
+compact_memory = "enqueue"
+"#
+    )?;
+
+    let mut mcp = TestAppServer::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+
+    let thread_id = start_thread(&mut mcp).await?;
+    send_turn_and_wait(&mut mcp, &thread_id, USER_MESSAGE).await?;
+
+    let compact_id = mcp
+        .send_thread_compact_start_request(ThreadCompactStartParams {
+            thread_id: thread_id.clone(),
+        })
+        .await?;
+    let compact_resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(compact_id)),
+    )
+    .await??;
+    let _compact: ThreadCompactStartResponse =
+        to_response::<ThreadCompactStartResponse>(compact_resp)?;
+
+    let started = wait_for_context_compaction_started(&mut mcp).await?;
+    let completed = wait_for_context_compaction_completed(&mut mcp).await?;
+    assert_eq!(started.thread_id, thread_id);
+    assert_eq!(completed.thread_id, thread_id);
+
+    let state_db =
+        StateRuntime::init(codex_home.path().to_path_buf(), "mock_provider".into()).await?;
+    let thread_id = ThreadId::from_string(&thread_id)?;
+    let stage1_output = timeout(DEFAULT_READ_TIMEOUT, async {
+        loop {
+            let outputs = state_db
+                .memories()
+                .list_stage1_outputs_for_global(/*n*/ 10)
+                .await?;
+            if let Some(output) = outputs
+                .into_iter()
+                .find(|output| output.thread_id == thread_id)
+            {
+                return anyhow::Ok(output);
+            }
+            sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await??;
+
+    assert_eq!(stage1_output.raw_memory, RAW_MEMORY);
+    assert_eq!(stage1_output.rollout_summary, ROLLOUT_SUMMARY);
+    assert_eq!(stage1_output.rollout_slug.as_deref(), Some(ROLLOUT_SLUG));
+    let response_requests = responses_log.requests();
+    assert!(
+        response_requests.len() >= 3,
+        "turn, compact, and memory stage-one requests should all be sent"
+    );
+    assert_eq!(
+        response_requests[2].body_json().get("response_format"),
+        None,
+        "memory stage-one requests must stay compatible with chat completions providers"
+    );
 
     Ok(())
 }

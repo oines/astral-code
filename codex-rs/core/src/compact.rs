@@ -23,6 +23,7 @@ use codex_analytics::CompactionStatus;
 use codex_analytics::CompactionStrategy;
 use codex_analytics::CompactionTrigger;
 use codex_analytics::now_unix_seconds;
+use codex_extension_api::CompactStartInput;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
 use codex_protocol::items::ContextCompactionItem;
@@ -152,6 +153,7 @@ async fn run_compact_task_inner(
             return Err(CodexErr::TurnAborted);
         }
     }
+    run_extension_before_compact(&sess, &turn_context, trigger).await;
     let result = run_compact_task_inner_impl(
         Arc::clone(&sess),
         Arc::clone(&turn_context),
@@ -186,6 +188,32 @@ async fn run_compact_task_inner(
         )
         .await;
     result.map(|_| ())
+}
+
+async fn run_extension_before_compact(
+    sess: &Arc<Session>,
+    turn_context: &Arc<TurnContext>,
+    trigger: CompactionTrigger,
+) {
+    let trigger = compaction_trigger_label(trigger);
+    for contributor in sess.services.extensions.compact_lifecycle_contributors() {
+        contributor
+            .before_compact(CompactStartInput {
+                thread_id: sess.thread_id,
+                turn_id: &turn_context.sub_id,
+                trigger,
+                session_store: &sess.services.session_extension_data,
+                thread_store: &sess.services.thread_extension_data,
+            })
+            .await;
+    }
+}
+
+fn compaction_trigger_label(trigger: CompactionTrigger) -> &'static str {
+    match trigger {
+        CompactionTrigger::Manual => "manual",
+        CompactionTrigger::Auto => "auto",
+    }
 }
 
 async fn run_compact_task_inner_impl(

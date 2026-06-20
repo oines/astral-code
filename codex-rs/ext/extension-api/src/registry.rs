@@ -3,6 +3,7 @@ use std::sync::Arc;
 use codex_protocol::protocol::ReviewDecision;
 
 use crate::ApprovalReviewContributor;
+use crate::CompactLifecycleContributor;
 use crate::ConfigContributor;
 use crate::ContextContributor;
 use crate::ExtensionData;
@@ -21,6 +22,7 @@ pub struct ExtensionRegistryBuilder<C: Sync> {
     event_sink: Arc<dyn ExtensionEventSink>,
     thread_lifecycle_contributors: Vec<Arc<dyn ThreadLifecycleContributor<C>>>,
     turn_lifecycle_contributors: Vec<Arc<dyn TurnLifecycleContributor>>,
+    compact_lifecycle_contributors: Vec<Arc<dyn CompactLifecycleContributor>>,
     config_contributors: Vec<Arc<dyn ConfigContributor<C>>>,
     token_usage_contributors: Vec<Arc<dyn TokenUsageContributor>>,
     context_contributors: Vec<Arc<dyn ContextContributor>>,
@@ -37,6 +39,7 @@ impl<C: Sync> Default for ExtensionRegistryBuilder<C> {
             event_sink: Arc::new(NoopExtensionEventSink),
             thread_lifecycle_contributors: Vec::new(),
             turn_lifecycle_contributors: Vec::new(),
+            compact_lifecycle_contributors: Vec::new(),
             config_contributors: Vec::new(),
             token_usage_contributors: Vec::new(),
             approval_review_contributors: Vec::new(),
@@ -86,6 +89,14 @@ impl<C: Sync> ExtensionRegistryBuilder<C> {
         self.turn_lifecycle_contributors.push(contributor);
     }
 
+    /// Registers one compact-lifecycle contributor.
+    pub fn compact_lifecycle_contributor(
+        &mut self,
+        contributor: Arc<dyn CompactLifecycleContributor>,
+    ) {
+        self.compact_lifecycle_contributors.push(contributor);
+    }
+
     /// Registers one config contributor.
     pub fn config_contributor(&mut self, contributor: Arc<dyn ConfigContributor<C>>) {
         self.config_contributors.push(contributor);
@@ -127,6 +138,7 @@ impl<C: Sync> ExtensionRegistryBuilder<C> {
             event_sink: self.event_sink,
             thread_lifecycle_contributors: self.thread_lifecycle_contributors,
             turn_lifecycle_contributors: self.turn_lifecycle_contributors,
+            compact_lifecycle_contributors: self.compact_lifecycle_contributors,
             config_contributors: self.config_contributors,
             token_usage_contributors: self.token_usage_contributors,
             approval_review_contributors: self.approval_review_contributors,
@@ -144,6 +156,7 @@ pub struct ExtensionRegistry<C: Sync> {
     event_sink: Arc<dyn ExtensionEventSink>,
     thread_lifecycle_contributors: Vec<Arc<dyn ThreadLifecycleContributor<C>>>,
     turn_lifecycle_contributors: Vec<Arc<dyn TurnLifecycleContributor>>,
+    compact_lifecycle_contributors: Vec<Arc<dyn CompactLifecycleContributor>>,
     config_contributors: Vec<Arc<dyn ConfigContributor<C>>>,
     token_usage_contributors: Vec<Arc<dyn TokenUsageContributor>>,
     context_contributors: Vec<Arc<dyn ContextContributor>>,
@@ -168,6 +181,11 @@ impl<C: Sync> ExtensionRegistry<C> {
     /// Returns the registered turn-lifecycle contributors.
     pub fn turn_lifecycle_contributors(&self) -> &[Arc<dyn TurnLifecycleContributor>] {
         &self.turn_lifecycle_contributors
+    }
+
+    /// Returns the registered compact-lifecycle contributors.
+    pub fn compact_lifecycle_contributors(&self) -> &[Arc<dyn CompactLifecycleContributor>] {
+        &self.compact_lifecycle_contributors
     }
 
     /// Returns the registered config contributors.

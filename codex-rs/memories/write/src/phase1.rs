@@ -20,8 +20,6 @@ use codex_rollout::should_persist_response_item_for_memories;
 use codex_secrets::redact_secrets;
 use futures::StreamExt;
 use serde::Deserialize;
-use serde_json::Value;
-use serde_json::json;
 use std::path::Path;
 use std::sync::Arc;
 use tracing::info;
@@ -58,7 +56,7 @@ struct StageOneOutput {
     #[serde(rename = "rollout_summary")]
     pub(crate) rollout_summary: String,
     /// Optional slug used to derive rollout summary artifact filenames.
-    #[serde(default, rename = "rollout_slug")]
+    #[serde(rename = "rollout_slug")]
     pub(crate) rollout_slug: Option<String>,
 }
 
@@ -115,6 +113,61 @@ pub async fn run(context: Arc<MemoryStartupContext>, config: Arc<Config>) {
     );
 }
 
+/// Runs memory phase 1 for the current thread only.
+pub async fn run_current_thread(context: Arc<MemoryStartupContext>, config: Arc<Config>) {
+    let Some(stage_one_context) = build_request_context(context.as_ref(), config.as_ref()).await
+    else {
+        context.counter(
+            MEMORY_PHASE_ONE_JOBS,
+            /*inc*/ 1,
+            &[("status", "compact_skipped_no_model")],
+        );
+        return;
+    };
+    let _phase_one_e2e_timer = stage_one_context.start_timer(MEMORY_PHASE_ONE_E2E_MS);
+
+    let Some(state_db) = context.state_db() else {
+        warn!("state db unavailable while claiming compact phase-1 job; skipping");
+        return;
+    };
+    let claim = match state_db
+        .memories()
+        .claim_stage1_job_for_thread(
+            context.thread_id(),
+            context.thread_id(),
+            crate::stage_one::JOB_LEASE_SECONDS,
+            config.memories.max_rollouts_per_startup,
+        )
+        .await
+    {
+        Ok(Some(claim)) => claim,
+        Ok(None) => {
+            stage_one_context.counter(
+                MEMORY_PHASE_ONE_JOBS,
+                /*inc*/ 1,
+                &[("status", "compact_skipped_no_candidate")],
+            );
+            return;
+        }
+        Err(err) => {
+            warn!("memories db claim_stage1_job_for_thread failed during compact memory: {err}");
+            return;
+        }
+    };
+
+    let outcomes = run_jobs(context, config, vec![claim], stage_one_context.clone()).await;
+    let counts = aggregate_stats(outcomes);
+    emit_metrics(&stage_one_context, &counts);
+    info!(
+        "compact memory stage-1 extraction complete: {} job(s) claimed, {} succeeded ({} with output, {} no output), {} failed",
+        counts.claimed,
+        counts.succeeded_with_output + counts.succeeded_no_output,
+        counts.succeeded_with_output,
+        counts.succeeded_no_output,
+        counts.failed
+    );
+}
+
 /// Prune old un-used "dead" raw memories.
 pub async fn prune(context: &MemoryStartupContext, config: &Config) {
     if let Some(db) = context.state_db() {
@@ -138,20 +191,6 @@ pub async fn prune(context: &MemoryStartupContext, config: &Config) {
             }
         }
     }
-}
-
-/// JSON schema used to constrain phase-1 model output.
-pub fn output_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "rollout_summary": { "type": "string" },
-            "rollout_slug": { "type": ["string", "null"] },
-            "raw_memory": { "type": "string" }
-        },
-        "required": ["rollout_summary", "rollout_slug", "raw_memory"],
-        "additionalProperties": false
-    })
 }
 
 async fn claim_startup_jobs(
@@ -317,19 +356,37 @@ mod job {
         prompt.base_instructions = BaseInstructions {
             text: crate::stage_one::PROMPT.to_string(),
         };
-        prompt.output_schema = Some(output_schema());
-        prompt.output_schema_strict = true;
 
         let (result, token_usage) = context
             .stream_stage_one_prompt(config, &prompt, stage_one_context)
             .await?;
 
-        let mut output: StageOneOutput = serde_json::from_str(&result)?;
+        let mut output = parse_stage_one_output(&result)?;
         output.raw_memory = redact_secrets(output.raw_memory);
         output.rollout_summary = redact_secrets(output.rollout_summary);
         output.rollout_slug = output.rollout_slug.map(redact_secrets);
 
         Ok((output, token_usage))
+    }
+
+    fn parse_stage_one_output(result: &str) -> anyhow::Result<StageOneOutput> {
+        let trimmed = result.trim();
+        let json_text = strip_whole_json_fence(trimmed).unwrap_or(trimmed);
+        serde_json::from_str(json_text).map_err(|err| {
+            anyhow::anyhow!("stage-one model output was not valid memory JSON: {err}")
+        })
+    }
+
+    fn strip_whole_json_fence(text: &str) -> Option<&str> {
+        let fenced = text.strip_prefix("```")?;
+        let (language, body) = fenced.split_once('\n')?;
+        let language = language.trim();
+        if !language.is_empty() && !language.eq_ignore_ascii_case("json") {
+            return None;
+        }
+        let body = body.trim_end();
+        let body = body.strip_suffix("```")?;
+        Some(body.trim())
     }
 
     mod result {
@@ -523,45 +580,39 @@ mod job {
         }
 
         #[test]
-        fn output_schema_requires_rollout_slug_and_keeps_it_nullable() {
-            let schema = output_schema();
-            let properties = schema
-                .get("properties")
-                .and_then(Value::as_object)
-                .expect("properties object");
-            let required = schema
-                .get("required")
-                .and_then(Value::as_array)
-                .expect("required array");
+        fn parses_stage_one_json_output() {
+            let output = parse_stage_one_output(
+                r#"{"rollout_summary":"summary","rollout_slug":null,"raw_memory":"memory"}"#,
+            )
+            .expect("valid stage-one output");
 
-            let mut required_keys = required
-                .iter()
-                .map(|key| key.as_str().expect("required key string"))
-                .collect::<Vec<_>>();
-            required_keys.sort_unstable();
+            assert_eq!(output.rollout_summary, "summary");
+            assert_eq!(output.rollout_slug, None);
+            assert_eq!(output.raw_memory, "memory");
+        }
 
-            assert!(
-                properties.contains_key("rollout_slug"),
-                "schema should declare rollout_slug"
+        #[test]
+        fn parses_whole_json_fenced_stage_one_output() {
+            let output = parse_stage_one_output(
+                r#"```json
+{"rollout_summary":"summary","rollout_slug":"slug","raw_memory":"memory"}
+```"#,
+            )
+            .expect("valid fenced stage-one output");
+
+            assert_eq!(output.rollout_summary, "summary");
+            assert_eq!(output.rollout_slug.as_deref(), Some("slug"));
+            assert_eq!(output.raw_memory, "memory");
+        }
+
+        #[test]
+        fn rejects_stage_one_output_with_surrounding_prose() {
+            let result = parse_stage_one_output(
+                r#"Here is the JSON:
+{"rollout_summary":"summary","rollout_slug":"slug","raw_memory":"memory"}"#,
             );
 
-            let rollout_slug_type = properties
-                .get("rollout_slug")
-                .and_then(Value::as_object)
-                .and_then(|entry| entry.get("type"))
-                .and_then(Value::as_array)
-                .expect("rollout_slug type array");
-            let mut rollout_slug_types = rollout_slug_type
-                .iter()
-                .map(|entry| entry.as_str().expect("type entry string"))
-                .collect::<Vec<_>>();
-            rollout_slug_types.sort_unstable();
-
-            assert_eq!(
-                required_keys,
-                vec!["raw_memory", "rollout_slug", "rollout_summary"]
-            );
-            assert_eq!(rollout_slug_types, vec!["null", "string"]);
+            assert!(result.is_err());
         }
     }
 }

@@ -10,12 +10,14 @@ use codex_tools::ToolExecutor;
 
 use crate::ExtensionData;
 
+mod compact_lifecycle;
 mod prompt;
 mod thread_lifecycle;
 mod tool_lifecycle;
 mod turn_input;
 mod turn_lifecycle;
 
+pub use compact_lifecycle::CompactStartInput;
 pub use prompt::PromptFragment;
 pub use prompt::PromptSlot;
 pub use thread_lifecycle::ThreadIdleInput;
@@ -87,6 +89,13 @@ pub trait TurnLifecycleContributor: Send + Sync {
 
     /// Called when the host observes an error for a running turn.
     async fn on_turn_error(&self, _input: TurnErrorInput<'_>) {}
+}
+
+/// Contributor for host-owned compact lifecycle gates.
+#[async_trait::async_trait]
+pub trait CompactLifecycleContributor: Send + Sync {
+    /// Called immediately before the host starts compacting a thread.
+    async fn before_compact(&self, _input: CompactStartInput<'_>) {}
 }
 
 /// Extension contribution that can add turn-local model input.

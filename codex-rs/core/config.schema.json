@@ -371,6 +371,14 @@
       },
       "type": "object"
     },
+    "CompactMemoryMode": {
+      "enum": [
+        "off",
+        "enqueue",
+        "blocking"
+      ],
+      "type": "string"
+    },
     "ConfigProfile": {
       "additionalProperties": false,
       "description": "Collection of common configuration options that a user can define as a unit in `config.toml`.",
@@ -1324,6 +1332,14 @@
       "additionalProperties": false,
       "description": "Memories settings loaded from config.toml.",
       "properties": {
+        "compact_memory": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/CompactMemoryMode"
+            }
+          ],
+          "description": "Whether compact should trigger memory extraction for the current thread."
+        },
         "consolidation_model": {
           "description": "Model used for memory consolidation.",
           "type": "string"

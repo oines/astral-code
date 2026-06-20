@@ -3232,9 +3232,12 @@ name = "codex-memories-extension"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "codex-config",
  "codex-core",
  "codex-extension-api",
  "codex-features",
+ "codex-login",
+ "codex-memories-write",
  "codex-otel",
  "codex-tools",
  "codex-utils-absolute-path",
@@ -3247,6 +3250,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

@@ -40,9 +40,28 @@ struct Counters {
     input: i64,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CompletionMode {
+    Background,
+    Blocking,
+}
+
 /// Runs memory phase 2 (aka consolidation) in strict order. The method represents the linear
 /// flow of the consolidation phase.
 pub async fn run(context: Arc<MemoryStartupContext>, config: Arc<Config>) {
+    run_inner(context, config, CompletionMode::Background).await;
+}
+
+/// Runs memory phase 2 and waits until the consolidation agent reaches a final status.
+pub async fn run_blocking(context: Arc<MemoryStartupContext>, config: Arc<Config>) {
+    run_inner(context, config, CompletionMode::Blocking).await;
+}
+
+async fn run_inner(
+    context: Arc<MemoryStartupContext>,
+    config: Arc<Config>,
+    completion_mode: CompletionMode,
+) {
     let phase_two_e2e_timer = context.start_timer(MEMORY_PHASE_TWO_E2E_MS);
 
     if crate::memory_model_name(
@@ -197,15 +216,31 @@ pub async fn run(context: Arc<MemoryStartupContext>, config: Arc<Config>) {
     };
 
     // 9. Hand off completion handling, heartbeats, and baseline reset.
-    agent::handle(
-        Arc::clone(&context),
-        claim,
-        new_watermark,
-        raw_memories.clone(),
-        root,
-        agent,
-        phase_two_e2e_timer,
-    );
+    match completion_mode {
+        CompletionMode::Background => {
+            agent::handle(
+                Arc::clone(&context),
+                claim,
+                new_watermark,
+                raw_memories.clone(),
+                root,
+                agent,
+                phase_two_e2e_timer,
+            );
+        }
+        CompletionMode::Blocking => {
+            agent::handle_blocking(
+                Arc::clone(&context),
+                claim,
+                new_watermark,
+                raw_memories.clone(),
+                root,
+                agent,
+                phase_two_e2e_timer,
+            )
+            .await;
+        }
+    }
 
     // 10. Emit dispatch metrics.
     let counters = Counters {
@@ -381,82 +416,123 @@ mod agent {
         };
 
         tokio::spawn(async move {
-            let _phase_two_e2e_timer = phase_two_e2e_timer;
-            let SpawnedConsolidationAgent { thread_id, thread } = agent;
+            finish_agent(
+                db,
+                context,
+                claim,
+                new_watermark,
+                selected_outputs,
+                memory_root,
+                agent,
+                phase_two_e2e_timer,
+            )
+            .await;
+        });
+    }
 
-            // Loop the agent until we have the final status.
-            let final_status =
-                loop_agent(db.clone(), claim.token.clone(), thread_id, &thread).await;
+    #[allow(clippy::too_many_arguments)]
+    pub(super) async fn handle_blocking(
+        context: Arc<MemoryStartupContext>,
+        claim: Claim,
+        new_watermark: i64,
+        selected_outputs: Vec<codex_state::Stage1Output>,
+        memory_root: codex_utils_absolute_path::AbsolutePathBuf,
+        agent: SpawnedConsolidationAgent,
+        phase_two_e2e_timer: Option<codex_otel::Timer>,
+    ) {
+        let Some(db) = context.state_db() else {
+            return;
+        };
 
-            if matches!(final_status, AgentStatus::Completed(_)) {
-                if let Some(token_usage) = thread
-                    .token_usage_info()
-                    .await
-                    .map(|info| info.total_token_usage)
-                {
-                    emit_token_usage_metrics(context.as_ref(), &token_usage);
-                }
-                // Do not reset the workspace baseline if we lost the lock.
-                let still_owns_lock = match db
-                    .memories()
-                    .heartbeat_global_phase2_job(
-                        &claim.token,
-                        crate::stage_two::JOB_LEASE_SECONDS,
-                    )
-                    .await
-                    .inspect_err(|err| {
-                        tracing::error!(
-                            "failed confirming global memory consolidation ownership before resetting workspace baseline: {err}"
-                        );
-                    }) {
-                    Ok(true) => true,
-                    Ok(false) => {
-                        tracing::error!(
-                            "lost global memory consolidation ownership before resetting workspace baseline"
-                        );
-                        false
-                    }
-                    Err(_) => {
-                        job::failed(context.as_ref(), &db, &claim, "failed_confirm_ownership")
-                            .await;
-                        false
-                    }
-                };
-                if still_owns_lock {
-                    if let Err(err) = reset_memory_workspace_baseline(&memory_root).await {
-                        tracing::error!("failed resetting memory workspace baseline: {err}");
-                        job::failed(context.as_ref(), &db, &claim, "failed_workspace_commit").await;
-                    } else if !job::succeed(
-                        context.as_ref(),
-                        &db,
-                        &claim,
-                        new_watermark,
-                        &selected_outputs,
-                        "succeeded",
-                    )
-                    .await
-                    {
-                        tracing::error!(
-                            "failed marking global memory consolidation job succeeded after resetting workspace baseline"
-                        );
-                    }
-                }
-            } else {
-                job::failed(context.as_ref(), &db, &claim, "failed_agent").await;
+        finish_agent(
+            db,
+            context,
+            claim,
+            new_watermark,
+            selected_outputs,
+            memory_root,
+            agent,
+            phase_two_e2e_timer,
+        )
+        .await;
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn finish_agent(
+        db: Arc<StateRuntime>,
+        context: Arc<MemoryStartupContext>,
+        claim: Claim,
+        new_watermark: i64,
+        selected_outputs: Vec<codex_state::Stage1Output>,
+        memory_root: codex_utils_absolute_path::AbsolutePathBuf,
+        agent: SpawnedConsolidationAgent,
+        phase_two_e2e_timer: Option<codex_otel::Timer>,
+    ) {
+        let _phase_two_e2e_timer = phase_two_e2e_timer;
+        let SpawnedConsolidationAgent { thread_id, thread } = agent;
+
+        // Loop the agent until we have the final status.
+        let final_status = loop_agent(db.clone(), claim.token.clone(), thread_id, &thread).await;
+
+        if matches!(final_status, AgentStatus::Completed(_)) {
+            if let Some(token_usage) = thread
+                .token_usage_info()
+                .await
+                .map(|info| info.total_token_usage)
+            {
+                emit_token_usage_metrics(context.as_ref(), &token_usage);
             }
-
-            let cleanup_context = Arc::clone(&context);
-            tokio::spawn(async move {
-                if let Err(err) = cleanup_context
-                    .shutdown_consolidation_agent(SpawnedConsolidationAgent { thread_id, thread })
-                    .await
+            // Do not reset the workspace baseline if we lost the lock.
+            let still_owns_lock = match db
+                .memories()
+                .heartbeat_global_phase2_job(&claim.token, crate::stage_two::JOB_LEASE_SECONDS)
+                .await
+                .inspect_err(|err| {
+                    tracing::error!(
+                        "failed confirming global memory consolidation ownership before resetting workspace baseline: {err}"
+                    );
+                }) {
+                Ok(true) => true,
+                Ok(false) => {
+                    tracing::error!(
+                        "lost global memory consolidation ownership before resetting workspace baseline"
+                    );
+                    false
+                }
+                Err(_) => {
+                    job::failed(context.as_ref(), &db, &claim, "failed_confirm_ownership").await;
+                    false
+                }
+            };
+            if still_owns_lock {
+                if let Err(err) = reset_memory_workspace_baseline(&memory_root).await {
+                    tracing::error!("failed resetting memory workspace baseline: {err}");
+                    job::failed(context.as_ref(), &db, &claim, "failed_workspace_commit").await;
+                } else if !job::succeed(
+                    context.as_ref(),
+                    &db,
+                    &claim,
+                    new_watermark,
+                    &selected_outputs,
+                    "succeeded",
+                )
+                .await
                 {
-                    warn!(
-                        "failed to auto-close global memory consolidation agent {thread_id}: {err}"
+                    tracing::error!(
+                        "failed marking global memory consolidation job succeeded after resetting workspace baseline"
                     );
                 }
-            });
-        });
+            }
+        } else {
+            job::failed(context.as_ref(), &db, &claim, "failed_agent").await;
+        }
+
+        if let Err(err) = context
+            .shutdown_consolidation_agent(SpawnedConsolidationAgent { thread_id, thread })
+            .await
+        {
+            warn!("failed to auto-close global memory consolidation agent {thread_id}: {err}");
+        }
     }
 
     async fn loop_agent(

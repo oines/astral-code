@@ -42,13 +42,18 @@ where
             &mut builder,
             state_db,
             codex_otel::global(),
-            thread_manager,
+            thread_manager.clone(),
             goal_service,
             |config: &Config| config.features.enabled(codex_features::Feature::Goals),
         );
     }
     codex_guardian::install(&mut builder, guardian_agent_spawner);
-    codex_memories_extension::install(&mut builder, codex_otel::global());
+    codex_memories_extension::install_with_compact_memory(
+        &mut builder,
+        codex_otel::global(),
+        Arc::clone(&auth_manager),
+        thread_manager,
+    );
     codex_web_search_extension::install(&mut builder, auth_manager);
     Arc::new(builder.build())
 }

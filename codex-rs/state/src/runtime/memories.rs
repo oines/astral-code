@@ -573,6 +573,45 @@ WHERE threads.id = ? AND threads.memory_mode = 'enabled'
             .transpose()
     }
 
+    /// Claims one stage-1 extraction job for the current thread when it is memory-enabled.
+    pub async fn claim_stage1_job_for_thread(
+        &self,
+        thread_id: ThreadId,
+        worker_id: ThreadId,
+        lease_seconds: i64,
+        max_running_jobs: usize,
+    ) -> anyhow::Result<Option<Stage1JobClaim>> {
+        let Some(thread) = self.enabled_thread_metadata(thread_id).await? else {
+            return Ok(None);
+        };
+        let source_updated_at = thread.updated_at.timestamp();
+        if !self
+            .stage1_source_needs_update(thread.id, source_updated_at)
+            .await?
+        {
+            return Ok(None);
+        }
+        match self
+            .try_claim_stage1_job(
+                thread.id,
+                worker_id,
+                source_updated_at,
+                lease_seconds,
+                max_running_jobs,
+            )
+            .await?
+        {
+            Stage1JobClaimOutcome::Claimed { ownership_token } => Ok(Some(Stage1JobClaim {
+                thread,
+                ownership_token,
+            })),
+            Stage1JobClaimOutcome::SkippedUpToDate
+            | Stage1JobClaimOutcome::SkippedRunning
+            | Stage1JobClaimOutcome::SkippedRetryBackoff
+            | Stage1JobClaimOutcome::SkippedRetryExhausted => Ok(None),
+        }
+    }
+
     /// Marks a thread as polluted and enqueues phase-2 forgetting when the
     /// thread participated in the last successful phase-2 baseline.
     pub async fn mark_thread_memory_mode_polluted(

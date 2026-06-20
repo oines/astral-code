@@ -15,8 +15,11 @@ workspace = true
 [dependencies]
 async-trait = { workspace = true }
 codex-core = { workspace = true }
+codex-config = { workspace = true }
 codex-extension-api = { workspace = true }
 codex-features = { workspace = true }
+codex-login = { workspace = true }
+codex-memories-write = { workspace = true }
 codex-otel = { workspace = true }
 codex-tools = { workspace = true }
 codex-utils-absolute-path = { workspace = true }
@@ -27,6 +30,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["fs"] }
+tracing = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

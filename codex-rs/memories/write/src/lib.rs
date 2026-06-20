@@ -24,6 +24,8 @@ pub use control::clear_memory_roots_contents;
 pub use extensions::prune_old_extension_resources;
 pub use prompts::build_consolidation_prompt;
 pub use prompts::build_stage_one_input_message;
+pub use start::run_compact_memory_task;
+pub use start::start_compact_memory_task;
 pub use start::start_memories_startup_task;
 pub use storage::rebuild_raw_memories_file_from_memories;
 pub use storage::rollout_summary_file_stem;

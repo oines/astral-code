@@ -50,6 +50,7 @@ use crate::plugin_cmd::PluginCli;
 use crate::plugin_cmd::PluginSubcommand;
 use crate::remote_control_cmd::RemoteControlCommand;
 use crate::sync_caps_cmd::SyncCapsCommand;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use doctor::DoctorCommand;
 use state_db_recovery as local_state_db;
 
@@ -140,6 +141,7 @@ enum Subcommand {
     Update,
 
     /// Diagnose local Astral installation, config, auth, and runtime health.
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     Doctor(DoctorCommand),
 
     /// Sync local model capability hints from LiteLLM.
@@ -1215,6 +1217,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
             )?;
             run_update_command()?;
         }
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
         Some(Subcommand::Doctor(doctor_cli)) => {
             reject_remote_mode_for_subcommand(
                 root_remote.as_deref(),
@@ -1854,8 +1857,9 @@ fn unsupported_subcommand_name_for_strict_config(
         | Some(Subcommand::Archive(_))
         | Some(Subcommand::Unarchive(_))
         | Some(Subcommand::Fork(_))
-        | Some(Subcommand::Doctor(_))
         | Some(Subcommand::SyncCaps(_)) => None,
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        Some(Subcommand::Doctor(_)) => None,
         Some(Subcommand::AppServer(app_server)) if app_server.subcommand.is_none() => None,
         Some(Subcommand::AppServer(app_server)) => {
             Some(app_server_subcommand_name(app_server.subcommand.as_ref()))

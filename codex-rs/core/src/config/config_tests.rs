@@ -38,6 +38,7 @@ use codex_config::permissions_toml::WorkspaceRootsToml;
 use codex_config::types::AppToolApproval;
 use codex_config::types::ApprovalsReviewer;
 use codex_config::types::BundledSkillsConfig;
+use codex_config::types::CompactMemoryMode;
 use codex_config::types::FeedbackConfigToml;
 use codex_config::types::HistoryPersistence;
 use codex_config::types::McpServerEnvVar;
@@ -318,10 +319,11 @@ max_unused_days = 21
 max_rollout_age_days = 42
 max_rollouts_per_startup = 9
 min_rollout_idle_hours = 24
-min_rate_limit_remaining_percent = 12
-extract_model = "gpt-5-mini"
-consolidation_model = "gpt-5.2"
-"#;
+	min_rate_limit_remaining_percent = 12
+	extract_model = "gpt-5-mini"
+	consolidation_model = "gpt-5.2"
+	compact_memory = "blocking"
+	"#;
     let memories_cfg =
         toml::from_str::<ConfigToml>(memories).expect("TOML deserialization should succeed");
     assert_eq!(
@@ -338,6 +340,7 @@ consolidation_model = "gpt-5.2"
             min_rate_limit_remaining_percent: Some(12),
             extract_model: Some("gpt-5-mini".to_string()),
             consolidation_model: Some("gpt-5.2".to_string()),
+            compact_memory: Some(CompactMemoryMode::Blocking),
         }),
         memories_cfg.memories
     );
@@ -364,6 +367,7 @@ consolidation_model = "gpt-5.2"
             min_rate_limit_remaining_percent: 12,
             extract_model: Some("gpt-5-mini".to_string()),
             consolidation_model: Some("gpt-5.2".to_string()),
+            compact_memory: CompactMemoryMode::Blocking,
         }
     );
 

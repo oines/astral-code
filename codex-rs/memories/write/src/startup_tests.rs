@@ -252,6 +252,58 @@ async fn memories_startup_phase2_prunes_old_extension_resources_without_stage1_i
 }
 
 #[tokio::test]
+async fn memories_phase2_blocking_waits_for_workspace_reset() -> anyhow::Result<()> {
+    let server = start_mock_server().await;
+    let home = Arc::new(TempDir::new()?);
+    let db = init_state_db(&home).await?;
+    let memory_root = home.path().join("memories");
+    let now = chrono::Utc::now();
+    let _thread_id = seed_stage1_output(
+        db.as_ref(),
+        home.path(),
+        now - chrono::Duration::hours(1),
+        "blocking raw memory",
+        "blocking rollout summary",
+        "blocking-rollout",
+    )
+    .await?;
+
+    let phase2 = mount_sse_once(
+        &server,
+        sse(vec![
+            ev_response_created("resp-phase2-blocking"),
+            ev_assistant_message("msg-phase2-blocking", "phase2 complete"),
+            ev_completed("resp-phase2-blocking"),
+        ]),
+    )
+    .await;
+
+    let test = build_test_codex(&server, home.clone()).await?;
+    let config_snapshot = test.codex.config_snapshot().await;
+    let context = crate::runtime::MemoryStartupContext::new(
+        Arc::clone(&test.thread_manager),
+        test.thread_manager.auth_manager(),
+        test.session_configured.thread_id,
+        Arc::clone(&test.codex),
+        &test.config,
+        config_snapshot.session_source,
+    );
+
+    crate::phase2::run_blocking(Arc::new(context), Arc::new(test.config.clone())).await;
+
+    let request = wait_for_single_request(&phase2).await;
+    let prompt = phase2_prompt_text(&request);
+    assert!(
+        prompt.contains("phase2_workspace_diff.md"),
+        "expected workspace diff file in prompt: {prompt}"
+    );
+    wait_for_phase2_workspace_reset(&memory_root).await?;
+
+    shutdown_test_codex(&test).await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn memories_startup_phase1_uses_live_thread_service_tier_and_detached_metadata()
 -> anyhow::Result<()> {
     let server = start_mock_server().await;
