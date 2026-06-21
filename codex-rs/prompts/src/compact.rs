@@ -1,7 +1,7 @@
 pub const SUMMARIZATION_PROMPT: &str = include_str!("../templates/compact/prompt.md");
 pub const SUMMARY_PREFIX: &str = include_str!("../templates/compact/summary_prefix.md");
 
-const COMPACT_CONTINUATION_SUFFIX: &str = r#"Continue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, do not preface with "I'll continue" or similar. Pick up the last task as if the break never happened."#;
+pub const DEFAULT_COMPACT_CONTINUATION_PROMPT: &str = r#"Continue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, do not preface with "I'll continue" or similar. Pick up the last task as if the break never happened."#;
 
 pub fn format_compact_summary(summary: &str) -> String {
     let without_analysis = replace_first_tag_block(summary, "analysis", None);
@@ -13,12 +13,24 @@ pub fn format_compact_summary(summary: &str) -> String {
 }
 
 pub fn compact_user_summary_message(summary: &str, suppress_follow_up_questions: bool) -> String {
+    compact_user_summary_message_with_continuation(summary, suppress_follow_up_questions, None)
+}
+
+pub fn compact_user_summary_message_with_continuation(
+    summary: &str,
+    suppress_follow_up_questions: bool,
+    continuation_prompt: Option<&str>,
+) -> String {
     let formatted_summary = format_compact_summary(summary);
     let mut message = format!("{}\n\n{}", SUMMARY_PREFIX.trim_end(), formatted_summary);
 
     if suppress_follow_up_questions {
         message.push('\n');
-        message.push_str(COMPACT_CONTINUATION_SUFFIX);
+        let continuation_prompt = continuation_prompt
+            .map(str::trim)
+            .filter(|prompt| !prompt.is_empty())
+            .unwrap_or(DEFAULT_COMPACT_CONTINUATION_PROMPT);
+        message.push_str(continuation_prompt);
     }
 
     message

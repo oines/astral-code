@@ -6555,6 +6555,7 @@ async fn cli_override_sets_compact_prompt() -> std::io::Result<()> {
     let codex_home = TempDir::new()?;
     let overrides = ConfigOverrides {
         compact_prompt: Some("Use the compact override".to_string()),
+        compact_continuation_prompt: Some("Use the continuation override".to_string()),
         ..Default::default()
     };
 
@@ -6568,6 +6569,10 @@ async fn cli_override_sets_compact_prompt() -> std::io::Result<()> {
     assert_eq!(
         config.compact_prompt.as_deref(),
         Some("Use the compact override")
+    );
+    assert_eq!(
+        config.compact_continuation_prompt.as_deref(),
+        Some("Use the continuation override")
     );
 
     Ok(())
@@ -6598,6 +6603,29 @@ async fn loads_compact_prompt_from_file() -> std::io::Result<()> {
     assert_eq!(
         config.compact_prompt.as_deref(),
         Some("summarize differently")
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn loads_compact_continuation_prompt_from_config() -> std::io::Result<()> {
+    let codex_home = TempDir::new()?;
+    let cfg = ConfigToml {
+        compact_continuation_prompt: Some("  continue as an event stream  ".to_string()),
+        ..Default::default()
+    };
+
+    let config = Config::load_from_base_config_with_overrides(
+        cfg,
+        ConfigOverrides::default(),
+        codex_home.abs(),
+    )
+    .await?;
+
+    assert_eq!(
+        config.compact_continuation_prompt.as_deref(),
+        Some("continue as an event stream")
     );
 
     Ok(())

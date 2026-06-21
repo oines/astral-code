@@ -135,7 +135,7 @@ fn request_maps_tool_use_and_tool_result_to_chat_shape() {
 }
 
 #[test]
-fn request_moves_read_image_tool_result_to_user_multimodal_message() {
+fn request_moves_image_tool_result_to_user_multimodal_message() {
     let request = AgentRequest {
         model: "mimo-v2.5".to_string(),
         instructions: Vec::new(),
@@ -150,35 +150,40 @@ fn request_moves_read_image_tool_result_to_user_multimodal_message() {
             AgentMessage {
                 role: MessageRole::Assistant,
                 content: vec![ContentBlock::ToolUse {
-                    id: "call_read".to_string(),
-                    name: "Read".to_string(),
-                    input: json!({ "file_path": "/tmp/test.png" }),
+                    id: "call_view".to_string(),
+                    name: "view_image".to_string(),
+                    input: json!({ "path": "/tmp/test.png" }),
                 }],
                 id: None,
             },
             AgentMessage {
                 role: MessageRole::User,
                 content: vec![ContentBlock::ToolResult {
-                    tool_use_id: "call_read".to_string(),
-                    content: vec![ToolResultContent::Image {
-                        source: ImageSource::Base64 {
-                            media_type: "image/png".to_string(),
-                            data: "AAA".to_string(),
+                    tool_use_id: "call_view".to_string(),
+                    content: vec![
+                        ToolResultContent::Text {
+                            text: "metadata: 64x32 image/png".to_string(),
                         },
-                        detail: Some("high".to_string()),
-                    }],
+                        ToolResultContent::Image {
+                            source: ImageSource::Base64 {
+                                media_type: "image/png".to_string(),
+                                data: "AAA".to_string(),
+                            },
+                            detail: Some("high".to_string()),
+                        },
+                    ],
                     is_error: false,
                 }],
                 id: None,
             },
         ],
         tools: vec![AgentTool {
-            name: "Read".to_string(),
-            description: "Read a file".to_string(),
+            name: "view_image".to_string(),
+            description: "View a local image".to_string(),
             input_schema: json!({
                 "type": "object",
-                "properties": { "file_path": { "type": "string" } },
-                "required": ["file_path"]
+                "properties": { "path": { "type": "string" } },
+                "required": ["path"]
             }),
             metadata: BTreeMap::new(),
         }],
@@ -200,25 +205,25 @@ fn request_moves_read_image_tool_result_to_user_multimodal_message() {
                     "role": "assistant",
                     "content": null,
                     "tool_calls": [{
-                        "id": "call_read",
+                        "id": "call_view",
                         "type": "function",
                         "function": {
-                            "name": "Read",
-                            "arguments": r#"{"file_path":"/tmp/test.png"}"#
+                            "name": "view_image",
+                            "arguments": r#"{"path":"/tmp/test.png"}"#
                         }
                     }]
                 },
                 {
                     "role": "tool",
-                    "tool_call_id": "call_read",
-                    "content": "Read returned an image. The image is attached in the following user message."
+                    "tool_call_id": "call_view",
+                    "content": "metadata: 64x32 image/png\n\nTool returned image content. The image is attached in the following user message."
                 },
                 {
                     "role": "user",
                     "content": [
                         {
                             "type": "text",
-                            "text": "Image returned by Read tool call call_read."
+                            "text": "Image returned by view_image tool call call_view."
                         },
                         {
                             "type": "image_url",
@@ -233,12 +238,12 @@ fn request_moves_read_image_tool_result_to_user_multimodal_message() {
             "tools": [{
                 "type": "function",
                 "function": {
-                    "name": "Read",
-                    "description": "Read a file",
+                    "name": "view_image",
+                    "description": "View a local image",
                     "parameters": {
                         "type": "object",
-                        "properties": { "file_path": { "type": "string" } },
-                        "required": ["file_path"]
+                        "properties": { "path": { "type": "string" } },
+                        "required": ["path"]
                     }
                 }
             }],

@@ -12,6 +12,7 @@ pub use apply_patch::APPLY_PATCH_TOOL_INSTRUCTIONS;
 pub use compact::SUMMARIZATION_PROMPT;
 pub use compact::SUMMARY_PREFIX;
 pub use compact::compact_user_summary_message;
+pub use compact::compact_user_summary_message_with_continuation;
 pub use compact::format_compact_summary;
 pub use goals::budget_limit_prompt;
 pub use goals::continuation_prompt;

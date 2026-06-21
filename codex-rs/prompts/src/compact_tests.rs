@@ -50,3 +50,27 @@ Summary:
 Continue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, do not preface with "I'll continue" or similar. Pick up the last task as if the break never happened."#
     );
 }
+
+#[test]
+fn compact_user_summary_message_can_override_continuation_prompt() {
+    let raw = r#"<summary>
+1. Primary Request and Intent:
+   Keep event stream context.
+</summary>"#;
+
+    let message = compact_user_summary_message_with_continuation(
+        raw,
+        true,
+        Some("Do not replay historical events."),
+    );
+
+    assert_eq!(
+        message,
+        r#"This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
+
+Summary:
+1. Primary Request and Intent:
+   Keep event stream context.
+Do not replay historical events."#
+    );
+}
