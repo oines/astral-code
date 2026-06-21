@@ -1396,6 +1396,14 @@
           "format": "int64",
           "type": "integer"
         },
+        "phase2_sandbox": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Phase2SandboxMode"
+            }
+          ],
+          "description": "Sandbox policy used by memory phase 2 consolidation."
+        },
         "use_memories": {
           "description": "When `false`, skip injecting memory usage instructions into developer prompts.",
           "type": "boolean"
@@ -2226,6 +2234,13 @@
         "none",
         "friendly",
         "pragmatic"
+      ],
+      "type": "string"
+    },
+    "Phase2SandboxMode": {
+      "enum": [
+        "workspace_write",
+        "danger_full_access"
       ],
       "type": "string"
     },
@@ -4550,6 +4565,10 @@
       ],
       "default": null,
       "description": "Preferred backend for storing CLI auth credentials. file (default): Use a file in the Astral home directory. keyring: Use an OS-specific keyring service. auto: Use the keyring if available, otherwise use a file."
+    },
+    "compact_continuation_prompt": {
+      "description": "Continuation prompt appended after automatic history compaction.",
+      "type": "string"
     },
     "compact_prompt": {
       "description": "Compact prompt used for history compaction.",

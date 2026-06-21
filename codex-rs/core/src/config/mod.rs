@@ -689,6 +689,9 @@ pub struct Config {
     /// Compact prompt override.
     pub compact_prompt: Option<String>,
 
+    /// Compact continuation prompt override.
+    pub compact_continuation_prompt: Option<String>,
+
     /// Optional external notifier command. When set, Astral will spawn this
     /// program after each completed *turn* (i.e. when the agent finishes
     /// processing a user submission). The value must be the full command
@@ -2278,6 +2281,7 @@ pub struct ConfigOverrides {
     pub developer_instructions: Option<String>,
     pub personality: Option<Personality>,
     pub compact_prompt: Option<String>,
+    pub compact_continuation_prompt: Option<String>,
     pub show_raw_agent_reasoning: Option<bool>,
     pub tools_web_search_request: Option<bool>,
     pub ephemeral: Option<bool>,
@@ -2707,6 +2711,7 @@ impl Config {
             developer_instructions,
             personality,
             compact_prompt,
+            compact_continuation_prompt,
             show_raw_agent_reasoning,
             tools_web_search_request: override_tools_web_search_request,
             ephemeral,
@@ -3291,6 +3296,16 @@ impl Config {
                 Some(trimmed.to_string())
             }
         });
+        let compact_continuation_prompt = compact_continuation_prompt
+            .or(cfg.compact_continuation_prompt)
+            .and_then(|value| {
+                let trimmed = value.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                }
+            });
 
         // Load base instructions override from a file if specified. If the
         // path is relative, resolve it against the effective cwd so the
@@ -3520,6 +3535,7 @@ impl Config {
             personality,
             developer_instructions,
             compact_prompt,
+            compact_continuation_prompt,
             include_permissions_instructions,
             include_apps_instructions,
             include_collaboration_mode_instructions,

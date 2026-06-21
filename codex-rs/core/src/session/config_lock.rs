@@ -113,6 +113,7 @@ fn save_session_resolved_fields(sc: &SessionConfiguration, lock_config: &mut Con
     lock_config.instructions = Some(sc.base_instructions.clone());
     lock_config.developer_instructions = sc.developer_instructions.clone();
     lock_config.compact_prompt = sc.compact_prompt.clone();
+    lock_config.compact_continuation_prompt = sc.compact_continuation_prompt.clone();
     lock_config.personality = sc.personality;
     lock_config.approval_policy = Some(sc.approval_policy.value());
     lock_config.approvals_reviewer = Some(sc.approvals_reviewer);
@@ -217,6 +218,7 @@ mod tests {
         sc.base_instructions = "resolved instructions".to_string();
         sc.developer_instructions = Some("resolved developer instructions".to_string());
         sc.compact_prompt = Some("resolved compact prompt".to_string());
+        sc.compact_continuation_prompt = Some("resolved compact continuation prompt".to_string());
 
         let lockfile = sc.to_config_lockfile_toml().expect("lock should serialize");
         let lock = &lockfile.config;
@@ -224,6 +226,10 @@ mod tests {
         assert_eq!(lock.instructions, Some(sc.base_instructions.clone()));
         assert_eq!(lock.developer_instructions, sc.developer_instructions);
         assert_eq!(lock.compact_prompt, sc.compact_prompt);
+        assert_eq!(
+            lock.compact_continuation_prompt,
+            sc.compact_continuation_prompt
+        );
         assert_eq!(lock.model, Some(sc.collaboration_mode.model().to_string()));
         assert_eq!(
             lock.model_reasoning_effort,
@@ -290,6 +296,7 @@ mod tests {
         sc.base_instructions = "catalog instructions".to_string();
         sc.developer_instructions = Some("catalog developer instructions".to_string());
         sc.compact_prompt = Some("catalog compact prompt".to_string());
+        sc.compact_continuation_prompt = Some("catalog compact continuation prompt".to_string());
         sc.service_tier = Some("flex".to_string());
 
         let lockfile = sc.to_config_lockfile_toml().expect("lock should serialize");
@@ -302,6 +309,7 @@ mod tests {
         assert_eq!(lock.instructions, None);
         assert_eq!(lock.developer_instructions, None);
         assert_eq!(lock.compact_prompt, None);
+        assert_eq!(lock.compact_continuation_prompt, None);
         assert_eq!(lock.personality, None);
         assert_eq!(lock.approval_policy, None);
         assert_eq!(lock.approvals_reviewer, None);

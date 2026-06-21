@@ -46,6 +46,7 @@ use tracing::error;
 pub use codex_prompts::SUMMARIZATION_PROMPT;
 pub use codex_prompts::SUMMARY_PREFIX;
 pub use codex_prompts::compact_user_summary_message;
+pub use codex_prompts::compact_user_summary_message_with_continuation;
 pub use codex_prompts::format_compact_summary;
 const COMPACT_USER_MESSAGE_MAX_TOKENS: usize = 20_000;
 
@@ -315,7 +316,11 @@ async fn run_compact_task_inner_impl(
     let history_snapshot = sess.clone_history().await;
     let history_items = history_snapshot.raw_items();
     let summary_suffix = get_last_assistant_message_from_turn(history_items).unwrap_or_default();
-    let summary_text = compact_user_summary_message(&summary_suffix, suppress_follow_up_questions);
+    let summary_text = compact_user_summary_message_with_continuation(
+        &summary_suffix,
+        suppress_follow_up_questions,
+        turn_context.compact_continuation_prompt(),
+    );
     let user_messages = collect_user_messages(history_items);
 
     let mut new_history = build_compacted_history(Vec::new(), &user_messages, &summary_text);

@@ -60,6 +60,10 @@ pub struct CodexToolCallParam {
     /// Prompt used when compacting the conversation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compact_prompt: Option<String>,
+
+    /// Prompt appended after automatic conversation compaction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compact_continuation_prompt: Option<String>,
 }
 
 /// Custom enum mirroring [`AskForApproval`], but has an extra dependency on
@@ -157,6 +161,7 @@ impl CodexToolCallParam {
             base_instructions,
             developer_instructions,
             compact_prompt,
+            compact_continuation_prompt,
         } = self;
 
         // Build the `ConfigOverrides` recognized by codex-core.
@@ -171,6 +176,7 @@ impl CodexToolCallParam {
             base_instructions,
             developer_instructions,
             compact_prompt,
+            compact_continuation_prompt,
             ..Default::default()
         };
 

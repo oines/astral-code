@@ -193,6 +193,9 @@ pub struct ConfigToml {
     /// Compact prompt used for history compaction.
     pub compact_prompt: Option<String>,
 
+    /// Continuation prompt appended after automatic history compaction.
+    pub compact_continuation_prompt: Option<String>,
+
     /// Preferred backend for storing CLI auth credentials.
     /// file (default): Use a file in the Astral home directory.
     /// keyring: Use an OS-specific keyring service.

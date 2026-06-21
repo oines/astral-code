@@ -514,15 +514,16 @@ fn tool_result_to_chat_messages(
         return Vec::new();
     };
 
-    if is_read_image_tool_result(tool_use_id, content, tool_use_names) {
+    if tool_result_contains_image(content) {
+        let tool_name = tool_use_names.get(tool_use_id).map(String::as_str);
         let mut messages = vec![json!({
             "role": "tool",
             "tool_call_id": tool_use_id,
-            "content": read_image_tool_result_text(content),
+            "content": image_tool_result_text(content),
         })];
         messages.push(json!({
             "role": "user",
-            "content": read_image_tool_result_user_content(tool_use_id, content),
+            "content": image_tool_result_user_content(tool_use_id, tool_name, content),
         }));
         return messages;
     }
@@ -745,20 +746,13 @@ fn content_block_text(block: &ContentBlock) -> String {
     }
 }
 
-fn is_read_image_tool_result(
-    tool_use_id: &str,
-    content: &[ToolResultContent],
-    tool_use_names: &HashMap<String, String>,
-) -> bool {
-    tool_use_names
-        .get(tool_use_id)
-        .is_some_and(|name| name == "Read")
-        && content
-            .iter()
-            .any(|content| matches!(content, ToolResultContent::Image { .. }))
+fn tool_result_contains_image(content: &[ToolResultContent]) -> bool {
+    content
+        .iter()
+        .any(|content| matches!(content, ToolResultContent::Image { .. }))
 }
 
-fn read_image_tool_result_text(content: &[ToolResultContent]) -> String {
+fn image_tool_result_text(content: &[ToolResultContent]) -> String {
     let text = content
         .iter()
         .filter_map(|content| match content {
@@ -771,18 +765,27 @@ fn read_image_tool_result_text(content: &[ToolResultContent]) -> String {
         .join("\n");
 
     if text.is_empty() {
-        "Read returned an image. The image is attached in the following user message.".to_string()
+        "Tool returned image content. The image is attached in the following user message."
+            .to_string()
     } else {
         format!(
-            "{text}\n\nRead returned an image. The image is attached in the following user message."
+            "{text}\n\nTool returned image content. The image is attached in the following user message."
         )
     }
 }
 
-fn read_image_tool_result_user_content(tool_use_id: &str, content: &[ToolResultContent]) -> Value {
+fn image_tool_result_user_content(
+    tool_use_id: &str,
+    tool_name: Option<&str>,
+    content: &[ToolResultContent],
+) -> Value {
+    let label = match tool_name {
+        Some(tool_name) => format!("Image returned by {tool_name} tool call {tool_use_id}."),
+        None => format!("Image returned by tool call {tool_use_id}."),
+    };
     let mut parts = vec![json!({
         "type": "text",
-        "text": format!("Image returned by Read tool call {tool_use_id}."),
+        "text": label,
     })];
 
     parts.extend(content.iter().filter_map(|content| match content {
