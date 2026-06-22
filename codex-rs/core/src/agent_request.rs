@@ -52,10 +52,7 @@ pub(crate) fn build_agent_request(params: AgentRequestBuildParams<'_>) -> Result
     let tool_specs = provider_neutral_tool_specs(&params.prompt.tools, &formatted_input);
     let tools = codex_tools::create_agent_tools_for_provider_neutral_request(&tool_specs)
         .map_err(|err| CodexErr::InvalidRequest(format!("failed to convert tools: {err}")))?;
-    let messages = formatted_input
-        .iter()
-        .filter_map(response_item_to_agent_message)
-        .collect();
+    let messages = response_items_to_agent_messages(&formatted_input);
 
     let mut provider = params.provider_request_body.unwrap_or_default();
     if let Some(provider_flavor) = params.provider_flavor {
@@ -228,7 +225,18 @@ fn build_reasoning_config(
     Some(ReasoningConfig { effort, summary })
 }
 
-fn response_item_to_agent_message(item: &ResponseItem) -> Option<AgentMessage> {
+fn response_items_to_agent_messages(items: &[ResponseItem]) -> Vec<AgentMessage> {
+    let mut skipped_function_call_ids = BTreeSet::new();
+    items
+        .iter()
+        .filter_map(|item| response_item_to_agent_message(item, &mut skipped_function_call_ids))
+        .collect()
+}
+
+fn response_item_to_agent_message(
+    item: &ResponseItem,
+    skipped_function_call_ids: &mut BTreeSet<String>,
+) -> Option<AgentMessage> {
     match item {
         ResponseItem::Message {
             id, role, content, ..
@@ -249,8 +257,28 @@ fn response_item_to_agent_message(item: &ResponseItem) -> Option<AgentMessage> {
             arguments,
             call_id,
             ..
+        } => {
+            let Some(input) = parse_function_call_input(arguments) else {
+                tracing::warn!(
+                    call_id = %call_id,
+                    tool_name = %name,
+                    "dropping malformed function call from provider-neutral request history"
+                );
+                skipped_function_call_ids.insert(call_id.clone());
+                return None;
+            };
+
+            Some(AgentMessage {
+                role: MessageRole::Assistant,
+                content: vec![ContentBlock::ToolUse {
+                    id: call_id.clone(),
+                    name: name.clone(),
+                    input,
+                }],
+                id: None,
+            })
         }
-        | ResponseItem::CustomToolCall {
+        ResponseItem::CustomToolCall {
             name,
             input: arguments,
             call_id,
@@ -277,8 +305,22 @@ fn response_item_to_agent_message(item: &ResponseItem) -> Option<AgentMessage> {
             }],
             id: None,
         }),
-        ResponseItem::FunctionCallOutput { call_id, output }
-        | ResponseItem::CustomToolCallOutput {
+        ResponseItem::FunctionCallOutput { call_id, output } => {
+            if skipped_function_call_ids.contains(call_id) {
+                return None;
+            }
+
+            Some(AgentMessage {
+                role: MessageRole::User,
+                content: vec![ContentBlock::ToolResult {
+                    tool_use_id: call_id.clone(),
+                    content: tool_result_content(output),
+                    is_error: output.success == Some(false),
+                }],
+                id: None,
+            })
+        }
+        ResponseItem::CustomToolCallOutput {
             call_id, output, ..
         } => Some(AgentMessage {
             role: MessageRole::User,
@@ -386,6 +428,13 @@ fn reasoning_blocks(
 
 fn parse_tool_input(input: &str) -> Value {
     serde_json::from_str(input).unwrap_or_else(|_| Value::String(input.to_string()))
+}
+
+fn parse_function_call_input(input: &str) -> Option<Value> {
+    match serde_json::from_str(input) {
+        Ok(value @ Value::Object(_)) => Some(value),
+        _ => None,
+    }
 }
 
 fn tool_result_content(output: &FunctionCallOutputPayload) -> Vec<ToolResultContent> {

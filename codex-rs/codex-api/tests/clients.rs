@@ -267,11 +267,7 @@ async fn stream_chat_completions<T: HttpTransport>(
     options: AgentOptions,
 ) -> std::result::Result<codex_api::ResponseStream, ApiError> {
     client
-        .stream_chat_completions(
-            agent_request(),
-            ChatCompletionsOptions { max_tokens: None },
-            options,
-        )
+        .stream_chat_completions(agent_request(), ChatCompletionsOptions::default(), options)
         .await
 }
 

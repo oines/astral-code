@@ -1,3 +1,5 @@
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use codex_agent_protocol::AgentMessage;
 use codex_agent_protocol::AgentRequest;
 use codex_agent_protocol::AgentStreamEvent;
@@ -11,10 +13,13 @@ use codex_agent_protocol::StopReason;
 use codex_agent_protocol::TokenUsage;
 use codex_agent_protocol::ToolChoice;
 use codex_agent_protocol::ToolResultContent;
+use codex_utils_image::PromptImageMode;
+use codex_utils_image::load_for_prompt_bytes;
 use serde_json::Map;
 use serde_json::Value;
 use serde_json::json;
 use std::collections::HashMap;
+use std::path::Path;
 
 const TEXT_BLOCK_INDEX: usize = 0;
 const REASONING_BLOCK_INDEX: usize = 1;
@@ -25,10 +30,24 @@ const FLAVOR_GENERIC_OPENAI: &str = "generic_openai";
 const FLAVOR_MINIMAX: &str = "minimax";
 const FLAVOR_OPENROUTER: &str = "openrouter";
 const FLAVOR_THINKING_TYPE: &str = "thinking_type";
+const IMAGE_CONTENT_OMITTED_PLACEHOLDER: &str =
+    "<image content omitted because you do not support image input>";
+const IMAGE_CONTENT_UNAVAILABLE_PLACEHOLDER: &str =
+    "<image content omitted because it could not be processed>";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChatCompletionsOptions {
     pub max_tokens: Option<u64>,
+    pub supports_image_input: bool,
+}
+
+impl Default for ChatCompletionsOptions {
+    fn default() -> Self {
+        Self {
+            max_tokens: None,
+            supports_image_input: true,
+        }
+    }
 }
 
 pub fn to_chat_completions_request(
@@ -66,7 +85,7 @@ pub fn to_chat_completions_request(
             request
                 .messages
                 .iter()
-                .flat_map(|message| message_to_chat_messages(message, &tool_use_names)),
+                .flat_map(|message| message_to_chat_messages(message, &tool_use_names, options)),
         )
         .collect::<Vec<_>>();
     normalize_system_messages(&mut messages);
@@ -253,13 +272,14 @@ fn tool_use_names_by_id(messages: &[AgentMessage]) -> HashMap<String, String> {
 fn message_to_chat_messages(
     message: &AgentMessage,
     tool_use_names: &HashMap<String, String>,
+    options: ChatCompletionsOptions,
 ) -> Vec<Value> {
     match message.role {
         MessageRole::System | MessageRole::Developer => vec![json!({
             "role": "system",
             "content": content_blocks_text(&message.content),
         })],
-        MessageRole::User => user_message_to_chat_messages(message, tool_use_names),
+        MessageRole::User => user_message_to_chat_messages(message, tool_use_names, options),
         MessageRole::Assistant => vec![assistant_message_to_chat(message)],
     }
 }
@@ -403,6 +423,7 @@ fn non_empty_string(value: &Value) -> Option<String> {
 fn user_message_to_chat_messages(
     message: &AgentMessage,
     tool_use_names: &HashMap<String, String>,
+    options: ChatCompletionsOptions,
 ) -> Vec<Value> {
     let mut messages = Vec::new();
     let user_blocks = message
@@ -428,7 +449,9 @@ fn user_message_to_chat_messages(
         } else {
             let parts = user_blocks
                 .iter()
-                .filter_map(|block| content_block_to_user_content(block))
+                .filter_map(|block| {
+                    content_block_to_user_content(block, options.supports_image_input)
+                })
                 .collect::<Vec<_>>();
             (!parts.is_empty()).then_some(Value::Array(parts))
         };
@@ -445,7 +468,7 @@ fn user_message_to_chat_messages(
         message
             .content
             .iter()
-            .flat_map(|block| tool_result_to_chat_messages(block, tool_use_names)),
+            .flat_map(|block| tool_result_to_chat_messages(block, tool_use_names, options)),
     );
     messages
 }
@@ -504,6 +527,7 @@ fn assistant_message_to_chat(message: &AgentMessage) -> Value {
 fn tool_result_to_chat_messages(
     block: &ContentBlock,
     tool_use_names: &HashMap<String, String>,
+    options: ChatCompletionsOptions,
 ) -> Vec<Value> {
     let ContentBlock::ToolResult {
         tool_use_id,
@@ -516,15 +540,26 @@ fn tool_result_to_chat_messages(
 
     if tool_result_contains_image(content) {
         let tool_name = tool_use_names.get(tool_use_id).map(String::as_str);
+        let user_content = if options.supports_image_input {
+            image_tool_result_user_content(tool_use_id, tool_name, content)
+        } else {
+            None
+        };
         let mut messages = vec![json!({
             "role": "tool",
             "tool_call_id": tool_use_id,
-            "content": image_tool_result_text(content),
+            "content": image_tool_result_text(
+                content,
+                user_content.is_some(),
+                options.supports_image_input
+            ),
         })];
-        messages.push(json!({
-            "role": "user",
-            "content": image_tool_result_user_content(tool_use_id, tool_name, content),
-        }));
+        if let Some(user_content) = user_content {
+            messages.push(json!({
+                "role": "user",
+                "content": user_content,
+            }));
+        }
         return messages;
     }
 
@@ -698,15 +733,28 @@ fn remove_tool_control_fields_without_tools(body: &mut Map<String, Value>) {
     body.remove("parallel_tool_calls");
 }
 
-fn content_block_to_user_content(block: &ContentBlock) -> Option<Value> {
+fn content_block_to_user_content(
+    block: &ContentBlock,
+    supports_image_input: bool,
+) -> Option<Value> {
     match block {
         ContentBlock::Text { text } | ContentBlock::Reasoning { text, signature: _ } => {
             (!text.is_empty()).then(|| json!({ "type": "text", "text": text }))
         }
-        ContentBlock::Image { source } => Some(json!({
-            "type": "image_url",
-            "image_url": { "url": image_source_url(source) }
-        })),
+        ContentBlock::Image { source } => {
+            if !supports_image_input {
+                return Some(json!({
+                    "type": "text",
+                    "text": IMAGE_CONTENT_OMITTED_PLACEHOLDER,
+                }));
+            }
+            image_content_part(source, None).or_else(|| {
+                Some(json!({
+                    "type": "text",
+                    "text": IMAGE_CONTENT_UNAVAILABLE_PLACEHOLDER,
+                }))
+            })
+        }
         ContentBlock::ToolUse { .. } | ContentBlock::ToolResult { .. } => {
             let text = content_block_text(block);
             (!text.is_empty()).then(|| json!({ "type": "text", "text": text }))
@@ -752,7 +800,11 @@ fn tool_result_contains_image(content: &[ToolResultContent]) -> bool {
         .any(|content| matches!(content, ToolResultContent::Image { .. }))
 }
 
-fn image_tool_result_text(content: &[ToolResultContent]) -> String {
+fn image_tool_result_text(
+    content: &[ToolResultContent],
+    image_attached: bool,
+    supports_image_input: bool,
+) -> String {
     let text = content
         .iter()
         .filter_map(|content| match content {
@@ -764,13 +816,18 @@ fn image_tool_result_text(content: &[ToolResultContent]) -> String {
         .collect::<Vec<_>>()
         .join("\n");
 
-    if text.is_empty() {
+    let image_notice = if image_attached {
         "Tool returned image content. The image is attached in the following user message."
-            .to_string()
+    } else if supports_image_input {
+        IMAGE_CONTENT_UNAVAILABLE_PLACEHOLDER
     } else {
-        format!(
-            "{text}\n\nTool returned image content. The image is attached in the following user message."
-        )
+        IMAGE_CONTENT_OMITTED_PLACEHOLDER
+    };
+
+    if text.is_empty() {
+        image_notice.to_string()
+    } else {
+        format!("{text}\n\n{image_notice}")
     }
 }
 
@@ -778,7 +835,7 @@ fn image_tool_result_user_content(
     tool_use_id: &str,
     tool_name: Option<&str>,
     content: &[ToolResultContent],
-) -> Value {
+) -> Option<Value> {
     let label = match tool_name {
         Some(tool_name) => format!("Image returned by {tool_name} tool call {tool_use_id}."),
         None => format!("Image returned by tool call {tool_use_id}."),
@@ -788,18 +845,19 @@ fn image_tool_result_user_content(
         "text": label,
     })];
 
-    parts.extend(content.iter().filter_map(|content| match content {
-        ToolResultContent::Image { source, detail } => {
-            let mut image_url = json!({ "url": image_source_url(source) });
-            if let Some(detail) = detail {
-                image_url["detail"] = Value::String(detail.clone());
+    let image_parts = content
+        .iter()
+        .filter_map(|content| match content {
+            ToolResultContent::Image { source, detail } => {
+                image_content_part(source, detail.as_deref())
             }
-            Some(json!({ "type": "image_url", "image_url": image_url }))
-        }
-        ToolResultContent::Text { .. } | ToolResultContent::Json { .. } => None,
-    }));
+            ToolResultContent::Text { .. } | ToolResultContent::Json { .. } => None,
+        })
+        .collect::<Vec<_>>();
+    let image_part_count = image_parts.len();
+    parts.extend(image_parts);
 
-    Value::Array(parts)
+    (image_part_count > 0).then_some(Value::Array(parts))
 }
 
 fn tool_result_content_text(content: &[ToolResultContent]) -> String {
@@ -839,6 +897,46 @@ fn tool_result_to_chat_content(content: &[ToolResultContent]) -> Value {
         })
         .collect::<Vec<_>>();
     Value::Array(parts)
+}
+
+fn image_content_part(source: &ImageSource, detail: Option<&str>) -> Option<Value> {
+    let mut image_url = json!({ "url": image_source_chat_url(source)? });
+    if let Some(detail) = detail {
+        image_url["detail"] = Value::String(detail.to_string());
+    }
+    Some(json!({ "type": "image_url", "image_url": image_url }))
+}
+
+fn image_source_chat_url(source: &ImageSource) -> Option<String> {
+    match source {
+        ImageSource::Url { url } => Some(url.clone()),
+        ImageSource::Base64 { media_type, data } => {
+            let bytes = match BASE64_STANDARD.decode(data) {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    tracing::warn!(
+                        media_type,
+                        "failed to decode base64 image for chat completions request: {error}"
+                    );
+                    return None;
+                }
+            };
+            match load_for_prompt_bytes(
+                Path::new("<chat-completions-image>"),
+                bytes,
+                PromptImageMode::ResizeToFit,
+            ) {
+                Ok(image) => Some(image.into_data_url()),
+                Err(error) => {
+                    tracing::warn!(
+                        media_type,
+                        "failed to process image for chat completions request: {error}"
+                    );
+                    None
+                }
+            }
+        }
+    }
 }
 
 fn image_source_url(source: &ImageSource) -> String {

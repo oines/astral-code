@@ -1916,6 +1916,7 @@ dependencies = [
  "codex-agent-protocol",
  "codex-client",
  "codex-protocol",
+ "codex-utils-image",
  "codex-utils-rustls-provider",
  "eventsource-stream",
  "futures",

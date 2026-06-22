@@ -329,6 +329,139 @@ fn build_agent_request_loads_recent_tool_search_results() {
 }
 
 #[test]
+fn build_agent_request_filters_malformed_function_calls_without_dropping_valid_history() {
+    let prompt = Prompt {
+        input: vec![
+            ResponseItem::Message {
+                id: Some("before".to_string()),
+                role: "user".to_string(),
+                content: vec![ContentItem::InputText {
+                    text: "before bad call".to_string(),
+                }],
+                phase: None,
+            },
+            ResponseItem::FunctionCall {
+                id: Some("bad-fc".to_string()),
+                name: "Bash".to_string(),
+                namespace: None,
+                arguments: r#"{"limit": "#.to_string(),
+                call_id: "call-bad".to_string(),
+            },
+            ResponseItem::FunctionCallOutput {
+                call_id: "call-bad".to_string(),
+                output: FunctionCallOutputPayload::from_text("bad output".to_string()),
+            },
+            ResponseItem::Message {
+                id: Some("after".to_string()),
+                role: "assistant".to_string(),
+                content: vec![ContentItem::OutputText {
+                    text: "after bad call".to_string(),
+                }],
+                phase: None,
+            },
+            ResponseItem::FunctionCall {
+                id: Some("good-fc".to_string()),
+                name: "Bash".to_string(),
+                namespace: None,
+                arguments: r#"{"command":"pwd"}"#.to_string(),
+                call_id: "call-good".to_string(),
+            },
+            ResponseItem::FunctionCallOutput {
+                call_id: "call-good".to_string(),
+                output: FunctionCallOutputPayload::from_text("/tmp/project".to_string()),
+            },
+            ResponseItem::CustomToolCall {
+                id: Some("custom-fc".to_string()),
+                status: Some("completed".to_string()),
+                call_id: "call-custom".to_string(),
+                name: "apply_patch".to_string(),
+                input: "*** Begin Patch\nraw patch text\n*** End Patch".to_string(),
+            },
+            ResponseItem::CustomToolCallOutput {
+                call_id: "call-custom".to_string(),
+                name: Some("apply_patch".to_string()),
+                output: FunctionCallOutputPayload::from_text("patch applied".to_string()),
+            },
+        ],
+        tools: vec![bash_tool_spec()],
+        ..Prompt::default()
+    };
+
+    let request = build_agent_request(AgentRequestBuildParams {
+        prompt: &prompt,
+        model_info: &test_model_info(/*supports_reasoning_summaries*/ false),
+        effort: None,
+        summary: ReasoningSummaryConfig::None,
+        service_tier: None,
+        prompt_cache_key: "thread-1".to_string(),
+        provider_request_body: None,
+        provider_request_body_remove: Vec::new(),
+        provider_flavor: None,
+    })
+    .expect("build agent request");
+
+    assert_eq!(
+        request.messages,
+        vec![
+            AgentMessage {
+                role: MessageRole::User,
+                content: vec![ContentBlock::Text {
+                    text: "before bad call".to_string(),
+                }],
+                id: Some("before".to_string()),
+            },
+            AgentMessage {
+                role: MessageRole::Assistant,
+                content: vec![ContentBlock::Text {
+                    text: "after bad call".to_string(),
+                }],
+                id: Some("after".to_string()),
+            },
+            AgentMessage {
+                role: MessageRole::Assistant,
+                content: vec![ContentBlock::ToolUse {
+                    id: "call-good".to_string(),
+                    name: "Bash".to_string(),
+                    input: json!({ "command": "pwd" }),
+                }],
+                id: None,
+            },
+            AgentMessage {
+                role: MessageRole::User,
+                content: vec![ContentBlock::ToolResult {
+                    tool_use_id: "call-good".to_string(),
+                    content: vec![ToolResultContent::Text {
+                        text: "/tmp/project".to_string(),
+                    }],
+                    is_error: false,
+                }],
+                id: None,
+            },
+            AgentMessage {
+                role: MessageRole::Assistant,
+                content: vec![ContentBlock::ToolUse {
+                    id: "call-custom".to_string(),
+                    name: "apply_patch".to_string(),
+                    input: json!("*** Begin Patch\nraw patch text\n*** End Patch"),
+                }],
+                id: None,
+            },
+            AgentMessage {
+                role: MessageRole::User,
+                content: vec![ContentBlock::ToolResult {
+                    tool_use_id: "call-custom".to_string(),
+                    content: vec![ToolResultContent::Text {
+                        text: "patch applied".to_string(),
+                    }],
+                    is_error: false,
+                }],
+                id: None,
+            },
+        ]
+    );
+}
+
+#[test]
 fn build_agent_request_rejects_responses_only_hosted_tools() {
     let prompt = Prompt {
         tools: vec![ToolSpec::WebSearch {

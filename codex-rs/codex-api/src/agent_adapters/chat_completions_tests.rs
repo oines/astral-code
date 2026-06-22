@@ -21,6 +21,9 @@ use super::ChatCompletionsOptions;
 use super::parse_stream_chunk;
 use super::to_chat_completions_request;
 
+const ONE_BY_ONE_PNG_BASE64: &str =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==";
+
 #[test]
 fn request_maps_tool_use_and_tool_result_to_chat_shape() {
     let request = AgentRequest {
@@ -82,7 +85,8 @@ fn request_maps_tool_use_and_tool_result_to_chat_shape() {
         to_chat_completions_request(
             &request,
             ChatCompletionsOptions {
-                max_tokens: Some(1024)
+                max_tokens: Some(1024),
+                supports_image_input: true,
             }
         ),
         json!({
@@ -167,7 +171,7 @@ fn request_moves_image_tool_result_to_user_multimodal_message() {
                         ToolResultContent::Image {
                             source: ImageSource::Base64 {
                                 media_type: "image/png".to_string(),
-                                data: "AAA".to_string(),
+                                data: ONE_BY_ONE_PNG_BASE64.to_string(),
                             },
                             detail: Some("high".to_string()),
                         },
@@ -195,7 +199,7 @@ fn request_moves_image_tool_result_to_user_multimodal_message() {
     };
 
     assert_eq!(
-        to_chat_completions_request(&request, ChatCompletionsOptions { max_tokens: None }),
+        to_chat_completions_request(&request, ChatCompletionsOptions::default()),
         json!({
             "model": "mimo-v2.5",
             "stream": false,
@@ -228,7 +232,7 @@ fn request_moves_image_tool_result_to_user_multimodal_message() {
                         {
                             "type": "image_url",
                             "image_url": {
-                                "url": "data:image/png;base64,AAA",
+                                "url": format!("data:image/png;base64,{ONE_BY_ONE_PNG_BASE64}"),
                                 "detail": "high"
                             }
                         }
@@ -249,6 +253,140 @@ fn request_moves_image_tool_result_to_user_multimodal_message() {
             }],
             "tool_choice": "auto",
             "parallel_tool_calls": true
+        })
+    );
+}
+
+#[test]
+fn request_omits_image_tool_result_for_text_only_model() {
+    let request = AgentRequest {
+        model: "mimo-v2.5".to_string(),
+        messages: vec![
+            AgentMessage {
+                role: MessageRole::Assistant,
+                content: vec![ContentBlock::ToolUse {
+                    id: "call_view".to_string(),
+                    name: "view_image".to_string(),
+                    input: json!({ "path": "/tmp/test.png" }),
+                }],
+                id: None,
+            },
+            AgentMessage {
+                role: MessageRole::User,
+                content: vec![ContentBlock::ToolResult {
+                    tool_use_id: "call_view".to_string(),
+                    content: vec![
+                        ToolResultContent::Text {
+                            text: "metadata: image/png".to_string(),
+                        },
+                        ToolResultContent::Image {
+                            source: ImageSource::Url {
+                                url: "https://example.com/test.png".to_string(),
+                            },
+                            detail: Some("high".to_string()),
+                        },
+                    ],
+                    is_error: false,
+                }],
+                id: None,
+            },
+        ],
+        stream: false,
+        ..AgentRequest::default()
+    };
+
+    assert_eq!(
+        to_chat_completions_request(
+            &request,
+            ChatCompletionsOptions {
+                max_tokens: None,
+                supports_image_input: false,
+            }
+        ),
+        json!({
+            "model": "mimo-v2.5",
+            "stream": false,
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_view",
+                        "type": "function",
+                        "function": {
+                            "name": "view_image",
+                            "arguments": r#"{"path":"/tmp/test.png"}"#
+                        }
+                    }]
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_view",
+                    "content": "metadata: image/png\n\n<image content omitted because you do not support image input>"
+                }
+            ]
+        })
+    );
+}
+
+#[test]
+fn request_omits_unprocessable_tool_result_image() {
+    let request = AgentRequest {
+        model: "vision-compatible".to_string(),
+        messages: vec![
+            AgentMessage {
+                role: MessageRole::Assistant,
+                content: vec![ContentBlock::ToolUse {
+                    id: "call_view".to_string(),
+                    name: "view_image".to_string(),
+                    input: json!({ "path": "/tmp/bad.png" }),
+                }],
+                id: None,
+            },
+            AgentMessage {
+                role: MessageRole::User,
+                content: vec![ContentBlock::ToolResult {
+                    tool_use_id: "call_view".to_string(),
+                    content: vec![ToolResultContent::Image {
+                        source: ImageSource::Base64 {
+                            media_type: "image/png".to_string(),
+                            data: "not base64".to_string(),
+                        },
+                        detail: Some("high".to_string()),
+                    }],
+                    is_error: false,
+                }],
+                id: None,
+            },
+        ],
+        stream: false,
+        ..AgentRequest::default()
+    };
+
+    assert_eq!(
+        to_chat_completions_request(&request, ChatCompletionsOptions::default()),
+        json!({
+            "model": "vision-compatible",
+            "stream": false,
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_view",
+                        "type": "function",
+                        "function": {
+                            "name": "view_image",
+                            "arguments": r#"{"path":"/tmp/bad.png"}"#
+                        }
+                    }]
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_view",
+                    "content": "<image content omitted because it could not be processed>"
+                }
+            ]
         })
     );
 }
@@ -292,7 +430,7 @@ fn request_collapses_system_and_developer_messages_to_head_system_message() {
     };
 
     assert_eq!(
-        to_chat_completions_request(&request, ChatCompletionsOptions { max_tokens: None }),
+        to_chat_completions_request(&request, ChatCompletionsOptions::default()),
         json!({
             "model": "astral-large",
             "stream": false,
@@ -336,7 +474,7 @@ fn request_maps_response_format_metadata() {
     };
 
     assert_eq!(
-        to_chat_completions_request(&request, ChatCompletionsOptions { max_tokens: None }),
+        to_chat_completions_request(&request, ChatCompletionsOptions::default()),
         json!({
             "model": "astral-large",
             "stream": true,
@@ -390,7 +528,7 @@ fn request_drops_tool_control_fields_when_provider_override_clears_tools() {
     };
 
     assert_eq!(
-        to_chat_completions_request(&request, ChatCompletionsOptions { max_tokens: None }),
+        to_chat_completions_request(&request, ChatCompletionsOptions::default()),
         json!({
             "model": "astral-large",
             "stream": false,
@@ -426,7 +564,7 @@ fn request_provider_null_override_removes_default_field() {
     };
 
     assert_eq!(
-        to_chat_completions_request(&request, ChatCompletionsOptions { max_tokens: None }),
+        to_chat_completions_request(&request, ChatCompletionsOptions::default()),
         json!({
             "model": "strict-compatible",
             "stream": true,
@@ -459,7 +597,7 @@ fn request_applies_deepseek_reasoning_shape() {
     };
 
     assert_eq!(
-        to_chat_completions_request(&request, ChatCompletionsOptions { max_tokens: None }),
+        to_chat_completions_request(&request, ChatCompletionsOptions::default()),
         json!({
             "model": "deepseek-v4-pro",
             "stream": false,
@@ -490,7 +628,7 @@ fn request_applies_enable_thinking_shape() {
     };
 
     assert_eq!(
-        to_chat_completions_request(&request, ChatCompletionsOptions { max_tokens: None }),
+        to_chat_completions_request(&request, ChatCompletionsOptions::default()),
         json!({
             "model": "qwen3-coder",
             "stream": false,
@@ -520,7 +658,7 @@ fn request_applies_thinking_type_shape() {
     };
 
     assert_eq!(
-        to_chat_completions_request(&request, ChatCompletionsOptions { max_tokens: None }),
+        to_chat_completions_request(&request, ChatCompletionsOptions::default()),
         json!({
             "model": "glm-5.1",
             "stream": false,
@@ -550,7 +688,7 @@ fn request_applies_minimax_reasoning_shape() {
     };
 
     assert_eq!(
-        to_chat_completions_request(&request, ChatCompletionsOptions { max_tokens: None }),
+        to_chat_completions_request(&request, ChatCompletionsOptions::default()),
         json!({
             "model": "MiniMax-M2",
             "stream": false,
@@ -581,7 +719,7 @@ fn request_applies_openrouter_reasoning_shape() {
     };
 
     assert_eq!(
-        to_chat_completions_request(&request, ChatCompletionsOptions { max_tokens: None }),
+        to_chat_completions_request(&request, ChatCompletionsOptions::default()),
         json!({
             "model": "deepseek/deepseek-chat-v3.1",
             "stream": false,
@@ -611,7 +749,7 @@ fn request_keeps_generic_openai_reasoning_private_fields_off() {
     };
 
     assert_eq!(
-        to_chat_completions_request(&request, ChatCompletionsOptions { max_tokens: None }),
+        to_chat_completions_request(&request, ChatCompletionsOptions::default()),
         json!({
             "model": "compatible-model",
             "stream": false,
@@ -641,7 +779,7 @@ fn request_provider_override_can_clear_flavor_defaults() {
     };
 
     assert_eq!(
-        to_chat_completions_request(&request, ChatCompletionsOptions { max_tokens: None }),
+        to_chat_completions_request(&request, ChatCompletionsOptions::default()),
         json!({
             "model": "deepseek-v4-pro",
             "stream": false,
@@ -673,7 +811,7 @@ fn request_keeps_multimodal_user_content_as_parts_array() {
     };
 
     assert_eq!(
-        to_chat_completions_request(&request, ChatCompletionsOptions { max_tokens: None }),
+        to_chat_completions_request(&request, ChatCompletionsOptions::default()),
         json!({
             "model": "vision-compatible",
             "stream": false,
@@ -684,6 +822,53 @@ fn request_keeps_multimodal_user_content_as_parts_array() {
                     {
                         "type": "image_url",
                         "image_url": { "url": "https://example.com/screenshot.png" }
+                    }
+                ]
+            }]
+        })
+    );
+}
+
+#[test]
+fn request_omits_user_image_for_text_only_model() {
+    let request = AgentRequest {
+        model: "text-only".to_string(),
+        messages: vec![AgentMessage {
+            role: MessageRole::User,
+            content: vec![
+                ContentBlock::Text {
+                    text: "inspect".to_string(),
+                },
+                ContentBlock::Image {
+                    source: ImageSource::Url {
+                        url: "https://example.com/screenshot.png".to_string(),
+                    },
+                },
+            ],
+            id: None,
+        }],
+        stream: false,
+        ..AgentRequest::default()
+    };
+
+    assert_eq!(
+        to_chat_completions_request(
+            &request,
+            ChatCompletionsOptions {
+                max_tokens: None,
+                supports_image_input: false,
+            }
+        ),
+        json!({
+            "model": "text-only",
+            "stream": false,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    { "type": "text", "text": "inspect" },
+                    {
+                        "type": "text",
+                        "text": "<image content omitted because you do not support image input>"
                     }
                 ]
             }]
@@ -713,7 +898,7 @@ fn request_preserves_assistant_reasoning_content_for_deepseek() {
     };
 
     assert_eq!(
-        to_chat_completions_request(&request, ChatCompletionsOptions { max_tokens: None }),
+        to_chat_completions_request(&request, ChatCompletionsOptions::default()),
         json!({
             "model": "deepseek-v4-pro",
             "stream": false,
@@ -743,7 +928,7 @@ fn request_sets_empty_content_for_reasoning_only_assistant_message() {
     };
 
     assert_eq!(
-        to_chat_completions_request(&request, ChatCompletionsOptions { max_tokens: None }),
+        to_chat_completions_request(&request, ChatCompletionsOptions::default()),
         json!({
             "model": "deepseek-v4-pro",
             "stream": false,
@@ -793,7 +978,7 @@ fn request_merges_adjacent_assistant_reasoning_and_tool_calls() {
     };
 
     assert_eq!(
-        to_chat_completions_request(&request, ChatCompletionsOptions { max_tokens: None }),
+        to_chat_completions_request(&request, ChatCompletionsOptions::default()),
         json!({
             "model": "deepseek-v4-pro",
             "stream": false,

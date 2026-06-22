@@ -46,6 +46,7 @@ use codex_protocol::ThreadId;
 use codex_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use codex_protocol::config_types::Verbosity as VerbosityConfig;
 use codex_protocol::models::ResponseItem;
+use codex_protocol::openai_models::InputModality;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
 use codex_protocol::protocol::SessionSource;
@@ -504,7 +505,12 @@ impl ModelClientSession {
                     client
                         .stream_chat_completions(
                             request,
-                            ChatCompletionsOptions { max_tokens: None },
+                            ChatCompletionsOptions {
+                                max_tokens: None,
+                                supports_image_input: model_info
+                                    .input_modalities
+                                    .contains(&InputModality::Image),
+                            },
                             options,
                         )
                         .await

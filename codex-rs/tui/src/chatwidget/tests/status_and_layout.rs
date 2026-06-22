@@ -13,10 +13,10 @@ fn enable_test_ambient_pet(chat: &mut ChatWidget) {
     chat.install_test_ambient_pet_for_tests(/*animations_enabled*/ false);
 }
 
-fn token_info_with_last_usage(last_token_usage: TokenUsage) -> TokenUsageInfo {
+fn token_info_with_total_usage(total_token_usage: TokenUsage) -> TokenUsageInfo {
     TokenUsageInfo {
-        total_token_usage: TokenUsage::default(),
-        last_token_usage,
+        total_token_usage,
+        last_token_usage: TokenUsage::default(),
         model_context_window: None,
     }
 }
@@ -1672,15 +1672,23 @@ async fn status_line_legacy_context_usage_renders_context_used_percent() {
 }
 
 #[tokio::test]
-async fn status_line_cache_hit_rate_renders_latest_usage_percent() {
+async fn status_line_cache_hit_rate_renders_session_usage_percent() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.thread_id = Some(ThreadId::new());
     chat.config.tui_status_line = Some(vec!["cache-hit-rate".to_string()]);
-    chat.set_token_info(Some(token_info_with_last_usage(TokenUsage {
-        input_tokens: 1000,
-        cached_input_tokens: 250,
-        ..TokenUsage::default()
-    })));
+    chat.set_token_info(Some(TokenUsageInfo {
+        total_token_usage: TokenUsage {
+            input_tokens: 1000,
+            cached_input_tokens: 250,
+            ..TokenUsage::default()
+        },
+        last_token_usage: TokenUsage {
+            input_tokens: 100,
+            cached_input_tokens: 100,
+            ..TokenUsage::default()
+        },
+        model_context_window: None,
+    }));
 
     chat.refresh_status_line();
 
@@ -1700,7 +1708,7 @@ async fn status_line_cache_hit_rate_omits_when_usage_is_missing_or_input_is_zero
         None
     );
 
-    chat.set_token_info(Some(token_info_with_last_usage(TokenUsage {
+    chat.set_token_info(Some(token_info_with_total_usage(TokenUsage {
         cached_input_tokens: 250,
         ..TokenUsage::default()
     })));
@@ -1714,7 +1722,7 @@ async fn status_line_cache_hit_rate_omits_when_usage_is_missing_or_input_is_zero
 #[tokio::test]
 async fn status_line_cache_hit_rate_clamps_to_one_hundred_percent() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    chat.set_token_info(Some(token_info_with_last_usage(TokenUsage {
+    chat.set_token_info(Some(token_info_with_total_usage(TokenUsage {
         input_tokens: 1000,
         cached_input_tokens: 1200,
         ..TokenUsage::default()
