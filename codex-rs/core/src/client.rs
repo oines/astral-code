@@ -496,6 +496,9 @@ impl ModelClientSession {
                             request,
                             AnthropicMessagesOptions {
                                 max_tokens: DEFAULT_ANTHROPIC_MAX_TOKENS,
+                                supports_image_input: model_info
+                                    .input_modalities
+                                    .contains(&InputModality::Image),
                             },
                             options,
                         )

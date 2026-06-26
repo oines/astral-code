@@ -8,6 +8,7 @@ use codex_protocol::models::ResponseItem;
 use futures::StreamExt;
 use pretty_assertions::assert_eq;
 use serde_json::json;
+use std::collections::BTreeMap;
 use tokio::sync::mpsc;
 use tokio::time::Duration;
 
@@ -159,6 +160,44 @@ fn mapper_streams_tool_arguments_and_finishes_function_call() {
 }
 
 #[test]
+fn mapper_restores_anthropic_tool_name_aliases() {
+    let mut mapper = AgentStreamMapper::new(BTreeMap::from([(
+        "mcp__server_tool__1234567890abcdef".to_string(),
+        "mcp__server__tool".to_string(),
+    )]));
+
+    let events = mapper
+        .process_event(AgentStreamEvent::ContentBlockStart {
+            index: 1,
+            block: ContentBlock::ToolUse {
+                id: "toolu_1".to_string(),
+                name: "mcp__server_tool__1234567890abcdef".to_string(),
+                input: json!({}),
+            },
+        })
+        .expect("tool start maps");
+
+    assert!(matches!(
+        &events[0],
+        super::ResponseEvent::OutputItemAdded(ResponseItem::FunctionCall {
+            name,
+            ..
+        }) if name == "mcp__server__tool"
+    ));
+
+    let events = mapper
+        .process_event(AgentStreamEvent::ContentBlockStop { index: 1 })
+        .expect("tool stop maps");
+    assert!(matches!(
+        &events[0],
+        super::ResponseEvent::OutputItemDone(ResponseItem::FunctionCall {
+            name,
+            ..
+        }) if name == "mcp__server__tool"
+    ));
+}
+
+#[test]
 fn mapper_marks_tool_use_stop_as_follow_up_required() {
     let mut mapper = AgentStreamMapper::default();
     let events = mapper
@@ -237,6 +276,7 @@ async fn chat_stream_merges_finish_reason_with_empty_choices_usage_chunk() {
         Duration::from_secs(5),
         None,
         AgentStreamFormat::ChatCompletions,
+        Default::default(),
     )
     .await;
 

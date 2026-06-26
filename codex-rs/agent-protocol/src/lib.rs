@@ -81,6 +81,11 @@ pub enum ContentBlock {
     },
     Image {
         source: ImageSource,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    Compaction {
+        text: String,
     },
     ToolUse {
         id: String,
@@ -106,6 +111,7 @@ pub enum ContentBlock {
 pub enum ImageSource {
     Base64 { media_type: String, data: String },
     Url { url: String },
+    FileId { file_id: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -659,7 +659,9 @@ async fn view_image_tool_can_preserve_original_resolution_when_requested_on_gpt5
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_model("gpt-5.3-codex");
+    let mut builder = test_codex().with_model_info_override("gpt-5.3-codex", |model_info| {
+        model_info.supports_image_detail_original = true;
+    });
     let test = builder.build_with_remote_env(&server).await?;
     let TestCodex {
         codex,

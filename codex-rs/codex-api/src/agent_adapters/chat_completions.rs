@@ -1,5 +1,3 @@
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use codex_agent_protocol::AgentMessage;
 use codex_agent_protocol::AgentRequest;
 use codex_agent_protocol::AgentStreamEvent;
@@ -13,13 +11,10 @@ use codex_agent_protocol::StopReason;
 use codex_agent_protocol::TokenUsage;
 use codex_agent_protocol::ToolChoice;
 use codex_agent_protocol::ToolResultContent;
-use codex_utils_image::PromptImageMode;
-use codex_utils_image::load_for_prompt_bytes;
 use serde_json::Map;
 use serde_json::Value;
 use serde_json::json;
 use std::collections::HashMap;
-use std::path::Path;
 
 const TEXT_BLOCK_INDEX: usize = 0;
 const REASONING_BLOCK_INDEX: usize = 1;
@@ -436,7 +431,9 @@ fn user_message_to_chat_messages(
         let user_content = if user_blocks.iter().all(|block| {
             matches!(
                 block,
-                ContentBlock::Text { .. } | ContentBlock::Reasoning { .. }
+                ContentBlock::Text { .. }
+                    | ContentBlock::Compaction { .. }
+                    | ContentBlock::Reasoning { .. }
             )
         }) {
             let text = user_blocks
@@ -738,17 +735,19 @@ fn content_block_to_user_content(
     supports_image_input: bool,
 ) -> Option<Value> {
     match block {
-        ContentBlock::Text { text } | ContentBlock::Reasoning { text, signature: _ } => {
+        ContentBlock::Text { text }
+        | ContentBlock::Compaction { text }
+        | ContentBlock::Reasoning { text, signature: _ } => {
             (!text.is_empty()).then(|| json!({ "type": "text", "text": text }))
         }
-        ContentBlock::Image { source } => {
+        ContentBlock::Image { source, detail } => {
             if !supports_image_input {
                 return Some(json!({
                     "type": "text",
                     "text": IMAGE_CONTENT_OMITTED_PLACEHOLDER,
                 }));
             }
-            image_content_part(source, None).or_else(|| {
+            image_content_part(source, detail.as_deref()).or_else(|| {
                 Some(json!({
                     "type": "text",
                     "text": IMAGE_CONTENT_UNAVAILABLE_PLACEHOLDER,
@@ -773,10 +772,10 @@ fn content_blocks_text(blocks: &[ContentBlock]) -> String {
 
 fn content_block_text(block: &ContentBlock) -> String {
     match block {
-        ContentBlock::Text { text } | ContentBlock::Reasoning { text, signature: _ } => {
-            text.clone()
-        }
-        ContentBlock::Image { source } => image_source_url(source),
+        ContentBlock::Text { text }
+        | ContentBlock::Compaction { text }
+        | ContentBlock::Reasoning { text, signature: _ } => text.clone(),
+        ContentBlock::Image { source, detail: _ } => image_source_url(source),
         ContentBlock::ToolUse { id, name, input } => {
             format!(
                 "tool_use {id} {name} {}",
@@ -910,32 +909,8 @@ fn image_content_part(source: &ImageSource, detail: Option<&str>) -> Option<Valu
 fn image_source_chat_url(source: &ImageSource) -> Option<String> {
     match source {
         ImageSource::Url { url } => Some(url.clone()),
-        ImageSource::Base64 { media_type, data } => {
-            let bytes = match BASE64_STANDARD.decode(data) {
-                Ok(bytes) => bytes,
-                Err(error) => {
-                    tracing::warn!(
-                        media_type,
-                        "failed to decode base64 image for chat completions request: {error}"
-                    );
-                    return None;
-                }
-            };
-            match load_for_prompt_bytes(
-                Path::new("<chat-completions-image>"),
-                bytes,
-                PromptImageMode::ResizeToFit,
-            ) {
-                Ok(image) => Some(image.into_data_url()),
-                Err(error) => {
-                    tracing::warn!(
-                        media_type,
-                        "failed to process image for chat completions request: {error}"
-                    );
-                    None
-                }
-            }
-        }
+        ImageSource::FileId { .. } => None,
+        ImageSource::Base64 { .. } => Some(image_source_url(source)),
     }
 }
 
@@ -943,6 +918,7 @@ fn image_source_url(source: &ImageSource) -> String {
     match source {
         ImageSource::Base64 { media_type, data } => format!("data:{media_type};base64,{data}"),
         ImageSource::Url { url } => url.clone(),
+        ImageSource::FileId { file_id } => format!("<image file_id {file_id}>"),
     }
 }
 

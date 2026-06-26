@@ -664,11 +664,8 @@ fn build_compacted_history_with_limit(
         summary_text.to_string()
     };
 
-    history.push(ResponseItem::Message {
-        id: None,
-        role: "user".to_string(),
-        content: vec![ContentItem::InputText { text: summary_text }],
-        phase: None,
+    history.push(ResponseItem::Compaction {
+        encrypted_content: summary_text,
     });
 
     history

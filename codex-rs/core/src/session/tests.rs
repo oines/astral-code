@@ -3684,6 +3684,191 @@ async fn user_turn_model_provider_update_streams_with_updated_provider() -> anyh
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn user_turn_model_provider_update_switches_from_chat_to_anthropic_messages()
+-> anyhow::Result<()> {
+    let provider_a_server = wiremock::MockServer::start().await;
+    let provider_b_server = wiremock::MockServer::start().await;
+    mount_chat_completions_provider(&provider_a_server, "provider-a reply").await;
+    mount_anthropic_messages_provider(&provider_b_server, "provider-b reply").await;
+
+    let provider_a = create_oss_provider_with_base_url(
+        &format!("{}/v1", provider_a_server.uri()),
+        WireApi::ChatCompletions,
+    );
+    let provider_b = create_oss_provider_with_base_url(
+        &format!("{}/v1", provider_b_server.uri()),
+        WireApi::AnthropicMessages,
+    );
+    let provider_a_id = "chat-provider".to_string();
+    let provider_b_id = "anthropic-provider".to_string();
+    let model_a = "chat-model".to_string();
+    let model_b = "claude-model".to_string();
+
+    let (session, _turn_context, rx) = make_session_and_context_with_auth_and_config_and_rx(
+        CodexAuth::from_api_key("Test API Key"),
+        Vec::new(),
+        |config| {
+            config.model = Some(model_a.clone());
+            config.model_provider_id = provider_a_id.clone();
+            config.model_provider = provider_a.clone();
+            config
+                .model_providers
+                .insert(provider_a_id.clone(), provider_a.clone());
+            config
+                .model_providers
+                .insert(provider_b_id.clone(), provider_b.clone());
+        },
+    )
+    .await;
+
+    submit_text_turn(
+        &session,
+        &rx,
+        "turn-1",
+        "first turn",
+        ThreadSettingsOverrides::default(),
+    )
+    .await;
+    submit_text_turn(
+        &session,
+        &rx,
+        "turn-2",
+        "second turn",
+        ThreadSettingsOverrides {
+            model: Some(model_b.clone()),
+            model_provider: Some(provider_b_id.clone()),
+            ..Default::default()
+        },
+    )
+    .await;
+
+    let provider_a_requests = provider_a_server
+        .received_requests()
+        .await
+        .unwrap_or_default();
+    let provider_b_requests = provider_b_server
+        .received_requests()
+        .await
+        .unwrap_or_default();
+
+    assert_eq!(
+        provider_a_requests
+            .iter()
+            .filter(|request| request.url.path() == "/v1/chat/completions")
+            .count(),
+        1
+    );
+    let provider_b_messages_requests: Vec<_> = provider_b_requests
+        .iter()
+        .filter(|request| request.url.path() == "/v1/messages")
+        .collect();
+    assert_eq!(provider_b_messages_requests.len(), 1);
+
+    let body: serde_json::Value = provider_b_messages_requests[0]
+        .body_json()
+        .expect("request body json");
+    assert_eq!(body["model"], model_b);
+    assert_eq!(body["cache_control"], json!({ "type": "ephemeral" }));
+    assert_anthropic_messages_include_text(&body, "first turn");
+    assert_anthropic_messages_include_text(&body, "provider-a reply");
+    assert_anthropic_messages_include_text(&body, "second turn");
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn user_turn_model_provider_update_switches_from_anthropic_messages_to_chat()
+-> anyhow::Result<()> {
+    let provider_a_server = wiremock::MockServer::start().await;
+    let provider_b_server = wiremock::MockServer::start().await;
+    mount_anthropic_messages_provider(&provider_a_server, "provider-a reply").await;
+    mount_chat_completions_provider(&provider_b_server, "provider-b reply").await;
+
+    let provider_a = create_oss_provider_with_base_url(
+        &format!("{}/v1", provider_a_server.uri()),
+        WireApi::AnthropicMessages,
+    );
+    let provider_b = create_oss_provider_with_base_url(
+        &format!("{}/v1", provider_b_server.uri()),
+        WireApi::ChatCompletions,
+    );
+    let provider_a_id = "anthropic-provider".to_string();
+    let provider_b_id = "chat-provider".to_string();
+    let model_a = "claude-model".to_string();
+    let model_b = "chat-model".to_string();
+
+    let (session, _turn_context, rx) = make_session_and_context_with_auth_and_config_and_rx(
+        CodexAuth::from_api_key("Test API Key"),
+        Vec::new(),
+        |config| {
+            config.model = Some(model_a.clone());
+            config.model_provider_id = provider_a_id.clone();
+            config.model_provider = provider_a.clone();
+            config
+                .model_providers
+                .insert(provider_a_id.clone(), provider_a.clone());
+            config
+                .model_providers
+                .insert(provider_b_id.clone(), provider_b.clone());
+        },
+    )
+    .await;
+
+    submit_text_turn(
+        &session,
+        &rx,
+        "turn-1",
+        "first turn",
+        ThreadSettingsOverrides::default(),
+    )
+    .await;
+    submit_text_turn(
+        &session,
+        &rx,
+        "turn-2",
+        "second turn",
+        ThreadSettingsOverrides {
+            model: Some(model_b.clone()),
+            model_provider: Some(provider_b_id.clone()),
+            ..Default::default()
+        },
+    )
+    .await;
+
+    let provider_a_requests = provider_a_server
+        .received_requests()
+        .await
+        .unwrap_or_default();
+    let provider_b_requests = provider_b_server
+        .received_requests()
+        .await
+        .unwrap_or_default();
+
+    assert_eq!(
+        provider_a_requests
+            .iter()
+            .filter(|request| request.url.path() == "/v1/messages")
+            .count(),
+        1
+    );
+    let provider_b_chat_requests: Vec<_> = provider_b_requests
+        .iter()
+        .filter(|request| request.url.path() == "/v1/chat/completions")
+        .collect();
+    assert_eq!(provider_b_chat_requests.len(), 1);
+
+    let body: serde_json::Value = provider_b_chat_requests[0]
+        .body_json()
+        .expect("request body json");
+    assert_eq!(body["model"], model_b);
+    assert_chat_messages_include_text(&body, "first turn");
+    assert_chat_messages_include_text(&body, "provider-a reply");
+    assert_chat_messages_include_text(&body, "second turn");
+
+    Ok(())
+}
+
 #[tokio::test]
 async fn session_settings_model_provider_update_rejects_unknown_provider() {
     let session_configuration = make_session_configuration_for_tests().await;
@@ -3696,6 +3881,32 @@ async fn session_settings_model_provider_update_rejects_unknown_provider() {
     };
 
     assert!(err.to_string().contains("model_provider"));
+}
+
+async fn submit_text_turn(
+    session: &Arc<Session>,
+    rx: &async_channel::Receiver<Event>,
+    turn_id: &str,
+    text: &str,
+    thread_settings: ThreadSettingsOverrides,
+) {
+    handlers::user_input_or_turn(
+        session,
+        turn_id.to_string(),
+        Op::UserInput {
+            items: vec![UserInput::Text {
+                text: text.to_string(),
+                text_elements: Vec::new(),
+            }],
+            final_output_json_schema: None,
+            model_client_metadata: None,
+            additional_context: Default::default(),
+            thread_settings,
+        },
+        /*client_user_message_id*/ None,
+    )
+    .await;
+    wait_for_turn_complete_from_rx(rx).await;
 }
 
 async fn wait_for_turn_complete_from_rx(rx: &async_channel::Receiver<Event>) {
@@ -3736,6 +3947,27 @@ async fn mount_chat_completions_provider(server: &wiremock::MockServer, reply: &
         .await;
 }
 
+async fn mount_anthropic_messages_provider(server: &wiremock::MockServer, reply: &str) {
+    Mock::given(method("GET"))
+        .and(path("/v1/models"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "object": "list",
+            "data": [],
+        })))
+        .mount(server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/v1/messages"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(anthropic_messages_text_sse(reply)),
+        )
+        .mount(server)
+        .await;
+}
+
 fn chat_completions_text_sse(text: &str) -> String {
     let chunk = json!({
         "id": "chatcmpl-provider-switch",
@@ -3754,6 +3986,67 @@ fn chat_completions_text_sse(text: &str) -> String {
         },
     });
     format!("data: {chunk}\n\n")
+}
+
+fn anthropic_messages_text_sse(text: &str) -> String {
+    let events = [
+        json!({
+            "type": "message_start",
+            "message": { "id": "msg-provider-switch", "model": "claude-test" }
+        }),
+        json!({
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": { "type": "text", "text": "" }
+        }),
+        json!({
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": { "type": "text_delta", "text": text }
+        }),
+        json!({ "type": "content_block_stop", "index": 0 }),
+        json!({
+            "type": "message_delta",
+            "delta": { "stop_reason": "end_turn" },
+            "usage": { "input_tokens": 13, "output_tokens": 5 }
+        }),
+    ];
+    events
+        .into_iter()
+        .map(|event| format!("data: {event}\n\n"))
+        .collect()
+}
+
+fn assert_anthropic_messages_include_text(body: &serde_json::Value, expected: &str) {
+    let messages = body["messages"].as_array().expect("messages array");
+    assert!(
+        messages.iter().any(|message| {
+            message["content"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|content| {
+                    content["text"]
+                        .as_str()
+                        .is_some_and(|text| text.contains(expected))
+                })
+        }),
+        "expected Anthropic messages to include {expected:?}, body: {body}"
+    );
+}
+
+fn assert_chat_messages_include_text(body: &serde_json::Value, expected: &str) {
+    let messages = body["messages"].as_array().expect("messages array");
+    assert!(
+        messages.iter().any(|message| match &message["content"] {
+            serde_json::Value::String(text) => text.contains(expected),
+            serde_json::Value::Array(parts) => parts.iter().any(|part| part["text"]
+                .as_str()
+                .is_some_and(|text| text.contains(expected))),
+            _ => false,
+        }),
+        "expected Chat messages to include {expected:?}, body: {body}"
+    );
 }
 
 pub(crate) async fn make_session_configuration_for_tests() -> SessionConfiguration {

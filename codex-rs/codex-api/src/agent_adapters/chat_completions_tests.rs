@@ -21,8 +21,7 @@ use super::ChatCompletionsOptions;
 use super::parse_stream_chunk;
 use super::to_chat_completions_request;
 
-const ONE_BY_ONE_PNG_BASE64: &str =
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==";
+const ONE_BY_ONE_PNG_BASE64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==";
 
 #[test]
 fn request_maps_tool_use_and_tool_result_to_chat_shape() {
@@ -330,7 +329,7 @@ fn request_omits_image_tool_result_for_text_only_model() {
 }
 
 #[test]
-fn request_omits_unprocessable_tool_result_image() {
+fn request_preserves_tool_result_image_data_urls_without_processing() {
     let request = AgentRequest {
         model: "vision-compatible".to_string(),
         messages: vec![
@@ -384,7 +383,23 @@ fn request_omits_unprocessable_tool_result_image() {
                 {
                     "role": "tool",
                     "tool_call_id": "call_view",
-                    "content": "<image content omitted because it could not be processed>"
+                    "content": "Tool returned image content. The image is attached in the following user message."
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Image returned by view_image tool call call_view."
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": "data:image/png;base64,not base64",
+                                "detail": "high"
+                            }
+                        }
+                    ]
                 }
             ]
         })
@@ -802,6 +817,7 @@ fn request_keeps_multimodal_user_content_as_parts_array() {
                     source: ImageSource::Url {
                         url: "https://example.com/screenshot.png".to_string(),
                     },
+                    detail: None,
                 },
             ],
             id: None,
@@ -843,6 +859,7 @@ fn request_omits_user_image_for_text_only_model() {
                     source: ImageSource::Url {
                         url: "https://example.com/screenshot.png".to_string(),
                     },
+                    detail: None,
                 },
             ],
             id: None,

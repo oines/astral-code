@@ -127,6 +127,9 @@ fn build_agent_request_maps_prompt_history_tools_and_metadata() {
                     success: Some(true),
                 },
             },
+            ResponseItem::Compaction {
+                encrypted_content: "compacted summary".to_string(),
+            },
         ],
         tools: vec![bash_tool_spec()],
         parallel_tool_calls: true,
@@ -170,6 +173,7 @@ fn build_agent_request_maps_prompt_history_tools_and_metadata() {
                                 media_type: "image/png".to_string(),
                                 data: "abc123".to_string(),
                             },
+                            detail: None,
                         },
                     ],
                     id: Some("msg-user".to_string()),
@@ -199,6 +203,13 @@ fn build_agent_request_maps_prompt_history_tools_and_metadata() {
                             text: "/tmp/project".to_string(),
                         }],
                         is_error: false,
+                    }],
+                    id: None,
+                },
+                AgentMessage {
+                    role: MessageRole::User,
+                    content: vec![ContentBlock::Compaction {
+                        text: "compacted summary".to_string(),
                     }],
                     id: None,
                 },

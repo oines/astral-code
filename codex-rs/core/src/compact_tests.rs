@@ -209,16 +209,14 @@ fn build_token_limited_compacted_history_truncates_overlong_user_messages() {
     );
 
     let summary_text = match summary_message {
-        ResponseItem::Message { role, content, .. } if role == "user" => {
-            content_items_to_text(content).unwrap_or_default()
-        }
+        ResponseItem::Compaction { encrypted_content } => encrypted_content.clone(),
         other => panic!("unexpected item in history: {other:?}"),
     };
     assert_eq!(summary_text, "SUMMARY");
 }
 
 #[test]
-fn build_token_limited_compacted_history_appends_summary_message() {
+fn build_token_limited_compacted_history_appends_compaction_summary() {
     let initial_context: Vec<ResponseItem> = Vec::new();
     let user_messages = vec!["first user message".to_string()];
     let summary_text = "summary text";
@@ -231,10 +229,8 @@ fn build_token_limited_compacted_history_appends_summary_message() {
 
     let last = history.last().expect("history should have a summary entry");
     let summary = match last {
-        ResponseItem::Message { role, content, .. } if role == "user" => {
-            content_items_to_text(content).unwrap_or_default()
-        }
-        other => panic!("expected summary message, found {other:?}"),
+        ResponseItem::Compaction { encrypted_content } => encrypted_content.clone(),
+        other => panic!("expected compaction summary, found {other:?}"),
     };
     assert_eq!(summary, summary_text);
 }

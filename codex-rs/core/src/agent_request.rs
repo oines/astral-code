@@ -355,9 +355,24 @@ fn response_item_to_agent_message(
         | ResponseItem::LocalShellCall { .. }
         | ResponseItem::ToolSearchCall { call_id: None, .. }
         | ResponseItem::WebSearchCall { .. }
-        | ResponseItem::ImageGenerationCall { .. }
-        | ResponseItem::Compaction { .. }
-        | ResponseItem::CompactionTrigger
+        | ResponseItem::ImageGenerationCall { .. } => None,
+        ResponseItem::Compaction { encrypted_content } => Some(AgentMessage {
+            role: MessageRole::User,
+            content: vec![ContentBlock::Compaction {
+                text: encrypted_content.clone(),
+            }],
+            id: None,
+        }),
+        ResponseItem::ContextCompaction {
+            encrypted_content: Some(encrypted_content),
+        } => Some(AgentMessage {
+            role: MessageRole::User,
+            content: vec![ContentBlock::Compaction {
+                text: encrypted_content.clone(),
+            }],
+            id: None,
+        }),
+        ResponseItem::CompactionTrigger
         | ResponseItem::ContextCompaction { .. }
         | ResponseItem::Other => None,
     }
@@ -378,10 +393,20 @@ fn content_item_to_block(item: &ContentItem) -> ContentBlock {
         ContentItem::InputText { text } | ContentItem::OutputText { text } => {
             ContentBlock::Text { text: text.clone() }
         }
-        ContentItem::InputImage { image_url, .. } => ContentBlock::Image {
+        ContentItem::InputImage { image_url, detail } => ContentBlock::Image {
             source: image_source(image_url),
+            detail: detail.as_ref().and_then(image_detail_string),
         },
     }
+}
+
+fn image_detail_string<T>(detail: &T) -> Option<String>
+where
+    T: serde::Serialize,
+{
+    serde_json::to_value(detail)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_string))
 }
 
 fn image_source(image_url: &str) -> ImageSource {
@@ -454,11 +479,7 @@ fn tool_result_content_item(item: &FunctionCallOutputContentItem) -> Option<Tool
         FunctionCallOutputContentItem::InputImage { image_url, detail } => {
             Some(ToolResultContent::Image {
                 source: image_source(image_url),
-                detail: detail.as_ref().and_then(|detail| {
-                    serde_json::to_value(detail)
-                        .ok()
-                        .and_then(|value| value.as_str().map(str::to_string))
-                }),
+                detail: detail.as_ref().and_then(image_detail_string),
             })
         }
         FunctionCallOutputContentItem::EncryptedContent { .. } => None,
