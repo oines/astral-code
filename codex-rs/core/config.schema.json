@@ -1422,6 +1422,57 @@
       },
       "type": "object"
     },
+    "ModelCapabilityToml": {
+      "properties": {
+        "context_window": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "litellm_provider": {
+          "type": "string"
+        },
+        "max_context_window": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "max_output_tokens": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "supported_endpoints": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "supports_native_streaming": {
+          "type": "boolean"
+        },
+        "supports_parallel_tools": {
+          "type": "boolean"
+        },
+        "supports_prompt_cache": {
+          "type": "boolean"
+        },
+        "supports_reasoning": {
+          "type": "boolean"
+        },
+        "supports_tools": {
+          "type": "boolean"
+        },
+        "supports_vision": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "ModelProviderAuthInfo": {
       "additionalProperties": false,
       "description": "Configuration for obtaining a provider bearer token from a command.",
@@ -5053,6 +5104,14 @@
         }
       ],
       "description": "Controls whether the auto-compaction limit applies to the full context or only to tokens after the carried prefix in the current compaction window."
+    },
+    "model_capabilities": {
+      "additionalProperties": {
+        "$ref": "#/definitions/ModelCapabilityToml"
+      },
+      "default": null,
+      "description": "Explicit per-model capability overrides. Entries here take precedence over the generated `model-capabilities.toml` cache.",
+      "type": "object"
     },
     "model_catalog_json": {
       "allOf": [

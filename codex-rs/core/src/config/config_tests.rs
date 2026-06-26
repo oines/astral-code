@@ -13,6 +13,7 @@ use codex_config::config_toml::AgentsToml;
 use codex_config::config_toml::AutoReviewToml;
 use codex_config::config_toml::ConfigToml;
 use codex_config::config_toml::ExperimentalRequestUserInput;
+use codex_config::config_toml::ModelCapabilityToml;
 use codex_config::config_toml::ProjectConfig;
 use codex_config::config_toml::RealtimeConfig;
 use codex_config::config_toml::RealtimeToml;
@@ -5185,6 +5186,72 @@ async fn anthropic_cached_fold_defaults_off_and_honors_config() -> std::io::Resu
     )
     .await?;
     assert!(config.experimental_anthropic_cached_fold);
+
+    Ok(())
+}
+
+#[test]
+fn config_toml_parses_explicit_model_capabilities() {
+    let cfg: ConfigToml = toml::from_str(
+        r#"
+[model_capabilities."mimo/mimo-v2.5"]
+supports_vision = true
+"#,
+    )
+    .expect("parse config model capabilities");
+
+    assert_eq!(
+        cfg.model_capabilities
+            .as_ref()
+            .and_then(|capabilities| capabilities.get("mimo/mimo-v2.5"))
+            .and_then(|capability| capability.supports_vision),
+        Some(true)
+    );
+}
+
+#[tokio::test]
+async fn config_model_capabilities_override_generated_capability_cache() -> std::io::Result<()> {
+    let codex_home = TempDir::new()?;
+    std::fs::write(
+        codex_home.path().join("model-capabilities.toml"),
+        r#"
+version = 1
+source = "test"
+generated_at_unix_seconds = 0
+
+[models."mimo/mimo-v2.5"]
+supports_vision = false
+"#,
+    )?;
+
+    let mut model_capabilities = BTreeMap::new();
+    model_capabilities.insert(
+        "mimo/mimo-v2.5".to_string(),
+        ModelCapabilityToml {
+            supports_vision: Some(true),
+            ..Default::default()
+        },
+    );
+    let cfg = ConfigToml {
+        model_capabilities: Some(model_capabilities),
+        ..Default::default()
+    };
+
+    let config = Config::load_from_base_config_with_overrides(
+        cfg,
+        ConfigOverrides::default(),
+        codex_home.abs(),
+    )
+    .await?;
+
+    assert_eq!(
+        config
+            .model_capabilities
+            .as_ref()
+            .and_then(|capabilities| capabilities.lookup("mimo/mimo-v2.5"))
+            .and_then(|capability| capability.supports_vision),
+        Some(true)
+    );
 
     Ok(())
 }
