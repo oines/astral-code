@@ -91,10 +91,10 @@ fn mapper_streams_text_with_lazy_content_block_start() {
     assert_eq!(response_id, "msg_1");
     assert_eq!(*end_turn, Some(true));
     let usage = token_usage.as_ref().expect("token usage present");
-    assert_eq!(usage.input_tokens, 12);
+    assert_eq!(usage.input_tokens, 15);
     assert_eq!(usage.cached_input_tokens, 3);
     assert_eq!(usage.output_tokens, 7);
-    assert_eq!(usage.total_tokens, 19);
+    assert_eq!(usage.total_tokens, 22);
 }
 
 #[test]
@@ -297,7 +297,7 @@ async fn chat_stream_merges_finish_reason_with_empty_choices_usage_chunk() {
         })
         .expect("completed event");
 
-    assert_eq!(completed.0.input_tokens, 13);
+    assert_eq!(completed.0.input_tokens, 21);
     assert_eq!(completed.0.cached_input_tokens, 8);
     assert_eq!(completed.0.output_tokens, 5);
     assert_eq!(*completed.1, Some(true));

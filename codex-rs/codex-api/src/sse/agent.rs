@@ -397,8 +397,12 @@ fn stop_reason_ends_turn(reason: &StopReason) -> bool {
 }
 
 fn agent_usage_to_protocol_usage(usage: AgentTokenUsage) -> TokenUsage {
-    let input_tokens = usage.input_tokens.unwrap_or(0);
+    let uncached_input_tokens = usage.input_tokens.unwrap_or(0);
+    let cache_creation_input_tokens = usage.cache_creation_input_tokens.unwrap_or(0);
     let cached_input_tokens = usage.cache_read_input_tokens.unwrap_or(0);
+    let input_tokens = uncached_input_tokens
+        .saturating_add(cache_creation_input_tokens)
+        .saturating_add(cached_input_tokens);
     let output_tokens = usage.output_tokens.unwrap_or(0);
 
     TokenUsage {
