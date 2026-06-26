@@ -134,6 +134,7 @@ async fn chat_stream_includes_session_context_headers_on_review() {
             /*service_tier*/ None,
             /*turn_metadata_header*/ None,
             &codex_rollout_trace::InferenceTraceContext::disabled(),
+            /*anthropic_cached_fold_enabled*/ false,
         )
         .await
         .expect("stream failed");
@@ -261,6 +262,7 @@ async fn chat_stream_includes_session_context_headers_on_other_subagent() {
             /*service_tier*/ None,
             /*turn_metadata_header*/ None,
             &codex_rollout_trace::InferenceTraceContext::disabled(),
+            /*anthropic_cached_fold_enabled*/ false,
         )
         .await
         .expect("stream failed");
@@ -387,6 +389,7 @@ async fn generic_chat_stream_omits_private_reasoning_fields() {
             /*service_tier*/ None,
             /*turn_metadata_header*/ None,
             &codex_rollout_trace::InferenceTraceContext::disabled(),
+            /*anthropic_cached_fold_enabled*/ false,
         )
         .await
         .expect("stream failed");

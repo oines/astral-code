@@ -3769,7 +3769,8 @@ async fn user_turn_model_provider_update_switches_from_chat_to_anthropic_message
         .body_json()
         .expect("request body json");
     assert_eq!(body["model"], model_b);
-    assert_eq!(body["cache_control"], json!({ "type": "ephemeral" }));
+    assert!(body.get("cache_control").is_none());
+    assert!(contains_ephemeral_cache_control(&body));
     assert_anthropic_messages_include_text(&body, "first turn");
     assert_anthropic_messages_include_text(&body, "provider-a reply");
     assert_anthropic_messages_include_text(&body, "second turn");
@@ -4033,6 +4034,20 @@ fn assert_anthropic_messages_include_text(body: &serde_json::Value, expected: &s
         }),
         "expected Anthropic messages to include {expected:?}, body: {body}"
     );
+}
+
+fn contains_ephemeral_cache_control(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Object(object) => {
+            object.get("cache_control") == Some(&json!({ "type": "ephemeral" }))
+                || object.values().any(contains_ephemeral_cache_control)
+        }
+        serde_json::Value::Array(array) => array.iter().any(contains_ephemeral_cache_control),
+        serde_json::Value::Null
+        | serde_json::Value::Bool(_)
+        | serde_json::Value::Number(_)
+        | serde_json::Value::String(_) => false,
+    }
 }
 
 fn assert_chat_messages_include_text(body: &serde_json::Value, expected: &str) {

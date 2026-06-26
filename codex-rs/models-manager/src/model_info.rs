@@ -21,6 +21,9 @@ const LOCAL_PRAGMATIC_TEMPLATE: &str = "You are a deeply pragmatic, effective so
 const PERSONALITY_PLACEHOLDER: &str = "{{ personality }}";
 
 pub fn with_config_overrides(mut model: ModelInfo, config: &ModelsManagerConfig) -> ModelInfo {
+    if let Some(input_modalities) = &config.model_input_modalities {
+        model.input_modalities = input_modalities.clone();
+    }
     if let Some(capability) = config.lookup_model_capability(&model.slug) {
         capability.apply_to_model_info(&mut model);
     }
@@ -37,9 +40,6 @@ pub fn with_config_overrides(mut model: ModelInfo, config: &ModelsManagerConfig)
                     context_window.min(max_context_window)
                 }),
         );
-    }
-    if let Some(input_modalities) = &config.model_input_modalities {
-        model.input_modalities = input_modalities.clone();
     }
     if let Some(auto_compact_token_limit) = config.model_auto_compact_token_limit {
         model.auto_compact_token_limit = Some(auto_compact_token_limit);

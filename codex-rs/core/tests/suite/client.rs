@@ -942,6 +942,7 @@ async fn send_provider_auth_request(server: &MockServer, auth: ModelProviderAuth
             /*service_tier*/ None,
             /*turn_metadata_header*/ None,
             &codex_rollout_trace::InferenceTraceContext::disabled(),
+            /*anthropic_cached_fold_enabled*/ false,
         )
         .await
         .expect("chat completions stream to start");
@@ -1517,7 +1518,7 @@ async fn skills_use_aliases_in_developer_message_under_budget_pressure() {
         "expected root alias for {expected_root_str}: {developer_messages:?}"
     );
     assert!(
-        developer_text.contains("- s00: d (file: r0/s00/SKILL.md)"),
+        developer_text.contains("- s00:") && developer_text.contains("(file: r0/s00/SKILL.md)"),
         "expected skill path to use root alias: {developer_messages:?}"
     );
     assert!(
@@ -2375,6 +2376,7 @@ async fn azure_chat_completions_request_serializes_model_context() {
             /*service_tier*/ None,
             /*turn_metadata_header*/ None,
             &codex_rollout_trace::InferenceTraceContext::disabled(),
+            /*anthropic_cached_fold_enabled*/ false,
         )
         .await
         .expect("chat completions stream to start");

@@ -9,6 +9,7 @@ use codex_login::CodexAuth;
 use codex_login::ExternalAuth;
 use codex_login::ExternalAuthRefreshContext;
 use codex_login::ExternalAuthTokens;
+use codex_protocol::openai_models::InputModality;
 use codex_protocol::openai_models::ModelsResponse;
 use pretty_assertions::assert_eq;
 use serde_json::json;
@@ -360,6 +361,34 @@ async fn get_model_info_uses_current_provider_capability_for_bare_model_name() {
     assert_eq!(model_info.slug, "mimo-v2.5-pro");
     assert_eq!(model_info.max_context_window, Some(1_000_000));
     assert!(!model_info.used_fallback_model_metadata);
+}
+
+#[tokio::test]
+async fn model_capability_vision_signal_overrides_global_input_modalities() {
+    let mut models = BTreeMap::new();
+    models.insert(
+        "mimo/mimo-v2.5-pro".to_string(),
+        ModelCapability {
+            supports_vision: Some(false),
+            ..Default::default()
+        },
+    );
+    let config = ModelsManagerConfig {
+        model_provider_id: Some("mimo".to_string()),
+        model_input_modalities: Some(vec![InputModality::Text, InputModality::Image]),
+        model_capabilities: Some(ModelCapabilitiesCache {
+            version: 1,
+            source: "test".to_string(),
+            generated_at_unix_seconds: 0,
+            models,
+        }),
+        ..Default::default()
+    };
+    let manager = static_manager_for_tests(ModelsResponse { models: Vec::new() });
+
+    let model_info = manager.get_model_info("mimo-v2.5-pro", &config).await;
+
+    assert_eq!(model_info.input_modalities, vec![InputModality::Text]);
 }
 
 #[tokio::test]

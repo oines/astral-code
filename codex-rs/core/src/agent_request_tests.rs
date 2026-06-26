@@ -139,6 +139,7 @@ fn build_agent_request_maps_prompt_history_tools_and_metadata() {
         personality: None,
         output_schema: None,
         output_schema_strict: true,
+        compact_input_placeholders: false,
     };
 
     let request = build_agent_request(AgentRequestBuildParams {

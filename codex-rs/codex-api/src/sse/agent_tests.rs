@@ -297,7 +297,7 @@ async fn chat_stream_merges_finish_reason_with_empty_choices_usage_chunk() {
         })
         .expect("completed event");
 
-    assert_eq!(completed.0.input_tokens, 21);
+    assert_eq!(completed.0.input_tokens, 13);
     assert_eq!(completed.0.cached_input_tokens, 8);
     assert_eq!(completed.0.output_tokens, 5);
     assert_eq!(*completed.1, Some(true));

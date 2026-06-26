@@ -1001,6 +1001,10 @@ pub struct Config {
     /// If set to `true`, used only the experimental unified exec tool.
     pub use_experimental_unified_exec_tool: bool,
 
+    /// Enables Anthropic Messages-only cached folding for older eligible tool
+    /// results. Defaults to `false`.
+    pub experimental_anthropic_cached_fold: bool,
+
     /// Maximum poll window for background terminal output (`write_stdin`), in milliseconds.
     /// Default: `300000` (5 minutes).
     pub background_terminal_max_timeout: u64,
@@ -3656,6 +3660,9 @@ impl Config {
             experimental_request_user_input_enabled,
             code_mode,
             use_experimental_unified_exec_tool,
+            experimental_anthropic_cached_fold: cfg
+                .experimental_anthropic_cached_fold
+                .unwrap_or(false),
             background_terminal_max_timeout,
             ghost_snapshot,
             multi_agent_v2,

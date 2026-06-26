@@ -25,6 +25,7 @@ pub use codex_thread::TryStartTurnIfIdleRejectionReason;
 pub use session::turn_context::TurnContext;
 mod agent;
 mod agent_request;
+mod anthropic_cache_fold;
 mod attestation;
 mod codex_delegate;
 mod command_canonicalization;

@@ -24,6 +24,7 @@ use codex_analytics::CompactionStrategy;
 use codex_analytics::CompactionTrigger;
 use codex_analytics::now_unix_seconds;
 use codex_extension_api::CompactStartInput;
+use codex_model_provider_info::WireApi;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
 use codex_protocol::items::ContextCompactionItem;
@@ -253,6 +254,11 @@ async fn run_compact_task_inner_impl(
             input: turn_input,
             base_instructions: sess.get_base_instructions().await,
             personality: turn_context.personality,
+            compact_input_placeholders: turn_context.config.experimental_anthropic_cached_fold
+                && matches!(
+                    turn_context.provider.info().wire_api,
+                    WireApi::AnthropicMessages
+                ),
             ..Default::default()
         };
         let window_id = sess.services.model_client.current_window_id();
@@ -691,6 +697,7 @@ async fn drain_to_completed(
             // Local compaction streams are left untraced until the reducer has a first-class
             // local compaction lifecycle.
             &InferenceTraceContext::disabled(),
+            turn_context.config.experimental_anthropic_cached_fold,
         )
         .await?;
     loop {

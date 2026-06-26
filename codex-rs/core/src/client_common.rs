@@ -36,6 +36,10 @@ pub struct Prompt {
 
     /// Whether the provider should strictly validate `output_schema` when supported.
     pub output_schema_strict: bool,
+
+    /// Internal marker for compact summarization prompts that may use
+    /// provider-specific media/tool-result placeholders.
+    pub(crate) compact_input_placeholders: bool,
 }
 
 impl Default for Prompt {
@@ -48,6 +52,7 @@ impl Default for Prompt {
             personality: None,
             output_schema: None,
             output_schema_strict: true,
+            compact_input_placeholders: false,
         }
     }
 }

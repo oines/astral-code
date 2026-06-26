@@ -1083,7 +1083,7 @@ fn stream_chunk_maps_text_tool_calls_finish_reason_and_usage() {
             AgentStreamEvent::MessageStop {
                 stop_reason: Some(StopReason::ToolUse),
                 usage: Some(TokenUsage {
-                    input_tokens: Some(12),
+                    input_tokens: Some(9),
                     output_tokens: Some(8),
                     cache_creation_input_tokens: None,
                     cache_read_input_tokens: Some(3),
@@ -1252,7 +1252,7 @@ fn stream_chunk_maps_openai_compatible_empty_choices_usage_chunk() {
         vec![AgentStreamEvent::MessageStop {
             stop_reason: None,
             usage: Some(TokenUsage {
-                input_tokens: Some(13),
+                input_tokens: Some(5),
                 output_tokens: Some(5),
                 cache_creation_input_tokens: None,
                 cache_read_input_tokens: Some(8),
@@ -1278,7 +1278,7 @@ fn stream_chunk_maps_deepseek_cache_usage_fields() {
         vec![AgentStreamEvent::MessageStop {
             stop_reason: None,
             usage: Some(TokenUsage {
-                input_tokens: Some(23),
+                input_tokens: Some(6),
                 output_tokens: Some(5),
                 cache_creation_input_tokens: None,
                 cache_read_input_tokens: Some(17),

@@ -504,10 +504,13 @@ fn chat_message_image_urls(body: &Value, role: &str) -> Vec<String> {
 fn chat_messages_to_response_input(messages: &[Value]) -> Vec<Value> {
     let mut items = Vec::new();
     let mut call_names = HashMap::new();
+    let mut index = 0;
 
-    for message in messages {
+    while index < messages.len() {
+        let message = &messages[index];
         if message.get("type").and_then(Value::as_str) == Some("agent_message") {
             items.push(message.clone());
+            index += 1;
             continue;
         }
 
@@ -588,20 +591,30 @@ fn chat_messages_to_response_input(messages: &[Value]) -> Vec<Value> {
             }
             Some("tool") => {
                 let Some(call_id) = message.get("tool_call_id").and_then(Value::as_str) else {
+                    index += 1;
                     continue;
                 };
                 let call_type = call_names
                     .get(call_id)
                     .map(|name| chat_tool_output_item_type(name))
                     .unwrap_or("function_call_output");
+                let mut output = chat_tool_message_output(message);
+                if let Some(image_items) =
+                    following_chat_image_tool_result_items(messages.get(index + 1), call_id)
+                {
+                    output = chat_tool_message_output_with_images(message, image_items);
+                    index += 1;
+                }
                 items.push(serde_json::json!({
                     "type": call_type,
                     "call_id": call_id,
-                    "output": chat_tool_message_output(message),
+                    "output": output,
                 }));
             }
             Some(_) | None => {}
         }
+
+        index += 1;
     }
 
     items
@@ -814,6 +827,72 @@ fn chat_tool_message_output(message: &Value) -> Value {
         | Some(Value::Null)
         | None => Value::String(String::new()),
     }
+}
+
+fn following_chat_image_tool_result_items(
+    message: Option<&Value>,
+    call_id: &str,
+) -> Option<Vec<Value>> {
+    let message = message?;
+    if message.get("role").and_then(Value::as_str) != Some("user") {
+        return None;
+    }
+
+    let parts = chat_message_content_parts(message);
+    let first_text = parts
+        .first()
+        .and_then(|part| part.get("text"))
+        .and_then(Value::as_str)?;
+    if !is_chat_image_tool_result_label(first_text, call_id) {
+        return None;
+    }
+
+    let image_items = parts
+        .into_iter()
+        .skip(1)
+        .filter_map(|part| match part.get("type").and_then(Value::as_str) {
+            Some("image_url" | "input_image") => chat_content_part_to_input_content(part),
+            Some(_) | None => None,
+        })
+        .collect::<Vec<_>>();
+
+    (!image_items.is_empty()).then_some(image_items)
+}
+
+fn is_chat_image_tool_result_label(text: &str, call_id: &str) -> bool {
+    text == format!("Image returned by tool call {call_id}.")
+        || (text.starts_with("Image returned by ")
+            && text.ends_with(&format!(" tool call {call_id}.")))
+}
+
+fn chat_tool_message_output_with_images(message: &Value, image_items: Vec<Value>) -> Value {
+    let output = chat_tool_message_output(message);
+    let mut items = match output {
+        Value::Array(items) => items,
+        Value::String(text) => {
+            let text = strip_chat_image_tool_result_notice(&text);
+            if text.is_empty() {
+                Vec::new()
+            } else {
+                vec![serde_json::json!({ "type": "input_text", "text": text })]
+            }
+        }
+        Value::Object(_) | Value::Number(_) | Value::Bool(_) | Value::Null => Vec::new(),
+    };
+    items.extend(image_items);
+    Value::Array(items)
+}
+
+fn strip_chat_image_tool_result_notice(text: &str) -> String {
+    const NOTICE: &str =
+        "Tool returned image content. The image is attached in the following user message.";
+
+    if let Some(prefix) = text.strip_suffix(&format!("\n\n{NOTICE}")) {
+        return prefix.to_string();
+    }
+
+    text.strip_suffix(NOTICE)
+        .map_or_else(|| text.to_string(), |prefix| prefix.trim_end().to_string())
 }
 
 fn chat_tool_text_output(text: &str) -> Option<Value> {

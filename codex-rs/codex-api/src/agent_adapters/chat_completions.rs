@@ -1012,25 +1012,23 @@ fn usage_from_chat(value: Option<&Value>) -> Option<TokenUsage> {
     if value.is_null() {
         return None;
     }
+    let prompt_tokens = value.get("prompt_tokens").and_then(Value::as_u64);
+    let cached_tokens = value
+        .pointer("/prompt_tokens_details/cached_tokens")
+        .and_then(Value::as_u64)
+        .or_else(|| value.get("prompt_cache_hit_tokens").and_then(Value::as_u64));
     let prompt_cache_hit_tokens = value.get("prompt_cache_hit_tokens").and_then(Value::as_u64);
     let prompt_cache_miss_tokens = value
         .get("prompt_cache_miss_tokens")
         .and_then(Value::as_u64);
     Some(TokenUsage {
-        input_tokens: value
-            .get("prompt_tokens")
-            .and_then(Value::as_u64)
-            .or_else(|| {
-                prompt_cache_hit_tokens
-                    .zip(prompt_cache_miss_tokens)
-                    .map(|(hit, miss)| hit.saturating_add(miss))
-            }),
+        input_tokens: prompt_cache_miss_tokens.or_else(|| {
+            prompt_tokens
+                .map(|prompt_tokens| prompt_tokens.saturating_sub(cached_tokens.unwrap_or(0)))
+        }),
         output_tokens: value.get("completion_tokens").and_then(Value::as_u64),
         cache_creation_input_tokens: None,
-        cache_read_input_tokens: value
-            .pointer("/prompt_tokens_details/cached_tokens")
-            .and_then(Value::as_u64)
-            .or(prompt_cache_hit_tokens),
+        cache_read_input_tokens: cached_tokens.or(prompt_cache_hit_tokens),
     })
 }
 

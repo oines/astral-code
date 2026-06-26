@@ -200,6 +200,7 @@ impl MemoryStartupContext {
                 context.service_tier.clone(),
                 context.turn_metadata_header.as_deref(),
                 &InferenceTraceContext::disabled(),
+                false,
             )
             .await?;
 

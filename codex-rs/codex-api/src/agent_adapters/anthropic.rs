@@ -17,14 +17,39 @@ use serde_json::json;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AnthropicMessagesOptions {
     pub max_tokens: u64,
     pub supports_image_input: bool,
+    pub cache_fold: Option<AnthropicCacheFoldOptions>,
+    pub compact_input_placeholders: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnthropicCacheFoldOptions {
+    pub cache_reference_tool_use_ids: BTreeSet<String>,
+    pub pinned_cache_edits: Vec<AnthropicPinnedCacheEdits>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnthropicPinnedCacheEdits {
+    pub user_message_index: usize,
+    pub cache_references: Vec<String>,
 }
 
 const IMAGE_CONTENT_OMITTED_PLACEHOLDER: &str =
     "<image content omitted because you do not support image input>";
+const COMPACT_IMAGE_PLACEHOLDER: &str = "[image]";
+const COMPACT_LARGE_TOOL_RESULT_PLACEHOLDER: &str = "[Old tool result content cleared]";
+const COMPACT_TOOL_RESULT_TEXT_PLACEHOLDER_MIN_BYTES: usize = 4096;
+const FUNCTION_RESULT_CLEARING_PROMPT: &str = "Old tool results may be automatically cleared from context to free up space. The 5 most recent eligible tool results are always kept. When a tool result contains information you may need later, write down the important details in your response.";
+
+#[derive(Clone, Copy)]
+struct ContentProjectionOptions<'a> {
+    tool_name_aliases: &'a BTreeMap<String, String>,
+    supports_image_input: bool,
+    compact_input_placeholders: bool,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AnthropicMessagesRequest {
@@ -47,15 +72,21 @@ pub fn to_messages_request_parts(
 
     let tool_name_aliases = build_tool_name_aliases(&request.tools);
     let cache_control_enabled = request.metadata.prompt_cache_key.is_some();
-    if cache_control_enabled {
-        body.insert("cache_control".to_string(), ephemeral_cache_control());
-    }
+    let cache_fold = options
+        .cache_fold
+        .as_ref()
+        .filter(|_| cache_control_enabled);
+    let projection_options = ContentProjectionOptions {
+        tool_name_aliases: &tool_name_aliases,
+        supports_image_input: options.supports_image_input,
+        compact_input_placeholders: options.compact_input_placeholders,
+    };
 
     let system = system_blocks(
         request,
         cache_control_enabled,
-        &tool_name_aliases,
-        options.supports_image_input,
+        cache_fold.is_some(),
+        projection_options,
     );
     if !system.is_empty() {
         body.insert("system".to_string(), Value::Array(system));
@@ -64,16 +95,15 @@ pub fn to_messages_request_parts(
     let mut messages = request
         .messages
         .iter()
-        .filter_map(|message| {
-            message_to_anthropic(
-                message,
-                cache_control_enabled,
-                &tool_name_aliases,
-                options.supports_image_input,
-            )
-        })
+        .filter_map(|message| message_to_anthropic(message, projection_options))
         .collect::<Vec<_>>();
     merge_adjacent_messages(&mut messages);
+    if cache_control_enabled {
+        add_cache_control_to_last_message_content(&mut messages);
+    }
+    if let Some(cache_fold) = cache_fold {
+        apply_cache_fold(&mut messages, cache_fold);
+    }
     body.insert("messages".to_string(), Value::Array(messages));
 
     if !request.tools.is_empty() {
@@ -190,8 +220,8 @@ impl std::error::Error for AnthropicStreamError {}
 fn system_blocks(
     request: &AgentRequest,
     cache_control_enabled: bool,
-    tool_name_aliases: &BTreeMap<String, String>,
-    supports_image_input: bool,
+    cache_fold_enabled: bool,
+    projection_options: ContentProjectionOptions<'_>,
 ) -> Vec<Value> {
     let message_blocks = request
         .messages
@@ -203,15 +233,14 @@ fn system_blocks(
         .instructions
         .iter()
         .chain(message_blocks)
-        .map(|block| {
-            content_block_to_anthropic(
-                block,
-                cache_control_enabled,
-                tool_name_aliases,
-                supports_image_input,
-            )
-        })
+        .map(|block| content_block_to_anthropic(block, projection_options))
         .collect::<Vec<_>>();
+    if cache_fold_enabled {
+        blocks.push(json!({
+            "type": "text",
+            "text": FUNCTION_RESULT_CLEARING_PROMPT
+        }));
+    }
     if cache_control_enabled {
         add_cache_control_to_last_object(&mut blocks);
     }
@@ -227,9 +256,7 @@ fn is_system_role(role: &MessageRole) -> bool {
 
 fn message_to_anthropic(
     message: &AgentMessage,
-    cache_control_enabled: bool,
-    tool_name_aliases: &BTreeMap<String, String>,
-    supports_image_input: bool,
+    projection_options: ContentProjectionOptions<'_>,
 ) -> Option<Value> {
     let role = match message.role {
         MessageRole::User => "user",
@@ -247,27 +274,13 @@ fn message_to_anthropic(
                     .iter()
                     .filter(|block| !matches!(block, ContentBlock::ToolResult { .. })),
             )
-            .map(|block| {
-                content_block_to_anthropic(
-                    block,
-                    cache_control_enabled,
-                    tool_name_aliases,
-                    supports_image_input,
-                )
-            })
+            .map(|block| content_block_to_anthropic(block, projection_options))
             .collect::<Vec<_>>()
     } else {
         message
             .content
             .iter()
-            .map(|block| {
-                content_block_to_anthropic(
-                    block,
-                    cache_control_enabled,
-                    tool_name_aliases,
-                    supports_image_input,
-                )
-            })
+            .map(|block| content_block_to_anthropic(block, projection_options))
             .collect::<Vec<_>>()
     };
 
@@ -370,29 +383,135 @@ fn ephemeral_cache_control() -> Value {
     json!({ "type": "ephemeral" })
 }
 
+fn add_cache_control_to_last_message_content(messages: &mut [Value]) {
+    if message_cache_marker_position(messages).is_some() {
+        return;
+    }
+
+    for message in messages.iter_mut().rev() {
+        let Some(content) = message.get_mut("content").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        if let Some(object) = content.iter_mut().rev().find_map(Value::as_object_mut) {
+            object.insert("cache_control".to_string(), ephemeral_cache_control());
+            return;
+        }
+    }
+}
+
+fn apply_cache_fold(messages: &mut [Value], cache_fold: &AnthropicCacheFoldOptions) {
+    insert_cache_edits(messages, &cache_fold.pinned_cache_edits);
+    add_cache_references_before_marker_message(messages, &cache_fold.cache_reference_tool_use_ids);
+}
+
+fn add_cache_references_before_marker_message(
+    messages: &mut [Value],
+    tool_use_ids: &BTreeSet<String>,
+) {
+    let Some(marker) = message_cache_marker_position(messages) else {
+        return;
+    };
+
+    for (message_index, message) in messages.iter_mut().enumerate() {
+        if message_index >= marker.0 {
+            continue;
+        }
+        let Some(content) = message.get_mut("content").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        for block in content.iter_mut() {
+            let Some(object) = block.as_object_mut() else {
+                continue;
+            };
+            if object.get("type").and_then(Value::as_str) != Some("tool_result") {
+                continue;
+            }
+            let Some(tool_use_id) = object.get("tool_use_id").and_then(Value::as_str) else {
+                continue;
+            };
+            if tool_use_ids.contains(tool_use_id) {
+                object.insert(
+                    "cache_reference".to_string(),
+                    Value::String(tool_use_id.to_string()),
+                );
+            }
+        }
+    }
+}
+
+fn insert_cache_edits(messages: &mut [Value], pinned_cache_edits: &[AnthropicPinnedCacheEdits]) {
+    let mut seen_refs = BTreeSet::new();
+    for pinned in pinned_cache_edits {
+        let cache_references = pinned
+            .cache_references
+            .iter()
+            .filter(|cache_reference| seen_refs.insert((*cache_reference).clone()))
+            .collect::<Vec<_>>();
+        if cache_references.is_empty() {
+            continue;
+        }
+
+        let Some(message) = messages.get_mut(pinned.user_message_index) else {
+            continue;
+        };
+        if message_role(message) != Some("user") {
+            continue;
+        }
+        let Some(content) = message.get_mut("content").and_then(Value::as_array_mut) else {
+            continue;
+        };
+
+        let insert_index = content
+            .iter()
+            .take_while(|block| block.get("type").and_then(Value::as_str) == Some("tool_result"))
+            .count();
+        content.insert(
+            insert_index,
+            json!({
+                "type": "cache_edits",
+                "edits": cache_references
+                    .iter()
+                    .map(|cache_reference| {
+                        json!({
+                            "type": "delete",
+                            "cache_reference": cache_reference,
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            }),
+        );
+    }
+}
+
+fn message_cache_marker_position(messages: &[Value]) -> Option<(usize, usize)> {
+    for (message_index, message) in messages.iter().enumerate().rev() {
+        let Some(content) = message.get("content").and_then(Value::as_array) else {
+            continue;
+        };
+        for (block_index, block) in content.iter().enumerate().rev() {
+            if block.get("cache_control").is_some() {
+                return Some((message_index, block_index));
+            }
+        }
+    }
+    None
+}
+
 fn content_block_to_anthropic(
     block: &ContentBlock,
-    cache_control_enabled: bool,
-    tool_name_aliases: &BTreeMap<String, String>,
-    supports_image_input: bool,
+    projection_options: ContentProjectionOptions<'_>,
 ) -> Value {
     match block {
         ContentBlock::Text { text } => json!({ "type": "text", "text": text }),
-        ContentBlock::Compaction { text } => {
-            let mut value = json!({ "type": "text", "text": text });
-            if cache_control_enabled {
-                value["cache_control"] = ephemeral_cache_control();
-            }
-            value
-        }
+        ContentBlock::Compaction { text } => json!({ "type": "text", "text": text }),
         ContentBlock::Image { source, detail: _ } => {
-            image_content_block(source, supports_image_input)
+            image_content_block(source, projection_options)
         }
         ContentBlock::ToolUse { id, name, input } => {
             json!({
                 "type": "tool_use",
                 "id": id,
-                "name": tool_name_for_wire(name, tool_name_aliases),
+                "name": tool_name_for_wire(name, projection_options.tool_name_aliases),
                 "input": input
             })
         }
@@ -406,7 +525,7 @@ fn content_block_to_anthropic(
                 "tool_use_id": tool_use_id,
                 "content": content
                     .iter()
-                    .map(|content| tool_result_content_to_anthropic(content, supports_image_input))
+                    .map(|content| tool_result_content_to_anthropic(content, projection_options))
                     .collect::<Vec<_>>()
             });
             if *is_error {
@@ -426,21 +545,37 @@ fn content_block_to_anthropic(
 
 fn tool_result_content_to_anthropic(
     content: &ToolResultContent,
-    supports_image_input: bool,
+    projection_options: ContentProjectionOptions<'_>,
 ) -> Value {
     match content {
-        ToolResultContent::Text { text } => json!({ "type": "text", "text": text }),
+        ToolResultContent::Text { text } => {
+            tool_result_text_content_block(text, projection_options.compact_input_placeholders)
+        }
         ToolResultContent::Json { value } => {
-            json!({ "type": "text", "text": serde_json::to_string(value).unwrap_or_default() })
+            let text = serde_json::to_string(value).unwrap_or_default();
+            tool_result_text_content_block(&text, projection_options.compact_input_placeholders)
         }
         ToolResultContent::Image { source, detail: _ } => {
-            image_content_block(source, supports_image_input)
+            image_content_block(source, projection_options)
         }
     }
 }
 
-fn image_content_block(source: &ImageSource, supports_image_input: bool) -> Value {
-    if supports_image_input {
+fn tool_result_text_content_block(text: &str, compact_input_placeholders: bool) -> Value {
+    if compact_input_placeholders && text.len() > COMPACT_TOOL_RESULT_TEXT_PLACEHOLDER_MIN_BYTES {
+        json!({ "type": "text", "text": COMPACT_LARGE_TOOL_RESULT_PLACEHOLDER })
+    } else {
+        json!({ "type": "text", "text": text })
+    }
+}
+
+fn image_content_block(
+    source: &ImageSource,
+    projection_options: ContentProjectionOptions<'_>,
+) -> Value {
+    if projection_options.compact_input_placeholders {
+        json!({ "type": "text", "text": COMPACT_IMAGE_PLACEHOLDER })
+    } else if projection_options.supports_image_input {
         json!({ "type": "image", "source": image_source(source) })
     } else {
         json!({ "type": "text", "text": IMAGE_CONTENT_OMITTED_PLACEHOLDER })

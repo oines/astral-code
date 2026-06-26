@@ -5163,6 +5163,33 @@ async fn legacy_toggles_map_to_features() -> std::io::Result<()> {
 }
 
 #[tokio::test]
+async fn anthropic_cached_fold_defaults_off_and_honors_config() -> std::io::Result<()> {
+    let codex_home = TempDir::new()?;
+    let config = Config::load_from_base_config_with_overrides(
+        ConfigToml::default(),
+        ConfigOverrides::default(),
+        codex_home.abs(),
+    )
+    .await?;
+    assert!(!config.experimental_anthropic_cached_fold);
+
+    let codex_home = TempDir::new()?;
+    let cfg = ConfigToml {
+        experimental_anthropic_cached_fold: Some(true),
+        ..Default::default()
+    };
+    let config = Config::load_from_base_config_with_overrides(
+        cfg,
+        ConfigOverrides::default(),
+        codex_home.abs(),
+    )
+    .await?;
+    assert!(config.experimental_anthropic_cached_fold);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn config_honors_explicit_file_oauth_store_mode() -> std::io::Result<()> {
     let codex_home = TempDir::new()?;
     let cfg = ConfigToml {
