@@ -104,7 +104,7 @@ pub async fn run_compact_memory_task(
     };
 
     phase1::run_current_thread(Arc::clone(&context), Arc::clone(&config)).await;
-    phase2::run_blocking(context, config).await;
+    phase2::run_blocking_after_compact(context, config).await;
 }
 
 async fn prepare_compact_memory_task(

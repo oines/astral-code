@@ -1076,6 +1076,35 @@ WHERE kind = ? AND job_key = ?
         worker_id: ThreadId,
         lease_seconds: i64,
     ) -> anyhow::Result<Phase2JobClaimOutcome> {
+        self.try_claim_global_phase2_job_inner(
+            worker_id,
+            lease_seconds,
+            /*bypass_success_cooldown*/ false,
+        )
+        .await
+    }
+
+    /// Attempts to claim the global phase-2 consolidation lock without enforcing
+    /// the normal success cooldown.
+    pub async fn try_claim_global_phase2_job_bypassing_success_cooldown(
+        &self,
+        worker_id: ThreadId,
+        lease_seconds: i64,
+    ) -> anyhow::Result<Phase2JobClaimOutcome> {
+        self.try_claim_global_phase2_job_inner(
+            worker_id,
+            lease_seconds,
+            /*bypass_success_cooldown*/ true,
+        )
+        .await
+    }
+
+    async fn try_claim_global_phase2_job_inner(
+        &self,
+        worker_id: ThreadId,
+        lease_seconds: i64,
+        bypass_success_cooldown: bool,
+    ) -> anyhow::Result<Phase2JobClaimOutcome> {
         let now = Utc::now().timestamp();
         let lease_until = now.saturating_add(lease_seconds.max(0));
         let cooldown_cutoff = now.saturating_sub(PHASE2_SUCCESS_COOLDOWN_SECONDS);
@@ -1154,7 +1183,8 @@ INSERT INTO jobs (
             tx.commit().await?;
             return Ok(Phase2JobClaimOutcome::SkippedRunning);
         }
-        if last_error.is_none()
+        if !bypass_success_cooldown
+            && last_error.is_none()
             && finished_at.is_some_and(|finished_at| finished_at > cooldown_cutoff)
         {
             tx.commit().await?;
@@ -1176,7 +1206,7 @@ SET
 WHERE kind = ? AND job_key = ?
   AND (status != 'running' OR lease_until IS NULL OR lease_until <= ?)
   AND (retry_at IS NULL OR retry_at <= ?)
-  AND (last_error IS NOT NULL OR finished_at IS NULL OR finished_at <= ?)
+  AND (? OR last_error IS NOT NULL OR finished_at IS NULL OR finished_at <= ?)
             "#,
         )
         .bind(worker_id.as_str())
@@ -1187,6 +1217,7 @@ WHERE kind = ? AND job_key = ?
         .bind(MEMORY_CONSOLIDATION_JOB_KEY)
         .bind(now)
         .bind(now)
+        .bind(bypass_success_cooldown)
         .bind(cooldown_cutoff)
         .execute(&mut *tx)
         .await?
@@ -1645,6 +1676,16 @@ impl StateRuntime {
     ) -> anyhow::Result<Phase2JobClaimOutcome> {
         self.memories
             .try_claim_global_phase2_job(worker_id, lease_seconds)
+            .await
+    }
+
+    async fn try_claim_global_phase2_job_bypassing_success_cooldown(
+        &self,
+        worker_id: ThreadId,
+        lease_seconds: i64,
+    ) -> anyhow::Result<Phase2JobClaimOutcome> {
+        self.memories
+            .try_claim_global_phase2_job_bypassing_success_cooldown(worker_id, lease_seconds)
             .await
     }
 
@@ -3063,6 +3104,64 @@ WHERE kind = ? AND job_key = ?
             .expect("claim phase2 after cooldown");
         assert!(matches!(
             claim_after_cooldown,
+            Phase2JobClaimOutcome::Claimed { .. }
+        ));
+
+        let _ = tokio::fs::remove_dir_all(codex_home).await;
+    }
+
+    #[tokio::test]
+    async fn phase2_global_lock_can_bypass_success_cooldown() {
+        let codex_home = unique_temp_dir();
+        let runtime = StateRuntime::init(codex_home.clone(), "test-provider".to_string())
+            .await
+            .expect("initialize runtime");
+
+        let owner = ThreadId::from_string(&Uuid::new_v4().to_string()).expect("owner id");
+
+        runtime
+            .enqueue_global_consolidation(/*input_watermark*/ 100)
+            .await
+            .expect("enqueue global consolidation");
+
+        let claim = runtime
+            .try_claim_global_phase2_job(owner, /*lease_seconds*/ 3600)
+            .await
+            .expect("claim phase2");
+        let (ownership_token, input_watermark) = match claim {
+            Phase2JobClaimOutcome::Claimed {
+                ownership_token,
+                input_watermark,
+            } => (ownership_token, input_watermark),
+            other => panic!("unexpected phase2 claim outcome: {other:?}"),
+        };
+        assert!(
+            runtime
+                .mark_global_phase2_job_succeeded(ownership_token.as_str(), input_watermark, &[],)
+                .await
+                .expect("mark phase2 succeeded"),
+            "phase2 success should finalize for current token"
+        );
+
+        runtime
+            .enqueue_global_consolidation(/*input_watermark*/ 101)
+            .await
+            .expect("enqueue global consolidation after success");
+
+        let cooldown_claim = runtime
+            .try_claim_global_phase2_job(owner, /*lease_seconds*/ 3600)
+            .await
+            .expect("claim phase2 with normal cooldown");
+        assert_eq!(cooldown_claim, Phase2JobClaimOutcome::SkippedCooldown);
+
+        let bypass_claim = runtime
+            .try_claim_global_phase2_job_bypassing_success_cooldown(
+                owner, /*lease_seconds*/ 3600,
+            )
+            .await
+            .expect("claim phase2 bypassing cooldown");
+        assert!(matches!(
+            bypass_claim,
             Phase2JobClaimOutcome::Claimed { .. }
         ));
 

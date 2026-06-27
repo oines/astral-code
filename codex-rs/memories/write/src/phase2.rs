@@ -47,21 +47,51 @@ enum CompletionMode {
     Blocking,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SuccessCooldown {
+    Respect,
+    Bypass,
+}
+
 /// Runs memory phase 2 (aka consolidation) in strict order. The method represents the linear
 /// flow of the consolidation phase.
 pub async fn run(context: Arc<MemoryStartupContext>, config: Arc<Config>) {
-    run_inner(context, config, CompletionMode::Background).await;
+    run_inner(
+        context,
+        config,
+        CompletionMode::Background,
+        SuccessCooldown::Respect,
+    )
+    .await;
 }
 
 /// Runs memory phase 2 and waits until the consolidation agent reaches a final status.
 pub async fn run_blocking(context: Arc<MemoryStartupContext>, config: Arc<Config>) {
-    run_inner(context, config, CompletionMode::Blocking).await;
+    run_inner(
+        context,
+        config,
+        CompletionMode::Blocking,
+        SuccessCooldown::Respect,
+    )
+    .await;
+}
+
+/// Runs compact-triggered memory phase 2 without the normal success cooldown.
+pub async fn run_blocking_after_compact(context: Arc<MemoryStartupContext>, config: Arc<Config>) {
+    run_inner(
+        context,
+        config,
+        CompletionMode::Blocking,
+        SuccessCooldown::Bypass,
+    )
+    .await;
 }
 
 async fn run_inner(
     context: Arc<MemoryStartupContext>,
     config: Arc<Config>,
     completion_mode: CompletionMode,
+    success_cooldown: SuccessCooldown,
 ) {
     let phase_two_e2e_timer = context.start_timer(MEMORY_PHASE_TWO_E2E_MS);
 
@@ -89,7 +119,7 @@ async fn run_inner(
     let max_unused_days = config.memories.max_unused_days;
 
     // 1. Claim the global Phase 2 lock before touching the memory workspace.
-    let claim = match job::claim(context.as_ref(), db.as_ref()).await {
+    let claim = match job::claim(context.as_ref(), db.as_ref(), success_cooldown).await {
         Ok(claim) => claim,
         Err(e) => {
             context.counter(MEMORY_PHASE_TWO_JOBS, /*inc*/ 1, &[("status", e)]);
@@ -267,15 +297,31 @@ mod job {
     pub(super) async fn claim(
         context: &MemoryStartupContext,
         db: &StateRuntime,
+        success_cooldown: SuccessCooldown,
     ) -> Result<Claim, &'static str> {
-        let claim = db
-            .memories()
-            .try_claim_global_phase2_job(context.thread_id(), crate::stage_two::JOB_LEASE_SECONDS)
-            .await
-            .map_err(|e| {
-                tracing::error!("failed to claim job: {e}");
-                "failed_claim"
-            })?;
+        let memories = db.memories();
+        let claim = match success_cooldown {
+            SuccessCooldown::Respect => {
+                memories
+                    .try_claim_global_phase2_job(
+                        context.thread_id(),
+                        crate::stage_two::JOB_LEASE_SECONDS,
+                    )
+                    .await
+            }
+            SuccessCooldown::Bypass => {
+                memories
+                    .try_claim_global_phase2_job_bypassing_success_cooldown(
+                        context.thread_id(),
+                        crate::stage_two::JOB_LEASE_SECONDS,
+                    )
+                    .await
+            }
+        }
+        .map_err(|e| {
+            tracing::error!("failed to claim job: {e}");
+            "failed_claim"
+        })?;
         let (token, watermark) = match claim {
             codex_state::Phase2JobClaimOutcome::Claimed {
                 ownership_token,
