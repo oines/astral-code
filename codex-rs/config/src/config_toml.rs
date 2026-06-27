@@ -113,6 +113,11 @@ pub struct ConfigToml {
     /// or ["text", "image"].
     pub model_input_modalities: Option<Vec<InputModality>>,
 
+    /// Explicit per-model capability overrides. Entries here take precedence
+    /// over the generated `model-capabilities.toml` cache.
+    #[serde(default)]
+    pub model_capabilities: Option<ModelCapabilitiesToml>,
+
     /// Token usage threshold triggering auto-compaction of conversation history.
     pub model_auto_compact_token_limit: Option<i64>,
 
@@ -451,8 +456,30 @@ pub struct ConfigToml {
 
     pub experimental_compact_prompt_file: Option<AbsolutePathBuf>,
     pub experimental_use_unified_exec_tool: Option<bool>,
+    /// Experimental / do not use. Enables Anthropic Messages-only cached
+    /// tool-result folding when the active wire API is Anthropic Messages.
+    pub experimental_anthropic_cached_fold: Option<bool>,
     /// Preferred OSS provider for local models, e.g. "lmstudio" or "ollama".
     pub oss_provider: Option<String>,
+}
+
+pub type ModelCapabilitiesToml = BTreeMap<String, ModelCapabilityToml>;
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, JsonSchema)]
+pub struct ModelCapabilityToml {
+    pub litellm_provider: Option<String>,
+    pub mode: Option<String>,
+    pub context_window: Option<u64>,
+    pub max_context_window: Option<u64>,
+    pub max_output_tokens: Option<u64>,
+    pub supports_tools: Option<bool>,
+    pub supports_parallel_tools: Option<bool>,
+    pub supports_vision: Option<bool>,
+    pub supports_prompt_cache: Option<bool>,
+    pub supports_reasoning: Option<bool>,
+    pub supports_native_streaming: Option<bool>,
+    #[serde(default)]
+    pub supported_endpoints: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema)]

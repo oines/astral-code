@@ -920,6 +920,7 @@ pub(crate) fn build_prompt(
         output_schema_strict: !crate::guardian::is_guardian_reviewer_source(
             &turn_context.session_source,
         ),
+        compact_input_placeholders: false,
     }
 }
 
@@ -1745,6 +1746,7 @@ async fn try_run_sampling_request(
             turn_context.config.service_tier.clone(),
             turn_metadata_header,
             &inference_trace,
+            turn_context.config.experimental_anthropic_cached_fold,
         )
         .instrument(trace_span!("stream_request"))
         .or_cancel(&cancellation_token)

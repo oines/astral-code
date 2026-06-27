@@ -401,7 +401,8 @@ async fn streaming_agent_client_attaches_extra_headers_and_chat_body() -> Result
         Some("gpt-test")
     );
     assert_eq!(
-        body.get("stream").and_then(|stream| stream.as_bool()),
+        body.get("stream")
+            .and_then(serde_json::value::Value::as_bool),
         Some(true)
     );
     assert_eq!(

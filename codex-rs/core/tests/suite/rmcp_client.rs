@@ -1239,7 +1239,9 @@ async fn stdio_image_responses_preserve_original_detail_metadata() -> anyhow::Re
     let rmcp_test_server_bin = remote_aware_stdio_server_bin()?;
 
     let fixture = test_codex()
-        .with_model("gpt-5.3-codex")
+        .with_model_info_override("gpt-5.3-codex", |model_info| {
+            model_info.supports_image_detail_original = true;
+        })
         .with_config(move |config| {
             insert_mcp_server(
                 config,

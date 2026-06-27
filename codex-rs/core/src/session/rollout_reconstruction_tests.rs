@@ -882,7 +882,9 @@ async fn reconstruct_history_legacy_compaction_without_replacement_history_does_
         reconstructed.history,
         vec![
             user_message("before compact"),
-            user_message("legacy summary"),
+            ResponseItem::Compaction {
+                encrypted_content: "legacy summary".to_string(),
+            },
         ]
     );
     assert!(reconstructed.reference_context_item.is_none());

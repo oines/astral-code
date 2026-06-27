@@ -1,5 +1,5 @@
 use crate::agent_adapters::anthropic::AnthropicMessagesOptions;
-use crate::agent_adapters::anthropic::to_messages_request;
+use crate::agent_adapters::anthropic::to_messages_request_parts;
 use crate::agent_adapters::chat_completions::ChatCompletionsOptions;
 use crate::agent_adapters::chat_completions::to_chat_completions_request;
 use crate::auth::SharedAuthProvider;
@@ -67,7 +67,7 @@ impl<T: HttpTransport> AgentClient<T> {
         messages_options: AnthropicMessagesOptions,
         options: AgentOptions,
     ) -> Result<ResponseStream, ApiError> {
-        let body = to_messages_request(&request, messages_options);
+        let messages_request = to_messages_request_parts(&request, messages_options);
         let mut headers = options.extra_headers;
         let version_header = HeaderName::from_static("anthropic-version");
         if !headers.contains_key(&version_header) {
@@ -76,12 +76,18 @@ impl<T: HttpTransport> AgentClient<T> {
 
         let stream_response = self
             .session
-            .stream_with(Method::POST, "messages", headers, Some(body), |req| {
-                req.headers.insert(
-                    http::header::ACCEPT,
-                    HeaderValue::from_static("text/event-stream"),
-                );
-            })
+            .stream_with(
+                Method::POST,
+                "messages",
+                headers,
+                Some(messages_request.body),
+                |req| {
+                    req.headers.insert(
+                        http::header::ACCEPT,
+                        HeaderValue::from_static("text/event-stream"),
+                    );
+                },
+            )
             .await?;
 
         Ok(spawn_agent_stream(
@@ -89,6 +95,7 @@ impl<T: HttpTransport> AgentClient<T> {
             self.session.provider().stream_idle_timeout,
             self.sse_telemetry.clone(),
             AgentStreamFormat::AnthropicMessages,
+            messages_request.tool_name_aliases,
         ))
     }
 
@@ -130,6 +137,7 @@ impl<T: HttpTransport> AgentClient<T> {
             self.session.provider().stream_idle_timeout,
             self.sse_telemetry.clone(),
             AgentStreamFormat::ChatCompletions,
+            Default::default(),
         ))
     }
 }

@@ -27,6 +27,8 @@ use codex_config::ThreadConfigLoader;
 use codex_config::config_toml::ConfigLockfileToml;
 use codex_config::config_toml::ConfigToml;
 use codex_config::config_toml::DEFAULT_PROJECT_DOC_MAX_BYTES;
+use codex_config::config_toml::ModelCapabilitiesToml;
+use codex_config::config_toml::ModelCapabilityToml;
 use codex_config::config_toml::ProjectConfig;
 use codex_config::config_toml::RealtimeAudioConfig;
 use codex_config::config_toml::RealtimeConfig;
@@ -83,6 +85,7 @@ use codex_model_provider_info::merge_configured_model_providers;
 use codex_models_manager::ModelsManagerConfig;
 use codex_models_manager::capabilities::MODEL_CAPABILITIES_FILE_NAME;
 use codex_models_manager::capabilities::ModelCapabilitiesCache;
+use codex_models_manager::capabilities::ModelCapability;
 use codex_protocol::config_types::AltScreenMode;
 use codex_protocol::config_types::AutoCompactTokenLimitScope;
 use codex_protocol::config_types::Personality;
@@ -1001,6 +1004,10 @@ pub struct Config {
     /// If set to `true`, used only the experimental unified exec tool.
     pub use_experimental_unified_exec_tool: bool,
 
+    /// Enables Anthropic Messages-only cached folding for older eligible tool
+    /// results. Defaults to `false`.
+    pub experimental_anthropic_cached_fold: bool,
+
     /// Maximum poll window for background terminal output (`write_stdin`), in milliseconds.
     /// Default: `300000` (5 minutes).
     pub background_terminal_max_timeout: u64,
@@ -1736,6 +1743,53 @@ fn load_model_capabilities_cache(
             ));
             None
         }
+    }
+}
+
+fn merge_model_capabilities_config(
+    file_capabilities: Option<ModelCapabilitiesCache>,
+    config_capabilities: Option<ModelCapabilitiesToml>,
+) -> Option<ModelCapabilitiesCache> {
+    let Some(config_capabilities) = config_capabilities else {
+        return file_capabilities;
+    };
+    if config_capabilities.is_empty() {
+        return file_capabilities;
+    }
+
+    let mut merged = file_capabilities.unwrap_or_else(|| ModelCapabilitiesCache {
+        version: 1,
+        source: "config.toml".to_string(),
+        generated_at_unix_seconds: 0,
+        models: BTreeMap::new(),
+    });
+    for (model, capability) in config_capabilities {
+        merged
+            .models
+            .insert(model, model_capability_from_config(capability));
+    }
+    merged.source = if merged.source == "config.toml" {
+        merged.source
+    } else {
+        format!("{} + config.toml", merged.source)
+    };
+    Some(merged)
+}
+
+fn model_capability_from_config(capability: ModelCapabilityToml) -> ModelCapability {
+    ModelCapability {
+        litellm_provider: capability.litellm_provider,
+        mode: capability.mode,
+        max_context_window: capability.max_context_window.or(capability.context_window),
+        max_output_tokens: capability.max_output_tokens,
+        supports_tools: capability.supports_tools,
+        supports_parallel_tools: capability.supports_parallel_tools,
+        supports_vision: capability.supports_vision,
+        supports_prompt_cache: capability.supports_prompt_cache,
+        supports_reasoning: capability.supports_reasoning,
+        supports_native_streaming: capability.supports_native_streaming,
+        supported_endpoints: capability.supported_endpoints,
+        pricing: None,
     }
 }
 
@@ -3364,7 +3418,10 @@ impl Config {
 
         let check_for_update_on_startup = cfg.check_for_update_on_startup.unwrap_or(true);
         let model_catalog = load_model_catalog(cfg.model_catalog_json.clone())?;
-        let model_capabilities = load_model_capabilities_cache(&codex_home, &mut startup_warnings);
+        let model_capabilities = merge_model_capabilities_config(
+            load_model_capabilities_cache(&codex_home, &mut startup_warnings),
+            cfg.model_capabilities.clone(),
+        );
 
         let log_dir = cfg
             .log_dir
@@ -3656,6 +3713,9 @@ impl Config {
             experimental_request_user_input_enabled,
             code_mode,
             use_experimental_unified_exec_tool,
+            experimental_anthropic_cached_fold: cfg
+                .experimental_anthropic_cached_fold
+                .unwrap_or(false),
             background_terminal_max_timeout,
             ghost_snapshot,
             multi_agent_v2,

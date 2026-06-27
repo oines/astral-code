@@ -60,12 +60,14 @@ use http::HeaderValue;
 use http::StatusCode as HttpStatusCode;
 use reqwest::StatusCode;
 use std::time::Duration;
+use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::instrument;
 
 use crate::agent_request::AgentRequestBuildParams;
 use crate::agent_request::build_agent_request;
+use crate::anthropic_cache_fold::AnthropicCacheFoldState;
 use crate::attestation::AttestationContext;
 use crate::attestation::AttestationProvider;
 use crate::attestation::X_OAI_ATTESTATION_HEADER;
@@ -116,6 +118,7 @@ struct ModelClientState {
     parent_thread_id: Option<ThreadId>,
     beta_features_header: Option<String>,
     attestation_provider: Option<Arc<dyn AttestationProvider>>,
+    anthropic_cache_fold: Mutex<AnthropicCacheFoldState>,
 }
 
 /// Resolved API client setup for a single request attempt.
@@ -217,6 +220,7 @@ impl ModelClient {
                 parent_thread_id,
                 beta_features_header,
                 attestation_provider,
+                anthropic_cache_fold: Mutex::new(AnthropicCacheFoldState::default()),
             }),
             prompt_cache_key_override: None,
         }
@@ -234,6 +238,21 @@ impl ModelClient {
         self.prompt_cache_key_override
             .clone()
             .unwrap_or_else(|| self.state.thread_id.to_string())
+    }
+
+    async fn anthropic_cache_fold_options(
+        &self,
+        request: &codex_api::agent_protocol::AgentRequest,
+    ) -> Option<codex_api::agent_adapters::anthropic::AnthropicCacheFoldOptions> {
+        self.state
+            .anthropic_cache_fold
+            .lock()
+            .await
+            .options_for_request(request)
+    }
+
+    async fn disable_anthropic_cache_fold(&self) {
+        self.state.anthropic_cache_fold.lock().await.disable();
     }
 
     /// Creates a fresh turn-scoped streaming session.
@@ -441,6 +460,7 @@ impl ModelClientSession {
         turn_metadata_header: Option<&str>,
         inference_trace: &InferenceTraceContext,
         wire_api: WireApi,
+        anthropic_cached_fold_enabled: bool,
     ) -> Result<ResponseStream> {
         let auth_manager = provider.auth_manager();
         let mut auth_recovery = auth_manager
@@ -483,6 +503,13 @@ impl ModelClientSession {
                 provider_request_body: provider.info().request_body.clone(),
                 provider_request_body_remove: provider.info().request_body_remove.clone(),
             })?;
+            let anthropic_cache_fold = if matches!(wire_api, WireApi::AnthropicMessages)
+                && anthropic_cached_fold_enabled
+            {
+                self.client.anthropic_cache_fold_options(&request).await
+            } else {
+                None
+            };
             let inference_trace_attempt = inference_trace.start_attempt();
             inference_trace_attempt.add_request_headers(&mut options.extra_headers);
             inference_trace_attempt.record_started(&request);
@@ -496,6 +523,11 @@ impl ModelClientSession {
                             request,
                             AnthropicMessagesOptions {
                                 max_tokens: DEFAULT_ANTHROPIC_MAX_TOKENS,
+                                supports_image_input: model_info
+                                    .input_modalities
+                                    .contains(&InputModality::Image),
+                                cache_fold: anthropic_cache_fold,
+                                compact_input_placeholders: prompt.compact_input_placeholders,
                             },
                             options,
                         )
@@ -550,6 +582,12 @@ impl ModelClientSession {
                     continue;
                 }
                 Err(err) => {
+                    if matches!(wire_api, WireApi::AnthropicMessages)
+                        && anthropic_cached_fold_enabled
+                        && is_anthropic_cache_fold_protocol_error(&err)
+                    {
+                        self.client.disable_anthropic_cache_fold().await;
+                    }
                     let response_debug_context =
                         extract_response_debug_context_from_api_error(&err);
                     let err = map_api_error(err);
@@ -600,6 +638,7 @@ impl ModelClientSession {
         service_tier: Option<String>,
         turn_metadata_header: Option<&str>,
         inference_trace: &InferenceTraceContext,
+        anthropic_cached_fold_enabled: bool,
     ) -> Result<ResponseStream> {
         let wire_api = provider.info().wire_api;
         match wire_api {
@@ -616,10 +655,28 @@ impl ModelClientSession {
                     turn_metadata_header,
                     inference_trace,
                     wire_api,
+                    anthropic_cached_fold_enabled,
                 )
                 .await
             }
         }
+    }
+}
+
+fn is_anthropic_cache_fold_protocol_error(err: &ApiError) -> bool {
+    match err {
+        ApiError::InvalidRequest { .. } => true,
+        ApiError::Api { status, .. } => status.as_u16() == 400,
+        ApiError::Transport(TransportError::Http { status, .. }) => status.as_u16() == 400,
+        ApiError::Stream(_)
+        | ApiError::ContextWindowExceeded
+        | ApiError::QuotaExceeded
+        | ApiError::UsageNotIncluded
+        | ApiError::Retryable { .. }
+        | ApiError::RateLimit(_)
+        | ApiError::CyberPolicy { .. }
+        | ApiError::ServerOverloaded
+        | ApiError::Transport(_) => false,
     }
 }
 

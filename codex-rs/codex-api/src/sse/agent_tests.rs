@@ -8,6 +8,7 @@ use codex_protocol::models::ResponseItem;
 use futures::StreamExt;
 use pretty_assertions::assert_eq;
 use serde_json::json;
+use std::collections::BTreeMap;
 use tokio::sync::mpsc;
 use tokio::time::Duration;
 
@@ -90,10 +91,10 @@ fn mapper_streams_text_with_lazy_content_block_start() {
     assert_eq!(response_id, "msg_1");
     assert_eq!(*end_turn, Some(true));
     let usage = token_usage.as_ref().expect("token usage present");
-    assert_eq!(usage.input_tokens, 12);
+    assert_eq!(usage.input_tokens, 15);
     assert_eq!(usage.cached_input_tokens, 3);
     assert_eq!(usage.output_tokens, 7);
-    assert_eq!(usage.total_tokens, 19);
+    assert_eq!(usage.total_tokens, 22);
 }
 
 #[test]
@@ -156,6 +157,44 @@ fn mapper_streams_tool_arguments_and_finishes_function_call() {
     assert_eq!(name, "Bash");
     assert_eq!(namespace, &None);
     assert_eq!(arguments, r#"{"command":"pwd"}"#);
+}
+
+#[test]
+fn mapper_restores_anthropic_tool_name_aliases() {
+    let mut mapper = AgentStreamMapper::new(BTreeMap::from([(
+        "mcp__server_tool__1234567890abcdef".to_string(),
+        "mcp__server__tool".to_string(),
+    )]));
+
+    let events = mapper
+        .process_event(AgentStreamEvent::ContentBlockStart {
+            index: 1,
+            block: ContentBlock::ToolUse {
+                id: "toolu_1".to_string(),
+                name: "mcp__server_tool__1234567890abcdef".to_string(),
+                input: json!({}),
+            },
+        })
+        .expect("tool start maps");
+
+    assert!(matches!(
+        &events[0],
+        super::ResponseEvent::OutputItemAdded(ResponseItem::FunctionCall {
+            name,
+            ..
+        }) if name == "mcp__server__tool"
+    ));
+
+    let events = mapper
+        .process_event(AgentStreamEvent::ContentBlockStop { index: 1 })
+        .expect("tool stop maps");
+    assert!(matches!(
+        &events[0],
+        super::ResponseEvent::OutputItemDone(ResponseItem::FunctionCall {
+            name,
+            ..
+        }) if name == "mcp__server__tool"
+    ));
 }
 
 #[test]
@@ -237,6 +276,7 @@ async fn chat_stream_merges_finish_reason_with_empty_choices_usage_chunk() {
         Duration::from_secs(5),
         None,
         AgentStreamFormat::ChatCompletions,
+        Default::default(),
     )
     .await;
 

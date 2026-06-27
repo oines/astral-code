@@ -44,6 +44,7 @@ pub fn spawn_agent_stream(
     idle_timeout: Duration,
     telemetry: Option<Arc<dyn SseTelemetry>>,
     format: AgentStreamFormat,
+    tool_name_aliases: BTreeMap<String, String>,
 ) -> ResponseStream {
     let rate_limit_snapshots = parse_all_rate_limits(&stream_response.headers);
     let upstream_request_id = stream_response
@@ -72,6 +73,7 @@ pub fn spawn_agent_stream(
             idle_timeout,
             telemetry,
             format,
+            tool_name_aliases,
         )
         .await;
     });
@@ -82,11 +84,28 @@ pub fn spawn_agent_stream(
     }
 }
 
-#[derive(Debug, Default)]
 struct AgentStreamMapper {
     response_id: Option<String>,
     blocks: BTreeMap<usize, BlockState>,
     block_order: Vec<usize>,
+    tool_name_aliases: BTreeMap<String, String>,
+}
+
+impl AgentStreamMapper {
+    fn new(tool_name_aliases: BTreeMap<String, String>) -> Self {
+        Self {
+            response_id: None,
+            blocks: BTreeMap::new(),
+            block_order: Vec::new(),
+            tool_name_aliases,
+        }
+    }
+}
+
+impl Default for AgentStreamMapper {
+    fn default() -> Self {
+        Self::new(BTreeMap::new())
+    }
 }
 
 #[derive(Debug)]
@@ -187,6 +206,7 @@ impl AgentStreamMapper {
                 }));
             }
             ContentBlock::ToolUse { id, name, input } => {
+                let name = self.canonical_tool_name(&name);
                 self.blocks.insert(
                     index,
                     BlockState::ToolUse {
@@ -205,7 +225,15 @@ impl AgentStreamMapper {
                 }));
             }
             ContentBlock::ToolResult { .. } | ContentBlock::Image { .. } => {}
+            ContentBlock::Compaction { .. } => {}
         }
+    }
+
+    fn canonical_tool_name(&self, name: &str) -> String {
+        self.tool_name_aliases
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| name.to_string())
     }
 
     fn apply_delta(
@@ -369,8 +397,12 @@ fn stop_reason_ends_turn(reason: &StopReason) -> bool {
 }
 
 fn agent_usage_to_protocol_usage(usage: AgentTokenUsage) -> TokenUsage {
-    let input_tokens = usage.input_tokens.unwrap_or(0);
+    let uncached_input_tokens = usage.input_tokens.unwrap_or(0);
+    let cache_creation_input_tokens = usage.cache_creation_input_tokens.unwrap_or(0);
     let cached_input_tokens = usage.cache_read_input_tokens.unwrap_or(0);
+    let input_tokens = uncached_input_tokens
+        .saturating_add(cache_creation_input_tokens)
+        .saturating_add(cached_input_tokens);
     let output_tokens = usage.output_tokens.unwrap_or(0);
 
     TokenUsage {
@@ -392,9 +424,10 @@ pub async fn process_sse(
     idle_timeout: Duration,
     telemetry: Option<Arc<dyn SseTelemetry>>,
     format: AgentStreamFormat,
+    tool_name_aliases: BTreeMap<String, String>,
 ) {
     let mut stream = stream.eventsource();
-    let mut mapper = AgentStreamMapper::default();
+    let mut mapper = AgentStreamMapper::new(tool_name_aliases);
     let mut pending_chat_stop_reason: Option<StopReason> = None;
 
     loop {

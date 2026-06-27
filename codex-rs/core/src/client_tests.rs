@@ -317,6 +317,7 @@ async fn provider_neutral_wire_apis_stream_from_mock_server() -> anyhow::Result<
                 /*service_tier*/ None,
                 /*turn_metadata_header*/ None,
                 &inference_trace,
+                /*anthropic_cached_fold_enabled*/ false,
             )
             .await?;
 

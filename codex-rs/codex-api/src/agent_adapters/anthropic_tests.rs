@@ -4,6 +4,7 @@ use codex_agent_protocol::AgentStreamEvent;
 use codex_agent_protocol::AgentTool;
 use codex_agent_protocol::ContentBlock;
 use codex_agent_protocol::ContentDelta;
+use codex_agent_protocol::ImageSource;
 use codex_agent_protocol::MessageRole;
 use codex_agent_protocol::ReasoningConfig;
 use codex_agent_protocol::RequestMetadata;
@@ -15,9 +16,21 @@ use pretty_assertions::assert_eq;
 use serde_json::json;
 use std::collections::BTreeMap;
 
+use super::AnthropicCacheFoldOptions;
 use super::AnthropicMessagesOptions;
+use super::AnthropicPinnedCacheEdits;
 use super::parse_stream_event;
 use super::to_messages_request;
+use super::to_messages_request_parts;
+
+fn options(max_tokens: u64) -> AnthropicMessagesOptions {
+    AnthropicMessagesOptions {
+        max_tokens,
+        supports_image_input: true,
+        cache_fold: None,
+        compact_input_placeholders: false,
+    }
+}
 
 #[test]
 fn messages_request_maps_agent_ir_to_anthropic_shape() {
@@ -89,7 +102,7 @@ fn messages_request_maps_agent_ir_to_anthropic_shape() {
     };
 
     assert_eq!(
-        to_messages_request(&request, AnthropicMessagesOptions { max_tokens: 4096 }),
+        to_messages_request(&request, options(4096)),
         json!({
             "model": "astral-large",
             "max_tokens": 4096,
@@ -170,7 +183,7 @@ fn messages_request_adds_cache_control_when_prompt_cache_key_is_set() {
     };
 
     assert_eq!(
-        to_messages_request(&request, AnthropicMessagesOptions { max_tokens: 1024 }),
+        to_messages_request(&request, options(1024)),
         json!({
             "model": "astral-large",
             "max_tokens": 1024,
@@ -204,6 +217,355 @@ fn messages_request_adds_cache_control_when_prompt_cache_key_is_set() {
 }
 
 #[test]
+fn messages_request_caches_compaction_summary_and_top_level_prefix() {
+    let request = AgentRequest {
+        model: "astral-large".to_string(),
+        instructions: vec![ContentBlock::Text {
+            text: "You are Astral-Code.".to_string(),
+        }],
+        messages: vec![AgentMessage {
+            role: MessageRole::User,
+            content: vec![ContentBlock::Compaction {
+                text: "Compacted summary".to_string(),
+            }],
+            id: None,
+        }],
+        metadata: RequestMetadata {
+            prompt_cache_key: Some("astral:test".to_string()),
+            ..RequestMetadata::default()
+        },
+        stream: true,
+        ..AgentRequest::default()
+    };
+
+    assert_eq!(
+        to_messages_request(&request, options(1024)),
+        json!({
+            "model": "astral-large",
+            "max_tokens": 1024,
+            "stream": true,
+            "system": [{
+                "type": "text",
+                "text": "You are Astral-Code.",
+                "cache_control": { "type": "ephemeral" }
+            }],
+            "messages": [{
+                "role": "user",
+                "content": [{
+                    "type": "text",
+                    "text": "Compacted summary",
+                    "cache_control": { "type": "ephemeral" }
+                }]
+            }]
+        })
+    );
+}
+
+#[test]
+fn messages_request_cached_fold_is_only_added_from_options() {
+    let messages = (1..=6)
+        .flat_map(|index| {
+            [
+                AgentMessage {
+                    role: MessageRole::Assistant,
+                    content: vec![ContentBlock::ToolUse {
+                        id: format!("toolu_{index}"),
+                        name: "Read".to_string(),
+                        input: json!({ "file_path": format!("file-{index}.txt") }),
+                    }],
+                    id: None,
+                },
+                AgentMessage {
+                    role: MessageRole::User,
+                    content: vec![ContentBlock::ToolResult {
+                        tool_use_id: format!("toolu_{index}"),
+                        content: vec![ToolResultContent::Text {
+                            text: format!("file {index} contents"),
+                        }],
+                        is_error: false,
+                    }],
+                    id: None,
+                },
+            ]
+        })
+        .chain([AgentMessage {
+            role: MessageRole::User,
+            content: vec![ContentBlock::Text {
+                text: "continue".to_string(),
+            }],
+            id: None,
+        }])
+        .collect::<Vec<_>>();
+    let request = AgentRequest {
+        model: "astral-large".to_string(),
+        instructions: vec![ContentBlock::Text {
+            text: "You are Astral-Code.".to_string(),
+        }],
+        messages,
+        metadata: RequestMetadata {
+            prompt_cache_key: Some("astral:test".to_string()),
+            ..RequestMetadata::default()
+        },
+        stream: true,
+        ..AgentRequest::default()
+    };
+
+    let body_without_fold = to_messages_request(&request, options(1024));
+    let body_without_fold = serde_json::to_string(&body_without_fold).expect("serialize body");
+    assert!(!body_without_fold.contains("cache_edits"));
+    assert!(!body_without_fold.contains("cache_reference"));
+    assert!(!body_without_fold.contains("Old tool results may be automatically cleared"));
+
+    let mut options = options(1024);
+    options.cache_fold = Some(AnthropicCacheFoldOptions {
+        cache_reference_tool_use_ids: (1..=6).map(|index| format!("toolu_{index}")).collect(),
+        pinned_cache_edits: vec![AnthropicPinnedCacheEdits {
+            user_message_index: 11,
+            cache_references: vec!["toolu_1".to_string()],
+        }],
+    });
+
+    let body_with_fold = to_messages_request(&request, options);
+    assert_eq!(
+        body_with_fold["messages"][1]["content"][0]["cache_reference"],
+        "toolu_1"
+    );
+    assert_eq!(
+        body_with_fold["messages"][11],
+        json!({
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_6",
+                    "content": [{ "type": "text", "text": "file 6 contents" }]
+                },
+                {
+                    "type": "cache_edits",
+                    "edits": [{
+                        "type": "delete",
+                        "cache_reference": "toolu_1"
+                    }]
+                },
+                {
+                    "type": "text",
+                    "text": "continue",
+                    "cache_control": { "type": "ephemeral" }
+                }
+            ]
+        })
+    );
+    assert_eq!(
+        body_with_fold["system"][1],
+        json!({
+            "type": "text",
+            "text": "Old tool results may be automatically cleared from context to free up space. The 5 most recent eligible tool results are always kept. When a tool result contains information you may need later, write down the important details in your response.",
+            "cache_control": { "type": "ephemeral" }
+        })
+    );
+}
+
+#[test]
+fn messages_request_compact_placeholders_replace_media_and_large_tool_result_content() {
+    let request = AgentRequest {
+        model: "astral-large".to_string(),
+        messages: vec![AgentMessage {
+            role: MessageRole::User,
+            content: vec![
+                ContentBlock::Image {
+                    source: ImageSource::Base64 {
+                        media_type: "image/png".to_string(),
+                        data: "abc123".to_string(),
+                    },
+                    detail: None,
+                },
+                ContentBlock::ToolResult {
+                    tool_use_id: "toolu_1".to_string(),
+                    content: vec![
+                        ToolResultContent::Text {
+                            text: "small output".to_string(),
+                        },
+                        ToolResultContent::Text {
+                            text: "x".repeat(4097),
+                        },
+                        ToolResultContent::Image {
+                            source: ImageSource::Url {
+                                url: "https://example.com/image.png".to_string(),
+                            },
+                            detail: None,
+                        },
+                    ],
+                    is_error: false,
+                },
+            ],
+            id: None,
+        }],
+        stream: true,
+        ..AgentRequest::default()
+    };
+    let mut options = options(1024);
+    options.compact_input_placeholders = true;
+
+    assert_eq!(
+        to_messages_request(&request, options),
+        json!({
+            "model": "astral-large",
+            "max_tokens": 1024,
+            "stream": true,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_1",
+                        "content": [
+                            { "type": "text", "text": "small output" },
+                            { "type": "text", "text": "[Old tool result content cleared]" },
+                            { "type": "text", "text": "[image]" }
+                        ]
+                    },
+                    { "type": "text", "text": "[image]" }
+                ]
+            }]
+        })
+    );
+}
+
+#[test]
+fn messages_request_puts_tool_results_first_and_keeps_images_native() {
+    let request = AgentRequest {
+        model: "astral-large".to_string(),
+        messages: vec![AgentMessage {
+            role: MessageRole::User,
+            content: vec![
+                ContentBlock::Text {
+                    text: "follow-up text".to_string(),
+                },
+                ContentBlock::ToolResult {
+                    tool_use_id: "toolu_1".to_string(),
+                    content: vec![
+                        ToolResultContent::Text {
+                            text: "metadata: image/png".to_string(),
+                        },
+                        ToolResultContent::Image {
+                            source: ImageSource::Base64 {
+                                media_type: "image/png".to_string(),
+                                data: "abc123".to_string(),
+                            },
+                            detail: Some("original".to_string()),
+                        },
+                    ],
+                    is_error: false,
+                },
+            ],
+            id: None,
+        }],
+        stream: true,
+        ..AgentRequest::default()
+    };
+
+    assert_eq!(
+        to_messages_request(&request, options(1024)),
+        json!({
+            "model": "astral-large",
+            "max_tokens": 1024,
+            "stream": true,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_1",
+                        "content": [
+                            { "type": "text", "text": "metadata: image/png" },
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "image/png",
+                                    "data": "abc123"
+                                }
+                            }
+                        ]
+                    },
+                    { "type": "text", "text": "follow-up text" }
+                ]
+            }]
+        })
+    );
+}
+
+#[test]
+fn messages_request_aliases_anthropic_incompatible_tool_names() {
+    let long_name = "mcp__very_long_server_name_that_would_exceed_anthropic_tool_name_length__very_long_tool_name";
+    let request = AgentRequest {
+        model: "astral-large".to_string(),
+        messages: vec![AgentMessage {
+            role: MessageRole::Assistant,
+            content: vec![ContentBlock::ToolUse {
+                id: "toolu_1".to_string(),
+                name: long_name.to_string(),
+                input: json!({ "query": "hello" }),
+            }],
+            id: None,
+        }],
+        tools: vec![AgentTool {
+            name: long_name.to_string(),
+            description: "A long MCP tool".to_string(),
+            input_schema: json!({ "type": "object" }),
+            metadata: BTreeMap::from([
+                ("deferLoading".to_string(), json!(true)),
+                ("strict".to_string(), json!(true)),
+            ]),
+        }],
+        tool_choice: ToolChoice::Tool {
+            name: long_name.to_string(),
+        },
+        stream: true,
+        ..AgentRequest::default()
+    };
+
+    let request = to_messages_request_parts(&request, options(1024));
+    let alias = request
+        .tool_name_aliases
+        .iter()
+        .find_map(|(alias, canonical)| (canonical == long_name).then_some(alias.clone()))
+        .expect("long tool should be aliased");
+    assert!(alias.len() <= 64);
+    assert!(
+        alias
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-'))
+    );
+
+    assert_eq!(
+        request.body,
+        json!({
+            "model": "astral-large",
+            "max_tokens": 1024,
+            "stream": true,
+            "messages": [{
+                "role": "assistant",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "toolu_1",
+                    "name": alias,
+                    "input": { "query": "hello" }
+                }]
+            }],
+            "tools": [{
+                "name": alias,
+                "description": "A long MCP tool",
+                "input_schema": { "type": "object" },
+                "defer_loading": true,
+                "strict": true
+            }],
+            "tool_choice": { "type": "tool", "name": alias }
+        })
+    );
+}
+
+#[test]
 fn messages_request_provider_null_override_removes_default_field() {
     let request = AgentRequest {
         model: "anthropic-compatible".to_string(),
@@ -226,7 +588,7 @@ fn messages_request_provider_null_override_removes_default_field() {
     };
 
     assert_eq!(
-        to_messages_request(&request, AnthropicMessagesOptions { max_tokens: 1024 }),
+        to_messages_request(&request, options(1024)),
         json!({
             "model": "anthropic-compatible",
             "max_tokens": 1024,
@@ -255,7 +617,7 @@ fn messages_request_omits_tool_choice_without_tools() {
     };
 
     assert_eq!(
-        to_messages_request(&request, AnthropicMessagesOptions { max_tokens: 1024 }),
+        to_messages_request(&request, options(1024)),
         json!({
             "model": "anthropic-compatible",
             "max_tokens": 1024,
@@ -318,7 +680,7 @@ fn messages_request_merges_adjacent_reasoning_tool_use_and_tool_results() {
     };
 
     assert_eq!(
-        to_messages_request(&request, AnthropicMessagesOptions { max_tokens: 4096 }),
+        to_messages_request(&request, options(4096)),
         json!({
             "model": "deepseek-v4-pro",
             "max_tokens": 4096,
