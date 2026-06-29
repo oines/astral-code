@@ -70,6 +70,12 @@ pub(crate) struct SessionConfiguration {
     /// Compact continuation prompt override.
     pub(super) compact_continuation_prompt: Option<String>,
 
+    /// Experimental session-memory summary template override.
+    pub(super) session_memory_template: Option<String>,
+
+    /// Experimental session-memory updater prompt override.
+    pub(super) session_memory_update_prompt: Option<String>,
+
     /// When to escalate for approval for execution
     pub(super) approval_policy: Constrained<AskForApproval>,
     pub(super) approvals_reviewer: ApprovalsReviewer,

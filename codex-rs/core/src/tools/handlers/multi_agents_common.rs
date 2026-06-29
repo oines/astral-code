@@ -230,6 +230,8 @@ fn build_agent_shared_config(turn: &TurnContext) -> Result<Config, FunctionCallE
     config.developer_instructions = turn.developer_instructions.clone();
     config.compact_prompt = turn.compact_prompt.clone();
     config.compact_continuation_prompt = turn.compact_continuation_prompt.clone();
+    config.session_memory_template = turn.session_memory_template.clone();
+    config.session_memory_update_prompt = turn.session_memory_update_prompt.clone();
     apply_spawn_agent_runtime_overrides(&mut config, turn)?;
 
     Ok(config)

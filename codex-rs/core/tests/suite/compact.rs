@@ -307,6 +307,77 @@ async fn session_memory_sidechain_updates_summary_without_polluting_main_history
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn session_memory_sidechain_uses_custom_template_and_prompt() {
+    skip_if_no_network!();
+
+    let server = start_mock_server().await;
+    let model_provider = responses_mock_model_provider(&server);
+    let mut builder = test_codex().with_config(move |config| {
+        config.model_provider = model_provider;
+        config.experimental_session_memory_compact = true;
+        config.session_memory_template = Some(
+            "# IM State\n_Current IM agent state_\n\n# Bridge Followups\n_Open bridge follow-ups_"
+                .to_string(),
+        );
+        config.session_memory_update_prompt = Some(
+            "CUSTOM MEMORY UPDATE\npath={{notesPath}}\nnotes={{currentNotes}}\nunknown={{missing}}"
+                .to_string(),
+        );
+    });
+    let test = builder.build(&server).await.unwrap();
+    let summary_path = test
+        .config
+        .codex_home
+        .join("session-memory")
+        .join(test.session_configured.thread_id.to_string())
+        .join("summary.md");
+    let summary_path_str = summary_path.as_path().to_string_lossy().to_string();
+
+    let main_turn = sse(vec![
+        ev_assistant_message("m-custom-main", "main turn complete"),
+        ev_completed_with_tokens("r-custom-main", 10_001),
+    ]);
+    let sidechain_edit = sse(vec![
+        ev_function_call(
+            "session-memory-custom-edit",
+            "Edit",
+            &json!({
+                "file_path": summary_path_str,
+                "old_string": "_Current IM agent state_\n\n# Bridge Followups",
+                "new_string": "_Current IM agent state_\n- Bridge handoff is active.\n\n# Bridge Followups"
+            })
+            .to_string(),
+        ),
+        ev_completed_with_tokens("r-custom-sidechain-edit", 10_010),
+    ]);
+    let sidechain_done = sse(vec![
+        ev_assistant_message("m-custom-sidechain-done", "updated"),
+        ev_completed_with_tokens("r-custom-sidechain-done", 10_020),
+    ]);
+    let mock = mount_sse_sequence(&server, vec![main_turn, sidechain_edit, sidechain_done]).await;
+
+    test.submit_turn("first custom session memory turn")
+        .await
+        .unwrap();
+    let requests = wait_for_request_count(&mock, 3).await;
+    wait_for_file_contains(summary_path.as_path(), "Bridge handoff is active.").await;
+
+    let sidechain_request = requests[1].body_json().to_string();
+    assert!(
+        body_contains_text(&sidechain_request, "CUSTOM MEMORY UPDATE"),
+        "sidechain request should use the custom updater prompt"
+    );
+    assert!(
+        body_contains_text(&sidechain_request, summary_path_str.as_str()),
+        "custom updater prompt should receive the notes path"
+    );
+    assert!(
+        body_contains_text(&sidechain_request, "# IM State"),
+        "custom updater prompt should receive the custom template contents"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn failed_session_memory_sidechain_restores_previous_summary() {
     skip_if_no_network!();
 
@@ -422,7 +493,10 @@ async fn session_memory_compact_uses_summary_without_legacy_summarization_reques
     wait_for_file_contains(&state_path, "\"last_summary_fingerprint\": \"").await;
 
     test.codex.submit(Op::Compact).await.unwrap();
-    sleep(Duration::from_millis(100)).await;
+    wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
     wait_for_file_contains(&state_path, "\"last_summary_index\": null").await;
 
     test.submit_turn("after session memory compact")

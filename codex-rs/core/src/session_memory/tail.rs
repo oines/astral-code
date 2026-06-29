@@ -11,7 +11,7 @@ use codex_utils_output_truncation::truncate_text;
 
 use super::SessionMemoryState;
 
-pub(super) const DEFAULT_SUMMARY: &str = r#"# Session Title
+pub(crate) const DEFAULT_SUMMARY: &str = r#"# Session Title
 _A short and distinctive 5-10 word descriptive title for the session. Super info dense, no filler_
 
 # Current State
@@ -50,18 +50,6 @@ const MAX_SESSION_MEMORY_TOTAL_TOKENS: usize = 12_000;
 const MIN_EXISTING_SUMMARY_TOKENS_FOR_COLLAPSE_GUARD: usize = 2_000;
 const MIN_REWRITTEN_SUMMARY_TOKENS: usize = 500;
 pub(super) const MAX_COMPACT_SUMMARY_BODY_TOKENS: usize = 9_500;
-const REQUIRED_SUMMARY_HEADINGS: &[&str] = &[
-    "# Current State",
-    "# Task specification",
-    "# Files and Functions",
-    "# Workflow",
-    "# Errors & Corrections",
-    "# Codebase and System Documentation",
-    "# Learnings",
-    "# Key results",
-    "# Worklog",
-];
-
 #[derive(Clone, Debug)]
 pub(super) struct ExtractionBoundary {
     pub(super) index: usize,
@@ -115,15 +103,15 @@ pub(super) fn raw_tail_after_summary_boundary(
     Ok(tail)
 }
 
-pub(super) fn validate_summary(summary: &str) -> CodexResult<()> {
+pub(super) fn validate_summary(summary: &str, template: &str) -> CodexResult<()> {
     let trimmed = summary.trim();
-    if trimmed.is_empty() || trimmed == DEFAULT_SUMMARY.trim() {
+    if trimmed.is_empty() || trimmed == template.trim() {
         return Err(CodexErr::Fatal(
             "session memory summary is missing or still the template".to_string(),
         ));
     }
-    for heading in REQUIRED_SUMMARY_HEADINGS {
-        if !trimmed.lines().any(|line| line.trim() == *heading) {
+    for heading in required_summary_headings(template) {
+        if !trimmed.lines().any(|line| line.trim() == heading) {
             return Err(CodexErr::Fatal(format!(
                 "session memory summary is missing required heading {heading}"
             )));
@@ -158,12 +146,13 @@ pub(super) fn validate_post_compact_budget(
 pub(super) fn validate_post_extraction_summary(
     previous_summary: &str,
     updated_summary: &str,
+    template: &str,
 ) -> CodexResult<()> {
-    validate_summary(updated_summary)?;
+    validate_summary(updated_summary, template)?;
 
     let previous_tokens = approx_token_count(previous_summary);
     let updated_tokens = approx_token_count(updated_summary);
-    if previous_summary.trim() != DEFAULT_SUMMARY.trim()
+    if previous_summary.trim() != template.trim()
         && previous_tokens >= MIN_EXISTING_SUMMARY_TOKENS_FOR_COLLAPSE_GUARD
         && updated_tokens < MIN_REWRITTEN_SUMMARY_TOKENS
         && updated_tokens.saturating_mul(4) < previous_tokens
@@ -174,6 +163,14 @@ pub(super) fn validate_post_extraction_summary(
     }
 
     Ok(())
+}
+
+fn required_summary_headings(template: &str) -> Vec<&str> {
+    template
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with('#'))
+        .collect()
 }
 
 pub(super) fn truncate_summary_for_compact(summary: &str) -> (String, bool) {

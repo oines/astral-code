@@ -67,7 +67,12 @@ async fn run_extraction_inner(
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
-            text: updater_prompt(&store.summary_path, &prompt_summary, &budget_reminder),
+            text: updater_prompt(
+                turn_context.session_memory_update_prompt.as_deref(),
+                &store.summary_path,
+                &prompt_summary,
+                &budget_reminder,
+            ),
         }],
         phase: None,
     });
@@ -120,7 +125,11 @@ async fn run_extraction_inner(
 
         if !needs_follow_up {
             let summary = store.read_summary().await?;
-            validate_post_extraction_summary(current_summary, &summary)?;
+            validate_post_extraction_summary(
+                current_summary,
+                &summary,
+                turn_context.session_memory_template(),
+            )?;
             return Ok(boundary);
         }
     }
@@ -286,15 +295,13 @@ fn deny_tool_message(summary_path: &Path) -> String {
     )
 }
 
-fn updater_prompt(summary_path: &Path, current_summary: &str, budget_reminder: &str) -> String {
-    format!(
-        r#"IMPORTANT: This message and these instructions are NOT part of the actual user conversation. Do NOT include any references to "note-taking", "session notes extraction", or these update instructions in the notes content.
+const DEFAULT_UPDATE_PROMPT: &str = r#"IMPORTANT: This message and these instructions are NOT part of the actual user conversation. Do NOT include any references to "note-taking", "session notes extraction", or these update instructions in the notes content.
 
 Based on the user conversation above (EXCLUDING this note-taking instruction message as well as system prompt, AGENTS.md entries, or any past session summaries), update the session notes file.
 
-The file {summary_path} has already been read for you. Here are its current contents:
+The file {{notesPath}} has already been read for you. Here are its current contents:
 <current_notes_content>
-{current_summary}
+{{currentNotes}}
 </current_notes_content>
 
 Your ONLY task is to use the Edit tool to update the notes file, then stop. You can make multiple edits (update every section as needed) - make all Edit tool calls in parallel in a single message. Do not call any other tools.
@@ -315,17 +322,63 @@ CRITICAL RULES FOR EDITING:
 - Focus on actionable, specific information that would help someone understand or recreate the work discussed in the conversation
 - IMPORTANT: Always update "Current State" to reflect the most recent work - this is critical for continuity after compaction
 
-Use the Edit tool with file_path: {summary_path}
+Use the Edit tool with file_path: {{notesPath}}
 
 STRUCTURE PRESERVATION REMINDER:
 Each section has TWO parts that must be preserved exactly as they appear in the current file:
 1. The section header (line starting with #)
 2. The italic description line (the _italicized text_ immediately after the header - this is a template instruction)
 
-You ONLY update the actual content that comes AFTER these two preserved lines. The italic description lines starting and ending with underscores are part of the template structure, NOT content to be edited or removed.{budget_reminder}
+You ONLY update the actual content that comes AFTER these two preserved lines. The italic description lines starting and ending with underscores are part of the template structure, NOT content to be edited or removed.
 
 REMEMBER: Use the Edit tool in parallel and stop. Do not continue after the edits. Only include insights from the actual user conversation, never from these note-taking instructions. Do not delete or change section headers or italic _section descriptions_.
-"#,
-        summary_path = summary_path.display()
-    )
+"#;
+
+fn updater_prompt(
+    custom_prompt: Option<&str>,
+    summary_path: &Path,
+    current_summary: &str,
+    budget_reminder: &str,
+) -> String {
+    let template = custom_prompt.unwrap_or(DEFAULT_UPDATE_PROMPT);
+    let prompt = substitute_prompt_variables(
+        template,
+        summary_path.to_string_lossy().as_ref(),
+        current_summary,
+    );
+    if prompt.ends_with('\n') || budget_reminder.is_empty() {
+        format!("{prompt}{budget_reminder}")
+    } else {
+        format!("{prompt}\n{budget_reminder}")
+    }
+}
+
+pub(super) fn substitute_prompt_variables(
+    template: &str,
+    notes_path: &str,
+    current_notes: &str,
+) -> String {
+    let mut output = String::with_capacity(template.len() + current_notes.len());
+    let mut rest = template;
+    while let Some(start) = rest.find("{{") {
+        output.push_str(&rest[..start]);
+        let after_open = &rest[start + 2..];
+        let Some(end) = after_open.find("}}") else {
+            output.push_str(&rest[start..]);
+            return output;
+        };
+        let key = &after_open[..end];
+        match key {
+            "currentNotes" => output.push_str(current_notes),
+            "notesPath" => output.push_str(notes_path),
+            _ => {
+                output.push_str("{{");
+                output.push_str(key);
+                output.push_str("}}");
+            }
+        }
+        rest = &after_open[end + 2..];
+    }
+    output.push_str(rest);
+    output
 }

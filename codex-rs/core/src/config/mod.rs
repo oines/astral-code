@@ -695,6 +695,12 @@ pub struct Config {
     /// Compact continuation prompt override.
     pub compact_continuation_prompt: Option<String>,
 
+    /// Experimental session-memory summary template override.
+    pub session_memory_template: Option<String>,
+
+    /// Experimental session-memory updater prompt override.
+    pub session_memory_update_prompt: Option<String>,
+
     /// Optional external notifier command. When set, Astral will spawn this
     /// program after each completed *turn* (i.e. when the agent finishes
     /// processing a user submission). The value must be the full command
@@ -3364,6 +3370,22 @@ impl Config {
                     Some(trimmed.to_string())
                 }
             });
+        let session_memory_template = cfg.session_memory_template.and_then(|value| {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        });
+        let session_memory_update_prompt = cfg.session_memory_update_prompt.and_then(|value| {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        });
 
         // Load base instructions override from a file if specified. If the
         // path is relative, resolve it against the effective cwd so the
@@ -3414,6 +3436,26 @@ impl Config {
         )
         .await?;
         let compact_prompt = compact_prompt.or(file_compact_prompt);
+        let experimental_session_memory_template_path =
+            cfg.experimental_session_memory_template_file.as_ref();
+        let file_session_memory_template = Self::try_read_non_empty_file(
+            fs,
+            experimental_session_memory_template_path,
+            "experimental session memory template file",
+        )
+        .await?;
+        let session_memory_template =
+            session_memory_template.or(file_session_memory_template);
+        let experimental_session_memory_update_prompt_path =
+            cfg.experimental_session_memory_update_prompt_file.as_ref();
+        let file_session_memory_update_prompt = Self::try_read_non_empty_file(
+            fs,
+            experimental_session_memory_update_prompt_path,
+            "experimental session memory update prompt file",
+        )
+        .await?;
+        let session_memory_update_prompt =
+            session_memory_update_prompt.or(file_session_memory_update_prompt);
         let zsh_path = default_zsh_path
             .or_else(|| InstallContext::current().bundled_zsh_path())
             .map(AbsolutePathBuf::into_path_buf);
@@ -3597,6 +3639,8 @@ impl Config {
             developer_instructions,
             compact_prompt,
             compact_continuation_prompt,
+            session_memory_template,
+            session_memory_update_prompt,
             include_permissions_instructions,
             include_apps_instructions,
             include_collaboration_mode_instructions,

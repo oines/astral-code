@@ -22,7 +22,7 @@ mod sidechain;
 mod tail;
 
 use sidechain::run_extraction;
-use tail::DEFAULT_SUMMARY;
+pub(crate) use tail::DEFAULT_SUMMARY;
 use tail::ExtractionBoundary;
 use tail::count_tool_calls;
 use tail::estimate_prompt_tokens;
@@ -137,10 +137,10 @@ impl SessionMemoryStore {
         }
     }
 
-    async fn ensure(&self) -> CodexResult<()> {
+    async fn ensure(&self, template: &str) -> CodexResult<()> {
         tokio::fs::create_dir_all(&self.dir).await?;
         if tokio::fs::metadata(&self.summary_path).await.is_err() {
-            tokio::fs::write(&self.summary_path, DEFAULT_SUMMARY).await?;
+            tokio::fs::write(&self.summary_path, template).await?;
         }
         if tokio::fs::metadata(&self.state_path).await.is_err() {
             self.write_state(&SessionMemoryState::default()).await?;
@@ -179,7 +179,7 @@ pub(crate) async fn maybe_spawn_post_sampling_extraction(
     }
 
     let store = SessionMemoryStore::new(turn_context.as_ref(), sess.as_ref());
-    if let Err(err) = store.ensure().await {
+    if let Err(err) = store.ensure(turn_context.session_memory_template()).await {
         warn!("failed to initialize session memory store: {err:#}");
         return;
     }
@@ -246,7 +246,7 @@ pub(crate) async fn try_compact(
     }
 
     let store = SessionMemoryStore::new(turn_context.as_ref(), sess.as_ref());
-    store.ensure().await?;
+    store.ensure(turn_context.session_memory_template()).await?;
     let mut state = store.read_state().await?;
     if is_auto_compact && state.consecutive_auto_compact_failures >= AUTO_COMPACT_FAILURE_BREAKER {
         return Ok(SessionMemoryCompactOutcome::Fallback {
@@ -296,7 +296,7 @@ async fn try_compact_inner(
     wait_for_running_extraction(store, state).await?;
 
     let summary = store.read_summary().await?;
-    validate_summary(&summary)?;
+    validate_summary(&summary, turn_context.session_memory_template())?;
     let history_snapshot = sess.clone_history().await;
     let history_items = history_snapshot.raw_items();
     let tail = raw_tail_after_summary_boundary(history_items, state)?;

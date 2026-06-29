@@ -401,6 +401,12 @@
         "experimental_session_memory_compact": {
           "type": "boolean"
         },
+        "experimental_session_memory_template_file": {
+          "$ref": "#/definitions/AbsolutePathBuf"
+        },
+        "experimental_session_memory_update_prompt_file": {
+          "$ref": "#/definitions/AbsolutePathBuf"
+        },
         "experimental_use_unified_exec_tool": {
           "type": "boolean"
         },
@@ -731,6 +737,12 @@
         },
         "service_tier": {
           "description": "Optional explicit service tier request id for new turns (for example `default`, `priority`, or `flex`; legacy `fast` also works).",
+          "type": "string"
+        },
+        "session_memory_template": {
+          "type": "string"
+        },
+        "session_memory_update_prompt": {
           "type": "string"
         },
         "tools": {
@@ -4689,6 +4701,12 @@
       "description": "Experimental / do not use. Enables Claude Code-style session-memory background compaction.",
       "type": "boolean"
     },
+    "experimental_session_memory_template_file": {
+      "$ref": "#/definitions/AbsolutePathBuf"
+    },
+    "experimental_session_memory_update_prompt_file": {
+      "$ref": "#/definitions/AbsolutePathBuf"
+    },
     "experimental_thread_config_endpoint": {
       "description": "Experimental / do not use. When set, app-server fetches thread-scoped config from a remote service at this endpoint.",
       "type": "string"
@@ -5310,6 +5328,14 @@
     },
     "service_tier": {
       "description": "Optional explicit service tier request id for new turns (for example `default`, `priority`, or `flex`; legacy `fast` also works).",
+      "type": "string"
+    },
+    "session_memory_template": {
+      "description": "Template used when creating a new experimental session-memory summary.",
+      "type": "string"
+    },
+    "session_memory_update_prompt": {
+      "description": "Prompt used by the experimental session-memory sidechain updater.",
       "type": "string"
     },
     "shell_environment_policy": {

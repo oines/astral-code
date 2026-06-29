@@ -134,6 +134,8 @@ pub(super) async fn spawn_review_thread(
         user_instructions: None,
         compact_prompt: parent_turn_context.compact_prompt.clone(),
         compact_continuation_prompt: parent_turn_context.compact_continuation_prompt.clone(),
+        session_memory_template: parent_turn_context.session_memory_template.clone(),
+        session_memory_update_prompt: parent_turn_context.session_memory_update_prompt.clone(),
         collaboration_mode: parent_turn_context.collaboration_mode.clone(),
         multi_agent_version: MultiAgentVersion::Disabled,
         personality: parent_turn_context.personality,

@@ -602,6 +602,8 @@ impl Codex {
             base_instructions,
             compact_prompt: config.compact_prompt.clone(),
             compact_continuation_prompt: config.compact_continuation_prompt.clone(),
+            session_memory_template: config.session_memory_template.clone(),
+            session_memory_update_prompt: config.session_memory_update_prompt.clone(),
             approval_policy: config.permissions.approval_policy.clone(),
             approvals_reviewer: config.approvals_reviewer,
             permission_profile_state: session_permission_profile_state_from_config(&config)?,

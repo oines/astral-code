@@ -122,7 +122,7 @@ fn compact_summary_truncates_overlarge_sections() {
     let summary =
         summary_with_current_state(&"token ".repeat(tail::MAX_COMPACT_SUMMARY_BODY_TOKENS * 2));
 
-    validate_summary(&summary).expect("summary can still be extracted");
+    validate_summary(&summary, tail::DEFAULT_SUMMARY).expect("summary can still be extracted");
     let (truncated, was_truncated) = truncate_summary_for_compact(&summary);
 
     assert!(was_truncated);
@@ -135,12 +135,46 @@ fn post_extraction_rejects_tiny_rewrite_of_existing_summary() {
     let previous_summary = summary_with_current_state(&"durable detail ".repeat(3_000));
     let updated_summary = summary_with_current_state("- done");
 
-    let err = tail::validate_post_extraction_summary(&previous_summary, &updated_summary)
-        .expect_err("tiny rewrite should be rejected");
+    let err = tail::validate_post_extraction_summary(
+        &previous_summary,
+        &updated_summary,
+        tail::DEFAULT_SUMMARY,
+    )
+    .expect_err("tiny rewrite should be rejected");
 
     assert!(
         err.to_string()
             .contains("session memory extraction collapsed existing summary unexpectedly")
+    );
+}
+
+#[test]
+fn custom_summary_template_controls_required_headings() {
+    let template = "# IM State\n_Current chat handoff_\n\n# Follow-ups\n_Open items_";
+    let summary =
+        "# IM State\n- Waiting for bridge reply.\n\n# Follow-ups\n- Confirm unread handling.";
+
+    validate_summary(summary, template).expect("custom template headings are accepted");
+
+    let err = validate_summary("# Current State\n- wrong template", template)
+        .expect_err("summary should preserve custom headings");
+    assert!(
+        err.to_string()
+            .contains("session memory summary is missing required heading # IM State")
+    );
+}
+
+#[test]
+fn prompt_variable_substitution_is_single_pass() {
+    let substituted = super::sidechain::substitute_prompt_variables(
+        "notes={{currentNotes}}\npath={{notesPath}}\nunknown={{missing}}",
+        "/tmp/summary.md",
+        "literal {{notesPath}}",
+    );
+
+    assert_eq!(
+        substituted,
+        "notes=literal {{notesPath}}\npath=/tmp/summary.md\nunknown={{missing}}"
     );
 }
 

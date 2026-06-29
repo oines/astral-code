@@ -201,6 +201,12 @@ pub struct ConfigToml {
     /// Continuation prompt appended after automatic history compaction.
     pub compact_continuation_prompt: Option<String>,
 
+    /// Template used when creating a new experimental session-memory summary.
+    pub session_memory_template: Option<String>,
+
+    /// Prompt used by the experimental session-memory sidechain updater.
+    pub session_memory_update_prompt: Option<String>,
+
     /// Preferred backend for storing CLI auth credentials.
     /// file (default): Use a file in the Astral home directory.
     /// keyring: Use an OS-specific keyring service.
@@ -455,6 +461,8 @@ pub struct ConfigToml {
     pub notice: Option<Notice>,
 
     pub experimental_compact_prompt_file: Option<AbsolutePathBuf>,
+    pub experimental_session_memory_template_file: Option<AbsolutePathBuf>,
+    pub experimental_session_memory_update_prompt_file: Option<AbsolutePathBuf>,
     pub experimental_use_unified_exec_tool: Option<bool>,
     /// Experimental / do not use. Enables Anthropic Messages-only cached
     /// tool-result folding when the active wire API is Anthropic Messages.
