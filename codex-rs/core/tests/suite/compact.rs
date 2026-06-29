@@ -386,6 +386,7 @@ async fn failed_session_memory_sidechain_restores_previous_summary() {
     let mut builder = test_codex().with_config(move |config| {
         config.model_provider = model_provider;
         config.experimental_session_memory_compact = true;
+        config.session_memory_template = Some("# Current State".to_string());
     });
     let test = builder.build(&server).await.unwrap();
     let summary_path = test
@@ -408,7 +409,7 @@ async fn failed_session_memory_sidechain_restores_previous_summary() {
             &json!({
                 "file_path": summary_path_str,
                 "old_string": "# Current State",
-                "new_string": "# Broken Current State"
+                "new_string": ""
             })
             .to_string(),
         ),
@@ -422,7 +423,7 @@ async fn failed_session_memory_sidechain_restores_previous_summary() {
 
     test.submit_turn("first session memory turn").await.unwrap();
     wait_for_request_count(&mock, 3).await;
-    wait_for_file_contains(&state_path, "missing required heading # Current State").await;
+    wait_for_file_contains(&state_path, "session memory summary is missing").await;
 
     let summary = fs::read_to_string(summary_path.as_path()).expect("summary file exists");
     assert!(
@@ -430,7 +431,7 @@ async fn failed_session_memory_sidechain_restores_previous_summary() {
         "failed sidechain extraction should restore previous summary"
     );
     assert!(
-        !summary.contains("# Broken Current State"),
+        !summary.trim().is_empty(),
         "failed sidechain extraction must not leave a partial summary edit"
     );
 }

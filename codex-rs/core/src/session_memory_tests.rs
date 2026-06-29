@@ -149,25 +149,13 @@ fn post_extraction_rejects_tiny_rewrite_of_existing_summary() {
 }
 
 #[test]
-fn post_extraction_preserves_existing_summary_headings() {
+fn post_extraction_allows_markdown_headings_in_content_to_change() {
     let template = "# IM State\n_Current chat handoff_\n\n# Follow-ups\n_Open items_";
-    let previous =
-        "# IM State\n- Waiting for bridge reply.\n\n# Follow-ups\n- Confirm unread handling.";
-    let updated = "# IM State\n- Waiting for bridge reply.\n\n# Follow-ups\n- Send result.";
+    let previous = "# IM State\n- Waiting for bridge reply.\n\n# Key results\n## User report\n- v1";
+    let updated = "# IM State\n- Waiting for bridge reply.\n\n# Key results\n- v2";
 
     tail::validate_post_extraction_summary(previous, updated, template)
-        .expect("existing custom headings are preserved");
-
-    let err = tail::validate_post_extraction_summary(
-        previous,
-        "# IM State\n- Missing follow-up.",
-        template,
-    )
-    .expect_err("updated summary should preserve previous headings");
-    assert!(
-        err.to_string()
-            .contains("session memory summary is missing required heading # Follow-ups")
-    );
+        .expect("content markdown headings should not become structural requirements");
 }
 
 #[test]
