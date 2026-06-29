@@ -41,6 +41,7 @@ use codex_rollout_trace::InferenceTraceContext;
 use codex_utils_output_truncation::TruncationPolicy;
 use codex_utils_output_truncation::approx_token_count;
 use codex_utils_output_truncation::truncate_text;
+use codex_config::types::CompactionRetention;
 use futures::prelude::*;
 use tracing::error;
 
@@ -327,7 +328,7 @@ async fn run_compact_task_inner_impl(
         suppress_follow_up_questions,
         turn_context.compact_continuation_prompt(),
     );
-    let user_messages = collect_user_messages(history_items);
+    let user_messages = collect_user_messages(history_items, turn_context.compaction_retention);
 
     let mut new_history = build_compacted_history(Vec::new(), &user_messages, &summary_text);
 
@@ -469,8 +470,15 @@ pub fn content_items_to_text(content: &[ContentItem]) -> Option<String> {
     }
 }
 
-pub(crate) fn collect_user_messages(items: &[ResponseItem]) -> Vec<String> {
-    items
+pub(crate) fn collect_user_messages(
+    items: &[ResponseItem],
+    retention: CompactionRetention,
+) -> Vec<String> {
+    if matches!(retention, CompactionRetention::SummaryOnly) {
+        return Vec::new();
+    }
+
+    let mut messages: Vec<String> = items
         .iter()
         .filter_map(|item| match crate::event_mapping::parse_turn_item(item) {
             Some(TurnItem::UserMessage(user)) => {
@@ -482,7 +490,56 @@ pub(crate) fn collect_user_messages(items: &[ResponseItem]) -> Vec<String> {
             }
             _ => None,
         })
-        .collect()
+        .collect();
+
+    if matches!(retention, CompactionRetention::Full) {
+        // Also preserve tool call outputs so that outbound actions
+        // (e.g. IM send_message calls) survive compaction.
+        let tool_outputs: Vec<String> = items
+            .iter()
+            .filter_map(|item| match item {
+                ResponseItem::FunctionCallOutput { .. } => {
+                    Some(format_tool_output_for_compaction(item))
+                }
+                ResponseItem::CustomToolCallOutput { .. } => {
+                    Some(format_tool_output_for_compaction(item))
+                }
+                _ => None,
+            })
+            .collect();
+        messages.extend(tool_outputs);
+    }
+
+    messages
+}
+
+/// Format a tool call output item into a compact string for inclusion
+/// in compacted history.
+fn format_tool_output_for_compaction(item: &ResponseItem) -> String {
+    let (call_id, output_text) = match item {
+        ResponseItem::FunctionCallOutput { call_id, output } => {
+            let text = output
+                .body
+                .to_text()
+                .unwrap_or_else(|| format!("{:?}", output.success));
+            (call_id.as_str(), text)
+        }
+        ResponseItem::CustomToolCallOutput { call_id, output, .. } => {
+            let text = output
+                .body
+                .to_text()
+                .unwrap_or_else(|| format!("{:?}", output.success));
+            (call_id.as_str(), text)
+        }
+        _ => return String::new(),
+    };
+    // Truncate very long outputs to keep token usage reasonable.
+    let truncated = if output_text.len() > 2000 {
+        format!("{}…[truncated]", &output_text[..2000])
+    } else {
+        output_text
+    };
+    format!("[toolu_vrtx_{}] {}", &call_id[..call_id.len().min(8)], truncated)
 }
 
 pub(crate) fn is_summary_message(message: &str) -> bool {

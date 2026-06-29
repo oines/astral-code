@@ -1,5 +1,6 @@
 use super::turn_context::TurnEnvironment;
 use super::*;
+use codex_config::types::CompactionRetention;
 use crate::codex_thread::TryStartTurnIfIdleRejectionReason;
 use crate::config::ConfigBuilder;
 use crate::config::ConfigOverrides;
@@ -9759,7 +9760,7 @@ async fn sample_rollout(
     let snapshot1 = live_history
         .clone()
         .for_prompt(&reconstruction_turn.model_info.input_modalities);
-    let user_messages1 = collect_user_messages(&snapshot1);
+    let user_messages1 = collect_user_messages(&snapshot1, CompactionRetention::MessagesAndSummary);
     let rebuilt1 = compact::build_compacted_history(Vec::new(), &user_messages1, summary1);
     live_history.replace(rebuilt1);
     rollout_items.push(RolloutItem::Compacted(CompactedItem {
@@ -9799,7 +9800,7 @@ async fn sample_rollout(
     let snapshot2 = live_history
         .clone()
         .for_prompt(&reconstruction_turn.model_info.input_modalities);
-    let user_messages2 = collect_user_messages(&snapshot2);
+    let user_messages2 = collect_user_messages(&snapshot2, CompactionRetention::MessagesAndSummary);
     let rebuilt2 = compact::build_compacted_history(Vec::new(), &user_messages2, summary2);
     live_history.replace(rebuilt2);
     rollout_items.push(RolloutItem::Compacted(CompactedItem {

@@ -1,5 +1,8 @@
 use super::*;
+use codex_config::types::CompactionRetention;
 use codex_protocol::models::DEFAULT_IMAGE_DETAIL;
+use codex_protocol::models::FunctionCallOutputBody;
+use codex_protocol::models::FunctionCallOutputPayload;
 use pretty_assertions::assert_eq;
 
 async fn process_compacted_history_with_test_session(
@@ -85,7 +88,7 @@ fn collect_user_messages_extracts_user_text_only() {
         ResponseItem::Other,
     ];
 
-    let collected = collect_user_messages(&items);
+    let collected = collect_user_messages(&items, CompactionRetention::MessagesAndSummary);
 
     assert_eq!(vec!["first".to_string()], collected);
 }
@@ -124,7 +127,7 @@ do things
         },
     ];
 
-    let collected = collect_user_messages(&items);
+    let collected = collect_user_messages(&items, CompactionRetention::MessagesAndSummary);
 
     assert_eq!(vec!["real user message".to_string()], collected);
 }
@@ -147,7 +150,7 @@ fn collect_user_messages_filters_legacy_warnings() {
         user_message("real user message"),
     ];
 
-    let collected = collect_user_messages(&items);
+    let collected = collect_user_messages(&items, CompactionRetention::MessagesAndSummary);
 
     assert_eq!(vec!["real user message".to_string()], collected);
 }
@@ -164,7 +167,7 @@ fn collect_user_messages_filters_claude_style_compaction_summaries() {
         user_message("next user message"),
     ];
 
-    let collected = collect_user_messages(&items);
+    let collected = collect_user_messages(&items, CompactionRetention::MessagesAndSummary);
 
     assert_eq!(
         vec![
@@ -618,4 +621,80 @@ fn insert_initial_context_before_last_real_user_or_summary_keeps_compaction_last
         },
     ];
     assert_eq!(refreshed, expected);
+}
+
+// ── CompactionRetention mode tests ──
+
+#[test]
+fn collect_user_messages_summary_only_returns_empty() {
+    let items = vec![
+        user_message("real user message"),
+        user_message("another user message"),
+    ];
+    let collected = collect_user_messages(&items, CompactionRetention::SummaryOnly);
+    assert!(collected.is_empty(), "SummaryOnly should return no user messages");
+}
+
+#[test]
+fn collect_user_messages_messages_and_summary_filters_tool_outputs() {
+    let items = vec![
+        user_message("keep me"),
+        ResponseItem::FunctionCallOutput {
+            call_id: "call_1".to_string(),
+            output: FunctionCallOutputPayload {
+                body: FunctionCallOutputBody::Text("tool result".to_string()),
+                success: Some(true),
+            },
+        },
+        user_message("keep me too"),
+    ];
+    let collected =
+        collect_user_messages(&items, CompactionRetention::MessagesAndSummary);
+    assert_eq!(
+        collected,
+        vec!["keep me".to_string(), "keep me too".to_string()],
+        "MessagesAndSummary should filter out tool outputs"
+    );
+}
+
+#[test]
+fn collect_user_messages_full_includes_tool_outputs() {
+    let items = vec![
+        user_message("user msg"),
+        ResponseItem::FunctionCallOutput {
+            call_id: "call_abc12345".to_string(),
+            output: FunctionCallOutputPayload {
+                body: FunctionCallOutputBody::Text("send_message ok".to_string()),
+                success: Some(true),
+            },
+        },
+        ResponseItem::CustomToolCallOutput {
+            call_id: "custom_1".to_string(),
+            name: Some("my_tool".to_string()),
+            output: FunctionCallOutputPayload {
+                body: FunctionCallOutputBody::Text("custom output".to_string()),
+                success: Some(true),
+            },
+        },
+    ];
+    let collected = collect_user_messages(&items, CompactionRetention::Full);
+    assert_eq!(collected.len(), 3, "Full should include user messages + tool outputs");
+    assert_eq!(collected[0], "user msg");
+    assert!(collected[1].contains("send_message ok"), "should include function call output");
+    assert!(collected[2].contains("custom output"), "should include custom tool output");
+}
+
+#[test]
+fn collect_user_messages_full_handles_non_text_output_body() {
+    let items = vec![ResponseItem::FunctionCallOutput {
+        call_id: "call_1".to_string(),
+        output: FunctionCallOutputPayload {
+            body: FunctionCallOutputBody::ContentItems(vec![]),
+            success: Some(false),
+        },
+    }];
+    let collected = collect_user_messages(&items, CompactionRetention::Full);
+    assert_eq!(collected.len(), 1);
+    // When to_text() returns None, we use the success field as fallback
+    assert!(collected[0].contains("Some(false)") || collected[0].contains("None"));
 }

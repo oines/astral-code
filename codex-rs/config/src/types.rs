@@ -321,6 +321,27 @@ pub enum CompactMemoryMode {
     Blocking,
 }
 
+/// Controls what history items survive compaction into the replacement context.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CompactionRetention {
+    /// Preserve recent user messages plus the model-generated summary (default,
+    /// matches upstream Codex behaviour). Tool call outputs are dropped.
+    MessagesAndSummary,
+    /// Keep only the model-generated summary; drop all prior user messages
+    /// and tool outputs.
+    SummaryOnly,
+    /// Preserve user messages, tool-call outputs, and the summary so that
+    /// outbound actions (e.g. IM send_message calls) survive compaction.
+    Full,
+}
+
+impl Default for CompactionRetention {
+    fn default() -> Self {
+        Self::MessagesAndSummary
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Phase2SandboxMode {

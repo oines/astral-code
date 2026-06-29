@@ -12,6 +12,7 @@ use crate::types::AnalyticsConfigToml;
 use crate::types::ApprovalsReviewer;
 use crate::types::AppsConfigToml;
 use crate::types::AuthCredentialsStoreMode;
+use crate::types::CompactionRetention;
 use crate::types::FeedbackConfigToml;
 use crate::types::History;
 use crate::types::MarketplaceConfig;
@@ -200,6 +201,12 @@ pub struct ConfigToml {
 
     /// Continuation prompt appended after automatic history compaction.
     pub compact_continuation_prompt: Option<String>,
+
+    /// Controls which history items survive compaction.
+    /// `messages_and_summary` (default): keep recent user messages + summary (upstream behaviour).
+    /// `summary_only`: keep only the summary, drop all history.
+    /// `full`: keep user messages, tool call outputs, and summary.
+    pub compaction_retention: Option<CompactionRetention>,
 
     /// Preferred backend for storing CLI auth credentials.
     /// file (default): Use a file in the Astral home directory.

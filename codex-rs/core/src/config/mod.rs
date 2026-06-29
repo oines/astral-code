@@ -41,6 +41,7 @@ use codex_config::permissions_toml::PermissionsToml;
 use codex_config::sandbox_mode_requirement_for_permission_profile;
 use codex_config::types::ApprovalsReviewer;
 use codex_config::types::AuthCredentialsStoreMode;
+use codex_config::types::CompactionRetention;
 use codex_config::types::History;
 use codex_config::types::McpServerConfig;
 use codex_config::types::McpServerDisabledReason;
@@ -694,6 +695,9 @@ pub struct Config {
 
     /// Compact continuation prompt override.
     pub compact_continuation_prompt: Option<String>,
+
+    /// Controls which history items survive compaction.
+    pub compaction_retention: CompactionRetention,
 
     /// Optional external notifier command. When set, Astral will spawn this
     /// program after each completed *turn* (i.e. when the agent finishes
@@ -2336,6 +2340,7 @@ pub struct ConfigOverrides {
     pub personality: Option<Personality>,
     pub compact_prompt: Option<String>,
     pub compact_continuation_prompt: Option<String>,
+    pub compaction_retention: Option<CompactionRetention>,
     pub show_raw_agent_reasoning: Option<bool>,
     pub tools_web_search_request: Option<bool>,
     pub ephemeral: Option<bool>,
@@ -2766,6 +2771,7 @@ impl Config {
             personality,
             compact_prompt,
             compact_continuation_prompt,
+            compaction_retention,
             show_raw_agent_reasoning,
             tools_web_search_request: override_tools_web_search_request,
             ephemeral,
@@ -3361,6 +3367,10 @@ impl Config {
                 }
             });
 
+        let compaction_retention = compaction_retention
+            .or(cfg.compaction_retention)
+            .unwrap_or_default();
+
         // Load base instructions override from a file if specified. If the
         // path is relative, resolve it against the effective cwd so the
         // behaviour matches other path-like config values.
@@ -3593,6 +3603,7 @@ impl Config {
             developer_instructions,
             compact_prompt,
             compact_continuation_prompt,
+            compaction_retention,
             include_permissions_instructions,
             include_apps_instructions,
             include_collaboration_mode_instructions,

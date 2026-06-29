@@ -1,6 +1,7 @@
 use super::*;
 use crate::SkillLoadOutcome;
 use crate::agents_md::LoadedAgentsMd;
+use codex_config::types::CompactionRetention;
 use crate::config::GhostSnapshotConfig;
 use crate::environment_selection::ResolvedTurnEnvironments;
 use codex_core_skills::HostLoadedSkills;
@@ -81,6 +82,7 @@ pub struct TurnContext {
     pub(crate) developer_instructions: Option<String>,
     pub(crate) compact_prompt: Option<String>,
     pub(crate) compact_continuation_prompt: Option<String>,
+    pub(crate) compaction_retention: CompactionRetention,
     pub(crate) user_instructions: Option<String>,
     pub(crate) collaboration_mode: CollaborationMode,
     pub(crate) multi_agent_version: MultiAgentVersion,
@@ -241,6 +243,7 @@ impl TurnContext {
             developer_instructions: self.developer_instructions.clone(),
             compact_prompt: self.compact_prompt.clone(),
             compact_continuation_prompt: self.compact_continuation_prompt.clone(),
+            compaction_retention: self.compaction_retention,
             user_instructions: self.user_instructions.clone(),
             collaboration_mode,
             multi_agent_version: self.multi_agent_version,
@@ -555,6 +558,7 @@ impl Session {
             developer_instructions: session_configuration.developer_instructions.clone(),
             compact_prompt: session_configuration.compact_prompt.clone(),
             compact_continuation_prompt: session_configuration.compact_continuation_prompt.clone(),
+            compaction_retention: per_turn_config.compaction_retention,
             user_instructions: session_configuration
                 .user_instructions
                 .as_ref()
