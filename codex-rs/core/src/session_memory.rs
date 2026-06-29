@@ -305,10 +305,7 @@ async fn try_compact_inner(
     let (summary_for_compact, was_truncated_for_compact) = truncate_summary_for_compact(&summary);
     let summary_text =
         format_session_memory_summary(&summary_for_compact, was_truncated_for_compact);
-    let mut new_history = vec![ResponseItem::Compaction {
-        encrypted_content: summary_text.clone(),
-    }];
-    new_history.extend(tail);
+    let mut new_history = build_session_memory_compacted_history(tail, summary_text.clone());
 
     if matches!(
         initial_context_injection,
@@ -342,6 +339,16 @@ async fn try_compact_inner(
     state.clear_summary_boundary();
 
     Ok(summary_text)
+}
+
+fn build_session_memory_compacted_history(
+    mut tail: Vec<ResponseItem>,
+    summary_text: String,
+) -> Vec<ResponseItem> {
+    tail.push(ResponseItem::Compaction {
+        encrypted_content: summary_text,
+    });
+    tail
 }
 
 fn should_extract(state: &SessionMemoryState, candidate: &ExtractionCandidate) -> bool {

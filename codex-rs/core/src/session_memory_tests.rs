@@ -165,6 +165,19 @@ fn custom_summary_template_controls_required_headings() {
 }
 
 #[test]
+fn session_memory_compacted_history_keeps_tail_before_summary() {
+    let tail = vec![user_message("recent user"), user_message("latest user")];
+
+    let history = build_session_memory_compacted_history(tail.clone(), "summary".to_string());
+
+    let mut expected = tail;
+    expected.push(ResponseItem::Compaction {
+        encrypted_content: "summary".to_string(),
+    });
+    assert_eq!(history, expected);
+}
+
+#[test]
 fn prompt_variable_substitution_is_single_pass() {
     let substituted = super::sidechain::substitute_prompt_variables(
         "notes={{currentNotes}}\npath={{notesPath}}\nunknown={{missing}}",

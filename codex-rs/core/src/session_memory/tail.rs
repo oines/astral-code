@@ -249,7 +249,7 @@ pub(super) fn format_session_memory_summary(
         formatted.push_str("\n\nSome session memory sections were truncated for compact length. The full session memory file may contain additional detail.");
     }
     formatted.push_str(
-        "\n\nRecent raw transcript messages after this session-memory summary follow below.",
+        "\n\nRecent raw transcript messages are preserved separately before this session-memory summary when available.",
     );
     formatted
 }
