@@ -1008,6 +1008,10 @@ pub struct Config {
     /// results. Defaults to `false`.
     pub experimental_anthropic_cached_fold: bool,
 
+    /// Enables the experimental session-memory compact backend. Defaults to
+    /// `false`.
+    pub experimental_session_memory_compact: bool,
+
     /// Maximum poll window for background terminal output (`write_stdin`), in milliseconds.
     /// Default: `300000` (5 minutes).
     pub background_terminal_max_timeout: u64,
@@ -3715,6 +3719,10 @@ impl Config {
             use_experimental_unified_exec_tool,
             experimental_anthropic_cached_fold: cfg
                 .experimental_anthropic_cached_fold
+                .unwrap_or(false)
+                && !cfg.experimental_session_memory_compact.unwrap_or(false),
+            experimental_session_memory_compact: cfg
+                .experimental_session_memory_compact
                 .unwrap_or(false),
             background_terminal_max_timeout,
             ghost_snapshot,

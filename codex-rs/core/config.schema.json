@@ -398,6 +398,9 @@
         "experimental_compact_prompt_file": {
           "$ref": "#/definitions/AbsolutePathBuf"
         },
+        "experimental_session_memory_compact": {
+          "type": "boolean"
+        },
         "experimental_use_unified_exec_tool": {
           "type": "boolean"
         },
@@ -4681,6 +4684,10 @@
     "experimental_realtime_ws_startup_context": {
       "description": "Experimental / do not use. Replaces the synthesized realtime startup context appended to websocket session instructions. An empty string disables startup context injection entirely.",
       "type": "string"
+    },
+    "experimental_session_memory_compact": {
+      "description": "Experimental / do not use. Enables Claude Code-style session-memory background compaction.",
+      "type": "boolean"
     },
     "experimental_thread_config_endpoint": {
       "description": "Experimental / do not use. When set, app-server fetches thread-scoped config from a remote service at this endpoint.",

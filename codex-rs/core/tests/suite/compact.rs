@@ -163,7 +163,7 @@ async fn wait_for_request_count(
     mock: &core_test_support::responses::ResponseMock,
     expected: usize,
 ) -> Vec<core_test_support::responses::ResponsesRequest> {
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         let requests = mock.requests();
         if requests.len() >= expected {
@@ -203,6 +203,217 @@ fn is_zstd_encoding(value: &str) -> bool {
     value
         .split(',')
         .any(|entry| entry.trim().eq_ignore_ascii_case("zstd"))
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn session_memory_sidechain_updates_summary_without_polluting_main_history() {
+    skip_if_no_network!();
+
+    let server = start_mock_server().await;
+    let model_provider = responses_mock_model_provider(&server);
+    let mut builder = test_codex().with_config(move |config| {
+        config.model_provider = model_provider;
+        config.experimental_session_memory_compact = true;
+    });
+    let test = builder.build(&server).await.unwrap();
+    let summary_path = test
+        .config
+        .codex_home
+        .join("session-memory")
+        .join(test.session_configured.thread_id.to_string())
+        .join("summary.md");
+    let summary_path_str = summary_path.as_path().to_string_lossy().to_string();
+
+    let main_turn = sse(vec![
+        ev_assistant_message("m-main-1", "main turn complete"),
+        ev_completed_with_tokens("r-main-1", 10_001),
+    ]);
+    let sidechain_edit = sse(vec![
+        ev_function_call(
+            "session-memory-edit",
+            "Edit",
+            &json!({
+                "file_path": summary_path_str,
+                "old_string": "No durable session memory has been extracted yet.",
+                "new_string": "User asked the first session-memory test turn."
+            })
+            .to_string(),
+        ),
+        ev_completed_with_tokens("r-sidechain-edit", 10_010),
+    ]);
+    let sidechain_done = sse(vec![
+        ev_assistant_message("m-sidechain-done", "updated"),
+        ev_completed_with_tokens("r-sidechain-done", 10_020),
+    ]);
+    let next_main_turn = sse(vec![
+        ev_assistant_message("m-main-2", "next main turn complete"),
+        ev_completed_with_tokens("r-main-2", 10_030),
+    ]);
+    let second_sidechain_done = sse(vec![
+        ev_assistant_message("m-sidechain-done-2", "still updated"),
+        ev_completed_with_tokens("r-sidechain-done-2", 10_040),
+    ]);
+    let mock = mount_sse_sequence(
+        &server,
+        vec![
+            main_turn,
+            sidechain_edit,
+            sidechain_done,
+            next_main_turn,
+            second_sidechain_done,
+        ],
+    )
+    .await;
+
+    test.submit_turn("first session memory turn").await.unwrap();
+    let requests = wait_for_request_count(&mock, 3).await;
+    assert_eq!(requests.len(), 3);
+    wait_for_file_contains(
+        summary_path.as_path(),
+        "User asked the first session-memory test turn.",
+    )
+    .await;
+
+    let sidechain_request = requests[1].body_json().to_string();
+    assert!(
+        body_contains_text(
+            &sidechain_request,
+            "This is an internal session-memory update."
+        ),
+        "sidechain request should append the internal updater prompt"
+    );
+
+    let summary = fs::read_to_string(summary_path.as_path()).expect("summary file exists");
+    assert!(
+        summary.contains("User asked the first session-memory test turn."),
+        "sidechain Edit should update summary.md"
+    );
+
+    let rollout_path = test.codex.rollout_path().expect("rollout path");
+    let rollout = fs::read_to_string(rollout_path).expect("rollout exists");
+    assert!(
+        !rollout.contains("This is an internal session-memory update."),
+        "sidechain updater prompt must not be persisted to rollout"
+    );
+    assert!(
+        !rollout.contains("session-memory-edit"),
+        "sidechain tool call must not be persisted to rollout"
+    );
+
+    test.submit_turn("second main turn").await.unwrap();
+    let requests = wait_for_request_count(&mock, 4).await;
+    let next_main_request = requests[3].body_json().to_string();
+    assert!(
+        !body_contains_text(
+            &next_main_request,
+            "This is an internal session-memory update."
+        ),
+        "next main request must not include sidechain updater prompt"
+    );
+    assert!(
+        !next_main_request.contains("session-memory-edit"),
+        "next main request must not include sidechain tool transcript"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn session_memory_compact_uses_summary_without_legacy_summarization_request() {
+    skip_if_no_network!();
+
+    let server = start_mock_server().await;
+    let model_provider = responses_mock_model_provider(&server);
+    let mut builder = test_codex().with_config(move |config| {
+        config.model_provider = model_provider;
+        config.experimental_session_memory_compact = true;
+    });
+    let test = builder.build(&server).await.unwrap();
+    let summary_path = test
+        .config
+        .codex_home
+        .join("session-memory")
+        .join(test.session_configured.thread_id.to_string())
+        .join("summary.md");
+    let summary_path_str = summary_path.as_path().to_string_lossy().to_string();
+    let state_path = summary_path.as_path().with_file_name("state.json");
+
+    let main_turn = sse(vec![
+        ev_assistant_message("m-main-before-compact", "ready to compact"),
+        ev_completed_with_tokens("r-main-before-compact", 10_001),
+    ]);
+    let sidechain_edit = sse(vec![
+        ev_function_call(
+            "session-memory-compact-edit",
+            "Edit",
+            &json!({
+                "file_path": summary_path_str,
+                "old_string": "No durable session memory has been extracted yet.",
+                "new_string": "Session memory compact has a durable summary."
+            })
+            .to_string(),
+        ),
+        ev_completed_with_tokens("r-sidechain-compact-edit", 10_010),
+    ]);
+    let sidechain_done = sse(vec![
+        ev_assistant_message("m-sidechain-compact-done", "updated"),
+        ev_completed_with_tokens("r-sidechain-compact-done", 10_020),
+    ]);
+    let post_compact_turn = sse(vec![
+        ev_assistant_message("m-post-session-memory-compact", "after compact"),
+        ev_completed_with_tokens("r-post-session-memory-compact", 10_030),
+    ]);
+    let mock = mount_sse_sequence(
+        &server,
+        vec![main_turn, sidechain_edit, sidechain_done, post_compact_turn],
+    )
+    .await;
+
+    test.submit_turn("session memory compact setup")
+        .await
+        .unwrap();
+    wait_for_request_count(&mock, 3).await;
+    wait_for_file_contains(&state_path, "\"last_summary_fingerprint\": \"").await;
+
+    test.codex.submit(Op::Compact).await.unwrap();
+    sleep(Duration::from_millis(100)).await;
+
+    test.submit_turn("after session memory compact")
+        .await
+        .unwrap();
+    let requests = wait_for_request_count(&mock, 4).await;
+    assert_eq!(
+        requests.len(),
+        4,
+        "session-memory compact should not issue a legacy summarization request"
+    );
+    let post_compact_body = requests[3].body_json().to_string();
+    assert!(
+        body_contains_text(&post_compact_body, "Session memory summary:"),
+        "post-compact request should include session-memory summary"
+    );
+    assert!(
+        body_contains_text(
+            &post_compact_body,
+            "Session memory compact has a durable summary."
+        ),
+        "post-compact request should include durable summary content"
+    );
+    assert!(
+        !body_contains_text(&post_compact_body, SUMMARIZATION_PROMPT),
+        "session-memory compact should not inject the legacy summarization prompt"
+    );
+}
+
+async fn wait_for_file_contains(path: &Path, needle: &str) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if fs::read_to_string(path).is_ok_and(|contents| contents.contains(needle)) {
+            return;
+        }
+        if Instant::now() >= deadline {
+            panic!("expected {} to contain {needle}", path.display());
+        }
+        sleep(Duration::from_millis(10)).await;
+    }
 }
 
 fn request_body_json(request: &wiremock::Request) -> Value {

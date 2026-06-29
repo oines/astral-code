@@ -5173,6 +5173,7 @@ async fn anthropic_cached_fold_defaults_off_and_honors_config() -> std::io::Resu
     )
     .await?;
     assert!(!config.experimental_anthropic_cached_fold);
+    assert!(!config.experimental_session_memory_compact);
 
     let codex_home = TempDir::new()?;
     let cfg = ConfigToml {
@@ -5186,6 +5187,22 @@ async fn anthropic_cached_fold_defaults_off_and_honors_config() -> std::io::Resu
     )
     .await?;
     assert!(config.experimental_anthropic_cached_fold);
+    assert!(!config.experimental_session_memory_compact);
+
+    let codex_home = TempDir::new()?;
+    let cfg = ConfigToml {
+        experimental_anthropic_cached_fold: Some(true),
+        experimental_session_memory_compact: Some(true),
+        ..Default::default()
+    };
+    let config = Config::load_from_base_config_with_overrides(
+        cfg,
+        ConfigOverrides::default(),
+        codex_home.abs(),
+    )
+    .await?;
+    assert!(!config.experimental_anthropic_cached_fold);
+    assert!(config.experimental_session_memory_compact);
 
     Ok(())
 }

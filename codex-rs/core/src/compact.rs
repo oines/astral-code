@@ -13,6 +13,7 @@ use crate::session::PreviousTurnSettings;
 use crate::session::session::Session;
 use crate::session::turn::get_last_assistant_message_from_turn;
 use crate::session::turn_context::TurnContext;
+use crate::session_memory::SessionMemoryCompactOutcome;
 use crate::turn_metadata::CompactionTurnMetadata;
 use crate::util::backoff;
 use codex_analytics::CodexCompactionEvent;
@@ -42,6 +43,7 @@ use codex_utils_output_truncation::TruncationPolicy;
 use codex_utils_output_truncation::approx_token_count;
 use codex_utils_output_truncation::truncate_text;
 use futures::prelude::*;
+use tracing::debug;
 use tracing::error;
 
 pub use codex_prompts::SUMMARIZATION_PROMPT;
@@ -229,6 +231,33 @@ async fn run_compact_task_inner_impl(
     let compaction_item = TurnItem::ContextCompaction(ContextCompactionItem::new());
     sess.emit_turn_item_started(&turn_context, &compaction_item)
         .await;
+
+    if turn_context.config.experimental_session_memory_compact {
+        match crate::session_memory::try_compact(
+            Arc::clone(&sess),
+            Arc::clone(&turn_context),
+            initial_context_injection,
+            suppress_follow_up_questions,
+            &compaction_item,
+        )
+        .await
+        {
+            Ok(SessionMemoryCompactOutcome::Used { summary_suffix }) => {
+                let warning = EventMsg::Warning(WarningEvent {
+                    message: "Heads up: Long threads and multiple compactions can cause the model to be less accurate. Start a new thread when possible to keep threads small and targeted.".to_string(),
+                });
+                sess.send_event(&turn_context, warning).await;
+                return Ok(summary_suffix);
+            }
+            Ok(SessionMemoryCompactOutcome::Fallback { reason }) => {
+                debug!("falling back to legacy compact: {reason}");
+            }
+            Err(err) => {
+                debug!("falling back to legacy compact: {err}");
+            }
+        }
+    }
+
     let initial_input_for_turn: ResponseInputItem = ResponseInputItem::from(input);
 
     let mut history = sess.clone_history().await;

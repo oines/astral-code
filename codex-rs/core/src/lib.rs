@@ -17,6 +17,7 @@ pub(crate) mod session;
 pub use session::SteerInputError;
 mod codex_thread;
 mod config_lock;
+mod session_memory;
 pub use codex_thread::CodexThread;
 pub use codex_thread::CodexThreadSettingsOverrides;
 pub use codex_thread::ThreadConfigSnapshot;

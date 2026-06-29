@@ -55,6 +55,7 @@ pub struct ConfigProfile {
     pub include_environment_context: Option<bool>,
     pub experimental_use_unified_exec_tool: Option<bool>,
     pub experimental_anthropic_cached_fold: Option<bool>,
+    pub experimental_session_memory_compact: Option<bool>,
     pub tools: Option<ToolsToml>,
     pub web_search: Option<WebSearchMode>,
     pub analytics: Option<AnalyticsConfigToml>,

@@ -459,6 +459,9 @@ pub struct ConfigToml {
     /// Experimental / do not use. Enables Anthropic Messages-only cached
     /// tool-result folding when the active wire API is Anthropic Messages.
     pub experimental_anthropic_cached_fold: Option<bool>,
+    /// Experimental / do not use. Enables Claude Code-style session-memory
+    /// background compaction.
+    pub experimental_session_memory_compact: Option<bool>,
     /// Preferred OSS provider for local models, e.g. "lmstudio" or "ollama".
     pub oss_provider: Option<String>,
 }
