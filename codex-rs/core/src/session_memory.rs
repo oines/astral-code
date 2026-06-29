@@ -110,6 +110,12 @@ impl SessionMemoryState {
         self.last_summary_index = None;
         self.last_summary_fingerprint = None;
     }
+
+    fn record_post_compact_baseline(&mut self, tokens: i64, tool_calls: usize) {
+        self.clear_summary_boundary();
+        self.last_summary_tokens = Some(tokens);
+        self.last_summary_tool_calls = Some(tool_calls);
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -322,6 +328,7 @@ async fn try_compact_inner(
         &new_history,
         post_compact_token_limit(turn_context.as_ref()),
     )?;
+    let post_compact_baseline_tool_calls = count_tool_calls(&new_history);
 
     let reference_context_item = match initial_context_injection {
         InitialContextInjection::DoNotInject => None,
@@ -334,9 +341,13 @@ async fn try_compact_inner(
     sess.replace_compacted_history(new_history, reference_context_item, compacted_item)
         .await;
     sess.recompute_token_usage(turn_context.as_ref()).await;
+    let post_compact_baseline_tokens = sess.get_total_token_usage().await;
     sess.emit_turn_item_completed(turn_context.as_ref(), compaction_item.clone())
         .await;
-    state.clear_summary_boundary();
+    state.record_post_compact_baseline(
+        post_compact_baseline_tokens,
+        post_compact_baseline_tool_calls,
+    );
 
     Ok(summary_text)
 }

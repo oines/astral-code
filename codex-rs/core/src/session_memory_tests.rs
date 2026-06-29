@@ -149,19 +149,34 @@ fn post_extraction_rejects_tiny_rewrite_of_existing_summary() {
 }
 
 #[test]
-fn custom_summary_template_controls_required_headings() {
+fn post_extraction_preserves_existing_summary_headings() {
     let template = "# IM State\n_Current chat handoff_\n\n# Follow-ups\n_Open items_";
-    let summary =
+    let previous =
         "# IM State\n- Waiting for bridge reply.\n\n# Follow-ups\n- Confirm unread handling.";
+    let updated = "# IM State\n- Waiting for bridge reply.\n\n# Follow-ups\n- Send result.";
 
-    validate_summary(summary, template).expect("custom template headings are accepted");
+    tail::validate_post_extraction_summary(previous, updated, template)
+        .expect("existing custom headings are preserved");
 
-    let err = validate_summary("# Current State\n- wrong template", template)
-        .expect_err("summary should preserve custom headings");
+    let err = tail::validate_post_extraction_summary(
+        previous,
+        "# IM State\n- Missing follow-up.",
+        template,
+    )
+    .expect_err("updated summary should preserve previous headings");
     assert!(
         err.to_string()
-            .contains("session memory summary is missing required heading # IM State")
+            .contains("session memory summary is missing required heading # Follow-ups")
     );
+}
+
+#[test]
+fn compact_summary_validation_allows_previous_template_headings() {
+    let current_template = "# IM State\n_Current chat handoff_\n\n# Follow-ups\n_Open items_";
+    let summary = summary_with_current_state("- Old template content.");
+
+    validate_summary(&summary, current_template)
+        .expect("compact should not require current template headings");
 }
 
 #[test]
@@ -175,6 +190,62 @@ fn session_memory_compacted_history_keeps_tail_before_summary() {
         encrypted_content: "summary".to_string(),
     });
     assert_eq!(history, expected);
+}
+
+#[test]
+fn compact_baseline_resets_to_post_compact_tokens() {
+    let mut state = SessionMemoryState {
+        last_summary_index: Some(7),
+        last_summary_fingerprint: Some("fingerprint".to_string()),
+        last_summary_tokens: Some(180_000),
+        last_summary_tool_calls: Some(40),
+        ..Default::default()
+    };
+
+    state.record_post_compact_baseline(20_000, 2);
+
+    assert_eq!(state.last_summary_index, None);
+    assert_eq!(state.last_summary_fingerprint, None);
+    assert_eq!(state.last_summary_tokens, Some(20_000));
+    assert_eq!(state.last_summary_tool_calls, Some(2));
+
+    let candidate = ExtractionCandidate {
+        prompt: Prompt::default(),
+        active_context_tokens: 25_000,
+        natural_break: true,
+    };
+    assert!(should_extract(&state, &candidate));
+}
+
+#[tokio::test]
+async fn ensure_preserves_existing_summary_when_template_changes() {
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let store = SessionMemoryStore {
+        thread_key: "thread".to_string(),
+        dir: temp.path().to_path_buf(),
+        summary_path: temp.path().join("summary.md"),
+        state_path: temp.path().join("state.json"),
+    };
+    let old_template = tail::DEFAULT_SUMMARY;
+    let new_template = "# IM State\n_Current chat handoff_\n\n# Follow-ups\n_Open items_";
+    store.ensure(old_template).await.expect("initialize store");
+    let existing_summary = summary_with_current_state("- Old template content.");
+    tokio::fs::write(&store.summary_path, existing_summary.as_bytes())
+        .await
+        .expect("write old summary");
+    let mut state = store.read_state().await.expect("read state");
+    state.last_summary_tokens = Some(42_000);
+    store.write_state(&state).await.expect("write state");
+
+    store
+        .ensure(new_template)
+        .await
+        .expect("template change should not reset store");
+
+    let summary = store.read_summary().await.expect("read summary");
+    assert_eq!(summary, existing_summary);
+    let state = store.read_state().await.expect("read preserved state");
+    assert_eq!(state.last_summary_tokens, Some(42_000));
 }
 
 #[test]

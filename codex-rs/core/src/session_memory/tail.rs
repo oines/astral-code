@@ -110,13 +110,6 @@ pub(super) fn validate_summary(summary: &str, template: &str) -> CodexResult<()>
             "session memory summary is missing or still the template".to_string(),
         ));
     }
-    for heading in required_summary_headings(template) {
-        if !trimmed.lines().any(|line| line.trim() == heading) {
-            return Err(CodexErr::Fatal(format!(
-                "session memory summary is missing required heading {heading}"
-            )));
-        }
-    }
     Ok(())
 }
 
@@ -149,6 +142,7 @@ pub(super) fn validate_post_extraction_summary(
     template: &str,
 ) -> CodexResult<()> {
     validate_summary(updated_summary, template)?;
+    validate_preserved_summary_headings(previous_summary, updated_summary, template)?;
 
     let previous_tokens = approx_token_count(previous_summary);
     let updated_tokens = approx_token_count(updated_summary);
@@ -165,12 +159,36 @@ pub(super) fn validate_post_extraction_summary(
     Ok(())
 }
 
+fn validate_preserved_summary_headings(
+    previous_summary: &str,
+    updated_summary: &str,
+    template: &str,
+) -> CodexResult<()> {
+    let heading_source = if previous_summary.trim() == template.trim() {
+        template
+    } else {
+        previous_summary
+    };
+    if let Some(heading) = missing_required_summary_heading(updated_summary, heading_source) {
+        return Err(CodexErr::Fatal(format!(
+            "session memory summary is missing required heading {heading}"
+        )));
+    }
+    Ok(())
+}
+
 fn required_summary_headings(template: &str) -> Vec<&str> {
     template
         .lines()
         .map(str::trim)
         .filter(|line| line.starts_with('#'))
         .collect()
+}
+
+fn missing_required_summary_heading<'a>(summary: &str, template: &'a str) -> Option<&'a str> {
+    required_summary_headings(template)
+        .into_iter()
+        .find(|heading| !summary.lines().any(|line| line.trim() == *heading))
 }
 
 pub(super) fn truncate_summary_for_compact(summary: &str) -> (String, bool) {
