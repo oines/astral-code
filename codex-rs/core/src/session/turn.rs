@@ -265,13 +265,11 @@ pub(crate) async fn run_turn(
                 );
 
                 if let Some(template) = session_memory_prompt_template {
-                    let input = sess
-                        .clone_history()
-                        .await
-                        .for_prompt(&turn_context.model_info.input_modalities);
-                    let candidate = crate::session_memory::ExtractionCandidate::new(
+                    let history = sess.clone_history().await;
+                    let candidate = crate::session_memory::ExtractionCandidate::from_history(
                         template,
-                        input,
+                        history,
+                        &turn_context.model_info.input_modalities,
                         token_status.active_context_tokens,
                         !needs_follow_up,
                     );

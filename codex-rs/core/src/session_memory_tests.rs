@@ -1,6 +1,9 @@
 use super::*;
 use codex_protocol::models::ContentItem;
+use codex_protocol::models::DEFAULT_IMAGE_DETAIL;
 use codex_protocol::models::FunctionCallOutputPayload;
+use codex_protocol::openai_models::InputModality;
+use codex_utils_output_truncation::TruncationPolicy;
 use codex_utils_output_truncation::approx_token_count;
 use pretty_assertions::assert_eq;
 
@@ -10,6 +13,18 @@ fn user_message(text: &str) -> ResponseItem {
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
             text: text.to_string(),
+        }],
+        phase: None,
+    }
+}
+
+fn user_image_message() -> ResponseItem {
+    ResponseItem::Message {
+        id: None,
+        role: "user".to_string(),
+        content: vec![ContentItem::InputImage {
+            image_url: "https://example.com/session-memory.png".to_string(),
+            detail: Some(DEFAULT_IMAGE_DETAIL),
         }],
         phase: None,
     }
@@ -181,6 +196,43 @@ fn session_memory_compacted_history_keeps_tail_before_summary() {
 }
 
 #[test]
+fn extraction_candidate_records_raw_boundary_for_normalized_image_history() {
+    let image_message = user_image_message();
+    let items = vec![user_message("before image"), image_message.clone()];
+    let mut history = crate::context_manager::ContextManager::new();
+    history.record_items(items.iter(), TruncationPolicy::Tokens(10_000));
+
+    let candidate = ExtractionCandidate::from_history(
+        PromptTemplate::from_prompt(&Prompt::default()),
+        history,
+        &[InputModality::Text],
+        20_000,
+        true,
+    );
+    let boundary = candidate.raw_boundary.expect("raw boundary is recorded");
+    let normalized_boundary_item = candidate
+        .prompt
+        .input
+        .get(boundary.index)
+        .expect("normalized boundary item");
+
+    assert_ne!(
+        tail::item_fingerprint(normalized_boundary_item),
+        tail::item_fingerprint(&image_message)
+    );
+    assert_eq!(boundary.index, 1);
+    assert_eq!(boundary.fingerprint, tail::item_fingerprint(&image_message));
+
+    let state = SessionMemoryState {
+        last_summary_index: Some(boundary.index),
+        last_summary_fingerprint: Some(boundary.fingerprint),
+        ..Default::default()
+    };
+    let tail = raw_tail_after_summary_boundary(&items, &state).expect("raw boundary matches");
+    assert_eq!(tail, items);
+}
+
+#[test]
 fn compact_baseline_resets_to_post_compact_tokens() {
     let mut state = SessionMemoryState {
         last_summary_index: Some(7),
@@ -199,6 +251,7 @@ fn compact_baseline_resets_to_post_compact_tokens() {
 
     let candidate = ExtractionCandidate {
         prompt: Prompt::default(),
+        raw_boundary: None,
         active_context_tokens: 25_000,
         natural_break: true,
     };
@@ -259,6 +312,7 @@ fn should_extract_requires_initial_token_threshold() {
     };
     let candidate = ExtractionCandidate {
         prompt,
+        raw_boundary: None,
         active_context_tokens: MINIMUM_MESSAGE_TOKENS_TO_INIT - 1,
         natural_break: true,
     };
@@ -274,6 +328,7 @@ fn should_not_extract_on_natural_break_before_token_threshold() {
     };
     let candidate = ExtractionCandidate {
         prompt: Prompt::default(),
+        raw_boundary: None,
         active_context_tokens: MINIMUM_MESSAGE_TOKENS_TO_INIT + 1,
         natural_break: true,
     };
@@ -289,6 +344,7 @@ fn should_extract_on_natural_break_after_token_threshold() {
     };
     let candidate = ExtractionCandidate {
         prompt: Prompt::default(),
+        raw_boundary: None,
         active_context_tokens: MINIMUM_MESSAGE_TOKENS_TO_INIT + MINIMUM_TOKENS_BETWEEN_UPDATE,
         natural_break: true,
     };
@@ -312,6 +368,7 @@ fn should_not_extract_on_tool_calls_without_token_threshold() {
             ],
             ..Default::default()
         },
+        raw_boundary: None,
         active_context_tokens: MINIMUM_MESSAGE_TOKENS_TO_INIT + 1,
         natural_break: false,
     };

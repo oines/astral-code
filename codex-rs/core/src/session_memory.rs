@@ -6,12 +6,14 @@ use std::time::Duration;
 
 use crate::Prompt;
 use crate::compact::InitialContextInjection;
+use crate::context_manager::ContextManager;
 use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
 use codex_protocol::config_types::AutoCompactTokenLimitScope;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
 use codex_protocol::models::ResponseItem;
+use codex_protocol::openai_models::InputModality;
 use codex_protocol::protocol::CompactedItem;
 use serde::Deserialize;
 use serde::Serialize;
@@ -69,19 +71,24 @@ impl PromptTemplate {
 #[derive(Clone, Debug)]
 pub(crate) struct ExtractionCandidate {
     prompt: Prompt,
+    raw_boundary: Option<ExtractionBoundary>,
     active_context_tokens: i64,
     natural_break: bool,
 }
 
 impl ExtractionCandidate {
-    pub(crate) fn new(
+    pub(crate) fn from_history(
         template: PromptTemplate,
-        input: Vec<ResponseItem>,
+        history: ContextManager,
+        input_modalities: &[InputModality],
         active_context_tokens: i64,
         natural_break: bool,
     ) -> Self {
+        let raw_boundary = extraction_boundary(history.raw_items());
+        let input = history.for_prompt(input_modalities);
         Self {
             prompt: template.with_input(input),
+            raw_boundary,
             active_context_tokens,
             natural_break,
         }
@@ -201,12 +208,13 @@ pub(crate) async fn maybe_spawn_post_sampling_extraction(
         return;
     }
 
-    let Some(mut boundary) = extraction_boundary(&candidate.prompt.input) else {
+    let Some(mut boundary) = candidate.raw_boundary.clone() else {
         return;
     };
     boundary.tokens = candidate
         .active_context_tokens
         .max(estimate_prompt_tokens(&candidate.prompt));
+    boundary.tool_calls = count_tool_calls(&candidate.prompt.input);
 
     {
         let mut running = RUNNING_EXTRACTIONS.lock().await;
