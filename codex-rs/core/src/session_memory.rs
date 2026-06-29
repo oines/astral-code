@@ -8,6 +8,7 @@ use crate::Prompt;
 use crate::compact::InitialContextInjection;
 use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
+use codex_protocol::config_types::AutoCompactTokenLimitScope;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
 use codex_protocol::models::ResponseItem;
@@ -102,6 +103,13 @@ struct SessionMemoryState {
     extraction_started_at_unix: Option<u64>,
     last_error: Option<String>,
     consecutive_auto_compact_failures: u32,
+}
+
+impl SessionMemoryState {
+    fn clear_summary_boundary(&mut self) {
+        self.last_summary_index = None;
+        self.last_summary_fingerprint = None;
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -313,7 +321,10 @@ async fn try_compact_inner(
         );
     }
 
-    validate_post_compact_budget(&new_history)?;
+    validate_post_compact_budget(
+        &new_history,
+        post_compact_token_limit(turn_context.as_ref()),
+    )?;
 
     let reference_context_item = match initial_context_injection {
         InitialContextInjection::DoNotInject => None,
@@ -328,6 +339,7 @@ async fn try_compact_inner(
     sess.recompute_token_usage(turn_context.as_ref()).await;
     sess.emit_turn_item_completed(turn_context.as_ref(), compaction_item.clone())
         .await;
+    state.clear_summary_boundary();
 
     Ok(summary_text)
 }
@@ -339,23 +351,38 @@ fn should_extract(state: &SessionMemoryState, candidate: &ExtractionCandidate) -
     let tool_calls = count_tool_calls(&candidate.prompt.input);
 
     let Some(last_tokens) = state.last_summary_tokens else {
-        return total_tokens >= MINIMUM_MESSAGE_TOKENS_TO_INIT;
+        if total_tokens < MINIMUM_MESSAGE_TOKENS_TO_INIT {
+            return false;
+        }
+        return candidate.natural_break || tool_calls >= TOOL_CALLS_BETWEEN_UPDATES;
     };
-    if total_tokens <= last_tokens {
+
+    let token_delta = total_tokens.saturating_sub(last_tokens);
+    if token_delta < MINIMUM_TOKENS_BETWEEN_UPDATE {
         return false;
     }
 
-    let token_delta = total_tokens.saturating_sub(last_tokens);
-    if token_delta >= MINIMUM_TOKENS_BETWEEN_UPDATE {
-        return true;
-    }
-
     let last_tool_calls = state.last_summary_tool_calls.unwrap_or_default();
-    if tool_calls.saturating_sub(last_tool_calls) >= TOOL_CALLS_BETWEEN_UPDATES {
-        return true;
-    }
+    tool_calls.saturating_sub(last_tool_calls) >= TOOL_CALLS_BETWEEN_UPDATES
+        || candidate.natural_break
+}
 
-    candidate.natural_break
+fn post_compact_token_limit(turn_context: &TurnContext) -> i64 {
+    let auto_compact_limit = turn_context
+        .config
+        .model_auto_compact_token_limit
+        .or_else(|| turn_context.model_info.auto_compact_token_limit())
+        .unwrap_or(i64::MAX);
+    let scoped_limit = match turn_context.config.model_auto_compact_token_limit_scope {
+        AutoCompactTokenLimitScope::Total | AutoCompactTokenLimitScope::BodyAfterPrefix => {
+            auto_compact_limit
+        }
+    };
+    turn_context
+        .model_context_window()
+        .map_or(scoped_limit, |context_window| {
+            scoped_limit.min(context_window)
+        })
 }
 
 async fn mark_extraction_started(

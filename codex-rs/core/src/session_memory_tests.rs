@@ -40,6 +40,15 @@ fn state_for_boundary(items: &[ResponseItem], index: usize) -> SessionMemoryStat
     }
 }
 
+fn summary_with_current_state(current_state: &str) -> String {
+    tail::DEFAULT_SUMMARY.replace(
+        "_What is actively being worked on right now? Pending tasks not yet completed. Immediate next steps._",
+        &format!(
+            "_What is actively being worked on right now? Pending tasks not yet completed. Immediate next steps._\n{current_state}"
+        ),
+    )
+}
+
 #[test]
 fn raw_tail_keeps_function_call_pair_after_boundary() {
     let items = vec![
@@ -51,7 +60,7 @@ fn raw_tail_keeps_function_call_pair_after_boundary() {
 
     let tail = raw_tail_after_summary_boundary(&items, &state).expect("tail is valid");
 
-    assert_eq!(tail, items[1..].to_vec());
+    assert_eq!(tail, items);
 }
 
 #[test]
@@ -85,11 +94,33 @@ fn raw_tail_rejects_boundary_fingerprint_mismatch() {
 }
 
 #[test]
+fn raw_tail_without_boundary_keeps_recent_text_messages() {
+    let items = (0..8)
+        .map(|index| user_message(&format!("message {index}")))
+        .collect::<Vec<_>>();
+    let state = SessionMemoryState::default();
+
+    let tail = raw_tail_after_summary_boundary(&items, &state).expect("tail is valid");
+
+    assert_eq!(tail, items);
+}
+
+#[test]
+fn raw_tail_expands_before_boundary_to_keep_context() {
+    let items = (0..6)
+        .map(|index| user_message(&format!("message {index}")))
+        .collect::<Vec<_>>();
+    let state = state_for_boundary(&items, 3);
+
+    let tail = raw_tail_after_summary_boundary(&items, &state).expect("tail is valid");
+
+    assert_eq!(tail, items);
+}
+
+#[test]
 fn compact_summary_truncates_overlarge_sections() {
-    let summary = format!(
-        "# Session Memory\n\n## Current State\n{}\n\n## Worklog\n- work\n\n## Errors\n- none\n\n## Files\n- file\n\n## Key Results\n- result",
-        "token ".repeat(tail::MAX_COMPACT_SUMMARY_BODY_TOKENS.saturating_mul(2))
-    );
+    let summary =
+        summary_with_current_state(&"token ".repeat(tail::MAX_COMPACT_SUMMARY_BODY_TOKENS * 2));
 
     validate_summary(&summary).expect("summary can still be extracted");
     let (truncated, was_truncated) = truncate_summary_for_compact(&summary);
@@ -101,13 +132,10 @@ fn compact_summary_truncates_overlarge_sections() {
 
 #[test]
 fn post_extraction_rejects_tiny_rewrite_of_existing_summary() {
-    let previous_summary = format!(
-        "# Session Memory\n\n## Current State\n{}\n\n## Worklog\n- work\n\n## Errors\n- none\n\n## Files\n- file\n\n## Key Results\n- result",
-        "durable detail ".repeat(3_000)
-    );
-    let updated_summary = "# Session Memory\n\n## Current State\n- done\n\n## Worklog\n- done\n\n## Errors\n- none\n\n## Files\n- none\n\n## Key Results\n- done";
+    let previous_summary = summary_with_current_state(&"durable detail ".repeat(3_000));
+    let updated_summary = summary_with_current_state("- done");
 
-    let err = tail::validate_post_extraction_summary(&previous_summary, updated_summary)
+    let err = tail::validate_post_extraction_summary(&previous_summary, &updated_summary)
         .expect_err("tiny rewrite should be rejected");
 
     assert!(
@@ -133,7 +161,7 @@ fn should_extract_requires_initial_token_threshold() {
 }
 
 #[test]
-fn should_extract_on_natural_break_after_token_increment() {
+fn should_not_extract_on_natural_break_before_token_threshold() {
     let state = SessionMemoryState {
         last_summary_tokens: Some(MINIMUM_MESSAGE_TOKENS_TO_INIT),
         ..Default::default()
@@ -144,5 +172,43 @@ fn should_extract_on_natural_break_after_token_increment() {
         natural_break: true,
     };
 
+    assert!(!should_extract(&state, &candidate));
+}
+
+#[test]
+fn should_extract_on_natural_break_after_token_threshold() {
+    let state = SessionMemoryState {
+        last_summary_tokens: Some(MINIMUM_MESSAGE_TOKENS_TO_INIT),
+        ..Default::default()
+    };
+    let candidate = ExtractionCandidate {
+        prompt: Prompt::default(),
+        active_context_tokens: MINIMUM_MESSAGE_TOKENS_TO_INIT + MINIMUM_TOKENS_BETWEEN_UPDATE,
+        natural_break: true,
+    };
+
     assert!(should_extract(&state, &candidate));
+}
+
+#[test]
+fn should_not_extract_on_tool_calls_without_token_threshold() {
+    let state = SessionMemoryState {
+        last_summary_tokens: Some(MINIMUM_MESSAGE_TOKENS_TO_INIT),
+        last_summary_tool_calls: Some(0),
+        ..Default::default()
+    };
+    let candidate = ExtractionCandidate {
+        prompt: Prompt {
+            input: vec![
+                function_call("call-1"),
+                function_call("call-2"),
+                function_call("call-3"),
+            ],
+            ..Default::default()
+        },
+        active_context_tokens: MINIMUM_MESSAGE_TOKENS_TO_INIT + 1,
+        natural_break: false,
+    };
+
+    assert!(!should_extract(&state, &candidate));
 }

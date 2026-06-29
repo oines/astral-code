@@ -234,8 +234,8 @@ async fn session_memory_sidechain_updates_summary_without_polluting_main_history
             "Edit",
             &json!({
                 "file_path": summary_path_str,
-                "old_string": "No durable session memory has been extracted yet.",
-                "new_string": "User asked the first session-memory test turn."
+                "old_string": "_What is actively being worked on right now? Pending tasks not yet completed. Immediate next steps._\n\n# Task specification",
+                "new_string": "_What is actively being worked on right now? Pending tasks not yet completed. Immediate next steps._\n- User asked the first session-memory test turn.\n\n# Task specification"
             })
             .to_string(),
         ),
@@ -249,19 +249,9 @@ async fn session_memory_sidechain_updates_summary_without_polluting_main_history
         ev_assistant_message("m-main-2", "next main turn complete"),
         ev_completed_with_tokens("r-main-2", 10_030),
     ]);
-    let second_sidechain_done = sse(vec![
-        ev_assistant_message("m-sidechain-done-2", "still updated"),
-        ev_completed_with_tokens("r-sidechain-done-2", 10_040),
-    ]);
     let mock = mount_sse_sequence(
         &server,
-        vec![
-            main_turn,
-            sidechain_edit,
-            sidechain_done,
-            next_main_turn,
-            second_sidechain_done,
-        ],
+        vec![main_turn, sidechain_edit, sidechain_done, next_main_turn],
     )
     .await;
 
@@ -278,7 +268,7 @@ async fn session_memory_sidechain_updates_summary_without_polluting_main_history
     assert!(
         body_contains_text(
             &sidechain_request,
-            "This is an internal session-memory update."
+            "IMPORTANT: This message and these instructions are NOT part of the actual user conversation."
         ),
         "sidechain request should append the internal updater prompt"
     );
@@ -292,7 +282,7 @@ async fn session_memory_sidechain_updates_summary_without_polluting_main_history
     let rollout_path = test.codex.rollout_path().expect("rollout path");
     let rollout = fs::read_to_string(rollout_path).expect("rollout exists");
     assert!(
-        !rollout.contains("This is an internal session-memory update."),
+        !rollout.contains("session notes extraction"),
         "sidechain updater prompt must not be persisted to rollout"
     );
     assert!(
@@ -306,13 +296,71 @@ async fn session_memory_sidechain_updates_summary_without_polluting_main_history
     assert!(
         !body_contains_text(
             &next_main_request,
-            "This is an internal session-memory update."
+            "IMPORTANT: This message and these instructions are NOT part of the actual user conversation."
         ),
         "next main request must not include sidechain updater prompt"
     );
     assert!(
         !next_main_request.contains("session-memory-edit"),
         "next main request must not include sidechain tool transcript"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn failed_session_memory_sidechain_restores_previous_summary() {
+    skip_if_no_network!();
+
+    let server = start_mock_server().await;
+    let model_provider = responses_mock_model_provider(&server);
+    let mut builder = test_codex().with_config(move |config| {
+        config.model_provider = model_provider;
+        config.experimental_session_memory_compact = true;
+    });
+    let test = builder.build(&server).await.unwrap();
+    let summary_path = test
+        .config
+        .codex_home
+        .join("session-memory")
+        .join(test.session_configured.thread_id.to_string())
+        .join("summary.md");
+    let summary_path_str = summary_path.as_path().to_string_lossy().to_string();
+    let state_path = summary_path.as_path().with_file_name("state.json");
+
+    let main_turn = sse(vec![
+        ev_assistant_message("m-main-before-failed-memory", "main turn complete"),
+        ev_completed_with_tokens("r-main-before-failed-memory", 10_001),
+    ]);
+    let sidechain_edit = sse(vec![
+        ev_function_call(
+            "session-memory-bad-edit",
+            "Edit",
+            &json!({
+                "file_path": summary_path_str,
+                "old_string": "# Current State",
+                "new_string": "# Broken Current State"
+            })
+            .to_string(),
+        ),
+        ev_completed_with_tokens("r-sidechain-bad-edit", 10_010),
+    ]);
+    let sidechain_done = sse(vec![
+        ev_assistant_message("m-sidechain-bad-done", "updated"),
+        ev_completed_with_tokens("r-sidechain-bad-done", 10_020),
+    ]);
+    let mock = mount_sse_sequence(&server, vec![main_turn, sidechain_edit, sidechain_done]).await;
+
+    test.submit_turn("first session memory turn").await.unwrap();
+    wait_for_request_count(&mock, 3).await;
+    wait_for_file_contains(&state_path, "missing required heading # Current State").await;
+
+    let summary = fs::read_to_string(summary_path.as_path()).expect("summary file exists");
+    assert!(
+        summary.contains("# Current State"),
+        "failed sidechain extraction should restore previous summary"
+    );
+    assert!(
+        !summary.contains("# Broken Current State"),
+        "failed sidechain extraction must not leave a partial summary edit"
     );
 }
 
@@ -346,8 +394,8 @@ async fn session_memory_compact_uses_summary_without_legacy_summarization_reques
             "Edit",
             &json!({
                 "file_path": summary_path_str,
-                "old_string": "No durable session memory has been extracted yet.",
-                "new_string": "Session memory compact has a durable summary."
+                "old_string": "_What is actively being worked on right now? Pending tasks not yet completed. Immediate next steps._\n\n# Task specification",
+                "new_string": "_What is actively being worked on right now? Pending tasks not yet completed. Immediate next steps._\n- Session memory compact has a durable summary.\n\n# Task specification"
             })
             .to_string(),
         ),
@@ -375,6 +423,7 @@ async fn session_memory_compact_uses_summary_without_legacy_summarization_reques
 
     test.codex.submit(Op::Compact).await.unwrap();
     sleep(Duration::from_millis(100)).await;
+    wait_for_file_contains(&state_path, "\"last_summary_index\": null").await;
 
     test.submit_turn("after session memory compact")
         .await
@@ -387,7 +436,10 @@ async fn session_memory_compact_uses_summary_without_legacy_summarization_reques
     );
     let post_compact_body = requests[3].body_json().to_string();
     assert!(
-        body_contains_text(&post_compact_body, "Session memory summary:"),
+        body_contains_text(
+            &post_compact_body,
+            "This session was summarized using the session memory file."
+        ),
         "post-compact request should include session-memory summary"
     );
     assert!(
