@@ -65,9 +65,11 @@ use crate::tools::router::ToolRouter;
 use crate::tools::router::ToolRouterParams;
 use codex_features::Feature;
 use codex_mcp::ToolInfo;
+use codex_models_manager::model_info;
 use codex_protocol::config_types::WebSearchMode;
 use codex_protocol::dynamic_tools::DynamicToolSpec;
 use codex_protocol::openai_models::ConfigShellToolType;
+use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::openai_models::ToolMode;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::SessionSource;
@@ -102,8 +104,10 @@ use codex_tools::request_user_input_available_modes;
 use codex_tools::shell_command_backend_for_features;
 use codex_tools::shell_type_for_model_and_features;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::sync::Arc;
+use toml::Value as TomlValue;
 use tracing::warn;
 
 const MULTI_AGENT_V2_NAMESPACE_DESCRIPTION: &str = "Tools for spawning and managing sub-agents.";
@@ -795,6 +799,7 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut
 fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut PlannedTools) {
     let turn_context = context.turn_context;
     if collab_tools_enabled(turn_context) {
+        let available_models = spawn_agent_available_models(turn_context);
         if multi_agent_v2_enabled(turn_context) {
             let exposure = if turn_context.config.multi_agent_v2.non_code_mode_only {
                 ToolExposure::DirectModelOnly
@@ -809,7 +814,7 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mu
             planned_tools.add_arc(override_tool_exposure(
                 multi_agent_v2_handler(
                     SpawnAgentHandlerV2::new(SpawnAgentToolOptions {
-                        available_models: turn_context.available_models.clone(),
+                        available_models: available_models.clone(),
                         agent_type_description,
                         hide_agent_type_model_reasoning: turn_context
                             .config
@@ -859,7 +864,7 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mu
                 };
             planned_tools.add_with_exposure(
                 SpawnAgentHandler::new(SpawnAgentToolOptions {
-                    available_models: turn_context.available_models.clone(),
+                    available_models,
                     agent_type_description,
                     hide_agent_type_model_reasoning: false,
                     include_usage_hint: turn_context.config.multi_agent_v2.usage_hint_enabled,
@@ -884,6 +889,118 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mu
             planned_tools.add(ReportAgentJobResultHandler);
         }
     }
+}
+
+fn spawn_agent_available_models(turn_context: &TurnContext) -> Vec<ModelPreset> {
+    let current_provider_id = turn_context.config.model_provider_id.as_str();
+    let mut seen = BTreeSet::new();
+    let mut available_models = Vec::new();
+
+    for mut model in turn_context.available_models.clone() {
+        let provider_id = model
+            .model_provider
+            .clone()
+            .unwrap_or_else(|| current_provider_id.to_string());
+        model.model_provider = Some(provider_id.clone());
+        model.model_provider_name = None;
+        if seen.insert((provider_id, model.model.clone())) {
+            available_models.push(model);
+        }
+    }
+
+    for (provider_id, model) in spawn_agent_configured_model_specs(turn_context) {
+        if !turn_context
+            .config
+            .model_providers
+            .contains_key(provider_id.as_str())
+        {
+            continue;
+        }
+        if seen.insert((provider_id.clone(), model.clone())) {
+            available_models.push(spawn_agent_configured_model_preset(
+                turn_context,
+                provider_id.as_str(),
+                model.as_str(),
+            ));
+        }
+    }
+
+    available_models
+}
+
+fn spawn_agent_configured_model_specs(turn_context: &TurnContext) -> Vec<(String, String)> {
+    let config = &turn_context.config;
+    let mut specs = BTreeSet::new();
+    if let Some(model_name) = config.model.as_ref() {
+        specs.insert((config.model_provider_id.clone(), model_name.clone()));
+    }
+
+    if let Some(TomlValue::Table(model_capabilities)) = config
+        .config_layer_stack
+        .effective_config()
+        .get("model_capabilities")
+    {
+        for model_key in model_capabilities.keys() {
+            if let Some(spec) = spawn_agent_configured_model_spec_from_key(
+                model_key,
+                config.model_provider_id.as_str(),
+            ) {
+                specs.insert(spec);
+            }
+        }
+    }
+
+    specs.into_iter().collect()
+}
+
+fn spawn_agent_configured_model_spec_from_key(
+    model_key: &str,
+    default_provider_id: &str,
+) -> Option<(String, String)> {
+    let (provider_id, model_name) = model_key.split_once('/').map_or(
+        (default_provider_id, model_key),
+        |(provider_id, model_name)| (provider_id, model_name),
+    );
+    let provider_id = provider_id.trim();
+    let model_name = model_name.trim();
+    if provider_id.is_empty() || model_name.is_empty() {
+        return None;
+    }
+    Some((provider_id.to_string(), model_name.to_string()))
+}
+
+fn spawn_agent_configured_model_preset(
+    turn_context: &TurnContext,
+    provider_id: &str,
+    model: &str,
+) -> ModelPreset {
+    let mut model_info = turn_context
+        .config
+        .model_catalog
+        .as_ref()
+        .and_then(|catalog| {
+            let provider_model = format!("{provider_id}/{model}");
+            catalog
+                .models
+                .iter()
+                .find(|candidate| candidate.slug == provider_model || candidate.slug == model)
+                .cloned()
+        })
+        .unwrap_or_else(|| model_info::model_info_from_slug(model));
+    model_info.slug = model.to_string();
+
+    let mut models_manager_config = turn_context.config.to_models_manager_config();
+    models_manager_config.model_provider_id = Some(provider_id.to_string());
+    let model_info = model_info::with_config_overrides(model_info, &models_manager_config);
+    let mut preset = ModelPreset::from(model_info);
+    preset.id = format!("{provider_id}/{model}");
+    preset.model_provider = Some(provider_id.to_string());
+    preset.model_provider_name = None;
+    preset.model = model.to_string();
+    preset.display_name = model.to_string();
+    preset.show_in_picker = true;
+    preset.supported_in_api = true;
+    preset
 }
 
 fn add_mcp_runtime_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut PlannedTools) {

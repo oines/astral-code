@@ -21,11 +21,14 @@ pub struct ModelsManagerConfig {
 impl ModelsManagerConfig {
     pub(crate) fn lookup_model_capability(&self, model: &str) -> Option<&ModelCapability> {
         let cache = self.model_capabilities.as_ref()?;
-        cache.lookup(model).or_else(|| {
-            self.model_provider_id.as_ref().and_then(|provider_id| {
-                let provider_model = format!("{provider_id}/{model}");
-                cache.lookup(&provider_model)
-            })
-        })
+        if let Some(provider_id) = self.model_provider_id.as_ref()
+            && !model.contains('/')
+        {
+            let provider_model = format!("{provider_id}/{model}");
+            if let Some(capability) = cache.models.get(&provider_model) {
+                return Some(capability);
+            }
+        }
+        cache.lookup(model)
     }
 }

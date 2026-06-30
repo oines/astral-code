@@ -38,6 +38,27 @@ fn model_preset(id: &str, show_in_picker: bool) -> ModelPreset {
     }
 }
 
+fn model_preset_with_provider(
+    id: &str,
+    provider_id: &str,
+    provider_name: &str,
+    default_reasoning_effort: ReasoningEffort,
+    supported_reasoning_efforts: Vec<ReasoningEffort>,
+) -> ModelPreset {
+    let mut preset = model_preset(id, /*show_in_picker*/ true);
+    preset.model_provider = Some(provider_id.to_string());
+    preset.model_provider_name = Some(provider_name.to_string());
+    preset.default_reasoning_effort = default_reasoning_effort;
+    preset.supported_reasoning_efforts = supported_reasoning_efforts
+        .into_iter()
+        .map(|effort| ReasoningEffortPreset {
+            effort,
+            description: "Supported".to_string(),
+        })
+        .collect();
+    preset
+}
+
 #[test]
 fn spawn_agent_tool_v2_requires_task_name_and_lists_visible_models() {
     let tool = create_spawn_agent_tool_v2(SpawnAgentToolOptions {
@@ -73,10 +94,10 @@ fn spawn_agent_tool_v2_requires_task_name_and_lists_visible_models() {
     assert!(description.contains("The spawned agent will have the same tools as you"));
     assert!(description.contains("`max_concurrent_threads_per_session = 4`"));
     assert!(description.contains(SPAWN_AGENT_INHERITED_MODEL_GUIDANCE));
-    assert!(
-        description
-            .contains("Available current-provider model overrides (optional; inherited parent provider/model is preferred):")
-    );
+    assert!(description.contains(
+        "Available provider/model overrides (optional; inherited parent provider/model is preferred):"
+    ));
+    assert!(description.contains("Provider `(current)`:"));
     assert!(description.contains(
         "- `visible-model`: visible description Reasoning efforts: medium (default). Service tiers: priority."
     ));
@@ -193,7 +214,7 @@ fn spawn_agent_tool_v1_keeps_legacy_fork_context_field() {
 }
 
 #[test]
-fn spawn_agent_tool_caps_visible_model_summaries() {
+fn spawn_agent_tool_lists_all_visible_model_summaries() {
     let tool = create_spawn_agent_tool_v2(SpawnAgentToolOptions {
         available_models: vec![
             model_preset("first", /*show_in_picker*/ true),
@@ -214,13 +235,59 @@ fn spawn_agent_tool_caps_visible_model_summaries() {
         panic!("spawn_agent should be a function tool");
     };
 
-    for model in ["first", "second", "third", "fourth", "fifth"] {
+    for model in ["first", "second", "third", "fourth", "fifth", "sixth"] {
         assert!(
             description.contains(&format!("`{model}-model`")),
             "expected {model} model summary in spawn_agent description: {description:?}"
         );
     }
-    assert!(!description.contains("`sixth-model`"));
+}
+
+#[test]
+fn spawn_agent_tool_groups_model_summaries_by_provider() {
+    let tool = create_spawn_agent_tool_v2(SpawnAgentToolOptions {
+        available_models: vec![
+            model_preset_with_provider(
+                "deepseek_v4_pro",
+                "deepseek",
+                "DeepSeek",
+                ReasoningEffort::High,
+                vec![
+                    ReasoningEffort::Low,
+                    ReasoningEffort::Medium,
+                    ReasoningEffort::High,
+                    ReasoningEffort::XHigh,
+                ],
+            ),
+            model_preset_with_provider(
+                "mimo_v25",
+                "mimo",
+                "MiMo",
+                ReasoningEffort::None,
+                vec![ReasoningEffort::None],
+            ),
+        ],
+        agent_type_description: "role help".to_string(),
+        hide_agent_type_model_reasoning: false,
+        include_usage_hint: true,
+        usage_hint_text: None,
+        max_concurrent_threads_per_session: Some(4),
+    });
+
+    let ToolSpec::Function(ResponsesApiTool { description, .. }) = tool else {
+        panic!("spawn_agent should be a function tool");
+    };
+
+    assert!(description.contains("Provider `deepseek`:"));
+    assert!(description.contains(
+        "- `deepseek_v4_pro-model`: deepseek_v4_pro description Reasoning efforts: low, medium, high (default), xhigh."
+    ));
+    assert!(description.contains("Provider `mimo`:"));
+    assert!(
+        description.contains(
+            "- `mimo_v25-model`: mimo_v25 description Reasoning efforts: none (default)."
+        )
+    );
 }
 
 #[test]
@@ -238,7 +305,7 @@ fn spawn_agent_tool_caps_reasoning_effort_value_length() {
     assert_eq!(
         spawn_agent_models_description(&[model]),
         format!(
-            "Available current-provider model overrides (optional; inherited parent provider/model is preferred):\n- `visible-model`: visible description Reasoning efforts: {} (default). Service tiers: priority.",
+            "Available provider/model overrides (optional; inherited parent provider/model is preferred):\nProvider `(current)`:\n- `visible-model`: visible description Reasoning efforts: {} (default). Service tiers: priority.",
             "é".repeat(MAX_REASONING_EFFORT_CHARS_IN_SPAWN_AGENT_DESCRIPTION)
         )
     );
@@ -274,7 +341,7 @@ fn spawn_agent_tool_hides_service_tier_with_spawn_metadata() {
     assert!(!properties.contains_key("reasoning_effort"));
     assert!(!properties.contains_key("service_tier"));
     assert!(!description.contains(SPAWN_AGENT_INHERITED_MODEL_GUIDANCE));
-    assert!(!description.contains("Available current-provider model overrides"));
+    assert!(!description.contains("Available provider/model overrides"));
 }
 
 #[test]

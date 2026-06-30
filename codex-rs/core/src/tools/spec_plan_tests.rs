@@ -8,11 +8,17 @@ use codex_mcp::ToolInfo;
 use codex_model_provider::create_model_provider;
 use codex_model_provider_info::AMAZON_BEDROCK_PROVIDER_ID;
 use codex_model_provider_info::ModelProviderInfo;
+use codex_model_provider_info::WireApi;
+use codex_models_manager::capabilities::ModelCapabilitiesCache;
+use codex_models_manager::capabilities::ModelCapability;
 use codex_protocol::config_types::WebSearchMode;
 use codex_protocol::dynamic_tools::DynamicToolSpec;
 use codex_protocol::openai_models::ApplyPatchToolType;
 use codex_protocol::openai_models::ConfigShellToolType;
 use codex_protocol::openai_models::InputModality;
+use codex_protocol::openai_models::ModelPreset;
+use codex_protocol::openai_models::ReasoningEffort;
+use codex_protocol::openai_models::ReasoningEffortPreset;
 use codex_protocol::openai_models::ToolMode;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
@@ -433,6 +439,40 @@ fn dynamic_tool(namespace: Option<&str>, name: &str, defer_loading: bool) -> Dyn
             "additionalProperties": false,
         }),
         defer_loading,
+    }
+}
+
+fn spawn_model_preset(
+    model: &str,
+    description: &str,
+    default_reasoning_effort: ReasoningEffort,
+    supported_reasoning_efforts: Vec<ReasoningEffort>,
+) -> ModelPreset {
+    ModelPreset {
+        model_provider: None,
+        model_provider_name: None,
+        id: model.to_string(),
+        model: model.to_string(),
+        display_name: model.to_string(),
+        description: description.to_string(),
+        default_reasoning_effort,
+        supported_reasoning_efforts: supported_reasoning_efforts
+            .into_iter()
+            .map(|effort| ReasoningEffortPreset {
+                effort,
+                description: "Supported".to_string(),
+            })
+            .collect(),
+        supports_personality: false,
+        additional_speed_tiers: Vec::new(),
+        service_tiers: Vec::new(),
+        default_service_tier: None,
+        is_default: false,
+        upgrade: None,
+        show_in_picker: true,
+        availability_nux: None,
+        supported_in_api: true,
+        input_modalities: vec![InputModality::Text],
     }
 }
 
@@ -1202,6 +1242,95 @@ async fn multi_agent_feature_selects_one_agent_tool_family() {
         direct_model_only.exposure("spawn_agent"),
         ToolExposure::DirectModelOnly
     );
+}
+
+#[tokio::test]
+async fn spawn_agent_description_lists_configured_cross_provider_models() {
+    let plan = probe(|turn| {
+        set_feature(turn, Feature::MultiAgentV2, /*enabled*/ true);
+        turn.available_models = vec![spawn_model_preset(
+            "deepseek-v4-pro",
+            "DeepSeek Pro",
+            ReasoningEffort::High,
+            vec![
+                ReasoningEffort::Low,
+                ReasoningEffort::Medium,
+                ReasoningEffort::High,
+                ReasoningEffort::XHigh,
+            ],
+        )];
+        update_config(turn, |config| {
+            config.multi_agent_v2.hide_spawn_agent_metadata = false;
+            config.model_provider_id = "deepseek".to_string();
+            config.model_provider = ModelProviderInfo {
+                name: "DeepSeek".to_string(),
+                wire_api: WireApi::ChatCompletions,
+                ..ModelProviderInfo::default()
+            };
+            config
+                .model_providers
+                .insert("deepseek".to_string(), config.model_provider.clone());
+            config.model_providers.insert(
+                "mimo".to_string(),
+                ModelProviderInfo {
+                    name: "MiMo".to_string(),
+                    wire_api: WireApi::AnthropicMessages,
+                    ..ModelProviderInfo::default()
+                },
+            );
+            config.model_capabilities = Some(ModelCapabilitiesCache {
+                version: 1,
+                source: "spec-plan-test".to_string(),
+                generated_at_unix_seconds: 0,
+                models: BTreeMap::from([
+                    (
+                        "mimo/mimo-v2.5".to_string(),
+                        ModelCapability {
+                            supports_vision: Some(true),
+                            ..Default::default()
+                        },
+                    ),
+                    (
+                        "mimo/mimo-v2.5-pro".to_string(),
+                        ModelCapability {
+                            supports_vision: Some(false),
+                            ..Default::default()
+                        },
+                    ),
+                ]),
+            });
+            let config_toml_path = config.codex_home.join("config.toml");
+            config.config_layer_stack = config.config_layer_stack.with_user_config(
+                &config_toml_path,
+                toml::toml! {
+                    [model_capabilities."mimo/mimo-v2.5"]
+                    supports_vision = true
+
+                    [model_capabilities."mimo/mimo-v2.5-pro"]
+                    supports_vision = false
+                }
+                .into(),
+            );
+        });
+    })
+    .await;
+
+    let ToolSpec::Function(tool) = plan.visible_spec("spawn_agent") else {
+        panic!("expected spawn_agent function spec");
+    };
+    let description = &tool.description;
+    assert!(description.contains(
+        "Available provider/model overrides (optional; inherited parent provider/model is preferred):"
+    ));
+    assert!(description.contains("Provider `deepseek`:"));
+    assert!(description.contains(
+        "- `deepseek-v4-pro`: DeepSeek Pro Reasoning efforts: low, medium, high (default), xhigh."
+    ));
+    assert!(description.contains("Provider `mimo`:"));
+    assert!(description.contains("- `mimo-v2.5`:"));
+    assert!(description.contains("- `mimo-v2.5-pro`:"));
+    assert!(!description.contains("(MiMo)"));
+    assert!(!description.contains("(DeepSeek)"));
 }
 
 #[tokio::test]
