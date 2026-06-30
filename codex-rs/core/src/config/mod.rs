@@ -701,6 +701,17 @@ pub struct Config {
     /// Experimental session-memory updater prompt override.
     pub session_memory_update_prompt: Option<String>,
 
+    /// Minimum context-window tokens before initializing experimental
+    /// session-memory extraction.
+    pub session_memory_minimum_message_tokens_to_init: i64,
+
+    /// Minimum context-window token growth between experimental session-memory
+    /// updates.
+    pub session_memory_minimum_tokens_between_update: i64,
+
+    /// Minimum number of tool calls between experimental session-memory updates.
+    pub session_memory_tool_calls_between_updates: usize,
+
     /// Optional external notifier command. When set, Astral will spawn this
     /// program after each completed *turn* (i.e. when the agent finishes
     /// processing a user submission). The value must be the full command
@@ -3641,6 +3652,19 @@ impl Config {
             compact_continuation_prompt,
             session_memory_template,
             session_memory_update_prompt,
+            session_memory_minimum_message_tokens_to_init: cfg
+                .session_memory_minimum_message_tokens_to_init
+                .unwrap_or(
+                    crate::session_memory::DEFAULT_MINIMUM_MESSAGE_TOKENS_TO_INIT,
+                ),
+            session_memory_minimum_tokens_between_update: cfg
+                .session_memory_minimum_tokens_between_update
+                .unwrap_or(
+                    crate::session_memory::DEFAULT_MINIMUM_TOKENS_BETWEEN_UPDATE,
+                ),
+            session_memory_tool_calls_between_updates: cfg
+                .session_memory_tool_calls_between_updates
+                .unwrap_or(crate::session_memory::DEFAULT_TOOL_CALLS_BETWEEN_UPDATES),
             include_permissions_instructions,
             include_apps_instructions,
             include_collaboration_mode_instructions,

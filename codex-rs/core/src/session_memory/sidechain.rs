@@ -12,20 +12,17 @@ use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::ResponseItem;
 use codex_rollout_trace::InferenceTraceContext;
 use codex_tools::EDIT_TOOL_NAME;
-use codex_utils_output_truncation::TruncationPolicy;
-use codex_utils_output_truncation::truncate_text;
 use codex_utils_path::paths_match_after_normalization;
 use futures::StreamExt;
 use serde::Deserialize;
 
 use super::ExtractionCandidate;
 use super::SessionMemoryStore;
+use super::finish_extraction;
 use super::tail::ExtractionBoundary;
-use super::tail::MAX_COMPACT_SUMMARY_BODY_TOKENS;
 use super::tail::summary_budget_reminder;
-use super::tail::validate_post_extraction_summary;
 
-const MAX_SIDECHAIN_TOOL_ROUNDS: usize = 3;
+const MAX_SIDECHAIN_TOOL_ROUNDS: usize = 6;
 
 pub(super) async fn run_extraction(
     sess: Arc<Session>,
@@ -58,10 +55,7 @@ async fn run_extraction_inner(
     boundary: ExtractionBoundary,
     current_summary: &str,
 ) -> CodexResult<ExtractionBoundary> {
-    let prompt_summary = truncate_text(
-        current_summary,
-        TruncationPolicy::Tokens(MAX_COMPACT_SUMMARY_BODY_TOKENS),
-    );
+    let mut edit_state = SummaryEditState::new(current_summary.to_string());
     let budget_reminder = summary_budget_reminder(current_summary);
     candidate.prompt.input.push(ResponseItem::Message {
         id: None,
@@ -70,7 +64,7 @@ async fn run_extraction_inner(
             text: updater_prompt(
                 turn_context.session_memory_update_prompt.as_deref(),
                 &store.summary_path,
-                &prompt_summary,
+                current_summary,
                 &budget_reminder,
             ),
         }],
@@ -80,6 +74,7 @@ async fn run_extraction_inner(
     let mut client_session = sess.services.model_client.new_session();
     for _ in 0..MAX_SIDECHAIN_TOOL_ROUNDS {
         let mut needs_follow_up = false;
+        let mut edited_summary = false;
         let mut stream = client_session
             .stream(
                 turn_context.provider.clone(),
@@ -112,24 +107,32 @@ async fn run_extraction_inner(
                 | ResponseEvent::ReasoningContentDelta { .. } => {}
                 ResponseEvent::Completed { .. } => {}
                 ResponseEvent::OutputItemDone(item) => {
-                    let output =
-                        handle_sidechain_item(&turn_context, &store.summary_path, &item).await?;
+                    let outcome = handle_sidechain_item(
+                        &turn_context,
+                        &store.summary_path,
+                        &item,
+                        &mut edit_state,
+                    )
+                    .await?;
                     candidate.prompt.input.push(item);
-                    if let Some(output) = output {
+                    if let Some(output) = outcome.output {
                         candidate.prompt.input.push(output);
-                        needs_follow_up = true;
+                        if outcome.edited_summary {
+                            edited_summary = true;
+                        } else {
+                            needs_follow_up = true;
+                        }
                     }
                 }
             }
         }
 
+        if edited_summary {
+            finish_extraction(store, Ok(boundary.clone())).await?;
+            return Ok(boundary);
+        }
+
         if !needs_follow_up {
-            let summary = store.read_summary().await?;
-            validate_post_extraction_summary(
-                current_summary,
-                &summary,
-                turn_context.session_memory_template(),
-            )?;
             return Ok(boundary);
         }
     }
@@ -143,7 +146,8 @@ async fn handle_sidechain_item(
     turn_context: &TurnContext,
     summary_path: &Path,
     item: &ResponseItem,
-) -> CodexResult<Option<ResponseItem>> {
+    edit_state: &mut SummaryEditState,
+) -> CodexResult<SidechainItemOutcome> {
     match item {
         ResponseItem::FunctionCall {
             name,
@@ -151,38 +155,52 @@ async fn handle_sidechain_item(
             call_id,
             ..
         } if name == EDIT_TOOL_NAME => {
-            let text = apply_summary_edit(turn_context, summary_path, arguments).await;
-            Ok(Some(ResponseItem::FunctionCallOutput {
-                call_id: call_id.clone(),
-                output: FunctionCallOutputPayload::from_text(text),
-            }))
+            let result =
+                apply_summary_edit(turn_context, summary_path, arguments, edit_state).await;
+            Ok(SidechainItemOutcome {
+                output: Some(ResponseItem::FunctionCallOutput {
+                    call_id: call_id.clone(),
+                    output: FunctionCallOutputPayload::from_text(result.text),
+                }),
+                edited_summary: result.edited_summary,
+            })
         }
-        ResponseItem::FunctionCall { call_id, .. } => Ok(Some(ResponseItem::FunctionCallOutput {
-            call_id: call_id.clone(),
-            output: FunctionCallOutputPayload::from_text(deny_tool_message(summary_path)),
-        })),
-        ResponseItem::CustomToolCall { call_id, name, .. } => {
-            Ok(Some(ResponseItem::CustomToolCallOutput {
+        ResponseItem::FunctionCall { call_id, .. } => Ok(SidechainItemOutcome {
+            output: Some(ResponseItem::FunctionCallOutput {
+                call_id: call_id.clone(),
+                output: FunctionCallOutputPayload::from_text(deny_tool_message(summary_path)),
+            }),
+            edited_summary: false,
+        }),
+        ResponseItem::CustomToolCall { call_id, name, .. } => Ok(SidechainItemOutcome {
+            output: Some(ResponseItem::CustomToolCallOutput {
                 call_id: call_id.clone(),
                 name: Some(name.clone()),
                 output: FunctionCallOutputPayload::from_text(deny_tool_message(summary_path)),
-            }))
-        }
+            }),
+            edited_summary: false,
+        }),
         ResponseItem::ToolSearchCall {
             call_id, execution, ..
-        } => Ok(Some(ResponseItem::ToolSearchOutput {
-            call_id: call_id.clone(),
-            status: "failed".to_string(),
-            execution: execution.clone(),
-            tools: Vec::new(),
-        })),
+        } => Ok(SidechainItemOutcome {
+            output: Some(ResponseItem::ToolSearchOutput {
+                call_id: call_id.clone(),
+                status: "failed".to_string(),
+                execution: execution.clone(),
+                tools: Vec::new(),
+            }),
+            edited_summary: false,
+        }),
         ResponseItem::LocalShellCall {
             call_id: Some(call_id),
             ..
-        } => Ok(Some(ResponseItem::FunctionCallOutput {
-            call_id: call_id.clone(),
-            output: FunctionCallOutputPayload::from_text(deny_tool_message(summary_path)),
-        })),
+        } => Ok(SidechainItemOutcome {
+            output: Some(ResponseItem::FunctionCallOutput {
+                call_id: call_id.clone(),
+                output: FunctionCallOutputPayload::from_text(deny_tool_message(summary_path)),
+            }),
+            edited_summary: false,
+        }),
         ResponseItem::Message { .. }
         | ResponseItem::AgentMessage { .. }
         | ResponseItem::Reasoning { .. }
@@ -195,8 +213,16 @@ async fn handle_sidechain_item(
         | ResponseItem::Compaction { .. }
         | ResponseItem::CompactionTrigger
         | ResponseItem::ContextCompaction { .. }
-        | ResponseItem::Other => Ok(None),
+        | ResponseItem::Other => Ok(SidechainItemOutcome {
+            output: None,
+            edited_summary: false,
+        }),
     }
+}
+
+struct SidechainItemOutcome {
+    output: Option<ResponseItem>,
+    edited_summary: bool,
 }
 
 #[derive(Deserialize)]
@@ -208,52 +234,111 @@ struct EditArgs {
     replace_all: bool,
 }
 
+#[derive(Debug)]
+struct SummaryEditState {
+    content: String,
+}
+
+impl SummaryEditState {
+    fn new(content: String) -> Self {
+        Self { content }
+    }
+
+    async fn current_file_matches_read_state(&self, summary_path: &Path) -> bool {
+        match tokio::fs::read_to_string(summary_path).await {
+            Ok(current) => current == self.content,
+            Err(_) => self.content.is_empty(),
+        }
+    }
+
+    fn update(&mut self, content: String) {
+        self.content = content;
+    }
+}
+
 async fn apply_summary_edit(
     turn_context: &TurnContext,
     summary_path: &Path,
     arguments: &str,
-) -> String {
+    edit_state: &mut SummaryEditState,
+) -> SummaryEditResult {
     let args: EditArgs = match serde_json::from_str(arguments) {
         Ok(args) => args,
-        Err(err) => return format!("Invalid Edit arguments: {err}"),
+        Err(err) => {
+            return SummaryEditResult {
+                text: format!("Invalid Edit arguments: {err}"),
+                edited_summary: false,
+            };
+        }
     };
 
     let target_path = resolve_edit_path(turn_context, &args.file_path);
     if !paths_match_after_normalization(&target_path, summary_path) {
-        return deny_tool_message(summary_path);
+        return SummaryEditResult {
+            text: deny_tool_message(summary_path),
+            edited_summary: false,
+        };
     }
     if args.old_string == args.new_string {
-        return "No changes to make: old_string and new_string are exactly the same.".to_string();
+        return SummaryEditResult {
+            text: "No changes were made: old_string and new_string are exactly the same. Session-memory extraction is not complete. Make a substantive Edit to summary.md that adds or condenses the current conversation details, then stop.".to_string(),
+            edited_summary: false,
+        };
+    }
+    if !edit_state
+        .current_file_matches_read_state(summary_path)
+        .await
+    {
+        return SummaryEditResult {
+            text: "File has been modified since it was pre-read for session-memory extraction. Retry extraction after reading the latest summary.md.".to_string(),
+            edited_summary: false,
+        };
     }
 
-    let current = tokio::fs::read_to_string(summary_path)
-        .await
-        .unwrap_or_default();
+    let current = edit_state.content.clone();
     if args.old_string.is_empty() {
         if !current.trim().is_empty() {
-            return "Cannot create new file - file already exists.".to_string();
+            return SummaryEditResult {
+                text: "Cannot create new file - file already exists.".to_string(),
+                edited_summary: false,
+            };
         }
-        return match tokio::fs::write(summary_path, args.new_string).await {
-            Ok(()) => format!(
-                "The file {} has been updated successfully.",
-                summary_path.display()
-            ),
-            Err(err) => format!("Failed to update file: {err}"),
+        return match tokio::fs::write(summary_path, &args.new_string).await {
+            Ok(()) => {
+                edit_state.update(args.new_string);
+                SummaryEditResult {
+                    text: format!(
+                        "The file {} has been updated successfully.",
+                        summary_path.display()
+                    ),
+                    edited_summary: true,
+                }
+            }
+            Err(err) => SummaryEditResult {
+                text: format!("Failed to update file: {err}"),
+                edited_summary: false,
+            },
         };
     }
 
     let occurrences = current.matches(&args.old_string).count();
     if occurrences == 0 {
-        return format!(
-            "String to replace not found in file.\nString: {}",
-            args.old_string
-        );
+        return SummaryEditResult {
+            text: format!(
+                "String to replace not found in file.\nString: {}",
+                args.old_string
+            ),
+            edited_summary: false,
+        };
     }
     if occurrences > 1 && !args.replace_all {
-        return format!(
-            "Found {occurrences} matches of the string to replace, but replace_all is false. To replace all occurrences, set replace_all to true. To replace only one occurrence, please provide more context to uniquely identify the instance.\nString: {}",
-            args.old_string
-        );
+        return SummaryEditResult {
+            text: format!(
+                "Found {occurrences} matches of the string to replace, but replace_all is false. To replace all occurrences, set replace_all to true. To replace only one occurrence, please provide more context to uniquely identify the instance.\nString: {}",
+                args.old_string
+            ),
+            edited_summary: false,
+        };
     }
 
     let updated = if args.replace_all {
@@ -261,17 +346,37 @@ async fn apply_summary_edit(
     } else {
         current.replacen(&args.old_string, &args.new_string, 1)
     };
-    match tokio::fs::write(summary_path, updated).await {
-        Ok(()) if args.replace_all => format!(
-            "The file {} has been updated. All occurrences were successfully replaced.",
-            summary_path.display()
-        ),
-        Ok(()) => format!(
-            "The file {} has been updated successfully.",
-            summary_path.display()
-        ),
-        Err(err) => format!("Failed to update file: {err}"),
+    match tokio::fs::write(summary_path, &updated).await {
+        Ok(()) if args.replace_all => {
+            edit_state.update(updated);
+            SummaryEditResult {
+                text: format!(
+                    "The file {} has been updated. All occurrences were successfully replaced.",
+                    summary_path.display()
+                ),
+                edited_summary: true,
+            }
+        }
+        Ok(()) => {
+            edit_state.update(updated);
+            SummaryEditResult {
+                text: format!(
+                    "The file {} has been updated successfully.",
+                    summary_path.display()
+                ),
+                edited_summary: true,
+            }
+        }
+        Err(err) => SummaryEditResult {
+            text: format!("Failed to update file: {err}"),
+            edited_summary: false,
+        },
     }
+}
+
+struct SummaryEditResult {
+    text: String,
+    edited_summary: bool,
 }
 
 fn resolve_edit_path(turn_context: &TurnContext, file_path: &str) -> PathBuf {
@@ -290,7 +395,7 @@ fn resolve_edit_path(turn_context: &TurnContext, file_path: &str) -> PathBuf {
 
 fn deny_tool_message(summary_path: &Path) -> String {
     format!(
-        "Denied: session-memory extraction may only use Edit on {}.",
+        "only {EDIT_TOOL_NAME} on {} is allowed",
         summary_path.display()
     )
 }
@@ -318,7 +423,7 @@ CRITICAL RULES FOR EDITING:
 - Write DETAILED, INFO-DENSE content for each section - include specifics like file paths, function names, error messages, exact commands, technical details, etc.
 - For "Key results", include the complete, exact output the user requested (e.g., full table, full answer, etc.)
 - Do not include information that's already in the AGENTS.md files included in the context
-- Keep each section under ~2,000 tokens/words - if a section is approaching this limit, condense it by cycling out less important details while preserving the most critical information
+- Keep each section under ~2000 tokens/words - if a section is approaching this limit, condense it by cycling out less important details while preserving the most critical information
 - Focus on actionable, specific information that would help someone understand or recreate the work discussed in the conversation
 - IMPORTANT: Always update "Current State" to reflect the most recent work - this is critical for continuity after compaction
 
@@ -331,10 +436,9 @@ Each section has TWO parts that must be preserved exactly as they appear in the 
 
 You ONLY update the actual content that comes AFTER these two preserved lines. The italic description lines starting and ending with underscores are part of the template structure, NOT content to be edited or removed.
 
-REMEMBER: Use the Edit tool in parallel and stop. Do not continue after the edits. Only include insights from the actual user conversation, never from these note-taking instructions. Do not delete or change section headers or italic _section descriptions_.
-"#;
+REMEMBER: Use the Edit tool in parallel and stop. Do not continue after the edits. Only include insights from the actual user conversation, never from these note-taking instructions. Do not delete or change section headers or italic _section descriptions_."#;
 
-fn updater_prompt(
+pub(super) fn updater_prompt(
     custom_prompt: Option<&str>,
     summary_path: &Path,
     current_summary: &str,
@@ -346,11 +450,7 @@ fn updater_prompt(
         summary_path.to_string_lossy().as_ref(),
         current_summary,
     );
-    if prompt.ends_with('\n') || budget_reminder.is_empty() {
-        format!("{prompt}{budget_reminder}")
-    } else {
-        format!("{prompt}\n{budget_reminder}")
-    }
+    format!("{prompt}{budget_reminder}")
 }
 
 pub(super) fn substitute_prompt_variables(

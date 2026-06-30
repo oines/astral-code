@@ -654,6 +654,7 @@ async fn emit_thread_stop_lifecycle(sess: &Session) {
 }
 
 pub async fn shutdown(sess: &Arc<Session>, sub_id: String) -> bool {
+    crate::session_memory::wait_for_pending_extraction_on_shutdown(sess).await;
     shutdown_session_runtime(sess).await;
     info!("Shutting down Codex instance");
     let history = sess.clone_history().await;

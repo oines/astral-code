@@ -98,6 +98,51 @@ fn mapper_streams_text_with_lazy_content_block_start() {
 }
 
 #[test]
+fn mapper_preserves_anthropic_reasoning_signature() {
+    let mut mapper = AgentStreamMapper::default();
+
+    let events = mapper
+        .process_event(AgentStreamEvent::ContentBlockStart {
+            index: 0,
+            block: ContentBlock::Reasoning {
+                text: "thinking".to_string(),
+                signature: None,
+            },
+        })
+        .expect("reasoning start maps");
+    assert_eq!(events.len(), 1);
+    assert!(matches!(
+        &events[0],
+        super::ResponseEvent::OutputItemAdded(ResponseItem::Reasoning { .. })
+    ));
+
+    let events = mapper
+        .process_event(AgentStreamEvent::ContentBlockDelta {
+            index: 0,
+            delta: ContentDelta::ReasoningSignature {
+                signature: "sig_opaque".to_string(),
+            },
+        })
+        .expect("reasoning signature maps");
+    assert!(events.is_empty());
+
+    let events = mapper
+        .process_event(AgentStreamEvent::ContentBlockStop { index: 0 })
+        .expect("reasoning stop maps");
+    assert_eq!(events.len(), 1);
+    let super::ResponseEvent::OutputItemDone(ResponseItem::Reasoning {
+        encrypted_content, ..
+    }) = &events[0]
+    else {
+        panic!("expected reasoning item done, got {:?}", events[0]);
+    };
+    assert_eq!(
+        encrypted_content,
+        &Some("anthropic_signature:sig_opaque".to_string())
+    );
+}
+
+#[test]
 fn mapper_streams_tool_arguments_and_finishes_function_call() {
     let mut mapper = AgentStreamMapper::default();
 

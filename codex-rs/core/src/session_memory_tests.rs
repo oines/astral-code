@@ -18,6 +18,17 @@ fn user_message(text: &str) -> ResponseItem {
     }
 }
 
+fn developer_message(text: &str) -> ResponseItem {
+    ResponseItem::Message {
+        id: None,
+        role: "developer".to_string(),
+        content: vec![ContentItem::InputText {
+            text: text.to_string(),
+        }],
+        phase: None,
+    }
+}
+
 fn user_image_message() -> ResponseItem {
     ResponseItem::Message {
         id: None,
@@ -76,6 +87,34 @@ fn raw_tail_keeps_function_call_pair_after_boundary() {
     let tail = raw_tail_after_summary_boundary(&items, &state).expect("tail is valid");
 
     assert_eq!(tail, items);
+}
+
+#[test]
+fn raw_tail_filters_reinjectable_context_when_expanding_before_boundary() {
+    let contextual_user = user_message("<environment_context>ctx</environment_context>");
+    let contextual_developer = developer_message("<permissions instructions>ctx");
+    let real_user = user_message("real user message");
+    let items = vec![
+        contextual_user.clone(),
+        contextual_developer.clone(),
+        real_user.clone(),
+        function_call("call-1"),
+        function_output("call-1"),
+    ];
+    let state = state_for_boundary(&items, 4);
+
+    let tail = raw_tail_after_summary_boundary(&items, &state).expect("tail is valid");
+
+    assert_eq!(
+        tail,
+        vec![
+            real_user,
+            function_call("call-1"),
+            function_output("call-1")
+        ]
+    );
+    assert!(!tail.contains(&contextual_user));
+    assert!(!tail.contains(&contextual_developer));
 }
 
 #[test]
@@ -146,34 +185,6 @@ fn compact_summary_truncates_overlarge_sections() {
 }
 
 #[test]
-fn post_extraction_rejects_tiny_rewrite_of_existing_summary() {
-    let previous_summary = summary_with_current_state(&"durable detail ".repeat(3_000));
-    let updated_summary = summary_with_current_state("- done");
-
-    let err = tail::validate_post_extraction_summary(
-        &previous_summary,
-        &updated_summary,
-        tail::DEFAULT_SUMMARY,
-    )
-    .expect_err("tiny rewrite should be rejected");
-
-    assert!(
-        err.to_string()
-            .contains("session memory extraction collapsed existing summary unexpectedly")
-    );
-}
-
-#[test]
-fn post_extraction_allows_markdown_headings_in_content_to_change() {
-    let template = "# IM State\n_Current chat handoff_\n\n# Follow-ups\n_Open items_";
-    let previous = "# IM State\n- Waiting for bridge reply.\n\n# Key results\n## User report\n- v1";
-    let updated = "# IM State\n- Waiting for bridge reply.\n\n# Key results\n- v2";
-
-    tail::validate_post_extraction_summary(previous, updated, template)
-        .expect("content markdown headings should not become structural requirements");
-}
-
-#[test]
 fn compact_summary_validation_allows_previous_template_headings() {
     let current_template = "# IM State\n_Current chat handoff_\n\n# Follow-ups\n_Open items_";
     let summary = summary_with_current_state("- Old template content.");
@@ -183,15 +194,25 @@ fn compact_summary_validation_allows_previous_template_headings() {
 }
 
 #[test]
-fn session_memory_compacted_history_keeps_tail_before_summary() {
+fn session_memory_compacted_history_places_summary_before_tail() {
     let tail = vec![user_message("recent user"), user_message("latest user")];
 
     let history = build_session_memory_compacted_history(tail.clone(), "summary".to_string());
 
-    let mut expected = tail;
-    expected.push(ResponseItem::Compaction {
+    let mut expected = vec![ResponseItem::Compaction {
         encrypted_content: "summary".to_string(),
-    });
+    }];
+    expected.extend(tail);
+    assert_eq!(history, expected);
+}
+
+#[test]
+fn session_memory_compacted_history_allows_empty_tail() {
+    let history = build_session_memory_compacted_history(Vec::new(), "summary".to_string());
+
+    let expected = vec![ResponseItem::Compaction {
+        encrypted_content: "summary".to_string(),
+    }];
     assert_eq!(history, expected);
 }
 
@@ -255,7 +276,15 @@ fn compact_baseline_resets_to_post_compact_tokens() {
         active_context_tokens: 25_000,
         natural_break: true,
     };
-    assert!(should_extract(&state, &candidate));
+    assert!(should_extract(&state, &candidate, test_thresholds()));
+}
+
+fn test_thresholds() -> ExtractionThresholds {
+    ExtractionThresholds {
+        minimum_message_tokens_to_init: 10_000,
+        minimum_tokens_between_update: 5_000,
+        tool_calls_between_updates: 3,
+    }
 }
 
 #[tokio::test]
@@ -289,6 +318,67 @@ async fn ensure_preserves_existing_summary_when_template_changes() {
     assert_eq!(state.last_summary_tokens, Some(42_000));
 }
 
+#[tokio::test]
+async fn wait_for_extraction_completion_observes_finished_state() {
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let store = SessionMemoryStore {
+        thread_key: "thread".to_string(),
+        dir: temp.path().to_path_buf(),
+        summary_path: temp.path().join("summary.md"),
+        state_path: temp.path().join("state.json"),
+    };
+    store
+        .ensure(tail::DEFAULT_SUMMARY)
+        .await
+        .expect("initialize store");
+    let state = SessionMemoryState {
+        extraction_started_at_unix: None,
+        last_summary_tokens: Some(12_000),
+        ..Default::default()
+    };
+    store.write_state(&state).await.expect("write state");
+
+    wait_for_extraction_completion(&store, Duration::from_millis(50))
+        .await
+        .expect("finished extraction should not block");
+}
+
+#[tokio::test]
+async fn wait_for_extraction_completion_clears_started_state_on_timeout() {
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let store = SessionMemoryStore {
+        thread_key: "thread".to_string(),
+        dir: temp.path().to_path_buf(),
+        summary_path: temp.path().join("summary.md"),
+        state_path: temp.path().join("state.json"),
+    };
+    store
+        .ensure(tail::DEFAULT_SUMMARY)
+        .await
+        .expect("initialize store");
+    let state = SessionMemoryState {
+        extraction_started_at_unix: Some(now_unix_seconds()),
+        ..Default::default()
+    };
+    store.write_state(&state).await.expect("write state");
+
+    let err = wait_for_extraction_completion(&store, Duration::from_millis(1))
+        .await
+        .expect_err("unfinished extraction should time out");
+
+    assert!(
+        err.to_string()
+            .contains("session memory extraction did not finish before shutdown timeout")
+    );
+    let state = store.read_state().await.expect("read state");
+    let expected = SessionMemoryState {
+        extraction_started_at_unix: None,
+        last_error: Some("session memory extraction interrupted during shutdown".to_string()),
+        ..Default::default()
+    };
+    assert_eq!(state, expected);
+}
+
 #[test]
 fn prompt_variable_substitution_is_single_pass() {
     let substituted = super::sidechain::substitute_prompt_variables(
@@ -304,6 +394,35 @@ fn prompt_variable_substitution_is_single_pass() {
 }
 
 #[test]
+fn updater_prompt_includes_full_current_notes_for_condensation() {
+    let current_notes = format!(
+        "start\n{}\nFINAL_SESSION_MEMORY_MARKER",
+        "token ".repeat(tail::MAX_COMPACT_SUMMARY_BODY_TOKENS * 2)
+    );
+    let prompt = super::sidechain::updater_prompt(
+        None,
+        std::path::Path::new("/tmp/summary.md"),
+        &current_notes,
+        "",
+    );
+
+    assert!(prompt.contains("FINAL_SESSION_MEMORY_MARKER"));
+    assert!(!prompt.contains("IMPORTANT PRE-READ NOTE"));
+}
+
+#[test]
+fn custom_updater_prompt_matches_custom_template_with_substitution() {
+    let prompt = super::sidechain::updater_prompt(
+        Some("CUSTOM\n{{currentNotes}}\n{{notesPath}}"),
+        std::path::Path::new("/tmp/summary.md"),
+        "current notes",
+        "",
+    );
+
+    assert_eq!(prompt, "CUSTOM\ncurrent notes\n/tmp/summary.md");
+}
+
+#[test]
 fn should_extract_requires_initial_token_threshold() {
     let state = SessionMemoryState::default();
     let prompt = Prompt {
@@ -313,49 +432,50 @@ fn should_extract_requires_initial_token_threshold() {
     let candidate = ExtractionCandidate {
         prompt,
         raw_boundary: None,
-        active_context_tokens: MINIMUM_MESSAGE_TOKENS_TO_INIT - 1,
+        active_context_tokens: test_thresholds().minimum_message_tokens_to_init - 1,
         natural_break: true,
     };
 
-    assert!(!should_extract(&state, &candidate));
+    assert!(!should_extract(&state, &candidate, test_thresholds()));
 }
 
 #[test]
 fn should_not_extract_on_natural_break_before_token_threshold() {
     let state = SessionMemoryState {
-        last_summary_tokens: Some(MINIMUM_MESSAGE_TOKENS_TO_INIT),
+        last_summary_tokens: Some(test_thresholds().minimum_message_tokens_to_init),
         ..Default::default()
     };
     let candidate = ExtractionCandidate {
         prompt: Prompt::default(),
         raw_boundary: None,
-        active_context_tokens: MINIMUM_MESSAGE_TOKENS_TO_INIT + 1,
+        active_context_tokens: test_thresholds().minimum_message_tokens_to_init + 1,
         natural_break: true,
     };
 
-    assert!(!should_extract(&state, &candidate));
+    assert!(!should_extract(&state, &candidate, test_thresholds()));
 }
 
 #[test]
 fn should_extract_on_natural_break_after_token_threshold() {
     let state = SessionMemoryState {
-        last_summary_tokens: Some(MINIMUM_MESSAGE_TOKENS_TO_INIT),
+        last_summary_tokens: Some(test_thresholds().minimum_message_tokens_to_init),
         ..Default::default()
     };
     let candidate = ExtractionCandidate {
         prompt: Prompt::default(),
         raw_boundary: None,
-        active_context_tokens: MINIMUM_MESSAGE_TOKENS_TO_INIT + MINIMUM_TOKENS_BETWEEN_UPDATE,
+        active_context_tokens: test_thresholds().minimum_message_tokens_to_init
+            + test_thresholds().minimum_tokens_between_update,
         natural_break: true,
     };
 
-    assert!(should_extract(&state, &candidate));
+    assert!(should_extract(&state, &candidate, test_thresholds()));
 }
 
 #[test]
 fn should_not_extract_on_tool_calls_without_token_threshold() {
     let state = SessionMemoryState {
-        last_summary_tokens: Some(MINIMUM_MESSAGE_TOKENS_TO_INIT),
+        last_summary_tokens: Some(test_thresholds().minimum_message_tokens_to_init),
         last_summary_tool_calls: Some(0),
         ..Default::default()
     };
@@ -369,9 +489,34 @@ fn should_not_extract_on_tool_calls_without_token_threshold() {
             ..Default::default()
         },
         raw_boundary: None,
-        active_context_tokens: MINIMUM_MESSAGE_TOKENS_TO_INIT + 1,
+        active_context_tokens: test_thresholds().minimum_message_tokens_to_init + 1,
         natural_break: false,
     };
 
-    assert!(!should_extract(&state, &candidate));
+    assert!(!should_extract(&state, &candidate, test_thresholds()));
+}
+
+#[test]
+fn should_extract_honors_custom_thresholds() {
+    let state = SessionMemoryState {
+        last_summary_tokens: Some(1_000),
+        last_summary_tool_calls: Some(0),
+        ..Default::default()
+    };
+    let candidate = ExtractionCandidate {
+        prompt: Prompt {
+            input: vec![function_call("call-1"), function_call("call-2")],
+            ..Default::default()
+        },
+        raw_boundary: None,
+        active_context_tokens: 3_000,
+        natural_break: false,
+    };
+    let thresholds = ExtractionThresholds {
+        minimum_message_tokens_to_init: 500,
+        minimum_tokens_between_update: 2_000,
+        tool_calls_between_updates: 2,
+    };
+
+    assert!(should_extract(&state, &candidate, thresholds));
 }

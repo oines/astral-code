@@ -6761,6 +6761,50 @@ async fn loads_session_memory_prompts_from_config_and_files() -> std::io::Result
 }
 
 #[tokio::test]
+async fn loads_session_memory_extraction_thresholds_from_config() -> std::io::Result<()> {
+    let codex_home = TempDir::new()?;
+    let config = Config::load_from_base_config_with_overrides(
+        ConfigToml::default(),
+        ConfigOverrides::default(),
+        codex_home.abs(),
+    )
+    .await?;
+
+    assert_eq!(
+        config.session_memory_minimum_message_tokens_to_init,
+        crate::session_memory::DEFAULT_MINIMUM_MESSAGE_TOKENS_TO_INIT
+    );
+    assert_eq!(
+        config.session_memory_minimum_tokens_between_update,
+        crate::session_memory::DEFAULT_MINIMUM_TOKENS_BETWEEN_UPDATE
+    );
+    assert_eq!(
+        config.session_memory_tool_calls_between_updates,
+        crate::session_memory::DEFAULT_TOOL_CALLS_BETWEEN_UPDATES
+    );
+
+    let codex_home = TempDir::new()?;
+    let cfg = ConfigToml {
+        session_memory_minimum_message_tokens_to_init: Some(12_345),
+        session_memory_minimum_tokens_between_update: Some(6_789),
+        session_memory_tool_calls_between_updates: Some(4),
+        ..Default::default()
+    };
+    let config = Config::load_from_base_config_with_overrides(
+        cfg,
+        ConfigOverrides::default(),
+        codex_home.abs(),
+    )
+    .await?;
+
+    assert_eq!(config.session_memory_minimum_message_tokens_to_init, 12_345);
+    assert_eq!(config.session_memory_minimum_tokens_between_update, 6_789);
+    assert_eq!(config.session_memory_tool_calls_between_updates, 4);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn loads_compact_continuation_prompt_from_config() -> std::io::Result<()> {
     let codex_home = TempDir::new()?;
     let cfg = ConfigToml {

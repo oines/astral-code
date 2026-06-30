@@ -708,7 +708,9 @@ fn content_delta_from_anthropic(
         "thinking_delta" => Ok(Some(ContentDelta::Reasoning {
             text: required_str(value, "thinking")?.to_string(),
         })),
-        "signature_delta" => Ok(None),
+        "signature_delta" => Ok(Some(ContentDelta::ReasoningSignature {
+            signature: required_str(value, "signature")?.to_string(),
+        })),
         other => Err(AnthropicStreamError::UnknownContentDelta(other.to_string())),
     }
 }

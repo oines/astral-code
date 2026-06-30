@@ -776,7 +776,12 @@ fn stream_parser_maps_anthropic_events_to_agent_ir() {
             "delta": { "type": "signature_delta", "signature": "sig_opaque" }
         }))
         .expect("parse signature_delta"),
-        None
+        Some(AgentStreamEvent::ContentBlockDelta {
+            index: 1,
+            delta: ContentDelta::ReasoningSignature {
+                signature: "sig_opaque".to_string(),
+            },
+        })
     );
 
     assert_eq!(

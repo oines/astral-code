@@ -51,6 +51,12 @@ pub struct ConfigProfile {
     pub experimental_compact_prompt_file: Option<AbsolutePathBuf>,
     pub session_memory_template: Option<String>,
     pub session_memory_update_prompt: Option<String>,
+    #[schemars(range(min = 1))]
+    pub session_memory_minimum_message_tokens_to_init: Option<i64>,
+    #[schemars(range(min = 1))]
+    pub session_memory_minimum_tokens_between_update: Option<i64>,
+    #[schemars(range(min = 1))]
+    pub session_memory_tool_calls_between_updates: Option<usize>,
     pub experimental_session_memory_template_file: Option<AbsolutePathBuf>,
     pub experimental_session_memory_update_prompt_file: Option<AbsolutePathBuf>,
     pub include_permissions_instructions: Option<bool>,

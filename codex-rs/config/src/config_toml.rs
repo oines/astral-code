@@ -207,6 +207,20 @@ pub struct ConfigToml {
     /// Prompt used by the experimental session-memory sidechain updater.
     pub session_memory_update_prompt: Option<String>,
 
+    /// Minimum context-window tokens before initializing experimental session
+    /// memory extraction.
+    #[schemars(range(min = 1))]
+    pub session_memory_minimum_message_tokens_to_init: Option<i64>,
+
+    /// Minimum context-window token growth between experimental session-memory
+    /// updates.
+    #[schemars(range(min = 1))]
+    pub session_memory_minimum_tokens_between_update: Option<i64>,
+
+    /// Minimum number of tool calls between experimental session-memory updates.
+    #[schemars(range(min = 1))]
+    pub session_memory_tool_calls_between_updates: Option<usize>,
+
     /// Preferred backend for storing CLI auth credentials.
     /// file (default): Use a file in the Astral home directory.
     /// keyring: Use an OS-specific keyring service.

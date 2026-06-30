@@ -739,8 +739,23 @@
           "description": "Optional explicit service tier request id for new turns (for example `default`, `priority`, or `flex`; legacy `fast` also works).",
           "type": "string"
         },
+        "session_memory_minimum_message_tokens_to_init": {
+          "format": "int64",
+          "minimum": 1.0,
+          "type": "integer"
+        },
+        "session_memory_minimum_tokens_between_update": {
+          "format": "int64",
+          "minimum": 1.0,
+          "type": "integer"
+        },
         "session_memory_template": {
           "type": "string"
+        },
+        "session_memory_tool_calls_between_updates": {
+          "format": "uint",
+          "minimum": 1.0,
+          "type": "integer"
         },
         "session_memory_update_prompt": {
           "type": "string"
@@ -5330,9 +5345,27 @@
       "description": "Optional explicit service tier request id for new turns (for example `default`, `priority`, or `flex`; legacy `fast` also works).",
       "type": "string"
     },
+    "session_memory_minimum_message_tokens_to_init": {
+      "description": "Minimum context-window tokens before initializing experimental session memory extraction.",
+      "format": "int64",
+      "minimum": 1.0,
+      "type": "integer"
+    },
+    "session_memory_minimum_tokens_between_update": {
+      "description": "Minimum context-window token growth between experimental session-memory updates.",
+      "format": "int64",
+      "minimum": 1.0,
+      "type": "integer"
+    },
     "session_memory_template": {
       "description": "Template used when creating a new experimental session-memory summary.",
       "type": "string"
+    },
+    "session_memory_tool_calls_between_updates": {
+      "description": "Minimum number of tool calls between experimental session-memory updates.",
+      "format": "uint",
+      "minimum": 1.0,
+      "type": "integer"
     },
     "session_memory_update_prompt": {
       "description": "Prompt used by the experimental session-memory sidechain updater.",

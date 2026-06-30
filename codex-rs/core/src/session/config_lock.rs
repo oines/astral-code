@@ -140,6 +140,12 @@ fn save_config_resolved_fields(
         Some(config.include_collaboration_mode_instructions);
     lock_config.include_environment_context = Some(config.include_environment_context);
     lock_config.background_terminal_max_timeout = Some(config.background_terminal_max_timeout);
+    lock_config.session_memory_minimum_message_tokens_to_init =
+        Some(config.session_memory_minimum_message_tokens_to_init);
+    lock_config.session_memory_minimum_tokens_between_update =
+        Some(config.session_memory_minimum_tokens_between_update);
+    lock_config.session_memory_tool_calls_between_updates =
+        Some(config.session_memory_tool_calls_between_updates);
 
     // Feature aliases and feature configs need to be written in their resolved
     // form; otherwise replay can drift when a legacy key maps to the same
@@ -240,6 +246,27 @@ mod tests {
         assert_eq!(
             lock.session_memory_update_prompt,
             sc.session_memory_update_prompt
+        );
+        assert_eq!(
+            lock.session_memory_minimum_message_tokens_to_init,
+            Some(
+                sc.original_config_do_not_use
+                    .session_memory_minimum_message_tokens_to_init
+            )
+        );
+        assert_eq!(
+            lock.session_memory_minimum_tokens_between_update,
+            Some(
+                sc.original_config_do_not_use
+                    .session_memory_minimum_tokens_between_update
+            )
+        );
+        assert_eq!(
+            lock.session_memory_tool_calls_between_updates,
+            Some(
+                sc.original_config_do_not_use
+                    .session_memory_tool_calls_between_updates
+            )
         );
         assert_eq!(lock.model, Some(sc.collaboration_mode.model().to_string()));
         assert_eq!(

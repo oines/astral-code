@@ -1,4 +1,6 @@
 #![allow(clippy::expect_used)]
+use codex_config::types::McpServerConfig;
+use codex_config::types::McpServerTransportConfig;
 use codex_core::compact::SUMMARIZATION_PROMPT;
 use codex_core::compact::SUMMARY_PREFIX;
 use codex_core::compact::compact_user_summary_message;
@@ -47,6 +49,7 @@ use core_test_support::responses::mount_response_sequence;
 use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::mount_sse_once_match;
 use core_test_support::responses::mount_sse_sequence;
+use core_test_support::responses::request_tool_names;
 use core_test_support::responses::sse;
 use core_test_support::responses::sse_failed;
 use core_test_support::responses::sse_response;
@@ -54,6 +57,7 @@ use core_test_support::responses::start_mock_server;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 use serde_json::json;
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::sync::atomic::AtomicUsize;
@@ -67,6 +71,9 @@ use wiremock::Respond;
 use wiremock::ResponseTemplate;
 use wiremock::matchers::method;
 use wiremock::matchers::path_regex;
+
+use core_test_support::stdio_server_bin;
+use core_test_support::wait_for_mcp_server;
 // --- Test helpers -----------------------------------------------------------
 
 pub(super) const FIRST_REPLY: &str = "FIRST_REPLY";
@@ -137,6 +144,13 @@ fn summary_with_prefix(summary: &str) -> String {
 
 fn set_test_compact_prompt(config: &mut Config) {
     config.compact_prompt = Some(SUMMARIZATION_PROMPT.to_string());
+}
+
+fn enable_test_session_memory_compact(config: &mut Config) {
+    config.experimental_session_memory_compact = true;
+    config.session_memory_minimum_message_tokens_to_init = 10_000;
+    config.session_memory_minimum_tokens_between_update = 5_000;
+    config.session_memory_tool_calls_between_updates = 3;
 }
 
 fn ev_completed_with_usage(id: &str, input_tokens: i64, output_tokens: i64) -> Value {
@@ -211,11 +225,44 @@ async fn session_memory_sidechain_updates_summary_without_polluting_main_history
 
     let server = start_mock_server().await;
     let model_provider = responses_mock_model_provider(&server);
+    let rmcp_test_server_bin = stdio_server_bin().expect("resolve rmcp test server");
     let mut builder = test_codex().with_config(move |config| {
         config.model_provider = model_provider;
-        config.experimental_session_memory_compact = true;
+        enable_test_session_memory_compact(config);
+        let mut servers = config.mcp_servers.get().clone();
+        servers.insert(
+            "rmcp".to_string(),
+            McpServerConfig {
+                transport: McpServerTransportConfig::Stdio {
+                    command: rmcp_test_server_bin,
+                    args: Vec::new(),
+                    env: None,
+                    env_vars: Vec::new(),
+                    cwd: None,
+                },
+                environment_id: "local".to_string(),
+                enabled: true,
+                required: false,
+                supports_parallel_tool_calls: false,
+                disabled_reason: None,
+                startup_timeout_sec: Some(Duration::from_secs(10)),
+                tool_timeout_sec: None,
+                default_tools_approval_mode: None,
+                enabled_tools: Some(vec!["echo".to_string()]),
+                disabled_tools: None,
+                scopes: None,
+                oauth: None,
+                oauth_resource: None,
+                tools: HashMap::new(),
+            },
+        );
+        config
+            .mcp_servers
+            .set(servers)
+            .expect("test mcp servers should accept any configuration");
     });
     let test = builder.build(&server).await.unwrap();
+    wait_for_mcp_server(&test.codex, "rmcp").await.unwrap();
     let summary_path = test
         .config
         .codex_home
@@ -241,30 +288,54 @@ async fn session_memory_sidechain_updates_summary_without_polluting_main_history
         ),
         ev_completed_with_tokens("r-sidechain-edit", 10_010),
     ]);
-    let sidechain_done = sse(vec![
-        ev_assistant_message("m-sidechain-done", "updated"),
-        ev_completed_with_tokens("r-sidechain-done", 10_020),
-    ]);
     let next_main_turn = sse(vec![
         ev_assistant_message("m-main-2", "next main turn complete"),
         ev_completed_with_tokens("r-main-2", 10_030),
     ]);
-    let mock = mount_sse_sequence(
-        &server,
-        vec![main_turn, sidechain_edit, sidechain_done, next_main_turn],
-    )
-    .await;
+    let mock = mount_sse_sequence(&server, vec![main_turn, sidechain_edit, next_main_turn]).await;
 
     test.submit_turn("first session memory turn").await.unwrap();
-    let requests = wait_for_request_count(&mock, 3).await;
-    assert_eq!(requests.len(), 3);
+    let requests = wait_for_request_count(&mock, 2).await;
+    assert_eq!(requests.len(), 2);
     wait_for_file_contains(
         summary_path.as_path(),
         "User asked the first session-memory test turn.",
     )
     .await;
 
-    let sidechain_request = requests[1].body_json().to_string();
+    let main_body = requests[0].body_json();
+    let sidechain_body = requests[1].body_json();
+    let main_tools_schema = main_body
+        .get("tools")
+        .expect("main request should include tools");
+    let sidechain_tools_schema = sidechain_body
+        .get("tools")
+        .expect("sidechain request should include tools");
+    let main_tools_schema_text = main_tools_schema.to_string();
+    assert!(
+        main_tools_schema_text.contains("rmcp"),
+        "main request should include configured MCP tools or MCP-backed discovery in its tool schema: {main_tools_schema_text}"
+    );
+    assert_eq!(
+        sidechain_tools_schema, main_tools_schema,
+        "sidechain should inherit the main request's complete model-visible tool schema"
+    );
+    assert_eq!(
+        sidechain_body.get("parallel_tool_calls"),
+        main_body.get("parallel_tool_calls"),
+        "sidechain should inherit the main request's parallel tool-call setting"
+    );
+    let sidechain_tools = request_tool_names(&sidechain_body);
+    assert!(
+        sidechain_tools.contains(&"Read".to_string()),
+        "Read must remain model-visible in sidechain so the tool schema stays cache-compatible"
+    );
+    assert!(
+        sidechain_tools.contains(&"Edit".to_string()),
+        "Edit must remain model-visible so the updater can modify summary.md"
+    );
+
+    let sidechain_request = sidechain_body.to_string();
     assert!(
         body_contains_text(
             &sidechain_request,
@@ -291,8 +362,8 @@ async fn session_memory_sidechain_updates_summary_without_polluting_main_history
     );
 
     test.submit_turn("second main turn").await.unwrap();
-    let requests = wait_for_request_count(&mock, 4).await;
-    let next_main_request = requests[3].body_json().to_string();
+    let requests = wait_for_request_count(&mock, 3).await;
+    let next_main_request = requests[2].body_json().to_string();
     assert!(
         !body_contains_text(
             &next_main_request,
@@ -314,7 +385,7 @@ async fn session_memory_sidechain_uses_custom_template_and_prompt() {
     let model_provider = responses_mock_model_provider(&server);
     let mut builder = test_codex().with_config(move |config| {
         config.model_provider = model_provider;
-        config.experimental_session_memory_compact = true;
+        enable_test_session_memory_compact(config);
         config.session_memory_template = Some(
             "# IM State\n_Current IM agent state_\n\n# Bridge Followups\n_Open bridge follow-ups_"
                 .to_string(),
@@ -350,16 +421,12 @@ async fn session_memory_sidechain_uses_custom_template_and_prompt() {
         ),
         ev_completed_with_tokens("r-custom-sidechain-edit", 10_010),
     ]);
-    let sidechain_done = sse(vec![
-        ev_assistant_message("m-custom-sidechain-done", "updated"),
-        ev_completed_with_tokens("r-custom-sidechain-done", 10_020),
-    ]);
-    let mock = mount_sse_sequence(&server, vec![main_turn, sidechain_edit, sidechain_done]).await;
+    let mock = mount_sse_sequence(&server, vec![main_turn, sidechain_edit]).await;
 
     test.submit_turn("first custom session memory turn")
         .await
         .unwrap();
-    let requests = wait_for_request_count(&mock, 3).await;
+    let requests = wait_for_request_count(&mock, 2).await;
     wait_for_file_contains(summary_path.as_path(), "Bridge handoff is active.").await;
 
     let sidechain_request = requests[1].body_json().to_string();
@@ -378,65 +445,6 @@ async fn session_memory_sidechain_uses_custom_template_and_prompt() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn failed_session_memory_sidechain_restores_previous_summary() {
-    skip_if_no_network!();
-
-    let server = start_mock_server().await;
-    let model_provider = responses_mock_model_provider(&server);
-    let mut builder = test_codex().with_config(move |config| {
-        config.model_provider = model_provider;
-        config.experimental_session_memory_compact = true;
-        config.session_memory_template = Some("# Current State".to_string());
-    });
-    let test = builder.build(&server).await.unwrap();
-    let summary_path = test
-        .config
-        .codex_home
-        .join("session-memory")
-        .join(test.session_configured.thread_id.to_string())
-        .join("summary.md");
-    let summary_path_str = summary_path.as_path().to_string_lossy().to_string();
-    let state_path = summary_path.as_path().with_file_name("state.json");
-
-    let main_turn = sse(vec![
-        ev_assistant_message("m-main-before-failed-memory", "main turn complete"),
-        ev_completed_with_tokens("r-main-before-failed-memory", 10_001),
-    ]);
-    let sidechain_edit = sse(vec![
-        ev_function_call(
-            "session-memory-bad-edit",
-            "Edit",
-            &json!({
-                "file_path": summary_path_str,
-                "old_string": "# Current State",
-                "new_string": ""
-            })
-            .to_string(),
-        ),
-        ev_completed_with_tokens("r-sidechain-bad-edit", 10_010),
-    ]);
-    let sidechain_done = sse(vec![
-        ev_assistant_message("m-sidechain-bad-done", "updated"),
-        ev_completed_with_tokens("r-sidechain-bad-done", 10_020),
-    ]);
-    let mock = mount_sse_sequence(&server, vec![main_turn, sidechain_edit, sidechain_done]).await;
-
-    test.submit_turn("first session memory turn").await.unwrap();
-    wait_for_request_count(&mock, 3).await;
-    wait_for_file_contains(&state_path, "session memory summary is missing").await;
-
-    let summary = fs::read_to_string(summary_path.as_path()).expect("summary file exists");
-    assert!(
-        summary.contains("# Current State"),
-        "failed sidechain extraction should restore previous summary"
-    );
-    assert!(
-        !summary.trim().is_empty(),
-        "failed sidechain extraction must not leave a partial summary edit"
-    );
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn session_memory_compact_uses_summary_without_legacy_summarization_request() {
     skip_if_no_network!();
 
@@ -444,7 +452,7 @@ async fn session_memory_compact_uses_summary_without_legacy_summarization_reques
     let model_provider = responses_mock_model_provider(&server);
     let mut builder = test_codex().with_config(move |config| {
         config.model_provider = model_provider;
-        config.experimental_session_memory_compact = true;
+        enable_test_session_memory_compact(config);
     });
     let test = builder.build(&server).await.unwrap();
     let summary_path = test
@@ -473,24 +481,19 @@ async fn session_memory_compact_uses_summary_without_legacy_summarization_reques
         ),
         ev_completed_with_tokens("r-sidechain-compact-edit", 10_010),
     ]);
-    let sidechain_done = sse(vec![
-        ev_assistant_message("m-sidechain-compact-done", "updated"),
-        ev_completed_with_tokens("r-sidechain-compact-done", 10_020),
-    ]);
     let post_compact_turn = sse(vec![
         ev_assistant_message("m-post-session-memory-compact", "after compact"),
         ev_completed_with_tokens("r-post-session-memory-compact", 10_030),
     ]);
-    let mock = mount_sse_sequence(
-        &server,
-        vec![main_turn, sidechain_edit, sidechain_done, post_compact_turn],
-    )
-    .await;
+    let mock =
+        mount_sse_sequence(&server, vec![main_turn, sidechain_edit, post_compact_turn]).await;
 
-    test.submit_turn("session memory compact setup")
-        .await
-        .unwrap();
-    wait_for_request_count(&mock, 3).await;
+    let setup_message = format!(
+        "session memory compact setup\n{}\nSESSION_MEMORY_RAW_TAIL_MARKER",
+        "cache-prefix-token ".repeat(3_000)
+    );
+    test.submit_turn(&setup_message).await.unwrap();
+    wait_for_request_count(&mock, 2).await;
     wait_for_file_contains(&state_path, "\"last_summary_fingerprint\": \"").await;
 
     test.codex.submit(Op::Compact).await.unwrap();
@@ -503,17 +506,17 @@ async fn session_memory_compact_uses_summary_without_legacy_summarization_reques
     test.submit_turn("after session memory compact")
         .await
         .unwrap();
-    let requests = wait_for_request_count(&mock, 4).await;
+    let requests = wait_for_request_count(&mock, 3).await;
     assert_eq!(
         requests.len(),
-        4,
+        3,
         "session-memory compact should not issue a legacy summarization request"
     );
-    let post_compact_body = requests[3].body_json().to_string();
+    let post_compact_body = requests[2].body_json().to_string();
     assert!(
         body_contains_text(
             &post_compact_body,
-            "This session was summarized using the session memory file."
+            "This session is being continued from a previous conversation that ran out of context."
         ),
         "post-compact request should include session-memory summary"
     );
@@ -527,6 +530,21 @@ async fn session_memory_compact_uses_summary_without_legacy_summarization_reques
     assert!(
         !body_contains_text(&post_compact_body, SUMMARIZATION_PROMPT),
         "session-memory compact should not inject the legacy summarization prompt"
+    );
+    let context_index = post_compact_body
+        .find("<environment_context>")
+        .expect("post-compact request should include initial context");
+    let raw_tail_index = post_compact_body
+        .find("SESSION_MEMORY_RAW_TAIL_MARKER")
+        .expect("post-compact request should include preserved raw tail");
+    let summary_index = post_compact_body
+        .find(
+            "This session is being continued from a previous conversation that ran out of context.",
+        )
+        .expect("post-compact request should include session-memory summary");
+    assert!(
+        summary_index < raw_tail_index && raw_tail_index < context_index,
+        "session-memory compact should keep summary before raw tail, then let the next turn reinject initial context"
     );
 }
 

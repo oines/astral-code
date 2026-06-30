@@ -34,6 +34,7 @@ use serde_json::json;
 use crate::client_common::Prompt;
 
 const MAX_PROVIDER_NEUTRAL_SEARCH_LOADED_FUNCTIONS: usize = 64;
+const ANTHROPIC_REASONING_SIGNATURE_PREFIX: &str = "anthropic_signature:";
 
 pub(crate) struct AgentRequestBuildParams<'a> {
     pub(crate) prompt: &'a Prompt,
@@ -246,12 +247,17 @@ fn response_item_to_agent_message(
             id: id.clone(),
         }),
         ResponseItem::Reasoning {
-            summary, content, ..
-        } => reasoning_blocks(summary, content.as_deref()).map(|content| AgentMessage {
-            role: MessageRole::Assistant,
+            summary,
             content,
-            id: None,
-        }),
+            encrypted_content,
+            ..
+        } => reasoning_blocks(summary, content.as_deref(), encrypted_content.as_deref()).map(
+            |content| AgentMessage {
+                role: MessageRole::Assistant,
+                content,
+                id: None,
+            },
+        ),
         ResponseItem::FunctionCall {
             name,
             arguments,
@@ -427,6 +433,7 @@ fn image_source(image_url: &str) -> ImageSource {
 fn reasoning_blocks(
     summary: &[ReasoningItemReasoningSummary],
     content: Option<&[ReasoningItemContent]>,
+    encrypted_content: Option<&str>,
 ) -> Option<Vec<ContentBlock>> {
     let reasoning_text = content
         .into_iter()
@@ -444,9 +451,14 @@ fn reasoning_blocks(
         .join("\n");
 
     (!reasoning_text.is_empty()).then(|| {
+        let signature = encrypted_content.and_then(|content| {
+            content
+                .strip_prefix(ANTHROPIC_REASONING_SIGNATURE_PREFIX)
+                .map(str::to_string)
+        });
         vec![ContentBlock::Reasoning {
             text: reasoning_text,
-            signature: None,
+            signature,
         }]
     })
 }

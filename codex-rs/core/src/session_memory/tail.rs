@@ -1,6 +1,9 @@
 use std::collections::HashSet;
+use std::path::Path;
 
 use crate::Prompt;
+use crate::event_mapping::is_contextual_dev_message_content;
+use crate::event_mapping::is_contextual_user_message_content;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
 use codex_protocol::models::ContentItem;
@@ -11,7 +14,8 @@ use codex_utils_output_truncation::truncate_text;
 
 use super::SessionMemoryState;
 
-pub(crate) const DEFAULT_SUMMARY: &str = r#"# Session Title
+pub(crate) const DEFAULT_SUMMARY: &str = r#"
+# Session Title
 _A short and distinctive 5-10 word descriptive title for the session. Super info dense, no filler_
 
 # Current State
@@ -47,8 +51,6 @@ const MIN_RAW_TAIL_TOKENS: i64 = 10_000;
 const MIN_RAW_TAIL_TEXT_ITEMS: usize = 5;
 const MAX_SESSION_MEMORY_SECTION_TOKENS: usize = 2_000;
 const MAX_SESSION_MEMORY_TOTAL_TOKENS: usize = 12_000;
-const MIN_EXISTING_SUMMARY_TOKENS_FOR_COLLAPSE_GUARD: usize = 2_000;
-const MIN_REWRITTEN_SUMMARY_TOKENS: usize = 500;
 pub(super) const MAX_COMPACT_SUMMARY_BODY_TOKENS: usize = 9_500;
 #[derive(Clone, Debug)]
 pub(super) struct ExtractionBoundary {
@@ -98,7 +100,7 @@ pub(super) fn raw_tail_after_summary_boundary(
         None => items.len(),
     };
     let start = calculate_tail_start(items, start.max(floor), floor);
-    let tail = items[start..].to_vec();
+    let tail = filter_reinjectable_context_items(&items[start..]);
     validate_tail_pairs(&tail)?;
     Ok(tail)
 }
@@ -136,26 +138,38 @@ pub(super) fn validate_post_compact_budget(
     Ok(())
 }
 
-pub(super) fn validate_post_extraction_summary(
-    previous_summary: &str,
-    updated_summary: &str,
-    template: &str,
-) -> CodexResult<()> {
-    validate_summary(updated_summary, template)?;
+fn filter_reinjectable_context_items(items: &[ResponseItem]) -> Vec<ResponseItem> {
+    items
+        .iter()
+        .filter(|item| !is_reinjectable_context_item(item))
+        .cloned()
+        .collect()
+}
 
-    let previous_tokens = approx_token_count(previous_summary);
-    let updated_tokens = approx_token_count(updated_summary);
-    if previous_summary.trim() != template.trim()
-        && previous_tokens >= MIN_EXISTING_SUMMARY_TOKENS_FOR_COLLAPSE_GUARD
-        && updated_tokens < MIN_REWRITTEN_SUMMARY_TOKENS
-        && updated_tokens.saturating_mul(4) < previous_tokens
-    {
-        return Err(CodexErr::Fatal(
-            "session memory extraction collapsed existing summary unexpectedly".to_string(),
-        ));
+fn is_reinjectable_context_item(item: &ResponseItem) -> bool {
+    match item {
+        ResponseItem::Message { role, content, .. } if role == "developer" => {
+            is_contextual_dev_message_content(content)
+        }
+        ResponseItem::Message { role, content, .. } if role == "user" => {
+            is_contextual_user_message_content(content)
+        }
+        ResponseItem::Compaction { .. } | ResponseItem::ContextCompaction { .. } => true,
+        ResponseItem::Message { .. }
+        | ResponseItem::AgentMessage { .. }
+        | ResponseItem::Reasoning { .. }
+        | ResponseItem::LocalShellCall { .. }
+        | ResponseItem::FunctionCall { .. }
+        | ResponseItem::ToolSearchCall { .. }
+        | ResponseItem::FunctionCallOutput { .. }
+        | ResponseItem::ToolSearchOutput { .. }
+        | ResponseItem::CustomToolCall { .. }
+        | ResponseItem::CustomToolCallOutput { .. }
+        | ResponseItem::WebSearchCall { .. }
+        | ResponseItem::ImageGenerationCall { .. }
+        | ResponseItem::CompactionTrigger
+        | ResponseItem::Other => false,
     }
-
-    Ok(())
 }
 
 pub(super) fn truncate_summary_for_compact(summary: &str) -> (String, bool) {
@@ -225,18 +239,56 @@ pub(super) fn summary_budget_reminder(summary: &str) -> String {
 pub(super) fn format_session_memory_summary(
     summary: &str,
     was_truncated_for_compact: bool,
+    transcript_path: Option<&Path>,
+    memory_path: &Path,
 ) -> String {
+    let formatted_summary = format_compact_summary(summary);
     let mut formatted = format!(
-        "This session was summarized using the session memory file. Use it as durable context for the conversation so far.\n\n{}",
-        summary.trim()
+        "This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.\n\n{formatted_summary}"
+    );
+    if let Some(transcript_path) = transcript_path {
+        formatted.push_str(&format!(
+            "\n\nIf you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: {}",
+            transcript_path.display()
+        ));
+    }
+    formatted.push_str("\n\nRecent messages are preserved verbatim.");
+    formatted.push_str(
+        "\nContinue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, do not preface with \"I'll continue\" or similar. Pick up the last task as if the break never happened.",
     );
     if was_truncated_for_compact {
-        formatted.push_str("\n\nSome session memory sections were truncated for compact length. The full session memory file may contain additional detail.");
+        formatted.push_str(&format!(
+            "\n\nSome session memory sections were truncated for length. The full session memory can be viewed at: {}",
+            memory_path.display()
+        ));
     }
-    formatted.push_str(
-        "\n\nRecent raw transcript messages are preserved separately before this session-memory summary when available.",
-    );
     formatted
+}
+
+fn format_compact_summary(summary: &str) -> String {
+    let mut formatted = summary.to_string();
+
+    if let Some(start) = formatted.find("<analysis>")
+        && let Some(end) = formatted[start..].find("</analysis>")
+    {
+        let end = start + end + "</analysis>".len();
+        formatted.replace_range(start..end, "");
+    }
+
+    if let Some(start) = formatted.find("<summary>") {
+        let content_start = start + "<summary>".len();
+        if let Some(end) = formatted[content_start..].find("</summary>") {
+            let content_end = content_start + end;
+            let replacement = format!("Summary:\n{}", formatted[content_start..content_end].trim());
+            formatted.replace_range(start..content_end + "</summary>".len(), &replacement);
+        }
+    }
+
+    while formatted.contains("\n\n\n") {
+        formatted = formatted.replace("\n\n\n", "\n\n");
+    }
+
+    formatted.trim().to_string()
 }
 
 fn calculate_tail_start(items: &[ResponseItem], requested_start: usize, floor: usize) -> usize {

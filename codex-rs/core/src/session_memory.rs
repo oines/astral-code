@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use crate::Prompt;
 use crate::compact::InitialContextInjection;
+use crate::config::Config;
 use crate::context_manager::ContextManager;
 use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
@@ -38,10 +39,11 @@ use tail::validate_tail_budget;
 
 const SUMMARY_FILE_NAME: &str = "summary.md";
 const STATE_FILE_NAME: &str = "state.json";
-const MINIMUM_MESSAGE_TOKENS_TO_INIT: i64 = 10_000;
-const MINIMUM_TOKENS_BETWEEN_UPDATE: i64 = 5_000;
-const TOOL_CALLS_BETWEEN_UPDATES: usize = 3;
+pub(crate) const DEFAULT_MINIMUM_MESSAGE_TOKENS_TO_INIT: i64 = 100_000;
+pub(crate) const DEFAULT_MINIMUM_TOKENS_BETWEEN_UPDATE: i64 = 20_000;
+pub(crate) const DEFAULT_TOOL_CALLS_BETWEEN_UPDATES: usize = 10;
 const EXTRACTION_WAIT_TIMEOUT: Duration = Duration::from_secs(15);
+const EXTRACTION_SHUTDOWN_WAIT_TIMEOUT: Duration = Duration::from_secs(20);
 const EXTRACTION_STALE_AFTER_SECS: u64 = 60;
 const AUTO_COMPACT_FAILURE_BREAKER: u32 = 3;
 
@@ -101,7 +103,7 @@ pub(crate) enum SessionMemoryCompactOutcome {
     Fallback { reason: String },
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 struct SessionMemoryState {
     last_summary_index: Option<usize>,
     last_summary_fingerprint: Option<String>,
@@ -135,9 +137,11 @@ struct SessionMemoryStore {
 
 impl SessionMemoryStore {
     fn new(turn_context: &TurnContext, sess: &Session) -> Self {
-        let thread_key = sess.thread_id().to_string();
-        let dir = turn_context
-            .config
+        Self::for_thread(&turn_context.config, sess.thread_id().to_string())
+    }
+
+    fn for_thread(config: &Config, thread_key: String) -> Self {
+        let dir = config
             .codex_home
             .join("session-memory")
             .join(&thread_key)
@@ -182,6 +186,19 @@ impl SessionMemoryStore {
     }
 }
 
+pub(crate) async fn wait_for_pending_extraction_on_shutdown(sess: &Arc<Session>) {
+    let config = sess.get_config().await;
+    if !config.experimental_session_memory_compact {
+        return;
+    }
+
+    let store = SessionMemoryStore::for_thread(config.as_ref(), sess.thread_id().to_string());
+    if let Err(err) = wait_for_extraction_completion(&store, EXTRACTION_SHUTDOWN_WAIT_TIMEOUT).await
+    {
+        warn!("failed to wait for session memory extraction during shutdown: {err:#}");
+    }
+}
+
 pub(crate) async fn maybe_spawn_post_sampling_extraction(
     sess: Arc<Session>,
     turn_context: Arc<TurnContext>,
@@ -204,7 +221,11 @@ pub(crate) async fn maybe_spawn_post_sampling_extraction(
             return;
         }
     };
-    if !should_extract(&state, &candidate) {
+    if !should_extract(
+        &state,
+        &candidate,
+        ExtractionThresholds::from_config(&turn_context.config),
+    ) {
         return;
     }
 
@@ -303,7 +324,7 @@ async fn try_compact_inner(
     sess: Arc<Session>,
     turn_context: Arc<TurnContext>,
     store: &SessionMemoryStore,
-    initial_context_injection: InitialContextInjection,
+    _initial_context_injection: InitialContextInjection,
     compaction_item: &codex_protocol::items::TurnItem,
     state: &mut SessionMemoryState,
 ) -> CodexResult<String> {
@@ -317,20 +338,14 @@ async fn try_compact_inner(
     validate_tail_budget(&tail)?;
 
     let (summary_for_compact, was_truncated_for_compact) = truncate_summary_for_compact(&summary);
-    let summary_text =
-        format_session_memory_summary(&summary_for_compact, was_truncated_for_compact);
-    let mut new_history = build_session_memory_compacted_history(tail, summary_text.clone());
-
-    if matches!(
-        initial_context_injection,
-        InitialContextInjection::BeforeLastUserMessage
-    ) {
-        let initial_context = sess.build_initial_context(turn_context.as_ref()).await;
-        new_history = crate::compact::insert_initial_context_before_last_real_user_or_summary(
-            new_history,
-            initial_context,
-        );
-    }
+    let transcript_path = sess.current_rollout_path().await.ok().flatten();
+    let summary_text = format_session_memory_summary(
+        &summary_for_compact,
+        was_truncated_for_compact,
+        transcript_path.as_deref(),
+        &store.summary_path,
+    );
+    let new_history = build_session_memory_compacted_history(tail, summary_text.clone());
 
     validate_post_compact_budget(
         &new_history,
@@ -338,15 +353,11 @@ async fn try_compact_inner(
     )?;
     let post_compact_baseline_tool_calls = count_tool_calls(&new_history);
 
-    let reference_context_item = match initial_context_injection {
-        InitialContextInjection::DoNotInject => None,
-        InitialContextInjection::BeforeLastUserMessage => Some(turn_context.to_turn_context_item()),
-    };
     let compacted_item = CompactedItem {
         message: summary_text.clone(),
         replacement_history: Some(new_history.clone()),
     };
-    sess.replace_compacted_history(new_history, reference_context_item, compacted_item)
+    sess.replace_compacted_history(new_history, None, compacted_item)
         .await;
     sess.recompute_token_usage(turn_context.as_ref()).await;
     let post_compact_baseline_tokens = sess.get_total_token_usage().await;
@@ -361,35 +372,57 @@ async fn try_compact_inner(
 }
 
 fn build_session_memory_compacted_history(
-    mut tail: Vec<ResponseItem>,
+    tail: Vec<ResponseItem>,
     summary_text: String,
 ) -> Vec<ResponseItem> {
-    tail.push(ResponseItem::Compaction {
+    let mut history = vec![ResponseItem::Compaction {
         encrypted_content: summary_text,
-    });
-    tail
+    }];
+    history.extend(tail);
+    history
 }
 
-fn should_extract(state: &SessionMemoryState, candidate: &ExtractionCandidate) -> bool {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ExtractionThresholds {
+    minimum_message_tokens_to_init: i64,
+    minimum_tokens_between_update: i64,
+    tool_calls_between_updates: usize,
+}
+
+impl ExtractionThresholds {
+    fn from_config(config: &Config) -> Self {
+        Self {
+            minimum_message_tokens_to_init: config.session_memory_minimum_message_tokens_to_init,
+            minimum_tokens_between_update: config.session_memory_minimum_tokens_between_update,
+            tool_calls_between_updates: config.session_memory_tool_calls_between_updates,
+        }
+    }
+}
+
+fn should_extract(
+    state: &SessionMemoryState,
+    candidate: &ExtractionCandidate,
+    thresholds: ExtractionThresholds,
+) -> bool {
     let total_tokens = candidate
         .active_context_tokens
         .max(estimate_prompt_tokens(&candidate.prompt));
     let tool_calls = count_tool_calls(&candidate.prompt.input);
 
     let Some(last_tokens) = state.last_summary_tokens else {
-        if total_tokens < MINIMUM_MESSAGE_TOKENS_TO_INIT {
+        if total_tokens < thresholds.minimum_message_tokens_to_init {
             return false;
         }
-        return candidate.natural_break || tool_calls >= TOOL_CALLS_BETWEEN_UPDATES;
+        return candidate.natural_break || tool_calls >= thresholds.tool_calls_between_updates;
     };
 
     let token_delta = total_tokens.saturating_sub(last_tokens);
-    if token_delta < MINIMUM_TOKENS_BETWEEN_UPDATE {
+    if token_delta < thresholds.minimum_tokens_between_update {
         return false;
     }
 
     let last_tool_calls = state.last_summary_tool_calls.unwrap_or_default();
-    tool_calls.saturating_sub(last_tool_calls) >= TOOL_CALLS_BETWEEN_UPDATES
+    tool_calls.saturating_sub(last_tool_calls) >= thresholds.tool_calls_between_updates
         || candidate.natural_break
 }
 
@@ -470,6 +503,38 @@ async fn wait_for_running_extraction(
     }
     *state = refreshed;
     Ok(())
+}
+
+async fn wait_for_extraction_completion(
+    store: &SessionMemoryStore,
+    timeout: Duration,
+) -> CodexResult<()> {
+    let result = tokio::time::timeout(timeout, async {
+        loop {
+            let state = store.read_state().await?;
+            if state.extraction_started_at_unix.is_none() {
+                return Ok(());
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await;
+
+    match result {
+        Ok(result) => result,
+        Err(_) => {
+            let mut state = store.read_state().await.unwrap_or_default();
+            if state.extraction_started_at_unix.is_some() {
+                state.extraction_started_at_unix = None;
+                state.last_error =
+                    Some("session memory extraction interrupted during shutdown".to_string());
+                store.write_state(&state).await?;
+            }
+            Err(CodexErr::Fatal(
+                "session memory extraction did not finish before shutdown timeout".to_string(),
+            ))
+        }
+    }
 }
 
 fn now_unix_seconds() -> u64 {
