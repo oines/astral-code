@@ -11,7 +11,8 @@ use std::collections::BTreeMap;
 pub const MULTI_AGENT_V1_NAMESPACE: &str = "multi_agent_v1";
 const MULTI_AGENT_V1_NAMESPACE_DESCRIPTION: &str = "Tools for spawning and managing sub-agents.";
 
-const SPAWN_AGENT_INHERITED_MODEL_GUIDANCE: &str = "Spawned agents inherit your current model by default. Omit `model` to use that preferred default; set `model` only when an explicit override is needed.";
+const SPAWN_AGENT_INHERITED_MODEL_GUIDANCE: &str = "Spawned agents inherit your current provider and model by default. Omit `model_provider` and `model` to use that preferred default; to use a different provider, set both `model_provider` and `model`.";
+const SPAWN_AGENT_PROVIDER_OVERRIDE_DESCRIPTION: &str = "Model provider id override for the new agent. Omit to inherit the parent provider. When overriding the provider, also set `model` to a model from that provider.";
 const SPAWN_AGENT_MODEL_OVERRIDE_DESCRIPTION: &str =
     "Model override for the new agent. Omit unless an explicit override is needed.";
 const SPAWN_AGENT_SERVICE_TIER_OVERRIDE_DESCRIPTION: &str =
@@ -576,6 +577,12 @@ fn spawn_agent_common_properties_v1(agent_type_description: &str) -> BTreeMap<St
             )),
         ),
         (
+            "model_provider".to_string(),
+            JsonSchema::string(Some(
+                SPAWN_AGENT_PROVIDER_OVERRIDE_DESCRIPTION.to_string(),
+            )),
+        ),
+        (
             "model".to_string(),
             JsonSchema::string(Some(
                 SPAWN_AGENT_MODEL_OVERRIDE_DESCRIPTION.to_string(),
@@ -618,6 +625,12 @@ fn spawn_agent_common_properties_v2(agent_type_description: &str) -> BTreeMap<St
             )),
         ),
         (
+            "model_provider".to_string(),
+            JsonSchema::string(Some(
+                SPAWN_AGENT_PROVIDER_OVERRIDE_DESCRIPTION.to_string(),
+            )),
+        ),
+        (
             "model".to_string(),
             JsonSchema::string(Some(
                 SPAWN_AGENT_MODEL_OVERRIDE_DESCRIPTION.to_string(),
@@ -641,6 +654,7 @@ fn spawn_agent_common_properties_v2(agent_type_description: &str) -> BTreeMap<St
 
 fn hide_spawn_agent_metadata_options(properties: &mut BTreeMap<String, JsonSchema>) {
     properties.remove("agent_type");
+    properties.remove("model_provider");
     properties.remove("model");
     properties.remove("reasoning_effort");
     properties.remove("service_tier");
@@ -680,7 +694,7 @@ fn spawn_agent_tool_description(
     format!(
         r#"
         {tool_description}
-This spawn_agent tool provides you access to sub-agents that inherit your current model by default. Do not set the `model` field unless the user explicitly asks for a different model or there is a clear task-specific reason. You should follow the rules and guidelines below to use this tool.
+This spawn_agent tool provides you access to sub-agents that inherit your current provider and model by default. Do not set `model_provider` or `model` unless the user explicitly asks for a different provider/model or there is a clear task-specific reason. You should follow the rules and guidelines below to use this tool.
 
 Only use `spawn_agent` if and only if the user explicitly asks for sub-agents, delegation, or parallel agent work.
 Requests for depth, thoroughness, research, investigation, or detailed codebase analysis do not count as permission to spawn.
@@ -819,7 +833,7 @@ fn spawn_agent_models_description(models: &[ModelPreset]) -> String {
         .collect::<Vec<_>>()
         .join("\n");
     format!(
-        "Available model overrides (optional; inherited parent model is preferred):\n{model_descriptions}"
+        "Available current-provider model overrides (optional; inherited parent provider/model is preferred):\n{model_descriptions}"
     )
 }
 

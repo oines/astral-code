@@ -75,7 +75,7 @@ fn spawn_agent_tool_v2_requires_task_name_and_lists_visible_models() {
     assert!(description.contains(SPAWN_AGENT_INHERITED_MODEL_GUIDANCE));
     assert!(
         description
-            .contains("Available model overrides (optional; inherited parent model is preferred):")
+            .contains("Available current-provider model overrides (optional; inherited parent provider/model is preferred):")
     );
     assert!(description.contains(
         "- `visible-model`: visible description Reasoning efforts: medium (default). Service tiers: priority."
@@ -95,6 +95,12 @@ fn spawn_agent_tool_v2_requires_task_name_and_lists_visible_models() {
     assert_eq!(
         properties.get("agent_type"),
         Some(&JsonSchema::string(Some("role help".to_string())))
+    );
+    assert_eq!(
+        properties
+            .get("model_provider")
+            .and_then(|schema| schema.description.as_deref()),
+        Some(SPAWN_AGENT_PROVIDER_OVERRIDE_DESCRIPTION)
     );
     assert_eq!(
         properties
@@ -133,11 +139,22 @@ fn spawn_agent_tool_v1_keeps_legacy_fork_context_field() {
         panic!("spawn_agent v1 should be a namespace tool");
     };
     assert_eq!(namespace.name, MULTI_AGENT_V1_NAMESPACE);
-    let Some(ResponsesApiNamespaceTool::Function(ResponsesApiTool { parameters, .. })) =
-        namespace.tools.first()
+    let Some(ResponsesApiNamespaceTool::Function(ResponsesApiTool {
+        description,
+        parameters,
+        ..
+    })) = namespace.tools.first()
     else {
         panic!("spawn_agent should be a namespace function tool");
     };
+    assert!(
+        description.contains("inherit your current provider and model by default"),
+        "spawn_agent v1 description should mention provider inheritance: {description:?}"
+    );
+    assert!(
+        description.contains("Do not set `model_provider` or `model`"),
+        "spawn_agent v1 description should guide both provider and model overrides: {description:?}"
+    );
     assert_eq!(
         parameters.schema_type.clone(),
         Some(JsonSchemaType::Single(JsonSchemaPrimitiveType::Object))
@@ -154,6 +171,12 @@ fn spawn_agent_tool_v1_keeps_legacy_fork_context_field() {
             .get("message")
             .and_then(|schema| schema.encrypted),
         None
+    );
+    assert_eq!(
+        properties
+            .get("model_provider")
+            .and_then(|schema| schema.description.as_deref()),
+        Some(SPAWN_AGENT_PROVIDER_OVERRIDE_DESCRIPTION)
     );
     assert_eq!(
         properties
@@ -215,7 +238,7 @@ fn spawn_agent_tool_caps_reasoning_effort_value_length() {
     assert_eq!(
         spawn_agent_models_description(&[model]),
         format!(
-            "Available model overrides (optional; inherited parent model is preferred):\n- `visible-model`: visible description Reasoning efforts: {} (default). Service tiers: priority.",
+            "Available current-provider model overrides (optional; inherited parent provider/model is preferred):\n- `visible-model`: visible description Reasoning efforts: {} (default). Service tiers: priority.",
             "é".repeat(MAX_REASONING_EFFORT_CHARS_IN_SPAWN_AGENT_DESCRIPTION)
         )
     );
@@ -246,11 +269,12 @@ fn spawn_agent_tool_hides_service_tier_with_spawn_metadata() {
         .expect("spawn_agent should use object params");
 
     assert!(!properties.contains_key("agent_type"));
+    assert!(!properties.contains_key("model_provider"));
     assert!(!properties.contains_key("model"));
     assert!(!properties.contains_key("reasoning_effort"));
     assert!(!properties.contains_key("service_tier"));
     assert!(!description.contains(SPAWN_AGENT_INHERITED_MODEL_GUIDANCE));
-    assert!(!description.contains("Available model overrides"));
+    assert!(!description.contains("Available current-provider model overrides"));
 }
 
 #[test]
