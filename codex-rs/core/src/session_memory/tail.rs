@@ -8,9 +8,7 @@ use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
-use codex_utils_output_truncation::TruncationPolicy;
 use codex_utils_output_truncation::approx_token_count;
-use codex_utils_output_truncation::truncate_text;
 
 use super::SessionMemoryState;
 
@@ -51,7 +49,6 @@ const MIN_RAW_TAIL_TOKENS: i64 = 10_000;
 const MIN_RAW_TAIL_TEXT_ITEMS: usize = 5;
 const MAX_SESSION_MEMORY_SECTION_TOKENS: usize = 2_000;
 const MAX_SESSION_MEMORY_TOTAL_TOKENS: usize = 12_000;
-pub(super) const MAX_COMPACT_SUMMARY_BODY_TOKENS: usize = 9_500;
 #[derive(Clone, Debug)]
 pub(super) struct ExtractionBoundary {
     pub(super) index: usize,
@@ -194,18 +191,7 @@ pub(super) fn truncate_summary_for_compact(summary: &str) -> (String, bool) {
     was_truncated |= section.was_truncated;
     output_lines.extend(section.lines);
 
-    let section_bounded = output_lines.join("\n");
-    if approx_token_count(&section_bounded) <= MAX_COMPACT_SUMMARY_BODY_TOKENS {
-        return (section_bounded, was_truncated);
-    }
-
-    (
-        truncate_text(
-            &section_bounded,
-            TruncationPolicy::Tokens(MAX_COMPACT_SUMMARY_BODY_TOKENS),
-        ),
-        true,
-    )
+    (output_lines.join("\n"), was_truncated)
 }
 
 pub(super) fn summary_budget_reminder(summary: &str) -> String {
