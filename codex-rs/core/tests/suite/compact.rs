@@ -94,6 +94,7 @@ const DUMMY_CALL_ID: &str = "call-multi-auto";
 const FUNCTION_CALL_LIMIT_MSG: &str = "function call limit push";
 const POST_AUTO_USER_MSG: &str = "post auto follow-up";
 const PRETURN_CONTEXT_DIFF_CWD: &str = "/tmp/PRETURN_CONTEXT_DIFF_CWD";
+const SESSION_MEMORY_TEST_STACK_SIZE_BYTES: usize = 16 * 1024 * 1024;
 
 pub(super) const COMPACT_WARNING_MESSAGE: &str = "Heads up: Long threads and multiple compactions can cause the model to be less accurate. Start a new thread when possible to keep threads small and targeted.";
 
@@ -219,8 +220,40 @@ fn is_zstd_encoding(value: &str) -> bool {
         .any(|entry| entry.trim().eq_ignore_ascii_case("zstd"))
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn session_memory_sidechain_updates_summary_without_polluting_main_history() {
+fn run_session_memory_test_on_large_stack<F, Fut>(name: &'static str, test: F)
+where
+    F: FnOnce() -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = ()> + 'static,
+{
+    let handle = std::thread::Builder::new()
+        .name(name.to_string())
+        .stack_size(SESSION_MEMORY_TEST_STACK_SIZE_BYTES)
+        .spawn(move || {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .thread_stack_size(SESSION_MEMORY_TEST_STACK_SIZE_BYTES)
+                .enable_all()
+                .build()
+                .expect("build session-memory test runtime");
+            runtime.block_on(test());
+        })
+        .expect("spawn session-memory test thread");
+
+    match handle.join() {
+        Ok(()) => {}
+        Err(payload) => std::panic::resume_unwind(payload),
+    }
+}
+
+#[test]
+fn session_memory_sidechain_updates_summary_without_polluting_main_history() {
+    run_session_memory_test_on_large_stack(
+        "session_memory_sidechain_updates_summary_without_polluting_main_history",
+        session_memory_sidechain_updates_summary_without_polluting_main_history_impl,
+    );
+}
+
+async fn session_memory_sidechain_updates_summary_without_polluting_main_history_impl() {
     skip_if_no_network!();
 
     let server = start_mock_server().await;
@@ -377,8 +410,15 @@ async fn session_memory_sidechain_updates_summary_without_polluting_main_history
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn session_memory_sidechain_uses_custom_template_and_prompt() {
+#[test]
+fn session_memory_sidechain_uses_custom_template_and_prompt() {
+    run_session_memory_test_on_large_stack(
+        "session_memory_sidechain_uses_custom_template_and_prompt",
+        session_memory_sidechain_uses_custom_template_and_prompt_impl,
+    );
+}
+
+async fn session_memory_sidechain_uses_custom_template_and_prompt_impl() {
     skip_if_no_network!();
 
     let server = start_mock_server().await;
@@ -444,8 +484,15 @@ async fn session_memory_sidechain_uses_custom_template_and_prompt() {
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn session_memory_compact_uses_summary_without_legacy_summarization_request() {
+#[test]
+fn session_memory_compact_uses_summary_without_legacy_summarization_request() {
+    run_session_memory_test_on_large_stack(
+        "session_memory_compact_uses_summary_without_legacy_summarization_request",
+        session_memory_compact_uses_summary_without_legacy_summarization_request_impl,
+    );
+}
+
+async fn session_memory_compact_uses_summary_without_legacy_summarization_request_impl() {
     skip_if_no_network!();
 
     let server = start_mock_server().await;
