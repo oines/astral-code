@@ -114,6 +114,8 @@ fn save_session_resolved_fields(sc: &SessionConfiguration, lock_config: &mut Con
     lock_config.developer_instructions = sc.developer_instructions.clone();
     lock_config.compact_prompt = sc.compact_prompt.clone();
     lock_config.compact_continuation_prompt = sc.compact_continuation_prompt.clone();
+    lock_config.session_memory_template = sc.session_memory_template.clone();
+    lock_config.session_memory_update_prompt = sc.session_memory_update_prompt.clone();
     lock_config.personality = sc.personality;
     lock_config.approval_policy = Some(sc.approval_policy.value());
     lock_config.approvals_reviewer = Some(sc.approvals_reviewer);
@@ -138,6 +140,12 @@ fn save_config_resolved_fields(
         Some(config.include_collaboration_mode_instructions);
     lock_config.include_environment_context = Some(config.include_environment_context);
     lock_config.background_terminal_max_timeout = Some(config.background_terminal_max_timeout);
+    lock_config.session_memory_minimum_message_tokens_to_init =
+        Some(config.session_memory_minimum_message_tokens_to_init);
+    lock_config.session_memory_minimum_tokens_between_update =
+        Some(config.session_memory_minimum_tokens_between_update);
+    lock_config.session_memory_tool_calls_between_updates =
+        Some(config.session_memory_tool_calls_between_updates);
 
     // Feature aliases and feature configs need to be written in their resolved
     // form; otherwise replay can drift when a legacy key maps to the same
@@ -188,6 +196,8 @@ fn drop_lockfile_inputs(lock_config: &mut ConfigToml) {
     clear_config_lock_debug_controls(lock_config);
     lock_config.model_instructions_file = None;
     lock_config.experimental_compact_prompt_file = None;
+    lock_config.experimental_session_memory_template_file = None;
+    lock_config.experimental_session_memory_update_prompt_file = None;
     lock_config.model_catalog_json = None;
     lock_config.sandbox_mode = None;
     lock_config.sandbox_workspace_write = None;
@@ -219,6 +229,8 @@ mod tests {
         sc.developer_instructions = Some("resolved developer instructions".to_string());
         sc.compact_prompt = Some("resolved compact prompt".to_string());
         sc.compact_continuation_prompt = Some("resolved compact continuation prompt".to_string());
+        sc.session_memory_template = Some("resolved session memory template".to_string());
+        sc.session_memory_update_prompt = Some("resolved session memory update prompt".to_string());
 
         let lockfile = sc.to_config_lockfile_toml().expect("lock should serialize");
         let lock = &lockfile.config;
@@ -229,6 +241,32 @@ mod tests {
         assert_eq!(
             lock.compact_continuation_prompt,
             sc.compact_continuation_prompt
+        );
+        assert_eq!(lock.session_memory_template, sc.session_memory_template);
+        assert_eq!(
+            lock.session_memory_update_prompt,
+            sc.session_memory_update_prompt
+        );
+        assert_eq!(
+            lock.session_memory_minimum_message_tokens_to_init,
+            Some(
+                sc.original_config_do_not_use
+                    .session_memory_minimum_message_tokens_to_init
+            )
+        );
+        assert_eq!(
+            lock.session_memory_minimum_tokens_between_update,
+            Some(
+                sc.original_config_do_not_use
+                    .session_memory_minimum_tokens_between_update
+            )
+        );
+        assert_eq!(
+            lock.session_memory_tool_calls_between_updates,
+            Some(
+                sc.original_config_do_not_use
+                    .session_memory_tool_calls_between_updates
+            )
         );
         assert_eq!(lock.model, Some(sc.collaboration_mode.model().to_string()));
         assert_eq!(
@@ -297,6 +335,8 @@ mod tests {
         sc.developer_instructions = Some("catalog developer instructions".to_string());
         sc.compact_prompt = Some("catalog compact prompt".to_string());
         sc.compact_continuation_prompt = Some("catalog compact continuation prompt".to_string());
+        sc.session_memory_template = Some("catalog session memory template".to_string());
+        sc.session_memory_update_prompt = Some("catalog session memory update prompt".to_string());
         sc.service_tier = Some("flex".to_string());
 
         let lockfile = sc.to_config_lockfile_toml().expect("lock should serialize");
@@ -310,6 +350,8 @@ mod tests {
         assert_eq!(lock.developer_instructions, None);
         assert_eq!(lock.compact_prompt, None);
         assert_eq!(lock.compact_continuation_prompt, None);
+        assert_eq!(lock.session_memory_template, None);
+        assert_eq!(lock.session_memory_update_prompt, None);
         assert_eq!(lock.personality, None);
         assert_eq!(lock.approval_policy, None);
         assert_eq!(lock.approvals_reviewer, None);

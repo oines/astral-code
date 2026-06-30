@@ -117,6 +117,7 @@ enum BlockState {
     Reasoning {
         id: String,
         text: String,
+        signature: Option<String>,
     },
     ToolUse {
         id: String,
@@ -189,13 +190,14 @@ impl AgentStreamMapper {
                     phase: None,
                 }));
             }
-            ContentBlock::Reasoning { text, .. } => {
+            ContentBlock::Reasoning { text, signature } => {
                 let id = block_item_id("agent-reasoning", index);
                 self.blocks.insert(
                     index,
                     BlockState::Reasoning {
                         id: id.clone(),
                         text: text.clone(),
+                        signature,
                     },
                 );
                 events.push(ResponseEvent::OutputItemAdded(ResponseItem::Reasoning {
@@ -259,6 +261,7 @@ impl AgentStreamMapper {
                 if let Some(BlockState::Reasoning {
                     id: _,
                     text: existing,
+                    signature: _,
                 }) = self.blocks.get_mut(&index)
                 {
                     existing.push_str(&text);
@@ -267,6 +270,17 @@ impl AgentStreamMapper {
                     delta: text,
                     content_index: index_as_i64(index)?,
                 });
+            }
+            ContentDelta::ReasoningSignature { signature } => {
+                self.ensure_reasoning_block(index, events);
+                if let Some(BlockState::Reasoning {
+                    id: _,
+                    text: _,
+                    signature: existing,
+                }) = self.blocks.get_mut(&index)
+                {
+                    *existing = Some(signature);
+                }
             }
             ContentDelta::ToolInputJson { partial_json } => {
                 let Some(BlockState::ToolUse { id, arguments, .. }) = self.blocks.get_mut(&index)
@@ -341,14 +355,17 @@ fn block_state_to_output_item_done(block: BlockState) -> ResponseEvent {
             content: vec![ContentItem::OutputText { text }],
             phase: None,
         }),
-        BlockState::Reasoning { id, text } => {
-            ResponseEvent::OutputItemDone(ResponseItem::Reasoning {
-                id,
-                summary: Vec::new(),
-                content: Some(vec![ReasoningItemContent::ReasoningText { text }]),
-                encrypted_content: None,
-            })
-        }
+        BlockState::Reasoning {
+            id,
+            text,
+            signature,
+        } => ResponseEvent::OutputItemDone(ResponseItem::Reasoning {
+            id,
+            summary: Vec::new(),
+            content: Some(vec![ReasoningItemContent::ReasoningText { text }]),
+            encrypted_content: signature
+                .map(|signature| format!("anthropic_signature:{signature}")),
+        }),
         BlockState::ToolUse {
             id,
             name,

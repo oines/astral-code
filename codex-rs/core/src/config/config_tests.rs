@@ -5173,6 +5173,7 @@ async fn anthropic_cached_fold_defaults_off_and_honors_config() -> std::io::Resu
     )
     .await?;
     assert!(!config.experimental_anthropic_cached_fold);
+    assert!(!config.experimental_session_memory_compact);
 
     let codex_home = TempDir::new()?;
     let cfg = ConfigToml {
@@ -5186,6 +5187,22 @@ async fn anthropic_cached_fold_defaults_off_and_honors_config() -> std::io::Resu
     )
     .await?;
     assert!(config.experimental_anthropic_cached_fold);
+    assert!(!config.experimental_session_memory_compact);
+
+    let codex_home = TempDir::new()?;
+    let cfg = ConfigToml {
+        experimental_anthropic_cached_fold: Some(true),
+        experimental_session_memory_compact: Some(true),
+        ..Default::default()
+    };
+    let config = Config::load_from_base_config_with_overrides(
+        cfg,
+        ConfigOverrides::default(),
+        codex_home.abs(),
+    )
+    .await?;
+    assert!(!config.experimental_anthropic_cached_fold);
+    assert!(config.experimental_session_memory_compact);
 
     Ok(())
 }
@@ -6698,6 +6715,91 @@ async fn loads_compact_prompt_from_file() -> std::io::Result<()> {
         config.compact_prompt.as_deref(),
         Some("summarize differently")
     );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn loads_session_memory_prompts_from_config_and_files() -> std::io::Result<()> {
+    let codex_home = TempDir::new()?;
+    let workspace = codex_home.path().join("workspace");
+    std::fs::create_dir_all(&workspace)?;
+
+    let template_path = workspace.join("session_memory_template.md");
+    std::fs::write(&template_path, "# File Template\n_file template_")?;
+    let prompt_path = workspace.join("session_memory_prompt.md");
+    std::fs::write(
+        &prompt_path,
+        "  update {{notesPath}} with {{currentNotes}}  ",
+    )?;
+
+    let cfg = ConfigToml {
+        session_memory_template: Some("  # Inline Template\n_inline template_  ".to_string()),
+        experimental_session_memory_template_file: Some(template_path.abs()),
+        experimental_session_memory_update_prompt_file: Some(prompt_path.abs()),
+        ..Default::default()
+    };
+
+    let overrides = ConfigOverrides {
+        cwd: Some(workspace),
+        ..Default::default()
+    };
+
+    let config =
+        Config::load_from_base_config_with_overrides(cfg, overrides, codex_home.abs()).await?;
+
+    assert_eq!(
+        config.session_memory_template.as_deref(),
+        Some("# Inline Template\n_inline template_")
+    );
+    assert_eq!(
+        config.session_memory_update_prompt.as_deref(),
+        Some("update {{notesPath}} with {{currentNotes}}")
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn loads_session_memory_extraction_thresholds_from_config() -> std::io::Result<()> {
+    let codex_home = TempDir::new()?;
+    let config = Config::load_from_base_config_with_overrides(
+        ConfigToml::default(),
+        ConfigOverrides::default(),
+        codex_home.abs(),
+    )
+    .await?;
+
+    assert_eq!(
+        config.session_memory_minimum_message_tokens_to_init,
+        crate::session_memory::DEFAULT_MINIMUM_MESSAGE_TOKENS_TO_INIT
+    );
+    assert_eq!(
+        config.session_memory_minimum_tokens_between_update,
+        crate::session_memory::DEFAULT_MINIMUM_TOKENS_BETWEEN_UPDATE
+    );
+    assert_eq!(
+        config.session_memory_tool_calls_between_updates,
+        crate::session_memory::DEFAULT_TOOL_CALLS_BETWEEN_UPDATES
+    );
+
+    let codex_home = TempDir::new()?;
+    let cfg = ConfigToml {
+        session_memory_minimum_message_tokens_to_init: Some(12_345),
+        session_memory_minimum_tokens_between_update: Some(6_789),
+        session_memory_tool_calls_between_updates: Some(4),
+        ..Default::default()
+    };
+    let config = Config::load_from_base_config_with_overrides(
+        cfg,
+        ConfigOverrides::default(),
+        codex_home.abs(),
+    )
+    .await?;
+
+    assert_eq!(config.session_memory_minimum_message_tokens_to_init, 12_345);
+    assert_eq!(config.session_memory_minimum_tokens_between_update, 6_789);
+    assert_eq!(config.session_memory_tool_calls_between_updates, 4);
 
     Ok(())
 }

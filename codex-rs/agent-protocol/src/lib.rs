@@ -241,6 +241,7 @@ pub enum AgentStreamEvent {
 pub enum ContentDelta {
     Text { text: String },
     Reasoning { text: String },
+    ReasoningSignature { signature: String },
     ToolInputJson { partial_json: String },
 }
 

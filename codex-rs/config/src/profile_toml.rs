@@ -49,12 +49,23 @@ pub struct ConfigProfile {
     #[schemars(skip)]
     pub js_repl_node_module_dirs: Option<Vec<AbsolutePathBuf>>,
     pub experimental_compact_prompt_file: Option<AbsolutePathBuf>,
+    pub session_memory_template: Option<String>,
+    pub session_memory_update_prompt: Option<String>,
+    #[schemars(range(min = 1))]
+    pub session_memory_minimum_message_tokens_to_init: Option<i64>,
+    #[schemars(range(min = 1))]
+    pub session_memory_minimum_tokens_between_update: Option<i64>,
+    #[schemars(range(min = 1))]
+    pub session_memory_tool_calls_between_updates: Option<usize>,
+    pub experimental_session_memory_template_file: Option<AbsolutePathBuf>,
+    pub experimental_session_memory_update_prompt_file: Option<AbsolutePathBuf>,
     pub include_permissions_instructions: Option<bool>,
     pub include_apps_instructions: Option<bool>,
     pub include_collaboration_mode_instructions: Option<bool>,
     pub include_environment_context: Option<bool>,
     pub experimental_use_unified_exec_tool: Option<bool>,
     pub experimental_anthropic_cached_fold: Option<bool>,
+    pub experimental_session_memory_compact: Option<bool>,
     pub tools: Option<ToolsToml>,
     pub web_search: Option<WebSearchMode>,
     pub analytics: Option<AnalyticsConfigToml>,

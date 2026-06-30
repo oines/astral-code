@@ -249,6 +249,54 @@ fn build_agent_request_maps_prompt_history_tools_and_metadata() {
 }
 
 #[test]
+fn build_agent_request_restores_anthropic_reasoning_signature() {
+    let prompt = Prompt {
+        input: vec![ResponseItem::Reasoning {
+            id: "rs-1".to_string(),
+            summary: Vec::new(),
+            content: Some(vec![ReasoningItemContent::ReasoningText {
+                text: "I should update the memory file.".to_string(),
+            }]),
+            encrypted_content: Some("anthropic_signature:sig_opaque".to_string()),
+        }],
+        tools: Vec::new(),
+        parallel_tool_calls: false,
+        base_instructions: codex_protocol::models::BaseInstructions {
+            text: String::new(),
+        },
+        personality: None,
+        output_schema: None,
+        output_schema_strict: false,
+        compact_input_placeholders: false,
+    };
+
+    let request = build_agent_request(AgentRequestBuildParams {
+        prompt: &prompt,
+        model_info: &test_model_info(/*supports_reasoning_summaries*/ false),
+        effort: None,
+        summary: ReasoningSummaryConfig::None,
+        service_tier: None,
+        prompt_cache_key: "cache-key".to_string(),
+        provider_request_body: None,
+        provider_request_body_remove: Vec::new(),
+        provider_flavor: None,
+    })
+    .expect("build agent request");
+
+    assert_eq!(
+        request.messages,
+        vec![AgentMessage {
+            role: MessageRole::Assistant,
+            content: vec![ContentBlock::Reasoning {
+                text: "I should update the memory file.".to_string(),
+                signature: Some("sig_opaque".to_string()),
+            }],
+            id: None,
+        }]
+    );
+}
+
+#[test]
 fn build_agent_request_loads_recent_tool_search_results() {
     let prompt = Prompt {
         input: vec![ResponseItem::ToolSearchOutput {

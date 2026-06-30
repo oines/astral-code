@@ -81,6 +81,8 @@ pub struct TurnContext {
     pub(crate) developer_instructions: Option<String>,
     pub(crate) compact_prompt: Option<String>,
     pub(crate) compact_continuation_prompt: Option<String>,
+    pub(crate) session_memory_template: Option<String>,
+    pub(crate) session_memory_update_prompt: Option<String>,
     pub(crate) user_instructions: Option<String>,
     pub(crate) collaboration_mode: CollaborationMode,
     pub(crate) multi_agent_version: MultiAgentVersion,
@@ -241,6 +243,8 @@ impl TurnContext {
             developer_instructions: self.developer_instructions.clone(),
             compact_prompt: self.compact_prompt.clone(),
             compact_continuation_prompt: self.compact_continuation_prompt.clone(),
+            session_memory_template: self.session_memory_template.clone(),
+            session_memory_update_prompt: self.session_memory_update_prompt.clone(),
             user_instructions: self.user_instructions.clone(),
             collaboration_mode,
             multi_agent_version: self.multi_agent_version,
@@ -335,6 +339,12 @@ impl TurnContext {
 
     pub(crate) fn compact_continuation_prompt(&self) -> Option<&str> {
         self.compact_continuation_prompt.as_deref()
+    }
+
+    pub(crate) fn session_memory_template(&self) -> &str {
+        self.session_memory_template
+            .as_deref()
+            .unwrap_or(crate::session_memory::DEFAULT_SUMMARY)
     }
 
     pub(crate) fn to_turn_context_item(&self) -> TurnContextItem {
@@ -555,6 +565,10 @@ impl Session {
             developer_instructions: session_configuration.developer_instructions.clone(),
             compact_prompt: session_configuration.compact_prompt.clone(),
             compact_continuation_prompt: session_configuration.compact_continuation_prompt.clone(),
+            session_memory_template: session_configuration.session_memory_template.clone(),
+            session_memory_update_prompt: session_configuration
+                .session_memory_update_prompt
+                .clone(),
             user_instructions: session_configuration
                 .user_instructions
                 .as_ref()

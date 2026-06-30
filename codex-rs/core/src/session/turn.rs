@@ -234,6 +234,7 @@ pub(crate) async fn run_turn(
                 let SamplingRequestResult {
                     needs_follow_up: model_needs_follow_up,
                     last_agent_message: sampling_request_last_agent_message,
+                    session_memory_prompt_template,
                 } = sampling_request_output;
                 can_drain_pending_input = true;
                 let has_pending_input = sess.input_queue.has_pending_input(&sess.active_turn).await;
@@ -262,6 +263,23 @@ pub(crate) async fn run_turn(
                     needs_follow_up,
                     "post sampling token usage"
                 );
+
+                if let Some(template) = session_memory_prompt_template {
+                    let history = sess.clone_history().await;
+                    let candidate = crate::session_memory::ExtractionCandidate::from_history(
+                        template,
+                        history,
+                        &turn_context.model_info.input_modalities,
+                        token_status.active_context_tokens,
+                        !needs_follow_up,
+                    );
+                    crate::session_memory::maybe_spawn_post_sampling_extraction(
+                        Arc::clone(&sess),
+                        Arc::clone(&turn_context),
+                        candidate,
+                    )
+                    .await;
+                }
 
                 // as long as compaction works well in getting us way below the token limit, we shouldn't worry about being in an infinite loop.
                 if token_limit_reached && needs_follow_up {
@@ -990,7 +1008,11 @@ async fn run_sampling_request(
         )
         .await
         {
-            Ok(output) => {
+            Ok(mut output) => {
+                if turn_context.config.experimental_session_memory_compact {
+                    output.session_memory_prompt_template =
+                        Some(crate::session_memory::PromptTemplate::from_prompt(&prompt));
+                }
                 return Ok(output);
             }
             Err(CodexErr::ContextWindowExceeded) => {
@@ -1142,6 +1164,7 @@ pub(crate) async fn built_tools(
 struct SamplingRequestResult {
     needs_follow_up: bool,
     last_agent_message: Option<String>,
+    session_memory_prompt_template: Option<crate::session_memory::PromptTemplate>,
 }
 
 /// Ephemeral per-response state for streaming a single proposed plan.
@@ -1903,6 +1926,7 @@ async fn try_run_sampling_request(
                     break Ok(SamplingRequestResult {
                         needs_follow_up: true,
                         last_agent_message,
+                        session_memory_prompt_template: None,
                     });
                 }
             }
@@ -2042,6 +2066,7 @@ async fn try_run_sampling_request(
                 break Ok(SamplingRequestResult {
                     needs_follow_up,
                     last_agent_message,
+                    session_memory_prompt_template: None,
                 });
             }
             ResponseEvent::OutputTextDelta(delta) => {

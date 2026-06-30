@@ -201,6 +201,26 @@ pub struct ConfigToml {
     /// Continuation prompt appended after automatic history compaction.
     pub compact_continuation_prompt: Option<String>,
 
+    /// Template used when creating a new experimental session-memory summary.
+    pub session_memory_template: Option<String>,
+
+    /// Prompt used by the experimental session-memory sidechain updater.
+    pub session_memory_update_prompt: Option<String>,
+
+    /// Minimum context-window tokens before initializing experimental session
+    /// memory extraction.
+    #[schemars(range(min = 1))]
+    pub session_memory_minimum_message_tokens_to_init: Option<i64>,
+
+    /// Minimum context-window token growth between experimental session-memory
+    /// updates.
+    #[schemars(range(min = 1))]
+    pub session_memory_minimum_tokens_between_update: Option<i64>,
+
+    /// Minimum number of tool calls between experimental session-memory updates.
+    #[schemars(range(min = 1))]
+    pub session_memory_tool_calls_between_updates: Option<usize>,
+
     /// Preferred backend for storing CLI auth credentials.
     /// file (default): Use a file in the Astral home directory.
     /// keyring: Use an OS-specific keyring service.
@@ -455,10 +475,15 @@ pub struct ConfigToml {
     pub notice: Option<Notice>,
 
     pub experimental_compact_prompt_file: Option<AbsolutePathBuf>,
+    pub experimental_session_memory_template_file: Option<AbsolutePathBuf>,
+    pub experimental_session_memory_update_prompt_file: Option<AbsolutePathBuf>,
     pub experimental_use_unified_exec_tool: Option<bool>,
     /// Experimental / do not use. Enables Anthropic Messages-only cached
     /// tool-result folding when the active wire API is Anthropic Messages.
     pub experimental_anthropic_cached_fold: Option<bool>,
+    /// Experimental / do not use. Enables Claude Code-style session-memory
+    /// background compaction.
+    pub experimental_session_memory_compact: Option<bool>,
     /// Preferred OSS provider for local models, e.g. "lmstudio" or "ollama".
     pub oss_provider: Option<String>,
 }
