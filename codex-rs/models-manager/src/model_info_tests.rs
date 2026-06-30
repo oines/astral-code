@@ -90,6 +90,34 @@ fn unknown_model_does_not_guess_context_window() {
 }
 
 #[test]
+fn unknown_model_uses_short_astral_prompt() {
+    let model = model_info_from_slug("unknown-model");
+
+    assert!(
+        model
+            .base_instructions
+            .starts_with(DEFAULT_PERSONALITY_HEADER)
+    );
+    assert!(
+        model
+            .base_instructions
+            .contains("Use Astral's native tool surface naturally:")
+    );
+    assert!(
+        model
+            .base_instructions
+            .contains("Use the available subagent or multi-agent tools")
+    );
+    assert!(!model.base_instructions.contains("Claude-ish"));
+    assert!(!model.base_instructions.contains("Codex subagent"));
+    assert!(
+        !model
+            .base_instructions
+            .contains("You are a coding agent running in astral-code")
+    );
+}
+
+#[test]
 fn model_input_modalities_override_sets_declared_capabilities() {
     let model = model_info_from_slug("unknown-model");
     let config = ModelsManagerConfig {

@@ -173,15 +173,27 @@ fn raw_tail_expands_before_boundary_to_keep_context() {
 
 #[test]
 fn compact_summary_truncates_overlarge_sections() {
-    let summary =
-        summary_with_current_state(&"token ".repeat(tail::MAX_COMPACT_SUMMARY_BODY_TOKENS * 2));
+    let summary = summary_with_current_state(&"token ".repeat(5_000));
 
     validate_summary(&summary, tail::DEFAULT_SUMMARY).expect("summary can still be extracted");
     let (truncated, was_truncated) = truncate_summary_for_compact(&summary);
 
     assert!(was_truncated);
     assert!(truncated.contains("[... section truncated for length ...]"));
-    assert!(approx_token_count(&truncated) <= tail::MAX_COMPACT_SUMMARY_BODY_TOKENS);
+}
+
+#[test]
+fn compact_summary_does_not_apply_total_body_cap() {
+    let sections = (0..10)
+        .map(|index| format!("# Section {index}\n{}\n", "x ".repeat(3_000)))
+        .collect::<String>();
+    let summary = format!("{sections}\n# Final Section\nFINAL_SESSION_MEMORY_MARKER");
+
+    let (truncated, was_truncated) = truncate_summary_for_compact(&summary);
+
+    assert!(!was_truncated);
+    assert!(approx_token_count(&truncated) > 9_500);
+    assert!(truncated.contains("FINAL_SESSION_MEMORY_MARKER"));
 }
 
 #[test]
@@ -397,7 +409,7 @@ fn prompt_variable_substitution_is_single_pass() {
 fn updater_prompt_includes_full_current_notes_for_condensation() {
     let current_notes = format!(
         "start\n{}\nFINAL_SESSION_MEMORY_MARKER",
-        "token ".repeat(tail::MAX_COMPACT_SUMMARY_BODY_TOKENS * 2)
+        "token ".repeat(20_000)
     );
     let prompt = super::sidechain::updater_prompt(
         None,

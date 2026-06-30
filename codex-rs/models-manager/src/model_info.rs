@@ -121,8 +121,10 @@ pub(crate) fn model_info_from_slug_with_warning(slug: &str, warn: bool) -> Model
 fn local_personality_messages_for_slug(slug: &str) -> Option<ModelMessages> {
     match slug {
         "gpt-5.2-codex" | "exp-codex-personality" => Some(ModelMessages {
-            instructions_template: Some(format!(
-                "{DEFAULT_PERSONALITY_HEADER}\n\n{PERSONALITY_PLACEHOLDER}\n\n{BASE_INSTRUCTIONS}"
+            instructions_template: Some(BASE_INSTRUCTIONS.replacen(
+                DEFAULT_PERSONALITY_HEADER,
+                &format!("{DEFAULT_PERSONALITY_HEADER}\n\n{PERSONALITY_PLACEHOLDER}"),
+                /*count*/ 1,
             )),
             instructions_variables: Some(ModelInstructionsVariables {
                 personality_default: Some(String::new()),
