@@ -11,12 +11,12 @@ use std::collections::BTreeMap;
 pub const MULTI_AGENT_V1_NAMESPACE: &str = "multi_agent_v1";
 const MULTI_AGENT_V1_NAMESPACE_DESCRIPTION: &str = "Tools for spawning and managing sub-agents.";
 
-const SPAWN_AGENT_INHERITED_MODEL_GUIDANCE: &str = "Spawned agents inherit your current model by default. Omit `model` to use that preferred default; set `model` only when an explicit override is needed.";
+const SPAWN_AGENT_INHERITED_MODEL_GUIDANCE: &str = "Spawned agents inherit your current provider and model by default. Omit `model_provider` and `model` to use that preferred default; to use a different provider, choose both `model_provider` and `model` from the provider/model table. If setting `reasoning_effort`, choose a value listed for the target model.";
+const SPAWN_AGENT_PROVIDER_OVERRIDE_DESCRIPTION: &str = "Model provider id override for the new agent. Omit to inherit the parent provider. When overriding the provider, also set `model` to a model from that provider.";
 const SPAWN_AGENT_MODEL_OVERRIDE_DESCRIPTION: &str =
     "Model override for the new agent. Omit unless an explicit override is needed.";
 const SPAWN_AGENT_SERVICE_TIER_OVERRIDE_DESCRIPTION: &str =
     "Service tier override for the new agent. Omit unless explicitly requested.";
-const MAX_MODEL_OVERRIDES_IN_SPAWN_AGENT_DESCRIPTION: usize = 5;
 const MAX_REASONING_EFFORT_CHARS_IN_SPAWN_AGENT_DESCRIPTION: usize = 64;
 
 #[derive(Debug, Clone, Default)]
@@ -576,6 +576,12 @@ fn spawn_agent_common_properties_v1(agent_type_description: &str) -> BTreeMap<St
             )),
         ),
         (
+            "model_provider".to_string(),
+            JsonSchema::string(Some(
+                SPAWN_AGENT_PROVIDER_OVERRIDE_DESCRIPTION.to_string(),
+            )),
+        ),
+        (
             "model".to_string(),
             JsonSchema::string(Some(
                 SPAWN_AGENT_MODEL_OVERRIDE_DESCRIPTION.to_string(),
@@ -584,7 +590,7 @@ fn spawn_agent_common_properties_v1(agent_type_description: &str) -> BTreeMap<St
         (
             "reasoning_effort".to_string(),
             JsonSchema::string(Some(
-                "Reasoning effort override for the new agent. Omit to inherit the parent effort."
+                "Reasoning effort override for the new agent. Choose a value listed for the target model in the provider/model table; omit to use the inherited or target-model default effort."
                     .to_string(),
             )),
         ),
@@ -618,6 +624,12 @@ fn spawn_agent_common_properties_v2(agent_type_description: &str) -> BTreeMap<St
             )),
         ),
         (
+            "model_provider".to_string(),
+            JsonSchema::string(Some(
+                SPAWN_AGENT_PROVIDER_OVERRIDE_DESCRIPTION.to_string(),
+            )),
+        ),
+        (
             "model".to_string(),
             JsonSchema::string(Some(
                 SPAWN_AGENT_MODEL_OVERRIDE_DESCRIPTION.to_string(),
@@ -626,7 +638,7 @@ fn spawn_agent_common_properties_v2(agent_type_description: &str) -> BTreeMap<St
         (
             "reasoning_effort".to_string(),
             JsonSchema::string(Some(
-                "Reasoning effort override for the new agent. Omit to inherit the parent effort."
+                "Reasoning effort override for the new agent. Choose a value listed for the target model in the provider/model table; omit to use the inherited or target-model default effort."
                     .to_string(),
             )),
         ),
@@ -641,6 +653,7 @@ fn spawn_agent_common_properties_v2(agent_type_description: &str) -> BTreeMap<St
 
 fn hide_spawn_agent_metadata_options(properties: &mut BTreeMap<String, JsonSchema>) {
     properties.remove("agent_type");
+    properties.remove("model_provider");
     properties.remove("model");
     properties.remove("reasoning_effort");
     properties.remove("service_tier");
@@ -680,7 +693,7 @@ fn spawn_agent_tool_description(
     format!(
         r#"
         {tool_description}
-This spawn_agent tool provides you access to sub-agents that inherit your current model by default. Do not set the `model` field unless the user explicitly asks for a different model or there is a clear task-specific reason. You should follow the rules and guidelines below to use this tool.
+This spawn_agent tool provides you access to sub-agents that inherit your current provider and model by default. Do not set `model_provider` or `model` unless the user explicitly asks for a different provider/model or there is a clear task-specific reason. You should follow the rules and guidelines below to use this tool.
 
 Only use `spawn_agent` if and only if the user explicitly asks for sub-agents, delegation, or parallel agent work.
 Requests for depth, thoroughness, research, investigation, or detailed codebase analysis do not count as permission to spawn.
@@ -761,66 +774,82 @@ The new agent's canonical task name will be provided to it along with the messag
 }
 
 fn spawn_agent_models_description(models: &[ModelPreset]) -> String {
-    let visible_models: Vec<&ModelPreset> = models
-        .iter()
-        .filter(|model| model.show_in_picker)
-        .take(MAX_MODEL_OVERRIDES_IN_SPAWN_AGENT_DESCRIPTION)
-        .collect();
-    if visible_models.is_empty() {
+    let mut providers: BTreeMap<String, Vec<&ModelPreset>> = BTreeMap::new();
+    for model in models.iter().filter(|model| model.show_in_picker) {
+        let provider_id = model
+            .model_provider
+            .clone()
+            .unwrap_or_else(|| "(current)".to_string());
+        providers.entry(provider_id).or_default().push(model);
+    }
+
+    if providers.is_empty() {
         return "No picker-visible model overrides are currently loaded.".to_string();
     }
 
-    let model_descriptions = visible_models
+    let provider_descriptions = providers
         .into_iter()
-        .map(|model| {
-            let default_reasoning_effort = &model.default_reasoning_effort;
-            let efforts = model
-                .supported_reasoning_efforts
-                .iter()
-                .map(|preset| {
-                    let effort = preset.effort.as_str();
-                    let effort = match effort
-                        .char_indices()
-                        .nth(MAX_REASONING_EFFORT_CHARS_IN_SPAWN_AGENT_DESCRIPTION)
-                    {
-                        Some((index, _)) => &effort[..index],
-                        None => effort,
-                    };
-                    if &preset.effort == default_reasoning_effort {
-                        format!("{effort} (default)")
-                    } else {
-                        effort.to_string()
-                    }
-                })
+        .map(|(provider_id, models)| {
+            let provider_label = format!("Provider `{provider_id}`:");
+            let model_descriptions = models
+                .into_iter()
+                .map(spawn_agent_model_description)
                 .collect::<Vec<_>>()
-                .join(", ");
-            let reasoning_efforts_suffix = if efforts.is_empty() {
-                String::new()
-            } else {
-                format!(" Reasoning efforts: {efforts}.")
-            };
-            let service_tiers = model
-                .service_tiers
-                .iter()
-                .map(|tier| tier.id.as_str())
-                .collect::<Vec<_>>()
-                .join(", ");
-            let service_tiers_suffix = if service_tiers.is_empty() {
-                String::new()
-            } else {
-                format!(" Service tiers: {service_tiers}.")
-            };
-            let model_slug = &model.model;
-            let description = &model.description;
-            format!(
-                "- `{model_slug}`: {description}{reasoning_efforts_suffix}{service_tiers_suffix}"
-            )
+                .join("\n");
+            format!("{provider_label}\n{model_descriptions}")
         })
         .collect::<Vec<_>>()
         .join("\n");
     format!(
-        "Available model overrides (optional; inherited parent model is preferred):\n{model_descriptions}"
+        "Available provider/model overrides (optional; inherited parent provider/model is preferred):\n{provider_descriptions}"
     )
+}
+
+fn spawn_agent_model_description(model: &ModelPreset) -> String {
+    let reasoning_efforts_suffix = spawn_agent_reasoning_efforts_suffix(model);
+    let service_tiers = model
+        .service_tiers
+        .iter()
+        .map(|tier| tier.id.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let service_tiers_suffix = if service_tiers.is_empty() {
+        String::new()
+    } else {
+        format!(" Service tiers: {service_tiers}.")
+    };
+    let model_slug = &model.model;
+    let description = &model.description;
+    format!("- `{model_slug}`: {description}{reasoning_efforts_suffix}{service_tiers_suffix}")
+}
+
+fn spawn_agent_reasoning_efforts_suffix(model: &ModelPreset) -> String {
+    let default_reasoning_effort = &model.default_reasoning_effort;
+    let efforts = model
+        .supported_reasoning_efforts
+        .iter()
+        .map(|preset| {
+            let effort = preset.effort.as_str();
+            let effort = match effort
+                .char_indices()
+                .nth(MAX_REASONING_EFFORT_CHARS_IN_SPAWN_AGENT_DESCRIPTION)
+            {
+                Some((index, _)) => &effort[..index],
+                None => effort,
+            };
+            if &preset.effort == default_reasoning_effort {
+                format!("{effort} (default)")
+            } else {
+                effort.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    if efforts.is_empty() {
+        String::new()
+    } else {
+        format!(" Reasoning efforts: {efforts}.")
+    }
 }
 
 fn wait_agent_tool_parameters_v1(options: WaitAgentTimeoutOptions) -> JsonSchema {

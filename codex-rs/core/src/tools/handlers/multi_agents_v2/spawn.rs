@@ -87,6 +87,7 @@ async fn handle_spawn_agent(
     if matches!(fork_mode, Some(SpawnAgentForkMode::FullHistory)) {
         reject_full_fork_spawn_overrides(
             role_name,
+            args.model_provider.as_deref(),
             args.model.as_deref(),
             args.reasoning_effort.clone(),
         )?;
@@ -95,6 +96,7 @@ async fn handle_spawn_agent(
             &session,
             turn.as_ref(),
             &mut config,
+            args.model_provider.as_deref(),
             args.model.as_deref(),
             args.reasoning_effort.clone(),
         )
@@ -243,6 +245,7 @@ struct SpawnAgentArgs {
     message: String,
     task_name: String,
     agent_type: Option<String>,
+    model_provider: Option<String>,
     model: Option<String>,
     reasoning_effort: Option<ReasoningEffort>,
     service_tier: Option<String>,

@@ -239,12 +239,17 @@ fn build_agent_shared_config(turn: &TurnContext) -> Result<Config, FunctionCallE
 
 pub(crate) fn reject_full_fork_spawn_overrides(
     agent_type: Option<&str>,
+    model_provider: Option<&str>,
     model: Option<&str>,
     reasoning_effort: Option<ReasoningEffort>,
 ) -> Result<(), FunctionCallError> {
-    if agent_type.is_some() || model.is_some() || reasoning_effort.is_some() {
+    if agent_type.is_some()
+        || model_provider.is_some()
+        || model.is_some()
+        || reasoning_effort.is_some()
+    {
         return Err(FunctionCallError::RespondToModel(
-            "Full-history forked agents inherit the parent agent type, model, and reasoning effort; omit agent_type, model, and reasoning_effort, or spawn without a full-history fork.".to_string(),
+            "Full-history forked agents inherit the parent agent type, model provider, model, and reasoning effort; omit agent_type, model_provider, model, and reasoning_effort, or spawn without a full-history fork.".to_string(),
         ));
     }
     Ok(())
@@ -284,10 +289,55 @@ pub(crate) async fn apply_requested_spawn_agent_model_overrides(
     session: &Session,
     turn: &TurnContext,
     config: &mut Config,
+    requested_model_provider: Option<&str>,
     requested_model: Option<&str>,
     requested_reasoning_effort: Option<ReasoningEffort>,
 ) -> Result<(), FunctionCallError> {
-    if requested_model.is_none() && requested_reasoning_effort.is_none() {
+    if requested_model_provider.is_none()
+        && requested_model.is_none()
+        && requested_reasoning_effort.is_none()
+    {
+        return Ok(());
+    }
+
+    let requested_model_provider =
+        normalize_optional_spawn_arg("model_provider", requested_model_provider)?;
+    let requested_model = normalize_optional_spawn_arg("model", requested_model)?;
+
+    if let Some(requested_model_provider) = requested_model_provider {
+        let Some(requested_model) = requested_model else {
+            return Err(FunctionCallError::RespondToModel(
+                "When overriding model_provider for spawn_agent, also provide model from that provider.".to_string(),
+            ));
+        };
+        apply_spawn_agent_provider_override(config, requested_model_provider)?;
+        let selected_model_info = session
+            .services
+            .models_manager
+            .get_model_info(requested_model, &config.to_models_manager_config())
+            .await;
+        if selected_model_info.used_fallback_model_metadata {
+            return Err(FunctionCallError::RespondToModel(
+                unknown_model_for_provider_message(
+                    config,
+                    requested_model_provider,
+                    requested_model,
+                ),
+            ));
+        }
+
+        config.model = Some(requested_model.to_string());
+        if let Some(reasoning_effort) = requested_reasoning_effort {
+            validate_spawn_agent_reasoning_effort(
+                requested_model,
+                &selected_model_info.supported_reasoning_levels,
+                &reasoning_effort,
+            )?;
+            config.model_reasoning_effort = Some(reasoning_effort);
+        } else {
+            config.model_reasoning_effort = selected_model_info.default_reasoning_level;
+        }
+
         return Ok(());
     }
 
@@ -297,7 +347,11 @@ pub(crate) async fn apply_requested_spawn_agent_model_overrides(
             .models_manager
             .list_models(RefreshStrategy::Offline)
             .await;
-        let selected_model_name = find_spawn_agent_model_name(&available_models, requested_model)?;
+        let selected_model_name = find_spawn_agent_model_name(
+            &available_models,
+            requested_model,
+            &config.model_provider_id,
+        )?;
         let selected_model_info = session
             .services
             .models_manager
@@ -328,6 +382,47 @@ pub(crate) async fn apply_requested_spawn_agent_model_overrides(
         config.model_reasoning_effort = Some(reasoning_effort);
     }
 
+    Ok(())
+}
+
+fn normalize_optional_spawn_arg<'a>(
+    name: &str,
+    value: Option<&'a str>,
+) -> Result<Option<&'a str>, FunctionCallError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(FunctionCallError::RespondToModel(format!(
+            "spawn_agent `{name}` must not be empty"
+        )));
+    }
+    Ok(Some(value))
+}
+
+fn apply_spawn_agent_provider_override(
+    config: &mut Config,
+    requested_model_provider: &str,
+) -> Result<(), FunctionCallError> {
+    let model_provider = config
+        .model_providers
+        .get(requested_model_provider)
+        .cloned()
+        .ok_or_else(|| {
+            let mut available = config
+                .model_providers
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>();
+            available.sort_unstable();
+            FunctionCallError::RespondToModel(format!(
+                "Unknown model_provider `{requested_model_provider}` for spawn_agent. Available providers: {}",
+                available.join(", ")
+            ))
+        })?;
+    config.model_provider_id = requested_model_provider.to_string();
+    config.model_provider = model_provider;
     Ok(())
 }
 
@@ -389,6 +484,7 @@ pub(crate) async fn apply_spawn_agent_service_tier(
 fn find_spawn_agent_model_name(
     available_models: &[codex_protocol::openai_models::ModelPreset],
     requested_model: &str,
+    provider_id: &str,
 ) -> Result<String, FunctionCallError> {
     available_models
         .iter()
@@ -401,9 +497,51 @@ fn find_spawn_agent_model_name(
                 .collect::<Vec<_>>()
                 .join(", ");
             FunctionCallError::RespondToModel(format!(
-                "Unknown model `{requested_model}` for spawn_agent. Available models: {available}"
+                "Unknown model `{requested_model}` for spawn_agent provider `{provider_id}`. Available models: {available}"
             ))
         })
+}
+
+fn unknown_model_for_provider_message(
+    config: &Config,
+    provider_id: &str,
+    requested_model: &str,
+) -> String {
+    let available = configured_models_for_provider(config, provider_id);
+    let available = if available.is_empty() {
+        "none configured".to_string()
+    } else {
+        available.join(", ")
+    };
+    format!(
+        "Unknown model `{requested_model}` for spawn_agent provider `{provider_id}`. Available models: {available}"
+    )
+}
+
+fn configured_models_for_provider(config: &Config, provider_id: &str) -> Vec<String> {
+    let mut models = Vec::new();
+    let provider_prefix = format!("{provider_id}/");
+
+    if let Some(capabilities) = &config.model_capabilities {
+        models.extend(capabilities.models.keys().filter_map(|model| {
+            model
+                .strip_prefix(&provider_prefix)
+                .map(ToString::to_string)
+        }));
+    }
+
+    if let Some(catalog) = &config.model_catalog {
+        models.extend(catalog.models.iter().filter_map(|model| {
+            model
+                .slug
+                .strip_prefix(&provider_prefix)
+                .map(ToString::to_string)
+        }));
+    }
+
+    models.sort();
+    models.dedup();
+    models
 }
 
 fn validate_spawn_agent_reasoning_effort(

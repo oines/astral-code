@@ -21,8 +21,12 @@ use codex_features::Feature;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
 use codex_model_provider::create_model_provider;
+use codex_model_provider_info::ModelProviderInfo;
+use codex_model_provider_info::WireApi;
 use codex_model_provider_info::built_in_model_providers;
 use codex_models_manager::bundled_models_response;
+use codex_models_manager::capabilities::ModelCapabilitiesCache;
+use codex_models_manager::capabilities::ModelCapability;
 use codex_models_manager::manager::SharedModelsManager;
 use codex_models_manager::manager::StaticModelsManager;
 use codex_protocol::AgentPath;
@@ -111,6 +115,37 @@ fn bundled_models_manager() -> SharedModelsManager {
         /*auth_manager*/ None,
         bundled_models_response().expect("bundled models.json should parse"),
     ))
+}
+
+fn test_provider(name: &str, wire_api: WireApi) -> ModelProviderInfo {
+    ModelProviderInfo {
+        name: name.to_string(),
+        base_url: Some("http://127.0.0.1:9/v1".to_string()),
+        wire_api,
+        ..ModelProviderInfo::default()
+    }
+}
+
+fn add_provider_model_capability(
+    config: &mut crate::config::Config,
+    provider_id: &str,
+    model: &str,
+) {
+    let capabilities = config
+        .model_capabilities
+        .get_or_insert_with(|| ModelCapabilitiesCache {
+            version: 1,
+            source: "multi-agent-tests".to_string(),
+            generated_at_unix_seconds: 0,
+            models: Default::default(),
+        });
+    capabilities.models.insert(
+        format!("{provider_id}/{model}"),
+        ModelCapability {
+            supports_tools: Some(true),
+            ..Default::default()
+        },
+    );
 }
 
 async fn make_session_and_context_with_bundled_models()
@@ -353,7 +388,7 @@ async fn spawn_agent_fork_context_rejects_agent_type_override() {
     assert_eq!(
         err,
         FunctionCallError::RespondToModel(
-            "Full-history forked agents inherit the parent agent type, model, and reasoning effort; omit agent_type, model, and reasoning_effort, or spawn without a full-history fork.".to_string(),
+            "Full-history forked agents inherit the parent agent type, model provider, model, and reasoning effort; omit agent_type, model_provider, model, and reasoning_effort, or spawn without a full-history fork.".to_string(),
         )
     );
 }
@@ -388,7 +423,7 @@ async fn spawn_agent_fork_context_rejects_child_model_overrides() {
     assert_eq!(
         err,
             FunctionCallError::RespondToModel(
-            "Full-history forked agents inherit the parent agent type, model, and reasoning effort; omit agent_type, model, and reasoning_effort, or spawn without a full-history fork.".to_string(),
+            "Full-history forked agents inherit the parent agent type, model provider, model, and reasoning effort; omit agent_type, model_provider, model, and reasoning_effort, or spawn without a full-history fork.".to_string(),
         )
     );
 }
@@ -434,7 +469,7 @@ async fn multi_agent_v2_spawn_fork_turns_all_rejects_agent_type_override() {
     assert_eq!(
         err,
         FunctionCallError::RespondToModel(
-            "Full-history forked agents inherit the parent agent type, model, and reasoning effort; omit agent_type, model, and reasoning_effort, or spawn without a full-history fork.".to_string(),
+            "Full-history forked agents inherit the parent agent type, model provider, model, and reasoning effort; omit agent_type, model_provider, model, and reasoning_effort, or spawn without a full-history fork.".to_string(),
         )
     );
 }
@@ -475,7 +510,202 @@ async fn multi_agent_v2_spawn_defaults_to_full_fork_and_rejects_child_model_over
     assert_eq!(
         err,
             FunctionCallError::RespondToModel(
-            "Full-history forked agents inherit the parent agent type, model, and reasoning effort; omit agent_type, model, and reasoning_effort, or spawn without a full-history fork.".to_string(),
+            "Full-history forked agents inherit the parent agent type, model provider, model, and reasoning effort; omit agent_type, model_provider, model, and reasoning_effort, or spawn without a full-history fork.".to_string(),
+        )
+    );
+}
+
+#[tokio::test]
+async fn spawn_agent_can_override_model_provider() {
+    #[derive(Debug, Deserialize)]
+    struct SpawnAgentResult {
+        agent_id: String,
+    }
+
+    let (mut session, mut turn) = make_session_and_context().await;
+    let manager = thread_manager();
+    let root = manager
+        .start_thread((*turn.config).clone())
+        .await
+        .expect("root thread should start");
+    session.services.agent_control = manager.agent_control();
+    session.thread_id = root.thread_id;
+
+    let mut config = (*turn.config).clone();
+    config.model_providers.insert(
+        "mimo".to_string(),
+        test_provider("Mimo", WireApi::AnthropicMessages),
+    );
+    add_provider_model_capability(&mut config, "mimo", "mimo-v2.5-pro");
+    set_turn_config(&mut turn, config);
+
+    let output = SpawnAgentHandler::default()
+        .handle(invocation(
+            Arc::new(session),
+            Arc::new(turn),
+            "spawn_agent",
+            function_payload(json!({
+                "message": "inspect this repo",
+                "model_provider": "mimo",
+                "model": "mimo-v2.5-pro"
+            })),
+        ))
+        .await
+        .expect("spawn_agent should accept a provider override");
+    let (content, _) = expect_text_output(output);
+    let result: SpawnAgentResult =
+        serde_json::from_str(&content).expect("spawn_agent result should be json");
+    let snapshot = manager
+        .get_thread(parse_agent_id(&result.agent_id))
+        .await
+        .expect("spawned agent thread should exist")
+        .config_snapshot()
+        .await;
+
+    assert_eq!(snapshot.model_provider_id, "mimo");
+    assert_eq!(snapshot.model, "mimo-v2.5-pro");
+}
+
+#[tokio::test]
+async fn multi_agent_v2_spawn_can_override_model_provider_back_to_chat_completions() {
+    #[derive(Debug, Deserialize)]
+    struct SpawnAgentResult {
+        task_name: String,
+    }
+
+    let (mut session, mut turn) = make_session_and_context().await;
+    let mimo_provider = test_provider("Mimo", WireApi::AnthropicMessages);
+    let deepseek_provider = test_provider("DeepSeek", WireApi::ChatCompletions);
+    let mut config = (*turn.config).clone();
+    config.model_provider_id = "mimo".to_string();
+    config.model_provider = mimo_provider.clone();
+    config
+        .model_providers
+        .insert("mimo".to_string(), mimo_provider.clone());
+    config
+        .model_providers
+        .insert("deepseek".to_string(), deepseek_provider);
+    add_provider_model_capability(&mut config, "mimo", "mimo-v2.5-pro");
+    add_provider_model_capability(&mut config, "deepseek", "deepseek-v4-pro");
+    config
+        .features
+        .enable(Feature::MultiAgentV2)
+        .expect("test config should allow feature update");
+    turn.provider = create_model_provider(mimo_provider, turn.auth_manager.clone());
+    set_turn_config(&mut turn, config);
+
+    let manager = thread_manager();
+    let root = manager
+        .start_thread((*turn.config).clone())
+        .await
+        .expect("root thread should start");
+    session.services.agent_control = manager.agent_control();
+    session.thread_id = root.thread_id;
+    let session = Arc::new(session);
+    let turn = Arc::new(turn);
+
+    let output = SpawnAgentHandlerV2::default()
+        .handle(invocation(
+            session.clone(),
+            turn.clone(),
+            "spawn_agent",
+            function_payload(json!({
+                "message": "inspect this repo",
+                "task_name": "deepseek_child",
+                "fork_turns": "none",
+                "model_provider": "deepseek",
+                "model": "deepseek-v4-pro"
+            })),
+        ))
+        .await
+        .expect("spawn_agent v2 should accept a provider override");
+    let (content, _) = expect_text_output(output);
+    let result: SpawnAgentResult =
+        serde_json::from_str(&content).expect("spawn_agent result should be json");
+    let child_thread_id = session
+        .services
+        .agent_control
+        .resolve_agent_reference(
+            session.thread_id,
+            &turn.session_source,
+            result.task_name.as_str(),
+        )
+        .await
+        .expect("spawned task name should resolve");
+    let snapshot = manager
+        .get_thread(child_thread_id)
+        .await
+        .expect("spawned agent thread should exist")
+        .config_snapshot()
+        .await;
+
+    assert_eq!(snapshot.model_provider_id, "deepseek");
+    assert_eq!(snapshot.model, "deepseek-v4-pro");
+}
+
+#[tokio::test]
+async fn spawn_agent_rejects_unknown_model_provider_override() {
+    let (session, turn) = make_session_and_context().await;
+
+    let err = SpawnAgentHandler::default()
+        .handle(invocation(
+            Arc::new(session),
+            Arc::new(turn),
+            "spawn_agent",
+            function_payload(json!({
+                "message": "inspect this repo",
+                "model_provider": "missing-provider",
+                "model": "some-model"
+            })),
+        ))
+        .await
+        .err()
+        .expect("unknown provider should be rejected");
+
+    assert!(matches!(
+        err,
+        FunctionCallError::RespondToModel(message)
+            if message.contains("Unknown model_provider `missing-provider` for spawn_agent")
+    ));
+}
+
+#[tokio::test]
+async fn multi_agent_v2_full_history_fork_rejects_model_provider_override() {
+    let (mut session, mut turn) = make_session_and_context().await;
+    let manager = thread_manager();
+    let root = manager
+        .start_thread((*turn.config).clone())
+        .await
+        .expect("root thread should start");
+    session.services.agent_control = manager.agent_control();
+    session.thread_id = root.thread_id;
+    let mut config = (*turn.config).clone();
+    config
+        .features
+        .enable(Feature::MultiAgentV2)
+        .expect("test config should allow feature update");
+    set_turn_config(&mut turn, config);
+
+    let err = SpawnAgentHandlerV2::default()
+        .handle(invocation(
+            Arc::new(session),
+            Arc::new(turn),
+            "spawn_agent",
+            function_payload(json!({
+                "message": "inspect this repo",
+                "task_name": "full_fork_provider",
+                "model_provider": "mimo",
+                "model": "mimo-v2.5-pro"
+            })),
+        ))
+        .await
+        .err()
+        .expect("full-history fork should reject provider overrides");
+
+    assert_eq!(
+        err,
+        FunctionCallError::RespondToModel(
+            "Full-history forked agents inherit the parent agent type, model provider, model, and reasoning effort; omit agent_type, model_provider, model, and reasoning_effort, or spawn without a full-history fork.".to_string(),
         )
     );
 }

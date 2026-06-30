@@ -364,6 +364,47 @@ async fn get_model_info_uses_current_provider_capability_for_bare_model_name() {
 }
 
 #[tokio::test]
+async fn provider_capability_for_bare_model_takes_precedence_over_litellm_suffix_fallback() {
+    let mut models = BTreeMap::new();
+    models.insert(
+        "openrouter/xiaomi/mimo-v2.5".to_string(),
+        ModelCapability {
+            supports_reasoning: Some(true),
+            supports_vision: Some(false),
+            ..Default::default()
+        },
+    );
+    models.insert(
+        "mimo/mimo-v2.5".to_string(),
+        ModelCapability {
+            supports_reasoning: Some(false),
+            supports_vision: Some(true),
+            ..Default::default()
+        },
+    );
+    let config = ModelsManagerConfig {
+        model_provider_id: Some("mimo".to_string()),
+        model_capabilities: Some(ModelCapabilitiesCache {
+            version: 1,
+            source: "test".to_string(),
+            generated_at_unix_seconds: 0,
+            models,
+        }),
+        ..Default::default()
+    };
+    let manager = static_manager_for_tests(ModelsResponse { models: Vec::new() });
+
+    let model_info = manager.get_model_info("mimo-v2.5", &config).await;
+
+    assert_eq!(
+        model_info.input_modalities,
+        vec![InputModality::Text, InputModality::Image]
+    );
+    assert!(model_info.supported_reasoning_levels.is_empty());
+    assert!(!model_info.used_fallback_model_metadata);
+}
+
+#[tokio::test]
 async fn model_capability_vision_signal_overrides_global_input_modalities() {
     let mut models = BTreeMap::new();
     models.insert(
