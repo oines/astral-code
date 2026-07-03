@@ -2,8 +2,8 @@ use std::process::Command;
 use std::sync::Arc;
 
 use codex_core::ModelClient;
+use codex_core::ModelStreamEvent;
 use codex_core::Prompt;
-use codex_core::ResponseEvent;
 use codex_login::CodexAuth;
 use codex_model_provider::create_model_provider;
 use codex_model_provider_info::ModelProviderInfo;
@@ -13,7 +13,7 @@ use codex_otel::TelemetryAuthMode;
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::models::ContentItem;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
 use core_test_support::load_default_config_for_test;
@@ -114,7 +114,7 @@ async fn chat_stream_includes_session_context_headers_on_review() {
     let mut client_session = client.new_session();
 
     let mut prompt = Prompt::default();
-    prompt.input = vec![ResponseItem::Message {
+    prompt.input = vec![TranscriptItem::Message {
         id: None,
         role: "user".into(),
         content: vec![ContentItem::InputText {
@@ -139,7 +139,7 @@ async fn chat_stream_includes_session_context_headers_on_review() {
         .await
         .expect("stream failed");
     while let Some(event) = stream.next().await {
-        if matches!(event, Ok(ResponseEvent::Completed { .. })) {
+        if matches!(event, Ok(ModelStreamEvent::Completed { .. })) {
             break;
         }
     }
@@ -242,7 +242,7 @@ async fn chat_stream_includes_session_context_headers_on_other_subagent() {
     let mut client_session = client.new_session();
 
     let mut prompt = Prompt::default();
-    prompt.input = vec![ResponseItem::Message {
+    prompt.input = vec![TranscriptItem::Message {
         id: None,
         role: "user".into(),
         content: vec![ContentItem::InputText {
@@ -267,7 +267,7 @@ async fn chat_stream_includes_session_context_headers_on_other_subagent() {
         .await
         .expect("stream failed");
     while let Some(event) = stream.next().await {
-        if matches!(event, Ok(ResponseEvent::Completed { .. })) {
+        if matches!(event, Ok(ModelStreamEvent::Completed { .. })) {
             break;
         }
     }
@@ -369,7 +369,7 @@ async fn generic_chat_stream_omits_private_reasoning_fields() {
     let mut client_session = client.new_session();
 
     let mut prompt = Prompt::default();
-    prompt.input = vec![ResponseItem::Message {
+    prompt.input = vec![TranscriptItem::Message {
         id: None,
         role: "user".into(),
         content: vec![ContentItem::InputText {
@@ -394,7 +394,7 @@ async fn generic_chat_stream_omits_private_reasoning_fields() {
         .await
         .expect("stream failed");
     while let Some(event) = stream.next().await {
-        if matches!(event, Ok(ResponseEvent::Completed { .. })) {
+        if matches!(event, Ok(ModelStreamEvent::Completed { .. })) {
             break;
         }
     }

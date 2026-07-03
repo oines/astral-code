@@ -5,7 +5,7 @@ use std::sync::atomic::Ordering;
 
 use codex_core::ThreadManager;
 use codex_protocol::ThreadId;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::protocol::ThreadGoal;
 
 use crate::accounting::BudgetLimitedGoalDisposition;
@@ -394,7 +394,7 @@ impl GoalRuntimeHandle {
         Ok(())
     }
 
-    pub(crate) async fn inject_active_turn_steering(&self, item: ResponseItem) {
+    pub(crate) async fn inject_active_turn_steering(&self, item: TranscriptItem) {
         let Some(thread_manager) = self.inner.thread_manager.upgrade() else {
             tracing::debug!("skipping goal steering because thread manager is unavailable");
             return;

@@ -7,8 +7,8 @@ use std::sync::atomic::Ordering;
 use crate::SkillInjections;
 use crate::build_skill_injections;
 use crate::client::ModelClientSession;
+use crate::client_common::ModelStreamEvent;
 use crate::client_common::Prompt;
-use crate::client_common::ResponseEvent;
 use crate::collect_explicit_skill_mentions;
 use crate::compact::InitialContextInjection;
 use crate::compact::run_inline_auto_compact_task;
@@ -81,8 +81,8 @@ use codex_protocol::items::build_hook_prompt_message;
 use codex_protocol::models::BaseInstructions;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::MessagePhase;
-use codex_protocol::models::ResponseInputItem;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptInputItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::protocol::AgentMessageContentDeltaEvent;
 use codex_protocol::protocol::AgentReasoningSectionBreakEvent;
 use codex_protocol::protocol::CodexErrorInfo;
@@ -208,7 +208,7 @@ pub(crate) async fn run_turn(
         }
 
         // Construct the input that we will send to the model.
-        let sampling_request_input: Vec<ResponseItem> = {
+        let sampling_request_input: Vec<TranscriptItem> = {
             sess.clone_history()
                 .await
                 .for_prompt(&turn_context.model_info.input_modalities)
@@ -445,12 +445,12 @@ async fn build_skills_and_plugins(
     turn_context: &TurnContext,
     input: &[TurnInput],
     cancellation_token: &CancellationToken,
-) -> Option<(Vec<ResponseItem>, HashSet<String>)> {
+) -> Option<(Vec<TranscriptItem>, HashSet<String>)> {
     let user_input = input
         .iter()
         .filter_map(|item| match item {
             TurnInput::UserInput { content, .. } => Some(content.as_slice()),
-            TurnInput::ResponseItem(_) => None,
+            TurnInput::TranscriptItem(_) => None,
         })
         .flatten()
         .cloned()
@@ -543,7 +543,7 @@ async fn build_skills_and_plugins(
             .await;
     }
 
-    let skill_items: Vec<ResponseItem> = skill_injections
+    let skill_items: Vec<TranscriptItem> = skill_injections
         .iter()
         .map(|skill| ContextualUserFragment::into(crate::context::SkillInstructions::from(skill)))
         .collect();
@@ -582,7 +582,7 @@ async fn build_skills_and_plugins(
             .track_plugin_used(tracking.clone(), plugin);
     }
 
-    let mut injection_items: Vec<ResponseItem> = match injected_host_skill_prompts {
+    let mut injection_items: Vec<TranscriptItem> = match injected_host_skill_prompts {
         Some(injected_host_skill_prompts) => skill_injections
             .iter()
             .filter(|skill| !injected_host_skill_prompts.contains_path(&skill.path))
@@ -602,7 +602,7 @@ async fn build_extension_turn_input_items(
     turn_context: &TurnContext,
     user_input: &[UserInput],
     cancellation_token: &CancellationToken,
-) -> Option<Vec<ResponseItem>> {
+) -> Option<Vec<TranscriptItem>> {
     let contributors = sess.services.extensions.turn_input_contributors().to_vec();
     if contributors.is_empty() {
         return Some(Vec::new());
@@ -670,7 +670,7 @@ async fn track_turn_resolved_config_analytics(
                 .iter()
                 .filter_map(|item| match item {
                     TurnInput::UserInput { content, .. } => Some(content.as_slice()),
-                    TurnInput::ResponseItem(_) => None,
+                    TurnInput::TranscriptItem(_) => None,
                 })
                 .flatten()
                 .filter(|item| {
@@ -872,7 +872,7 @@ async fn run_auto_compact(
 }
 
 pub(super) fn collect_explicit_app_ids_from_skill_items(
-    skill_items: &[ResponseItem],
+    skill_items: &[TranscriptItem],
     connectors: &[connectors::AppInfo],
     skill_name_counts_lower: &HashMap<String, usize>,
 ) -> HashSet<String> {
@@ -883,7 +883,7 @@ pub(super) fn collect_explicit_app_ids_from_skill_items(
     let skill_messages = skill_items
         .iter()
         .filter_map(|item| match item {
-            ResponseItem::Message { content, .. } => {
+            TranscriptItem::Message { content, .. } => {
                 content.iter().find_map(|content_item| match content_item {
                     ContentItem::InputText { text } => Some(text.clone()),
                     _ => None,
@@ -923,7 +923,7 @@ pub(super) fn collect_explicit_app_ids_from_skill_items(
 }
 
 pub(crate) fn build_prompt(
-    input: Vec<ResponseItem>,
+    input: Vec<TranscriptItem>,
     router: &ToolRouter,
     turn_context: &TurnContext,
     base_instructions: BaseInstructions,
@@ -959,7 +959,7 @@ async fn run_sampling_request(
     turn_diff_tracker: SharedTurnDiffTracker,
     client_session: &mut ModelClientSession,
     turn_metadata_header: Option<&str>,
-    input: Vec<ResponseItem>,
+    input: Vec<TranscriptItem>,
     cancellation_token: CancellationToken,
 ) -> CodexResult<SamplingRequestResult> {
     let router = built_tools(sess.as_ref(), turn_context.as_ref(), &cancellation_token).await?;
@@ -1557,9 +1557,9 @@ async fn maybe_complete_plan_item_from_message(
     sess: &Session,
     turn_context: &TurnContext,
     state: &mut PlanModeStreamState,
-    item: &ResponseItem,
+    item: &TranscriptItem,
 ) {
-    if let ResponseItem::Message { role, content, .. } = item
+    if let TranscriptItem::Message { role, content, .. } = item
         && role == "assistant"
     {
         let mut text = String::new();
@@ -1650,12 +1650,12 @@ async fn handle_assistant_item_done_in_plan_mode(
     sess: &Session,
     turn_context: &TurnContext,
     turn_store: &codex_extension_api::ExtensionData,
-    item: &ResponseItem,
+    item: &TranscriptItem,
     state: &mut PlanModeStreamState,
     previously_active_item: Option<&TurnItem>,
     last_agent_message: &mut Option<String>,
 ) -> bool {
-    if let ResponseItem::Message { role, .. } = item
+    if let TranscriptItem::Message { role, .. } = item
         && role == "assistant"
     {
         maybe_complete_plan_item_from_message(sess, turn_context, state, item).await;
@@ -1700,7 +1700,7 @@ async fn handle_assistant_item_done_in_plan_mode(
 }
 
 async fn drain_in_flight(
-    in_flight: &mut FuturesOrdered<BoxFuture<'static, CodexResult<ResponseInputItem>>>,
+    in_flight: &mut FuturesOrdered<BoxFuture<'static, CodexResult<TranscriptInputItem>>>,
     sess: Arc<Session>,
     turn_context: Arc<TurnContext>,
 ) -> CodexResult<()> {
@@ -1774,7 +1774,7 @@ async fn try_run_sampling_request(
         .instrument(trace_span!("stream_request"))
         .or_cancel(&cancellation_token)
         .await??;
-    let mut in_flight: FuturesOrdered<BoxFuture<'static, CodexResult<ResponseInputItem>>> =
+    let mut in_flight: FuturesOrdered<BoxFuture<'static, CodexResult<TranscriptInputItem>>> =
         FuturesOrdered::new();
     let mut needs_follow_up = false;
     let mut last_agent_message: Option<String> = None;
@@ -1835,8 +1835,8 @@ async fn try_run_sampling_request(
         record_turn_ttft_metric(&turn_context, &event).await;
 
         match event {
-            ResponseEvent::Created => {}
-            ResponseEvent::OutputItemDone(item) => {
+            ModelStreamEvent::Created => {}
+            ModelStreamEvent::OutputItemDone(item) => {
                 if let Some((_, mut consumer)) = active_tool_argument_diff_consumer.take()
                     && let Ok(Some(event)) = consumer.finish()
                 {
@@ -1886,24 +1886,24 @@ async fn try_run_sampling_request(
                 };
 
                 let preempt_for_mailbox_mail = match &item {
-                    ResponseItem::Message { role, phase, .. } => {
+                    TranscriptItem::Message { role, phase, .. } => {
                         role == "assistant" && matches!(phase, Some(MessagePhase::Commentary))
                     }
-                    ResponseItem::Reasoning { .. } => true,
-                    ResponseItem::AgentMessage { .. } => false,
-                    ResponseItem::LocalShellCall { .. }
-                    | ResponseItem::FunctionCall { .. }
-                    | ResponseItem::ToolSearchCall { .. }
-                    | ResponseItem::FunctionCallOutput { .. }
-                    | ResponseItem::CustomToolCall { .. }
-                    | ResponseItem::CustomToolCallOutput { .. }
-                    | ResponseItem::ToolSearchOutput { .. }
-                    | ResponseItem::WebSearchCall { .. }
-                    | ResponseItem::ImageGenerationCall { .. }
-                    | ResponseItem::Compaction { .. }
-                    | ResponseItem::CompactionTrigger
-                    | ResponseItem::ContextCompaction { .. }
-                    | ResponseItem::Other => false,
+                    TranscriptItem::Reasoning { .. } => true,
+                    TranscriptItem::AgentMessage { .. } => false,
+                    TranscriptItem::LocalShellCall { .. }
+                    | TranscriptItem::FunctionCall { .. }
+                    | TranscriptItem::ToolSearchCall { .. }
+                    | TranscriptItem::FunctionCallOutput { .. }
+                    | TranscriptItem::CustomToolCall { .. }
+                    | TranscriptItem::CustomToolCallOutput { .. }
+                    | TranscriptItem::ToolSearchOutput { .. }
+                    | TranscriptItem::WebSearchCall { .. }
+                    | TranscriptItem::ImageGenerationCall { .. }
+                    | TranscriptItem::Compaction { .. }
+                    | TranscriptItem::CompactionTrigger
+                    | TranscriptItem::ContextCompaction { .. }
+                    | TranscriptItem::Other => false,
                 };
 
                 let output_result =
@@ -1930,10 +1930,10 @@ async fn try_run_sampling_request(
                     });
                 }
             }
-            ResponseEvent::OutputItemAdded(item) => {
+            ModelStreamEvent::OutputItemAdded(item) => {
                 let tool_call = match &item {
-                    ResponseItem::CustomToolCall { call_id, name, .. }
-                    | ResponseItem::FunctionCall { call_id, name, .. } => Some((call_id, name)),
+                    TranscriptItem::CustomToolCall { call_id, name, .. }
+                    | TranscriptItem::FunctionCall { call_id, name, .. } => Some((call_id, name)),
                     _ => None,
                 };
                 if let Some((call_id, name)) = tool_call {
@@ -2005,7 +2005,7 @@ async fn try_run_sampling_request(
                     active_item_is_streaming_to_client = stream_item_to_client;
                 }
             }
-            ResponseEvent::ServerModel(server_model) => {
+            ModelStreamEvent::ServerModel(server_model) => {
                 if !turn_context
                     .server_model_warning_emitted
                     .load(Ordering::Relaxed)
@@ -2018,7 +2018,7 @@ async fn try_run_sampling_request(
                         .store(true, Ordering::Relaxed);
                 }
             }
-            ResponseEvent::ModelVerifications(verifications) => {
+            ModelStreamEvent::ModelVerifications(verifications) => {
                 if !turn_context
                     .model_verification_emitted
                     .swap(true, Ordering::Relaxed)
@@ -2027,24 +2027,28 @@ async fn try_run_sampling_request(
                         .await;
                 }
             }
-            ResponseEvent::TurnModerationMetadata(metadata) => {
+            ModelStreamEvent::TurnModerationMetadata(metadata) => {
                 sess.emit_turn_moderation_metadata(&turn_context, metadata)
                     .await;
             }
-            ResponseEvent::ServerReasoningIncluded(included) => {
+            ModelStreamEvent::ServerReasoningIncluded(included) => {
                 sess.set_server_reasoning_included(included).await;
             }
-            ResponseEvent::RateLimits(snapshot) => {
+            ModelStreamEvent::RateLimits(snapshot) => {
                 // Update internal state with latest rate limits, but defer sending until
                 // token usage is available to avoid duplicate TokenCount events.
                 sess.record_rate_limits_info(snapshot).await;
                 should_emit_token_count = true;
             }
-            ResponseEvent::ModelsEtag(etag) => {
+            ModelStreamEvent::ModelsEtag(etag) => {
                 // Update internal state with latest models etag
                 sess.services.models_manager.refresh_if_new_etag(etag).await;
             }
-            ResponseEvent::Completed {
+            ModelStreamEvent::Warning(message) => {
+                sess.send_event(&turn_context, EventMsg::Warning(WarningEvent { message }))
+                    .await;
+            }
+            ModelStreamEvent::Completed {
                 token_usage,
                 end_turn,
                 ..
@@ -2069,7 +2073,7 @@ async fn try_run_sampling_request(
                     session_memory_prompt_template: None,
                 });
             }
-            ResponseEvent::OutputTextDelta(delta) => {
+            ModelStreamEvent::OutputTextDelta(delta) => {
                 // In review child threads, suppress assistant text deltas; the
                 // UI will show a selection popup from the final ReviewOutput.
                 if let Some(active) = active_item.as_ref() {
@@ -2101,7 +2105,7 @@ async fn try_run_sampling_request(
                     error_or_panic("OutputTextDelta without active item".to_string());
                 }
             }
-            ResponseEvent::ToolCallInputDelta {
+            ModelStreamEvent::ToolCallInputDelta {
                 item_id: _,
                 call_id,
                 delta,
@@ -2119,7 +2123,7 @@ async fn try_run_sampling_request(
                     sess.send_event(&turn_context, event).await;
                 }
             }
-            ResponseEvent::ReasoningSummaryDelta {
+            ModelStreamEvent::ReasoningSummaryDelta {
                 delta,
                 summary_index,
             } => {
@@ -2140,7 +2144,7 @@ async fn try_run_sampling_request(
                     error_or_panic("ReasoningSummaryDelta without active item".to_string());
                 }
             }
-            ResponseEvent::ReasoningSummaryPartAdded { summary_index } => {
+            ModelStreamEvent::ReasoningSummaryPartAdded { summary_index } => {
                 if let Some(active) = active_item.as_ref() {
                     if !active_item_is_streaming_to_client {
                         continue;
@@ -2155,7 +2159,7 @@ async fn try_run_sampling_request(
                     error_or_panic("ReasoningSummaryPartAdded without active item".to_string());
                 }
             }
-            ResponseEvent::ReasoningContentDelta {
+            ModelStreamEvent::ReasoningContentDelta {
                 delta,
                 content_index,
             } => {
@@ -2222,7 +2226,7 @@ async fn try_run_sampling_request(
     outcome
 }
 
-pub(crate) fn get_last_assistant_message_from_turn(responses: &[ResponseItem]) -> Option<String> {
+pub(crate) fn get_last_assistant_message_from_turn(responses: &[TranscriptItem]) -> Option<String> {
     for item in responses.iter().rev() {
         if let Some(message) = last_assistant_message_from_item(item, /*plan_mode*/ false) {
             return Some(message);

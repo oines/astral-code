@@ -272,6 +272,7 @@ mod tests {
                 is_directory: true,
                 is_file: false,
                 is_symlink: false,
+                size: Some(0),
                 created_at_ms: 1,
                 modified_at_ms: 2,
             })
@@ -362,6 +363,7 @@ mod tests {
                 is_directory: true,
                 is_file: false,
                 is_symlink: false,
+                size: Some(0),
                 created_at_ms: 1,
                 modified_at_ms: 2,
             }

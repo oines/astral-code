@@ -7,8 +7,8 @@ use codex_utils_output_truncation::TruncationPolicy;
 use codex_utils_output_truncation::approx_token_count;
 use pretty_assertions::assert_eq;
 
-fn user_message(text: &str) -> ResponseItem {
-    ResponseItem::Message {
+fn user_message(text: &str) -> TranscriptItem {
+    TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
@@ -18,8 +18,8 @@ fn user_message(text: &str) -> ResponseItem {
     }
 }
 
-fn developer_message(text: &str) -> ResponseItem {
-    ResponseItem::Message {
+fn developer_message(text: &str) -> TranscriptItem {
+    TranscriptItem::Message {
         id: None,
         role: "developer".to_string(),
         content: vec![ContentItem::InputText {
@@ -29,8 +29,8 @@ fn developer_message(text: &str) -> ResponseItem {
     }
 }
 
-fn user_image_message() -> ResponseItem {
-    ResponseItem::Message {
+fn user_image_message() -> TranscriptItem {
+    TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputImage {
@@ -41,8 +41,8 @@ fn user_image_message() -> ResponseItem {
     }
 }
 
-fn function_call(call_id: &str) -> ResponseItem {
-    ResponseItem::FunctionCall {
+fn function_call(call_id: &str) -> TranscriptItem {
+    TranscriptItem::FunctionCall {
         id: None,
         name: "shell_command".to_string(),
         namespace: None,
@@ -51,14 +51,14 @@ fn function_call(call_id: &str) -> ResponseItem {
     }
 }
 
-fn function_output(call_id: &str) -> ResponseItem {
-    ResponseItem::FunctionCallOutput {
+fn function_output(call_id: &str) -> TranscriptItem {
+    TranscriptItem::FunctionCallOutput {
         call_id: call_id.to_string(),
         output: FunctionCallOutputPayload::from_text("ok".to_string()),
     }
 }
 
-fn state_for_boundary(items: &[ResponseItem], index: usize) -> SessionMemoryState {
+fn state_for_boundary(items: &[TranscriptItem], index: usize) -> SessionMemoryState {
     SessionMemoryState {
         last_summary_index: Some(index),
         last_summary_fingerprint: Some(tail::item_fingerprint(&items[index])),
@@ -197,6 +197,18 @@ fn compact_summary_does_not_apply_total_body_cap() {
 }
 
 #[test]
+fn claude_code_golden_raw_tail_rejects_more_than_40k_tokens() {
+    let tail = vec![user_message(&"token ".repeat(45_000))];
+
+    let err = validate_tail_budget(&tail).expect_err("tail should exceed compact budget");
+
+    assert!(
+        err.to_string()
+            .contains("session memory raw tail exceeds 40000 tokens")
+    );
+}
+
+#[test]
 fn compact_summary_validation_allows_previous_template_headings() {
     let current_template = "# IM State\n_Current chat handoff_\n\n# Follow-ups\n_Open items_";
     let summary = summary_with_current_state("- Old template content.");
@@ -211,7 +223,7 @@ fn session_memory_compacted_history_places_summary_before_tail() {
 
     let history = build_session_memory_compacted_history(tail.clone(), "summary".to_string());
 
-    let mut expected = vec![ResponseItem::Compaction {
+    let mut expected = vec![TranscriptItem::Compaction {
         encrypted_content: "summary".to_string(),
     }];
     expected.extend(tail);
@@ -222,7 +234,7 @@ fn session_memory_compacted_history_places_summary_before_tail() {
 fn session_memory_compacted_history_allows_empty_tail() {
     let history = build_session_memory_compacted_history(Vec::new(), "summary".to_string());
 
-    let expected = vec![ResponseItem::Compaction {
+    let expected = vec![TranscriptItem::Compaction {
         encrypted_content: "summary".to_string(),
     }];
     assert_eq!(history, expected);
@@ -291,6 +303,28 @@ fn compact_baseline_resets_to_post_compact_tokens() {
     assert!(should_extract(&state, &candidate, test_thresholds()));
 }
 
+#[test]
+fn legacy_auto_compact_breaker_state_is_ignored() {
+    let state: SessionMemoryState = serde_json::from_value(serde_json::json!({
+        "last_summary_tokens": 42_000,
+        "consecutive_auto_compact_failures": 99
+    }))
+    .expect("legacy state should deserialize");
+
+    let expected = SessionMemoryState {
+        last_summary_tokens: Some(42_000),
+        ..Default::default()
+    };
+    assert_eq!(state, expected);
+
+    let serialized = serde_json::to_value(&state).expect("serialize state");
+    assert!(
+        serialized
+            .get("consecutive_auto_compact_failures")
+            .is_none()
+    );
+}
+
 fn test_thresholds() -> ExtractionThresholds {
     ExtractionThresholds {
         minimum_message_tokens_to_init: 10_000,
@@ -328,6 +362,45 @@ async fn ensure_preserves_existing_summary_when_template_changes() {
     assert_eq!(summary, existing_summary);
     let state = store.read_state().await.expect("read preserved state");
     assert_eq!(state.last_summary_tokens, Some(42_000));
+}
+
+#[tokio::test]
+async fn write_state_persists_via_atomic_tempfile_without_leaving_temps() {
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let store = SessionMemoryStore {
+        thread_key: "thread".to_string(),
+        dir: temp.path().to_path_buf(),
+        summary_path: temp.path().join("summary.md"),
+        state_path: temp.path().join("state.json"),
+    };
+    store
+        .ensure(tail::DEFAULT_SUMMARY)
+        .await
+        .expect("initialize store");
+    let state = SessionMemoryState {
+        last_summary_tokens: Some(42_000),
+        last_summary_tool_calls: Some(7),
+        ..Default::default()
+    };
+
+    store.write_state(&state).await.expect("write state");
+
+    assert_eq!(store.read_state().await.expect("read state"), state);
+    let mut file_names = std::fs::read_dir(temp.path())
+        .expect("read session memory dir")
+        .map(|entry| {
+            entry
+                .expect("read dir entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect::<Vec<_>>();
+    file_names.sort();
+    assert_eq!(
+        file_names,
+        vec!["state.json".to_string(), "summary.md".to_string()]
+    );
 }
 
 #[tokio::test]
@@ -389,6 +462,42 @@ async fn wait_for_extraction_completion_clears_started_state_on_timeout() {
         ..Default::default()
     };
     assert_eq!(state, expected);
+}
+
+#[tokio::test]
+async fn wait_for_running_extraction_timeout_continues_and_clears_marker() {
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let store = SessionMemoryStore {
+        thread_key: "thread".to_string(),
+        dir: temp.path().to_path_buf(),
+        summary_path: temp.path().join("summary.md"),
+        state_path: temp.path().join("state.json"),
+    };
+    store
+        .ensure(tail::DEFAULT_SUMMARY)
+        .await
+        .expect("initialize store");
+    let original = SessionMemoryState {
+        extraction_started_at_unix: Some(now_unix_seconds()),
+        ..Default::default()
+    };
+    store.write_state(&original).await.expect("write state");
+    let mut state = original;
+
+    wait_for_running_extraction_with_timeout(&store, &mut state, Duration::from_millis(1))
+        .await
+        .expect("compact wait timeout should continue");
+
+    let expected = SessionMemoryState {
+        extraction_started_at_unix: None,
+        last_error: Some(
+            "session memory extraction did not finish before compact timeout".to_string(),
+        ),
+        ..Default::default()
+    };
+    assert_eq!(state, expected);
+    let stored = store.read_state().await.expect("read state");
+    assert_eq!(stored, expected);
 }
 
 #[test]

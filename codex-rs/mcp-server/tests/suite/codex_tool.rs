@@ -1,9 +1,7 @@
 use std::collections::HashMap;
-use std::env;
 use std::path::Path;
 use std::path::PathBuf;
 
-use codex_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
 use codex_mcp_server::CodexToolCallParam;
 use codex_mcp_server::ExecApprovalElicitRequestParams;
 use codex_mcp_server::ExecApprovalResponse;
@@ -38,12 +36,7 @@ const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 /// command, as expected.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_shell_command_approval_triggers_elicitation() {
-    if env::var(CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok() {
-        println!(
-            "Skipping test because it cannot execute when network is disabled in a Codex sandbox."
-        );
-        return;
-    }
+    skip_if_no_network!();
 
     // Apparently `#[tokio::test]` must return `()`, so we create a helper
     // function that returns `Result` so we can use `?` in favor of `unwrap`.
@@ -218,12 +211,7 @@ fn create_expected_elicitation_request_params(
 /// sending the approval applies the patch, as expected.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_patch_approval_triggers_elicitation() {
-    if env::var(CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok() {
-        println!(
-            "Skipping test because it cannot execute when network is disabled in a Codex sandbox."
-        );
-        return;
-    }
+    skip_if_no_network!();
 
     if let Err(err) = patch_approval_triggers_elicitation().await {
         panic!("failure: {err}");

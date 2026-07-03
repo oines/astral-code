@@ -1558,10 +1558,11 @@ Run astral doctor without --summary for detailed diagnostics.
                 DoctorCheck::new(
                     "network.websocket_reachability",
                     "websocket",
-                CheckStatus::Ok,
-                "Responses WebSocket transport is removed",
-            )
-            .detail("Responses WebSocket transport has been removed."),
+                    CheckStatus::Ok,
+                    "Responses WebSocket transport is removed",
+                )
+                .detail("auth mode: ChatGPT")
+                .detail("Responses WebSocket transport has been removed."),
                 DoctorCheck::new(
                     "network.provider_reachability",
                     "reachability",

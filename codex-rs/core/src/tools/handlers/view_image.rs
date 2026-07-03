@@ -5,7 +5,7 @@ use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::ImageDetail;
-use codex_protocol::models::ResponseInputItem;
+use codex_protocol::models::TranscriptInputItem;
 use codex_protocol::openai_models::InputModality;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_image::PromptImageMode;
@@ -251,7 +251,7 @@ impl ToolOutput for ViewImageOutput {
         true
     }
 
-    fn to_response_item(&self, call_id: &str, _payload: &ToolPayload) -> ResponseInputItem {
+    fn to_response_item(&self, call_id: &str, _payload: &ToolPayload) -> TranscriptInputItem {
         let body =
             FunctionCallOutputBody::ContentItems(vec![FunctionCallOutputContentItem::InputImage {
                 image_url: self.image_url.clone(),
@@ -262,7 +262,7 @@ impl ToolOutput for ViewImageOutput {
             success: Some(true),
         };
 
-        ResponseInputItem::FunctionCallOutput {
+        TranscriptInputItem::FunctionCallOutput {
             call_id: call_id.to_string(),
             output,
         }

@@ -33,8 +33,8 @@ use std::path::PathBuf;
 const EXEC_FORMAT_MAX_BYTES: usize = 10_000;
 const EXEC_FORMAT_MAX_TOKENS: usize = 2_500;
 
-fn assistant_msg(text: &str) -> ResponseItem {
-    ResponseItem::Message {
+fn assistant_msg(text: &str) -> TranscriptItem {
+    TranscriptItem::Message {
         id: None,
         role: "assistant".to_string(),
         content: vec![ContentItem::OutputText {
@@ -44,7 +44,7 @@ fn assistant_msg(text: &str) -> ResponseItem {
     }
 }
 
-fn inter_agent_assistant_msg(text: &str) -> ResponseItem {
+fn inter_agent_assistant_msg(text: &str) -> TranscriptItem {
     let communication = InterAgentCommunication::new(
         AgentPath::root(),
         AgentPath::root().join("worker").unwrap(),
@@ -52,7 +52,7 @@ fn inter_agent_assistant_msg(text: &str) -> ResponseItem {
         text.to_string(),
         /*trigger_turn*/ true,
     );
-    ResponseItem::Message {
+    TranscriptItem::Message {
         id: None,
         role: "assistant".to_string(),
         content: vec![ContentItem::OutputText {
@@ -62,7 +62,7 @@ fn inter_agent_assistant_msg(text: &str) -> ResponseItem {
     }
 }
 
-fn create_history_with_items(items: Vec<ResponseItem>) -> ContextManager {
+fn create_history_with_items(items: Vec<TranscriptItem>) -> ContextManager {
     let mut h = ContextManager::new();
     // Use a generous but fixed token budget; tests only rely on truncation
     // behavior, not on a specific model's token limit.
@@ -70,8 +70,8 @@ fn create_history_with_items(items: Vec<ResponseItem>) -> ContextManager {
     h
 }
 
-fn user_msg(text: &str) -> ResponseItem {
-    ResponseItem::Message {
+fn user_msg(text: &str) -> TranscriptItem {
+    TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::OutputText {
@@ -81,8 +81,8 @@ fn user_msg(text: &str) -> ResponseItem {
     }
 }
 
-fn user_input_text_msg(text: &str) -> ResponseItem {
-    ResponseItem::Message {
+fn user_input_text_msg(text: &str) -> TranscriptItem {
+    TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
@@ -92,8 +92,8 @@ fn user_input_text_msg(text: &str) -> ResponseItem {
     }
 }
 
-fn developer_msg(text: &str) -> ResponseItem {
-    ResponseItem::Message {
+fn developer_msg(text: &str) -> TranscriptItem {
+    TranscriptItem::Message {
         id: None,
         role: "developer".to_string(),
         content: vec![ContentItem::InputText {
@@ -103,8 +103,8 @@ fn developer_msg(text: &str) -> ResponseItem {
     }
 }
 
-fn developer_msg_with_fragments(texts: &[&str]) -> ResponseItem {
-    ResponseItem::Message {
+fn developer_msg_with_fragments(texts: &[&str]) -> TranscriptItem {
+    TranscriptItem::Message {
         id: None,
         role: "developer".to_string(),
         content: texts
@@ -139,16 +139,16 @@ fn reference_context_item() -> TurnContextItem {
     }
 }
 
-fn custom_tool_call_output(call_id: &str, output: &str) -> ResponseItem {
-    ResponseItem::CustomToolCallOutput {
+fn custom_tool_call_output(call_id: &str, output: &str) -> TranscriptItem {
+    TranscriptItem::CustomToolCallOutput {
         call_id: call_id.to_string(),
         name: None,
         output: FunctionCallOutputPayload::from_text(output.to_string()),
     }
 }
 
-fn reasoning_msg(text: &str) -> ResponseItem {
-    ResponseItem::Reasoning {
+fn reasoning_msg(text: &str) -> TranscriptItem {
+    TranscriptItem::Reasoning {
         id: String::new(),
         summary: vec![ReasoningItemReasoningSummary::SummaryText {
             text: "summary".to_string(),
@@ -157,17 +157,19 @@ fn reasoning_msg(text: &str) -> ResponseItem {
             text: text.to_string(),
         }]),
         encrypted_content: None,
+        provider_metadata: None,
     }
 }
 
-fn reasoning_with_encrypted_content(len: usize) -> ResponseItem {
-    ResponseItem::Reasoning {
+fn reasoning_with_encrypted_content(len: usize) -> TranscriptItem {
+    TranscriptItem::Reasoning {
         id: String::new(),
         summary: vec![ReasoningItemReasoningSummary::SummaryText {
             text: "summary".to_string(),
         }],
         content: None,
         encrypted_content: Some("a".repeat(len)),
+        provider_metadata: None,
     }
 }
 
@@ -184,7 +186,7 @@ fn filters_non_api_messages() {
     let mut h = ContextManager::default();
     let policy = TruncationPolicy::Tokens(10_000);
     // System message is not API messages; Other is ignored.
-    let system = ResponseItem::Message {
+    let system = TranscriptItem::Message {
         id: None,
         role: "system".to_string(),
         content: vec![ContentItem::OutputText {
@@ -193,7 +195,7 @@ fn filters_non_api_messages() {
         phase: None,
     };
     let reasoning = reasoning_msg("thinking...");
-    h.record_items([&system, &reasoning, &ResponseItem::Other], policy);
+    h.record_items([&system, &reasoning, &TranscriptItem::Other], policy);
 
     // User and assistant should be retained.
     let u = user_msg("hi");
@@ -204,7 +206,7 @@ fn filters_non_api_messages() {
     assert_eq!(
         items,
         vec![
-            ResponseItem::Reasoning {
+            TranscriptItem::Reasoning {
                 id: String::new(),
                 summary: vec![ReasoningItemReasoningSummary::SummaryText {
                     text: "summary".to_string(),
@@ -213,8 +215,9 @@ fn filters_non_api_messages() {
                     text: "thinking...".to_string(),
                 }]),
                 encrypted_content: None,
+                provider_metadata: None,
             },
-            ResponseItem::Message {
+            TranscriptItem::Message {
                 id: None,
                 role: "user".to_string(),
                 content: vec![ContentItem::OutputText {
@@ -222,7 +225,7 @@ fn filters_non_api_messages() {
                 }],
                 phase: None,
             },
-            ResponseItem::Message {
+            TranscriptItem::Message {
                 id: None,
                 role: "assistant".to_string(),
                 content: vec![ContentItem::OutputText {
@@ -362,7 +365,7 @@ fn total_token_usage_includes_all_items_after_last_model_generated_item() {
 #[test]
 fn for_prompt_strips_images_when_model_does_not_support_images() {
     let items = vec![
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![
@@ -379,14 +382,14 @@ fn for_prompt_strips_images_when_model_does_not_support_images() {
             ],
             phase: None,
         },
-        ResponseItem::FunctionCall {
+        TranscriptItem::FunctionCall {
             id: None,
             name: "view_image".to_string(),
             namespace: None,
             arguments: "{}".to_string(),
             call_id: "call-1".to_string(),
         },
-        ResponseItem::FunctionCallOutput {
+        TranscriptItem::FunctionCallOutput {
             call_id: "call-1".to_string(),
             output: FunctionCallOutputPayload::from_content_items(vec![
                 FunctionCallOutputContentItem::InputText {
@@ -398,14 +401,14 @@ fn for_prompt_strips_images_when_model_does_not_support_images() {
                 },
             ]),
         },
-        ResponseItem::CustomToolCall {
+        TranscriptItem::CustomToolCall {
             id: None,
             status: None,
             call_id: "tool-1".to_string(),
             name: "js_repl".to_string(),
             input: "view_image".to_string(),
         },
-        ResponseItem::CustomToolCallOutput {
+        TranscriptItem::CustomToolCallOutput {
             call_id: "tool-1".to_string(),
             name: None,
             output: FunctionCallOutputPayload::from_content_items(vec![
@@ -424,7 +427,7 @@ fn for_prompt_strips_images_when_model_does_not_support_images() {
     let stripped = history.for_prompt(&text_only_modalities);
 
     let expected = vec![
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![
@@ -441,14 +444,14 @@ fn for_prompt_strips_images_when_model_does_not_support_images() {
             ],
             phase: None,
         },
-        ResponseItem::FunctionCall {
+        TranscriptItem::FunctionCall {
             id: None,
             name: "view_image".to_string(),
             namespace: None,
             arguments: "{}".to_string(),
             call_id: "call-1".to_string(),
         },
-        ResponseItem::FunctionCallOutput {
+        TranscriptItem::FunctionCallOutput {
             call_id: "call-1".to_string(),
             output: FunctionCallOutputPayload::from_content_items(vec![
                 FunctionCallOutputContentItem::InputText {
@@ -460,14 +463,14 @@ fn for_prompt_strips_images_when_model_does_not_support_images() {
                 },
             ]),
         },
-        ResponseItem::CustomToolCall {
+        TranscriptItem::CustomToolCall {
             id: None,
             status: None,
             call_id: "tool-1".to_string(),
             name: "js_repl".to_string(),
             input: "view_image".to_string(),
         },
-        ResponseItem::CustomToolCallOutput {
+        TranscriptItem::CustomToolCallOutput {
             call_id: "tool-1".to_string(),
             name: None,
             output: FunctionCallOutputPayload::from_content_items(vec![
@@ -485,7 +488,7 @@ fn for_prompt_strips_images_when_model_does_not_support_images() {
 
     // With image support, images are preserved
     let modalities = default_input_modalities();
-    let with_images = create_history_with_items(vec![ResponseItem::Message {
+    let with_images = create_history_with_items(vec![TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![
@@ -501,7 +504,7 @@ fn for_prompt_strips_images_when_model_does_not_support_images() {
     }]);
     let preserved = with_images.for_prompt(&modalities);
     assert_eq!(preserved.len(), 1);
-    if let ResponseItem::Message { content, .. } = &preserved[0] {
+    if let TranscriptItem::Message { content, .. } = &preserved[0] {
         assert_eq!(content.len(), 2);
         assert!(matches!(content[1], ContentItem::InputImage { .. }));
     } else {
@@ -512,13 +515,13 @@ fn for_prompt_strips_images_when_model_does_not_support_images() {
 #[test]
 fn for_prompt_preserves_image_generation_calls_when_images_are_supported() {
     let history = create_history_with_items(vec![
-        ResponseItem::ImageGenerationCall {
+        TranscriptItem::ImageGenerationCall {
             id: "ig_123".to_string(),
             status: "generating".to_string(),
             revised_prompt: Some("lobster".to_string()),
             result: "Zm9v".to_string(),
         },
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -531,13 +534,13 @@ fn for_prompt_preserves_image_generation_calls_when_images_are_supported() {
     assert_eq!(
         history.for_prompt(&default_input_modalities()),
         vec![
-            ResponseItem::ImageGenerationCall {
+            TranscriptItem::ImageGenerationCall {
                 id: "ig_123".to_string(),
                 status: "generating".to_string(),
                 revised_prompt: Some("lobster".to_string()),
                 result: "Zm9v".to_string(),
             },
-            ResponseItem::Message {
+            TranscriptItem::Message {
                 id: None,
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
@@ -552,7 +555,7 @@ fn for_prompt_preserves_image_generation_calls_when_images_are_supported() {
 #[test]
 fn for_prompt_clears_image_generation_result_when_images_are_unsupported() {
     let history = create_history_with_items(vec![
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -560,7 +563,7 @@ fn for_prompt_clears_image_generation_result_when_images_are_unsupported() {
             }],
             phase: None,
         },
-        ResponseItem::ImageGenerationCall {
+        TranscriptItem::ImageGenerationCall {
             id: "ig_123".to_string(),
             status: "completed".to_string(),
             revised_prompt: Some("lobster".to_string()),
@@ -571,7 +574,7 @@ fn for_prompt_clears_image_generation_result_when_images_are_unsupported() {
     assert_eq!(
         history.for_prompt(&[InputModality::Text]),
         vec![
-            ResponseItem::Message {
+            TranscriptItem::Message {
                 id: None,
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
@@ -579,7 +582,7 @@ fn for_prompt_clears_image_generation_result_when_images_are_unsupported() {
                 }],
                 phase: None,
             },
-            ResponseItem::ImageGenerationCall {
+            TranscriptItem::ImageGenerationCall {
                 id: "ig_123".to_string(),
                 status: "completed".to_string(),
                 revised_prompt: Some("lobster".to_string()),
@@ -614,14 +617,14 @@ fn estimate_token_count_with_base_instructions_uses_provided_text() {
 #[test]
 fn remove_first_item_removes_matching_output_for_function_call() {
     let items = vec![
-        ResponseItem::FunctionCall {
+        TranscriptItem::FunctionCall {
             id: None,
             name: "do_it".to_string(),
             namespace: None,
             arguments: "{}".to_string(),
             call_id: "call-1".to_string(),
         },
-        ResponseItem::FunctionCallOutput {
+        TranscriptItem::FunctionCallOutput {
             call_id: "call-1".to_string(),
             output: FunctionCallOutputPayload::from_text("ok".to_string()),
         },
@@ -634,11 +637,11 @@ fn remove_first_item_removes_matching_output_for_function_call() {
 #[test]
 fn remove_first_item_removes_matching_call_for_output() {
     let items = vec![
-        ResponseItem::FunctionCallOutput {
+        TranscriptItem::FunctionCallOutput {
             call_id: "call-2".to_string(),
             output: FunctionCallOutputPayload::from_text("ok".to_string()),
         },
-        ResponseItem::FunctionCall {
+        TranscriptItem::FunctionCall {
             id: None,
             name: "do_it".to_string(),
             namespace: None,
@@ -655,7 +658,7 @@ fn remove_first_item_removes_matching_call_for_output() {
 fn replace_last_turn_images_replaces_tool_output_images() {
     let items = vec![
         user_input_text_msg("hi"),
-        ResponseItem::FunctionCallOutput {
+        TranscriptItem::FunctionCallOutput {
             call_id: "call-1".to_string(),
             output: FunctionCallOutputPayload {
                 body: FunctionCallOutputBody::ContentItems(vec![
@@ -676,7 +679,7 @@ fn replace_last_turn_images_replaces_tool_output_images() {
         history.raw_items(),
         vec![
             user_input_text_msg("hi"),
-            ResponseItem::FunctionCallOutput {
+            TranscriptItem::FunctionCallOutput {
                 call_id: "call-1".to_string(),
                 output: FunctionCallOutputPayload {
                     body: FunctionCallOutputBody::ContentItems(vec![
@@ -693,7 +696,7 @@ fn replace_last_turn_images_replaces_tool_output_images() {
 
 #[test]
 fn replace_last_turn_images_does_not_touch_user_images() {
-    let items = vec![ResponseItem::Message {
+    let items = vec![TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputImage {
@@ -711,7 +714,7 @@ fn replace_last_turn_images_does_not_touch_user_images() {
 #[test]
 fn remove_first_item_handles_local_shell_pair() {
     let items = vec![
-        ResponseItem::LocalShellCall {
+        TranscriptItem::LocalShellCall {
             id: None,
             call_id: Some("call-3".to_string()),
             status: LocalShellStatus::Completed,
@@ -723,7 +726,7 @@ fn remove_first_item_handles_local_shell_pair() {
                 user: None,
             }),
         },
-        ResponseItem::FunctionCallOutput {
+        TranscriptItem::FunctionCallOutput {
             call_id: "call-3".to_string(),
             output: FunctionCallOutputPayload::from_text("ok".to_string()),
         },
@@ -941,14 +944,14 @@ fn drop_last_n_user_turns_clears_reference_context_for_mixed_developer_context_b
 #[test]
 fn remove_first_item_handles_custom_tool_pair() {
     let items = vec![
-        ResponseItem::CustomToolCall {
+        TranscriptItem::CustomToolCall {
             id: None,
             status: None,
             call_id: "tool-1".to_string(),
             name: "my_tool".to_string(),
             input: "{}".to_string(),
         },
-        ResponseItem::CustomToolCallOutput {
+        TranscriptItem::CustomToolCallOutput {
             call_id: "tool-1".to_string(),
             name: None,
             output: FunctionCallOutputPayload::from_text("ok".to_string()),
@@ -962,7 +965,7 @@ fn remove_first_item_handles_custom_tool_pair() {
 #[test]
 fn normalization_retains_local_shell_outputs() {
     let items = vec![
-        ResponseItem::LocalShellCall {
+        TranscriptItem::LocalShellCall {
             id: None,
             call_id: Some("shell-1".to_string()),
             status: LocalShellStatus::Completed,
@@ -974,7 +977,7 @@ fn normalization_retains_local_shell_outputs() {
                 user: None,
             }),
         },
-        ResponseItem::FunctionCallOutput {
+        TranscriptItem::FunctionCallOutput {
             call_id: "shell-1".to_string(),
             output: FunctionCallOutputPayload::from_text("Total output lines: 1\n\nok".to_string()),
         },
@@ -994,7 +997,7 @@ fn record_items_truncates_function_call_output_content() {
     let policy = TruncationPolicy::Tokens(1_000);
     let long_line = "a very long line to trigger truncation\n";
     let long_output = long_line.repeat(2_500);
-    let item = ResponseItem::FunctionCallOutput {
+    let item = TranscriptItem::FunctionCallOutput {
         call_id: "call-100".to_string(),
         output: FunctionCallOutputPayload {
             body: FunctionCallOutputBody::Text(long_output.clone()),
@@ -1006,7 +1009,7 @@ fn record_items_truncates_function_call_output_content() {
 
     assert_eq!(history.items.len(), 1);
     match &history.items[0] {
-        ResponseItem::FunctionCallOutput { output, .. } => {
+        TranscriptItem::FunctionCallOutput { output, .. } => {
             let content = output.text_content().unwrap_or_default();
             assert_ne!(content, long_output);
             assert!(
@@ -1028,7 +1031,7 @@ fn record_items_truncates_custom_tool_call_output_content() {
     let policy = TruncationPolicy::Tokens(1_000);
     let line = "custom output that is very long\n";
     let long_output = line.repeat(2_500);
-    let item = ResponseItem::CustomToolCallOutput {
+    let item = TranscriptItem::CustomToolCallOutput {
         call_id: "tool-200".to_string(),
         name: None,
         output: FunctionCallOutputPayload::from_text(long_output.clone()),
@@ -1038,7 +1041,7 @@ fn record_items_truncates_custom_tool_call_output_content() {
 
     assert_eq!(history.items.len(), 1);
     match &history.items[0] {
-        ResponseItem::CustomToolCallOutput { output, .. } => {
+        TranscriptItem::CustomToolCallOutput { output, .. } => {
             let output = output.text_content().unwrap_or_default();
             assert_ne!(output, long_output);
             assert!(
@@ -1059,7 +1062,7 @@ fn record_items_respects_custom_token_limit() {
     let mut history = ContextManager::new();
     let policy = TruncationPolicy::Tokens(10);
     let long_output = "tokenized content repeated many times ".repeat(200);
-    let item = ResponseItem::FunctionCallOutput {
+    let item = TranscriptItem::FunctionCallOutput {
         call_id: "call-custom-limit".to_string(),
         output: FunctionCallOutputPayload {
             body: FunctionCallOutputBody::Text(long_output),
@@ -1070,7 +1073,7 @@ fn record_items_respects_custom_token_limit() {
     history.record_items([&item], policy);
 
     let stored = match &history.items[0] {
-        ResponseItem::FunctionCallOutput { output, .. } => output,
+        TranscriptItem::FunctionCallOutput { output, .. } => output,
         other => panic!("unexpected history item: {other:?}"),
     };
     assert!(
@@ -1178,7 +1181,7 @@ fn format_exec_output_prefers_line_marker_when_both_limits_exceeded() {
 #[cfg(not(debug_assertions))]
 #[test]
 fn normalize_adds_missing_output_for_function_call() {
-    let items = vec![ResponseItem::FunctionCall {
+    let items = vec![TranscriptItem::FunctionCall {
         id: None,
         name: "do_it".to_string(),
         namespace: None,
@@ -1192,14 +1195,14 @@ fn normalize_adds_missing_output_for_function_call() {
     assert_eq!(
         h.raw_items(),
         vec![
-            ResponseItem::FunctionCall {
+            TranscriptItem::FunctionCall {
                 id: None,
                 name: "do_it".to_string(),
                 namespace: None,
                 arguments: "{}".to_string(),
                 call_id: "call-x".to_string(),
             },
-            ResponseItem::FunctionCallOutput {
+            TranscriptItem::FunctionCallOutput {
                 call_id: "call-x".to_string(),
                 output: FunctionCallOutputPayload::from_text("aborted".to_string()),
             },
@@ -1210,7 +1213,7 @@ fn normalize_adds_missing_output_for_function_call() {
 #[cfg(not(debug_assertions))]
 #[test]
 fn normalize_adds_missing_output_for_custom_tool_call() {
-    let items = vec![ResponseItem::CustomToolCall {
+    let items = vec![TranscriptItem::CustomToolCall {
         id: None,
         status: None,
         call_id: "tool-x".to_string(),
@@ -1224,14 +1227,14 @@ fn normalize_adds_missing_output_for_custom_tool_call() {
     assert_eq!(
         h.raw_items(),
         vec![
-            ResponseItem::CustomToolCall {
+            TranscriptItem::CustomToolCall {
                 id: None,
                 status: None,
                 call_id: "tool-x".to_string(),
                 name: "custom".to_string(),
                 input: "{}".to_string(),
             },
-            ResponseItem::CustomToolCallOutput {
+            TranscriptItem::CustomToolCallOutput {
                 call_id: "tool-x".to_string(),
                 name: None,
                 output: FunctionCallOutputPayload::from_text("aborted".to_string()),
@@ -1243,7 +1246,7 @@ fn normalize_adds_missing_output_for_custom_tool_call() {
 #[cfg(not(debug_assertions))]
 #[test]
 fn normalize_adds_missing_output_for_local_shell_call_with_id() {
-    let items = vec![ResponseItem::LocalShellCall {
+    let items = vec![TranscriptItem::LocalShellCall {
         id: None,
         call_id: Some("shell-1".to_string()),
         status: LocalShellStatus::Completed,
@@ -1262,7 +1265,7 @@ fn normalize_adds_missing_output_for_local_shell_call_with_id() {
     assert_eq!(
         h.raw_items(),
         vec![
-            ResponseItem::LocalShellCall {
+            TranscriptItem::LocalShellCall {
                 id: None,
                 call_id: Some("shell-1".to_string()),
                 status: LocalShellStatus::Completed,
@@ -1274,7 +1277,7 @@ fn normalize_adds_missing_output_for_local_shell_call_with_id() {
                     user: None,
                 }),
             },
-            ResponseItem::FunctionCallOutput {
+            TranscriptItem::FunctionCallOutput {
                 call_id: "shell-1".to_string(),
                 output: FunctionCallOutputPayload::from_text("aborted".to_string()),
             },
@@ -1285,7 +1288,7 @@ fn normalize_adds_missing_output_for_local_shell_call_with_id() {
 #[cfg(not(debug_assertions))]
 #[test]
 fn normalize_removes_orphan_function_call_output() {
-    let items = vec![ResponseItem::FunctionCallOutput {
+    let items = vec![TranscriptItem::FunctionCallOutput {
         call_id: "orphan-1".to_string(),
         output: FunctionCallOutputPayload::from_text("ok".to_string()),
     }];
@@ -1299,7 +1302,7 @@ fn normalize_removes_orphan_function_call_output() {
 #[cfg(not(debug_assertions))]
 #[test]
 fn normalize_removes_orphan_custom_tool_call_output() {
-    let items = vec![ResponseItem::CustomToolCallOutput {
+    let items = vec![TranscriptItem::CustomToolCallOutput {
         call_id: "orphan-2".to_string(),
         name: None,
         output: FunctionCallOutputPayload::from_text("ok".to_string()),
@@ -1316,7 +1319,7 @@ fn normalize_removes_orphan_custom_tool_call_output() {
 fn normalize_mixed_inserts_and_removals() {
     let items = vec![
         // Will get an inserted output
-        ResponseItem::FunctionCall {
+        TranscriptItem::FunctionCall {
             id: None,
             name: "f1".to_string(),
             namespace: None,
@@ -1324,12 +1327,12 @@ fn normalize_mixed_inserts_and_removals() {
             call_id: "c1".to_string(),
         },
         // Orphan output that should be removed
-        ResponseItem::FunctionCallOutput {
+        TranscriptItem::FunctionCallOutput {
             call_id: "c2".to_string(),
             output: FunctionCallOutputPayload::from_text("ok".to_string()),
         },
         // Will get an inserted custom tool output
-        ResponseItem::CustomToolCall {
+        TranscriptItem::CustomToolCall {
             id: None,
             status: None,
             call_id: "t1".to_string(),
@@ -1337,7 +1340,7 @@ fn normalize_mixed_inserts_and_removals() {
             input: "{}".to_string(),
         },
         // Local shell call also gets an inserted function call output
-        ResponseItem::LocalShellCall {
+        TranscriptItem::LocalShellCall {
             id: None,
             call_id: Some("s1".to_string()),
             status: LocalShellStatus::Completed,
@@ -1357,30 +1360,30 @@ fn normalize_mixed_inserts_and_removals() {
     assert_eq!(
         h.raw_items(),
         vec![
-            ResponseItem::FunctionCall {
+            TranscriptItem::FunctionCall {
                 id: None,
                 name: "f1".to_string(),
                 namespace: None,
                 arguments: "{}".to_string(),
                 call_id: "c1".to_string(),
             },
-            ResponseItem::FunctionCallOutput {
+            TranscriptItem::FunctionCallOutput {
                 call_id: "c1".to_string(),
                 output: FunctionCallOutputPayload::from_text("aborted".to_string()),
             },
-            ResponseItem::CustomToolCall {
+            TranscriptItem::CustomToolCall {
                 id: None,
                 status: None,
                 call_id: "t1".to_string(),
                 name: "tool".to_string(),
                 input: "{}".to_string(),
             },
-            ResponseItem::CustomToolCallOutput {
+            TranscriptItem::CustomToolCallOutput {
                 call_id: "t1".to_string(),
                 name: None,
                 output: FunctionCallOutputPayload::from_text("aborted".to_string()),
             },
-            ResponseItem::LocalShellCall {
+            TranscriptItem::LocalShellCall {
                 id: None,
                 call_id: Some("s1".to_string()),
                 status: LocalShellStatus::Completed,
@@ -1392,7 +1395,7 @@ fn normalize_mixed_inserts_and_removals() {
                     user: None,
                 }),
             },
-            ResponseItem::FunctionCallOutput {
+            TranscriptItem::FunctionCallOutput {
                 call_id: "s1".to_string(),
                 output: FunctionCallOutputPayload::from_text("aborted".to_string()),
             },
@@ -1402,7 +1405,7 @@ fn normalize_mixed_inserts_and_removals() {
 
 #[test]
 fn normalize_adds_missing_output_for_function_call_inserts_output() {
-    let items = vec![ResponseItem::FunctionCall {
+    let items = vec![TranscriptItem::FunctionCall {
         id: None,
         name: "do_it".to_string(),
         namespace: None,
@@ -1414,14 +1417,14 @@ fn normalize_adds_missing_output_for_function_call_inserts_output() {
     assert_eq!(
         h.raw_items(),
         vec![
-            ResponseItem::FunctionCall {
+            TranscriptItem::FunctionCall {
                 id: None,
                 name: "do_it".to_string(),
                 namespace: None,
                 arguments: "{}".to_string(),
                 call_id: "call-x".to_string(),
             },
-            ResponseItem::FunctionCallOutput {
+            TranscriptItem::FunctionCallOutput {
                 call_id: "call-x".to_string(),
                 output: FunctionCallOutputPayload::from_text("aborted".to_string()),
             },
@@ -1431,7 +1434,7 @@ fn normalize_adds_missing_output_for_function_call_inserts_output() {
 
 #[test]
 fn normalize_adds_missing_output_for_tool_search_call() {
-    let items = vec![ResponseItem::ToolSearchCall {
+    let items = vec![TranscriptItem::ToolSearchCall {
         id: None,
         call_id: Some("search-call-x".to_string()),
         status: Some("completed".to_string()),
@@ -1445,14 +1448,14 @@ fn normalize_adds_missing_output_for_tool_search_call() {
     assert_eq!(
         h.raw_items(),
         vec![
-            ResponseItem::ToolSearchCall {
+            TranscriptItem::ToolSearchCall {
                 id: None,
                 call_id: Some("search-call-x".to_string()),
                 status: Some("completed".to_string()),
                 execution: "client".to_string(),
                 arguments: "{}".into(),
             },
-            ResponseItem::ToolSearchOutput {
+            TranscriptItem::ToolSearchOutput {
                 call_id: Some("search-call-x".to_string()),
                 status: "completed".to_string(),
                 execution: "client".to_string(),
@@ -1466,7 +1469,7 @@ fn normalize_adds_missing_output_for_tool_search_call() {
 #[test]
 #[should_panic]
 fn normalize_adds_missing_output_for_custom_tool_call_panics_in_debug() {
-    let items = vec![ResponseItem::CustomToolCall {
+    let items = vec![TranscriptItem::CustomToolCall {
         id: None,
         status: None,
         call_id: "tool-x".to_string(),
@@ -1481,7 +1484,7 @@ fn normalize_adds_missing_output_for_custom_tool_call_panics_in_debug() {
 #[test]
 #[should_panic]
 fn normalize_adds_missing_output_for_local_shell_call_with_id_panics_in_debug() {
-    let items = vec![ResponseItem::LocalShellCall {
+    let items = vec![TranscriptItem::LocalShellCall {
         id: None,
         call_id: Some("shell-1".to_string()),
         status: LocalShellStatus::Completed,
@@ -1501,7 +1504,7 @@ fn normalize_adds_missing_output_for_local_shell_call_with_id_panics_in_debug() 
 #[test]
 #[should_panic]
 fn normalize_removes_orphan_function_call_output_panics_in_debug() {
-    let items = vec![ResponseItem::FunctionCallOutput {
+    let items = vec![TranscriptItem::FunctionCallOutput {
         call_id: "orphan-1".to_string(),
         output: FunctionCallOutputPayload::from_text("ok".to_string()),
     }];
@@ -1513,7 +1516,7 @@ fn normalize_removes_orphan_function_call_output_panics_in_debug() {
 #[test]
 #[should_panic]
 fn normalize_removes_orphan_custom_tool_call_output_panics_in_debug() {
-    let items = vec![ResponseItem::CustomToolCallOutput {
+    let items = vec![TranscriptItem::CustomToolCallOutput {
         call_id: "orphan-2".to_string(),
         name: None,
         output: FunctionCallOutputPayload::from_text("ok".to_string()),
@@ -1525,7 +1528,7 @@ fn normalize_removes_orphan_custom_tool_call_output_panics_in_debug() {
 #[cfg(not(debug_assertions))]
 #[test]
 fn normalize_removes_orphan_client_tool_search_output() {
-    let items = vec![ResponseItem::ToolSearchOutput {
+    let items = vec![TranscriptItem::ToolSearchOutput {
         call_id: Some("orphan-search".to_string()),
         status: "completed".to_string(),
         execution: "client".to_string(),
@@ -1542,7 +1545,7 @@ fn normalize_removes_orphan_client_tool_search_output() {
 #[test]
 #[should_panic]
 fn normalize_removes_orphan_client_tool_search_output_panics_in_debug() {
-    let items = vec![ResponseItem::ToolSearchOutput {
+    let items = vec![TranscriptItem::ToolSearchOutput {
         call_id: Some("orphan-search".to_string()),
         status: "completed".to_string(),
         execution: "client".to_string(),
@@ -1554,7 +1557,7 @@ fn normalize_removes_orphan_client_tool_search_output_panics_in_debug() {
 
 #[test]
 fn normalize_keeps_server_tool_search_output_without_matching_call() {
-    let items = vec![ResponseItem::ToolSearchOutput {
+    let items = vec![TranscriptItem::ToolSearchOutput {
         call_id: Some("server-search".to_string()),
         status: "completed".to_string(),
         execution: "server".to_string(),
@@ -1566,7 +1569,7 @@ fn normalize_keeps_server_tool_search_output_without_matching_call() {
 
     assert_eq!(
         h.raw_items(),
-        vec![ResponseItem::ToolSearchOutput {
+        vec![TranscriptItem::ToolSearchOutput {
             call_id: Some("server-search".to_string()),
             status: "completed".to_string(),
             execution: "server".to_string(),
@@ -1580,25 +1583,25 @@ fn normalize_keeps_server_tool_search_output_without_matching_call() {
 #[should_panic]
 fn normalize_mixed_inserts_and_removals_panics_in_debug() {
     let items = vec![
-        ResponseItem::FunctionCall {
+        TranscriptItem::FunctionCall {
             id: None,
             name: "f1".to_string(),
             namespace: None,
             arguments: "{}".to_string(),
             call_id: "c1".to_string(),
         },
-        ResponseItem::FunctionCallOutput {
+        TranscriptItem::FunctionCallOutput {
             call_id: "c2".to_string(),
             output: FunctionCallOutputPayload::from_text("ok".to_string()),
         },
-        ResponseItem::CustomToolCall {
+        TranscriptItem::CustomToolCall {
             id: None,
             status: None,
             call_id: "t1".to_string(),
             name: "tool".to_string(),
             input: "{}".to_string(),
         },
-        ResponseItem::LocalShellCall {
+        TranscriptItem::LocalShellCall {
             id: None,
             call_id: Some("s1".to_string()),
             status: LocalShellStatus::Completed,
@@ -1619,7 +1622,7 @@ fn normalize_mixed_inserts_and_removals_panics_in_debug() {
 fn image_data_url_payload_does_not_dominate_message_estimate() {
     let payload = "A".repeat(100_000);
     let image_url = format!("data:image/png;base64,{payload}");
-    let image_item = ResponseItem::Message {
+    let image_item = TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![
@@ -1633,7 +1636,7 @@ fn image_data_url_payload_does_not_dominate_message_estimate() {
         ],
         phase: None,
     };
-    let text_only_item = ResponseItem::Message {
+    let text_only_item = TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
@@ -1656,7 +1659,7 @@ fn image_data_url_payload_does_not_dominate_message_estimate() {
 fn image_data_url_payload_does_not_dominate_function_call_output_estimate() {
     let payload = "B".repeat(50_000);
     let image_url = format!("data:image/png;base64,{payload}");
-    let item = ResponseItem::FunctionCallOutput {
+    let item = TranscriptItem::FunctionCallOutput {
         call_id: "call-abc".to_string(),
         output: FunctionCallOutputPayload::from_content_items(vec![
             FunctionCallOutputContentItem::InputText {
@@ -1681,7 +1684,7 @@ fn image_data_url_payload_does_not_dominate_function_call_output_estimate() {
 fn image_data_url_payload_does_not_dominate_custom_tool_call_output_estimate() {
     let payload = "C".repeat(50_000);
     let image_url = format!("data:image/png;base64,{payload}");
-    let item = ResponseItem::CustomToolCallOutput {
+    let item = TranscriptItem::CustomToolCallOutput {
         call_id: "call-js-repl".to_string(),
         name: None,
         output: FunctionCallOutputPayload::from_content_items(vec![
@@ -1705,7 +1708,7 @@ fn image_data_url_payload_does_not_dominate_custom_tool_call_output_estimate() {
 
 #[test]
 fn non_base64_image_urls_are_unchanged() {
-    let message_item = ResponseItem::Message {
+    let message_item = TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputImage {
@@ -1714,7 +1717,7 @@ fn non_base64_image_urls_are_unchanged() {
         }],
         phase: None,
     };
-    let function_output_item = ResponseItem::FunctionCallOutput {
+    let function_output_item = TranscriptItem::FunctionCallOutput {
         call_id: "call-1".to_string(),
         output: FunctionCallOutputPayload::from_content_items(vec![
             FunctionCallOutputContentItem::InputImage {
@@ -1737,7 +1740,7 @@ fn non_base64_image_urls_are_unchanged() {
 #[test]
 fn encrypted_function_output_uses_plaintext_byte_estimate() {
     let encrypted_content = "A".repeat(1_868);
-    let item = ResponseItem::FunctionCallOutput {
+    let item = TranscriptItem::FunctionCallOutput {
         call_id: "call-encrypted".to_string(),
         output: FunctionCallOutputPayload::from_content_items(vec![
             FunctionCallOutputContentItem::EncryptedContent {
@@ -1756,7 +1759,7 @@ fn encrypted_function_output_uses_plaintext_byte_estimate() {
 
 #[test]
 fn data_url_without_base64_marker_is_unchanged() {
-    let item = ResponseItem::Message {
+    let item = TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputImage {
@@ -1776,7 +1779,7 @@ fn data_url_without_base64_marker_is_unchanged() {
 fn non_image_base64_data_url_is_unchanged() {
     let payload = "C".repeat(4_096);
     let image_url = format!("data:application/octet-stream;base64,{payload}");
-    let item = ResponseItem::FunctionCallOutput {
+    let item = TranscriptItem::FunctionCallOutput {
         call_id: "call-octet".to_string(),
         output: FunctionCallOutputPayload::from_content_items(vec![
             FunctionCallOutputContentItem::InputImage {
@@ -1796,7 +1799,7 @@ fn non_image_base64_data_url_is_unchanged() {
 fn mixed_case_data_url_markers_are_adjusted() {
     let payload = "F".repeat(1_024);
     let image_url = format!("DATA:image/png;BASE64,{payload}");
-    let item = ResponseItem::Message {
+    let item = TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputImage {
@@ -1819,7 +1822,7 @@ fn multiple_inline_images_apply_multiple_fixed_costs() {
     let payload_two = "E".repeat(200);
     let image_url_one = format!("data:image/png;base64,{payload_one}");
     let image_url_two = format!("data:image/jpeg;base64,{payload_two}");
-    let item = ResponseItem::Message {
+    let item = TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![
@@ -1861,7 +1864,7 @@ fn original_detail_images_scale_with_dimensions() {
         .expect("encode png");
     let payload = BASE64_STANDARD.encode(bytes.get_ref());
     let image_url = format!("data:image/png;base64,{payload}");
-    let item = ResponseItem::FunctionCallOutput {
+    let item = TranscriptItem::FunctionCallOutput {
         call_id: "call-original".to_string(),
         output: FunctionCallOutputPayload::from_content_items(vec![
             FunctionCallOutputContentItem::InputImage {
@@ -1891,7 +1894,7 @@ fn original_detail_images_are_capped_at_max_patch_count() {
         .expect("encode png");
     let payload = BASE64_STANDARD.encode(bytes.get_ref());
     let image_url = format!("data:image/png;base64,{payload}");
-    let item = ResponseItem::FunctionCallOutput {
+    let item = TranscriptItem::FunctionCallOutput {
         call_id: "call-original-capped".to_string(),
         output: FunctionCallOutputPayload::from_content_items(vec![
             FunctionCallOutputContentItem::InputImage {
@@ -1924,7 +1927,7 @@ fn original_detail_webp_images_scale_with_dimensions() {
         .expect("encode webp");
     let payload = BASE64_STANDARD.encode(bytes.get_ref());
     let image_url = format!("data:image/webp;base64,{payload}");
-    let item = ResponseItem::FunctionCallOutput {
+    let item = TranscriptItem::FunctionCallOutput {
         call_id: "call-original-webp".to_string(),
         output: FunctionCallOutputPayload::from_content_items(vec![
             FunctionCallOutputContentItem::InputImage {
@@ -1943,7 +1946,7 @@ fn original_detail_webp_images_scale_with_dimensions() {
 
 #[test]
 fn text_only_items_unchanged() {
-    let item = ResponseItem::Message {
+    let item = TranscriptItem::Message {
         id: None,
         role: "assistant".to_string(),
         content: vec![ContentItem::OutputText {

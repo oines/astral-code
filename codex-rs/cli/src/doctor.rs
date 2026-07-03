@@ -2252,6 +2252,7 @@ fn fallback_state_check() -> DoctorCheck {
 struct ReachabilityPlan {
     description: String,
     endpoints: Vec<ReachabilityEndpoint>,
+    config_error: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -2334,23 +2335,21 @@ fn provider_reachability_plan_from_parts(
     provider_query_params: Option<&HashMap<String, String>>,
     is_amazon_bedrock: bool,
 ) -> ReachabilityPlan {
-    let provider_route_probe_url = provider_base_url
-        .or_else(|| {
-            (mode == ProviderAuthReachabilityMode::ApiKey).then_some("https://api.openai.com/v1")
-        })
-        .and_then(|url| {
-            should_probe_models_route(provider_name, url, is_amazon_bedrock)
-                .then(|| provider_url_for_path(url, "models", provider_query_params))
-        });
+    let provider_route_probe_url = provider_base_url.and_then(|url| {
+        should_probe_models_route(provider_name, url, is_amazon_bedrock)
+            .then(|| provider_url_for_path(url, "models", provider_query_params))
+    });
     let endpoints = match mode {
-        ProviderAuthReachabilityMode::ApiKey => vec![ReachabilityEndpoint {
-            label: format!("{provider_id} API"),
-            url: provider_base_url
-                .unwrap_or("https://api.openai.com/v1")
-                .to_string(),
-            required: true,
-            route_probe_url: provider_route_probe_url,
-        }],
+        ProviderAuthReachabilityMode::ApiKey => provider_base_url
+            .map(|url| {
+                vec![ReachabilityEndpoint {
+                    label: format!("{provider_id} API"),
+                    url: url.to_string(),
+                    required: true,
+                    route_probe_url: provider_route_probe_url,
+                }]
+            })
+            .unwrap_or_default(),
         ProviderAuthReachabilityMode::NotRequired => provider_base_url
             .map(|url| {
                 vec![ReachabilityEndpoint {
@@ -2365,6 +2364,8 @@ fn provider_reachability_plan_from_parts(
     ReachabilityPlan {
         description: mode.description().to_string(),
         endpoints,
+        config_error: (mode == ProviderAuthReachabilityMode::ApiKey && provider_base_url.is_none())
+            .then(|| "ASTRAL_BASE_URL is not configured".to_string()),
     }
 }
 
@@ -2405,6 +2406,16 @@ fn provider_url_for_path(
 
 async fn provider_reachability_check(plan: ReachabilityPlan) -> DoctorCheck {
     let mut details = vec![format!("reachability mode: {}", plan.description)];
+    if let Some(config_error) = plan.config_error {
+        details.push(config_error.clone());
+        return DoctorCheck::new(
+            "network.provider_reachability",
+            "reachability",
+            CheckStatus::Fail,
+            config_error,
+        )
+        .details(details);
+    }
     if plan.endpoints.is_empty() {
         details.push("active provider endpoint: none configured".to_string());
         return DoctorCheck::new(
@@ -3305,8 +3316,11 @@ mod tests {
                     label: "azure API".to_string(),
                     url: "https://example.openai.azure.com/openai/v1".to_string(),
                     required: true,
-                    route_probe_url: None,
+                    route_probe_url: Some(
+                        "https://example.openai.azure.com/openai/v1/models".to_string(),
+                    ),
                 }],
+                config_error: None,
             }
         );
     }
@@ -3334,6 +3348,7 @@ mod tests {
                         "https://example.com/openai/v1/models?api-version=2026-01-01".to_string()
                     ),
                 }],
+                config_error: None,
             }
         );
     }
@@ -3353,24 +3368,44 @@ mod tests {
     }
 
     #[test]
-    fn provider_reachability_api_key_does_not_require_chatgpt() {
+    fn provider_reachability_api_key_requires_astral_base_url() {
         let plan = provider_reachability_plan_from_parts(
             ProviderAuthReachabilityMode::ApiKey,
-            "openai",
-            "OpenAI",
+            "astral",
+            "Astral",
             /*provider_base_url*/ None,
             /*provider_query_params*/ None,
             /*is_amazon_bedrock*/ false,
         );
 
+        assert_eq!(plan.endpoints, Vec::new());
         assert_eq!(
-            plan.endpoints,
-            vec![ReachabilityEndpoint {
-                label: "openai API".to_string(),
-                url: "https://api.openai.com/v1".to_string(),
-                required: true,
-                route_probe_url: Some("https://api.openai.com/v1/models".to_string()),
-            }]
+            plan.config_error,
+            Some("ASTRAL_BASE_URL is not configured".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn provider_reachability_api_key_without_base_url_fails_config_check() {
+        let plan = provider_reachability_plan_from_parts(
+            ProviderAuthReachabilityMode::ApiKey,
+            "astral",
+            "Astral",
+            /*provider_base_url*/ None,
+            /*provider_query_params*/ None,
+            /*is_amazon_bedrock*/ false,
+        );
+
+        let check = provider_reachability_check(plan).await;
+
+        assert_eq!(check.status, CheckStatus::Fail);
+        assert_eq!(check.summary, "ASTRAL_BASE_URL is not configured");
+        assert_eq!(
+            check.details,
+            vec![
+                "reachability mode: API key auth".to_string(),
+                "ASTRAL_BASE_URL is not configured".to_string(),
+            ]
         );
     }
 

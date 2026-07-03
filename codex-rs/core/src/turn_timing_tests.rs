@@ -3,7 +3,7 @@ use codex_protocol::items::AgentMessageItem;
 use codex_protocol::items::TurnItem;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::FunctionCallOutputPayload;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use pretty_assertions::assert_eq;
 use std::time::Duration;
 use std::time::Instant;
@@ -14,14 +14,14 @@ use super::TurnProfilePhase;
 use super::TurnProfileState;
 use super::TurnTimingState;
 use super::response_item_records_turn_ttft;
-use crate::ResponseEvent;
+use crate::ModelStreamEvent;
 
 #[tokio::test]
 async fn turn_timing_state_records_ttft_only_once_per_turn() {
     let state = TurnTimingState::default();
     assert_eq!(
         state
-            .record_ttft_for_response_event(&ResponseEvent::OutputTextDelta("hi".to_string()))
+            .record_ttft_for_response_event(&ModelStreamEvent::OutputTextDelta("hi".to_string()))
             .await,
         None
     );
@@ -29,19 +29,19 @@ async fn turn_timing_state_records_ttft_only_once_per_turn() {
     state.mark_turn_started(Instant::now()).await;
     assert_eq!(
         state
-            .record_ttft_for_response_event(&ResponseEvent::Created)
+            .record_ttft_for_response_event(&ModelStreamEvent::Created)
             .await,
         None
     );
     assert!(
         state
-            .record_ttft_for_response_event(&ResponseEvent::OutputTextDelta("hi".to_string()))
+            .record_ttft_for_response_event(&ModelStreamEvent::OutputTextDelta("hi".to_string()))
             .await
             .is_some()
     );
     assert_eq!(
         state
-            .record_ttft_for_response_event(&ResponseEvent::OutputTextDelta("again".to_string()))
+            .record_ttft_for_response_event(&ModelStreamEvent::OutputTextDelta("again".to_string()))
             .await,
         None
     );
@@ -54,7 +54,7 @@ async fn turn_timing_state_records_ttfm_independently_of_ttft() {
 
     assert!(
         state
-            .record_ttft_for_response_event(&ResponseEvent::OutputTextDelta("hi".to_string()))
+            .record_ttft_for_response_event(&ModelStreamEvent::OutputTextDelta("hi".to_string()))
             .await
             .is_some()
     );
@@ -106,7 +106,7 @@ async fn turn_timing_state_records_turn_started_epoch_millis() {
 #[test]
 fn response_item_records_turn_ttft_for_first_output_signals() {
     assert!(response_item_records_turn_ttft(
-        &ResponseItem::FunctionCall {
+        &TranscriptItem::FunctionCall {
             id: None,
             name: "shell".to_string(),
             namespace: None,
@@ -115,7 +115,7 @@ fn response_item_records_turn_ttft_for_first_output_signals() {
         }
     ));
     assert!(response_item_records_turn_ttft(
-        &ResponseItem::CustomToolCall {
+        &TranscriptItem::CustomToolCall {
             id: None,
             status: None,
             call_id: "call-2".to_string(),
@@ -123,7 +123,7 @@ fn response_item_records_turn_ttft_for_first_output_signals() {
             input: "echo hi".to_string(),
         }
     ));
-    assert!(response_item_records_turn_ttft(&ResponseItem::Message {
+    assert!(response_item_records_turn_ttft(&TranscriptItem::Message {
         id: None,
         role: "assistant".to_string(),
         content: vec![ContentItem::OutputText {
@@ -135,7 +135,7 @@ fn response_item_records_turn_ttft_for_first_output_signals() {
 
 #[test]
 fn response_item_records_turn_ttft_ignores_empty_non_output_items() {
-    assert!(!response_item_records_turn_ttft(&ResponseItem::Message {
+    assert!(!response_item_records_turn_ttft(&TranscriptItem::Message {
         id: None,
         role: "assistant".to_string(),
         content: vec![ContentItem::OutputText {
@@ -144,7 +144,7 @@ fn response_item_records_turn_ttft_ignores_empty_non_output_items() {
         phase: None,
     }));
     assert!(!response_item_records_turn_ttft(
-        &ResponseItem::FunctionCallOutput {
+        &TranscriptItem::FunctionCallOutput {
             call_id: "call-1".to_string(),
             output: FunctionCallOutputPayload::from_text("ok".to_string()),
         }

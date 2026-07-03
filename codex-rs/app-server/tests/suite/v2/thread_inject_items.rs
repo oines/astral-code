@@ -12,7 +12,7 @@ use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::UserInput as V2UserInput;
 use codex_core::RolloutRecorder;
 use codex_protocol::models::ContentItem;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::protocol::InitialHistory;
 use codex_protocol::protocol::RolloutItem;
 use core_test_support::responses;
@@ -53,7 +53,7 @@ async fn thread_inject_items_adds_raw_response_items_to_thread_history() -> Resu
     let ThreadStartResponse { thread, .. } = to_response::<ThreadStartResponse>(thread_resp)?;
 
     let injected_text = "Injected assistant context";
-    let injected_item = ResponseItem::Message {
+    let injected_item = TranscriptItem::Message {
         id: None,
         role: "assistant".to_string(),
         content: vec![ContentItem::OutputText {
@@ -85,7 +85,7 @@ async fn thread_inject_items_adds_raw_response_items_to_thread_history() -> Resu
         resumed_history
             .history
             .iter()
-            .any(|item| matches!(item, RolloutItem::ResponseItem(response_item) if response_item == &injected_item)),
+            .any(|item| matches!(item, RolloutItem::TranscriptItem(response_item) if response_item == &injected_item)),
         "injected item should be persisted in rollout history"
     );
 
@@ -190,7 +190,7 @@ async fn thread_inject_items_adds_raw_response_items_after_a_turn() -> Result<()
     )
     .await??;
 
-    let injected_item = ResponseItem::Message {
+    let injected_item = TranscriptItem::Message {
         id: None,
         role: "assistant".to_string(),
         content: vec![ContentItem::OutputText {

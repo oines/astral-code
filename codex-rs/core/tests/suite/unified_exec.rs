@@ -10,7 +10,7 @@ use anyhow::Result;
 use codex_exec_server::CreateDirectoryOptions;
 use codex_features::Feature;
 use codex_protocol::models::PermissionProfile;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::permissions::NetworkSandboxPolicy;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
@@ -204,7 +204,7 @@ async fn wait_for_raw_unified_exec_output(
 ) -> Result<ParsedUnifiedExecOutput> {
     let content = wait_for_event_match(&test.codex, |event| match event {
         EventMsg::RawResponseItem(raw) => match &raw.item {
-            ResponseItem::FunctionCallOutput {
+            TranscriptItem::FunctionCallOutput {
                 call_id: output_call_id,
                 output,
             } if output_call_id == call_id => output.text_content().map(str::to_string),

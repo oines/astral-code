@@ -1,6 +1,7 @@
 use crate::agent_adapters::anthropic;
 use crate::agent_adapters::chat_completions;
-use crate::common::ResponseEvent;
+use crate::agent_adapters::chat_completions::ChatCompletionsStreamState;
+use crate::common::ModelStreamEvent;
 use crate::common::ResponseStream;
 use crate::error::ApiError;
 use crate::rate_limits::parse_all_rate_limits;
@@ -14,7 +15,8 @@ use codex_client::ByteStream;
 use codex_client::StreamResponse;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ReasoningItemContent;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::ReasoningProviderMetadata;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::protocol::TokenUsage;
 use eventsource_stream::Eventsource;
 use futures::StreamExt;
@@ -58,14 +60,16 @@ pub fn spawn_agent_stream(
         .get(MODELS_ETAG_HEADER)
         .and_then(|value| value.to_str().ok())
         .map(str::to_string);
-    let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent, ApiError>>(1600);
+    let (tx_event, rx_event) = mpsc::channel::<Result<ModelStreamEvent, ApiError>>(1600);
 
     tokio::spawn(async move {
         for snapshot in rate_limit_snapshots {
-            let _ = tx_event.send(Ok(ResponseEvent::RateLimits(snapshot))).await;
+            let _ = tx_event
+                .send(Ok(ModelStreamEvent::RateLimits(snapshot)))
+                .await;
         }
         if let Some(etag) = models_etag {
-            let _ = tx_event.send(Ok(ResponseEvent::ModelsEtag(etag))).await;
+            let _ = tx_event.send(Ok(ModelStreamEvent::ModelsEtag(etag))).await;
         }
         process_sse(
             stream_response.bytes,
@@ -86,6 +90,7 @@ pub fn spawn_agent_stream(
 
 struct AgentStreamMapper {
     response_id: Option<String>,
+    pending_usage: Option<AgentTokenUsage>,
     blocks: BTreeMap<usize, BlockState>,
     block_order: Vec<usize>,
     tool_name_aliases: BTreeMap<String, String>,
@@ -95,6 +100,7 @@ impl AgentStreamMapper {
     fn new(tool_name_aliases: BTreeMap<String, String>) -> Self {
         Self {
             response_id: None,
+            pending_usage: None,
             blocks: BTreeMap::new(),
             block_order: Vec::new(),
             tool_name_aliases,
@@ -128,15 +134,19 @@ enum BlockState {
 }
 
 impl AgentStreamMapper {
-    fn process_event(&mut self, event: AgentStreamEvent) -> Result<Vec<ResponseEvent>, ApiError> {
+    fn process_event(
+        &mut self,
+        event: AgentStreamEvent,
+    ) -> Result<Vec<ModelStreamEvent>, ApiError> {
         let mut events = Vec::new();
 
         match event {
-            AgentStreamEvent::MessageStart { id, model } => {
+            AgentStreamEvent::MessageStart { id, model, usage } => {
                 self.response_id = id;
-                events.push(ResponseEvent::Created);
+                self.pending_usage = merge_agent_usage(self.pending_usage.take(), usage);
+                events.push(ModelStreamEvent::Created);
                 if let Some(model) = model {
-                    events.push(ResponseEvent::ServerModel(model));
+                    events.push(ModelStreamEvent::ServerModel(model));
                 }
             }
             AgentStreamEvent::ContentBlockStart { index, block } => {
@@ -155,7 +165,14 @@ impl AgentStreamMapper {
                     return Err(ApiError::Stream(message.clone()));
                 }
                 events.extend(self.finish_all_blocks());
-                events.push(ResponseEvent::Completed {
+                if matches!(stop_reason, Some(StopReason::MaxTokens)) {
+                    events.push(ModelStreamEvent::Warning(
+                        "Model output was truncated because the provider reported max_tokens."
+                            .to_string(),
+                    ));
+                }
+                let usage = merge_agent_usage(self.pending_usage.take(), usage);
+                events.push(ModelStreamEvent::Completed {
                     response_id: self
                         .response_id
                         .clone()
@@ -169,7 +186,12 @@ impl AgentStreamMapper {
         Ok(events)
     }
 
-    fn start_block(&mut self, index: usize, block: ContentBlock, events: &mut Vec<ResponseEvent>) {
+    fn start_block(
+        &mut self,
+        index: usize,
+        block: ContentBlock,
+        events: &mut Vec<ModelStreamEvent>,
+    ) {
         if !self.blocks.contains_key(&index) {
             self.block_order.push(index);
         }
@@ -183,7 +205,7 @@ impl AgentStreamMapper {
                         text: text.clone(),
                     },
                 );
-                events.push(ResponseEvent::OutputItemAdded(ResponseItem::Message {
+                events.push(ModelStreamEvent::OutputItemAdded(TranscriptItem::Message {
                     id: Some(id),
                     role: "assistant".to_string(),
                     content: vec![ContentItem::OutputText { text }],
@@ -200,12 +222,15 @@ impl AgentStreamMapper {
                         signature,
                     },
                 );
-                events.push(ResponseEvent::OutputItemAdded(ResponseItem::Reasoning {
-                    id,
-                    summary: Vec::new(),
-                    content: Some(vec![ReasoningItemContent::ReasoningText { text }]),
-                    encrypted_content: None,
-                }));
+                events.push(ModelStreamEvent::OutputItemAdded(
+                    TranscriptItem::Reasoning {
+                        id,
+                        summary: Vec::new(),
+                        content: Some(vec![ReasoningItemContent::ReasoningText { text }]),
+                        encrypted_content: None,
+                        provider_metadata: None,
+                    },
+                ));
             }
             ContentBlock::ToolUse { id, name, input } => {
                 let name = self.canonical_tool_name(&name);
@@ -218,13 +243,15 @@ impl AgentStreamMapper {
                         arguments: String::new(),
                     },
                 );
-                events.push(ResponseEvent::OutputItemAdded(ResponseItem::FunctionCall {
-                    id: Some(id.clone()),
-                    name,
-                    namespace: None,
-                    arguments: json_arguments(&input),
-                    call_id: id,
-                }));
+                events.push(ModelStreamEvent::OutputItemAdded(
+                    TranscriptItem::FunctionCall {
+                        id: Some(id.clone()),
+                        name,
+                        namespace: None,
+                        arguments: json_arguments(&input),
+                        call_id: id,
+                    },
+                ));
             }
             ContentBlock::ToolResult { .. } | ContentBlock::Image { .. } => {}
             ContentBlock::Compaction { .. } => {}
@@ -242,7 +269,7 @@ impl AgentStreamMapper {
         &mut self,
         index: usize,
         delta: ContentDelta,
-        events: &mut Vec<ResponseEvent>,
+        events: &mut Vec<ModelStreamEvent>,
     ) -> Result<(), ApiError> {
         match delta {
             ContentDelta::Text { text } => {
@@ -254,7 +281,7 @@ impl AgentStreamMapper {
                 {
                     existing.push_str(&text);
                 }
-                events.push(ResponseEvent::OutputTextDelta(text));
+                events.push(ModelStreamEvent::OutputTextDelta(text));
             }
             ContentDelta::Reasoning { text } => {
                 self.ensure_reasoning_block(index, events);
@@ -266,7 +293,7 @@ impl AgentStreamMapper {
                 {
                     existing.push_str(&text);
                 }
-                events.push(ResponseEvent::ReasoningContentDelta {
+                events.push(ModelStreamEvent::ReasoningContentDelta {
                     delta: text,
                     content_index: index_as_i64(index)?,
                 });
@@ -290,7 +317,7 @@ impl AgentStreamMapper {
                     )));
                 };
                 arguments.push_str(&partial_json);
-                events.push(ResponseEvent::ToolCallInputDelta {
+                events.push(ModelStreamEvent::ToolCallInputDelta {
                     item_id: id.clone(),
                     call_id: Some(id.clone()),
                     delta: partial_json,
@@ -301,7 +328,7 @@ impl AgentStreamMapper {
         Ok(())
     }
 
-    fn ensure_text_block(&mut self, index: usize, events: &mut Vec<ResponseEvent>) {
+    fn ensure_text_block(&mut self, index: usize, events: &mut Vec<ModelStreamEvent>) {
         if self.blocks.contains_key(&index) {
             return;
         }
@@ -314,7 +341,7 @@ impl AgentStreamMapper {
         );
     }
 
-    fn ensure_reasoning_block(&mut self, index: usize, events: &mut Vec<ResponseEvent>) {
+    fn ensure_reasoning_block(&mut self, index: usize, events: &mut Vec<ModelStreamEvent>) {
         if self.blocks.contains_key(&index) {
             return;
         }
@@ -328,14 +355,14 @@ impl AgentStreamMapper {
         );
     }
 
-    fn finish_block(&mut self, index: usize) -> Option<ResponseEvent> {
+    fn finish_block(&mut self, index: usize) -> Option<ModelStreamEvent> {
         self.block_order.retain(|block_index| *block_index != index);
         self.blocks
             .remove(&index)
             .map(block_state_to_output_item_done)
     }
 
-    fn finish_all_blocks(&mut self) -> Vec<ResponseEvent> {
+    fn finish_all_blocks(&mut self) -> Vec<ModelStreamEvent> {
         let mut blocks = std::mem::take(&mut self.blocks);
         let mut events = std::mem::take(&mut self.block_order)
             .into_iter()
@@ -347,24 +374,28 @@ impl AgentStreamMapper {
     }
 }
 
-fn block_state_to_output_item_done(block: BlockState) -> ResponseEvent {
+fn block_state_to_output_item_done(block: BlockState) -> ModelStreamEvent {
     match block {
-        BlockState::Text { id, text } => ResponseEvent::OutputItemDone(ResponseItem::Message {
-            id: Some(id),
-            role: "assistant".to_string(),
-            content: vec![ContentItem::OutputText { text }],
-            phase: None,
-        }),
+        BlockState::Text { id, text } => {
+            ModelStreamEvent::OutputItemDone(TranscriptItem::Message {
+                id: Some(id),
+                role: "assistant".to_string(),
+                content: vec![ContentItem::OutputText { text }],
+                phase: None,
+            })
+        }
         BlockState::Reasoning {
             id,
             text,
             signature,
-        } => ResponseEvent::OutputItemDone(ResponseItem::Reasoning {
+        } => ModelStreamEvent::OutputItemDone(TranscriptItem::Reasoning {
             id,
             summary: Vec::new(),
             content: Some(vec![ReasoningItemContent::ReasoningText { text }]),
-            encrypted_content: signature
-                .map(|signature| format!("anthropic_signature:{signature}")),
+            encrypted_content: None,
+            provider_metadata: signature.map(|signature| ReasoningProviderMetadata {
+                anthropic_signature: Some(signature),
+            }),
         }),
         BlockState::ToolUse {
             id,
@@ -377,7 +408,7 @@ fn block_state_to_output_item_done(block: BlockState) -> ResponseEvent {
             } else {
                 arguments
             };
-            ResponseEvent::OutputItemDone(ResponseItem::FunctionCall {
+            ModelStreamEvent::OutputItemDone(TranscriptItem::FunctionCall {
                 id: Some(id.clone()),
                 name,
                 namespace: None,
@@ -431,13 +462,33 @@ fn agent_usage_to_protocol_usage(usage: AgentTokenUsage) -> TokenUsage {
     }
 }
 
+fn merge_agent_usage(
+    start_usage: Option<AgentTokenUsage>,
+    stop_usage: Option<AgentTokenUsage>,
+) -> Option<AgentTokenUsage> {
+    match (start_usage, stop_usage) {
+        (None, None) => None,
+        (Some(usage), None) | (None, Some(usage)) => Some(usage),
+        (Some(start), Some(stop)) => Some(AgentTokenUsage {
+            input_tokens: stop.input_tokens.or(start.input_tokens),
+            output_tokens: stop.output_tokens.or(start.output_tokens),
+            cache_creation_input_tokens: stop
+                .cache_creation_input_tokens
+                .or(start.cache_creation_input_tokens),
+            cache_read_input_tokens: stop
+                .cache_read_input_tokens
+                .or(start.cache_read_input_tokens),
+        }),
+    }
+}
+
 fn to_i64(value: u64) -> i64 {
     i64::try_from(value).unwrap_or(i64::MAX)
 }
 
 pub async fn process_sse(
     stream: ByteStream,
-    tx_event: mpsc::Sender<Result<ResponseEvent, ApiError>>,
+    tx_event: mpsc::Sender<Result<ModelStreamEvent, ApiError>>,
     idle_timeout: Duration,
     telemetry: Option<Arc<dyn SseTelemetry>>,
     format: AgentStreamFormat,
@@ -445,7 +496,9 @@ pub async fn process_sse(
 ) {
     let mut stream = stream.eventsource();
     let mut mapper = AgentStreamMapper::new(tool_name_aliases);
+    let mut chat_stream_state = ChatCompletionsStreamState::default();
     let mut pending_chat_stop_reason: Option<StopReason> = None;
+    let mut pending_chat_usage: Option<AgentTokenUsage> = None;
 
     loop {
         let start = Instant::now();
@@ -485,7 +538,7 @@ pub async fn process_sse(
                 &mut mapper,
                 AgentStreamEvent::MessageStop {
                     stop_reason: Some(stop_reason),
-                    usage: None,
+                    usage: pending_chat_usage.take(),
                 },
                 &tx_event,
             )
@@ -517,23 +570,25 @@ pub async fn process_sse(
                     return;
                 }
             },
-            AgentStreamFormat::ChatCompletions => match chat_completions::parse_stream_chunk(value)
-            {
-                Ok(events) => events,
-                Err(error) => {
-                    let api_error = match error {
-                        chat_completions::ChatCompletionsStreamError::ContextWindowExceeded => {
-                            ApiError::ContextWindowExceeded
-                        }
-                        chat_completions::ChatCompletionsStreamError::QuotaExceeded => {
-                            ApiError::QuotaExceeded
-                        }
-                        error => ApiError::Stream(error.to_string()),
-                    };
-                    let _ = tx_event.send(Err(api_error)).await;
-                    return;
+            AgentStreamFormat::ChatCompletions => {
+                match chat_completions::parse_stream_chunk_with_state(value, &mut chat_stream_state)
+                {
+                    Ok(events) => events,
+                    Err(error) => {
+                        let api_error = match error {
+                            chat_completions::ChatCompletionsStreamError::ContextWindowExceeded => {
+                                ApiError::ContextWindowExceeded
+                            }
+                            chat_completions::ChatCompletionsStreamError::QuotaExceeded => {
+                                ApiError::QuotaExceeded
+                            }
+                            error => ApiError::Stream(error.to_string()),
+                        };
+                        let _ = tx_event.send(Err(api_error)).await;
+                        return;
+                    }
                 }
-            },
+            }
         };
 
         for event in agent_events {
@@ -547,12 +602,27 @@ pub async fn process_sse(
                         continue;
                     }
                     AgentStreamEvent::MessageStop {
+                        stop_reason: Some(stop_reason),
+                        usage: Some(usage),
+                    } => {
+                        pending_chat_stop_reason = Some(stop_reason);
+                        pending_chat_usage = Some(usage);
+                        let stop_reason = pending_chat_stop_reason.take();
+                        let usage = pending_chat_usage.take();
+                        AgentStreamEvent::MessageStop { stop_reason, usage }
+                    }
+                    AgentStreamEvent::MessageStop {
                         stop_reason: None,
                         usage: Some(usage),
-                    } => AgentStreamEvent::MessageStop {
-                        stop_reason: pending_chat_stop_reason.take(),
-                        usage: Some(usage),
-                    },
+                    } => {
+                        pending_chat_usage = Some(usage);
+                        if pending_chat_stop_reason.is_none() {
+                            continue;
+                        }
+                        let stop_reason = pending_chat_stop_reason.take();
+                        let usage = pending_chat_usage.take();
+                        AgentStreamEvent::MessageStop { stop_reason, usage }
+                    }
                     event => event,
                 }
             } else {
@@ -568,7 +638,7 @@ pub async fn process_sse(
 async fn send_agent_stream_event(
     mapper: &mut AgentStreamMapper,
     event: AgentStreamEvent,
-    tx_event: &mpsc::Sender<Result<ResponseEvent, ApiError>>,
+    tx_event: &mpsc::Sender<Result<ModelStreamEvent, ApiError>>,
 ) -> bool {
     let response_events = match mapper.process_event(event) {
         Ok(events) => events,
@@ -578,7 +648,7 @@ async fn send_agent_stream_event(
         }
     };
     for event in response_events {
-        let is_completed = matches!(event, ResponseEvent::Completed { .. });
+        let is_completed = matches!(event, ModelStreamEvent::Completed { .. });
         if tx_event.send(Ok(event)).await.is_err() {
             return false;
         }

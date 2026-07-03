@@ -11,7 +11,7 @@ use codex_protocol::mcp::CallToolResult;
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::FunctionCallOutputPayload;
-use codex_protocol::models::ResponseInputItem;
+use codex_protocol::models::TranscriptInputItem;
 use codex_protocol::models::function_call_output_content_items_to_text;
 use codex_tools::LoadableToolSpec;
 use codex_tools::ToolName;
@@ -85,8 +85,8 @@ impl ToolOutput for McpToolOutput {
         self.result.success()
     }
 
-    fn to_response_item(&self, call_id: &str, _payload: &ToolPayload) -> ResponseInputItem {
-        ResponseInputItem::FunctionCallOutput {
+    fn to_response_item(&self, call_id: &str, _payload: &ToolPayload) -> TranscriptInputItem {
+        TranscriptInputItem::FunctionCallOutput {
             call_id: call_id.to_string(),
             output: self.response_payload(),
         }
@@ -163,8 +163,8 @@ impl ToolOutput for ToolSearchOutput {
         true
     }
 
-    fn to_response_item(&self, call_id: &str, _payload: &ToolPayload) -> ResponseInputItem {
-        ResponseInputItem::ToolSearchOutput {
+    fn to_response_item(&self, call_id: &str, _payload: &ToolPayload) -> TranscriptInputItem {
+        TranscriptInputItem::ToolSearchOutput {
             call_id: call_id.to_string(),
             status: "completed".to_string(),
             execution: "client".to_string(),
@@ -223,7 +223,7 @@ impl ToolOutput for FunctionToolOutput {
         self.success.unwrap_or(true)
     }
 
-    fn to_response_item(&self, call_id: &str, payload: &ToolPayload) -> ResponseInputItem {
+    fn to_response_item(&self, call_id: &str, payload: &ToolPayload) -> TranscriptInputItem {
         function_tool_response(call_id, payload, self.body.clone(), self.success)
     }
 
@@ -251,7 +251,7 @@ impl ToolOutput for ApplyPatchToolOutput {
         true
     }
 
-    fn to_response_item(&self, call_id: &str, payload: &ToolPayload) -> ResponseInputItem {
+    fn to_response_item(&self, call_id: &str, payload: &ToolPayload) -> TranscriptInputItem {
         function_tool_response(
             call_id,
             payload,
@@ -284,9 +284,9 @@ impl ToolOutput for AbortedToolOutput {
         false
     }
 
-    fn to_response_item(&self, call_id: &str, payload: &ToolPayload) -> ResponseInputItem {
+    fn to_response_item(&self, call_id: &str, payload: &ToolPayload) -> TranscriptInputItem {
         match payload {
-            ToolPayload::ToolSearch { .. } => ResponseInputItem::ToolSearchOutput {
+            ToolPayload::ToolSearch { .. } => TranscriptInputItem::ToolSearchOutput {
                 call_id: call_id.to_string(),
                 status: "completed".to_string(),
                 execution: "client".to_string(),
@@ -328,7 +328,7 @@ impl ToolOutput for ExecCommandToolOutput {
         true
     }
 
-    fn to_response_item(&self, call_id: &str, payload: &ToolPayload) -> ResponseInputItem {
+    fn to_response_item(&self, call_id: &str, payload: &ToolPayload) -> TranscriptInputItem {
         function_tool_response(
             call_id,
             payload,
@@ -440,7 +440,7 @@ fn function_tool_response(
     payload: &ToolPayload,
     body: Vec<FunctionCallOutputContentItem>,
     success: Option<bool>,
-) -> ResponseInputItem {
+) -> TranscriptInputItem {
     let body = match body.as_slice() {
         [FunctionCallOutputContentItem::InputText { text }] => {
             FunctionCallOutputBody::Text(text.clone())
@@ -449,14 +449,14 @@ fn function_tool_response(
     };
 
     if matches!(payload, ToolPayload::Custom { .. }) {
-        return ResponseInputItem::CustomToolCallOutput {
+        return TranscriptInputItem::CustomToolCallOutput {
             call_id: call_id.to_string(),
             name: None,
             output: FunctionCallOutputPayload { body, success },
         };
     }
 
-    ResponseInputItem::FunctionCallOutput {
+    TranscriptInputItem::FunctionCallOutput {
         call_id: call_id.to_string(),
         output: FunctionCallOutputPayload { body, success },
     }

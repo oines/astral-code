@@ -1355,6 +1355,7 @@ async fn view_image_tool_returns_unsupported_message_for_text_only_model() -> an
         supports_image_detail_original: false,
         context_window: Some(272_000),
         max_context_window: None,
+        max_output_tokens: None,
         auto_compact_token_limit: None,
         effective_context_window_percent: 95,
         experimental_supported_tools: Vec::new(),

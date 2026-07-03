@@ -10,7 +10,7 @@ use std::time::Duration;
 use anyhow::Result;
 use base64::Engine;
 use codex_protocol::models::ContentItem;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::openai_models::ModelsResponse;
 use futures::SinkExt;
 use futures::StreamExt;
@@ -1333,8 +1333,8 @@ pub fn ev_assistant_message(id: &str, text: &str) -> Value {
     })
 }
 
-pub fn user_message_item(text: &str) -> ResponseItem {
-    ResponseItem::Message {
+pub fn user_message_item(text: &str) -> TranscriptItem {
+    TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputText {

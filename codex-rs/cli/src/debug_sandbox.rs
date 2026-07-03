@@ -12,9 +12,10 @@ use codex_core::config::ConfigBuilder;
 use codex_core::config::ConfigOverrides;
 use codex_core::config::NetworkProxyAuditMetadata;
 use codex_core::exec_env::create_env;
-#[cfg(target_os = "macos")]
-use codex_core::spawn::CODEX_SANDBOX_ENV_VAR;
+use codex_core::spawn::ASTRAL_SANDBOX_NETWORK_DISABLED_ENV_VAR;
 use codex_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
+#[cfg(target_os = "macos")]
+use codex_core::spawn::insert_seatbelt_sandbox_env;
 use codex_protocol::config_types::SandboxMode;
 use codex_protocol::permissions::NetworkSandboxPolicy;
 use codex_sandboxing::landlock::allow_network_for_proxy;
@@ -293,7 +294,7 @@ async fn run_command_under_sandbox(
                 network_sandbox_policy,
                 env,
                 |env_map| {
-                    env_map.insert(CODEX_SANDBOX_ENV_VAR.to_string(), "seatbelt".to_string());
+                    insert_seatbelt_sandbox_env(env_map);
                     if let Some(network) = network.as_ref() {
                         network.apply_to_env(env_map);
                     }
@@ -505,6 +506,7 @@ async fn spawn_debug_sandbox_child(
     cmd.envs(env);
 
     if !network_sandbox_policy.is_enabled() {
+        cmd.env(ASTRAL_SANDBOX_NETWORK_DISABLED_ENV_VAR, "1");
         cmd.env(CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR, "1");
     }
 

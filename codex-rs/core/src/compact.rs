@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use crate::Prompt;
 use crate::client::ModelClientSession;
-use crate::client_common::ResponseEvent;
+use crate::client_common::ModelStreamEvent;
 use crate::hook_runtime::PostCompactHookOutcome;
 use crate::hook_runtime::PreCompactHookOutcome;
 use crate::hook_runtime::run_post_compact_hooks;
@@ -31,8 +31,8 @@ use codex_protocol::error::Result as CodexResult;
 use codex_protocol::items::ContextCompactionItem;
 use codex_protocol::items::TurnItem;
 use codex_protocol::models::ContentItem;
-use codex_protocol::models::ResponseInputItem;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptInputItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::protocol::CompactedItem;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::TurnStartedEvent;
@@ -258,7 +258,7 @@ async fn run_compact_task_inner_impl(
         }
     }
 
-    let initial_input_for_turn: ResponseInputItem = ResponseInputItem::from(input);
+    let initial_input_for_turn: TranscriptInputItem = TranscriptInputItem::from(input);
 
     let mut history = sess.clone_history().await;
     history.record_items(
@@ -376,9 +376,16 @@ async fn run_compact_task_inner_impl(
         message: summary_text.clone(),
         replacement_history: Some(new_history.clone()),
     };
+    let post_compact_history = new_history.clone();
     sess.replace_compacted_history(new_history, reference_context_item, compacted_item)
         .await;
     sess.recompute_token_usage(&turn_context).await;
+    crate::session_memory::record_post_legacy_compact_baseline(
+        sess.as_ref(),
+        turn_context.as_ref(),
+        &post_compact_history,
+    )
+    .await;
 
     sess.emit_turn_item_completed(&turn_context, compaction_item)
         .await;
@@ -498,7 +505,7 @@ pub fn content_items_to_text(content: &[ContentItem]) -> Option<String> {
     }
 }
 
-pub(crate) fn collect_user_messages(items: &[ResponseItem]) -> Vec<String> {
+pub(crate) fn collect_user_messages(items: &[TranscriptItem]) -> Vec<String> {
     items
         .iter()
         .filter_map(|item| match crate::event_mapping::parse_turn_item(item) {
@@ -529,9 +536,9 @@ pub(crate) fn is_summary_message(message: &str) -> bool {
 ///   that item remains last.
 /// - If there are no user messages or compaction items, append the context.
 pub(crate) fn insert_initial_context_before_last_real_user_or_summary(
-    mut compacted_history: Vec<ResponseItem>,
-    initial_context: Vec<ResponseItem>,
-) -> Vec<ResponseItem> {
+    mut compacted_history: Vec<TranscriptItem>,
+    initial_context: Vec<TranscriptItem>,
+) -> Vec<TranscriptItem> {
     let mut last_user_or_summary_index = None;
     let mut last_real_user_index = None;
     for (i, item) in compacted_history.iter().enumerate().rev() {
@@ -554,7 +561,7 @@ pub(crate) fn insert_initial_context_before_last_real_user_or_summary(
         .find_map(|(i, item)| {
             matches!(
                 item,
-                ResponseItem::Compaction { .. } | ResponseItem::ContextCompaction { .. }
+                TranscriptItem::Compaction { .. } | TranscriptItem::ContextCompaction { .. }
             )
             .then_some(i)
         });
@@ -579,9 +586,9 @@ pub(crate) fn insert_initial_context_before_last_real_user_or_summary(
 pub(crate) async fn process_compacted_history(
     sess: &Session,
     turn_context: &TurnContext,
-    mut compacted_history: Vec<ResponseItem>,
+    mut compacted_history: Vec<TranscriptItem>,
     initial_context_injection: InitialContextInjection,
-) -> Vec<ResponseItem> {
+) -> Vec<TranscriptItem> {
     // Mid-turn compaction is the only path that must inject initial context above the last user
     // message in the replacement history. Pre-turn compaction instead injects context after the
     // compaction item, but mid-turn compaction keeps the compaction item last for model training.
@@ -615,39 +622,39 @@ pub(crate) async fn process_compacted_history(
 ///   messages. Legacy warning fragments are filtered by `parse_turn_item` before they reach this
 ///   check.
 #[cfg(test)]
-pub(crate) fn should_keep_compacted_history_item(item: &ResponseItem) -> bool {
+pub(crate) fn should_keep_compacted_history_item(item: &TranscriptItem) -> bool {
     match item {
-        ResponseItem::Message { role, .. } if role == "developer" => false,
-        ResponseItem::Message { role, .. } if role == "user" => {
+        TranscriptItem::Message { role, .. } if role == "developer" => false,
+        TranscriptItem::Message { role, .. } if role == "user" => {
             matches!(
                 crate::event_mapping::parse_turn_item(item),
                 Some(TurnItem::UserMessage(_) | TurnItem::HookPrompt(_))
             )
         }
-        ResponseItem::Message { role, .. } if role == "assistant" => true,
-        ResponseItem::Message { .. } => false,
-        ResponseItem::AgentMessage { .. } => true,
-        ResponseItem::Compaction { .. } | ResponseItem::ContextCompaction { .. } => true,
-        ResponseItem::CompactionTrigger => false,
-        ResponseItem::Reasoning { .. }
-        | ResponseItem::LocalShellCall { .. }
-        | ResponseItem::FunctionCall { .. }
-        | ResponseItem::ToolSearchCall { .. }
-        | ResponseItem::FunctionCallOutput { .. }
-        | ResponseItem::ToolSearchOutput { .. }
-        | ResponseItem::CustomToolCall { .. }
-        | ResponseItem::CustomToolCallOutput { .. }
-        | ResponseItem::WebSearchCall { .. }
-        | ResponseItem::ImageGenerationCall { .. }
-        | ResponseItem::Other => false,
+        TranscriptItem::Message { role, .. } if role == "assistant" => true,
+        TranscriptItem::Message { .. } => false,
+        TranscriptItem::AgentMessage { .. } => true,
+        TranscriptItem::Compaction { .. } | TranscriptItem::ContextCompaction { .. } => true,
+        TranscriptItem::CompactionTrigger => false,
+        TranscriptItem::Reasoning { .. }
+        | TranscriptItem::LocalShellCall { .. }
+        | TranscriptItem::FunctionCall { .. }
+        | TranscriptItem::ToolSearchCall { .. }
+        | TranscriptItem::FunctionCallOutput { .. }
+        | TranscriptItem::ToolSearchOutput { .. }
+        | TranscriptItem::CustomToolCall { .. }
+        | TranscriptItem::CustomToolCallOutput { .. }
+        | TranscriptItem::WebSearchCall { .. }
+        | TranscriptItem::ImageGenerationCall { .. }
+        | TranscriptItem::Other => false,
     }
 }
 
 pub(crate) fn build_compacted_history(
-    initial_context: Vec<ResponseItem>,
+    initial_context: Vec<TranscriptItem>,
     user_messages: &[String],
     summary_text: &str,
-) -> Vec<ResponseItem> {
+) -> Vec<TranscriptItem> {
     build_compacted_history_with_limit(
         initial_context,
         user_messages,
@@ -657,11 +664,11 @@ pub(crate) fn build_compacted_history(
 }
 
 fn build_compacted_history_with_limit(
-    mut history: Vec<ResponseItem>,
+    mut history: Vec<TranscriptItem>,
     user_messages: &[String],
     summary_text: &str,
     max_tokens: usize,
-) -> Vec<ResponseItem> {
+) -> Vec<TranscriptItem> {
     let mut selected_messages: Vec<String> = Vec::new();
     if max_tokens > 0 {
         let mut remaining = max_tokens;
@@ -683,7 +690,7 @@ fn build_compacted_history_with_limit(
     }
 
     for message in &selected_messages {
-        history.push(ResponseItem::Message {
+        history.push(TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -699,7 +706,7 @@ fn build_compacted_history_with_limit(
         summary_text.to_string()
     };
 
-    history.push(ResponseItem::Compaction {
+    history.push(TranscriptItem::Compaction {
         encrypted_content: summary_text,
     });
 
@@ -738,17 +745,17 @@ async fn drain_to_completed(
             ));
         };
         match event {
-            Ok(ResponseEvent::OutputItemDone(item)) => {
+            Ok(ModelStreamEvent::OutputItemDone(item)) => {
                 sess.record_conversation_items(turn_context, std::slice::from_ref(&item))
                     .await;
             }
-            Ok(ResponseEvent::ServerReasoningIncluded(included)) => {
+            Ok(ModelStreamEvent::ServerReasoningIncluded(included)) => {
                 sess.set_server_reasoning_included(included).await;
             }
-            Ok(ResponseEvent::RateLimits(snapshot)) => {
+            Ok(ModelStreamEvent::RateLimits(snapshot)) => {
                 sess.update_rate_limits(turn_context, snapshot).await;
             }
-            Ok(ResponseEvent::Completed { token_usage, .. }) => {
+            Ok(ModelStreamEvent::Completed { token_usage, .. }) => {
                 sess.update_token_usage_info(turn_context, token_usage.as_ref())
                     .await;
                 return Ok(());

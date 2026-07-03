@@ -1,8 +1,8 @@
-pub use codex_api::ResponseEvent;
+pub use codex_api::ModelStreamEvent;
 use codex_config::types::Personality;
 use codex_protocol::error::Result;
 use codex_protocol::models::BaseInstructions;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::protocol::InterAgentCommunication;
 use codex_tools::ToolSpec;
 use futures::Stream;
@@ -17,7 +17,7 @@ use tokio_util::sync::CancellationToken;
 #[derive(Debug, Clone)]
 pub struct Prompt {
     /// Conversation context input items.
-    pub input: Vec<ResponseItem>,
+    pub input: Vec<TranscriptItem>,
 
     /// Tools available to the model, including additional tools sourced from
     /// external MCP servers.
@@ -58,12 +58,12 @@ impl Default for Prompt {
 }
 
 impl Prompt {
-    pub(crate) fn get_formatted_input(&self) -> Vec<ResponseItem> {
+    pub(crate) fn get_formatted_input(&self) -> Vec<TranscriptItem> {
         self.input
             .iter()
             .cloned()
             .map(|item| {
-                let ResponseItem::Message { role, content, .. } = &item else {
+                let TranscriptItem::Message { role, content, .. } = &item else {
                     return item;
                 };
                 if role != "assistant" {
@@ -79,14 +79,14 @@ impl Prompt {
 }
 
 pub struct ResponseStream {
-    pub(crate) rx_event: mpsc::Receiver<Result<ResponseEvent>>,
+    pub(crate) rx_event: mpsc::Receiver<Result<ModelStreamEvent>>,
     /// Signals the mapper task that the consumer stopped polling before the
     /// provider stream reached its own terminal event.
     pub(crate) consumer_dropped: CancellationToken,
 }
 
 impl Stream for ResponseStream {
-    type Item = Result<ResponseEvent>;
+    type Item = Result<ModelStreamEvent>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.rx_event.poll_recv(cx)

@@ -1,7 +1,7 @@
 use crate::state::ActiveTurn;
 use crate::state::MailboxDeliveryPhase;
 use crate::state::TurnState;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::protocol::InterAgentCommunication;
 use codex_protocol::user_input::UserInput;
 use std::collections::VecDeque;
@@ -15,7 +15,7 @@ pub(crate) enum TurnInput {
         content: Vec<UserInput>,
         client_id: Option<String>,
     },
-    ResponseItem(ResponseItem),
+    TranscriptItem(TranscriptItem),
 }
 
 /// Turn-local pending input storage owned by the input queue flow.
@@ -70,12 +70,12 @@ impl InputQueue {
             .any(|mail| mail.trigger_turn)
     }
 
-    pub(crate) async fn drain_mailbox_input_items(&self) -> Vec<ResponseItem> {
+    pub(crate) async fn drain_mailbox_input_items(&self) -> Vec<TranscriptItem> {
         self.mailbox_pending_mails
             .lock()
             .await
             .drain(..)
-            .map(|mail| ResponseItem::from(mail.to_response_input_item()))
+            .map(|mail| TranscriptItem::from(mail.to_response_input_item()))
             .collect()
     }
 
@@ -193,7 +193,7 @@ impl InputQueue {
             .drain_mailbox_input_items()
             .await
             .into_iter()
-            .map(TurnInput::ResponseItem);
+            .map(TurnInput::TranscriptItem);
         if pending_input.is_empty() {
             mailbox_items.collect()
         } else {
@@ -303,8 +303,8 @@ mod tests {
         assert_eq!(
             input_queue.drain_mailbox_input_items().await,
             vec![
-                ResponseItem::from(mail_one.to_response_input_item()),
-                ResponseItem::from(mail_two.to_response_input_item())
+                TranscriptItem::from(mail_one.to_response_input_item()),
+                TranscriptItem::from(mail_two.to_response_input_item())
             ]
         );
         assert!(!input_queue.has_pending_mailbox_items().await);

@@ -26,8 +26,8 @@ use crate::tasks::UserShellCommandMode;
 use crate::tasks::UserShellCommandTask;
 use crate::tasks::execute_user_shell_command;
 use codex_protocol::models::ContentItem;
-use codex_protocol::models::ResponseInputItem;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptInputItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::protocol::CodexErrorInfo;
 use codex_protocol::protocol::ErrorEvent;
 use codex_protocol::protocol::Event;
@@ -265,8 +265,8 @@ pub(super) async fn user_input_or_turn_inner(
             };
             let mut task_input = additional_context_input
                 .into_iter()
-                .map(ResponseItem::from)
-                .map(TurnInput::ResponseItem)
+                .map(TranscriptItem::from)
+                .map(TurnInput::TranscriptItem)
                 .collect::<Vec<_>>();
             if !items.is_empty() {
                 task_input.push(TurnInput::UserInput {
@@ -918,7 +918,7 @@ Do not assume this also authorizes similar operations with different payloads.
 Approved action:
 {approved_action_json}"#,
     );
-    let items = vec![ResponseItem::from(ResponseInputItem::Message {
+    let items = vec![TranscriptItem::from(TranscriptInputItem::Message {
         role: "developer".to_string(),
         content: vec![ContentItem::InputText { text }],
         phase: None,

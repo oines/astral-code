@@ -4,7 +4,7 @@ use codex_core::build_prompt_input;
 use codex_core::config::ConfigBuilder;
 use codex_core::config::ConfigOverrides;
 use codex_protocol::models::ContentItem;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::user_input::UserInput;
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;
@@ -37,7 +37,7 @@ async fn build_prompt_input_includes_context_and_user_message() -> Result<()> {
     )
     .await?;
 
-    let expected_user_message = ResponseItem::Message {
+    let expected_user_message = TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
@@ -47,7 +47,7 @@ async fn build_prompt_input_includes_context_and_user_message() -> Result<()> {
     };
     assert_eq!(input.last(), Some(&expected_user_message));
     assert!(input.iter().any(|item| {
-        let ResponseItem::Message { content, .. } = item else {
+        let TranscriptItem::Message { content, .. } = item else {
             return false;
         };
 

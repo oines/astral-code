@@ -69,6 +69,12 @@ impl AnthropicCacheFoldState {
     pub(crate) fn disable(&mut self) {
         self.disabled = true;
     }
+
+    pub(crate) fn reset(&mut self) {
+        self.registered_refs.clear();
+        self.deleted_refs.clear();
+        self.pinned_cache_edits.clear();
+    }
 }
 
 fn last_projected_user_message_index(request: &AgentRequest) -> Option<usize> {

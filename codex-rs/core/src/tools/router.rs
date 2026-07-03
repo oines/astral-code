@@ -11,8 +11,8 @@ use crate::tools::registry::ToolRegistry;
 use crate::tools::spec_plan::build_tool_router;
 use codex_mcp::ToolInfo;
 use codex_protocol::dynamic_tools::DynamicToolSpec;
-use codex_protocol::models::ResponseItem;
 use codex_protocol::models::SearchToolCallParams;
+use codex_protocol::models::TranscriptItem;
 use codex_tools::DiscoverableTool;
 use codex_tools::TOOL_SEARCH_TOOL_NAME;
 use codex_tools::ToolCall as ExtensionToolCall;
@@ -96,9 +96,9 @@ impl ToolRouter {
     }
 
     #[instrument(level = "trace", skip_all, err)]
-    pub fn build_tool_call(item: ResponseItem) -> Result<Option<ToolCall>, FunctionCallError> {
+    pub fn build_tool_call(item: TranscriptItem) -> Result<Option<ToolCall>, FunctionCallError> {
         match item {
-            ResponseItem::FunctionCall {
+            TranscriptItem::FunctionCall {
                 name,
                 namespace,
                 arguments,
@@ -126,7 +126,7 @@ impl ToolRouter {
                     payload: ToolPayload::Function { arguments },
                 }))
             }
-            ResponseItem::ToolSearchCall {
+            TranscriptItem::ToolSearchCall {
                 call_id: Some(call_id),
                 execution,
                 arguments,
@@ -144,8 +144,8 @@ impl ToolRouter {
                     payload: ToolPayload::ToolSearch { arguments },
                 }))
             }
-            ResponseItem::ToolSearchCall { .. } => Ok(None),
-            ResponseItem::CustomToolCall {
+            TranscriptItem::ToolSearchCall { .. } => Ok(None),
+            TranscriptItem::CustomToolCall {
                 name,
                 input,
                 call_id,

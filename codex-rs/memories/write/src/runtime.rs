@@ -1,8 +1,8 @@
 use codex_core::CodexThread;
 use codex_core::ModelClient;
+use codex_core::ModelStreamEvent;
 use codex_core::NewThread;
 use codex_core::Prompt;
-use codex_core::ResponseEvent;
 use codex_core::StartThreadOptions;
 use codex_core::ThreadManager;
 use codex_core::config::Config;
@@ -208,16 +208,17 @@ impl MemoryStartupContext {
         let mut token_usage = None;
         while let Some(message) = stream.next().await.transpose()? {
             match message {
-                ResponseEvent::OutputTextDelta(delta) => result.push_str(&delta),
-                ResponseEvent::OutputItemDone(item) => {
+                ModelStreamEvent::OutputTextDelta(delta) => result.push_str(&delta),
+                ModelStreamEvent::OutputItemDone(item) => {
                     if result.is_empty()
-                        && let codex_protocol::models::ResponseItem::Message { content, .. } = item
+                        && let codex_protocol::models::TranscriptItem::Message { content, .. } =
+                            item
                         && let Some(text) = content_items_to_text(&content)
                     {
                         result.push_str(&text);
                     }
                 }
-                ResponseEvent::Completed {
+                ModelStreamEvent::Completed {
                     token_usage: usage, ..
                 } => {
                     token_usage = usage;

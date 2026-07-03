@@ -23,8 +23,8 @@ use codex_protocol::config_types::ApprovalsReviewer;
 use codex_protocol::models::AdditionalPermissionProfile as PermissionProfile;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::NetworkPermissions;
-use codex_protocol::models::ResponseInputItem;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptInputItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::request_permissions::PermissionGrantScope;
 use codex_protocol::request_permissions::RequestPermissionProfile;
@@ -58,8 +58,8 @@ where
         },
     );
     match response {
-        ResponseInputItem::FunctionCallOutput { output, .. }
-        | ResponseInputItem::CustomToolCallOutput { output, .. } => {
+        TranscriptInputItem::FunctionCallOutput { output, .. }
+        | TranscriptInputItem::CustomToolCallOutput { output, .. } => {
             output.body.to_text().unwrap_or_default()
         }
         other => panic!("expected function output, got {other:?}"),
@@ -476,7 +476,7 @@ async fn process_compacted_history_preserves_separate_guardian_developer_message
         &session,
         &turn_context,
         vec![
-            ResponseItem::Message {
+            TranscriptItem::Message {
                 id: None,
                 role: "developer".to_string(),
                 content: vec![ContentItem::InputText {
@@ -484,7 +484,7 @@ async fn process_compacted_history_preserves_separate_guardian_developer_message
                 }],
                 phase: None,
             },
-            ResponseItem::Message {
+            TranscriptItem::Message {
                 id: None,
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
@@ -500,7 +500,7 @@ async fn process_compacted_history_preserves_separate_guardian_developer_message
     let developer_messages = refreshed
         .iter()
         .filter_map(|item| match item {
-            ResponseItem::Message { role, content, .. } if role == "developer" => {
+            TranscriptItem::Message { role, content, .. } if role == "developer" => {
                 crate::content_items_to_text(content)
             }
             _ => None,

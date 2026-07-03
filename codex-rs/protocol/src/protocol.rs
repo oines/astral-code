@@ -39,9 +39,9 @@ use crate::models::ContentItem;
 use crate::models::ImageDetail;
 use crate::models::MessagePhase;
 use crate::models::PermissionProfile;
-use crate::models::ResponseInputItem;
-use crate::models::ResponseItem;
 use crate::models::SandboxEnforcement;
+use crate::models::TranscriptInputItem;
+use crate::models::TranscriptItem;
 use crate::models::WebSearchAction;
 use crate::num_format::format_with_separators;
 use crate::openai_models::ReasoningEffort as ReasoningEffortConfig;
@@ -699,8 +699,8 @@ impl InterAgentCommunication {
         }
     }
 
-    pub fn to_response_input_item(&self) -> ResponseInputItem {
-        ResponseInputItem::Message {
+    pub fn to_response_input_item(&self) -> TranscriptInputItem {
+        TranscriptInputItem::Message {
             role: "assistant".to_string(),
             content: vec![ContentItem::OutputText {
                 text: serde_json::to_string(self).unwrap_or_default(),
@@ -709,9 +709,9 @@ impl InterAgentCommunication {
         }
     }
 
-    pub fn to_model_input_item(&self) -> ResponseItem {
+    pub fn to_model_input_item(&self) -> TranscriptItem {
         match &self.encrypted_content {
-            Some(encrypted_content) => ResponseItem::AgentMessage {
+            Some(encrypted_content) => TranscriptItem::AgentMessage {
                 author: self.author.to_string(),
                 recipient: self.recipient.to_string(),
                 content: vec![AgentMessageInputContent::EncryptedContent {
@@ -1664,7 +1664,7 @@ impl CodexErrorInfo {
 
 #[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema)]
 pub struct RawResponseItemEvent {
-    pub item: ResponseItem,
+    pub item: TranscriptItem,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema)]
@@ -2760,7 +2760,7 @@ fn multi_agent_version_from_items(
         items.iter().rev().find_map(|item| match item {
             RolloutItem::TurnContext(turn_context) => turn_context.multi_agent_version,
             RolloutItem::SessionMeta(_)
-            | RolloutItem::ResponseItem(_)
+            | RolloutItem::TranscriptItem(_)
             | RolloutItem::Compacted(_)
             | RolloutItem::EventMsg(_) => None,
         })
@@ -2855,7 +2855,8 @@ pub struct SessionMetaLine {
 #[serde(tag = "type", content = "payload", rename_all = "snake_case")]
 pub enum RolloutItem {
     SessionMeta(SessionMetaLine),
-    ResponseItem(ResponseItem),
+    #[serde(rename = "response_item")]
+    TranscriptItem(TranscriptItem),
     Compacted(CompactedItem),
     TurnContext(TurnContextItem),
     EventMsg(EventMsg),
@@ -2865,12 +2866,12 @@ pub enum RolloutItem {
 pub struct CompactedItem {
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub replacement_history: Option<Vec<ResponseItem>>,
+    pub replacement_history: Option<Vec<TranscriptItem>>,
 }
 
-impl From<CompactedItem> for ResponseItem {
+impl From<CompactedItem> for TranscriptItem {
     fn from(value: CompactedItem) -> Self {
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "assistant".to_string(),
             content: vec![ContentItem::OutputText {
@@ -4022,6 +4023,34 @@ mod tests {
     use tempfile::NamedTempFile;
     use tempfile::TempDir;
 
+    #[test]
+    fn rollout_transcript_item_keeps_legacy_response_item_tag() -> Result<()> {
+        let legacy_json = r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}}"#;
+        let item: RolloutItem = serde_json::from_str(legacy_json)?;
+
+        let RolloutItem::TranscriptItem(TranscriptItem::Message {
+            id,
+            role,
+            content,
+            phase,
+        }) = &item
+        else {
+            panic!("expected legacy response_item to deserialize as TranscriptItem::Message");
+        };
+        assert_eq!(id, &None);
+        assert_eq!(role, "user");
+        assert_eq!(
+            content,
+            &vec![ContentItem::InputText {
+                text: "hello".to_string(),
+            }]
+        );
+        assert_eq!(phase, &None);
+        assert_eq!(legacy_json, serde_json::to_string(&item)?);
+
+        Ok(())
+    }
+
     fn sorted_writable_roots(roots: Vec<WritableRoot>) -> Vec<(PathBuf, Vec<PathBuf>)> {
         let mut sorted_roots: Vec<(PathBuf, Vec<PathBuf>)> = roots
             .into_iter()
@@ -4079,7 +4108,7 @@ mod tests {
 
         assert_eq!(
             communication.to_response_input_item(),
-            ResponseInputItem::Message {
+            TranscriptInputItem::Message {
                 role: "assistant".to_string(),
                 content: vec![ContentItem::OutputText {
                     text: serde_json::to_string(&communication).expect("serialize communication"),

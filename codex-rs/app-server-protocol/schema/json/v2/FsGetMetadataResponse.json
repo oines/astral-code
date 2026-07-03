@@ -23,6 +23,16 @@
       "description": "File modification time in Unix milliseconds when available, otherwise `0`.",
       "format": "int64",
       "type": "integer"
+    },
+    "size": {
+      "default": null,
+      "description": "File size in bytes when reported by the backing filesystem.",
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
     }
   },
   "required": [

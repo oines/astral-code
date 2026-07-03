@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
 use tracing::warn;
@@ -82,8 +82,8 @@ struct TracedCompactionCompleted {
 /// `replacement_history` is what future prompts may carry after the checkpoint.
 #[derive(Serialize)]
 pub struct CompactionCheckpointTracePayload<'a> {
-    pub input_history: &'a [ResponseItem],
-    pub replacement_history: &'a [ResponseItem],
+    pub input_history: &'a [TranscriptItem],
+    pub replacement_history: &'a [TranscriptItem],
 }
 
 impl CompactionTraceContext {
@@ -203,9 +203,9 @@ impl CompactionTraceAttempt {
     /// Records the non-streaming compact endpoint response payload.
     ///
     /// Compaction responses use the same response-item preservation rules as
-    /// inference streams: traces are evidence, while normal ResponseItem
+    /// inference streams: traces are evidence, while normal TranscriptItem
     /// serialization is shaped for future request construction.
-    pub fn record_completed(&self, output_items: &[ResponseItem]) {
+    pub fn record_completed(&self, output_items: &[TranscriptItem]) {
         let CompactionTraceAttemptState::Enabled(attempt) = &self.state else {
             return;
         };
@@ -231,7 +231,7 @@ impl CompactionTraceAttempt {
     }
 
     /// Records the compact endpoint result without forcing callers to branch on trace events.
-    pub fn record_result<E: Display>(&self, result: Result<&[ResponseItem], E>) {
+    pub fn record_result<E: Display>(&self, result: Result<&[TranscriptItem], E>) {
         match result {
             Ok(output_items) => self.record_completed(output_items),
             Err(err) => self.record_failed(err),

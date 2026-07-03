@@ -5,7 +5,7 @@ use crate::context::InternalModelContextFragment;
 use crate::context::SubagentNotification;
 use codex_protocol::items::HookPromptFragment;
 use codex_protocol::items::build_hook_prompt_message;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use pretty_assertions::assert_eq;
 
 #[test]
@@ -98,7 +98,7 @@ fn detects_hook_prompt_fragment_and_roundtrips_escaping() {
     )])
     .expect("hook prompt message");
 
-    let ResponseItem::Message { content, .. } = message else {
+    let TranscriptItem::Message { content, .. } = message else {
         panic!("expected hook prompt response item");
     };
 

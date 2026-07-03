@@ -14,7 +14,7 @@ use codex_experimental_api_macros::ExperimentalApi;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::Personality;
 use codex_protocol::config_types::ReasoningSummary;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::ThreadGoalStatus as CoreThreadGoalStatus;
 use codex_protocol::protocol::TokenUsage as CoreTokenUsage;
@@ -331,7 +331,7 @@ pub struct ThreadResumeParams {
     /// instead of loaded from disk.
     #[experimental("thread/resume.history")]
     #[ts(optional = nullable)]
-    pub history: Option<Vec<ResponseItem>>,
+    pub history: Option<Vec<TranscriptItem>>,
 
     /// [UNSTABLE] Specify the rollout path to resume from.
     /// If specified for a non-running thread, the thread_id param will be ignored.

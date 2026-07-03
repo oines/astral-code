@@ -7,7 +7,7 @@ use crate::event_mapping::is_contextual_user_message_content;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
 use codex_protocol::models::ContentItem;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_utils_output_truncation::approx_token_count;
 
 use super::SessionMemoryState;
@@ -57,7 +57,7 @@ pub(super) struct ExtractionBoundary {
     pub(super) tool_calls: usize,
 }
 
-pub(super) fn extraction_boundary(input: &[ResponseItem]) -> Option<ExtractionBoundary> {
+pub(super) fn extraction_boundary(input: &[TranscriptItem]) -> Option<ExtractionBoundary> {
     let index = input.len().checked_sub(1)?;
     let item = input.get(index)?;
     Some(ExtractionBoundary {
@@ -69,9 +69,9 @@ pub(super) fn extraction_boundary(input: &[ResponseItem]) -> Option<ExtractionBo
 }
 
 pub(super) fn raw_tail_after_summary_boundary(
-    items: &[ResponseItem],
+    items: &[TranscriptItem],
     state: &SessionMemoryState,
-) -> CodexResult<Vec<ResponseItem>> {
+) -> CodexResult<Vec<TranscriptItem>> {
     let last_compaction_index = items
         .iter()
         .enumerate()
@@ -112,7 +112,7 @@ pub(super) fn validate_summary(summary: &str, template: &str) -> CodexResult<()>
     Ok(())
 }
 
-pub(super) fn validate_tail_budget(tail: &[ResponseItem]) -> CodexResult<()> {
+pub(super) fn validate_tail_budget(tail: &[TranscriptItem]) -> CodexResult<()> {
     let tokens = estimate_items_tokens(tail);
     if usize::try_from(tokens).unwrap_or(usize::MAX) > MAX_RAW_TAIL_TOKENS {
         return Err(CodexErr::Fatal(format!(
@@ -123,7 +123,7 @@ pub(super) fn validate_tail_budget(tail: &[ResponseItem]) -> CodexResult<()> {
 }
 
 pub(super) fn validate_post_compact_budget(
-    items: &[ResponseItem],
+    items: &[TranscriptItem],
     token_limit: i64,
 ) -> CodexResult<()> {
     let tokens = estimate_items_tokens(items);
@@ -135,7 +135,7 @@ pub(super) fn validate_post_compact_budget(
     Ok(())
 }
 
-fn filter_reinjectable_context_items(items: &[ResponseItem]) -> Vec<ResponseItem> {
+fn filter_reinjectable_context_items(items: &[TranscriptItem]) -> Vec<TranscriptItem> {
     items
         .iter()
         .filter(|item| !is_reinjectable_context_item(item))
@@ -143,29 +143,29 @@ fn filter_reinjectable_context_items(items: &[ResponseItem]) -> Vec<ResponseItem
         .collect()
 }
 
-fn is_reinjectable_context_item(item: &ResponseItem) -> bool {
+fn is_reinjectable_context_item(item: &TranscriptItem) -> bool {
     match item {
-        ResponseItem::Message { role, content, .. } if role == "developer" => {
+        TranscriptItem::Message { role, content, .. } if role == "developer" => {
             is_contextual_dev_message_content(content)
         }
-        ResponseItem::Message { role, content, .. } if role == "user" => {
+        TranscriptItem::Message { role, content, .. } if role == "user" => {
             is_contextual_user_message_content(content)
         }
-        ResponseItem::Compaction { .. } | ResponseItem::ContextCompaction { .. } => true,
-        ResponseItem::Message { .. }
-        | ResponseItem::AgentMessage { .. }
-        | ResponseItem::Reasoning { .. }
-        | ResponseItem::LocalShellCall { .. }
-        | ResponseItem::FunctionCall { .. }
-        | ResponseItem::ToolSearchCall { .. }
-        | ResponseItem::FunctionCallOutput { .. }
-        | ResponseItem::ToolSearchOutput { .. }
-        | ResponseItem::CustomToolCall { .. }
-        | ResponseItem::CustomToolCallOutput { .. }
-        | ResponseItem::WebSearchCall { .. }
-        | ResponseItem::ImageGenerationCall { .. }
-        | ResponseItem::CompactionTrigger
-        | ResponseItem::Other => false,
+        TranscriptItem::Compaction { .. } | TranscriptItem::ContextCompaction { .. } => true,
+        TranscriptItem::Message { .. }
+        | TranscriptItem::AgentMessage { .. }
+        | TranscriptItem::Reasoning { .. }
+        | TranscriptItem::LocalShellCall { .. }
+        | TranscriptItem::FunctionCall { .. }
+        | TranscriptItem::ToolSearchCall { .. }
+        | TranscriptItem::FunctionCallOutput { .. }
+        | TranscriptItem::ToolSearchOutput { .. }
+        | TranscriptItem::CustomToolCall { .. }
+        | TranscriptItem::CustomToolCallOutput { .. }
+        | TranscriptItem::WebSearchCall { .. }
+        | TranscriptItem::ImageGenerationCall { .. }
+        | TranscriptItem::CompactionTrigger
+        | TranscriptItem::Other => false,
     }
 }
 
@@ -277,7 +277,7 @@ fn format_compact_summary(summary: &str) -> String {
     formatted.trim().to_string()
 }
 
-fn calculate_tail_start(items: &[ResponseItem], requested_start: usize, floor: usize) -> usize {
+fn calculate_tail_start(items: &[TranscriptItem], requested_start: usize, floor: usize) -> usize {
     let mut start = requested_start.min(items.len()).max(floor.min(items.len()));
     let mut tokens = estimate_items_tokens(&items[start..]);
     let mut text_items = count_text_items(&items[start..]);
@@ -299,26 +299,26 @@ fn calculate_tail_start(items: &[ResponseItem], requested_start: usize, floor: u
     adjust_start_to_preserve_pairs(items, start, floor)
 }
 
-fn adjust_start_to_preserve_pairs(items: &[ResponseItem], start: usize, floor: usize) -> usize {
+fn adjust_start_to_preserve_pairs(items: &[TranscriptItem], start: usize, floor: usize) -> usize {
     let mut adjusted_start = start;
     let function_output_ids: HashSet<&str> = items[start..]
         .iter()
         .filter_map(|item| match item {
-            ResponseItem::FunctionCallOutput { call_id, .. } => Some(call_id.as_str()),
+            TranscriptItem::FunctionCallOutput { call_id, .. } => Some(call_id.as_str()),
             _ => None,
         })
         .collect();
     let custom_output_ids: HashSet<&str> = items[start..]
         .iter()
         .filter_map(|item| match item {
-            ResponseItem::CustomToolCallOutput { call_id, .. } => Some(call_id.as_str()),
+            TranscriptItem::CustomToolCallOutput { call_id, .. } => Some(call_id.as_str()),
             _ => None,
         })
         .collect();
     let tool_search_output_ids: HashSet<&str> = items[start..]
         .iter()
         .filter_map(|item| match item {
-            ResponseItem::ToolSearchOutput { call_id, .. } => call_id.as_deref(),
+            TranscriptItem::ToolSearchOutput { call_id, .. } => call_id.as_deref(),
             _ => None,
         })
         .collect();
@@ -326,19 +326,19 @@ fn adjust_start_to_preserve_pairs(items: &[ResponseItem], start: usize, floor: u
     for index in (floor..start).rev() {
         let item = &items[index];
         match item {
-            ResponseItem::FunctionCall { call_id, .. }
-            | ResponseItem::LocalShellCall {
+            TranscriptItem::FunctionCall { call_id, .. }
+            | TranscriptItem::LocalShellCall {
                 call_id: Some(call_id),
                 ..
             } if function_output_ids.contains(call_id.as_str()) => {
                 adjusted_start = index;
             }
-            ResponseItem::CustomToolCall { call_id, .. }
+            TranscriptItem::CustomToolCall { call_id, .. }
                 if custom_output_ids.contains(call_id.as_str()) =>
             {
                 adjusted_start = index;
             }
-            ResponseItem::ToolSearchCall {
+            TranscriptItem::ToolSearchCall {
                 call_id: Some(call_id),
                 ..
             } if tool_search_output_ids.contains(call_id.as_str()) => {
@@ -420,7 +420,7 @@ fn collect_oversized_section(sections: &mut Vec<String>, header: &str, lines: &[
     }
 }
 
-fn validate_tail_pairs(tail: &[ResponseItem]) -> CodexResult<()> {
+fn validate_tail_pairs(tail: &[TranscriptItem]) -> CodexResult<()> {
     let function_call_ids: HashSet<&str> = tail
         .iter()
         .filter_map(function_call_output_pair_start_id)
@@ -428,14 +428,14 @@ fn validate_tail_pairs(tail: &[ResponseItem]) -> CodexResult<()> {
     let custom_call_ids: HashSet<&str> = tail
         .iter()
         .filter_map(|item| match item {
-            ResponseItem::CustomToolCall { call_id, .. } => Some(call_id.as_str()),
+            TranscriptItem::CustomToolCall { call_id, .. } => Some(call_id.as_str()),
             _ => None,
         })
         .collect();
     let tool_search_call_ids: HashSet<&str> = tail
         .iter()
         .filter_map(|item| match item {
-            ResponseItem::ToolSearchCall {
+            TranscriptItem::ToolSearchCall {
                 call_id: Some(call_id),
                 ..
             } => Some(call_id.as_str()),
@@ -445,21 +445,21 @@ fn validate_tail_pairs(tail: &[ResponseItem]) -> CodexResult<()> {
     let function_output_ids: HashSet<&str> = tail
         .iter()
         .filter_map(|item| match item {
-            ResponseItem::FunctionCallOutput { call_id, .. } => Some(call_id.as_str()),
+            TranscriptItem::FunctionCallOutput { call_id, .. } => Some(call_id.as_str()),
             _ => None,
         })
         .collect();
     let custom_output_ids: HashSet<&str> = tail
         .iter()
         .filter_map(|item| match item {
-            ResponseItem::CustomToolCallOutput { call_id, .. } => Some(call_id.as_str()),
+            TranscriptItem::CustomToolCallOutput { call_id, .. } => Some(call_id.as_str()),
             _ => None,
         })
         .collect();
     let tool_search_output_ids: HashSet<&str> = tail
         .iter()
         .filter_map(|item| match item {
-            ResponseItem::ToolSearchOutput {
+            TranscriptItem::ToolSearchOutput {
                 call_id: Some(call_id),
                 ..
             } => Some(call_id.as_str()),
@@ -468,8 +468,8 @@ fn validate_tail_pairs(tail: &[ResponseItem]) -> CodexResult<()> {
         .collect();
     for item in tail {
         match item {
-            ResponseItem::FunctionCall { call_id, .. }
-            | ResponseItem::LocalShellCall {
+            TranscriptItem::FunctionCall { call_id, .. }
+            | TranscriptItem::LocalShellCall {
                 call_id: Some(call_id),
                 ..
             } if !function_output_ids.contains(call_id.as_str()) => {
@@ -477,14 +477,14 @@ fn validate_tail_pairs(tail: &[ResponseItem]) -> CodexResult<()> {
                     "session memory raw tail would split a function call pair".to_string(),
                 ));
             }
-            ResponseItem::CustomToolCall { call_id, .. }
+            TranscriptItem::CustomToolCall { call_id, .. }
                 if !custom_output_ids.contains(call_id.as_str()) =>
             {
                 return Err(CodexErr::Fatal(
                     "session memory raw tail would split a custom tool call pair".to_string(),
                 ));
             }
-            ResponseItem::ToolSearchCall {
+            TranscriptItem::ToolSearchCall {
                 call_id: Some(call_id),
                 ..
             } if !tool_search_output_ids.contains(call_id.as_str()) => {
@@ -492,21 +492,21 @@ fn validate_tail_pairs(tail: &[ResponseItem]) -> CodexResult<()> {
                     "session memory raw tail would split a tool search pair".to_string(),
                 ));
             }
-            ResponseItem::FunctionCallOutput { call_id, .. } => {
+            TranscriptItem::FunctionCallOutput { call_id, .. } => {
                 if !function_call_ids.contains(call_id.as_str()) {
                     return Err(CodexErr::Fatal(
                         "session memory raw tail would split a tool call pair".to_string(),
                     ));
                 }
             }
-            ResponseItem::CustomToolCallOutput { call_id, .. } => {
+            TranscriptItem::CustomToolCallOutput { call_id, .. } => {
                 if !custom_call_ids.contains(call_id.as_str()) {
                     return Err(CodexErr::Fatal(
                         "session memory raw tail would split a custom tool call pair".to_string(),
                     ));
                 }
             }
-            ResponseItem::ToolSearchOutput {
+            TranscriptItem::ToolSearchOutput {
                 call_id: Some(call_id),
                 ..
             } if !tool_search_call_ids.contains(call_id.as_str()) => {
@@ -520,10 +520,10 @@ fn validate_tail_pairs(tail: &[ResponseItem]) -> CodexResult<()> {
     Ok(())
 }
 
-fn function_call_output_pair_start_id(item: &ResponseItem) -> Option<&str> {
+fn function_call_output_pair_start_id(item: &TranscriptItem) -> Option<&str> {
     match item {
-        ResponseItem::FunctionCall { call_id, .. } => Some(call_id.as_str()),
-        ResponseItem::LocalShellCall {
+        TranscriptItem::FunctionCall { call_id, .. } => Some(call_id.as_str()),
+        TranscriptItem::LocalShellCall {
             call_id: Some(call_id),
             ..
         } => Some(call_id.as_str()),
@@ -531,31 +531,33 @@ fn function_call_output_pair_start_id(item: &ResponseItem) -> Option<&str> {
     }
 }
 
-pub(super) fn count_tool_calls(items: &[ResponseItem]) -> usize {
+pub(super) fn count_tool_calls(items: &[TranscriptItem]) -> usize {
     items
         .iter()
         .filter(|item| {
             matches!(
                 item,
-                ResponseItem::FunctionCall { .. }
-                    | ResponseItem::CustomToolCall { .. }
-                    | ResponseItem::ToolSearchCall { .. }
-                    | ResponseItem::LocalShellCall { .. }
+                TranscriptItem::FunctionCall { .. }
+                    | TranscriptItem::CustomToolCall { .. }
+                    | TranscriptItem::ToolSearchCall { .. }
+                    | TranscriptItem::LocalShellCall { .. }
             )
         })
         .count()
 }
 
-fn count_text_items(items: &[ResponseItem]) -> usize {
+fn count_text_items(items: &[TranscriptItem]) -> usize {
     items
         .iter()
         .filter(|item| match item {
-            ResponseItem::Message { content, .. } => content.iter().any(|content| match content {
-                ContentItem::InputText { text } | ContentItem::OutputText { text } => {
-                    !text.trim().is_empty()
-                }
-                ContentItem::InputImage { .. } => false,
-            }),
+            TranscriptItem::Message { content, .. } => {
+                content.iter().any(|content| match content {
+                    ContentItem::InputText { text } | ContentItem::OutputText { text } => {
+                        !text.trim().is_empty()
+                    }
+                    ContentItem::InputImage { .. } => false,
+                })
+            }
             _ => false,
         })
         .count()
@@ -567,7 +569,7 @@ pub(super) fn estimate_prompt_tokens(prompt: &Prompt) -> i64 {
     base_tokens.saturating_add(estimate_items_tokens(&prompt.input))
 }
 
-fn estimate_items_tokens(items: &[ResponseItem]) -> i64 {
+fn estimate_items_tokens(items: &[TranscriptItem]) -> i64 {
     items
         .iter()
         .map(|item| {
@@ -578,15 +580,15 @@ fn estimate_items_tokens(items: &[ResponseItem]) -> i64 {
         .fold(0i64, i64::saturating_add)
 }
 
-pub(super) fn item_fingerprint(item: &ResponseItem) -> String {
+pub(super) fn item_fingerprint(item: &TranscriptItem) -> String {
     let bytes = serde_json::to_vec(item).unwrap_or_default();
     let digest = codex_utils_cache::sha1_digest(&bytes);
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-fn is_compaction_boundary(item: &ResponseItem) -> bool {
+fn is_compaction_boundary(item: &TranscriptItem) -> bool {
     matches!(
         item,
-        ResponseItem::Compaction { .. } | ResponseItem::ContextCompaction { .. }
+        TranscriptItem::Compaction { .. } | TranscriptItem::ContextCompaction { .. }
     )
 }

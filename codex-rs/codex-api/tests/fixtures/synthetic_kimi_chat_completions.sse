@@ -1,0 +1,11 @@
+: synthetic fixture only; not a captured provider golden.
+: Kimi-style chat stream with reasoning_details entries.
+
+data: {"id":"kimi-synth-1","model":"kimi-k2","choices":[{"delta":{"role":"assistant"},"finish_reason":null}]}
+
+data: {"id":"kimi-synth-1","choices":[{"delta":{"reasoning_details":[{"type":"text","text":"inspect"},{"type":"summary","content":" decide"}]},"finish_reason":null}]}
+
+data: {"id":"kimi-synth-1","choices":[{"delta":{"content":"kimi answer"},"finish_reason":null}]}
+
+data: {"id":"kimi-synth-1","choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":13,"completion_tokens":5}}
+

@@ -1,7 +1,7 @@
 use codex_core::context::ContextualUserFragment;
 use codex_core::context::InternalContextSource;
 use codex_core::context::InternalModelContextFragment;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::protocol::ThreadGoal;
 use codex_utils_template::Template;
 use std::sync::LazyLock;
@@ -34,19 +34,19 @@ fn parse_embedded_template(source: &'static str, template_name: &str) -> Templat
     }
 }
 
-pub(crate) fn budget_limit_steering_item(goal: &ThreadGoal) -> ResponseItem {
+pub(crate) fn budget_limit_steering_item(goal: &ThreadGoal) -> TranscriptItem {
     goal_context_input_item(budget_limit_prompt(goal))
 }
 
-pub(crate) fn objective_updated_steering_item(goal: &ThreadGoal) -> ResponseItem {
+pub(crate) fn objective_updated_steering_item(goal: &ThreadGoal) -> TranscriptItem {
     goal_context_input_item(objective_updated_prompt(goal))
 }
 
-pub(crate) fn continuation_steering_item(goal: &ThreadGoal) -> ResponseItem {
+pub(crate) fn continuation_steering_item(goal: &ThreadGoal) -> TranscriptItem {
     goal_context_input_item(continuation_prompt(goal))
 }
 
-fn goal_context_input_item(prompt: String) -> ResponseItem {
+fn goal_context_input_item(prompt: String) -> TranscriptItem {
     ContextualUserFragment::into(InternalModelContextFragment::new(
         InternalContextSource::from_static("goal"),
         prompt,

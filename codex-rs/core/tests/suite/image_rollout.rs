@@ -2,7 +2,7 @@ use anyhow::Context;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::DEFAULT_IMAGE_DETAIL;
 use codex_protocol::models::PermissionProfile;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::Op;
@@ -28,7 +28,7 @@ use pretty_assertions::assert_eq;
 use std::path::Path;
 use std::time::Duration;
 
-fn find_user_message_with_image(text: &str) -> Option<ResponseItem> {
+fn find_user_message_with_image(text: &str) -> Option<TranscriptItem> {
     for line in text.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
@@ -38,13 +38,13 @@ fn find_user_message_with_image(text: &str) -> Option<ResponseItem> {
             Ok(rollout) => rollout,
             Err(_) => continue,
         };
-        if let RolloutItem::ResponseItem(ResponseItem::Message { role, content, .. }) =
+        if let RolloutItem::TranscriptItem(TranscriptItem::Message { role, content, .. }) =
             &rollout.item
             && role == "user"
             && content
                 .iter()
                 .any(|span| matches!(span, ContentItem::InputImage { .. }))
-            && let RolloutItem::ResponseItem(item) = rollout.item.clone()
+            && let RolloutItem::TranscriptItem(item) = rollout.item.clone()
         {
             return Some(item);
         }
@@ -52,9 +52,9 @@ fn find_user_message_with_image(text: &str) -> Option<ResponseItem> {
     None
 }
 
-fn extract_image_url(item: &ResponseItem) -> Option<String> {
+fn extract_image_url(item: &TranscriptItem) -> Option<String> {
     match item {
-        ResponseItem::Message { content, .. } => content.iter().find_map(|span| match span {
+        TranscriptItem::Message { content, .. } => content.iter().find_map(|span| match span {
             ContentItem::InputImage { image_url, .. } => Some(image_url.clone()),
             _ => None,
         }),
@@ -157,7 +157,7 @@ async fn copy_paste_local_image_persists_rollout_request_shape() -> anyhow::Resu
         .expect("expected user message with input image in rollout");
 
     let image_url = extract_image_url(&actual).expect("expected image url in rollout");
-    let expected = ResponseItem::Message {
+    let expected = TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![
@@ -255,7 +255,7 @@ async fn drag_drop_image_persists_rollout_request_shape() -> anyhow::Result<()> 
         .expect("expected user message with input image in rollout");
 
     let image_url = extract_image_url(&actual).expect("expected image url in rollout");
-    let expected = ResponseItem::Message {
+    let expected = TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![

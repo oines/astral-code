@@ -22,8 +22,8 @@ use codex_protocol::models::DEFAULT_IMAGE_DETAIL;
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::FunctionCallOutputPayload;
-use codex_protocol::models::ResponseInputItem;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptInputItem;
+use codex_protocol::models::TranscriptItem;
 use codex_tools::ResponsesApiNamespace;
 use codex_tools::ResponsesApiNamespaceTool;
 use codex_tools::ResponsesApiTool;
@@ -152,7 +152,7 @@ enum ImageRequest {
 /// Builds a generation or edit request from the mutually exclusive image selectors.
 fn request_for_args(
     args: &ImagegenArgs,
-    history: &[ResponseItem],
+    history: &[TranscriptItem],
 ) -> Result<ImageRequest, FunctionCallError> {
     let paths = args.referenced_image_paths.as_deref().unwrap_or_default();
     if paths.len() > MAX_EDIT_IMAGES {
@@ -210,31 +210,31 @@ fn request_for_args(
 }
 
 /// Selects the newest requested images while preserving their conversation order.
-fn recent_images(history: &[ResponseItem], count: usize) -> Vec<ImageUrl> {
+fn recent_images(history: &[TranscriptItem], count: usize) -> Vec<ImageUrl> {
     let mut function_call_ids = HashSet::new();
     let mut custom_tool_call_ids = HashSet::new();
     for item in history {
         match item {
-            ResponseItem::FunctionCall { call_id, .. } => {
+            TranscriptItem::FunctionCall { call_id, .. } => {
                 function_call_ids.insert(call_id.as_str());
             }
-            ResponseItem::CustomToolCall { call_id, .. } => {
+            TranscriptItem::CustomToolCall { call_id, .. } => {
                 custom_tool_call_ids.insert(call_id.as_str());
             }
-            ResponseItem::Message { .. }
-            | ResponseItem::AgentMessage { .. }
-            | ResponseItem::Reasoning { .. }
-            | ResponseItem::LocalShellCall { .. }
-            | ResponseItem::ToolSearchCall { .. }
-            | ResponseItem::FunctionCallOutput { .. }
-            | ResponseItem::CustomToolCallOutput { .. }
-            | ResponseItem::ToolSearchOutput { .. }
-            | ResponseItem::WebSearchCall { .. }
-            | ResponseItem::ImageGenerationCall { .. }
-            | ResponseItem::Compaction { .. }
-            | ResponseItem::CompactionTrigger
-            | ResponseItem::ContextCompaction { .. }
-            | ResponseItem::Other => {}
+            TranscriptItem::Message { .. }
+            | TranscriptItem::AgentMessage { .. }
+            | TranscriptItem::Reasoning { .. }
+            | TranscriptItem::LocalShellCall { .. }
+            | TranscriptItem::ToolSearchCall { .. }
+            | TranscriptItem::FunctionCallOutput { .. }
+            | TranscriptItem::CustomToolCallOutput { .. }
+            | TranscriptItem::ToolSearchOutput { .. }
+            | TranscriptItem::WebSearchCall { .. }
+            | TranscriptItem::ImageGenerationCall { .. }
+            | TranscriptItem::Compaction { .. }
+            | TranscriptItem::CompactionTrigger
+            | TranscriptItem::ContextCompaction { .. }
+            | TranscriptItem::Other => {}
         }
     }
 
@@ -242,40 +242,40 @@ fn recent_images(history: &[ResponseItem], count: usize) -> Vec<ImageUrl> {
     'history: for item in history.iter().rev() {
         let mut image_urls = Vec::new();
         match item {
-            ResponseItem::Message { content, .. } => {
+            TranscriptItem::Message { content, .. } => {
                 image_urls.extend(content.iter().rev().filter_map(|item| match item {
                     ContentItem::InputImage { image_url, .. } => Some(image_url.clone()),
                     ContentItem::InputText { .. } | ContentItem::OutputText { .. } => None,
                 }));
             }
-            ResponseItem::FunctionCallOutput { call_id, output }
+            TranscriptItem::FunctionCallOutput { call_id, output }
                 if function_call_ids.contains(call_id.as_str()) =>
             {
                 image_urls.extend(output_image_urls(output));
             }
-            ResponseItem::CustomToolCallOutput {
+            TranscriptItem::CustomToolCallOutput {
                 call_id, output, ..
             } if custom_tool_call_ids.contains(call_id.as_str()) => {
                 image_urls.extend(output_image_urls(output));
             }
-            ResponseItem::ImageGenerationCall { result, .. } if !result.is_empty() => {
+            TranscriptItem::ImageGenerationCall { result, .. } if !result.is_empty() => {
                 image_urls.push(format!("data:image/png;base64,{result}"));
             }
-            ResponseItem::Reasoning { .. }
-            | ResponseItem::AgentMessage { .. }
-            | ResponseItem::LocalShellCall { .. }
-            | ResponseItem::FunctionCall { .. }
-            | ResponseItem::ToolSearchCall { .. }
-            | ResponseItem::CustomToolCall { .. }
-            | ResponseItem::FunctionCallOutput { .. }
-            | ResponseItem::CustomToolCallOutput { .. }
-            | ResponseItem::ToolSearchOutput { .. }
-            | ResponseItem::WebSearchCall { .. }
-            | ResponseItem::ImageGenerationCall { .. }
-            | ResponseItem::Compaction { .. }
-            | ResponseItem::CompactionTrigger
-            | ResponseItem::ContextCompaction { .. }
-            | ResponseItem::Other => {}
+            TranscriptItem::Reasoning { .. }
+            | TranscriptItem::AgentMessage { .. }
+            | TranscriptItem::LocalShellCall { .. }
+            | TranscriptItem::FunctionCall { .. }
+            | TranscriptItem::ToolSearchCall { .. }
+            | TranscriptItem::CustomToolCall { .. }
+            | TranscriptItem::FunctionCallOutput { .. }
+            | TranscriptItem::CustomToolCallOutput { .. }
+            | TranscriptItem::ToolSearchOutput { .. }
+            | TranscriptItem::WebSearchCall { .. }
+            | TranscriptItem::ImageGenerationCall { .. }
+            | TranscriptItem::Compaction { .. }
+            | TranscriptItem::CompactionTrigger
+            | TranscriptItem::ContextCompaction { .. }
+            | TranscriptItem::Other => {}
         }
         for image_url in image_urls {
             images.push(ImageUrl { image_url });
@@ -393,7 +393,7 @@ impl ToolOutput for GeneratedImageOutput {
     }
 
     /// Returns generated bytes and persisted-artifact context for model follow-up.
-    fn to_response_item(&self, call_id: &str, _payload: &ToolPayload) -> ResponseInputItem {
+    fn to_response_item(&self, call_id: &str, _payload: &ToolPayload) -> TranscriptInputItem {
         let mut content = vec![FunctionCallOutputContentItem::InputImage {
             image_url: format!("data:image/png;base64,{}", self.result),
             detail: Some(DEFAULT_IMAGE_DETAIL),
@@ -403,7 +403,7 @@ impl ToolOutput for GeneratedImageOutput {
                 text: output_hint.clone(),
             });
         }
-        ResponseInputItem::FunctionCallOutput {
+        TranscriptInputItem::FunctionCallOutput {
             call_id: call_id.to_string(),
             output: FunctionCallOutputPayload {
                 body: FunctionCallOutputBody::ContentItems(content),

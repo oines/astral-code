@@ -24,8 +24,8 @@ impl TurnItemContributor for RewriteAgentMessageContributor {
     }
 }
 
-fn assistant_output_text(text: &str) -> ResponseItem {
-    ResponseItem::Message {
+fn assistant_output_text(text: &str) -> TranscriptItem {
+    TranscriptItem::Message {
         id: Some("msg-1".to_string()),
         role: "assistant".to_string(),
         content: vec![ContentItem::OutputText {

@@ -273,9 +273,11 @@ async fn user_shell_command_history_is_persisted_and_shared_with_model() -> anyh
     let test = builder.build(&server).await?;
 
     #[cfg(windows)]
-    let command = r#"$val = $env:CODEX_SANDBOX; if ([string]::IsNullOrEmpty($val)) { $val = 'not-set' } ; [System.Console]::Write($val)"#.to_string();
+    let command = r#"$astral = $env:ASTRAL_SANDBOX; if ([string]::IsNullOrEmpty($astral)) { $astral = 'not-set' }; $codex = $env:CODEX_SANDBOX; if ([string]::IsNullOrEmpty($codex)) { $codex = 'not-set' }; [System.Console]::Write("$astral|$codex")"#.to_string();
     #[cfg(not(windows))]
-    let command = r#"sh -c "printf '%s' \"${CODEX_SANDBOX:-not-set}\"""#.to_string();
+    let command =
+        r#"sh -c "printf '%s|%s' \"${ASTRAL_SANDBOX:-not-set}\" \"${CODEX_SANDBOX:-not-set}\"""#
+            .to_string();
 
     test.codex
         .submit(Op::RunUserShellCommand {
@@ -305,7 +307,7 @@ async fn user_shell_command_history_is_persisted_and_shared_with_model() -> anyh
     assert_eq!(delta_event.stream, ExecOutputStream::Stdout);
     let chunk_text =
         String::from_utf8(delta_event.chunk.clone()).expect("user command chunk is valid utf-8");
-    assert_eq!(chunk_text.trim(), "not-set");
+    assert_eq!(chunk_text.trim(), "not-set|not-set");
 
     let end_event = wait_for_event_match(&test.codex, |ev| match ev {
         EventMsg::ExecCommandEnd(event) => Some(event.clone()),
@@ -313,7 +315,7 @@ async fn user_shell_command_history_is_persisted_and_shared_with_model() -> anyh
     })
     .await;
     assert_eq!(end_event.exit_code, 0);
-    assert_eq!(end_event.stdout.trim(), "not-set");
+    assert_eq!(end_event.stdout.trim(), "not-set|not-set");
 
     let _ = wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
@@ -336,7 +338,7 @@ async fn user_shell_command_history_is_persisted_and_shared_with_model() -> anyh
     let command_message = command_message.replace("\r\n", "\n");
     let escaped_command = escape(&command);
     let expected_pattern = format!(
-        r"(?m)\A<user_shell_command>\n<command>\n{escaped_command}\n</command>\n<result>\nExit code: 0\nDuration: [0-9]+(?:\.[0-9]+)? seconds\nOutput:\nnot-set\n</result>\n</user_shell_command>\z"
+        r"(?m)\A<user_shell_command>\n<command>\n{escaped_command}\n</command>\n<result>\nExit code: 0\nDuration: [0-9]+(?:\.[0-9]+)? seconds\nOutput:\nnot-set\|not-set\n</result>\n</user_shell_command>\z"
     );
     assert_regex_match(&expected_pattern, &command_message);
 
@@ -359,10 +361,9 @@ async fn user_shell_command_does_not_set_network_sandbox_env_var() -> anyhow::Re
     let test = builder.build(&server).await?;
 
     #[cfg(windows)]
-    let command = r#"$val = $env:CODEX_SANDBOX_NETWORK_DISABLED; if ([string]::IsNullOrEmpty($val)) { $val = 'not-set' } ; [System.Console]::Write($val)"#.to_string();
+    let command = r#"$astral = $env:ASTRAL_SANDBOX_NETWORK_DISABLED; if ([string]::IsNullOrEmpty($astral)) { $astral = 'not-set' }; $codex = $env:CODEX_SANDBOX_NETWORK_DISABLED; if ([string]::IsNullOrEmpty($codex)) { $codex = 'not-set' }; [System.Console]::Write("$astral|$codex")"#.to_string();
     #[cfg(not(windows))]
-    let command =
-        r#"sh -c "printf '%s' \"${CODEX_SANDBOX_NETWORK_DISABLED:-not-set}\"""#.to_string();
+    let command = r#"sh -c "printf '%s|%s' \"${ASTRAL_SANDBOX_NETWORK_DISABLED:-not-set}\" \"${CODEX_SANDBOX_NETWORK_DISABLED:-not-set}\"""#.to_string();
 
     test.codex
         .submit(Op::RunUserShellCommand { command })
@@ -383,7 +384,7 @@ async fn user_shell_command_does_not_set_network_sandbox_env_var() -> anyhow::Re
         exit_code, 0,
         "shell command should execute successfully. stdout=`{stdout}`, stderr=`{stderr}`",
     );
-    assert_eq!(stdout.trim(), "not-set");
+    assert_eq!(stdout.trim(), "not-set|not-set");
 
     Ok(())
 }

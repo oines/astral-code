@@ -1,5 +1,5 @@
 use crate::common::Reasoning;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -24,7 +24,7 @@ pub struct SearchRequest {
 #[serde(untagged)]
 pub enum SearchInput {
     Text(String),
-    Items(Vec<ResponseItem>),
+    Items(Vec<TranscriptItem>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, JsonSchema)]

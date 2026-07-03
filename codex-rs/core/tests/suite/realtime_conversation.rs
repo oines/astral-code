@@ -7,7 +7,7 @@ use codex_login::ASTRAL_API_KEY_ENV_VAR;
 use codex_login::CodexAuth;
 use codex_protocol::ThreadId;
 use codex_protocol::models::ContentItem;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::protocol::CodexErrorInfo;
 use codex_protocol::protocol::ConversationAudioParams;
 use codex_protocol::protocol::ConversationStartParams;
@@ -1867,13 +1867,13 @@ async fn conversation_startup_context_current_thread_selects_many_turns_by_budge
             let turn_number = index + 1;
             let assistant_turn = format!("assistant turn {turn_number}");
             [
-                RolloutItem::ResponseItem(ResponseItem::Message {
+                RolloutItem::TranscriptItem(TranscriptItem::Message {
                     id: None,
                     role: "user".to_string(),
                     content: vec![ContentItem::InputText { text: user_turn }],
                     phase: None,
                 }),
-                RolloutItem::ResponseItem(ResponseItem::Message {
+                RolloutItem::TranscriptItem(TranscriptItem::Message {
                     id: None,
                     role: "assistant".to_string(),
                     content: vec![ContentItem::OutputText {

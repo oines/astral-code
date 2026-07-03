@@ -5,7 +5,7 @@ use crate::context_manager::is_user_turn_boundary;
 // the resume/fork hydration metadata derived from the same replay.
 #[derive(Debug)]
 pub(super) struct RolloutReconstruction {
-    pub(super) history: Vec<ResponseItem>,
+    pub(super) history: Vec<TranscriptItem>,
     pub(super) previous_turn_settings: Option<PreviousTurnSettings>,
     pub(super) reference_context_item: Option<TurnContextItem>,
 }
@@ -32,7 +32,7 @@ struct ActiveReplaySegment<'a> {
     counts_as_user_turn: bool,
     previous_turn_settings: Option<PreviousTurnSettings>,
     reference_context_item: TurnReferenceContextItem,
-    base_replacement_history: Option<&'a [ResponseItem]>,
+    base_replacement_history: Option<&'a [TranscriptItem]>,
 }
 
 fn turn_ids_are_compatible(active_turn_id: Option<&str>, item_turn_id: Option<&str>) -> bool {
@@ -42,7 +42,7 @@ fn turn_ids_are_compatible(active_turn_id: Option<&str>, item_turn_id: Option<&s
 
 fn finalize_active_segment<'a>(
     active_segment: ActiveReplaySegment<'a>,
-    base_replacement_history: &mut Option<&'a [ResponseItem]>,
+    base_replacement_history: &mut Option<&'a [TranscriptItem]>,
     previous_turn_settings: &mut Option<PreviousTurnSettings>,
     reference_context_item: &mut TurnReferenceContextItem,
     pending_rollback_turns: &mut usize,
@@ -94,7 +94,7 @@ impl Session {
         // stopping once a surviving replacement-history checkpoint and the required resume metadata
         // are both known; then replay only the buffered surviving tail forward to preserve exact
         // history semantics.
-        let mut base_replacement_history: Option<&[ResponseItem]> = None;
+        let mut base_replacement_history: Option<&[TranscriptItem]> = None;
         let mut previous_turn_settings = None;
         let mut reference_context_item = TurnReferenceContextItem::NeverSet;
         // Rollback is "drop the newest N user turns". While scanning in reverse, that becomes
@@ -202,7 +202,7 @@ impl Session {
                         );
                     }
                 }
-                RolloutItem::ResponseItem(response_item) => {
+                RolloutItem::TranscriptItem(response_item) => {
                     let active_segment =
                         active_segment.get_or_insert_with(ActiveReplaySegment::default);
                     active_segment.counts_as_user_turn |= is_user_turn_boundary(response_item);
@@ -241,7 +241,7 @@ impl Session {
         // instead of an eagerly loaded `&[RolloutItem]`.
         for item in rollout_suffix {
             match item {
-                RolloutItem::ResponseItem(response_item) => {
+                RolloutItem::TranscriptItem(response_item) => {
                     history.record_items(
                         std::iter::once(response_item),
                         turn_context.truncation_policy,

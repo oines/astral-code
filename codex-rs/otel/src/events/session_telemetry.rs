@@ -27,10 +27,10 @@ use crate::metrics::timer::Timer;
 use crate::provider::OtelProvider;
 use crate::sanitize_metric_tag_value;
 use codex_api::ApiError;
-use codex_api::ResponseEvent;
+use codex_api::ModelStreamEvent;
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::ReasoningSummary;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::ReviewDecision;
@@ -383,23 +383,23 @@ impl SessionTelemetry {
         }
     }
 
-    pub fn record_responses(&self, handle_responses_span: &Span, event: &ResponseEvent) {
+    pub fn record_responses(&self, handle_responses_span: &Span, event: &ModelStreamEvent) {
         handle_responses_span.record("otel.name", SessionTelemetry::responses_type(event));
 
         match event {
-            ResponseEvent::OutputItemDone(item) => {
+            ModelStreamEvent::OutputItemDone(item) => {
                 handle_responses_span.record("from", "output_item_done");
-                if let ResponseItem::FunctionCall { name, .. } = item {
+                if let TranscriptItem::FunctionCall { name, .. } = item {
                     handle_responses_span.record("tool_name", name.as_str());
                 }
             }
-            ResponseEvent::OutputItemAdded(item) => {
+            ModelStreamEvent::OutputItemAdded(item) => {
                 handle_responses_span.record("from", "output_item_added");
-                if let ResponseItem::FunctionCall { name, .. } = item {
+                if let TranscriptItem::FunctionCall { name, .. } = item {
                     handle_responses_span.record("tool_name", name.as_str());
                 }
             }
-            ResponseEvent::Completed {
+            ModelStreamEvent::Completed {
                 token_usage: Some(token_usage),
                 ..
             } => {
@@ -784,7 +784,7 @@ impl SessionTelemetry {
                             self.sse_event_failed(Some(&sse.event), duration, &error);
                         }
                         Ok(content) if sse.event == "response.output_item.done" => {
-                            match serde_json::from_value::<ResponseItem>(content) {
+                            match serde_json::from_value::<TranscriptItem>(content) {
                                 Ok(_) => self.sse_event(&sse.event, duration),
                                 Err(_) => {
                                     self.sse_event_failed(
@@ -1118,47 +1118,48 @@ impl SessionTelemetry {
         );
     }
 
-    fn responses_type(event: &ResponseEvent) -> String {
+    fn responses_type(event: &ModelStreamEvent) -> String {
         match event {
-            ResponseEvent::Created => "created".into(),
-            ResponseEvent::OutputItemDone(item) | ResponseEvent::OutputItemAdded(item) => {
+            ModelStreamEvent::Created => "created".into(),
+            ModelStreamEvent::OutputItemDone(item) | ModelStreamEvent::OutputItemAdded(item) => {
                 SessionTelemetry::responses_item_type(item)
             }
-            ResponseEvent::Completed { .. } => "completed".into(),
-            ResponseEvent::OutputTextDelta(_) => "text_delta".into(),
-            ResponseEvent::ToolCallInputDelta { .. } => "tool_input_delta".into(),
-            ResponseEvent::ReasoningSummaryDelta { .. } => "reasoning_summary_delta".into(),
-            ResponseEvent::ReasoningContentDelta { .. } => "reasoning_content_delta".into(),
-            ResponseEvent::ReasoningSummaryPartAdded { .. } => {
+            ModelStreamEvent::Completed { .. } => "completed".into(),
+            ModelStreamEvent::OutputTextDelta(_) => "text_delta".into(),
+            ModelStreamEvent::ToolCallInputDelta { .. } => "tool_input_delta".into(),
+            ModelStreamEvent::ReasoningSummaryDelta { .. } => "reasoning_summary_delta".into(),
+            ModelStreamEvent::ReasoningContentDelta { .. } => "reasoning_content_delta".into(),
+            ModelStreamEvent::ReasoningSummaryPartAdded { .. } => {
                 "reasoning_summary_part_added".into()
             }
-            ResponseEvent::ServerModel(_) => "server_model".into(),
-            ResponseEvent::ModelVerifications(_) => "model_verifications".into(),
-            ResponseEvent::TurnModerationMetadata(_) => "turn_moderation_metadata".into(),
-            ResponseEvent::ServerReasoningIncluded(_) => "server_reasoning_included".into(),
-            ResponseEvent::RateLimits(_) => "rate_limits".into(),
-            ResponseEvent::ModelsEtag(_) => "models_etag".into(),
+            ModelStreamEvent::ServerModel(_) => "server_model".into(),
+            ModelStreamEvent::ModelVerifications(_) => "model_verifications".into(),
+            ModelStreamEvent::TurnModerationMetadata(_) => "turn_moderation_metadata".into(),
+            ModelStreamEvent::ServerReasoningIncluded(_) => "server_reasoning_included".into(),
+            ModelStreamEvent::Warning(_) => "warning".into(),
+            ModelStreamEvent::RateLimits(_) => "rate_limits".into(),
+            ModelStreamEvent::ModelsEtag(_) => "models_etag".into(),
         }
     }
 
-    fn responses_item_type(item: &ResponseItem) -> String {
+    fn responses_item_type(item: &TranscriptItem) -> String {
         match item {
-            ResponseItem::Message { role, .. } => format!("message_from_{role}"),
-            ResponseItem::AgentMessage { .. } => "agent_message".into(),
-            ResponseItem::Reasoning { .. } => "reasoning".into(),
-            ResponseItem::LocalShellCall { .. } => "local_shell_call".into(),
-            ResponseItem::FunctionCall { .. } => "function_call".into(),
-            ResponseItem::ToolSearchCall { .. } => "tool_search_call".into(),
-            ResponseItem::FunctionCallOutput { .. } => "function_call_output".into(),
-            ResponseItem::ToolSearchOutput { .. } => "tool_search_output".into(),
-            ResponseItem::CustomToolCall { .. } => "custom_tool_call".into(),
-            ResponseItem::CustomToolCallOutput { .. } => "custom_tool_call_output".into(),
-            ResponseItem::WebSearchCall { .. } => "web_search_call".into(),
-            ResponseItem::ImageGenerationCall { .. } => "image_generation_call".into(),
-            ResponseItem::Compaction { .. } => "compaction".into(),
-            ResponseItem::CompactionTrigger => "compaction_trigger".into(),
-            ResponseItem::ContextCompaction { .. } => "context_compaction".into(),
-            ResponseItem::Other => "other".into(),
+            TranscriptItem::Message { role, .. } => format!("message_from_{role}"),
+            TranscriptItem::AgentMessage { .. } => "agent_message".into(),
+            TranscriptItem::Reasoning { .. } => "reasoning".into(),
+            TranscriptItem::LocalShellCall { .. } => "local_shell_call".into(),
+            TranscriptItem::FunctionCall { .. } => "function_call".into(),
+            TranscriptItem::ToolSearchCall { .. } => "tool_search_call".into(),
+            TranscriptItem::FunctionCallOutput { .. } => "function_call_output".into(),
+            TranscriptItem::ToolSearchOutput { .. } => "tool_search_output".into(),
+            TranscriptItem::CustomToolCall { .. } => "custom_tool_call".into(),
+            TranscriptItem::CustomToolCallOutput { .. } => "custom_tool_call_output".into(),
+            TranscriptItem::WebSearchCall { .. } => "web_search_call".into(),
+            TranscriptItem::ImageGenerationCall { .. } => "image_generation_call".into(),
+            TranscriptItem::Compaction { .. } => "compaction".into(),
+            TranscriptItem::CompactionTrigger => "compaction_trigger".into(),
+            TranscriptItem::ContextCompaction { .. } => "context_compaction".into(),
+            TranscriptItem::Other => "other".into(),
         }
     }
 }

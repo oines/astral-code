@@ -9,9 +9,10 @@ import type { LocalShellStatus } from "./LocalShellStatus";
 import type { MessagePhase } from "./MessagePhase";
 import type { ReasoningItemContent } from "./ReasoningItemContent";
 import type { ReasoningItemReasoningSummary } from "./ReasoningItemReasoningSummary";
+import type { ReasoningProviderMetadata } from "./ReasoningProviderMetadata";
 import type { WebSearchAction } from "./WebSearchAction";
 
-export type ResponseItem = { "type": "message", role: string, content: Array<ContentItem>, phase?: MessagePhase, } | { "type": "agent_message", author: string, recipient: string, content: Array<AgentMessageInputContent>, } | { "type": "reasoning", summary: Array<ReasoningItemReasoningSummary>, content?: Array<ReasoningItemContent>, encrypted_content: string | null, } | { "type": "local_shell_call",
+export type TranscriptItem = { "type": "message", role: string, content: Array<ContentItem>, phase?: MessagePhase, } | { "type": "agent_message", author: string, recipient: string, content: Array<AgentMessageInputContent>, } | { "type": "reasoning", summary: Array<ReasoningItemReasoningSummary>, content?: Array<ReasoningItemContent>, encrypted_content: string | null, provider_metadata?: ReasoningProviderMetadata, } | { "type": "local_shell_call",
 /**
  * Model-assigned call id when available.
  */

@@ -8,9 +8,9 @@ use std::fmt::Display;
 use std::sync::Arc;
 
 use codex_protocol::models::AdditionalPermissionProfile;
-use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::SandboxPermissions;
 use codex_protocol::models::SearchToolCallParams;
+use codex_protocol::models::TranscriptInputItem;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
 use serde_json::json;
@@ -99,7 +99,7 @@ pub enum ToolDispatchPayload {
 #[derive(Serialize)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum ToolDispatchResult {
-    DirectResponse { response_item: ResponseInputItem },
+    DirectResponse { response_item: TranscriptInputItem },
     CodeModeResponse { value: JsonValue },
 }
 
@@ -116,7 +116,7 @@ struct DispatchedToolTraceRequest<'a> {
 #[serde(rename_all = "snake_case", tag = "type")]
 enum DispatchedToolTraceResponse<'a> {
     DirectResponse {
-        response_item: &'a ResponseInputItem,
+        response_item: &'a TranscriptInputItem,
     },
     CodeModeResponse {
         value: &'a JsonValue,

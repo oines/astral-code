@@ -34,6 +34,8 @@ impl SessionTask for CompactTask {
             "local",
             /*manual*/ true,
         );
+        // Custom compact prompts are scoped to the synthetic summarization turn only; they must not
+        // rewrite the session's persistent developer or initial-context instructions.
         let input = vec![UserInput::Text {
             text: ctx.compact_prompt().to_string(),
             // Compaction prompt is synthesized; no UI element ranges to preserve.

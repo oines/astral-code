@@ -4,6 +4,7 @@ use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::ReasoningItemContent;
 use codex_protocol::models::ReasoningItemReasoningSummary;
+use codex_protocol::models::ReasoningProviderMetadata;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_tools::AdditionalProperties;
 use codex_tools::JsonSchema;
@@ -89,7 +90,7 @@ fn test_function_tool(name: &str, description: &str) -> ResponsesApiTool {
 fn build_agent_request_maps_prompt_history_tools_and_metadata() {
     let prompt = Prompt {
         input: vec![
-            ResponseItem::Message {
+            TranscriptItem::Message {
                 id: Some("msg-user".to_string()),
                 role: "user".to_string(),
                 content: vec![
@@ -103,7 +104,7 @@ fn build_agent_request_maps_prompt_history_tools_and_metadata() {
                 ],
                 phase: None,
             },
-            ResponseItem::Reasoning {
+            TranscriptItem::Reasoning {
                 id: "rs-1".to_string(),
                 summary: vec![ReasoningItemReasoningSummary::SummaryText {
                     text: "checked the tool plan".to_string(),
@@ -112,22 +113,23 @@ fn build_agent_request_maps_prompt_history_tools_and_metadata() {
                     text: "need a shell call".to_string(),
                 }]),
                 encrypted_content: None,
+                provider_metadata: None,
             },
-            ResponseItem::FunctionCall {
+            TranscriptItem::FunctionCall {
                 id: Some("fc-1".to_string()),
                 name: "Bash".to_string(),
                 namespace: None,
                 arguments: r#"{"command":"pwd"}"#.to_string(),
                 call_id: "call-1".to_string(),
             },
-            ResponseItem::FunctionCallOutput {
+            TranscriptItem::FunctionCallOutput {
                 call_id: "call-1".to_string(),
                 output: FunctionCallOutputPayload {
                     body: FunctionCallOutputBody::Text("/tmp/project".to_string()),
                     success: Some(true),
                 },
             },
-            ResponseItem::Compaction {
+            TranscriptItem::Compaction {
                 encrypted_content: "compacted summary".to_string(),
             },
         ],
@@ -251,13 +253,65 @@ fn build_agent_request_maps_prompt_history_tools_and_metadata() {
 #[test]
 fn build_agent_request_restores_anthropic_reasoning_signature() {
     let prompt = Prompt {
-        input: vec![ResponseItem::Reasoning {
+        input: vec![TranscriptItem::Reasoning {
             id: "rs-1".to_string(),
             summary: Vec::new(),
             content: Some(vec![ReasoningItemContent::ReasoningText {
                 text: "I should update the memory file.".to_string(),
             }]),
             encrypted_content: Some("anthropic_signature:sig_opaque".to_string()),
+            provider_metadata: None,
+        }],
+        tools: Vec::new(),
+        parallel_tool_calls: false,
+        base_instructions: codex_protocol::models::BaseInstructions {
+            text: String::new(),
+        },
+        personality: None,
+        output_schema: None,
+        output_schema_strict: false,
+        compact_input_placeholders: false,
+    };
+
+    let request = build_agent_request(AgentRequestBuildParams {
+        prompt: &prompt,
+        model_info: &test_model_info(/*supports_reasoning_summaries*/ false),
+        effort: None,
+        summary: ReasoningSummaryConfig::None,
+        service_tier: None,
+        prompt_cache_key: "cache-key".to_string(),
+        provider_request_body: None,
+        provider_request_body_remove: Vec::new(),
+        provider_flavor: None,
+    })
+    .expect("build agent request");
+
+    assert_eq!(
+        request.messages,
+        vec![AgentMessage {
+            role: MessageRole::Assistant,
+            content: vec![ContentBlock::Reasoning {
+                text: "I should update the memory file.".to_string(),
+                signature: Some("sig_opaque".to_string()),
+            }],
+            id: None,
+        }]
+    );
+}
+
+#[test]
+fn build_agent_request_restores_structured_anthropic_reasoning_signature() {
+    let prompt = Prompt {
+        input: vec![TranscriptItem::Reasoning {
+            id: "rs-1".to_string(),
+            summary: Vec::new(),
+            content: Some(vec![ReasoningItemContent::ReasoningText {
+                text: "I should update the memory file.".to_string(),
+            }]),
+            encrypted_content: Some("anthropic_signature:legacy_sig".to_string()),
+            provider_metadata: Some(ReasoningProviderMetadata {
+                anthropic_signature: Some("sig_opaque".to_string()),
+            }),
         }],
         tools: Vec::new(),
         parallel_tool_calls: false,
@@ -299,7 +353,7 @@ fn build_agent_request_restores_anthropic_reasoning_signature() {
 #[test]
 fn build_agent_request_loads_recent_tool_search_results() {
     let prompt = Prompt {
-        input: vec![ResponseItem::ToolSearchOutput {
+        input: vec![TranscriptItem::ToolSearchOutput {
             call_id: None,
             status: "completed".to_string(),
             execution: "client".to_string(),
@@ -392,7 +446,7 @@ fn build_agent_request_loads_recent_tool_search_results() {
 fn build_agent_request_filters_malformed_function_calls_without_dropping_valid_history() {
     let prompt = Prompt {
         input: vec![
-            ResponseItem::Message {
+            TranscriptItem::Message {
                 id: Some("before".to_string()),
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
@@ -400,18 +454,18 @@ fn build_agent_request_filters_malformed_function_calls_without_dropping_valid_h
                 }],
                 phase: None,
             },
-            ResponseItem::FunctionCall {
+            TranscriptItem::FunctionCall {
                 id: Some("bad-fc".to_string()),
                 name: "Bash".to_string(),
                 namespace: None,
                 arguments: r#"{"limit": "#.to_string(),
                 call_id: "call-bad".to_string(),
             },
-            ResponseItem::FunctionCallOutput {
+            TranscriptItem::FunctionCallOutput {
                 call_id: "call-bad".to_string(),
                 output: FunctionCallOutputPayload::from_text("bad output".to_string()),
             },
-            ResponseItem::Message {
+            TranscriptItem::Message {
                 id: Some("after".to_string()),
                 role: "assistant".to_string(),
                 content: vec![ContentItem::OutputText {
@@ -419,25 +473,25 @@ fn build_agent_request_filters_malformed_function_calls_without_dropping_valid_h
                 }],
                 phase: None,
             },
-            ResponseItem::FunctionCall {
+            TranscriptItem::FunctionCall {
                 id: Some("good-fc".to_string()),
                 name: "Bash".to_string(),
                 namespace: None,
                 arguments: r#"{"command":"pwd"}"#.to_string(),
                 call_id: "call-good".to_string(),
             },
-            ResponseItem::FunctionCallOutput {
+            TranscriptItem::FunctionCallOutput {
                 call_id: "call-good".to_string(),
                 output: FunctionCallOutputPayload::from_text("/tmp/project".to_string()),
             },
-            ResponseItem::CustomToolCall {
+            TranscriptItem::CustomToolCall {
                 id: Some("custom-fc".to_string()),
                 status: Some("completed".to_string()),
                 call_id: "call-custom".to_string(),
                 name: "apply_patch".to_string(),
                 input: "*** Begin Patch\nraw patch text\n*** End Patch".to_string(),
             },
-            ResponseItem::CustomToolCallOutput {
+            TranscriptItem::CustomToolCallOutput {
                 call_id: "call-custom".to_string(),
                 name: Some("apply_patch".to_string()),
                 output: FunctionCallOutputPayload::from_text("patch applied".to_string()),

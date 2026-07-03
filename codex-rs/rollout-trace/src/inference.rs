@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::protocol::TokenUsage;
 use http::HeaderMap;
 use http::HeaderValue;
@@ -207,7 +207,7 @@ impl InferenceTraceAttempt {
         response_id: &str,
         upstream_request_id: Option<&str>,
         token_usage: &Option<TokenUsage>,
-        output_items: &[ResponseItem],
+        output_items: &[TranscriptItem],
     ) {
         let Some(attempt) = self.take_terminal_attempt() else {
             return;
@@ -238,7 +238,7 @@ impl InferenceTraceAttempt {
         &self,
         error: impl Display,
         upstream_request_id: Option<&str>,
-        output_items: &[ResponseItem],
+        output_items: &[TranscriptItem],
     ) {
         let Some(attempt) = self.take_terminal_attempt() else {
             return;
@@ -274,7 +274,7 @@ impl InferenceTraceAttempt {
         &self,
         reason: impl Display,
         upstream_request_id: Option<&str>,
-        output_items: &[ResponseItem],
+        output_items: &[TranscriptItem],
     ) {
         let Some(attempt) = self.take_terminal_attempt() else {
             return;
@@ -318,14 +318,14 @@ impl InferenceTraceAttempt {
 /// The protocol serializer intentionally omits some readable reasoning content
 /// when shaping items for later model requests. Rollout traces need the item as
 /// Codex received it, so this helper restores that content in the raw payload.
-pub(crate) fn trace_response_item_json(item: &ResponseItem) -> JsonValue {
+pub(crate) fn trace_response_item_json(item: &TranscriptItem) -> JsonValue {
     let mut value = serde_json::to_value(item).unwrap_or_else(|err| {
         serde_json::json!({
             "serialization_error": err.to_string(),
         })
     });
 
-    if let ResponseItem::Reasoning {
+    if let TranscriptItem::Reasoning {
         content: Some(content),
         ..
     } = item
@@ -361,7 +361,7 @@ fn write_response_payload_best_effort(
     response_id: Option<&str>,
     upstream_request_id: Option<&str>,
     token_usage: Option<&TokenUsage>,
-    output_items: &[ResponseItem],
+    output_items: &[TranscriptItem],
 ) -> Option<crate::RawPayloadRef> {
     let response_payload = TracedResponseStreamOutput {
         response_id,
@@ -495,7 +495,7 @@ mod tests {
 
     #[test]
     fn traced_response_item_preserves_reasoning_content_omitted_by_normal_serializer() {
-        let item = ResponseItem::Reasoning {
+        let item = TranscriptItem::Reasoning {
             id: "rs-1".to_string(),
             summary: vec![ReasoningItemReasoningSummary::SummaryText {
                 text: "summary".to_string(),

@@ -3,7 +3,7 @@ use codex_core::REVIEW_PROMPT;
 use codex_core::config::Config;
 use codex_core::review_format::render_review_output_text;
 use codex_protocol::models::ContentItem;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::protocol::ENVIRONMENT_CONTEXT_OPEN_TAG;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::ExitedReviewModeEvent;
@@ -152,7 +152,8 @@ async fn review_op_emits_lifecycle_and_review_output() {
         }
         let v: serde_json::Value = serde_json::from_str(line).expect("jsonl line");
         let rl: RolloutLine = serde_json::from_value(v).expect("rollout line");
-        if let RolloutItem::ResponseItem(ResponseItem::Message { role, content, .. }) = rl.item {
+        if let RolloutItem::TranscriptItem(TranscriptItem::Message { role, content, .. }) = rl.item
+        {
             if role == "user" {
                 for c in content {
                     if let ContentItem::InputText { text } = c {
@@ -520,7 +521,7 @@ async fn review_input_isolated_from_parent_history() {
             .unwrap();
 
         // Prior user message (enveloped response_item)
-        let user = codex_protocol::models::ResponseItem::Message {
+        let user = codex_protocol::models::TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![codex_protocol::models::ContentItem::InputText {
@@ -539,7 +540,7 @@ async fn review_input_isolated_from_parent_history() {
             .unwrap();
 
         // Prior assistant message (enveloped response_item)
-        let assistant = codex_protocol::models::ResponseItem::Message {
+        let assistant = codex_protocol::models::TranscriptItem::Message {
             id: None,
             role: "assistant".to_string(),
             content: vec![codex_protocol::models::ContentItem::OutputText {
@@ -635,7 +636,7 @@ async fn review_input_isolated_from_parent_history() {
         }
         let v: serde_json::Value = serde_json::from_str(line).expect("jsonl line");
         let rl: RolloutLine = serde_json::from_value(v).expect("rollout line");
-        if let RolloutItem::ResponseItem(ResponseItem::Message { role, content, .. }) = rl.item
+        if let RolloutItem::TranscriptItem(TranscriptItem::Message { role, content, .. }) = rl.item
             && role == "user"
         {
             for c in content {

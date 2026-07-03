@@ -4,7 +4,7 @@ use crate::session::session::Session;
 use chrono::Utc;
 use codex_exec_server::LOCAL_FS;
 use codex_git_utils::resolve_root_git_project_for_trust;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_thread_store::ListThreadsParams;
 use codex_thread_store::SortDirection;
 use codex_thread_store::StoredThread;
@@ -204,14 +204,14 @@ async fn build_recent_work_section(
     (!sections.is_empty()).then(|| sections.join("\n\n"))
 }
 
-fn build_current_thread_section(items: &[ResponseItem]) -> Option<String> {
+fn build_current_thread_section(items: &[TranscriptItem]) -> Option<String> {
     let mut turns = Vec::new();
     let mut current_user = Vec::new();
     let mut current_assistant = Vec::new();
 
     for item in items {
         match item {
-            ResponseItem::Message { role, content, .. } if role == "user" => {
+            TranscriptItem::Message { role, content, .. } if role == "user" => {
                 if is_contextual_user_message_content(content) {
                     continue;
                 }
@@ -226,7 +226,7 @@ fn build_current_thread_section(items: &[ResponseItem]) -> Option<String> {
                 }
                 current_user.push(text);
             }
-            ResponseItem::Message { role, content, .. } if role == "assistant" => {
+            TranscriptItem::Message { role, content, .. } if role == "assistant" => {
                 let Some(text) = content_items_to_text(content)
                     .map(|text| text.trim().to_string())
                     .filter(|text| !text.is_empty())

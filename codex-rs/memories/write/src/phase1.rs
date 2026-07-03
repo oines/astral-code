@@ -12,7 +12,7 @@ use codex_core::config::Config;
 use codex_protocol::error::CodexErr;
 use codex_protocol::models::BaseInstructions;
 use codex_protocol::models::ContentItem;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::protocol::RolloutItem;
 use codex_protocol::protocol::TokenUsage;
 use codex_rollout::INTERACTIVE_SESSION_SOURCES;
@@ -340,7 +340,7 @@ mod job {
         let rollout_contents = serialize_filtered_rollout_response_items(&rollout_items)?;
 
         let mut prompt = Prompt::default();
-        prompt.input = vec![ResponseItem::Message {
+        prompt.input = vec![TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -473,7 +473,7 @@ mod job {
         let filtered = items
             .iter()
             .filter_map(|item| {
-                if let RolloutItem::ResponseItem(item) = item {
+                if let RolloutItem::TranscriptItem(item) = item {
                     sanitize_response_item_for_memories(item)
                 } else {
                     None
@@ -486,8 +486,8 @@ mod job {
         Ok(redact_secrets(serialized))
     }
 
-    fn sanitize_response_item_for_memories(item: &ResponseItem) -> Option<ResponseItem> {
-        let ResponseItem::Message {
+    fn sanitize_response_item_for_memories(item: &TranscriptItem) -> Option<TranscriptItem> {
+        let TranscriptItem::Message {
             id,
             role,
             content,
@@ -514,7 +514,7 @@ mod job {
             return None;
         }
 
-        Some(ResponseItem::Message {
+        Some(TranscriptItem::Message {
             id: id.clone(),
             role: role.clone(),
             content,
@@ -717,7 +717,7 @@ mod tests {
 
     #[test]
     fn serializes_memory_rollout_with_agents_removed_but_environment_kept() {
-        let mixed_contextual_message = ResponseItem::Message {
+        let mixed_contextual_message = TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![
@@ -733,7 +733,7 @@ mod tests {
             ],
             phase: None,
         };
-        let skill_message = ResponseItem::Message {
+        let skill_message = TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -743,7 +743,7 @@ mod tests {
             }],
             phase: None,
         };
-        let subagent_message = ResponseItem::Message {
+        let subagent_message = TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -754,17 +754,17 @@ mod tests {
         };
 
         let serialized = job::serialize_filtered_rollout_response_items(&[
-            RolloutItem::ResponseItem(mixed_contextual_message),
-            RolloutItem::ResponseItem(skill_message),
-            RolloutItem::ResponseItem(subagent_message.clone()),
+            RolloutItem::TranscriptItem(mixed_contextual_message),
+            RolloutItem::TranscriptItem(skill_message),
+            RolloutItem::TranscriptItem(subagent_message.clone()),
         ])
         .expect("serialize");
-        let parsed: Vec<ResponseItem> = serde_json::from_str(&serialized).expect("parse");
+        let parsed: Vec<TranscriptItem> = serde_json::from_str(&serialized).expect("parse");
 
         assert_eq!(
             parsed,
             vec![
-                ResponseItem::Message {
+                TranscriptItem::Message {
                     id: None,
                     role: "user".to_string(),
                     content: vec![ContentItem::InputText {
@@ -781,8 +781,8 @@ mod tests {
     #[test]
     fn serializes_memory_rollout_redacts_secrets_before_prompt_upload() {
         let serialized =
-            job::serialize_filtered_rollout_response_items(&[RolloutItem::ResponseItem(
-                ResponseItem::FunctionCallOutput {
+            job::serialize_filtered_rollout_response_items(&[RolloutItem::TranscriptItem(
+                TranscriptItem::FunctionCallOutput {
                     call_id: "call_123".to_string(),
                     output: codex_protocol::models::FunctionCallOutputPayload {
                         body: codex_protocol::models::FunctionCallOutputBody::Text(

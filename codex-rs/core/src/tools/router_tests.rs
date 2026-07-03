@@ -13,9 +13,9 @@ use codex_extension_api::ToolExecutor;
 use codex_protocol::dynamic_tools::DynamicToolSpec;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::FunctionCallOutputBody;
-use codex_protocol::models::ResponseInputItem;
-use codex_protocol::models::ResponseItem;
 use codex_protocol::models::SearchToolCallParams;
+use codex_protocol::models::TranscriptInputItem;
+use codex_protocol::models::TranscriptItem;
 use codex_tools::ResponsesApiNamespace;
 use codex_tools::ResponsesApiNamespaceTool;
 use codex_tools::ToolName;
@@ -148,7 +148,7 @@ async fn parallel_support_does_not_match_namespaced_local_tool_names() -> anyhow
 async fn build_tool_call_uses_namespace_for_registry_name() -> anyhow::Result<()> {
     let tool_name = "create_event".to_string();
 
-    let call = ToolRouter::build_tool_call(ResponseItem::FunctionCall {
+    let call = ToolRouter::build_tool_call(TranscriptItem::FunctionCall {
         id: None,
         name: tool_name.clone(),
         namespace: Some("mcp__codex_apps__calendar".to_string()),
@@ -174,7 +174,7 @@ async fn build_tool_call_uses_namespace_for_registry_name() -> anyhow::Result<()
 
 #[tokio::test]
 async fn build_tool_call_maps_provider_neutral_tool_search_function_call() -> anyhow::Result<()> {
-    let call = ToolRouter::build_tool_call(ResponseItem::FunctionCall {
+    let call = ToolRouter::build_tool_call(TranscriptItem::FunctionCall {
         id: None,
         name: "tool_search".to_string(),
         namespace: None,
@@ -353,7 +353,7 @@ fn mcp_tool_info(
 async fn extension_tool_executors_are_model_visible_and_dispatchable() -> anyhow::Result<()> {
     let (mut session, turn) = make_session_and_context().await;
     session.services.extensions = extension_tool_test_registry();
-    let history_item = ResponseItem::Message {
+    let history_item = TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
@@ -388,7 +388,7 @@ async fn extension_tool_executors_are_model_visible_and_dispatchable() -> anyhow
         "expected extension-provided tool to be visible to the model"
     );
 
-    let call = ToolRouter::build_tool_call(ResponseItem::FunctionCall {
+    let call = ToolRouter::build_tool_call(TranscriptItem::FunctionCall {
         id: None,
         name: "echo".to_string(),
         namespace: Some("extension/".to_string()),
@@ -409,7 +409,7 @@ async fn extension_tool_executors_are_model_visible_and_dispatchable() -> anyhow
 
     let response = result.into_response();
     match response {
-        ResponseInputItem::FunctionCallOutput { call_id, output } => {
+        TranscriptInputItem::FunctionCallOutput { call_id, output } => {
             assert_eq!(call_id, "call-extension");
             let FunctionCallOutputBody::Text(text) = output.body else {
                 panic!("expected text function call output")

@@ -8,7 +8,7 @@ use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::ToolExecutor;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::models::FunctionCallOutputPayload;
-use codex_protocol::models::ResponseInputItem;
+use codex_protocol::models::TranscriptInputItem;
 use codex_protocol::plan_tool::UpdatePlanArgs;
 use codex_protocol::protocol::EventMsg;
 use codex_tools::ToolName;
@@ -30,11 +30,11 @@ impl ToolOutput for PlanToolOutput {
         true
     }
 
-    fn to_response_item(&self, call_id: &str, _payload: &ToolPayload) -> ResponseInputItem {
+    fn to_response_item(&self, call_id: &str, _payload: &ToolPayload) -> TranscriptInputItem {
         let mut output = FunctionCallOutputPayload::from_text(PLAN_UPDATED_MESSAGE.to_string());
         output.success = Some(true);
 
-        ResponseInputItem::FunctionCallOutput {
+        TranscriptInputItem::FunctionCallOutput {
             call_id: call_id.to_string(),
             output,
         }

@@ -1,0 +1,11 @@
+: synthetic fixture only; not a captured provider golden.
+: DeepSeek /v1-style chat completions stream with reasoning_content.
+
+data: {"id":"deepseek-chat-synth-1","model":"deepseek-chat","choices":[{"delta":{"role":"assistant"},"finish_reason":null}]}
+
+data: {"id":"deepseek-chat-synth-1","choices":[{"delta":{"reasoning_content":"inspect"},"finish_reason":null}]}
+
+data: {"id":"deepseek-chat-synth-1","choices":[{"delta":{"content":"done"},"finish_reason":null}]}
+
+data: {"id":"deepseek-chat-synth-1","choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":3,"total_tokens":8}}
+

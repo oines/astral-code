@@ -12,7 +12,7 @@ use codex_protocol::config_types::AutoCompactTokenLimitScope;
 use codex_protocol::config_types::Personality;
 use codex_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use codex_protocol::models::PermissionProfile;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::Event;
@@ -804,7 +804,7 @@ async fn run_review_on_session(
 }
 
 async fn append_guardian_followup_reminder(review_session: &GuardianReviewSession) {
-    let reminder: ResponseItem = ContextualUserFragment::into(GuardianFollowupReviewReminder);
+    let reminder: TranscriptItem = ContextualUserFragment::into(GuardianFollowupReviewReminder);
     review_session
         .codex
         .session

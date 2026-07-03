@@ -1,5 +1,5 @@
 use crate::error::ApiError;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
 use codex_protocol::protocol::ModelVerification;
 use codex_protocol::protocol::RateLimitSnapshot;
@@ -44,10 +44,10 @@ pub struct MemorySummarizeOutput {
 }
 
 #[derive(Debug)]
-pub enum ResponseEvent {
+pub enum ModelStreamEvent {
     Created,
-    OutputItemDone(ResponseItem),
-    OutputItemAdded(ResponseItem),
+    OutputItemDone(TranscriptItem),
+    OutputItemAdded(TranscriptItem),
     /// Emitted when the server includes `OpenAI-Model` on the stream response.
     /// This can differ from the requested model when backend safety routing applies.
     ServerModel(String),
@@ -59,6 +59,8 @@ pub enum ResponseEvent {
     /// meaning the server already accounted for past reasoning tokens and the
     /// client should not re-estimate them.
     ServerReasoningIncluded(bool),
+    /// User-visible warning emitted by the model stream adapter.
+    Warning(String),
     Completed {
         response_id: String,
         token_usage: Option<TokenUsage>,
@@ -96,13 +98,13 @@ pub struct Reasoning {
 }
 
 pub struct ResponseStream {
-    pub rx_event: mpsc::Receiver<Result<ResponseEvent, ApiError>>,
+    pub rx_event: mpsc::Receiver<Result<ModelStreamEvent, ApiError>>,
     /// Server-assigned `x-request-id` response header, when present.
     pub upstream_request_id: Option<String>,
 }
 
 impl Stream for ResponseStream {
-    type Item = Result<ResponseEvent, ApiError>;
+    type Item = Result<ModelStreamEvent, ApiError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.rx_event.poll_recv(cx)

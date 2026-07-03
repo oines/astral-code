@@ -77,6 +77,10 @@ pub struct FsGetMetadataResponse {
     pub is_file: bool,
     /// Whether the path itself is a symbolic link.
     pub is_symlink: bool,
+    /// File size in bytes when reported by the backing filesystem.
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub size: Option<u64>,
     /// File creation time in Unix milliseconds when available, otherwise `0`.
     #[ts(type = "number")]
     pub created_at_ms: i64,

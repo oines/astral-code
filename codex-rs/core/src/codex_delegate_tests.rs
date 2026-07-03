@@ -5,7 +5,7 @@ use async_channel::bounded;
 use codex_mcp::CODEX_APPS_MCP_SERVER_NAME;
 use codex_protocol::config_types::ApprovalsReviewer;
 use codex_protocol::models::NetworkPermissions;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::protocol::AgentStatus;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
@@ -75,7 +75,7 @@ async fn forward_events_cancelled_while_send_blocked_shuts_down_delegate() {
         .send(Event {
             id: "evt".to_string(),
             msg: EventMsg::RawResponseItem(RawResponseItemEvent {
-                item: ResponseItem::CustomToolCall {
+                item: TranscriptItem::CustomToolCall {
                     id: None,
                     status: None,
                     call_id: "call-1".to_string(),

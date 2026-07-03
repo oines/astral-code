@@ -8268,6 +8268,43 @@ async fn metrics_exporter_defaults_to_none_when_missing() -> std::io::Result<()>
 }
 
 #[tokio::test]
+async fn statsig_otel_exporters_emit_deprecation_warnings() -> std::io::Result<()> {
+    let fixture = create_test_fixture()?;
+    let mut cfg = fixture.cfg.clone();
+    cfg.otel = Some(OtelConfigToml {
+        exporter: Some(OtelExporterKind::Statsig),
+        trace_exporter: Some(OtelExporterKind::Statsig),
+        metrics_exporter: Some(OtelExporterKind::Statsig),
+        ..Default::default()
+    });
+
+    let config = Config::load_from_base_config_with_overrides(
+        cfg,
+        ConfigOverrides {
+            cwd: Some(fixture.cwd_path()),
+            ..Default::default()
+        },
+        fixture.codex_home(),
+    )
+    .await?;
+
+    assert_eq!(
+        config
+            .startup_warnings
+            .iter()
+            .filter(|warning| warning.contains("statsig"))
+            .cloned()
+            .collect::<Vec<_>>(),
+        vec![
+            "`otel.exporter = \"statsig\"` is deprecated and disabled in Astral; use `none` or an OTLP exporter.".to_string(),
+            "`otel.trace_exporter = \"statsig\"` is deprecated and disabled in Astral; use `none` or an OTLP exporter.".to_string(),
+            "`otel.metrics_exporter = \"statsig\"` is deprecated and disabled in Astral; use `none` or an OTLP exporter.".to_string(),
+        ]
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn trace_exporter_defaults_to_none_when_log_exporter_is_set() -> std::io::Result<()> {
     let fixture = create_test_fixture()?;
     let mut cfg = fixture.cfg.clone();

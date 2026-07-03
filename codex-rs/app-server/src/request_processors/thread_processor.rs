@@ -2883,7 +2883,7 @@ impl ThreadRequestProcessor {
 
     async fn resume_thread_from_history(
         &self,
-        history: &[ResponseItem],
+        history: &[TranscriptItem],
     ) -> Result<InitialHistory, JSONRPCErrorError> {
         if history.is_empty() {
             return Err(invalid_request("history must not be empty"));
@@ -2892,7 +2892,7 @@ impl ThreadRequestProcessor {
             history
                 .iter()
                 .cloned()
-                .map(RolloutItem::ResponseItem)
+                .map(RolloutItem::TranscriptItem)
                 .collect(),
         ))
     }
@@ -4135,7 +4135,7 @@ fn preview_from_rollout_items(items: &[RolloutItem]) -> String {
     items
         .iter()
         .find_map(|item| match item {
-            RolloutItem::ResponseItem(item) => match codex_core::parse_turn_item(item) {
+            RolloutItem::TranscriptItem(item) => match codex_core::parse_turn_item(item) {
                 Some(codex_protocol::items::TurnItem::UserMessage(user)) => Some(user.message()),
                 _ => None,
             },

@@ -12,9 +12,9 @@ use crate::exec::ExecExpiration;
 use crate::exec::StdoutStream;
 use crate::exec::WindowsSandboxFilesystemOverrides;
 use crate::exec::execute_exec_request;
+use crate::spawn::insert_network_sandbox_disabled_env;
 #[cfg(target_os = "macos")]
-use crate::spawn::CODEX_SANDBOX_ENV_VAR;
-use crate::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
+use crate::spawn::insert_seatbelt_sandbox_env;
 use codex_network_proxy::NetworkProxy;
 use codex_protocol::config_types::WindowsSandboxLevel;
 use codex_protocol::exec_output::ExecToolCallOutput;
@@ -124,14 +124,11 @@ impl ExecRequest {
             capture_policy,
         } = options;
         if !network_sandbox_policy.is_enabled() {
-            env.insert(
-                CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR.to_string(),
-                "1".to_string(),
-            );
+            insert_network_sandbox_disabled_env(&mut env);
         }
         #[cfg(target_os = "macos")]
         if sandbox == SandboxType::MacosSeatbelt {
-            env.insert(CODEX_SANDBOX_ENV_VAR.to_string(), "seatbelt".to_string());
+            insert_seatbelt_sandbox_env(&mut env);
         }
         Self {
             command,

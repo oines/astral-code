@@ -14,11 +14,16 @@ use codex_agent_protocol::TokenUsage;
 use codex_agent_protocol::ToolChoice;
 use codex_agent_protocol::ToolResultContent;
 use pretty_assertions::assert_eq;
+use proptest::prelude::*;
+use serde_json::Value;
 use serde_json::json;
 use std::collections::BTreeMap;
 
+use super::super::CHAT_REASONING_CONTENT_METADATA_KEY;
 use super::ChatCompletionsOptions;
+use super::ChatCompletionsStreamState;
 use super::parse_stream_chunk;
+use super::parse_stream_chunk_with_state;
 use super::to_chat_completions_request;
 
 const ONE_BY_ONE_PNG_BASE64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==";
@@ -254,6 +259,69 @@ fn request_moves_image_tool_result_to_user_multimodal_message() {
             "parallel_tool_calls": true
         })
     );
+}
+
+#[test]
+fn request_appends_image_user_messages_after_all_tool_results() {
+    let request = AgentRequest {
+        model: "mimo-v2.5".to_string(),
+        messages: vec![
+            AgentMessage {
+                role: MessageRole::Assistant,
+                content: vec![
+                    ContentBlock::ToolUse {
+                        id: "call_image".to_string(),
+                        name: "view_image".to_string(),
+                        input: json!({ "path": "/tmp/test.png" }),
+                    },
+                    ContentBlock::ToolUse {
+                        id: "call_text".to_string(),
+                        name: "Bash".to_string(),
+                        input: json!({ "command": "pwd" }),
+                    },
+                ],
+                id: None,
+            },
+            AgentMessage {
+                role: MessageRole::User,
+                content: vec![
+                    ContentBlock::ToolResult {
+                        tool_use_id: "call_image".to_string(),
+                        content: vec![ToolResultContent::Image {
+                            source: ImageSource::Base64 {
+                                media_type: "image/png".to_string(),
+                                data: ONE_BY_ONE_PNG_BASE64.to_string(),
+                            },
+                            detail: None,
+                        }],
+                        is_error: false,
+                    },
+                    ContentBlock::ToolResult {
+                        tool_use_id: "call_text".to_string(),
+                        content: vec![ToolResultContent::Text {
+                            text: "/tmp".to_string(),
+                        }],
+                        is_error: false,
+                    },
+                ],
+                id: None,
+            },
+        ],
+        stream: false,
+        ..AgentRequest::default()
+    };
+
+    let request = to_chat_completions_request(&request, ChatCompletionsOptions::default());
+    let messages = request["messages"]
+        .as_array()
+        .expect("messages should be an array");
+
+    assert_eq!(messages[0]["role"], "assistant");
+    assert_eq!(messages[1]["role"], "tool");
+    assert_eq!(messages[1]["tool_call_id"], "call_image");
+    assert_eq!(messages[2]["role"], "tool");
+    assert_eq!(messages[2]["tool_call_id"], "call_text");
+    assert_eq!(messages[3]["role"], "user");
 }
 
 #[test]
@@ -823,6 +891,13 @@ fn request_keeps_multimodal_user_content_as_parts_array() {
             id: None,
         }],
         stream: false,
+        metadata: RequestMetadata {
+            provider: BTreeMap::from([(
+                PROVIDER_FLAVOR_METADATA_KEY.to_string(),
+                json!("deepseek"),
+            )]),
+            ..RequestMetadata::default()
+        },
         ..AgentRequest::default()
     };
 
@@ -865,6 +940,13 @@ fn request_omits_user_image_for_text_only_model() {
             id: None,
         }],
         stream: false,
+        metadata: RequestMetadata {
+            provider: BTreeMap::from([(
+                PROVIDER_FLAVOR_METADATA_KEY.to_string(),
+                json!("deepseek"),
+            )]),
+            ..RequestMetadata::default()
+        },
         ..AgentRequest::default()
     };
 
@@ -911,6 +993,13 @@ fn request_preserves_assistant_reasoning_content_for_deepseek() {
             id: None,
         }],
         stream: false,
+        metadata: RequestMetadata {
+            provider: BTreeMap::from([(
+                PROVIDER_FLAVOR_METADATA_KEY.to_string(),
+                json!("deepseek"),
+            )]),
+            ..RequestMetadata::default()
+        },
         ..AgentRequest::default()
     };
 
@@ -918,6 +1007,92 @@ fn request_preserves_assistant_reasoning_content_for_deepseek() {
         to_chat_completions_request(&request, ChatCompletionsOptions::default()),
         json!({
             "model": "deepseek-v4-pro",
+            "stream": false,
+            "messages": [{
+                "role": "assistant",
+                "content": "I will check the files.",
+                "reasoning_content": "I should inspect the repo first."
+            }]
+        })
+    );
+}
+
+#[test]
+fn request_omits_assistant_reasoning_content_for_generic_openai() {
+    let request = AgentRequest {
+        model: "compatible-model".to_string(),
+        messages: vec![AgentMessage {
+            role: MessageRole::Assistant,
+            content: vec![
+                ContentBlock::Reasoning {
+                    text: "I should inspect the repo first.".to_string(),
+                    signature: None,
+                },
+                ContentBlock::Text {
+                    text: "I will check the files.".to_string(),
+                },
+            ],
+            id: None,
+        }],
+        stream: false,
+        metadata: RequestMetadata {
+            provider: BTreeMap::from([(
+                PROVIDER_FLAVOR_METADATA_KEY.to_string(),
+                json!("generic_openai"),
+            )]),
+            ..RequestMetadata::default()
+        },
+        ..AgentRequest::default()
+    };
+
+    assert_eq!(
+        to_chat_completions_request(&request, ChatCompletionsOptions::default()),
+        json!({
+            "model": "compatible-model",
+            "stream": false,
+            "messages": [{
+                "role": "assistant",
+                "content": "I will check the files."
+            }]
+        })
+    );
+}
+
+#[test]
+fn request_preserves_assistant_reasoning_content_when_metadata_enables_it() {
+    let request = AgentRequest {
+        model: "compatible-model".to_string(),
+        messages: vec![AgentMessage {
+            role: MessageRole::Assistant,
+            content: vec![
+                ContentBlock::Reasoning {
+                    text: "I should inspect the repo first.".to_string(),
+                    signature: None,
+                },
+                ContentBlock::Text {
+                    text: "I will check the files.".to_string(),
+                },
+            ],
+            id: None,
+        }],
+        stream: false,
+        metadata: RequestMetadata {
+            provider: BTreeMap::from([
+                (
+                    PROVIDER_FLAVOR_METADATA_KEY.to_string(),
+                    json!("generic_openai"),
+                ),
+                (CHAT_REASONING_CONTENT_METADATA_KEY.to_string(), json!(true)),
+            ]),
+            ..RequestMetadata::default()
+        },
+        ..AgentRequest::default()
+    };
+
+    assert_eq!(
+        to_chat_completions_request(&request, ChatCompletionsOptions::default()),
+        json!({
+            "model": "compatible-model",
             "stream": false,
             "messages": [{
                 "role": "assistant",
@@ -941,6 +1116,13 @@ fn request_sets_empty_content_for_reasoning_only_assistant_message() {
             id: None,
         }],
         stream: false,
+        metadata: RequestMetadata {
+            provider: BTreeMap::from([(
+                PROVIDER_FLAVOR_METADATA_KEY.to_string(),
+                json!("deepseek"),
+            )]),
+            ..RequestMetadata::default()
+        },
         ..AgentRequest::default()
     };
 
@@ -991,6 +1173,13 @@ fn request_merges_adjacent_assistant_reasoning_and_tool_calls() {
             },
         ],
         stream: false,
+        metadata: RequestMetadata {
+            provider: BTreeMap::from([(
+                PROVIDER_FLAVOR_METADATA_KEY.to_string(),
+                json!("deepseek"),
+            )]),
+            ..RequestMetadata::default()
+        },
         ..AgentRequest::default()
     };
 
@@ -1059,6 +1248,7 @@ fn stream_chunk_maps_text_tool_calls_finish_reason_and_usage() {
             AgentStreamEvent::MessageStart {
                 id: Some("chatcmpl_1".to_string()),
                 model: Some("astral-fast".to_string()),
+                usage: None,
             },
             AgentStreamEvent::ContentBlockDelta {
                 index: 0,
@@ -1094,6 +1284,118 @@ fn stream_chunk_maps_text_tool_calls_finish_reason_and_usage() {
 }
 
 #[test]
+fn stream_chunk_assigns_missing_tool_call_indexes_by_id_order() {
+    let mut state = ChatCompletionsStreamState::default();
+
+    assert_eq!(
+        parse_stream_chunk_with_state(
+            json!({
+                "choices": [{
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "type": "function",
+                                "function": { "name": "Bash", "arguments": "" }
+                            },
+                            {
+                                "id": "call_2",
+                                "type": "function",
+                                "function": { "name": "Read", "arguments": "" }
+                            }
+                        ]
+                    }
+                }]
+            }),
+            &mut state,
+        )
+        .expect("parse first chunk"),
+        vec![
+            AgentStreamEvent::ContentBlockStart {
+                index: 2,
+                block: ContentBlock::ToolUse {
+                    id: "call_1".to_string(),
+                    name: "Bash".to_string(),
+                    input: json!({}),
+                },
+            },
+            AgentStreamEvent::ContentBlockStart {
+                index: 3,
+                block: ContentBlock::ToolUse {
+                    id: "call_2".to_string(),
+                    name: "Read".to_string(),
+                    input: json!({}),
+                },
+            },
+        ]
+    );
+
+    assert_eq!(
+        parse_stream_chunk_with_state(
+            json!({
+                "choices": [{
+                    "delta": {
+                        "tool_calls": [{
+                            "id": "call_2",
+                            "type": "function",
+                            "function": { "arguments": r#"{"file_path":"README.md"}"# }
+                        }]
+                    }
+                }]
+            }),
+            &mut state,
+        )
+        .expect("parse second chunk"),
+        vec![AgentStreamEvent::ContentBlockDelta {
+            index: 3,
+            delta: ContentDelta::ToolInputJson {
+                partial_json: r#"{"file_path":"README.md"}"#.to_string(),
+            },
+        }]
+    );
+}
+
+#[test]
+fn stream_chunk_does_not_repeat_message_start_for_repeated_assistant_role() {
+    let mut state = ChatCompletionsStreamState::default();
+
+    assert_eq!(
+        parse_stream_chunk_with_state(
+            json!({
+                "id": "chatcmpl_1",
+                "model": "astral-fast",
+                "choices": [{ "delta": { "role": "assistant" } }]
+            }),
+            &mut state,
+        )
+        .expect("parse first role chunk"),
+        vec![AgentStreamEvent::MessageStart {
+            id: Some("chatcmpl_1".to_string()),
+            model: Some("astral-fast".to_string()),
+            usage: None,
+        }]
+    );
+
+    assert_eq!(
+        parse_stream_chunk_with_state(
+            json!({
+                "id": "chatcmpl_1",
+                "model": "astral-fast",
+                "choices": [{ "delta": { "role": "assistant", "content": "hi" } }]
+            }),
+            &mut state,
+        )
+        .expect("parse repeated role chunk"),
+        vec![AgentStreamEvent::ContentBlockDelta {
+            index: 0,
+            delta: ContentDelta::Text {
+                text: "hi".to_string(),
+            },
+        }]
+    );
+}
+
+#[test]
 fn stream_chunk_maps_deepseek_reasoning_content_delta() {
     assert_eq!(
         parse_stream_chunk(json!({
@@ -1111,6 +1413,7 @@ fn stream_chunk_maps_deepseek_reasoning_content_delta() {
             AgentStreamEvent::MessageStart {
                 id: Some("chatcmpl_reasoning".to_string()),
                 model: Some("deepseek-v4-pro".to_string()),
+                usage: None,
             },
             AgentStreamEvent::ContentBlockDelta {
                 index: 1,
@@ -1144,6 +1447,7 @@ fn stream_chunk_maps_reasoning_details_delta() {
             AgentStreamEvent::MessageStart {
                 id: Some("chatcmpl_reasoning_details".to_string()),
                 model: Some("MiniMax-M2".to_string()),
+                usage: None,
             },
             AgentStreamEvent::ContentBlockDelta {
                 index: 1,
@@ -1188,6 +1492,44 @@ fn stream_chunk_maps_usage_only_chunk() {
 }
 
 #[test]
+fn stream_chunk_maps_text_and_usage_without_finish_as_usage_update() {
+    assert_eq!(
+        parse_stream_chunk(json!({
+            "id": "chatcmpl_1",
+            "model": "astral-fast",
+            "choices": [{
+                "delta": { "role": "assistant", "content": "hello" },
+                "finish_reason": null
+            }],
+            "usage": { "prompt_tokens": 1, "completion_tokens": 2 }
+        }))
+        .expect("parse stream chunk"),
+        vec![
+            AgentStreamEvent::MessageStart {
+                id: Some("chatcmpl_1".to_string()),
+                model: Some("astral-fast".to_string()),
+                usage: None,
+            },
+            AgentStreamEvent::ContentBlockDelta {
+                index: 0,
+                delta: ContentDelta::Text {
+                    text: "hello".to_string(),
+                },
+            },
+            AgentStreamEvent::MessageStop {
+                stop_reason: None,
+                usage: Some(TokenUsage {
+                    input_tokens: Some(1),
+                    output_tokens: Some(2),
+                    cache_creation_input_tokens: None,
+                    cache_read_input_tokens: None,
+                }),
+            },
+        ]
+    );
+}
+
+#[test]
 fn stream_chunk_ignores_null_usage() {
     assert_eq!(
         parse_stream_chunk(json!({
@@ -1203,6 +1545,7 @@ fn stream_chunk_ignores_null_usage() {
         vec![AgentStreamEvent::MessageStart {
             id: Some("chatcmpl_1".to_string()),
             model: Some("deepseek-v4-pro".to_string()),
+            usage: None,
         }]
     );
 }
@@ -1285,4 +1628,66 @@ fn stream_chunk_maps_deepseek_cache_usage_fields() {
             }),
         }]
     );
+}
+
+fn chat_text_wire_chunk(id: &str, model: &str, text: &str) -> Value {
+    json!({
+        "id": id,
+        "model": model,
+        "choices": [{
+            "index": 0,
+            "delta": {
+                "role": "assistant",
+                "content": text
+            },
+            "finish_reason": null
+        }]
+    })
+}
+
+fn chat_text_wire_chunk_from_events(events: &[AgentStreamEvent]) -> Value {
+    let mut id = None;
+    let mut model = None;
+    let mut text = String::new();
+    for event in events {
+        match event {
+            AgentStreamEvent::MessageStart {
+                id: event_id,
+                model: event_model,
+                usage: None,
+            } => {
+                id = event_id.as_deref();
+                model = event_model.as_deref();
+            }
+            AgentStreamEvent::ContentBlockDelta {
+                index: 0,
+                delta: ContentDelta::Text { text: delta_text },
+            } => text.push_str(delta_text),
+            _ => {}
+        }
+    }
+    chat_text_wire_chunk(
+        id.unwrap_or("chatcmpl_prop"),
+        model.unwrap_or("model-prop"),
+        &text,
+    )
+}
+
+proptest! {
+    #[test]
+    fn chat_completions_text_delta_wire_item_wire_roundtrips(
+        id in "[a-zA-Z0-9_-]{1,24}",
+        model in "[a-zA-Z0-9_.:-]{1,24}",
+        text in "[a-zA-Z0-9 _.,:;!?/-]{1,64}",
+    ) {
+        let mut state = ChatCompletionsStreamState::default();
+        let events = parse_stream_chunk_with_state(chat_text_wire_chunk(&id, &model, &text), &mut state)
+            .expect("parse chat completions chunk");
+        let projected = chat_text_wire_chunk_from_events(&events);
+        let mut second_state = ChatCompletionsStreamState::default();
+        let reparsed = parse_stream_chunk_with_state(projected, &mut second_state)
+            .expect("reparse projected chat completions chunk");
+
+        prop_assert_eq!(reparsed, events);
+    }
 }

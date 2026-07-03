@@ -2,7 +2,7 @@ use codex_extension_api::ToolOutput;
 use codex_extension_api::ToolPayload;
 use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::FunctionCallOutputPayload;
-use codex_protocol::models::ResponseInputItem;
+use codex_protocol::models::TranscriptInputItem;
 
 pub(crate) struct WebToolOutput {
     output: String,
@@ -38,8 +38,8 @@ impl ToolOutput for WebToolOutput {
         true
     }
 
-    fn to_response_item(&self, call_id: &str, _payload: &ToolPayload) -> ResponseInputItem {
-        ResponseInputItem::FunctionCallOutput {
+    fn to_response_item(&self, call_id: &str, _payload: &ToolPayload) -> TranscriptInputItem {
+        TranscriptInputItem::FunctionCallOutput {
             call_id: call_id.to_string(),
             output: FunctionCallOutputPayload {
                 body: codex_protocol::models::FunctionCallOutputBody::ContentItems(vec![
@@ -58,7 +58,7 @@ mod tests {
     use codex_extension_api::ToolPayload;
     use codex_protocol::models::FunctionCallOutputContentItem;
     use codex_protocol::models::FunctionCallOutputPayload;
-    use codex_protocol::models::ResponseInputItem;
+    use codex_protocol::models::TranscriptInputItem;
     use pretty_assertions::assert_eq;
 
     use super::ToolOutput;
@@ -75,7 +75,7 @@ mod tests {
                     arguments: "{}".to_string(),
                 },
             ),
-            ResponseInputItem::FunctionCallOutput {
+            TranscriptInputItem::FunctionCallOutput {
                 call_id: "call-1".to_string(),
                 output: FunctionCallOutputPayload {
                     body: codex_protocol::models::FunctionCallOutputBody::ContentItems(vec![
@@ -100,7 +100,7 @@ mod tests {
                     arguments: "{}".to_string(),
                 },
             ),
-            ResponseInputItem::FunctionCallOutput {
+            TranscriptInputItem::FunctionCallOutput {
                 call_id: "call-1".to_string(),
                 output: FunctionCallOutputPayload {
                     body: codex_protocol::models::FunctionCallOutputBody::ContentItems(vec![

@@ -11,7 +11,7 @@ use crate::AttestationProvider;
 use crate::GenerateAttestationFuture;
 use crate::client_common::Prompt;
 use codex_api::ApiError;
-use codex_api::ResponseEvent;
+use codex_api::ModelStreamEvent;
 use codex_app_server_protocol::AuthMode;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
@@ -25,7 +25,8 @@ use codex_protocol::SessionId;
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::models::ContentItem;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::FunctionCallOutputPayload;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
@@ -60,6 +61,8 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
 use wiremock::Mock;
+use wiremock::Request as WiremockRequest;
+use wiremock::Respond;
 use wiremock::ResponseTemplate;
 use wiremock::matchers::method;
 use wiremock::matchers::path;
@@ -208,8 +211,8 @@ fn started_inference_attempt(temp: &TempDir) -> anyhow::Result<InferenceTraceAtt
     Ok(attempt)
 }
 
-fn output_message(id: &str, text: &str) -> ResponseItem {
-    ResponseItem::Message {
+fn output_message(id: &str, text: &str) -> TranscriptItem {
+    TranscriptItem::Message {
         id: Some(id.to_string()),
         role: "assistant".to_string(),
         content: vec![ContentItem::OutputText {
@@ -302,7 +305,10 @@ async fn provider_neutral_wire_apis_stream_from_mock_server() -> anyhow::Result<
             /*beta_features_header*/ None,
             /*attestation_provider*/ None,
         );
-        let model_info = test_model_info();
+        let mut model_info = test_model_info();
+        if matches!(case.wire_api, WireApi::AnthropicMessages) {
+            model_info.max_output_tokens = Some(12_345);
+        }
         let session_telemetry = test_session_telemetry();
         let inference_trace = InferenceTraceContext::disabled();
         let mut stream = model_client
@@ -325,8 +331,8 @@ async fn provider_neutral_wire_apis_stream_from_mock_server() -> anyhow::Result<
         let mut completed = None;
         while let Some(event) = stream.next().await {
             match event? {
-                ResponseEvent::OutputItemDone(item) => output_items.push(item),
-                ResponseEvent::Completed {
+                ModelStreamEvent::OutputItemDone(item) => output_items.push(item),
+                ModelStreamEvent::Completed {
                     response_id,
                     token_usage,
                     end_turn,
@@ -338,7 +344,7 @@ async fn provider_neutral_wire_apis_stream_from_mock_server() -> anyhow::Result<
             }
         }
 
-        let Some(ResponseItem::Message { role, content, .. }) = output_items.first() else {
+        let Some(TranscriptItem::Message { role, content, .. }) = output_items.first() else {
             panic!("expected assistant output item, got {output_items:?}");
         };
         assert_eq!(role, "assistant");
@@ -355,6 +361,9 @@ async fn provider_neutral_wire_apis_stream_from_mock_server() -> anyhow::Result<
         let request_body: serde_json::Value =
             serde_json::from_slice(&requests[0].body).expect("request body json");
         assert_eq!(request_body["model"], "gpt-test");
+        if matches!(case.wire_api, WireApi::AnthropicMessages) {
+            assert_eq!(request_body["max_tokens"], 12_345);
+        }
     }
 
     Ok(())
@@ -365,6 +374,146 @@ fn sse_body(events: Vec<serde_json::Value>) -> String {
         .into_iter()
         .map(|event| format!("data: {event}\n\n"))
         .collect()
+}
+
+struct SeqResponseResponder {
+    num_calls: AtomicUsize,
+    responses: Vec<ResponseTemplate>,
+}
+
+impl Respond for SeqResponseResponder {
+    fn respond(&self, _: &WiremockRequest) -> ResponseTemplate {
+        let call_num = self.num_calls.fetch_add(1, Ordering::SeqCst);
+        self.responses
+            .get(call_num)
+            .unwrap_or_else(|| panic!("no response for {call_num}"))
+            .clone()
+    }
+}
+
+fn cache_fold_prompt() -> Prompt {
+    Prompt {
+        input: (1..=6)
+            .flat_map(|index| {
+                [
+                    TranscriptItem::FunctionCall {
+                        id: Some(format!("fc-{index}")),
+                        name: "Read".to_string(),
+                        namespace: None,
+                        arguments: json!({ "file_path": format!("/tmp/file-{index}.txt") })
+                            .to_string(),
+                        call_id: format!("toolu_{index}"),
+                    },
+                    TranscriptItem::FunctionCallOutput {
+                        call_id: format!("toolu_{index}"),
+                        output: FunctionCallOutputPayload::from_text(format!(
+                            "file {index} contents"
+                        )),
+                    },
+                ]
+            })
+            .collect(),
+        ..Prompt::default()
+    }
+}
+
+#[tokio::test]
+async fn anthropic_cache_fold_400_retries_without_fold() -> anyhow::Result<()> {
+    let server = wiremock::MockServer::start().await;
+    let responses = vec![
+        ResponseTemplate::new(400).set_body_json(json!({
+            "error": {
+                "type": "invalid_request_error",
+                "message": "cache_reference is invalid"
+            }
+        })),
+        ResponseTemplate::new(200)
+            .insert_header("content-type", "text/event-stream")
+            .set_body_string(sse_body(vec![
+                json!({
+                    "type": "message_start",
+                    "message": { "id": "msg_1", "model": "claude-test" }
+                }),
+                json!({
+                    "type": "content_block_start",
+                    "index": 0,
+                    "content_block": { "type": "text", "text": "" }
+                }),
+                json!({
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": { "type": "text_delta", "text": "retried" }
+                }),
+                json!({ "type": "content_block_stop", "index": 0 }),
+                json!({
+                    "type": "message_delta",
+                    "delta": { "stop_reason": "end_turn" },
+                    "usage": { "input_tokens": 5, "output_tokens": 7 }
+                }),
+            ])),
+    ];
+    Mock::given(method("POST"))
+        .and(path("/v1/messages"))
+        .respond_with(SeqResponseResponder {
+            num_calls: AtomicUsize::new(0),
+            responses,
+        })
+        .expect(2)
+        .mount(&server)
+        .await;
+
+    let provider = create_oss_provider_with_base_url(
+        &format!("{}/v1", server.uri()),
+        WireApi::AnthropicMessages,
+    );
+    let runtime_provider = create_model_provider(provider.clone(), /*auth_manager*/ None);
+    let model_client = ModelClient::new(
+        /*auth_manager*/ None,
+        SessionId::new(),
+        ThreadId::new(),
+        /*installation_id*/ "11111111-1111-4111-8111-111111111111".to_string(),
+        provider,
+        SessionSource::Cli,
+        /*parent_thread_id*/ None,
+        /*model_verbosity*/ None,
+        /*enable_request_compression*/ false,
+        /*include_timing_metrics*/ false,
+        /*beta_features_header*/ None,
+        /*attestation_provider*/ None,
+    );
+
+    let mut stream = model_client
+        .new_session()
+        .stream(
+            runtime_provider,
+            &cache_fold_prompt(),
+            &test_model_info(),
+            &test_session_telemetry(),
+            /*effort*/ None,
+            ReasoningSummary::None,
+            /*service_tier*/ None,
+            /*turn_metadata_header*/ None,
+            &InferenceTraceContext::disabled(),
+            /*anthropic_cached_fold_enabled*/ true,
+        )
+        .await?;
+
+    while let Some(event) = stream.next().await {
+        if matches!(event?, ModelStreamEvent::Completed { .. }) {
+            break;
+        }
+    }
+
+    let requests = server.received_requests().await.unwrap_or_default();
+    assert_eq!(requests.len(), 2);
+    let first_body = String::from_utf8(requests[0].body.clone()).expect("first request body");
+    let second_body = String::from_utf8(requests[1].body.clone()).expect("second request body");
+    assert!(first_body.contains("cache_reference"));
+    assert!(first_body.contains("cache_edits"));
+    assert!(!second_body.contains("cache_reference"));
+    assert!(!second_body.contains("cache_edits"));
+
+    Ok(())
 }
 
 async fn replay_until_cancelled(temp: &TempDir) -> anyhow::Result<RolloutTrace> {
@@ -385,14 +534,14 @@ async fn replay_until_cancelled(temp: &TempDir) -> anyhow::Result<RolloutTrace> 
 }
 
 struct NotifyAfterEventStream {
-    events: VecDeque<ResponseEvent>,
+    events: VecDeque<ModelStreamEvent>,
     yielded: usize,
     notify_after: usize,
     notify: Arc<Notify>,
 }
 
 impl futures::Stream for NotifyAfterEventStream {
-    type Item = std::result::Result<ResponseEvent, ApiError>;
+    type Item = std::result::Result<ModelStreamEvent, ApiError>;
 
     fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let Some(event) = self.events.pop_front() else {
@@ -482,7 +631,7 @@ async fn dropped_response_stream_traces_cancelled_partial_output() -> anyhow::Re
     // item in history, so the trace should preserve it when the stream is
     // abandoned.
     let item = output_message("msg-1", "partial answer");
-    let api_stream = futures::stream::iter([Ok(ResponseEvent::OutputItemDone(item))])
+    let api_stream = futures::stream::iter([Ok(ModelStreamEvent::OutputItemDone(item))])
         .chain(futures::stream::pending());
     let mut stream = super::map_response_events(
         /*upstream_request_id*/ None,
@@ -495,7 +644,7 @@ async fn dropped_response_stream_traces_cancelled_partial_output() -> anyhow::Re
         .next()
         .await
         .expect("mapped stream should yield output item")?;
-    assert!(matches!(observed, ResponseEvent::OutputItemDone(_)));
+    assert!(matches!(observed, ModelStreamEvent::OutputItemDone(_)));
 
     // Dropping the consumer is how turn interruption/preemption stops polling
     // the provider stream. The mapper task observes that drop asynchronously
@@ -526,8 +675,8 @@ async fn response_stream_records_last_model_feedback_ids() {
         .set_default();
 
     let api_stream = futures::stream::iter([
-        Ok(ResponseEvent::Created),
-        Ok(ResponseEvent::Completed {
+        Ok(ModelStreamEvent::Created),
+        Ok(ModelStreamEvent::Completed {
             response_id: "resp-123".to_string(),
             token_usage: None,
             end_turn: Some(true),
@@ -561,9 +710,9 @@ async fn dropped_backpressured_response_stream_traces_cancelled_partial_output()
     let backpressured_item_yielded = Arc::new(Notify::new());
     let mut events = VecDeque::new();
     for _ in 0..super::RESPONSE_STREAM_CHANNEL_CAPACITY {
-        events.push_back(ResponseEvent::Created);
+        events.push_back(ModelStreamEvent::Created);
     }
-    events.push_back(ResponseEvent::OutputItemDone(output_message(
+    events.push_back(ModelStreamEvent::OutputItemDone(output_message(
         "msg-1",
         "partial answer",
     )));

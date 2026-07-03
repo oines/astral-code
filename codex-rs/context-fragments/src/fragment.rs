@@ -1,6 +1,6 @@
 use codex_protocol::models::ContentItem;
-use codex_protocol::models::ResponseInputItem;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptInputItem;
+use codex_protocol::models::TranscriptItem;
 
 /// Type-erased registration for a contextual user fragment.
 ///
@@ -72,11 +72,11 @@ pub trait ContextualUserFragment {
         format!("{start_marker}{body}{end_marker}")
     }
 
-    fn into(self) -> ResponseItem
+    fn into(self) -> TranscriptItem
     where
         Self: Sized,
     {
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: self.role().to_string(),
             content: vec![ContentItem::InputText {
@@ -86,8 +86,8 @@ pub trait ContextualUserFragment {
         }
     }
 
-    fn into_boxed_response_item(self: Box<Self>) -> ResponseItem {
-        ResponseItem::Message {
+    fn into_boxed_response_item(self: Box<Self>) -> TranscriptItem {
+        TranscriptItem::Message {
             id: None,
             role: self.role().to_string(),
             content: vec![ContentItem::InputText {
@@ -97,11 +97,11 @@ pub trait ContextualUserFragment {
         }
     }
 
-    fn into_response_input_item(self) -> ResponseInputItem
+    fn into_response_input_item(self) -> TranscriptInputItem
     where
         Self: Sized,
     {
-        ResponseInputItem::Message {
+        TranscriptInputItem::Message {
             role: self.role().to_string(),
             content: vec![ContentItem::InputText {
                 text: self.render(),

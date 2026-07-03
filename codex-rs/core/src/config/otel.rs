@@ -14,11 +14,23 @@ pub(crate) fn resolve_config(
     let environment = config
         .environment
         .unwrap_or_else(|| DEFAULT_OTEL_ENVIRONMENT.to_string());
-    let exporter = config.exporter.unwrap_or(OtelExporterKind::None);
+    let exporter = resolve_exporter_kind(
+        "otel.exporter",
+        config.exporter.unwrap_or(OtelExporterKind::None),
+        startup_warnings,
+    );
     // OTLP HTTP endpoints are signal-specific in our config, so enabling log
     // export must not implicitly send spans to a /v1/logs endpoint.
-    let trace_exporter = config.trace_exporter.unwrap_or(OtelExporterKind::None);
-    let metrics_exporter = config.metrics_exporter.unwrap_or(OtelExporterKind::None);
+    let trace_exporter = resolve_exporter_kind(
+        "otel.trace_exporter",
+        config.trace_exporter.unwrap_or(OtelExporterKind::None),
+        startup_warnings,
+    );
+    let metrics_exporter = resolve_exporter_kind(
+        "otel.metrics_exporter",
+        config.metrics_exporter.unwrap_or(OtelExporterKind::None),
+        startup_warnings,
+    );
     // Provider initialization installs process-global OTEL state. Sanitize
     // user-editable trace metadata here so malformed config is reported as a
     // startup warning instead of making startup fail.
@@ -34,6 +46,17 @@ pub(crate) fn resolve_config(
         span_attributes,
         tracestate,
     }
+}
+
+fn resolve_exporter_kind(
+    config_key: &str,
+    exporter: OtelExporterKind,
+    startup_warnings: &mut Vec<String>,
+) -> OtelExporterKind {
+    if matches!(exporter, OtelExporterKind::Statsig) {
+        push_deprecated_statsig_warning(config_key, startup_warnings);
+    }
+    exporter
 }
 
 fn resolve_span_attributes(
@@ -112,6 +135,14 @@ fn push_invalid_config_warning(
     startup_warnings: &mut Vec<String>,
 ) {
     let message = format!("Ignoring invalid `{config_key}` config: {err}");
+    tracing::warn!("{message}");
+    startup_warnings.push(message);
+}
+
+fn push_deprecated_statsig_warning(config_key: &str, startup_warnings: &mut Vec<String>) {
+    let message = format!(
+        "`{config_key} = \"statsig\"` is deprecated and disabled in Astral; use `none` or an OTLP exporter."
+    );
     tracing::warn!("{message}");
     startup_warnings.push(message);
 }

@@ -54,7 +54,7 @@ pub(crate) struct AstralFileToolRequest {
     pub(crate) hook_input: Value,
     pub(crate) turn_environment: TurnEnvironment,
     pub(crate) cwd: AbsolutePathBuf,
-    pub(crate) environment_id: Option<String>,
+    pub(crate) environment_id: String,
     pub(crate) read_state: Arc<FileReadStateStore>,
     pub(crate) sandbox_permissions: SandboxPermissions,
     pub(crate) additional_permissions: Option<AdditionalPermissionProfile>,

@@ -4,7 +4,7 @@ use codex_agent_protocol::ContentDelta;
 use codex_agent_protocol::StopReason;
 use codex_agent_protocol::TokenUsage as AgentTokenUsage;
 use codex_protocol::models::ContentItem;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use futures::StreamExt;
 use pretty_assertions::assert_eq;
 use serde_json::json;
@@ -14,7 +14,7 @@ use tokio::time::Duration;
 
 use super::AgentStreamFormat;
 use super::AgentStreamMapper;
-use super::ResponseEvent;
+use super::ModelStreamEvent;
 use super::process_sse;
 
 #[test]
@@ -25,13 +25,14 @@ fn mapper_streams_text_with_lazy_content_block_start() {
         .process_event(AgentStreamEvent::MessageStart {
             id: Some("msg_1".to_string()),
             model: Some("astral-fast".to_string()),
+            usage: None,
         })
         .expect("message start maps");
     assert_eq!(events.len(), 2);
-    assert!(matches!(events[0], super::ResponseEvent::Created));
+    assert!(matches!(events[0], super::ModelStreamEvent::Created));
     assert!(matches!(
         &events[1],
-        super::ResponseEvent::ServerModel(model) if model == "astral-fast"
+        super::ModelStreamEvent::ServerModel(model) if model == "astral-fast"
     ));
 
     let events = mapper
@@ -43,7 +44,8 @@ fn mapper_streams_text_with_lazy_content_block_start() {
         })
         .expect("text delta maps");
     assert_eq!(events.len(), 2);
-    let super::ResponseEvent::OutputItemAdded(ResponseItem::Message { content, .. }) = &events[0]
+    let super::ModelStreamEvent::OutputItemAdded(TranscriptItem::Message { content, .. }) =
+        &events[0]
     else {
         panic!("expected assistant message item start, got {:?}", events[0]);
     };
@@ -55,7 +57,7 @@ fn mapper_streams_text_with_lazy_content_block_start() {
     );
     assert!(matches!(
         &events[1],
-        super::ResponseEvent::OutputTextDelta(delta) if delta == "hello"
+        super::ModelStreamEvent::OutputTextDelta(delta) if delta == "hello"
     ));
 
     let events = mapper
@@ -70,7 +72,8 @@ fn mapper_streams_text_with_lazy_content_block_start() {
         })
         .expect("message stop maps");
     assert_eq!(events.len(), 2);
-    let super::ResponseEvent::OutputItemDone(ResponseItem::Message { content, .. }) = &events[0]
+    let super::ModelStreamEvent::OutputItemDone(TranscriptItem::Message { content, .. }) =
+        &events[0]
     else {
         panic!("expected assistant message item done, got {:?}", events[0]);
     };
@@ -80,7 +83,7 @@ fn mapper_streams_text_with_lazy_content_block_start() {
             text: "hello".to_string(),
         }]
     );
-    let super::ResponseEvent::Completed {
+    let super::ModelStreamEvent::Completed {
         response_id,
         token_usage,
         end_turn,
@@ -95,6 +98,45 @@ fn mapper_streams_text_with_lazy_content_block_start() {
     assert_eq!(usage.cached_input_tokens, 3);
     assert_eq!(usage.output_tokens, 7);
     assert_eq!(usage.total_tokens, 22);
+}
+
+#[test]
+fn mapper_merges_message_start_and_stop_usage() {
+    let mut mapper = AgentStreamMapper::default();
+
+    mapper
+        .process_event(AgentStreamEvent::MessageStart {
+            id: Some("msg_1".to_string()),
+            model: None,
+            usage: Some(AgentTokenUsage {
+                input_tokens: Some(19),
+                output_tokens: None,
+                cache_creation_input_tokens: Some(5),
+                cache_read_input_tokens: None,
+            }),
+        })
+        .expect("message start maps");
+
+    let events = mapper
+        .process_event(AgentStreamEvent::MessageStop {
+            stop_reason: Some(StopReason::EndTurn),
+            usage: Some(AgentTokenUsage {
+                input_tokens: Some(10),
+                output_tokens: Some(7),
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: Some(3),
+            }),
+        })
+        .expect("message stop maps");
+
+    let super::ModelStreamEvent::Completed { token_usage, .. } = &events[0] else {
+        panic!("expected completed event, got {:?}", events[0]);
+    };
+    let usage = token_usage.as_ref().expect("token usage present");
+    assert_eq!(usage.input_tokens, 18);
+    assert_eq!(usage.cached_input_tokens, 3);
+    assert_eq!(usage.output_tokens, 7);
+    assert_eq!(usage.total_tokens, 25);
 }
 
 #[test]
@@ -113,7 +155,7 @@ fn mapper_preserves_anthropic_reasoning_signature() {
     assert_eq!(events.len(), 1);
     assert!(matches!(
         &events[0],
-        super::ResponseEvent::OutputItemAdded(ResponseItem::Reasoning { .. })
+        super::ModelStreamEvent::OutputItemAdded(TranscriptItem::Reasoning { .. })
     ));
 
     let events = mapper
@@ -130,15 +172,20 @@ fn mapper_preserves_anthropic_reasoning_signature() {
         .process_event(AgentStreamEvent::ContentBlockStop { index: 0 })
         .expect("reasoning stop maps");
     assert_eq!(events.len(), 1);
-    let super::ResponseEvent::OutputItemDone(ResponseItem::Reasoning {
-        encrypted_content, ..
+    let super::ModelStreamEvent::OutputItemDone(TranscriptItem::Reasoning {
+        encrypted_content,
+        provider_metadata,
+        ..
     }) = &events[0]
     else {
         panic!("expected reasoning item done, got {:?}", events[0]);
     };
+    assert_eq!(encrypted_content, &None);
     assert_eq!(
-        encrypted_content,
-        &Some("anthropic_signature:sig_opaque".to_string())
+        provider_metadata
+            .as_ref()
+            .and_then(|metadata| metadata.anthropic_signature.as_deref()),
+        Some("sig_opaque")
     );
 }
 
@@ -159,7 +206,7 @@ fn mapper_streams_tool_arguments_and_finishes_function_call() {
     assert_eq!(events.len(), 1);
     assert!(matches!(
         &events[0],
-        super::ResponseEvent::OutputItemAdded(ResponseItem::FunctionCall {
+        super::ModelStreamEvent::OutputItemAdded(TranscriptItem::FunctionCall {
             call_id,
             name,
             ..
@@ -177,7 +224,7 @@ fn mapper_streams_tool_arguments_and_finishes_function_call() {
     assert_eq!(events.len(), 1);
     assert!(matches!(
         &events[0],
-        super::ResponseEvent::ToolCallInputDelta {
+        super::ModelStreamEvent::ToolCallInputDelta {
             item_id,
             call_id: Some(call_id),
             delta,
@@ -188,7 +235,7 @@ fn mapper_streams_tool_arguments_and_finishes_function_call() {
         .process_event(AgentStreamEvent::ContentBlockStop { index: 1 })
         .expect("tool stop maps");
     assert_eq!(events.len(), 1);
-    let super::ResponseEvent::OutputItemDone(ResponseItem::FunctionCall {
+    let super::ModelStreamEvent::OutputItemDone(TranscriptItem::FunctionCall {
         call_id,
         name,
         arguments,
@@ -224,7 +271,7 @@ fn mapper_restores_anthropic_tool_name_aliases() {
 
     assert!(matches!(
         &events[0],
-        super::ResponseEvent::OutputItemAdded(ResponseItem::FunctionCall {
+        super::ModelStreamEvent::OutputItemAdded(TranscriptItem::FunctionCall {
             name,
             ..
         }) if name == "mcp__server__tool"
@@ -235,7 +282,7 @@ fn mapper_restores_anthropic_tool_name_aliases() {
         .expect("tool stop maps");
     assert!(matches!(
         &events[0],
-        super::ResponseEvent::OutputItemDone(ResponseItem::FunctionCall {
+        super::ModelStreamEvent::OutputItemDone(TranscriptItem::FunctionCall {
             name,
             ..
         }) if name == "mcp__server__tool"
@@ -255,8 +302,32 @@ fn mapper_marks_tool_use_stop_as_follow_up_required() {
     assert_eq!(events.len(), 1);
     assert!(matches!(
         &events[0],
-        super::ResponseEvent::Completed {
+        super::ModelStreamEvent::Completed {
             end_turn: Some(false),
+            ..
+        }
+    ));
+}
+
+#[test]
+fn mapper_warns_when_model_stops_at_max_tokens() {
+    let mut mapper = AgentStreamMapper::default();
+    let events = mapper
+        .process_event(AgentStreamEvent::MessageStop {
+            stop_reason: Some(StopReason::MaxTokens),
+            usage: None,
+        })
+        .expect("max_tokens stop maps");
+
+    assert_eq!(events.len(), 2);
+    assert!(matches!(
+        &events[0],
+        super::ModelStreamEvent::Warning(message) if message.contains("max_tokens")
+    ));
+    assert!(matches!(
+        &events[1],
+        super::ModelStreamEvent::Completed {
+            end_turn: Some(true),
             ..
         }
     ));
@@ -333,7 +404,7 @@ async fn chat_stream_merges_finish_reason_with_empty_choices_usage_chunk() {
     let completed = events
         .iter()
         .find_map(|event| match event {
-            ResponseEvent::Completed {
+            ModelStreamEvent::Completed {
                 token_usage,
                 end_turn,
                 ..
@@ -349,7 +420,109 @@ async fn chat_stream_merges_finish_reason_with_empty_choices_usage_chunk() {
     assert_eq!(
         events
             .iter()
-            .filter(|event| matches!(event, ResponseEvent::Completed { .. }))
+            .filter(|event| matches!(event, ModelStreamEvent::Completed { .. }))
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn chat_stream_keeps_streaming_when_content_chunks_include_usage() {
+    let chunks = vec![
+        Ok(bytes::Bytes::from(format!(
+            "data: {}\n\n",
+            json!({
+                "id": "chatcmpl_1",
+                "model": "astral-fast",
+                "choices": [{
+                    "delta": { "role": "assistant", "content": "hel" },
+                    "finish_reason": null
+                }],
+                "usage": {
+                    "prompt_tokens": 13,
+                    "completion_tokens": 1,
+                    "prompt_tokens_details": { "cached_tokens": 8 }
+                }
+            })
+        ))),
+        Ok(bytes::Bytes::from(format!(
+            "data: {}\n\n",
+            json!({
+                "choices": [{
+                    "delta": { "content": "lo" },
+                    "finish_reason": null
+                }],
+                "usage": {
+                    "prompt_tokens": 13,
+                    "completion_tokens": 2,
+                    "prompt_tokens_details": { "cached_tokens": 8 }
+                }
+            })
+        ))),
+        Ok(bytes::Bytes::from(format!(
+            "data: {}\n\n",
+            json!({
+                "choices": [{
+                    "delta": {},
+                    "finish_reason": "stop"
+                }]
+            })
+        ))),
+        Ok(bytes::Bytes::from("data: [DONE]\n\n")),
+    ];
+    let stream = futures::stream::iter(chunks).boxed() as codex_client::ByteStream;
+    let (tx_event, mut rx_event) = mpsc::channel(16);
+
+    process_sse(
+        stream,
+        tx_event,
+        Duration::from_secs(5),
+        None,
+        AgentStreamFormat::ChatCompletions,
+        Default::default(),
+    )
+    .await;
+
+    let mut events = Vec::new();
+    while let Some(event) = rx_event.recv().await {
+        events.push(event.expect("event should map"));
+    }
+
+    let done_message = events
+        .iter()
+        .find_map(|event| match event {
+            ModelStreamEvent::OutputItemDone(TranscriptItem::Message { content, .. }) => {
+                Some(content)
+            }
+            _ => None,
+        })
+        .expect("message done event");
+    assert_eq!(
+        done_message,
+        &vec![ContentItem::OutputText {
+            text: "hello".to_string()
+        }]
+    );
+
+    let completed = events
+        .iter()
+        .find_map(|event| match event {
+            ModelStreamEvent::Completed {
+                token_usage,
+                end_turn,
+                ..
+            } => Some((token_usage.as_ref().expect("usage present"), end_turn)),
+            _ => None,
+        })
+        .expect("completed event");
+    assert_eq!(completed.0.input_tokens, 13);
+    assert_eq!(completed.0.cached_input_tokens, 8);
+    assert_eq!(completed.0.output_tokens, 2);
+    assert_eq!(*completed.1, Some(true));
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event, ModelStreamEvent::Completed { .. }))
             .count(),
         1
     );

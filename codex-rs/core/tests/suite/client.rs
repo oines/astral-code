@@ -2,9 +2,9 @@ use codex_config::ConfigLayerStack;
 use codex_config::types::AuthCredentialsStoreMode;
 use codex_core::LoadedAgentsMd;
 use codex_core::ModelClient;
+use codex_core::ModelStreamEvent;
 use codex_core::NewThread;
 use codex_core::Prompt;
-use codex_core::ResponseEvent;
 use codex_core::ThreadManager;
 use codex_core::resolve_installation_id;
 use codex_core::thread_store_from_config;
@@ -38,7 +38,7 @@ use codex_protocol::models::LocalShellStatus;
 use codex_protocol::models::MessagePhase;
 use codex_protocol::models::ReasoningItemContent;
 use codex_protocol::models::ReasoningItemReasoningSummary;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::models::WebSearchAction;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::EventMsg;
@@ -315,7 +315,7 @@ async fn resume_includes_initial_messages_and_sends_prior_items() {
     .unwrap();
 
     // Prior item: user message (should be delivered)
-    let prior_user = codex_protocol::models::ResponseItem::Message {
+    let prior_user = codex_protocol::models::TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![codex_protocol::models::ContentItem::InputText {
@@ -336,7 +336,7 @@ async fn resume_includes_initial_messages_and_sends_prior_items() {
     .unwrap();
 
     // Prior item: system message (excluded from API history)
-    let prior_system = codex_protocol::models::ResponseItem::Message {
+    let prior_system = codex_protocol::models::TranscriptItem::Message {
         id: None,
         role: "system".to_string(),
         content: vec![codex_protocol::models::ContentItem::OutputText {
@@ -357,7 +357,7 @@ async fn resume_includes_initial_messages_and_sends_prior_items() {
     .unwrap();
 
     // Prior item: assistant message
-    let prior_item = codex_protocol::models::ResponseItem::Message {
+    let prior_item = codex_protocol::models::TranscriptItem::Message {
         id: None,
         role: "assistant".to_string(),
         content: vec![codex_protocol::models::ContentItem::OutputText {
@@ -486,7 +486,7 @@ async fn resume_replays_legacy_js_repl_image_rollout_shapes() {
     // a string-valued custom_tool_call_output plus a standalone user input_image message.
     // Current image tests cover today's shapes; this keeps resume compatibility for that
     // legacy rollout representation.
-    let legacy_custom_tool_call = ResponseItem::CustomToolCall {
+    let legacy_custom_tool_call = TranscriptItem::CustomToolCall {
         id: None,
         status: None,
         call_id: "legacy-js-call".to_string(),
@@ -513,11 +513,11 @@ async fn resume_replays_legacy_js_repl_image_rollout_shapes() {
         },
         RolloutLine {
             timestamp: "2024-01-01T00:00:01.000Z".to_string(),
-            item: RolloutItem::ResponseItem(legacy_custom_tool_call),
+            item: RolloutItem::TranscriptItem(legacy_custom_tool_call),
         },
         RolloutLine {
             timestamp: "2024-01-01T00:00:02.000Z".to_string(),
-            item: RolloutItem::ResponseItem(ResponseItem::CustomToolCallOutput {
+            item: RolloutItem::TranscriptItem(TranscriptItem::CustomToolCallOutput {
                 call_id: "legacy-js-call".to_string(),
                 name: None,
                 output: FunctionCallOutputPayload::from_text("legacy js_repl stdout".to_string()),
@@ -525,7 +525,7 @@ async fn resume_replays_legacy_js_repl_image_rollout_shapes() {
         },
         RolloutLine {
             timestamp: "2024-01-01T00:00:03.000Z".to_string(),
-            item: RolloutItem::ResponseItem(ResponseItem::Message {
+            item: RolloutItem::TranscriptItem(TranscriptItem::Message {
                 id: None,
                 role: "user".to_string(),
                 content: vec![ContentItem::InputImage {
@@ -646,7 +646,7 @@ async fn resume_replays_image_tool_outputs_with_detail() {
         },
         RolloutLine {
             timestamp: "2024-01-01T00:00:01.000Z".to_string(),
-            item: RolloutItem::ResponseItem(ResponseItem::FunctionCall {
+            item: RolloutItem::TranscriptItem(TranscriptItem::FunctionCall {
                 id: None,
                 name: "view_image".to_string(),
                 namespace: None,
@@ -656,7 +656,7 @@ async fn resume_replays_image_tool_outputs_with_detail() {
         },
         RolloutLine {
             timestamp: "2024-01-01T00:00:01.500Z".to_string(),
-            item: RolloutItem::ResponseItem(ResponseItem::FunctionCallOutput {
+            item: RolloutItem::TranscriptItem(TranscriptItem::FunctionCallOutput {
                 call_id: function_call_id.to_string(),
                 output: FunctionCallOutputPayload::from_content_items(vec![
                     FunctionCallOutputContentItem::InputImage {
@@ -668,7 +668,7 @@ async fn resume_replays_image_tool_outputs_with_detail() {
         },
         RolloutLine {
             timestamp: "2024-01-01T00:00:02.000Z".to_string(),
-            item: RolloutItem::ResponseItem(ResponseItem::CustomToolCall {
+            item: RolloutItem::TranscriptItem(TranscriptItem::CustomToolCall {
                 id: None,
                 status: Some("completed".to_string()),
                 call_id: custom_call_id.to_string(),
@@ -678,7 +678,7 @@ async fn resume_replays_image_tool_outputs_with_detail() {
         },
         RolloutLine {
             timestamp: "2024-01-01T00:00:02.500Z".to_string(),
-            item: RolloutItem::ResponseItem(ResponseItem::CustomToolCallOutput {
+            item: RolloutItem::TranscriptItem(TranscriptItem::CustomToolCallOutput {
                 call_id: custom_call_id.to_string(),
                 name: None,
                 output: FunctionCallOutputPayload::from_content_items(vec![
@@ -922,7 +922,7 @@ async fn send_provider_auth_request(server: &MockServer, auth: ModelProviderAuth
     );
     let mut client_session = client.new_session();
     let mut prompt = Prompt::default();
-    prompt.input.push(ResponseItem::Message {
+    prompt.input.push(TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
@@ -948,7 +948,7 @@ async fn send_provider_auth_request(server: &MockServer, auth: ModelProviderAuth
         .expect("chat completions stream to start");
 
     while let Some(event) = stream.next().await {
-        if let Ok(ResponseEvent::Completed { .. }) = event {
+        if let Ok(ModelStreamEvent::Completed { .. }) = event {
             break;
         }
     }
@@ -2303,7 +2303,7 @@ async fn azure_chat_completions_request_serializes_model_context() {
     let mut client_session = client.new_session();
 
     let mut prompt = Prompt::default();
-    prompt.input.push(ResponseItem::Reasoning {
+    prompt.input.push(TranscriptItem::Reasoning {
         id: "reasoning-id".into(),
         summary: vec![ReasoningItemReasoningSummary::SummaryText {
             text: "summary".into(),
@@ -2312,8 +2312,9 @@ async fn azure_chat_completions_request_serializes_model_context() {
             text: "content".into(),
         }]),
         encrypted_content: None,
+        provider_metadata: None,
     });
-    prompt.input.push(ResponseItem::Message {
+    prompt.input.push(TranscriptItem::Message {
         id: Some("message-id".into()),
         role: "assistant".into(),
         content: vec![ContentItem::OutputText {
@@ -2321,7 +2322,7 @@ async fn azure_chat_completions_request_serializes_model_context() {
         }],
         phase: None,
     });
-    prompt.input.push(ResponseItem::WebSearchCall {
+    prompt.input.push(TranscriptItem::WebSearchCall {
         id: Some("web-search-id".into()),
         status: Some("completed".into()),
         action: Some(WebSearchAction::Search {
@@ -2329,18 +2330,18 @@ async fn azure_chat_completions_request_serializes_model_context() {
             queries: None,
         }),
     });
-    prompt.input.push(ResponseItem::FunctionCall {
+    prompt.input.push(TranscriptItem::FunctionCall {
         id: Some("function-id".into()),
         name: "do_thing".into(),
         namespace: None,
         arguments: "{}".into(),
         call_id: "function-call-id".into(),
     });
-    prompt.input.push(ResponseItem::FunctionCallOutput {
+    prompt.input.push(TranscriptItem::FunctionCallOutput {
         call_id: "function-call-id".into(),
         output: FunctionCallOutputPayload::from_text("ok".into()),
     });
-    prompt.input.push(ResponseItem::LocalShellCall {
+    prompt.input.push(TranscriptItem::LocalShellCall {
         id: Some("local-shell-id".into()),
         call_id: Some("local-shell-call-id".into()),
         status: LocalShellStatus::Completed,
@@ -2352,14 +2353,14 @@ async fn azure_chat_completions_request_serializes_model_context() {
             user: None,
         }),
     });
-    prompt.input.push(ResponseItem::CustomToolCall {
+    prompt.input.push(TranscriptItem::CustomToolCall {
         id: Some("custom-tool-id".into()),
         status: Some("completed".into()),
         call_id: "custom-tool-call-id".into(),
         name: "custom_tool".into(),
         input: "{}".into(),
     });
-    prompt.input.push(ResponseItem::CustomToolCallOutput {
+    prompt.input.push(TranscriptItem::CustomToolCallOutput {
         call_id: "custom-tool-call-id".into(),
         name: None,
         output: FunctionCallOutputPayload::from_text("ok".into()),
@@ -2382,7 +2383,7 @@ async fn azure_chat_completions_request_serializes_model_context() {
         .expect("chat completions stream to start");
 
     while let Some(event) = stream.next().await {
-        if let Ok(ResponseEvent::Completed { .. }) = event {
+        if let Ok(ModelStreamEvent::Completed { .. }) = event {
             break;
         }
     }
@@ -2399,11 +2400,9 @@ async fn azure_chat_completions_request_serializes_model_context() {
                 && message["content"]
                     .as_str()
                     .is_some_and(|text| text.contains("message"))
-                && message["reasoning_content"]
-                    .as_str()
-                    .is_some_and(|text| text.contains("summary") && text.contains("content"))
+                && message.get("reasoning_content").is_none()
         }),
-        "expected assistant message and reasoning content, got {messages:?}"
+        "expected assistant message without generic reasoning content, got {messages:?}"
     );
     assert!(
         messages.iter().any(|message| {

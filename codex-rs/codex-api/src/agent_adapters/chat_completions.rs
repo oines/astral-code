@@ -72,16 +72,14 @@ pub fn to_chat_completions_request(
     }
 
     let tool_use_names = tool_use_names_by_id(&request.messages);
+    let include_reasoning_content = supports_chat_reasoning_content(request);
     let mut messages = request
         .instructions
         .iter()
         .map(instruction_to_chat_message)
-        .chain(
-            request
-                .messages
-                .iter()
-                .flat_map(|message| message_to_chat_messages(message, &tool_use_names, options)),
-        )
+        .chain(request.messages.iter().flat_map(|message| {
+            message_to_chat_messages(message, &tool_use_names, options, include_reasoning_content)
+        }))
         .collect::<Vec<_>>();
     normalize_system_messages(&mut messages);
     merge_adjacent_assistant_messages(&mut messages);
@@ -102,7 +100,7 @@ pub fn to_chat_completions_request(
         );
     }
     apply_provider_flavor_defaults(&mut body, request);
-    apply_provider_body_overrides(&mut body, request);
+    super::apply_provider_body_overrides(&mut body, request);
     remove_tool_control_fields_without_tools(&mut body);
 
     Value::Object(body)
@@ -110,6 +108,21 @@ pub fn to_chat_completions_request(
 
 pub fn parse_stream_chunk(
     value: Value,
+) -> Result<Vec<AgentStreamEvent>, ChatCompletionsStreamError> {
+    let mut state = ChatCompletionsStreamState::default();
+    parse_stream_chunk_with_state(value, &mut state)
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct ChatCompletionsStreamState {
+    tool_call_indexes_by_id: HashMap<String, usize>,
+    next_tool_call_index: usize,
+    message_started: bool,
+}
+
+pub(crate) fn parse_stream_chunk_with_state(
+    value: Value,
+    state: &mut ChatCompletionsStreamState,
 ) -> Result<Vec<AgentStreamEvent>, ChatCompletionsStreamError> {
     let mut events = Vec::new();
 
@@ -159,13 +172,16 @@ pub fn parse_stream_chunk(
             None => return Err(ChatCompletionsStreamError::MissingField("delta")),
         };
 
-        if delta.get("role").and_then(Value::as_str) == Some("assistant") {
+        if delta.get("role").and_then(Value::as_str) == Some("assistant") && !state.message_started
+        {
+            state.message_started = true;
             events.push(AgentStreamEvent::MessageStart {
                 id: value.get("id").and_then(Value::as_str).map(str::to_string),
                 model: value
                     .get("model")
                     .and_then(Value::as_str)
                     .map(str::to_string),
+                usage: None,
             });
         }
 
@@ -201,7 +217,7 @@ pub fn parse_stream_chunk(
 
         if let Some(tool_calls) = delta.get("tool_calls").and_then(Value::as_array) {
             for tool_call in tool_calls {
-                append_tool_call_delta(&mut events, tool_call)?;
+                append_tool_call_delta(&mut events, tool_call, state)?;
             }
         }
 
@@ -268,6 +284,7 @@ fn message_to_chat_messages(
     message: &AgentMessage,
     tool_use_names: &HashMap<String, String>,
     options: ChatCompletionsOptions,
+    include_reasoning_content: bool,
 ) -> Vec<Value> {
     match message.role {
         MessageRole::System | MessageRole::Developer => vec![json!({
@@ -275,7 +292,12 @@ fn message_to_chat_messages(
             "content": content_blocks_text(&message.content),
         })],
         MessageRole::User => user_message_to_chat_messages(message, tool_use_names, options),
-        MessageRole::Assistant => vec![assistant_message_to_chat(message)],
+        MessageRole::Assistant => {
+            vec![assistant_message_to_chat(
+                message,
+                include_reasoning_content,
+            )]
+        }
     }
 }
 
@@ -461,16 +483,21 @@ fn user_message_to_chat_messages(
         }
     }
 
-    messages.extend(
-        message
-            .content
-            .iter()
-            .flat_map(|block| tool_result_to_chat_messages(block, tool_use_names, options)),
-    );
+    let mut image_user_messages = Vec::new();
+    for block in &message.content {
+        for tool_result_message in tool_result_to_chat_messages(block, tool_use_names, options) {
+            if tool_result_message.get("role").and_then(Value::as_str) == Some("user") {
+                image_user_messages.push(tool_result_message);
+            } else {
+                messages.push(tool_result_message);
+            }
+        }
+    }
+    messages.extend(image_user_messages);
     messages
 }
 
-fn assistant_message_to_chat(message: &AgentMessage) -> Value {
+fn assistant_message_to_chat(message: &AgentMessage, include_reasoning_content: bool) -> Value {
     let mut value = Map::new();
     value.insert("role".to_string(), Value::String("assistant".to_string()));
 
@@ -501,7 +528,7 @@ fn assistant_message_to_chat(message: &AgentMessage) -> Value {
         .filter(|text| !text.is_empty())
         .collect::<Vec<_>>()
         .join("\n");
-    if !reasoning_content.is_empty() {
+    if include_reasoning_content && !reasoning_content.is_empty() {
         if !has_text && tool_calls.is_empty() {
             value.insert("content".to_string(), Value::String(String::new()));
         }
@@ -605,19 +632,6 @@ fn tool_choice_to_chat(tool_choice: &ToolChoice) -> Value {
     }
 }
 
-fn apply_provider_body_overrides(body: &mut Map<String, Value>, request: &AgentRequest) {
-    for (key, value) in &request.metadata.provider {
-        if key == PROVIDER_FLAVOR_METADATA_KEY {
-            continue;
-        }
-        if value.is_null() {
-            body.remove(key);
-        } else {
-            body.insert(key.clone(), value.clone());
-        }
-    }
-}
-
 fn apply_provider_flavor_defaults(body: &mut Map<String, Value>, request: &AgentRequest) {
     let provider_flavor = provider_flavor(request);
     match provider_flavor {
@@ -629,6 +643,15 @@ fn apply_provider_flavor_defaults(body: &mut Map<String, Value>, request: &Agent
         FLAVOR_GENERIC_OPENAI => {}
         _ => {}
     }
+}
+
+fn supports_chat_reasoning_content(request: &AgentRequest) -> bool {
+    request
+        .metadata
+        .provider
+        .get(super::CHAT_REASONING_CONTENT_METADATA_KEY)
+        .and_then(Value::as_bool)
+        .unwrap_or_else(|| provider_flavor(request) == FLAVOR_DEEPSEEK)
 }
 
 fn provider_flavor(request: &AgentRequest) -> &str {
@@ -925,14 +948,16 @@ fn image_source_url(source: &ImageSource) -> String {
 fn append_tool_call_delta(
     events: &mut Vec<AgentStreamEvent>,
     tool_call: &Value,
+    state: &mut ChatCompletionsStreamState,
 ) -> Result<(), ChatCompletionsStreamError> {
-    let index = tool_call
+    let tool_call_index = tool_call
         .get("index")
         .and_then(Value::as_u64)
         .map(usize::try_from)
         .transpose()
         .map_err(|_| ChatCompletionsStreamError::InvalidField("index"))?
-        .unwrap_or(0)
+        .unwrap_or_else(|| missing_tool_call_index(tool_call, state));
+    let index = tool_call_index
         .checked_add(TOOL_CALL_BLOCK_INDEX_OFFSET)
         .ok_or(ChatCompletionsStreamError::InvalidField("index"))?;
 
@@ -966,6 +991,22 @@ fn append_tool_call_delta(
     }
 
     Ok(())
+}
+
+fn missing_tool_call_index(tool_call: &Value, state: &mut ChatCompletionsStreamState) -> usize {
+    let id = tool_call.get("id").and_then(Value::as_str);
+    if let Some(id) = id
+        && let Some(index) = state.tool_call_indexes_by_id.get(id)
+    {
+        return *index;
+    }
+
+    let index = state.next_tool_call_index;
+    state.next_tool_call_index = state.next_tool_call_index.saturating_add(1);
+    if let Some(id) = id {
+        state.tool_call_indexes_by_id.insert(id.to_string(), index);
+    }
+    index
 }
 
 fn reasoning_details_texts(delta: &Value) -> Vec<String> {

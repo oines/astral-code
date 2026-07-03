@@ -1,7 +1,7 @@
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::FunctionCallOutputPayload;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::openai_models::InputModality;
 use codex_tools::TOOL_SEARCH_TOOL_NAME;
 use std::collections::HashSet;
@@ -12,15 +12,15 @@ use tracing::info;
 const IMAGE_CONTENT_OMITTED_PLACEHOLDER: &str =
     "image content omitted because you do not support image input";
 
-pub(crate) fn ensure_call_outputs_present(items: &mut Vec<ResponseItem>) {
+pub(crate) fn ensure_call_outputs_present(items: &mut Vec<TranscriptItem>) {
     // Collect synthetic outputs to insert immediately after their calls.
     // Store the insertion position (index of call) alongside the item so
     // we can insert in reverse order and avoid index shifting.
-    let mut missing_outputs_to_insert: Vec<(usize, ResponseItem)> = Vec::new();
+    let mut missing_outputs_to_insert: Vec<(usize, TranscriptItem)> = Vec::new();
 
     for (idx, item) in items.iter().enumerate() {
         match item {
-            ResponseItem::FunctionCall {
+            TranscriptItem::FunctionCall {
                 call_id,
                 name,
                 namespace,
@@ -28,7 +28,7 @@ pub(crate) fn ensure_call_outputs_present(items: &mut Vec<ResponseItem>) {
             } => {
                 let has_output = if namespace.is_none() && name == TOOL_SEARCH_TOOL_NAME {
                     items.iter().any(|i| match i {
-                        ResponseItem::ToolSearchOutput {
+                        TranscriptItem::ToolSearchOutput {
                             call_id: Some(existing),
                             ..
                         } => existing == call_id,
@@ -36,7 +36,7 @@ pub(crate) fn ensure_call_outputs_present(items: &mut Vec<ResponseItem>) {
                     })
                 } else {
                     items.iter().any(|i| match i {
-                        ResponseItem::FunctionCallOutput {
+                        TranscriptItem::FunctionCallOutput {
                             call_id: existing, ..
                         } => existing == call_id,
                         _ => false,
@@ -47,19 +47,19 @@ pub(crate) fn ensure_call_outputs_present(items: &mut Vec<ResponseItem>) {
                     info!("Function call output is missing for call id: {call_id}");
                     missing_outputs_to_insert.push((
                         idx,
-                        ResponseItem::FunctionCallOutput {
+                        TranscriptItem::FunctionCallOutput {
                             call_id: call_id.clone(),
                             output: FunctionCallOutputPayload::from_text("aborted".to_string()),
                         },
                     ));
                 }
             }
-            ResponseItem::ToolSearchCall {
+            TranscriptItem::ToolSearchCall {
                 call_id: Some(call_id),
                 ..
             } => {
                 let has_output = items.iter().any(|i| match i {
-                    ResponseItem::ToolSearchOutput {
+                    TranscriptItem::ToolSearchOutput {
                         call_id: Some(existing),
                         ..
                     } => existing == call_id,
@@ -70,7 +70,7 @@ pub(crate) fn ensure_call_outputs_present(items: &mut Vec<ResponseItem>) {
                     info!("Tool search output is missing for call id: {call_id}");
                     missing_outputs_to_insert.push((
                         idx,
-                        ResponseItem::ToolSearchOutput {
+                        TranscriptItem::ToolSearchOutput {
                             call_id: Some(call_id.clone()),
                             status: "completed".to_string(),
                             execution: "client".to_string(),
@@ -79,9 +79,9 @@ pub(crate) fn ensure_call_outputs_present(items: &mut Vec<ResponseItem>) {
                     ));
                 }
             }
-            ResponseItem::CustomToolCall { call_id, .. } => {
+            TranscriptItem::CustomToolCall { call_id, .. } => {
                 let has_output = items.iter().any(|i| match i {
-                    ResponseItem::CustomToolCallOutput {
+                    TranscriptItem::CustomToolCallOutput {
                         call_id: existing, ..
                     } => existing == call_id,
                     _ => false,
@@ -93,7 +93,7 @@ pub(crate) fn ensure_call_outputs_present(items: &mut Vec<ResponseItem>) {
                     ));
                     missing_outputs_to_insert.push((
                         idx,
-                        ResponseItem::CustomToolCallOutput {
+                        TranscriptItem::CustomToolCallOutput {
                             call_id: call_id.clone(),
                             name: None,
                             output: FunctionCallOutputPayload::from_text("aborted".to_string()),
@@ -102,10 +102,10 @@ pub(crate) fn ensure_call_outputs_present(items: &mut Vec<ResponseItem>) {
                 }
             }
             // LocalShellCall is represented in upstream streams by a FunctionCallOutput
-            ResponseItem::LocalShellCall { call_id, .. } => {
+            TranscriptItem::LocalShellCall { call_id, .. } => {
                 if let Some(call_id) = call_id.as_ref() {
                     let has_output = items.iter().any(|i| match i {
-                        ResponseItem::FunctionCallOutput {
+                        TranscriptItem::FunctionCallOutput {
                             call_id: existing, ..
                         } => existing == call_id,
                         _ => false,
@@ -117,7 +117,7 @@ pub(crate) fn ensure_call_outputs_present(items: &mut Vec<ResponseItem>) {
                         ));
                         missing_outputs_to_insert.push((
                             idx,
-                            ResponseItem::FunctionCallOutput {
+                            TranscriptItem::FunctionCallOutput {
                                 call_id: call_id.clone(),
                                 output: FunctionCallOutputPayload::from_text("aborted".to_string()),
                             },
@@ -135,11 +135,11 @@ pub(crate) fn ensure_call_outputs_present(items: &mut Vec<ResponseItem>) {
     }
 }
 
-pub(crate) fn remove_orphan_outputs(items: &mut Vec<ResponseItem>) {
+pub(crate) fn remove_orphan_outputs(items: &mut Vec<TranscriptItem>) {
     let function_call_ids: HashSet<String> = items
         .iter()
         .filter_map(|i| match i {
-            ResponseItem::FunctionCall { call_id, .. } => Some(call_id.clone()),
+            TranscriptItem::FunctionCall { call_id, .. } => Some(call_id.clone()),
             _ => None,
         })
         .collect();
@@ -147,11 +147,11 @@ pub(crate) fn remove_orphan_outputs(items: &mut Vec<ResponseItem>) {
     let tool_search_call_ids: HashSet<String> = items
         .iter()
         .filter_map(|i| match i {
-            ResponseItem::ToolSearchCall {
+            TranscriptItem::ToolSearchCall {
                 call_id: Some(call_id),
                 ..
             } => Some(call_id.clone()),
-            ResponseItem::FunctionCall {
+            TranscriptItem::FunctionCall {
                 call_id,
                 name,
                 namespace: None,
@@ -164,7 +164,7 @@ pub(crate) fn remove_orphan_outputs(items: &mut Vec<ResponseItem>) {
     let local_shell_call_ids: HashSet<String> = items
         .iter()
         .filter_map(|i| match i {
-            ResponseItem::LocalShellCall {
+            TranscriptItem::LocalShellCall {
                 call_id: Some(call_id),
                 ..
             } => Some(call_id.clone()),
@@ -175,13 +175,13 @@ pub(crate) fn remove_orphan_outputs(items: &mut Vec<ResponseItem>) {
     let custom_tool_call_ids: HashSet<String> = items
         .iter()
         .filter_map(|i| match i {
-            ResponseItem::CustomToolCall { call_id, .. } => Some(call_id.clone()),
+            TranscriptItem::CustomToolCall { call_id, .. } => Some(call_id.clone()),
             _ => None,
         })
         .collect();
 
     items.retain(|item| match item {
-        ResponseItem::FunctionCallOutput { call_id, .. } => {
+        TranscriptItem::FunctionCallOutput { call_id, .. } => {
             let has_match =
                 function_call_ids.contains(call_id) || local_shell_call_ids.contains(call_id);
             if !has_match {
@@ -191,7 +191,7 @@ pub(crate) fn remove_orphan_outputs(items: &mut Vec<ResponseItem>) {
             }
             has_match
         }
-        ResponseItem::CustomToolCallOutput { call_id, .. } => {
+        TranscriptItem::CustomToolCallOutput { call_id, .. } => {
             let has_match = custom_tool_call_ids.contains(call_id);
             if !has_match {
                 error_or_panic(format!(
@@ -200,8 +200,8 @@ pub(crate) fn remove_orphan_outputs(items: &mut Vec<ResponseItem>) {
             }
             has_match
         }
-        ResponseItem::ToolSearchOutput { execution, .. } if execution == "server" => true,
-        ResponseItem::ToolSearchOutput {
+        TranscriptItem::ToolSearchOutput { execution, .. } if execution == "server" => true,
+        TranscriptItem::ToolSearchOutput {
             call_id: Some(call_id),
             ..
         } => {
@@ -211,49 +211,49 @@ pub(crate) fn remove_orphan_outputs(items: &mut Vec<ResponseItem>) {
             }
             has_match
         }
-        ResponseItem::ToolSearchOutput { call_id: None, .. } => true,
+        TranscriptItem::ToolSearchOutput { call_id: None, .. } => true,
         _ => true,
     });
 }
 
-pub(crate) fn remove_corresponding_for(items: &mut Vec<ResponseItem>, item: &ResponseItem) {
+pub(crate) fn remove_corresponding_for(items: &mut Vec<TranscriptItem>, item: &TranscriptItem) {
     match item {
-        ResponseItem::FunctionCall { call_id, .. } => {
+        TranscriptItem::FunctionCall { call_id, .. } => {
             remove_first_matching(items, |i| {
                 matches!(
                     i,
-                    ResponseItem::FunctionCallOutput {
+                    TranscriptItem::FunctionCallOutput {
                         call_id: existing, ..
                     } if existing == call_id
                 )
             });
         }
-        ResponseItem::FunctionCallOutput { call_id, .. } => {
+        TranscriptItem::FunctionCallOutput { call_id, .. } => {
             if let Some(pos) = items.iter().position(|i| {
-                matches!(i, ResponseItem::FunctionCall { call_id: existing, .. } if existing == call_id)
+                matches!(i, TranscriptItem::FunctionCall { call_id: existing, .. } if existing == call_id)
             }) {
                 items.remove(pos);
             } else if let Some(pos) = items.iter().position(|i| {
-                matches!(i, ResponseItem::LocalShellCall { call_id: Some(existing), .. } if existing == call_id)
+                matches!(i, TranscriptItem::LocalShellCall { call_id: Some(existing), .. } if existing == call_id)
             }) {
                 items.remove(pos);
             }
         }
-        ResponseItem::ToolSearchCall {
+        TranscriptItem::ToolSearchCall {
             call_id: Some(call_id),
             ..
         } => {
             remove_first_matching(items, |i| {
                 matches!(
                     i,
-                    ResponseItem::ToolSearchOutput {
+                    TranscriptItem::ToolSearchOutput {
                         call_id: Some(existing),
                         ..
                     } if existing == call_id
                 )
             });
         }
-        ResponseItem::ToolSearchOutput {
+        TranscriptItem::ToolSearchOutput {
             call_id: Some(call_id),
             ..
         } => {
@@ -262,13 +262,13 @@ pub(crate) fn remove_corresponding_for(items: &mut Vec<ResponseItem>, item: &Res
                 |i| {
                     matches!(
                         i,
-                        ResponseItem::ToolSearchCall {
+                        TranscriptItem::ToolSearchCall {
                             call_id: Some(existing),
                             ..
                         } if existing == call_id
                     ) || matches!(
                         i,
-                        ResponseItem::FunctionCall {
+                        TranscriptItem::FunctionCall {
                             call_id: existing,
                             name,
                             namespace: None,
@@ -278,30 +278,30 @@ pub(crate) fn remove_corresponding_for(items: &mut Vec<ResponseItem>, item: &Res
                 },
             );
         }
-        ResponseItem::CustomToolCall { call_id, .. } => {
+        TranscriptItem::CustomToolCall { call_id, .. } => {
             remove_first_matching(items, |i| {
                 matches!(
                     i,
-                    ResponseItem::CustomToolCallOutput {
+                    TranscriptItem::CustomToolCallOutput {
                         call_id: existing, ..
                     } if existing == call_id
                 )
             });
         }
-        ResponseItem::CustomToolCallOutput { call_id, .. } => {
+        TranscriptItem::CustomToolCallOutput { call_id, .. } => {
             remove_first_matching(
                 items,
-                |i| matches!(i, ResponseItem::CustomToolCall { call_id: existing, .. } if existing == call_id),
+                |i| matches!(i, TranscriptItem::CustomToolCall { call_id: existing, .. } if existing == call_id),
             );
         }
-        ResponseItem::LocalShellCall {
+        TranscriptItem::LocalShellCall {
             call_id: Some(call_id),
             ..
         } => {
             remove_first_matching(items, |i| {
                 matches!(
                     i,
-                    ResponseItem::FunctionCallOutput {
+                    TranscriptItem::FunctionCallOutput {
                         call_id: existing, ..
                     } if existing == call_id
                 )
@@ -311,9 +311,9 @@ pub(crate) fn remove_corresponding_for(items: &mut Vec<ResponseItem>, item: &Res
     }
 }
 
-fn remove_first_matching<F>(items: &mut Vec<ResponseItem>, predicate: F)
+fn remove_first_matching<F>(items: &mut Vec<TranscriptItem>, predicate: F)
 where
-    F: Fn(&ResponseItem) -> bool,
+    F: Fn(&TranscriptItem) -> bool,
 {
     if let Some(pos) = items.iter().position(predicate) {
         items.remove(pos);
@@ -324,7 +324,7 @@ where
 /// When `input_modalities` contains `InputModality::Image`, no stripping is performed.
 pub(crate) fn strip_images_when_unsupported(
     input_modalities: &[InputModality],
-    items: &mut [ResponseItem],
+    items: &mut [TranscriptItem],
 ) {
     let supports_images = input_modalities.contains(&InputModality::Image);
     if supports_images {
@@ -333,7 +333,7 @@ pub(crate) fn strip_images_when_unsupported(
 
     for item in items.iter_mut() {
         match item {
-            ResponseItem::Message { content, .. } => {
+            TranscriptItem::Message { content, .. } => {
                 let mut normalized_content = Vec::with_capacity(content.len());
                 for content_item in content.iter() {
                     match content_item {
@@ -347,8 +347,8 @@ pub(crate) fn strip_images_when_unsupported(
                 }
                 *content = normalized_content;
             }
-            ResponseItem::FunctionCallOutput { output, .. }
-            | ResponseItem::CustomToolCallOutput { output, .. } => {
+            TranscriptItem::FunctionCallOutput { output, .. }
+            | TranscriptItem::CustomToolCallOutput { output, .. } => {
                 if let Some(content_items) = output.content_items_mut() {
                     let mut normalized_content_items = Vec::with_capacity(content_items.len());
                     for content_item in content_items.iter() {
@@ -366,7 +366,7 @@ pub(crate) fn strip_images_when_unsupported(
                     *content_items = normalized_content_items;
                 }
             }
-            ResponseItem::ImageGenerationCall { result, .. } => {
+            TranscriptItem::ImageGenerationCall { result, .. } => {
                 result.clear();
             }
             _ => {}

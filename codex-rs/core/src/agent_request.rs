@@ -20,7 +20,8 @@ use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::ReasoningItemContent;
 use codex_protocol::models::ReasoningItemReasoningSummary;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::ReasoningProviderMetadata;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
 use codex_tools::LoadableToolSpec;
@@ -107,7 +108,7 @@ fn response_format_for_output_schema(
     })
 }
 
-fn provider_neutral_tool_specs(base_tools: &[ToolSpec], input: &[ResponseItem]) -> Vec<ToolSpec> {
+fn provider_neutral_tool_specs(base_tools: &[ToolSpec], input: &[TranscriptItem]) -> Vec<ToolSpec> {
     let mut tools = base_tools.to_vec();
     let mut seen_names = provider_neutral_tool_names_for_specs(base_tools);
 
@@ -154,12 +155,12 @@ fn provider_neutral_tool_names_for_spec(spec: &ToolSpec) -> Vec<String> {
     }
 }
 
-fn collect_search_loaded_tool_specs(input: &[ResponseItem]) -> Vec<LoadableToolSpec> {
+fn collect_search_loaded_tool_specs(input: &[TranscriptItem]) -> Vec<LoadableToolSpec> {
     let mut loaded_tools = Vec::new();
     let mut function_count = 0usize;
 
     for item in input.iter().rev() {
-        let ResponseItem::ToolSearchOutput {
+        let TranscriptItem::ToolSearchOutput {
             execution, tools, ..
         } = item
         else {
@@ -226,7 +227,7 @@ fn build_reasoning_config(
     Some(ReasoningConfig { effort, summary })
 }
 
-fn response_items_to_agent_messages(items: &[ResponseItem]) -> Vec<AgentMessage> {
+fn response_items_to_agent_messages(items: &[TranscriptItem]) -> Vec<AgentMessage> {
     let mut skipped_function_call_ids = BTreeSet::new();
     items
         .iter()
@@ -235,30 +236,35 @@ fn response_items_to_agent_messages(items: &[ResponseItem]) -> Vec<AgentMessage>
 }
 
 fn response_item_to_agent_message(
-    item: &ResponseItem,
+    item: &TranscriptItem,
     skipped_function_call_ids: &mut BTreeSet<String>,
 ) -> Option<AgentMessage> {
     match item {
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id, role, content, ..
         } => Some(AgentMessage {
             role: message_role(role),
             content: content.iter().map(content_item_to_block).collect(),
             id: id.clone(),
         }),
-        ResponseItem::Reasoning {
+        TranscriptItem::Reasoning {
             summary,
             content,
             encrypted_content,
+            provider_metadata,
             ..
-        } => reasoning_blocks(summary, content.as_deref(), encrypted_content.as_deref()).map(
-            |content| AgentMessage {
-                role: MessageRole::Assistant,
-                content,
-                id: None,
-            },
-        ),
-        ResponseItem::FunctionCall {
+        } => reasoning_blocks(
+            summary,
+            content.as_deref(),
+            encrypted_content.as_deref(),
+            provider_metadata.as_ref(),
+        )
+        .map(|content| AgentMessage {
+            role: MessageRole::Assistant,
+            content,
+            id: None,
+        }),
+        TranscriptItem::FunctionCall {
             name,
             arguments,
             call_id,
@@ -284,7 +290,7 @@ fn response_item_to_agent_message(
                 id: None,
             })
         }
-        ResponseItem::CustomToolCall {
+        TranscriptItem::CustomToolCall {
             name,
             input: arguments,
             call_id,
@@ -298,7 +304,7 @@ fn response_item_to_agent_message(
             }],
             id: None,
         }),
-        ResponseItem::ToolSearchCall {
+        TranscriptItem::ToolSearchCall {
             call_id: Some(call_id),
             arguments,
             ..
@@ -311,7 +317,7 @@ fn response_item_to_agent_message(
             }],
             id: None,
         }),
-        ResponseItem::FunctionCallOutput { call_id, output } => {
+        TranscriptItem::FunctionCallOutput { call_id, output } => {
             if skipped_function_call_ids.contains(call_id) {
                 return None;
             }
@@ -326,7 +332,7 @@ fn response_item_to_agent_message(
                 id: None,
             })
         }
-        ResponseItem::CustomToolCallOutput {
+        TranscriptItem::CustomToolCallOutput {
             call_id, output, ..
         } => Some(AgentMessage {
             role: MessageRole::User,
@@ -337,7 +343,7 @@ fn response_item_to_agent_message(
             }],
             id: None,
         }),
-        ResponseItem::ToolSearchOutput {
+        TranscriptItem::ToolSearchOutput {
             call_id,
             status,
             execution,
@@ -357,19 +363,19 @@ fn response_item_to_agent_message(
             }],
             id: None,
         }),
-        ResponseItem::AgentMessage { .. }
-        | ResponseItem::LocalShellCall { .. }
-        | ResponseItem::ToolSearchCall { call_id: None, .. }
-        | ResponseItem::WebSearchCall { .. }
-        | ResponseItem::ImageGenerationCall { .. } => None,
-        ResponseItem::Compaction { encrypted_content } => Some(AgentMessage {
+        TranscriptItem::AgentMessage { .. }
+        | TranscriptItem::LocalShellCall { .. }
+        | TranscriptItem::ToolSearchCall { call_id: None, .. }
+        | TranscriptItem::WebSearchCall { .. }
+        | TranscriptItem::ImageGenerationCall { .. } => None,
+        TranscriptItem::Compaction { encrypted_content } => Some(AgentMessage {
             role: MessageRole::User,
             content: vec![ContentBlock::Compaction {
                 text: encrypted_content.clone(),
             }],
             id: None,
         }),
-        ResponseItem::ContextCompaction {
+        TranscriptItem::ContextCompaction {
             encrypted_content: Some(encrypted_content),
         } => Some(AgentMessage {
             role: MessageRole::User,
@@ -378,9 +384,9 @@ fn response_item_to_agent_message(
             }],
             id: None,
         }),
-        ResponseItem::CompactionTrigger
-        | ResponseItem::ContextCompaction { .. }
-        | ResponseItem::Other => None,
+        TranscriptItem::CompactionTrigger
+        | TranscriptItem::ContextCompaction { .. }
+        | TranscriptItem::Other => None,
     }
 }
 
@@ -434,6 +440,7 @@ fn reasoning_blocks(
     summary: &[ReasoningItemReasoningSummary],
     content: Option<&[ReasoningItemContent]>,
     encrypted_content: Option<&str>,
+    provider_metadata: Option<&ReasoningProviderMetadata>,
 ) -> Option<Vec<ContentBlock>> {
     let reasoning_text = content
         .into_iter()
@@ -451,11 +458,15 @@ fn reasoning_blocks(
         .join("\n");
 
     (!reasoning_text.is_empty()).then(|| {
-        let signature = encrypted_content.and_then(|content| {
-            content
-                .strip_prefix(ANTHROPIC_REASONING_SIGNATURE_PREFIX)
-                .map(str::to_string)
-        });
+        let signature = provider_metadata
+            .and_then(|metadata| metadata.anthropic_signature.clone())
+            .or_else(|| {
+                encrypted_content.and_then(|content| {
+                    content
+                        .strip_prefix(ANTHROPIC_REASONING_SIGNATURE_PREFIX)
+                        .map(str::to_string)
+                })
+            });
         vec![ContentBlock::Reasoning {
             text: reasoning_text,
             signature,

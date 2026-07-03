@@ -17,7 +17,7 @@ use codex_protocol::AgentPath;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::MessagePhase;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::protocol::CompactedItem;
 use codex_protocol::protocol::ErrorEvent;
 use codex_protocol::protocol::EventMsg;
@@ -68,8 +68,8 @@ fn text_input(text: &str) -> Op {
     .into()
 }
 
-fn assistant_message(text: &str, phase: Option<MessagePhase>) -> ResponseItem {
-    ResponseItem::Message {
+fn assistant_message(text: &str, phase: Option<MessagePhase>) -> TranscriptItem {
+    TranscriptItem::Message {
         id: None,
         role: "assistant".to_string(),
         content: vec![ContentItem::OutputText {
@@ -88,8 +88,8 @@ fn register_session_root_skips_threads_with_explicit_parent() {
     assert_eq!(control.state.agent_id_for_path(&AgentPath::root()), None);
 }
 
-fn spawn_agent_call(call_id: &str) -> ResponseItem {
-    ResponseItem::FunctionCall {
+fn spawn_agent_call(call_id: &str) -> TranscriptItem {
+    TranscriptItem::FunctionCall {
         id: None,
         name: "spawn_agent".to_string(),
         namespace: None,
@@ -141,9 +141,9 @@ impl AgentControlHarness {
     }
 }
 
-fn has_subagent_notification(history_items: &[ResponseItem]) -> bool {
+fn has_subagent_notification(history_items: &[TranscriptItem]) -> bool {
     history_items.iter().any(|item| {
-        let ResponseItem::Message { role, content, .. } = item else {
+        let TranscriptItem::Message { role, content, .. } = item else {
             return false;
         };
         if role != "user" {
@@ -159,9 +159,9 @@ fn has_subagent_notification(history_items: &[ResponseItem]) -> bool {
 }
 
 /// Returns true when any message item contains `needle` in a text span.
-fn history_contains_text(history_items: &[ResponseItem], needle: &str) -> bool {
+fn history_contains_text(history_items: &[TranscriptItem], needle: &str) -> bool {
     history_items.iter().any(|item| {
-        let ResponseItem::Message { content, .. } = item else {
+        let TranscriptItem::Message { content, .. } = item else {
             return false;
         };
         content.iter().any(|content_item| match content_item {
@@ -174,11 +174,11 @@ fn history_contains_text(history_items: &[ResponseItem], needle: &str) -> bool {
 }
 
 fn history_contains_assistant_inter_agent_communication(
-    history_items: &[ResponseItem],
+    history_items: &[TranscriptItem],
     expected: &InterAgentCommunication,
 ) -> bool {
     history_items.iter().any(|item| {
-        let ResponseItem::Message { role, content, .. } = item else {
+        let TranscriptItem::Message { role, content, .. } = item else {
             return false;
         };
         if role != "assistant" {
@@ -859,7 +859,7 @@ async fn spawn_agent_can_fork_parent_thread_history_with_sanitized_items() {
         .record_conversation_items(
             turn_context.as_ref(),
             &[
-                ResponseItem::Message {
+                TranscriptItem::Message {
                     id: None,
                     role: "developer".to_string(),
                     content: vec![ContentItem::InputText {
@@ -867,7 +867,7 @@ async fn spawn_agent_can_fork_parent_thread_history_with_sanitized_items() {
                     }],
                     phase: None,
                 },
-                ResponseItem::Message {
+                TranscriptItem::Message {
                     id: None,
                     role: "developer".to_string(),
                     content: vec![ContentItem::InputText {
@@ -878,11 +878,12 @@ async fn spawn_agent_can_fork_parent_thread_history_with_sanitized_items() {
                 assistant_message("parent commentary", Some(MessagePhase::Commentary)),
                 assistant_message("parent final answer", Some(MessagePhase::FinalAnswer)),
                 assistant_message("parent unknown phase", /*phase*/ None),
-                ResponseItem::Reasoning {
+                TranscriptItem::Reasoning {
                     id: "parent-reasoning".to_string(),
                     summary: Vec::new(),
                     content: None,
                     encrypted_content: None,
+                    provider_metadata: None,
                 },
                 trigger_message.to_response_input_item().into(),
                 spawn_agent_call(&parent_spawn_call_id),
@@ -939,7 +940,7 @@ async fn spawn_agent_can_fork_parent_thread_history_with_sanitized_items() {
     assert_ne!(child_thread_id, parent_thread_id);
     let history = child_thread.codex.session.clone_history().await;
     let expected_history = [
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -948,7 +949,7 @@ async fn spawn_agent_can_fork_parent_thread_history_with_sanitized_items() {
             phase: None,
         },
         assistant_message("parent final answer", Some(MessagePhase::FinalAnswer)),
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "developer".to_string(),
             content: vec![ContentItem::InputText {
@@ -1078,7 +1079,7 @@ async fn spawn_agent_fork_strips_parent_usage_hints_from_compacted_history() {
     let turn_context = parent_thread.codex.session.new_default_turn().await;
     let parent_spawn_call_id = "spawn-call-compacted-usage-hints".to_string();
     let replacement_history = vec![
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -1086,7 +1087,7 @@ async fn spawn_agent_fork_strips_parent_usage_hints_from_compacted_history() {
             }],
             phase: None,
         },
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "developer".to_string(),
             content: vec![ContentItem::InputText {
@@ -1104,7 +1105,7 @@ async fn spawn_agent_fork_strips_parent_usage_hints_from_compacted_history() {
                 replacement_history: Some(replacement_history),
             }),
             RolloutItem::TurnContext(turn_context.to_turn_context_item()),
-            RolloutItem::ResponseItem(spawn_agent_call(&parent_spawn_call_id)),
+            RolloutItem::TranscriptItem(spawn_agent_call(&parent_spawn_call_id)),
         ])
         .await;
     parent_thread
@@ -1382,7 +1383,7 @@ async fn spawn_agent_fork_last_n_turns_drops_parent_startup_prefix_when_under_li
         .session
         .record_conversation_items(
             startup_turn_context.as_ref(),
-            &[ResponseItem::Message {
+            &[TranscriptItem::Message {
                 id: None,
                 role: "developer".to_string(),
                 content: vec![ContentItem::InputText {
@@ -1503,7 +1504,7 @@ async fn spawn_agent_fork_last_n_turns_strips_parent_usage_hints() {
         .record_conversation_items(
             turn_context.as_ref(),
             &[
-                ResponseItem::Message {
+                TranscriptItem::Message {
                     id: None,
                     role: "developer".to_string(),
                     content: vec![ContentItem::InputText {

@@ -723,7 +723,7 @@ impl TurnRequestProcessor {
             .into_iter()
             .enumerate()
             .map(|(index, value)| {
-                serde_json::from_value::<ResponseItem>(value)
+                serde_json::from_value::<TranscriptItem>(value)
                     .map_err(|err| format!("items[{index}] is not a valid response item: {err}"))
             })
             .collect::<std::result::Result<Vec<_>, _>>()

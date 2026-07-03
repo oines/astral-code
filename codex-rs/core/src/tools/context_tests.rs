@@ -14,7 +14,7 @@ fn custom_tool_calls_should_roundtrip_as_custom_outputs() {
         .to_response_item("call-42", &payload);
 
     match response {
-        ResponseInputItem::CustomToolCallOutput {
+        TranscriptInputItem::CustomToolCallOutput {
             call_id, output, ..
         } => {
             assert_eq!(call_id, "call-42");
@@ -35,7 +35,7 @@ fn function_payloads_remain_function_outputs() {
         .to_response_item("fn-1", &payload);
 
     match response {
-        ResponseInputItem::FunctionCallOutput { call_id, output } => {
+        TranscriptInputItem::FunctionCallOutput { call_id, output } => {
             assert_eq!(call_id, "fn-1");
             assert_eq!(output.content_items(), None);
             assert_eq!(output.body.to_text().as_deref(), Some("ok"));
@@ -111,7 +111,7 @@ fn mcp_tool_output_response_item_includes_wall_time() {
     );
 
     match response {
-        ResponseInputItem::FunctionCallOutput { call_id, output } => {
+        TranscriptInputItem::FunctionCallOutput { call_id, output } => {
             assert_eq!(call_id, "mcp-call-1");
             assert_eq!(output.success, Some(true));
             let Some(text) = output.body.to_text() else {
@@ -163,7 +163,7 @@ fn mcp_tool_output_response_item_truncates_large_structured_content() {
     );
 
     match response {
-        ResponseInputItem::FunctionCallOutput { call_id, output } => {
+        TranscriptInputItem::FunctionCallOutput { call_id, output } => {
             assert_eq!(call_id, "mcp-call-large");
             assert_eq!(output.success, Some(true));
             let text = output
@@ -206,7 +206,7 @@ fn mcp_tool_output_response_item_preserves_content_items() {
     );
 
     match response {
-        ResponseInputItem::FunctionCallOutput { output, .. } => {
+        TranscriptInputItem::FunctionCallOutput { output, .. } => {
             assert_eq!(
                 output.content_items(),
                 Some(
@@ -294,7 +294,7 @@ fn custom_tool_calls_can_derive_text_from_content_items() {
     .to_response_item("call-99", &payload);
 
     match response {
-        ResponseInputItem::CustomToolCallOutput {
+        TranscriptInputItem::CustomToolCallOutput {
             call_id, output, ..
         } => {
             let expected = vec![
@@ -343,7 +343,7 @@ fn tool_search_payloads_roundtrip_as_tool_search_outputs() {
     .to_response_item("search-1", &payload);
 
     match response {
-        ResponseInputItem::ToolSearchOutput {
+        TranscriptInputItem::ToolSearchOutput {
             call_id,
             status,
             execution,
@@ -439,7 +439,7 @@ fn exec_command_tool_output_formats_truncated_response() {
     .to_response_item("call-42", &payload);
 
     match response {
-        ResponseInputItem::FunctionCallOutput { call_id, output } => {
+        TranscriptInputItem::FunctionCallOutput { call_id, output } => {
             assert_eq!(call_id, "call-42");
             assert_eq!(output.success, Some(true));
             let text = output

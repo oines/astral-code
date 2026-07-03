@@ -139,7 +139,7 @@ mod tests {
     use codex_protocol::items::TurnItem;
     use codex_protocol::items::WebSearchItem;
     use codex_protocol::models::ContentItem;
-    use codex_protocol::models::ResponseItem;
+    use codex_protocol::models::TranscriptItem;
     use codex_protocol::models::WebSearchAction;
     use codex_protocol::protocol::EventMsg;
     use codex_tools::ExtensionTurnItem;
@@ -287,7 +287,7 @@ mod tests {
         let turn_id = turn.sub_id.clone();
         let model = turn.model_info.slug.clone();
         let truncation_policy = turn.truncation_policy;
-        let history_item = ResponseItem::Message {
+        let history_item = TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {

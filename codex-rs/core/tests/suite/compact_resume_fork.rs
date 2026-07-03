@@ -15,7 +15,7 @@ use codex_core::CodexThread;
 use codex_core::ThreadManager;
 use codex_core::compact::SUMMARIZATION_PROMPT;
 use codex_core::config::Config;
-use codex_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
+use codex_core::spawn::is_network_sandbox_disabled;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::Settings;
@@ -49,7 +49,7 @@ const AFTER_SECOND_RESUME: &str = "AFTER_SECOND_RESUME";
 const AFTER_ROLLBACK: &str = "AFTER_ROLLBACK";
 
 fn network_disabled() -> bool {
-    std::env::var(CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok()
+    is_network_sandbox_disabled()
 }
 
 fn body_contains_text(body: &str, text: &str) -> bool {

@@ -937,8 +937,8 @@ fn aggregate_output(
 /// output consumption begins.
 ///
 /// `network_sandbox_policy` is used to determine whether
-/// CODEX_SANDBOX_NETWORK_DISABLED=1 is added to the environment of the spawned
-/// process.
+/// sandbox network-disabled environment variables are added to the environment
+/// of the spawned process.
 ///
 /// Note this command does not apply any sandboxing logic. The caller is
 /// responsible for constructing [ExecParams::command] to include any sandboxing
