@@ -98,15 +98,13 @@ fn unknown_model_uses_short_astral_prompt() {
             .base_instructions
             .starts_with(DEFAULT_PERSONALITY_HEADER)
     );
+    assert!(model.base_instructions.contains("Work from evidence."));
+    assert!(model.base_instructions.contains("Report honestly."));
+    assert!(!model.base_instructions.contains("Native Tool Flavor"));
     assert!(
-        model
+        !model
             .base_instructions
             .contains("Use Astral's native tool surface naturally:")
-    );
-    assert!(
-        model
-            .base_instructions
-            .contains("Use the available subagent or multi-agent tools")
     );
     assert!(!model.base_instructions.contains("Claude-ish"));
     assert!(!model.base_instructions.contains("Codex subagent"));
