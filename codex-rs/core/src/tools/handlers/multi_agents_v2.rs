@@ -12,7 +12,7 @@ use crate::tools::handlers::parse_arguments;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::ToolExecutor;
 use codex_protocol::AgentPath;
-use codex_protocol::models::ResponseInputItem;
+use codex_protocol::models::TranscriptInputItem;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::CollabAgentInteractionBeginEvent;
 use codex_protocol::protocol::CollabAgentInteractionEndEvent;

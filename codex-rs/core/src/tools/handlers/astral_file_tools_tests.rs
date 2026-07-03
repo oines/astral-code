@@ -19,6 +19,7 @@ use codex_exec_server::GlobSearchRequest;
 use codex_exec_server::GlobSearchResponse;
 use codex_exec_server::GrepSearchRequest;
 use codex_exec_server::GrepSearchResponse;
+use codex_exec_server::LOCAL_ENVIRONMENT_ID;
 use codex_exec_server::LOCAL_FS;
 use codex_exec_server::ReadDirectoryEntry;
 use codex_exec_server::RemoveOptions;
@@ -35,6 +36,8 @@ use codex_utils_absolute_path::AbsolutePathBuf;
 use core_test_support::PathExt;
 
 use super::AstralFileToolTextOutput;
+use super::DEFAULT_READ_MAX_BYTES_WITHOUT_LIMIT;
+use super::DEFAULT_READ_MAX_OUTPUT_TOKENS;
 use super::EMPTY_FILE_REMINDER;
 use super::FILE_HAS_NOT_BEEN_READ_ERROR;
 use super::FILE_MODIFIED_SINCE_READ_ERROR;
@@ -51,6 +54,7 @@ use super::glob_files;
 use super::grep_files;
 use super::is_blocked_device_path;
 use super::read_file;
+use super::read_state_key;
 use super::split_lines_preserving_newline;
 use super::write_file;
 use crate::function_tool::FunctionCallError;
@@ -109,7 +113,6 @@ fn path_key(path: &AbsolutePathBuf) -> String {
 fn read_args(file_path: &str) -> ReadArgs {
     ReadArgs {
         file_path: file_path.to_string(),
-        environment_id: None,
         offset: None,
         limit: None,
     }
@@ -169,6 +172,7 @@ impl FileToolFixture {
             &self.fs,
             &self.sandbox,
             &self.cwd,
+            LOCAL_ENVIRONMENT_ID,
             &self.read_state,
         )
         .await
@@ -185,7 +189,7 @@ async fn write_remote(
         &fixture.fs,
         &fixture.sandbox,
         &fixture.cwd,
-        None,
+        LOCAL_ENVIRONMENT_ID,
         &fixture.read_state,
     )
     .await
@@ -208,7 +212,7 @@ async fn edit_remote(
         &fixture.fs,
         &fixture.sandbox,
         &fixture.cwd,
-        None,
+        LOCAL_ENVIRONMENT_ID,
         &fixture.read_state,
     )
     .await
@@ -263,10 +267,16 @@ impl ExecutorFileSystem for RecordingFileSystem {
 
     async fn create_directory(
         &self,
-        _path: &AbsolutePathBuf,
-        _create_directory_options: CreateDirectoryOptions,
+        path: &AbsolutePathBuf,
+        create_directory_options: CreateDirectoryOptions,
         _sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<()> {
+        self.calls.lock().await.push(format!(
+            "create_directory:{}:{}",
+            path.display(),
+            create_directory_options.recursive
+        ));
+        self.insert_directory(path).await;
         Ok(())
     }
 
@@ -416,6 +426,17 @@ fn file_tools_accept_snake_and_camel_environment_ids() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
+async fn read_state_key_uses_resolved_environment_id() {
+    let fixture = FileToolFixture::with_file("remote.txt", b"contents\n").await;
+
+    let key = read_state_key(&fixture.fs, &fixture.sandbox, "remote-env", &fixture.path)
+        .await
+        .expect("state key");
+
+    assert_eq!(key.environment_id, "remote-env");
+}
+
+#[tokio::test]
 async fn grep_content_output_can_include_line_numbers() {
     let temp_dir = tempfile::TempDir::new().expect("temp dir");
     let cwd = temp_dir.path().abs();
@@ -458,6 +479,7 @@ async fn read_file_formats_text_like_cat_n() {
         &fixture.fs,
         &fixture.sandbox,
         &fixture.cwd,
+        LOCAL_ENVIRONMENT_ID,
         &fixture.read_state,
     )
     .await
@@ -478,9 +500,16 @@ async fn read_file_reports_empty_and_offset_past_end_like_claude() {
     let sandbox = FileSystemSandboxContext::from_permission_profile(PermissionProfile::Disabled);
     let read_state = FileReadStateStore::default();
 
-    let empty = read_file(read_args("empty.txt"), &fs, &sandbox, &cwd, &read_state)
-        .await
-        .expect("read empty succeeds");
+    let empty = read_file(
+        read_args("empty.txt"),
+        &fs,
+        &sandbox,
+        &cwd,
+        LOCAL_ENVIRONMENT_ID,
+        &read_state,
+    )
+    .await
+    .expect("read empty succeeds");
     let past_end = read_file(
         ReadArgs {
             offset: Some(5),
@@ -489,6 +518,7 @@ async fn read_file_reports_empty_and_offset_past_end_like_claude() {
         &fs,
         &sandbox,
         &cwd,
+        LOCAL_ENVIRONMENT_ID,
         &read_state,
     )
     .await
@@ -510,6 +540,7 @@ async fn read_file_repeated_unchanged_full_read_returns_stub() {
         &fixture.fs,
         &fixture.sandbox,
         &fixture.cwd,
+        LOCAL_ENVIRONMENT_ID,
         &fixture.read_state,
     )
     .await
@@ -519,6 +550,7 @@ async fn read_file_repeated_unchanged_full_read_returns_stub() {
         &fixture.fs,
         &fixture.sandbox,
         &fixture.cwd,
+        LOCAL_ENVIRONMENT_ID,
         &fixture.read_state,
     )
     .await
@@ -540,6 +572,7 @@ async fn read_file_partial_output_omits_astral_footer() {
         &fixture.fs,
         &fixture.sandbox,
         &fixture.cwd,
+        LOCAL_ENVIRONMENT_ID,
         &fixture.read_state,
     )
     .await
@@ -547,6 +580,59 @@ async fn read_file_partial_output_omits_astral_footer() {
 
     assert_eq!(output, "1\tone\n2\ttwo\n");
     assert!(!output.contains("[Showing lines"));
+}
+
+#[tokio::test]
+async fn read_without_limit_rejects_large_file() {
+    let fixture = FileToolFixture::with_file(
+        "large.txt",
+        vec![b'a'; DEFAULT_READ_MAX_BYTES_WITHOUT_LIMIT + 1],
+    )
+    .await;
+
+    let error = read_file(
+        read_args("large.txt"),
+        &fixture.fs,
+        &fixture.sandbox,
+        &fixture.cwd,
+        LOCAL_ENVIRONMENT_ID,
+        &fixture.read_state,
+    )
+    .await
+    .expect_err("large unbounded read should fail");
+
+    assert_eq!(
+        model_error(error),
+        format!(
+            "File content ({}) exceeds maximum allowed size ({}). Use offset and limit parameters to read specific portions of the file.",
+            DEFAULT_READ_MAX_BYTES_WITHOUT_LIMIT + 1,
+            DEFAULT_READ_MAX_BYTES_WITHOUT_LIMIT
+        )
+    );
+}
+
+#[tokio::test]
+async fn read_rejects_output_over_token_limit() {
+    let contents = "token ".repeat(DEFAULT_READ_MAX_OUTPUT_TOKENS + 1_000);
+    let fixture = FileToolFixture::with_file("long.txt", contents).await;
+
+    let error = read_file(
+        ReadArgs {
+            limit: Some(1),
+            ..read_args("long.txt")
+        },
+        &fixture.fs,
+        &fixture.sandbox,
+        &fixture.cwd,
+        LOCAL_ENVIRONMENT_ID,
+        &fixture.read_state,
+    )
+    .await
+    .expect_err("token-heavy output should fail");
+
+    let message = model_error(error);
+    assert!(message.contains("exceeds maximum allowed tokens (25000)"));
+    assert!(message.contains("Use offset and limit parameters"));
 }
 
 #[tokio::test]
@@ -567,7 +653,7 @@ async fn edit_empty_old_string_creates_missing_file() {
         LOCAL_FS.as_ref(),
         &sandbox,
         &cwd,
-        None,
+        LOCAL_ENVIRONMENT_ID,
         &read_state,
     )
     .await
@@ -606,7 +692,7 @@ async fn edit_empty_old_string_rejects_existing_nonempty_file() {
         &fixture.fs,
         &fixture.sandbox,
         &fixture.cwd,
-        None,
+        LOCAL_ENVIRONMENT_ID,
         &fixture.read_state,
     )
     .await
@@ -632,7 +718,7 @@ async fn write_uses_executor_file_system() {
         &fixture.fs,
         &fixture.sandbox,
         &fixture.cwd,
-        None,
+        LOCAL_ENVIRONMENT_ID,
         &fixture.read_state,
     )
     .await
@@ -658,9 +744,56 @@ async fn write_uses_executor_file_system() {
     );
     assert_eq!(
         fixture.fs.calls().await,
-        vec![format!("write_file:{}", fixture.path.display())]
+        vec![
+            format!("create_directory:{}:true", fixture.cwd.display()),
+            format!("write_file:{}", fixture.path.display())
+        ]
     );
     assert!(!fixture.path.exists());
+}
+
+#[tokio::test]
+async fn write_creates_missing_parent_directory() {
+    let fixture = FileToolFixture::without_file("nested/remote.txt");
+    let arguments = json!({
+        "file_path": "nested/remote.txt",
+        "content": "nested content\n"
+    })
+    .to_string();
+
+    let output = write_file(
+        arguments,
+        &fixture.fs,
+        &fixture.sandbox,
+        &fixture.cwd,
+        LOCAL_ENVIRONMENT_ID,
+        &fixture.read_state,
+    )
+    .await
+    .expect("write succeeds");
+
+    assert_eq!(
+        output.text,
+        format!("File created successfully at: {}", fixture.path.display())
+    );
+    assert_eq!(
+        fixture
+            .fs
+            .file_contents(&fixture.path)
+            .await
+            .expect("recorded file"),
+        b"nested content\n"
+    );
+    assert_eq!(
+        fixture.fs.calls().await,
+        vec![
+            format!(
+                "create_directory:{}:true",
+                fixture.cwd.join("nested").display()
+            ),
+            format!("write_file:{}", fixture.path.display())
+        ]
+    );
 }
 
 #[tokio::test]
@@ -729,6 +862,7 @@ async fn write_existing_file_succeeds_after_limited_read() {
         &fixture.fs,
         &fixture.sandbox,
         &fixture.cwd,
+        LOCAL_ENVIRONMENT_ID,
         &fixture.read_state,
     )
     .await
@@ -816,10 +950,57 @@ async fn edit_uses_executor_file_system() {
         vec![
             format!("read_file:{}", fixture.path.display()),
             format!("read_file:{}", fixture.path.display()),
+            format!("create_directory:{}:true", fixture.cwd.display()),
             format!("write_file:{}", fixture.path.display())
         ]
     );
     assert!(!fixture.path.exists());
+}
+
+#[tokio::test]
+async fn edit_empty_old_string_creates_missing_parent_directory() {
+    let fixture = FileToolFixture::without_file("nested/created.txt");
+    let output = edit_file(
+        json!({
+            "file_path": "nested/created.txt",
+            "old_string": "",
+            "new_string": "created\n"
+        })
+        .to_string(),
+        &fixture.fs,
+        &fixture.sandbox,
+        &fixture.cwd,
+        LOCAL_ENVIRONMENT_ID,
+        &fixture.read_state,
+    )
+    .await
+    .expect("edit create succeeds");
+
+    assert_eq!(
+        output.text,
+        format!(
+            "The file {} has been updated successfully.",
+            fixture.path.display()
+        )
+    );
+    assert_eq!(
+        fixture
+            .fs
+            .file_contents(&fixture.path)
+            .await
+            .expect("recorded file"),
+        b"created\n"
+    );
+    assert_eq!(
+        fixture.fs.calls().await,
+        vec![
+            format!(
+                "create_directory:{}:true",
+                fixture.cwd.join("nested").display()
+            ),
+            format!("write_file:{}", fixture.path.display())
+        ]
+    );
 }
 
 #[tokio::test]
@@ -837,6 +1018,7 @@ async fn edit_requires_read_but_allows_limited_read_for_existing_file() {
         &fixture.fs,
         &fixture.sandbox,
         &fixture.cwd,
+        LOCAL_ENVIRONMENT_ID,
         &fixture.read_state,
     )
     .await

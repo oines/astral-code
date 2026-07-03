@@ -147,10 +147,9 @@ async fn grep_excludes_vcs_directories_but_not_generated_directories() -> io::Re
     })
     .await?;
 
-    assert_eq!(
-        response.lines,
-        vec!["target/debug/generated.rs", "src/lib.rs"]
-    );
+    let mut lines = response.lines;
+    lines.sort();
+    assert_eq!(lines, vec!["src/lib.rs", "target/debug/generated.rs"]);
     Ok(())
 }
 
@@ -205,6 +204,72 @@ async fn grep_supports_count_content_context_and_glob_filters() -> io::Result<()
         content.lines,
         vec!["root.md-1-alpha", "root.md:2:needle", "root.md-3-omega"]
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn grep_multiline_matches_all_output_modes() -> io::Result<()> {
+    let temp_dir = tempfile::TempDir::new()?;
+    let root = AbsolutePathBuf::from_absolute_path(temp_dir.path())?;
+    std::fs::write(temp_dir.path().join("sample.txt"), "alpha\nbeta\ngamma\n")?;
+
+    let files = grep_search(GrepSearchRequest {
+        pattern: "alpha\nbeta".to_string(),
+        multiline: true,
+        output_mode: GrepOutputMode::FilesWithMatches,
+        ..grep_request_defaults(root.clone())
+    })
+    .await?;
+    assert_eq!(files.lines, vec!["sample.txt"]);
+
+    let count = grep_search(GrepSearchRequest {
+        pattern: "alpha\nbeta".to_string(),
+        multiline: true,
+        output_mode: GrepOutputMode::Count,
+        ..grep_request_defaults(root.clone())
+    })
+    .await?;
+    assert_eq!(count.lines, vec!["sample.txt:1"]);
+
+    let content = grep_search(GrepSearchRequest {
+        pattern: "alpha\nbeta".to_string(),
+        multiline: true,
+        output_mode: GrepOutputMode::Content,
+        line_numbers: true,
+        ..grep_request_defaults(root)
+    })
+    .await?;
+    assert_eq!(
+        content.lines,
+        vec!["sample.txt:1:alpha", "sample.txt:2:beta"]
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn glob_prunes_to_literal_prefix() -> io::Result<()> {
+    let temp_dir = tempfile::TempDir::new()?;
+    let root = AbsolutePathBuf::from_absolute_path(temp_dir.path())?;
+    std::fs::create_dir_all(temp_dir.path().join("src/nested"))?;
+    std::fs::create_dir_all(temp_dir.path().join("wide/nested"))?;
+    std::fs::write(temp_dir.path().join("src/lib.rs"), "")?;
+    std::fs::write(temp_dir.path().join("src/nested/mod.rs"), "")?;
+    std::fs::write(temp_dir.path().join("wide/nested/mod.rs"), "")?;
+
+    let response = glob_search(GlobSearchRequest {
+        root: root.clone(),
+        pattern: "src/**/*.rs".to_string(),
+        max_results: 10,
+    })
+    .await?;
+
+    let mut paths = response
+        .matches
+        .iter()
+        .map(|matched| relative_slash_path(matched.path.as_path(), root.as_path()))
+        .collect::<Vec<_>>();
+    paths.sort();
+    assert_eq!(paths, vec!["src/lib.rs", "src/nested/mod.rs"]);
     Ok(())
 }
 

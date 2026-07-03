@@ -25,7 +25,7 @@ use crate::tools::router::ToolCall;
 use crate::tools::router::ToolCallSource;
 use crate::tools::router::ToolRouter;
 use codex_protocol::error::CodexErr;
-use codex_protocol::models::ResponseInputItem;
+use codex_protocol::models::TranscriptInputItem;
 
 #[derive(Clone)]
 pub(crate) struct ToolCallRuntime {
@@ -64,7 +64,7 @@ impl ToolCallRuntime {
         self,
         call: ToolCall,
         cancellation_token: CancellationToken,
-    ) -> impl std::future::Future<Output = Result<ResponseInputItem, CodexErr>> {
+    ) -> impl std::future::Future<Output = Result<TranscriptInputItem, CodexErr>> {
         let error_call = call.clone();
         let future =
             self.handle_tool_call_with_source(call, ToolCallSource::Direct, cancellation_token);
@@ -183,16 +183,16 @@ impl ToolCallRuntime {
         FunctionCallError::Fatal(format!("tool task failed to receive: {err:?}"))
     }
 
-    fn failure_response(call: ToolCall, err: FunctionCallError) -> ResponseInputItem {
+    fn failure_response(call: ToolCall, err: FunctionCallError) -> TranscriptInputItem {
         let message = err.to_string();
         match call.payload {
-            ToolPayload::ToolSearch { .. } => ResponseInputItem::ToolSearchOutput {
+            ToolPayload::ToolSearch { .. } => TranscriptInputItem::ToolSearchOutput {
                 call_id: call.call_id,
                 status: "completed".to_string(),
                 execution: "client".to_string(),
                 tools: Vec::new(),
             },
-            ToolPayload::Custom { .. } => ResponseInputItem::CustomToolCallOutput {
+            ToolPayload::Custom { .. } => TranscriptInputItem::CustomToolCallOutput {
                 call_id: call.call_id,
                 name: None,
                 output: codex_protocol::models::FunctionCallOutputPayload {
@@ -200,7 +200,7 @@ impl ToolCallRuntime {
                     success: Some(false),
                 },
             },
-            _ => ResponseInputItem::FunctionCallOutput {
+            _ => TranscriptInputItem::FunctionCallOutput {
                 call_id: call.call_id,
                 output: codex_protocol::models::FunctionCallOutputPayload {
                     body: codex_protocol::models::FunctionCallOutputBody::Text(message),
@@ -449,7 +449,7 @@ mod tests {
             .await
             .expect("timed out waiting for tool response")
             .expect("tool response task should join")?;
-        let expected_response = ResponseInputItem::FunctionCallOutput {
+        let expected_response = TranscriptInputItem::FunctionCallOutput {
             call_id: "call-1".to_string(),
             output: FunctionCallOutputPayload {
                 body: FunctionCallOutputBody::Text("ok".to_string()),
@@ -521,7 +521,7 @@ mod tests {
             .await
             .expect("timed out waiting for tool response")
             .expect("tool response task should join")?;
-        let ResponseInputItem::FunctionCallOutput { output, .. } = response else {
+        let TranscriptInputItem::FunctionCallOutput { output, .. } = response else {
             anyhow::bail!("cancelled tool should return function output");
         };
         let FunctionCallOutputBody::Text(text) = output.body else {

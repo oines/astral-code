@@ -27,7 +27,7 @@ async fn formats_basic_record() {
     };
     let (_, turn_context) = make_session_and_context().await;
     let item = user_shell_command_record_item("echo hi", &exec_output, &turn_context);
-    let ResponseItem::Message { content, .. } = item else {
+    let TranscriptItem::Message { content, .. } = item else {
         panic!("expected message");
     };
     let [ContentItem::InputText { text }] = content.as_slice() else {

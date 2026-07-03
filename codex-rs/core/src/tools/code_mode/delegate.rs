@@ -8,7 +8,7 @@ use codex_code_mode::CodeModeSessionDelegate;
 use codex_code_mode::NotificationFuture;
 use codex_code_mode::ToolInvocationFuture;
 use codex_protocol::models::FunctionCallOutputPayload;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use serde_json::Value as JsonValue;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
@@ -297,7 +297,7 @@ impl CoreTurnHost {
         }
         self.exec
             .session
-            .inject_if_running(vec![ResponseItem::FunctionCallOutput {
+            .inject_if_running(vec![TranscriptItem::FunctionCallOutput {
                 call_id,
                 output: FunctionCallOutputPayload::from_text(text),
             }])

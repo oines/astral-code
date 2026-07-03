@@ -2,7 +2,7 @@ use codex_api::SearchInput;
 use codex_core::parse_turn_item;
 use codex_protocol::items::TurnItem;
 use codex_protocol::models::ContentItem;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_tools::retain_tail_from_last_n_user_messages;
 use codex_tools::truncate_assistant_output_text_to_token_budget;
 
@@ -14,7 +14,7 @@ const USER_ROLE: &str = "user";
 ///
 /// The tail keeps the previous user text message, up to 1k tokens of assistant
 /// text that followed it, and the current user text message.
-pub(crate) fn recent_input(items: &[ResponseItem]) -> Option<SearchInput> {
+pub(crate) fn recent_input(items: &[TranscriptItem]) -> Option<SearchInput> {
     let mut messages = Vec::new();
     for item in items {
         push_visible_message(&mut messages, item);
@@ -25,12 +25,12 @@ pub(crate) fn recent_input(items: &[ResponseItem]) -> Option<SearchInput> {
     (!messages.is_empty()).then_some(SearchInput::Items(messages))
 }
 
-fn push_visible_message(messages: &mut Vec<ResponseItem>, item: &ResponseItem) {
+fn push_visible_message(messages: &mut Vec<TranscriptItem>, item: &TranscriptItem) {
     match item {
-        ResponseItem::Message { role, .. } if role == ASSISTANT_ROLE => {
+        TranscriptItem::Message { role, .. } if role == ASSISTANT_ROLE => {
             messages.push(item.clone());
         }
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id,
             role,
             content,
@@ -44,7 +44,7 @@ fn push_visible_message(messages: &mut Vec<ResponseItem>, item: &ResponseItem) {
                 .cloned()
                 .collect::<Vec<_>>();
             if !content.is_empty() {
-                messages.push(ResponseItem::Message {
+                messages.push(TranscriptItem::Message {
                     id: id.clone(),
                     role: role.clone(),
                     content,
@@ -60,15 +60,15 @@ fn push_visible_message(messages: &mut Vec<ResponseItem>, item: &ResponseItem) {
 mod tests {
     use codex_api::SearchInput;
     use codex_protocol::models::ContentItem;
-    use codex_protocol::models::ResponseItem;
+    use codex_protocol::models::TranscriptItem;
     use pretty_assertions::assert_eq;
 
     use super::ASSISTANT_ROLE;
     use super::USER_ROLE;
     use super::recent_input;
 
-    fn message(role: &str, text: &str) -> ResponseItem {
-        ResponseItem::Message {
+    fn message(role: &str, text: &str) -> TranscriptItem {
+        TranscriptItem::Message {
             id: None,
             role: role.to_string(),
             content: vec![if role == ASSISTANT_ROLE {
@@ -91,7 +91,7 @@ mod tests {
             message(USER_ROLE, "old user"),
             message(ASSISTANT_ROLE, "old assistant"),
             message(USER_ROLE, "previous user"),
-            ResponseItem::FunctionCall {
+            TranscriptItem::FunctionCall {
                 id: None,
                 name: "tool".to_string(),
                 namespace: None,
@@ -116,7 +116,7 @@ mod tests {
 
     #[test]
     fn keeps_only_text_from_recent_user_messages() {
-        let previous_user = ResponseItem::Message {
+        let previous_user = TranscriptItem::Message {
             id: None,
             role: USER_ROLE.to_string(),
             content: vec![

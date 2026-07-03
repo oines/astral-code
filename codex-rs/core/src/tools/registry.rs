@@ -32,7 +32,7 @@ use crate::tools::tool_dispatch_trace::ToolDispatchTrace;
 use crate::util::error_or_panic;
 use codex_extension_api::ToolCallOutcome;
 use codex_protocol::models::FunctionCallOutputPayload;
-use codex_protocol::models::ResponseInputItem;
+use codex_protocol::models::TranscriptInputItem;
 use codex_protocol::protocol::EventMsg;
 use codex_rollout::state_db;
 use codex_tools::ToolName;
@@ -93,7 +93,7 @@ pub(crate) trait CoreToolRuntime: ToolExecutor<ToolInvocation> {
                     // Most function tools can expose their model-facing output
                     // as the hook response. Outputs with a more stable hook
                     // contract should override post_tool_use_response above.
-                    let ResponseInputItem::FunctionCallOutput {
+                    let TranscriptInputItem::FunctionCallOutput {
                         output: FunctionCallOutputPayload { body, .. },
                         ..
                     } = result.to_response_item(&invocation.call_id, &invocation.payload)
@@ -171,7 +171,7 @@ pub(crate) struct AnyToolResult {
 }
 
 impl AnyToolResult {
-    pub(crate) fn into_response(self) -> ResponseInputItem {
+    pub(crate) fn into_response(self) -> TranscriptInputItem {
         let Self {
             call_id,
             payload,
@@ -203,7 +203,7 @@ impl ToolOutput for PostToolUseFeedbackOutput {
         self.original.success_for_logging()
     }
 
-    fn to_response_item(&self, call_id: &str, payload: &ToolPayload) -> ResponseInputItem {
+    fn to_response_item(&self, call_id: &str, payload: &ToolPayload) -> TranscriptInputItem {
         self.model_visible.to_response_item(call_id, payload)
     }
 

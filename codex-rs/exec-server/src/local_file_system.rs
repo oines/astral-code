@@ -368,6 +368,9 @@ impl ExecutorFileSystem for DirectFileSystem {
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<()> {
         reject_sandbox_context(sandbox)?;
+        if let Some(parent) = path.as_path().parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
         tokio::fs::write(path.as_path(), contents).await
     }
 

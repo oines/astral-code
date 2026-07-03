@@ -13,7 +13,7 @@ use codex_protocol::AgentPath;
 use codex_protocol::ThreadId;
 use codex_protocol::error::CodexErr;
 use codex_protocol::models::BaseInstructions;
-use codex_protocol::models::ResponseInputItem;
+use codex_protocol::models::TranscriptInputItem;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::openai_models::ReasoningEffortPreset;
 use codex_protocol::protocol::CollabAgentRef;
@@ -55,7 +55,7 @@ pub(crate) fn tool_output_response_item<T>(
     value: &T,
     success: Option<bool>,
     tool_name: &str,
-) -> ResponseInputItem
+) -> TranscriptInputItem
 where
     T: Serialize,
 {

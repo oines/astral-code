@@ -360,6 +360,14 @@ pub fn sandbox_network_env_var() -> &'static str {
     codex_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR
 }
 
+pub fn is_seatbelt_sandboxed() -> bool {
+    codex_core::spawn::is_seatbelt_sandboxed()
+}
+
+pub fn is_network_sandbox_disabled() -> bool {
+    codex_core::spawn::is_network_sandbox_disabled()
+}
+
 const REMOTE_ENV_ENV_VAR: &str = "CODEX_TEST_REMOTE_ENV";
 
 pub fn remote_env_env_var() -> &'static str {
@@ -557,9 +565,7 @@ pub mod fs_wait {
 #[macro_export]
 macro_rules! skip_if_sandbox {
     () => {{
-        if ::std::env::var($crate::sandbox_env_var())
-            == ::core::result::Result::Ok("seatbelt".to_string())
-        {
+        if $crate::is_seatbelt_sandboxed() {
             eprintln!(
                 "{} is set to 'seatbelt', skipping test.",
                 $crate::sandbox_env_var()
@@ -568,9 +574,7 @@ macro_rules! skip_if_sandbox {
         }
     }};
     ($return_value:expr $(,)?) => {{
-        if ::std::env::var($crate::sandbox_env_var())
-            == ::core::result::Result::Ok("seatbelt".to_string())
-        {
+        if $crate::is_seatbelt_sandboxed() {
             eprintln!(
                 "{} is set to 'seatbelt', skipping test.",
                 $crate::sandbox_env_var()
@@ -583,7 +587,7 @@ macro_rules! skip_if_sandbox {
 #[macro_export]
 macro_rules! skip_if_no_network {
     () => {{
-        if ::std::env::var($crate::sandbox_network_env_var()).is_ok() {
+        if $crate::is_network_sandbox_disabled() {
             println!(
                 "Skipping test because it cannot execute when network is disabled in a Codex sandbox."
             );
@@ -591,7 +595,7 @@ macro_rules! skip_if_no_network {
         }
     }};
     ($return_value:expr $(,)?) => {{
-        if ::std::env::var($crate::sandbox_network_env_var()).is_ok() {
+        if $crate::is_network_sandbox_disabled() {
             println!(
                 "Skipping test because it cannot execute when network is disabled in a Codex sandbox."
             );

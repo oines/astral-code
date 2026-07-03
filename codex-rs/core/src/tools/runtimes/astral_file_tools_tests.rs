@@ -40,7 +40,7 @@ fn test_request(
         hook_input: json!({ "file_path": "file.txt" }),
         turn_environment: test_turn_environment(codex_exec_server::LOCAL_ENVIRONMENT_ID),
         cwd: cwd.clone(),
-        environment_id: None,
+        environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
         read_state: Arc::new(FileReadStateStore::default()),
         sandbox_permissions: SandboxPermissions::WithAdditionalPermissions,
         additional_permissions,

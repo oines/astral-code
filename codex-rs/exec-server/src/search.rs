@@ -4,6 +4,11 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+use std::time::Duration;
+use std::time::Instant;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
@@ -31,6 +36,8 @@ use ignore::types::TypesBuilder;
 
 const GREP_EXCLUDED_DIRECTORY_GLOBS: &[&str] = &["!.git", "!.svn", "!.hg", "!.bzr", "!.jj", "!.sl"];
 const MAX_COLUMNS: usize = 500;
+const MAX_GLOB_SCAN_ENTRIES: usize = 100_000;
+const MAX_GLOB_SCAN_DURATION: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Debug)]
 struct SearchCandidate {
@@ -90,7 +97,11 @@ fn glob_search_blocking(request: GlobSearchRequest) -> io::Result<GlobSearchResp
 }
 
 fn glob_candidates(root: &Path, override_matcher: &Override) -> io::Result<Vec<GlobCandidate>> {
-    let metadata = std::fs::metadata(root)?;
+    let metadata = match std::fs::metadata(root) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) => return Err(err),
+    };
     if metadata.is_file() {
         if !path_matches_overrides(override_matcher, root, false) {
             return Ok(Vec::new());
@@ -110,14 +121,30 @@ fn glob_candidates(root: &Path, override_matcher: &Override) -> io::Result<Vec<G
     }
 
     let candidates = Arc::new(Mutex::new(Vec::new()));
+    let scanned_entries = Arc::new(AtomicUsize::new(0));
+    let entry_limit_exceeded = Arc::new(AtomicBool::new(false));
+    let time_limit_exceeded = Arc::new(AtomicBool::new(false));
+    let started_at = Instant::now();
     let mut builder = walk_builder(root, glob_walk_config());
     builder.overrides(override_matcher.clone());
     builder.build_parallel().run(|| {
         let candidates = Arc::clone(&candidates);
+        let scanned_entries = Arc::clone(&scanned_entries);
+        let entry_limit_exceeded = Arc::clone(&entry_limit_exceeded);
+        let time_limit_exceeded = Arc::clone(&time_limit_exceeded);
         Box::new(move |result| {
             let Ok(entry) = result else {
                 return WalkState::Continue;
             };
+            let scanned = scanned_entries.fetch_add(1, Ordering::Relaxed) + 1;
+            if scanned > MAX_GLOB_SCAN_ENTRIES {
+                entry_limit_exceeded.store(true, Ordering::Relaxed);
+                return WalkState::Quit;
+            }
+            if started_at.elapsed() > MAX_GLOB_SCAN_DURATION {
+                time_limit_exceeded.store(true, Ordering::Relaxed);
+                return WalkState::Quit;
+            }
             if !entry_is_file(&entry) {
                 return WalkState::Continue;
             }
@@ -143,6 +170,13 @@ fn glob_candidates(root: &Path, override_matcher: &Override) -> io::Result<Vec<G
             WalkState::Continue
         })
     });
+
+    if entry_limit_exceeded.load(Ordering::Relaxed) || time_limit_exceeded.load(Ordering::Relaxed) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Glob search scanned too many paths. Use a more specific path or pattern.",
+        ));
+    }
 
     let mut candidates = into_inner_vec(candidates, "glob candidates lock")?;
     candidates.sort_by(|left, right| {
@@ -229,7 +263,7 @@ fn grep_files_with_matches(
 ) -> io::Result<Vec<String>> {
     let metadata = std::fs::metadata(request.root.as_path())?;
     if metadata.is_file() {
-        let mut searcher = files_with_matches_searcher();
+        let mut searcher = files_with_matches_searcher(request.multiline);
         if !path_has_match(&mut searcher, matcher, request.root.as_path()) {
             return Ok(Vec::new());
         }
@@ -243,7 +277,7 @@ fn grep_files_with_matches(
     let builder = grep_walk_builder(request.root.as_path(), overrides, type_matcher);
     builder.build_parallel().run(|| {
         let matches = Arc::clone(&matches);
-        let mut searcher = files_with_matches_searcher();
+        let mut searcher = files_with_matches_searcher(request.multiline);
         Box::new(move |result| {
             let Ok(entry) = result else {
                 return WalkState::Continue;
@@ -350,10 +384,11 @@ fn grep_candidates(
     Ok(candidates)
 }
 
-fn files_with_matches_searcher() -> Searcher {
+fn files_with_matches_searcher(multiline: bool) -> Searcher {
     let mut builder = SearcherBuilder::new();
     builder
         .binary_detection(BinaryDetection::quit(0))
+        .multi_line(multiline)
         .line_number(false)
         .max_matches(Some(1));
     builder.build()
@@ -615,13 +650,35 @@ fn split_grep_globs(glob: &str) -> Vec<String> {
 }
 
 fn glob_root_and_pattern(root: &Path, pattern: &str) -> (PathBuf, String) {
-    if Path::new(pattern).is_absolute()
-        && let Some((base_dir, relative_pattern)) = absolute_glob_base(pattern)
+    let pattern = normalize_pattern(pattern);
+    if Path::new(&pattern).is_absolute()
+        && let Some((base_dir, relative_pattern)) = absolute_glob_base(&pattern)
     {
-        return (base_dir, normalize_pattern(&relative_pattern));
+        return (base_dir, relative_pattern);
+    }
+    if let Some((base_dir, relative_pattern)) = relative_glob_base(&pattern) {
+        return (root.join(base_dir), relative_pattern);
     }
 
-    (root.to_path_buf(), normalize_pattern(pattern))
+    (root.to_path_buf(), pattern)
+}
+
+fn relative_glob_base(pattern: &str) -> Option<(PathBuf, String)> {
+    if Path::new(pattern).is_absolute() {
+        return None;
+    }
+    let glob_index = pattern.find(['*', '?', '[', '{']).unwrap_or(pattern.len());
+    let static_prefix = &pattern[..glob_index];
+    let last_separator = static_prefix.rfind('/')?;
+    let base_dir = PathBuf::from(&static_prefix[..last_separator]);
+    if base_dir.as_os_str().is_empty() {
+        return None;
+    }
+    let mut relative_pattern = pattern[last_separator + 1..].to_string();
+    if !relative_pattern.contains('/') && !relative_pattern.contains("**") {
+        relative_pattern = format!("/{relative_pattern}");
+    }
+    Some((base_dir, relative_pattern))
 }
 
 fn absolute_glob_base(pattern: &str) -> Option<(PathBuf, String)> {
@@ -643,7 +700,10 @@ fn absolute_glob_base(pattern: &str) -> Option<(PathBuf, String)> {
         last_separator
     };
     let base_dir = PathBuf::from(&pattern[..base_end]);
-    let relative_pattern = pattern[last_separator + 1..].to_string();
+    let mut relative_pattern = pattern[last_separator + 1..].to_string();
+    if !relative_pattern.contains('/') && !relative_pattern.contains("**") {
+        relative_pattern = format!("/{relative_pattern}");
+    }
     Some((base_dir, relative_pattern))
 }
 

@@ -38,9 +38,9 @@ use codex_protocol::models::BaseInstructions;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::PermissionProfile;
-use codex_protocol::models::ResponseInputItem;
-use codex_protocol::models::ResponseItem;
 use codex_protocol::models::SandboxEnforcement;
+use codex_protocol::models::TranscriptInputItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::AgentStatus;
 use codex_protocol::protocol::AskForApproval;
@@ -205,8 +205,8 @@ where
         },
     );
     match response {
-        ResponseInputItem::FunctionCallOutput { output, .. }
-        | ResponseInputItem::CustomToolCallOutput { output, .. } => {
+        TranscriptInputItem::FunctionCallOutput { output, .. }
+        | TranscriptInputItem::CustomToolCallOutput { output, .. } => {
             let content = match output.body {
                 FunctionCallOutputBody::Text(text) => text,
                 FunctionCallOutputBody::ContentItems(items) => {
@@ -3038,7 +3038,7 @@ async fn resume_agent_restores_closed_agent_and_accepts_send_input() {
     let thread = manager
         .resume_thread_with_history(
             config.clone(),
-            InitialHistory::Forked(vec![RolloutItem::ResponseItem(ResponseItem::Message {
+            InitialHistory::Forked(vec![RolloutItem::TranscriptItem(TranscriptItem::Message {
                 id: None,
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {

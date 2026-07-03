@@ -12,8 +12,8 @@ use codex_protocol::models::DEFAULT_IMAGE_DETAIL;
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::FunctionCallOutputPayload;
-use codex_protocol::models::ResponseInputItem;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptInputItem;
+use codex_protocol::models::TranscriptItem;
 use codex_tools::ResponsesApiNamespaceTool;
 use pretty_assertions::assert_eq;
 
@@ -63,7 +63,7 @@ fn omitted_references_generate_with_fixed_defaults() {
 #[test]
 fn recent_image_fallback_selects_newest_images_in_chronological_order() {
     let history = vec![
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![
@@ -75,36 +75,36 @@ fn recent_image_fallback_selects_newest_images_in_chronological_order() {
             ],
             phase: None,
         },
-        ResponseItem::FunctionCall {
+        TranscriptItem::FunctionCall {
             id: None,
             name: "mcp_image".to_string(),
             namespace: None,
             arguments: "{}".to_string(),
             call_id: "mcp-call".to_string(),
         },
-        ResponseItem::FunctionCallOutput {
+        TranscriptItem::FunctionCallOutput {
             call_id: "mcp-call".to_string(),
             output: image_output("mcp"),
         },
-        ResponseItem::CustomToolCall {
+        TranscriptItem::CustomToolCall {
             id: None,
             status: Some("completed".to_string()),
             call_id: "code-mode-call".to_string(),
             name: "exec".to_string(),
             input: String::new(),
         },
-        ResponseItem::CustomToolCallOutput {
+        TranscriptItem::CustomToolCallOutput {
             call_id: "code-mode-call".to_string(),
             name: Some("exec".to_string()),
             output: image_output("code-mode"),
         },
-        ResponseItem::ImageGenerationCall {
+        TranscriptItem::ImageGenerationCall {
             id: "generated-call".to_string(),
             status: "completed".to_string(),
             revised_prompt: None,
             result: "generated".to_string(),
         },
-        ResponseItem::FunctionCallOutput {
+        TranscriptItem::FunctionCallOutput {
             call_id: "orphan-call".to_string(),
             output: image_output("orphan"),
         },
@@ -183,7 +183,7 @@ fn recent_image_fallback_requires_requested_count() {
             referenced_image_paths: None,
             num_last_images_to_include: Some(2),
         },
-        &[ResponseItem::Message {
+        &[TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![input_image("only-image")],
@@ -207,7 +207,7 @@ fn generated_output_returns_image_input_and_output_hint() {
         output_hint: Some(output_hint.clone()),
     };
 
-    let ResponseInputItem::FunctionCallOutput {
+    let TranscriptInputItem::FunctionCallOutput {
         output: response_output,
         ..
     } = output.to_response_item("call-1", &function_payload())
@@ -253,7 +253,7 @@ fn generated_output_omits_oversized_output_hint() {
         output_hint: extension_image_generation_output_hint("/tmp", long_path),
     };
 
-    let ResponseInputItem::FunctionCallOutput {
+    let TranscriptInputItem::FunctionCallOutput {
         output: response_output,
         ..
     } = output.to_response_item("call-1", &function_payload())

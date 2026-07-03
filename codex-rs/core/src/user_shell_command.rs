@@ -1,5 +1,5 @@
 use codex_protocol::exec_output::ExecToolCallOutput;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 
 use crate::context::ContextualUserFragment;
 use crate::context::UserShellCommand;
@@ -28,7 +28,7 @@ pub fn user_shell_command_record_item(
     command: &str,
     exec_output: &ExecToolCallOutput,
     turn_context: &TurnContext,
-) -> ResponseItem {
+) -> TranscriptItem {
     ContextualUserFragment::into(user_shell_command_fragment(
         command,
         exec_output,

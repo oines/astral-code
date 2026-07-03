@@ -5,7 +5,7 @@ use codex_config::config_toml::SecretString;
 use codex_config::config_toml::WebSearchProvider;
 use codex_config::config_toml::WebSearchRuntimeConfig;
 use codex_protocol::items::WebSearchItem;
-use codex_protocol::models::ResponseInputItem;
+use codex_protocol::models::TranscriptInputItem;
 use codex_protocol::protocol::TruncationPolicy;
 use codex_tools::ConversationHistory;
 use codex_tools::ExtensionTurnItem;
@@ -184,7 +184,7 @@ async fn web_search_failure_returns_model_output_and_completes_visible_item() {
             arguments: "{}".to_string(),
         },
     );
-    let ResponseInputItem::FunctionCallOutput { output, .. } = response else {
+    let TranscriptInputItem::FunctionCallOutput { output, .. } = response else {
         panic!("expected function call output");
     };
     assert_eq!(output.success, Some(false));
@@ -239,7 +239,7 @@ async fn web_fetch_failure_returns_model_output() {
             arguments: "{}".to_string(),
         },
     );
-    let ResponseInputItem::FunctionCallOutput { output, .. } = response else {
+    let TranscriptInputItem::FunctionCallOutput { output, .. } = response else {
         panic!("expected function call output");
     };
     assert_eq!(output.success, Some(false));

@@ -75,6 +75,21 @@ impl FileSystemHandler {
                 "{FS_WRITE_FILE_METHOD} requires valid base64 dataBase64: {err}"
             ))
         })?;
+        if let Some(parent) = self
+            .file_system
+            .parent(&params.path)
+            .await
+            .map_err(map_fs_error)?
+        {
+            self.file_system
+                .create_directory(
+                    &parent,
+                    CreateDirectoryOptions { recursive: true },
+                    params.sandbox.as_ref(),
+                )
+                .await
+                .map_err(map_fs_error)?;
+        }
         self.file_system
             .write_file(&params.path, bytes, params.sandbox.as_ref())
             .await

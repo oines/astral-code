@@ -30,6 +30,7 @@ use crate::tools::runtimes::astral_file_tools::AstralFileToolRuntime;
 use crate::tools::sandboxing::ExecApprovalRequirement;
 use crate::tools::sandboxing::ToolCtx;
 use crate::tools::sandboxing::ToolError;
+use codex_exec_server::CreateDirectoryOptions;
 use codex_exec_server::ExecutorFileSystem;
 use codex_exec_server::FileMetadata;
 use codex_exec_server::FileSystemSandboxContext;
@@ -61,10 +62,14 @@ use codex_tools::WRITE_TOOL_NAME;
 use codex_tools::astral_core_tool_by_name;
 use codex_tools::parse_tool_input_schema_without_compaction;
 use codex_utils_absolute_path::AbsolutePathBuf;
+use codex_utils_output_truncation::approx_token_count;
 use serde::Deserialize;
 use serde_json::Value;
 
 const DEFAULT_READ_LINE_LIMIT: usize = 2_000;
+const DEFAULT_READ_MAX_BYTES_WITHOUT_LIMIT: usize = 256 * 1024;
+const DEFAULT_READ_MAX_OUTPUT_TOKENS: usize = 25_000;
+const READ_MAX_OUTPUT_TOKENS_ENV_VAR: &str = "CLAUDE_CODE_MAX_OUTPUT_TOKENS";
 const DEFAULT_GLOB_RESULT_LIMIT: usize = 100;
 const DEFAULT_GREP_HEAD_LIMIT: usize = 250;
 const FILE_UNCHANGED_STUB: &str = "File unchanged since last read. The content from the earlier Read tool_result in this conversation is still current — refer to that instead of re-reading.";
@@ -112,7 +117,7 @@ struct FileReadState {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct FileReadStateKey {
-    environment_id: Option<String>,
+    environment_id: String,
     path: String,
 }
 
@@ -239,7 +244,7 @@ impl ToolExecutor<ToolInvocation> for AstralFileToolHandler {
             hook_input,
             turn_environment: turn_environment.clone(),
             cwd,
-            environment_id,
+            environment_id: turn_environment.environment_id.clone(),
             read_state,
             sandbox_permissions: permission_plan.sandbox_permissions,
             additional_permissions: permission_plan.additional_permissions,
@@ -341,8 +346,6 @@ fn astral_file_tool_spec(name: &str) -> ToolSpec {
 #[derive(Deserialize)]
 struct ReadArgs {
     file_path: String,
-    #[serde(default, rename = "environment_id", alias = "environmentId")]
-    environment_id: Option<String>,
     #[serde(default)]
     offset: Option<usize>,
     #[serde(default)]
@@ -354,6 +357,7 @@ async fn read_file(
     fs: &dyn ExecutorFileSystem,
     sandbox: &FileSystemSandboxContext,
     cwd: &AbsolutePathBuf,
+    environment_id: &str,
     read_state: &FileReadStateStore,
 ) -> Result<String, FunctionCallError> {
     let path = resolve_path(cwd, &args.file_path);
@@ -381,6 +385,13 @@ async fn read_file(
     let bytes = fs.read_file(&path, Some(sandbox)).await.map_err(|err| {
         FunctionCallError::RespondToModel(format!("unable to read `{}`: {err}", path.display()))
     })?;
+    if args.limit.is_none() && bytes.len() > DEFAULT_READ_MAX_BYTES_WITHOUT_LIMIT {
+        return Err(FunctionCallError::RespondToModel(format!(
+            "File content ({}) exceeds maximum allowed size ({}). Use offset and limit parameters to read specific portions of the file.",
+            bytes.len(),
+            DEFAULT_READ_MAX_BYTES_WITHOUT_LIMIT
+        )));
+    }
     let text = String::from_utf8_lossy(&bytes);
     let lines = split_lines_preserving_newline(&text);
     let start_line = args.offset.unwrap_or(1).max(1);
@@ -388,7 +399,7 @@ async fn read_file(
     let requested_limit = args.limit.unwrap_or(DEFAULT_READ_LINE_LIMIT);
     let end = start.saturating_add(requested_limit).min(lines.len());
     let requested_offset = Some(start_line);
-    let state_key = read_state_key(fs, sandbox, args.environment_id.clone(), &path).await?;
+    let state_key = read_state_key(fs, sandbox, environment_id, &path).await?;
 
     if let Some(previous) = read_state.get(&state_key)
         && !previous.is_partial_view
@@ -420,7 +431,24 @@ async fn read_file(
         ));
     }
 
-    Ok(add_line_numbers(&lines[start..end], start + 1))
+    let output_lines = &lines[start..end];
+    let output_token_count = approx_token_count(&output_lines.concat());
+    let max_output_tokens = read_max_output_tokens();
+    if output_token_count > max_output_tokens {
+        return Err(FunctionCallError::RespondToModel(format!(
+            "File content ({output_token_count} tokens) exceeds maximum allowed tokens ({max_output_tokens}). Use offset and limit parameters to read specific portions of the file."
+        )));
+    }
+
+    Ok(add_line_numbers(output_lines, start + 1))
+}
+
+fn read_max_output_tokens() -> usize {
+    std::env::var(READ_MAX_OUTPUT_TOKENS_ENV_VAR)
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(DEFAULT_READ_MAX_OUTPUT_TOKENS)
 }
 
 fn is_blocked_device_path(path: &Path) -> bool {
@@ -470,6 +498,7 @@ pub(crate) async fn execute_astral_file_tool(
                 fs.as_ref(),
                 sandbox,
                 &req.cwd,
+                &req.environment_id,
                 req.read_state.as_ref(),
             )
             .await
@@ -481,7 +510,7 @@ pub(crate) async fn execute_astral_file_tool(
                 fs.as_ref(),
                 sandbox,
                 &req.cwd,
-                req.environment_id.clone(),
+                &req.environment_id,
                 req.read_state.as_ref(),
             )
             .await?
@@ -492,7 +521,7 @@ pub(crate) async fn execute_astral_file_tool(
                 fs.as_ref(),
                 sandbox,
                 &req.cwd,
-                req.environment_id.clone(),
+                &req.environment_id,
                 req.read_state.as_ref(),
             )
             .await?
@@ -799,7 +828,7 @@ async fn write_file(
     fs: &dyn ExecutorFileSystem,
     sandbox: &FileSystemSandboxContext,
     cwd: &AbsolutePathBuf,
-    environment_id: Option<String>,
+    environment_id: &str,
     read_state: &FileReadStateStore,
 ) -> Result<AstralFileToolTextOutput, FunctionCallError> {
     let args: WriteArgs = parse_arguments(&arguments)?;
@@ -813,7 +842,7 @@ async fn write_file(
             )));
         }
         let current_text = read_text_lossy(fs, sandbox, &path).await?;
-        let state_key = read_state_key(fs, sandbox, environment_id.clone(), &path).await?;
+        let state_key = read_state_key(fs, sandbox, environment_id, &path).await?;
         validate_full_read_state(
             read_state,
             &state_key,
@@ -870,7 +899,7 @@ async fn edit_file(
     fs: &dyn ExecutorFileSystem,
     sandbox: &FileSystemSandboxContext,
     cwd: &AbsolutePathBuf,
-    environment_id: Option<String>,
+    environment_id: &str,
     read_state: &FileReadStateStore,
 ) -> Result<AstralFileToolTextOutput, FunctionCallError> {
     let args: EditArgs = parse_arguments(&arguments)?;
@@ -898,7 +927,7 @@ async fn edit_file(
     let Some((text, metadata)) = current else {
         return Err(file_does_not_exist_error(cwd));
     };
-    let state_key = read_state_key(fs, sandbox, environment_id.clone(), &path).await?;
+    let state_key = read_state_key(fs, sandbox, environment_id, &path).await?;
     validate_full_read_state(read_state, &state_key, &text, metadata.modified_at_ms)?;
     let occurrences = text.matches(&args.old_string).count();
     if occurrences == 0 {
@@ -950,7 +979,7 @@ async fn edit_empty_old_string(
     fs: &dyn ExecutorFileSystem,
     sandbox: &FileSystemSandboxContext,
     read_state: &FileReadStateStore,
-    environment_id: Option<String>,
+    environment_id: &str,
     path: &AbsolutePathBuf,
     current: Option<(String, FileMetadata)>,
 ) -> Result<AstralFileToolTextOutput, FunctionCallError> {
@@ -1077,7 +1106,7 @@ async fn read_text_lossy(
 async fn read_state_key(
     fs: &dyn ExecutorFileSystem,
     sandbox: &FileSystemSandboxContext,
-    environment_id: Option<String>,
+    environment_id: &str,
     path: &AbsolutePathBuf,
 ) -> Result<FileReadStateKey, FunctionCallError> {
     let canonical = fs.canonicalize(path, Some(sandbox)).await.map_err(|err| {
@@ -1087,7 +1116,7 @@ async fn read_state_key(
         ))
     })?;
     Ok(FileReadStateKey {
-        environment_id,
+        environment_id: environment_id.to_string(),
         path: canonical.to_string_lossy().into_owned(),
     })
 }
@@ -1095,7 +1124,7 @@ async fn read_state_key(
 async fn best_effort_read_state_key(
     fs: &dyn ExecutorFileSystem,
     sandbox: &FileSystemSandboxContext,
-    environment_id: Option<String>,
+    environment_id: &str,
     path: &AbsolutePathBuf,
 ) -> FileReadStateKey {
     let canonical = fs
@@ -1103,7 +1132,7 @@ async fn best_effort_read_state_key(
         .await
         .unwrap_or_else(|_| path.clone());
     FileReadStateKey {
-        environment_id,
+        environment_id: environment_id.to_string(),
         path: canonical.to_string_lossy().into_owned(),
     }
 }
@@ -1144,7 +1173,7 @@ async fn record_full_file_state(
     fs: &dyn ExecutorFileSystem,
     sandbox: &FileSystemSandboxContext,
     read_state: &FileReadStateStore,
-    environment_id: Option<String>,
+    environment_id: &str,
     path: &AbsolutePathBuf,
     content: String,
 ) {
@@ -1179,6 +1208,7 @@ async fn write_file_contents(
     path: &AbsolutePathBuf,
     contents: Vec<u8>,
 ) -> Result<(), FunctionCallError> {
+    ensure_parent_directory(fs, sandbox, path).await?;
     fs.write_file(path, contents, Some(sandbox))
         .await
         .map_err(|err| {
@@ -1187,6 +1217,34 @@ async fn write_file_contents(
                 path.display()
             ))
         })
+}
+
+async fn ensure_parent_directory(
+    fs: &dyn ExecutorFileSystem,
+    sandbox: &FileSystemSandboxContext,
+    path: &AbsolutePathBuf,
+) -> Result<(), FunctionCallError> {
+    let parent = fs.parent(path).await.map_err(|err| {
+        FunctionCallError::RespondToModel(format!(
+            "unable to resolve parent for `{}`: {err}",
+            path.display()
+        ))
+    })?;
+    let Some(parent) = parent else {
+        return Ok(());
+    };
+    fs.create_directory(
+        &parent,
+        CreateDirectoryOptions { recursive: true },
+        Some(sandbox),
+    )
+    .await
+    .map_err(|err| {
+        FunctionCallError::RespondToModel(format!(
+            "unable to create parent directory `{}`: {err}",
+            parent.display()
+        ))
+    })
 }
 
 #[derive(Deserialize)]
@@ -1575,6 +1633,10 @@ fn is_pdf_path(path: &AbsolutePathBuf) -> bool {
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"))
 }
+
+#[cfg(test)]
+#[path = "claude_code_golden_tests.rs"]
+mod claude_code_golden_tests;
 
 #[cfg(test)]
 #[path = "astral_file_tools_tests.rs"]

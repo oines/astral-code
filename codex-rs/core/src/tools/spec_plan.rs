@@ -814,7 +814,7 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mu
             planned_tools.add_arc(override_tool_exposure(
                 multi_agent_v2_handler(
                     SpawnAgentHandlerV2::new(SpawnAgentToolOptions {
-                        available_models: available_models.clone(),
+                        available_models,
                         agent_type_description,
                         hide_agent_type_model_reasoning: turn_context
                             .config

@@ -135,7 +135,7 @@ impl ToolOutput for SendInputResult {
         true
     }
 
-    fn to_response_item(&self, call_id: &str, payload: &ToolPayload) -> ResponseInputItem {
+    fn to_response_item(&self, call_id: &str, payload: &ToolPayload) -> TranscriptInputItem {
         tool_output_response_item(call_id, payload, self, Some(true), "send_input")
     }
 

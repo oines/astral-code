@@ -219,7 +219,7 @@ fn rewrite_bash_arguments_for_shell_command(arguments: &str) -> Result<String, F
 
     move_field_if_absent(&mut object, "cwd", "workdir");
     move_field_if_absent(&mut object, "timeout", "timeout_ms");
-    object.remove("run_in_background");
+    reject_run_in_background_for_shell_command(&mut object)?;
 
     serde_json::to_string(&object).map_err(|err| {
         FunctionCallError::RespondToModel(format!(
@@ -235,6 +235,22 @@ fn move_field_if_absent(object: &mut Map<String, Value>, from: &str, to: &str) {
     if let Some(value) = object.remove(from) {
         object.insert(to.to_string(), value);
     }
+}
+
+fn reject_run_in_background_for_shell_command(
+    object: &mut Map<String, Value>,
+) -> Result<(), FunctionCallError> {
+    let run_in_background = object
+        .remove("run_in_background")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    if run_in_background {
+        return Err(FunctionCallError::RespondToModel(
+            "Bash run_in_background is only supported by the unified exec backend in this session."
+                .to_string(),
+        ));
+    }
+    Ok(())
 }
 
 fn apply_run_in_background_yield(object: &mut Map<String, Value>) {
