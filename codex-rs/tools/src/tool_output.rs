@@ -2,7 +2,7 @@ use codex_protocol::models::DEFAULT_IMAGE_DETAIL;
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::FunctionCallOutputPayload;
-use codex_protocol::models::ResponseInputItem;
+use codex_protocol::models::TranscriptInputItem;
 use codex_utils_string::take_bytes_at_char_boundary;
 use serde_json::Value as JsonValue;
 
@@ -24,7 +24,7 @@ pub trait ToolOutput: Send {
         false
     }
 
-    fn to_response_item(&self, call_id: &str, payload: &ToolPayload) -> ResponseInputItem;
+    fn to_response_item(&self, call_id: &str, payload: &ToolPayload) -> TranscriptInputItem;
 
     /// Returns the tool call id exposed to `PostToolUse` hooks for this output.
     fn post_tool_use_id(&self, call_id: &str) -> String {
@@ -68,7 +68,7 @@ where
         (**self).contains_external_context()
     }
 
-    fn to_response_item(&self, call_id: &str, payload: &ToolPayload) -> ResponseInputItem {
+    fn to_response_item(&self, call_id: &str, payload: &ToolPayload) -> TranscriptInputItem {
         (**self).to_response_item(call_id, payload)
     }
 
@@ -117,21 +117,21 @@ impl ToolOutput for JsonToolOutput {
         self.success.unwrap_or(true)
     }
 
-    fn to_response_item(&self, call_id: &str, payload: &ToolPayload) -> ResponseInputItem {
+    fn to_response_item(&self, call_id: &str, payload: &ToolPayload) -> TranscriptInputItem {
         let output = FunctionCallOutputPayload {
             body: FunctionCallOutputBody::Text(self.value.to_string()),
             success: self.success,
         };
 
         if matches!(payload, ToolPayload::Custom { .. }) {
-            return ResponseInputItem::CustomToolCallOutput {
+            return TranscriptInputItem::CustomToolCallOutput {
                 call_id: call_id.to_string(),
                 name: None,
                 output,
             };
         }
 
-        ResponseInputItem::FunctionCallOutput {
+        TranscriptInputItem::FunctionCallOutput {
             call_id: call_id.to_string(),
             output,
         }
@@ -157,8 +157,8 @@ impl ToolOutput for codex_protocol::mcp::CallToolResult {
         self.success()
     }
 
-    fn to_response_item(&self, call_id: &str, _payload: &ToolPayload) -> ResponseInputItem {
-        ResponseInputItem::McpToolCallOutput {
+    fn to_response_item(&self, call_id: &str, _payload: &ToolPayload) -> TranscriptInputItem {
+        TranscriptInputItem::McpToolCallOutput {
             call_id: call_id.to_string(),
             output: self.clone(),
         }
@@ -171,9 +171,9 @@ impl ToolOutput for codex_protocol::mcp::CallToolResult {
     }
 }
 
-fn response_input_to_code_mode_result(response: ResponseInputItem) -> JsonValue {
+fn response_input_to_code_mode_result(response: TranscriptInputItem) -> JsonValue {
     match response {
-        ResponseInputItem::Message { content, .. } => content_items_to_code_mode_result(
+        TranscriptInputItem::Message { content, .. } => content_items_to_code_mode_result(
             &content
                 .into_iter()
                 .map(|item| match item {
@@ -190,15 +190,15 @@ fn response_input_to_code_mode_result(response: ResponseInputItem) -> JsonValue 
                 })
                 .collect::<Vec<_>>(),
         ),
-        ResponseInputItem::FunctionCallOutput { output, .. }
-        | ResponseInputItem::CustomToolCallOutput { output, .. } => match output.body {
+        TranscriptInputItem::FunctionCallOutput { output, .. }
+        | TranscriptInputItem::CustomToolCallOutput { output, .. } => match output.body {
             FunctionCallOutputBody::Text(text) => JsonValue::String(text),
             FunctionCallOutputBody::ContentItems(items) => {
                 content_items_to_code_mode_result(&items)
             }
         },
-        ResponseInputItem::ToolSearchOutput { tools, .. } => JsonValue::Array(tools),
-        ResponseInputItem::McpToolCallOutput { output, .. } => serde_json::to_value(output)
+        TranscriptInputItem::ToolSearchOutput { tools, .. } => JsonValue::Array(tools),
+        TranscriptInputItem::McpToolCallOutput { output, .. } => serde_json::to_value(output)
             .unwrap_or_else(|err| {
                 JsonValue::String(format!("failed to serialize mcp result: {err}"))
             }),

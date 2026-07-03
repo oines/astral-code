@@ -4,7 +4,7 @@ use crate::MessageRole;
 use crate::records::read_session_import;
 use crate::summarize_for_label;
 use codex_protocol::models::ContentItem;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::protocol::AgentMessageEvent;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::RolloutItem;
@@ -89,7 +89,7 @@ fn rollout_items_from_messages(messages: Vec<ConversationMessage>) -> Vec<Rollou
                 )));
                 response_item_bytes =
                     response_item_bytes.saturating_add(message_byte_count(&message));
-                items.push(RolloutItem::ResponseItem(response_item(message)));
+                items.push(RolloutItem::TranscriptItem(response_item(message)));
                 current_turn = Some(turn_id);
             }
             MessageRole::Assistant => {
@@ -106,7 +106,7 @@ fn rollout_items_from_messages(messages: Vec<ConversationMessage>) -> Vec<Rollou
                         memory_citation: None,
                     },
                 )));
-                items.push(RolloutItem::ResponseItem(response_item(message)));
+                items.push(RolloutItem::TranscriptItem(response_item(message)));
             }
         }
     }
@@ -128,12 +128,12 @@ fn external_session_imported_marker_item() -> RolloutItem {
     }))
 }
 
-fn response_item(message: ConversationMessage) -> ResponseItem {
+fn response_item(message: ConversationMessage) -> TranscriptItem {
     let content = match message.role {
         MessageRole::Assistant => ContentItem::OutputText { text: message.text },
         MessageRole::User => ContentItem::InputText { text: message.text },
     };
-    ResponseItem::Message {
+    TranscriptItem::Message {
         id: None,
         role: match message.role {
             MessageRole::Assistant => "assistant".to_string(),
@@ -287,7 +287,7 @@ mod tests {
             .filter(|item| {
                 matches!(
                     item,
-                    RolloutItem::ResponseItem(ResponseItem::Message { .. })
+                    RolloutItem::TranscriptItem(TranscriptItem::Message { .. })
                 )
             })
             .count();

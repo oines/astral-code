@@ -112,7 +112,7 @@ use codex_protocol::approvals::GuardianAssessmentEvent;
 use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
 use codex_protocol::models::ActivePermissionProfile;
 use codex_protocol::models::PermissionProfile;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::openai_models::ModelAvailabilityNux;
 use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::openai_models::ModelServiceTier;
@@ -628,7 +628,7 @@ impl AppServerSession {
     pub(crate) async fn thread_inject_items(
         &mut self,
         thread_id: ThreadId,
-        items: Vec<ResponseItem>,
+        items: Vec<TranscriptItem>,
     ) -> Result<ThreadInjectItemsResponse> {
         let items = items
             .into_iter()

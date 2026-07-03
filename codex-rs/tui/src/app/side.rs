@@ -10,7 +10,7 @@
 use super::*;
 use crate::chatwidget::InterruptedTurnNoticeMode;
 use codex_protocol::models::ContentItem;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 
 const SIDE_RENAME_BLOCK_MESSAGE: &str = "Side conversations are ephemeral and cannot be renamed.";
 const SIDE_MAIN_THREAD_UNAVAILABLE_MESSAGE: &str =
@@ -106,7 +106,7 @@ mod tests {
     #[test]
     fn side_boundary_prompt_marks_inherited_history_reference_only() {
         let item = App::side_boundary_prompt_item();
-        let ResponseItem::Message { role, content, .. } = item else {
+        let TranscriptItem::Message { role, content, .. } = item else {
             panic!("expected hidden side boundary prompt to be a user message");
         };
         assert_eq!(role, "user");
@@ -445,8 +445,8 @@ impl App {
         }
     }
 
-    pub(super) fn side_boundary_prompt_item() -> ResponseItem {
-        ResponseItem::Message {
+    pub(super) fn side_boundary_prompt_item() -> TranscriptItem {
+        TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {

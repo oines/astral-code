@@ -3,7 +3,7 @@ use crate::memory_citation::MemoryCitation;
 use crate::models::ContentItem;
 use crate::models::ImageDetail;
 use crate::models::MessagePhase;
-use crate::models::ResponseItem;
+use crate::models::TranscriptItem;
 use crate::models::WebSearchAction;
 use crate::protocol::AgentMessageEvent;
 use crate::protocol::AgentReasoningEvent;
@@ -102,7 +102,7 @@ pub enum AgentMessageContent {
 pub struct AgentMessageItem {
     pub id: String,
     pub content: Vec<AgentMessageContent>,
-    /// Optional phase metadata carried through from `ResponseItem::Message`.
+    /// Optional phase metadata carried through from `TranscriptItem::Message`.
     ///
     /// This is currently used by TUI rendering to distinguish mid-turn
     /// commentary from a final answer and avoid status-indicator jitter.
@@ -402,7 +402,7 @@ impl HookPromptFragment {
     }
 }
 
-pub fn build_hook_prompt_message(fragments: &[HookPromptFragment]) -> Option<ResponseItem> {
+pub fn build_hook_prompt_message(fragments: &[HookPromptFragment]) -> Option<TranscriptItem> {
     let content = fragments
         .iter()
         .filter(|fragment| !fragment.hook_run_id.trim().is_empty())
@@ -416,7 +416,7 @@ pub fn build_hook_prompt_message(fragments: &[HookPromptFragment]) -> Option<Res
         return None;
     }
 
-    Some(ResponseItem::Message {
+    Some(TranscriptItem::Message {
         id: Some(uuid::Uuid::new_v4().to_string()),
         role: "user".to_string(),
         content,
@@ -652,7 +652,7 @@ mod tests {
         ];
         let message = build_hook_prompt_message(&original).expect("hook prompt");
 
-        let ResponseItem::Message { content, .. } = message else {
+        let TranscriptItem::Message { content, .. } = message else {
             panic!("expected hook prompt message");
         };
 

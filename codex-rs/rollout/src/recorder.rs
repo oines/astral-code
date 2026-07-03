@@ -877,8 +877,8 @@ impl RolloutRecorder {
                         }
                         items.push(RolloutItem::SessionMeta(session_meta_line));
                     }
-                    RolloutItem::ResponseItem(item) => {
-                        items.push(RolloutItem::ResponseItem(item));
+                    RolloutItem::TranscriptItem(item) => {
+                        items.push(RolloutItem::TranscriptItem(item));
                     }
                     RolloutItem::Compacted(item) => {
                         items.push(RolloutItem::Compacted(item));
@@ -1774,7 +1774,7 @@ async fn resume_candidate_matches_cwd(
         && let Some(latest_turn_context_cwd) = items.iter().rev().find_map(|item| match item {
             RolloutItem::TurnContext(turn_context) => Some(turn_context.cwd.as_path()),
             RolloutItem::SessionMeta(_)
-            | RolloutItem::ResponseItem(_)
+            | RolloutItem::TranscriptItem(_)
             | RolloutItem::Compacted(_)
             | RolloutItem::EventMsg(_) => None,
         })

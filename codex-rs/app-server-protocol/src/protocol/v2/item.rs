@@ -20,7 +20,7 @@ use codex_protocol::items::TurnItem as CoreTurnItem;
 use codex_protocol::memory_citation::MemoryCitation as CoreMemoryCitation;
 use codex_protocol::memory_citation::MemoryCitationEntry as CoreMemoryCitationEntry;
 use codex_protocol::models::MessagePhase;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::parse_command::ParsedCommand as CoreParsedCommand;
 use codex_protocol::protocol::AgentStatus as CoreAgentStatus;
@@ -1203,7 +1203,7 @@ pub struct ItemCompletedNotification {
 pub struct RawResponseItemCompletedNotification {
     pub thread_id: String,
     pub turn_id: String,
-    pub item: ResponseItem,
+    pub item: TranscriptItem,
 }
 
 // Item-specific progress notifications

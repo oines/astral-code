@@ -3,7 +3,7 @@ use crate::ToolName;
 use crate::ToolPayload;
 use codex_protocol::items::ImageGenerationItem;
 use codex_protocol::items::WebSearchItem;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_utils_output_truncation::TruncationPolicy;
 use std::future::Future;
 use std::pin::Pin;
@@ -12,17 +12,17 @@ use std::sync::Arc;
 /// Raw response history snapshot available when an extension tool is invoked.
 #[derive(Clone, Debug, Default)]
 pub struct ConversationHistory {
-    items: Arc<[ResponseItem]>,
+    items: Arc<[TranscriptItem]>,
 }
 
 impl ConversationHistory {
-    pub fn new(items: Vec<ResponseItem>) -> Self {
+    pub fn new(items: Vec<TranscriptItem>) -> Self {
         Self {
             items: items.into(),
         }
     }
 
-    pub fn items(&self) -> &[ResponseItem] {
+    pub fn items(&self) -> &[TranscriptItem] {
         &self.items
     }
 }

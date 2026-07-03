@@ -1418,7 +1418,7 @@ async fn complete_command_execution_item(
 async fn maybe_emit_raw_response_item_completed(
     conversation_id: ThreadId,
     turn_id: &str,
-    item: codex_protocol::models::ResponseItem,
+    item: codex_protocol::models::TranscriptItem,
     outgoing: &ThreadScopedOutgoingMessageSender,
 ) {
     let notification = RawResponseItemCompletedNotification {
@@ -1434,10 +1434,10 @@ async fn maybe_emit_raw_response_item_completed(
 pub(crate) async fn maybe_emit_hook_prompt_item_completed(
     conversation_id: ThreadId,
     turn_id: &str,
-    item: &codex_protocol::models::ResponseItem,
+    item: &codex_protocol::models::TranscriptItem,
     outgoing: &ThreadScopedOutgoingMessageSender,
 ) {
-    let codex_protocol::models::ResponseItem::Message {
+    let codex_protocol::models::TranscriptItem::Message {
         role, content, id, ..
     } = item
     else {

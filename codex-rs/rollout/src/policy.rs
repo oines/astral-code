@@ -1,11 +1,11 @@
 use crate::protocol::EventMsg;
 use crate::protocol::RolloutItem;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 
 /// Whether a rollout `item` should be persisted in rollout files.
 pub fn is_persisted_rollout_item(item: &RolloutItem) -> bool {
     match item {
-        RolloutItem::ResponseItem(item) => should_persist_response_item(item),
+        RolloutItem::TranscriptItem(item) => should_persist_response_item(item),
         RolloutItem::EventMsg(ev) => should_persist_event_msg(ev),
         // Persist Codex executive markers so we can analyze flows (e.g., compaction, API turns).
         RolloutItem::Compacted(_) | RolloutItem::TurnContext(_) | RolloutItem::SessionMeta(_) => {
@@ -25,49 +25,49 @@ pub fn persisted_rollout_items(items: &[RolloutItem]) -> Vec<RolloutItem> {
     persisted
 }
 
-/// Whether a `ResponseItem` should be persisted in rollout files.
+/// Whether a `TranscriptItem` should be persisted in rollout files.
 #[inline]
-pub fn should_persist_response_item(item: &ResponseItem) -> bool {
+pub fn should_persist_response_item(item: &TranscriptItem) -> bool {
     match item {
-        ResponseItem::Message { .. }
-        | ResponseItem::AgentMessage { .. }
-        | ResponseItem::Reasoning { .. }
-        | ResponseItem::LocalShellCall { .. }
-        | ResponseItem::FunctionCall { .. }
-        | ResponseItem::ToolSearchCall { .. }
-        | ResponseItem::FunctionCallOutput { .. }
-        | ResponseItem::ToolSearchOutput { .. }
-        | ResponseItem::CustomToolCall { .. }
-        | ResponseItem::CustomToolCallOutput { .. }
-        | ResponseItem::WebSearchCall { .. }
-        | ResponseItem::ImageGenerationCall { .. }
-        | ResponseItem::Compaction { .. }
-        | ResponseItem::ContextCompaction { .. } => true,
-        ResponseItem::CompactionTrigger => false,
-        ResponseItem::Other => false,
+        TranscriptItem::Message { .. }
+        | TranscriptItem::AgentMessage { .. }
+        | TranscriptItem::Reasoning { .. }
+        | TranscriptItem::LocalShellCall { .. }
+        | TranscriptItem::FunctionCall { .. }
+        | TranscriptItem::ToolSearchCall { .. }
+        | TranscriptItem::FunctionCallOutput { .. }
+        | TranscriptItem::ToolSearchOutput { .. }
+        | TranscriptItem::CustomToolCall { .. }
+        | TranscriptItem::CustomToolCallOutput { .. }
+        | TranscriptItem::WebSearchCall { .. }
+        | TranscriptItem::ImageGenerationCall { .. }
+        | TranscriptItem::Compaction { .. }
+        | TranscriptItem::ContextCompaction { .. } => true,
+        TranscriptItem::CompactionTrigger => false,
+        TranscriptItem::Other => false,
     }
 }
 
-/// Whether a `ResponseItem` should be persisted for the memories.
+/// Whether a `TranscriptItem` should be persisted for the memories.
 #[inline]
-pub fn should_persist_response_item_for_memories(item: &ResponseItem) -> bool {
+pub fn should_persist_response_item_for_memories(item: &TranscriptItem) -> bool {
     match item {
-        ResponseItem::Message { role, .. } => role != "developer",
-        ResponseItem::LocalShellCall { .. }
-        | ResponseItem::FunctionCall { .. }
-        | ResponseItem::ToolSearchCall { .. }
-        | ResponseItem::FunctionCallOutput { .. }
-        | ResponseItem::ToolSearchOutput { .. }
-        | ResponseItem::CustomToolCall { .. }
-        | ResponseItem::CustomToolCallOutput { .. }
-        | ResponseItem::WebSearchCall { .. } => true,
-        ResponseItem::AgentMessage { .. }
-        | ResponseItem::Reasoning { .. }
-        | ResponseItem::ImageGenerationCall { .. }
-        | ResponseItem::Compaction { .. }
-        | ResponseItem::CompactionTrigger
-        | ResponseItem::ContextCompaction { .. }
-        | ResponseItem::Other => false,
+        TranscriptItem::Message { role, .. } => role != "developer",
+        TranscriptItem::LocalShellCall { .. }
+        | TranscriptItem::FunctionCall { .. }
+        | TranscriptItem::ToolSearchCall { .. }
+        | TranscriptItem::FunctionCallOutput { .. }
+        | TranscriptItem::ToolSearchOutput { .. }
+        | TranscriptItem::CustomToolCall { .. }
+        | TranscriptItem::CustomToolCallOutput { .. }
+        | TranscriptItem::WebSearchCall { .. } => true,
+        TranscriptItem::AgentMessage { .. }
+        | TranscriptItem::Reasoning { .. }
+        | TranscriptItem::ImageGenerationCall { .. }
+        | TranscriptItem::Compaction { .. }
+        | TranscriptItem::CompactionTrigger
+        | TranscriptItem::ContextCompaction { .. }
+        | TranscriptItem::Other => false,
     }
 }
 
@@ -94,7 +94,7 @@ pub fn should_persist_event_msg(ev: &EventMsg) -> bool {
         | EventMsg::ImageGenerationEnd(_) => true,
         EventMsg::ItemCompleted(event) => {
             // Plan items are derived from streaming tags and are not part of the
-            // raw ResponseItem history, so we persist their completion to replay
+            // raw TranscriptItem history, so we persist their completion to replay
             // them on resume without bloating rollouts with every item lifecycle.
             matches!(event.item, codex_protocol::items::TurnItem::Plan(_))
         }

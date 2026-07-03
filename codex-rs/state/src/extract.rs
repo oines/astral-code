@@ -1,5 +1,5 @@
 use crate::model::ThreadMetadata;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::RolloutItem;
 use codex_protocol::protocol::SessionMetaLine;
@@ -21,7 +21,7 @@ pub fn apply_rollout_item(
         RolloutItem::SessionMeta(meta_line) => apply_session_meta_from_item(metadata, meta_line),
         RolloutItem::TurnContext(turn_ctx) => apply_turn_context(metadata, turn_ctx),
         RolloutItem::EventMsg(event) => apply_event_msg(metadata, event),
-        RolloutItem::ResponseItem(item) => apply_response_item(metadata, item),
+        RolloutItem::TranscriptItem(item) => apply_response_item(metadata, item),
         RolloutItem::Compacted(_) => {}
     }
     if metadata.model_provider.is_empty() {
@@ -36,7 +36,7 @@ pub fn rollout_item_affects_thread_metadata(item: &RolloutItem) -> bool {
         RolloutItem::EventMsg(
             EventMsg::TokenCount(_) | EventMsg::UserMessage(_) | EventMsg::ThreadGoalUpdated(_),
         ) => true,
-        RolloutItem::EventMsg(_) | RolloutItem::ResponseItem(_) | RolloutItem::Compacted(_) => {
+        RolloutItem::EventMsg(_) | RolloutItem::TranscriptItem(_) | RolloutItem::Compacted(_) => {
             false
         }
     }
@@ -111,7 +111,7 @@ fn apply_event_msg(metadata: &mut ThreadMetadata, event: &EventMsg) {
     }
 }
 
-fn apply_response_item(_metadata: &mut ThreadMetadata, _item: &ResponseItem) {}
+fn apply_response_item(_metadata: &mut ThreadMetadata, _item: &TranscriptItem) {}
 
 fn set_preview_if_empty(metadata: &mut ThreadMetadata, preview: Option<String>) {
     if metadata.preview.is_none() {
@@ -159,7 +159,7 @@ mod tests {
     use codex_protocol::ThreadId;
     use codex_protocol::models::ContentItem;
     use codex_protocol::models::PermissionProfile;
-    use codex_protocol::models::ResponseItem;
+    use codex_protocol::models::TranscriptItem;
     use codex_protocol::openai_models::ReasoningEffort;
     use codex_protocol::protocol::AskForApproval;
     use codex_protocol::protocol::EventMsg;
@@ -182,7 +182,7 @@ mod tests {
     #[test]
     fn response_item_user_messages_do_not_set_title_or_first_user_message() {
         let mut metadata = metadata_for_test();
-        let item = RolloutItem::ResponseItem(ResponseItem::Message {
+        let item = RolloutItem::TranscriptItem(TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {

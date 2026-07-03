@@ -216,6 +216,8 @@ pub enum AgentStreamEvent {
         id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         model: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        usage: Option<TokenUsage>,
     },
     ContentBlockStart {
         index: usize,

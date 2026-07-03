@@ -53,7 +53,7 @@ use codex_protocol::ThreadId;
 use codex_protocol::config_types::Personality;
 use codex_protocol::mcp::CallToolResult;
 use codex_protocol::models::ContentItem;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::protocol::AgentMessageEvent;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::ImageGenerationEndEvent;
@@ -2365,7 +2365,7 @@ async fn thread_resume_rejects_history_when_thread_is_running() -> Result<()> {
     let resume_id = primary
         .send_thread_resume_request(ThreadResumeParams {
             thread_id: thread_id.clone(),
-            history: Some(vec![ResponseItem::Message {
+            history: Some(vec![TranscriptItem::Message {
                 id: None,
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
@@ -3280,7 +3280,7 @@ async fn thread_resume_supports_history_and_overrides() -> Result<()> {
     } = start_materialized_thread_and_restart(codex_home.path(), "seed history").await?;
 
     let history_text = "Hello from history";
-    let history = vec![ResponseItem::Message {
+    let history = vec![TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputText {

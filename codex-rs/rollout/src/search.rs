@@ -5,7 +5,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use codex_protocol::models::ContentItem;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::RolloutItem;
 use codex_protocol::protocol::RolloutLine;
@@ -260,7 +260,7 @@ fn conversation_text_from_item(item: &RolloutItem) -> Option<String> {
                 Some(agent.message.trim().to_string())
             }
         }
-        RolloutItem::ResponseItem(ResponseItem::Message { role, content, .. }) => {
+        RolloutItem::TranscriptItem(TranscriptItem::Message { role, content, .. }) => {
             let text = content
                 .iter()
                 .filter_map(content_item_text)
@@ -275,7 +275,7 @@ fn conversation_text_from_item(item: &RolloutItem) -> Option<String> {
         RolloutItem::SessionMeta(_)
         | RolloutItem::TurnContext(_)
         | RolloutItem::EventMsg(_)
-        | RolloutItem::ResponseItem(_)
+        | RolloutItem::TranscriptItem(_)
         | RolloutItem::Compacted(_) => None,
     }
 }

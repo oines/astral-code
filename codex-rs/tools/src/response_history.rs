@@ -1,5 +1,5 @@
 use codex_protocol::models::ContentItem;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_utils_output_truncation::TruncationPolicy;
 use codex_utils_output_truncation::approx_token_count;
 use codex_utils_output_truncation::truncate_text;
@@ -7,7 +7,7 @@ use codex_utils_output_truncation::truncate_text;
 /// Retains items from the earliest of the last `user_message_count` user
 /// messages through the latest user message.
 pub fn retain_tail_from_last_n_user_messages(
-    items: &mut Vec<ResponseItem>,
+    items: &mut Vec<TranscriptItem>,
     user_message_count: usize,
 ) {
     if user_message_count == 0 {
@@ -15,7 +15,7 @@ pub fn retain_tail_from_last_n_user_messages(
         return;
     }
 
-    let Some(latest_user_idx) = items.iter().rposition(ResponseItem::is_user_message) else {
+    let Some(latest_user_idx) = items.iter().rposition(TranscriptItem::is_user_message) else {
         items.clear();
         return;
     };
@@ -35,13 +35,13 @@ pub fn retain_tail_from_last_n_user_messages(
 
 /// Truncates assistant output text to a shared token budget across items.
 pub fn truncate_assistant_output_text_to_token_budget(
-    items: &mut Vec<ResponseItem>,
+    items: &mut Vec<TranscriptItem>,
     max_tokens: usize,
 ) {
     let mut remaining_budget = max_tokens;
 
     items.retain_mut(|item| {
-        let ResponseItem::Message { role, content, .. } = item else {
+        let TranscriptItem::Message { role, content, .. } = item else {
             return true;
         };
         if role != "assistant" {
@@ -73,7 +73,7 @@ pub fn truncate_assistant_output_text_to_token_budget(
 #[cfg(test)]
 mod tests {
     use codex_protocol::models::ContentItem;
-    use codex_protocol::models::ResponseItem;
+    use codex_protocol::models::TranscriptItem;
     use codex_utils_output_truncation::TruncationPolicy;
     use codex_utils_output_truncation::truncate_text;
     use pretty_assertions::assert_eq;
@@ -81,8 +81,8 @@ mod tests {
     use super::retain_tail_from_last_n_user_messages;
     use super::truncate_assistant_output_text_to_token_budget;
 
-    fn message(role: &str, text: &str) -> ResponseItem {
-        ResponseItem::Message {
+    fn message(role: &str, text: &str) -> TranscriptItem {
+        TranscriptItem::Message {
             id: None,
             role: role.to_string(),
             content: vec![if role == "assistant" {

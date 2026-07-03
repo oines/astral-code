@@ -662,7 +662,7 @@ impl From<&FileSystemPermissions> for FileSystemSandboxPolicy {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum ResponseInputItem {
+pub enum TranscriptInputItem {
     Message {
         role: String,
         content: Vec<ContentItem>,
@@ -750,7 +750,7 @@ pub enum MessagePhase {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum ResponseItem {
+pub enum TranscriptItem {
     Message {
         #[serde(default, skip_serializing)]
         #[ts(skip)]
@@ -779,6 +779,9 @@ pub enum ResponseItem {
         #[ts(optional)]
         content: Option<Vec<ReasoningItemContent>>,
         encrypted_content: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        provider_metadata: Option<ReasoningProviderMetadata>,
     },
     LocalShellCall {
         /// Legacy id field retained for compatibility with older payloads.
@@ -908,11 +911,18 @@ pub enum ResponseItem {
     Other,
 }
 
-impl ResponseItem {
+impl TranscriptItem {
     /// Returns whether this item is an ordinary user-role message.
     pub fn is_user_message(&self) -> bool {
         matches!(self, Self::Message { role, .. } if role == "user")
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
+pub struct ReasoningProviderMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub anthropic_signature: Option<String>,
 }
 
 pub const BASE_INSTRUCTIONS_DEFAULT: &str = include_str!("prompts/base_instructions/default.md");
@@ -1123,10 +1133,10 @@ pub fn local_image_content_items_with_label_number(
     }
 }
 
-impl From<ResponseInputItem> for ResponseItem {
-    fn from(item: ResponseInputItem) -> Self {
+impl From<TranscriptInputItem> for TranscriptItem {
+    fn from(item: TranscriptInputItem) -> Self {
         match item {
-            ResponseInputItem::Message {
+            TranscriptInputItem::Message {
                 role,
                 content,
                 phase,
@@ -1136,14 +1146,14 @@ impl From<ResponseInputItem> for ResponseItem {
                 id: None,
                 phase,
             },
-            ResponseInputItem::FunctionCallOutput { call_id, output } => {
+            TranscriptInputItem::FunctionCallOutput { call_id, output } => {
                 Self::FunctionCallOutput { call_id, output }
             }
-            ResponseInputItem::McpToolCallOutput { call_id, output } => {
+            TranscriptInputItem::McpToolCallOutput { call_id, output } => {
                 let output = output.into_function_call_output_payload();
                 Self::FunctionCallOutput { call_id, output }
             }
-            ResponseInputItem::CustomToolCallOutput {
+            TranscriptInputItem::CustomToolCallOutput {
                 call_id,
                 name,
                 output,
@@ -1152,7 +1162,7 @@ impl From<ResponseInputItem> for ResponseItem {
                 name,
                 output,
             },
-            ResponseInputItem::ToolSearchOutput {
+            TranscriptInputItem::ToolSearchOutput {
                 call_id,
                 status,
                 execution,
@@ -1233,7 +1243,7 @@ pub enum ReasoningItemContent {
     Text { text: String },
 }
 
-impl From<Vec<UserInput>> for ResponseInputItem {
+impl From<Vec<UserInput>> for TranscriptInputItem {
     fn from(items: Vec<UserInput>) -> Self {
         let mut image_index = 0;
         Self::Message {
@@ -1280,7 +1290,7 @@ pub struct SearchToolCallParams {
     pub limit: Option<usize>,
 }
 
-/// If the `name` of a `ResponseItem::FunctionCall` is `shell_command`, the
+/// If the `name` of a `TranscriptItem::FunctionCall` is `shell_command`, the
 /// `arguments` field should deserialize to this struct.
 #[derive(Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 pub struct ShellCommandToolCallParams {
@@ -1664,7 +1674,7 @@ mod tests {
 
     #[test]
     fn response_input_message_conversion_preserves_phase() {
-        let item = ResponseItem::from(ResponseInputItem::Message {
+        let item = TranscriptItem::from(TranscriptInputItem::Message {
             role: "assistant".to_string(),
             content: vec![ContentItem::OutputText {
                 text: "still working".to_string(),
@@ -1674,7 +1684,7 @@ mod tests {
 
         assert_eq!(
             item,
-            ResponseItem::Message {
+            TranscriptItem::Message {
                 id: None,
                 role: "assistant".to_string(),
                 content: vec![ContentItem::OutputText {
@@ -1770,7 +1780,7 @@ mod tests {
 
     #[test]
     fn response_item_parses_image_generation_call() {
-        let item = serde_json::from_value::<ResponseItem>(serde_json::json!({
+        let item = serde_json::from_value::<TranscriptItem>(serde_json::json!({
             "id": "ig_123",
             "type": "image_generation_call",
             "status": "completed",
@@ -1781,7 +1791,7 @@ mod tests {
 
         assert_eq!(
             item,
-            ResponseItem::ImageGenerationCall {
+            TranscriptItem::ImageGenerationCall {
                 id: "ig_123".to_string(),
                 status: "completed".to_string(),
                 revised_prompt: Some("A small blue square".to_string()),
@@ -1792,7 +1802,7 @@ mod tests {
 
     #[test]
     fn response_item_parses_image_generation_call_without_revised_prompt() {
-        let item = serde_json::from_value::<ResponseItem>(serde_json::json!({
+        let item = serde_json::from_value::<TranscriptItem>(serde_json::json!({
             "id": "ig_123",
             "type": "image_generation_call",
             "status": "completed",
@@ -1802,12 +1812,39 @@ mod tests {
 
         assert_eq!(
             item,
-            ResponseItem::ImageGenerationCall {
+            TranscriptItem::ImageGenerationCall {
                 id: "ig_123".to_string(),
                 status: "completed".to_string(),
                 revised_prompt: None,
                 result: "Zm9v".to_string(),
             }
+        );
+    }
+
+    #[test]
+    fn transcript_reasoning_provider_metadata_defaults_for_legacy_json() {
+        let legacy_json = r#"{"type":"reasoning","summary":[],"encrypted_content":"anthropic_signature:sig_legacy"}"#;
+        let item = serde_json::from_str::<TranscriptItem>(legacy_json)
+            .expect("legacy reasoning item should deserialize");
+
+        assert_eq!(
+            item,
+            TranscriptItem::Reasoning {
+                id: String::new(),
+                summary: Vec::new(),
+                content: None,
+                encrypted_content: Some("anthropic_signature:sig_legacy".to_string()),
+                provider_metadata: None,
+            }
+        );
+        assert_eq!(
+            serde_json::to_value(&item).unwrap(),
+            serde_json::json!({
+                "type": "reasoning",
+                "summary": [],
+                "content": null,
+                "encrypted_content": "anthropic_signature:sig_legacy",
+            })
         );
     }
 
@@ -2141,7 +2178,7 @@ mod tests {
 
     #[test]
     fn function_call_deserializes_optional_namespace() {
-        let item: ResponseItem = serde_json::from_value(serde_json::json!({
+        let item: TranscriptItem = serde_json::from_value(serde_json::json!({
             "type": "function_call",
             "name": "mcp__codex_apps__gmail_get_recent_emails",
             "namespace": "mcp__codex_apps__gmail",
@@ -2152,7 +2189,7 @@ mod tests {
 
         assert_eq!(
             item,
-            ResponseItem::FunctionCall {
+            TranscriptItem::FunctionCall {
                 id: None,
                 name: "mcp__codex_apps__gmail_get_recent_emails".to_string(),
                 namespace: Some("mcp__codex_apps__gmail".to_string()),
@@ -2220,7 +2257,7 @@ mod tests {
 
     #[test]
     fn serializes_success_as_plain_string() -> Result<()> {
-        let item = ResponseInputItem::FunctionCallOutput {
+        let item = TranscriptInputItem::FunctionCallOutput {
             call_id: "call1".into(),
             output: FunctionCallOutputPayload::from_text("ok".into()),
         };
@@ -2235,7 +2272,7 @@ mod tests {
 
     #[test]
     fn serializes_failure_as_string() -> Result<()> {
-        let item = ResponseInputItem::FunctionCallOutput {
+        let item = TranscriptInputItem::FunctionCallOutput {
             call_id: "call1".into(),
             output: FunctionCallOutputPayload {
                 body: FunctionCallOutputBody::Text("bad".into()),
@@ -2281,7 +2318,7 @@ mod tests {
             ]
         );
 
-        let item = ResponseInputItem::FunctionCallOutput {
+        let item = TranscriptInputItem::FunctionCallOutput {
             call_id: "call1".into(),
             output: payload,
         };
@@ -2297,7 +2334,7 @@ mod tests {
 
     #[test]
     fn serializes_custom_tool_image_outputs_as_array() -> Result<()> {
-        let item = ResponseInputItem::CustomToolCallOutput {
+        let item = TranscriptInputItem::CustomToolCallOutput {
             call_id: "call1".into(),
             name: None,
             output: FunctionCallOutputPayload::from_content_items(vec![
@@ -2319,7 +2356,7 @@ mod tests {
 
     #[test]
     fn serializes_encrypted_function_output_content_as_array() -> Result<()> {
-        let item = ResponseInputItem::FunctionCallOutput {
+        let item = TranscriptInputItem::FunctionCallOutput {
             call_id: "call1".into(),
             output: FunctionCallOutputPayload::from_content_items(vec![
                 FunctionCallOutputContentItem::EncryptedContent {
@@ -2498,11 +2535,11 @@ mod tests {
     fn deserializes_compaction_alias() -> Result<()> {
         let json = r#"{"type":"compaction_summary","encrypted_content":"abc"}"#;
 
-        let item: ResponseItem = serde_json::from_str(json)?;
+        let item: TranscriptItem = serde_json::from_str(json)?;
 
         assert_eq!(
             item,
-            ResponseItem::Compaction {
+            TranscriptItem::Compaction {
                 encrypted_content: "abc".into(),
             }
         );
@@ -2513,11 +2550,11 @@ mod tests {
     fn deserializes_context_compaction() -> Result<()> {
         let json = r#"{"type":"context_compaction","encrypted_content":"abc"}"#;
 
-        let item: ResponseItem = serde_json::from_str(json)?;
+        let item: TranscriptItem = serde_json::from_str(json)?;
 
         assert_eq!(
             item,
-            ResponseItem::ContextCompaction {
+            TranscriptItem::ContextCompaction {
                 encrypted_content: Some("abc".into()),
             }
         );
@@ -2526,7 +2563,7 @@ mod tests {
 
     #[test]
     fn serializes_compaction_trigger_without_payload() -> Result<()> {
-        let item = ResponseItem::CompactionTrigger;
+        let item = TranscriptItem::CompactionTrigger;
 
         assert_eq!(
             serde_json::to_value(item)?,
@@ -2541,9 +2578,9 @@ mod tests {
     fn deserializes_compaction_trigger_without_payload() -> Result<()> {
         let json = r#"{"type":"compaction_trigger"}"#;
 
-        let item: ResponseItem = serde_json::from_str(json)?;
+        let item: TranscriptItem = serde_json::from_str(json)?;
 
-        assert_eq!(item, ResponseItem::CompactionTrigger);
+        assert_eq!(item, TranscriptItem::CompactionTrigger);
         Ok(())
     }
 
@@ -2559,9 +2596,9 @@ mod tests {
             }
         }"#;
 
-        let item: ResponseItem = serde_json::from_str(json)?;
+        let item: TranscriptItem = serde_json::from_str(json)?;
 
-        assert_eq!(item, ResponseItem::Other);
+        assert_eq!(item, TranscriptItem::Other);
         Ok(())
     }
 
@@ -2635,8 +2672,8 @@ mod tests {
 
         for (json_literal, expected_id, expected_action, expected_status, expect_roundtrip) in cases
         {
-            let parsed: ResponseItem = serde_json::from_str(json_literal)?;
-            let expected = ResponseItem::WebSearchCall {
+            let parsed: TranscriptItem = serde_json::from_str(json_literal)?;
+            let expected = TranscriptItem::WebSearchCall {
                 id: expected_id.clone(),
                 status: expected_status.clone(),
                 action: expected_action.clone(),
@@ -2658,13 +2695,13 @@ mod tests {
     fn serializes_image_user_input_without_tags() -> Result<()> {
         let image_url = "data:image/png;base64,abc".to_string();
 
-        let item = ResponseInputItem::from(vec![UserInput::Image {
+        let item = TranscriptInputItem::from(vec![UserInput::Image {
             image_url: image_url.clone(),
             detail: None,
         }]);
 
         match item {
-            ResponseInputItem::Message { content, .. } => {
+            TranscriptInputItem::Message { content, .. } => {
                 let expected = vec![ContentItem::InputImage {
                     image_url,
                     detail: Some(DEFAULT_IMAGE_DETAIL),
@@ -2681,13 +2718,13 @@ mod tests {
     fn image_user_input_preserves_requested_detail() -> Result<()> {
         let image_url = "data:image/png;base64,abc".to_string();
 
-        let item = ResponseInputItem::from(vec![UserInput::Image {
+        let item = TranscriptInputItem::from(vec![UserInput::Image {
             image_url: image_url.clone(),
             detail: Some(ImageDetail::Original),
         }]);
 
         match item {
-            ResponseInputItem::Message { content, .. } => {
+            TranscriptInputItem::Message { content, .. } => {
                 assert_eq!(
                     content.first(),
                     Some(&ContentItem::InputImage {
@@ -2704,7 +2741,7 @@ mod tests {
 
     #[test]
     fn tool_search_call_roundtrips() -> Result<()> {
-        let parsed: ResponseItem = serde_json::from_str(
+        let parsed: TranscriptItem = serde_json::from_str(
             r#"{
                 "type": "tool_search_call",
                 "call_id": "search-1",
@@ -2718,7 +2755,7 @@ mod tests {
 
         assert_eq!(
             parsed,
-            ResponseItem::ToolSearchCall {
+            TranscriptItem::ToolSearchCall {
                 id: None,
                 call_id: Some("search-1".to_string()),
                 status: None,
@@ -2748,7 +2785,7 @@ mod tests {
 
     #[test]
     fn tool_search_output_roundtrips() -> Result<()> {
-        let input = ResponseInputItem::ToolSearchOutput {
+        let input = TranscriptInputItem::ToolSearchOutput {
             call_id: "search-1".to_string(),
             status: "completed".to_string(),
             execution: "client".to_string(),
@@ -2768,8 +2805,8 @@ mod tests {
             })],
         };
         assert_eq!(
-            ResponseItem::from(input.clone()),
-            ResponseItem::ToolSearchOutput {
+            TranscriptItem::from(input.clone()),
+            TranscriptItem::ToolSearchOutput {
                 call_id: Some("search-1".to_string()),
                 status: "completed".to_string(),
                 execution: "client".to_string(),
@@ -2819,7 +2856,7 @@ mod tests {
 
     #[test]
     fn tool_search_server_items_allow_null_call_id() -> Result<()> {
-        let parsed_call: ResponseItem = serde_json::from_str(
+        let parsed_call: TranscriptItem = serde_json::from_str(
             r#"{
                 "type": "tool_search_call",
                 "execution": "server",
@@ -2832,7 +2869,7 @@ mod tests {
         )?;
         assert_eq!(
             parsed_call,
-            ResponseItem::ToolSearchCall {
+            TranscriptItem::ToolSearchCall {
                 id: None,
                 call_id: None,
                 status: Some("completed".to_string()),
@@ -2843,7 +2880,7 @@ mod tests {
             }
         );
 
-        let parsed_output: ResponseItem = serde_json::from_str(
+        let parsed_output: TranscriptItem = serde_json::from_str(
             r#"{
                 "type": "tool_search_output",
                 "execution": "server",
@@ -2854,7 +2891,7 @@ mod tests {
         )?;
         assert_eq!(
             parsed_output,
-            ResponseItem::ToolSearchOutput {
+            TranscriptItem::ToolSearchOutput {
                 call_id: None,
                 status: "completed".to_string(),
                 execution: "server".to_string(),
@@ -2872,7 +2909,7 @@ mod tests {
         let local_path = dir.path().join("local.png");
         std::fs::write(&local_path, TINY_PNG_BYTES)?;
 
-        let item = ResponseInputItem::from(vec![
+        let item = TranscriptInputItem::from(vec![
             UserInput::Image {
                 image_url: image_url.clone(),
                 detail: None,
@@ -2884,7 +2921,7 @@ mod tests {
         ]);
 
         match item {
-            ResponseInputItem::Message { content, .. } => {
+            TranscriptInputItem::Message { content, .. } => {
                 assert_eq!(
                     content.first(),
                     Some(&ContentItem::InputImage {
@@ -2935,13 +2972,13 @@ mod tests {
         let local_path = dir.path().join("local.png");
         std::fs::write(&local_path, TINY_PNG_BYTES)?;
 
-        let item = ResponseInputItem::from(vec![UserInput::LocalImage {
+        let item = TranscriptInputItem::from(vec![UserInput::LocalImage {
             path: local_path,
             detail: Some(ImageDetail::Original),
         }]);
 
         match item {
-            ResponseInputItem::Message { content, .. } => {
+            TranscriptInputItem::Message { content, .. } => {
                 assert!(matches!(
                     content.get(1),
                     Some(ContentItem::InputImage {
@@ -2961,13 +2998,13 @@ mod tests {
         let dir = tempdir()?;
         let missing_path = dir.path().join("missing-image.png");
 
-        let item = ResponseInputItem::from(vec![UserInput::LocalImage {
+        let item = TranscriptInputItem::from(vec![UserInput::LocalImage {
             path: missing_path.clone(),
             detail: None,
         }]);
 
         match item {
-            ResponseInputItem::Message { content, .. } => {
+            TranscriptInputItem::Message { content, .. } => {
                 assert_eq!(content.len(), 1);
                 match &content[0] {
                     ContentItem::InputText { text } => {
@@ -2996,13 +3033,13 @@ mod tests {
         let json_path = dir.path().join("example.json");
         std::fs::write(&json_path, br#"{"hello":"world"}"#)?;
 
-        let item = ResponseInputItem::from(vec![UserInput::LocalImage {
+        let item = TranscriptInputItem::from(vec![UserInput::LocalImage {
             path: json_path.clone(),
             detail: None,
         }]);
 
         match item {
-            ResponseInputItem::Message { content, .. } => {
+            TranscriptInputItem::Message { content, .. } => {
                 assert_eq!(content.len(), 1);
                 match &content[0] {
                     ContentItem::InputText { text } => {
@@ -3034,13 +3071,13 @@ mod tests {
 <svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"></svg>"#,
         )?;
 
-        let item = ResponseInputItem::from(vec![UserInput::LocalImage {
+        let item = TranscriptInputItem::from(vec![UserInput::LocalImage {
             path: svg_path.clone(),
             detail: None,
         }]);
 
         match item {
-            ResponseInputItem::Message { content, .. } => {
+            TranscriptInputItem::Message { content, .. } => {
                 assert_eq!(content.len(), 1);
                 let expected = format!(
                     "Astral cannot attach image at `{}`: unsupported image `image/svg+xml`.",

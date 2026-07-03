@@ -1,11 +1,11 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use codex_protocol::models::ResponseInputItem;
+use codex_protocol::models::TranscriptInputItem;
 
 /// Future returned when an extension asks the host to inject model-visible input.
 pub type ResponseItemInjectionFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<(), Vec<ResponseInputItem>>> + Send + 'a>>;
+    Pin<Box<dyn Future<Output = Result<(), Vec<TranscriptInputItem>>> + Send + 'a>>;
 
 /// Host-provided helper for extensions that need to steer the active model turn.
 ///
@@ -15,7 +15,7 @@ pub type ResponseItemInjectionFuture<'a> =
 pub trait ResponseItemInjector: Send + Sync {
     fn inject_response_items<'a>(
         &'a self,
-        items: Vec<ResponseInputItem>,
+        items: Vec<TranscriptInputItem>,
     ) -> ResponseItemInjectionFuture<'a>;
 }
 
@@ -26,7 +26,7 @@ pub struct NoopResponseItemInjector;
 impl ResponseItemInjector for NoopResponseItemInjector {
     fn inject_response_items<'a>(
         &'a self,
-        items: Vec<ResponseInputItem>,
+        items: Vec<TranscriptInputItem>,
     ) -> ResponseItemInjectionFuture<'a> {
         Box::pin(std::future::ready(Err(items)))
     }

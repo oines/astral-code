@@ -118,6 +118,7 @@ fn stream_events_preserve_tool_json_deltas_and_usage() {
         AgentStreamEvent::MessageStart {
             id: Some("msg_1".to_string()),
             model: Some("astral-fast".to_string()),
+            usage: None,
         },
         AgentStreamEvent::ContentBlockStart {
             index: 0,
