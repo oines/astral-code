@@ -234,7 +234,8 @@ pub struct FsGetMetadataResponse {
     pub is_directory: bool,
     pub is_file: bool,
     pub is_symlink: bool,
-    pub size: u64,
+    #[serde(default)]
+    pub size: Option<u64>,
     pub created_at_ms: i64,
     pub modified_at_ms: i64,
 }
@@ -490,8 +491,33 @@ mod base64_bytes {
 
 #[cfg(test)]
 mod tests {
+    use super::FsGetMetadataResponse;
     use super::HttpRequestParams;
     use pretty_assertions::assert_eq;
+
+    #[test]
+    fn fs_get_metadata_response_deserializes_legacy_payload_without_size() {
+        let response: FsGetMetadataResponse = serde_json::from_value(serde_json::json!({
+            "isDirectory": false,
+            "isFile": true,
+            "isSymlink": false,
+            "createdAtMs": 123,
+            "modifiedAtMs": 456,
+        }))
+        .expect("legacy fs/getMetadata response should deserialize");
+
+        assert_eq!(
+            response,
+            FsGetMetadataResponse {
+                is_directory: false,
+                is_file: true,
+                is_symlink: false,
+                size: None,
+                created_at_ms: 123,
+                modified_at_ms: 456,
+            }
+        );
+    }
 
     #[test]
     fn http_request_timeout_treats_omitted_and_null_as_no_timeout() {

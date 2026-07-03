@@ -7553,3 +7553,47 @@ Compact 观察：
 - 生产行为变更均对应九项 follow-up：usage-limit 解析、Anthropic thinking budget 下限、Read/FileMetadata/env var、app-server metadata schema。
 - 文件操作继续走 `ExecutorFileSystem` / app-server/exec-server 既有抽象；sandbox、approval、PTY 安全语义未做范围外改动。
 - 未写入任何真实 key 或 provider 抓包 fixture。
+
+## 2026-07-03 第三轮验收最终收尾
+
+执行范围：
+
+- 修复 `FileMetadata.size` 的新 client / 旧 exec-server 版本兼容问题。
+- 查证并补报 `8b929ec861` 中三处未申报测试改动。
+- 将 `codex-app-server` 纳入后续每轮必跑 full changed-crate 测试清单。
+- 本轮未做 proptest 加宽；按用户裁决留到下轮。
+
+版本兼容修复：
+
+- `FileMetadata.size` 改为 `Option<u64>`；exec-server wire response `FsGetMetadataResponse.size` 加 `#[serde(default)]`，旧 server 不返回 `size` 时新版 client 反序列化为 `None`。
+- 本地 exec-server / app-server 仍在能拿到 metadata 时返回 `Some(size)`；app-server v2 schema 已重新生成，`size` 不再是 required 字段，TypeScript 类型为 `number | null`。
+- `Read` 的 256KB no-limit 护栏改为双路径：
+  - `size=Some(_)`：读文件前拒绝超限，保留新优化。
+  - `size=None`：先读文件，再按旧逻辑用实际字节数拒绝超限，护栏不消失。
+- 已补测试：旧格式 exec-server JSON 缺失 `size` 可成功反序列化；core Read 在 `metadata.size=None` 时会读后触发同一条 256KB 报错。
+
+三处未申报测试改动查证：
+
+- 图片 detail 断言保留。行为来源不是本轮测试硬改，而是上游 `8543e398859 Preserve image detail in app-server inputs (#20693)`：该 commit 给 app-server v2 `UserInput::{Image, LocalImage}` 增加 optional detail，并在 `protocol/src/models.rs` 中把 omitted detail 落到既有 `DEFAULT_IMAGE_DETAIL=high`，显式 `original` 也会继续传入 Responses image input。因此 `turn_start_sends_default_local_image_detail_for_chat_completions` 断言 `high`、`turn_start_sends_custom_local_image_detail_for_chat_completions` 断言 `original` 是合理的，继续保留。
+- skills warning 断言没有改回固定 `7`。原因是 app-server 集成测试会加载当前运行时可见的 repo/user/plugin/system skills，省略总数随测试环境和已安装插件变化；旧断言的 `7` 是环境快照，不是稳定产品契约。本轮保留宽松断言，并明确它覆盖稳定契约：warning 为 thread-scoped、文案前后缀精确、至少两个测试技能被裁掉、且 `alpha-skill` / `beta-skill` 不进入模型请求。
+- `app-server/tests/common/models_cache.rs` 的 `max_output_tokens: None` 是正确补漏。根因是 `bb893244c0 refactor: rename response transcript surfaces` 给 `ModelInfo` 增加了 `max_output_tokens` 字段，但当时没有同步 app-server 测试辅助 fixture；直到 `8b929ec861` 才补上。这意味着从 `bb893244c0` 到 `8b929ec861` 之间，`codex-app-server` crate full test 会编译失败；前两轮验证漏掉的原因就是没有跑 `just test -p codex-app-server`。
+
+规则更新：
+
+- 后续每轮涉及 common / protocol / core / app-server 边界的 changed-crate full test 清单必须显式包含 `just test -p codex-app-server`，避免再次漏掉 app-server fixture 编译破损。
+
+验证结果：
+
+- `just fmt` 通过。
+- `just write-app-server-schema` 通过。
+- `git diff --check` 通过。
+- Focused tests：
+  - `just test -p codex-exec-server fs_get_metadata_response_deserializes_legacy_payload_without_size`：1 passed，209 skipped。
+  - `RUST_MIN_STACK=8388608 just test -p codex-core read_without_limit_rejects_large_file`：2 passed，2708 skipped。
+- Full changed-crate tests：
+  - `just test -p codex-file-system`：1 passed，0 skipped。
+  - `just test -p codex-exec-server`：210 passed，0 skipped。
+  - `just test -p codex-app-server-protocol`：218 passed，0 skipped。
+  - `just test -p codex-app-server`：先暴露 `fs_get_metadata_returns_only_used_fields` 期望写成 `Some(11)` 的测试数据错误；修正为真实文件大小 `Some(5)` 后重跑全量通过：719 passed，62 skipped。
+  - `RUST_MIN_STACK=8388608 just test -p codex-core`：2685 passed，25 skipped。
+- `just fix -p codex-core -p codex-exec-server -p codex-app-server-protocol -p codex-app-server -p codex-file-system` 通过，退出码 0。命令仍打印既有 `codex-memories-write::phase2::run_blocking` dead_code warning，以及 core / core tests 中已有 `unwrap/expect` clippy warning；本轮未扩大为测试风格重写。

@@ -296,7 +296,7 @@ async fn file_system_get_metadata_returns_expected_fields(use_remote: bool) -> R
     assert_eq!(metadata.is_directory, false);
     assert_eq!(metadata.is_file, true);
     assert_eq!(metadata.is_symlink, false);
-    assert_eq!(metadata.size, 5);
+    assert_eq!(metadata.size, Some(5));
     assert!(metadata.modified_at_ms > 0);
 
     let symlink_path = tmp.path().join("note-link.txt");
@@ -308,7 +308,7 @@ async fn file_system_get_metadata_returns_expected_fields(use_remote: bool) -> R
     assert_eq!(symlink_metadata.is_directory, false);
     assert_eq!(symlink_metadata.is_file, true);
     assert_eq!(symlink_metadata.is_symlink, true);
-    assert_eq!(symlink_metadata.size, 5);
+    assert_eq!(symlink_metadata.size, Some(5));
     assert!(symlink_metadata.modified_at_ms > 0);
 
     let dir_path = tmp.path().join("notes");

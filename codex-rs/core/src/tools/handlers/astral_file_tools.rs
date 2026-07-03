@@ -381,17 +381,18 @@ async fn read_file(
             path.display()
         )));
     }
-    if args.limit.is_none() && metadata.size > DEFAULT_READ_MAX_BYTES_WITHOUT_LIMIT as u64 {
-        return Err(FunctionCallError::RespondToModel(format!(
-            "File content ({}) exceeds maximum allowed size ({}). Use offset and limit parameters to read specific portions of the file, or search for specific content instead of reading the whole file.",
-            format_file_size(metadata.size),
-            format_file_size(DEFAULT_READ_MAX_BYTES_WITHOUT_LIMIT as u64)
-        )));
+    if args.limit.is_none()
+        && let Some(size) = metadata.size
+    {
+        reject_oversized_unbounded_read(size)?;
     }
 
     let bytes = fs.read_file(&path, Some(sandbox)).await.map_err(|err| {
         FunctionCallError::RespondToModel(format!("unable to read `{}`: {err}", path.display()))
     })?;
+    if args.limit.is_none() && metadata.size.is_none() {
+        reject_oversized_unbounded_read(bytes.len() as u64)?;
+    }
     let text = String::from_utf8_lossy(&bytes);
     let lines = split_lines_preserving_newline(&text);
     let start_line = args.offset.unwrap_or(1).max(1);
@@ -441,6 +442,17 @@ async fn read_file(
     }
 
     Ok(add_line_numbers(output_lines, start + 1))
+}
+
+fn reject_oversized_unbounded_read(size: u64) -> Result<(), FunctionCallError> {
+    if size <= DEFAULT_READ_MAX_BYTES_WITHOUT_LIMIT as u64 {
+        return Ok(());
+    }
+    Err(FunctionCallError::RespondToModel(format!(
+        "File content ({}) exceeds maximum allowed size ({}). Use offset and limit parameters to read specific portions of the file, or search for specific content instead of reading the whole file.",
+        format_file_size(size),
+        format_file_size(DEFAULT_READ_MAX_BYTES_WITHOUT_LIMIT as u64)
+    )))
 }
 
 fn format_file_size(size_in_bytes: u64) -> String {

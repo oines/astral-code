@@ -65,6 +65,7 @@ use crate::tools::sandboxing::ExecApprovalRequirement;
 struct RecordingFileSystem {
     files: Mutex<HashMap<String, Vec<u8>>>,
     directories: Mutex<HashSet<String>>,
+    reported_file_size: Mutex<Option<Option<u64>>>,
     calls: Mutex<Vec<String>>,
     glob_response: Mutex<Option<GlobSearchResponse>>,
     grep_response: Mutex<Option<GrepSearchResponse>>,
@@ -84,6 +85,10 @@ impl RecordingFileSystem {
 
     async fn file_contents(&self, path: &AbsolutePathBuf) -> Option<Vec<u8>> {
         self.files.lock().await.get(&path_key(path)).cloned()
+    }
+
+    async fn set_reported_file_size(&self, size: Option<u64>) {
+        *self.reported_file_size.lock().await = Some(size);
     }
 
     async fn calls(&self) -> Vec<String> {
@@ -290,16 +295,18 @@ impl ExecutorFileSystem for RecordingFileSystem {
                 is_directory: true,
                 is_file: false,
                 is_symlink: false,
-                size: 0,
+                size: Some(0),
                 created_at_ms: 0,
                 modified_at_ms: 0,
             })
         } else if let Some(contents) = self.file_contents(path).await {
+            let reported_file_size = *self.reported_file_size.lock().await;
+            let size = reported_file_size.unwrap_or(Some(contents.len() as u64));
             Ok(FileMetadata {
                 is_directory: false,
                 is_file: true,
                 is_symlink: false,
-                size: contents.len() as u64,
+                size,
                 created_at_ms: 0,
                 modified_at_ms: 0,
             })
@@ -608,6 +615,36 @@ async fn read_without_limit_rejects_large_file() {
         "File content (256KB) exceeds maximum allowed size (256KB). Use offset and limit parameters to read specific portions of the file, or search for specific content instead of reading the whole file."
     );
     assert_eq!(fixture.fs.calls().await, Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn read_without_limit_rejects_large_file_when_metadata_size_is_missing() {
+    let fixture = FileToolFixture::with_file(
+        "large.txt",
+        vec![b'a'; DEFAULT_READ_MAX_BYTES_WITHOUT_LIMIT + 1],
+    )
+    .await;
+    fixture.fs.set_reported_file_size(None).await;
+
+    let error = read_file(
+        read_args("large.txt"),
+        &fixture.fs,
+        &fixture.sandbox,
+        &fixture.cwd,
+        LOCAL_ENVIRONMENT_ID,
+        &fixture.read_state,
+    )
+    .await
+    .expect_err("large unbounded read should fail after reading when metadata size is missing");
+
+    assert_eq!(
+        model_error(error),
+        "File content (256KB) exceeds maximum allowed size (256KB). Use offset and limit parameters to read specific portions of the file, or search for specific content instead of reading the whole file."
+    );
+    assert_eq!(
+        fixture.fs.calls().await,
+        vec![format!("read_file:{}", fixture.path.display())]
+    );
 }
 
 #[tokio::test]

@@ -5281,10 +5281,14 @@
           "type": "integer"
         },
         "size": {
-          "description": "File size in bytes.",
+          "default": null,
+          "description": "File size in bytes when reported by the backing filesystem.",
           "format": "uint64",
           "minimum": 0.0,
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "required": [
@@ -5292,8 +5296,7 @@
         "isDirectory",
         "isFile",
         "isSymlink",
-        "modifiedAtMs",
-        "size"
+        "modifiedAtMs"
       ],
       "title": "FsGetMetadataResponse",
       "type": "object"
