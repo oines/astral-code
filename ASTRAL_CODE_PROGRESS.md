@@ -7597,3 +7597,8 @@ Compact 观察：
   - `just test -p codex-app-server`：先暴露 `fs_get_metadata_returns_only_used_fields` 期望写成 `Some(11)` 的测试数据错误；修正为真实文件大小 `Some(5)` 后重跑全量通过：719 passed，62 skipped。
   - `RUST_MIN_STACK=8388608 just test -p codex-core`：2685 passed，25 skipped。
 - `just fix -p codex-core -p codex-exec-server -p codex-app-server-protocol -p codex-app-server -p codex-file-system` 通过，退出码 0。命令仍打印既有 `codex-memories-write::phase2::run_blocking` dead_code warning，以及 core / core tests 中已有 `unwrap/expect` clippy warning；本轮未扩大为测试风格重写。
+
+## 2026-07-03 归因勘误与仓库修复(验收方记录)
+
+- **勘误**:「第三轮验收最终收尾」中图片 detail 断言的归因不完整。经 baseline 实跑核实:旧断言("不发 detail")在 baseline `b5e3d35bf8` 上即已失败。行为真正来源是上游 `a026286bb1`(chat completions 投影开始携带 image detail)与 `8543e398859`/`53b1570367`(omitted→high 默认),均早于 fork 内改动;旧断言自 a026286bb1 起即为陈旧红测试,长期被 `bb893244c0` 引入的 app-server fixture 编译破损掩盖。`8b929ec861` 的断言翻转属于修正陈旧测试,不属于 A9/Z1 的行为夹带。
+- **仓库修复**:`.gitignore` 的 `apply_patch/` 规则(上游遗留,意在忽略补丁草稿目录)误吞了 `codex-rs/core/src/tools/handlers/apply_patch/argument_delta.rs`,该文件自 2026-06-17 起从未入库,任何干净 checkout 无法编译 codex-core。已将规则根锚定为 `/apply_patch/` 并补交该文件。全仓扫描确认无其他被忽略的 `.rs` 源码。

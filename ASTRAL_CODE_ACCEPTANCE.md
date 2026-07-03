@@ -114,3 +114,24 @@
 ### 建议提交方式
 
 工作区是两轮改动的总和(230+ 文件),建议按批次拆 PR:Z1 rename 单独一个(纯机械、diff 大)、1A 协议层、1B compact、1C+C9 工具面、1D+F1+Phase2 杂项。每个 PR 引用 PROGRESS.md 对应报告节。
+
+---
+
+## 七、第四轮验收记录(2026-07-03,commit a8257e4023)
+
+独立全量:五 crate 3833/3833 通过(零 flaky)。代码级复核含 baseline 实跑对照。
+
+### 判定:代码通过;合并前有一个必须处理的仓库级阻塞项(与本 commit 无关,系复核时意外发现)
+
+- **size 版本兼容 PASS**:`Option<u64>` + wire `#[serde(default)]`,legacy JSON 反序列化测试真实;256KB 护栏双路径完整(Some 读前拒/None 读后拒,成对测试);本地实现仍返回 Some,remote 透传;schema 同步一致。
+- **图片 detail:断言保留成立,报告归因需更正**。复核 agent 在 baseline worktree 实跑旧断言:**baseline 上就是红的**。真正的行为来源是上游 `a026286bb1`(chat 投影开始携带 detail)+ `8543e398859`/`53b1570367`(omitted→high 默认);旧断言自 a026286bb1 起即为陈旧红测试,一直被 `bb893244c0` 造成的 app-server fixture 编译破损掩盖,`8b929ec861` 只是修正断言。分支内不存在改变该行为的改动,不属于 A9/Z1 夹带。→ 请在 PROGRESS.md 补一条归因勘误。
+- **skills 宽断言 PASS,理由成立**:测试 codex_home 隔离但 thread cwd 未隔离,skill 发现会加载仓库自带 `.codex/skills/`(13 个),总数确实环境相关;宽断言钉死了稳定契约(前后缀精确、alpha/beta 不进请求)。未来若要精确断言,正确做法是隔离测试 cwd,不是改回常数。
+
+### 合并前阻塞项(仓库级,立即处理)
+
+**`codex-rs/core/src/tools/handlers/apply_patch/argument_delta.rs` 被 `.gitignore:65` 的 `apply_patch/` 规则忽略,从未入库**,但被 `apply_patch.rs` 的 `mod argument_delta;` 引用——任何干净 checkout 编译不过 codex-core(worktree 实测 E0583)。本机工作区有此文件,故本地测试一直是绿的,掩盖至今。
+修法:把 `.gitignore` 该行收窄(如根锚定)或删除,`git add` 该文件并提交;顺手全仓 `git ls-files` 对照 `mod` 声明扫一遍有无同类被吞源码。
+
+### 状态
+
+四轮验收全部完成。上述阻塞项 + 归因勘误处理完毕后,`codex/astral-accepted-series` 可合并进 main。
