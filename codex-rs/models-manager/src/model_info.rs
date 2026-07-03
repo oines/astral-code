@@ -14,7 +14,7 @@ use codex_utils_output_truncation::approx_bytes_for_tokens;
 use tracing::info;
 
 pub const BASE_INSTRUCTIONS: &str = include_str!("../prompt.md");
-const DEFAULT_PERSONALITY_HEADER: &str = "You are Astral, an agentic coding assistant running inside astral-code. You and the user share one workspace, and your job is to keep working until the user's task is genuinely handled.";
+const DEFAULT_PERSONALITY_HEADER: &str = "You are Astral, an agentic coding assistant running inside astral-code. You and the user share one workspace. Help the user complete software engineering tasks end to end.";
 const LOCAL_FRIENDLY_TEMPLATE: &str =
     "You optimize for team morale and being a supportive teammate as much as code quality.";
 const LOCAL_PRAGMATIC_TEMPLATE: &str = "You are a deeply pragmatic, effective software engineer.";
