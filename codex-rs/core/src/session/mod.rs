@@ -324,8 +324,8 @@ use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::Personality;
 use codex_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use codex_protocol::config_types::WindowsSandboxLevel;
-use codex_protocol::models::ResponseInputItem;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptInputItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
 use codex_protocol::protocol::ApplyPatchApprovalRequestEvent;
 use codex_protocol::protocol::AskForApproval;
@@ -1614,7 +1614,7 @@ impl Session {
         &self,
         reference_context_item: Option<&TurnContextItem>,
         current_context: &TurnContext,
-    ) -> Vec<ResponseItem> {
+    ) -> Vec<TranscriptItem> {
         // TODO: Make context updates a pure diff of persisted previous/current TurnContextItem
         // state so replay/backtracking is deterministic. Runtime inputs that affect model-visible
         // context (shell, exec policy, feature gates, previous-turn bridge) should be persisted
@@ -1897,7 +1897,7 @@ impl Session {
             warn!("execpolicy amendment for {sub_id} had no command prefix");
             return;
         };
-        let message: ResponseItem =
+        let message: TranscriptItem =
             ContextualUserFragment::into(ApprovedCommandPrefixSaved::new(prefixes));
         let turn_context = self.turn_context_for_sub_id(sub_id).await;
         self.inject_no_new_turn(vec![message], turn_context.as_deref())
@@ -1978,7 +1978,8 @@ impl Session {
         sub_id: &str,
         amendment: &NetworkPolicyAmendment,
     ) {
-        let message: ResponseItem = ContextualUserFragment::into(NetworkRuleSaved::new(amendment));
+        let message: TranscriptItem =
+            ContextualUserFragment::into(NetworkRuleSaved::new(amendment));
         let turn_context = self.turn_context_for_sub_id(sub_id).await;
         self.inject_no_new_turn(vec![message], turn_context.as_deref())
             .await;
@@ -2565,7 +2566,7 @@ impl Session {
     pub(crate) async fn record_conversation_items(
         &self,
         turn_context: &TurnContext,
-        items: &[ResponseItem],
+        items: &[TranscriptItem],
     ) {
         {
             let mut state = self.state.lock().await;
@@ -2637,16 +2638,22 @@ impl Session {
 
     pub(crate) async fn replace_history(
         &self,
-        items: Vec<ResponseItem>,
+        items: Vec<TranscriptItem>,
         reference_context_item: Option<TurnContextItem>,
     ) {
-        let mut state = self.state.lock().await;
-        state.replace_history(items, reference_context_item);
+        {
+            let mut state = self.state.lock().await;
+            state.replace_history(items, reference_context_item);
+        }
+        self.services
+            .model_client
+            .reset_anthropic_cache_fold()
+            .await;
     }
 
     pub(crate) async fn replace_compacted_history(
         &self,
-        items: Vec<ResponseItem>,
+        items: Vec<TranscriptItem>,
         reference_context_item: Option<TurnContextItem>,
         compacted_item: CompactedItem,
     ) {
@@ -2655,6 +2662,10 @@ impl Session {
             state.replace_history(items, reference_context_item.clone());
             state.start_next_auto_compact_window();
         }
+        self.services
+            .model_client
+            .reset_anthropic_cache_fold()
+            .await;
 
         self.persist_rollout_items(&[RolloutItem::Compacted(compacted_item)])
             .await;
@@ -2669,11 +2680,11 @@ impl Session {
         self.services.model_client.advance_window_generation();
     }
 
-    async fn persist_rollout_response_items(&self, items: &[ResponseItem]) {
+    async fn persist_rollout_response_items(&self, items: &[TranscriptItem]) {
         let rollout_items: Vec<RolloutItem> = items
             .iter()
             .cloned()
-            .map(RolloutItem::ResponseItem)
+            .map(RolloutItem::TranscriptItem)
             .collect();
         self.persist_rollout_items(&rollout_items).await;
     }
@@ -2718,7 +2729,7 @@ impl Session {
         self.set_multi_agent_version_if_unset(selected)
     }
 
-    async fn send_raw_response_items(&self, turn_context: &TurnContext, items: &[ResponseItem]) {
+    async fn send_raw_response_items(&self, turn_context: &TurnContext, items: &[TranscriptItem]) {
         for item in items {
             self.send_event(
                 turn_context,
@@ -2735,7 +2746,7 @@ impl Session {
     pub(crate) async fn build_initial_context(
         &self,
         turn_context: &TurnContext,
-    ) -> Vec<ResponseItem> {
+    ) -> Vec<TranscriptItem> {
         let mut developer_sections = Vec::<String>::with_capacity(8);
         let mut contextual_user_sections = Vec::<String>::with_capacity(2);
         let mut separate_developer_sections = Vec::<String>::new();
@@ -3158,7 +3169,7 @@ impl Session {
     pub(crate) async fn record_response_item_and_emit_turn_item(
         &self,
         turn_context: &TurnContext,
-        response_item: ResponseItem,
+        response_item: TranscriptItem,
     ) {
         // Add to conversation history and persist response item to rollout.
         self.record_conversation_items(turn_context, std::slice::from_ref(&response_item))
@@ -3178,9 +3189,9 @@ impl Session {
         client_id: Option<String>,
     ) {
         // Persist the user message to history, but emit the turn item from `UserInput` so
-        // UI-only `text_elements` are preserved. `ResponseItem::Message` does not carry
+        // UI-only `text_elements` are preserved. `TranscriptItem::Message` does not carry
         // those spans, and `record_response_item_and_emit_turn_item` would drop them.
-        let response_item = ResponseItem::from(ResponseInputItem::from(input.to_vec()));
+        let response_item = TranscriptItem::from(TranscriptInputItem::from(input.to_vec()));
         self.record_conversation_items(turn_context, std::slice::from_ref(&response_item))
             .await;
         let mut user_message_item = UserMessageItem::new(input);
@@ -3275,8 +3286,8 @@ impl Session {
 
         let mut pending_input = additional_context_input
             .into_iter()
-            .map(ResponseItem::from)
-            .map(TurnInput::ResponseItem)
+            .map(TranscriptItem::from)
+            .map(TurnInput::TranscriptItem)
             .collect::<Vec<_>>();
         pending_input.push(TurnInput::UserInput {
             content: input,

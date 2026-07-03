@@ -11,7 +11,7 @@ use codex_plugin::PluginId;
 use codex_protocol::items::parse_hook_prompt_fragment;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::PermissionProfile;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::permissions::NetworkSandboxPolicy;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
@@ -879,7 +879,8 @@ fn rollout_hook_prompt_texts(text: &str) -> Result<Vec<String>> {
             continue;
         }
         let rollout: RolloutLine = serde_json::from_str(trimmed).context("parse rollout line")?;
-        if let RolloutItem::ResponseItem(ResponseItem::Message { role, content, .. }) = rollout.item
+        if let RolloutItem::TranscriptItem(TranscriptItem::Message { role, content, .. }) =
+            rollout.item
             && role == "user"
         {
             for item in content {

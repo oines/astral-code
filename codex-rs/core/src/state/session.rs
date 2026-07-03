@@ -1,7 +1,7 @@
 //! Session-wide mutable state.
 
 use codex_protocol::models::AdditionalPermissionProfile;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_sandboxing::policy_transforms::merge_permission_profiles;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -63,7 +63,7 @@ impl SessionState {
     pub(crate) fn record_items<I>(&mut self, items: I, policy: TruncationPolicy)
     where
         I: IntoIterator,
-        I::Item: std::ops::Deref<Target = ResponseItem>,
+        I::Item: std::ops::Deref<Target = TranscriptItem>,
     {
         self.history.record_items(items, policy);
     }
@@ -94,7 +94,7 @@ impl SessionState {
 
     pub(crate) fn replace_history(
         &mut self,
-        items: Vec<ResponseItem>,
+        items: Vec<TranscriptItem>,
         reference_context_item: Option<TurnContextItem>,
     ) {
         self.history.replace(items);

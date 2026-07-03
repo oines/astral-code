@@ -1,7 +1,7 @@
 # Astral-Code 实现审查报告（v2，含 Claude Code 源码对照）
 
 审查日期：2026-07-03
-审查基线：`main` @ `2590a75ee3`（含工作区未提交的 models-manager 改动）
+审查基线：`main` @ `b5e3d35bf8`（审查开展时为 `2590a75ee3` + 工作区未提交的 models-manager prompt 改动；该改动其后已合入为 `fa4d5fece3`，PR #29，见第六节）
 对照上游：`openai/codex`（fork 点 `08cb633c06`，2026-06-08；此后本仓 315 个 commit、1313 个文件变更，+57.8k/-76.6k 行）
 对照参考：`~/project/claude-code`（Claude Code 还原 TS 源码）——工具层与 session memory compact 的每条发现都已逐项对照，标注判定：**【真 bug】**（CC 行为不同）、**【忠实模仿】**（与 CC 一致，是 feature 不是 bug）、**【自有设计】**（CC 无对应机制）。
 
@@ -61,9 +61,9 @@
    CC 是 **1 秒间隔轮询、最多 15s**，且超时/过期（>60s stale）后**照样继续 SM compact**（`services/SessionMemory/sessionMemoryUtils.ts:12, 89-105`）。astral 是一次性 `sleep(15s)` 再检查一次，仍在跑就返回 Err → 回退 legacy 并计入熔断（`session_memory.rs:482-506`）。两个后果：提取 2s 完成也白等满 15s（compact 卡顿 13s）；提取 16s 完成则白白 fallback 且喂熔断。
    修法：改 1s 轮询（复用 `wait_for_extraction_completion` 的实现，`:508-538`），超时容忍继续而非判失败。
 
-7. **【自有设计缺陷】熔断移植错了层。**
-   CC 的 SM compact 失败是**零成本静默回退**（catch → return null，`sessionMemoryCompact.ts:621-629`），不计数无熔断；CC 的 3 次熔断在 **autocompact 整体层**（`autoCompact.ts:70`），内存态、只统计 legacy compact 失败、成功即清零。astral 把熔断装在 SM compact 失败上并**持久化到 state.json**（`session_memory.rs:48, 286-320`）——SM 失败本是零成本事件，却会永久性关闭 SM compact；叠加 #5 的 stale boundary 才形成死锁倾向。
-   修法：SM compact 失败不进熔断（回退 legacy 本身就是兜底）；如要保护，把熔断放到与 CC 同层。
+7. **【未经决策，已确认需修】熔断移植错了层。**
+   CC 的 SM compact 失败是**零成本静默回退**（catch → return null，`sessionMemoryCompact.ts:621-629`），不计数无熔断；CC 的 3 次熔断在 **autocompact 整体层**（`autoCompact.ts:70`），内存态、只统计 legacy compact 失败、成功即清零。astral 把熔断装在 SM compact 失败上并**持久化到 state.json**（`session_memory.rs:48, 286-320`）——SM 失败本是零成本事件，却会永久性关闭 SM compact；叠加 #5 的 stale boundary 才形成死锁倾向。**维护者确认这块由 Codex agent 实现、未经专门决策**（见第九节登记）。
+   修法：SM compact 失败不进熔断（回退 legacy 本身就是兜底）；防 compact thrashing 的保护（progress 文档中 `rapid_refill_breaker` TODO）应在 autocompact 整体层实现，与 CC 同层。
 
 ### 3.3 工具层
 
@@ -100,8 +100,8 @@
 
 - **【自有 bug】read-state key 用原始 `args.environment_id` 而非 resolved id**（`astral_file_tools.rs:391/816/901` vs `:231`），多环境下"Read 省略 id → Edit 显式传默认 id"会报 "File has not been read yet"。这是 astral 的多环境机制，与 CC 无关，统一用 resolved id 即可。（注：freshness 检查本体经对照是忠实模仿——CC 同样以 mtime 为主、内容 fallback 同样只在 full-read state 生效、`touch` 后同样会误报，见第八节撤回清单；astral 的 canonicalize key 和"mtime 相同内容不同也报错"属于合理增强。）
 - **【自有 bug】`CoreToolCallStatus::Interrupted` 从不发出**：`core_tool_lifecycle.rs` 只发三态，turn abort 时 in-flight item 永久 InProgress（协议和 TUI 都已支持 Interrupted，唯独 core 不产生）。
-- **【与 CC 训练分布的真实偏差】Bash 前台 10 秒即 yield。**
-  CC 前台**阻塞直到命令完成**，默认 timeout 120s / 上限 600s（`utils/timeouts.ts:2-3`），超时才 auto-background 或 SIGTERM（`BashTool.tsx:965-983`）。astral 前台 10s 即 yield 成后台 task（`unified_exec.rs:64-66`，Bash 未覆盖默认值）。有 ReadTaskOutput 可闭环，且这是项目引以为傲的 terminal 体验的一部分，但与模型训练分布差异大——建议评估把前台默认 yield 提到 120s，把"提前转后台"留给显式 `run_in_background`（CC 的后台返回文案是 `Command running in background with ID: ...`，可顺带对齐）。
+- **【有意分叉，已拍板保留】Bash 前台 10 秒即 yield。**
+  CC 前台**阻塞直到命令完成**，默认 timeout 120s / 上限 600s（`utils/timeouts.ts:2-3`），超时才 auto-background 或 SIGTERM（`BashTool.tsx:965-983`）。astral 前台 10s 即 yield 成后台 task（`unified_exec.rs:64-66`）。**维护者确认有意保留 UnifiedExec 语义**（见第九节登记），不向 CC 靠拢。剩余小项：后台返回文案可对齐 CC 的 `Command running in background with ID: ...`；yield 时长可开配置通道（默认不变）。
 - **【真 bug（小）】Read `limit=0` 被接受并返回空串**：CC schema 用 `positive()` 直接拒绝（`FileReadTool.ts:233`）；astral 接受 0（`astral_file_tools.rs:388-389`）。按输入校验错误处理。
 - **【设计选择，需拍板】非 multiline pattern 含 `\n`**：CC 把 rg 的 usage error 静默吞成 "No matches found"（`utils/ripgrep.ts:376-380, 437-442`）；astral 返回构建错误（`search.rs:186-195`）。astral 更友好但不忠实。建议：保留报错但在文案中提示 "set multiline: true"。
 - **【真 bug】ShellCommand 回退模式下 Bash 静态描述承诺兑现不了**：`spec_plan.rs:703-708` 不注册后台任务四件套、`astral_bash.rs:222` 静默丢弃 `run_in_background`，但 `bash_description()` 仍在教模型用它们。描述应随 backend 动态生成。
@@ -110,7 +110,7 @@
 
 ### Session memory compact
 
-- **【真偏差】提取触发阈值与 CC 源码默认差一个数量级**：CC 默认 init 10k tokens / 增量 5k / 3 次工具调用（`sessionMemoryUtils.ts:32-36`，可被远程配置覆盖，生产值未知）；astral 硬编码 100k/20k/10（`session_memory.rs:42-44`）。触发逻辑形状一致。astral 的保守值意味着 summary 更新频率低得多 → compact 时 summary 更陈旧、boundary 间隙更大。建议至少做成可配置，并评估向 CC 默认靠拢。
+- **【有意分叉，已拍板保留】提取触发阈值 100k/20k/10**：CC 源码默认 init 10k / 增量 5k / 3 次工具调用（`sessionMemoryUtils.ts:32-36`，可被远程配置覆盖，生产值未知）；**维护者确认 astral 的 100k/20k/10 是自定的保守值**（有意压低提取频率），不是抄错。触发逻辑形状一致。代价要知情：summary 更新频率低 → compact 时 summary 更陈旧、boundary 间隙更大——B1/B2 修掉后这个代价可控。建议做成可配置（默认不变），便于后续按真实会话数据调参。
 - **【真偏差】summary.md 写入非原子**：CC 的 Edit 落盘走 tempfile + `renameSync`（`utils/file.ts:84-98, 423-438`）；astral 全部裸 `tokio::fs::write`（`sidechain.rs:306/349`、`session_memory.rs:160/184`）。state.json 是 astral 自创（CC 无持久化状态，全内存），更应原子写——它一旦写坏，读失败仅 warn 跳过，等于静默丢 boundary。
 - **【自有设计的连带义务】state 持久化 + 多进程**：CC 状态是进程内存（重启即清，天然无一致性问题）；astral 把 boundary/token 基线持久化到 `state.json` 且 per-thread 跨进程，就必须自己解决 CC 不存在的问题：多进程 resume 并发提取（`RUNNING_EXTRACTIONS` 是进程级，`session_memory.rs:50-51`）、崩溃残留、shutdown 清别人的标记（`:526-532`）。这不是"抄错"，是自有设计没配套做完。
 - **【行为差异，非 bug】mid-turn compact 丢 initial context**：`compact.rs:57-66` 注释声明的不变量被 `try_compact_inner` 自己违反（`session_memory.rs:327, 360` 丢弃 `_initial_context_injection`），当前 turn 剩余请求缺 user_instructions/environment_context。这是 astral 对接 Codex 历史重建机制的自有问题（CC 无此机制），无测试覆盖。
@@ -126,7 +126,12 @@
 
 ## 五、P2：清理与架构质量
 
-- **砍掉 sse 层的 `ResponseItem`/`ResponseEvent` 往返**：IR → Responses 形状 → 再翻回 IR 的双重翻译催生了 `"anthropic_signature:"` 魔法字符串走私（`sse/agent.rs:367` vs `core/src/agent_request.rs:37`）等隐式契约。让 core 直接消费 `AgentStreamEvent`。顺带清理 codex-api 里残留的 realtime_websocket（约 3000 行）等 Responses 时代 sideband endpoint。
+- **完成 `ResponseItem` 的中立化，并用无损往返测试固化**（v1 的"砍掉往返"判定已修正——经与维护者确认，`ResponseItem` 已被改造为中立的 canonical 内部表示，同时服务 chat completions 和 Anthropic Messages，投影层是有意设计，名字属于命名债）。剩余收尾：
+  1. `"anthropic_signature:"` 字符串前缀走私（`sse/agent.rs:367` vs `core/src/agent_request.rs:37`）说明中立化未做完——signature、`redacted_thinking`、cache 标记应成为 `ResponseItem` 的结构化字段（或 `provider_metadata` 扩展位），而非编码进 `encrypted_content`；
+  2. 立不变量并用 property test 固化：每个 wire 的 adapter → `ResponseItem` → adapter 必须无损往返。现有的 reasoning 多块丢 signature、跨 provider 产生非法 thinking block 都会被这条测试当场抓住；
+  3. 在文档中显式定位 `agent-protocol` 的 IR 类型为 adapter 的流式中间产物（wire-local），防止它漂移成第二个中立表示；
+  4. `ResponseItem` 一族改名（2026-07-03 维护者拍板：现在做，任务清单 Z1，作为执行计划的第一个 PR）——`Response*` 前缀误导读者以为耦合 OpenAI Responses API，本审查 v1 的架构误判即由此名而起。关键事实：改类型标识符不动 serde tag/字段名，纯编译期变更，rollout 兼容无损；schema 生成物的类型名变更趁 v1 未发布时付清最便宜；
+  5. 顺带清理 codex-api 里残留的 realtime_websocket（约 3000 行）等 Responses 时代 sideband endpoint。
 - **anthropic_cache_fold 状态机**（`core/src/anthropic_cache_fold.rs:57-66`）：pinned index 不随历史重写（compact/回滚）重置；请求发出前就 mutate 状态、失败即污染；首次撞上不支持 `cache_edits` 的端点是一次用户可见 400（`client.rs:584-590`），本可摘掉 fold 原地重试。
 - **死代码删除**：`codex-rs/chatgpt/` 空目录、`app-server-transport` remote_control 整目录（双重封死但仍保留 `wham/remote/control/*` 路径拼接）、`connectors` crate 的 directory HTTP 助手、`backend-client` 的 wham/HostedApi 路径风格、`feedback` 的 sentry 依赖（`feedback/Cargo.toml:14`）、`has_chatgpt_account` / `Product::Chatgpt` 等死枚举。
 - **`otel.exporter = "statsig"` 被静默映射为 None**（`otel/src/config.rs:9-17`）：应在 config 加载层显式 warn 并从 schema 移除。
@@ -137,17 +142,17 @@
 
 ---
 
-## 六、未提交的 models-manager 系统提示词改动
+## 六、models-manager 系统提示词改动（已合入：`fa4d5fece3`，PR #29）
 
-改动内容：`models.json` 全部模型条目 + `prompt.md` + `DEFAULT_PERSONALITY_HEADER` 的 base_instructions 从分节式（Operating Style / Native Tool Flavor / Sandbox / Planning / Code Work / Communication）收敛为 8 段行为准则式短 prompt（work from evidence / stay within the request / protect the user's work / report honestly…），测试同步更新。
+改动内容：`models.json` 全部模型条目 + `prompt.md` + `DEFAULT_PERSONALITY_HEADER` 的 base_instructions 从分节式（Operating Style / Native Tool Flavor / Sandbox / Planning / Code Work / Communication）收敛为 8 段行为准则式短 prompt（work from evidence / stay within the request / protect the user's work / report honestly…），测试同步更新。审查时该改动尚在工作区，现已合入 main。
 
 评价：
 
 - **方向正确**：新 prompt 更短、更行为化，减少每请求 token 固定开销，且"证据先行/不越界/诚实汇报"是对弱模型更有效的约束形式。与 harness-bench 观察到的"Astral token/cache footprint 偏大"问题方向一致。
-- **两个值得斟酌的删减**：
-  1. 删掉了 *"your job is to keep working until the user's task is genuinely handled"* 这类 persistence 条款。对 DeepSeek 等模型，agentic 持续性很大程度靠这句话撑着；新 prompt 只有 "end to end" 一处弱表述。建议保留一句明确的"不要中途停在提案/半成品"。
-  2. 删掉了 Native Tool Flavor 段（TodoWrite 时机、后台任务 monitor、subagent 使用）。理论上这些该由工具描述自身承载——但结合第四节"Bash 静态描述在 ShellCommand 回退模式下名不副实"的发现，工具描述目前还没有完全接住这个职责。建议先补齐工具描述的动态生成，再删 prompt 里的兜底。
-- **验证建议**：这类 prompt 改动应过一轮 harness-bench fair 对比（2026-06-14 的基建可直接复用），至少确认 `20-heartbeat-escalation` 这类长任务的 persistence 不回退，再提交。
+- **两个值得跟进的删减**（已合入，以下作为后续跟进项而非提交前提）：
+  1. 删掉了 *"your job is to keep working until the user's task is genuinely handled"* 这类 persistence 条款。对 DeepSeek 等模型，agentic 持续性很大程度靠这句话撑着；新 prompt 只有 "end to end" 一处弱表述。建议跟进补一句明确的"不要中途停在提案/半成品"。
+  2. 删掉了 Native Tool Flavor 段（TodoWrite 时机、后台任务 monitor、subagent 使用）。理论上这些该由工具描述自身承载——但结合第四节"Bash 静态描述在 ShellCommand 回退模式下名不副实"的发现，工具描述目前还没有完全接住这个职责。补齐工具描述动态生成（任务清单 C7）后复查是否需要 prompt 兜底。
+- **验证建议**：用 harness-bench fair 对比（2026-06-14 的基建可直接复用）回归验证一轮，重点确认 `20-heartbeat-escalation` 这类长任务的 persistence 相比旧 prompt 不回退；若回退，优先补 persistence 条款。
 
 ---
 
@@ -159,10 +164,11 @@
 4. **Glob 后端性能**（P0.9）：pattern 前缀剪枝 + 扫描上限，语义保持 CC 对齐不动。这是当前唯一能拖死会话的层。
 5. **建立两张"契约表"防回归**：
    - *flavor 能力表*：reasoning 回传、usage 字段位置、tool_call index 行为、stream_options 支持、默认 max_tokens 等 provider 差异集中查表，adapter 不再散落 if；
-   - *Claude Code 行为 golden test*：本次对照确认的"忠实点"（行号格式、排序方向、截断文案、tail 参数、空文件 reminder 等）集中固化成对照测试，防止后续重构无意破坏；配真实 provider 抓包 SSE 回放（DeepSeek、SiliconFlow、GLM、Kimi、MiniMax 各一份 golden fixture）作为兼容矩阵回归基线。
+   - *Claude Code 行为 golden test*：本次对照确认的"忠实点"（行号格式、排序方向、截断文案、tail 参数、空文件 reminder 等）集中固化成对照测试，防止后续重构无意破坏；配真实 provider 抓包 SSE 回放（DeepSeek、SiliconFlow、GLM、Kimi、MiniMax 各一份 golden fixture）作为兼容矩阵回归基线；
+   - *无损往返 property test*：每个 wire 的 adapter → `ResponseItem` → adapter 恒等（见 P2 第一条），这是 `ResponseItem` 作为中立 canonical 表示的核心不变量。
 6. **自有机制的连带义务**：environment_id key 统一、CoreToolCall 补 Interrupted 终态、state.json/summary.md 原子写、mid-turn compact 的 initial context。
 7. **控制面扫尾**（一个下午的量）：doctor 的 api.openai.com fallback、announcement fetch 加 gate、删死代码目录、statsig 显式 warn。
-8. **prompt 改动**：按第六节建议补 persistence 条款 + 工具描述动态生成后再提交，并跑一轮 fair bench。
+8. **prompt 改动跟进**（已合入 `fa4d5fece3`）：跑一轮 fair bench 回归；按第六节建议评估补 persistence 条款；C7 完成后复查工具引导是否需要 prompt 兜底。
 9. **需要拍板的设计选择**（不是 bug，但要有意识地选）：Bash 前台 10s yield vs CC 的 120s 阻塞；提取阈值 100k/20k/10 vs CC 的 10k/5k/3；pattern 含 `\n` 报错 vs CC 静默空结果。三个都建议做成可配置或向 CC 靠拢，理由：模型是按 CC 分布训练的。
 
 ## 八、v1 判定撤回/修正清单（经 Claude Code 源码对照）
@@ -185,7 +191,33 @@
 | /compact 自定义指令被 SM 静默吞掉 | astral 目前无指令入口，谈不上"吞"；CC 的做法是有指令则跳过 SM。改为前瞻性要求（见 P1）。 |
 | compact 后 summary-first 顺序、10k/5/40k tail 参数 | 与 CC 完全一致（`sessionMemoryCompact.ts:57-61`、`compact.ts:330-338`），文案逐字复刻。忠实模仿。 |
 
-## 九、测试覆盖缺口汇总（修上述问题时顺带补齐）
+## 九、与 Claude Code 的分叉意图登记（2026-07-03 与维护者确认）
+
+真 bug 类发现需要再分"不小心没抄对"和"故意没抄"——前者修复无争议，后者是受保护的设计决策，Codex 执行时不得"顺手对齐 CC"改掉。依据：progress 文档、commit message、维护者当面确认。
+
+### 有意分叉（受保护，不改）
+
+| 分叉点 | 意图依据 |
+| --- | --- |
+| Bash 前台 10s yield 成后台 task（CC 是阻塞到完成/120s） | **维护者确认有意保留**——terminal 持续观察体验是项目核心优势，UnifiedExec 语义不向 CC 靠拢 |
+| 后台任务四件套（ReadTaskOutput 等）+ `task_id` 错误语义 | progress 文档补充 64/65，有意设计 |
+| subagent/multi-agent 工具保持 Codex 原版，不 Claude-ish 化 | progress 文档明确记录 |
+| `AskUserQuestion` 走 Codex 原生 `request_user_input` UI | progress 文档明确记录 |
+| SM 提取阈值 100k/20k/10（CC 源码默认 10k/5k/3） | **维护者确认为自定的保守值**，有意压低提取频率，不是抄错 |
+| SM 状态持久化到 `state.json`（CC 为进程内存态） | 适配 daemon/C-S 多进程架构的必要改造；但连带义务（原子写、多进程防护）未做完，属欠账 |
+| Glob 的 `--no-ignore --hidden` 语义及噪声目录剪枝的删除 | commit `613c7a3188` "Align Glob and Grep with Claude Code behavior" 有意对齐；性能回归是该次对齐的无意副作用。Grep 只保护 hidden 行为；按 Claude Code ground truth 仍尊重 ignore 文件，不在 `--no-ignore` 保护范围 |
+| Plan Mode / Goal Mode / local compact 骨架保留 Codex 方案 | progress 文档明确记录 |
+| 非 multiline pattern 含 `\n` 时报错（CC 静默空结果） | 无意形成但结果更优，作为开放设计选择保留（任务清单 C8） |
+
+### 不小心没抄对（修复无争议）
+
+Grep files_with_matches 漏 `multi_line`（另两个模式都有，明显抄漏）；Write/Edit 不建父目录；Read 双护栏缺失；legacy compact 后不重置 boundary；compact 等待提取的一次性 15s sleep + 超时判失败；summary.md 非原子写；Read limit=0 / CRLF 归一。这些在文档和 commit 中均无有意迹象，且与 progress 文档"工具 flavor 仍需继续校准 schema/result shape"的自述吻合。
+
+### 未经决策 → 已决策（2026-07-03 维护者拍板）
+
+**SM compact 失败熔断（3 次、持久化）**：由 Codex agent 实现，维护者确认未专门决策，现已拍板按审查建议处理——**删除 SM 层熔断，失败降级为日志/metrics**（零成本事件不该有自动关闭；自锁 + 持久化违反"不留静默单向退化机制"原则）。progress 文档中"类似 `rapid_refill_breaker` 保护语义"的真实意图（防 compact thrashing）在 autocompact 整体层单独落地（与 CC 同层，内存态，触发时明确提示）。见任务清单 B3 / B3b。
+
+## 十、测试覆盖缺口汇总（修上述问题时顺带补齐）
 
 - 协议层：每 chunk 带 usage 的流、未知 Anthropic 事件容错、Anthropic messages 端到端 wiremock 回放（目前 `codex-api/tests/clients.rs` 只测 chat completions）、429/retry-after、tool_calls 缺 index、跨 provider 历史投影。
 - 工具层：Grep multiline（三种输出模式）、Read 护栏触发、Write 建父目录、多环境 key 一致性、CRLF/非 UTF-8 Edit、interrupt 下的 CoreToolCall 生命周期、CC 行为 golden 对照测试（第七节第 5 条）。

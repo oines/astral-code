@@ -23,7 +23,7 @@ use codex_otel::HOOK_RUN_DURATION_METRIC;
 use codex_otel::HOOK_RUN_METRIC;
 use codex_protocol::items::TurnItem;
 use codex_protocol::items::UserMessageItem;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::HookCompletedEvent;
@@ -430,7 +430,7 @@ pub(crate) async fn run_post_compact_hooks(
 pub(crate) async fn run_legacy_after_agent_hook(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
-    input: &[ResponseItem],
+    input: &[TranscriptItem],
     last_assistant_message: Option<String>,
 ) -> bool {
     let mut abort_message = None;
@@ -522,7 +522,7 @@ pub(crate) async fn inspect_pending_input(
             )
             .await
         }
-        TurnInput::ResponseItem(_) => HookRuntimeOutcome {
+        TurnInput::TranscriptItem(_) => HookRuntimeOutcome {
             should_stop: false,
             additional_contexts: Vec::new(),
         },
@@ -544,7 +544,7 @@ pub(crate) async fn record_pending_input(
             )
             .await;
         }
-        TurnInput::ResponseItem(item) => {
+        TurnInput::TranscriptItem(item) => {
             sess.record_conversation_items(turn_context, std::slice::from_ref(&item))
                 .await;
         }
@@ -595,7 +595,7 @@ pub(crate) async fn record_additional_contexts(
         .await;
 }
 
-fn additional_context_messages(additional_contexts: Vec<String>) -> Vec<ResponseItem> {
+fn additional_context_messages(additional_contexts: Vec<String>) -> Vec<TranscriptItem> {
     additional_contexts
         .into_iter()
         .map(HookAdditionalContext::new)
@@ -795,7 +795,7 @@ mod tests {
             messages
                 .iter()
                 .map(|message| match message {
-                    codex_protocol::models::ResponseItem::Message { role, content, .. } => {
+                    codex_protocol::models::TranscriptItem::Message { role, content, .. } => {
                         let text = content
                             .iter()
                             .map(|item| match item {

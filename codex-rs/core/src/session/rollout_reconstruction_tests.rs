@@ -4,7 +4,7 @@ use super::tests::make_session_and_context;
 use codex_protocol::AgentPath;
 use codex_protocol::ThreadId;
 use codex_protocol::models::ContentItem;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::protocol::CompactedItem;
 use codex_protocol::protocol::InitialHistory;
 use codex_protocol::protocol::InterAgentCommunication;
@@ -12,8 +12,8 @@ use codex_protocol::protocol::ResumedHistory;
 use pretty_assertions::assert_eq;
 use std::path::PathBuf;
 
-fn user_message(text: &str) -> ResponseItem {
-    ResponseItem::Message {
+fn user_message(text: &str) -> TranscriptItem {
+    TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
@@ -23,8 +23,8 @@ fn user_message(text: &str) -> ResponseItem {
     }
 }
 
-fn assistant_message(text: &str) -> ResponseItem {
-    ResponseItem::Message {
+fn assistant_message(text: &str) -> TranscriptItem {
+    TranscriptItem::Message {
         id: None,
         role: "assistant".to_string(),
         content: vec![ContentItem::OutputText {
@@ -34,7 +34,7 @@ fn assistant_message(text: &str) -> ResponseItem {
     }
 }
 
-fn inter_agent_assistant_message(text: &str) -> ResponseItem {
+fn inter_agent_assistant_message(text: &str) -> TranscriptItem {
     let communication = InterAgentCommunication::new(
         AgentPath::root(),
         AgentPath::root().join("worker").unwrap(),
@@ -42,7 +42,7 @@ fn inter_agent_assistant_message(text: &str) -> ResponseItem {
         text.to_string(),
         /*trigger_turn*/ true,
     );
-    ResponseItem::Message {
+    TranscriptItem::Message {
         id: None,
         role: "assistant".to_string(),
         content: vec![ContentItem::OutputText {
@@ -212,8 +212,8 @@ async fn reconstruct_history_rollback_keeps_history_and_metadata_in_sync_for_com
             },
         )),
         RolloutItem::TurnContext(first_context_item.clone()),
-        RolloutItem::ResponseItem(turn_one_user.clone()),
-        RolloutItem::ResponseItem(turn_one_assistant.clone()),
+        RolloutItem::TranscriptItem(turn_one_user.clone()),
+        RolloutItem::TranscriptItem(turn_one_assistant.clone()),
         RolloutItem::EventMsg(EventMsg::TurnComplete(
             codex_protocol::protocol::TurnCompleteEvent {
                 turn_id: first_turn_id,
@@ -243,8 +243,8 @@ async fn reconstruct_history_rollback_keeps_history_and_metadata_in_sync_for_com
             },
         )),
         RolloutItem::TurnContext(rolled_back_context_item),
-        RolloutItem::ResponseItem(turn_two_user),
-        RolloutItem::ResponseItem(turn_two_assistant),
+        RolloutItem::TranscriptItem(turn_two_user),
+        RolloutItem::TranscriptItem(turn_two_assistant),
         RolloutItem::EventMsg(EventMsg::TurnComplete(
             codex_protocol::protocol::TurnCompleteEvent {
                 turn_id: rolled_back_turn_id,
@@ -316,8 +316,8 @@ async fn reconstruct_history_rollback_keeps_history_and_metadata_in_sync_for_inc
             },
         )),
         RolloutItem::TurnContext(first_context_item.clone()),
-        RolloutItem::ResponseItem(turn_one_user.clone()),
-        RolloutItem::ResponseItem(turn_one_assistant.clone()),
+        RolloutItem::TranscriptItem(turn_one_user.clone()),
+        RolloutItem::TranscriptItem(turn_one_assistant.clone()),
         RolloutItem::EventMsg(EventMsg::TurnComplete(
             codex_protocol::protocol::TurnCompleteEvent {
                 turn_id: first_turn_id,
@@ -346,7 +346,7 @@ async fn reconstruct_history_rollback_keeps_history_and_metadata_in_sync_for_inc
                 ..Default::default()
             },
         )),
-        RolloutItem::ResponseItem(turn_two_user),
+        RolloutItem::TranscriptItem(turn_two_user),
         RolloutItem::EventMsg(EventMsg::ThreadRolledBack(
             codex_protocol::protocol::ThreadRolledBackEvent { num_turns: 1 },
         )),
@@ -412,8 +412,8 @@ async fn reconstruct_history_rollback_skips_non_user_turns_for_history_and_metad
             },
         )),
         RolloutItem::TurnContext(first_context_item.clone()),
-        RolloutItem::ResponseItem(turn_one_user.clone()),
-        RolloutItem::ResponseItem(turn_one_assistant.clone()),
+        RolloutItem::TranscriptItem(turn_one_user.clone()),
+        RolloutItem::TranscriptItem(turn_one_assistant.clone()),
         RolloutItem::EventMsg(EventMsg::TurnComplete(
             codex_protocol::protocol::TurnCompleteEvent {
                 turn_id: first_turn_id,
@@ -442,8 +442,8 @@ async fn reconstruct_history_rollback_skips_non_user_turns_for_history_and_metad
                 ..Default::default()
             },
         )),
-        RolloutItem::ResponseItem(turn_two_user),
-        RolloutItem::ResponseItem(turn_two_assistant),
+        RolloutItem::TranscriptItem(turn_two_user),
+        RolloutItem::TranscriptItem(turn_two_assistant),
         RolloutItem::EventMsg(EventMsg::TurnComplete(
             codex_protocol::protocol::TurnCompleteEvent {
                 turn_id: second_turn_id,
@@ -462,7 +462,7 @@ async fn reconstruct_history_rollback_skips_non_user_turns_for_history_and_metad
                 collaboration_mode_kind: ModeKind::Default,
             },
         )),
-        RolloutItem::ResponseItem(standalone_assistant),
+        RolloutItem::TranscriptItem(standalone_assistant),
         RolloutItem::EventMsg(EventMsg::TurnComplete(
             codex_protocol::protocol::TurnCompleteEvent {
                 turn_id: standalone_turn_id,
@@ -537,8 +537,8 @@ async fn reconstruct_history_rollback_counts_inter_agent_assistant_turns() {
             },
         )),
         RolloutItem::TurnContext(first_context_item.clone()),
-        RolloutItem::ResponseItem(user_message("turn 1 user")),
-        RolloutItem::ResponseItem(assistant_message("turn 1 assistant")),
+        RolloutItem::TranscriptItem(user_message("turn 1 user")),
+        RolloutItem::TranscriptItem(assistant_message("turn 1 assistant")),
         RolloutItem::EventMsg(EventMsg::TurnComplete(
             codex_protocol::protocol::TurnCompleteEvent {
                 turn_id: first_turn_id,
@@ -558,8 +558,8 @@ async fn reconstruct_history_rollback_counts_inter_agent_assistant_turns() {
             },
         )),
         RolloutItem::TurnContext(assistant_turn_context),
-        RolloutItem::ResponseItem(assistant_instruction),
-        RolloutItem::ResponseItem(assistant_reply),
+        RolloutItem::TranscriptItem(assistant_instruction),
+        RolloutItem::TranscriptItem(assistant_reply),
         RolloutItem::EventMsg(EventMsg::TurnComplete(
             codex_protocol::protocol::TurnCompleteEvent {
                 turn_id: assistant_turn_id,
@@ -629,8 +629,8 @@ async fn reconstruct_history_rollback_clears_history_and_metadata_when_exceeding
             },
         )),
         RolloutItem::TurnContext(only_context_item),
-        RolloutItem::ResponseItem(user_message("only user")),
-        RolloutItem::ResponseItem(assistant_message("only assistant")),
+        RolloutItem::TranscriptItem(user_message("only user")),
+        RolloutItem::TranscriptItem(assistant_message("only assistant")),
         RolloutItem::EventMsg(EventMsg::TurnComplete(
             codex_protocol::protocol::TurnCompleteEvent {
                 turn_id: only_turn_id,
@@ -866,8 +866,8 @@ async fn reconstruct_history_legacy_compaction_without_replacement_history_does_
  {
     let (session, turn_context) = make_session_and_context().await;
     let rollout_items = vec![
-        RolloutItem::ResponseItem(user_message("before compact")),
-        RolloutItem::ResponseItem(assistant_message("assistant reply")),
+        RolloutItem::TranscriptItem(user_message("before compact")),
+        RolloutItem::TranscriptItem(assistant_message("assistant reply")),
         RolloutItem::Compacted(CompactedItem {
             message: "legacy summary".to_string(),
             replacement_history: None,
@@ -882,7 +882,7 @@ async fn reconstruct_history_legacy_compaction_without_replacement_history_does_
         reconstructed.history,
         vec![
             user_message("before compact"),
-            ResponseItem::Compaction {
+            TranscriptItem::Compaction {
                 encrypted_content: "legacy summary".to_string(),
             },
         ]
@@ -900,7 +900,7 @@ async fn reconstruct_history_legacy_compaction_without_replacement_history_clear
         .clone()
         .expect("turn context should have turn_id");
     let rollout_items = vec![
-        RolloutItem::ResponseItem(user_message("before compact")),
+        RolloutItem::TranscriptItem(user_message("before compact")),
         RolloutItem::Compacted(CompactedItem {
             message: "legacy summary".to_string(),
             replacement_history: None,

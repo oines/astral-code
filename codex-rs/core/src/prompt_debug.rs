@@ -5,8 +5,8 @@ use codex_exec_server::ExecServerRuntimePaths;
 use codex_login::AuthManager;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
-use codex_protocol::models::ResponseInputItem;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptInputItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::user_input::UserInput;
 use tokio_util::sync::CancellationToken;
@@ -27,7 +27,7 @@ pub async fn build_prompt_input(
     mut config: Config,
     input: Vec<UserInput>,
     state_db: Option<StateDbHandle>,
-) -> CodexResult<Vec<ResponseItem>> {
+) -> CodexResult<Vec<TranscriptItem>> {
     config.ephemeral = true;
 
     let auth_manager =
@@ -72,14 +72,14 @@ pub async fn build_prompt_input(
 pub(crate) async fn build_prompt_input_from_session(
     sess: &Session,
     input: Vec<UserInput>,
-) -> CodexResult<Vec<ResponseItem>> {
+) -> CodexResult<Vec<TranscriptItem>> {
     let turn_context = sess.new_default_turn().await;
     sess.record_context_updates_and_set_reference_context_item(turn_context.as_ref())
         .await;
 
     if !input.is_empty() {
-        let input_item = ResponseInputItem::from(input);
-        let response_item = ResponseItem::from(input_item);
+        let input_item = TranscriptInputItem::from(input);
+        let response_item = TranscriptItem::from(input_item);
         sess.record_conversation_items(turn_context.as_ref(), std::slice::from_ref(&response_item))
             .await;
     }

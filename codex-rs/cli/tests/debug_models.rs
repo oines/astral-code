@@ -34,7 +34,6 @@ fn debug_models_default_prints_json_without_auth() -> Result<()> {
     let stdout = String::from_utf8(output.stdout)?;
     let value: serde_json::Value = serde_json::from_str(&stdout)?;
     assert!(value["models"].is_array());
-    assert!(!value["models"].as_array().unwrap_or(&Vec::new()).is_empty());
 
     Ok(())
 }

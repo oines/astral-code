@@ -9,20 +9,59 @@ use tracing::trace;
 
 use codex_protocol::permissions::NetworkSandboxPolicy;
 
-/// Experimental environment variable that will be set to some non-empty value
+/// Environment variable that will be set to some non-empty value
 /// if both of the following are true:
 ///
-/// 1. The process was spawned by Codex as part of a shell tool call.
+/// 1. The process was spawned by Astral as part of a shell tool call.
 /// 2. NetworkSandboxPolicy is restricted for the tool call.
+pub const ASTRAL_SANDBOX_NETWORK_DISABLED_ENV_VAR: &str = "ASTRAL_SANDBOX_NETWORK_DISABLED";
+
+/// Deprecated legacy name for [`ASTRAL_SANDBOX_NETWORK_DISABLED_ENV_VAR`].
 ///
-/// We may try to have just one environment variable for all sandboxing
-/// attributes, so this may change in the future.
 pub const CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR: &str = "CODEX_SANDBOX_NETWORK_DISABLED";
 
 /// Should be set when the process is spawned under a sandbox. Currently, the
 /// value is "seatbelt" for macOS, but it may change in the future to
 /// accommodate sandboxing configuration and other sandboxing mechanisms.
+pub const ASTRAL_SANDBOX_ENV_VAR: &str = "ASTRAL_SANDBOX";
+
+/// Deprecated legacy name for [`ASTRAL_SANDBOX_ENV_VAR`].
 pub const CODEX_SANDBOX_ENV_VAR: &str = "CODEX_SANDBOX";
+
+const SANDBOX_NETWORK_DISABLED_VALUE: &str = "1";
+const SEATBELT_SANDBOX_VALUE: &str = "seatbelt";
+
+pub fn is_network_sandbox_disabled() -> bool {
+    std::env::var(ASTRAL_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok()
+        || std::env::var(CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok()
+}
+
+pub fn is_seatbelt_sandboxed() -> bool {
+    std::env::var(ASTRAL_SANDBOX_ENV_VAR).as_deref() == Ok(SEATBELT_SANDBOX_VALUE)
+        || std::env::var(CODEX_SANDBOX_ENV_VAR).as_deref() == Ok(SEATBELT_SANDBOX_VALUE)
+}
+
+pub fn insert_network_sandbox_disabled_env(env: &mut HashMap<String, String>) {
+    env.insert(
+        ASTRAL_SANDBOX_NETWORK_DISABLED_ENV_VAR.to_string(),
+        SANDBOX_NETWORK_DISABLED_VALUE.to_string(),
+    );
+    env.insert(
+        CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR.to_string(),
+        SANDBOX_NETWORK_DISABLED_VALUE.to_string(),
+    );
+}
+
+pub fn insert_seatbelt_sandbox_env(env: &mut HashMap<String, String>) {
+    env.insert(
+        ASTRAL_SANDBOX_ENV_VAR.to_string(),
+        SEATBELT_SANDBOX_VALUE.to_string(),
+    );
+    env.insert(
+        CODEX_SANDBOX_ENV_VAR.to_string(),
+        SEATBELT_SANDBOX_VALUE.to_string(),
+    );
+}
 
 #[derive(Debug, Clone, Copy)]
 pub enum StdioPolicy {
@@ -35,8 +74,8 @@ pub enum StdioPolicy {
 /// (and `Child`) honor the configuration.
 ///
 /// For now, we take `NetworkSandboxPolicy` as a parameter to spawn_child()
-/// because we need to determine whether to set the
-/// `CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR` environment variable.
+/// because we need to determine whether to set the sandbox network-disabled
+/// environment variables.
 pub(crate) struct SpawnChildRequest<'a> {
     pub program: PathBuf,
     pub args: Vec<String>,
@@ -76,7 +115,14 @@ pub(crate) async fn spawn_child_async(request: SpawnChildRequest<'_>) -> std::io
     cmd.envs(env);
 
     if !network_sandbox_policy.is_enabled() {
-        cmd.env(CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR, "1");
+        cmd.env(
+            ASTRAL_SANDBOX_NETWORK_DISABLED_ENV_VAR,
+            SANDBOX_NETWORK_DISABLED_VALUE,
+        );
+        cmd.env(
+            CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR,
+            SANDBOX_NETWORK_DISABLED_VALUE,
+        );
     }
 
     // If this Codex process dies (including being killed via SIGKILL), we want
@@ -123,4 +169,38 @@ pub(crate) async fn spawn_child_async(request: SpawnChildRequest<'_>) -> std::io
     }
 
     cmd.kill_on_drop(true).spawn()
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    #[tokio::test]
+    async fn spawn_child_sets_astral_and_legacy_network_sandbox_env_vars() {
+        let cwd = std::env::current_dir()
+            .expect("current dir")
+            .try_into()
+            .expect("absolute cwd");
+        let child = spawn_child_async(SpawnChildRequest {
+            program: PathBuf::from("/bin/sh"),
+            args: vec![
+                "-c".to_string(),
+                "printf '%s|%s' \"${ASTRAL_SANDBOX_NETWORK_DISABLED:-not-set}\" \"${CODEX_SANDBOX_NETWORK_DISABLED:-not-set}\"".to_string(),
+            ],
+            arg0: None,
+            cwd,
+            network_sandbox_policy: NetworkSandboxPolicy::Restricted,
+            network: None,
+            stdio_policy: StdioPolicy::RedirectForShellTool,
+            env: HashMap::new(),
+        })
+        .await
+        .expect("spawn child");
+
+        let output = child.wait_with_output().await.expect("child output");
+
+        assert!(output.status.success(), "child failed: {output:?}");
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "1|1");
+    }
 }

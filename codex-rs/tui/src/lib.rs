@@ -1316,7 +1316,9 @@ async fn run_ratatui_app(
     let uses_remote_workspace = app_server_target.uses_remote_workspace();
     color_eyre::install()?;
 
-    tooltips::announcement::prewarm();
+    if initial_config.check_for_update_on_startup {
+        tooltips::announcement::prewarm();
+    }
 
     // Forward panic reports through tracing so they appear in the UI status
     // line, but do not swallow the default/color-eyre panic handler.

@@ -32,7 +32,7 @@ use codex_protocol::approvals::NetworkApprovalProtocol;
 use codex_protocol::config_types::ApprovalsReviewer;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::PermissionProfile;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::permissions::FileSystemAccessMode;
 use codex_protocol::permissions::FileSystemPath;
@@ -205,7 +205,7 @@ async fn seed_guardian_parent_history(session: &Arc<Session>, turn: &Arc<TurnCon
         .record_conversation_items(
             turn.as_ref(),
             &[
-                ResponseItem::Message {
+                TranscriptItem::Message {
                     id: None,
                     role: "user".to_string(),
                     content: vec![ContentItem::InputText {
@@ -214,20 +214,20 @@ async fn seed_guardian_parent_history(session: &Arc<Session>, turn: &Arc<TurnCon
                     }],
                     phase: None,
                 },
-                ResponseItem::FunctionCall {
+                TranscriptItem::FunctionCall {
                     id: None,
                     name: "gh_repo_view".to_string(),
                     namespace: None,
                     arguments: "{\"repo\":\"openai/codex\"}".to_string(),
                     call_id: "call-1".to_string(),
                 },
-                ResponseItem::FunctionCallOutput {
+                TranscriptItem::FunctionCallOutput {
                     call_id: "call-1".to_string(),
                     output: codex_protocol::models::FunctionCallOutputPayload::from_text(
                         "repo visibility: public".to_string(),
                     ),
                 },
-                ResponseItem::Message {
+                TranscriptItem::Message {
                     id: None,
                     role: "assistant".to_string(),
                     content: vec![ContentItem::OutputText {
@@ -242,14 +242,14 @@ async fn seed_guardian_parent_history(session: &Arc<Session>, turn: &Arc<TurnCon
 }
 
 fn rollout_item_contains_message_text(item: &RolloutItem, needle: &str) -> bool {
-    let RolloutItem::ResponseItem(response_item) = item else {
+    let RolloutItem::TranscriptItem(response_item) = item else {
         return false;
     };
     response_item_contains_message_text(response_item, needle)
 }
 
-fn response_item_contains_message_text(item: &ResponseItem, needle: &str) -> bool {
-    let ResponseItem::Message { content, .. } = item else {
+fn response_item_contains_message_text(item: &TranscriptItem, needle: &str) -> bool {
+    let TranscriptItem::Message { content, .. } = item else {
         return false;
     };
     content.iter().any(|item| match item {
@@ -441,7 +441,7 @@ async fn build_guardian_prompt_delta_mode_preserves_original_numbering() -> anyh
         .record_conversation_items(
             turn.as_ref(),
             &[
-                ResponseItem::Message {
+                TranscriptItem::Message {
                     id: None,
                     role: "user".to_string(),
                     content: vec![ContentItem::InputText {
@@ -449,7 +449,7 @@ async fn build_guardian_prompt_delta_mode_preserves_original_numbering() -> anyh
                     }],
                     phase: None,
                 },
-                ResponseItem::Message {
+                TranscriptItem::Message {
                     id: None,
                     role: "assistant".to_string(),
                     content: vec![ContentItem::OutputText {
@@ -571,7 +571,7 @@ async fn build_guardian_prompt_stale_delta_version_falls_back_to_full_prompt() -
     session
         .replace_history(
             vec![
-                ResponseItem::Message {
+                TranscriptItem::Message {
                     id: None,
                     role: "user".to_string(),
                     content: vec![ContentItem::InputText {
@@ -579,7 +579,7 @@ async fn build_guardian_prompt_stale_delta_version_falls_back_to_full_prompt() -
                     }],
                     phase: None,
                 },
-                ResponseItem::Message {
+                TranscriptItem::Message {
                     id: None,
                     role: "assistant".to_string(),
                     content: vec![ContentItem::OutputText {
@@ -595,7 +595,7 @@ async fn build_guardian_prompt_stale_delta_version_falls_back_to_full_prompt() -
         .record_conversation_items(
             turn.as_ref(),
             &[
-                ResponseItem::Message {
+                TranscriptItem::Message {
                     id: None,
                     role: "user".to_string(),
                     content: vec![ContentItem::InputText {
@@ -603,7 +603,7 @@ async fn build_guardian_prompt_stale_delta_version_falls_back_to_full_prompt() -
                     }],
                     phase: None,
                 },
-                ResponseItem::Message {
+                TranscriptItem::Message {
                     id: None,
                     role: "assistant".to_string(),
                     content: vec![ContentItem::OutputText {
@@ -650,7 +650,7 @@ async fn build_guardian_prompt_stale_delta_version_falls_back_to_full_prompt() -
 #[test]
 fn collect_guardian_transcript_entries_skips_contextual_user_messages() {
     let items = vec![
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -658,7 +658,7 @@ fn collect_guardian_transcript_entries_skips_contextual_user_messages() {
             }],
             phase: None,
         },
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "assistant".to_string(),
             content: vec![ContentItem::OutputText {
@@ -685,7 +685,7 @@ fn collect_guardian_transcript_entries_keeps_manual_approval_developer_message()
     let approval_text =
         format!("{AUTO_REVIEW_DENIED_ACTION_APPROVAL_DEVELOPER_PREFIX}\n\nApproved action:\n{{}}");
     let items = vec![
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "developer".to_string(),
             content: vec![ContentItem::InputText {
@@ -693,7 +693,7 @@ fn collect_guardian_transcript_entries_keeps_manual_approval_developer_message()
             }],
             phase: None,
         },
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "developer".to_string(),
             content: vec![ContentItem::InputText {
@@ -717,7 +717,7 @@ fn collect_guardian_transcript_entries_keeps_manual_approval_developer_message()
 #[test]
 fn collect_guardian_transcript_entries_includes_recent_tool_calls_and_output() {
     let items = vec![
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -725,20 +725,20 @@ fn collect_guardian_transcript_entries_includes_recent_tool_calls_and_output() {
             }],
             phase: None,
         },
-        ResponseItem::FunctionCall {
+        TranscriptItem::FunctionCall {
             id: None,
             name: "read_file".to_string(),
             namespace: None,
             arguments: "{\"path\":\"README.md\"}".to_string(),
             call_id: "call-1".to_string(),
         },
-        ResponseItem::FunctionCallOutput {
+        TranscriptItem::FunctionCallOutput {
             call_id: "call-1".to_string(),
             output: codex_protocol::models::FunctionCallOutputPayload::from_text(
                 "repo is public".to_string(),
             ),
         },
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "assistant".to_string(),
             content: vec![ContentItem::OutputText {
@@ -1660,7 +1660,7 @@ async fn guardian_reuses_prompt_cache_key_and_appends_prior_reviews() -> anyhow:
         .record_conversation_items(
             turn.as_ref(),
             &[
-                ResponseItem::Message {
+                TranscriptItem::Message {
                     id: None,
                     role: "user".to_string(),
                     content: vec![ContentItem::InputText {
@@ -1668,7 +1668,7 @@ async fn guardian_reuses_prompt_cache_key_and_appends_prior_reviews() -> anyhow:
                     }],
                     phase: None,
                 },
-                ResponseItem::Message {
+                TranscriptItem::Message {
                     id: None,
                     role: "assistant".to_string(),
                     content: vec![ContentItem::OutputText {
@@ -1704,7 +1704,7 @@ async fn guardian_reuses_prompt_cache_key_and_appends_prior_reviews() -> anyhow:
         .record_conversation_items(
             turn.as_ref(),
             &[
-                ResponseItem::Message {
+                TranscriptItem::Message {
                     id: None,
                     role: "user".to_string(),
                     content: vec![ContentItem::InputText {
@@ -1712,7 +1712,7 @@ async fn guardian_reuses_prompt_cache_key_and_appends_prior_reviews() -> anyhow:
                     }],
                     phase: None,
                 },
-                ResponseItem::Message {
+                TranscriptItem::Message {
                     id: None,
                     role: "assistant".to_string(),
                     content: vec![ContentItem::OutputText {
@@ -2199,7 +2199,7 @@ async fn guardian_parallel_reviews_fork_from_last_committed_trunk_history() -> a
             .record_conversation_items(
                 turn.as_ref(),
                 &[
-                    ResponseItem::Message {
+                    TranscriptItem::Message {
                         id: None,
                         role: "user".to_string(),
                         content: vec![ContentItem::InputText {
@@ -2207,7 +2207,7 @@ async fn guardian_parallel_reviews_fork_from_last_committed_trunk_history() -> a
                         }],
                         phase: None,
                     },
-                    ResponseItem::Message {
+                    TranscriptItem::Message {
                         id: None,
                         role: "assistant".to_string(),
                         content: vec![ContentItem::OutputText {
@@ -2266,7 +2266,7 @@ async fn guardian_parallel_reviews_fork_from_last_committed_trunk_history() -> a
             .record_conversation_items(
                 turn.as_ref(),
                 &[
-                    ResponseItem::Message {
+                    TranscriptItem::Message {
                         id: None,
                         role: "user".to_string(),
                         content: vec![ContentItem::InputText {
@@ -2274,7 +2274,7 @@ async fn guardian_parallel_reviews_fork_from_last_committed_trunk_history() -> a
                         }],
                         phase: None,
                     },
-                    ResponseItem::Message {
+                    TranscriptItem::Message {
                         id: None,
                         role: "assistant".to_string(),
                         content: vec![ContentItem::OutputText {

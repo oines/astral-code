@@ -17,7 +17,7 @@ use codex_protocol::mcp::CallToolResult;
 use codex_protocol::models::ActivePermissionProfile;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::PermissionProfile;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::AdditionalContextEntry;
 use codex_protocol::protocol::AskForApproval;
@@ -94,11 +94,14 @@ pub enum TryStartTurnIfIdleRejectionReason {
 #[derive(Debug)]
 pub struct TryStartTurnIfIdleError {
     reason: TryStartTurnIfIdleRejectionReason,
-    input: Vec<ResponseItem>,
+    input: Vec<TranscriptItem>,
 }
 
 impl TryStartTurnIfIdleError {
-    pub(crate) fn new(reason: TryStartTurnIfIdleRejectionReason, input: Vec<ResponseItem>) -> Self {
+    pub(crate) fn new(
+        reason: TryStartTurnIfIdleRejectionReason,
+        input: Vec<TranscriptItem>,
+    ) -> Self {
         Self { reason, input }
     }
 
@@ -109,7 +112,7 @@ impl TryStartTurnIfIdleError {
 
     /// Consumes the rejection and returns the original model-visible input
     /// unchanged, so callers can retry, drop, or log it explicitly.
-    pub fn into_input(self) -> Vec<ResponseItem> {
+    pub fn into_input(self) -> Vec<TranscriptItem> {
         self.input
     }
 }
@@ -286,8 +289,8 @@ impl CodexThread {
     /// It returns the unchanged items when this thread has no active turn.
     pub async fn inject_if_running(
         &self,
-        items: Vec<ResponseItem>,
-    ) -> Result<(), Vec<ResponseItem>> {
+        items: Vec<TranscriptItem>,
+    ) -> Result<(), Vec<TranscriptItem>> {
         self.codex.session.inject_if_running(items).await
     }
 
@@ -306,7 +309,7 @@ impl CodexThread {
     /// them, retry later, or log why no automatic turn was started.
     pub async fn try_start_turn_if_idle(
         &self,
-        items: Vec<ResponseItem>,
+        items: Vec<TranscriptItem>,
     ) -> Result<(), TryStartTurnIfIdleError> {
         self.codex.session.try_start_turn_if_idle(items).await
     }
@@ -416,7 +419,7 @@ impl CodexThread {
 
     /// Records a user-role session-prefix message without creating a new user turn boundary.
     pub(crate) async fn inject_user_message_without_turn(&self, message: String) {
-        let item = ResponseItem::Message {
+        let item = TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText { text: message }],
@@ -429,7 +432,7 @@ impl CodexThread {
     }
 
     /// Record raw model history items without starting a new turn.
-    pub async fn inject_response_items(&self, items: Vec<ResponseItem>) -> CodexResult<()> {
+    pub async fn inject_response_items(&self, items: Vec<TranscriptItem>) -> CodexResult<()> {
         if items.is_empty() {
             return Err(CodexErr::InvalidRequest(
                 "items must not be empty".to_string(),

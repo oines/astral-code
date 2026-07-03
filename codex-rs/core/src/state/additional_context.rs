@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use crate::context::AdditionalContextDeveloperFragment;
 use crate::context::AdditionalContextUserFragment;
 use crate::context::ContextualUserFragment;
-use codex_protocol::models::ResponseInputItem;
+use codex_protocol::models::TranscriptInputItem;
 use codex_protocol::protocol::AdditionalContextEntry;
 use codex_protocol::protocol::AdditionalContextKind;
 
@@ -16,7 +16,7 @@ impl AdditionalContextStore {
     pub(crate) fn merge(
         &mut self,
         values: BTreeMap<String, AdditionalContextEntry>,
-    ) -> Vec<ResponseInputItem> {
+    ) -> Vec<TranscriptInputItem> {
         let fragments = values
             .iter()
             .filter(|(key, value)| self.values.get(*key) != Some(*value))

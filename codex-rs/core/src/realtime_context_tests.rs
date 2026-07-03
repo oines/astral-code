@@ -14,7 +14,7 @@ use codex_git_utils::GitSha;
 use codex_protocol::ThreadId;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::PermissionProfile;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::GitInfo;
 use codex_protocol::protocol::SessionSource;
@@ -68,8 +68,8 @@ fn stored_thread(cwd: &str, title: &str, first_user_message: &str) -> StoredThre
     }
 }
 
-fn message(role: &str, content: ContentItem) -> ResponseItem {
-    ResponseItem::Message {
+fn message(role: &str, content: ContentItem) -> TranscriptItem {
+    TranscriptItem::Message {
         id: None,
         role: role.to_string(),
         content: vec![content],
@@ -77,11 +77,11 @@ fn message(role: &str, content: ContentItem) -> ResponseItem {
     }
 }
 
-fn user_message(text: impl Into<String>) -> ResponseItem {
+fn user_message(text: impl Into<String>) -> TranscriptItem {
     message("user", ContentItem::InputText { text: text.into() })
 }
 
-fn assistant_message(text: impl Into<String>) -> ResponseItem {
+fn assistant_message(text: impl Into<String>) -> TranscriptItem {
     message("assistant", ContentItem::OutputText { text: text.into() })
 }
 

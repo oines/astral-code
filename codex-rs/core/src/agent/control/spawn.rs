@@ -32,28 +32,29 @@ pub(super) fn agent_nickname_candidates(config: &Config, role_name: Option<&str>
 
 fn keep_forked_rollout_item(item: &RolloutItem, preserve_reference_context_item: bool) -> bool {
     match item {
-        RolloutItem::ResponseItem(ResponseItem::Message { role, phase, .. }) => match role.as_str()
-        {
-            "system" | "developer" | "user" => true,
-            "assistant" => *phase == Some(MessagePhase::FinalAnswer),
-            _ => false,
-        },
-        RolloutItem::ResponseItem(
-            ResponseItem::AgentMessage { .. }
-            | ResponseItem::Reasoning { .. }
-            | ResponseItem::LocalShellCall { .. }
-            | ResponseItem::FunctionCall { .. }
-            | ResponseItem::ToolSearchCall { .. }
-            | ResponseItem::FunctionCallOutput { .. }
-            | ResponseItem::CustomToolCall { .. }
-            | ResponseItem::CustomToolCallOutput { .. }
-            | ResponseItem::ToolSearchOutput { .. }
-            | ResponseItem::WebSearchCall { .. }
-            | ResponseItem::ImageGenerationCall { .. }
-            | ResponseItem::Compaction { .. }
-            | ResponseItem::CompactionTrigger
-            | ResponseItem::ContextCompaction { .. }
-            | ResponseItem::Other,
+        RolloutItem::TranscriptItem(TranscriptItem::Message { role, phase, .. }) => {
+            match role.as_str() {
+                "system" | "developer" | "user" => true,
+                "assistant" => *phase == Some(MessagePhase::FinalAnswer),
+                _ => false,
+            }
+        }
+        RolloutItem::TranscriptItem(
+            TranscriptItem::AgentMessage { .. }
+            | TranscriptItem::Reasoning { .. }
+            | TranscriptItem::LocalShellCall { .. }
+            | TranscriptItem::FunctionCall { .. }
+            | TranscriptItem::ToolSearchCall { .. }
+            | TranscriptItem::FunctionCallOutput { .. }
+            | TranscriptItem::CustomToolCall { .. }
+            | TranscriptItem::CustomToolCallOutput { .. }
+            | TranscriptItem::ToolSearchOutput { .. }
+            | TranscriptItem::WebSearchCall { .. }
+            | TranscriptItem::ImageGenerationCall { .. }
+            | TranscriptItem::Compaction { .. }
+            | TranscriptItem::CompactionTrigger
+            | TranscriptItem::ContextCompaction { .. }
+            | TranscriptItem::Other,
         ) => false,
         // Full-history forks preserve the cached prompt prefix and can keep diffing
         // from the parent's durable baseline. Truncated forks drop part of that prompt,
@@ -63,8 +64,11 @@ fn keep_forked_rollout_item(item: &RolloutItem, preserve_reference_context_item:
     }
 }
 
-fn is_multi_agent_v2_usage_hint_message(item: &ResponseItem, usage_hint_texts: &[String]) -> bool {
-    let ResponseItem::Message { role, content, .. } = item else {
+fn is_multi_agent_v2_usage_hint_message(
+    item: &TranscriptItem,
+    usage_hint_texts: &[String],
+) -> bool {
+    let TranscriptItem::Message { role, content, .. } = item else {
         return false;
     };
     if role != "developer" {
@@ -471,7 +475,7 @@ impl AgentControl {
             keep_forked_rollout_item(item, preserve_reference_context_item)
                 && !matches!(
                     item,
-                    RolloutItem::ResponseItem(response_item)
+                    RolloutItem::TranscriptItem(response_item)
                         if is_multi_agent_v2_usage_hint_message(
                             response_item,
                             &multi_agent_v2_usage_hint_texts_to_filter,
@@ -500,7 +504,7 @@ impl AgentControl {
                     subagent_usage_hint_text,
                 ])
         {
-            forked_rollout_items.push(RolloutItem::ResponseItem(subagent_usage_hint_message));
+            forked_rollout_items.push(RolloutItem::TranscriptItem(subagent_usage_hint_message));
         }
 
         state

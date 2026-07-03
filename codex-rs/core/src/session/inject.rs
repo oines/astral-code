@@ -7,7 +7,7 @@ use crate::state::ActiveTurn;
 use crate::state::TurnState;
 use crate::tasks::RegularTask;
 use codex_protocol::config_types::ModeKind;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use std::sync::Arc;
 
 impl Session {
@@ -18,15 +18,15 @@ impl Session {
     )]
     pub async fn inject_if_running(
         &self,
-        input: Vec<ResponseItem>,
-    ) -> Result<(), Vec<ResponseItem>> {
+        input: Vec<TranscriptItem>,
+    ) -> Result<(), Vec<TranscriptItem>> {
         let mut active = self.active_turn.lock().await;
         match active.as_mut() {
             Some(active_turn) => {
                 self.input_queue
                     .extend_pending_input_for_turn_state(
                         active_turn.turn_state.as_ref(),
-                        input.into_iter().map(TurnInput::ResponseItem).collect(),
+                        input.into_iter().map(TurnInput::TranscriptItem).collect(),
                     )
                     .await;
                 Ok(())
@@ -44,7 +44,7 @@ impl Session {
     /// covered by the active-task check because Review turns are not steerable.
     pub(crate) async fn try_start_turn_if_idle(
         self: &Arc<Self>,
-        input: Vec<ResponseItem>,
+        input: Vec<TranscriptItem>,
     ) -> Result<(), TryStartTurnIfIdleError> {
         if input.is_empty() {
             return Ok(());
@@ -121,7 +121,7 @@ impl Session {
         self.input_queue
             .extend_pending_input_for_turn_state(
                 turn_state.as_ref(),
-                input.into_iter().map(TurnInput::ResponseItem).collect(),
+                input.into_iter().map(TurnInput::TranscriptItem).collect(),
             )
             .await;
         self.start_task(turn_context, Vec::new(), RegularTask::new())
@@ -142,7 +142,7 @@ impl Session {
     /// Injects items into active work, or records them without starting a turn.
     pub(crate) async fn inject_no_new_turn(
         &self,
-        items: Vec<ResponseItem>,
+        items: Vec<TranscriptItem>,
         current_turn_context: Option<&TurnContext>,
     ) {
         let Err(items) = self.inject_if_running(items).await else {

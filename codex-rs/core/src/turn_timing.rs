@@ -8,14 +8,14 @@ use std::time::UNIX_EPOCH;
 use codex_analytics::TurnProfile;
 use codex_otel::TURN_TTFM_DURATION_METRIC;
 use codex_protocol::items::TurnItem;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use tokio::sync::Mutex;
 
-use crate::ResponseEvent;
+use crate::ModelStreamEvent;
 use crate::session::turn_context::TurnContext;
 use crate::stream_events_utils::raw_assistant_output_text_from_item;
 
-pub(crate) async fn record_turn_ttft_metric(turn_context: &TurnContext, event: &ResponseEvent) {
+pub(crate) async fn record_turn_ttft_metric(turn_context: &TurnContext, event: &ModelStreamEvent) {
     let Some(duration) = turn_context
         .turn_timing_state
         .record_ttft_for_response_event(event)
@@ -142,7 +142,7 @@ impl TurnTimingState {
 
     pub(crate) async fn record_ttft_for_response_event(
         &self,
-        event: &ResponseEvent,
+        event: &ModelStreamEvent,
     ) -> Option<Duration> {
         if !response_event_records_turn_ttft(event) {
             return None;
@@ -327,33 +327,34 @@ impl TurnTimingStateInner {
     }
 }
 
-fn response_event_records_turn_ttft(event: &ResponseEvent) -> bool {
+fn response_event_records_turn_ttft(event: &ModelStreamEvent) -> bool {
     match event {
-        ResponseEvent::OutputItemDone(item) | ResponseEvent::OutputItemAdded(item) => {
+        ModelStreamEvent::OutputItemDone(item) | ModelStreamEvent::OutputItemAdded(item) => {
             response_item_records_turn_ttft(item)
         }
-        ResponseEvent::OutputTextDelta(_)
-        | ResponseEvent::ReasoningSummaryDelta { .. }
-        | ResponseEvent::ReasoningContentDelta { .. } => true,
-        ResponseEvent::Created
-        | ResponseEvent::ServerModel(_)
-        | ResponseEvent::ModelVerifications(_)
-        | ResponseEvent::TurnModerationMetadata(_)
-        | ResponseEvent::ServerReasoningIncluded(_)
-        | ResponseEvent::ToolCallInputDelta { .. }
-        | ResponseEvent::Completed { .. }
-        | ResponseEvent::ReasoningSummaryPartAdded { .. }
-        | ResponseEvent::RateLimits(_)
-        | ResponseEvent::ModelsEtag(_) => false,
+        ModelStreamEvent::OutputTextDelta(_)
+        | ModelStreamEvent::ReasoningSummaryDelta { .. }
+        | ModelStreamEvent::ReasoningContentDelta { .. } => true,
+        ModelStreamEvent::Created
+        | ModelStreamEvent::ServerModel(_)
+        | ModelStreamEvent::ModelVerifications(_)
+        | ModelStreamEvent::TurnModerationMetadata(_)
+        | ModelStreamEvent::ServerReasoningIncluded(_)
+        | ModelStreamEvent::Warning(_)
+        | ModelStreamEvent::ToolCallInputDelta { .. }
+        | ModelStreamEvent::Completed { .. }
+        | ModelStreamEvent::ReasoningSummaryPartAdded { .. }
+        | ModelStreamEvent::RateLimits(_)
+        | ModelStreamEvent::ModelsEtag(_) => false,
     }
 }
 
-fn response_item_records_turn_ttft(item: &ResponseItem) -> bool {
+fn response_item_records_turn_ttft(item: &TranscriptItem) -> bool {
     match item {
-        ResponseItem::Message { .. } => {
+        TranscriptItem::Message { .. } => {
             raw_assistant_output_text_from_item(item).is_some_and(|text| !text.is_empty())
         }
-        ResponseItem::Reasoning {
+        TranscriptItem::Reasoning {
             summary, content, ..
         } => {
             summary.iter().any(|entry| match entry {
@@ -369,20 +370,20 @@ fn response_item_records_turn_ttft(item: &ResponseItem) -> bool {
                 })
             })
         }
-        ResponseItem::AgentMessage { .. } => false,
-        ResponseItem::LocalShellCall { .. }
-        | ResponseItem::FunctionCall { .. }
-        | ResponseItem::CustomToolCall { .. }
-        | ResponseItem::ToolSearchCall { .. }
-        | ResponseItem::WebSearchCall { .. }
-        | ResponseItem::ImageGenerationCall { .. }
-        | ResponseItem::Compaction { .. }
-        | ResponseItem::ContextCompaction { .. } => true,
-        ResponseItem::CompactionTrigger => false,
-        ResponseItem::FunctionCallOutput { .. }
-        | ResponseItem::CustomToolCallOutput { .. }
-        | ResponseItem::ToolSearchOutput { .. }
-        | ResponseItem::Other => false,
+        TranscriptItem::AgentMessage { .. } => false,
+        TranscriptItem::LocalShellCall { .. }
+        | TranscriptItem::FunctionCall { .. }
+        | TranscriptItem::CustomToolCall { .. }
+        | TranscriptItem::ToolSearchCall { .. }
+        | TranscriptItem::WebSearchCall { .. }
+        | TranscriptItem::ImageGenerationCall { .. }
+        | TranscriptItem::Compaction { .. }
+        | TranscriptItem::ContextCompaction { .. } => true,
+        TranscriptItem::CompactionTrigger => false,
+        TranscriptItem::FunctionCallOutput { .. }
+        | TranscriptItem::CustomToolCallOutput { .. }
+        | TranscriptItem::ToolSearchOutput { .. }
+        | TranscriptItem::Other => false,
     }
 }
 

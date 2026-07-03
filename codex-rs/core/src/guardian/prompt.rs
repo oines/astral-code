@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::protocol::GuardianRiskLevel;
 use codex_protocol::protocol::GuardianUserAuthorization;
 use codex_protocol::user_input::UserInput;
@@ -416,7 +416,7 @@ fn render_guardian_transcript_entries_with_offset(
 /// agent's exact queried path / arguments as well as the returned evidence to
 /// decide whether the pending approval is justified.
 pub(crate) fn collect_guardian_transcript_entries(
-    items: &[ResponseItem],
+    items: &[TranscriptItem],
 ) -> Vec<GuardianTranscriptEntry> {
     let mut entries = Vec::new();
     let mut tool_names_by_call_id = HashMap::new();
@@ -430,14 +430,14 @@ pub(crate) fn collect_guardian_transcript_entries(
 
     for item in items {
         let entry = match item {
-            ResponseItem::Message { role, content, .. } if role == "user" => {
+            TranscriptItem::Message { role, content, .. } if role == "user" => {
                 if is_contextual_user_message_content(content) {
                     None
                 } else {
                     content_entry(GuardianTranscriptEntryKind::User, content)
                 }
             }
-            ResponseItem::Message { role, content, .. } if role == "developer" => {
+            TranscriptItem::Message { role, content, .. } if role == "developer" => {
                 content_items_to_text(content).and_then(|text| {
                     // Preserve only the explicit auto-review approval marker for
                     // Guardian context; other developer messages are intentionally
@@ -449,14 +449,14 @@ pub(crate) fn collect_guardian_transcript_entries(
                         })
                 })
             }
-            ResponseItem::Message { role, content, .. } if role == "assistant" => {
+            TranscriptItem::Message { role, content, .. } if role == "assistant" => {
                 content_entry(GuardianTranscriptEntryKind::Assistant, content)
             }
-            ResponseItem::LocalShellCall { action, .. } => serialized_entry(
+            TranscriptItem::LocalShellCall { action, .. } => serialized_entry(
                 GuardianTranscriptEntryKind::Tool("tool shell call".to_string()),
                 serde_json::to_string(action).ok(),
             ),
-            ResponseItem::FunctionCall {
+            TranscriptItem::FunctionCall {
                 call_id,
                 name,
                 arguments,
@@ -468,7 +468,7 @@ pub(crate) fn collect_guardian_transcript_entries(
                     text: arguments.clone(),
                 })
             }
-            ResponseItem::CustomToolCall {
+            TranscriptItem::CustomToolCall {
                 call_id,
                 name,
                 input,
@@ -480,16 +480,16 @@ pub(crate) fn collect_guardian_transcript_entries(
                     text: input.clone(),
                 })
             }
-            ResponseItem::WebSearchCall { action, .. } => action.as_ref().and_then(|action| {
+            TranscriptItem::WebSearchCall { action, .. } => action.as_ref().and_then(|action| {
                 serialized_entry(
                     GuardianTranscriptEntryKind::Tool("tool web_search call".to_string()),
                     serde_json::to_string(action).ok(),
                 )
             }),
-            ResponseItem::FunctionCallOutput {
+            TranscriptItem::FunctionCallOutput {
                 call_id, output, ..
             }
-            | ResponseItem::CustomToolCallOutput {
+            | TranscriptItem::CustomToolCallOutput {
                 call_id, output, ..
             } => output.body.to_text().and_then(|text| {
                 non_empty_entry(

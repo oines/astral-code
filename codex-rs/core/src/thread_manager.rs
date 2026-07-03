@@ -1605,21 +1605,21 @@ fn append_interrupted_boundary(
         InitialHistory::New | InitialHistory::Cleared => {
             let mut history = Vec::new();
             if let Some(marker) = interrupted_turn_history_marker(interrupted_marker) {
-                history.push(RolloutItem::ResponseItem(marker));
+                history.push(RolloutItem::TranscriptItem(marker));
             }
             history.push(aborted_event);
             InitialHistory::Forked(history)
         }
         InitialHistory::Forked(mut history) => {
             if let Some(marker) = interrupted_turn_history_marker(interrupted_marker) {
-                history.push(RolloutItem::ResponseItem(marker));
+                history.push(RolloutItem::TranscriptItem(marker));
             }
             history.push(aborted_event);
             InitialHistory::Forked(history)
         }
         InitialHistory::Resumed(mut resumed) => {
             if let Some(marker) = interrupted_turn_history_marker(interrupted_marker) {
-                resumed.history.push(RolloutItem::ResponseItem(marker));
+                resumed.history.push(RolloutItem::TranscriptItem(marker));
             }
             resumed.history.push(aborted_event);
             InitialHistory::Forked(resumed.history)

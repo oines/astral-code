@@ -47,6 +47,10 @@ fn env_overlay_for_exec_server_keeps_runtime_changes_only() {
         ("SHELL_SET".to_string(), "policy".to_string()),
         ("ASTRAL_THREAD_ID".to_string(), "thread-1".to_string()),
         (
+            "ASTRAL_SANDBOX_NETWORK_DISABLED".to_string(),
+            "1".to_string(),
+        ),
+        (
             "CODEX_SANDBOX_NETWORK_DISABLED".to_string(),
             "1".to_string(),
         ),
@@ -57,6 +61,10 @@ fn env_overlay_for_exec_server_keeps_runtime_changes_only() {
         HashMap::from([
             ("PATH".to_string(), "/sandbox-path".to_string()),
             ("ASTRAL_THREAD_ID".to_string(), "thread-1".to_string()),
+            (
+                "ASTRAL_SANDBOX_NETWORK_DISABLED".to_string(),
+                "1".to_string()
+            ),
             (
                 "CODEX_SANDBOX_NETWORK_DISABLED".to_string(),
                 "1".to_string()

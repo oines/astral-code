@@ -16,6 +16,10 @@ use std::sync::LazyLock;
 use std::sync::Mutex;
 use std::sync::RwLock;
 
+const ASTRAL_SANDBOX_ENV_VAR: &str = "ASTRAL_SANDBOX";
+const CODEX_SANDBOX_ENV_VAR: &str = "CODEX_SANDBOX";
+const SEATBELT_SANDBOX_VALUE: &str = "seatbelt";
+
 /// Set this to add a suffix to the User-Agent string.
 ///
 /// It is not ideal that we're using a global singleton for this.
@@ -247,7 +251,8 @@ pub fn default_headers() -> HeaderMap {
 }
 
 fn is_sandboxed() -> bool {
-    std::env::var("CODEX_SANDBOX").as_deref() == Ok("seatbelt")
+    std::env::var(ASTRAL_SANDBOX_ENV_VAR).as_deref() == Ok(SEATBELT_SANDBOX_VALUE)
+        || std::env::var(CODEX_SANDBOX_ENV_VAR).as_deref() == Ok(SEATBELT_SANDBOX_VALUE)
 }
 
 #[cfg(test)]

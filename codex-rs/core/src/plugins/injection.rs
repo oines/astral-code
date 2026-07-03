@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use codex_connectors::metadata::connector_display_label;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 
 use crate::connectors;
 use crate::context::ContextualUserFragment;
@@ -15,7 +15,7 @@ pub(crate) fn build_plugin_injections(
     mentioned_plugins: &[PluginCapabilitySummary],
     mcp_tools: &[ToolInfo],
     available_connectors: &[connectors::AppInfo],
-) -> Vec<ResponseItem> {
+) -> Vec<TranscriptItem> {
     if mentioned_plugins.is_empty() {
         return Vec::new();
     }

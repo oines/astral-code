@@ -102,7 +102,7 @@ use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::Settings;
 use codex_protocol::models::BaseInstructions;
 use codex_protocol::models::ContentItem;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::CodexErrorInfo;
 use codex_protocol::protocol::CompactedItem;
@@ -183,8 +183,8 @@ struct InstructionsTestCase {
     expects_apply_patch_description: bool,
 }
 
-fn user_message(text: &str) -> ResponseItem {
-    ResponseItem::Message {
+fn user_message(text: &str) -> TranscriptItem {
+    TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
@@ -194,8 +194,8 @@ fn user_message(text: &str) -> ResponseItem {
     }
 }
 
-fn assistant_message(text: &str) -> ResponseItem {
-    ResponseItem::Message {
+fn assistant_message(text: &str) -> TranscriptItem {
+    TranscriptItem::Message {
         id: None,
         role: "assistant".to_string(),
         content: vec![ContentItem::OutputText {
@@ -253,8 +253,8 @@ fn histogram_sum(resource_metrics: &ResourceMetrics, name: &str) -> u64 {
     }
 }
 
-fn skill_message(text: &str) -> ResponseItem {
-    ResponseItem::Message {
+fn skill_message(text: &str) -> TranscriptItem {
+    TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
@@ -308,11 +308,11 @@ async fn request_mcp_server_elicitation_auto_accepts_when_auto_deny_is_enabled()
     assert!(rx.try_recv().is_err());
 }
 
-fn developer_input_texts(items: &[ResponseItem]) -> Vec<&str> {
+fn developer_input_texts(items: &[TranscriptItem]) -> Vec<&str> {
     items
         .iter()
         .filter_map(|item| match item {
-            ResponseItem::Message { role, content, .. } if role == "developer" => {
+            TranscriptItem::Message { role, content, .. } if role == "developer" => {
                 Some(content.as_slice())
             }
             _ => None,
@@ -325,11 +325,11 @@ fn developer_input_texts(items: &[ResponseItem]) -> Vec<&str> {
         .collect()
 }
 
-fn developer_message_texts(items: &[ResponseItem]) -> Vec<Vec<&str>> {
+fn developer_message_texts(items: &[TranscriptItem]) -> Vec<Vec<&str>> {
     items
         .iter()
         .filter_map(|item| match item {
-            ResponseItem::Message { role, content, .. } if role == "developer" => {
+            TranscriptItem::Message { role, content, .. } if role == "developer" => {
                 Some(content.as_slice())
             }
             _ => None,
@@ -346,11 +346,11 @@ fn developer_message_texts(items: &[ResponseItem]) -> Vec<Vec<&str>> {
         .collect()
 }
 
-fn user_input_texts(items: &[ResponseItem]) -> Vec<&str> {
+fn user_input_texts(items: &[TranscriptItem]) -> Vec<&str> {
     items
         .iter()
         .filter_map(|item| match item {
-            ResponseItem::Message { role, content, .. } if role == "user" => {
+            TranscriptItem::Message { role, content, .. } if role == "user" => {
                 Some(content.as_slice())
             }
             _ => None,
@@ -1462,7 +1462,7 @@ async fn reconstruct_history_matches_live_compactions() {
 #[tokio::test]
 async fn reconstruct_history_uses_replacement_history_verbatim() {
     let (session, turn_context) = make_session_and_context().await;
-    let summary_item = ResponseItem::Message {
+    let summary_item = TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
@@ -1472,7 +1472,7 @@ async fn reconstruct_history_uses_replacement_history_verbatim() {
     };
     let replacement_history = vec![
         summary_item.clone(),
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "developer".to_string(),
             content: vec![ContentItem::InputText {
@@ -1583,7 +1583,7 @@ async fn record_initial_history_new_defers_initial_context_until_first_turn() {
     session.record_initial_history(InitialHistory::New).await;
 
     let history = session.clone_history().await;
-    assert_eq!(history.raw_items().to_vec(), Vec::<ResponseItem>::new());
+    assert_eq!(history.raw_items().to_vec(), Vec::<TranscriptItem>::new());
     assert!(session.reference_context_item().await.is_none());
     assert_eq!(session.previous_turn_settings().await, None);
 }
@@ -2502,7 +2502,7 @@ async fn thread_rollback_drops_last_turn_from_history() {
         .await;
     let rollout_items: Vec<RolloutItem> = full_history
         .into_iter()
-        .map(RolloutItem::ResponseItem)
+        .map(RolloutItem::TranscriptItem)
         .collect();
     sess.persist_rollout_items(&rollout_items).await;
     sess.set_previous_turn_settings(Some(PreviousTurnSettings {
@@ -2561,7 +2561,7 @@ async fn thread_rollback_clears_history_when_num_turns_exceeds_existing_turns() 
         .await;
     let rollout_items: Vec<RolloutItem> = full_history
         .into_iter()
-        .map(RolloutItem::ResponseItem)
+        .map(RolloutItem::TranscriptItem)
         .collect();
     sess.persist_rollout_items(&rollout_items).await;
 
@@ -2642,8 +2642,8 @@ async fn thread_rollback_recomputes_previous_turn_settings_and_reference_context
             },
         )),
         RolloutItem::TurnContext(first_context_item.clone()),
-        RolloutItem::ResponseItem(turn_one_user.clone()),
-        RolloutItem::ResponseItem(turn_one_assistant.clone()),
+        RolloutItem::TranscriptItem(turn_one_user.clone()),
+        RolloutItem::TranscriptItem(turn_one_assistant.clone()),
         RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
             turn_id: first_turn_id,
             last_agent_message: None,
@@ -2671,8 +2671,8 @@ async fn thread_rollback_recomputes_previous_turn_settings_and_reference_context
             },
         )),
         RolloutItem::TurnContext(rolled_back_context_item),
-        RolloutItem::ResponseItem(turn_two_user),
-        RolloutItem::ResponseItem(turn_two_assistant),
+        RolloutItem::TranscriptItem(turn_two_user),
+        RolloutItem::TranscriptItem(turn_two_assistant),
         RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
             turn_id: rolled_back_turn_id,
             last_agent_message: None,
@@ -2755,8 +2755,8 @@ async fn thread_rollback_restores_cleared_reference_context_item_after_compactio
             ..Default::default()
         })),
         RolloutItem::TurnContext(first_context_item.clone()),
-        RolloutItem::ResponseItem(user_message("turn 1 user")),
-        RolloutItem::ResponseItem(assistant_message("turn 1 assistant")),
+        RolloutItem::TranscriptItem(user_message("turn 1 user")),
+        RolloutItem::TranscriptItem(assistant_message("turn 1 assistant")),
         RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
             turn_id: first_turn_id,
             last_agent_message: None,
@@ -2806,8 +2806,8 @@ async fn thread_rollback_restores_cleared_reference_context_item_after_compactio
             model: "rolled-back-model".to_string(),
             ..first_context_item.clone()
         }),
-        RolloutItem::ResponseItem(user_message("turn 2 user")),
-        RolloutItem::ResponseItem(assistant_message("turn 2 assistant")),
+        RolloutItem::TranscriptItem(user_message("turn 2 user")),
+        RolloutItem::TranscriptItem(assistant_message("turn 2 assistant")),
         RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
             turn_id: rolled_back_turn_id,
             last_agent_message: None,
@@ -2859,8 +2859,8 @@ async fn thread_rollback_persists_marker_and_replays_cumulatively() {
             ..Default::default()
         })),
         RolloutItem::TurnContext(turn_context_item.clone()),
-        RolloutItem::ResponseItem(user_message("turn 1 user")),
-        RolloutItem::ResponseItem(assistant_message("turn 1 assistant")),
+        RolloutItem::TranscriptItem(user_message("turn 1 user")),
+        RolloutItem::TranscriptItem(assistant_message("turn 1 assistant")),
         RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
             turn_id: "turn-1".to_string(),
             last_agent_message: None,
@@ -2886,8 +2886,8 @@ async fn thread_rollback_persists_marker_and_replays_cumulatively() {
             ..Default::default()
         })),
         RolloutItem::TurnContext(turn_context_item.clone()),
-        RolloutItem::ResponseItem(user_message("turn 2 user")),
-        RolloutItem::ResponseItem(assistant_message("turn 2 assistant")),
+        RolloutItem::TranscriptItem(user_message("turn 2 user")),
+        RolloutItem::TranscriptItem(assistant_message("turn 2 assistant")),
         RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
             turn_id: "turn-2".to_string(),
             last_agent_message: None,
@@ -2913,8 +2913,8 @@ async fn thread_rollback_persists_marker_and_replays_cumulatively() {
             ..Default::default()
         })),
         RolloutItem::TurnContext(turn_context_item),
-        RolloutItem::ResponseItem(user_message("turn 3 user")),
-        RolloutItem::ResponseItem(assistant_message("turn 3 assistant")),
+        RolloutItem::TranscriptItem(user_message("turn 3 user")),
+        RolloutItem::TranscriptItem(assistant_message("turn 3 assistant")),
         RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
             turn_id: "turn-3".to_string(),
             last_agent_message: None,
@@ -7798,7 +7798,7 @@ async fn build_initial_context_omits_default_image_save_location_with_image_hist
     let (session, turn_context) = make_session_and_context().await;
     session
         .replace_history(
-            vec![ResponseItem::ImageGenerationCall {
+            vec![TranscriptItem::ImageGenerationCall {
                 id: "ig-test".to_string(),
                 status: "completed".to_string(),
                 revised_prompt: Some("a tiny blue square".to_string()),
@@ -8050,7 +8050,7 @@ async fn handle_output_item_done_records_image_save_history_message() {
         call_id,
     );
     let _ = std::fs::remove_file(&expected_saved_path);
-    let item = ResponseItem::ImageGenerationCall {
+    let item = TranscriptItem::ImageGenerationCall {
         id: call_id.to_string(),
         status: "completed".to_string(),
         revised_prompt: Some("a tiny blue square".to_string()),
@@ -8079,7 +8079,7 @@ async fn handle_output_item_done_records_image_save_history_message() {
     let image_output_dir = image_output_path
         .parent()
         .expect("generated image path should have a parent");
-    let image_message: ResponseItem = crate::context::ContextualUserFragment::into(
+    let image_message: TranscriptItem = crate::context::ContextualUserFragment::into(
         crate::context::ImageGenerationInstructions::new(
             image_output_dir.display(),
             image_output_path.display(),
@@ -8105,7 +8105,7 @@ async fn handle_output_item_done_skips_image_save_message_when_save_fails() {
         call_id,
     );
     let _ = std::fs::remove_file(&expected_saved_path);
-    let item = ResponseItem::ImageGenerationCall {
+    let item = TranscriptItem::ImageGenerationCall {
         id: call_id.to_string(),
         status: "completed".to_string(),
         revised_prompt: Some("broken payload".to_string()),
@@ -8248,7 +8248,7 @@ async fn record_context_updates_and_set_reference_context_item_injects_full_cont
 async fn record_context_updates_and_set_reference_context_item_reinjects_full_context_after_clear()
 {
     let (session, turn_context) = make_session_and_context().await;
-    let compacted_summary = ResponseItem::Message {
+    let compacted_summary = TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
@@ -8389,7 +8389,7 @@ async fn build_initial_context_prepends_model_switch_message() {
         .await;
     let initial_context = session.build_initial_context(&turn_context).await;
 
-    let ResponseItem::Message { role, content, .. } = &initial_context[0] else {
+    let TranscriptItem::Message { role, content, .. } = &initial_context[0] else {
         panic!("expected developer message");
     };
     assert_eq!(role, "developer");
@@ -8843,7 +8843,7 @@ async fn task_finish_emits_turn_item_lifecycle_for_leftover_pending_user_input()
         .await;
 
     let history = sess.clone_history().await;
-    let expected = ResponseItem::Message {
+    let expected = TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
@@ -9267,7 +9267,7 @@ async fn steer_input_returns_active_turn_id() {
 #[tokio::test]
 async fn abort_empty_active_turn_preserves_pending_input() {
     let (sess, _tc, _rx) = make_session_and_context_with_rx().await;
-    let pending_item = ResponseItem::Message {
+    let pending_item = TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
@@ -9283,7 +9283,7 @@ async fn abort_empty_active_turn_preserves_pending_input() {
     sess.input_queue
         .extend_pending_input_for_turn_state(
             turn_state.as_ref(),
-            vec![TurnInput::ResponseItem(pending_item.clone())],
+            vec![TurnInput::TranscriptItem(pending_item.clone())],
         )
         .await;
 
@@ -9294,7 +9294,7 @@ async fn abort_empty_active_turn_preserves_pending_input() {
         sess.input_queue
             .take_pending_input_for_turn_state(turn_state.as_ref())
             .await,
-        vec![TurnInput::ResponseItem(pending_item)]
+        vec![TurnInput::TranscriptItem(pending_item)]
     );
 }
 
@@ -9347,7 +9347,7 @@ async fn queue_only_mailbox_mail_waits_for_next_turn_after_answer_boundary() {
 
     assert_eq!(
         sess.input_queue.get_pending_input(&sess.active_turn).await,
-        vec![TurnInput::ResponseItem(ResponseItem::from(
+        vec![TurnInput::TranscriptItem(TranscriptItem::from(
             communication.to_response_input_item()
         ))],
     );
@@ -9438,7 +9438,7 @@ async fn steered_input_reopens_mailbox_delivery_for_current_turn() {
                 }],
                 client_id: None
             },
-            TurnInput::ResponseItem(ResponseItem::from(communication.to_response_input_item())),
+            TurnInput::TranscriptItem(TranscriptItem::from(communication.to_response_input_item())),
         ],
     );
 }
@@ -9496,7 +9496,7 @@ async fn stale_defer_mailbox_delivery_does_not_override_steered_input() {
                 }],
                 client_id: None
             },
-            TurnInput::ResponseItem(ResponseItem::from(communication.to_response_input_item())),
+            TurnInput::TranscriptItem(TranscriptItem::from(communication.to_response_input_item())),
         ],
     );
 }
@@ -9528,7 +9528,7 @@ async fn tool_calls_reopen_mailbox_delivery_for_current_turn() {
         .enqueue_mailbox_communication(communication.clone())
         .await;
 
-    let item = ResponseItem::FunctionCall {
+    let item = TranscriptItem::FunctionCall {
         id: None,
         name: "test_tool".to_string(),
         namespace: None,
@@ -9551,7 +9551,7 @@ async fn tool_calls_reopen_mailbox_delivery_for_current_turn() {
     assert!(output.tool_future.is_some());
     assert_eq!(
         sess.input_queue.get_pending_input(&sess.active_turn).await,
-        vec![TurnInput::ResponseItem(ResponseItem::from(
+        vec![TurnInput::TranscriptItem(TranscriptItem::from(
             communication.to_response_input_item()
         ))],
     );
@@ -9617,7 +9617,7 @@ async fn abort_review_task_emits_exited_then_aborted_and_records_history() {
     // Verify the `<turn_aborted>` marker is still recorded in history for the model.
     assert!(
         history.raw_items().iter().any(|item| {
-            let ResponseItem::Message { role, content, .. } = item else {
+            let TranscriptItem::Message { role, content, .. } = item else {
                 return false;
             };
             if role != "user" {
@@ -9661,7 +9661,7 @@ async fn fatal_tool_error_stops_turn_and_reports_error() {
             dynamic_tools: turn_context.dynamic_tools.as_slice(),
         },
     );
-    let item = ResponseItem::CustomToolCall {
+    let item = TranscriptItem::CustomToolCall {
         id: None,
         status: None,
         call_id: "call-1".to_string(),
@@ -9697,7 +9697,7 @@ async fn fatal_tool_error_stops_turn_and_reports_error() {
 async fn sample_rollout(
     session: &Session,
     _turn_context: &TurnContext,
-) -> (Vec<RolloutItem>, Vec<ResponseItem>) {
+) -> (Vec<RolloutItem>, Vec<TranscriptItem>) {
     let mut rollout_items = Vec::new();
     let mut live_history = ContextManager::new();
 
@@ -9710,7 +9710,7 @@ async fn sample_rollout(
     // Ensure personality_spec is present when Personality is enabled, so expected matches
     // what reconstruction produces (build_initial_context may omit it when baked into model).
     if !initial_context.iter().any(|m| {
-        matches!(m, ResponseItem::Message { role, content, .. }
+        matches!(m, TranscriptItem::Message { role, content, .. }
         if role == "developer"
             && content.iter().any(|c| {
                 matches!(c, ContentItem::InputText { text } if text.contains("<personality_spec>"))
@@ -9728,20 +9728,20 @@ async fn sample_rollout(
         );
         let insert_at = initial_context
             .iter()
-            .position(|m| matches!(m, ResponseItem::Message { role, .. } if role == "developer"))
+            .position(|m| matches!(m, TranscriptItem::Message { role, .. } if role == "developer"))
             .map(|i| i + 1)
             .unwrap_or(0);
         initial_context.insert(insert_at, msg);
     }
     for item in &initial_context {
-        rollout_items.push(RolloutItem::ResponseItem(item.clone()));
+        rollout_items.push(RolloutItem::TranscriptItem(item.clone()));
     }
     live_history.record_items(
         initial_context.iter(),
         reconstruction_turn.truncation_policy,
     );
 
-    let user1 = ResponseItem::Message {
+    let user1 = TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
@@ -9753,9 +9753,9 @@ async fn sample_rollout(
         std::iter::once(&user1),
         reconstruction_turn.truncation_policy,
     );
-    rollout_items.push(RolloutItem::ResponseItem(user1.clone()));
+    rollout_items.push(RolloutItem::TranscriptItem(user1.clone()));
 
-    let assistant1 = ResponseItem::Message {
+    let assistant1 = TranscriptItem::Message {
         id: None,
         role: "assistant".to_string(),
         content: vec![ContentItem::OutputText {
@@ -9767,7 +9767,7 @@ async fn sample_rollout(
         std::iter::once(&assistant1),
         reconstruction_turn.truncation_policy,
     );
-    rollout_items.push(RolloutItem::ResponseItem(assistant1.clone()));
+    rollout_items.push(RolloutItem::TranscriptItem(assistant1.clone()));
 
     let summary1 = "summary one";
     let snapshot1 = live_history
@@ -9781,7 +9781,7 @@ async fn sample_rollout(
         replacement_history: None,
     }));
 
-    let user2 = ResponseItem::Message {
+    let user2 = TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
@@ -9793,9 +9793,9 @@ async fn sample_rollout(
         std::iter::once(&user2),
         reconstruction_turn.truncation_policy,
     );
-    rollout_items.push(RolloutItem::ResponseItem(user2.clone()));
+    rollout_items.push(RolloutItem::TranscriptItem(user2.clone()));
 
-    let assistant2 = ResponseItem::Message {
+    let assistant2 = TranscriptItem::Message {
         id: None,
         role: "assistant".to_string(),
         content: vec![ContentItem::OutputText {
@@ -9807,7 +9807,7 @@ async fn sample_rollout(
         std::iter::once(&assistant2),
         reconstruction_turn.truncation_policy,
     );
-    rollout_items.push(RolloutItem::ResponseItem(assistant2.clone()));
+    rollout_items.push(RolloutItem::TranscriptItem(assistant2.clone()));
 
     let summary2 = "summary two";
     let snapshot2 = live_history
@@ -9821,7 +9821,7 @@ async fn sample_rollout(
         replacement_history: None,
     }));
 
-    let user3 = ResponseItem::Message {
+    let user3 = TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
@@ -9833,9 +9833,9 @@ async fn sample_rollout(
         std::iter::once(&user3),
         reconstruction_turn.truncation_policy,
     );
-    rollout_items.push(RolloutItem::ResponseItem(user3));
+    rollout_items.push(RolloutItem::TranscriptItem(user3));
 
-    let assistant3 = ResponseItem::Message {
+    let assistant3 = TranscriptItem::Message {
         id: None,
         role: "assistant".to_string(),
         content: vec![ContentItem::OutputText {
@@ -9847,7 +9847,7 @@ async fn sample_rollout(
         std::iter::once(&assistant3),
         reconstruction_turn.truncation_policy,
     );
-    rollout_items.push(RolloutItem::ResponseItem(assistant3));
+    rollout_items.push(RolloutItem::TranscriptItem(assistant3));
 
     (
         rollout_items,
@@ -9977,7 +9977,7 @@ async fn shell_tool_cancellation_returns_aborted_response() -> anyhow::Result<()
 while :; do sleep 1; done"#,
         ready_marker.display(),
     );
-    let item = ResponseItem::FunctionCall {
+    let item = TranscriptItem::FunctionCall {
         id: None,
         name: "Bash".to_string(),
         namespace: None,
@@ -10017,7 +10017,7 @@ while :; do sleep 1; done"#,
         .expect("cancelled shell tool should finish promptly")
         .expect("shell tool task should join")
         .expect("cancelled shell tool should return a response item");
-    let ResponseInputItem::FunctionCallOutput { output, .. } = response else {
+    let TranscriptInputItem::FunctionCallOutput { output, .. } = response else {
         anyhow::bail!("cancelled shell tool should return function output");
     };
     let FunctionCallOutputBody::Text(text) = output.body else {
