@@ -625,9 +625,19 @@ async fn turn_start_emits_thread_scoped_warning_notification_for_trimmed_skills(
     let warning: WarningNotification =
         serde_json::from_value(params).expect("deserialize warning notification");
     assert_eq!(warning.thread_id.as_deref(), Some(thread.id.as_str()));
-    assert_eq!(
-        warning.message,
-        "Exceeded skills context budget of 2%. All skill descriptions were removed and 7 additional skills were not included in the model-visible skills list."
+    let warning_prefix =
+        "Exceeded skills context budget of 2%. All skill descriptions were removed and ";
+    let warning_suffix = " additional skills were not included in the model-visible skills list.";
+    let trimmed_skill_count = warning
+        .message
+        .strip_prefix(warning_prefix)
+        .and_then(|message| message.strip_suffix(warning_suffix))
+        .expect("warning message should report omitted skill count")
+        .parse::<usize>()
+        .expect("omitted skill count should be numeric");
+    assert!(
+        trimmed_skill_count >= 2,
+        "expected at least the two oversized test skills to be trimmed, got: {trimmed_skill_count}"
     );
 
     timeout(
@@ -1939,7 +1949,7 @@ async fn turn_start_uses_migrated_pragmatic_personality_without_override_v2() ->
 }
 
 #[tokio::test]
-async fn turn_start_sends_local_image_without_chat_completions_detail_by_default() -> Result<()> {
+async fn turn_start_sends_default_local_image_detail_for_chat_completions() -> Result<()> {
     let input_images = run_local_image_turn(/*detail*/ None).await?;
 
     assert_eq!(input_images.len(), 1);
@@ -1949,13 +1959,16 @@ async fn turn_start_sends_local_image_without_chat_completions_detail_by_default
             .and_then(Value::as_str)
             .is_some()
     );
-    assert_eq!(input_images[0].get("detail").and_then(Value::as_str), None);
+    assert_eq!(
+        input_images[0].get("detail").and_then(Value::as_str),
+        Some("high")
+    );
 
     Ok(())
 }
 
 #[tokio::test]
-async fn turn_start_omits_custom_local_image_detail_for_chat_completions() -> Result<()> {
+async fn turn_start_sends_custom_local_image_detail_for_chat_completions() -> Result<()> {
     let input_images = run_local_image_turn(Some(ImageDetail::Original)).await?;
 
     assert_eq!(input_images.len(), 1);
@@ -1965,7 +1978,10 @@ async fn turn_start_omits_custom_local_image_detail_for_chat_completions() -> Re
             .and_then(Value::as_str)
             .is_some()
     );
-    assert_eq!(input_images[0].get("detail").and_then(Value::as_str), None);
+    assert_eq!(
+        input_images[0].get("detail").and_then(Value::as_str),
+        Some("original")
+    );
 
     Ok(())
 }

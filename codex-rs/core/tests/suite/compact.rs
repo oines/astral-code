@@ -667,6 +667,251 @@ async fn session_memory_compact_uses_summary_without_legacy_summarization_reques
     );
 }
 
+#[test]
+fn session_memory_compact_failure_falls_back_and_allows_later_extraction() {
+    run_session_memory_test_on_large_stack(
+        "session_memory_compact_failure_falls_back_and_allows_later_extraction",
+        session_memory_compact_failure_falls_back_and_allows_later_extraction_impl,
+    );
+}
+
+async fn session_memory_compact_failure_falls_back_and_allows_later_extraction_impl() {
+    skip_if_no_network!();
+
+    const FALLBACK_TEMPLATE: &str =
+        "# Current\n_Active work._\n\n# Task specification\n_Task details._";
+
+    let server = start_mock_server().await;
+    let model_provider = responses_mock_model_provider(&server);
+    let mut builder = test_codex().with_config(move |config| {
+        config.model_provider = model_provider;
+        enable_test_session_memory_compact(config);
+        config.session_memory_template = Some(FALLBACK_TEMPLATE.to_string());
+    });
+    let test = builder.build(&server).await.unwrap();
+    let summary_path = test
+        .config
+        .codex_home
+        .join("session-memory")
+        .join(test.session_configured.thread_id.to_string())
+        .join("summary.md");
+    let summary_path_str = summary_path.as_path().to_string_lossy().to_string();
+    let state_path = summary_path.as_path().with_file_name("state.json");
+
+    let main_turn = sse(vec![
+        ev_assistant_message("m-main-before-fallback", "ready to fallback"),
+        ev_completed_with_tokens("r-main-before-fallback", 10_001),
+    ]);
+    let sidechain_edit = sse(vec![
+        ev_function_call(
+            "session-memory-fallback-setup-edit",
+            "Edit",
+            &json!({
+                "file_path": summary_path_str,
+                "old_string": "_Active work._\n\n# Task specification",
+                "new_string": "_Active work._\n- Durable summary before fallback.\n\n# Task specification"
+            })
+            .to_string(),
+        ),
+        ev_completed_with_tokens("r-sidechain-fallback-setup", 10_010),
+    ]);
+    let legacy_compact_turn = sse(vec![
+        ev_assistant_message("m-legacy-fallback-summary", "LEGACY_FALLBACK_SUMMARY"),
+        ev_completed_with_tokens("r-legacy-fallback-summary", 20),
+    ]);
+    let post_legacy_turn = sse(vec![
+        ev_assistant_message("m-post-legacy-main", "after legacy fallback"),
+        ev_completed_with_tokens("r-post-legacy-main", 10_050),
+    ]);
+    let post_legacy_sidechain = sse(vec![
+        ev_function_call(
+            "session-memory-post-fallback-edit",
+            "Edit",
+            &json!({
+                "file_path": summary_path.as_path().to_string_lossy(),
+                "old_string": "_Active work._\n\n# Task specification",
+                "new_string": "_Active work._\n- Post fallback extraction works.\n\n# Task specification"
+            })
+            .to_string(),
+        ),
+        ev_completed_with_tokens("r-post-legacy-sidechain", 10_060),
+    ]);
+    let mock = mount_sse_sequence(
+        &server,
+        vec![
+            main_turn,
+            sidechain_edit,
+            legacy_compact_turn,
+            post_legacy_turn,
+            post_legacy_sidechain,
+        ],
+    )
+    .await;
+
+    test.submit_turn("session memory fallback setup")
+        .await
+        .unwrap();
+    wait_for_request_count(&mock, 2).await;
+    wait_for_file_contains(&state_path, "\"last_summary_fingerprint\": \"").await;
+    fs::write(summary_path.as_path(), FALLBACK_TEMPLATE).expect("restore template summary");
+
+    test.codex.submit(Op::Compact).await.unwrap();
+    wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+
+    let requests = wait_for_request_count(&mock, 3).await;
+    let legacy_request = requests[2].body_json().to_string();
+    assert!(
+        body_contains_text(&legacy_request, SUMMARIZATION_PROMPT),
+        "failed session-memory compact should fall back to legacy summarization"
+    );
+    let state = fs::read_to_string(state_path.as_path()).expect("state file exists");
+    assert!(
+        state.contains("\"last_summary_index\": null")
+            && state.contains("\"last_summary_fingerprint\": null")
+            && state.contains("\"last_error\": null"),
+        "legacy compact fallback should reset session-memory baseline state: {state}"
+    );
+
+    test.submit_turn("after legacy fallback extraction")
+        .await
+        .unwrap();
+    wait_for_request_count(&mock, 5).await;
+    wait_for_file_contains(summary_path.as_path(), "Post fallback extraction works.").await;
+}
+
+#[test]
+fn session_memory_mid_turn_compact_injects_initial_context() {
+    run_session_memory_test_on_large_stack(
+        "session_memory_mid_turn_compact_injects_initial_context",
+        session_memory_mid_turn_compact_injects_initial_context_impl,
+    );
+}
+
+async fn session_memory_mid_turn_compact_injects_initial_context_impl() {
+    skip_if_no_network!();
+
+    let server = start_mock_server().await;
+    let model_provider = responses_mock_model_provider(&server);
+    let mut builder = test_codex().with_config(move |config| {
+        config.model_provider = model_provider;
+        enable_test_session_memory_compact(config);
+        config.session_memory_minimum_message_tokens_to_init = 10;
+        config.session_memory_minimum_tokens_between_update = 10;
+        config.model_context_window = Some(100_000);
+        config.model_auto_compact_token_limit = Some(90_000);
+    });
+    let test = builder.build(&server).await.unwrap();
+    let summary_path = test
+        .config
+        .codex_home
+        .join("session-memory")
+        .join(test.session_configured.thread_id.to_string())
+        .join("summary.md");
+    let summary_path_str = summary_path.as_path().to_string_lossy().to_string();
+    let state_path = summary_path.as_path().with_file_name("state.json");
+
+    let setup_turn = sse(vec![
+        ev_assistant_message("m-midturn-setup", "mid-turn setup complete"),
+        ev_completed_with_tokens("r-midturn-setup", 50),
+    ]);
+    let sidechain_edit = sse(vec![
+        ev_function_call(
+            "session-memory-midturn-edit",
+            "Edit",
+            &json!({
+                "file_path": summary_path_str,
+                "old_string": "_What is actively being worked on right now? Pending tasks not yet completed. Immediate next steps._\n\n# Task specification",
+                "new_string": "_What is actively being worked on right now? Pending tasks not yet completed. Immediate next steps._\n- Mid-turn compact has durable session memory.\n\n# Task specification"
+            })
+            .to_string(),
+        ),
+        ev_completed_with_tokens("r-midturn-sidechain", 60),
+    ]);
+    let over_limit_turn = sse(vec![
+        ev_function_call(DUMMY_CALL_ID, DUMMY_FUNCTION_NAME, "{}"),
+        ev_completed_with_tokens("r-midturn-over-limit", 95_001),
+    ]);
+    let post_compact_turn = sse(vec![
+        ev_assistant_message("m-midturn-post-compact", FINAL_REPLY),
+        ev_completed_with_tokens("r-midturn-post-compact", 20),
+    ]);
+    let mock = mount_sse_sequence(
+        &server,
+        vec![
+            setup_turn,
+            sidechain_edit,
+            over_limit_turn,
+            post_compact_turn,
+        ],
+    )
+    .await;
+
+    test.submit_turn("mid-turn session memory setup")
+        .await
+        .unwrap();
+    wait_for_request_count(&mock, 2).await;
+    wait_for_file_contains(&state_path, "\"last_summary_fingerprint\": \"").await;
+
+    test.codex
+        .submit(Op::UserInput {
+            items: vec![UserInput::Text {
+                text: FUNCTION_CALL_LIMIT_MSG.into(),
+                text_elements: Vec::new(),
+            }],
+            final_output_json_schema: None,
+            model_client_metadata: None,
+            additional_context: Default::default(),
+            thread_settings: Default::default(),
+        })
+        .await
+        .unwrap();
+    loop {
+        let event = test.codex.next_event().await.unwrap();
+        if matches!(event.msg, EventMsg::TurnComplete(_)) && !event.id.starts_with("auto-compact-")
+        {
+            break;
+        }
+    }
+
+    let requests = wait_for_request_count(&mock, 4).await;
+    assert_eq!(
+        requests.len(),
+        4,
+        "session-memory mid-turn compact should avoid legacy summarization request"
+    );
+    let request_bodies = requests
+        .iter()
+        .map(|request| request.body_json().to_string())
+        .collect::<Vec<_>>();
+    assert!(
+        !request_bodies
+            .iter()
+            .any(|body| body_contains_text(body, SUMMARIZATION_PROMPT)),
+        "session-memory mid-turn compact should not inject the legacy summarization prompt"
+    );
+    let post_compact_body = &request_bodies[3];
+    assert!(
+        body_contains_text(
+            post_compact_body,
+            "Mid-turn compact has durable session memory."
+        ),
+        "post compact request should include the session-memory summary"
+    );
+    let context_index = post_compact_body
+        .find("<environment_context>")
+        .expect("mid-turn post compact request should preserve initial context");
+    let user_index = post_compact_body
+        .find(FUNCTION_CALL_LIMIT_MSG)
+        .expect("mid-turn post compact request should keep the active user message");
+    assert!(
+        context_index < user_index,
+        "BeforeLastUserMessage injection should keep initial context before the active user message"
+    );
+}
+
 async fn wait_for_file_contains(path: &Path, needle: &str) {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {

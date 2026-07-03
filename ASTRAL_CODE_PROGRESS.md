@@ -7401,3 +7401,155 @@ Compact 观察：
 
 - `just fix` 期间仍能看到既有 `codex-memories-write::phase2::run_blocking` dead_code warning，以及部分 core 测试里的 `unwrap/expect` clippy warning；命令最终退出码为 0，本轮没有顺手改整套测试风格。
 - 验收返工、full related crate tests、`just fix` 后，当前 `codex-rs/target` 约 49GB，磁盘可用约 84GiB。
+
+## 2026-07-03 `ASTRAL_CODE_ACCEPTANCE.md` follow-up 清尾款与入库整理
+
+入库整理：
+
+- 基线：`main @ b5e3d35bf8` 之上的已验收未提交工作区。
+- Snapshot 保护分支：`codex/astral-accepted-snapshot`。
+- Snapshot commit：`6e192ebb6ac7e7c65438aa5afee292577522faa4`，message `snapshot: accepted astral tasks implementation`。
+- Snapshot tree：`d5dae7379e8770fa0562af5f9b4c4d5ca2c65f26`。
+- 整理分支：`codex/astral-accepted-series`。
+- 整理提交序列：
+  - `bb893244c0 refactor: rename response transcript surfaces`
+  - `26bdb91f91 feat: harden provider stream adapters`
+  - `2a8741db8c feat: stabilize session memory compaction`
+  - `67329cabb7 feat: align astral tool behavior`
+  - `e1b19e90c6 chore: finish astral cleanup and accepted docs`
+- 对账：整理后的 `HEAD^{tree}` 与 snapshot tree 均为 `d5dae7379e8770fa0562af5f9b4c4d5ca2c65f26`；`git diff --exit-code codex/astral-accepted-snapshot HEAD` 为空。
+- 三个文档 `ASTRAL_CODE_REVIEW.md` / `ASTRAL_CODE_TASKS.md` / `ASTRAL_CODE_ACCEPTANCE.md` 已随整理提交入库。
+
+九项 follow-up 状态：
+
+1. 完成：补 session memory 整链集成测试，覆盖 SM compact 失败后回退 legacy compact、baseline 重置、后续 extraction 继续更新 summary。
+2. 完成：补 mid-turn `BeforeLastUserMessage` 注入模式测试，覆盖 SM compact 后 initial context 保留且位于 active user message 之前。
+3. 完成：`usage_limit_reached` 429 检测改为 serde 类型化解析 `error.type`；解析失败继续按 fail-open retry 行为。
+4. 完成：引入 `proptest`，为 agent IR、chat completions adapter、Anthropic adapter 补 roundtrip property tests；已更新 `Cargo.lock` 和 `MODULE.bazel.lock`。
+5. 完成：查证 `~/project/claude-code` thinking budget 逻辑以 `max_tokens - 1` 为上界；Astral 侧补 Anthropic 1024 下限保护，请求预算低于 1024 时禁用 thinking，足够时抬到至少 1024 并保持上界。
+6. 完成：Read token 上限 env var 改为 `ASTRAL_FILE_READ_MAX_OUTPUT_TOKENS`，不保留旧名；两条护栏报错补 CC 尾句；字节数改为人类可读格式；`FileMetadata` 补 `size`，本地、远程、exec-server、app-server v2 schema 均已贯通；256KB no-limit 判定挪到读前 metadata 阶段。
+7. 完成：`debug_models` 无 auth 默认测试改为精确断言 `{"models":[]}`。
+8. 完成：78 个上游安全骨架 commit 已逐 hash 分类；本轮只分类，不做新的 cherry-pick。
+9. 完成：`grep` 结果 mtime 降序契约补直接测试，测试文件 mtime 拉开秒级差距，避免平局依赖。
+
+范围外按要求未做：
+
+- Interrupted 终态、C8 小项包、yield 配置通道、真实 provider 抓包、bench。
+- 本轮没有新增 cherry-pick；E1 只分类留档。
+
+78 个上游安全骨架 commit 分类：
+
+- 已收割 / 等价落地：
+  - `76d8f20241` `[codex] Add size to internal filesystem metadata (#27927)`：本轮 follow-up 6 已按 Astral 当前 `ExecutorFileSystem` / exec-server / app-server v2 形态等价落地，未直接 cherry-pick。
+- 不适用：
+  - `cc97839068` `[codex] add cross-platform filesystem adapter coverage (#27454)`：测试覆盖骨架，非本轮生产安全修复。
+  - `5a56caf18c` `[codex] Remove async_trait from first-party code (#27475)`：内部 trait 形态整理，非安全行为修复。
+  - `9d938a46d9` `[codex] Add hermetic Wine exec-server test (#27937)`：Windows/Wine 测试基础设施，不改变 Astral 当前生产语义。
+  - `740c4f269d` `build: run buildifier from just fmt (#28125)`：构建格式化流程变更，非安全修复。
+  - `efbd00f21f` `[codex] exec-server honors remote environment cwd and shell (#28122)`：依赖 remote environment 迁移，本轮 Astral 未启用对应路径。
+  - `1fe89de576` `Run core integration tests against a Wine-backed Windows executor (#28401)`：测试基础设施。
+  - `e752f7b4ae` `[codex] Use expect in integration tests (#28441)`：测试风格整理。
+  - `172b2218a5` `core: remove redundant TurnContext and Prompt fields (#28638)`：结构清理，非安全修复。
+  - `4c7228e423` `[codex] Initialize exec-server OpenTelemetry at startup (#25019)`：遥测初始化，Astral 保持 OTEL 默认 none 语义。
+  - `dce673905a` `core: load AGENTS.md from foreign environments (#28958)`：foreign environment 行为未在本轮启用。
+  - `f886e33e5a` `[3/3] app-server: configure environment connection timeout (#29025)`：app-server remote environment 配置面，非本轮安全面。
+  - `1088b30fda` `Test pipelined scalar exec-server requests (#29325)`：测试覆盖。
+  - `2cf2a6a844` `chore(core) rm AskForApproval::OnFailure (#28418)`：配置枚举清理，非安全修复。
+  - `66f0220c56` `[codex] Report the exec-server working directory (#29666)`：诊断信息增强，非安全修复。
+  - `9a79536e6b` `test: branch on target OS instead of runner flavor (#29712)`：测试条件整理。
+  - `283bc4cf01` `test: add app-server auto environment helper (#29746)`：测试 helper。
+  - `1d65ccabd5` `config: own layer provenance types (#29722)`：配置来源类型整理，非安全修复。
+  - `74dcce594d` `[codex] Trace exec-server JSON-RPC requests (#27466)`：tracing，按本轮规则跳过遥测旁支。
+  - `b215961a56` `Support OAuth for HTTP MCP servers from selected executor plugins (#28529)`：MCP OAuth 功能扩展，非 sandbox/exec 安全骨架。
+  - `8f02973d25` `Persist selected capability roots and resolve availability per model step (#29856)`：capability availability 功能路径，本轮未触发。
+  - `2dec46e30a` `[codex] Record exec-server lifecycle metrics (#27467)`：metrics，跳过遥测旁支。
+  - `3b22498f69` `[codex] Observe remote exec-server lifecycle (#27470)`：remote lifecycle 观测，跳过遥测旁支。
+  - `8ce931ab76` `[codex] Propagate traces through exec-server HTTP (#30117)`：tracing，跳过遥测旁支。
+  - `25f50de6ed` `Test selected capabilities across availability and resume (#30157)`：测试覆盖。
+  - `b5866eebd6` `Persist Cloudflare affinity cookies for MCP HTTP (#29516)`：HTTP MCP 连接稳定性，非本轮安全骨架。
+  - `e2398d0b16` `[app-server] expose environment info RPC (#30291)`：app-server API 功能扩展，非安全修复。
+- 保守跳过 / 复核条件：
+  - `f2969f36e8` `[codex] Handle Ctrl-C for non-TTY unified exec (#26734)`：unified exec 交互恢复路径；复核条件是 Astral 重新同步 upstream unified exec lifecycle。
+  - `a1a8807e9d` `Add app-server background terminal process APIs (#26041)`：app-server terminal API 面较大；复核条件是引入对应 background terminal API。
+  - `4a05d3b282` `[codex] remove EnvironmentPathRef (#27433)`：PathUri/EnvironmentPath 大迁移依赖；复核条件是 Astral 开始 PathUri 收敛。
+  - `b2a4e3be27` `[codex] migrate ExecutorFileSystem paths to PathUri (#27424)`：PathUri 大迁移依赖；复核条件同上。
+  - `d23bb22f25` `[codex] migrate exec-server filesystem protocol to PathUri (#27653)`：exec-server wire path 大迁移；复核条件同上。
+  - `e069153f2a` `Remove fs/join and fs/parent from exec-server protocol (#27700)`：协议删改依赖 PathUri；复核条件是 exec-server fs RPC 重切。
+  - `52a50aec70` `sandboxing: migrate cwd inputs to PathUri (#27816)`：sandbox cwd PathUri 迁移；复核条件是 sandbox path model 同步。
+  - `968a3ac9c1` `[codex] make PathUri::from_abs_path infallible (#27976)`：PathUri API 调整；复核条件是 PathUri 引入后再收。
+  - `0fed4497f5` `[codex] Carry exec-server cwd as PathUri (#28032)`：remote cwd PathUri；复核条件是 exec-server cwd wire 同步。
+  - `bbcfed8ac2` `chore: restore exec-server relay keepalives (#28286)`：relay keepalive 依赖 remote relay；复核条件是 Astral 启用 relay。
+  - `c3415f76c9` `Extract shared Windows sandbox session runner (#28357)`：Windows sandbox 骨架；复核条件是 Windows sandbox backend parity 专项。
+  - `c0b36d234a` `recover stale Windows sandbox credentials (#27944)`：Windows credential 恢复；复核条件是 Windows release target 恢复。
+  - `e7a9988d1a` `Add Windows unified exec yield floor (#27086)`：Windows unified exec 时序；复核条件是 Windows unified exec 本地验证恢复。
+  - `fbbe7706d6` `Add hidden Windows sandbox wrapper entrypoint (#28358)`：Windows wrapper 入口；复核条件是 Windows sandbox 专项。
+  - `428cd44154` `exec-server: add Noise relay transport (#26242)`：Noise relay 大功能；复核条件是 remote relay 设计落地。
+  - `46f17930b6` `Use PathUri in filesystem permission paths for exec-server (#28165)`：permission path PathUri；复核条件是 permission path model 同步。
+  - `6e50b22e55` `exec-server: default remote transport to Noise (#26245)`：Noise 默认 transport；复核条件是 Noise relay 被采用。
+  - `022f1221e8` `[codex] Bind shell snapshots to retained thread environments (#28421)`：retained environments 依赖；复核条件是 retained remote env port。
+  - `7162030b37` `path-uri: clarify invalid host path errors (#28473)`：PathUri error polish；复核条件是 PathUri 引入后再收。
+  - `a4711b88dd` `[codex] exec-server: stream files in chunks (#28354)`：大文件 streaming RPC；复核条件是 exec-server file streaming 协议迁移。
+  - `cf17e1bc20` `Resume exec-server sessions after disconnect (#28512)`：remote exec-server recovery；复核条件是 remote session recovery port。
+  - `a5229e0686` `Back off registry retries during exec recovery (#28546)`：registry retry 依赖 exec recovery；复核条件同上。
+  - `ef75171f18` `Run fs helper through Windows sandbox wrapper (#28359)`：Windows fs helper；复核条件是 Windows sandbox 专项。
+  - `5867b529ae` `unified-exec: preserve PathUri through exec-server (#28681)`：unified exec + PathUri；复核条件是 PathUri/unified exec 同步。
+  - `a0586ad12d` `exec-server: expose environment registry payloads (#28651)`：remote environment registry；复核条件是 registry API port。
+  - `c274a83f8b` `feat(exec-server): add Noise rendezvous environment (#28774)`：Noise rendezvous；复核条件是 remote rendezvous transport 引入。
+  - `ac3fe64100` `Refresh signed exec-server URLs on reconnect (#28374)`：signed URL reconnect；复核条件是 signed remote exec-server adoption。
+  - `0369b24d54` `Add network environment ID plumbing (#28766)`：network environment plumbing；复核条件是 network env ID 进入 Astral config/runtime。
+  - `83e6a786a2` `Recover exec process stdin writes (#28895)`：remote stdin recovery；复核条件是 exec process recovery port。
+  - `afbb69a2fb` `[codex] Fix Windows sandbox runtime ACL refresh (#28943)`：Windows ACL；复核条件是 Windows sandbox 专项。
+  - `41988e6a24` `[1/3] core: add remote environment connection lifecycle (#28674)`：remote lifecycle 大面；复核条件是 remote environment lifecycle 进入 Astral。
+  - `bd5d31b250` `Scope network approvals by environment (#28899)`：environment-scoped network approvals；复核条件是多 environment approval surface 完整落地。
+  - `04483f4ce5` `Keep remote exec commands native to the executor (#29099)`：remote native shell semantics；复核条件是 remote executor parity。
+  - `bd2968a4db` `Carry sandbox intent to remote exec servers (#29108)`：remote sandbox intent；复核条件是 remote sandbox policy port。
+  - `9c3b10e5d4` `Apply sandbox intent inside remote exec servers (#29113)`：remote sandbox enforcement；复核条件同上。
+  - `9f06cf1a09` `Report remote sandbox denials semantically (#29424)`：remote sandbox denial reporting；复核条件是 remote sandbox errors adopted。
+  - `11fab432be` `path-uri: clarify host-native path conversion (#29501)`：PathUri diagnostics；复核条件是 PathUri adopted。
+  - `e476fc16ce` `Prepare managed network sandbox context (#29456)`：managed network sandbox context；复核条件是 managed network sandbox migration。
+  - `18fe1d9fe3` `[codex] Preserve proxy state for filesystem sandbox helpers (#29671)`：fs helper proxy state；复核条件是 corresponding sandbox helper path port。
+  - `c26f961b85` `path-uri: remove legacy path deserialization (#29158)`：breaking PathUri cleanup；复核条件是 Astral wire compatibility review。
+  - `829f5b6b59` `protocol: separate app and exec RPC ownership (#29714)`：protocol ownership split；复核条件是 app/exec RPC split adopted。
+  - `c14623d04c` `Add a bounded filesystem walk RPC (#29841)`：new RPC surface；复核条件是 bounded walk API design approved。
+  - `a781761eda` `[codex] fix Windows ConPTY input handling (#29734)`：Windows ConPTY；复核条件是 Windows terminal path validated.
+  - `4907f0c2c3` `Preserve Windows sandbox identity during credential retry (#29624)`：Windows identity/credential；复核条件是 Windows sandbox 专项。
+  - `96d8e34712` `Follow directory symlinks in filesystem walks (#29844)`：walk symlink policy 需和当前 search/ExecutorFileSystem 语义重新对齐；复核条件是 bounded walk RPC 引入时统一判定。
+  - `3ccef20ef4` `Skip credential refresh for WindowsApps launch failures (#29637)`：WindowsApps failure handling；复核条件是 Windows sandbox 专项。
+  - `c65cfeab14` `core: expose permission profile to shell tools (#29941)`：permission profile exposure 面较大；复核条件是 shell tool protocol review。
+  - `964b138c3d` `[codex] Retry temporarily offline exec-server recovery (#30098)`：remote recovery；复核条件是 exec-server recovery adopted。
+  - `d4ec08b8f0` `[codex] consume pushed exec-server process events (#30273)`：pushed process events；复核条件是 remote process event stream adopted。
+  - `cfead68e5d` `[codex] disable Nagle on Rendezvous WebSockets (#30269)`：Rendezvous WebSocket tuning；复核条件是 rendezvous transport adopted。
+  - `042e61726d` `[codex] bound Rendezvous WebSocket liveness (#30643)`：Rendezvous liveness bound；复核条件是 rendezvous transport adopted。
+
+验证结果：
+
+- `just fmt` 通过。
+- `just write-app-server-schema` 通过。
+- `just bazel-lock-update` 通过。
+- `just bazel-lock-check` 通过。
+- Focused tests：
+  - `RUST_MIN_STACK=8388608 just test -p codex-core session_memory_compact_failure_falls_back_and_allows_later_extraction session_memory_mid_turn_compact_injects_initial_context`：2 passed，2707 skipped。
+  - `just test -p codex-api chat_completions_text_delta_wire_item_wire_roundtrips anthropic_text_delta_wire_item_wire_roundtrips messages_request_disables_thinking_when_max_tokens_cannot_fit_minimum_budget messages_request_raises_custom_thinking_budget_to_anthropic_minimum`：4 passed，153 skipped。
+  - `just test -p codex-agent-protocol agent_request_json_roundtrips agent_stream_event_json_roundtrips`：2 passed，2 skipped。
+  - `just test -p codex-exec-server grep_files_with_matches_sorts_by_newest_mtime`：1 passed，208 skipped。
+  - `just test -p codex-client retry_on_429_skips_usage_limit_reached_body retry_on_429_retries_when_usage_limit_body_is_not_json`：2 passed，20 skipped。
+  - `just test -p codex-cli debug_models_default_prints_json_without_auth`：1 passed，266 skipped。
+  - `RUST_MIN_STACK=8388608 just test -p codex-core read_without_limit_rejects_large_file read_rejects_output_over_token_limit`：2 passed，2707 skipped。
+  - `just test -p codex-app-server turn_start_emits_thread_scoped_warning_notification_for_trimmed_skills turn_start_sends_default_local_image_detail_for_chat_completions turn_start_sends_custom_local_image_detail_for_chat_completions`：3 passed，778 skipped。
+- Full changed-crate tests：
+  - `just test -p codex-agent-protocol`：4 passed。
+  - `just test -p codex-file-system`：1 passed。
+  - `just test -p codex-app-server-protocol`：218 passed。
+  - `just test -p codex-client`：22 passed。
+  - `just test -p codex-api`：157 passed。
+  - `just test -p codex-exec-server`：209 passed。
+  - `just test -p codex-app-server`：719 passed，62 skipped。
+  - `just test -p codex-cli`：267 passed，0 skipped。
+  - `RUST_MIN_STACK=8388608 just test -p codex-core`：2684 passed，25 skipped。
+- `just fix -p codex-core -p codex-exec-server -p codex-api -p codex-agent-protocol -p codex-client -p codex-cli -p codex-app-server-protocol -p codex-app-server -p codex-file-system` 通过，退出码 0。该命令仍打印既有 `codex-memories-write::phase2::run_blocking` dead_code warning，以及 core 测试 target 中已有/同风格的 `unwrap/expect` warning；本轮未扩大为测试风格重写。
+
+收口备注：
+
+- 生产行为变更均对应九项 follow-up：usage-limit 解析、Anthropic thinking budget 下限、Read/FileMetadata/env var、app-server metadata schema。
+- 文件操作继续走 `ExecutorFileSystem` / app-server/exec-server 既有抽象；sandbox、approval、PTY 安全语义未做范围外改动。
+- 未写入任何真实 key 或 provider 抓包 fixture。

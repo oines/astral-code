@@ -69,7 +69,7 @@ use serde_json::Value;
 const DEFAULT_READ_LINE_LIMIT: usize = 2_000;
 const DEFAULT_READ_MAX_BYTES_WITHOUT_LIMIT: usize = 256 * 1024;
 const DEFAULT_READ_MAX_OUTPUT_TOKENS: usize = 25_000;
-const READ_MAX_OUTPUT_TOKENS_ENV_VAR: &str = "CLAUDE_CODE_MAX_OUTPUT_TOKENS";
+const READ_MAX_OUTPUT_TOKENS_ENV_VAR: &str = "ASTRAL_FILE_READ_MAX_OUTPUT_TOKENS";
 const DEFAULT_GLOB_RESULT_LIMIT: usize = 100;
 const DEFAULT_GREP_HEAD_LIMIT: usize = 250;
 const FILE_UNCHANGED_STUB: &str = "File unchanged since last read. The content from the earlier Read tool_result in this conversation is still current — refer to that instead of re-reading.";
@@ -381,17 +381,17 @@ async fn read_file(
             path.display()
         )));
     }
+    if args.limit.is_none() && metadata.size > DEFAULT_READ_MAX_BYTES_WITHOUT_LIMIT as u64 {
+        return Err(FunctionCallError::RespondToModel(format!(
+            "File content ({}) exceeds maximum allowed size ({}). Use offset and limit parameters to read specific portions of the file, or search for specific content instead of reading the whole file.",
+            format_file_size(metadata.size),
+            format_file_size(DEFAULT_READ_MAX_BYTES_WITHOUT_LIMIT as u64)
+        )));
+    }
 
     let bytes = fs.read_file(&path, Some(sandbox)).await.map_err(|err| {
         FunctionCallError::RespondToModel(format!("unable to read `{}`: {err}", path.display()))
     })?;
-    if args.limit.is_none() && bytes.len() > DEFAULT_READ_MAX_BYTES_WITHOUT_LIMIT {
-        return Err(FunctionCallError::RespondToModel(format!(
-            "File content ({}) exceeds maximum allowed size ({}). Use offset and limit parameters to read specific portions of the file.",
-            bytes.len(),
-            DEFAULT_READ_MAX_BYTES_WITHOUT_LIMIT
-        )));
-    }
     let text = String::from_utf8_lossy(&bytes);
     let lines = split_lines_preserving_newline(&text);
     let start_line = args.offset.unwrap_or(1).max(1);
@@ -436,11 +436,32 @@ async fn read_file(
     let max_output_tokens = read_max_output_tokens();
     if output_token_count > max_output_tokens {
         return Err(FunctionCallError::RespondToModel(format!(
-            "File content ({output_token_count} tokens) exceeds maximum allowed tokens ({max_output_tokens}). Use offset and limit parameters to read specific portions of the file."
+            "File content ({output_token_count} tokens) exceeds maximum allowed tokens ({max_output_tokens}). Use offset and limit parameters to read specific portions of the file, or search for specific content instead of reading the whole file."
         )));
     }
 
     Ok(add_line_numbers(output_lines, start + 1))
+}
+
+fn format_file_size(size_in_bytes: u64) -> String {
+    let kb = size_in_bytes as f64 / 1024.0;
+    if kb < 1.0 {
+        return format!("{size_in_bytes} bytes");
+    }
+    if kb < 1024.0 {
+        return format_one_decimal_unit(kb, "KB");
+    }
+    let mb = kb / 1024.0;
+    if mb < 1024.0 {
+        return format_one_decimal_unit(mb, "MB");
+    }
+    format_one_decimal_unit(mb / 1024.0, "GB")
+}
+
+fn format_one_decimal_unit(value: f64, unit: &str) -> String {
+    let formatted = format!("{value:.1}");
+    let trimmed = formatted.strip_suffix(".0").unwrap_or(&formatted);
+    format!("{trimmed}{unit}")
 }
 
 fn read_max_output_tokens() -> usize {

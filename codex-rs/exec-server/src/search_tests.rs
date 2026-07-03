@@ -154,6 +154,36 @@ async fn grep_excludes_vcs_directories_but_not_generated_directories() -> io::Re
 }
 
 #[tokio::test]
+async fn grep_files_with_matches_sorts_by_newest_mtime() -> io::Result<()> {
+    let temp_dir = tempfile::TempDir::new()?;
+    let root = AbsolutePathBuf::from_absolute_path(temp_dir.path())?;
+    std::fs::write(temp_dir.path().join("old.txt"), "needle\n")?;
+    std::thread::sleep(Duration::from_secs(1));
+    std::fs::write(temp_dir.path().join("middle.txt"), "needle\n")?;
+    std::thread::sleep(Duration::from_secs(1));
+    std::fs::write(temp_dir.path().join("new.txt"), "needle\n")?;
+
+    let response = grep_search(GrepSearchRequest {
+        root,
+        pattern: "needle".to_string(),
+        glob: Some("*.txt".to_string()),
+        file_type: None,
+        output_mode: GrepOutputMode::FilesWithMatches,
+        context_before: 0,
+        context_after: 0,
+        line_numbers: false,
+        ignore_case: false,
+        head_limit: 10,
+        offset: 0,
+        multiline: false,
+    })
+    .await?;
+
+    assert_eq!(response.lines, vec!["new.txt", "middle.txt", "old.txt"]);
+    Ok(())
+}
+
+#[tokio::test]
 async fn grep_supports_count_content_context_and_glob_filters() -> io::Result<()> {
     let temp_dir = tempfile::TempDir::new()?;
     let root = AbsolutePathBuf::from_absolute_path(temp_dir.path())?;

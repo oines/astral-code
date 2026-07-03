@@ -92,10 +92,17 @@ fn retry_after_delay(err: &TransportError) -> Option<Duration> {
 }
 
 fn is_usage_limit_reached_body(body: Option<&str>) -> bool {
-    body.is_some_and(|body| {
-        body.contains(r#""type":"usage_limit_reached""#)
-            || body.contains(r#""type": "usage_limit_reached""#)
-    })
+    let Some(body) = body else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
+        return false;
+    };
+    value
+        .get("error")
+        .and_then(|error| error.get("type"))
+        .and_then(serde_json::Value::as_str)
+        == Some("usage_limit_reached")
 }
 
 #[cfg(test)]
@@ -155,5 +162,22 @@ mod tests {
         };
 
         assert!(!retry_on.should_retry(&err, /*attempt*/ 0, /*max_attempts*/ 3));
+    }
+
+    #[test]
+    fn retry_on_429_retries_when_usage_limit_body_is_not_json() {
+        let retry_on = RetryOn {
+            retry_429: true,
+            retry_5xx: true,
+            retry_transport: true,
+        };
+        let err = TransportError::Http {
+            status: StatusCode::TOO_MANY_REQUESTS,
+            url: None,
+            headers: None,
+            body: Some(r#""type":"usage_limit_reached""#.to_string()),
+        };
+
+        assert!(retry_on.should_retry(&err, /*attempt*/ 0, /*max_attempts*/ 3));
     }
 }

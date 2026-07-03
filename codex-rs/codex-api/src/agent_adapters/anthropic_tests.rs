@@ -13,6 +13,8 @@ use codex_agent_protocol::TokenUsage;
 use codex_agent_protocol::ToolChoice;
 use codex_agent_protocol::ToolResultContent;
 use pretty_assertions::assert_eq;
+use proptest::prelude::*;
+use serde_json::Value;
 use serde_json::json;
 use std::collections::BTreeMap;
 
@@ -148,6 +150,55 @@ fn messages_request_maps_agent_ir_to_anthropic_shape() {
             "temperature": 0.2,
             "top_p": 0.9
         })
+    );
+}
+
+#[test]
+fn messages_request_disables_thinking_when_max_tokens_cannot_fit_minimum_budget() {
+    let request = AgentRequest {
+        model: "astral-large".to_string(),
+        messages: vec![AgentMessage {
+            role: MessageRole::User,
+            content: vec![ContentBlock::Text {
+                text: "hello".to_string(),
+            }],
+            id: None,
+        }],
+        stream: true,
+        reasoning: Some(ReasoningConfig {
+            effort: Some("low".to_string()),
+            summary: None,
+        }),
+        ..AgentRequest::default()
+    };
+
+    let body = to_messages_request(&request, options(1024));
+
+    assert_eq!(body.get("thinking"), None);
+}
+
+#[test]
+fn messages_request_raises_custom_thinking_budget_to_anthropic_minimum() {
+    let request = AgentRequest {
+        model: "astral-large".to_string(),
+        messages: vec![AgentMessage {
+            role: MessageRole::User,
+            content: vec![ContentBlock::Text {
+                text: "hello".to_string(),
+            }],
+            id: None,
+        }],
+        stream: true,
+        reasoning: Some(ReasoningConfig {
+            effort: Some("1".to_string()),
+            summary: None,
+        }),
+        ..AgentRequest::default()
+    };
+
+    assert_eq!(
+        to_messages_request(&request, options(4096))["thinking"],
+        json!({ "type": "enabled", "budget_tokens": 1024 })
     );
 }
 
@@ -981,4 +1032,44 @@ fn stream_parser_skips_unknown_content_deltas() {
         .expect("unknown content delta should not fail"),
         None
     );
+}
+
+fn anthropic_text_delta_wire_event(index: usize, text: &str) -> Value {
+    json!({
+        "type": "content_block_delta",
+        "index": index,
+        "delta": {
+            "type": "text_delta",
+            "text": text,
+        }
+    })
+}
+
+fn anthropic_text_delta_wire_event_from_item(event: &AgentStreamEvent) -> Value {
+    let AgentStreamEvent::ContentBlockDelta {
+        index,
+        delta: ContentDelta::Text { text },
+    } = event
+    else {
+        panic!("expected text delta event");
+    };
+    anthropic_text_delta_wire_event(*index, text)
+}
+
+proptest! {
+    #[test]
+    fn anthropic_text_delta_wire_item_wire_roundtrips(
+        index in 0usize..8,
+        text in "[a-zA-Z0-9 _.,:;!?/-]{1,64}",
+    ) {
+        let event = parse_stream_event(anthropic_text_delta_wire_event(index, &text))
+            .expect("parse anthropic text delta")
+            .expect("anthropic text delta should map to an event");
+        let projected = anthropic_text_delta_wire_event_from_item(&event);
+        let reparsed = parse_stream_event(projected)
+            .expect("reparse projected anthropic text delta")
+            .expect("projected anthropic text delta should map to an event");
+
+        prop_assert_eq!(reparsed, event);
+    }
 }

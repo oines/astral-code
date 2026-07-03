@@ -290,14 +290,16 @@ impl ExecutorFileSystem for RecordingFileSystem {
                 is_directory: true,
                 is_file: false,
                 is_symlink: false,
+                size: 0,
                 created_at_ms: 0,
                 modified_at_ms: 0,
             })
-        } else if self.file_contents(path).await.is_some() {
+        } else if let Some(contents) = self.file_contents(path).await {
             Ok(FileMetadata {
                 is_directory: false,
                 is_file: true,
                 is_symlink: false,
+                size: contents.len() as u64,
                 created_at_ms: 0,
                 modified_at_ms: 0,
             })
@@ -603,12 +605,9 @@ async fn read_without_limit_rejects_large_file() {
 
     assert_eq!(
         model_error(error),
-        format!(
-            "File content ({}) exceeds maximum allowed size ({}). Use offset and limit parameters to read specific portions of the file.",
-            DEFAULT_READ_MAX_BYTES_WITHOUT_LIMIT + 1,
-            DEFAULT_READ_MAX_BYTES_WITHOUT_LIMIT
-        )
+        "File content (256KB) exceeds maximum allowed size (256KB). Use offset and limit parameters to read specific portions of the file, or search for specific content instead of reading the whole file."
     );
+    assert_eq!(fixture.fs.calls().await, Vec::<String>::new());
 }
 
 #[tokio::test]
@@ -632,7 +631,9 @@ async fn read_rejects_output_over_token_limit() {
 
     let message = model_error(error);
     assert!(message.contains("exceeds maximum allowed tokens (25000)"));
-    assert!(message.contains("Use offset and limit parameters"));
+    assert!(message.contains(
+        "Use offset and limit parameters to read specific portions of the file, or search for specific content instead of reading the whole file."
+    ));
 }
 
 #[tokio::test]

@@ -1,4 +1,5 @@
 use pretty_assertions::assert_eq;
+use proptest::prelude::*;
 use serde_json::json;
 
 use super::*;
@@ -182,4 +183,110 @@ fn stream_events_preserve_tool_json_deltas_and_usage() {
             }
         ])
     );
+}
+
+fn small_string() -> impl Strategy<Value = String> {
+    "[a-zA-Z0-9 _./:-]{0,32}"
+}
+
+fn content_block_strategy() -> impl Strategy<Value = ContentBlock> {
+    prop_oneof![
+        small_string().prop_map(|text| ContentBlock::Text { text }),
+        small_string().prop_map(|text| ContentBlock::Compaction { text }),
+        (small_string(), prop::option::of(small_string()))
+            .prop_map(|(text, signature)| { ContentBlock::Reasoning { text, signature } }),
+        (small_string(), small_string()).prop_map(|(id, name)| ContentBlock::ToolUse {
+            id,
+            name,
+            input: json!({ "value": "test" }),
+        }),
+        (
+            small_string(),
+            prop::collection::vec(small_string(), 0..3),
+            any::<bool>()
+        )
+            .prop_map(|(tool_use_id, texts, is_error)| ContentBlock::ToolResult {
+                tool_use_id,
+                content: texts
+                    .into_iter()
+                    .map(|text| ToolResultContent::Text { text })
+                    .collect(),
+                is_error,
+            },),
+    ]
+}
+
+fn message_role_strategy() -> impl Strategy<Value = MessageRole> {
+    prop_oneof![
+        Just(MessageRole::System),
+        Just(MessageRole::Developer),
+        Just(MessageRole::User),
+        Just(MessageRole::Assistant),
+    ]
+}
+
+fn agent_message_strategy() -> impl Strategy<Value = AgentMessage> {
+    (
+        message_role_strategy(),
+        prop::collection::vec(content_block_strategy(), 0..4),
+        prop::option::of(small_string()),
+    )
+        .prop_map(|(role, content, id)| AgentMessage { role, content, id })
+}
+
+fn agent_stream_event_strategy() -> impl Strategy<Value = AgentStreamEvent> {
+    prop_oneof![
+        (
+            prop::option::of(small_string()),
+            prop::option::of(small_string())
+        )
+            .prop_map(|(id, model)| AgentStreamEvent::MessageStart {
+                id,
+                model,
+                usage: None,
+            },),
+        (0usize..8, content_block_strategy())
+            .prop_map(|(index, block)| { AgentStreamEvent::ContentBlockStart { index, block } }),
+        (0usize..8, small_string()).prop_map(|(index, text)| {
+            AgentStreamEvent::ContentBlockDelta {
+                index,
+                delta: ContentDelta::Text { text },
+            }
+        }),
+        (0usize..8).prop_map(|index| AgentStreamEvent::ContentBlockStop { index }),
+        Just(AgentStreamEvent::MessageStop {
+            stop_reason: Some(StopReason::EndTurn),
+            usage: Some(TokenUsage {
+                input_tokens: Some(1),
+                output_tokens: Some(2),
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: Some(3),
+            }),
+        }),
+    ]
+}
+
+proptest! {
+    #[test]
+    fn agent_request_json_roundtrips(messages in prop::collection::vec(agent_message_strategy(), 0..5)) {
+        let request = AgentRequest {
+            model: "astral-test".to_string(),
+            messages,
+            stream: true,
+            ..AgentRequest::default()
+        };
+
+        let value = serde_json::to_value(&request).expect("serialize agent request");
+        let decoded = serde_json::from_value::<AgentRequest>(value).expect("deserialize agent request");
+
+        prop_assert_eq!(decoded, request);
+    }
+
+    #[test]
+    fn agent_stream_event_json_roundtrips(event in agent_stream_event_strategy()) {
+        let value = serde_json::to_value(&event).expect("serialize agent stream event");
+        let decoded = serde_json::from_value::<AgentStreamEvent>(value).expect("deserialize agent stream event");
+
+        prop_assert_eq!(decoded, event);
+    }
 }

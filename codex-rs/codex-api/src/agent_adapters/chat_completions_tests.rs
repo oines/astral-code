@@ -14,6 +14,8 @@ use codex_agent_protocol::TokenUsage;
 use codex_agent_protocol::ToolChoice;
 use codex_agent_protocol::ToolResultContent;
 use pretty_assertions::assert_eq;
+use proptest::prelude::*;
+use serde_json::Value;
 use serde_json::json;
 use std::collections::BTreeMap;
 
@@ -1626,4 +1628,66 @@ fn stream_chunk_maps_deepseek_cache_usage_fields() {
             }),
         }]
     );
+}
+
+fn chat_text_wire_chunk(id: &str, model: &str, text: &str) -> Value {
+    json!({
+        "id": id,
+        "model": model,
+        "choices": [{
+            "index": 0,
+            "delta": {
+                "role": "assistant",
+                "content": text
+            },
+            "finish_reason": null
+        }]
+    })
+}
+
+fn chat_text_wire_chunk_from_events(events: &[AgentStreamEvent]) -> Value {
+    let mut id = None;
+    let mut model = None;
+    let mut text = String::new();
+    for event in events {
+        match event {
+            AgentStreamEvent::MessageStart {
+                id: event_id,
+                model: event_model,
+                usage: None,
+            } => {
+                id = event_id.as_deref();
+                model = event_model.as_deref();
+            }
+            AgentStreamEvent::ContentBlockDelta {
+                index: 0,
+                delta: ContentDelta::Text { text: delta_text },
+            } => text.push_str(delta_text),
+            _ => {}
+        }
+    }
+    chat_text_wire_chunk(
+        id.unwrap_or("chatcmpl_prop"),
+        model.unwrap_or("model-prop"),
+        &text,
+    )
+}
+
+proptest! {
+    #[test]
+    fn chat_completions_text_delta_wire_item_wire_roundtrips(
+        id in "[a-zA-Z0-9_-]{1,24}",
+        model in "[a-zA-Z0-9_.:-]{1,24}",
+        text in "[a-zA-Z0-9 _.,:;!?/-]{1,64}",
+    ) {
+        let mut state = ChatCompletionsStreamState::default();
+        let events = parse_stream_chunk_with_state(chat_text_wire_chunk(&id, &model, &text), &mut state)
+            .expect("parse chat completions chunk");
+        let projected = chat_text_wire_chunk_from_events(&events);
+        let mut second_state = ChatCompletionsStreamState::default();
+        let reparsed = parse_stream_chunk_with_state(projected, &mut second_state)
+            .expect("reparse projected chat completions chunk");
+
+        prop_assert_eq!(reparsed, events);
+    }
 }

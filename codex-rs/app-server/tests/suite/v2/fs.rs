@@ -98,6 +98,7 @@ async fn fs_get_metadata_returns_only_used_fields() -> Result<()> {
             "isFile".to_string(),
             "isSymlink".to_string(),
             "modifiedAtMs".to_string(),
+            "size".to_string(),
         ]
     );
 
@@ -108,6 +109,7 @@ async fn fs_get_metadata_returns_only_used_fields() -> Result<()> {
             is_directory: false,
             is_file: true,
             is_symlink: false,
+            size: stat.size,
             created_at_ms: stat.created_at_ms,
             modified_at_ms: stat.modified_at_ms,
         }

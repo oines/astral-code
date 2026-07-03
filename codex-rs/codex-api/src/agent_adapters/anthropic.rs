@@ -43,6 +43,7 @@ const COMPACT_IMAGE_PLACEHOLDER: &str = "[image]";
 const COMPACT_LARGE_TOOL_RESULT_PLACEHOLDER: &str = "[Old tool result content cleared]";
 const COMPACT_TOOL_RESULT_TEXT_PLACEHOLDER_MIN_BYTES: usize = 4096;
 const FUNCTION_RESULT_CLEARING_PROMPT: &str = "Old tool results may be automatically cleared from context to free up space. The 5 most recent eligible tool results are always kept. When a tool result contains information you may need later, write down the important details in your response.";
+const MIN_THINKING_BUDGET_TOKENS: u64 = 1_024;
 
 #[derive(Clone, Copy)]
 struct ContentProjectionOptions<'a> {
@@ -410,17 +411,17 @@ fn anthropic_thinking_budget(effort: &str, max_tokens: u64) -> Option<u64> {
         return None;
     }
     let max_budget = max_tokens.saturating_sub(1);
-    if max_budget == 0 {
+    if max_budget < MIN_THINKING_BUDGET_TOKENS {
         return None;
     }
     let requested = match effort {
-        "minimal" | "low" => 1_024,
+        "minimal" | "low" => MIN_THINKING_BUDGET_TOKENS,
         "medium" => 4_096,
         "high" => 8_192,
         "xhigh" | "max" => 16_384,
         custom => custom.parse::<u64>().unwrap_or(4_096),
     };
-    Some(requested.min(max_budget))
+    Some(requested.max(MIN_THINKING_BUDGET_TOKENS).min(max_budget))
 }
 
 fn add_cache_control_to_last_object(values: &mut [Value]) {
