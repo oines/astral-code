@@ -5,7 +5,7 @@ use codex_prompts::render_review_exit_success;
 use codex_protocol::config_types::WebSearchMode;
 use codex_protocol::items::TurnItem;
 use codex_protocol::models::ContentItem;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::protocol::AgentMessageContentDeltaEvent;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::Event;
@@ -65,7 +65,7 @@ impl SessionTask for ReviewTask {
         for item in input {
             match item {
                 TurnInput::UserInput { mut content, .. } => user_input.append(&mut content),
-                TurnInput::ResponseItem(_) => {}
+                TurnInput::TranscriptItem(_) => {}
             }
         }
 
@@ -242,7 +242,7 @@ pub(crate) async fn exit_review_mode(
     session
         .record_conversation_items(
             &ctx,
-            &[ResponseItem::Message {
+            &[TranscriptItem::Message {
                 id: Some(REVIEW_USER_MESSAGE_ID.to_string()),
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText { text: user_message }],
@@ -260,7 +260,7 @@ pub(crate) async fn exit_review_mode(
     session
         .record_response_item_and_emit_turn_item(
             ctx.as_ref(),
-            ResponseItem::Message {
+            TranscriptItem::Message {
                 id: Some(REVIEW_ASSISTANT_MESSAGE_ID.to_string()),
                 role: "assistant".to_string(),
                 content: vec![ContentItem::OutputText {

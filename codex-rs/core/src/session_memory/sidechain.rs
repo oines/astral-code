@@ -2,14 +2,14 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::client_common::ResponseEvent;
+use crate::client_common::ModelStreamEvent;
 use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::FunctionCallOutputPayload;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_rollout_trace::InferenceTraceContext;
 use codex_tools::EDIT_TOOL_NAME;
 use codex_utils_path::paths_match_after_normalization;
@@ -18,6 +18,7 @@ use serde::Deserialize;
 
 use super::ExtractionCandidate;
 use super::SessionMemoryStore;
+use super::atomic_write;
 use super::finish_extraction;
 use super::tail::ExtractionBoundary;
 use super::tail::summary_budget_reminder;
@@ -42,7 +43,7 @@ pub(super) async fn run_extraction(
     )
     .await;
     if result.is_err() {
-        let _ = tokio::fs::write(&store.summary_path, current_summary).await;
+        let _ = atomic_write(&store.summary_path, current_summary.into_bytes()).await;
     }
     result
 }
@@ -57,7 +58,7 @@ async fn run_extraction_inner(
 ) -> CodexResult<ExtractionBoundary> {
     let mut edit_state = SummaryEditState::new(current_summary.to_string());
     let budget_reminder = summary_budget_reminder(current_summary);
-    candidate.prompt.input.push(ResponseItem::Message {
+    candidate.prompt.input.push(TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
@@ -92,21 +93,22 @@ async fn run_extraction_inner(
 
         while let Some(event) = stream.next().await {
             match event? {
-                ResponseEvent::Created
-                | ResponseEvent::OutputItemAdded(_)
-                | ResponseEvent::ServerModel(_)
-                | ResponseEvent::ModelVerifications(_)
-                | ResponseEvent::TurnModerationMetadata(_)
-                | ResponseEvent::ServerReasoningIncluded(_)
-                | ResponseEvent::RateLimits(_)
-                | ResponseEvent::ModelsEtag(_)
-                | ResponseEvent::OutputTextDelta(_)
-                | ResponseEvent::ToolCallInputDelta { .. }
-                | ResponseEvent::ReasoningSummaryDelta { .. }
-                | ResponseEvent::ReasoningSummaryPartAdded { .. }
-                | ResponseEvent::ReasoningContentDelta { .. } => {}
-                ResponseEvent::Completed { .. } => {}
-                ResponseEvent::OutputItemDone(item) => {
+                ModelStreamEvent::Created
+                | ModelStreamEvent::OutputItemAdded(_)
+                | ModelStreamEvent::ServerModel(_)
+                | ModelStreamEvent::ModelVerifications(_)
+                | ModelStreamEvent::TurnModerationMetadata(_)
+                | ModelStreamEvent::ServerReasoningIncluded(_)
+                | ModelStreamEvent::Warning(_)
+                | ModelStreamEvent::RateLimits(_)
+                | ModelStreamEvent::ModelsEtag(_)
+                | ModelStreamEvent::OutputTextDelta(_)
+                | ModelStreamEvent::ToolCallInputDelta { .. }
+                | ModelStreamEvent::ReasoningSummaryDelta { .. }
+                | ModelStreamEvent::ReasoningSummaryPartAdded { .. }
+                | ModelStreamEvent::ReasoningContentDelta { .. } => {}
+                ModelStreamEvent::Completed { .. } => {}
+                ModelStreamEvent::OutputItemDone(item) => {
                     let outcome = handle_sidechain_item(
                         &turn_context,
                         &store.summary_path,
@@ -145,11 +147,11 @@ async fn run_extraction_inner(
 async fn handle_sidechain_item(
     turn_context: &TurnContext,
     summary_path: &Path,
-    item: &ResponseItem,
+    item: &TranscriptItem,
     edit_state: &mut SummaryEditState,
 ) -> CodexResult<SidechainItemOutcome> {
     match item {
-        ResponseItem::FunctionCall {
+        TranscriptItem::FunctionCall {
             name,
             arguments,
             call_id,
@@ -158,32 +160,32 @@ async fn handle_sidechain_item(
             let result =
                 apply_summary_edit(turn_context, summary_path, arguments, edit_state).await;
             Ok(SidechainItemOutcome {
-                output: Some(ResponseItem::FunctionCallOutput {
+                output: Some(TranscriptItem::FunctionCallOutput {
                     call_id: call_id.clone(),
                     output: FunctionCallOutputPayload::from_text(result.text),
                 }),
                 edited_summary: result.edited_summary,
             })
         }
-        ResponseItem::FunctionCall { call_id, .. } => Ok(SidechainItemOutcome {
-            output: Some(ResponseItem::FunctionCallOutput {
+        TranscriptItem::FunctionCall { call_id, .. } => Ok(SidechainItemOutcome {
+            output: Some(TranscriptItem::FunctionCallOutput {
                 call_id: call_id.clone(),
                 output: FunctionCallOutputPayload::from_text(deny_tool_message(summary_path)),
             }),
             edited_summary: false,
         }),
-        ResponseItem::CustomToolCall { call_id, name, .. } => Ok(SidechainItemOutcome {
-            output: Some(ResponseItem::CustomToolCallOutput {
+        TranscriptItem::CustomToolCall { call_id, name, .. } => Ok(SidechainItemOutcome {
+            output: Some(TranscriptItem::CustomToolCallOutput {
                 call_id: call_id.clone(),
                 name: Some(name.clone()),
                 output: FunctionCallOutputPayload::from_text(deny_tool_message(summary_path)),
             }),
             edited_summary: false,
         }),
-        ResponseItem::ToolSearchCall {
+        TranscriptItem::ToolSearchCall {
             call_id, execution, ..
         } => Ok(SidechainItemOutcome {
-            output: Some(ResponseItem::ToolSearchOutput {
+            output: Some(TranscriptItem::ToolSearchOutput {
                 call_id: call_id.clone(),
                 status: "failed".to_string(),
                 execution: execution.clone(),
@@ -191,29 +193,29 @@ async fn handle_sidechain_item(
             }),
             edited_summary: false,
         }),
-        ResponseItem::LocalShellCall {
+        TranscriptItem::LocalShellCall {
             call_id: Some(call_id),
             ..
         } => Ok(SidechainItemOutcome {
-            output: Some(ResponseItem::FunctionCallOutput {
+            output: Some(TranscriptItem::FunctionCallOutput {
                 call_id: call_id.clone(),
                 output: FunctionCallOutputPayload::from_text(deny_tool_message(summary_path)),
             }),
             edited_summary: false,
         }),
-        ResponseItem::Message { .. }
-        | ResponseItem::AgentMessage { .. }
-        | ResponseItem::Reasoning { .. }
-        | ResponseItem::LocalShellCall { call_id: None, .. }
-        | ResponseItem::FunctionCallOutput { .. }
-        | ResponseItem::CustomToolCallOutput { .. }
-        | ResponseItem::ToolSearchOutput { .. }
-        | ResponseItem::WebSearchCall { .. }
-        | ResponseItem::ImageGenerationCall { .. }
-        | ResponseItem::Compaction { .. }
-        | ResponseItem::CompactionTrigger
-        | ResponseItem::ContextCompaction { .. }
-        | ResponseItem::Other => Ok(SidechainItemOutcome {
+        TranscriptItem::Message { .. }
+        | TranscriptItem::AgentMessage { .. }
+        | TranscriptItem::Reasoning { .. }
+        | TranscriptItem::LocalShellCall { call_id: None, .. }
+        | TranscriptItem::FunctionCallOutput { .. }
+        | TranscriptItem::CustomToolCallOutput { .. }
+        | TranscriptItem::ToolSearchOutput { .. }
+        | TranscriptItem::WebSearchCall { .. }
+        | TranscriptItem::ImageGenerationCall { .. }
+        | TranscriptItem::Compaction { .. }
+        | TranscriptItem::CompactionTrigger
+        | TranscriptItem::ContextCompaction { .. }
+        | TranscriptItem::Other => Ok(SidechainItemOutcome {
             output: None,
             edited_summary: false,
         }),
@@ -221,7 +223,7 @@ async fn handle_sidechain_item(
 }
 
 struct SidechainItemOutcome {
-    output: Option<ResponseItem>,
+    output: Option<TranscriptItem>,
     edited_summary: bool,
 }
 
@@ -303,7 +305,7 @@ async fn apply_summary_edit(
                 edited_summary: false,
             };
         }
-        return match tokio::fs::write(summary_path, &args.new_string).await {
+        return match atomic_write(summary_path, args.new_string.clone().into_bytes()).await {
             Ok(()) => {
                 edit_state.update(args.new_string);
                 SummaryEditResult {
@@ -346,7 +348,7 @@ async fn apply_summary_edit(
     } else {
         current.replacen(&args.old_string, &args.new_string, 1)
     };
-    match tokio::fs::write(summary_path, &updated).await {
+    match atomic_write(summary_path, updated.clone().into_bytes()).await {
         Ok(()) if args.replace_all => {
             edit_state.update(updated);
             SummaryEditResult {

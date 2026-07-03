@@ -411,6 +411,78 @@ async fn session_memory_sidechain_updates_summary_without_polluting_main_history
 }
 
 #[test]
+fn failed_session_memory_sidechain_restores_previous_summary() {
+    run_session_memory_test_on_large_stack(
+        "failed_session_memory_sidechain_restores_previous_summary",
+        failed_session_memory_sidechain_restores_previous_summary_impl,
+    );
+}
+
+async fn failed_session_memory_sidechain_restores_previous_summary_impl() {
+    skip_if_no_network!();
+
+    let server = start_mock_server().await;
+    let model_provider = responses_mock_model_provider(&server);
+    let mut builder = test_codex().with_config(move |config| {
+        config.model_provider = model_provider;
+        enable_test_session_memory_compact(config);
+    });
+    let test = builder.build(&server).await.unwrap();
+    let summary_path = test
+        .config
+        .codex_home
+        .join("session-memory")
+        .join(test.session_configured.thread_id.to_string())
+        .join("summary.md");
+    let state_path = summary_path.as_path().with_file_name("state.json");
+    let summary_path_str = summary_path.as_path().to_string_lossy().to_string();
+
+    let main_turn = sse(vec![
+        ev_assistant_message("m-main-failed-sidechain", "main turn complete"),
+        ev_completed_with_tokens("r-main-failed-sidechain", 10_001),
+    ]);
+    let failed_sidechain = sse(vec![
+        ev_function_call(
+            "session-memory-failed-edit",
+            "Edit",
+            &json!({
+                "file_path": summary_path_str,
+                "old_string": "_What is actively being worked on right now? Pending tasks not yet completed. Immediate next steps._\n\n# Task specification",
+                "new_string": "_What is actively being worked on right now? Pending tasks not yet completed. Immediate next steps._\n- Temporary corrupted summary.\n\n# Task specification"
+            })
+            .to_string(),
+        ),
+        json!({
+            "type": "response.failed",
+            "response": {
+                "id": "r-sidechain-failed",
+                "error": {
+                    "code": "server_error",
+                    "message": "sidechain failed after edit"
+                }
+            }
+        }),
+    ]);
+    let mock = mount_sse_sequence(&server, vec![main_turn, failed_sidechain]).await;
+
+    test.submit_turn("first failing session memory turn")
+        .await
+        .unwrap();
+    wait_for_request_count(&mock, 2).await;
+    wait_for_file_contains(&state_path, "sidechain failed after edit").await;
+
+    let summary = fs::read_to_string(summary_path.as_path()).expect("summary file exists");
+    assert!(
+        !summary.contains("Temporary corrupted summary."),
+        "failed sidechain extraction should restore the previous summary"
+    );
+    assert!(
+        summary.contains("_What is actively being worked on right now? Pending tasks not yet completed. Immediate next steps._"),
+        "restored summary should keep the default template"
+    );
+}
+
+#[test]
 fn session_memory_sidechain_uses_custom_template_and_prompt() {
     run_session_memory_test_on_large_stack(
         "session_memory_sidechain_uses_custom_template_and_prompt",

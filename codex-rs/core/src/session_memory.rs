@@ -1,4 +1,6 @@
 use std::collections::HashSet;
+use std::io::Write;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::LazyLock;
@@ -13,7 +15,7 @@ use crate::session::turn_context::TurnContext;
 use codex_protocol::config_types::AutoCompactTokenLimitScope;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::openai_models::InputModality;
 use codex_protocol::protocol::CompactedItem;
 use serde::Deserialize;
@@ -45,7 +47,6 @@ pub(crate) const DEFAULT_TOOL_CALLS_BETWEEN_UPDATES: usize = 10;
 const EXTRACTION_WAIT_TIMEOUT: Duration = Duration::from_secs(15);
 const EXTRACTION_SHUTDOWN_WAIT_TIMEOUT: Duration = Duration::from_secs(20);
 const EXTRACTION_STALE_AFTER_SECS: u64 = 60;
-const AUTO_COMPACT_FAILURE_BREAKER: u32 = 3;
 
 static RUNNING_EXTRACTIONS: LazyLock<Mutex<HashSet<String>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
@@ -63,7 +64,7 @@ impl PromptTemplate {
         Self { prompt }
     }
 
-    fn with_input(&self, input: Vec<ResponseItem>) -> Prompt {
+    fn with_input(&self, input: Vec<TranscriptItem>) -> Prompt {
         let mut prompt = self.prompt.clone();
         prompt.input = input;
         prompt
@@ -111,7 +112,6 @@ struct SessionMemoryState {
     last_summary_tool_calls: Option<usize>,
     extraction_started_at_unix: Option<u64>,
     last_error: Option<String>,
-    consecutive_auto_compact_failures: u32,
 }
 
 impl SessionMemoryState {
@@ -157,7 +157,7 @@ impl SessionMemoryStore {
     async fn ensure(&self, template: &str) -> CodexResult<()> {
         tokio::fs::create_dir_all(&self.dir).await?;
         if tokio::fs::metadata(&self.summary_path).await.is_err() {
-            tokio::fs::write(&self.summary_path, template).await?;
+            atomic_write(&self.summary_path, template.as_bytes().to_vec()).await?;
         }
         if tokio::fs::metadata(&self.state_path).await.is_err() {
             self.write_state(&SessionMemoryState::default()).await?;
@@ -181,9 +181,28 @@ impl SessionMemoryStore {
 
     async fn write_state(&self, state: &SessionMemoryState) -> CodexResult<()> {
         let contents = serde_json::to_string_pretty(state)?;
-        tokio::fs::write(&self.state_path, contents).await?;
+        atomic_write(&self.state_path, contents.into_bytes()).await?;
         Ok(())
     }
+}
+
+async fn atomic_write(path: &Path, contents: Vec<u8>) -> CodexResult<()> {
+    let path = path.to_path_buf();
+    tokio::task::spawn_blocking(move || -> std::io::Result<()> {
+        let parent = path.parent().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("path has no parent: {}", path.display()),
+            )
+        })?;
+        let mut temp_file = tempfile::NamedTempFile::new_in(parent)?;
+        temp_file.write_all(&contents)?;
+        temp_file.as_file().sync_all()?;
+        temp_file.persist(&path).map_err(|err| err.error)?;
+        Ok(())
+    })
+    .await??;
+    Ok(())
 }
 
 pub(crate) async fn wait_for_pending_extraction_on_shutdown(sess: &Arc<Session>) {
@@ -271,7 +290,7 @@ pub(crate) async fn try_compact(
     sess: Arc<Session>,
     turn_context: Arc<TurnContext>,
     initial_context_injection: InitialContextInjection,
-    is_auto_compact: bool,
+    _is_auto_compact: bool,
     compaction_item: &codex_protocol::items::TurnItem,
 ) -> CodexResult<SessionMemoryCompactOutcome> {
     if !turn_context.config.experimental_session_memory_compact {
@@ -283,11 +302,6 @@ pub(crate) async fn try_compact(
     let store = SessionMemoryStore::new(turn_context.as_ref(), sess.as_ref());
     store.ensure(turn_context.session_memory_template()).await?;
     let mut state = store.read_state().await?;
-    if is_auto_compact && state.consecutive_auto_compact_failures >= AUTO_COMPACT_FAILURE_BREAKER {
-        return Ok(SessionMemoryCompactOutcome::Fallback {
-            reason: "session memory compact breaker open".to_string(),
-        });
-    }
 
     let result = try_compact_inner(
         Arc::clone(&sess),
@@ -301,16 +315,12 @@ pub(crate) async fn try_compact(
 
     match result {
         Ok(summary_suffix) => {
-            state.consecutive_auto_compact_failures = 0;
             state.last_error = None;
             store.write_state(&state).await?;
             Ok(SessionMemoryCompactOutcome::Used { summary_suffix })
         }
         Err(err) => {
-            if is_auto_compact {
-                state.consecutive_auto_compact_failures =
-                    state.consecutive_auto_compact_failures.saturating_add(1);
-            }
+            warn!("session memory compact failed; falling back to legacy compact: {err:#}");
             state.last_error = Some(err.to_string());
             store.write_state(&state).await?;
             Ok(SessionMemoryCompactOutcome::Fallback {
@@ -324,7 +334,7 @@ async fn try_compact_inner(
     sess: Arc<Session>,
     turn_context: Arc<TurnContext>,
     store: &SessionMemoryStore,
-    _initial_context_injection: InitialContextInjection,
+    initial_context_injection: InitialContextInjection,
     compaction_item: &codex_protocol::items::TurnItem,
     state: &mut SessionMemoryState,
 ) -> CodexResult<String> {
@@ -345,7 +355,18 @@ async fn try_compact_inner(
         transcript_path.as_deref(),
         &store.summary_path,
     );
-    let new_history = build_session_memory_compacted_history(tail, summary_text.clone());
+    let mut new_history = build_session_memory_compacted_history(tail, summary_text.clone());
+    let reference_context_item = match initial_context_injection {
+        InitialContextInjection::DoNotInject => None,
+        InitialContextInjection::BeforeLastUserMessage => {
+            let initial_context = sess.build_initial_context(turn_context.as_ref()).await;
+            new_history = crate::compact::insert_initial_context_before_last_real_user_or_summary(
+                new_history,
+                initial_context,
+            );
+            Some(turn_context.to_turn_context_item())
+        }
+    };
 
     validate_post_compact_budget(
         &new_history,
@@ -357,7 +378,7 @@ async fn try_compact_inner(
         message: summary_text.clone(),
         replacement_history: Some(new_history.clone()),
     };
-    sess.replace_compacted_history(new_history, None, compacted_item)
+    sess.replace_compacted_history(new_history, reference_context_item, compacted_item)
         .await;
     sess.recompute_token_usage(turn_context.as_ref()).await;
     let post_compact_baseline_tokens = sess.get_total_token_usage().await;
@@ -371,11 +392,49 @@ async fn try_compact_inner(
     Ok(summary_text)
 }
 
+pub(crate) async fn record_post_legacy_compact_baseline(
+    sess: &Session,
+    turn_context: &TurnContext,
+    post_compact_history: &[TranscriptItem],
+) {
+    if !turn_context.config.experimental_session_memory_compact {
+        return;
+    }
+
+    let store = SessionMemoryStore::new(turn_context, sess);
+    if let Err(err) = record_post_legacy_compact_baseline_for_store(
+        sess,
+        turn_context,
+        &store,
+        post_compact_history,
+    )
+    .await
+    {
+        warn!("failed to record session memory post-legacy-compact baseline: {err:#}");
+    }
+}
+
+async fn record_post_legacy_compact_baseline_for_store(
+    sess: &Session,
+    turn_context: &TurnContext,
+    store: &SessionMemoryStore,
+    post_compact_history: &[TranscriptItem],
+) -> CodexResult<()> {
+    store.ensure(turn_context.session_memory_template()).await?;
+    let mut state = store.read_state().await?;
+    state.record_post_compact_baseline(
+        sess.get_total_token_usage().await,
+        count_tool_calls(post_compact_history),
+    );
+    state.last_error = None;
+    store.write_state(&state).await
+}
+
 fn build_session_memory_compacted_history(
-    tail: Vec<ResponseItem>,
+    tail: Vec<TranscriptItem>,
     summary_text: String,
-) -> Vec<ResponseItem> {
-    let mut history = vec![ResponseItem::Compaction {
+) -> Vec<TranscriptItem> {
+    let mut history = vec![TranscriptItem::Compaction {
         encrypted_content: summary_text,
     }];
     history.extend(tail);
@@ -483,25 +542,39 @@ async fn wait_for_running_extraction(
     store: &SessionMemoryStore,
     state: &mut SessionMemoryState,
 ) -> CodexResult<()> {
+    wait_for_running_extraction_with_timeout(store, state, EXTRACTION_WAIT_TIMEOUT).await
+}
+
+async fn wait_for_running_extraction_with_timeout(
+    store: &SessionMemoryStore,
+    state: &mut SessionMemoryState,
+    timeout: Duration,
+) -> CodexResult<()> {
     let Some(started_at) = state.extraction_started_at_unix else {
         return Ok(());
     };
     if now_unix_seconds().saturating_sub(started_at) > EXTRACTION_STALE_AFTER_SECS {
         state.extraction_started_at_unix = None;
+        state.last_error = Some("session memory extraction was stale before compact".to_string());
         store.write_state(state).await?;
-        return Err(CodexErr::Fatal(
-            "session memory extraction is stale".to_string(),
-        ));
+        warn!("session memory extraction was stale before compact; continuing compact");
+        return Ok(());
     }
 
-    tokio::time::sleep(EXTRACTION_WAIT_TIMEOUT).await;
-    let refreshed = store.read_state().await?;
-    if refreshed.extraction_started_at_unix.is_some() {
-        return Err(CodexErr::Fatal(
-            "session memory extraction did not finish before compact timeout".to_string(),
-        ));
+    match poll_for_extraction_completion(store, timeout).await? {
+        true => {
+            *state = store.read_state().await?;
+        }
+        false => {
+            state.extraction_started_at_unix = None;
+            state.last_error =
+                Some("session memory extraction did not finish before compact timeout".to_string());
+            store.write_state(state).await?;
+            warn!(
+                "session memory extraction did not finish before compact timeout; continuing compact"
+            );
+        }
     }
-    *state = refreshed;
     Ok(())
 }
 
@@ -509,11 +582,31 @@ async fn wait_for_extraction_completion(
     store: &SessionMemoryStore,
     timeout: Duration,
 ) -> CodexResult<()> {
+    if poll_for_extraction_completion(store, timeout).await? {
+        return Ok(());
+    }
+
+    let mut state = store.read_state().await.unwrap_or_default();
+    if state.extraction_started_at_unix.is_some() {
+        state.extraction_started_at_unix = None;
+        state.last_error =
+            Some("session memory extraction interrupted during shutdown".to_string());
+        store.write_state(&state).await?;
+    }
+    Err(CodexErr::Fatal(
+        "session memory extraction did not finish before shutdown timeout".to_string(),
+    ))
+}
+
+async fn poll_for_extraction_completion(
+    store: &SessionMemoryStore,
+    timeout: Duration,
+) -> CodexResult<bool> {
     let result = tokio::time::timeout(timeout, async {
         loop {
             let state = store.read_state().await?;
             if state.extraction_started_at_unix.is_none() {
-                return Ok(());
+                return Ok(true);
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
@@ -522,18 +615,7 @@ async fn wait_for_extraction_completion(
 
     match result {
         Ok(result) => result,
-        Err(_) => {
-            let mut state = store.read_state().await.unwrap_or_default();
-            if state.extraction_started_at_unix.is_some() {
-                state.extraction_started_at_unix = None;
-                state.last_error =
-                    Some("session memory extraction interrupted during shutdown".to_string());
-                store.write_state(&state).await?;
-            }
-            Err(CodexErr::Fatal(
-                "session memory extraction did not finish before shutdown timeout".to_string(),
-            ))
-        }
+        Err(_) => Ok(false),
     }
 }
 

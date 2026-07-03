@@ -42,7 +42,7 @@ use codex_otel::TURN_MEMORY_METRIC;
 use codex_otel::TURN_NETWORK_PROXY_METRIC;
 use codex_otel::TURN_TOKEN_USAGE_METRIC;
 use codex_otel::TURN_TOOL_CALL_METRIC;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::TokenUsage;
@@ -90,7 +90,7 @@ impl InterruptedTurnHistoryMarker {
 /// interrupted fork snapshots.
 pub(crate) fn interrupted_turn_history_marker(
     marker: InterruptedTurnHistoryMarker,
-) -> Option<ResponseItem> {
+) -> Option<TranscriptItem> {
     match marker {
         InterruptedTurnHistoryMarker::Disabled => None,
         InterruptedTurnHistoryMarker::ContextualUser => Some(ContextualUserFragment::into(
@@ -100,7 +100,7 @@ pub(crate) fn interrupted_turn_history_marker(
             let marker = crate::context::TurnAborted::new(
                 crate::context::TurnAborted::INTERRUPTED_DEVELOPER_GUIDANCE,
             );
-            Some(ResponseItem::Message {
+            Some(TranscriptItem::Message {
                 id: None,
                 role: "developer".to_string(),
                 content: vec![ContentItem::InputText {

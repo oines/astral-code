@@ -14,7 +14,7 @@ use codex_execpolicy::Policy;
 use codex_features::Feature;
 use codex_protocol::config_types::Personality;
 use codex_protocol::models::ContentItem;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::protocol::TurnContextItem;
 
@@ -22,7 +22,7 @@ fn build_environment_update_item(
     previous: Option<&TurnContextItem>,
     next: &TurnContext,
     shell: &Shell,
-) -> Option<ResponseItem> {
+) -> Option<TranscriptItem> {
     if !next.config.include_environment_context {
         return None;
     }
@@ -180,15 +180,15 @@ pub(crate) fn build_model_instructions_update_item(
     Some(ModelSwitchInstructions::new(model_instructions).render())
 }
 
-pub(crate) fn build_developer_update_item(text_sections: Vec<String>) -> Option<ResponseItem> {
+pub(crate) fn build_developer_update_item(text_sections: Vec<String>) -> Option<TranscriptItem> {
     build_text_message("developer", text_sections)
 }
 
-pub(crate) fn build_contextual_user_message(text_sections: Vec<String>) -> Option<ResponseItem> {
+pub(crate) fn build_contextual_user_message(text_sections: Vec<String>) -> Option<TranscriptItem> {
     build_text_message("user", text_sections)
 }
 
-fn build_text_message(role: &str, text_sections: Vec<String>) -> Option<ResponseItem> {
+fn build_text_message(role: &str, text_sections: Vec<String>) -> Option<TranscriptItem> {
     if text_sections.is_empty() {
         return None;
     }
@@ -198,7 +198,7 @@ fn build_text_message(role: &str, text_sections: Vec<String>) -> Option<Response
         .map(|text| ContentItem::InputText { text })
         .collect();
 
-    Some(ResponseItem::Message {
+    Some(TranscriptItem::Message {
         id: None,
         role: role.to_string(),
         content,
@@ -213,7 +213,7 @@ pub(crate) fn build_settings_update_items(
     shell: &Shell,
     exec_policy: &Policy,
     personality_feature_enabled: bool,
-) -> Vec<ResponseItem> {
+) -> Vec<TranscriptItem> {
     // TODO(ccunningham): build_settings_update_items still does not cover every
     // model-visible item emitted by build_initial_context. Persist the remaining
     // inputs or add explicit replay events so fork/resume can diff everything

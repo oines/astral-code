@@ -11,7 +11,7 @@ use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::ImageDetail;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::openai_models::InputModality;
 use codex_protocol::protocol::InterAgentCommunication;
 use codex_protocol::protocol::TokenUsage;
@@ -33,7 +33,7 @@ use std::sync::LazyLock;
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ContextManager {
     /// The oldest items are at the beginning of the vector.
-    items: Vec<ResponseItem>,
+    items: Vec<TranscriptItem>,
     /// Bumped whenever history is rewritten, such as compaction or rollback.
     history_version: u64,
     token_info: Option<TokenUsageInfo>,
@@ -91,7 +91,7 @@ impl ContextManager {
     pub(crate) fn record_items<I>(&mut self, items: I, policy: TruncationPolicy)
     where
         I: IntoIterator,
-        I::Item: std::ops::Deref<Target = ResponseItem>,
+        I::Item: std::ops::Deref<Target = TranscriptItem>,
     {
         for item in items {
             let item_ref = item.deref();
@@ -108,18 +108,18 @@ impl ContextManager {
     /// normalization and drops un-suited items. When `input_modalities` does not
     /// include `InputModality::Image`, images are stripped from messages and tool
     /// outputs.
-    pub(crate) fn for_prompt(mut self, input_modalities: &[InputModality]) -> Vec<ResponseItem> {
+    pub(crate) fn for_prompt(mut self, input_modalities: &[InputModality]) -> Vec<TranscriptItem> {
         self.normalize_history(input_modalities);
         self.items
     }
 
     /// Returns raw items in the history.
-    pub(crate) fn raw_items(&self) -> &[ResponseItem] {
+    pub(crate) fn raw_items(&self) -> &[TranscriptItem] {
         &self.items
     }
 
     /// Returns raw items in the history and consumes the snapshot.
-    pub(crate) fn into_raw_items(self) -> Vec<ResponseItem> {
+    pub(crate) fn into_raw_items(self) -> Vec<TranscriptItem> {
         self.items
     }
 
@@ -166,7 +166,7 @@ impl ContextManager {
         }
     }
 
-    pub(crate) fn replace(&mut self, items: Vec<ResponseItem>) {
+    pub(crate) fn replace(&mut self, items: Vec<TranscriptItem>) {
         self.items = items;
         self.history_version = self.history_version.saturating_add(1);
     }
@@ -175,13 +175,13 @@ impl ContextManager {
     /// Returns true when a tool image was replaced, false otherwise.
     pub(crate) fn replace_last_turn_images(&mut self, placeholder: &str) -> bool {
         let Some(index) = self.items.iter().rposition(|item| {
-            matches!(item, ResponseItem::FunctionCallOutput { .. }) || is_user_turn_boundary(item)
+            matches!(item, TranscriptItem::FunctionCallOutput { .. }) || is_user_turn_boundary(item)
         }) else {
             return false;
         };
 
         match &mut self.items[index] {
-            ResponseItem::FunctionCallOutput { output, .. } => {
+            TranscriptItem::FunctionCallOutput { output, .. } => {
                 let Some(content_items) = output.content_items_mut() else {
                     return false;
                 };
@@ -200,7 +200,7 @@ impl ContextManager {
                 }
                 replaced
             }
-            ResponseItem::Message { .. } => false,
+            TranscriptItem::Message { .. } => false,
             _ => false,
         }
     }
@@ -270,7 +270,7 @@ impl ContextManager {
             .filter(|item| {
                 matches!(
                     item,
-                    ResponseItem::Reasoning {
+                    TranscriptItem::Reasoning {
                         encrypted_content: Some(_),
                         ..
                     }
@@ -282,7 +282,7 @@ impl ContextManager {
 
     // These are local items added after the most recent model-emitted item.
     // They are not reflected in `last_token_usage.total_tokens`.
-    fn items_after_last_model_generated_item(&self) -> &[ResponseItem] {
+    fn items_after_last_model_generated_item(&self) -> &[TranscriptItem] {
         let start = self
             .items
             .iter()
@@ -328,11 +328,11 @@ impl ContextManager {
         normalize::strip_images_when_unsupported(input_modalities, &mut self.items);
     }
 
-    fn process_item(&self, item: &ResponseItem, policy: TruncationPolicy) -> ResponseItem {
+    fn process_item(&self, item: &TranscriptItem, policy: TruncationPolicy) -> TranscriptItem {
         let policy_with_serialization_budget = policy * 1.2;
         match item {
-            ResponseItem::FunctionCallOutput { call_id, output } => {
-                ResponseItem::FunctionCallOutput {
+            TranscriptItem::FunctionCallOutput { call_id, output } => {
+                TranscriptItem::FunctionCallOutput {
                     call_id: call_id.clone(),
                     output: truncate_function_output_payload(
                         output,
@@ -340,29 +340,29 @@ impl ContextManager {
                     ),
                 }
             }
-            ResponseItem::CustomToolCallOutput {
+            TranscriptItem::CustomToolCallOutput {
                 call_id,
                 name,
                 output,
-            } => ResponseItem::CustomToolCallOutput {
+            } => TranscriptItem::CustomToolCallOutput {
                 call_id: call_id.clone(),
                 name: name.clone(),
                 output: truncate_function_output_payload(output, policy_with_serialization_budget),
             },
-            ResponseItem::Message { .. }
-            | ResponseItem::AgentMessage { .. }
-            | ResponseItem::Reasoning { .. }
-            | ResponseItem::LocalShellCall { .. }
-            | ResponseItem::FunctionCall { .. }
-            | ResponseItem::ToolSearchCall { .. }
-            | ResponseItem::ToolSearchOutput { .. }
-            | ResponseItem::WebSearchCall { .. }
-            | ResponseItem::ImageGenerationCall { .. }
-            | ResponseItem::CustomToolCall { .. }
-            | ResponseItem::Compaction { .. }
-            | ResponseItem::CompactionTrigger
-            | ResponseItem::ContextCompaction { .. }
-            | ResponseItem::Other => item.clone(),
+            TranscriptItem::Message { .. }
+            | TranscriptItem::AgentMessage { .. }
+            | TranscriptItem::Reasoning { .. }
+            | TranscriptItem::LocalShellCall { .. }
+            | TranscriptItem::FunctionCall { .. }
+            | TranscriptItem::ToolSearchCall { .. }
+            | TranscriptItem::ToolSearchOutput { .. }
+            | TranscriptItem::WebSearchCall { .. }
+            | TranscriptItem::ImageGenerationCall { .. }
+            | TranscriptItem::CustomToolCall { .. }
+            | TranscriptItem::Compaction { .. }
+            | TranscriptItem::CompactionTrigger
+            | TranscriptItem::ContextCompaction { .. }
+            | TranscriptItem::Other => item.clone(),
         }
     }
 
@@ -385,13 +385,13 @@ impl ContextManager {
     /// reinjection.
     fn trim_pre_turn_context_updates(
         &mut self,
-        snapshot: &[ResponseItem],
+        snapshot: &[TranscriptItem],
         first_instruction_turn_idx: usize,
         mut cut_idx: usize,
     ) -> usize {
         while cut_idx > first_instruction_turn_idx {
             match &snapshot[cut_idx - 1] {
-                ResponseItem::Message { role, content, .. }
+                TranscriptItem::Message { role, content, .. }
                     if role == "developer" && is_contextual_dev_message_content(content) =>
                 {
                     if has_non_contextual_dev_message_content(content) {
@@ -402,7 +402,7 @@ impl ContextManager {
                     }
                     cut_idx -= 1;
                 }
-                ResponseItem::Message { role, content, .. }
+                TranscriptItem::Message { role, content, .. }
                     if role == "user" && is_contextual_user_message_content(content) =>
                 {
                     cut_idx -= 1;
@@ -436,24 +436,24 @@ pub(crate) fn truncate_function_output_payload(
 /// API messages include every non-system item (user/assistant messages, reasoning,
 /// tool calls, tool outputs, shell calls, web-search calls, and image-generation
 /// calls).
-fn is_api_message(message: &ResponseItem) -> bool {
+fn is_api_message(message: &TranscriptItem) -> bool {
     match message {
-        ResponseItem::Message { role, .. } => role.as_str() != "system",
-        ResponseItem::AgentMessage { .. }
-        | ResponseItem::FunctionCallOutput { .. }
-        | ResponseItem::FunctionCall { .. }
-        | ResponseItem::ToolSearchCall { .. }
-        | ResponseItem::ToolSearchOutput { .. }
-        | ResponseItem::CustomToolCall { .. }
-        | ResponseItem::CustomToolCallOutput { .. }
-        | ResponseItem::LocalShellCall { .. }
-        | ResponseItem::Reasoning { .. }
-        | ResponseItem::WebSearchCall { .. }
-        | ResponseItem::ImageGenerationCall { .. }
-        | ResponseItem::Compaction { .. }
-        | ResponseItem::ContextCompaction { .. } => true,
-        ResponseItem::CompactionTrigger => false,
-        ResponseItem::Other => false,
+        TranscriptItem::Message { role, .. } => role.as_str() != "system",
+        TranscriptItem::AgentMessage { .. }
+        | TranscriptItem::FunctionCallOutput { .. }
+        | TranscriptItem::FunctionCall { .. }
+        | TranscriptItem::ToolSearchCall { .. }
+        | TranscriptItem::ToolSearchOutput { .. }
+        | TranscriptItem::CustomToolCall { .. }
+        | TranscriptItem::CustomToolCallOutput { .. }
+        | TranscriptItem::LocalShellCall { .. }
+        | TranscriptItem::Reasoning { .. }
+        | TranscriptItem::WebSearchCall { .. }
+        | TranscriptItem::ImageGenerationCall { .. }
+        | TranscriptItem::Compaction { .. }
+        | TranscriptItem::ContextCompaction { .. } => true,
+        TranscriptItem::CompactionTrigger => false,
+        TranscriptItem::Other => false,
     }
 }
 
@@ -469,7 +469,7 @@ fn estimate_encrypted_function_output_length(encoded_len: usize) -> usize {
     encoded_len.saturating_mul(9).div_ceil(16)
 }
 
-fn estimate_item_token_count(item: &ResponseItem) -> i64 {
+fn estimate_item_token_count(item: &TranscriptItem) -> i64 {
     let model_visible_bytes = estimate_response_item_model_visible_bytes(item);
     approx_tokens_from_byte_count_i64(model_visible_bytes)
 }
@@ -496,16 +496,16 @@ static ORIGINAL_IMAGE_ESTIMATE_CACHE: LazyLock<BlockingLruCache<[u8; 20], Option
         )
     });
 
-fn estimate_response_item_model_visible_bytes(item: &ResponseItem) -> i64 {
+fn estimate_response_item_model_visible_bytes(item: &TranscriptItem) -> i64 {
     match item {
-        ResponseItem::Reasoning {
+        TranscriptItem::Reasoning {
             encrypted_content: Some(content),
             ..
         }
-        | ResponseItem::Compaction {
+        | TranscriptItem::Compaction {
             encrypted_content: content,
         }
-        | ResponseItem::ContextCompaction {
+        | TranscriptItem::ContextCompaction {
             encrypted_content: Some(content),
         } => i64::try_from(estimate_reasoning_length(content.len())).unwrap_or(i64::MAX),
         item => {
@@ -602,7 +602,7 @@ fn estimate_original_image_bytes(image_url: &str) -> Option<i64> {
 /// returns:
 /// - total base64 payload bytes to subtract from raw serialized size
 /// - total replacement byte estimate for those images
-fn image_data_url_estimate_adjustment(item: &ResponseItem) -> (i64, i64) {
+fn image_data_url_estimate_adjustment(item: &TranscriptItem) -> (i64, i64) {
     let mut payload_bytes = 0i64;
     let mut replacement_bytes = 0i64;
 
@@ -620,15 +620,15 @@ fn image_data_url_estimate_adjustment(item: &ResponseItem) -> (i64, i64) {
     };
 
     match item {
-        ResponseItem::Message { content, .. } => {
+        TranscriptItem::Message { content, .. } => {
             for content_item in content {
                 if let ContentItem::InputImage { image_url, detail } = content_item {
                     accumulate(image_url, *detail);
                 }
             }
         }
-        ResponseItem::FunctionCallOutput { output, .. }
-        | ResponseItem::CustomToolCallOutput { output, .. } => {
+        TranscriptItem::FunctionCallOutput { output, .. }
+        | TranscriptItem::CustomToolCallOutput { output, .. } => {
             if let FunctionCallOutputBody::ContentItems(items) = &output.body {
                 for content_item in items {
                     if let FunctionCallOutputContentItem::InputImage { image_url, detail } =
@@ -645,8 +645,8 @@ fn image_data_url_estimate_adjustment(item: &ResponseItem) -> (i64, i64) {
     (payload_bytes, replacement_bytes)
 }
 
-fn encrypted_function_output_estimate_adjustment(item: &ResponseItem) -> (i64, i64) {
-    let ResponseItem::FunctionCallOutput { output, .. } = item else {
+fn encrypted_function_output_estimate_adjustment(item: &TranscriptItem) -> (i64, i64) {
+    let TranscriptItem::FunctionCallOutput { output, .. } = item else {
         return (0, 0);
     };
     let FunctionCallOutputBody::ContentItems(items) = &output.body else {
@@ -670,32 +670,32 @@ fn encrypted_function_output_estimate_adjustment(item: &ResponseItem) -> (i64, i
     })
 }
 
-fn is_model_generated_item(item: &ResponseItem) -> bool {
+fn is_model_generated_item(item: &TranscriptItem) -> bool {
     match item {
-        ResponseItem::Message { role, .. } => role == "assistant",
-        ResponseItem::Reasoning { .. }
-        | ResponseItem::FunctionCall { .. }
-        | ResponseItem::ToolSearchCall { .. }
-        | ResponseItem::WebSearchCall { .. }
-        | ResponseItem::ImageGenerationCall { .. }
-        | ResponseItem::CustomToolCall { .. }
-        | ResponseItem::LocalShellCall { .. }
-        | ResponseItem::Compaction { .. }
-        | ResponseItem::ContextCompaction { .. } => true,
-        ResponseItem::CompactionTrigger => false,
-        ResponseItem::FunctionCallOutput { .. }
-        | ResponseItem::ToolSearchOutput { .. }
-        | ResponseItem::CustomToolCallOutput { .. }
-        | ResponseItem::AgentMessage { .. }
-        | ResponseItem::Other => false,
+        TranscriptItem::Message { role, .. } => role == "assistant",
+        TranscriptItem::Reasoning { .. }
+        | TranscriptItem::FunctionCall { .. }
+        | TranscriptItem::ToolSearchCall { .. }
+        | TranscriptItem::WebSearchCall { .. }
+        | TranscriptItem::ImageGenerationCall { .. }
+        | TranscriptItem::CustomToolCall { .. }
+        | TranscriptItem::LocalShellCall { .. }
+        | TranscriptItem::Compaction { .. }
+        | TranscriptItem::ContextCompaction { .. } => true,
+        TranscriptItem::CompactionTrigger => false,
+        TranscriptItem::FunctionCallOutput { .. }
+        | TranscriptItem::ToolSearchOutput { .. }
+        | TranscriptItem::CustomToolCallOutput { .. }
+        | TranscriptItem::AgentMessage { .. }
+        | TranscriptItem::Other => false,
     }
 }
 
-pub(crate) fn is_user_turn_boundary(item: &ResponseItem) -> bool {
-    if matches!(item, ResponseItem::AgentMessage { .. }) {
+pub(crate) fn is_user_turn_boundary(item: &TranscriptItem) -> bool {
+    if matches!(item, TranscriptItem::AgentMessage { .. }) {
         return true;
     }
-    let ResponseItem::Message { role, content, .. } = item else {
+    let TranscriptItem::Message { role, content, .. } = item else {
         return false;
     };
 
@@ -707,7 +707,7 @@ fn is_inter_agent_instruction_content(content: &[ContentItem]) -> bool {
     InterAgentCommunication::is_message_content(content)
 }
 
-fn user_message_positions(items: &[ResponseItem]) -> Vec<usize> {
+fn user_message_positions(items: &[TranscriptItem]) -> Vec<usize> {
     let mut positions = Vec::new();
     for (idx, item) in items.iter().enumerate() {
         if is_user_turn_boundary(item) {

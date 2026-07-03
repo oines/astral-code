@@ -3,9 +3,9 @@ use codex_protocol::models::DEFAULT_IMAGE_DETAIL;
 use pretty_assertions::assert_eq;
 
 async fn process_compacted_history_with_test_session(
-    compacted_history: Vec<ResponseItem>,
+    compacted_history: Vec<TranscriptItem>,
     previous_turn_settings: Option<&PreviousTurnSettings>,
-) -> (Vec<ResponseItem>, Vec<ResponseItem>) {
+) -> (Vec<TranscriptItem>, Vec<TranscriptItem>) {
     let (session, turn_context) = crate::session::tests::make_session_and_context().await;
     session
         .set_previous_turn_settings(previous_turn_settings.cloned())
@@ -21,8 +21,8 @@ async fn process_compacted_history_with_test_session(
     (refreshed, initial_context)
 }
 
-fn user_message(text: &str) -> ResponseItem {
-    ResponseItem::Message {
+fn user_message(text: &str) -> TranscriptItem {
+    TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
@@ -66,7 +66,7 @@ fn content_items_to_text_ignores_image_only_content() {
 #[test]
 fn collect_user_messages_extracts_user_text_only() {
     let items = vec![
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: Some("assistant".to_string()),
             role: "assistant".to_string(),
             content: vec![ContentItem::OutputText {
@@ -74,7 +74,7 @@ fn collect_user_messages_extracts_user_text_only() {
             }],
             phase: None,
         },
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: Some("user".to_string()),
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -82,7 +82,7 @@ fn collect_user_messages_extracts_user_text_only() {
             }],
             phase: None,
         },
-        ResponseItem::Other,
+        TranscriptItem::Other,
     ];
 
     let collected = collect_user_messages(&items);
@@ -93,7 +93,7 @@ fn collect_user_messages_extracts_user_text_only() {
 #[test]
 fn collect_user_messages_filters_session_prefix_entries() {
     let items = vec![
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -106,7 +106,7 @@ do things
             }],
             phase: None,
         },
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -114,7 +114,7 @@ do things
             }],
             phase: None,
         },
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -193,7 +193,7 @@ fn build_token_limited_compacted_history_truncates_overlong_user_messages() {
     let summary_message = &history[1];
 
     let truncated_text = match truncated_message {
-        ResponseItem::Message { role, content, .. } if role == "user" => {
+        TranscriptItem::Message { role, content, .. } if role == "user" => {
             content_items_to_text(content).unwrap_or_default()
         }
         other => panic!("unexpected item in history: {other:?}"),
@@ -209,7 +209,7 @@ fn build_token_limited_compacted_history_truncates_overlong_user_messages() {
     );
 
     let summary_text = match summary_message {
-        ResponseItem::Compaction { encrypted_content } => encrypted_content.clone(),
+        TranscriptItem::Compaction { encrypted_content } => encrypted_content.clone(),
         other => panic!("unexpected item in history: {other:?}"),
     };
     assert_eq!(summary_text, "SUMMARY");
@@ -217,7 +217,7 @@ fn build_token_limited_compacted_history_truncates_overlong_user_messages() {
 
 #[test]
 fn build_token_limited_compacted_history_appends_compaction_summary() {
-    let initial_context: Vec<ResponseItem> = Vec::new();
+    let initial_context: Vec<TranscriptItem> = Vec::new();
     let user_messages = vec!["first user message".to_string()];
     let summary_text = "summary text";
 
@@ -229,7 +229,7 @@ fn build_token_limited_compacted_history_appends_compaction_summary() {
 
     let last = history.last().expect("history should have a summary entry");
     let summary = match last {
-        ResponseItem::Compaction { encrypted_content } => encrypted_content.clone(),
+        TranscriptItem::Compaction { encrypted_content } => encrypted_content.clone(),
         other => panic!("expected compaction summary, found {other:?}"),
     };
     assert_eq!(summary, summary_text);
@@ -238,7 +238,7 @@ fn build_token_limited_compacted_history_appends_compaction_summary() {
 #[tokio::test]
 async fn process_compacted_history_replaces_developer_messages() {
     let compacted_history = vec![
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "developer".to_string(),
             content: vec![ContentItem::InputText {
@@ -246,7 +246,7 @@ async fn process_compacted_history_replaces_developer_messages() {
             }],
             phase: None,
         },
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -254,7 +254,7 @@ async fn process_compacted_history_replaces_developer_messages() {
             }],
             phase: None,
         },
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "developer".to_string(),
             content: vec![ContentItem::InputText {
@@ -268,7 +268,7 @@ async fn process_compacted_history_replaces_developer_messages() {
         /*previous_turn_settings*/ None,
     )
     .await;
-    expected.push(ResponseItem::Message {
+    expected.push(TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
@@ -281,7 +281,7 @@ async fn process_compacted_history_replaces_developer_messages() {
 
 #[tokio::test]
 async fn process_compacted_history_reinjects_full_initial_context() {
-    let compacted_history = vec![ResponseItem::Message {
+    let compacted_history = vec![TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
@@ -294,7 +294,7 @@ async fn process_compacted_history_reinjects_full_initial_context() {
         /*previous_turn_settings*/ None,
     )
     .await;
-    expected.push(ResponseItem::Message {
+    expected.push(TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
@@ -308,7 +308,7 @@ async fn process_compacted_history_reinjects_full_initial_context() {
 #[tokio::test]
 async fn process_compacted_history_drops_non_user_content_messages() {
     let compacted_history = vec![
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -321,7 +321,7 @@ keep me updated
             }],
             phase: None,
         },
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -333,7 +333,7 @@ keep me updated
             }],
             phase: None,
         },
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -345,7 +345,7 @@ keep me updated
             }],
             phase: None,
         },
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -353,7 +353,7 @@ keep me updated
             }],
             phase: None,
         },
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "developer".to_string(),
             content: vec![ContentItem::InputText {
@@ -367,7 +367,7 @@ keep me updated
         /*previous_turn_settings*/ None,
     )
     .await;
-    expected.push(ResponseItem::Message {
+    expected.push(TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
@@ -409,7 +409,7 @@ async fn process_compacted_history_drops_legacy_warnings() {
 #[tokio::test]
 async fn process_compacted_history_inserts_context_before_last_real_user_message_only() {
     let compacted_history = vec![
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -417,7 +417,7 @@ async fn process_compacted_history_inserts_context_before_last_real_user_message
             }],
             phase: None,
         },
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -425,7 +425,7 @@ async fn process_compacted_history_inserts_context_before_last_real_user_message
             }],
             phase: None,
         },
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -441,7 +441,7 @@ async fn process_compacted_history_inserts_context_before_last_real_user_message
     )
     .await;
     let mut expected = vec![
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -449,7 +449,7 @@ async fn process_compacted_history_inserts_context_before_last_real_user_message
             }],
             phase: None,
         },
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -459,7 +459,7 @@ async fn process_compacted_history_inserts_context_before_last_real_user_message
         },
     ];
     expected.extend(initial_context);
-    expected.push(ResponseItem::Message {
+    expected.push(TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
@@ -472,7 +472,7 @@ async fn process_compacted_history_inserts_context_before_last_real_user_message
 
 #[tokio::test]
 async fn process_compacted_history_reinjects_model_switch_message() {
-    let compacted_history = vec![ResponseItem::Message {
+    let compacted_history = vec![TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
@@ -491,7 +491,7 @@ async fn process_compacted_history_reinjects_model_switch_message() {
     )
     .await;
 
-    let ResponseItem::Message { role, content, .. } = &initial_context[0] else {
+    let TranscriptItem::Message { role, content, .. } = &initial_context[0] else {
         panic!("expected developer message");
     };
     assert_eq!(role, "developer");
@@ -501,7 +501,7 @@ async fn process_compacted_history_reinjects_model_switch_message() {
     assert!(text.contains("<model_switch>"));
 
     let mut expected = initial_context;
-    expected.push(ResponseItem::Message {
+    expected.push(TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
@@ -515,7 +515,7 @@ async fn process_compacted_history_reinjects_model_switch_message() {
 #[test]
 fn insert_initial_context_before_last_real_user_or_summary_keeps_summary_last() {
     let compacted_history = vec![
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -523,7 +523,7 @@ fn insert_initial_context_before_last_real_user_or_summary_keeps_summary_last() 
             }],
             phase: None,
         },
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -531,7 +531,7 @@ fn insert_initial_context_before_last_real_user_or_summary_keeps_summary_last() 
             }],
             phase: None,
         },
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -540,7 +540,7 @@ fn insert_initial_context_before_last_real_user_or_summary_keeps_summary_last() 
             phase: None,
         },
     ];
-    let initial_context = vec![ResponseItem::Message {
+    let initial_context = vec![TranscriptItem::Message {
         id: None,
         role: "developer".to_string(),
         content: vec![ContentItem::InputText {
@@ -552,7 +552,7 @@ fn insert_initial_context_before_last_real_user_or_summary_keeps_summary_last() 
     let refreshed =
         insert_initial_context_before_last_real_user_or_summary(compacted_history, initial_context);
     let expected = vec![
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -560,7 +560,7 @@ fn insert_initial_context_before_last_real_user_or_summary_keeps_summary_last() 
             }],
             phase: None,
         },
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "developer".to_string(),
             content: vec![ContentItem::InputText {
@@ -568,7 +568,7 @@ fn insert_initial_context_before_last_real_user_or_summary_keeps_summary_last() 
             }],
             phase: None,
         },
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -576,7 +576,7 @@ fn insert_initial_context_before_last_real_user_or_summary_keeps_summary_last() 
             }],
             phase: None,
         },
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -590,10 +590,10 @@ fn insert_initial_context_before_last_real_user_or_summary_keeps_summary_last() 
 
 #[test]
 fn insert_initial_context_before_last_real_user_or_summary_keeps_compaction_last() {
-    let compacted_history = vec![ResponseItem::Compaction {
+    let compacted_history = vec![TranscriptItem::Compaction {
         encrypted_content: "encrypted".to_string(),
     }];
-    let initial_context = vec![ResponseItem::Message {
+    let initial_context = vec![TranscriptItem::Message {
         id: None,
         role: "developer".to_string(),
         content: vec![ContentItem::InputText {
@@ -605,7 +605,7 @@ fn insert_initial_context_before_last_real_user_or_summary_keeps_compaction_last
     let refreshed =
         insert_initial_context_before_last_real_user_or_summary(compacted_history, initial_context);
     let expected = vec![
-        ResponseItem::Message {
+        TranscriptItem::Message {
             id: None,
             role: "developer".to_string(),
             content: vec![ContentItem::InputText {
@@ -613,7 +613,7 @@ fn insert_initial_context_before_last_real_user_or_summary_keeps_compaction_last
             }],
             phase: None,
         },
-        ResponseItem::Compaction {
+        TranscriptItem::Compaction {
             encrypted_content: "encrypted".to_string(),
         },
     ];

@@ -1,12 +1,12 @@
 //! Helpers for truncating rollouts based on "user turn" boundaries.
 //!
-//! In core, "user turns" are detected by scanning `ResponseItem::Message` items and
+//! In core, "user turns" are detected by scanning `TranscriptItem::Message` items and
 //! interpreting them via `event_mapping::parse_turn_item(...)`.
 
 use crate::context_manager::is_user_turn_boundary;
 use crate::event_mapping;
 use codex_protocol::items::TurnItem;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::InitialHistory;
 use codex_protocol::protocol::InterAgentCommunication;
@@ -18,14 +18,14 @@ pub(crate) fn initial_history_has_prior_user_turns(conversation_history: &Initia
 
 fn rollout_item_is_user_turn_boundary(item: &RolloutItem) -> bool {
     match item {
-        RolloutItem::ResponseItem(item) => is_user_turn_boundary(item),
+        RolloutItem::TranscriptItem(item) => is_user_turn_boundary(item),
         _ => false,
     }
 }
 
 /// Return the indices of user message boundaries in a rollout.
 ///
-/// A user message boundary is a `RolloutItem::ResponseItem(ResponseItem::Message { .. })`
+/// A user message boundary is a `RolloutItem::TranscriptItem(TranscriptItem::Message { .. })`
 /// whose parsed turn item is `TurnItem::UserMessage`.
 ///
 /// Rollouts can contain `ThreadRolledBack` markers. Those markers indicate that the
@@ -35,7 +35,7 @@ pub(crate) fn user_message_positions_in_rollout(items: &[RolloutItem]) -> Vec<us
     let mut user_positions = Vec::new();
     for (idx, item) in items.iter().enumerate() {
         match item {
-            RolloutItem::ResponseItem(item @ ResponseItem::Message { .. })
+            RolloutItem::TranscriptItem(item @ TranscriptItem::Message { .. })
                 if matches!(
                     event_mapping::parse_turn_item(item),
                     Some(TurnItem::UserMessage(_))
@@ -69,7 +69,7 @@ pub(crate) fn fork_turn_positions_in_rollout(items: &[RolloutItem]) -> Vec<usize
     let mut fork_turn_positions = Vec::new();
     for (idx, item) in items.iter().enumerate() {
         match item {
-            RolloutItem::ResponseItem(item) => {
+            RolloutItem::TranscriptItem(item) => {
                 if is_user_turn_boundary(item) {
                     rollback_turn_positions.push(idx);
                 }
@@ -152,15 +152,15 @@ pub(crate) fn truncate_rollout_to_last_n_fork_turns(
     items[keep_idx..].to_vec()
 }
 
-fn is_real_user_message_boundary(item: &ResponseItem) -> bool {
+fn is_real_user_message_boundary(item: &TranscriptItem) -> bool {
     matches!(
         event_mapping::parse_turn_item(item),
         Some(TurnItem::UserMessage(_))
     )
 }
 
-fn is_trigger_turn_boundary(item: &ResponseItem) -> bool {
-    let ResponseItem::Message { role, content, .. } = item else {
+fn is_trigger_turn_boundary(item: &TranscriptItem) -> bool {
+    let TranscriptItem::Message { role, content, .. } = item else {
         return false;
     };
 
