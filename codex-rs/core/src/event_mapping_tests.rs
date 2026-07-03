@@ -11,7 +11,7 @@ use codex_protocol::models::ContentItem;
 use codex_protocol::models::DEFAULT_IMAGE_DETAIL;
 use codex_protocol::models::ReasoningItemContent;
 use codex_protocol::models::ReasoningItemReasoningSummary;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::models::WebSearchAction;
 use codex_protocol::user_input::UserInput;
 use pretty_assertions::assert_eq;
@@ -21,7 +21,7 @@ fn parses_user_message_with_text_and_two_images() {
     let img1 = "https://example.com/one.png".to_string();
     let img2 = "https://example.com/two.jpg".to_string();
 
-    let item = ResponseItem::Message {
+    let item = TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![
@@ -70,7 +70,7 @@ fn skips_local_image_label_text() {
     let label = r#"<image name=[Image #1] path="/tmp/local.png">"#.to_string();
     let user_text = "Please review this image.".to_string();
 
-    let item = ResponseItem::Message {
+    let item = TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![
@@ -111,7 +111,7 @@ fn skips_local_image_label_text() {
 
 #[test]
 fn parses_assistant_message_input_text_for_backward_compatibility() {
-    let item = ResponseItem::Message {
+    let item = TranscriptItem::Message {
         id: None,
         role: "assistant".to_string(),
         content: vec![ContentItem::InputText {
@@ -151,7 +151,7 @@ fn skips_unnamed_image_label_text() {
     let label = codex_protocol::models::image_open_tag_text();
     let user_text = "Please review this image.".to_string();
 
-    let item = ResponseItem::Message {
+    let item = TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
         content: vec![
@@ -193,7 +193,7 @@ fn skips_unnamed_image_label_text() {
 #[test]
 fn skips_user_instructions_and_env() {
     let items = vec![
-            ResponseItem::Message {
+            TranscriptItem::Message {
                 id: None,
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
@@ -201,7 +201,7 @@ fn skips_user_instructions_and_env() {
                 }],
             phase: None,
             },
-            ResponseItem::Message {
+            TranscriptItem::Message {
                 id: None,
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
@@ -209,7 +209,7 @@ fn skips_user_instructions_and_env() {
                 }],
             phase: None,
             },
-            ResponseItem::Message {
+            TranscriptItem::Message {
                 id: None,
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
@@ -217,7 +217,7 @@ fn skips_user_instructions_and_env() {
                 }],
             phase: None,
             },
-            ResponseItem::Message {
+            TranscriptItem::Message {
                 id: None,
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
@@ -226,7 +226,7 @@ fn skips_user_instructions_and_env() {
                 }],
             phase: None,
             },
-            ResponseItem::Message {
+            TranscriptItem::Message {
                 id: None,
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
@@ -234,7 +234,7 @@ fn skips_user_instructions_and_env() {
                 }],
             phase: None,
             },
-            ResponseItem::Message {
+            TranscriptItem::Message {
                 id: None,
                 role: "user".to_string(),
                 content: vec![
@@ -284,7 +284,7 @@ fn parses_hook_prompt_message_as_distinct_turn_item() {
 
 #[test]
 fn parses_hook_prompt_and_hides_other_contextual_fragments() {
-    let item = ResponseItem::Message {
+    let item = TranscriptItem::Message {
         id: Some("msg-1".to_string()),
         role: "user".to_string(),
         content: vec![
@@ -319,7 +319,7 @@ fn parses_hook_prompt_and_hides_other_contextual_fragments() {
 
 #[test]
 fn internal_model_context_does_not_parse_as_visible_turn_item() {
-    let item = ResponseItem::Message {
+    let item = TranscriptItem::Message {
         id: Some("msg-1".to_string()),
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
@@ -337,7 +337,7 @@ fn internal_model_context_does_not_parse_as_visible_turn_item() {
 
 #[test]
 fn parses_agent_message() {
-    let item = ResponseItem::Message {
+    let item = TranscriptItem::Message {
         id: Some("msg-1".to_string()),
         role: "assistant".to_string(),
         content: vec![ContentItem::OutputText {
@@ -361,7 +361,7 @@ fn parses_agent_message() {
 
 #[test]
 fn parses_reasoning_summary_and_raw_content() {
-    let item = ResponseItem::Reasoning {
+    let item = TranscriptItem::Reasoning {
         id: "reasoning_1".to_string(),
         summary: vec![
             ReasoningItemReasoningSummary::SummaryText {
@@ -375,6 +375,7 @@ fn parses_reasoning_summary_and_raw_content() {
             text: "raw details".to_string(),
         }]),
         encrypted_content: None,
+        provider_metadata: None,
     };
 
     let turn_item = parse_turn_item(&item).expect("expected reasoning turn item");
@@ -393,7 +394,7 @@ fn parses_reasoning_summary_and_raw_content() {
 
 #[test]
 fn parses_reasoning_including_raw_content() {
-    let item = ResponseItem::Reasoning {
+    let item = TranscriptItem::Reasoning {
         id: "reasoning_2".to_string(),
         summary: vec![ReasoningItemReasoningSummary::SummaryText {
             text: "Summarized step".to_string(),
@@ -407,6 +408,7 @@ fn parses_reasoning_including_raw_content() {
             },
         ]),
         encrypted_content: None,
+        provider_metadata: None,
     };
 
     let turn_item = parse_turn_item(&item).expect("expected reasoning turn item");
@@ -425,7 +427,7 @@ fn parses_reasoning_including_raw_content() {
 
 #[test]
 fn parses_web_search_call() {
-    let item = ResponseItem::WebSearchCall {
+    let item = TranscriptItem::WebSearchCall {
         id: Some("ws_1".to_string()),
         status: Some("completed".to_string()),
         action: Some(WebSearchAction::Search {
@@ -454,7 +456,7 @@ fn parses_web_search_call() {
 
 #[test]
 fn parses_web_search_open_page_call() {
-    let item = ResponseItem::WebSearchCall {
+    let item = TranscriptItem::WebSearchCall {
         id: Some("ws_open".to_string()),
         status: Some("completed".to_string()),
         action: Some(WebSearchAction::OpenPage {
@@ -481,7 +483,7 @@ fn parses_web_search_open_page_call() {
 
 #[test]
 fn parses_web_search_find_in_page_call() {
-    let item = ResponseItem::WebSearchCall {
+    let item = TranscriptItem::WebSearchCall {
         id: Some("ws_find".to_string()),
         status: Some("completed".to_string()),
         action: Some(WebSearchAction::FindInPage {
@@ -510,7 +512,7 @@ fn parses_web_search_find_in_page_call() {
 
 #[test]
 fn parses_partial_web_search_call_without_action_as_other() {
-    let item = ResponseItem::WebSearchCall {
+    let item = TranscriptItem::WebSearchCall {
         id: Some("ws_partial".to_string()),
         status: Some("in_progress".to_string()),
         action: None,

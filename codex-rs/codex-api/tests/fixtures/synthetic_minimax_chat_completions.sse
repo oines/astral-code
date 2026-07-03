@@ -1,0 +1,11 @@
+: synthetic fixture only; not a captured provider golden.
+: MiniMax-style chat stream that relies on [DONE] to finalize.
+
+data: {"id":"minimax-synth-1","model":"minimax-text","choices":[{"delta":{"role":"assistant"},"finish_reason":null}]}
+
+data: {"id":"minimax-synth-1","choices":[{"delta":{"content":"mini"},"finish_reason":null}]}
+
+data: {"id":"minimax-synth-1","choices":[{"delta":{"content":"max"},"finish_reason":null}]}
+
+data: [DONE]
+

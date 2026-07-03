@@ -24,18 +24,18 @@ use codex_protocol::models::LocalShellAction;
 use codex_protocol::models::LocalShellExecAction;
 use codex_protocol::models::LocalShellStatus;
 use codex_protocol::models::MessagePhase;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_utils_absolute_path::test_support::PathExt;
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
-fn assistant_output_text(text: &str) -> ResponseItem {
+fn assistant_output_text(text: &str) -> TranscriptItem {
     assistant_output_text_with_phase(text, /*phase*/ None)
 }
 
-fn assistant_output_text_with_phase(text: &str, phase: Option<MessagePhase>) -> ResponseItem {
-    ResponseItem::Message {
+fn assistant_output_text_with_phase(text: &str, phase: Option<MessagePhase>) -> TranscriptItem {
+    TranscriptItem::Message {
         id: Some("msg-1".to_string()),
         role: "assistant".to_string(),
         content: vec![ContentItem::OutputText {
@@ -48,19 +48,19 @@ fn assistant_output_text_with_phase(text: &str, phase: Option<MessagePhase>) -> 
 #[test]
 fn external_context_pollution_items_include_web_search_and_tool_search() {
     let polluting_items = [
-        ResponseItem::WebSearchCall {
+        TranscriptItem::WebSearchCall {
             id: None,
             status: Some("completed".to_string()),
             action: None,
         },
-        ResponseItem::ToolSearchCall {
+        TranscriptItem::ToolSearchCall {
             id: None,
             call_id: Some("search-1".to_string()),
             status: None,
             execution: "client".to_string(),
             arguments: serde_json::json!({"query": "calendar"}),
         },
-        ResponseItem::ToolSearchOutput {
+        TranscriptItem::ToolSearchOutput {
             call_id: Some("search-1".to_string()),
             status: "completed".to_string(),
             execution: "client".to_string(),
@@ -78,7 +78,7 @@ fn external_context_pollution_items_include_web_search_and_tool_search() {
 #[test]
 fn external_context_pollution_items_exclude_local_tool_calls() {
     let non_polluting_items = [
-        ResponseItem::LocalShellCall {
+        TranscriptItem::LocalShellCall {
             id: None,
             call_id: Some("shell-1".to_string()),
             status: LocalShellStatus::Completed,
@@ -90,25 +90,25 @@ fn external_context_pollution_items_exclude_local_tool_calls() {
                 user: None,
             }),
         },
-        ResponseItem::FunctionCall {
+        TranscriptItem::FunctionCall {
             id: None,
             name: "shell".to_string(),
             namespace: None,
             arguments: "{}".to_string(),
             call_id: "call-1".to_string(),
         },
-        ResponseItem::FunctionCallOutput {
+        TranscriptItem::FunctionCallOutput {
             call_id: "call-1".to_string(),
             output: FunctionCallOutputPayload::from_text("ok".to_string()),
         },
-        ResponseItem::CustomToolCall {
+        TranscriptItem::CustomToolCall {
             id: None,
             status: None,
             call_id: "custom-1".to_string(),
             name: "apply_patch".to_string(),
             input: "*** Begin Patch\n*** End Patch\n".to_string(),
         },
-        ResponseItem::CustomToolCallOutput {
+        TranscriptItem::CustomToolCallOutput {
             call_id: "custom-1".to_string(),
             name: Some("apply_patch".to_string()),
             output: FunctionCallOutputPayload::from_text("ok".to_string()),
@@ -405,7 +405,7 @@ fn completed_item_keeps_mailbox_delivery_open_for_commentary_messages() {
 
 #[test]
 fn completed_item_defers_mailbox_delivery_for_image_generation_calls() {
-    let item = ResponseItem::ImageGenerationCall {
+    let item = TranscriptItem::ImageGenerationCall {
         id: "ig-1".to_string(),
         status: "completed".to_string(),
         revised_prompt: None,

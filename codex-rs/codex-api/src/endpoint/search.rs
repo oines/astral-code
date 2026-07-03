@@ -71,7 +71,7 @@ mod tests {
     use codex_client::StreamResponse;
     use codex_client::TransportError;
     use codex_protocol::models::ContentItem;
-    use codex_protocol::models::ResponseItem;
+    use codex_protocol::models::TranscriptItem;
     use http::StatusCode;
     use pretty_assertions::assert_eq;
     use serde_json::json;
@@ -150,7 +150,7 @@ mod tests {
                     id: "search-session".to_string(),
                     model: "gpt-test".to_string(),
                     reasoning: None,
-                    input: Some(SearchInput::Items(vec![ResponseItem::Message {
+                    input: Some(SearchInput::Items(vec![TranscriptItem::Message {
                         id: None,
                         role: "user".to_string(),
                         content: vec![

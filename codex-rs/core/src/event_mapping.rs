@@ -8,7 +8,7 @@ use codex_protocol::models::ContentItem;
 use codex_protocol::models::MessagePhase;
 use codex_protocol::models::ReasoningItemContent;
 use codex_protocol::models::ReasoningItemReasoningSummary;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::models::WebSearchAction;
 use codex_protocol::models::is_image_close_tag_text;
 use codex_protocol::models::is_image_open_tag_text;
@@ -133,9 +133,9 @@ fn parse_agent_message(
     }
 }
 
-pub fn parse_turn_item(item: &ResponseItem) -> Option<TurnItem> {
+pub fn parse_turn_item(item: &TranscriptItem) -> Option<TurnItem> {
     match item {
-        ResponseItem::Message {
+        TranscriptItem::Message {
             role,
             content,
             id,
@@ -153,7 +153,7 @@ pub fn parse_turn_item(item: &ResponseItem) -> Option<TurnItem> {
             "system" => None,
             _ => None,
         },
-        ResponseItem::Reasoning {
+        TranscriptItem::Reasoning {
             id,
             summary,
             content,
@@ -180,7 +180,7 @@ pub fn parse_turn_item(item: &ResponseItem) -> Option<TurnItem> {
                 raw_content,
             }))
         }
-        ResponseItem::WebSearchCall { id, action, .. } => {
+        TranscriptItem::WebSearchCall { id, action, .. } => {
             let (action, query) = match action {
                 Some(action) => (action.clone(), web_search_action_detail(action)),
                 None => (WebSearchAction::Other, String::new()),
@@ -191,7 +191,7 @@ pub fn parse_turn_item(item: &ResponseItem) -> Option<TurnItem> {
                 action,
             }))
         }
-        ResponseItem::ImageGenerationCall {
+        TranscriptItem::ImageGenerationCall {
             id,
             status,
             revised_prompt,

@@ -127,6 +127,11 @@ impl ModelCapability {
                 model.context_window = Some(max_context_window);
             }
         }
+        if let Some(max_output_tokens) = self.max_output_tokens.and_then(u64_to_i64)
+            && model.max_output_tokens.is_none()
+        {
+            model.max_output_tokens = Some(max_output_tokens);
+        }
 
         if let Some(supports_parallel_tools) = self.supports_parallel_tools {
             model.supports_parallel_tool_calls = supports_parallel_tools;

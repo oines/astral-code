@@ -1,7 +1,7 @@
 use anyhow::Result;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::PermissionProfile;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::CodexErrorInfo;
 use codex_protocol::protocol::EventMsg;
@@ -359,7 +359,7 @@ async fn model_verification_emits_structured_event_without_reroute_or_warning() 
             EventMsg::RawResponseItem(raw)
                 if matches!(
                     &raw.item,
-                    ResponseItem::Message { content, .. }
+                    TranscriptItem::Message { content, .. }
                         if content.iter().any(|item| matches!(
                             item,
                             ContentItem::InputText { text } if text.starts_with("Warning: ")

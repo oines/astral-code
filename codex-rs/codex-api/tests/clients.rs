@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -11,6 +12,7 @@ use codex_api::ApiError;
 use codex_api::AuthError;
 use codex_api::AuthProvider;
 use codex_api::Provider;
+use codex_api::agent_adapters::anthropic::AnthropicMessagesOptions;
 use codex_api::agent_adapters::chat_completions::ChatCompletionsOptions;
 use codex_api::agent_protocol::AgentMessage;
 use codex_api::agent_protocol::AgentRequest;
@@ -139,6 +141,12 @@ struct FlakyTransport {
     state: Arc<Mutex<i64>>,
 }
 
+#[derive(Clone)]
+struct RateLimitOnceTransport {
+    attempts: Arc<Mutex<i64>>,
+    retry_after: Option<HeaderValue>,
+}
+
 impl Default for FlakyTransport {
     fn default() -> Self {
         Self::new()
@@ -155,6 +163,22 @@ impl FlakyTransport {
     fn attempts(&self) -> i64 {
         *self
             .state
+            .lock()
+            .unwrap_or_else(|err| panic!("mutex poisoned: {err}"))
+    }
+}
+
+impl RateLimitOnceTransport {
+    fn new(retry_after: Option<HeaderValue>) -> Self {
+        Self {
+            attempts: Arc::new(Mutex::new(0)),
+            retry_after,
+        }
+    }
+
+    fn attempts(&self) -> i64 {
+        *self
+            .attempts
             .lock()
             .unwrap_or_else(|err| panic!("mutex poisoned: {err}"))
     }
@@ -248,6 +272,48 @@ data: {"id":"chatcmpl-1","choices":[{"delta":{},"finish_reason":"stop"}]}
     }
 }
 
+#[async_trait]
+impl HttpTransport for RateLimitOnceTransport {
+    async fn execute(&self, _req: Request) -> Result<Response, TransportError> {
+        Err(TransportError::Build("execute should not run".to_string()))
+    }
+
+    async fn stream(&self, _req: Request) -> Result<StreamResponse, TransportError> {
+        let attempt = {
+            let mut attempts = self
+                .attempts
+                .lock()
+                .unwrap_or_else(|err| panic!("mutex poisoned: {err}"));
+            *attempts += 1;
+            *attempts
+        };
+
+        if attempt == 1 {
+            let mut headers = HeaderMap::new();
+            if let Some(retry_after) = &self.retry_after {
+                headers.insert(http::header::RETRY_AFTER, retry_after.clone());
+            }
+            return Err(TransportError::Http {
+                status: StatusCode::TOO_MANY_REQUESTS,
+                url: Some("https://example.com/v1/chat/completions".to_string()),
+                headers: Some(headers),
+                body: Some(r#"{"error":{"message":"rate limited"}}"#.to_string()),
+            });
+        }
+
+        let stream = futures::stream::iter(vec![Ok(Bytes::from(
+            r#"data: {"id":"chatcmpl-1","model":"gpt-test","choices":[{"delta":{"role":"assistant"},"finish_reason":"stop"}]}
+
+"#,
+        ))]);
+        Ok(StreamResponse {
+            status: StatusCode::OK,
+            headers: HeaderMap::new(),
+            bytes: Box::pin(stream),
+        })
+    }
+}
+
 fn agent_request() -> AgentRequest {
     AgentRequest {
         model: "gpt-test".to_string(),
@@ -262,6 +328,15 @@ fn agent_request() -> AgentRequest {
     }
 }
 
+fn anthropic_options() -> AnthropicMessagesOptions {
+    AnthropicMessagesOptions {
+        max_tokens: 4096,
+        supports_image_input: true,
+        cache_fold: None,
+        compact_input_placeholders: false,
+    }
+}
+
 async fn stream_chat_completions<T: HttpTransport>(
     client: &AgentClient<T>,
     options: AgentOptions,
@@ -269,6 +344,17 @@ async fn stream_chat_completions<T: HttpTransport>(
     client
         .stream_chat_completions(agent_request(), ChatCompletionsOptions::default(), options)
         .await
+}
+
+#[test]
+fn provider_url_encodes_query_params() {
+    let mut provider = provider("openai");
+    provider.query_params = Some(HashMap::from([("prompt".to_string(), "a b&c".to_string())]));
+
+    assert_eq!(
+        provider.url_for_path("chat/completions"),
+        "https://example.com/v1/chat/completions?prompt=a+b%26c"
+    );
 }
 
 #[tokio::test]
@@ -281,6 +367,36 @@ async fn agent_client_uses_chat_completions_path() -> Result<()> {
 
     let requests = state.take_stream_requests();
     assert_path_ends_with(&requests, "/chat/completions");
+    Ok(())
+}
+
+#[tokio::test]
+async fn streaming_anthropic_client_preserves_provider_version_header() -> Result<()> {
+    let state = RecordingState::default();
+    let transport = RecordingTransport::new(state.clone());
+    let mut provider = provider("anthropic");
+    provider
+        .headers
+        .insert("anthropic-version", HeaderValue::from_static("2024-10-22"));
+    let client = AgentClient::new(transport, provider, Arc::new(NoAuth));
+
+    let _stream = client
+        .stream_anthropic_messages(
+            agent_request(),
+            anthropic_options(),
+            AgentOptions::default(),
+        )
+        .await?;
+
+    let requests = state.take_stream_requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0]
+            .headers
+            .get("anthropic-version")
+            .and_then(|value| value.to_str().ok()),
+        Some("2024-10-22")
+    );
     Ok(())
 }
 
@@ -319,6 +435,36 @@ async fn streaming_agent_client_retries_on_transport_error() -> Result<()> {
 
     let mut provider = provider("openai");
     provider.retry.max_attempts = 2;
+
+    let client = AgentClient::new(transport.clone(), provider, Arc::new(NoAuth));
+
+    let _stream = stream_chat_completions(&client, AgentOptions::default()).await?;
+    assert_eq!(transport.attempts(), 2);
+    Ok(())
+}
+
+#[tokio::test]
+async fn streaming_agent_client_retries_429_with_retry_after() -> Result<()> {
+    let transport = RateLimitOnceTransport::new(Some(HeaderValue::from_static("0")));
+
+    let mut provider = provider("openai");
+    provider.retry.max_attempts = 1;
+    provider.retry.retry_429 = true;
+
+    let client = AgentClient::new(transport.clone(), provider, Arc::new(NoAuth));
+
+    let _stream = stream_chat_completions(&client, AgentOptions::default()).await?;
+    assert_eq!(transport.attempts(), 2);
+    Ok(())
+}
+
+#[tokio::test]
+async fn streaming_agent_client_retries_429_without_retry_after() -> Result<()> {
+    let transport = RateLimitOnceTransport::new(None);
+
+    let mut provider = provider("openai");
+    provider.retry.max_attempts = 1;
+    provider.retry.retry_429 = true;
 
     let client = AgentClient::new(transport.clone(), provider, Arc::new(NoAuth));
 

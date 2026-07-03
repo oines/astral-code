@@ -45,7 +45,7 @@ use codex_protocol::SessionId;
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use codex_protocol::config_types::Verbosity as VerbosityConfig;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::openai_models::InputModality;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
@@ -63,7 +63,9 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+use tracing::debug;
 use tracing::instrument;
+use tracing::warn;
 
 use crate::agent_request::AgentRequestBuildParams;
 use crate::agent_request::build_agent_request;
@@ -71,8 +73,8 @@ use crate::anthropic_cache_fold::AnthropicCacheFoldState;
 use crate::attestation::AttestationContext;
 use crate::attestation::AttestationProvider;
 use crate::attestation::X_OAI_ATTESTATION_HEADER;
+use crate::client_common::ModelStreamEvent;
 use crate::client_common::Prompt;
-use crate::client_common::ResponseEvent;
 use crate::client_common::ResponseStream;
 use crate::feedback_tags;
 use crate::util::emit_feedback_auth_recovery_tags;
@@ -102,6 +104,14 @@ const DEFAULT_ANTHROPIC_MAX_TOKENS: u64 = 4096;
 
 fn responses_api_unsupported_error() -> CodexErr {
     CodexErr::UnsupportedOperation(RESPONSES_API_UNSUPPORTED_MESSAGE.to_string())
+}
+
+fn anthropic_max_tokens(model_info: &ModelInfo) -> u64 {
+    model_info
+        .max_output_tokens
+        .and_then(|max_output_tokens| u64::try_from(max_output_tokens).ok())
+        .filter(|max_output_tokens| *max_output_tokens > 0)
+        .unwrap_or(DEFAULT_ANTHROPIC_MAX_TOKENS)
 }
 
 /// Session-scoped state shared by all [`ModelClient`] clones.
@@ -253,6 +263,10 @@ impl ModelClient {
 
     async fn disable_anthropic_cache_fold(&self) {
         self.state.anthropic_cache_fold.lock().await.disable();
+    }
+
+    pub(crate) async fn reset_anthropic_cache_fold(&self) {
+        self.state.anthropic_cache_fold.lock().await.reset();
     }
 
     /// Creates a fresh turn-scoped streaming session.
@@ -492,6 +506,19 @@ impl ModelClientSession {
                     .build_agent_headers(&provider, turn_metadata_header)
                     .await,
             );
+            let provider_info = provider.info();
+            let provider_flavor = provider_info.effective_provider_flavor();
+            let provider_flavor_source = if provider_info.provider_flavor.is_some() {
+                "explicit"
+            } else {
+                "inferred"
+            };
+            debug!(
+                provider_name = %provider_info.name,
+                provider_flavor = %provider_flavor,
+                provider_flavor_source,
+                "selected provider flavor"
+            );
             let request = build_agent_request(AgentRequestBuildParams {
                 prompt,
                 model_info,
@@ -499,9 +526,9 @@ impl ModelClientSession {
                 summary,
                 service_tier: service_tier.clone(),
                 prompt_cache_key: self.client.prompt_cache_key(),
-                provider_flavor: Some(provider.info().effective_provider_flavor().to_string()),
-                provider_request_body: provider.info().request_body.clone(),
-                provider_request_body_remove: provider.info().request_body_remove.clone(),
+                provider_flavor: Some(provider_flavor.to_string()),
+                provider_request_body: provider_info.request_body.clone(),
+                provider_request_body_remove: provider_info.request_body_remove.clone(),
             })?;
             let anthropic_cache_fold = if matches!(wire_api, WireApi::AnthropicMessages)
                 && anthropic_cached_fold_enabled
@@ -510,6 +537,7 @@ impl ModelClientSession {
             } else {
                 None
             };
+            let used_anthropic_cache_fold = anthropic_cache_fold.is_some();
             let inference_trace_attempt = inference_trace.start_attempt();
             inference_trace_attempt.add_request_headers(&mut options.extra_headers);
             inference_trace_attempt.record_started(&request);
@@ -522,7 +550,7 @@ impl ModelClientSession {
                         .stream_anthropic_messages(
                             request,
                             AnthropicMessagesOptions {
-                                max_tokens: DEFAULT_ANTHROPIC_MAX_TOKENS,
+                                max_tokens: anthropic_max_tokens(model_info),
                                 supports_image_input: model_info
                                     .input_modalities
                                     .contains(&InputModality::Image),
@@ -582,14 +610,23 @@ impl ModelClientSession {
                     continue;
                 }
                 Err(err) => {
-                    if matches!(wire_api, WireApi::AnthropicMessages)
-                        && anthropic_cached_fold_enabled
-                        && is_anthropic_cache_fold_protocol_error(&err)
-                    {
-                        self.client.disable_anthropic_cache_fold().await;
-                    }
                     let response_debug_context =
                         extract_response_debug_context_from_api_error(&err);
+                    if matches!(wire_api, WireApi::AnthropicMessages)
+                        && used_anthropic_cache_fold
+                        && is_anthropic_cache_fold_protocol_error(&err)
+                    {
+                        warn!(
+                            "anthropic cache fold request failed with protocol error; retrying without cache fold"
+                        );
+                        inference_trace_attempt.record_failed(
+                            &err,
+                            response_debug_context.request_id.as_deref(),
+                            /*output_items*/ &[],
+                        );
+                        self.client.disable_anthropic_cache_fold().await;
+                        continue;
+                    }
                     let err = map_api_error(err);
                     inference_trace_attempt.record_failed(
                         &err,
@@ -723,19 +760,19 @@ fn map_response_events<S>(
     inference_trace_attempt: InferenceTraceAttempt,
 ) -> ResponseStream
 where
-    S: futures::Stream<Item = std::result::Result<ResponseEvent, ApiError>>
+    S: futures::Stream<Item = std::result::Result<ModelStreamEvent, ApiError>>
         + Unpin
         + Send
         + 'static,
 {
     let (tx_event, rx_event) =
-        mpsc::channel::<Result<ResponseEvent>>(RESPONSE_STREAM_CHANNEL_CAPACITY);
+        mpsc::channel::<Result<ModelStreamEvent>>(RESPONSE_STREAM_CHANNEL_CAPACITY);
     let consumer_dropped = CancellationToken::new();
     let consumer_dropped_for_stream = consumer_dropped.clone();
 
     tokio::spawn(async move {
         let mut logged_error = false;
-        let mut items_added: Vec<ResponseItem> = Vec::new();
+        let mut items_added: Vec<TranscriptItem> = Vec::new();
         let mut api_stream = api_stream;
         let upstream_request_id = upstream_request_id.as_deref();
         if let Some(upstream_request_id) = upstream_request_id {
@@ -757,10 +794,10 @@ where
                 break;
             };
             match event {
-                Ok(ResponseEvent::OutputItemDone(item)) => {
+                Ok(ModelStreamEvent::OutputItemDone(item)) => {
                     items_added.push(item.clone());
                     if tx_event
-                        .send(Ok(ResponseEvent::OutputItemDone(item)))
+                        .send(Ok(ModelStreamEvent::OutputItemDone(item)))
                         .await
                         .is_err()
                     {
@@ -772,7 +809,7 @@ where
                         return;
                     }
                 }
-                Ok(ResponseEvent::Completed {
+                Ok(ModelStreamEvent::Completed {
                     response_id,
                     token_usage,
                     end_turn,
@@ -794,7 +831,7 @@ where
                         &items_added,
                     );
                     if tx_event
-                        .send(Ok(ResponseEvent::Completed {
+                        .send(Ok(ModelStreamEvent::Completed {
                             response_id,
                             token_usage,
                             end_turn,

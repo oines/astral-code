@@ -26,8 +26,8 @@ use codex_protocol::memory_citation::MemoryCitation;
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::MessagePhase;
-use codex_protocol::models::ResponseInputItem;
-use codex_protocol::models::ResponseItem;
+use codex_protocol::models::TranscriptInputItem;
+use codex_protocol::models::TranscriptItem;
 use codex_rollout::state_db;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_stream_parser::strip_proposed_plan_blocks;
@@ -92,8 +92,8 @@ fn strip_hidden_assistant_markup_and_parse_memory_citation(
     (visible_text, parse_memory_citation(citations))
 }
 
-pub(crate) fn raw_assistant_output_text_from_item(item: &ResponseItem) -> Option<String> {
-    if let ResponseItem::Message { role, content, .. } = item
+pub(crate) fn raw_assistant_output_text_from_item(item: &TranscriptItem) -> Option<String> {
+    if let TranscriptItem::Message { role, content, .. } = item
         && role == "assistant"
     {
         let combined = content
@@ -179,7 +179,7 @@ async fn record_image_generation_instructions(
     let image_output_dir = image_output_path
         .parent()
         .unwrap_or_else(|| turn_context.config.codex_home.clone());
-    let message: ResponseItem = ContextualUserFragment::into(ImageGenerationInstructions::new(
+    let message: TranscriptItem = ContextualUserFragment::into(ImageGenerationInstructions::new(
         image_output_dir.display(),
         image_output_path.display(),
     ));
@@ -191,7 +191,7 @@ async fn record_image_generation_instructions(
 pub(crate) async fn record_completed_response_item(
     sess: &Session,
     turn_context: &TurnContext,
-    item: &ResponseItem,
+    item: &TranscriptItem,
 ) {
     record_completed_response_item_with_finalized_facts(
         sess,
@@ -205,7 +205,7 @@ pub(crate) async fn record_completed_response_item(
 pub(crate) async fn record_completed_response_item_with_finalized_facts(
     sess: &Session,
     turn_context: &TurnContext,
-    item: &ResponseItem,
+    item: &TranscriptItem,
     finalized_facts: Option<&FinalizedTurnItemFacts>,
 ) {
     sess.record_conversation_items(turn_context, std::slice::from_ref(item))
@@ -243,19 +243,19 @@ pub(crate) async fn record_completed_response_item_with_finalized_facts(
     }
 }
 
-fn response_item_may_include_external_context(item: &ResponseItem) -> bool {
+fn response_item_may_include_external_context(item: &TranscriptItem) -> bool {
     matches!(
         item,
-        ResponseItem::ToolSearchCall { .. }
-            | ResponseItem::ToolSearchOutput { .. }
-            | ResponseItem::WebSearchCall { .. }
+        TranscriptItem::ToolSearchCall { .. }
+            | TranscriptItem::ToolSearchOutput { .. }
+            | TranscriptItem::WebSearchCall { .. }
     )
 }
 
 pub(crate) async fn mark_thread_memory_mode_polluted_if_external_context(
     sess: &Session,
     turn_context: &TurnContext,
-    item: &ResponseItem,
+    item: &TranscriptItem,
 ) {
     if !turn_context.config.memories.disable_on_external_context
         || !response_item_may_include_external_context(item)
@@ -272,7 +272,7 @@ pub(crate) async fn mark_thread_memory_mode_polluted_if_external_context(
 
 async fn record_stage1_output_usage_and_detect_memory_citation(
     state_db_ctx: Option<&state_db::StateDbHandle>,
-    item: &ResponseItem,
+    item: &TranscriptItem,
 ) -> bool {
     let Some(raw_text) = raw_assistant_output_text_from_item(item) else {
         return false;
@@ -304,7 +304,7 @@ async fn record_stage1_output_usage_for_memory_citation(
 /// queuing any tool execution futures. This records items immediately so
 /// history and rollout stay in sync even if the turn is later cancelled.
 pub(crate) type InFlightFuture<'f> =
-    Pin<Box<dyn Future<Output = Result<ResponseInputItem>> + Send + 'f>>;
+    Pin<Box<dyn Future<Output = Result<TranscriptInputItem>> + Send + 'f>>;
 
 #[derive(Default)]
 pub(crate) struct OutputItemResult {
@@ -358,7 +358,7 @@ pub(crate) async fn finalize_non_tool_response_item(
     sess: &Session,
     turn_context: &TurnContext,
     contributor_policy: TurnItemContributorPolicy<'_>,
-    item: &ResponseItem,
+    item: &TranscriptItem,
     plan_mode: bool,
 ) -> Option<FinalizedTurnItem> {
     let turn_item =
@@ -404,7 +404,7 @@ pub(crate) async fn finalize_non_tool_response_item(
 #[instrument(level = "trace", skip_all)]
 pub(crate) async fn handle_output_item_done(
     ctx: &mut HandleOutputCtx,
-    item: ResponseItem,
+    item: TranscriptItem,
     previously_active_item: Option<TurnItem>,
 ) -> Result<OutputItemResult> {
     let mut output = OutputItemResult::default();
@@ -485,7 +485,7 @@ pub(crate) async fn handle_output_item_done(
         }
         // The tool request should be answered directly (or was denied); push that response into the transcript.
         Err(FunctionCallError::RespondToModel(message)) => {
-            let response = ResponseInputItem::FunctionCallOutput {
+            let response = TranscriptInputItem::FunctionCallOutput {
                 call_id: String::new(),
                 output: FunctionCallOutputPayload {
                     body: FunctionCallOutputBody::Text(message),
@@ -518,16 +518,16 @@ pub(crate) async fn handle_non_tool_response_item(
     sess: &Session,
     turn_context: &TurnContext,
     contributor_policy: TurnItemContributorPolicy<'_>,
-    item: &ResponseItem,
+    item: &TranscriptItem,
     plan_mode: bool,
 ) -> Option<TurnItem> {
     debug!(?item, "Output item");
 
     match item {
-        ResponseItem::Message { .. }
-        | ResponseItem::Reasoning { .. }
-        | ResponseItem::WebSearchCall { .. }
-        | ResponseItem::ImageGenerationCall { .. } => {
+        TranscriptItem::Message { .. }
+        | TranscriptItem::Reasoning { .. }
+        | TranscriptItem::WebSearchCall { .. }
+        | TranscriptItem::ImageGenerationCall { .. } => {
             let mut turn_item = parse_turn_item(item)?;
             finalize_turn_item(
                 sess,
@@ -542,9 +542,9 @@ pub(crate) async fn handle_non_tool_response_item(
             }
             Some(turn_item)
         }
-        ResponseItem::FunctionCallOutput { .. }
-        | ResponseItem::CustomToolCallOutput { .. }
-        | ResponseItem::ToolSearchOutput { .. } => {
+        TranscriptItem::FunctionCallOutput { .. }
+        | TranscriptItem::CustomToolCallOutput { .. }
+        | TranscriptItem::ToolSearchOutput { .. } => {
             debug!("unexpected tool output from stream");
             None
         }
@@ -584,7 +584,7 @@ pub(crate) async fn finalize_turn_item(
 }
 
 pub(crate) fn last_assistant_message_from_item(
-    item: &ResponseItem,
+    item: &TranscriptItem,
     plan_mode: bool,
 ) -> Option<String> {
     if let Some(combined) = raw_assistant_output_text_from_item(item) {
@@ -601,11 +601,11 @@ pub(crate) fn last_assistant_message_from_item(
 }
 
 fn completed_item_defers_mailbox_delivery_to_next_turn(
-    item: &ResponseItem,
+    item: &TranscriptItem,
     plan_mode: bool,
 ) -> bool {
     match item {
-        ResponseItem::Message { role, phase, .. } => {
+        TranscriptItem::Message { role, phase, .. } => {
             if role != "assistant" || matches!(phase, Some(MessagePhase::Commentary)) {
                 return false;
             }
@@ -613,41 +613,43 @@ fn completed_item_defers_mailbox_delivery_to_next_turn(
             // to the safer "defer mailbox mail" behavior.
             last_assistant_message_from_item(item, plan_mode).is_some()
         }
-        ResponseItem::ImageGenerationCall { .. } => true,
+        TranscriptItem::ImageGenerationCall { .. } => true,
         _ => false,
     }
 }
 
-pub(crate) fn response_input_to_response_item(input: &ResponseInputItem) -> Option<ResponseItem> {
+pub(crate) fn response_input_to_response_item(
+    input: &TranscriptInputItem,
+) -> Option<TranscriptItem> {
     match input {
-        ResponseInputItem::FunctionCallOutput { call_id, output } => {
-            Some(ResponseItem::FunctionCallOutput {
+        TranscriptInputItem::FunctionCallOutput { call_id, output } => {
+            Some(TranscriptItem::FunctionCallOutput {
                 call_id: call_id.clone(),
                 output: output.clone(),
             })
         }
-        ResponseInputItem::CustomToolCallOutput {
+        TranscriptInputItem::CustomToolCallOutput {
             call_id,
             name,
             output,
-        } => Some(ResponseItem::CustomToolCallOutput {
+        } => Some(TranscriptItem::CustomToolCallOutput {
             call_id: call_id.clone(),
             name: name.clone(),
             output: output.clone(),
         }),
-        ResponseInputItem::McpToolCallOutput { call_id, output } => {
+        TranscriptInputItem::McpToolCallOutput { call_id, output } => {
             let output = output.as_function_call_output_payload();
-            Some(ResponseItem::FunctionCallOutput {
+            Some(TranscriptItem::FunctionCallOutput {
                 call_id: call_id.clone(),
                 output,
             })
         }
-        ResponseInputItem::ToolSearchOutput {
+        TranscriptInputItem::ToolSearchOutput {
             call_id,
             status,
             execution,
             tools,
-        } => Some(ResponseItem::ToolSearchOutput {
+        } => Some(TranscriptItem::ToolSearchOutput {
             call_id: Some(call_id.clone()),
             status: status.clone(),
             execution: execution.clone(),

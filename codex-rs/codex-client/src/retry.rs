@@ -1,5 +1,6 @@
 use crate::error::TransportError;
 use crate::request::Request;
+use http::header::RETRY_AFTER;
 use rand::Rng;
 use std::future::Future;
 use std::time::Duration;
@@ -25,8 +26,10 @@ impl RetryOn {
             return false;
         }
         match err {
-            TransportError::Http { status, .. } => {
-                (self.retry_429 && status.as_u16() == 429)
+            TransportError::Http { status, body, .. } => {
+                (self.retry_429
+                    && status.as_u16() == 429
+                    && !is_usage_limit_reached_body(body.as_deref()))
                     || (self.retry_5xx && status.is_server_error())
             }
             TransportError::Timeout | TransportError::Network(_) => self.retry_transport,
@@ -64,10 +67,93 @@ where
                     .retry_on
                     .should_retry(&err, attempt, policy.max_attempts) =>
             {
-                sleep(backoff(policy.base_delay, attempt + 1)).await;
+                let delay = retry_after_delay(&err)
+                    .unwrap_or_else(|| backoff(policy.base_delay, attempt + 1));
+                sleep(delay).await;
             }
             Err(err) => return Err(err),
         }
     }
     Err(TransportError::RetryLimit)
+}
+
+fn retry_after_delay(err: &TransportError) -> Option<Duration> {
+    let TransportError::Http {
+        headers: Some(headers),
+        ..
+    } = err
+    else {
+        return None;
+    };
+
+    let value = headers.get(RETRY_AFTER)?.to_str().ok()?.trim();
+    let seconds = value.parse::<u64>().ok()?;
+    Some(Duration::from_secs(seconds))
+}
+
+fn is_usage_limit_reached_body(body: Option<&str>) -> bool {
+    body.is_some_and(|body| {
+        body.contains(r#""type":"usage_limit_reached""#)
+            || body.contains(r#""type": "usage_limit_reached""#)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RetryOn;
+    use super::retry_after_delay;
+    use crate::TransportError;
+    use http::HeaderMap;
+    use http::HeaderValue;
+    use http::StatusCode;
+    use pretty_assertions::assert_eq;
+    use std::time::Duration;
+
+    #[test]
+    fn retry_after_delay_parses_delta_seconds() {
+        let mut headers = HeaderMap::new();
+        headers.insert(http::header::RETRY_AFTER, HeaderValue::from_static("3"));
+        let err = TransportError::Http {
+            status: StatusCode::TOO_MANY_REQUESTS,
+            url: None,
+            headers: Some(headers),
+            body: None,
+        };
+
+        assert_eq!(retry_after_delay(&err), Some(Duration::from_secs(3)));
+    }
+
+    #[test]
+    fn retry_after_delay_ignores_non_delta_values() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            http::header::RETRY_AFTER,
+            HeaderValue::from_static("Fri, 03 Jul 2026 10:00:00 GMT"),
+        );
+        let err = TransportError::Http {
+            status: StatusCode::TOO_MANY_REQUESTS,
+            url: None,
+            headers: Some(headers),
+            body: None,
+        };
+
+        assert_eq!(retry_after_delay(&err), None);
+    }
+
+    #[test]
+    fn retry_on_429_skips_usage_limit_reached_body() {
+        let retry_on = RetryOn {
+            retry_429: true,
+            retry_5xx: true,
+            retry_transport: true,
+        };
+        let err = TransportError::Http {
+            status: StatusCode::TOO_MANY_REQUESTS,
+            url: None,
+            headers: None,
+            body: Some(r#"{"error":{"type":"usage_limit_reached"}}"#.to_string()),
+        };
+
+        assert!(!retry_on.should_retry(&err, /*attempt*/ 0, /*max_attempts*/ 3));
+    }
 }

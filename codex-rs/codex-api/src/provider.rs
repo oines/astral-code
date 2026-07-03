@@ -61,11 +61,11 @@ impl Provider {
         if let Some(params) = &self.query_params
             && !params.is_empty()
         {
-            let qs = params
-                .iter()
-                .map(|(k, v)| format!("{k}={v}"))
-                .collect::<Vec<_>>()
-                .join("&");
+            let mut serializer = url::form_urlencoded::Serializer::new(String::new());
+            for (key, value) in params {
+                serializer.append_pair(key, value);
+            }
+            let qs = serializer.finish();
             url.push('?');
             url.push_str(&qs);
         }

@@ -68,6 +68,26 @@ fn cached_fold_disable_stops_later_options() {
     assert_eq!(state.options_for_request(&request), None);
 }
 
+#[test]
+fn cached_fold_reset_clears_refs_without_disabling_future_folds() {
+    let mut state = AnthropicCacheFoldState::default();
+    let request = request_with_tool_results("Read", 6, Some("astral:test"));
+    state
+        .options_for_request(&request)
+        .expect("initial fold options should be enabled");
+
+    state.reset();
+
+    let options = state
+        .options_for_request(&request)
+        .expect("fold options should remain enabled after reset");
+    assert_eq!(options.pinned_cache_edits.len(), 1);
+    assert_eq!(
+        options.pinned_cache_edits[0].cache_references,
+        vec!["toolu_1"]
+    );
+}
+
 fn request_with_tool_results(
     tool_name: &str,
     count: usize,

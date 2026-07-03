@@ -514,6 +514,7 @@ pub struct OtelTlsConfig {
 #[serde(rename_all = "kebab-case")]
 pub enum OtelExporterKind {
     None,
+    #[schemars(skip)]
     Statsig,
     OtlpHttp {
         endpoint: String,

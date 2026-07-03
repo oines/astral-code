@@ -1,0 +1,11 @@
+: synthetic fixture only; not a captured provider golden.
+: GLM-style chat stream with tool_call deltas that omit index and rely on id.
+
+data: {"id":"glm-synth-1","model":"glm-4.5","choices":[{"delta":{"role":"assistant"},"finish_reason":null}]}
+
+data: {"id":"glm-synth-1","choices":[{"delta":{"tool_calls":[{"id":"call_glm","type":"function","function":{"name":"Bash","arguments":"{\"command\""}}]},"finish_reason":null}]}
+
+data: {"id":"glm-synth-1","choices":[{"delta":{"tool_calls":[{"id":"call_glm","type":"function","function":{"arguments":":\"pwd\"}"}}]},"finish_reason":null}]}
+
+data: {"id":"glm-synth-1","choices":[{"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":11,"completion_tokens":4}}
+

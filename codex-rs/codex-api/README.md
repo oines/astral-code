@@ -5,7 +5,7 @@ Typed clients for Codex/OpenAI APIs built on top of the generic transport in `co
 - Hosts the request/response models and request builders for provider-neutral
   agent requests.
 - Owns provider configuration (base URLs, headers, query params), auth header injection, retry tuning, and stream idle settings.
-- Parses SSE streams into `ResponseEvent`/`ResponseStream`, including rate-limit snapshots and API-specific error mapping.
+- Parses SSE streams into `ModelStreamEvent`/`ResponseStream`, including rate-limit snapshots and API-specific error mapping.
 - Serves as the wire-level layer consumed by `codex-core`; higher layers handle auth refresh and business logic.
 
 ## Core interface
@@ -16,7 +16,7 @@ The public interface of this crate is intentionally small and uniform:
   - Input:
     - `AgentRequest` for provider-neutral model turns.
     - `AgentOptions` for transport/header concerns.
-  - Output: a `ResponseStream` of `ResponseEvent` (both re-exported from `common`).
+  - Output: a `ResponseStream` of `ModelStreamEvent` (both re-exported from `common`).
 
 - **Memory summarize endpoint**
   - Input: `MemorySummarizeInput` (re-exported as `codex_api::MemorySummarizeInput`):
@@ -27,4 +27,4 @@ The public interface of this crate is intentionally small and uniform:
   - Output: `Vec<MemorySummarizeOutput>`.
   - `MemoriesClient::summarize_input(&MemorySummarizeInput, extra_headers)` wraps JSON encoding and retry/telemetry wiring.
 
-All HTTP details (URLs, headers, retry/backoff policies, SSE framing) are encapsulated in `codex-api` and `codex-client`. Callers construct prompts/inputs using protocol types and work with typed streams of `ResponseEvent` values.
+All HTTP details (URLs, headers, retry/backoff policies, SSE framing) are encapsulated in `codex-api` and `codex-client`. Callers construct prompts/inputs using protocol types and work with typed streams of `ModelStreamEvent` values.

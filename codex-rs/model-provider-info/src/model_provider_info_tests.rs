@@ -176,6 +176,21 @@ wire_api = "chat_completions"
 }
 
 #[test]
+fn to_api_provider_retries_429_by_default() {
+    let provider = ModelProviderInfo {
+        name: "OpenAI-compatible chat".to_string(),
+        base_url: Some("https://example.com/v1".to_string()),
+        ..ModelProviderInfo::default()
+    };
+
+    let api_provider = provider
+        .to_api_provider(/*auth_mode*/ None)
+        .expect("provider should convert");
+
+    assert!(api_provider.retry.retry_429);
+}
+
+#[test]
 fn test_deserialize_provider_flavor_override() {
     let provider_toml = r#"
 name = "Custom DeepSeek Gateway"

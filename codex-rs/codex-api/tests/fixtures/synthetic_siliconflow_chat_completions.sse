@@ -1,0 +1,11 @@
+: synthetic fixture only; not a captured provider golden.
+: SiliconFlow-style chat stream where every chunk carries cumulative usage.
+
+data: {"id":"siliconflow-synth-1","model":"sf-chat","choices":[{"delta":{"role":"assistant"},"finish_reason":null}],"usage":{"prompt_tokens":9,"completion_tokens":0}}
+
+data: {"id":"siliconflow-synth-1","choices":[{"delta":{"content":"silicon"},"finish_reason":null}],"usage":{"prompt_tokens":9,"completion_tokens":1}}
+
+data: {"id":"siliconflow-synth-1","choices":[{"delta":{"content":" flow"},"finish_reason":null}],"usage":{"prompt_tokens":9,"completion_tokens":2}}
+
+data: [DONE]
+

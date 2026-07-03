@@ -6,7 +6,6 @@ use codex_agent_protocol::ContentBlock;
 use codex_agent_protocol::ContentDelta;
 use codex_agent_protocol::ImageSource;
 use codex_agent_protocol::MessageRole;
-use codex_agent_protocol::PROVIDER_FLAVOR_METADATA_KEY;
 use codex_agent_protocol::StopReason;
 use codex_agent_protocol::TokenUsage;
 use codex_agent_protocol::ToolChoice;
@@ -16,6 +15,7 @@ use serde_json::Value;
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use tracing::warn;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AnthropicMessagesOptions {
@@ -49,6 +49,7 @@ struct ContentProjectionOptions<'a> {
     tool_name_aliases: &'a BTreeMap<String, String>,
     supports_image_input: bool,
     compact_input_placeholders: bool,
+    thinking_enabled: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -76,10 +77,12 @@ pub fn to_messages_request_parts(
         .cache_fold
         .as_ref()
         .filter(|_| cache_control_enabled);
+    let thinking_enabled = apply_reasoning_config(&mut body, request, options.max_tokens);
     let projection_options = ContentProjectionOptions {
         tool_name_aliases: &tool_name_aliases,
         supports_image_input: options.supports_image_input,
         compact_input_placeholders: options.compact_input_placeholders,
+        thinking_enabled,
     };
 
     let system = system_blocks(
@@ -121,7 +124,7 @@ pub fn to_messages_request_parts(
             tool_choice_to_anthropic(&request.tool_choice, &tool_name_aliases),
         );
     }
-    apply_provider_body_overrides(&mut body, request);
+    super::apply_provider_body_overrides(&mut body, request);
 
     AnthropicMessagesRequest {
         body: Value::Object(body),
@@ -145,18 +148,34 @@ pub fn parse_stream_event(value: Value) -> Result<Option<AgentStreamEvent>, Anth
                 .pointer("/message/model")
                 .and_then(Value::as_str)
                 .map(str::to_string),
+            usage: usage_from_anthropic(value.pointer("/message/usage")),
         })),
-        "content_block_start" => Ok(Some(AgentStreamEvent::ContentBlockStart {
-            index: required_usize(&value, "index")?,
-            block: content_block_from_anthropic(required_value(&value, "content_block")?)?,
-        })),
-        "content_block_delta" => Ok(Some(AgentStreamEvent::ContentBlockDelta {
-            index: required_usize(&value, "index")?,
-            delta: match content_delta_from_anthropic(required_value(&value, "delta")?)? {
-                Some(delta) => delta,
-                None => return Ok(None),
-            },
-        })),
+        "content_block_start" => {
+            let index = required_usize(&value, "index")?;
+            let block = match content_block_from_anthropic(required_value(&value, "content_block")?)
+            {
+                Ok(block) => block,
+                Err(AnthropicStreamError::UnknownContentBlock(block_type)) => {
+                    warn!("skipping unknown anthropic content block type: {block_type}");
+                    return Ok(None);
+                }
+                Err(error) => return Err(error),
+            };
+            Ok(Some(AgentStreamEvent::ContentBlockStart { index, block }))
+        }
+        "content_block_delta" => {
+            let index = required_usize(&value, "index")?;
+            let delta = match content_delta_from_anthropic(required_value(&value, "delta")?) {
+                Ok(Some(delta)) => delta,
+                Ok(None) => return Ok(None),
+                Err(AnthropicStreamError::UnknownContentDelta(delta_type)) => {
+                    warn!("skipping unknown anthropic content delta type: {delta_type}");
+                    return Ok(None);
+                }
+                Err(error) => return Err(error),
+            };
+            Ok(Some(AgentStreamEvent::ContentBlockDelta { index, delta }))
+        }
         "content_block_stop" => Ok(Some(AgentStreamEvent::ContentBlockStop {
             index: required_usize(&value, "index")?,
         })),
@@ -178,7 +197,10 @@ pub fn parse_stream_event(value: Value) -> Result<Option<AgentStreamEvent>, Anth
             }),
             usage: None,
         })),
-        other => Err(AnthropicStreamError::UnknownEvent(other.to_string())),
+        other => {
+            warn!("skipping unknown anthropic stream event type: {other}");
+            Ok(None)
+        }
     }
 }
 
@@ -233,7 +255,7 @@ fn system_blocks(
         .instructions
         .iter()
         .chain(message_blocks)
-        .map(|block| content_block_to_anthropic(block, projection_options))
+        .filter_map(|block| content_block_to_anthropic(block, projection_options))
         .collect::<Vec<_>>();
     if cache_fold_enabled {
         blocks.push(json!({
@@ -274,15 +296,18 @@ fn message_to_anthropic(
                     .iter()
                     .filter(|block| !matches!(block, ContentBlock::ToolResult { .. })),
             )
-            .map(|block| content_block_to_anthropic(block, projection_options))
+            .filter_map(|block| content_block_to_anthropic(block, projection_options))
             .collect::<Vec<_>>()
     } else {
         message
             .content
             .iter()
-            .map(|block| content_block_to_anthropic(block, projection_options))
+            .filter_map(|block| content_block_to_anthropic(block, projection_options))
             .collect::<Vec<_>>()
     };
+    if content.is_empty() {
+        return None;
+    }
 
     Some(json!({
         "role": role,
@@ -358,17 +383,44 @@ fn tool_choice_to_anthropic(
     }
 }
 
-fn apply_provider_body_overrides(body: &mut Map<String, Value>, request: &AgentRequest) {
-    for (key, value) in &request.metadata.provider {
-        if key == PROVIDER_FLAVOR_METADATA_KEY {
-            continue;
-        }
-        if value.is_null() {
-            body.remove(key);
-        } else {
-            body.insert(key.clone(), value.clone());
-        }
+fn apply_reasoning_config(
+    body: &mut Map<String, Value>,
+    request: &AgentRequest,
+    max_tokens: u64,
+) -> bool {
+    let Some(effort) = request
+        .reasoning
+        .as_ref()
+        .and_then(|reasoning| reasoning.effort.as_deref())
+    else {
+        return false;
+    };
+    let Some(budget_tokens) = anthropic_thinking_budget(effort, max_tokens) else {
+        return false;
+    };
+    body.insert(
+        "thinking".to_string(),
+        json!({ "type": "enabled", "budget_tokens": budget_tokens }),
+    );
+    true
+}
+
+fn anthropic_thinking_budget(effort: &str, max_tokens: u64) -> Option<u64> {
+    if matches!(effort, "none" | "off" | "disabled") {
+        return None;
     }
+    let max_budget = max_tokens.saturating_sub(1);
+    if max_budget == 0 {
+        return None;
+    }
+    let requested = match effort {
+        "minimal" | "low" => 1_024,
+        "medium" => 4_096,
+        "high" => 8_192,
+        "xhigh" | "max" => 16_384,
+        custom => custom.parse::<u64>().unwrap_or(4_096),
+    };
+    Some(requested.min(max_budget))
 }
 
 fn add_cache_control_to_last_object(values: &mut [Value]) {
@@ -500,21 +552,19 @@ fn message_cache_marker_position(messages: &[Value]) -> Option<(usize, usize)> {
 fn content_block_to_anthropic(
     block: &ContentBlock,
     projection_options: ContentProjectionOptions<'_>,
-) -> Value {
+) -> Option<Value> {
     match block {
-        ContentBlock::Text { text } => json!({ "type": "text", "text": text }),
-        ContentBlock::Compaction { text } => json!({ "type": "text", "text": text }),
+        ContentBlock::Text { text } => Some(json!({ "type": "text", "text": text })),
+        ContentBlock::Compaction { text } => Some(json!({ "type": "text", "text": text })),
         ContentBlock::Image { source, detail: _ } => {
-            image_content_block(source, projection_options)
+            Some(image_content_block(source, projection_options))
         }
-        ContentBlock::ToolUse { id, name, input } => {
-            json!({
-                "type": "tool_use",
-                "id": id,
-                "name": tool_name_for_wire(name, projection_options.tool_name_aliases),
-                "input": input
-            })
-        }
+        ContentBlock::ToolUse { id, name, input } => Some(json!({
+            "type": "tool_use",
+            "id": id,
+            "name": tool_name_for_wire(name, projection_options.tool_name_aliases),
+            "input": input
+        })),
         ContentBlock::ToolResult {
             tool_use_id,
             content,
@@ -531,14 +581,16 @@ fn content_block_to_anthropic(
             if *is_error {
                 value["is_error"] = Value::Bool(true);
             }
-            value
+            Some(value)
         }
         ContentBlock::Reasoning { text, signature } => {
-            let mut value = json!({ "type": "thinking", "thinking": text });
-            if let Some(signature) = signature {
-                value["signature"] = Value::String(signature.clone());
+            if !projection_options.thinking_enabled {
+                return None;
             }
-            value
+            let signature = signature.as_ref()?;
+            let mut value = json!({ "type": "thinking", "thinking": text });
+            value["signature"] = Value::String(signature.clone());
+            Some(value)
         }
     }
 }

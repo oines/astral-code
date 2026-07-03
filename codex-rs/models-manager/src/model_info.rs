@@ -105,6 +105,7 @@ pub(crate) fn model_info_from_slug_with_warning(slug: &str, warn: bool) -> Model
         supports_image_detail_original: false,
         context_window: None,
         max_context_window: None,
+        max_output_tokens: None,
         auto_compact_token_limit: None,
         effective_context_window_percent: 95,
         experimental_supported_tools: Vec::new(),

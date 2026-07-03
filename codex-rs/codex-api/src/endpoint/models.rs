@@ -78,6 +78,7 @@ fn provider_model_id_to_model_info(id: String, index: usize) -> ModelInfo {
         supports_image_detail_original: false,
         context_window: None,
         max_context_window: None,
+        max_output_tokens: None,
         auto_compact_token_limit: None,
         effective_context_window_percent: 95,
         experimental_supported_tools: Vec::new(),

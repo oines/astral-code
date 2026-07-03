@@ -70,7 +70,12 @@ impl<T: HttpTransport> AgentClient<T> {
         let messages_request = to_messages_request_parts(&request, messages_options);
         let mut headers = options.extra_headers;
         let version_header = HeaderName::from_static("anthropic-version");
-        if !headers.contains_key(&version_header) {
+        let provider_has_version_header = self
+            .session
+            .provider()
+            .headers
+            .contains_key(&version_header);
+        if !provider_has_version_header && !headers.contains_key(&version_header) {
             headers.insert(version_header, HeaderValue::from_static(ANTHROPIC_VERSION));
         }
 
