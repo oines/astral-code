@@ -200,7 +200,28 @@ jobs:
         if: ${{ matrix.target == 'aarch64-unknown-linux-gnu' }}
         run: |
           set -euo pipefail
+          source /etc/os-release
+          suite="${VERSION_CODENAME:-noble}"
           sudo dpkg --add-architecture arm64
+          if [[ -f /etc/apt/sources.list.d/ubuntu.sources ]] &&
+             ! grep -q "^Architectures:" /etc/apt/sources.list.d/ubuntu.sources; then
+            sudo sed -i "/^URIs:/i Architectures: amd64" /etc/apt/sources.list.d/ubuntu.sources
+          fi
+          sudo tee /etc/apt/sources.list.d/ubuntu-arm64-ports.sources >/dev/null <<EOF
+          Types: deb
+          URIs: https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports/
+          Suites: ${suite} ${suite}-updates ${suite}-backports
+          Components: main universe restricted multiverse
+          Architectures: arm64
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+
+          Types: deb
+          URIs: https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports/
+          Suites: ${suite}-security
+          Components: main universe restricted multiverse
+          Architectures: arm64
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+          EOF
           if ! command -v aarch64-linux-gnu-gcc >/dev/null ||
              ! command -v aarch64-linux-gnu-g++ >/dev/null ||
              ! dpkg-query -W -f='${Status}' libssl-dev:arm64 2>/dev/null | grep -q "install ok installed"; then
