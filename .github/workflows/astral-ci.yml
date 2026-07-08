@@ -1,11 +1,13 @@
 name: Astral CI
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
     inputs:
+      smoke:
+        description: Run formatting and schema smoke checks.
+        required: false
+        default: false
+        type: boolean
       package:
         description: Optional Cargo package for a targeted nextest run, such as codex-core.
         required: false
@@ -35,7 +37,7 @@ permissions:
 
 concurrency:
   group: astral-ci-${{ github.ref_name || github.run_id }}
-  cancel-in-progress: ${{ github.ref_name != 'main' }}
+  cancel-in-progress: false
 
 env:
   CARGO_HOME: /ci/cache/cargo
@@ -48,6 +50,7 @@ env:
 jobs:
   smoke:
     name: Smoke
+    if: ${{ inputs.smoke || (inputs.package == '' && !inputs.full && !inputs.linux_artifacts) }}
     runs-on: [self-hosted, Linux, X64, astral-ci]
     timeout-minutes: 45
     defaults:
