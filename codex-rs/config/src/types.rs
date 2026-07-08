@@ -286,6 +286,10 @@ pub struct MemoriesToml {
     pub min_rate_limit_remaining_percent: Option<i64>,
     /// Model used for thread summarisation.
     pub extract_model: Option<String>,
+    /// System prompt used for phase 1 thread memory extraction.
+    pub stage_one_prompt: Option<String>,
+    /// File containing the system prompt used for phase 1 thread memory extraction.
+    pub experimental_stage_one_prompt_file: Option<AbsolutePathBuf>,
     /// Model used for memory consolidation.
     pub consolidation_model: Option<String>,
     /// Whether compact should trigger memory extraction for the current thread.
@@ -308,6 +312,7 @@ pub struct MemoriesConfig {
     pub min_rollout_idle_hours: i64,
     pub min_rate_limit_remaining_percent: i64,
     pub extract_model: Option<String>,
+    pub stage_one_prompt: Option<String>,
     pub consolidation_model: Option<String>,
     pub compact_memory: CompactMemoryMode,
     pub phase2_sandbox: Phase2SandboxMode,
@@ -342,6 +347,7 @@ impl Default for MemoriesConfig {
             min_rollout_idle_hours: DEFAULT_MEMORIES_MIN_ROLLOUT_IDLE_HOURS,
             min_rate_limit_remaining_percent: DEFAULT_MEMORIES_MIN_RATE_LIMIT_REMAINING_PERCENT,
             extract_model: None,
+            stage_one_prompt: None,
             consolidation_model: None,
             compact_memory: CompactMemoryMode::Off,
             phase2_sandbox: Phase2SandboxMode::WorkspaceWrite,
@@ -390,6 +396,14 @@ impl From<MemoriesToml> for MemoriesConfig {
                 .unwrap_or(defaults.min_rate_limit_remaining_percent)
                 .clamp(0, 100),
             extract_model: toml.extract_model,
+            stage_one_prompt: toml.stage_one_prompt.and_then(|value| {
+                let trimmed = value.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                }
+            }),
             consolidation_model: toml.consolidation_model,
             compact_memory: toml.compact_memory.unwrap_or(defaults.compact_memory),
             phase2_sandbox: toml.phase2_sandbox.unwrap_or(defaults.phase2_sandbox),

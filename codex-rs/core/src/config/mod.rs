@@ -2935,7 +2935,7 @@ impl Config {
             Some(WindowsSandboxModeToml::Unelevated) => WindowsSandboxLevel::RestrictedToken,
             None => WindowsSandboxLevel::Disabled,
         };
-        let memories_config: MemoriesConfig = cfg.memories.clone().unwrap_or_default().into();
+        let mut memories_config: MemoriesConfig = cfg.memories.clone().unwrap_or_default().into();
         let memories_root = memory_root(&codex_home);
 
         let profiles_are_active = effective_permission_selection.profiles_are_active(
@@ -3467,6 +3467,18 @@ impl Config {
         .await?;
         let session_memory_update_prompt =
             session_memory_update_prompt.or(file_session_memory_update_prompt);
+        let experimental_stage_one_prompt_path = cfg
+            .memories
+            .as_ref()
+            .and_then(|memories| memories.experimental_stage_one_prompt_file.as_ref());
+        let file_stage_one_prompt = Self::try_read_non_empty_file(
+            fs,
+            experimental_stage_one_prompt_path,
+            "experimental stage one prompt file",
+        )
+        .await?;
+        memories_config.stage_one_prompt =
+            memories_config.stage_one_prompt.or(file_stage_one_prompt);
         let zsh_path = default_zsh_path
             .or_else(|| InstallContext::current().bundled_zsh_path())
             .map(AbsolutePathBuf::into_path_buf);

@@ -354,7 +354,7 @@ mod job {
             phase: None,
         }];
         prompt.base_instructions = BaseInstructions {
-            text: crate::stage_one::PROMPT.to_string(),
+            text: stage_one_prompt(&config.memories).to_string(),
         };
 
         let (result, token_usage) = context
@@ -375,6 +375,13 @@ mod job {
         serde_json::from_str(json_text).map_err(|err| {
             anyhow::anyhow!("stage-one model output was not valid memory JSON: {err}")
         })
+    }
+
+    fn stage_one_prompt(memories_config: &MemoriesConfig) -> &str {
+        memories_config
+            .stage_one_prompt
+            .as_deref()
+            .unwrap_or(crate::stage_one::PROMPT)
     }
 
     fn strip_whole_json_fence(text: &str) -> Option<&str> {
@@ -613,6 +620,27 @@ mod job {
             );
 
             assert!(result.is_err());
+        }
+
+        #[test]
+        fn uses_configured_stage_one_prompt_when_set() {
+            let memories_config = MemoriesConfig {
+                stage_one_prompt: Some("Custom stage one prompt.".to_string()),
+                ..MemoriesConfig::default()
+            };
+
+            assert_eq!(
+                stage_one_prompt(&memories_config),
+                "Custom stage one prompt."
+            );
+        }
+
+        #[test]
+        fn uses_builtin_stage_one_prompt_by_default() {
+            assert_eq!(
+                stage_one_prompt(&MemoriesConfig::default()),
+                crate::stage_one::PROMPT
+            );
         }
     }
 }

@@ -323,6 +323,7 @@ max_rollouts_per_startup = 9
 min_rollout_idle_hours = 24
 	min_rate_limit_remaining_percent = 12
 	extract_model = "gpt-5-mini"
+	stage_one_prompt = "Use custom stage one prompt."
 	consolidation_model = "gpt-5.2"
 	compact_memory = "blocking"
 	phase2_sandbox = "danger_full_access"
@@ -342,6 +343,8 @@ min_rollout_idle_hours = 24
             min_rollout_idle_hours: Some(24),
             min_rate_limit_remaining_percent: Some(12),
             extract_model: Some("gpt-5-mini".to_string()),
+            stage_one_prompt: Some("Use custom stage one prompt.".to_string()),
+            experimental_stage_one_prompt_file: None,
             consolidation_model: Some("gpt-5.2".to_string()),
             compact_memory: Some(CompactMemoryMode::Blocking),
             phase2_sandbox: Some(Phase2SandboxMode::DangerFullAccess),
@@ -370,6 +373,7 @@ min_rollout_idle_hours = 24
             min_rollout_idle_hours: 24,
             min_rate_limit_remaining_percent: 12,
             extract_model: Some("gpt-5-mini".to_string()),
+            stage_one_prompt: Some("Use custom stage one prompt.".to_string()),
             consolidation_model: Some("gpt-5.2".to_string()),
             compact_memory: CompactMemoryMode::Blocking,
             phase2_sandbox: Phase2SandboxMode::DangerFullAccess,
@@ -6714,6 +6718,81 @@ async fn loads_compact_prompt_from_file() -> std::io::Result<()> {
     assert_eq!(
         config.compact_prompt.as_deref(),
         Some("summarize differently")
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn loads_stage_one_prompt_from_memories_config_and_files() -> std::io::Result<()> {
+    let codex_home = TempDir::new()?;
+    let workspace = codex_home.path().join("workspace");
+    std::fs::create_dir_all(&workspace)?;
+
+    let prompt_path = workspace.join("stage_one_prompt.md");
+    std::fs::write(&prompt_path, "  file stage one prompt  ")?;
+
+    let inline_cfg = ConfigToml {
+        memories: Some(MemoriesToml {
+            stage_one_prompt: Some("  inline stage one prompt  ".to_string()),
+            experimental_stage_one_prompt_file: Some(prompt_path.abs()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let overrides = ConfigOverrides {
+        cwd: Some(workspace.clone()),
+        ..Default::default()
+    };
+    let config =
+        Config::load_from_base_config_with_overrides(inline_cfg, overrides, codex_home.abs())
+            .await?;
+    assert_eq!(
+        config.memories.stage_one_prompt.as_deref(),
+        Some("inline stage one prompt")
+    );
+
+    let file_cfg = ConfigToml {
+        memories: Some(MemoriesToml {
+            experimental_stage_one_prompt_file: Some(prompt_path.abs()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let config = Config::load_from_base_config_with_overrides(
+        file_cfg,
+        ConfigOverrides {
+            cwd: Some(workspace.clone()),
+            ..Default::default()
+        },
+        codex_home.abs(),
+    )
+    .await?;
+    assert_eq!(
+        config.memories.stage_one_prompt.as_deref(),
+        Some("file stage one prompt")
+    );
+
+    let empty_inline_cfg = ConfigToml {
+        memories: Some(MemoriesToml {
+            stage_one_prompt: Some("   ".to_string()),
+            experimental_stage_one_prompt_file: Some(prompt_path.abs()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let config = Config::load_from_base_config_with_overrides(
+        empty_inline_cfg,
+        ConfigOverrides {
+            cwd: Some(workspace),
+            ..Default::default()
+        },
+        codex_home.abs(),
+    )
+    .await?;
+    assert_eq!(
+        config.memories.stage_one_prompt.as_deref(),
+        Some("file stage one prompt")
     );
 
     Ok(())
