@@ -1,0 +1,163 @@
+name: Astral CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request: {}
+  workflow_dispatch:
+    inputs:
+      package:
+        description: Optional Cargo package for a targeted nextest run, such as codex-core.
+        required: false
+        type: string
+      test_filter:
+        description: Optional nextest test filter for the targeted run.
+        required: false
+        type: string
+      full:
+        description: Run the full Linux nextest suite.
+        required: false
+        default: false
+        type: boolean
+      test_threads:
+        description: Nextest thread count for targeted/full runs.
+        required: false
+        default: "4"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: astral-ci-${{ github.event.pull_request.number || github.ref_name }}
+  cancel-in-progress: ${{ github.ref_name != 'main' }}
+
+env:
+  CARGO_HOME: /ci/cache/cargo
+  RUSTUP_HOME: /ci/cache/rustup
+  CARGO_TARGET_DIR: /ci/cache/target/astral-code
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  TMPDIR: /ci/tmp
+  RUST_MIN_STACK: "8388608"
+
+jobs:
+  smoke:
+    name: Smoke
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: [self-hosted, linux, x64, astral-ci]
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: codex-rs
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+        with:
+          components: rustfmt
+
+      - uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2.62.49
+        with:
+          tool: just
+
+      - name: Prepare persistent cache directories
+        run: mkdir -p "$CARGO_HOME" "$RUSTUP_HOME" "$CARGO_TARGET_DIR" "$TMPDIR"
+
+      - name: Format check
+        run: just fmt-check
+
+      - name: Schema freshness check
+        run: |
+          just write-config-schema
+          git diff --exit-code -- core/config.schema.json
+
+      - name: Cleanup cheap build artifacts
+        if: always()
+        run: |
+          find "$CARGO_TARGET_DIR" -type d -name incremental -prune -exec rm -rf {} + 2>/dev/null || true
+          find "$TMPDIR" -mindepth 1 -maxdepth 1 -mtime +1 -exec rm -rf {} + 2>/dev/null || true
+
+  targeted-test:
+    name: Targeted Test
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.package != '' }}
+    runs-on: [self-hosted, linux, x64, astral-ci]
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: codex-rs
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+
+      - uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2.62.49
+        with:
+          tool: just,nextest
+
+      - name: Prepare persistent cache directories
+        run: mkdir -p "$CARGO_HOME" "$RUSTUP_HOME" "$CARGO_TARGET_DIR" "$TMPDIR"
+
+      - name: Run targeted nextest
+        shell: bash
+        env:
+          TARGET_PACKAGE: ${{ inputs.package }}
+          TEST_FILTER: ${{ inputs.test_filter }}
+          TEST_THREADS: ${{ inputs.test_threads }}
+        run: |
+          set -euo pipefail
+          args=(-p "$TARGET_PACKAGE" --test-threads "$TEST_THREADS")
+          if [[ -n "$TEST_FILTER" ]]; then
+            args+=("$TEST_FILTER")
+          fi
+          just test "${args[@]}"
+
+      - name: Cleanup cheap build artifacts
+        if: always()
+        run: |
+          find "$CARGO_TARGET_DIR" -type d -name incremental -prune -exec rm -rf {} + 2>/dev/null || true
+          find "$TMPDIR" -mindepth 1 -maxdepth 1 -mtime +1 -exec rm -rf {} + 2>/dev/null || true
+
+  full-linux:
+    name: Full Linux Test
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.full }}
+    runs-on: [self-hosted, linux, x64, astral-ci]
+    timeout-minutes: 360
+    defaults:
+      run:
+        working-directory: codex-rs
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+
+      - uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2.62.49
+        with:
+          tool: just,nextest
+
+      - name: Prepare persistent cache directories
+        run: mkdir -p "$CARGO_HOME" "$RUSTUP_HOME" "$CARGO_TARGET_DIR" "$TMPDIR"
+
+      - name: Enable Linux sandbox prerequisites
+        run: |
+          sudo sysctl -w kernel.unprivileged_userns_clone=1
+          if sudo sysctl -a 2>/dev/null | grep -q '^kernel.apparmor_restrict_unprivileged_userns'; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+
+      - name: Run full Linux nextest
+        env:
+          TEST_THREADS: ${{ inputs.test_threads }}
+        run: just test --test-threads "$TEST_THREADS"
+
+      - name: Cleanup cheap build artifacts
+        if: always()
+        run: |
+          find "$CARGO_TARGET_DIR" -type d -name incremental -prune -exec rm -rf {} + 2>/dev/null || true
+          find "$TMPDIR" -mindepth 1 -maxdepth 1 -mtime +1 -exec rm -rf {} + 2>/dev/null || true
