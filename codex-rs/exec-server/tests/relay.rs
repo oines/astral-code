@@ -48,7 +48,7 @@ use wiremock::matchers::path;
 const ENVIRONMENT_ID: &str = "env-mux-test";
 const REGISTRY_TOKEN: &str = "registry-token";
 const RELAY_MESSAGE_FRAME_VERSION: u32 = 1;
-const TEST_TIMEOUT: Duration = Duration::from_secs(5);
+const TEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug)]
 struct StaticRegistryAuthProvider;

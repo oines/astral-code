@@ -967,6 +967,7 @@ mod tests {
     }
 
     async fn build_test_config_for_codex_home(codex_home: &Path) -> Config {
+        write_mock_config(codex_home).expect("test config should be written");
         match ConfigBuilder::default()
             .codex_home(codex_home.to_path_buf())
             .build()
@@ -980,6 +981,27 @@ mod tests {
             .await
             .expect("default config should load"),
         }
+    }
+
+    fn write_mock_config(codex_home: &Path) -> std::io::Result<()> {
+        std::fs::write(
+            codex_home.join("config.toml"),
+            r#"
+model = "mock-model"
+model_provider = "mock_provider"
+
+[model_providers.mock_provider]
+name = "Mock provider for test"
+base_url = "http://127.0.0.1:9/v1"
+wire_api = "chat_completions"
+
+[model_capabilities."mock_provider/mock-model"]
+max_context_window = 272000
+max_output_tokens = 32000
+supports_tools = true
+supports_vision = true
+"#,
+        )
     }
 
     struct TestClient {

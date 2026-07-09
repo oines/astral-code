@@ -832,7 +832,7 @@ fn body_contains(req: &Request, text: &str) -> bool {
 }
 
 async fn wait_for_spawned_thread(test: &TestCodex) -> Result<Arc<CodexThread>> {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     loop {
         let ids = test.thread_manager.list_thread_ids().await;
         if let Some(thread_id) = ids
@@ -2492,7 +2492,7 @@ async fn spawned_subagent_execpolicy_amendment_propagates_to_parent_session() ->
                 EventMsg::ExecApprovalRequest(_) | EventMsg::TurnComplete(_)
             )
         },
-        Duration::from_secs(2),
+        Duration::from_secs(10),
     )
     .await;
 

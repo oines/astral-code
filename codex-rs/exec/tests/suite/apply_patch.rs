@@ -88,7 +88,7 @@ async fn test_apply_patch_tool() -> anyhow::Result<()> {
         "expected apply_patch turn to continue after tool calls, got requests: {:#?}",
         requests
             .iter()
-            .map(|request| request.body_json())
+            .map(core_test_support::responses::ResponsesRequest::body_json)
             .collect::<Vec<_>>()
     );
 
@@ -144,7 +144,7 @@ async fn test_apply_patch_freeform_tool() -> anyhow::Result<()> {
         "expected apply_patch turn to continue after tool calls, got requests: {:#?}",
         requests
             .iter()
-            .map(|request| request.body_json())
+            .map(core_test_support::responses::ResponsesRequest::body_json)
             .collect::<Vec<_>>()
     );
 

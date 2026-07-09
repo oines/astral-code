@@ -49,6 +49,12 @@ const AUTO_COMPACT_LIMIT: i64 = 1_000;
 const COMPACT_PROMPT: &str = "Summarize the conversation.";
 const INVALID_REQUEST_ERROR_CODE: i64 = -32600;
 
+fn body_contains(req: &wiremock::Request, text: &str) -> bool {
+    String::from_utf8(req.body.clone())
+        .ok()
+        .is_some_and(|body| body.contains(text))
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn auto_compaction_local_emits_started_and_completed_items() -> Result<()> {
     skip_if_no_network!(Ok(()));
@@ -291,6 +297,7 @@ async fn thread_compact_start_enqueue_runs_memory_extraction() -> Result<()> {
     const USER_MESSAGE: &str = "remember compact memory should extract this rollout";
     const TURN_REPLY: &str = "TURN_REPLY";
     const COMPACT_SUMMARY: &str = "MANUAL_COMPACT_SUMMARY";
+    const COMPACT_CONTINUATION: &str = "MANUAL_COMPACT_CONTINUATION";
     const RAW_MEMORY: &str = "The compact memory e2e test proved stage one extraction ran.";
     const ROLLOUT_SUMMARY: &str = "Compact memory extraction ran";
     const ROLLOUT_SLUG: &str = "compact-memory-extraction-ran";
@@ -302,19 +309,44 @@ async fn thread_compact_start_enqueue_runs_memory_extraction() -> Result<()> {
         "raw_memory": RAW_MEMORY,
     })
     .to_string();
-    let responses_log = responses::mount_sse_sequence(
+    let _turn_response = responses::mount_sse_once_match(
         &server,
-        vec![
-            responses::sse(vec![
-                responses::ev_assistant_message("turn-message", TURN_REPLY),
-                responses::ev_completed_with_tokens("turn-response", /*total_tokens*/ 200),
-            ]),
-            responses::sse(vec![
-                responses::ev_assistant_message("compact-message", COMPACT_SUMMARY),
-                responses::ev_completed_with_tokens("compact-response", /*total_tokens*/ 200),
-            ]),
-            responses::chat_completions_text_sse(&memory_payload),
-        ],
+        |req: &wiremock::Request| {
+            body_contains(req, USER_MESSAGE) && !body_contains(req, "Analyze this rollout")
+        },
+        responses::sse(vec![
+            responses::ev_assistant_message("turn-message", TURN_REPLY),
+            responses::ev_completed_with_tokens("turn-response", /*total_tokens*/ 200),
+        ]),
+    )
+    .await;
+    let _compact_response = responses::mount_sse_once_match(
+        &server,
+        |req: &wiremock::Request| body_contains(req, COMPACT_PROMPT),
+        responses::sse(vec![
+            responses::ev_assistant_message("compact-message", COMPACT_SUMMARY),
+            responses::ev_completed_with_tokens("compact-response", /*total_tokens*/ 200),
+        ]),
+    )
+    .await;
+    let stage_one_response = responses::mount_sse_once_match(
+        &server,
+        |req: &wiremock::Request| body_contains(req, "Analyze this rollout"),
+        responses::chat_completions_text_sse(&memory_payload),
+    )
+    .await;
+    let _compact_continuation_response = responses::mount_sse_once_match(
+        &server,
+        |req: &wiremock::Request| {
+            body_contains(req, COMPACT_SUMMARY) && !body_contains(req, "Analyze this rollout")
+        },
+        responses::sse(vec![
+            responses::ev_assistant_message("compact-continuation-message", COMPACT_CONTINUATION),
+            responses::ev_completed_with_tokens(
+                "compact-continuation-response",
+                /*total_tokens*/ 200,
+            ),
+        ]),
     )
     .await;
 
@@ -386,13 +418,9 @@ compact_memory = "enqueue"
     assert_eq!(stage1_output.raw_memory, RAW_MEMORY);
     assert_eq!(stage1_output.rollout_summary, ROLLOUT_SUMMARY);
     assert_eq!(stage1_output.rollout_slug.as_deref(), Some(ROLLOUT_SLUG));
-    let response_requests = responses_log.requests();
-    assert!(
-        response_requests.len() >= 3,
-        "turn, compact, and memory stage-one requests should all be sent"
-    );
+    let memory_request = stage_one_response.single_request();
     assert_eq!(
-        response_requests[2].body_json().get("response_format"),
+        memory_request.body_json().get("response_format"),
         None,
         "memory stage-one requests must stay compatible with chat completions providers"
     );

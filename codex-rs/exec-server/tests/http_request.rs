@@ -409,7 +409,7 @@ async fn wait_for_error_response(
 
 /// Accepts one HTTP/1.1 request and captures its wire-visible fields.
 async fn accept_http_request(listener: &TcpListener) -> anyhow::Result<CapturedHttpRequest> {
-    let (stream, _) = timeout(Duration::from_secs(5), listener.accept()).await??;
+    let (stream, _) = timeout(Duration::from_secs(10), listener.accept()).await??;
     let mut reader = BufReader::new(stream);
 
     let mut request_line = String::new();

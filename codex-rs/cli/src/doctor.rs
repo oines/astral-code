@@ -3128,11 +3128,18 @@ mod tests {
 
     #[tokio::test]
     async fn mcp_check_warns_for_optional_http_reachability() {
-        let optional_server: McpServerConfig = toml::from_str(
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test listener");
+        let url = format!(
+            "http://{}/mcp",
+            listener.local_addr().expect("listener address")
+        );
+        drop(listener);
+
+        let optional_server: McpServerConfig = toml::from_str(&format!(
             r#"
-                url = "http://127.0.0.1:9/mcp"
+                url = "{url}"
             "#,
-        )
+        ))
         .expect("should deserialize optional MCP config");
         let servers = HashMap::from([("optional".to_string(), optional_server)]);
 
@@ -3140,12 +3147,9 @@ mod tests {
 
         assert_eq!(check.status, CheckStatus::Warning);
         assert_eq!(check.summary, "MCP configuration has optional issues");
-        assert!(
-            check
-                .details
-                .iter()
-                .any(|detail| detail.contains("optional reachability failed: optional:"))
-        );
+        assert!(check.details.iter().any(|detail| {
+            detail.contains(&format!("optional reachability failed: optional: {url}"))
+        }));
     }
 
     #[tokio::test]

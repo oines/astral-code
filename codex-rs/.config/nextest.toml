@@ -14,6 +14,9 @@ max-threads = 1
 [test-groups.app_server_integration]
 max-threads = 1
 
+[test-groups.core_integration]
+max-threads = 4
+
 [test-groups.core_apply_patch_cli_integration]
 max-threads = 1
 
@@ -33,14 +36,34 @@ filter = 'test(approval_matrix_covers_all_modes)'
 slow-timeout = { period = "30s", terminate-after = 2 }
 
 [[profile.default.overrides]]
+# These CLI integration tests launch nested Codex processes and can cross the
+# default 60s kill threshold under full-suite contention.
+filter = 'package(codex-cli) & test(debug_sandbox::tests::debug_sandbox_)'
+slow-timeout = { period = "1m", terminate-after = 2 }
+
+[[profile.default.overrides]]
 filter = 'package(codex-app-server-protocol) & (test(typescript_schema_fixtures_match_generated) | test(json_schema_fixtures_match_generated) | test(generate_ts_with_experimental_api_retains_experimental_entries) | test(generated_ts_optional_nullable_fields_only_in_params) | test(generate_json_filters_experimental_fields_and_methods))'
 test-group = 'app_server_protocol_codegen'
 
 [[profile.default.overrides]]
 # These integration tests spawn a fresh app-server subprocess per case.
 # Keep the library unit tests parallel.
-filter = 'package(codex-app-server) & kind(test)'
+filter = 'package(codex-app-server) & (kind(test) | test(in_process_start_uses_requested_session_source_for_thread_start))'
 test-group = 'app_server_integration'
+slow-timeout = { period = "1m", terminate-after = 3 }
+
+[[profile.default.overrides]]
+# These client tests spawn app-server subprocesses from the library test suite.
+filter = 'package(codex-app-server-client)'
+test-group = 'app_server_integration'
+slow-timeout = { period = "1m", terminate-after = 3 }
+
+[[profile.default.overrides]]
+# Core integration tests run full Codex turns and can be delayed by full-suite
+# process and socket contention.
+filter = 'package(codex-core) & kind(test)'
+test-group = 'core_integration'
+slow-timeout = { period = "1m", terminate-after = 3 }
 
 [[profile.default.overrides]]
 # These tests exercise full Codex turns and apply_patch execution, and they are

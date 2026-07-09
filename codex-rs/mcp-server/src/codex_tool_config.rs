@@ -324,6 +324,10 @@ mod tests {
                 "description": "Prompt used when compacting the conversation.",
                 "type": "string"
               },
+              "compact-continuation-prompt": {
+                "description": "Prompt appended after automatic conversation compaction.",
+                "type": "string"
+              },
               "config": {
                 "additionalProperties": true,
                 "description": "Individual config settings that will override what is in ASTRAL_HOME/config.toml.",

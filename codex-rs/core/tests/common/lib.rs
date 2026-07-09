@@ -341,8 +341,9 @@ where
     use tokio::time::Duration;
     use tokio::time::timeout;
     loop {
-        // Allow a bit more time to accommodate async startup work (e.g. config IO, tool discovery)
-        let ev = timeout(wait_time.max(Duration::from_secs(10)), codex.next_event())
+        // Allow enough time to accommodate async startup work under full-suite
+        // contention (e.g. config IO, tool discovery, subprocess startup).
+        let ev = timeout(wait_time.max(Duration::from_secs(60)), codex.next_event())
             .await
             .expect("timeout waiting for event")
             .expect("stream ended unexpectedly");

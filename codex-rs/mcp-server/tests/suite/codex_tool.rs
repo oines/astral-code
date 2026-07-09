@@ -402,24 +402,10 @@ async fn codex_tool_passes_base_instructions() -> anyhow::Result<()> {
 
     let requests = server.received_requests().await.unwrap();
     let request = requests[0].body_json::<serde_json::Value>()?;
-    let instructions = request["instructions"]
-        .as_str()
-        .expect("responses request should include instructions");
+    let instructions = model_request_instructions(&request);
     assert!(instructions.starts_with("You are a helpful assistant."));
 
-    let developer_messages: Vec<&serde_json::Value> = request["input"]
-        .as_array()
-        .expect("responses request should include input items")
-        .iter()
-        .filter(|msg| msg.get("role").and_then(|role| role.as_str()) == Some("developer"))
-        .collect();
-    let developer_contents: Vec<&str> = developer_messages
-        .iter()
-        .filter_map(|msg| msg.get("content").and_then(serde_json::Value::as_array))
-        .flat_map(|content| content.iter())
-        .filter(|span| span.get("type").and_then(serde_json::Value::as_str) == Some("input_text"))
-        .filter_map(|span| span.get("text").and_then(serde_json::Value::as_str))
-        .collect();
+    let developer_contents = model_request_developer_texts(&request);
     assert!(
         developer_contents
             .iter()
@@ -427,11 +413,75 @@ async fn codex_tool_passes_base_instructions() -> anyhow::Result<()> {
         "expected permissions developer message, got {developer_contents:?}"
     );
     assert!(
-        developer_contents.contains(&"Foreshadow upcoming tool calls."),
+        developer_contents
+            .iter()
+            .any(|content| content.contains("Foreshadow upcoming tool calls.")),
         "expected developer instructions in developer messages, got {developer_contents:?}"
     );
 
     Ok(())
+}
+
+fn model_request_instructions(request: &serde_json::Value) -> String {
+    if let Some(instructions) = request
+        .get("instructions")
+        .and_then(serde_json::Value::as_str)
+    {
+        return instructions.to_string();
+    }
+
+    model_request_message_texts(request, "system").join("\n\n")
+}
+
+fn model_request_developer_texts(request: &serde_json::Value) -> Vec<String> {
+    let mut texts = model_request_message_texts(request, "developer");
+    texts.extend(model_request_message_texts(request, "system"));
+    texts
+}
+
+fn model_request_message_texts(request: &serde_json::Value, role: &str) -> Vec<String> {
+    let response_input_texts = request
+        .get("input")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|item| item.get("type").and_then(serde_json::Value::as_str) == Some("message"))
+        .filter(|item| item.get("role").and_then(serde_json::Value::as_str) == Some(role))
+        .flat_map(content_texts);
+    let chat_message_texts = request
+        .get("messages")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|message| message.get("role").and_then(serde_json::Value::as_str) == Some(role))
+        .flat_map(content_texts);
+
+    response_input_texts.chain(chat_message_texts).collect()
+}
+
+fn content_texts(message: &serde_json::Value) -> Vec<String> {
+    match message.get("content") {
+        Some(serde_json::Value::String(text)) => vec![text.clone()],
+        Some(serde_json::Value::Array(parts)) => parts
+            .iter()
+            .filter(|part| {
+                matches!(
+                    part.get("type").and_then(serde_json::Value::as_str),
+                    Some("text" | "input_text")
+                )
+            })
+            .filter_map(|part| {
+                part.get("text")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string)
+            })
+            .collect(),
+        Some(serde_json::Value::Object(_))
+        | Some(serde_json::Value::Number(_))
+        | Some(serde_json::Value::Bool(_))
+        | Some(serde_json::Value::Null)
+        | None => Vec::new(),
+    }
 }
 
 fn create_expected_patch_approval_elicitation_request_params(
