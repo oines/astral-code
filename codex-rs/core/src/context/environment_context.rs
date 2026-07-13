@@ -18,6 +18,9 @@ use super::ContextualUserFragment;
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct EnvironmentContext {
     pub(crate) environments: EnvironmentContextEnvironments,
+    /// Model slug the session is invoking via the API. Rendered so the model
+    /// can answer "what model is this" from session facts instead of guessing.
+    pub(crate) model: Option<String>,
     pub(crate) current_date: Option<String>,
     pub(crate) timezone: Option<String>,
     pub(crate) network: Option<NetworkContext>,
@@ -337,6 +340,7 @@ impl EnvironmentContext {
     ) -> Self {
         Self {
             environments: EnvironmentContextEnvironments::from_vec(environments),
+            model: None,
             current_date,
             timezone,
             network,
@@ -347,6 +351,7 @@ impl EnvironmentContext {
 
     fn new_with_environments(
         environments: EnvironmentContextEnvironments,
+        model: Option<String>,
         current_date: Option<String>,
         timezone: Option<String>,
         network: Option<NetworkContext>,
@@ -355,6 +360,7 @@ impl EnvironmentContext {
     ) -> Self {
         Self {
             environments,
+            model,
             current_date,
             timezone,
             network,
@@ -368,6 +374,7 @@ impl EnvironmentContext {
     /// include the shell, and then it is not configurable from turn to turn.
     pub(crate) fn equals_except_shell(&self, other: &EnvironmentContext) -> bool {
         self.environments.equals_except_shell(&other.environments)
+            && self.model == other.model
             && self.current_date == other.current_date
             && self.timezone == other.timezone
             && self.network == other.network
@@ -409,6 +416,7 @@ impl EnvironmentContext {
         };
         EnvironmentContext::new_with_environments(
             environments,
+            after.model.clone(),
             after.current_date.clone(),
             after.timezone.clone(),
             network,
@@ -432,6 +440,7 @@ impl EnvironmentContext {
             &turn_context.permission_profile,
             &turn_context.config.effective_workspace_roots(),
         ));
+        context.model = Some(turn_context.model_info.slug.clone());
         context
     }
 
@@ -447,6 +456,7 @@ impl EnvironmentContext {
             EnvironmentContextEnvironments::from_vec(vec![EnvironmentContextEnvironment::legacy(
                 cwd, shell,
             )]),
+            Some(turn_context_item.model.clone()),
             turn_context_item.current_date.clone(),
             turn_context_item.timezone.clone(),
             Self::network_from_turn_context_item(turn_context_item),
@@ -562,6 +572,9 @@ impl ContextualUserFragment for EnvironmentContext {
                 lines.push("  </environments>".to_string());
             }
             EnvironmentContextEnvironments::None => {}
+        }
+        if let Some(model) = &self.model {
+            lines.push(format!("  <model>{model}</model>"));
         }
         if let Some(current_date) = &self.current_date {
             lines.push(format!("  <current_date>{current_date}</current_date>"));

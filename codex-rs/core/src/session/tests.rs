@@ -7425,6 +7425,33 @@ async fn environment_context_uses_session_shell_when_environment_shell_is_absent
 }
 
 #[tokio::test]
+async fn environment_context_reports_turn_context_model() {
+    let (session, turn_context) = make_session_and_context().await;
+    let expected_model_tag = format!("<model>{}</model>", turn_context.model_info.slug);
+
+    let session_shell = session.user_shell();
+    let environment_context = crate::context::EnvironmentContext::from_turn_context(
+        &turn_context,
+        session_shell.as_ref(),
+    )
+    .render();
+    assert!(
+        environment_context.contains(&expected_model_tag),
+        "{environment_context}"
+    );
+
+    let initial_context = session.build_initial_context(&turn_context).await;
+    let environment_context = user_input_texts(&initial_context)
+        .into_iter()
+        .find(|text| text.contains("<environment_context>"))
+        .expect("initial context should include environment context");
+    assert!(
+        environment_context.contains(&expected_model_tag),
+        "{environment_context}"
+    );
+}
+
+#[tokio::test]
 async fn build_settings_update_items_emits_environment_item_for_time_changes() {
     let (session, previous_context) = make_session_and_context().await;
     let previous_context = Arc::new(previous_context);
@@ -8305,7 +8332,21 @@ async fn record_context_updates_and_set_reference_context_item_persists_baseline
     let update_items = session
         .build_settings_update_items(Some(&previous_context_item), &turn_context)
         .await;
-    assert_eq!(update_items, Vec::new());
+    // Both models resolve to the same instructions, so no <model_switch> item is
+    // emitted; the switch still updates the model identity fact in the
+    // environment context.
+    assert_eq!(update_items.len(), 1);
+    let TranscriptItem::Message { role, content, .. } = &update_items[0] else {
+        panic!("expected environment context update message");
+    };
+    assert_eq!(role, "user");
+    let ContentItem::InputText { text } = &content[0] else {
+        panic!("expected text content in environment context update");
+    };
+    assert!(
+        text.contains(&format!("<model>{next_model}</model>")),
+        "{text}"
+    );
 
     session
         .record_context_updates_and_set_reference_context_item(&turn_context)
@@ -8313,7 +8354,7 @@ async fn record_context_updates_and_set_reference_context_item_persists_baseline
 
     assert_eq!(
         session.clone_history().await.raw_items().to_vec(),
-        Vec::new()
+        update_items
     );
     assert_eq!(
         serde_json::to_value(session.reference_context_item().await)
