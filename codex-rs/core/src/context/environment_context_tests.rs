@@ -60,6 +60,96 @@ fn serialize_workspace_write_environment_context() {
 }
 
 #[test]
+fn serialize_environment_context_with_model() {
+    let cwd = test_path_buf("/repo");
+    let mut context = EnvironmentContext::new(
+        vec![EnvironmentContextEnvironment {
+            id: "local".to_string(),
+            cwd: cwd.abs(),
+            shell: fake_shell_name(),
+        }],
+        Some("2026-02-26".to_string()),
+        /*timezone*/ None,
+        /*network*/ None,
+        /*subagents*/ None,
+    );
+    context.model = Some("deepseek-v3.2".to_string());
+
+    let expected = format!(
+        r#"<environment_context>
+  <cwd>{cwd}</cwd>
+  <shell>bash</shell>
+  <model>deepseek-v3.2</model>
+  <current_date>2026-02-26</current_date>
+</environment_context>"#,
+        cwd = cwd.display(),
+    );
+
+    assert_eq!(context.render(), expected);
+}
+
+#[test]
+fn turn_context_item_reconstruction_renders_model() {
+    let item = TurnContextItem {
+        turn_id: None,
+        cwd: test_path_buf("/repo"),
+        workspace_roots: None,
+        current_date: None,
+        timezone: None,
+        approval_policy: AskForApproval::Never,
+        sandbox_policy: SandboxPolicy::new_read_only_policy(),
+        permission_profile: None,
+        network: None,
+        file_system_sandbox_policy: None,
+        model: "gpt-5".to_string(),
+        personality: None,
+        collaboration_mode: None,
+        multi_agent_version: None,
+        realtime_active: None,
+        effort: None,
+        summary: codex_protocol::config_types::ReasoningSummary::Auto,
+    };
+
+    let context = EnvironmentContext::from_turn_context_item(&item, fake_shell_name());
+
+    assert!(
+        context.render().contains("<model>gpt-5</model>"),
+        "{}",
+        context.render()
+    );
+}
+
+#[test]
+fn equals_except_shell_compares_model() {
+    let environments = vec![EnvironmentContextEnvironment {
+        id: "local".to_string(),
+        cwd: test_path_buf("/repo").abs(),
+        shell: fake_shell_name(),
+    }];
+    let mut context1 = EnvironmentContext::new(
+        environments.clone(),
+        /*current_date*/ None,
+        /*timezone*/ None,
+        /*network*/ None,
+        /*subagents*/ None,
+    );
+    let mut context2 = EnvironmentContext::new(
+        environments,
+        /*current_date*/ None,
+        /*timezone*/ None,
+        /*network*/ None,
+        /*subagents*/ None,
+    );
+    context1.model = Some("gpt-5".to_string());
+    context2.model = Some("deepseek-v3.2".to_string());
+
+    assert!(!context1.equals_except_shell(&context2));
+
+    context2.model = Some("gpt-5".to_string());
+    assert!(context1.equals_except_shell(&context2));
+}
+
+#[test]
 fn serialize_environment_context_with_network() {
     let network = NetworkContext::new(
         vec!["api.example.com".to_string(), "*.openai.com".to_string()],
