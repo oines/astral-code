@@ -48,7 +48,6 @@ pub(crate) struct WebSearchTool {
     pub(crate) config: WebSearchRuntimeConfig,
 }
 
-#[async_trait::async_trait]
 impl ToolExecutor<ToolCall> for WebSearchTool {
     fn tool_name(&self) -> ToolName {
         ToolName::namespaced(WEB_NAMESPACE, SEARCH_TOOL_NAME)
@@ -66,8 +65,8 @@ impl ToolExecutor<ToolCall> for WebSearchTool {
         true
     }
 
-    async fn handle(&self, call: ToolCall) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
-        self.handle_call(call).await
+    fn handle(&self, call: ToolCall) -> codex_extension_api::ToolExecutorFuture<'_> {
+        Box::pin(self.handle_call(call))
     }
 }
 
@@ -123,7 +122,6 @@ pub(crate) struct WebFetchTool {
     pub(crate) client: reqwest::Client,
 }
 
-#[async_trait::async_trait]
 impl ToolExecutor<ToolCall> for WebFetchTool {
     fn tool_name(&self) -> ToolName {
         ToolName::namespaced(WEB_NAMESPACE, FETCH_TOOL_NAME)
@@ -141,7 +139,13 @@ impl ToolExecutor<ToolCall> for WebFetchTool {
         true
     }
 
-    async fn handle(&self, call: ToolCall) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
+    fn handle(&self, call: ToolCall) -> codex_extension_api::ToolExecutorFuture<'_> {
+        Box::pin(self.handle_call(call))
+    }
+}
+
+impl WebFetchTool {
+    async fn handle_call(&self, call: ToolCall) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
         let input: WebFetchInput = parse_input(&call)?;
         let action = WebSearchAction::OpenPage {
             url: Some(visible_fetch_url(&input.url)),

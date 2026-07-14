@@ -31,9 +31,19 @@ impl AstralTodoWriteHandler {
     pub(crate) fn new() -> Self {
         Self { plan: PlanHandler }
     }
+
+    async fn handle_call(
+        &self,
+        invocation: ToolInvocation,
+    ) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
+        self.plan.handle(to_plan_invocation(invocation)?).await?;
+        Ok(boxed_tool_output(FunctionToolOutput::from_text(
+            TODO_WRITE_SUCCESS_MESSAGE.to_string(),
+            Some(true),
+        )))
+    }
 }
 
-#[async_trait::async_trait]
 impl ToolExecutor<ToolInvocation> for AstralTodoWriteHandler {
     fn tool_name(&self) -> ToolName {
         ToolName::plain(TODO_WRITE_TOOL_NAME)
@@ -58,15 +68,8 @@ impl ToolExecutor<ToolInvocation> for AstralTodoWriteHandler {
         })
     }
 
-    async fn handle(
-        &self,
-        invocation: ToolInvocation,
-    ) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
-        self.plan.handle(to_plan_invocation(invocation)?).await?;
-        Ok(boxed_tool_output(FunctionToolOutput::from_text(
-            TODO_WRITE_SUCCESS_MESSAGE.to_string(),
-            Some(true),
-        )))
+    fn handle(&self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'_> {
+        Box::pin(self.handle_call(invocation))
     }
 }
 

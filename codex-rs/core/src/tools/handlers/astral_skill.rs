@@ -23,32 +23,8 @@ const MAX_SKILL_OUTPUT_CHARS: usize = 24_000;
 
 pub struct AstralSkillHandler;
 
-#[async_trait::async_trait]
-impl ToolExecutor<ToolInvocation> for AstralSkillHandler {
-    fn tool_name(&self) -> ToolName {
-        ToolName::plain(SKILL_TOOL_NAME)
-    }
-
-    fn spec(&self) -> ToolSpec {
-        let tool = astral_core_tool_by_name(SKILL_TOOL_NAME).unwrap_or_else(|| {
-            panic!("astral core tool `{SKILL_TOOL_NAME}` should have a schema");
-        });
-        let parameters = parse_tool_input_schema_without_compaction(&tool.input_schema)
-            .unwrap_or_else(|err| {
-                panic!("astral core tool `{SKILL_TOOL_NAME}` schema should parse: {err}");
-            });
-
-        ToolSpec::Function(ResponsesApiTool {
-            name: tool.name,
-            description: tool.description,
-            strict: false,
-            defer_loading: None,
-            parameters,
-            output_schema: None,
-        })
-    }
-
-    async fn handle(
+impl AstralSkillHandler {
+    async fn handle_call(
         &self,
         invocation: ToolInvocation,
     ) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
@@ -86,6 +62,35 @@ impl ToolExecutor<ToolInvocation> for AstralSkillHandler {
             truncate_skill_output(text),
             Some(true),
         )))
+    }
+}
+
+impl ToolExecutor<ToolInvocation> for AstralSkillHandler {
+    fn tool_name(&self) -> ToolName {
+        ToolName::plain(SKILL_TOOL_NAME)
+    }
+
+    fn spec(&self) -> ToolSpec {
+        let tool = astral_core_tool_by_name(SKILL_TOOL_NAME).unwrap_or_else(|| {
+            panic!("astral core tool `{SKILL_TOOL_NAME}` should have a schema");
+        });
+        let parameters = parse_tool_input_schema_without_compaction(&tool.input_schema)
+            .unwrap_or_else(|err| {
+                panic!("astral core tool `{SKILL_TOOL_NAME}` schema should parse: {err}");
+            });
+
+        ToolSpec::Function(ResponsesApiTool {
+            name: tool.name,
+            description: tool.description,
+            strict: false,
+            defer_loading: None,
+            parameters,
+            output_schema: None,
+        })
+    }
+
+    fn handle(&self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'_> {
+        Box::pin(self.handle_call(invocation))
     }
 }
 

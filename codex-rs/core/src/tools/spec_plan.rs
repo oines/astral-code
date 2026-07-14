@@ -89,7 +89,6 @@ use codex_tools::ToolCall as ExtensionToolCall;
 use codex_tools::ToolEnvironmentMode;
 use codex_tools::ToolExecutor;
 use codex_tools::ToolName;
-use codex_tools::ToolOutput;
 use codex_tools::ToolSearchInfo;
 use codex_tools::ToolSpec;
 use codex_tools::UnifiedExecShellMode;
@@ -1163,7 +1162,6 @@ struct MultiAgentV2NamespaceOverride {
     namespace: String,
 }
 
-#[async_trait::async_trait]
 impl ToolExecutor<ToolInvocation> for MultiAgentV2NamespaceOverride {
     fn tool_name(&self) -> ToolName {
         ToolName::namespaced(self.namespace.clone(), self.handler.tool_name().name)
@@ -1192,11 +1190,8 @@ impl ToolExecutor<ToolInvocation> for MultiAgentV2NamespaceOverride {
         self.handler.search_info()
     }
 
-    async fn handle(
-        &self,
-        invocation: ToolInvocation,
-    ) -> Result<Box<dyn ToolOutput>, codex_tools::FunctionCallError> {
-        self.handler.handle(invocation).await
+    fn handle(&self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'_> {
+        self.handler.handle(invocation)
     }
 }
 
