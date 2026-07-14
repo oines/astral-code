@@ -186,8 +186,13 @@ impl CodeModeService {
                 return Err(format!("exec cell {cell_id} already exists"));
             }
 
-            let (runtime_tx, runtime_control_tx, runtime_terminate_handle) =
-                spawn_runtime(stored_values, request, event_tx, pending_mode)?;
+            let (runtime_tx, runtime_control_tx, runtime_terminate_handle) = spawn_runtime(
+                stored_values,
+                request,
+                event_tx,
+                pending_mode,
+                /*task_failure_handler*/ None,
+            )?;
 
             cells.insert(
                 cell_id.clone(),
@@ -635,6 +640,7 @@ async fn run_cell_control(
                             break;
                         }
                     }
+                    RuntimeEvent::ThreadPanicked => {}
                 }
             }
             task_result = notification_tasks.join_next(), if !notification_tasks.is_empty() => {
@@ -1759,6 +1765,7 @@ image({
             },
             runtime_event_tx,
             PendingRuntimeMode::Continue,
+            /*task_failure_handler*/ None,
         )
         .unwrap();
 
