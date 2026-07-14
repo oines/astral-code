@@ -375,7 +375,7 @@ fn build_code_mode_executors(
 
     let mut code_mode_nested_tool_specs = Vec::new();
     let mut exec_prompt_tool_specs = Vec::new();
-    let mut deferred_tools_available = false;
+    let mut deferred_exec_prompt_tool_specs = Vec::new();
     let deferred_tools_guidance_enabled = search_tool_enabled(turn_context);
     for executor in executors {
         let exposure = executor.exposure();
@@ -385,11 +385,6 @@ fn build_code_mode_executors(
         }
 
         if exposure == ToolExposure::Hidden {
-            if tool_name.namespace.is_none()
-                && matches!(tool_name.name.as_str(), "exec_command" | "shell_command")
-            {
-                code_mode_nested_tool_specs.push(executor.spec());
-            }
             continue;
         }
 
@@ -400,10 +395,9 @@ fn build_code_mode_executors(
         let spec = executor.spec();
 
         if exposure == ToolExposure::Deferred {
-            // Only show deferred-tool guidance when supported and an included spec is usable by code mode.
-            deferred_tools_available |= deferred_tools_guidance_enabled
-                && !collect_code_mode_exec_prompt_tool_definitions(std::iter::once(&spec))
-                    .is_empty();
+            if deferred_tools_guidance_enabled {
+                deferred_exec_prompt_tool_specs.push(spec.clone());
+            }
         } else {
             exec_prompt_tool_specs.push(spec.clone());
         }
@@ -415,14 +409,16 @@ fn build_code_mode_executors(
         collect_code_mode_exec_prompt_tool_definitions(exec_prompt_tool_specs.iter());
     enabled_tools
         .sort_by(|left, right| compare_code_mode_tools(left, right, &namespace_descriptions));
+    let deferred_tools =
+        collect_code_mode_exec_prompt_tool_definitions(deferred_exec_prompt_tool_specs.iter());
 
     vec![
         Arc::new(CodeModeExecuteHandler::new(
             create_code_mode_tool(
                 &enabled_tools,
+                &deferred_tools,
                 &namespace_descriptions,
                 turn_context.tool_mode == ToolMode::CodeModeOnly,
-                deferred_tools_available,
             ),
             code_mode_nested_tool_specs,
         )),

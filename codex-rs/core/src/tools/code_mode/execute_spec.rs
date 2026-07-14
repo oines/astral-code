@@ -6,17 +6,17 @@ use std::collections::BTreeMap;
 
 pub(crate) fn create_code_mode_tool(
     enabled_tools: &[CodeModeToolDefinition],
+    deferred_tools: &[CodeModeToolDefinition],
     namespace_descriptions: &BTreeMap<String, codex_code_mode::ToolNamespaceDescription>,
     code_mode_only: bool,
-    deferred_tools_available: bool,
 ) -> ToolSpec {
     ToolSpec::Function(ResponsesApiTool {
         name: codex_code_mode::PUBLIC_TOOL_NAME.to_string(),
         description: codex_code_mode::build_exec_tool_description(
             enabled_tools,
+            deferred_tools,
             namespace_descriptions,
             code_mode_only,
-            deferred_tools_available,
         ),
         strict: false,
         parameters: JsonSchema::object(
@@ -52,17 +52,17 @@ mod tests {
         assert_eq!(
             create_code_mode_tool(
                 &enabled_tools,
+                &[],
                 &BTreeMap::new(),
                 /*code_mode_only*/ true,
-                /*deferred_tools_available*/ false,
             ),
             ToolSpec::Function(ResponsesApiTool {
                 name: codex_code_mode::PUBLIC_TOOL_NAME.to_string(),
                 description: codex_code_mode::build_exec_tool_description(
                     &enabled_tools,
+                    &[],
                     &BTreeMap::new(),
                     /*code_mode_only*/ true,
-                    /*deferred_tools_available*/ false
                 ),
                 strict: false,
                 parameters: JsonSchema::object(
