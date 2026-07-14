@@ -15,6 +15,7 @@ use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
 use crate::tools::context::boxed_tool_output;
+use crate::tools::effective_tool_surface;
 use crate::tools::format_exec_output_for_model;
 use crate::tools::handlers::ViewImageOutput;
 use crate::tools::handlers::apply_granted_turn_permissions;
@@ -829,7 +830,7 @@ fn file_tool_error_to_function_call(error: ToolError, turn: &TurnContext) -> Fun
         ToolError::Rejected(message) => FunctionCallError::RespondToModel(message),
         ToolError::Codex(CodexErr::Sandbox(SandboxErr::Denied { output, .. })) => {
             let mut response = format_exec_output_for_model(&output, turn.truncation_policy);
-            append_sandbox_intervention_hint(&mut response);
+            append_sandbox_intervention_hint(&mut response, effective_tool_surface(turn));
             FunctionCallError::RespondToModel(response)
         }
         ToolError::Codex(CodexErr::Sandbox(SandboxErr::Timeout { output })) => {

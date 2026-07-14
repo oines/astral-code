@@ -1,10 +1,10 @@
-pub(crate) mod astral_tool_bridge;
 pub(crate) mod code_mode;
 pub(crate) mod context;
 pub(crate) mod core_tool_lifecycle;
 pub(crate) mod events;
 pub(crate) mod handlers;
 pub(crate) mod hook_names;
+pub(crate) mod hosted_spec;
 pub(crate) mod lifecycle;
 pub(crate) mod network_approval;
 pub(crate) mod orchestrator;
@@ -18,7 +18,10 @@ pub(crate) mod tool_dispatch_trace;
 
 use std::borrow::Cow;
 
+use crate::config::ToolSurface;
+use crate::session::turn_context::TurnContext;
 use codex_protocol::exec_output::ExecToolCallOutput;
+use codex_protocol::openai_models::ToolMode;
 use codex_tools::ToolName;
 use codex_utils_output_truncation::TruncationPolicy;
 use codex_utils_output_truncation::formatted_truncate_text;
@@ -31,20 +34,44 @@ pub(crate) const TELEMETRY_PREVIEW_MAX_LINES: usize = 64; // lines
 pub(crate) const TELEMETRY_PREVIEW_TRUNCATION_NOTICE: &str =
     "[... telemetry preview truncated ...]";
 
+pub(crate) fn effective_tool_surface(turn_context: &TurnContext) -> ToolSurface {
+    if matches!(
+        turn_context.tool_mode,
+        ToolMode::CodeMode | ToolMode::CodeModeOnly
+    ) {
+        ToolSurface::Codex
+    } else {
+        turn_context.config.tool_surface
+    }
+}
+
 pub(crate) const SANDBOX_INTERVENTION_HINT: &str = "\
 [Sandbox Intervention] This action was blocked by the environment permission policy.
 
 To proceed, call RequestPermissions to request the exact filesystem or network permissions needed. Wait for approval, then retry the original action.
 Do not retry the blocked action before permission is granted.";
 
-pub(crate) fn append_sandbox_intervention_hint(output: &mut String) {
+pub(crate) const CODEX_SANDBOX_INTERVENTION_HINT: &str = "\
+[Sandbox Intervention] This action was blocked by the environment permission policy.
+
+To proceed, call request_permissions to request the exact filesystem or network permissions needed. Wait for approval, then retry the original action.
+Do not retry the blocked action before permission is granted.";
+
+pub(crate) fn sandbox_intervention_hint(surface: ToolSurface) -> &'static str {
+    match surface {
+        ToolSurface::Claude => SANDBOX_INTERVENTION_HINT,
+        ToolSurface::Codex => CODEX_SANDBOX_INTERVENTION_HINT,
+    }
+}
+
+pub(crate) fn append_sandbox_intervention_hint(output: &mut String, surface: ToolSurface) {
     if !output.is_empty() {
         if !output.ends_with('\n') {
             output.push('\n');
         }
         output.push('\n');
     }
-    output.push_str(SANDBOX_INTERVENTION_HINT);
+    output.push_str(sandbox_intervention_hint(surface));
 }
 
 /// Legacy boundaries such as hook payloads, telemetry tags, and Responses tool

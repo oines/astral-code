@@ -2,12 +2,12 @@ use std::sync::Arc;
 
 use crate::function_tool::FunctionCallError;
 use crate::maybe_emit_implicit_skill_invocation;
-use crate::tools::SANDBOX_INTERVENTION_HINT;
 use crate::tools::append_sandbox_intervention_hint;
 use crate::tools::context::ExecCommandToolOutput;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
 use crate::tools::context::boxed_tool_output;
+use crate::tools::effective_tool_surface;
 use crate::tools::handlers::apply_granted_turn_permissions;
 use crate::tools::handlers::apply_patch::intercept_apply_patch;
 use crate::tools::handlers::implicit_granted_permissions;
@@ -22,6 +22,7 @@ use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::PostToolUsePayload;
 use crate::tools::registry::PreToolUsePayload;
 use crate::tools::registry::ToolExecutor;
+use crate::tools::sandbox_intervention_hint;
 use crate::unified_exec::ExecCommandRequest;
 use crate::unified_exec::UnifiedExecContext;
 use crate::unified_exec::UnifiedExecError;
@@ -296,8 +297,9 @@ impl ExecCommandHandler {
             Ok(response) => Ok(boxed_tool_output(response)),
             Err(UnifiedExecError::SandboxDenied { output, .. }) => {
                 let original_token_count = approx_token_count(&output.aggregated_output.text);
+                let tool_surface = effective_tool_surface(&turn);
                 let hint_token_count =
-                    approx_token_count(SANDBOX_INTERVENTION_HINT).saturating_add(8);
+                    approx_token_count(sandbox_intervention_hint(tool_surface)).saturating_add(8);
                 let model_output_max_tokens = resolve_max_tokens(max_output_tokens)
                     .max(hint_token_count.saturating_add(16))
                     .min(turn.truncation_policy.token_budget());
@@ -308,7 +310,7 @@ impl ExecCommandHandler {
                     &output.aggregated_output.text,
                     TruncationPolicy::Tokens(output_max_tokens),
                 );
-                append_sandbox_intervention_hint(&mut output_text);
+                append_sandbox_intervention_hint(&mut output_text, tool_surface);
                 Ok(boxed_tool_output(ExecCommandToolOutput {
                     event_call_id: context.call_id.clone(),
                     chunk_id: generate_chunk_id(),

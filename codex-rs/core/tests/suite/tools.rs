@@ -7,6 +7,7 @@ use std::time::Instant;
 
 use anyhow::Context;
 use anyhow::Result;
+use codex_core::config::ToolSurface;
 use codex_core::sandboxing::SandboxPermissions;
 use codex_features::Feature;
 use codex_protocol::models::PermissionProfile;
@@ -31,6 +32,7 @@ use core_test_support::skip_if_no_network;
 use core_test_support::skip_if_sandbox;
 use core_test_support::test_codex::local;
 use core_test_support::test_codex::test_codex;
+use core_test_support::test_codex::test_codex_with_codex_surface;
 use regex_lite::Regex;
 use serde_json::Value;
 use serde_json::json;
@@ -196,7 +198,7 @@ async fn shell_command_escalated_permissions_rejected_then_ok() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_model("test-gpt-5-codex");
+    let mut builder = test_codex_with_codex_surface().with_model("test-gpt-5-codex");
     let test = builder.build(&server).await?;
 
     let command = "echo shell ok";
@@ -259,7 +261,7 @@ async fn shell_command_escalated_permissions_rejected_then_ok() -> Result<()> {
 
     let policy = AskForApproval::Never;
     let expected_message = format!(
-        "approval policy is {policy:?}; reject command — you cannot ask for escalated permissions if the approval policy is {policy:?}"
+        "approval policy is {policy:?}; reject command — you should not ask for escalated permissions if the approval policy is {policy:?}"
     );
 
     let blocked_output = second_mock
@@ -278,7 +280,7 @@ async fn shell_command_escalated_permissions_rejected_then_ok() -> Result<()> {
         .and_then(|(content, _)| content)
         .expect("success output string");
     assert_regex_match(
-        r"(?s)^(?:Chunk ID: [^\n]+\n)?Wall time: [0-9]+(?:\.[0-9]+)? seconds\nProcess exited with code 0(?:\nOriginal token count: \d+)?\nOutput:\nshell ok\n?$",
+        r"(?s)^Exit code: 0\nWall time: [0-9]+(?:\.[0-9]+)? seconds\nOutput:\nshell ok\n?$",
         &success_output,
     );
 
@@ -290,7 +292,7 @@ async fn sandbox_denied_shell_command_returns_original_output() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_model("gpt-5.4");
+    let mut builder = test_codex_with_codex_surface().with_model("gpt-5.4");
     let fixture = builder.build(&server).await?;
 
     let call_id = "sandbox-denied-shell-command";
@@ -372,7 +374,7 @@ async fn shell_command_enforces_glob_deny_read_policy() -> Result<()> {
     skip_if_sandbox!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex()
+    let mut builder = test_codex_with_codex_surface()
         .with_model("gpt-5.4")
         .with_config(move |config| {
             let mut file_system_sandbox_policy = FileSystemSandboxPolicy::default();
@@ -462,7 +464,7 @@ async fn shell_command_enforces_glob_deny_read_policy() -> Result<()> {
     Ok(())
 }
 
-async fn collect_tools(use_unified_exec: bool) -> Result<Vec<String>> {
+async fn collect_tools(surface: ToolSurface, use_unified_exec: bool) -> Result<Vec<String>> {
     let server = start_mock_server().await;
 
     let responses = vec![sse(vec![
@@ -475,6 +477,7 @@ async fn collect_tools(use_unified_exec: bool) -> Result<Vec<String>> {
     let mut builder = test_codex()
         .with_model("gpt-5.4")
         .with_config(move |config| {
+            config.tool_surface = surface;
             if use_unified_exec {
                 config
                     .features
@@ -504,7 +507,7 @@ async fn collect_tools(use_unified_exec: bool) -> Result<Vec<String>> {
 async fn unified_exec_spec_toggle_end_to_end() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
-    let tools_disabled = collect_tools(/*use_unified_exec*/ false).await?;
+    let tools_disabled = collect_tools(ToolSurface::Claude, /*use_unified_exec*/ false).await?;
     assert!(
         tools_disabled.iter().any(|name| name == "Bash"),
         "tools list should keep the public Bash tool when unified exec is disabled: {tools_disabled:?}"
@@ -521,7 +524,7 @@ async fn unified_exec_spec_toggle_end_to_end() -> Result<()> {
         );
     }
 
-    let tools_enabled = collect_tools(/*use_unified_exec*/ true).await?;
+    let tools_enabled = collect_tools(ToolSurface::Claude, /*use_unified_exec*/ true).await?;
     assert!(
         tools_enabled.iter().any(|name| name == "Bash"),
         "tools list should include Bash when unified exec is enabled: {tools_enabled:?}"
@@ -550,11 +553,59 @@ async fn unified_exec_spec_toggle_end_to_end() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn tool_surface_switch_replaces_the_model_visible_tool_family() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let claude = collect_tools(ToolSurface::Claude, /*use_unified_exec*/ true).await?;
+    for expected in ["Bash", "ReadTaskOutput", "Read", "TodoWrite"] {
+        assert!(
+            claude.iter().any(|name| name == expected),
+            "Claude surface should include {expected}: {claude:?}"
+        );
+    }
+    for absent in [
+        "exec_command",
+        "write_stdin",
+        "update_plan",
+        "request_user_input",
+        "apply_patch",
+        "view_image",
+    ] {
+        assert!(
+            !claude.iter().any(|name| name == absent),
+            "Claude surface should not include {absent}: {claude:?}"
+        );
+    }
+
+    let codex = collect_tools(ToolSurface::Codex, /*use_unified_exec*/ true).await?;
+    for expected in [
+        "exec_command",
+        "write_stdin",
+        "update_plan",
+        "request_user_input",
+        "view_image",
+    ] {
+        assert!(
+            codex.iter().any(|name| name == expected),
+            "Codex surface should include {expected}: {codex:?}"
+        );
+    }
+    for absent in ["Bash", "ReadTaskOutput", "Read", "TodoWrite"] {
+        assert!(
+            !codex.iter().any(|name| name == absent),
+            "Codex surface should not include {absent}: {codex:?}"
+        );
+    }
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn shell_command_timeout_includes_timeout_prefix_and_metadata() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_model("test-gpt-5-codex");
+    let mut builder = test_codex_with_codex_surface().with_model("test-gpt-5-codex");
     let test = builder.build(&server).await?;
 
     let call_id = "shell-command-timeout";
@@ -641,12 +692,14 @@ async fn shell_command_timeout_handles_background_grandchild_stdout() -> Result<
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_model("gpt-5.4").with_config(|config| {
-        config
-            .permissions
-            .set_permission_profile(PermissionProfile::Disabled)
-            .expect("set permission profile");
-    });
+    let mut builder = test_codex_with_codex_surface()
+        .with_model("gpt-5.4")
+        .with_config(|config| {
+            config
+                .permissions
+                .set_permission_profile(PermissionProfile::Disabled)
+                .expect("set permission profile");
+        });
     let test = builder.build(&server).await?;
 
     let call_id = "shell-command-grandchild-timeout";

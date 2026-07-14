@@ -16,6 +16,7 @@ use codex_config::CloudConfigBundleLoader;
 use codex_core::CodexThread;
 use codex_core::ThreadManager;
 use codex_core::config::Config;
+use codex_core::config::ToolSurface;
 use codex_core::resolve_installation_id;
 use codex_core::shell::Shell;
 use codex_core::shell::get_shell_by_model_provided_path;
@@ -269,6 +270,12 @@ impl TestCodexBuilder {
         let new_model = model.to_string();
         self.with_config(move |config| {
             config.model = Some(new_model);
+        })
+    }
+
+    pub fn with_tool_surface(self, tool_surface: ToolSurface) -> Self {
+        self.with_config(move |config| {
+            config.tool_surface = tool_surface;
         })
     }
 
@@ -1123,6 +1130,14 @@ pub fn test_codex() -> TestCodexBuilder {
         exec_server_url: None,
         extensions: empty_extension_registry(),
     }
+}
+
+pub fn test_codex_with_codex_surface() -> TestCodexBuilder {
+    test_codex().with_tool_surface(ToolSurface::Codex)
+}
+
+pub fn test_codex_with_claude_surface() -> TestCodexBuilder {
+    test_codex().with_tool_surface(ToolSurface::Claude)
 }
 
 #[cfg(test)]

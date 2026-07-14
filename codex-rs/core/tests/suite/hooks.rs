@@ -42,7 +42,8 @@ use core_test_support::skip_if_windows;
 use core_test_support::streaming_sse::StreamingSseChunk;
 use core_test_support::streaming_sse::start_streaming_sse_server;
 use core_test_support::test_codex::responses_mock_model_provider;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_codex::test_codex_with_claude_surface;
+use core_test_support::test_codex::test_codex_with_codex_surface as test_codex;
 use core_test_support::wait_for_event;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
@@ -3967,11 +3968,8 @@ async fn post_tool_use_blocks_when_exec_session_completes_via_read_task_output()
     let poll_call_id = "posttooluse-exec-session-poll";
     let command = "sleep 1; printf session-post-hook-output".to_string();
     let start_args = serde_json::json!({
-        "cmd": command,
-        "shell": "/bin/sh",
-        "login": false,
-        "tty": false,
-        "yield_time_ms": 250,
+        "command": command,
+        "run_in_background": true,
     });
     let poll_args = serde_json::json!({
         "task_id": 1000,
@@ -3985,7 +3983,7 @@ async fn post_tool_use_blocks_when_exec_session_completes_via_read_task_output()
                 ev_response_created("resp-1"),
                 core_test_support::responses::ev_function_call(
                     start_call_id,
-                    "exec_command",
+                    "Bash",
                     &serde_json::to_string(&start_args)?,
                 ),
                 ev_completed("resp-1"),
@@ -4008,7 +4006,7 @@ async fn post_tool_use_blocks_when_exec_session_completes_via_read_task_output()
     )
     .await;
 
-    let mut builder = test_codex()
+    let mut builder = test_codex_with_claude_surface()
         .with_pre_build_hook(|home| {
             if let Err(error) = write_logging_pre_and_blocking_post_tool_use_hooks(home, feedback) {
                 panic!("failed to write tool use hook test fixture: {error}");

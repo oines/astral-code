@@ -18,7 +18,8 @@ use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::test_codex::local_selections;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_codex::test_codex_with_claude_surface;
+use core_test_support::test_codex::test_codex_with_codex_surface as test_codex;
 use core_test_support::test_codex::turn_permission_fields;
 use core_test_support::wait_for_event;
 use serde_json::Value;
@@ -160,7 +161,7 @@ async fn unified_exec_disabled_windows_sandbox_rejects_managed_read_only_command
 
 #[tokio::test]
 async fn execpolicy_blocks_shell_invocation() -> Result<()> {
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_codex_with_claude_surface().with_config(|config| {
         let policy_path = config.codex_home.join("rules").join("policy.rules");
         fs::create_dir_all(
             policy_path

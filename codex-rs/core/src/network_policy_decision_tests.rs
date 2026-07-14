@@ -1,4 +1,5 @@
 use super::*;
+use crate::config::ToolSurface;
 use codex_network_proxy::BlockedRequest;
 use codex_network_proxy::NetworkDecisionSource;
 use codex_protocol::approvals::NetworkPolicyAmendment;
@@ -166,7 +167,10 @@ fn denied_network_policy_message_requires_deny_decision() {
         port: Some(80),
         timestamp: 0,
     };
-    assert_eq!(denied_network_policy_message(&blocked), None);
+    assert_eq!(
+        denied_network_policy_message(&blocked, ToolSurface::Claude),
+        None
+    );
 }
 
 #[test]
@@ -184,7 +188,7 @@ fn denied_network_policy_message_for_denylist_block_is_explicit() {
         timestamp: 0,
     };
     assert_eq!(
-            denied_network_policy_message(&blocked),
+            denied_network_policy_message(&blocked, ToolSurface::Claude),
             Some(
                 "Network access to \"example.com\" was blocked: domain is explicitly denied by policy and cannot be approved from this prompt.".to_string()
             )
@@ -205,7 +209,8 @@ fn denied_network_policy_message_for_not_allowed_includes_intervention_hint() {
         port: Some(80),
         timestamp: 0,
     };
-    let msg = denied_network_policy_message(&blocked).expect("should produce a message");
+    let msg = denied_network_policy_message(&blocked, ToolSurface::Claude)
+        .expect("should produce a message");
     assert!(
         msg.contains("[Sandbox Intervention]"),
         "message should include intervention hint"
@@ -215,6 +220,11 @@ fn denied_network_policy_message_for_not_allowed_includes_intervention_hint() {
         "message should mention RequestPermissions"
     );
     assert!(msg.contains("network"), "message should mention network");
+
+    let codex_msg = denied_network_policy_message(&blocked, ToolSurface::Codex)
+        .expect("should produce a message");
+    assert!(codex_msg.contains("call request_permissions"));
+    assert!(!codex_msg.contains("RequestPermissions"));
 }
 
 #[test]
@@ -231,7 +241,8 @@ fn denied_network_policy_message_for_not_allowed_local_includes_intervention_hin
         port: Some(80),
         timestamp: 0,
     };
-    let msg = denied_network_policy_message(&blocked).expect("should produce a message");
+    let msg = denied_network_policy_message(&blocked, ToolSurface::Claude)
+        .expect("should produce a message");
     assert!(
         msg.contains("[Sandbox Intervention]"),
         "message should include intervention hint"
@@ -252,7 +263,8 @@ fn denied_network_policy_message_for_method_not_allowed_has_no_hint() {
         port: Some(80),
         timestamp: 0,
     };
-    let msg = denied_network_policy_message(&blocked).expect("should produce a message");
+    let msg = denied_network_policy_message(&blocked, ToolSurface::Claude)
+        .expect("should produce a message");
     assert!(
         !msg.contains("[Sandbox Intervention]"),
         "hard-denied reason should not include intervention hint"

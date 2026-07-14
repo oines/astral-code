@@ -142,9 +142,16 @@ fn assert_truncated_repeated_ascii_output(output: &str, byte: u8, max_len: usize
         "expected truncated output, got len {} preview {preview:?}",
         output.len()
     );
-    let body = output
-        .strip_prefix("Total output lines: 1\n\n")
-        .unwrap_or(output);
+    let body = if output.starts_with("Warning: truncated output") {
+        output
+            .split_once("\n\n")
+            .map(|(_, body)| body)
+            .unwrap_or(output)
+    } else {
+        output
+            .strip_prefix("Total output lines: 1\n\n")
+            .unwrap_or(output)
+    };
     let marker_start = body.find('…').unwrap_or_else(|| {
         panic!("truncated output should include opening marker: {preview:?} ... {suffix_preview:?}")
     });
@@ -177,7 +184,7 @@ fn wait_for_file_source(path: &Path) -> Result<String> {
     let quoted_path = shlex::try_join([path.to_string_lossy().as_ref()])?;
     let command = format!("if [ -f {quoted_path} ]; then printf ready; fi");
     Ok(format!(
-        r#"while ((await tools.Bash({{ command: {command:?} }})).output !== "ready") {{
+        r#"while ((await tools.exec_command({{ cmd: {command:?} }})).output !== "ready") {{
 }}"#
     ))
 }
@@ -405,7 +412,7 @@ async fn code_mode_can_return_exec_command_output() -> Result<()> {
         &server,
         "use exec to run exec_command",
         r#"
-text(JSON.stringify(await tools.Bash({ command: "printf code_mode_exec_marker" })));
+text(JSON.stringify(await tools.exec_command({ cmd: "printf code_mode_exec_marker" })));
 "#,
     )
     .await?;
@@ -461,7 +468,11 @@ async fn code_mode_only_restricts_prompt_tools() -> Result<()> {
     let first_body = resp_mock.single_request().body_json();
     assert_eq!(
         tool_names(&first_body),
-        vec!["exec".to_string(), "wait".to_string()]
+        vec![
+            "exec".to_string(),
+            "wait".to_string(),
+            "request_user_input".to_string(),
+        ]
     );
 
     Ok(())
@@ -543,7 +554,11 @@ if (!tool) {
     let first_body = resp_mock.single_request().body_json();
     assert_eq!(
         tool_names(&first_body),
-        vec!["exec".to_string(), "wait".to_string()]
+        vec![
+            "exec".to_string(),
+            "wait".to_string(),
+            "request_user_input".to_string(),
+        ]
     );
 
     let exec_description = first_body
@@ -688,7 +703,7 @@ async fn code_mode_only_can_call_nested_tools() -> Result<()> {
                 "call-1",
                 "exec",
                 r#"
-const output = await tools.Bash({ command: "printf code_mode_only_nested_tool_marker" });
+const output = await tools.exec_command({ cmd: "printf code_mode_only_nested_tool_marker" });
 text(output.output);
 "#,
             ),
@@ -725,20 +740,16 @@ text(output.output);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn code_mode_todo_write_nested_tool_returns_success_message() -> Result<()> {
+async fn code_mode_update_plan_nested_tool_result_is_empty_object() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
     let (_test, second_mock) = run_code_mode_turn(
         &server,
-        "use exec to run TodoWrite",
+        "use exec to run update_plan",
         r#"
-const result = await tools.TodoWrite({
-  todos: [{
-    content: "Run TodoWrite from code mode",
-    status: "in_progress",
-    activeForm: "Running TodoWrite from code mode",
-  }],
+const result = await tools.update_plan({
+  plan: [{ step: "Run update_plan from code mode", status: "in_progress" }],
 });
 text(JSON.stringify(result));
 "#,
@@ -750,16 +761,11 @@ text(JSON.stringify(result));
     assert_ne!(
         success,
         Some(false),
-        "exec TodoWrite call failed unexpectedly: {output}"
+        "exec update_plan call failed unexpectedly: {output}"
     );
 
     let parsed: Value = serde_json::from_str(&output)?;
-    assert_eq!(
-        parsed,
-        serde_json::json!(
-            "Todos have been modified successfully. Ensure that you continue to use the todo list to track your progress. Please proceed with the current tasks if applicable"
-        )
-    );
+    assert_eq!(parsed, serde_json::json!({}));
 
     Ok(())
 }
@@ -866,8 +872,8 @@ async fn code_mode_exec_command_explicit_max_output_tokens_truncates() -> Result
         &server,
         "use exec_command from code mode",
         r#"
-const result = await tools.Bash({
-  command: "printf '0123456789012345678901234567890123456789'",
+const result = await tools.exec_command({
+  cmd: "printf '0123456789012345678901234567890123456789'",
   max_output_tokens: 5
 });
 text(result.output);
@@ -880,7 +886,7 @@ text(result.output);
             &custom_tool_output_items(&second_mock.single_request(), "call-1"),
             /*index*/ 1
         ),
-        "Total output lines: 1\n\n0123456789…5 tokens truncated…0123456789"
+        "Warning: truncated output (original token count: 10)\nTotal output lines: 1\n\n0123456789…5 tokens truncated…0123456789"
     );
 
     Ok(())
@@ -896,8 +902,8 @@ async fn code_mode_exec_explicit_max_above_turn_budget_is_clamped() -> Result<()
         &server,
         "use exec_command from code mode",
         r#"// @exec: {"max_output_tokens": 20000}
-const result = await tools.Bash({
-  command: "python3 -c \"import sys; sys.stdout.write('x' * 50000)\"",
+const result = await tools.exec_command({
+  cmd: "python3 -c \"import sys; sys.stdout.write('x' * 50000)\"",
   max_output_tokens: 20000
 });
 text(result.output);
@@ -927,8 +933,8 @@ async fn code_mode_exec_explicit_max_above_default_truncates_larger_output() -> 
         &server,
         "use exec_command from code mode",
         r#"// @exec: {"max_output_tokens": 25000}
-const result = await tools.Bash({
-  command: "python3 -c \"import sys; sys.stdout.write('A' * 90000)\"",
+const result = await tools.exec_command({
+  cmd: "python3 -c \"import sys; sys.stdout.write('A' * 90000)\"",
   max_output_tokens: 20000
 });
 text(result.output);
@@ -958,8 +964,8 @@ async fn code_mode_exec_explicit_max_above_truncation_policy_is_clamped() -> Res
         &server,
         "use exec_command from code mode",
         r#"// @exec: {"max_output_tokens": 20000}
-const result = await tools.Bash({
-  command: "python3 -c \"import sys; sys.stdout.write('x' * 50000)\"",
+const result = await tools.exec_command({
+  cmd: "python3 -c \"import sys; sys.stdout.write('x' * 50000)\"",
   max_output_tokens: 20000
 });
 text(result.output);
@@ -992,8 +998,8 @@ async fn code_mode_exec_without_max_is_clamped_by_turn_budget() -> Result<()> {
         &server,
         "use exec_command from code mode",
         r#"// @exec: {"max_output_tokens": 20000}
-const result = await tools.Bash({
-  command: "python3 -c \"import sys; sys.stdout.write('x' * 50000)\""
+const result = await tools.exec_command({
+  cmd: "python3 -c \"import sys; sys.stdout.write('x' * 50000)\""
 });
 text(result.output);
 "#,
@@ -1022,8 +1028,8 @@ async fn code_mode_exec_without_max_is_clamped_by_truncation_policy() -> Result<
         &server,
         "use exec_command from code mode",
         r#"// @exec: {"max_output_tokens": 20000}
-const result = await tools.Bash({
-  command: "python3 -c \"import sys; sys.stdout.write('x' * 50000)\""
+const result = await tools.exec_command({
+  cmd: "python3 -c \"import sys; sys.stdout.write('x' * 50000)\""
 });
 text(result.output);
 "#,
@@ -1055,8 +1061,8 @@ async fn code_mode_exec_explicit_max_output_tokens_truncates() -> Result<()> {
         &server,
         "use exec_command from code mode",
         r#"// @exec: {"max_output_tokens": 5}
-const result = await tools.Bash({
-  command: "printf '0123456789012345678901234567890123456789'"
+const result = await tools.exec_command({
+  cmd: "printf '0123456789012345678901234567890123456789'"
 });
 text(result.output);
 "#,
@@ -1068,7 +1074,7 @@ text(result.output);
             &custom_tool_output_items(&second_mock.single_request(), "call-1"),
             /*index*/ 1
         ),
-        "Total output lines: 1\n\n0123456789…5 tokens truncated…0123456789"
+        "Warning: truncated output (original token count: 10)\nTotal output lines: 1\n\n0123456789…5 tokens truncated…0123456789"
     );
 
     Ok(())
@@ -1127,7 +1133,7 @@ async fn code_mode_exec_surfaces_handler_errors_as_exceptions() -> Result<()> {
         "surface nested tool handler failures as script exceptions",
         r#"
 try {
-  await tools.Bash({});
+  await tools.exec_command({});
   text("no-exception");
 } catch (error) {
   text(`caught:${error?.message ?? String(error)}`);
@@ -1929,7 +1935,7 @@ text("session a start");
 yield_control();
 {session_a_wait}
 text("session a done");
-await tools.Bash({{ command: {session_a_done_command:?} }});
+await tools.exec_command({{ cmd: {session_a_done_command:?} }});
 "#
     );
     let session_b_code = format!(
@@ -2118,7 +2124,7 @@ async fn code_mode_background_keeps_running_on_later_turn_without_wait() -> Resu
         r#"
 text("before yield");
 yield_control();
-await tools.Bash({{ command: {write_file_command:?} }});
+await tools.exec_command({{ cmd: {write_file_command:?} }});
 text("after yield");
 "#
     );
@@ -2281,6 +2287,7 @@ text("token one token two token three token four token five token six token seve
     );
     let expected_pattern = r#"(?sx)
 \A
+Warning:\ truncated\ output\ \(original\ token\ count:\ \d+\)\n
 Total\ output\ lines:\ 1\n
 \n
 .*…\d+\ tokens\ truncated….*
@@ -2596,7 +2603,7 @@ async fn code_mode_can_write_file_via_nested_tool() -> Result<()> {
     let file_path = test.cwd_path().join(file_name);
     let quoted_path = shlex::try_join([file_path.to_string_lossy().as_ref()])?;
     let command = format!("printf 'hello from code_mode\\n' > {quoted_path}");
-    let code = format!("text((await tools.Bash({{ command: {command:?} }})).output);\n");
+    let code = format!("text((await tools.exec_command({{ cmd: {command:?} }})).output);\n");
 
     responses::mount_sse_once(
         &server,
@@ -2800,7 +2807,7 @@ async fn code_mode_exposes_namespaced_mcp_tools_on_global_tools_object() -> Resu
     let server = responses::start_mock_server().await;
     let code = r#"
 text(JSON.stringify({
-  hasBash: typeof tools.Bash === "function",
+  hasExecCommand: typeof tools.exec_command === "function",
   hasNamespacedEcho: typeof tools.mcp__rmcp__echo === "function",
 }));
 "#;
@@ -2821,7 +2828,7 @@ text(JSON.stringify({
     assert_eq!(
         parsed,
         serde_json::json!({
-            "hasBash": !cfg!(windows),
+            "hasExecCommand": !cfg!(windows),
             "hasNamespacedEcho": true,
         })
     );
@@ -2975,7 +2982,7 @@ async fn code_mode_exports_all_tools_metadata_for_builtin_tools() -> Result<()> 
 
     let server = responses::start_mock_server().await;
     let code = r#"
-const tool = ALL_TOOLS.find(({ name }) => name === "Bash");
+const tool = ALL_TOOLS.find(({ name }) => name === "view_image");
 text(JSON.stringify({ names: ALL_TOOLS.map(({ name }) => name), tool }));
 "#;
 
@@ -2990,12 +2997,14 @@ text(JSON.stringify({ names: ALL_TOOLS.map(({ name }) => name), tool }));
         "exec ALL_TOOLS lookup failed unexpectedly: {output}"
     );
     let parsed: Value = serde_json::from_str(&output)?;
-    let tool = parsed.get("tool").expect("Bash metadata should be present");
-    assert_eq!(tool.get("name").and_then(Value::as_str), Some("Bash"));
+    let tool = parsed
+        .get("tool")
+        .expect("view_image metadata should be present");
+    assert_eq!(tool.get("name").and_then(Value::as_str), Some("view_image"));
     assert!(
         tool.get("description")
             .and_then(Value::as_str)
-            .is_some_and(|description| description.contains("declare const tools: { Bash"))
+            .is_some_and(|description| description.contains("declare const tools: { view_image"))
     );
 
     Ok(())
@@ -3183,8 +3192,8 @@ async fn code_mode_excludes_configured_nested_tool_namespaces() -> Result<()> {
 text(JSON.stringify({
   excludedType: typeof tools.excluded__lookup,
   excludedMetadata: ALL_TOOLS.some(({ name }) => name === "excluded__lookup"),
-  allowedType: typeof tools.TodoWrite,
-  allowedMetadata: ALL_TOOLS.some(({ name }) => name === "TodoWrite"),
+  allowedType: typeof tools.update_plan,
+  allowedMetadata: ALL_TOOLS.some(({ name }) => name === "update_plan"),
 }));
 "#,
             ),

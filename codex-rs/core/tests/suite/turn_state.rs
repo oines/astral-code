@@ -14,7 +14,7 @@ use core_test_support::responses::start_mock_server;
 use core_test_support::responses::start_websocket_server_with_headers;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::responses_api_model_provider;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_codex::test_codex_with_codex_surface as test_codex;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 

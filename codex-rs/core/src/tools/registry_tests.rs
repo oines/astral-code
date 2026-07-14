@@ -362,7 +362,7 @@ async fn write_stdin_does_not_expose_default_pre_tool_use_payload() {
 }
 
 #[tokio::test]
-async fn hidden_tools_are_not_directly_callable_by_model() {
+async fn hidden_tools_remain_dispatchable_by_internal_runtimes() {
     let (session, turn) = crate::session::tests::make_session_and_context().await;
     let tool_name = codex_tools::ToolName::plain("write_stdin");
     let registry = ToolRegistry::from_tools([override_tool_exposure(
@@ -373,15 +373,10 @@ async fn hidden_tools_are_not_directly_callable_by_model() {
     )]);
     let invocation = test_invocation(Arc::new(session), Arc::new(turn), "call-1", tool_name);
 
-    let err = match registry.dispatch_any(invocation).await {
-        Ok(_) => panic!("hidden tool should be rejected before handler execution"),
-        Err(err) => err,
-    };
-
-    assert_eq!(
-        err.to_string(),
-        "write_stdin is internal in Astral; call ReadTaskOutput to poll output or SendTaskInput to send interactive stdin."
-    );
+    registry
+        .dispatch_any(invocation)
+        .await
+        .expect("hidden runtimes are excluded from specs, not dispatch");
 }
 
 #[test]

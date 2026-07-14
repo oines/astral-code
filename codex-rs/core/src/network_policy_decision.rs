@@ -1,3 +1,4 @@
+use crate::config::ToolSurface;
 use codex_execpolicy::Decision as ExecPolicyDecision;
 use codex_execpolicy::NetworkRuleProtocol as ExecPolicyNetworkRuleProtocol;
 use codex_network_proxy::BlockedRequest;
@@ -43,7 +44,10 @@ pub(crate) fn network_approval_context_from_payload(
     })
 }
 
-pub(crate) fn denied_network_policy_message(blocked: &BlockedRequest) -> Option<String> {
+pub(crate) fn denied_network_policy_message(
+    blocked: &BlockedRequest,
+    tool_surface: ToolSurface,
+) -> Option<String> {
     let decision = blocked
         .decision
         .as_deref()
@@ -69,9 +73,13 @@ pub(crate) fn denied_network_policy_message(blocked: &BlockedRequest) -> Option<
     let requestable = matches!(blocked.reason.as_str(), "not_allowed" | "not_allowed_local");
 
     if requestable {
+        let request_permissions_tool = match tool_surface {
+            ToolSurface::Claude => "RequestPermissions",
+            ToolSurface::Codex => "request_permissions",
+        };
         Some(format!(
             "Network access to \"{host}\" was blocked: {detail}.\n\n\
-             [Sandbox Intervention] To proceed, call RequestPermissions to request \
+             [Sandbox Intervention] To proceed, call {request_permissions_tool} to request \
              network access ({{\"network\": {{\"enabled\": true}}}}). \
              Wait for approval, then retry the original action.\n\
              Do not retry the blocked action before permission is granted."

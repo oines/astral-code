@@ -1,8 +1,10 @@
 use crate::agent::exceeds_thread_spawn_depth_limit;
 use crate::agent::next_thread_spawn_depth;
+use crate::config::ToolSurface;
 use crate::session::turn_context::TurnContext;
 use crate::tools::code_mode::execute_spec::create_code_mode_tool;
 use crate::tools::context::ToolInvocation;
+use crate::tools::effective_tool_surface;
 use crate::tools::handlers::ApplyPatchHandler;
 use crate::tools::handlers::AstralAskUserQuestionHandler;
 use crate::tools::handlers::AstralBashHandler;
@@ -57,6 +59,8 @@ use crate::tools::handlers::multi_agents_v2::SendMessageHandler as SendMessageHa
 use crate::tools::handlers::multi_agents_v2::SpawnAgentHandler as SpawnAgentHandlerV2;
 use crate::tools::handlers::multi_agents_v2::WaitAgentHandler as WaitAgentHandlerV2;
 use crate::tools::handlers::view_image_spec::ViewImageToolOptions;
+use crate::tools::hosted_spec::WebSearchToolOptions;
+use crate::tools::hosted_spec::create_web_search_tool;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::ToolExposure;
 use crate::tools::registry::ToolRegistry;
@@ -74,16 +78,9 @@ use codex_protocol::openai_models::ToolMode;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
-use codex_tools::BASH_TOOL_NAME;
 use codex_tools::DiscoverableTool;
-use codex_tools::EDIT_TOOL_NAME;
-use codex_tools::GLOB_TOOL_NAME;
-use codex_tools::GREP_TOOL_NAME;
-use codex_tools::READ_TASK_OUTPUT_TOOL_NAME;
-use codex_tools::READ_TOOL_NAME;
 use codex_tools::ResponsesApiNamespace;
 use codex_tools::ResponsesApiNamespaceTool;
-use codex_tools::TODO_WRITE_TOOL_NAME;
 use codex_tools::TOOL_SEARCH_TOOL_NAME;
 use codex_tools::ToolCall as ExtensionToolCall;
 use codex_tools::ToolEnvironmentMode;
@@ -92,13 +89,10 @@ use codex_tools::ToolName;
 use codex_tools::ToolSearchInfo;
 use codex_tools::ToolSpec;
 use codex_tools::UnifiedExecShellMode;
-use codex_tools::WRITE_TOOL_NAME;
-use codex_tools::astral_core_tool_by_name;
 use codex_tools::can_request_original_image_detail;
 use codex_tools::collect_code_mode_exec_prompt_tool_definitions;
 use codex_tools::collect_request_plugin_install_entries;
 use codex_tools::default_namespace_description;
-use codex_tools::parse_tool_input_schema_without_compaction;
 use codex_tools::request_user_input_available_modes;
 use codex_tools::shell_command_backend_for_features;
 use codex_tools::shell_type_for_model_and_features;
@@ -118,6 +112,7 @@ type PlannedRuntime = Arc<dyn CoreToolRuntime>;
 #[derive(Default)]
 struct PlannedTools {
     runtimes: Vec<PlannedRuntime>,
+    hosted_specs: Vec<ToolSpec>,
 }
 
 impl PlannedTools {
@@ -145,6 +140,10 @@ impl PlannedTools {
         T: CoreToolRuntime + 'static,
     {
         self.add_with_exposure(handler, ToolExposure::Hidden);
+    }
+
+    fn add_hosted_spec(&mut self, spec: ToolSpec) {
+        self.hosted_specs.push(spec);
     }
 
     fn runtimes(&self) -> &[PlannedRuntime] {
@@ -206,14 +205,12 @@ fn build_model_visible_specs_and_registry(
     turn_context: &TurnContext,
     planned_tools: PlannedTools,
 ) -> (Vec<ToolSpec>, ToolRegistry) {
-    let PlannedTools { runtimes } = planned_tools;
+    let PlannedTools {
+        runtimes,
+        hosted_specs,
+    } = planned_tools;
     let mut specs = Vec::new();
     let mut seen_tool_names = HashSet::new();
-    let registered_tool_names = runtimes
-        .iter()
-        .map(|runtime| runtime.tool_name())
-        .collect::<HashSet<_>>();
-    let mut seen_model_visible_names = HashSet::new();
     for runtime in &runtimes {
         let tool_name = runtime.tool_name();
         if !seen_tool_names.insert(tool_name.clone()) {
@@ -224,16 +221,10 @@ fn build_model_visible_specs_and_registry(
         {
             let spec = runtime.spec();
             let spec = spec_for_model_request(turn_context, exposure, &tool_name, spec);
-            let spec = astral_spec_for_model_request(&tool_name, spec, &registered_tool_names);
-            push_model_visible_spec(&mut specs, &mut seen_model_visible_names, spec);
+            specs.push(spec);
         }
     }
-    append_astral_file_search_specs(
-        turn_context,
-        &registered_tool_names,
-        &mut specs,
-        &mut seen_model_visible_names,
-    );
+    specs.extend(hosted_specs);
     let registry = ToolRegistry::from_tools(runtimes);
     let model_visible_specs = merge_into_namespaces(specs)
         .into_iter()
@@ -243,119 +234,6 @@ fn build_model_visible_specs_and_registry(
         .collect();
 
     (model_visible_specs, registry)
-}
-
-fn push_model_visible_spec(
-    specs: &mut Vec<ToolSpec>,
-    seen_names: &mut HashSet<String>,
-    spec: ToolSpec,
-) {
-    if matches!(spec, ToolSpec::Namespace(_)) {
-        specs.push(spec);
-        return;
-    }
-
-    if seen_names.insert(spec.name().to_string()) {
-        specs.push(spec);
-    }
-}
-
-fn append_astral_file_search_specs(
-    turn_context: &TurnContext,
-    registered_tool_names: &HashSet<ToolName>,
-    specs: &mut Vec<ToolSpec>,
-    seen_names: &mut HashSet<String>,
-) {
-    if matches!(
-        turn_context.tool_mode,
-        ToolMode::CodeMode | ToolMode::CodeModeOnly
-    ) {
-        return;
-    }
-
-    if !registered_tool_names.contains(&ToolName::plain("exec_command")) {
-        return;
-    }
-
-    for tool_name in [
-        READ_TOOL_NAME,
-        WRITE_TOOL_NAME,
-        EDIT_TOOL_NAME,
-        GLOB_TOOL_NAME,
-        GREP_TOOL_NAME,
-    ] {
-        push_model_visible_spec(specs, seen_names, astral_tool_spec(tool_name));
-    }
-}
-
-fn astral_spec_for_model_request(
-    tool_name: &ToolName,
-    spec: ToolSpec,
-    registered_tool_names: &HashSet<ToolName>,
-) -> ToolSpec {
-    if tool_name.namespace.is_some() {
-        return spec;
-    }
-
-    let astral_tool_name = match tool_name.name.as_str() {
-        "exec_command" => Some(BASH_TOOL_NAME),
-        "write_stdin" => Some(READ_TASK_OUTPUT_TOOL_NAME),
-        "shell_command" if registered_tool_names.contains(&ToolName::plain("exec_command")) => {
-            Some(BASH_TOOL_NAME)
-        }
-        "update_plan" => Some(TODO_WRITE_TOOL_NAME),
-        _ => None,
-    };
-
-    let Some(astral_tool_name) = astral_tool_name else {
-        return spec;
-    };
-
-    astral_tool_spec_from_source(astral_tool_name, &spec)
-}
-
-fn astral_tool_spec(name: &str) -> ToolSpec {
-    astral_tool_spec_from_source(
-        name,
-        /*source*/
-        &ToolSpec::ImageGeneration {
-            output_format: String::new(),
-        },
-    )
-}
-
-fn astral_tool_spec_from_source(name: &str, source: &ToolSpec) -> ToolSpec {
-    let tool = astral_core_tool_by_name(name).unwrap_or_else(|| {
-        panic!("astral core tool `{name}` should have a schema");
-    });
-    let parameters = parse_tool_input_schema_without_compaction(&tool.input_schema)
-        .unwrap_or_else(|err| panic!("astral core tool `{name}` schema should parse: {err}"));
-    let description = source_description(source).map_or(tool.description.clone(), |source| {
-        if source.trim().is_empty() || source == tool.description {
-            tool.description.clone()
-        } else {
-            format!("{}\n\n{}", tool.description, source)
-        }
-    });
-    ToolSpec::Function(codex_tools::ResponsesApiTool {
-        name: tool.name,
-        description,
-        strict: false,
-        defer_loading: None,
-        parameters,
-        output_schema: None,
-    })
-}
-
-fn source_description(source: &ToolSpec) -> Option<&str> {
-    match source {
-        ToolSpec::Function(tool) => Some(tool.description.as_str()),
-        ToolSpec::ToolSearch { description, .. } => Some(description.as_str()),
-        ToolSpec::Namespace(_)
-        | ToolSpec::ImageGeneration { .. }
-        | ToolSpec::WebSearch { .. }
-        | ToolSpec::Freeform(_) => None,
-    }
 }
 
 fn spec_for_model_request(
@@ -629,13 +507,15 @@ fn add_tool_sources(context: &CoreToolPlanContext<'_>, planned_tools: &mut Plann
     add_mcp_runtime_tools(context, planned_tools);
     add_extension_tools(context, planned_tools);
     add_dynamic_tools(context, planned_tools);
+    if effective_tool_surface(context.turn_context) == ToolSurface::Codex {
+        for spec in hosted_model_tool_specs(context) {
+            planned_tools.add_hosted_spec(spec);
+        }
+    }
 }
 
 fn add_astral_file_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut PlannedTools) {
-    if matches!(
-        context.turn_context.tool_mode,
-        ToolMode::CodeMode | ToolMode::CodeModeOnly
-    ) {
+    if effective_tool_surface(context.turn_context) != ToolSurface::Claude {
         return;
     }
     if !context
@@ -661,6 +541,43 @@ fn provider_neutral_web_tools_enabled(turn_context: &TurnContext) -> bool {
     turn_context.config.web_search_mode.value() == WebSearchMode::Live
 }
 
+fn standalone_web_search_enabled(turn_context: &TurnContext) -> bool {
+    namespace_tools_enabled(turn_context)
+        && (turn_context.model_info.use_responses_lite
+            || turn_context
+                .config
+                .features
+                .get()
+                .enabled(Feature::StandaloneWebSearch))
+}
+
+fn hosted_model_tool_specs(context: &CoreToolPlanContext<'_>) -> Vec<ToolSpec> {
+    let turn_context = context.turn_context;
+    if turn_context.model_info.use_responses_lite {
+        return Vec::new();
+    }
+
+    let standalone_web_search_available = standalone_web_search_enabled(turn_context)
+        && context
+            .extension_tool_executors
+            .iter()
+            .any(|executor| executor.tool_name() == ToolName::namespaced("web", "run"));
+    let web_search_mode = (!standalone_web_search_available
+        && turn_context.provider.capabilities().web_search)
+        .then_some(turn_context.config.web_search_mode.value());
+    let web_search_config = web_search_mode
+        .as_ref()
+        .and(turn_context.config.web_search_config.as_ref());
+
+    create_web_search_tool(WebSearchToolOptions {
+        web_search_mode,
+        web_search_config,
+        web_search_tool_type: turn_context.model_info.web_search_tool_type,
+    })
+    .into_iter()
+    .collect()
+}
+
 fn add_shell_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut PlannedTools) {
     let turn_context = context.turn_context;
     let features = turn_context.features.get();
@@ -678,8 +595,11 @@ fn add_shell_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut Planne
         exec_permission_approvals_enabled,
     };
 
-    match shell_type_for_model_and_features(&turn_context.model_info, features) {
-        ConfigShellToolType::UnifiedExec => {
+    match (
+        effective_tool_surface(turn_context),
+        shell_type_for_model_and_features(&turn_context.model_info, features),
+    ) {
+        (ToolSurface::Claude, ConfigShellToolType::UnifiedExec) => {
             let exec_options = ExecCommandHandlerOptions {
                 allow_login_shell,
                 exec_permission_approvals_enabled,
@@ -691,19 +611,34 @@ fn add_shell_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut Planne
             planned_tools.add(AstralSendTaskInputHandler::new());
             planned_tools.add(AstralListBackgroundTasksHandler);
             planned_tools.add(AstralStopBackgroundTaskHandler);
-            planned_tools.add_dispatch_only(ExecCommandHandler::new(exec_options));
-            planned_tools.add_dispatch_only(WriteStdinHandler);
-
-            // Keep the legacy shell tool registered while unified exec is
-            // model-visible.
+        }
+        (ToolSurface::Codex, ConfigShellToolType::UnifiedExec) => {
+            let exec_options = ExecCommandHandlerOptions {
+                allow_login_shell,
+                exec_permission_approvals_enabled,
+                include_environment_id,
+                include_shell_parameter: unified_exec_should_include_shell_parameter(turn_context),
+            };
+            planned_tools.add(ExecCommandHandler::new(exec_options));
+            planned_tools.add(WriteStdinHandler);
             planned_tools.add_dispatch_only(ShellCommandHandler::new(shell_command_options));
         }
-        ConfigShellToolType::Disabled => {}
-        ConfigShellToolType::Default
-        | ConfigShellToolType::Local
-        | ConfigShellToolType::ShellCommand => {
+        (ToolSurface::Claude | ToolSurface::Codex, ConfigShellToolType::Disabled) => {}
+        (
+            ToolSurface::Claude,
+            ConfigShellToolType::Default
+            | ConfigShellToolType::Local
+            | ConfigShellToolType::ShellCommand,
+        ) => {
             planned_tools.add(AstralBashHandler::new_shell_command(shell_command_options));
-            planned_tools.add_dispatch_only(ShellCommandHandler::new(shell_command_options));
+        }
+        (
+            ToolSurface::Codex,
+            ConfigShellToolType::Default
+            | ConfigShellToolType::Local
+            | ConfigShellToolType::ShellCommand,
+        ) => {
+            planned_tools.add(ShellCommandHandler::new(shell_command_options));
         }
     }
 }
@@ -720,12 +655,21 @@ fn unified_exec_should_include_shell_parameter(turn_context: &TurnContext) -> bo
 }
 
 fn add_mcp_resource_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut PlannedTools) {
-    if context.mcp_tools.is_some() {
-        planned_tools.add(AstralListMcpResourcesHandler::new());
-        planned_tools.add_dispatch_only(ListMcpResourcesHandler);
-        planned_tools.add(ListMcpResourceTemplatesHandler);
-        planned_tools.add(AstralReadMcpResourceHandler::new());
-        planned_tools.add_dispatch_only(ReadMcpResourceHandler);
+    if context.mcp_tools.is_none() {
+        return;
+    }
+
+    match effective_tool_surface(context.turn_context) {
+        ToolSurface::Claude => {
+            planned_tools.add(AstralListMcpResourcesHandler::new());
+            planned_tools.add(ListMcpResourceTemplatesHandler);
+            planned_tools.add(AstralReadMcpResourceHandler::new());
+        }
+        ToolSurface::Codex => {
+            planned_tools.add(ListMcpResourcesHandler);
+            planned_tools.add(ListMcpResourceTemplatesHandler);
+            planned_tools.add(ReadMcpResourceHandler);
+        }
     }
 }
 
@@ -734,27 +678,47 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut
     let features = turn_context.features.get();
     let environment_mode = turn_context.tool_environment_mode();
 
-    planned_tools.add(AstralTodoWriteHandler::new());
-    planned_tools.add_dispatch_only(PlanHandler);
+    match effective_tool_surface(turn_context) {
+        ToolSurface::Claude => {
+            planned_tools.add(AstralTodoWriteHandler::new());
 
-    if turn_context
-        .turn_skills
-        .outcome
-        .skills_with_enabled()
-        .any(|(_, enabled)| enabled)
-    {
-        planned_tools.add(AstralSkillHandler);
-    }
+            if turn_context
+                .turn_skills
+                .outcome
+                .skills_with_enabled()
+                .any(|(_, enabled)| enabled)
+            {
+                planned_tools.add(AstralSkillHandler);
+            }
 
-    if turn_context.config.experimental_request_user_input_enabled {
-        let available_modes = request_user_input_available_modes(features);
-        planned_tools.add(AstralAskUserQuestionHandler::new(available_modes.clone()));
-        planned_tools.add_dispatch_only(RequestUserInputHandler { available_modes });
-    }
+            if turn_context.config.experimental_request_user_input_enabled {
+                planned_tools.add(AstralAskUserQuestionHandler::new(
+                    request_user_input_available_modes(features),
+                ));
+            }
 
-    if features.enabled(Feature::RequestPermissionsTool) {
-        planned_tools.add(AstralRequestPermissionsHandler::new());
-        planned_tools.add_dispatch_only(RequestPermissionsHandler);
+            if features.enabled(Feature::RequestPermissionsTool) {
+                planned_tools.add(AstralRequestPermissionsHandler::new());
+            }
+        }
+        ToolSurface::Codex => {
+            planned_tools.add(PlanHandler);
+
+            if turn_context.config.experimental_request_user_input_enabled {
+                planned_tools.add_with_exposure(
+                    RequestUserInputHandler {
+                        available_modes: request_user_input_available_modes(features),
+                    },
+                    ToolExposure::DirectModelOnly,
+                );
+            }
+
+            if environment_mode.has_environment()
+                && features.enabled(Feature::RequestPermissionsTool)
+            {
+                planned_tools.add(RequestPermissionsHandler);
+            }
+        }
     }
 
     if tool_suggest_enabled(turn_context)
@@ -769,10 +733,12 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut
         ));
     }
 
-    if environment_mode.has_environment() && turn_context.model_info.apply_patch_tool_type.is_some()
+    if environment_mode.has_environment()
+        && turn_context.model_info.apply_patch_tool_type.is_some()
+        && effective_tool_surface(turn_context) == ToolSurface::Codex
     {
         let include_environment_id = matches!(environment_mode, ToolEnvironmentMode::Multiple);
-        planned_tools.add_dispatch_only(ApplyPatchHandler::new(include_environment_id));
+        planned_tools.add(ApplyPatchHandler::new(include_environment_id));
     }
 
     if turn_context
@@ -784,9 +750,11 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut
         planned_tools.add(TestSyncHandler);
     }
 
-    if environment_mode.has_environment() {
+    if environment_mode.has_environment()
+        && effective_tool_surface(turn_context) == ToolSurface::Codex
+    {
         let include_environment_id = matches!(environment_mode, ToolEnvironmentMode::Multiple);
-        planned_tools.add_dispatch_only(ViewImageHandler::new(ViewImageToolOptions {
+        planned_tools.add(ViewImageHandler::new(ViewImageToolOptions {
             can_request_original_image_detail: can_request_original_image_detail(
                 &turn_context.model_info,
             ),
@@ -1114,15 +1082,32 @@ fn append_extension_tool_executors(
         reserved_tool_names.insert(ToolName::plain(TOOL_SEARCH_TOOL_NAME));
     }
 
+    let surface = effective_tool_surface(turn_context);
     let provider_neutral_web_tools_enabled = provider_neutral_web_tools_enabled(turn_context);
+    let standalone_web_search_enabled = standalone_web_search_enabled(turn_context);
+    let web_search_mode_on = turn_context.config.web_search_mode.value() != WebSearchMode::Disabled;
 
     for executor in executors.iter().cloned() {
         let tool_name = executor.tool_name();
-        if tool_name == ToolName::namespaced("web", "run") {
-            continue;
-        }
-        if is_provider_neutral_web_tool(&tool_name) && !provider_neutral_web_tools_enabled {
-            continue;
+        match surface {
+            ToolSurface::Claude => {
+                if tool_name == ToolName::namespaced("web", "run") {
+                    continue;
+                }
+                if is_provider_neutral_web_tool(&tool_name) && !provider_neutral_web_tools_enabled {
+                    continue;
+                }
+            }
+            ToolSurface::Codex => {
+                if is_provider_neutral_web_tool(&tool_name) {
+                    continue;
+                }
+                if tool_name == ToolName::namespaced("web", "run")
+                    && (!standalone_web_search_enabled || !web_search_mode_on)
+                {
+                    continue;
+                }
+            }
         }
         if tool_name == ToolName::namespaced(IMAGE_GEN_NAMESPACE, IMAGEGEN_TOOL_NAME)
             && !standalone_image_generation_model_visible(turn_context)

@@ -1,7 +1,6 @@
 use crate::function_tool::FunctionCallError;
 use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
-use crate::tools::astral_tool_bridge::canonical_astral_tool_name;
 use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
@@ -79,19 +78,18 @@ impl ToolRouter {
         &self,
         tool_name: &ToolName,
     ) -> Option<Box<dyn ToolArgumentDiffConsumer>> {
-        self.registry
-            .create_diff_consumer(&canonical_astral_tool_name(tool_name))
+        self.registry.create_diff_consumer(tool_name)
     }
 
     pub fn tool_supports_parallel(&self, call: &ToolCall) -> bool {
         self.registry
-            .supports_parallel_tool_calls(&canonical_astral_tool_name(&call.tool_name))
+            .supports_parallel_tool_calls(&call.tool_name)
             .unwrap_or(false)
     }
 
     pub fn tool_waits_for_runtime_cancellation(&self, call: &ToolCall) -> bool {
         self.registry
-            .waits_for_runtime_cancellation(&canonical_astral_tool_name(&call.tool_name))
+            .waits_for_runtime_cancellation(&call.tool_name)
             .unwrap_or(false)
     }
 

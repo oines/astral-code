@@ -29,7 +29,7 @@ use core_test_support::skip_if_no_network;
 use core_test_support::skip_if_sandbox;
 use core_test_support::test_codex::TestCodex;
 use core_test_support::test_codex::local_selections;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_codex::test_codex_with_codex_surface as test_codex;
 use core_test_support::test_codex::turn_permission_fields;
 use core_test_support::wait_for_event;
 use pretty_assertions::assert_eq;
@@ -53,7 +53,7 @@ fn request_permissions_tool_event(
         "permissions": permissions,
     });
     let args_str = serde_json::to_string(&args)?;
-    Ok(ev_function_call(call_id, "RequestPermissions", &args_str))
+    Ok(ev_function_call(call_id, "request_permissions", &args_str))
 }
 
 fn exec_command_event(call_id: &str, command: &str) -> Result<Value> {

@@ -26,6 +26,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use super::append_sandbox_intervention_hint;
+use super::effective_tool_surface;
 use super::format_exec_output_str;
 
 #[derive(Clone, Copy)]
@@ -379,7 +380,7 @@ impl ToolEmitter {
             }
             Err(ToolError::Codex(CodexErr::Sandbox(SandboxErr::Denied { output, .. }))) => {
                 let mut response = self.format_exec_output_for_model(&output, ctx);
-                append_sandbox_intervention_hint(&mut response);
+                append_sandbox_intervention_hint(&mut response, effective_tool_surface(ctx.turn));
                 // apply_patch can be denied after it has already committed a
                 // known prefix. Reuse the output-bearing path so the visible
                 // item still fails while the turn diff consumes that prefix.

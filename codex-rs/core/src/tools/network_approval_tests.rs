@@ -1,4 +1,5 @@
 use super::*;
+use crate::config::ToolSurface;
 use crate::sandboxing::SandboxPermissions;
 use codex_network_proxy::BlockedRequestArgs;
 use codex_protocol::models::PermissionProfile;
@@ -237,6 +238,7 @@ async fn register_call_with_default_shell_trigger(
                 tty: None,
             },
             "curl https://example.com".to_string(),
+            ToolSurface::Claude,
             cancellation_token.clone(),
         )
         .await;
@@ -263,6 +265,7 @@ async fn active_call_preserves_triggering_command_context() {
             "turn-1".to_string(),
             expected.clone(),
             "curl https://example.com".to_string(),
+            ToolSurface::Claude,
             CancellationToken::new(),
         )
         .await;

@@ -36,6 +36,7 @@ use codex_tools::create_agent_tools_for_provider_neutral_request;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 
+use crate::config::ToolSurface;
 use crate::session::tests::make_session_and_context;
 use crate::session::turn_context::TurnContext;
 use crate::tools::handlers::multi_agents_spec::MULTI_AGENT_V1_NAMESPACE;
@@ -259,6 +260,10 @@ fn update_config(turn: &mut TurnContext, update: impl FnOnce(&mut crate::config:
     let mut config = (*turn.config).clone();
     update(&mut config);
     turn.config = Arc::new(config);
+}
+
+fn set_tool_surface(turn: &mut TurnContext, surface: ToolSurface) {
+    update_config(turn, |config| config.tool_surface = surface);
 }
 
 fn set_web_search_mode(turn: &mut TurnContext, mode: WebSearchMode) {
@@ -491,7 +496,8 @@ fn has_parameter(spec: &ToolSpec, parameter_name: &str) -> bool {
 async fn request_user_input_tool_respects_experimental_config_gate() {
     let enabled = probe(|_| {}).await;
     enabled.assert_visible_contains(&["AskUserQuestion"]);
-    enabled.assert_registered_contains(&["request_user_input"]);
+    enabled.assert_registered_contains(&["AskUserQuestion"]);
+    enabled.assert_registered_lacks(&["request_user_input"]);
 
     let disabled = probe(|turn| {
         update_config(turn, |config| {
@@ -504,7 +510,7 @@ async fn request_user_input_tool_respects_experimental_config_gate() {
 }
 
 #[tokio::test]
-async fn shell_family_registers_visible_unified_exec_and_hidden_legacy_shell() {
+async fn claude_surface_registers_only_claude_unified_exec_tools() {
     let plan = probe(|turn| {
         set_features(turn, &[Feature::ShellTool, Feature::UnifiedExec]);
         set_feature(turn, Feature::ShellZshFork, /*enabled*/ false);
@@ -526,9 +532,7 @@ async fn shell_family_registers_visible_unified_exec_and_hidden_legacy_shell() {
     ]);
     plan.assert_visible_lacks(&["shell_command"]);
     plan.assert_registered_contains(&[
-        "exec_command",
-        "write_stdin",
-        "shell_command",
+        "Bash",
         "Read",
         "Write",
         "Edit",
@@ -539,8 +543,115 @@ async fn shell_family_registers_visible_unified_exec_and_hidden_legacy_shell() {
         "ListBackgroundTasks",
         "StopBackgroundTask",
     ]);
-    assert_eq!(plan.exposure("shell_command"), ToolExposure::Hidden);
+    plan.assert_registered_lacks(&["exec_command", "write_stdin", "shell_command"]);
     assert!(has_parameter(plan.visible_spec("Bash"), "command"));
+}
+
+#[tokio::test]
+async fn tool_surfaces_are_complete_mutually_exclusive_replacements() {
+    let configure = |turn: &mut TurnContext, surface| {
+        set_tool_surface(turn, surface);
+        set_features(
+            turn,
+            &[
+                Feature::ShellTool,
+                Feature::UnifiedExec,
+                Feature::RequestPermissionsTool,
+            ],
+        );
+        set_feature(turn, Feature::ShellZshFork, /*enabled*/ false);
+        set_feature(turn, Feature::Collab, /*enabled*/ false);
+        set_web_search_mode(turn, WebSearchMode::Disabled);
+        turn.model_info.shell_type = ConfigShellToolType::ShellCommand;
+        turn.model_info.apply_patch_tool_type = Some(ApplyPatchToolType::Freeform);
+    };
+
+    let claude = probe(|turn| configure(turn, ToolSurface::Claude)).await;
+    assert_eq!(
+        claude.visible_names,
+        vec![
+            "Bash",
+            "ReadTaskOutput",
+            "SendTaskInput",
+            "ListBackgroundTasks",
+            "StopBackgroundTask",
+            "Read",
+            "Write",
+            "Edit",
+            "Glob",
+            "Grep",
+            "TodoWrite",
+            "Skill",
+            "AskUserQuestion",
+            "RequestPermissions",
+        ]
+    );
+    assert_eq!(
+        claude.registered_names,
+        vec![
+            "AskUserQuestion",
+            "Bash",
+            "Edit",
+            "Glob",
+            "Grep",
+            "ListBackgroundTasks",
+            "Read",
+            "ReadTaskOutput",
+            "RequestPermissions",
+            "SendTaskInput",
+            "Skill",
+            "StopBackgroundTask",
+            "TodoWrite",
+            "Write",
+        ]
+    );
+
+    let codex = probe(|turn| configure(turn, ToolSurface::Codex)).await;
+    assert_eq!(
+        codex.visible_names,
+        vec![
+            "exec_command",
+            "write_stdin",
+            "update_plan",
+            "request_user_input",
+            "request_permissions",
+            "apply_patch",
+            "view_image",
+        ]
+    );
+    assert_eq!(
+        codex.registered_names,
+        vec![
+            "apply_patch",
+            "exec_command",
+            "request_permissions",
+            "request_user_input",
+            "shell_command",
+            "update_plan",
+            "view_image",
+            "write_stdin",
+        ]
+    );
+    assert_eq!(codex.exposure("shell_command"), ToolExposure::Hidden);
+}
+
+#[tokio::test]
+async fn code_mode_forces_codex_surface() {
+    let plan = probe(|turn| {
+        set_tool_surface(turn, ToolSurface::Claude);
+        set_features(
+            turn,
+            &[Feature::CodeMode, Feature::ShellTool, Feature::UnifiedExec],
+        );
+        set_feature(turn, Feature::ShellZshFork, /*enabled*/ false);
+        turn.model_info.shell_type = ConfigShellToolType::ShellCommand;
+    })
+    .await;
+
+    plan.assert_visible_contains(&[codex_code_mode::PUBLIC_TOOL_NAME, "exec_command"]);
+    plan.assert_visible_lacks(&["Bash", "Read", "TodoWrite", "AskUserQuestion"]);
+    plan.assert_registered_contains(&["exec_command", "write_stdin", "update_plan"]);
+    plan.assert_registered_lacks(&["Bash", "Read", "TodoWrite", "AskUserQuestion"]);
 }
 
 #[tokio::test]
@@ -598,8 +709,8 @@ async fn model_visible_core_tools_convert_to_provider_neutral_astral_names() {
         );
     }
     plan.assert_visible_lacks(&["request_permissions"]);
-    plan.assert_registered_contains(&["request_permissions"]);
-    assert_eq!(plan.exposure("request_permissions"), ToolExposure::Hidden);
+    plan.assert_registered_contains(&["RequestPermissions"]);
+    plan.assert_registered_lacks(&["request_permissions"]);
 }
 
 #[tokio::test]
@@ -622,9 +733,8 @@ async fn shell_zsh_fork_standalone_backend_keeps_bash_model_visible() {
         "ListBackgroundTasks",
         "StopBackgroundTask",
     ]);
-    standalone.assert_registered_contains(&["Bash", "shell_command"]);
-    standalone.assert_registered_lacks(&["exec_command", "write_stdin"]);
-    assert_eq!(standalone.exposure("shell_command"), ToolExposure::Hidden);
+    standalone.assert_registered_contains(&["Bash"]);
+    standalone.assert_registered_lacks(&["exec_command", "write_stdin", "shell_command"]);
 
     let composed = probe(|turn| {
         set_features(
@@ -649,8 +759,14 @@ async fn shell_zsh_fork_standalone_backend_keeps_bash_model_visible() {
             "StopBackgroundTask",
         ]);
         composed.assert_visible_lacks(&["shell_command"]);
-        composed.assert_registered_contains(&["exec_command", "write_stdin", "shell_command"]);
-        assert_eq!(composed.exposure("shell_command"), ToolExposure::Hidden);
+        composed.assert_registered_contains(&[
+            "Bash",
+            "ReadTaskOutput",
+            "SendTaskInput",
+            "ListBackgroundTasks",
+            "StopBackgroundTask",
+        ]);
+        composed.assert_registered_lacks(&["exec_command", "write_stdin", "shell_command"]);
     } else {
         composed.assert_visible_contains(&[
             "Bash",
@@ -787,15 +903,7 @@ async fn environment_count_controls_environment_backed_tools() {
     .await;
     multiple_environments.assert_visible_contains(&["Bash", "Read"]);
     multiple_environments.assert_visible_lacks(&["apply_patch", "view_image"]);
-    multiple_environments.assert_registered_contains(&["apply_patch", "view_image"]);
-    assert_eq!(
-        multiple_environments.exposure("apply_patch"),
-        ToolExposure::Hidden
-    );
-    assert_eq!(
-        multiple_environments.exposure("view_image"),
-        ToolExposure::Hidden
-    );
+    multiple_environments.assert_registered_lacks(&["apply_patch", "view_image"]);
     assert!(!has_parameter(
         multiple_environments.visible_spec("Bash"),
         "environment_id"
@@ -835,10 +943,36 @@ async fn mcp_and_tool_search_follow_direct_and_deferred_tool_exposure() {
         "list_mcp_resource_templates",
         "ReadMcpResourceTool",
     ]);
+    direct_mcp.assert_registered_contains(&[
+        "ListMcpResourcesTool",
+        "list_mcp_resource_templates",
+        "ReadMcpResourceTool",
+    ]);
+    direct_mcp.assert_registered_lacks(&["list_mcp_resources", "read_mcp_resource"]);
     assert_eq!(
         direct_mcp.namespace_function_names("mcp__direct"),
         &["lookup".to_string()]
     );
+
+    let codex_mcp = probe_with(
+        |turn| set_tool_surface(turn, ToolSurface::Codex),
+        ToolPlanInputs {
+            mcp_tools: Some(vec![mcp_tool("direct", "mcp__direct", "lookup")]),
+            ..ToolPlanInputs::default()
+        },
+    )
+    .await;
+    codex_mcp.assert_visible_contains(&[
+        "list_mcp_resources",
+        "list_mcp_resource_templates",
+        "read_mcp_resource",
+    ]);
+    codex_mcp.assert_registered_contains(&[
+        "list_mcp_resources",
+        "list_mcp_resource_templates",
+        "read_mcp_resource",
+    ]);
+    codex_mcp.assert_registered_lacks(&["ListMcpResourcesTool", "ReadMcpResourceTool"]);
 
     let searchable_mcp = ToolPlanInputs {
         deferred_mcp_tools: Some(vec![mcp_tool("searchable", "mcp__searchable", "lookup")]),
@@ -1510,7 +1644,10 @@ async fn code_mode_only_can_expose_namespaced_multi_agent_v2_as_normal_tools() {
     })
     .await;
 
-    assert_eq!(plan.visible_names, vec!["exec", "wait", "agents",]);
+    assert_eq!(
+        plan.visible_names,
+        vec!["exec", "wait", "request_user_input", "agents"]
+    );
     assert!(
         !plan
             .namespace_function_names("agents")
@@ -1536,7 +1673,7 @@ async fn code_mode_only_can_expose_namespaced_multi_agent_v2_as_normal_tools() {
 }
 
 #[tokio::test]
-async fn openai_hosted_tools_are_not_model_visible() {
+async fn hosted_and_extension_web_tools_follow_surface() {
     let api_key_auth = probe(|turn| {
         set_feature(turn, Feature::ImageGeneration, /*enabled*/ true);
         turn.model_info.input_modalities = vec![InputModality::Image];
@@ -1568,6 +1705,13 @@ async fn openai_hosted_tools_are_not_model_visible() {
     .await;
     live_web_search.assert_visible_lacks(&["web_search"]);
 
+    let codex_live_web_search = probe(|turn| {
+        set_tool_surface(turn, ToolSurface::Codex);
+        set_web_search_mode(turn, WebSearchMode::Live);
+    })
+    .await;
+    codex_live_web_search.assert_visible_lacks(&["web_search"]);
+
     let code_mode_only = probe(|turn| {
         use_chatgpt_auth(turn);
         set_features(turn, &[Feature::CodeModeOnly, Feature::MultiAgentV2]);
@@ -1581,6 +1725,8 @@ async fn openai_hosted_tools_are_not_model_visible() {
             // Code-mode entrypoints.
             codex_code_mode::PUBLIC_TOOL_NAME,
             codex_code_mode::WAIT_TOOL_NAME,
+            // Direct-only upstream utility.
+            "request_user_input",
             // Multi-agent v2 tools.
             "spawn_agent",
             "send_message",
@@ -1598,6 +1744,14 @@ async fn openai_hosted_tools_are_not_model_visible() {
     .await;
     standalone_web_search_without_web_run.assert_visible_lacks(&["web_search"]);
 
+    let codex_standalone_without_web_run = probe(|turn| {
+        set_tool_surface(turn, ToolSurface::Codex);
+        set_feature(turn, Feature::StandaloneWebSearch, /*enabled*/ true);
+        set_web_search_mode(turn, WebSearchMode::Live);
+    })
+    .await;
+    codex_standalone_without_web_run.assert_visible_lacks(&["web_search"]);
+
     let standalone_web_search = probe_with(
         |turn| {
             set_feature(turn, Feature::StandaloneWebSearch, /*enabled*/ true);
@@ -1611,6 +1765,21 @@ async fn openai_hosted_tools_are_not_model_visible() {
     .await;
     standalone_web_search.assert_visible_lacks(&["web"]);
     standalone_web_search.assert_visible_lacks(&["web_search"]);
+
+    let codex_standalone_web_search = probe_with(
+        |turn| {
+            set_tool_surface(turn, ToolSurface::Codex);
+            set_feature(turn, Feature::StandaloneWebSearch, /*enabled*/ true);
+            set_web_search_mode(turn, WebSearchMode::Live);
+        },
+        ToolPlanInputs {
+            extension_tool_executors: vec![Arc::new(WebRunExtensionTool)],
+            ..Default::default()
+        },
+    )
+    .await;
+    codex_standalone_web_search.assert_visible_contains(&["web"]);
+    codex_standalone_web_search.assert_visible_lacks(&["web_search"]);
 
     let provider_neutral_web_tools_disabled = probe_with(
         |turn| {
@@ -1649,6 +1818,7 @@ async fn openai_hosted_tools_are_not_model_visible() {
     provider_neutral_web_tools.assert_registered_contains(&["websearch", "webfetch"]);
 
     let unsupported_provider = probe(|turn| {
+        set_tool_surface(turn, ToolSurface::Codex);
         set_web_search_mode(turn, WebSearchMode::Live);
         use_bedrock_provider(turn);
     })

@@ -10,7 +10,7 @@ use codex_protocol::permissions::NetworkSandboxPolicy;
 use codex_protocol::protocol::AskForApproval;
 
 use crate::test_codex::TestCodex;
-use crate::test_codex::test_codex;
+use crate::test_codex::test_codex_with_codex_surface as test_codex;
 
 #[derive(Clone)]
 pub struct ZshForkRuntime {

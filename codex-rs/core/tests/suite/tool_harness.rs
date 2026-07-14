@@ -25,6 +25,7 @@ use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::TestCodex;
 use core_test_support::test_codex::test_codex;
+use core_test_support::test_codex::test_codex_with_codex_surface;
 use core_test_support::test_codex::turn_permission_fields;
 use core_test_support::wait_for_event;
 use serde_json::Value;
@@ -71,7 +72,7 @@ async fn shell_command_tool_executes_command_and_streams_output() -> anyhow::Res
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_model("test-gpt-5-codex");
+    let mut builder = test_codex_with_codex_surface().with_model("test-gpt-5-codex");
     let TestCodex {
         codex,
         cwd,
@@ -135,7 +136,7 @@ async fn shell_command_tool_executes_command_and_streams_output() -> anyhow::Res
     let req = second_mock.single_request();
     let (output_text, _) = call_output(&req, call_id);
     assert_regex_match(
-        r"(?s)^(?:Chunk ID: [^\n]+\n)?Wall time: [0-9]+(?:\.[0-9]+)? seconds\nProcess exited with code 0(?:\nOriginal token count: \d+)?\nOutput:\ntool harness\n?$",
+        r"(?s)^Exit code: 0\nWall time: [0-9]+(?:\.[0-9]+)? seconds\nOutput:\ntool harness\n?$",
         &output_text,
     );
 
@@ -351,7 +352,7 @@ async fn apply_patch_tool_executes_and_emits_patch_events() -> anyhow::Result<()
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex();
+    let mut builder = test_codex_with_codex_surface();
     let TestCodex {
         codex,
         cwd,
@@ -494,7 +495,7 @@ async fn apply_patch_reports_parse_diagnostics() -> anyhow::Result<()> {
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex();
+    let mut builder = test_codex_with_codex_surface();
     let TestCodex {
         codex,
         cwd,
