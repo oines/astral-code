@@ -25,6 +25,7 @@ use codex_protocol::models::AdditionalPermissionProfile;
 use codex_sandboxing::SandboxCommand;
 use codex_sandboxing::SandboxType;
 use codex_utils_absolute_path::AbsolutePathBuf;
+use codex_utils_path_uri::PathUri;
 use std::collections::HashMap;
 #[cfg(unix)]
 use std::path::Path;
@@ -45,10 +46,11 @@ pub(crate) fn build_sandbox_command(
     let (program, args) = command
         .split_first()
         .ok_or_else(|| ToolError::Rejected("command args are empty".to_string()))?;
+    let cwd = PathUri::from_abs_path(cwd);
     Ok(SandboxCommand {
         program: program.clone().into(),
         args: args.to_vec(),
-        cwd: cwd.clone(),
+        cwd,
         env: env.clone(),
         additional_permissions,
     })

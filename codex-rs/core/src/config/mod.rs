@@ -116,6 +116,7 @@ use codex_protocol::protocol::SandboxPolicy;
 pub use codex_thread_store::ExtraConfig;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_absolute_path::AbsolutePathBufGuard;
+use codex_utils_path_uri::PathUri;
 use rmcp::model::ElicitationCapability;
 use rmcp::model::FormElicitationCapability;
 use rmcp::model::UrlElicitationCapability;
@@ -3907,8 +3908,9 @@ impl Config {
             return Ok(None);
         };
 
+        let path_uri = PathUri::from_abs_path(path);
         let contents = fs
-            .read_file_text(path, /*sandbox*/ None)
+            .read_file_text(&path_uri, /*sandbox*/ None)
             .await
             .map_err(|e| {
                 std::io::Error::new(

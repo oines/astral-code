@@ -350,14 +350,66 @@ fn map_fs_error(err: io::Error) -> JSONRPCErrorError {
 
 #[cfg(test)]
 mod tests {
+    use codex_utils_path_uri::PathUri;
+    use serde_json::json;
+
     use super::*;
+
+    #[test]
+    fn helper_protocol_uses_path_uris() -> serde_json::Result<()> {
+        let local_path =
+            PathUri::from_host_native_path(std::env::current_dir().expect("cwd").join("file"))
+                .expect("path URI");
+        let paths = [
+            local_path,
+            PathUri::parse("file://server/share/file").expect("path URI"),
+        ];
+
+        for path in paths {
+            let expected_path = path.to_string();
+            let request = serde_json::to_value(FsHelperRequest::WriteFile(FsWriteFileParams {
+                path: path.clone(),
+                data_base64: String::new(),
+                sandbox: None,
+            }))?;
+            assert_eq!(
+                request,
+                json!({
+                    "operation": FS_WRITE_FILE_METHOD,
+                    "params": {
+                        "path": expected_path.as_str(),
+                        "dataBase64": "",
+                        "sandbox": null,
+                    },
+                }),
+            );
+
+            let response = serde_json::to_value(FsHelperResponse::Ok(
+                FsHelperPayload::Canonicalize(FsCanonicalizeResponse { path }),
+            ))?;
+            assert_eq!(
+                response,
+                json!({
+                    "status": "ok",
+                    "payload": {
+                        "operation": FS_CANONICALIZE_METHOD,
+                        "response": {
+                            "path": expected_path.as_str(),
+                        },
+                    },
+                }),
+            );
+        }
+
+        Ok(())
+    }
 
     #[test]
     fn helper_requests_use_fs_method_names() -> serde_json::Result<()> {
         let root = absolute_test_path("fs-helper-root");
         assert_eq!(
             serde_json::to_value(FsHelperRequest::WriteFile(FsWriteFileParams {
-                path: root.join("file"),
+                path: root.join("file").expect("file URI"),
                 data_base64: String::new(),
                 sandbox: None,
             }))?["operation"],
@@ -444,12 +496,8 @@ mod tests {
         );
     }
 
-    fn absolute_test_path(name: &str) -> codex_utils_absolute_path::AbsolutePathBuf {
-        std::env::current_dir()
-            .expect("cwd")
-            .join(name)
-            .as_path()
-            .try_into()
-            .expect("absolute path")
+    fn absolute_test_path(name: &str) -> PathUri {
+        PathUri::from_host_native_path(std::env::current_dir().expect("cwd").join(name))
+            .expect("path URI")
     }
 }

@@ -49,7 +49,7 @@ impl EnvironmentContextEnvironment {
             .iter()
             .map(|environment| Self {
                 id: environment.environment_id.clone(),
-                cwd: environment.cwd.clone(),
+                cwd: environment.cwd().clone(),
                 shell: environment
                     .shell
                     .as_ref()

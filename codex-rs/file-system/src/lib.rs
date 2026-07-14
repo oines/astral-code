@@ -8,7 +8,7 @@ use codex_protocol::permissions::FileSystemSandboxPolicy;
 use codex_protocol::permissions::FileSystemSpecialPath;
 use codex_protocol::permissions::NetworkSandboxPolicy;
 use codex_protocol::protocol::SandboxPolicy;
-use codex_utils_absolute_path::AbsolutePathBuf;
+use codex_utils_path_uri::PathUri;
 use std::io;
 use std::path::Path;
 
@@ -48,7 +48,7 @@ pub struct ReadDirectoryEntry {
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GlobSearchRequest {
-    pub root: AbsolutePathBuf,
+    pub root: PathUri,
     pub pattern: String,
     pub max_results: usize,
 }
@@ -56,7 +56,7 @@ pub struct GlobSearchRequest {
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GlobSearchMatch {
-    pub path: AbsolutePathBuf,
+    pub path: PathUri,
     pub modified_at_ms: i64,
 }
 
@@ -78,7 +78,7 @@ pub enum GrepOutputMode {
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GrepSearchRequest {
-    pub root: AbsolutePathBuf,
+    pub root: PathUri,
     pub pattern: String,
     pub glob: Option<String>,
     pub file_type: Option<String>,
@@ -108,7 +108,7 @@ pub struct GrepSearchResponse {
 pub struct FileSystemSandboxContext {
     pub permissions: PermissionProfile,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cwd: Option<AbsolutePathBuf>,
+    pub cwd: Option<PathUri>,
     pub windows_sandbox_level: WindowsSandboxLevel,
     #[serde(default)]
     pub windows_sandbox_private_desktop: bool,
@@ -117,32 +117,35 @@ pub struct FileSystemSandboxContext {
 }
 
 impl FileSystemSandboxContext {
-    pub fn from_legacy_sandbox_policy(sandbox_policy: SandboxPolicy, cwd: AbsolutePathBuf) -> Self {
+    pub fn from_legacy_sandbox_policy(
+        sandbox_policy: SandboxPolicy,
+        cwd: PathUri,
+    ) -> io::Result<Self> {
+        // Legacy policy projection materializes native roots, so convert at the receiving-host
+        // boundary while retaining the URI in the resulting sandbox context.
+        let native_cwd = cwd.to_abs_path()?;
         let file_system_sandbox_policy =
-            FileSystemSandboxPolicy::from_legacy_sandbox_policy_for_cwd(&sandbox_policy, &cwd);
+            FileSystemSandboxPolicy::from_legacy_sandbox_policy_for_cwd(
+                &sandbox_policy,
+                &native_cwd,
+            );
         let permissions = PermissionProfile::from_runtime_permissions_with_enforcement(
             SandboxEnforcement::from_legacy_sandbox_policy(&sandbox_policy),
             &file_system_sandbox_policy,
             NetworkSandboxPolicy::from(&sandbox_policy),
         );
-        Self::from_permission_profile_with_cwd(permissions, cwd)
+        Ok(Self::from_permission_profile_with_cwd(permissions, cwd))
     }
 
     pub fn from_permission_profile(permissions: PermissionProfile) -> Self {
         Self::from_permissions_and_cwd(permissions, /*cwd*/ None)
     }
 
-    pub fn from_permission_profile_with_cwd(
-        permissions: PermissionProfile,
-        cwd: AbsolutePathBuf,
-    ) -> Self {
+    pub fn from_permission_profile_with_cwd(permissions: PermissionProfile, cwd: PathUri) -> Self {
         Self::from_permissions_and_cwd(permissions, Some(cwd))
     }
 
-    fn from_permissions_and_cwd(
-        permissions: PermissionProfile,
-        cwd: Option<AbsolutePathBuf>,
-    ) -> Self {
+    fn from_permissions_and_cwd(permissions: PermissionProfile, cwd: Option<PathUri>) -> Self {
         Self {
             permissions,
             cwd,
@@ -195,30 +198,20 @@ pub trait ExecutorFileSystem: Send + Sync {
     /// Resolves a path within this filesystem.
     async fn canonicalize(
         &self,
-        path: &AbsolutePathBuf,
+        path: &PathUri,
         sandbox: Option<&FileSystemSandboxContext>,
-    ) -> FileSystemResult<AbsolutePathBuf>;
-
-    /// Lexically joins a path onto an existing bound path.
-    async fn join(
-        &self,
-        base_path: &AbsolutePathBuf,
-        path: &Path,
-    ) -> FileSystemResult<AbsolutePathBuf>;
-
-    /// Returns the parent directory of a bound path.
-    async fn parent(&self, path: &AbsolutePathBuf) -> FileSystemResult<Option<AbsolutePathBuf>>;
+    ) -> FileSystemResult<PathUri>;
 
     async fn read_file(
         &self,
-        path: &AbsolutePathBuf,
+        path: &PathUri,
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<Vec<u8>>;
 
     /// Reads a file and decodes it as UTF-8 text.
     async fn read_file_text(
         &self,
-        path: &AbsolutePathBuf,
+        path: &PathUri,
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<String> {
         let bytes = self.read_file(path, sandbox).await?;
@@ -227,41 +220,41 @@ pub trait ExecutorFileSystem: Send + Sync {
 
     async fn write_file(
         &self,
-        path: &AbsolutePathBuf,
+        path: &PathUri,
         contents: Vec<u8>,
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<()>;
 
     async fn create_directory(
         &self,
-        path: &AbsolutePathBuf,
+        path: &PathUri,
         create_directory_options: CreateDirectoryOptions,
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<()>;
 
     async fn get_metadata(
         &self,
-        path: &AbsolutePathBuf,
+        path: &PathUri,
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<FileMetadata>;
 
     async fn read_directory(
         &self,
-        path: &AbsolutePathBuf,
+        path: &PathUri,
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<Vec<ReadDirectoryEntry>>;
 
     async fn remove(
         &self,
-        path: &AbsolutePathBuf,
+        path: &PathUri,
         remove_options: RemoveOptions,
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<()>;
 
     async fn copy(
         &self,
-        source_path: &AbsolutePathBuf,
-        destination_path: &AbsolutePathBuf,
+        source_path: &PathUri,
+        destination_path: &PathUri,
         copy_options: CopyOptions,
         sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<()>;

@@ -16,6 +16,7 @@ use codex_exec_server::ProcessId;
 use codex_exec_server::ReadResponse;
 use codex_exec_server::StartedExecProcess;
 use codex_exec_server::WriteStatus;
+use codex_utils_path_uri::PathUri;
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;
 use test_case::test_case;
@@ -73,7 +74,7 @@ async fn assert_exec_process_starts_and_exits(use_remote: bool) -> Result<()> {
         .start(ExecParams {
             process_id: ProcessId::from("proc-1"),
             argv: vec!["true".to_string()],
-            cwd: std::env::current_dir()?,
+            cwd: PathUri::from_host_native_path(std::env::current_dir()?)?,
             env_policy: /*env_policy*/ None,
             env: Default::default(),
             tty: false,
@@ -214,7 +215,7 @@ async fn assert_exec_process_streams_output(use_remote: bool) -> Result<()> {
                 "-c".to_string(),
                 "sleep 0.05; printf 'session output\\n'".to_string(),
             ],
-            cwd: std::env::current_dir()?,
+            cwd: PathUri::from_host_native_path(std::env::current_dir()?)?,
             env_policy: /*env_policy*/ None,
             env: Default::default(),
             tty: false,
@@ -245,7 +246,7 @@ async fn assert_exec_process_pushes_events(use_remote: bool) -> Result<()> {
                 "-c".to_string(),
                 "printf 'event output\\n'; sleep 0.1; printf 'event err\\n' >&2; sleep 0.1; exit 7".to_string(),
             ],
-            cwd: std::env::current_dir()?,
+            cwd: PathUri::from_host_native_path(std::env::current_dir()?)?,
             env_policy: /*env_policy*/ None,
             env: Default::default(),
             tty: false,
@@ -292,7 +293,7 @@ async fn assert_exec_process_replays_events_after_close(use_remote: bool) -> Res
                 "-c".to_string(),
                 "printf 'late one\\n'; printf 'late two\\n'".to_string(),
             ],
-            cwd: std::env::current_dir()?,
+            cwd: PathUri::from_host_native_path(std::env::current_dir()?)?,
             env_policy: /*env_policy*/ None,
             env: Default::default(),
             tty: false,
@@ -340,7 +341,7 @@ async fn assert_exec_process_retains_output_after_exit_until_streams_close(
                 DELAYED_OUTPUT_AFTER_EXIT_PARENT_ARG.to_string(),
                 release_path.to_string_lossy().into_owned(),
             ],
-            cwd: std::env::current_dir()?,
+            cwd: PathUri::from_host_native_path(std::env::current_dir()?)?,
             env_policy: /*env_policy*/ None,
             env: Default::default(),
             tty: false,
@@ -413,7 +414,7 @@ async fn assert_exec_process_write_then_read(use_remote: bool) -> Result<()> {
                 "-c".to_string(),
                 "IFS= read line; printf 'from-stdin:%s\\n' \"$line\"".to_string(),
             ],
-            cwd: std::env::current_dir()?,
+            cwd: PathUri::from_host_native_path(std::env::current_dir()?)?,
             env_policy: /*env_policy*/ None,
             env: Default::default(),
             tty: true,
@@ -450,7 +451,7 @@ async fn assert_exec_process_write_then_read_without_tty(use_remote: bool) -> Re
                 "-c".to_string(),
                 "IFS= read line; printf 'from-stdin:%s\\n' \"$line\"".to_string(),
             ],
-            cwd: std::env::current_dir()?,
+            cwd: PathUri::from_host_native_path(std::env::current_dir()?)?,
             env_policy: /*env_policy*/ None,
             env: Default::default(),
             tty: false,
@@ -483,7 +484,7 @@ async fn assert_exec_process_rejects_write_without_pipe_stdin(use_remote: bool) 
                 "-c".to_string(),
                 "sleep 0.3; if IFS= read -r line; then printf 'read:%s\\n' \"$line\"; else printf 'eof\\n'; fi".to_string(),
             ],
-            cwd: std::env::current_dir()?,
+            cwd: PathUri::from_host_native_path(std::env::current_dir()?)?,
             env_policy: /*env_policy*/ None,
             env: Default::default(),
             tty: false,
@@ -518,7 +519,7 @@ async fn assert_exec_process_preserves_queued_events_before_subscribe(
                 "-c".to_string(),
                 "printf 'queued output\\n'".to_string(),
             ],
-            cwd: std::env::current_dir()?,
+            cwd: PathUri::from_host_native_path(std::env::current_dir()?)?,
             env_policy: /*env_policy*/ None,
             env: Default::default(),
             tty: false,
@@ -552,7 +553,7 @@ async fn remote_exec_process_reports_transport_disconnect() -> Result<()> {
                 "-c".to_string(),
                 "sleep 10".to_string(),
             ],
-            cwd: std::env::current_dir()?,
+            cwd: PathUri::from_host_native_path(std::env::current_dir()?)?,
             env_policy: /*env_policy*/ None,
             env: Default::default(),
             tty: false,

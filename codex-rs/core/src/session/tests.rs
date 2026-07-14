@@ -4125,12 +4125,12 @@ fn turn_environments_for_tests(
     cwd: &codex_utils_absolute_path::AbsolutePathBuf,
 ) -> crate::environment_selection::ResolvedTurnEnvironments {
     crate::environment_selection::ResolvedTurnEnvironments {
-        turn_environments: vec![TurnEnvironment {
-            environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
-            environment: Arc::clone(environment),
-            cwd: cwd.clone(),
-            shell: None,
-        }],
+        turn_environments: vec![TurnEnvironment::new(
+            codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
+            Arc::clone(environment),
+            cwd.clone(),
+            /*shell*/ None,
+        )],
     }
 }
 
@@ -5753,8 +5753,13 @@ async fn request_permissions_tool_resolves_relative_paths_against_selected_envir
             mcp_elicitations: true,
         }))
         .expect("test setup should allow updating approval policy");
-    turn_context_mut.environments.turn_environments[0].environment_id = "remote".to_string();
-    turn_context_mut.environments.turn_environments[0].cwd = environment_cwd.clone();
+    let current_environment = turn_context_mut.environments.turn_environments[0].clone();
+    turn_context_mut.environments.turn_environments[0] = TurnEnvironment::new(
+        "remote".to_string(),
+        current_environment.environment,
+        environment_cwd.clone(),
+        current_environment.shell,
+    );
 
     let call_id = "call-1".to_string();
     let handler = RequestPermissionsHandler;
@@ -6346,12 +6351,12 @@ async fn primary_environment_uses_first_turn_environment() {
     turn_context
         .environments
         .turn_environments
-        .push(TurnEnvironment {
-            environment_id: "second".to_string(),
-            environment: Arc::clone(&first_environment.environment),
-            cwd: second_cwd.clone(),
-            shell: None,
-        });
+        .push(TurnEnvironment::new(
+            "second".to_string(),
+            Arc::clone(&first_environment.environment),
+            second_cwd.clone(),
+            /*shell*/ None,
+        ));
 
     assert_eq!(
         turn_context
@@ -6368,13 +6373,13 @@ async fn primary_environment_uses_first_turn_environment() {
             .iter()
             .find(|environment| environment.environment_id == "second")
             .expect("second environment")
-            .cwd,
-        second_cwd
+            .cwd(),
+        &second_cwd
     );
     assert_eq!(turn_context.environments.turn_environments.len(), 2);
     assert_eq!(
-        turn_context.environments.turn_environments[1].cwd,
-        second_cwd
+        turn_context.environments.turn_environments[1].cwd(),
+        &second_cwd
     );
 }
 

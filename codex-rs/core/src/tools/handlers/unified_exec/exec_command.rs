@@ -140,8 +140,8 @@ impl ExecCommandHandler {
             .as_deref()
             .filter(|workdir| !workdir.is_empty())
             .map_or_else(
-                || turn_environment.cwd.clone(),
-                |workdir| turn_environment.cwd.join(workdir),
+                || turn_environment.cwd().clone(),
+                |workdir| turn_environment.cwd().join(workdir),
             );
         let environment = Arc::clone(&turn_environment.environment);
         let fs = environment.get_filesystem();
@@ -278,7 +278,7 @@ impl ExecCommandHandler {
                     timeout_ms,
                     max_output_tokens,
                     cwd,
-                    sandbox_cwd: turn_environment.cwd.clone(),
+                    sandbox_cwd: turn_environment.cwd().clone(),
                     environment,
                     shell_mode,
                     network: context.turn.network.clone(),

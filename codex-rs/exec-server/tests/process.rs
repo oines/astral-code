@@ -12,6 +12,7 @@ use codex_exec_server::ReadResponse;
 use codex_exec_server::TerminateResponse;
 use codex_exec_server::WriteResponse;
 use codex_exec_server::WriteStatus;
+use codex_utils_path_uri::PathUri;
 use common::exec_server::exec_server;
 use pretty_assertions::assert_eq;
 
@@ -46,7 +47,7 @@ async fn exec_server_starts_process_over_websocket() -> anyhow::Result<()> {
             serde_json::json!({
                 "processId": "proc-1",
                 "argv": ["true"],
-                "cwd": std::env::current_dir()?,
+                "cwd": PathUri::from_host_native_path(std::env::current_dir()?)?,
                 "env": {},
                 "tty": false,
                 "pipeStdin": false,
@@ -113,7 +114,7 @@ async fn exec_server_defaults_omitted_pipe_stdin_to_closed_stdin() -> anyhow::Re
                     "-c",
                     "sleep 0.3; if IFS= read -r line; then printf 'read:%s\\n' \"$line\"; else printf 'eof\\n'; fi"
                 ],
-                "cwd": std::env::current_dir()?,
+                "cwd": PathUri::from_host_native_path(std::env::current_dir()?)?,
                 "env": {},
                 "tty": false,
                 "arg0": null
@@ -206,7 +207,7 @@ async fn exec_server_resumes_detached_session_without_killing_processes() -> any
             serde_json::json!({
                 "processId": "proc-resume",
                 "argv": ["/bin/sh", "-c", "sleep 5"],
-                "cwd": std::env::current_dir()?,
+                "cwd": PathUri::from_host_native_path(std::env::current_dir()?)?,
                 "env": {},
                 "tty": false,
                 "pipeStdin": false,

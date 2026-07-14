@@ -3106,6 +3106,7 @@ async fn turn_start_streams_apply_patch_change_updates_v2() -> Result<()> {
             (Feature::ShellSnapshot, false),
         ]),
     )?;
+    configure_codex_tool_surface(&codex_home)?;
     write_models_cache(&codex_home)?;
     let cache_path = codex_home.join("models_cache.json");
     let mut cache: serde_json::Value =
@@ -3936,6 +3937,7 @@ async fn command_execution_notifications_include_process_id() -> Result<()> {
         &BTreeMap::from([(Feature::UnifiedExec, true)]),
         "danger-full-access",
     )?;
+    configure_codex_tool_surface(codex_home.path())?;
 
     let mut mcp = TestAppServer::new(codex_home.path()).await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
@@ -4183,6 +4185,15 @@ stream_max_retries = 0
     )?;
     write_mock_model_capabilities_cache(codex_home, "mock_provider")?;
     write_models_cache(codex_home)
+}
+
+fn configure_codex_tool_surface(codex_home: &Path) -> std::io::Result<()> {
+    let config_path = codex_home.join("config.toml");
+    let config = std::fs::read_to_string(&config_path)?;
+    std::fs::write(
+        config_path,
+        format!("{config}\n[tools]\nsurface = \"codex\"\n"),
+    )
 }
 
 fn mock_model_capabilities_toml(model_provider_id: &str) -> String {

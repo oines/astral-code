@@ -3,7 +3,7 @@ use std::time::Duration;
 use codex_file_system::GlobSearchRequest;
 use codex_file_system::GrepOutputMode;
 use codex_file_system::GrepSearchRequest;
-use codex_utils_absolute_path::AbsolutePathBuf;
+use codex_utils_path_uri::PathUri;
 use pretty_assertions::assert_eq;
 
 use super::*;
@@ -11,7 +11,7 @@ use super::*;
 #[tokio::test]
 async fn glob_without_slash_recurses_and_sorts_by_oldest_mtime() -> io::Result<()> {
     let temp_dir = tempfile::TempDir::new()?;
-    let root = AbsolutePathBuf::from_absolute_path(temp_dir.path())?;
+    let root = PathUri::from_host_native_path(temp_dir.path())?;
     std::fs::create_dir_all(temp_dir.path().join("nested"))?;
     std::fs::write(temp_dir.path().join("old.toml"), "")?;
     std::thread::sleep(Duration::from_millis(20));
@@ -29,7 +29,7 @@ async fn glob_without_slash_recurses_and_sorts_by_oldest_mtime() -> io::Result<(
     let paths = response
         .matches
         .iter()
-        .map(|matched| relative_slash_path(matched.path.as_path(), root.as_path()))
+        .map(|matched| relative_uri_slash_path(&matched.path, &root))
         .collect::<Vec<_>>();
     assert_eq!(paths, vec!["old.toml", "new.toml", "nested/child.toml"]);
     assert!(!response.truncated);
@@ -39,7 +39,7 @@ async fn glob_without_slash_recurses_and_sorts_by_oldest_mtime() -> io::Result<(
 #[tokio::test]
 async fn glob_with_slash_matches_relative_path() -> io::Result<()> {
     let temp_dir = tempfile::TempDir::new()?;
-    let root = AbsolutePathBuf::from_absolute_path(temp_dir.path())?;
+    let root = PathUri::from_host_native_path(temp_dir.path())?;
     std::fs::create_dir_all(temp_dir.path().join("src/nested"))?;
     std::fs::write(temp_dir.path().join("src/lib.rs"), "")?;
     std::fs::write(temp_dir.path().join("src/nested/mod.rs"), "")?;
@@ -54,7 +54,7 @@ async fn glob_with_slash_matches_relative_path() -> io::Result<()> {
     let paths = response
         .matches
         .iter()
-        .map(|matched| relative_slash_path(matched.path.as_path(), root.as_path()))
+        .map(|matched| relative_uri_slash_path(&matched.path, &root))
         .collect::<Vec<_>>();
     assert_eq!(paths, vec!["src/lib.rs"]);
     Ok(())
@@ -63,7 +63,7 @@ async fn glob_with_slash_matches_relative_path() -> io::Result<()> {
 #[tokio::test]
 async fn glob_absolute_pattern_extracts_search_root() -> io::Result<()> {
     let temp_dir = tempfile::TempDir::new()?;
-    let root = AbsolutePathBuf::from_absolute_path(temp_dir.path())?;
+    let root = PathUri::from_host_native_path(temp_dir.path())?;
     std::fs::create_dir_all(temp_dir.path().join("src"))?;
     std::fs::write(temp_dir.path().join("src/lib.rs"), "")?;
     std::fs::write(temp_dir.path().join("other.rs"), "")?;
@@ -84,7 +84,7 @@ async fn glob_absolute_pattern_extracts_search_root() -> io::Result<()> {
     let paths = response
         .matches
         .iter()
-        .map(|matched| relative_slash_path(matched.path.as_path(), root.as_path()))
+        .map(|matched| relative_uri_slash_path(&matched.path, &root))
         .collect::<Vec<_>>();
     assert_eq!(paths, vec!["src/lib.rs"]);
     Ok(())
@@ -93,7 +93,7 @@ async fn glob_absolute_pattern_extracts_search_root() -> io::Result<()> {
 #[tokio::test]
 async fn glob_double_star_recurses_under_literal_prefix() -> io::Result<()> {
     let temp_dir = tempfile::TempDir::new()?;
-    let root = AbsolutePathBuf::from_absolute_path(temp_dir.path())?;
+    let root = PathUri::from_host_native_path(temp_dir.path())?;
     std::fs::create_dir_all(temp_dir.path().join("src/nested"))?;
     std::fs::create_dir_all(temp_dir.path().join("tests/nested"))?;
     std::fs::write(temp_dir.path().join("src/lib.rs"), "")?;
@@ -110,7 +110,7 @@ async fn glob_double_star_recurses_under_literal_prefix() -> io::Result<()> {
     let mut paths = response
         .matches
         .iter()
-        .map(|matched| relative_slash_path(matched.path.as_path(), root.as_path()))
+        .map(|matched| relative_uri_slash_path(&matched.path, &root))
         .collect::<Vec<_>>();
     paths.sort();
     assert_eq!(paths, vec!["src/lib.rs", "src/nested/mod.rs"]);
@@ -120,7 +120,7 @@ async fn glob_double_star_recurses_under_literal_prefix() -> io::Result<()> {
 #[tokio::test]
 async fn grep_excludes_vcs_directories_but_not_generated_directories() -> io::Result<()> {
     let temp_dir = tempfile::TempDir::new()?;
-    let root = AbsolutePathBuf::from_absolute_path(temp_dir.path())?;
+    let root = PathUri::from_host_native_path(temp_dir.path())?;
     std::fs::create_dir_all(temp_dir.path().join("src"))?;
     std::fs::create_dir_all(temp_dir.path().join(".git"))?;
     std::fs::create_dir_all(temp_dir.path().join("target/debug"))?;
@@ -156,7 +156,7 @@ async fn grep_excludes_vcs_directories_but_not_generated_directories() -> io::Re
 #[tokio::test]
 async fn grep_files_with_matches_sorts_by_newest_mtime() -> io::Result<()> {
     let temp_dir = tempfile::TempDir::new()?;
-    let root = AbsolutePathBuf::from_absolute_path(temp_dir.path())?;
+    let root = PathUri::from_host_native_path(temp_dir.path())?;
     std::fs::write(temp_dir.path().join("old.txt"), "needle\n")?;
     std::thread::sleep(Duration::from_secs(1));
     std::fs::write(temp_dir.path().join("middle.txt"), "needle\n")?;
@@ -186,7 +186,7 @@ async fn grep_files_with_matches_sorts_by_newest_mtime() -> io::Result<()> {
 #[tokio::test]
 async fn grep_supports_count_content_context_and_glob_filters() -> io::Result<()> {
     let temp_dir = tempfile::TempDir::new()?;
-    let root = AbsolutePathBuf::from_absolute_path(temp_dir.path())?;
+    let root = PathUri::from_host_native_path(temp_dir.path())?;
     std::fs::create_dir_all(temp_dir.path().join("nested"))?;
     std::fs::write(temp_dir.path().join("root.md"), "alpha\nneedle\nomega\n")?;
     std::thread::sleep(Duration::from_millis(20));
@@ -240,7 +240,7 @@ async fn grep_supports_count_content_context_and_glob_filters() -> io::Result<()
 #[tokio::test]
 async fn grep_multiline_matches_all_output_modes() -> io::Result<()> {
     let temp_dir = tempfile::TempDir::new()?;
-    let root = AbsolutePathBuf::from_absolute_path(temp_dir.path())?;
+    let root = PathUri::from_host_native_path(temp_dir.path())?;
     std::fs::write(temp_dir.path().join("sample.txt"), "alpha\nbeta\ngamma\n")?;
 
     let files = grep_search(GrepSearchRequest {
@@ -279,7 +279,7 @@ async fn grep_multiline_matches_all_output_modes() -> io::Result<()> {
 #[tokio::test]
 async fn glob_prunes_to_literal_prefix() -> io::Result<()> {
     let temp_dir = tempfile::TempDir::new()?;
-    let root = AbsolutePathBuf::from_absolute_path(temp_dir.path())?;
+    let root = PathUri::from_host_native_path(temp_dir.path())?;
     std::fs::create_dir_all(temp_dir.path().join("src/nested"))?;
     std::fs::create_dir_all(temp_dir.path().join("wide/nested"))?;
     std::fs::write(temp_dir.path().join("src/lib.rs"), "")?;
@@ -296,7 +296,7 @@ async fn glob_prunes_to_literal_prefix() -> io::Result<()> {
     let mut paths = response
         .matches
         .iter()
-        .map(|matched| relative_slash_path(matched.path.as_path(), root.as_path()))
+        .map(|matched| relative_uri_slash_path(&matched.path, &root))
         .collect::<Vec<_>>();
     paths.sort();
     assert_eq!(paths, vec!["src/lib.rs", "src/nested/mod.rs"]);
@@ -306,7 +306,7 @@ async fn glob_prunes_to_literal_prefix() -> io::Result<()> {
 #[tokio::test]
 async fn grep_head_limit_zero_is_unlimited() -> io::Result<()> {
     let temp_dir = tempfile::TempDir::new()?;
-    let root = AbsolutePathBuf::from_absolute_path(temp_dir.path())?;
+    let root = PathUri::from_host_native_path(temp_dir.path())?;
     std::fs::write(temp_dir.path().join("a.txt"), "needle\n")?;
     std::fs::write(temp_dir.path().join("b.txt"), "needle\n")?;
     std::fs::write(temp_dir.path().join("c.txt"), "needle\n")?;
@@ -324,7 +324,7 @@ async fn grep_head_limit_zero_is_unlimited() -> io::Result<()> {
     Ok(())
 }
 
-fn grep_request_defaults(root: AbsolutePathBuf) -> GrepSearchRequest {
+fn grep_request_defaults(root: PathUri) -> GrepSearchRequest {
     GrepSearchRequest {
         root,
         pattern: "needle".to_string(),
@@ -339,4 +339,10 @@ fn grep_request_defaults(root: AbsolutePathBuf) -> GrepSearchRequest {
         offset: 0,
         multiline: false,
     }
+}
+
+fn relative_uri_slash_path(path: &PathUri, root: &PathUri) -> String {
+    let path = path.to_abs_path().expect("local match path URI");
+    let root = root.to_abs_path().expect("local root path URI");
+    relative_slash_path(path.as_path(), root.as_path())
 }

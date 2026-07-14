@@ -29,10 +29,6 @@ use crate::protocol::FsGlobParams;
 use crate::protocol::FsGlobResponse;
 use crate::protocol::FsGrepParams;
 use crate::protocol::FsGrepResponse;
-use crate::protocol::FsJoinParams;
-use crate::protocol::FsJoinResponse;
-use crate::protocol::FsParentParams;
-use crate::protocol::FsParentResponse;
 use crate::protocol::FsReadDirectoryParams;
 use crate::protocol::FsReadDirectoryResponse;
 use crate::protocol::FsReadFileParams;
@@ -262,22 +258,6 @@ impl ExecServerHandler {
     ) -> Result<FsCanonicalizeResponse, JSONRPCErrorError> {
         self.require_initialized_for("filesystem")?;
         self.file_system.canonicalize(params).await
-    }
-
-    pub(crate) async fn fs_join(
-        &self,
-        params: FsJoinParams,
-    ) -> Result<FsJoinResponse, JSONRPCErrorError> {
-        self.require_initialized_for("filesystem")?;
-        self.file_system.join(params).await
-    }
-
-    pub(crate) async fn fs_parent(
-        &self,
-        params: FsParentParams,
-    ) -> Result<FsParentResponse, JSONRPCErrorError> {
-        self.require_initialized_for("filesystem")?;
-        self.file_system.parent(params).await
     }
 
     pub(crate) async fn fs_read_directory(
