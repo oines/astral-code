@@ -21,6 +21,7 @@ use codex_config::config_toml::RealtimeTransport;
 use codex_config::config_toml::RealtimeWsMode;
 use codex_config::config_toml::RealtimeWsVersion;
 use codex_config::config_toml::SecretString;
+use codex_config::config_toml::ToolSurface;
 use codex_config::config_toml::ToolsToml;
 use codex_config::config_toml::WebSearchProvider;
 use codex_config::config_toml::WebSearchToolConfig;
@@ -429,6 +430,7 @@ web_search = true
     assert_eq!(
         cfg.tools,
         Some(ToolsToml {
+            surface: None,
             web_search: None,
             experimental_request_user_input: None,
         })
@@ -448,6 +450,7 @@ web_search = false
     assert_eq!(
         cfg.tools,
         Some(ToolsToml {
+            surface: None,
             web_search: None,
             experimental_request_user_input: None,
         })
@@ -466,6 +469,7 @@ fn tools_experimental_request_user_input_defaults_to_enabled() {
     assert_eq!(
         cfg.tools,
         Some(ToolsToml {
+            surface: None,
             web_search: None,
             experimental_request_user_input: Some(ExperimentalRequestUserInput { enabled: true }),
         })
@@ -485,6 +489,7 @@ enabled = false
     assert_eq!(
         cfg.tools,
         Some(ToolsToml {
+            surface: None,
             web_search: None,
             experimental_request_user_input: Some(ExperimentalRequestUserInput { enabled: false }),
         })
@@ -497,6 +502,7 @@ async fn load_config_resolves_experimental_request_user_input_enabled() -> std::
     let config = Config::load_from_base_config_with_overrides(
         ConfigToml {
             tools: Some(ToolsToml {
+                surface: None,
                 web_search: None,
                 experimental_request_user_input: Some(ExperimentalRequestUserInput {
                     enabled: false,
@@ -510,6 +516,33 @@ async fn load_config_resolves_experimental_request_user_input_enabled() -> std::
     .await?;
 
     assert!(!config.experimental_request_user_input_enabled);
+    Ok(())
+}
+
+#[tokio::test]
+async fn load_config_resolves_tool_surface() -> std::io::Result<()> {
+    let codex_home = tempdir()?;
+    let default_config = Config::load_from_base_config_with_overrides(
+        ConfigToml::default(),
+        ConfigOverrides::default(),
+        codex_home.abs(),
+    )
+    .await?;
+    assert_eq!(default_config.tool_surface, ToolSurface::Claude);
+
+    let codex_config = Config::load_from_base_config_with_overrides(
+        toml::from_str(
+            r#"
+[tools]
+surface = "codex"
+"#,
+        )
+        .expect("tool surface should deserialize"),
+        ConfigOverrides::default(),
+        codex_home.abs(),
+    )
+    .await?;
+    assert_eq!(codex_config.tool_surface, ToolSurface::Codex);
     Ok(())
 }
 

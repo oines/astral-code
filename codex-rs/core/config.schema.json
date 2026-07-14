@@ -2930,11 +2930,21 @@
       ],
       "type": "string"
     },
+    "ToolSurface": {
+      "enum": [
+        "claude",
+        "codex"
+      ],
+      "type": "string"
+    },
     "ToolsToml": {
       "additionalProperties": false,
       "properties": {
         "experimental_request_user_input": {
           "$ref": "#/definitions/ExperimentalRequestUserInput"
+        },
+        "surface": {
+          "$ref": "#/definitions/ToolSurface"
         },
         "web_search": {
           "allOf": [

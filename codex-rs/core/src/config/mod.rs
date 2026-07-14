@@ -33,6 +33,7 @@ use codex_config::config_toml::ProjectConfig;
 use codex_config::config_toml::RealtimeAudioConfig;
 use codex_config::config_toml::RealtimeConfig;
 use codex_config::config_toml::ThreadStoreToml;
+pub use codex_config::config_toml::ToolSurface;
 use codex_config::config_toml::WebSearchRuntimeConfig;
 use codex_config::config_toml::validate_model_providers;
 use codex_config::loader::load_config_layers_state;
@@ -1014,6 +1015,9 @@ pub struct Config {
 
     /// Whether to register the experimental request_user_input tool.
     pub experimental_request_user_input_enabled: bool,
+
+    /// Selects the model-visible core tool surface outside code mode.
+    pub tool_surface: ToolSurface,
 
     /// Configuration for the experimental code-mode tool surface.
     pub code_mode: CodeModeConfig,
@@ -2458,6 +2462,14 @@ fn resolve_experimental_request_user_input_enabled(config_toml: &ConfigToml) -> 
         .is_none_or(|config| config.enabled)
 }
 
+fn resolve_tool_surface(config_toml: &ConfigToml) -> ToolSurface {
+    config_toml
+        .tools
+        .as_ref()
+        .and_then(|tools| tools.surface)
+        .unwrap_or_default()
+}
+
 fn resolve_code_mode_config(config_toml: &ConfigToml) -> CodeModeConfig {
     let base = code_mode_toml_config(config_toml.features.as_ref());
 
@@ -3195,6 +3207,7 @@ impl Config {
         let web_search_runtime_config = resolve_web_search_runtime_config(&cfg);
         let experimental_request_user_input_enabled =
             resolve_experimental_request_user_input_enabled(&cfg);
+        let tool_surface = resolve_tool_surface(&cfg);
         let code_mode = resolve_code_mode_config(&cfg);
         let multi_agent_v2 = resolve_multi_agent_v2_config(&cfg);
         let apps_mcp_path_override = if features.enabled(Feature::AppsMcpPathOverride) {
@@ -3795,6 +3808,7 @@ impl Config {
             web_search_config,
             web_search_runtime_config,
             experimental_request_user_input_enabled,
+            tool_surface,
             code_mode,
             use_experimental_unified_exec_tool,
             experimental_anthropic_cached_fold: cfg
