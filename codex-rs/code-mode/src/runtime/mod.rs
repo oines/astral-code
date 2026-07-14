@@ -35,6 +35,7 @@ pub(crate) enum RuntimeCommand {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum PendingRuntimeMode {
+    #[cfg(test)]
     Continue,
     PauseUntilResumed,
 }
@@ -291,6 +292,7 @@ fn next_runtime_command(
 
         let _ = event_tx.send(RuntimeEvent::Pending);
         match pending_mode {
+            #[cfg(test)]
             PendingRuntimeMode::Continue => return command_rx.recv().ok(),
             PendingRuntimeMode::PauseUntilResumed => match control_rx.recv().ok()? {
                 RuntimeControlCommand::Continue => return command_rx.recv().ok(),
