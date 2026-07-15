@@ -289,7 +289,7 @@ pub(crate) async fn maybe_spawn_post_sampling_extraction(
 pub(crate) async fn try_compact(
     sess: Arc<Session>,
     turn_context: Arc<TurnContext>,
-    initial_context_injection: InitialContextInjection,
+    initial_context_injection: &InitialContextInjection,
     _is_auto_compact: bool,
     compaction_item: &codex_protocol::items::TurnItem,
 ) -> CodexResult<SessionMemoryCompactOutcome> {
@@ -334,7 +334,7 @@ async fn try_compact_inner(
     sess: Arc<Session>,
     turn_context: Arc<TurnContext>,
     store: &SessionMemoryStore,
-    initial_context_injection: InitialContextInjection,
+    initial_context_injection: &InitialContextInjection,
     compaction_item: &codex_protocol::items::TurnItem,
     state: &mut SessionMemoryState,
 ) -> CodexResult<String> {
@@ -356,14 +356,21 @@ async fn try_compact_inner(
         &store.summary_path,
     );
     let mut new_history = build_session_memory_compacted_history(tail, summary_text.clone());
+    let (initial_context, world_state_baseline) = crate::compact::build_compaction_initial_context(
+        sess.as_ref(),
+        turn_context.as_ref(),
+        initial_context_injection,
+    )
+    .await;
+    if !initial_context.is_empty() {
+        new_history = crate::compact::insert_initial_context_before_last_real_user_or_summary(
+            new_history,
+            initial_context,
+        );
+    }
     let reference_context_item = match initial_context_injection {
         InitialContextInjection::DoNotInject => None,
-        InitialContextInjection::BeforeLastUserMessage => {
-            let initial_context = sess.build_initial_context(turn_context.as_ref()).await;
-            new_history = crate::compact::insert_initial_context_before_last_real_user_or_summary(
-                new_history,
-                initial_context,
-            );
+        InitialContextInjection::BeforeLastUserMessage(_) => {
             Some(turn_context.to_turn_context_item())
         }
     };
@@ -378,8 +385,13 @@ async fn try_compact_inner(
         message: summary_text.clone(),
         replacement_history: Some(new_history.clone()),
     };
-    sess.replace_compacted_history(new_history, reference_context_item, compacted_item)
-        .await;
+    sess.replace_compacted_history(
+        new_history,
+        reference_context_item,
+        world_state_baseline,
+        compacted_item,
+    )
+    .await;
     sess.recompute_token_usage(turn_context.as_ref()).await;
     let post_compact_baseline_tokens = sess.get_total_token_usage().await;
     sess.emit_turn_item_completed(turn_context.as_ref(), compaction_item.clone())

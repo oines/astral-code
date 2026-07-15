@@ -70,6 +70,7 @@ use codex_async_utils::OrCancelExt;
 use codex_core_skills::injection::InjectedHostSkillPrompts;
 use codex_extension_api::TurnInputContext;
 use codex_extension_api::TurnInputEnvironment;
+use codex_features::Feature;
 use codex_git_utils::get_git_repo_root_with_fs;
 use codex_protocol::config_types::AutoCompactTokenLimitScope;
 use codex_protocol::config_types::ModeKind;
@@ -150,11 +151,14 @@ pub(crate) async fn run_turn(
     }
 
     let first_step_context = sess.capture_step_context(Arc::clone(&turn_context)).await;
-    sess.record_context_updates_and_set_reference_context_item_with_mcp(
-        first_step_context.turn.as_ref(),
-        first_step_context.mcp.as_ref(),
-    )
-    .await;
+    // Keep the exact model-visible state used by this turn and its inline compactions.
+    let mut world_state = sess
+        .record_context_updates_and_set_reference_context_item_with_mcp(
+            first_step_context.turn.as_ref(),
+            &first_step_context.environments,
+            first_step_context.mcp.as_ref(),
+        )
+        .await;
 
     let (injection_items, explicitly_enabled_connectors) = build_skills_and_plugins(
         &sess,
@@ -223,6 +227,20 @@ pub(crate) async fn run_turn(
             Some(step_context) => step_context,
             None => sess.capture_step_context(Arc::clone(&turn_context)).await,
         };
+
+        if turn_context
+            .config
+            .features
+            .enabled(Feature::DeferredExecutor)
+        {
+            world_state = sess
+                .record_step_environment_context_if_changed(
+                    turn_context.as_ref(),
+                    &world_state,
+                    step_context.as_ref(),
+                )
+                .await;
+        }
 
         // Construct the input that we will send to the model.
         let sampling_request_input: Vec<TranscriptItem> = {
@@ -304,7 +322,7 @@ pub(crate) async fn run_turn(
                         &sess,
                         &turn_context,
                         &mut client_session,
-                        InitialContextInjection::BeforeLastUserMessage,
+                        InitialContextInjection::BeforeLastUserMessage(Arc::clone(&world_state)),
                         CompactionReason::ContextLimit,
                         CompactionPhase::MidTurn,
                     )

@@ -228,7 +228,7 @@ use self::turn::collect_explicit_app_ids_from_skill_items;
 use self::turn::realtime_text_for_event;
 use self::turn_context::TurnContext;
 use self::turn_context::TurnSkillsContext;
-use self::world_state::build_world_state_from_turn_context;
+use self::world_state::build_world_state_from_environment_snapshot;
 use self::world_state::build_world_state_from_turn_context_item;
 #[cfg(test)]
 mod rollout_reconstruction_tests;
@@ -1305,7 +1305,7 @@ impl Session {
                 .lock()
                 .await
                 .history
-                .set_world_state_baseline(world_state);
+                .set_world_state_baseline(Arc::new(world_state));
         }
         let prefix_tokens = if matches!(
             turn_context.config.model_auto_compact_token_limit_scope,
@@ -2555,6 +2555,32 @@ impl Session {
         self.send_raw_response_items(turn_context, items).await;
     }
 
+    pub(crate) async fn record_step_environment_context_if_changed(
+        &self,
+        turn_context: &TurnContext,
+        previous_world_state: &Arc<WorldState>,
+        step_context: &step_context::StepContext,
+    ) -> Arc<WorldState> {
+        let world_state = Arc::new(
+            self.build_world_state_for_environments(turn_context, &step_context.environments)
+                .await,
+        );
+        let items = crate::context_manager::updates::merge_contextual_fragments(
+            world_state.render_diff(previous_world_state.as_ref()),
+        );
+        if !items.is_empty() {
+            self.record_conversation_items(turn_context, &items).await;
+        }
+
+        // ContextManager remembers this for later turns; run_turn owns the live value.
+        self.state
+            .lock()
+            .await
+            .history
+            .set_world_state_baseline(Arc::clone(&world_state));
+        world_state
+    }
+
     async fn maybe_warn_on_server_model_mismatch(
         self: &Arc<Self>,
         turn_context: &Arc<TurnContext>,
@@ -2634,11 +2660,15 @@ impl Session {
         &self,
         items: Vec<TranscriptItem>,
         reference_context_item: Option<TurnContextItem>,
+        world_state_baseline: Option<Arc<WorldState>>,
         compacted_item: CompactedItem,
     ) {
         {
             let mut state = self.state.lock().await;
             state.replace_history(items, reference_context_item.clone());
+            if let Some(world_state) = world_state_baseline {
+                state.history.set_world_state_baseline(world_state);
+            }
             state.start_next_auto_compact_window();
         }
         self.services
@@ -2718,26 +2748,11 @@ impl Session {
         }
     }
 
-    pub(crate) async fn build_initial_context(
+    pub(crate) async fn build_world_state_for_environments(
         &self,
         turn_context: &TurnContext,
-    ) -> Vec<TranscriptItem> {
-        let mcp = self.services.latest_mcp_runtime();
-        self.build_initial_context_with_mcp(turn_context, mcp.as_ref())
-            .await
-    }
-
-    async fn build_initial_context_with_mcp(
-        &self,
-        turn_context: &TurnContext,
-        mcp: &McpRuntimeSnapshot,
-    ) -> Vec<TranscriptItem> {
-        let world_state = self.build_world_state(turn_context).await;
-        self.build_initial_context_with_mcp_and_world_state(turn_context, mcp, &world_state)
-            .await
-    }
-
-    async fn build_world_state(&self, turn_context: &TurnContext) -> WorldState {
+        environments: &TurnEnvironmentSnapshot,
+    ) -> WorldState {
         let environment_subagents = if turn_context.config.include_environment_context {
             self.services
                 .agent_control
@@ -2746,7 +2761,21 @@ impl Session {
         } else {
             String::new()
         };
-        build_world_state_from_turn_context(turn_context, &environment_subagents)
+        build_world_state_from_environment_snapshot(
+            turn_context,
+            environments,
+            &environment_subagents,
+        )
+    }
+
+    pub(crate) async fn build_initial_context_with_world_state(
+        &self,
+        turn_context: &TurnContext,
+        world_state: &WorldState,
+    ) -> Vec<TranscriptItem> {
+        let mcp = self.services.latest_mcp_runtime();
+        self.build_initial_context_with_mcp_and_world_state(turn_context, &mcp, world_state)
+            .await
     }
 
     async fn build_initial_context_with_mcp_and_world_state(
@@ -3028,32 +3057,44 @@ impl Session {
     pub(crate) async fn record_context_updates_and_set_reference_context_item(
         &self,
         turn_context: &TurnContext,
-    ) {
+    ) -> Arc<WorldState> {
         let mcp = self.services.latest_mcp_runtime();
-        self.record_context_updates_and_set_reference_context_item_with_mcp(turn_context, &mcp)
-            .await;
+        self.record_context_updates_and_set_reference_context_item_with_mcp(
+            turn_context,
+            &turn_context.environments,
+            &mcp,
+        )
+        .await
     }
 
     async fn record_context_updates_and_set_reference_context_item_with_mcp(
         &self,
         turn_context: &TurnContext,
+        environments: &TurnEnvironmentSnapshot,
         mcp: &McpRuntimeSnapshot,
-    ) {
+    ) -> Arc<WorldState> {
         let reference_context_item = {
             let state = self.state.lock().await;
             state.reference_context_item()
         };
         let should_inject_full_context = reference_context_item.is_none();
-        let world_state = self.build_world_state(turn_context).await;
+        let world_state = Arc::new(
+            self.build_world_state_for_environments(turn_context, environments)
+                .await,
+        );
         let context_items = if should_inject_full_context {
             let context_items = self
-                .build_initial_context_with_mcp_and_world_state(turn_context, mcp, &world_state)
+                .build_initial_context_with_mcp_and_world_state(
+                    turn_context,
+                    mcp,
+                    world_state.as_ref(),
+                )
                 .await;
             self.state
                 .lock()
                 .await
                 .history
-                .set_world_state_baseline(world_state);
+                .set_world_state_baseline(Arc::clone(&world_state));
             context_items
         } else {
             // Steady-state path: append only built-in context diffs to minimize token overhead.
@@ -3063,7 +3104,7 @@ impl Session {
             let world_state_items = {
                 let mut state = self.state.lock().await;
                 crate::context_manager::updates::merge_contextual_fragments(
-                    state.history.update_world_state(world_state),
+                    state.history.update_world_state(Arc::clone(&world_state)),
                 )
             };
             context_items.extend(world_state_items);
@@ -3083,6 +3124,7 @@ impl Session {
         // context items. This keeps later runtime diffing aligned with the current turn state.
         let mut state = self.state.lock().await;
         state.set_reference_context_item(Some(turn_context_item));
+        world_state
     }
 
     pub(crate) async fn update_token_usage_info(

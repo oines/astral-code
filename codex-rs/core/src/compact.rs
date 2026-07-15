@@ -4,6 +4,7 @@ use std::time::Instant;
 use crate::Prompt;
 use crate::client::ModelClientSession;
 use crate::client_common::ModelStreamEvent;
+use crate::context::world_state::WorldState;
 use crate::hook_runtime::PostCompactHookOutcome;
 use crate::hook_runtime::PreCompactHookOutcome;
 use crate::hook_runtime::run_post_compact_hooks;
@@ -62,10 +63,27 @@ const COMPACT_USER_MESSAGE_MAX_TOKENS: usize = 20_000;
 /// Mid-turn compaction must use `BeforeLastUserMessage` because the model is trained to see the
 /// compaction summary as the last item in history after mid-turn compaction; we therefore inject
 /// initial context into the replacement history just above the last real user message.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Debug)]
 pub(crate) enum InitialContextInjection {
-    BeforeLastUserMessage,
+    BeforeLastUserMessage(Arc<WorldState>),
     DoNotInject,
+}
+
+pub(crate) async fn build_compaction_initial_context(
+    sess: &Session,
+    turn_context: &TurnContext,
+    initial_context_injection: &InitialContextInjection,
+) -> (Vec<TranscriptItem>, Option<Arc<WorldState>>) {
+    // Return the rendered state with its items so history and its baseline stay identical.
+    match initial_context_injection {
+        InitialContextInjection::BeforeLastUserMessage(world_state) => {
+            let items = sess
+                .build_initial_context_with_world_state(turn_context, world_state.as_ref())
+                .await;
+            (items, Some(Arc::clone(world_state)))
+        }
+        InitialContextInjection::DoNotInject => (Vec::new(), None),
+    }
 }
 
 pub(crate) async fn run_inline_auto_compact_task(
@@ -236,7 +254,7 @@ async fn run_compact_task_inner_impl(
         match crate::session_memory::try_compact(
             Arc::clone(&sess),
             Arc::clone(&turn_context),
-            initial_context_injection,
+            &initial_context_injection,
             suppress_follow_up_questions,
             &compaction_item,
         )
@@ -360,25 +378,34 @@ async fn run_compact_task_inner_impl(
 
     let mut new_history = build_compacted_history(Vec::new(), &user_messages, &summary_text);
 
-    if matches!(
-        initial_context_injection,
-        InitialContextInjection::BeforeLastUserMessage
-    ) {
-        let initial_context = sess.build_initial_context(turn_context.as_ref()).await;
+    let (initial_context, world_state_baseline) = build_compaction_initial_context(
+        sess.as_ref(),
+        turn_context.as_ref(),
+        &initial_context_injection,
+    )
+    .await;
+    if !initial_context.is_empty() {
         new_history =
             insert_initial_context_before_last_real_user_or_summary(new_history, initial_context);
     }
     let reference_context_item = match initial_context_injection {
         InitialContextInjection::DoNotInject => None,
-        InitialContextInjection::BeforeLastUserMessage => Some(turn_context.to_turn_context_item()),
+        InitialContextInjection::BeforeLastUserMessage(_) => {
+            Some(turn_context.to_turn_context_item())
+        }
     };
     let compacted_item = CompactedItem {
         message: summary_text.clone(),
         replacement_history: Some(new_history.clone()),
     };
     let post_compact_history = new_history.clone();
-    sess.replace_compacted_history(new_history, reference_context_item, compacted_item)
-        .await;
+    sess.replace_compacted_history(
+        new_history,
+        reference_context_item,
+        world_state_baseline,
+        compacted_item,
+    )
+    .await;
     sess.recompute_token_usage(&turn_context).await;
     crate::session_memory::record_post_legacy_compact_baseline(
         sess.as_ref(),
@@ -587,22 +614,19 @@ pub(crate) async fn process_compacted_history(
     sess: &Session,
     turn_context: &TurnContext,
     mut compacted_history: Vec<TranscriptItem>,
-    initial_context_injection: InitialContextInjection,
-) -> Vec<TranscriptItem> {
+    initial_context_injection: &InitialContextInjection,
+) -> (Vec<TranscriptItem>, Option<Arc<WorldState>>) {
     // Mid-turn compaction is the only path that must inject initial context above the last user
     // message in the replacement history. Pre-turn compaction instead injects context after the
     // compaction item, but mid-turn compaction keeps the compaction item last for model training.
-    let initial_context = if matches!(
-        initial_context_injection,
-        InitialContextInjection::BeforeLastUserMessage
-    ) {
-        sess.build_initial_context(turn_context).await
-    } else {
-        Vec::new()
-    };
+    let (initial_context, world_state_baseline) =
+        build_compaction_initial_context(sess, turn_context, initial_context_injection).await;
 
     compacted_history.retain(should_keep_compacted_history_item);
-    insert_initial_context_before_last_real_user_or_summary(compacted_history, initial_context)
+    (
+        insert_initial_context_before_last_real_user_or_summary(compacted_history, initial_context),
+        world_state_baseline,
+    )
 }
 
 /// Returns whether an item from compacted transcript output should be preserved.

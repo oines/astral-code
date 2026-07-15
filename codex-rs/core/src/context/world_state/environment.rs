@@ -27,10 +27,6 @@ pub(crate) struct EnvironmentsState {
 }
 
 impl EnvironmentsState {
-    pub(crate) fn from_turn_context(turn_context: &TurnContext) -> Self {
-        Self::from_turn_context_with_environments(turn_context, &turn_context.environments)
-    }
-
     pub(crate) fn from_turn_context_with_environments(
         turn_context: &TurnContext,
         environments: &TurnEnvironmentSnapshot,
