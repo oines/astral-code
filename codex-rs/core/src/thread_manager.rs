@@ -18,6 +18,9 @@ use crate::tasks::interrupted_turn_history_marker;
 use codex_analytics::AnalyticsEventsClient;
 use codex_app_server_protocol::ThreadHistoryBuilder;
 use codex_app_server_protocol::TurnStatus;
+use codex_code_mode::CodeModeSessionProvider;
+use codex_code_mode::InProcessCodeModeSessionProvider;
+use codex_code_mode::ProcessOwnedCodeModeSessionProvider;
 use codex_core_plugins::PluginsManager;
 use codex_exec_server::EnvironmentManager;
 use codex_extension_api::ExtensionRegistry;
@@ -205,6 +208,7 @@ pub(crate) struct ThreadManagerState {
     skills_manager: Arc<SkillsManager>,
     plugins_manager: Arc<PluginsManager>,
     mcp_manager: Arc<McpManager>,
+    code_mode_session_provider: Arc<dyn CodeModeSessionProvider>,
     extensions: Arc<ExtensionRegistry<Config>>,
     thread_store: Arc<dyn ThreadStore>,
     attestation_provider: Option<Arc<dyn AttestationProvider>>,
@@ -284,6 +288,11 @@ impl ThreadManager {
                 skills_manager,
                 plugins_manager,
                 mcp_manager,
+                code_mode_session_provider: if config.features.enabled(Feature::CodeModeHost) {
+                    Arc::new(ProcessOwnedCodeModeSessionProvider::default())
+                } else {
+                    Arc::new(InProcessCodeModeSessionProvider)
+                },
                 extensions,
                 thread_store,
                 attestation_provider,
@@ -385,6 +394,7 @@ impl ThreadManager {
                 skills_manager,
                 plugins_manager,
                 mcp_manager,
+                code_mode_session_provider: Arc::new(InProcessCodeModeSessionProvider),
                 extensions: empty_extension_registry(),
                 thread_store,
                 attestation_provider: None,
@@ -1331,6 +1341,7 @@ impl ThreadManagerState {
             skills_manager: Arc::clone(&self.skills_manager),
             plugins_manager: Arc::clone(&self.plugins_manager),
             mcp_manager: Arc::clone(&self.mcp_manager),
+            code_mode_session_provider: Arc::clone(&self.code_mode_session_provider),
             extensions: Arc::clone(&self.extensions),
             conversation_history: initial_history,
             session_source,
