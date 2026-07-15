@@ -29,7 +29,7 @@ async fn agents_instructions(mut builder: TestCodexBuilder) -> Result<String> {
     request
         .message_input_texts("user")
         .into_iter()
-        .find(|text| text.starts_with("# AGENTS.md instructions for "))
+        .find(|text| text.starts_with("# AGENTS.md instructions"))
         .ok_or_else(|| anyhow::anyhow!("instructions message not found"))
 }
 
@@ -237,7 +237,7 @@ async fn symlinked_cwd_uses_logical_parent_for_agents_discovery() -> Result<()> 
         .single_request()
         .message_input_texts("user")
         .into_iter()
-        .find(|text| text.starts_with("# AGENTS.md instructions for "))
+        .find(|text| text.starts_with("# AGENTS.md instructions"))
         .expect("instructions message");
     assert!(instructions.contains("logical parent doc"));
     assert!(instructions.contains("workspace doc"));
@@ -287,7 +287,7 @@ async fn selected_environment_sources_match_model_visible_instructions() -> Resu
         .single_request()
         .message_input_texts("user")
         .into_iter()
-        .find(|text| text.starts_with("# AGENTS.md instructions for "))
+        .find(|text| text.starts_with("# AGENTS.md instructions"))
         .expect("instructions message");
     assert!(instructions.contains("global doc\n\n--- project-doc ---\n\nproject doc"));
 

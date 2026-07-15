@@ -90,7 +90,7 @@ impl WorldStateSection for TestWorldStateSection {
     ) -> Option<Box<dyn crate::context::ContextualUserFragment>> {
         (previous != Some(&true)).then(|| {
             Box::new(UserInstructions {
-                directory: String::new(),
+                directory: None,
                 text: "test".to_string(),
             }) as Box<dyn crate::context::ContextualUserFragment>
         })

@@ -1,5 +1,5 @@
-use crate::agents_md::AgentsMdManager;
 pub use crate::agents_md::LoadedAgentsMd;
+use crate::agents_md::load_global_instructions;
 use crate::config::edit::ConfigEdit;
 use crate::config::edit::ConfigEditsBuilder;
 use crate::path_utils::normalize_for_native_workdir;
@@ -2772,7 +2772,7 @@ impl Config {
             .startup_warnings()
             .unwrap_or_default()
             .to_vec();
-        let user_instructions = AgentsMdManager::load_global_instructions(
+        let user_instructions = load_global_instructions(
             LOCAL_FS.as_ref(),
             Some(&codex_home),
             &mut startup_warnings,

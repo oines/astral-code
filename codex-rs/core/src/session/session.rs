@@ -864,26 +864,12 @@ impl Session {
             ));
             turn_environments.update_selections(session_configuration.environment_selections());
             let resolved_environments = turn_environments.snapshot().await;
-            let mut user_instruction_warnings = Vec::new();
-            session_configuration.user_instructions = match resolved_environments
-                .primary_environment()
-            {
-                Some(primary_environment) => {
-                    AgentsMdManager::new(&config)
-                        .user_instructions(
-                            primary_environment.as_ref(),
-                            &mut user_instruction_warnings,
-                        )
-                        .await
-                }
-                None => None,
-            };
-            post_session_configured_events.extend(user_instruction_warnings.into_iter().map(
-                |message| Event {
-                    id: INITIAL_SUBMIT_ID.to_owned(),
-                    msg: EventMsg::Warning(WarningEvent { message }),
-                },
-            ));
+            session_configuration.user_instructions = load_project_instructions(
+                &config,
+                config.user_instructions.clone(),
+                &resolved_environments,
+            )
+            .await;
             let plugin_skill_errors = warm_plugins_and_skills_for_session_init(
                 Arc::clone(&config),
                 Arc::clone(&plugins_manager),

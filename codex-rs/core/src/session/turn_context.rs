@@ -132,7 +132,7 @@ pub struct TurnContext {
     pub(crate) compact_continuation_prompt: Option<String>,
     pub(crate) session_memory_template: Option<String>,
     pub(crate) session_memory_update_prompt: Option<String>,
-    pub(crate) user_instructions: Option<String>,
+    pub(crate) user_instructions: Option<LoadedAgentsMd>,
     pub(crate) collaboration_mode: CollaborationMode,
     pub(crate) multi_agent_version: MultiAgentVersion,
     pub(crate) personality: Option<Personality>,
@@ -614,10 +614,7 @@ impl Session {
             session_memory_update_prompt: session_configuration
                 .session_memory_update_prompt
                 .clone(),
-            user_instructions: session_configuration
-                .user_instructions
-                .as_ref()
-                .map(LoadedAgentsMd::text),
+            user_instructions: session_configuration.user_instructions.clone(),
             collaboration_mode: session_configuration.collaboration_mode.clone(),
             multi_agent_version,
             personality: session_configuration.personality,
