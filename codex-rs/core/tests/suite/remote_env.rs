@@ -37,6 +37,7 @@ use codex_utils_path_uri::PathUri;
 use core_test_support::PathBufExt;
 use core_test_support::PathExt;
 use core_test_support::get_remote_test_env;
+use core_test_support::responses::ResponseMock;
 use core_test_support::responses::ev_apply_patch_custom_tool_call;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
@@ -45,6 +46,7 @@ use core_test_support::responses::ev_function_call;
 use core_test_support::responses::ev_response_created;
 use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::mount_sse_sequence;
+use core_test_support::responses::request_tool_names;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
@@ -150,6 +152,16 @@ async fn send_environment_info(websocket: &mut WebSocketStream<TcpStream>) -> Re
 async fn serve_environment_info(listener: TcpListener) -> Result<()> {
     let mut websocket = accept_initialized_exec_server(listener).await?;
     send_environment_info(&mut websocket).await
+}
+
+async fn wait_for_response_request_count(response_mock: &ResponseMock, expected_count: usize) {
+    timeout(Duration::from_secs(5), async {
+        while response_mock.requests().len() < expected_count {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for Responses API request");
 }
 
 async fn submit_turn_with_approval_and_environments(
@@ -298,6 +310,257 @@ async fn remote_test_env_exposes_target_shell_to_model() -> Result<()> {
             .find(|line| line.trim_start().starts_with("<shell>"))
             .map(str::trim),
         Some("<shell>bash</shell>"),
+    );
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn deferred_executor_updates_context_and_tools_after_startup() -> Result<()> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let server = start_mock_server().await;
+    let wait_call_id = "wait-for-startup";
+    let response_mock = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_function_call(
+                    wait_call_id,
+                    "wait_for_environment",
+                    &json!({
+                        "environment_id": REMOTE_ENVIRONMENT_ID,
+                    })
+                    .to_string(),
+                ),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-2"),
+                ev_function_call(
+                    "request-permissions",
+                    "request_permissions",
+                    &json!({
+                        "reason": "Verify that the ready environment is used.",
+                        "permissions": {
+                            "network": { "enabled": true }
+                        }
+                    })
+                    .to_string(),
+                ),
+                ev_completed("resp-2"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-3"),
+                ev_assistant_message("msg-3", "done"),
+                ev_completed("resp-3"),
+            ]),
+        ],
+    )
+    .await;
+    let mut builder = test_codex()
+        .with_exec_server_url(format!("ws://{}", listener.local_addr()?))
+        .with_config(|config| {
+            config.project_doc_max_bytes = 0;
+            config.use_experimental_unified_exec_tool = true;
+            config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
+            config.approvals_reviewer = ApprovalsReviewer::User;
+            assert!(config.features.enable(Feature::DeferredExecutor).is_ok());
+            assert!(config.features.enable(Feature::UnifiedExec).is_ok());
+            assert!(
+                config
+                    .features
+                    .enable(Feature::RequestPermissionsTool)
+                    .is_ok()
+            );
+        });
+    let test = timeout(Duration::from_secs(5), builder.build(&server))
+        .await
+        .context("thread startup should not wait for the remote environment")??;
+
+    test.codex
+        .submit(Op::UserInput {
+            items: vec![UserInput::Text {
+                text: "wait for the environment".into(),
+                text_elements: Vec::new(),
+            }],
+            final_output_json_schema: None,
+            model_client_metadata: None,
+            additional_context: Default::default(),
+            thread_settings: Default::default(),
+        })
+        .await?;
+    wait_for_response_request_count(&response_mock, /*expected_count*/ 1).await;
+    assert_eq!(response_mock.requests().len(), 1);
+    serve_environment_info(listener).await?;
+    let event = wait_for_event(&test.codex, |event| {
+        matches!(
+            event,
+            EventMsg::RequestPermissions(_) | EventMsg::TurnComplete(_)
+        )
+    })
+    .await;
+    let EventMsg::RequestPermissions(permission_request) = event else {
+        panic!("ready environment should be available to request_permissions: {event:?}");
+    };
+    assert_eq!(
+        permission_request.environment_id.as_deref(),
+        Some(REMOTE_ENVIRONMENT_ID)
+    );
+    test.codex
+        .submit(Op::RequestPermissionsResponse {
+            id: permission_request.call_id,
+            response: RequestPermissionsResponse {
+                permissions: RequestPermissionProfile::default(),
+                scope: PermissionGrantScope::Turn,
+                strict_auto_review: false,
+            },
+        })
+        .await?;
+    wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+
+    let requests = response_mock.requests();
+    assert_eq!(requests.len(), 3);
+    let starting_tools = request_tool_names(&requests[0].body_json());
+    let ready_tools = request_tool_names(&requests[1].body_json());
+    assert!(starting_tools.contains(&"wait_for_environment".to_string()));
+    assert!(!starting_tools.contains(&"exec_command".to_string()));
+    assert!(ready_tools.contains(&"exec_command".to_string()));
+    assert!(ready_tools.contains(&"wait_for_environment".to_string()));
+    let wait_output_item = requests[1].function_call_output(wait_call_id);
+    let wait_output = wait_output_item
+        .get("output")
+        .context("wait_for_environment output should be present")?;
+    let wait_output = match wait_output {
+        Value::String(output) => serde_json::from_str(output)?,
+        output => output.clone(),
+    };
+    assert_eq!(
+        wait_output,
+        json!({
+            "environment_id": REMOTE_ENVIRONMENT_ID,
+            "status": "ready",
+        })
+    );
+    assert!(
+        requests[0]
+            .message_input_texts("user")
+            .iter()
+            .any(|text| text.contains("<status>starting</status>"))
+    );
+    let ready_user_context = requests[1].message_input_texts("user");
+    assert_eq!(
+        ready_user_context
+            .iter()
+            .filter(|text| text.contains("<shell>zsh</shell>"))
+            .count(),
+        1
+    );
+    let final_user_context = requests[2].message_input_texts("user");
+    assert_eq!(
+        final_user_context
+            .iter()
+            .filter(|text| text.contains("<status>starting</status>"))
+            .count(),
+        1
+    );
+    assert_eq!(
+        final_user_context
+            .iter()
+            .filter(|text| text.contains("<shell>zsh</shell>"))
+            .count(),
+        1
+    );
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn deferred_executor_wait_reports_startup_failure() -> Result<()> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let server = start_mock_server().await;
+    let wait_call_id = "wait-for-failure";
+    let response_mock = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_function_call(
+                    wait_call_id,
+                    "wait_for_environment",
+                    &json!({
+                        "environment_id": REMOTE_ENVIRONMENT_ID,
+                    })
+                    .to_string(),
+                ),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-2"),
+                ev_assistant_message("msg-2", "done"),
+                ev_completed("resp-2"),
+            ]),
+        ],
+    )
+    .await;
+    let mut builder = test_codex()
+        .with_exec_server_url(format!("ws://{}", listener.local_addr()?))
+        .with_config(|config| {
+            config.project_doc_max_bytes = 0;
+            config.use_experimental_unified_exec_tool = true;
+            assert!(config.features.enable(Feature::DeferredExecutor).is_ok());
+            assert!(config.features.enable(Feature::UnifiedExec).is_ok());
+        });
+    let test = timeout(Duration::from_secs(5), builder.build(&server))
+        .await
+        .context("thread startup should not wait for the remote environment")??;
+
+    test.codex
+        .submit(Op::UserInput {
+            items: vec![UserInput::Text {
+                text: "wait for the environment".into(),
+                text_elements: Vec::new(),
+            }],
+            final_output_json_schema: None,
+            model_client_metadata: None,
+            additional_context: Default::default(),
+            thread_settings: Default::default(),
+        })
+        .await?;
+    wait_for_response_request_count(&response_mock, /*expected_count*/ 1).await;
+    assert_eq!(response_mock.requests().len(), 1);
+    let (stream, _) = timeout(Duration::from_secs(5), listener.accept())
+        .await
+        .context("exec-server connection should arrive")??;
+    drop(stream);
+    wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+
+    let requests = response_mock.requests();
+    assert_eq!(requests.len(), 2);
+    let starting_tools = request_tool_names(&requests[0].body_json());
+    let failed_tools = request_tool_names(&requests[1].body_json());
+    assert!(starting_tools.contains(&"wait_for_environment".to_string()));
+    assert!(!starting_tools.contains(&"exec_command".to_string()));
+    assert!(failed_tools.contains(&"wait_for_environment".to_string()));
+    assert!(!failed_tools.contains(&"exec_command".to_string()));
+    let (wait_output, _) = requests[1]
+        .function_call_output_content_and_success(wait_call_id)
+        .context("wait_for_environment output should be present")?;
+    assert_eq!(
+        wait_output.as_deref(),
+        Some("Environment `remote` failed to start and is unavailable. Continue without it.")
+    );
+    assert!(
+        requests[1]
+            .message_input_texts("user")
+            .iter()
+            .any(|text| text.contains("status=\"unavailable\""))
     );
 
     Ok(())
