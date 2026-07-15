@@ -1512,6 +1512,103 @@ while (true) {}
 
 #[cfg_attr(windows, ignore = "no exec_command on Windows")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn code_mode_yield_and_termination_are_not_starved_by_runtime_output() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = responses::start_mock_server().await;
+    let mut builder = test_codex().with_config(move |config| {
+        let _ = config.features.enable(Feature::CodeMode);
+    });
+    let test = builder.build(&server).await?;
+
+    // Exact controller arbitration is covered by deterministic code-mode contract tests. Keep
+    // this end-to-end load bounded while exercising a substantial runtime output backlog.
+    let code = r#"// @exec: {"yield_time_ms": 0, "max_output_tokens": 16}
+for (let index = 0; index < 16_384; index++) {
+    text(`event ${index}`);
+}
+while (true) {}
+"#;
+
+    responses::mount_sse_once(
+        &server,
+        sse(vec![
+            ev_response_created("resp-1"),
+            ev_custom_tool_call("call-1", "exec", code),
+            ev_completed("resp-1"),
+        ]),
+    )
+    .await;
+    let first_completion = responses::mount_sse_once(
+        &server,
+        sse(vec![
+            ev_assistant_message("msg-1", "waiting"),
+            ev_completed("resp-2"),
+        ]),
+    )
+    .await;
+
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        test.submit_turn("start the busy loop"),
+    )
+    .await??;
+
+    let first_request = first_completion.single_request();
+    let first_items = custom_tool_output_items(&first_request, "call-1");
+    assert_eq!(first_items.len(), 1);
+    assert_regex_match(
+        concat!(
+            r"(?s)\A",
+            r"Script running with cell ID \d+\nWall time \d+\.\d seconds\nOutput:\n\z"
+        ),
+        text_item(&first_items, /*index*/ 0),
+    );
+    let cell_id = extract_running_cell_id(text_item(&first_items, /*index*/ 0));
+
+    responses::mount_sse_once(
+        &server,
+        sse(vec![
+            ev_response_created("resp-3"),
+            responses::ev_function_call(
+                "call-2",
+                "wait",
+                &serde_json::to_string(&serde_json::json!({
+                    "cell_id": cell_id.clone(),
+                    "terminate": true,
+                }))?,
+            ),
+            ev_completed("resp-3"),
+        ]),
+    )
+    .await;
+    let second_completion = responses::mount_sse_once(
+        &server,
+        sse(vec![
+            ev_assistant_message("msg-2", "terminated"),
+            ev_completed("resp-4"),
+        ]),
+    )
+    .await;
+
+    test.submit_turn("terminate it").await?;
+
+    let second_request = second_completion.single_request();
+    let second_items = function_tool_output_items(&second_request, "call-2");
+    assert!(!second_items.is_empty());
+    assert_regex_match(
+        concat!(
+            r"(?s)\A",
+            r"Script terminated\nWall time \d+\.\d seconds\nOutput:\n\z"
+        ),
+        text_item(&second_items, /*index*/ 0),
+    );
+
+    Ok(())
+}
+
+#[cfg_attr(windows, ignore = "no exec_command on Windows")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn code_mode_can_run_multiple_yielded_sessions() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
