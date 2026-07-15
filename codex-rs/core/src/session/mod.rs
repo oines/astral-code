@@ -148,9 +148,6 @@ use futures::future::Shared;
 use futures::prelude::*;
 use rmcp::model::ElicitationCapability;
 use rmcp::model::FormElicitationCapability;
-use rmcp::model::ListResourceTemplatesResult;
-use rmcp::model::ListResourcesResult;
-use rmcp::model::PaginatedRequestParams;
 use rmcp::model::ReadResourceRequestParams;
 use rmcp::model::ReadResourceResult;
 use rmcp::model::RequestId;
@@ -200,6 +197,7 @@ mod handlers;
 mod inject;
 mod input_queue;
 mod mcp;
+mod mcp_runtime;
 mod multi_agents;
 mod review;
 mod rollout_reconstruction;
@@ -215,6 +213,7 @@ use self::handlers::submission_dispatch_span;
 use self::handlers::submission_loop;
 pub(crate) use self::input_queue::TurnInput;
 pub(crate) use self::input_queue::TurnInputQueue;
+pub use self::mcp_runtime::McpRuntimeSnapshot;
 use self::review::spawn_review_thread;
 use self::session::AppServerClientMetadata;
 use self::session::Session;
@@ -317,7 +316,7 @@ use crate::windows_sandbox::WindowsSandboxLevelExt;
 use codex_core_plugins::PluginsManager;
 use codex_git_utils::get_git_repo_root;
 use codex_mcp::compute_auth_statuses;
-use codex_mcp::effective_mcp_servers_from_configured;
+use codex_mcp::effective_mcp_servers;
 use codex_mcp::host_owned_codex_apps_enabled;
 use codex_otel::SessionTelemetry;
 use codex_otel::THREAD_STARTED_METRIC;
@@ -786,8 +785,11 @@ impl Codex {
                 ..Default::default()
             })
             .await?;
-        let mcp_connection_manager = self.session.services.mcp_connection_manager.load_full();
-        mcp_connection_manager.set_elicitations_auto_deny(mcp_elicitations_auto_deny);
+        self.session
+            .services
+            .latest_mcp_runtime()
+            .manager()
+            .set_elicitations_auto_deny(mcp_elicitations_auto_deny);
         Ok(())
     }
 
@@ -2707,6 +2709,16 @@ impl Session {
         &self,
         turn_context: &TurnContext,
     ) -> Vec<TranscriptItem> {
+        let mcp = self.services.latest_mcp_runtime();
+        self.build_initial_context_with_mcp(turn_context, mcp.as_ref())
+            .await
+    }
+
+    async fn build_initial_context_with_mcp(
+        &self,
+        turn_context: &TurnContext,
+        mcp: &McpRuntimeSnapshot,
+    ) -> Vec<TranscriptItem> {
         let mut developer_sections = Vec::<String>::with_capacity(8);
         let mut contextual_user_sections = Vec::<String>::with_capacity(2);
         let mut separate_developer_sections = Vec::<String>::new();
@@ -2795,10 +2807,9 @@ impl Session {
             }
         }
         if turn_context.config.include_apps_instructions && turn_context.apps_enabled() {
-            let mcp_connection_manager = self.services.mcp_connection_manager.load_full();
             let accessible_and_enabled_connectors =
                 connectors::list_accessible_and_enabled_connectors_from_manager(
-                    &mcp_connection_manager,
+                    mcp.manager(),
                     &turn_context.config,
                 )
                 .await;
@@ -2963,7 +2974,12 @@ impl Session {
         } else {
             turn_context.environments.clone()
         };
-        Arc::new(step_context::StepContext::new(turn_context, environments))
+        let mcp = self.services.latest_mcp_runtime();
+        Arc::new(step_context::StepContext::new(
+            turn_context,
+            environments,
+            mcp,
+        ))
     }
 
     /// Persist the latest turn context snapshot for the first real user turn and for
@@ -2983,13 +2999,23 @@ impl Session {
         &self,
         turn_context: &TurnContext,
     ) {
+        let mcp = self.services.latest_mcp_runtime();
+        self.record_context_updates_and_set_reference_context_item_with_mcp(turn_context, &mcp)
+            .await;
+    }
+
+    async fn record_context_updates_and_set_reference_context_item_with_mcp(
+        &self,
+        turn_context: &TurnContext,
+        mcp: &McpRuntimeSnapshot,
+    ) {
         let reference_context_item = {
             let state = self.state.lock().await;
             state.reference_context_item()
         };
         let should_inject_full_context = reference_context_item.is_none();
         let context_items = if should_inject_full_context {
-            self.build_initial_context(turn_context).await
+            self.build_initial_context_with_mcp(turn_context, mcp).await
         } else {
             // Steady-state path: append only context diffs to minimize token overhead.
             self.build_settings_update_items(reference_context_item.as_ref(), turn_context)

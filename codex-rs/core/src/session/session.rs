@@ -640,19 +640,27 @@ impl Session {
 
         let auth_manager_clone = Arc::clone(&auth_manager);
         let config_for_mcp = Arc::clone(&config);
-        let mcp_manager_for_mcp = Arc::clone(&mcp_manager);
+        let plugins_manager_for_mcp = Arc::clone(&plugins_manager);
         let auth_and_mcp_fut = async move {
             let auth = auth_manager_clone.auth().await;
-            let mcp_servers = mcp_manager_for_mcp
-                .effective_servers(&config_for_mcp, auth.as_ref())
+            let mcp_config = config_for_mcp
+                .to_mcp_config(plugins_manager_for_mcp.as_ref())
                 .await;
+            let mcp_servers = codex_mcp::effective_mcp_servers(&mcp_config, auth.as_ref());
             let auth_statuses = compute_auth_statuses(
                 mcp_servers.iter(),
-                config_for_mcp.mcp_oauth_credentials_store_mode,
+                mcp_config.mcp_oauth_credentials_store_mode,
                 auth.as_ref(),
             )
             .await;
-            (auth, mcp_servers, auth_statuses)
+            let tool_plugin_provenance = codex_mcp::tool_plugin_provenance(&mcp_config);
+            (
+                auth,
+                mcp_config,
+                mcp_servers,
+                auth_statuses,
+                tool_plugin_provenance,
+            )
         }
         .instrument(info_span!(
             "session_init.auth_mcp",
@@ -660,8 +668,11 @@ impl Session {
         ));
 
         // Join all independent futures.
-        let (thread_persistence_result, state_db_ctx, (auth, mcp_servers, auth_statuses)) =
-            tokio::join!(thread_persistence_fut, state_db_fut, auth_and_mcp_fut);
+        let (
+            thread_persistence_result,
+            state_db_ctx,
+            (auth, mcp_config, mcp_servers, auth_statuses, tool_plugin_provenance),
+        ) = tokio::join!(thread_persistence_fut, state_db_fut, auth_and_mcp_fut);
 
         let mut live_thread_init =
             LiveThreadInitGuard::new(thread_persistence_result.map_err(|e| {
@@ -1015,6 +1026,7 @@ impl Session {
                         config.prefix_mcp_tool_names(),
                     ),
                 )),
+                mcp_runtime: arc_swap::ArcSwapOption::empty(),
                 mcp_startup_cancellation_token: Mutex::new(CancellationToken::new()),
                 unified_exec_manager: UnifiedExecProcessManager::new(
                     config.background_terminal_max_timeout,
@@ -1147,7 +1159,6 @@ impl Session {
             let enabled_mcp_server_count =
                 mcp_servers.values().filter(|server| server.enabled()).count();
             let required_mcp_server_count = required_mcp_servers.len();
-            let tool_plugin_provenance = mcp_manager.tool_plugin_provenance(config.as_ref()).await;
             let host_owned_codex_apps_enabled =
                 mcp_servers.contains_key(codex_mcp::CODEX_APPS_MCP_SERVER_NAME);
             let client_elicitation_capability = if config.features.enabled(Feature::AuthElicitation) {
@@ -1182,7 +1193,7 @@ impl Session {
                 INITIAL_SUBMIT_ID.to_owned(),
                 tx_event.clone(),
                 session_configuration.permission_profile(),
-                mcp_runtime_context,
+                mcp_runtime_context.clone(),
                 config.codex_home.to_path_buf(),
                 codex_apps_tools_cache_key(auth),
                 host_owned_codex_apps_enabled,
@@ -1199,9 +1210,11 @@ impl Session {
                 session_init.required_mcp_server_count = required_mcp_server_count,
             ))
             .await;
-            sess.services
-                .mcp_connection_manager
-                .store(Arc::new(mcp_connection_manager));
+            let mcp_runtime = sess.services.publish_mcp_runtime(
+                Arc::new(mcp_config),
+                mcp_runtime_context,
+                mcp_connection_manager,
+            );
             {
                 let mut cancel_guard = sess.services.mcp_startup_cancellation_token.lock().await;
                 if cancel_guard.is_cancelled() {
@@ -1210,10 +1223,8 @@ impl Session {
                 *cancel_guard = cancel_token;
             }
             if !required_mcp_servers.is_empty() {
-                let failures = sess
-                    .services
-                    .mcp_connection_manager
-                    .load_full()
+                let failures = mcp_runtime
+                    .manager()
                     .required_startup_failures(&required_mcp_servers)
                     .instrument(info_span!(
                         "session_init.required_mcp_wait",

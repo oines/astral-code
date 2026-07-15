@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Instant;
 
 use crate::function_tool::FunctionCallError;
@@ -51,11 +52,13 @@ impl ReadMcpResourceHandler {
     ) -> Result<Box<dyn crate::tools::context::ToolOutput>, FunctionCallError> {
         let ToolInvocation {
             session,
-            turn,
+            step_context,
             call_id,
             payload,
             ..
         } = invocation;
+        let turn = Arc::clone(&step_context.turn);
+        let manager = step_context.mcp.manager();
 
         let arguments = match payload {
             ToolPayload::Function { arguments } => arguments,
@@ -82,7 +85,7 @@ impl ReadMcpResourceHandler {
         let start = Instant::now();
 
         let payload_result: Result<ReadResourcePayload, FunctionCallError> = async {
-            let result = session
+            let result = manager
                 .read_resource(&server, ReadResourceRequestParams::new(uri.clone()))
                 .await
                 .map_err(|err| {

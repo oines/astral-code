@@ -149,11 +149,20 @@ pub(crate) async fn run_turn(
         return None;
     }
 
-    sess.record_context_updates_and_set_reference_context_item(turn_context.as_ref())
-        .await;
+    let first_step_context = sess.capture_step_context(Arc::clone(&turn_context)).await;
+    sess.record_context_updates_and_set_reference_context_item_with_mcp(
+        first_step_context.turn.as_ref(),
+        first_step_context.mcp.as_ref(),
+    )
+    .await;
 
-    let (injection_items, explicitly_enabled_connectors) =
-        build_skills_and_plugins(&sess, turn_context.as_ref(), &input, &cancellation_token).await?;
+    let (injection_items, explicitly_enabled_connectors) = build_skills_and_plugins(
+        &sess,
+        first_step_context.as_ref(),
+        &input,
+        &cancellation_token,
+    )
+    .await?;
 
     if run_pending_session_start_hooks(&sess, &turn_context).await {
         return None;
@@ -194,6 +203,7 @@ pub(crate) async fn run_turn(
     // 1. At the start of a turn, so the fresh turn input in `input` gets sampled first.
     // 2. After auto-compact, when model/tool continuation needs to resume before any steer.
 
+    let mut next_step_context = Some(first_step_context);
     loop {
         // Note that pending_input would be something like a message the user
         // submitted through the UI while the model was running. Though the UI
@@ -209,7 +219,10 @@ pub(crate) async fn run_turn(
         }
 
         // Capture once so context, advertised tools, and tool calls share one request view.
-        let step_context = sess.capture_step_context(Arc::clone(&turn_context)).await;
+        let step_context = match next_step_context.take() {
+            Some(step_context) => step_context,
+            None => sess.capture_step_context(Arc::clone(&turn_context)).await,
+        };
 
         // Construct the input that we will send to the model.
         let sampling_request_input: Vec<TranscriptItem> = {
@@ -445,10 +458,11 @@ async fn run_hooks_and_record_inputs(
 
 async fn build_skills_and_plugins(
     sess: &Arc<Session>,
-    turn_context: &TurnContext,
+    step_context: &StepContext,
     input: &[TurnInput],
     cancellation_token: &CancellationToken,
 ) -> Option<(Vec<TranscriptItem>, HashSet<String>)> {
+    let turn_context = step_context.turn.as_ref();
     let user_input = input
         .iter()
         .filter_map(|item| match item {
@@ -476,15 +490,8 @@ async fn build_skills_and_plugins(
         // Plugin mentions need raw MCP/app inventory even when app tools
         // are normally hidden so we can describe the plugin's currently
         // usable capabilities for this turn.
-        match sess
-            .services
-            .mcp_connection_manager
-            .load_full()
-            .list_all_tools()
-            .or_cancel(cancellation_token)
-            .await
-        {
-            Ok(mcp_tools) => mcp_tools,
+        match step_context.mcp_tools().or_cancel(cancellation_token).await {
+            Ok(mcp_tools) => mcp_tools.to_vec(),
             Err(_) if turn_context.apps_enabled() => return None,
             Err(_) => Vec::new(),
         }
@@ -1068,12 +1075,13 @@ pub(crate) async fn built_tools(
     cancellation_token: &CancellationToken,
 ) -> CodexResult<Arc<ToolRouter>> {
     let turn_context = step_context.turn.as_ref();
-    let mcp_connection_manager = sess.services.mcp_connection_manager.load_full();
+    let mcp_connection_manager = step_context.mcp.manager();
     let has_mcp_servers = mcp_connection_manager.has_servers();
-    let all_mcp_tools = mcp_connection_manager
-        .list_all_tools()
+    let all_mcp_tools = step_context
+        .mcp_tools()
         .or_cancel(cancellation_token)
-        .await?;
+        .await?
+        .to_vec();
     let loaded_plugins = sess
         .services
         .plugins_manager

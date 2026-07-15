@@ -1,6 +1,7 @@
 use super::*;
 use crate::config::ConfigBuilder;
 use crate::config::ManagedFeatures;
+use crate::session::step_context::StepContext;
 use crate::session::tests::make_session_and_context;
 use crate::session::tests::make_session_and_context_with_rx;
 use crate::state::ActiveTurn;
@@ -152,10 +153,12 @@ async fn execute_mcp_tool_call_records_replayable_correlation() -> anyhow::Resul
             })
         });
     assert!(dispatch_trace.is_enabled());
+    let turn_context = Arc::new(turn_context);
+    let step_context = StepContext::for_test(Arc::clone(&turn_context));
 
     let result = execute_mcp_tool_call(
         &session,
-        &turn_context,
+        step_context.as_ref(),
         "mcp-call",
         &McpInvocation {
             server: "docs".to_string(),
@@ -1245,7 +1248,10 @@ fn codex_apps_auth_failure_metadata() -> McpToolApprovalMetadata {
     metadata
 }
 
-async fn install_host_owned_codex_apps_manager(session: &Session, turn_context: &TurnContext) {
+async fn host_owned_codex_apps_manager(
+    session: &Session,
+    turn_context: &TurnContext,
+) -> Arc<codex_mcp::McpConnectionManager> {
     let auth = session.services.auth_manager.auth().await;
     let (manager, _cancel_token) = codex_mcp::McpConnectionManager::new(
         &HashMap::new(),
@@ -1272,22 +1278,20 @@ async fn install_host_owned_codex_apps_manager(session: &Session, turn_context: 
         /*elicitation_reviewer*/ None,
     )
     .await;
-    session
-        .services
-        .mcp_connection_manager
-        .store(Arc::new(manager));
+    Arc::new(manager)
 }
 
 #[tokio::test]
 async fn codex_apps_auth_elicitation_feature_disabled_returns_original_result() {
     let (session, turn_context, rx_event) = make_session_and_context_with_rx().await;
-    install_host_owned_codex_apps_manager(&session, &turn_context).await;
+    let manager = host_owned_codex_apps_manager(&session, &turn_context).await;
     let result = codex_apps_auth_failure_result();
     let metadata = codex_apps_auth_failure_metadata();
 
     let returned = maybe_request_codex_apps_auth_elicitation(
         &session,
         &turn_context,
+        manager.as_ref(),
         "call_123",
         CODEX_APPS_MCP_SERVER_NAME,
         Some(&metadata),
@@ -1309,10 +1313,12 @@ async fn codex_apps_auth_elicitation_non_host_owned_server_returns_original_resu
         .features = ManagedFeatures::from(features);
     let result = codex_apps_auth_failure_result();
     let metadata = codex_apps_auth_failure_metadata();
+    let manager = session.services.latest_mcp_runtime().manager_arc();
 
     let returned = maybe_request_codex_apps_auth_elicitation(
         &session,
         &turn_context,
+        manager.as_ref(),
         "call_123",
         CODEX_APPS_MCP_SERVER_NAME,
         Some(&metadata),
@@ -1327,7 +1333,7 @@ async fn codex_apps_auth_elicitation_non_host_owned_server_returns_original_resu
 #[tokio::test]
 async fn codex_apps_auth_elicitation_disallowed_by_policy_returns_original_result() {
     let (session, mut turn_context, rx_event) = make_session_and_context_with_rx().await;
-    install_host_owned_codex_apps_manager(&session, &turn_context).await;
+    let manager = host_owned_codex_apps_manager(&session, &turn_context).await;
     let mut features = Features::with_defaults();
     features.enable(Feature::AuthElicitation);
     let turn_context = Arc::get_mut(&mut turn_context).expect("single turn context ref");
@@ -1342,6 +1348,7 @@ async fn codex_apps_auth_elicitation_disallowed_by_policy_returns_original_resul
     let returned = maybe_request_codex_apps_auth_elicitation(
         &session,
         turn_context,
+        manager.as_ref(),
         "call_123",
         CODEX_APPS_MCP_SERVER_NAME,
         Some(&metadata),
@@ -1356,7 +1363,7 @@ async fn codex_apps_auth_elicitation_disallowed_by_policy_returns_original_resul
 #[tokio::test]
 async fn codex_apps_auth_elicitation_granular_mcp_disabled_returns_original_result() {
     let (session, mut turn_context, rx_event) = make_session_and_context_with_rx().await;
-    install_host_owned_codex_apps_manager(&session, &turn_context).await;
+    let manager = host_owned_codex_apps_manager(&session, &turn_context).await;
     let mut features = Features::with_defaults();
     features.enable(Feature::AuthElicitation);
     let turn_context = Arc::get_mut(&mut turn_context).expect("single turn context ref");
@@ -1377,6 +1384,7 @@ async fn codex_apps_auth_elicitation_granular_mcp_disabled_returns_original_resu
     let returned = maybe_request_codex_apps_auth_elicitation(
         &session,
         turn_context,
+        manager.as_ref(),
         "call_123",
         CODEX_APPS_MCP_SERVER_NAME,
         Some(&metadata),
@@ -1391,7 +1399,7 @@ async fn codex_apps_auth_elicitation_granular_mcp_disabled_returns_original_resu
 #[tokio::test]
 async fn codex_apps_auth_elicitation_feature_enabled_requests_elicitation() {
     let (session, mut turn_context, rx_event) = make_session_and_context_with_rx().await;
-    install_host_owned_codex_apps_manager(&session, &turn_context).await;
+    let manager = host_owned_codex_apps_manager(&session, &turn_context).await;
     *session.active_turn.lock().await = Some(ActiveTurn::default());
     let mut features = Features::with_defaults();
     features.enable(Feature::AuthElicitation);
@@ -1404,10 +1412,12 @@ async fn codex_apps_auth_elicitation_feature_enabled_requests_elicitation() {
     let request_task = tokio::spawn({
         let session = Arc::clone(&session);
         let turn_context = Arc::clone(&turn_context);
+        let manager = Arc::clone(&manager);
         async move {
             maybe_request_codex_apps_auth_elicitation(
                 &session,
                 &turn_context,
+                manager.as_ref(),
                 "call_123",
                 CODEX_APPS_MCP_SERVER_NAME,
                 Some(&metadata),
@@ -2288,7 +2298,7 @@ async fn approve_mode_skips_when_annotations_do_not_require_approval() {
 
     let decision = maybe_request_mcp_tool_approval(
         &session,
-        &turn_context,
+        &StepContext::for_test(Arc::clone(&turn_context)),
         "call-1",
         &invocation,
         &HookToolName::new("mcp__test__tool"),
@@ -2365,7 +2375,7 @@ async fn guardian_mode_skips_auto_when_annotations_do_not_require_approval() {
 
     let decision = maybe_request_mcp_tool_approval(
         &session,
-        &turn_context,
+        &StepContext::for_test(Arc::clone(&turn_context)),
         "call-guardian",
         &invocation,
         &HookToolName::new("mcp__test__tool"),
@@ -2421,7 +2431,7 @@ async fn permission_request_hook_allows_mcp_tool_call() {
 
     let decision = maybe_request_mcp_tool_approval(
         &session,
-        &turn_context,
+        &StepContext::for_test(Arc::clone(&turn_context)),
         "call-mcp-hook",
         &invocation,
         &HookToolName::new("mcp__memory__create_entities"),
@@ -2483,7 +2493,7 @@ async fn permission_request_hook_uses_hook_tool_name_without_metadata() {
 
     let decision = maybe_request_mcp_tool_approval(
         &session,
-        &turn_context,
+        &StepContext::for_test(Arc::clone(&turn_context)),
         "call-mcp-hook-no-metadata",
         &invocation,
         &HookToolName::new("mcp__memory__create_entities"),
@@ -2562,7 +2572,7 @@ async fn permission_request_hook_runs_after_remembered_mcp_approval() {
     let turn_context = Arc::new(turn_context);
     let decision = maybe_request_mcp_tool_approval(
         &session,
-        &turn_context,
+        &StepContext::for_test(Arc::clone(&turn_context)),
         "call-mcp-remembered",
         &invocation,
         &HookToolName::new("mcp__memory__create_entities"),
@@ -2646,7 +2656,7 @@ async fn guardian_mode_mcp_denial_returns_rationale_message() {
 
     let decision = maybe_request_mcp_tool_approval(
         &session,
-        &turn_context,
+        &StepContext::for_test(Arc::clone(&turn_context)),
         "call-guardian-deny",
         &invocation,
         &HookToolName::new("mcp__test__tool"),
@@ -2709,7 +2719,7 @@ async fn prompt_mode_waits_for_approval_when_annotations_do_not_require_approval
         tokio::spawn(async move {
             maybe_request_mcp_tool_approval(
                 &session,
-                &turn_context,
+                &StepContext::for_test(Arc::clone(&turn_context)),
                 "call-prompt",
                 &invocation,
                 &HookToolName::new("mcp__test__tool"),
@@ -2764,7 +2774,7 @@ async fn full_access_mode_skips_mcp_tool_approval_for_all_approval_modes() {
     ] {
         let decision = maybe_request_mcp_tool_approval(
             &session,
-            &turn_context,
+            &StepContext::for_test(Arc::clone(&turn_context)),
             "call-2",
             &invocation,
             &HookToolName::new("mcp__test__tool"),
@@ -2851,7 +2861,7 @@ async fn approve_mode_skips_guardian_in_every_permission_mode() {
         let turn_context = Arc::new(turn_context);
         let decision = maybe_request_mcp_tool_approval(
             &session,
-            &turn_context,
+            &StepContext::for_test(Arc::clone(&turn_context)),
             "call-3",
             &invocation,
             &HookToolName::new("mcp__test__tool"),

@@ -90,8 +90,8 @@ impl Session {
     ) -> McpServerElicitationOutcome {
         if self
             .services
-            .mcp_connection_manager
-            .load_full()
+            .latest_mcp_runtime()
+            .manager()
             .elicitations_auto_deny()
         {
             return McpServerElicitationOutcome {
@@ -224,33 +224,9 @@ impl Session {
         }
 
         self.services
-            .mcp_connection_manager
-            .load_full()
+            .latest_mcp_runtime()
+            .manager_arc()
             .resolve_elicitation(server_name, id, response)
-            .await
-    }
-
-    pub async fn list_resources(
-        &self,
-        server: &str,
-        params: Option<PaginatedRequestParams>,
-    ) -> anyhow::Result<ListResourcesResult> {
-        self.services
-            .mcp_connection_manager
-            .load_full()
-            .list_resources(server, params)
-            .await
-    }
-
-    pub async fn list_resource_templates(
-        &self,
-        server: &str,
-        params: Option<PaginatedRequestParams>,
-    ) -> anyhow::Result<ListResourceTemplatesResult> {
-        self.services
-            .mcp_connection_manager
-            .load_full()
-            .list_resource_templates(server, params)
             .await
     }
 
@@ -260,8 +236,8 @@ impl Session {
         params: ReadResourceRequestParams,
     ) -> anyhow::Result<ReadResourceResult> {
         self.services
-            .mcp_connection_manager
-            .load_full()
+            .latest_mcp_runtime()
+            .manager_arc()
             .read_resource(server, params)
             .await
     }
@@ -274,8 +250,8 @@ impl Session {
         meta: Option<serde_json::Value>,
     ) -> anyhow::Result<CallToolResult> {
         self.services
-            .mcp_connection_manager
-            .load_full()
+            .latest_mcp_runtime()
+            .manager_arc()
             .call_tool(server, tool, arguments, meta)
             .await
     }
@@ -289,20 +265,21 @@ impl Session {
     ) {
         let auth = self.services.auth_manager.auth().await;
         let config = self.get_config().await;
-        let mcp_config = config
+        let mut mcp_config = config
             .to_mcp_config(self.services.plugins_manager.as_ref())
             .await;
-        let tool_plugin_provenance = self
-            .services
-            .mcp_manager
-            .tool_plugin_provenance(config.as_ref())
-            .await;
-        let mcp_servers =
-            effective_mcp_servers_from_configured(mcp_servers, &mcp_config, auth.as_ref());
+        mcp_config.mcp_oauth_credentials_store_mode = store_mode;
+        mcp_config.configured_mcp_servers = mcp_servers;
+        let tool_plugin_provenance = codex_mcp::tool_plugin_provenance(&mcp_config);
+        let mcp_servers = effective_mcp_servers(&mcp_config, auth.as_ref());
         let host_owned_codex_apps_enabled =
             host_owned_codex_apps_enabled(&mcp_config, auth.as_ref());
-        let auth_statuses =
-            compute_auth_statuses(mcp_servers.iter(), store_mode, auth.as_ref()).await;
+        let auth_statuses = compute_auth_statuses(
+            mcp_servers.iter(),
+            mcp_config.mcp_oauth_credentials_store_mode,
+            auth.as_ref(),
+        )
+        .await;
         let mcp_runtime_context = match turn_context.environments.primary() {
             Some(turn_environment) => McpRuntimeContext::new(
                 self.services.turn_environments.environment_manager(),
@@ -316,31 +293,32 @@ impl Session {
         };
         {
             let mut guard = self.services.mcp_startup_cancellation_token.lock().await;
-            guard.cancel();
+            // The previous runtime owns its token and may still be serving an in-flight step.
             *guard = CancellationToken::new();
         }
         let (refreshed_manager, cancel_token) = McpConnectionManager::new(
             &mcp_servers,
-            store_mode,
+            mcp_config.mcp_oauth_credentials_store_mode,
             auth_statuses,
             &turn_context.approval_policy,
             turn_context.sub_id.clone(),
             self.get_tx_event(),
             turn_context.permission_profile(),
-            mcp_runtime_context,
-            config.codex_home.to_path_buf(),
+            mcp_runtime_context.clone(),
+            mcp_config.codex_home.clone(),
             codex_apps_tools_cache_key(auth.as_ref()),
             host_owned_codex_apps_enabled,
             mcp_config.prefix_mcp_tool_names,
-            mcp_config.client_elicitation_capability,
+            mcp_config.client_elicitation_capability.clone(),
             tool_plugin_provenance,
             auth.as_ref(),
             elicitation_reviewer,
         )
         .await;
         {
-            let current_manager = self.services.mcp_connection_manager.load_full();
-            refreshed_manager.set_elicitations_auto_deny(current_manager.elicitations_auto_deny());
+            let current_runtime = self.services.latest_mcp_runtime();
+            refreshed_manager
+                .set_elicitations_auto_deny(current_runtime.manager().elicitations_auto_deny());
         }
         {
             let mut guard = self.services.mcp_startup_cancellation_token.lock().await;
@@ -350,11 +328,11 @@ impl Session {
             *guard = cancel_token;
         }
 
-        let old_manager = self
-            .services
-            .mcp_connection_manager
-            .swap(Arc::new(refreshed_manager));
-        old_manager.shutdown().await;
+        self.services.publish_mcp_runtime(
+            Arc::new(mcp_config),
+            mcp_runtime_context,
+            refreshed_manager,
+        );
     }
 
     pub(crate) async fn refresh_mcp_servers_if_requested(

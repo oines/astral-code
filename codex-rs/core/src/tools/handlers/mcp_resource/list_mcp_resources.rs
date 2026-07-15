@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Instant;
 
 use crate::function_tool::FunctionCallError;
@@ -51,11 +52,13 @@ impl ListMcpResourcesHandler {
     ) -> Result<Box<dyn crate::tools::context::ToolOutput>, FunctionCallError> {
         let ToolInvocation {
             session,
-            turn,
+            step_context,
             call_id,
             payload,
             ..
         } = invocation;
+        let turn = Arc::clone(&step_context.turn);
+        let manager = step_context.mcp.manager();
 
         let arguments = match payload {
             ToolPayload::Function { arguments } => arguments,
@@ -86,7 +89,7 @@ impl ListMcpResourcesHandler {
                 let params = cursor
                     .clone()
                     .map(|value| PaginatedRequestParams::default().with_cursor(Some(value)));
-                let result = session
+                let result = manager
                     .list_resources(&server_name, params)
                     .await
                     .map_err(|err| {
@@ -103,12 +106,7 @@ impl ListMcpResourcesHandler {
                     ));
                 }
 
-                let resources = session
-                    .services
-                    .mcp_connection_manager
-                    .load_full()
-                    .list_all_resources()
-                    .await;
+                let resources = manager.list_all_resources().await;
                 Ok(ListResourcesPayload::from_all_servers(resources))
             }
         }

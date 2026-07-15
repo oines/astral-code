@@ -12,6 +12,7 @@ use crate::exec_policy::ExecPolicyManager;
 use crate::guardian::GuardianRejection;
 use crate::guardian::GuardianRejectionCircuitBreaker;
 use crate::mcp::McpManager;
+use crate::session::McpRuntimeSnapshot;
 use crate::tools::code_mode::CodeModeService;
 use crate::tools::network_approval::NetworkApprovalService;
 use crate::tools::sandboxing::ApprovalStore;
@@ -24,7 +25,9 @@ use codex_extension_api::ExtensionData;
 use codex_extension_api::ExtensionRegistry;
 use codex_hooks::Hooks;
 use codex_login::AuthManager;
+use codex_mcp::McpConfig;
 use codex_mcp::McpConnectionManager;
+use codex_mcp::McpRuntimeContext;
 use codex_models_manager::manager::SharedModelsManager;
 use codex_otel::SessionTelemetry;
 use codex_rollout::state_db::StateDbHandle;
@@ -39,6 +42,8 @@ use tokio_util::sync::CancellationToken;
 pub(crate) struct SessionServices {
     /// The latest manager; callers retain an owned handle while performing MCP I/O.
     pub(crate) mcp_connection_manager: Arc<ArcSwap<McpConnectionManager>>,
+    /// The latest atomically published MCP config and manager pair.
+    pub(crate) mcp_runtime: ArcSwapOption<McpRuntimeSnapshot>,
     pub(crate) mcp_startup_cancellation_token: Mutex<CancellationToken>,
     pub(crate) unified_exec_manager: UnifiedExecProcessManager,
     #[cfg_attr(not(unix), allow(dead_code))]
@@ -77,4 +82,28 @@ pub(crate) struct SessionServices {
     pub(crate) model_client: ModelClient,
     pub(crate) code_mode_service: CodeModeService,
     pub(crate) turn_environments: Arc<ThreadEnvironments>,
+}
+
+impl SessionServices {
+    pub(crate) fn publish_mcp_runtime(
+        &self,
+        config: Arc<McpConfig>,
+        runtime_context: McpRuntimeContext,
+        manager: McpConnectionManager,
+    ) -> Arc<McpRuntimeSnapshot> {
+        let manager = Arc::new(manager);
+        // Publish the manager mirror first. Once the paired snapshot is visible, every
+        // model-scoped consumer observes this exact manager and configuration.
+        self.mcp_connection_manager.store(Arc::clone(&manager));
+        let runtime = Arc::new(McpRuntimeSnapshot::new(config, manager, runtime_context));
+        self.mcp_runtime.store(Some(Arc::clone(&runtime)));
+        runtime
+    }
+
+    pub(crate) fn latest_mcp_runtime(&self) -> Arc<McpRuntimeSnapshot> {
+        let Some(runtime) = self.mcp_runtime.load_full() else {
+            unreachable!("MCP runtime must be installed before handling requests");
+        };
+        runtime
+    }
 }
