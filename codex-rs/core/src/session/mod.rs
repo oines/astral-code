@@ -289,7 +289,6 @@ use crate::SkillLoadOutcome;
 #[cfg(test)]
 use crate::SkillMetadata;
 use crate::SkillsManager;
-use crate::agents_md::load_project_instructions;
 use crate::exec_policy::ExecPolicyUpdateError;
 use crate::guardian::GuardianReviewSessionManager;
 use crate::mcp::McpManager;
@@ -590,7 +589,6 @@ impl Codex {
             model_reasoning_summary: config.model_reasoning_summary,
             service_tier,
             developer_instructions: config.developer_instructions.clone(),
-            user_instructions: None,
             personality: config.personality,
             base_instructions,
             compact_prompt: config.compact_prompt.clone(),
@@ -806,10 +804,11 @@ impl Codex {
     }
 
     pub(crate) async fn instruction_sources(&self) -> Vec<PathUri> {
-        let state = self.session.state.lock().await;
-        state
-            .session_configuration
-            .user_instructions
+        self.session
+            .services
+            .agents_md_manager
+            .get_loaded()
+            .await
             .as_ref()
             .map_or_else(Vec::new, |instructions| instructions.sources().collect())
     }
@@ -2953,7 +2952,7 @@ impl Session {
                 }
             }
         }
-        if let Some(user_instructions) = turn_context.user_instructions.as_ref() {
+        if let Some(user_instructions) = self.services.agents_md_manager.get_loaded().await {
             contextual_user_sections.push(user_instructions.contextual_user_fragment().render());
         }
         for fragment in world_state.render_full() {

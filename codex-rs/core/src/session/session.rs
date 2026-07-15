@@ -1,6 +1,6 @@
 use super::input_queue::InputQueue;
 use super::*;
-use crate::agents_md::LoadedAgentsMd;
+use crate::agents_md_manager::AgentsMdManager;
 use crate::config::ConstraintError;
 use crate::skills::SkillError;
 use crate::state::ActiveTurn;
@@ -52,10 +52,6 @@ pub(crate) struct SessionConfiguration {
 
     /// Developer instructions that supplement the base instructions.
     pub(super) developer_instructions: Option<String>,
-
-    /// Model instructions that are appended to the base instructions and the
-    /// files that supplied them.
-    pub(super) user_instructions: Option<LoadedAgentsMd>,
 
     /// Personality preference for the model.
     pub(super) personality: Option<Personality>,
@@ -864,12 +860,10 @@ impl Session {
             ));
             turn_environments.update_selections(session_configuration.environment_selections());
             let resolved_environments = turn_environments.snapshot().await;
-            session_configuration.user_instructions = load_project_instructions(
-                &config,
-                config.user_instructions.clone(),
-                &resolved_environments,
-            )
-            .await;
+            let agents_md_manager = Arc::new(AgentsMdManager::new(config.user_instructions.clone()));
+            agents_md_manager
+                .refresh(config.as_ref(), &resolved_environments)
+                .await;
             let plugin_skill_errors = warm_plugins_and_skills_for_session_init(
                 Arc::clone(&config),
                 Arc::clone(&plugins_manager),
@@ -1033,6 +1027,7 @@ impl Session {
                 guardian_rejection_circuit_breaker: Mutex::new(Default::default()),
                 runtime_handle: tokio::runtime::Handle::current(),
                 skills_manager,
+                agents_md_manager,
                 plugins_manager: Arc::clone(&plugins_manager),
                 mcp_manager: Arc::clone(&mcp_manager),
                 extensions,

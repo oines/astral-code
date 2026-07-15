@@ -1,6 +1,5 @@
 use super::*;
 use crate::SkillLoadOutcome;
-use crate::agents_md::LoadedAgentsMd;
 use crate::config::GhostSnapshotConfig;
 use crate::environment_selection::TurnEnvironmentSnapshot;
 use crate::shell_snapshot::ShellSnapshotFile;
@@ -132,7 +131,6 @@ pub struct TurnContext {
     pub(crate) compact_continuation_prompt: Option<String>,
     pub(crate) session_memory_template: Option<String>,
     pub(crate) session_memory_update_prompt: Option<String>,
-    pub(crate) user_instructions: Option<LoadedAgentsMd>,
     pub(crate) collaboration_mode: CollaborationMode,
     pub(crate) multi_agent_version: MultiAgentVersion,
     pub(crate) personality: Option<Personality>,
@@ -290,7 +288,6 @@ impl TurnContext {
             compact_continuation_prompt: self.compact_continuation_prompt.clone(),
             session_memory_template: self.session_memory_template.clone(),
             session_memory_update_prompt: self.session_memory_update_prompt.clone(),
-            user_instructions: self.user_instructions.clone(),
             collaboration_mode,
             multi_agent_version: self.multi_agent_version,
             personality: self.personality,
@@ -614,7 +611,6 @@ impl Session {
             session_memory_update_prompt: session_configuration
                 .session_memory_update_prompt
                 .clone(),
-            user_instructions: session_configuration.user_instructions.clone(),
             collaboration_mode: session_configuration.collaboration_mode.clone(),
             multi_agent_version,
             personality: session_configuration.personality,
