@@ -167,22 +167,26 @@ pub fn create_agent_tools_for_provider_neutral_request(
                 };
                 push_agent_tool(&mut agent_tools, &mut seen_names, agent_tool)?;
             }
-            ToolSpec::Freeform(tool) if tool.name == "apply_patch" => {
-                push_agent_tool(
-                    &mut agent_tools,
-                    &mut seen_names,
-                    apply_patch_freeform_tool_to_agent_tool(tool),
-                )?;
-            }
             ToolSpec::ImageGeneration { .. } | ToolSpec::WebSearch { .. } => {
                 return Err(AgentToolSpecError::UnsupportedTool {
                     name: spec.name().to_string(),
                 });
             }
-            ToolSpec::Freeform(_) => {
-                return Err(AgentToolSpecError::UnsupportedTool {
-                    name: spec.name().to_string(),
-                });
+            ToolSpec::Freeform(tool) => {
+                let input_description = match tool.name.as_str() {
+                    "apply_patch" => "The raw apply_patch patch body.",
+                    codex_code_mode::PUBLIC_TOOL_NAME => "JavaScript source to execute.",
+                    _ => {
+                        return Err(AgentToolSpecError::UnsupportedTool {
+                            name: spec.name().to_string(),
+                        });
+                    }
+                };
+                push_agent_tool(
+                    &mut agent_tools,
+                    &mut seen_names,
+                    freeform_tool_to_agent_tool(tool, input_description),
+                )?;
             }
         }
     }
@@ -210,7 +214,7 @@ fn responses_api_tool_to_agent_tool(
     responses_api_tool_to_agent_tool_with_name(tool, tool.name.clone(), metadata)
 }
 
-fn apply_patch_freeform_tool_to_agent_tool(tool: &FreeformTool) -> AgentTool {
+fn freeform_tool_to_agent_tool(tool: &FreeformTool, input_description: &str) -> AgentTool {
     AgentTool {
         name: tool.name.clone(),
         description: tool.description.clone(),
@@ -219,7 +223,7 @@ fn apply_patch_freeform_tool_to_agent_tool(tool: &FreeformTool) -> AgentTool {
             "properties": {
                 "input": {
                     "type": "string",
-                    "description": "The raw apply_patch patch body."
+                    "description": input_description
                 }
             },
             "required": ["input"],

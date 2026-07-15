@@ -1,6 +1,6 @@
 use codex_code_mode::ToolDefinition as CodeModeToolDefinition;
-use codex_tools::JsonSchema;
-use codex_tools::ResponsesApiTool;
+use codex_tools::FreeformTool;
+use codex_tools::FreeformToolFormat;
 use codex_tools::ToolSpec;
 use std::collections::BTreeMap;
 
@@ -10,7 +10,17 @@ pub(crate) fn create_code_mode_tool(
     namespace_descriptions: &BTreeMap<String, codex_code_mode::ToolNamespaceDescription>,
     code_mode_only: bool,
 ) -> ToolSpec {
-    ToolSpec::Function(ResponsesApiTool {
+    const CODE_MODE_FREEFORM_GRAMMAR: &str = r#"
+start: pragma_source | plain_source
+pragma_source: PRAGMA_LINE NEWLINE SOURCE
+plain_source: SOURCE
+
+PRAGMA_LINE: /[ \t]*\/\/ @exec:[^\r\n]*/
+NEWLINE: /\r?\n/
+SOURCE: /[\s\S]+/
+"#;
+
+    ToolSpec::Freeform(FreeformTool {
         name: codex_code_mode::PUBLIC_TOOL_NAME.to_string(),
         description: codex_code_mode::build_exec_tool_description(
             enabled_tools,
@@ -18,17 +28,11 @@ pub(crate) fn create_code_mode_tool(
             namespace_descriptions,
             code_mode_only,
         ),
-        strict: false,
-        parameters: JsonSchema::object(
-            BTreeMap::from([(
-                "input".to_string(),
-                JsonSchema::string(Some("JavaScript source to execute.".to_string())),
-            )]),
-            Some(vec!["input".to_string()]),
-            Some(false.into()),
-        ),
-        output_schema: None,
-        defer_loading: None,
+        format: FreeformToolFormat {
+            r#type: "grammar".to_string(),
+            syntax: "lark".to_string(),
+            definition: CODE_MODE_FREEFORM_GRAMMAR.to_string(),
+        },
     })
 }
 
@@ -56,7 +60,7 @@ mod tests {
                 &BTreeMap::new(),
                 /*code_mode_only*/ true,
             ),
-            ToolSpec::Function(ResponsesApiTool {
+            ToolSpec::Freeform(FreeformTool {
                 name: codex_code_mode::PUBLIC_TOOL_NAME.to_string(),
                 description: codex_code_mode::build_exec_tool_description(
                     &enabled_tools,
@@ -64,17 +68,20 @@ mod tests {
                     &BTreeMap::new(),
                     /*code_mode_only*/ true,
                 ),
-                strict: false,
-                parameters: JsonSchema::object(
-                    BTreeMap::from([(
-                        "input".to_string(),
-                        JsonSchema::string(Some("JavaScript source to execute.".to_string())),
-                    )]),
-                    Some(vec!["input".to_string()]),
-                    Some(false.into()),
-                ),
-                output_schema: None,
-                defer_loading: None,
+                format: FreeformToolFormat {
+                    r#type: "grammar".to_string(),
+                    syntax: "lark".to_string(),
+                    definition: r#"
+start: pragma_source | plain_source
+pragma_source: PRAGMA_LINE NEWLINE SOURCE
+plain_source: SOURCE
+
+PRAGMA_LINE: /[ \t]*\/\/ @exec:[^\r\n]*/
+NEWLINE: /\r?\n/
+SOURCE: /[\s\S]+/
+"#
+                    .to_string(),
+                },
             })
         );
     }

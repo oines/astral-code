@@ -316,6 +316,38 @@ fn create_agent_tools_converts_apply_patch_freeform_tool() {
 }
 
 #[test]
+fn create_agent_tools_converts_code_mode_exec_freeform_tool() {
+    assert_eq!(
+        create_agent_tools_for_provider_neutral_request(&[ToolSpec::Freeform(FreeformTool {
+            name: codex_code_mode::PUBLIC_TOOL_NAME.to_string(),
+            description: "Execute JavaScript".to_string(),
+            format: FreeformToolFormat {
+                r#type: "grammar".to_string(),
+                syntax: "lark".to_string(),
+                definition: "start: SOURCE".to_string(),
+            },
+        })])
+        .expect("code mode exec freeform should convert to provider-neutral function"),
+        vec![AgentTool {
+            name: codex_code_mode::PUBLIC_TOOL_NAME.to_string(),
+            description: "Execute JavaScript".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "input": {
+                        "type": "string",
+                        "description": "JavaScript source to execute.",
+                    },
+                },
+                "required": ["input"],
+                "additionalProperties": false,
+            }),
+            metadata: BTreeMap::new(),
+        }]
+    );
+}
+
+#[test]
 fn create_agent_tools_rejects_duplicate_names() {
     assert_eq!(
         create_agent_tools_for_provider_neutral_request(&[
@@ -366,7 +398,7 @@ fn create_agent_tools_rejects_hosted_and_freeform_tools() {
     );
     assert_eq!(
         create_agent_tools_for_provider_neutral_request(&[ToolSpec::Freeform(FreeformTool {
-            name: "exec".to_string(),
+            name: "unsupported_freeform".to_string(),
             description: "Run a command".to_string(),
             format: FreeformToolFormat {
                 r#type: "grammar".to_string(),
@@ -375,7 +407,7 @@ fn create_agent_tools_rejects_hosted_and_freeform_tools() {
             },
         })]),
         Err(AgentToolSpecError::UnsupportedTool {
-            name: "exec".to_string(),
+            name: "unsupported_freeform".to_string(),
         })
     );
 }
