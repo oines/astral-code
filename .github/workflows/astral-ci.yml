@@ -229,7 +229,7 @@ jobs:
             sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libssl-dev:arm64
           fi
 
-      - name: Build release binary
+      - name: Build release binaries
         shell: bash
         env:
           TARGET: ${{ matrix.target }}
@@ -241,9 +241,11 @@ jobs:
           PKG_CONFIG_ALLOW_CROSS: "1"
           PKG_CONFIG_LIBDIR_aarch64_unknown_linux_gnu: /usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig
           PKG_CONFIG_SYSROOT_DIR_aarch64_unknown_linux_gnu: /
-        run: cargo build -p codex-cli --bin astral --release --target "$TARGET"
+        run: |
+          cargo build -p codex-cli --bin astral --release --target "$TARGET"
+          cargo build -p codex-code-mode-host --bin codex-code-mode-host --release --target "$TARGET"
 
-      - name: Package artifact
+      - name: Package and verify artifact
         shell: bash
         env:
           ARTIFACT_NAME: astral-${{ matrix.artifact_name }}
@@ -255,15 +257,18 @@ jobs:
           rm -rf "$staging" "$archive"
           mkdir -p "$staging"
           cp "$CARGO_TARGET_DIR/$TARGET/release/astral" "$staging/astral"
-          chmod +x "$staging/astral"
+          cp "$CARGO_TARGET_DIR/$TARGET/release/codex-code-mode-host" "$staging/codex-code-mode-host"
+          chmod +x "$staging/astral" "$staging/codex-code-mode-host"
           {
             echo "artifact=$ARTIFACT_NAME"
             echo "target=$TARGET"
             echo "commit=$GITHUB_SHA"
             echo "built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           } > "$staging/BUILD_INFO"
-          (cd "$staging" && sha256sum astral BUILD_INFO > SHA256SUMS)
+          (cd "$staging" && sha256sum astral codex-code-mode-host BUILD_INFO > SHA256SUMS)
           tar -C "$staging" -czf "$archive" .
+          tar -tzf "$archive" | grep -qx './astral'
+          tar -tzf "$archive" | grep -qx './codex-code-mode-host'
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
