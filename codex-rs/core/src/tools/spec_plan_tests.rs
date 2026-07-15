@@ -566,7 +566,6 @@ async fn tool_surfaces_are_complete_mutually_exclusive_replacements() {
         set_feature(turn, Feature::Collab, /*enabled*/ false);
         set_web_search_mode(turn, WebSearchMode::Disabled);
         turn.model_info.shell_type = ConfigShellToolType::ShellCommand;
-        turn.model_info.apply_patch_tool_type = Some(ApplyPatchToolType::Freeform);
     };
 
     let claude = probe(|turn| configure(turn, ToolSurface::Claude)).await;
@@ -651,9 +650,13 @@ async fn code_mode_forces_codex_surface() {
     })
     .await;
 
-    plan.assert_visible_contains(&[codex_code_mode::PUBLIC_TOOL_NAME, "exec_command"]);
+    plan.assert_visible_contains(&[
+        codex_code_mode::PUBLIC_TOOL_NAME,
+        "exec_command",
+        "apply_patch",
+    ]);
     plan.assert_visible_lacks(&["Bash", "Read", "TodoWrite", "AskUserQuestion"]);
-    plan.assert_registered_contains(&["exec_command", "write_stdin", "update_plan"]);
+    plan.assert_registered_contains(&["exec_command", "write_stdin", "update_plan", "apply_patch"]);
     plan.assert_registered_lacks(&["Bash", "Read", "TodoWrite", "AskUserQuestion"]);
 }
 

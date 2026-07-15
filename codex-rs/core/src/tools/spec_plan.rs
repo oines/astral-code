@@ -743,7 +743,6 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut
     }
 
     if environment_mode.has_environment()
-        && turn_context.model_info.apply_patch_tool_type.is_some()
         && effective_tool_surface(turn_context) == ToolSurface::Codex
     {
         let include_environment_id = matches!(environment_mode, ToolEnvironmentMode::Multiple);
