@@ -1575,6 +1575,25 @@ async fn tool_mode_selector_overrides_feature_flags() {
 }
 
 #[tokio::test]
+async fn guardian_reviewer_forces_direct_tool_mode() {
+    let direct = probe(|turn| {
+        set_tool_surface(turn, ToolSurface::Claude);
+        set_features(turn, &[Feature::CodeMode, Feature::CodeModeOnly]);
+        turn.model_info.tool_mode = Some(ToolMode::CodeModeOnly);
+        turn.session_source = SessionSource::SubAgent(SubAgentSource::Other(
+            crate::guardian::GUARDIAN_REVIEWER_NAME.to_string(),
+        ));
+    })
+    .await;
+
+    direct.assert_visible_contains(&["Bash", "Read"]);
+    direct.assert_visible_lacks(&[
+        codex_code_mode::PUBLIC_TOOL_NAME,
+        codex_code_mode::WAIT_TOOL_NAME,
+    ]);
+}
+
+#[tokio::test]
 async fn v1_multi_agent_tools_defer_when_tool_search_available() {
     let plan = probe(|turn| {
         turn.model_info.supports_search_tool = true;
