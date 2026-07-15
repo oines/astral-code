@@ -9,6 +9,7 @@ use crate::ExecutorFileSystem;
 use crate::HttpClient;
 use crate::client::LazyRemoteExecServerClient;
 use crate::client::http_client::ReqwestHttpClient;
+use crate::client_api::DEFAULT_REMOTE_EXEC_SERVER_CONNECT_TIMEOUT;
 use crate::client_api::ExecServerTransportParams;
 use crate::environment_provider::DefaultEnvironmentProvider;
 use crate::environment_provider::EnvironmentDefault;
@@ -255,11 +256,13 @@ impl EnvironmentManager {
     }
 
     /// Adds or replaces a named remote environment without changing the
-    /// manager's default environment selection.
+    /// manager's default environment selection. Uses the default WebSocket
+    /// connection timeout when none is provided.
     pub fn upsert_environment(
         &self,
         environment_id: String,
         exec_server_url: String,
+        connect_timeout: Option<std::time::Duration>,
     ) -> Result<(), ExecServerError> {
         if environment_id.is_empty() {
             return Err(ExecServerError::Protocol(
@@ -277,8 +280,11 @@ impl EnvironmentManager {
                 "remote environment requires an exec-server url".to_string(),
             ));
         };
-        let environment = Arc::new(Environment::remote_inner(
-            exec_server_url,
+        let environment = Arc::new(Environment::remote_with_transport(
+            ExecServerTransportParams::websocket_url(
+                exec_server_url,
+                connect_timeout.unwrap_or(DEFAULT_REMOTE_EXEC_SERVER_CONNECT_TIMEOUT),
+            ),
             self.local_runtime_paths.clone(),
         ));
         environment.start_connecting();
@@ -384,7 +390,10 @@ impl Environment {
         local_runtime_paths: Option<ExecServerRuntimePaths>,
     ) -> Self {
         Self::remote_with_transport(
-            ExecServerTransportParams::websocket_url(exec_server_url),
+            ExecServerTransportParams::websocket_url(
+                exec_server_url,
+                DEFAULT_REMOTE_EXEC_SERVER_CONNECT_TIMEOUT,
+            ),
             local_runtime_paths,
         )
     }
@@ -837,7 +846,11 @@ mod tests {
         let manager = EnvironmentManager::without_environments();
 
         manager
-            .upsert_environment("executor-a".to_string(), "ws://127.0.0.1:8765".to_string())
+            .upsert_environment(
+                "executor-a".to_string(),
+                "ws://127.0.0.1:8765".to_string(),
+                /*connect_timeout*/ None,
+            )
             .expect("remote environment");
         let first = manager
             .get_environment("executor-a")
@@ -847,7 +860,11 @@ mod tests {
         assert_eq!(manager.default_environment_id(), None);
 
         manager
-            .upsert_environment("executor-a".to_string(), "ws://127.0.0.1:9876".to_string())
+            .upsert_environment(
+                "executor-a".to_string(),
+                "ws://127.0.0.1:9876".to_string(),
+                /*connect_timeout*/ None,
+            )
             .expect("updated remote environment");
         let second = manager
             .get_environment("executor-a")
@@ -868,6 +885,7 @@ mod tests {
             .upsert_environment(
                 "executor-a".to_string(),
                 format!("ws://{}", listener.local_addr().expect("listener address")),
+                /*connect_timeout*/ None,
             )
             .expect("remote environment");
 
@@ -923,6 +941,7 @@ mod tests {
                     "ws://{}",
                     first_listener.local_addr().expect("first listener address")
                 ),
+                /*connect_timeout*/ None,
             )
             .expect("first remote environment");
         let environment = manager
@@ -947,6 +966,7 @@ mod tests {
                         .local_addr()
                         .expect("second listener address")
                 ),
+                /*connect_timeout*/ None,
             )
             .expect("replacement remote environment");
 
@@ -964,7 +984,11 @@ mod tests {
         let manager = EnvironmentManager::without_environments();
 
         let err = manager
-            .upsert_environment("executor-a".to_string(), String::new())
+            .upsert_environment(
+                "executor-a".to_string(),
+                String::new(),
+                /*connect_timeout*/ None,
+            )
             .expect_err("empty URL should fail");
 
         assert_eq!(

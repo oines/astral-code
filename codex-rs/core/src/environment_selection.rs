@@ -724,6 +724,7 @@ url = "ws://127.0.0.1:8765"
             .upsert_environment(
                 REMOTE_ENVIRONMENT_ID.to_string(),
                 format!("ws://{}", listener.local_addr().expect("listener address")),
+                /*connect_timeout*/ None,
             )
             .expect("replacement environment");
         environments.update_selections(std::slice::from_ref(&selection));
@@ -777,6 +778,7 @@ url = "ws://127.0.0.1:8765"
                         .local_addr()
                         .expect("second listener address")
                 ),
+                /*connect_timeout*/ None,
             )
             .expect("replace environment");
 
@@ -826,6 +828,7 @@ url = "ws://127.0.0.1:8765"
             .upsert_environment(
                 REMOTE_ENVIRONMENT_ID.to_string(),
                 "ws://127.0.0.1:9876".to_string(),
+                /*connect_timeout*/ None,
             )
             .expect("replacement environment");
         let environments = ThreadEnvironments::new(
