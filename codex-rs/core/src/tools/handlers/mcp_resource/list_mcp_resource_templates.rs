@@ -108,8 +108,7 @@ impl ListMcpResourceTemplatesHandler {
                 let templates = session
                     .services
                     .mcp_connection_manager
-                    .read()
-                    .await
+                    .load_full()
                     .list_all_resource_templates()
                     .await;
                 Ok(ListResourceTemplatesPayload::from_all_servers(templates))

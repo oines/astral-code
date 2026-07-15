@@ -496,10 +496,6 @@ impl Session {
 
     #[instrument(name = "session_init", level = "info", skip_all)]
     #[allow(clippy::too_many_arguments)]
-    #[expect(
-        clippy::await_holding_invalid_type,
-        reason = "session initialization must serialize access through session-owned manager guards"
-    )]
     pub(crate) async fn new(
         mut session_configuration: SessionConfiguration,
         config: Arc<Config>,
@@ -1012,7 +1008,7 @@ impl Session {
                 // before any MCP-related events. It is reasonable to consider
                 // changing this to use Option or OnceCell, though the current
                 // setup is straightforward enough and performs well.
-                mcp_connection_manager: Arc::new(RwLock::new(
+                mcp_connection_manager: Arc::new(arc_swap::ArcSwap::from_pointee(
                     McpConnectionManager::new_uninitialized_with_permission_profile(
                         &config.permissions.approval_policy,
                         config.permissions.permission_profile(),
@@ -1203,10 +1199,9 @@ impl Session {
                 session_init.required_mcp_server_count = required_mcp_server_count,
             ))
             .await;
-            {
-                let mut manager_guard = sess.services.mcp_connection_manager.write().await;
-                *manager_guard = mcp_connection_manager;
-            }
+            sess.services
+                .mcp_connection_manager
+                .store(Arc::new(mcp_connection_manager));
             {
                 let mut cancel_guard = sess.services.mcp_startup_cancellation_token.lock().await;
                 if cancel_guard.is_cancelled() {
@@ -1218,8 +1213,7 @@ impl Session {
                 let failures = sess
                     .services
                     .mcp_connection_manager
-                    .read()
-                    .await
+                    .load_full()
                     .required_startup_failures(&required_mcp_servers)
                     .instrument(info_span!(
                         "session_init.required_mcp_wait",

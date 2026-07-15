@@ -106,8 +106,7 @@ impl ListMcpResourcesHandler {
                 let resources = session
                     .services
                     .mcp_connection_manager
-                    .read()
-                    .await
+                    .load_full()
                     .list_all_resources()
                     .await;
                 Ok(ListResourcesPayload::from_all_servers(resources))
