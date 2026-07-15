@@ -380,10 +380,10 @@ impl LoadedAgentsMd {
     }
 
     /// Returns the AGENTS.md files that supplied instruction entries.
-    pub fn sources(&self) -> impl Iterator<Item = &AbsolutePathBuf> {
+    pub fn sources(&self) -> impl Iterator<Item = PathUri> + '_ {
         self.entries
             .iter()
-            .filter_map(|entry| entry.provenance.path())
+            .filter_map(|entry| entry.provenance.path().map(PathUri::from_abs_path))
     }
 }
 

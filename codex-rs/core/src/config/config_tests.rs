@@ -95,6 +95,7 @@ use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::NetworkAccess;
 use codex_protocol::protocol::RealtimeVoice;
 use codex_protocol::protocol::SandboxPolicy;
+use codex_utils_path_uri::PathUri;
 use serde::Deserialize;
 use tempfile::tempdir;
 
@@ -246,7 +247,7 @@ async fn load_config_loads_global_agents_instructions() -> std::io::Result<()> {
     assert_eq!(user_instructions.text(), "global instructions");
     assert_eq!(
         user_instructions.sources().collect::<Vec<_>>(),
-        vec![&global_agents_path]
+        vec![PathUri::from_abs_path(&global_agents_path)]
     );
     Ok(())
 }
@@ -275,7 +276,7 @@ async fn load_config_prefers_global_agents_override_instructions() -> std::io::R
     assert_eq!(user_instructions.text(), "local override instructions");
     assert_eq!(
         user_instructions.sources().collect::<Vec<_>>(),
-        vec![&global_agents_override_path]
+        vec![PathUri::from_abs_path(&global_agents_override_path)]
     );
     Ok(())
 }

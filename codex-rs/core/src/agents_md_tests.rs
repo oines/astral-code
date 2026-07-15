@@ -336,7 +336,10 @@ async fn sourceless_user_instructions_preserve_separator_without_reporting_a_sou
         loaded.text(),
         format!("user instructions{AGENTS_MD_SEPARATOR}project doc")
     );
-    assert_eq!(loaded.sources().collect::<Vec<_>>(), vec![&project_agents]);
+    assert_eq!(
+        loaded.sources().collect::<Vec<_>>(),
+        vec![PathUri::from_abs_path(&project_agents)]
+    );
 }
 
 /// If there are existing system instructions but AGENTS.md docs are
@@ -401,7 +404,10 @@ async fn concatenates_root_and_cwd_docs() {
     assert_eq!(loaded.text(), "root doc\n\ncrate doc");
     assert_eq!(
         loaded.sources().collect::<Vec<_>>(),
-        vec![&root_agents, &crate_agents]
+        vec![
+            PathUri::from_abs_path(&root_agents),
+            PathUri::from_abs_path(&crate_agents)
+        ]
     );
 }
 
@@ -519,7 +525,10 @@ async fn instruction_sources_include_global_before_agents_md_docs() {
     assert_eq!(loaded, expected);
     assert_eq!(
         loaded.sources().collect::<Vec<_>>(),
-        vec![&global_agents, &project_agents]
+        vec![
+            PathUri::from_abs_path(&global_agents),
+            PathUri::from_abs_path(&project_agents)
+        ]
     );
     assert_eq!(
         loaded.text(),
@@ -564,7 +573,10 @@ async fn child_agents_message_after_project_docs_is_not_an_instruction_source() 
     assert_eq!(loaded, expected);
     assert_eq!(
         loaded.sources().collect::<Vec<_>>(),
-        vec![&global_agents, &project_agents]
+        vec![
+            PathUri::from_abs_path(&global_agents),
+            PathUri::from_abs_path(&project_agents)
+        ]
     );
     assert_eq!(
         loaded.text(),
