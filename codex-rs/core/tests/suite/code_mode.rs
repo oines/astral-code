@@ -5,7 +5,12 @@ use codex_config::types::McpServerConfig;
 use codex_config::types::McpServerTransportConfig;
 use codex_core::config::Config;
 use codex_features::Feature;
+use codex_protocol::dynamic_tools::DynamicToolCallOutputContentItem;
+use codex_protocol::dynamic_tools::DynamicToolResponse;
 use codex_protocol::dynamic_tools::DynamicToolSpec;
+use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::Op;
+use codex_protocol::user_input::UserInput;
 use core_test_support::apps_test_server::AppsTestServer;
 use core_test_support::apps_test_server::AppsTestToolLoading;
 use core_test_support::apps_test_server::DIRECT_CALENDAR_APP_ONLY_TOOL;
@@ -28,6 +33,8 @@ use core_test_support::stdio_server_bin;
 use core_test_support::test_codex::TestCodex;
 use core_test_support::test_codex::TestCodexBuilder;
 use core_test_support::test_codex::test_codex;
+use core_test_support::wait_for_event;
+use core_test_support::wait_for_event_match;
 use core_test_support::wait_for_mcp_server;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
@@ -3199,7 +3206,7 @@ text(JSON.stringify(tool));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn code_mode_does_not_eagerly_expose_hidden_dynamic_tools() -> Result<()> {
+async fn code_mode_can_call_hidden_dynamic_tools() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
@@ -3232,18 +3239,13 @@ async fn code_mode_does_not_eagerly_expose_hidden_dynamic_tools() -> Result<()> 
     test.session_configured = new_thread.session_configured;
 
     let code = r#"
-const tool = ALL_TOOLS.find(({ name }) => name === "codex_app_hidden_dynamic_tool");
-let error = null;
-try {
-  await tools.codex_app_hidden_dynamic_tool({ city: "Paris" });
-} catch (caught) {
-  error = String(caught);
-}
+const tool = ALL_TOOLS.find(({ name }) => name === "codex_app__hidden_dynamic_tool");
+const out = await tools.codex_app__hidden_dynamic_tool({ city: "Paris" });
 text(
   JSON.stringify({
-    listed: tool !== undefined,
-    callable: typeof tools.codex_app_hidden_dynamic_tool === "function",
-    error,
+    name: tool?.name ?? null,
+    description: tool?.description ?? null,
+    out,
   })
 );
 "#;
@@ -3267,7 +3269,48 @@ text(
     )
     .await;
 
-    test.submit_turn("use exec to inspect hidden tools").await?;
+    test.codex
+        .submit(Op::UserInput {
+            items: vec![UserInput::Text {
+                text: "use exec to inspect and call hidden tools".into(),
+                text_elements: Vec::new(),
+            }],
+            final_output_json_schema: None,
+            model_client_metadata: None,
+            additional_context: Default::default(),
+            thread_settings: Default::default(),
+        })
+        .await?;
+
+    let turn_id = wait_for_event_match(&test.codex, |event| match event {
+        EventMsg::TurnStarted(event) => Some(event.turn_id.clone()),
+        _ => None,
+    })
+    .await;
+    let request = wait_for_event_match(&test.codex, |event| match event {
+        EventMsg::DynamicToolCallRequest(request) => Some(request.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(request.namespace.as_deref(), Some("codex_app"));
+    assert_eq!(request.tool, "hidden_dynamic_tool");
+    assert_eq!(request.arguments, serde_json::json!({ "city": "Paris" }));
+    test.codex
+        .submit(Op::DynamicToolResponse {
+            id: request.call_id,
+            response: DynamicToolResponse {
+                content_items: vec![DynamicToolCallOutputContentItem::InputText {
+                    text: "hidden-ok".to_string(),
+                }],
+                success: true,
+            },
+        })
+        .await?;
+    wait_for_event(&test.codex, |event| match event {
+        EventMsg::TurnComplete(event) => event.turn_id == turn_id,
+        _ => false,
+    })
+    .await;
 
     let req = second_mock.single_request();
     let (output, success) = custom_tool_output_body_and_success(&req, "call-1");
@@ -3281,13 +3324,24 @@ text(
         &custom_tool_output_last_non_empty_text(&req, "call-1")
             .expect("exec hidden dynamic tool lookup should emit JSON"),
     )?;
-    assert_eq!(parsed.get("listed"), Some(&Value::Bool(false)));
-    assert_eq!(parsed.get("callable"), Some(&Value::Bool(false)));
+    assert_eq!(
+        parsed.get("name"),
+        Some(&Value::String("codex_app__hidden_dynamic_tool".to_string()))
+    );
+    assert_eq!(
+        parsed.get("out"),
+        Some(&Value::String("hidden-ok".to_string()))
+    );
     assert!(
         parsed
-            .get("error")
+            .get("description")
             .and_then(Value::as_str)
-            .is_some_and(|error| error.contains("is not a function"))
+            .is_some_and(|description| {
+                description.contains("Tools in the codex_app namespace.")
+                    && description.contains("A hidden dynamic tool.")
+                    && description.contains("declare const tools:")
+                    && description.contains("codex_app__hidden_dynamic_tool(args:")
+            })
     );
 
     Ok(())
