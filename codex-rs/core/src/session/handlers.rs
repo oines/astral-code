@@ -230,7 +230,7 @@ pub(super) async fn user_input_or_turn_inner(
         })
         .await;
     }
-    sess.maybe_emit_unknown_model_warning_for_turn(current_context.as_ref())
+    sess.maybe_emit_model_warnings_for_turn(current_context.as_ref())
         .await;
     let accepted_items = match sess
         .steer_input(
@@ -708,7 +708,7 @@ pub async fn review(
     review_request: ReviewRequest,
 ) {
     let turn_context = sess.new_default_turn_with_sub_id(sub_id.clone()).await;
-    sess.maybe_emit_unknown_model_warning_for_turn(turn_context.as_ref())
+    sess.maybe_emit_model_warnings_for_turn(turn_context.as_ref())
         .await;
     sess.refresh_mcp_servers_if_requested(&turn_context, Some(sess.mcp_elicitation_reviewer()))
         .await;
