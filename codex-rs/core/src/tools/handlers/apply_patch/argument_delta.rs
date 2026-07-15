@@ -25,10 +25,10 @@ impl ApplyPatchArgumentDeltaNormalizer {
                     self.mode = ApplyPatchArgumentDeltaMode::Undetected(pending);
                     return Vec::new();
                 };
-                let first_char = pending[first..]
-                    .chars()
-                    .next()
-                    .expect("first non-whitespace char");
+                let Some(first_char) = pending[first..].chars().next() else {
+                    self.mode = ApplyPatchArgumentDeltaMode::Undetected(pending);
+                    return Vec::new();
+                };
                 match first_char {
                     '"' => {
                         let mut decoder = JsonStringDeltaDecoder::default();

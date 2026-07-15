@@ -2,7 +2,7 @@ use super::*;
 use codex_apply_patch::AppliedPatchDelta;
 use codex_apply_patch::MaybeApplyPatchVerified;
 use codex_exec_server::LOCAL_FS;
-use codex_utils_absolute_path::AbsolutePathBuf;
+use codex_utils_path_uri::PathUri;
 use pretty_assertions::assert_eq;
 use std::fs;
 use std::path::Path;
@@ -13,7 +13,7 @@ fn git_blob_sha1_hex(data: &str) -> String {
 }
 
 async fn apply_verified_patch(root: &Path, patch: &str) -> AppliedPatchDelta {
-    let cwd = AbsolutePathBuf::from_absolute_path(root).expect("absolute tempdir path");
+    let cwd = PathUri::from_host_native_path(root).expect("absolute tempdir path");
     let argv = vec!["apply_patch".to_string(), patch.to_string()];
     match codex_apply_patch::maybe_parse_apply_patch_verified(
         &argv,
