@@ -40,6 +40,7 @@ mod auto_review;
 mod cli_stream;
 mod client;
 mod code_mode;
+mod code_mode_elicitation;
 mod codex_delegate;
 mod collaboration_instructions;
 mod compact;

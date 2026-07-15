@@ -141,6 +141,7 @@ impl McpConnectionManager {
                 approval_policy.value(),
                 permission_profile.clone(),
                 /*reviewer*/ None,
+                /*lifecycle*/ None,
                 ElicitationRequestRouter::default(),
             ),
             startup_cancellation_token: CancellationToken::new(),
@@ -230,6 +231,7 @@ impl McpConnectionManager {
         tool_plugin_provenance: ToolPluginProvenance,
         _auth: Option<&CodexAuth>,
         elicitation_reviewer: Option<ElicitationReviewerHandle>,
+        elicitation_lifecycle: Option<crate::ElicitationLifecycle>,
         elicitation_router: ElicitationRequestRouter,
     ) -> (Self, CancellationToken) {
         let cancel_token = CancellationToken::new();
@@ -240,6 +242,7 @@ impl McpConnectionManager {
             approval_policy.value(),
             initial_permission_profile,
             elicitation_reviewer,
+            elicitation_lifecycle,
             elicitation_router,
         );
         let tool_plugin_provenance = Arc::new(tool_plugin_provenance);

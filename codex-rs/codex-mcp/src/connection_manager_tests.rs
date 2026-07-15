@@ -6,6 +6,7 @@ use crate::codex_apps::load_startup_cached_codex_apps_tools_snapshot;
 use crate::codex_apps::read_cached_codex_apps_tools;
 use crate::codex_apps::write_cached_codex_apps_tools;
 use crate::codex_apps::write_cached_codex_apps_tools_if_needed;
+use crate::elicitation::ElicitationLifecycle;
 use crate::elicitation::ElicitationRequestManager;
 use crate::elicitation::ElicitationRequestRouter;
 use crate::elicitation::elicitation_is_rejected_by_policy;
@@ -37,6 +38,7 @@ use rmcp::model::NumberOrString;
 use rmcp::model::Tool;
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
 use tempfile::tempdir;
 
 fn create_test_tool(server_name: &str, tool_name: &str) -> ToolInfo {
@@ -218,6 +220,7 @@ async fn disabled_permissions_auto_accept_elicitation_with_empty_form_schema() {
         AskForApproval::Never,
         PermissionProfile::Disabled,
         /*reviewer*/ None,
+        /*lifecycle*/ None,
         ElicitationRequestRouter::default(),
     );
     let (tx_event, _rx_event) = async_channel::bounded(1);
@@ -252,6 +255,7 @@ async fn disabled_permissions_do_not_auto_accept_elicitation_with_requested_fiel
         AskForApproval::Never,
         PermissionProfile::Disabled,
         /*reviewer*/ None,
+        /*lifecycle*/ None,
         ElicitationRequestRouter::default(),
     );
     let (tx_event, _rx_event) = async_channel::bounded(1);
@@ -286,17 +290,35 @@ async fn disabled_permissions_do_not_auto_accept_elicitation_with_requested_fiel
 
 #[tokio::test]
 async fn shared_elicitation_router_targets_the_exact_pending_request() {
+    struct Registration(Arc<AtomicUsize>);
+
+    impl Drop for Registration {
+        fn drop(&mut self) {
+            self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
     let router = ElicitationRequestRouter::default();
+    let outstanding = Arc::new(AtomicUsize::new(0));
+    let lifecycle = ElicitationLifecycle::new({
+        let outstanding = Arc::clone(&outstanding);
+        move || {
+            outstanding.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Registration(Arc::clone(&outstanding))
+        }
+    });
     let manager_a = ElicitationRequestManager::new(
         AskForApproval::OnRequest,
         PermissionProfile::default(),
         /*reviewer*/ None,
+        Some(lifecycle.clone()),
         router.clone(),
     );
     let manager_b = ElicitationRequestManager::new(
         AskForApproval::OnRequest,
         PermissionProfile::default(),
         /*reviewer*/ None,
+        Some(lifecycle),
         router,
     );
     let (tx_event, rx_event) = async_channel::bounded(2);
@@ -324,6 +346,7 @@ async fn shared_elicitation_router_targets_the_exact_pending_request() {
     else {
         panic!("expected elicitation request");
     };
+    assert_eq!(outstanding.load(std::sync::atomic::Ordering::SeqCst), 2);
     let (
         codex_protocol::mcp::RequestId::String(request_a_id),
         codex_protocol::mcp::RequestId::String(request_b_id),
@@ -374,6 +397,7 @@ async fn shared_elicitation_router_targets_the_exact_pending_request() {
             .expect("request B response"),
         response_b
     );
+    assert_eq!(outstanding.load(std::sync::atomic::Ordering::SeqCst), 0);
 }
 
 #[test]
@@ -1309,6 +1333,7 @@ async fn no_local_runtime_fails_local_stdio_but_keeps_local_http_server() {
         ToolPluginProvenance::default(),
         /*auth*/ None,
         /*elicitation_reviewer*/ None,
+        /*elicitation_lifecycle*/ None,
         ElicitationRequestRouter::default(),
     )
     .await;

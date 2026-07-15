@@ -295,6 +295,7 @@ pub async fn read_mcp_resource(
         tool_plugin_provenance(config),
         auth,
         /*elicitation_reviewer*/ None,
+        /*elicitation_lifecycle*/ None,
         crate::elicitation::ElicitationRequestRouter::default(),
     )
     .await;
@@ -366,6 +367,7 @@ pub async fn collect_mcp_server_status_snapshot_with_detail(
         tool_plugin_provenance,
         auth,
         /*elicitation_reviewer*/ None,
+        /*elicitation_lifecycle*/ None,
         crate::elicitation::ElicitationRequestRouter::default(),
     )
     .await;

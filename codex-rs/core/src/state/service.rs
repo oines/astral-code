@@ -7,6 +7,7 @@ use crate::attestation::AttestationProvider;
 use crate::client::ModelClient;
 use crate::config::NetworkProxyAuditMetadata;
 use crate::config::StartedNetworkProxy;
+use crate::elicitation::ElicitationService;
 use crate::environment_selection::ThreadEnvironments;
 use crate::exec_policy::ExecPolicyManager;
 use crate::guardian::GuardianRejection;
@@ -46,6 +47,7 @@ pub(crate) struct SessionServices {
     pub(crate) mcp_runtime: ArcSwapOption<McpRuntimeSnapshot>,
     pub(crate) mcp_startup_cancellation_token: Mutex<CancellationToken>,
     pub(crate) unified_exec_manager: UnifiedExecProcessManager,
+    pub(crate) elicitations: ElicitationService,
     #[cfg_attr(not(unix), allow(dead_code))]
     pub(crate) shell_zsh_path: Option<PathBuf>,
     #[cfg_attr(not(unix), allow(dead_code))]

@@ -1055,12 +1055,8 @@ impl Session {
         state.session_configuration.codex_home().clone()
     }
 
-    pub(crate) fn subscribe_out_of_band_elicitation_pause_state(&self) -> watch::Receiver<bool> {
-        self.out_of_band_elicitation_paused.subscribe()
-    }
-
-    pub(crate) fn set_out_of_band_elicitation_pause_state(&self, paused: bool) {
-        self.out_of_band_elicitation_paused.send_replace(paused);
+    pub(crate) fn subscribe_elicitation_pause_state(&self) -> watch::Receiver<bool> {
+        self.services.elicitations.subscribe()
     }
 
     pub(crate) fn get_tx_event(&self) -> Sender<Event> {
@@ -1952,6 +1948,7 @@ impl Session {
         additional_permissions: Option<AdditionalPermissionProfile>,
         available_decisions: Option<Vec<ReviewDecision>>,
     ) -> ReviewDecision {
+        let _elicitation = self.services.elicitations.register();
         //  command-level approvals use `call_id`.
         // `approval_id` is only present for subcommand callbacks (execve intercept)
         let effective_approval_id = approval_id.clone().unwrap_or_else(|| call_id.clone());
@@ -2022,7 +2019,8 @@ impl Session {
         changes: HashMap<PathBuf, FileChange>,
         reason: Option<String>,
         grant_root: Option<PathBuf>,
-    ) -> oneshot::Receiver<ReviewDecision> {
+    ) -> ReviewDecision {
+        let _elicitation = self.services.elicitations.register();
         // Add the tx_approve callback to the map before sending the request.
         let (tx_approve, rx_approve) = oneshot::channel();
         let approval_id = call_id.clone();
@@ -2049,7 +2047,7 @@ impl Session {
             grant_root,
         });
         self.send_event(turn_context, event).await;
-        rx_approve
+        rx_approve.await.unwrap_or(ReviewDecision::Abort)
     }
 
     #[expect(
@@ -2178,6 +2176,7 @@ impl Session {
             return Some(response);
         }
 
+        let _elicitation = self.services.elicitations.register();
         let (tx_response, rx_response) = oneshot::channel();
         let prev_entry = {
             let mut active = self.active_turn.lock().await;
@@ -2269,6 +2268,7 @@ impl Session {
         call_id: String,
         args: RequestUserInputArgs,
     ) -> Option<RequestUserInputResponse> {
+        let _elicitation = self.services.elicitations.register();
         let sub_id = turn_context.sub_id.clone();
         let (tx_response, rx_response) = oneshot::channel();
         let event_id = sub_id.clone();
@@ -3425,6 +3425,10 @@ async fn build_hooks_for_config(
         shell_args: hook_shell_argv,
     })
 }
+
+#[cfg(test)]
+#[path = "elicitation_holders_tests.rs"]
+mod elicitation_holders_tests;
 
 #[cfg(test)]
 pub(crate) mod tests;
