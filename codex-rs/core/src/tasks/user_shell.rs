@@ -125,10 +125,11 @@ pub(crate) async fn execute_user_shell_command(
         session.send_event(turn_context.as_ref(), event).await;
     }
 
-    // Execute the user's script under their default shell when known; this
-    // allows commands that use shell features (pipes, &&, redirects, etc.).
-    // We do not source rc files or otherwise reformat the script.
-    let Some(turn_environment) = turn_context.environments.primary() else {
+    let Some((turn_environment, environment_shell)) = turn_context
+        .environments
+        .local()
+        .and_then(|environment| environment.shell.as_ref().map(|shell| (environment, shell)))
+    else {
         send_user_shell_error(
             &session,
             turn_context.as_ref(),
@@ -137,11 +138,10 @@ pub(crate) async fn execute_user_shell_command(
         .await;
         return;
     };
-    let session_shell = session.user_shell();
-    let environment_shell = turn_environment
-        .shell
-        .as_ref()
-        .unwrap_or(session_shell.as_ref());
+
+    // Execute the user's script under the environment's shell; this
+    // allows commands that use shell features (pipes, &&, redirects, etc.).
+    // We do not source rc files or otherwise reformat the script.
     let use_login_shell = true;
     let display_command = environment_shell.derive_exec_args(&command, use_login_shell);
     let Ok(cwd) = turn_environment.cwd().to_abs_path() else {
