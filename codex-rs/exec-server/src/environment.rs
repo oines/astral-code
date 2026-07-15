@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::RwLock;
 
 use crate::ExecServerError;
@@ -23,6 +24,7 @@ use crate::protocol::ShellInfo;
 use crate::remote_file_system::RemoteFileSystem;
 use crate::remote_process::RemoteProcess;
 use codex_shell_command::shell_detect::DetectedShell;
+use tokio_util::task::AbortOnDropHandle;
 
 pub const ASTRAL_EXEC_SERVER_URL_ENV_VAR: &str = "ASTRAL_EXEC_SERVER_URL";
 
@@ -37,9 +39,9 @@ pub const ASTRAL_EXEC_SERVER_URL_ENV_VAR: &str = "ASTRAL_EXEC_SERVER_URL";
 /// use `default_environment().is_some()` as the signal for model-facing
 /// shell/filesystem tool availability.
 ///
-/// Remote environments create remote filesystem and execution backends that
-/// lazy-connect to the configured exec-server on first use. The remote
-/// transport is not opened when the manager or environment is constructed.
+/// Remote environments begin connecting when added to the manager. Their
+/// filesystem and execution backends share that startup result and reconnect
+/// after later disconnects as needed.
 #[derive(Debug)]
 pub struct EnvironmentManager {
     default_environment: Option<String>,
@@ -188,6 +190,10 @@ impl EnvironmentManager {
                 Some(environment_id)
             }
         };
+        // The snapshot is valid; start connecting its remote environments in the background.
+        for environment in environment_map.values() {
+            environment.start_connecting();
+        }
         Ok(Self {
             default_environment,
             environments: RwLock::new(environment_map),
@@ -271,12 +277,15 @@ impl EnvironmentManager {
                 "remote environment requires an exec-server url".to_string(),
             ));
         };
-        let environment =
-            Environment::remote_inner(exec_server_url, self.local_runtime_paths.clone());
+        let environment = Arc::new(Environment::remote_inner(
+            exec_server_url,
+            self.local_runtime_paths.clone(),
+        ));
+        environment.start_connecting();
         self.environments
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(environment_id, Arc::new(environment));
+            .insert(environment_id, environment);
         Ok(())
     }
 }
@@ -288,8 +297,9 @@ impl EnvironmentManager {
 #[derive(Clone)]
 pub struct Environment {
     exec_server_url: Option<String>,
-    remote_transport: Option<ExecServerTransportParams>,
     remote_client: Option<LazyRemoteExecServerClient>,
+    // Dropping the environment stops unfinished background startup work.
+    startup_task: Arc<Mutex<Option<AbortOnDropHandle<()>>>>,
     exec_backend: Arc<dyn ExecBackend>,
     filesystem: Arc<dyn ExecutorFileSystem>,
     http_client: Arc<dyn HttpClient>,
@@ -301,8 +311,8 @@ impl Environment {
     pub fn default_for_tests() -> Self {
         Self {
             exec_server_url: None,
-            remote_transport: None,
             remote_client: None,
+            startup_task: Arc::new(Mutex::new(None)),
             exec_backend: Arc::new(LocalProcess::default()),
             filesystem: Arc::new(LocalFileSystem::unsandboxed()),
             http_client: Arc::new(ReqwestHttpClient),
@@ -358,8 +368,8 @@ impl Environment {
     pub(crate) fn local(local_runtime_paths: ExecServerRuntimePaths) -> Self {
         Self {
             exec_server_url: None,
-            remote_transport: None,
             remote_client: None,
+            startup_task: Arc::new(Mutex::new(None)),
             exec_backend: Arc::new(LocalProcess::default()),
             filesystem: Arc::new(LocalFileSystem::with_runtime_paths(
                 local_runtime_paths.clone(),
@@ -390,15 +400,15 @@ impl Environment {
             } => Some(exec_server_url.clone()),
             ExecServerTransportParams::StdioCommand { .. } => None,
         };
-        let client = LazyRemoteExecServerClient::new(remote_transport.clone());
+        let client = LazyRemoteExecServerClient::new(remote_transport);
         let exec_backend: Arc<dyn ExecBackend> = Arc::new(RemoteProcess::new(client.clone()));
         let filesystem: Arc<dyn ExecutorFileSystem> =
             Arc::new(RemoteFileSystem::new(client.clone()));
 
         Self {
             exec_server_url,
-            remote_transport: Some(remote_transport),
             remote_client: Some(client.clone()),
+            startup_task: Arc::new(Mutex::new(None)),
             exec_backend,
             filesystem,
             http_client: Arc::new(client),
@@ -407,7 +417,7 @@ impl Environment {
     }
 
     pub fn is_remote(&self) -> bool {
-        self.remote_transport.is_some()
+        self.remote_client.is_some()
     }
 
     /// Returns the remote exec-server URL when this environment is remote.
@@ -427,10 +437,32 @@ impl Environment {
         }
     }
 
-    /// Waits until the selected environment can serve requests.
+    /// Starts connecting a remote environment without waiting for it.
+    /// Requires an active Tokio runtime when background startup is supported.
+    pub fn start_connecting(&self) {
+        let Some(client) = &self.remote_client else {
+            return;
+        };
+        let mut startup_task = self
+            .startup_task
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if startup_task.is_none() {
+            *startup_task = client.start_connecting();
+        }
+    }
+
+    /// Returns whether initial startup has either succeeded or permanently failed.
+    pub fn startup_finished(&self) -> bool {
+        self.remote_client
+            .as_ref()
+            .is_none_or(LazyRemoteExecServerClient::startup_finished)
+    }
+
+    /// Waits for initial startup. A failed startup is never attempted again.
     pub async fn wait_until_ready(&self) -> Result<(), ExecServerError> {
         match &self.remote_client {
-            Some(client) => client.get().await.map(drop),
+            Some(client) => client.wait_until_ready().await,
             None => Ok(()),
         }
     }
@@ -467,7 +499,9 @@ impl From<DetectedShell> for ShellInfo {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::sync::Arc;
+    use std::time::Duration;
 
     use super::Environment;
     use super::EnvironmentManager;
@@ -475,10 +509,14 @@ mod tests {
     use super::REMOTE_ENVIRONMENT_ID;
     use crate::ExecServerRuntimePaths;
     use crate::ProcessId;
+    use crate::client_api::ExecServerTransportParams;
+    use crate::client_api::StdioExecServerCommand;
     use crate::environment_provider::EnvironmentDefault;
     use crate::environment_provider::EnvironmentProviderSnapshot;
     use codex_utils_path_uri::PathUri;
     use pretty_assertions::assert_eq;
+    use tokio::net::TcpListener;
+    use tokio::time::timeout;
 
     fn test_runtime_paths() -> ExecServerRuntimePaths {
         ExecServerRuntimePaths::new(
@@ -817,6 +855,108 @@ mod tests {
         assert!(second.is_remote());
         assert_eq!(second.exec_server_url(), Some("ws://127.0.0.1:9876"));
         assert!(!Arc::ptr_eq(&first, &second));
+    }
+
+    #[tokio::test]
+    async fn environment_manager_starts_remote_environment_when_upserted() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind websocket listener");
+        let manager = EnvironmentManager::without_environments();
+
+        manager
+            .upsert_environment(
+                "executor-a".to_string(),
+                format!("ws://{}", listener.local_addr().expect("listener address")),
+            )
+            .expect("remote environment");
+
+        timeout(Duration::from_secs(5), listener.accept())
+            .await
+            .expect("environment should start connecting when registered")
+            .expect("accept connection");
+    }
+
+    #[tokio::test]
+    async fn environment_manager_leaves_stdio_environment_lazy() {
+        let environment = Environment::remote_with_transport(
+            ExecServerTransportParams::StdioCommand {
+                command: StdioExecServerCommand {
+                    program: "codex-missing-exec-server-for-test".to_string(),
+                    args: Vec::new(),
+                    env: HashMap::new(),
+                    cwd: None,
+                },
+                initialize_timeout: Duration::from_secs(1),
+            },
+            /*local_runtime_paths*/ None,
+        );
+        let manager = EnvironmentManager::from_snapshot(
+            EnvironmentProviderSnapshot {
+                environments: vec![("stdio".to_string(), environment)],
+                default: EnvironmentDefault::Disabled,
+                include_local: false,
+            },
+            /*local_runtime_paths*/ None,
+        )
+        .expect("environment manager");
+        let environment = manager.get_environment("stdio").expect("stdio environment");
+
+        assert!(!environment.startup_finished());
+        assert!(environment.wait_until_ready().await.is_err());
+        assert!(environment.startup_finished());
+    }
+
+    #[tokio::test]
+    async fn replacing_environment_stops_its_startup_task() {
+        let first_listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind first websocket listener");
+        let second_listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind second websocket listener");
+        let manager = EnvironmentManager::without_environments();
+        manager
+            .upsert_environment(
+                "executor-a".to_string(),
+                format!(
+                    "ws://{}",
+                    first_listener.local_addr().expect("first listener address")
+                ),
+            )
+            .expect("first remote environment");
+        let environment = manager
+            .get_environment("executor-a")
+            .expect("first remote environment");
+        let startup_abort = environment
+            .startup_task
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .expect("startup task")
+            .abort_handle();
+        assert!(!startup_abort.is_finished());
+        drop(environment);
+
+        manager
+            .upsert_environment(
+                "executor-a".to_string(),
+                format!(
+                    "ws://{}",
+                    second_listener
+                        .local_addr()
+                        .expect("second listener address")
+                ),
+            )
+            .expect("replacement remote environment");
+
+        timeout(Duration::from_secs(1), async {
+            while !startup_abort.is_finished() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("replacing the environment should cancel its startup task");
     }
 
     #[tokio::test]
