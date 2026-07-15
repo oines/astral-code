@@ -26,6 +26,7 @@ use codex_exec_server::ExecutorFileSystem;
 use codex_exec_server::RemoveOptions;
 use codex_extension_api::ExtensionRegistry;
 use codex_extension_api::empty_extension_registry;
+use codex_features::Feature;
 use codex_login::CodexAuth;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::WireApi;
@@ -252,6 +253,7 @@ pub struct TestCodexBuilder {
     user_shell_override: Option<Shell>,
     exec_server_url: Option<String>,
     extensions: Arc<ExtensionRegistry<Config>>,
+    code_mode_host_program: Option<PathBuf>,
 }
 
 impl TestCodexBuilder {
@@ -344,6 +346,11 @@ impl TestCodexBuilder {
 
     pub fn with_extensions(mut self, extensions: Arc<ExtensionRegistry<Config>>) -> Self {
         self.extensions = extensions;
+        self
+    }
+
+    pub fn with_code_mode_host_program(mut self, host_program: PathBuf) -> Self {
+        self.code_mode_host_program = Some(host_program);
         self
     }
 
@@ -549,6 +556,20 @@ impl TestCodexBuilder {
             installation_id,
             /*attestation_provider*/ None,
         );
+        let code_mode_host_program = self
+            .code_mode_host_program
+            .take()
+            .or_else(|| codex_utils_cargo_bin::cargo_bin("codex-code-mode-host").ok());
+        let thread_manager = if config.features.enabled(Feature::CodeModeHost)
+            && let Some(code_mode_host_program) = code_mode_host_program
+        {
+            codex_core::test_support::with_code_mode_host_program(
+                thread_manager,
+                code_mode_host_program,
+            )
+        } else {
+            thread_manager
+        };
         let thread_manager = Arc::new(thread_manager);
         let user_shell_override = self.user_shell_override.clone();
 
@@ -1148,6 +1169,7 @@ pub fn test_codex() -> TestCodexBuilder {
         user_shell_override: None,
         exec_server_url: None,
         extensions: empty_extension_registry(),
+        code_mode_host_program: None,
     }
 }
 
