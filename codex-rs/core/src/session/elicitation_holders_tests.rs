@@ -44,6 +44,7 @@ async fn command_approval_holds_an_elicitation_until_response() {
                     turn_context.as_ref(),
                     "call-1".to_string(),
                     /*approval_id*/ None,
+                    /*environment_id*/ None,
                     vec!["echo".to_string()],
                     cwd,
                     /*reason*/ None,

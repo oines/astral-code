@@ -136,6 +136,7 @@ impl Approvable<AstralFileToolRequest> for AstralFileToolRuntime {
         let keys = self.approval_keys(req);
         let command = req.approval_command.clone();
         let cwd = req.cwd.clone();
+        let environment_id = Some(req.turn_environment.environment_id.clone());
         let retry_reason = ctx.retry_reason.clone();
         let reason = retry_reason.clone();
         let session = ctx.session;
@@ -173,6 +174,7 @@ impl Approvable<AstralFileToolRequest> for AstralFileToolRuntime {
                             turn,
                             call_id,
                             /*approval_id*/ None,
+                            environment_id,
                             command,
                             cwd,
                             reason,

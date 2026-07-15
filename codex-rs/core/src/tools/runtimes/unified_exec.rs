@@ -176,6 +176,7 @@ impl Approvable<UnifiedExecRequest> for UnifiedExecRuntime<'_> {
         let turn = ctx.turn;
         let call_id = ctx.call_id.to_string();
         let command = req.command.clone();
+        let environment_id = Some(req.turn_environment.environment_id.clone());
         let retry_reason = ctx.retry_reason.clone();
         let reason = retry_reason.clone().or_else(|| req.justification.clone());
         let guardian_review_id = ctx.guardian_review_id.clone();
@@ -213,6 +214,7 @@ impl Approvable<UnifiedExecRequest> for UnifiedExecRuntime<'_> {
                         turn,
                         call_id,
                         /*approval_id*/ None,
+                        environment_id,
                         command,
                         native_cwd,
                         reason,
