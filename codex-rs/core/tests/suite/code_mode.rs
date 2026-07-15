@@ -2837,40 +2837,18 @@ image(imageItem);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn code_mode_can_write_file_via_nested_tool() -> Result<()> {
+async fn code_mode_can_apply_patch_via_nested_tool() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
     let file_name = "code_mode_apply_patch.txt";
-    let mut builder = test_codex().with_config(move |config| {
-        let _ = config.features.enable(Feature::CodeMode);
-    });
-    let test = builder.build(&server).await?;
-    let file_path = test.cwd_path().join(file_name);
-    let quoted_path = shlex::try_join([file_path.to_string_lossy().as_ref()])?;
-    let command = format!("printf 'hello from code_mode\\n' > {quoted_path}");
-    let code = format!("text((await tools.exec_command({{ cmd: {command:?} }})).output);\n");
+    let patch = format!(
+        "*** Begin Patch\n*** Add File: {file_name}\n+hello from code_mode\n*** End Patch\n"
+    );
+    let code = format!("text(await tools.apply_patch({patch:?}));\n");
 
-    responses::mount_sse_once(
-        &server,
-        sse(vec![
-            ev_response_created("resp-1"),
-            ev_custom_tool_call("call-1", "exec", &code),
-            ev_completed("resp-1"),
-        ]),
-    )
-    .await;
-
-    let second_mock = responses::mount_sse_once(
-        &server,
-        sse(vec![
-            ev_assistant_message("msg-1", "done"),
-            ev_completed("resp-2"),
-        ]),
-    )
-    .await;
-
-    test.submit_turn("use exec to run Write").await?;
+    let (test, second_mock) =
+        run_code_mode_turn(&server, "use exec to run apply_patch", &code).await?;
 
     let req = second_mock.single_request();
     let items = custom_tool_output_items(&req, "call-1");
@@ -2878,8 +2856,9 @@ async fn code_mode_can_write_file_via_nested_tool() -> Result<()> {
     assert_ne!(
         success,
         Some(false),
-        "exec Bash file write call failed unexpectedly: {items:?}"
+        "exec apply_patch call failed unexpectedly: {items:?}"
     );
+    assert_eq!(items.len(), 2);
     assert_regex_match(
         concat!(
             r"(?s)\A",
@@ -2887,7 +2866,9 @@ async fn code_mode_can_write_file_via_nested_tool() -> Result<()> {
         ),
         text_item(&items, /*index*/ 0),
     );
+    assert_eq!(text_item(&items, /*index*/ 1), "{}");
 
+    let file_path = test.cwd_path().join(file_name);
     assert_eq!(fs::read_to_string(&file_path)?, "hello from code_mode\n");
 
     Ok(())
