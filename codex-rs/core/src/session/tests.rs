@@ -8522,15 +8522,15 @@ async fn record_context_updates_and_set_reference_context_item_persists_baseline
         .await;
     turn_context.sub_id = "next-turn".to_string();
     let previous_context_item = previous_context.to_turn_context_item();
-    let world_state = Arc::new(
-        session
-            .build_world_state_for_environments(&previous_context, &previous_context.environments)
-            .await,
-    );
+    let world_state = session
+        .build_world_state_for_environments(&previous_context, &previous_context.environments)
+        .await;
     {
         let mut state = session.state.lock().await;
         state.set_reference_context_item(Some(previous_context_item.clone()));
-        state.history.set_world_state_baseline(world_state);
+        state
+            .history
+            .set_world_state_baseline(world_state.snapshot());
     }
     let rollout_path = attach_thread_persistence(&mut session).await;
 
