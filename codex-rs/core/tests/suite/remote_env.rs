@@ -1,5 +1,7 @@
 use anyhow::Context;
 use anyhow::Result;
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use codex_config::types::ApprovalsReviewer;
 use codex_core::compact::SUMMARIZATION_PROMPT;
 use codex_core::config::Constrained;
@@ -38,6 +40,7 @@ use core_test_support::PathBufExt;
 use core_test_support::PathExt;
 use core_test_support::get_remote_test_env;
 use core_test_support::responses::ResponseMock;
+use core_test_support::responses::ResponsesRequest;
 use core_test_support::responses::ev_apply_patch_custom_tool_call;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
@@ -152,6 +155,59 @@ async fn send_environment_info(websocket: &mut WebSocketStream<TcpStream>) -> Re
 async fn serve_environment_info(listener: TcpListener) -> Result<()> {
     let mut websocket = accept_initialized_exec_server(listener).await?;
     send_environment_info(&mut websocket).await
+}
+
+async fn serve_environment_with_agents_md(
+    listener: TcpListener,
+    contents: &str,
+    attach: tokio::sync::oneshot::Receiver<()>,
+    mut shutdown: tokio::sync::oneshot::Receiver<()>,
+) -> Result<usize> {
+    let mut websocket = accept_initialized_exec_server(listener).await?;
+    attach.await.context("attach signal")?;
+    send_environment_info(&mut websocket).await?;
+
+    let mut agents_md_reads = 0;
+    loop {
+        let request = tokio::select! {
+            request = read_exec_server_json(&mut websocket) => request?,
+            _ = &mut shutdown => return Ok(agents_md_reads),
+        };
+        let is_agents_md = request["params"]["path"]
+            .as_str()
+            .is_some_and(|path| path.ends_with("/AGENTS.md"));
+        let response = match request["method"].as_str() {
+            Some("fs/getMetadata") if is_agents_md => {
+                json!({
+                    "id": request["id"],
+                    "result": {
+                        "isDirectory": false,
+                        "isFile": true,
+                        "isSymlink": false,
+                        "size": contents.len(),
+                        "createdAtMs": 0,
+                        "modifiedAtMs": 0,
+                    }
+                })
+            }
+            Some("fs/getMetadata") => json!({
+                "id": request["id"],
+                "error": { "code": -32004, "message": "not found" }
+            }),
+            Some("fs/readFile") if is_agents_md => {
+                agents_md_reads += 1;
+                json!({
+                    "id": request["id"],
+                    "result": { "dataBase64": BASE64_STANDARD.encode(contents) }
+                })
+            }
+            method => anyhow::bail!("unexpected exec-server request: {method:?}"),
+        };
+        websocket
+            .send(Message::Text(response.to_string().into()))
+            .await
+            .context("filesystem response")?;
+    }
 }
 
 async fn wait_for_response_request_count(response_mock: &ResponseMock, expected_count: usize) {
@@ -476,6 +532,99 @@ async fn deferred_executor_updates_context_and_tools_after_startup() -> Result<(
     );
 
     Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn deferred_executor_loads_agents_md_when_environment_becomes_ready() -> Result<()> {
+    const AGENTS_CONTENT: &str = "REMOTE_AGENTS_INSTRUCTIONS";
+
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let server = start_mock_server().await;
+    let response_mock = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_function_call(
+                    "wait-1",
+                    "wait_for_environment",
+                    &json!({ "environment_id": REMOTE_ENVIRONMENT_ID }).to_string(),
+                ),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-2"),
+                ev_function_call(
+                    "wait-2",
+                    "wait_for_environment",
+                    &json!({ "environment_id": REMOTE_ENVIRONMENT_ID }).to_string(),
+                ),
+                ev_completed("resp-2"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-3"),
+                ev_assistant_message("msg-3", "done"),
+                ev_completed("resp-3"),
+            ]),
+        ],
+    )
+    .await;
+    let mut builder = test_codex()
+        .with_exec_server_url(format!("ws://{}", listener.local_addr()?))
+        .with_config(|config| {
+            assert!(config.features.enable(Feature::DeferredExecutor).is_ok());
+        });
+    let (attach_tx, attach_rx) = tokio::sync::oneshot::channel();
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+    let exec_server = tokio::spawn(serve_environment_with_agents_md(
+        listener,
+        AGENTS_CONTENT,
+        attach_rx,
+        shutdown_rx,
+    ));
+    let test = timeout(Duration::from_secs(5), builder.build(&server))
+        .await
+        .context("thread startup should not wait for the remote environment")??;
+
+    test.codex
+        .submit(Op::UserInput {
+            items: vec![UserInput::Text {
+                text: "load the environment instructions".into(),
+                text_elements: Vec::new(),
+            }],
+            final_output_json_schema: None,
+            model_client_metadata: None,
+            additional_context: Default::default(),
+            thread_settings: Default::default(),
+        })
+        .await?;
+    wait_for_response_request_count(&response_mock, /*expected_count*/ 1).await;
+    let agents_path = PathUri::from_abs_path(&test.config.cwd).join("AGENTS.md")?;
+    attach_tx.send(()).expect("attach environment");
+    wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+    shutdown_tx.send(()).expect("stop exec server");
+    let agents_md_reads = exec_server.await??;
+
+    let requests = response_mock.requests();
+    assert_eq!(requests.len(), 3);
+    assert_eq!(agents_md_reads, 1);
+    assert_eq!(agents_md_occurrences(&requests[0], AGENTS_CONTENT), 0);
+    assert_eq!(agents_md_occurrences(&requests[1], AGENTS_CONTENT), 1);
+    assert_eq!(agents_md_occurrences(&requests[2], AGENTS_CONTENT), 1);
+    assert_eq!(test.codex.instruction_sources().await, vec![agents_path]);
+
+    Ok(())
+}
+
+fn agents_md_occurrences(request: &ResponsesRequest, contents: &str) -> usize {
+    request
+        .message_input_texts("user")
+        .iter()
+        .filter(|text| text.contains(contents))
+        .count()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
