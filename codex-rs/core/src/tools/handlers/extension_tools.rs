@@ -128,6 +128,7 @@ async fn to_extension_call(invocation: &ToolInvocation) -> ExtensionToolCall {
 mod tests {
     use std::sync::Arc;
 
+    use crate::session::step_context::StepContext;
     use codex_extension_api::ExtensionData;
     use codex_extension_api::TurnItemContributor;
     use codex_protocol::items::TurnItem;
@@ -242,9 +243,11 @@ mod tests {
     async fn exposes_generic_hook_payloads() {
         let handler = ExtensionToolAdapter::new(Arc::new(StubExtensionExecutor));
         let (session, turn) = crate::session::tests::make_session_and_context().await;
+        let turn = Arc::new(turn);
         let invocation = ToolInvocation {
             session: session.into(),
-            turn: turn.into(),
+            step_context: StepContext::for_test(Arc::clone(&turn)),
+            turn,
             cancellation_token: tokio_util::sync::CancellationToken::new(),
             tracker: Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new())),
             call_id: "call-extension".to_string(),
@@ -302,8 +305,10 @@ mod tests {
             panic!("expected raw response item event");
         };
         assert_eq!(raw_history_item.item, history_item);
+        let step_context = StepContext::for_test(Arc::clone(&turn));
         let invocation = ToolInvocation {
             session,
+            step_context,
             turn,
             cancellation_token: tokio_util::sync::CancellationToken::new(),
             tracker: Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new())),
@@ -494,8 +499,10 @@ mod tests {
             &session.thread_id.to_string(),
             "call-image",
         );
+        let step_context = StepContext::for_test(Arc::clone(&turn));
         let invocation = ToolInvocation {
             session,
+            step_context,
             turn,
             cancellation_token: tokio_util::sync::CancellationToken::new(),
             tracker: Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new())),

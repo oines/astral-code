@@ -205,6 +205,7 @@ mod review;
 mod rollout_reconstruction;
 #[allow(clippy::module_inception)]
 pub(crate) mod session;
+pub(crate) mod step_context;
 pub(crate) mod turn;
 pub(crate) mod turn_context;
 use self::config_lock::export_config_lock_if_configured;
@@ -361,7 +362,6 @@ use codex_protocol::protocol::TokenUsageInfo;
 use codex_protocol::protocol::TurnModerationMetadataEvent;
 use codex_protocol::protocol::WarningEvent;
 use codex_protocol::user_input::UserInput;
-use codex_tools::ToolEnvironmentMode;
 use codex_tools::UnifiedExecShellMode;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_path_uri::PathUri;
@@ -2951,6 +2951,23 @@ impl Session {
     pub(crate) async fn reference_context_item(&self) -> Option<TurnContextItem> {
         let state = self.state.lock().await;
         state.reference_context_item()
+    }
+
+    pub(crate) async fn capture_step_context(
+        &self,
+        turn_context: Arc<TurnContext>,
+    ) -> Arc<step_context::StepContext> {
+        // Keep the turn-frozen view unless deferred executors are explicitly enabled.
+        let environments = if turn_context
+            .config
+            .features
+            .enabled(Feature::DeferredExecutor)
+        {
+            self.services.turn_environments.snapshot().await
+        } else {
+            turn_context.environments.clone()
+        };
+        Arc::new(step_context::StepContext::new(turn_context, environments))
     }
 
     /// Persist the latest turn context snapshot for the first real user turn and for

@@ -204,6 +204,7 @@ impl AstralFileToolHandler {
         let ToolInvocation {
             session,
             turn,
+            step_context,
             payload,
             tracker,
             call_id,
@@ -223,7 +224,7 @@ impl AstralFileToolHandler {
         let hook_input = parse_arguments::<Value>(&arguments)?;
         let environment_id = file_environment_id(&arguments)?;
         let Some(turn_environment) =
-            resolve_tool_environment(turn.as_ref(), environment_id.as_deref())?
+            resolve_tool_environment(&step_context.environments, environment_id.as_deref())?
         else {
             return Err(FunctionCallError::RespondToModel(format!(
                 "{} is unavailable in this session",

@@ -37,6 +37,7 @@ use pretty_assertions::assert_eq;
 use serde_json::json;
 
 use crate::config::ToolSurface;
+use crate::session::step_context::StepContext;
 use crate::session::tests::make_session_and_context;
 use crate::session::turn_context::TurnContext;
 use crate::tools::handlers::multi_agents_spec::MULTI_AGENT_V1_NAMESPACE;
@@ -182,8 +183,10 @@ async fn probe_with(
 ) -> ToolPlanProbe {
     let (_session, mut turn) = make_session_and_context().await;
     configure_turn(&mut turn);
-    let router = ToolRouter::from_turn_context(
-        &turn,
+    let turn = Arc::new(turn);
+    let step_context = StepContext::for_test(Arc::clone(&turn));
+    let router = ToolRouter::from_context(
+        step_context.as_ref(),
         ToolRouterParams {
             mcp_tools: inputs.mcp_tools,
             deferred_mcp_tools: inputs.deferred_mcp_tools,
@@ -865,6 +868,7 @@ async fn environment_count_controls_environment_backed_tools() {
     let no_environment = probe(|turn| {
         turn.environments.turn_environments.clear();
         set_feature(turn, Feature::ShellTool, /*enabled*/ true);
+        set_feature(turn, Feature::RequestPermissionsTool, /*enabled*/ true);
         turn.model_info.apply_patch_tool_type = Some(ApplyPatchToolType::Freeform);
     })
     .await;
@@ -882,6 +886,7 @@ async fn environment_count_controls_environment_backed_tools() {
         "Glob",
         "Grep",
         "view_image",
+        "RequestPermissions",
     ]);
     no_environment.assert_registered_lacks(&[
         "shell_command",
@@ -892,22 +897,49 @@ async fn environment_count_controls_environment_backed_tools() {
         "Glob",
         "Grep",
         "view_image",
+        "RequestPermissions",
     ]);
 
     let multiple_environments = probe(|turn| {
         duplicate_primary_environment(turn);
         set_feature(turn, Feature::ShellTool, /*enabled*/ true);
         set_feature(turn, Feature::UnifiedExec, /*enabled*/ true);
+        set_feature(turn, Feature::RequestPermissionsTool, /*enabled*/ true);
         turn.model_info.apply_patch_tool_type = Some(ApplyPatchToolType::Freeform);
     })
     .await;
-    multiple_environments.assert_visible_contains(&["Bash", "Read"]);
+    multiple_environments.assert_visible_contains(&["Bash", "Read", "RequestPermissions"]);
     multiple_environments.assert_visible_lacks(&["apply_patch", "view_image"]);
     multiple_environments.assert_registered_lacks(&["apply_patch", "view_image"]);
     assert!(!has_parameter(
         multiple_environments.visible_spec("Bash"),
         "environment_id"
     ));
+}
+
+#[tokio::test]
+async fn environment_tools_follow_the_step_context() {
+    let (_session, mut turn) = make_session_and_context().await;
+    set_tool_surface(&mut turn, ToolSurface::Codex);
+    set_feature(&mut turn, Feature::UnifiedExec, /*enabled*/ true);
+    turn.model_info.apply_patch_tool_type = Some(ApplyPatchToolType::Freeform);
+
+    let environments = turn.environments.clone();
+    turn.environments.turn_environments.clear();
+    let step_context = Arc::new(StepContext::new(Arc::new(turn), environments));
+
+    let plan = ToolPlanProbe::from_router(ToolRouter::from_context(
+        step_context.as_ref(),
+        ToolRouterParams {
+            mcp_tools: None,
+            deferred_mcp_tools: None,
+            discoverable_tools: None,
+            extension_tool_executors: Vec::new(),
+            dynamic_tools: &[],
+        },
+    ));
+
+    plan.assert_visible_contains(&["exec_command", "apply_patch", "view_image"]);
 }
 
 #[tokio::test]
