@@ -296,6 +296,7 @@ impl Session {
             // The previous runtime owns its token and may still be serving an in-flight step.
             *guard = CancellationToken::new();
         }
+        let current_runtime = self.services.latest_mcp_runtime();
         let (refreshed_manager, cancel_token) = McpConnectionManager::new(
             &mcp_servers,
             mcp_config.mcp_oauth_credentials_store_mode,
@@ -313,13 +314,11 @@ impl Session {
             tool_plugin_provenance,
             auth.as_ref(),
             elicitation_reviewer,
+            current_runtime.manager().elicitation_router(),
         )
         .await;
-        {
-            let current_runtime = self.services.latest_mcp_runtime();
-            refreshed_manager
-                .set_elicitations_auto_deny(current_runtime.manager().elicitations_auto_deny());
-        }
+        refreshed_manager
+            .set_elicitations_auto_deny(current_runtime.manager().elicitations_auto_deny());
         {
             let mut guard = self.services.mcp_startup_cancellation_token.lock().await;
             if guard.is_cancelled() {

@@ -369,6 +369,7 @@ pub async fn list_accessible_connectors_from_mcp_tools_with_environment_manager(
         ToolPluginProvenance::default(),
         auth.as_ref(),
         /*elicitation_reviewer*/ None,
+        codex_mcp::ElicitationRequestRouter::default(),
     )
     .await;
 
