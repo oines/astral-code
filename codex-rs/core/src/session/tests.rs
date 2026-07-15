@@ -7460,7 +7460,7 @@ async fn spawn_task_does_not_update_previous_turn_settings_for_non_run_turn_task
 }
 
 #[tokio::test]
-async fn build_settings_update_items_emits_environment_item_for_network_changes() {
+async fn record_context_updates_emits_environment_item_for_network_changes() {
     let (session, previous_context) = make_session_and_context().await;
     let previous_context = Arc::new(previous_context);
     let mut current_context = previous_context
@@ -7507,10 +7507,8 @@ async fn build_settings_update_items_emits_environment_item_for_network_changes(
     .expect("rebuild config layer stack with network requirements");
     current_context.config = Arc::new(config);
 
-    let reference_context_item = previous_context.to_turn_context_item();
-    let update_items = session
-        .build_settings_update_items(Some(&reference_context_item), &current_context)
-        .await;
+    let update_items =
+        record_context_update_items(&session, &previous_context, &current_context).await;
 
     let environment_update = user_input_texts(&update_items)
         .into_iter()
@@ -7522,63 +7520,42 @@ async fn build_settings_update_items_emits_environment_item_for_network_changes(
 }
 
 #[tokio::test]
-async fn environment_context_uses_session_shell_when_environment_shell_is_absent() {
-    let (mut session, mut turn_context) = make_session_and_context().await;
-    session.services.user_shell = Arc::new(crate::shell::Shell {
-        shell_type: crate::shell::ShellType::PowerShell,
-        shell_path: PathBuf::from("powershell"),
-    });
-    for environment in &mut turn_context.environments.turn_environments {
-        environment.shell = None;
-    }
-
-    let session_shell = session.user_shell();
-    let environment_context = crate::context::EnvironmentContext::from_turn_context(
-        &turn_context,
-        session_shell.as_ref(),
-    )
-    .render();
-    assert!(
-        environment_context.contains("<shell>powershell</shell>"),
-        "{environment_context}"
+async fn record_context_updates_emits_environment_item_for_cwd_changes() {
+    let (session, previous_context) = make_session_and_context().await;
+    let previous_context = Arc::new(previous_context);
+    let mut current_context = previous_context
+        .with_model(
+            previous_context.model_info.slug.clone(),
+            &session.services.models_manager,
+        )
+        .await;
+    let cwd = test_path_buf("/new-repo").abs();
+    let environment = current_context.environments.turn_environments[0].clone();
+    current_context.environments.turn_environments[0] = TurnEnvironment::new(
+        environment.environment_id,
+        environment.environment,
+        PathUri::from_abs_path(&cwd),
+        environment.shell,
     );
 
-    let primary_environment = turn_context
-        .environments
-        .turn_environments
-        .first_mut()
-        .expect("primary environment");
-    primary_environment.shell = Some(crate::shell::Shell {
-        shell_type: crate::shell::ShellType::Cmd,
-        shell_path: PathBuf::from("cmd"),
-    });
+    let update_items =
+        record_context_update_items(&session, &previous_context, &current_context).await;
 
-    let environment_context = crate::context::EnvironmentContext::from_turn_context(
-        &turn_context,
-        session_shell.as_ref(),
-    )
-    .render();
+    let environment_update = user_input_texts(&update_items)
+        .into_iter()
+        .find(|text| text.contains("<environment_context>"))
+        .expect("environment update item should be emitted");
     assert!(
-        environment_context.contains("<shell>cmd</shell>"),
-        "{environment_context}"
+        environment_update.contains(&format!("<cwd>{}</cwd>", cwd.display())),
+        "{environment_update}"
     );
+    assert!(!environment_update.contains("<environments>"));
 }
 
 #[tokio::test]
 async fn environment_context_reports_turn_context_model() {
     let (session, turn_context) = make_session_and_context().await;
     let expected_model_tag = format!("<model>{}</model>", turn_context.model_info.slug);
-
-    let session_shell = session.user_shell();
-    let environment_context = crate::context::EnvironmentContext::from_turn_context(
-        &turn_context,
-        session_shell.as_ref(),
-    )
-    .render();
-    assert!(
-        environment_context.contains(&expected_model_tag),
-        "{environment_context}"
-    );
 
     let initial_context = session.build_initial_context(&turn_context).await;
     let environment_context = user_input_texts(&initial_context)
@@ -7592,7 +7569,32 @@ async fn environment_context_reports_turn_context_model() {
 }
 
 #[tokio::test]
-async fn build_settings_update_items_emits_environment_item_for_time_changes() {
+async fn record_context_updates_emits_environment_item_for_model_changes() {
+    let (session, previous_context) = make_session_and_context().await;
+    let previous_context = Arc::new(previous_context);
+    let next_model = if previous_context.model_info.slug == "gpt-5.4" {
+        "gpt-5.2"
+    } else {
+        "gpt-5.4"
+    };
+    let current_context = previous_context
+        .with_model(next_model.to_string(), &session.services.models_manager)
+        .await;
+
+    let update_items =
+        record_context_update_items(&session, &previous_context, &current_context).await;
+    let environment_update = user_input_texts(&update_items)
+        .into_iter()
+        .find(|text| text.contains("<environment_context>"))
+        .expect("environment update item should be emitted");
+    assert!(
+        environment_update.contains(&format!("<model>{next_model}</model>")),
+        "{environment_update}"
+    );
+}
+
+#[tokio::test]
+async fn record_context_updates_emits_environment_item_for_time_changes() {
     let (session, previous_context) = make_session_and_context().await;
     let previous_context = Arc::new(previous_context);
     let mut current_context = previous_context
@@ -7604,10 +7606,8 @@ async fn build_settings_update_items_emits_environment_item_for_time_changes() {
     current_context.current_date = Some("2026-02-27".to_string());
     current_context.timezone = Some("Europe/Berlin".to_string());
 
-    let reference_context_item = previous_context.to_turn_context_item();
-    let update_items = session
-        .build_settings_update_items(Some(&reference_context_item), &current_context)
-        .await;
+    let update_items =
+        record_context_update_items(&session, &previous_context, &current_context).await;
 
     let environment_update = user_input_texts(&update_items)
         .into_iter()
@@ -7618,7 +7618,7 @@ async fn build_settings_update_items_emits_environment_item_for_time_changes() {
 }
 
 #[tokio::test]
-async fn build_settings_update_items_omits_environment_item_when_disabled() {
+async fn record_context_updates_omits_environment_item_when_disabled() {
     let (session, previous_context) = make_session_and_context().await;
     let previous_context = Arc::new(previous_context);
     let mut current_context = previous_context
@@ -7630,12 +7630,16 @@ async fn build_settings_update_items_omits_environment_item_when_disabled() {
     let mut config = (*current_context.config).clone();
     config.include_environment_context = false;
     current_context.config = Arc::new(config);
-    current_context.current_date = Some("2026-02-27".to_string());
+    let environment = current_context.environments.turn_environments[0].clone();
+    current_context.environments.turn_environments[0] = TurnEnvironment::new(
+        environment.environment_id,
+        environment.environment,
+        PathUri::from_abs_path(&test_path_buf("/new-repo").abs()),
+        environment.shell,
+    );
 
-    let reference_context_item = previous_context.to_turn_context_item();
-    let update_items = session
-        .build_settings_update_items(Some(&reference_context_item), &current_context)
-        .await;
+    let update_items =
+        record_context_update_items(&session, &previous_context, &current_context).await;
 
     let user_texts = user_input_texts(&update_items);
     assert!(
@@ -7644,6 +7648,23 @@ async fn build_settings_update_items_omits_environment_item_when_disabled() {
             .any(|text| text.contains("<environment_context>")),
         "did not expect environment context updates when disabled, got {user_texts:?}"
     );
+}
+
+async fn record_context_update_items(
+    session: &Session,
+    previous_context: &TurnContext,
+    current_context: &TurnContext,
+) -> Vec<TranscriptItem> {
+    session
+        .record_context_updates_and_set_reference_context_item(previous_context)
+        .await;
+    let previous_len = session.clone_history().await.raw_items().len();
+
+    session
+        .record_context_updates_and_set_reference_context_item(current_context)
+        .await;
+    let history = session.clone_history().await;
+    history.raw_items()[previous_len..].to_vec()
 }
 
 #[tokio::test]
@@ -8474,39 +8495,26 @@ async fn record_context_updates_and_set_reference_context_item_reinjects_full_co
 async fn record_context_updates_and_set_reference_context_item_persists_baseline_without_emitting_diffs()
  {
     let (mut session, previous_context) = make_session_and_context().await;
-    let next_model = if previous_context.model_info.slug == "gpt-5.4" {
-        "gpt-5.2"
-    } else {
-        "gpt-5.4"
-    };
-    let turn_context = previous_context
-        .with_model(next_model.to_string(), &session.services.models_manager)
+    let mut turn_context = previous_context
+        .with_model(
+            previous_context.model_info.slug.clone(),
+            &session.services.models_manager,
+        )
         .await;
+    turn_context.sub_id = "next-turn".to_string();
     let previous_context_item = previous_context.to_turn_context_item();
+    let world_state = session.build_world_state(&previous_context).await;
     {
         let mut state = session.state.lock().await;
         state.set_reference_context_item(Some(previous_context_item.clone()));
+        state.history.set_world_state_baseline(world_state);
     }
     let rollout_path = attach_thread_persistence(&mut session).await;
 
     let update_items = session
         .build_settings_update_items(Some(&previous_context_item), &turn_context)
         .await;
-    // Both models resolve to the same instructions, so no <model_switch> item is
-    // emitted; the switch still updates the model identity fact in the
-    // environment context.
-    assert_eq!(update_items.len(), 1);
-    let TranscriptItem::Message { role, content, .. } = &update_items[0] else {
-        panic!("expected environment context update message");
-    };
-    assert_eq!(role, "user");
-    let ContentItem::InputText { text } = &content[0] else {
-        panic!("expected text content in environment context update");
-    };
-    assert!(
-        text.contains(&format!("<model>{next_model}</model>")),
-        "{text}"
-    );
+    assert_eq!(update_items, Vec::new());
 
     session
         .record_context_updates_and_set_reference_context_item(&turn_context)

@@ -1,4 +1,6 @@
 use super::*;
+use crate::context::world_state::EnvironmentsState;
+use crate::context::world_state::WorldState;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use codex_protocol::AgentPath;
@@ -68,6 +70,25 @@ fn create_history_with_items(items: Vec<TranscriptItem>) -> ContextManager {
     // behavior, not on a specific model's token limit.
     h.record_items(items.iter(), TruncationPolicy::Tokens(10_000));
     h
+}
+
+#[test]
+fn world_state_baseline_deduplicates_until_history_is_replaced() {
+    let world_state = || {
+        let mut state = WorldState::default();
+        state.add_section(EnvironmentsState::from_turn_context_item(
+            &reference_context_item(),
+        ));
+        state
+    };
+    let mut history = ContextManager::new();
+
+    assert_eq!(1, history.update_world_state(world_state()).len());
+    assert!(history.update_world_state(world_state()).is_empty());
+
+    history.replace(Vec::new());
+
+    assert_eq!(1, history.update_world_state(world_state()).len());
 }
 
 fn user_msg(text: &str) -> TranscriptItem {

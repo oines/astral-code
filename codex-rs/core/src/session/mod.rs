@@ -28,6 +28,7 @@ use crate::context::ContextualUserFragment;
 use crate::context::NetworkRuleSaved;
 use crate::context::PermissionsInstructions;
 use crate::context::PersonalitySpecInstructions;
+use crate::context::world_state::WorldState;
 use crate::default_skill_metadata_budget;
 use crate::environment_selection::ThreadEnvironments;
 use crate::environment_selection::TurnEnvironmentSnapshot;
@@ -206,6 +207,7 @@ pub(crate) mod session;
 pub(crate) mod step_context;
 pub(crate) mod turn;
 pub(crate) mod turn_context;
+mod world_state;
 use self::config_lock::export_config_lock_if_configured;
 use self::config_lock::validate_config_lock_if_configured;
 #[cfg(test)]
@@ -226,6 +228,8 @@ use self::turn::collect_explicit_app_ids_from_skill_items;
 use self::turn::realtime_text_for_event;
 use self::turn_context::TurnContext;
 use self::turn_context::TurnSkillsContext;
+use self::world_state::build_world_state_from_turn_context;
+use self::world_state::build_world_state_from_turn_context_item;
 #[cfg(test)]
 mod rollout_reconstruction_tests;
 
@@ -1287,11 +1291,22 @@ impl Session {
             .reconstruct_history_from_rollout(turn_context, rollout_items)
             .await;
         let previous_turn_settings = reconstructed_rollout.previous_turn_settings.clone();
+        let world_state_baseline = reconstructed_rollout
+            .reference_context_item
+            .as_ref()
+            .map(build_world_state_from_turn_context_item);
         self.replace_history(
             reconstructed_rollout.history,
             reconstructed_rollout.reference_context_item,
         )
         .await;
+        if let Some(world_state) = world_state_baseline {
+            self.state
+                .lock()
+                .await
+                .history
+                .set_world_state_baseline(world_state);
+        }
         let prefix_tokens = if matches!(
             turn_context.config.model_auto_compact_token_limit_scope,
             AutoCompactTokenLimitScope::BodyAfterPrefix
@@ -1558,13 +1573,11 @@ impl Session {
             let state = self.state.lock().await;
             state.previous_turn_settings()
         };
-        let shell = self.user_shell();
         let exec_policy = self.services.exec_policy.current();
         crate::context_manager::updates::build_settings_update_items(
             reference_context_item,
             previous_turn_settings.as_ref(),
             current_context,
-            shell.as_ref(),
             exec_policy.as_ref(),
             self.features.enabled(Feature::Personality),
         )
@@ -2719,6 +2732,29 @@ impl Session {
         turn_context: &TurnContext,
         mcp: &McpRuntimeSnapshot,
     ) -> Vec<TranscriptItem> {
+        let world_state = self.build_world_state(turn_context).await;
+        self.build_initial_context_with_mcp_and_world_state(turn_context, mcp, &world_state)
+            .await
+    }
+
+    async fn build_world_state(&self, turn_context: &TurnContext) -> WorldState {
+        let environment_subagents = if turn_context.config.include_environment_context {
+            self.services
+                .agent_control
+                .format_environment_context_subagents(self.thread_id)
+                .await
+        } else {
+            String::new()
+        };
+        build_world_state_from_turn_context(turn_context, &environment_subagents)
+    }
+
+    async fn build_initial_context_with_mcp_and_world_state(
+        &self,
+        turn_context: &TurnContext,
+        mcp: &McpRuntimeSnapshot,
+        world_state: &WorldState,
+    ) -> Vec<TranscriptItem> {
         let mut developer_sections = Vec::<String>::with_capacity(8);
         let mut contextual_user_sections = Vec::<String>::with_capacity(2);
         let mut separate_developer_sections = Vec::<String>::new();
@@ -2884,18 +2920,12 @@ impl Session {
                 .render(),
             );
         }
-        if turn_context.config.include_environment_context {
-            let shell = self.user_shell();
-            let subagents = self
-                .services
-                .agent_control
-                .format_environment_context_subagents(self.thread_id)
-                .await;
-            contextual_user_sections.push(
-                crate::context::EnvironmentContext::from_turn_context(turn_context, shell.as_ref())
-                    .with_subagents(subagents)
-                    .render(),
-            );
+        for fragment in world_state.render_full() {
+            match fragment.role() {
+                "developer" => developer_sections.push(fragment.render()),
+                "user" => contextual_user_sections.push(fragment.render()),
+                _ => {}
+            }
         }
 
         let multi_agent_v2_usage_hint_text =
@@ -3014,12 +3044,30 @@ impl Session {
             state.reference_context_item()
         };
         let should_inject_full_context = reference_context_item.is_none();
+        let world_state = self.build_world_state(turn_context).await;
         let context_items = if should_inject_full_context {
-            self.build_initial_context_with_mcp(turn_context, mcp).await
-        } else {
-            // Steady-state path: append only context diffs to minimize token overhead.
-            self.build_settings_update_items(reference_context_item.as_ref(), turn_context)
+            let context_items = self
+                .build_initial_context_with_mcp_and_world_state(turn_context, mcp, &world_state)
+                .await;
+            self.state
+                .lock()
                 .await
+                .history
+                .set_world_state_baseline(world_state);
+            context_items
+        } else {
+            // Steady-state path: append only built-in context diffs to minimize token overhead.
+            let mut context_items = self
+                .build_settings_update_items(reference_context_item.as_ref(), turn_context)
+                .await;
+            let world_state_items = {
+                let mut state = self.state.lock().await;
+                crate::context_manager::updates::merge_contextual_fragments(
+                    state.history.update_world_state(world_state),
+                )
+            };
+            context_items.extend(world_state_items);
+            context_items
         };
         let turn_context_item = turn_context.to_turn_context_item();
         if !context_items.is_empty() {
