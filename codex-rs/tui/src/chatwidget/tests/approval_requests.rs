@@ -57,6 +57,7 @@ fn app_server_exec_approval_request_splits_shell_wrapped_command() {
             item_id: "item-1".to_string(),
             started_at_ms: 0,
             approval_id: Some("approval-1".to_string()),
+            environment_id: None,
             reason: None,
             network_approval_context: None,
             command: Some(
@@ -96,6 +97,7 @@ fn app_server_exec_approval_request_preserves_permissions_context() {
             item_id: "item-1".to_string(),
             started_at_ms: 0,
             approval_id: Some("approval-1".to_string()),
+            environment_id: None,
             reason: None,
             network_approval_context: Some(codex_app_server_protocol::NetworkApprovalContext {
                 host: "example.com".to_string(),
@@ -155,6 +157,7 @@ async fn network_exec_approval_history_describes_session_host_allowance() {
             item_id: "item-1".to_string(),
             started_at_ms: 0,
             approval_id: Some("approval-1".to_string()),
+            environment_id: None,
             reason: None,
             network_approval_context: Some(codex_app_server_protocol::NetworkApprovalContext {
                 host: "example.com".to_string(),
@@ -196,6 +199,7 @@ async fn network_exec_approval_history_describes_one_time_host_allowance() {
             item_id: "item-1".to_string(),
             started_at_ms: 0,
             approval_id: Some("approval-1".to_string()),
+            environment_id: None,
             reason: None,
             network_approval_context: Some(codex_app_server_protocol::NetworkApprovalContext {
                 host: "example.com".to_string(),
@@ -237,6 +241,7 @@ async fn network_exec_approval_history_describes_canceled_host_request() {
             item_id: "item-1".to_string(),
             started_at_ms: 0,
             approval_id: Some("approval-1".to_string()),
+            environment_id: None,
             reason: None,
             network_approval_context: Some(codex_app_server_protocol::NetworkApprovalContext {
                 host: "example.com".to_string(),
