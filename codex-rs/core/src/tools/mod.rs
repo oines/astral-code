@@ -21,6 +21,7 @@ use std::borrow::Cow;
 
 use crate::config::ToolSurface;
 use crate::session::turn_context::TurnContext;
+use codex_features::Feature;
 use codex_protocol::exec_output::ExecToolCallOutput;
 use codex_protocol::openai_models::ToolMode;
 use codex_tools::ToolName;
@@ -35,9 +36,25 @@ pub(crate) const TELEMETRY_PREVIEW_MAX_LINES: usize = 64; // lines
 pub(crate) const TELEMETRY_PREVIEW_TRUNCATION_NOTICE: &str =
     "[... telemetry preview truncated ...]";
 
+pub(crate) fn effective_tool_mode(turn_context: &TurnContext) -> ToolMode {
+    if crate::guardian::is_guardian_reviewer_source(&turn_context.session_source) {
+        return ToolMode::Direct;
+    }
+
+    turn_context.model_info.tool_mode.unwrap_or_else(|| {
+        if turn_context.config.features.enabled(Feature::CodeModeOnly) {
+            ToolMode::CodeModeOnly
+        } else if turn_context.config.features.enabled(Feature::CodeMode) {
+            ToolMode::CodeMode
+        } else {
+            ToolMode::Direct
+        }
+    })
+}
+
 pub(crate) fn effective_tool_surface(turn_context: &TurnContext) -> ToolSurface {
     if matches!(
-        turn_context.tool_mode,
+        effective_tool_mode(turn_context),
         ToolMode::CodeMode | ToolMode::CodeModeOnly
     ) {
         ToolSurface::Codex
