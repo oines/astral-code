@@ -372,6 +372,37 @@ async fn remote_test_env_exposes_target_shell_to_model() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn deferred_executor_does_not_duplicate_initial_environment_context() -> Result<()> {
+    let server = start_mock_server().await;
+    let response_mock = mount_sse_once(
+        &server,
+        sse(vec![
+            ev_response_created("resp-1"),
+            ev_assistant_message("msg-1", "done"),
+            ev_completed("resp-1"),
+        ]),
+    )
+    .await;
+    let mut builder = test_codex().with_config(|config| {
+        assert!(config.features.enable(Feature::DeferredExecutor).is_ok());
+    });
+    let test = builder.build(&server).await?;
+
+    test.submit_turn("report the environment").await?;
+
+    let user_context = response_mock.single_request().message_input_texts("user");
+    assert_eq!(
+        user_context
+            .iter()
+            .filter(|text| text.contains("<environment_context>"))
+            .count(),
+        1
+    );
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn deferred_executor_updates_context_and_tools_after_startup() -> Result<()> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let server = start_mock_server().await;
