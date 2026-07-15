@@ -230,7 +230,6 @@ use self::turn::realtime_text_for_event;
 use self::turn_context::TurnContext;
 use self::turn_context::TurnSkillsContext;
 use self::world_state::build_world_state_from_environment_snapshot;
-use self::world_state::build_world_state_from_turn_context_item;
 #[cfg(test)]
 mod rollout_reconstruction_tests;
 
@@ -1292,11 +1291,7 @@ impl Session {
             .reconstruct_history_from_rollout(turn_context, rollout_items)
             .await;
         let previous_turn_settings = reconstructed_rollout.previous_turn_settings.clone();
-        let world_state_baseline = reconstructed_rollout
-            .reference_context_item
-            .as_ref()
-            .map(build_world_state_from_turn_context_item)
-            .map(|world_state| world_state.snapshot());
+        let world_state_baseline = reconstructed_rollout.world_state_baseline;
         self.replace_history(
             reconstructed_rollout.history,
             reconstructed_rollout.reference_context_item,
