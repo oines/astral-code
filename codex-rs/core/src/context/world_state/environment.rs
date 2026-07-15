@@ -1,3 +1,4 @@
+use super::PreviousSectionState;
 use super::WorldStateSection;
 use crate::context::ContextualUserFragment;
 use crate::context::environment_context::FileSystemContext;
@@ -104,11 +105,14 @@ impl WorldStateSection for EnvironmentsState {
 
     fn render_diff(
         &self,
-        previous: Option<&Self::Snapshot>,
+        previous: PreviousSectionState<'_, Self::Snapshot>,
     ) -> Option<Box<dyn ContextualUserFragment>> {
         let current = self.snapshot();
         let empty = EnvironmentsSnapshot::default();
-        let previous = previous.unwrap_or(&empty);
+        let previous = match previous {
+            PreviousSectionState::Known(previous) => previous,
+            PreviousSectionState::Absent | PreviousSectionState::Unknown => &empty,
+        };
         let turn_context_values_changed = current.model != previous.model
             || current.current_date != previous.current_date
             || current.timezone != previous.timezone

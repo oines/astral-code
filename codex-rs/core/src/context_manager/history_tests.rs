@@ -84,16 +84,25 @@ impl WorldStateSection for TestWorldStateSection {
         true
     }
 
+    fn matches_legacy_fragment(role: &str, text: &str) -> bool {
+        role == "user" && UserInstructions::matches_text(text)
+    }
+
     fn render_diff(
         &self,
-        previous: Option<&Self::Snapshot>,
+        previous: crate::context::world_state::PreviousSectionState<'_, Self::Snapshot>,
     ) -> Option<Box<dyn crate::context::ContextualUserFragment>> {
-        (previous != Some(&true)).then(|| {
-            Box::new(UserInstructions {
-                directory: None,
-                text: "test".to_string(),
-            }) as Box<dyn crate::context::ContextualUserFragment>
+        let text = match previous {
+            crate::context::world_state::PreviousSectionState::Known(true) => return None,
+            crate::context::world_state::PreviousSectionState::Unknown => "unknown",
+            crate::context::world_state::PreviousSectionState::Absent
+            | crate::context::world_state::PreviousSectionState::Known(false) => "test",
+        };
+        Some(Box::new(UserInstructions {
+            directory: None,
+            text: text.to_string(),
         })
+            as Box<dyn crate::context::ContextualUserFragment>)
     }
 }
 

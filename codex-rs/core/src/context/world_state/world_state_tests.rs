@@ -21,11 +21,15 @@ impl WorldStateSection for TestSection {
 
     fn render_diff(
         &self,
-        previous: Option<&Self::Snapshot>,
+        previous: PreviousSectionState<'_, Self::Snapshot>,
     ) -> Option<Box<dyn ContextualUserFragment>> {
-        let previous = previous?;
-        (self.value != previous.value)
-            .then(|| Box::new(TestFragment(self.value.clone())) as Box<dyn ContextualUserFragment>)
+        match previous {
+            PreviousSectionState::Known(previous) if self.value != previous.value => {
+                Some(Box::new(TestFragment(self.value.clone())))
+            }
+            PreviousSectionState::Unknown => Some(Box::new(TestFragment("unknown".to_string()))),
+            PreviousSectionState::Absent | PreviousSectionState::Known(_) => None,
+        }
     }
 }
 
@@ -59,7 +63,7 @@ impl WorldStateSection for DuplicateTestSection {
 
     fn render_diff(
         &self,
-        _previous: Option<&Self::Snapshot>,
+        _previous: PreviousSectionState<'_, Self::Snapshot>,
     ) -> Option<Box<dyn ContextualUserFragment>> {
         None
     }
