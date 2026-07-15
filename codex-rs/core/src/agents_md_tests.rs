@@ -17,6 +17,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tempfile::TempDir;
 
+#[path = "agents_md_discovery_tests.rs"]
+mod discovery_tests;
+
 fn resolved_local_environments<const N: usize>(
     environments: [(&str, AbsolutePathBuf); N],
 ) -> TurnEnvironmentSnapshot {
