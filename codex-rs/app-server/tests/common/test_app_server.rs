@@ -124,6 +124,7 @@ pub struct TestAppServer {
 pub const DEFAULT_CLIENT_NAME: &str = "codex-app-server-tests";
 pub const DISABLE_PLUGIN_STARTUP_TASKS_ARG: &str = "--disable-plugin-startup-tasks-for-tests";
 const DISABLE_MANAGED_CONFIG_ENV_VAR: &str = "ASTRAL_APP_SERVER_DISABLE_MANAGED_CONFIG";
+const CODE_MODE_HOST_PATH_ENV_VAR: &str = "CODEX_CODE_MODE_HOST_PATH";
 
 impl TestAppServer {
     pub async fn new(codex_home: &Path) -> anyhow::Result<Self> {
@@ -225,6 +226,15 @@ impl TestAppServer {
         );
         cmd.env_remove(ASTRAL_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR);
         cmd.args(args);
+
+        if !env_overrides
+            .iter()
+            .any(|(key, _)| *key == CODE_MODE_HOST_PATH_ENV_VAR)
+            && let Ok(code_mode_host_program) =
+                codex_utils_cargo_bin::cargo_bin("codex-code-mode-host")
+        {
+            cmd.env(CODE_MODE_HOST_PATH_ENV_VAR, code_mode_host_program);
+        }
 
         for (k, v) in env_overrides {
             match v {
