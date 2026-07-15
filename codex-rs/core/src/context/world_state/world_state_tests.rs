@@ -111,6 +111,29 @@ fn render_diff_restores_the_typed_section_snapshot() {
 }
 
 #[test]
+fn unreadable_section_snapshot_is_treated_as_unknown() {
+    let mut current = WorldState::default();
+    current.add_section(TestSection {
+        value: "current".to_string(),
+        optional: None,
+        array: Vec::new(),
+    });
+    let previous = WorldStateSnapshot {
+        sections: BTreeMap::from([("test".to_string(), json!({"invalid": true}))]),
+    };
+
+    let rendered = current.render_diff(&previous);
+
+    assert_eq!(
+        vec!["unknown"],
+        rendered
+            .into_iter()
+            .map(|fragment| fragment.body())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 #[should_panic(expected = "duplicate world-state section ID: test")]
 fn duplicate_section_ids_are_rejected() {
     let mut world_state = WorldState::default();

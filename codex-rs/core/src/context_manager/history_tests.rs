@@ -174,6 +174,32 @@ fn world_state_baseline_tracks_subagent_roster_updates() {
     assert!(unchanged_fragments.is_empty());
     assert_eq!(unchanged_item, None);
 }
+
+#[test]
+fn world_state_reconciles_matching_legacy_history_once() {
+    let item = crate::context::ContextualUserFragment::into(UserInstructions {
+        directory: None,
+        text: "legacy".to_string(),
+    });
+    let mut history = create_history_with_items(vec![item]);
+    let mut world_state = WorldState::default();
+    world_state.add_section(TestWorldStateSection);
+
+    let (fragments, rollout_item) = history.update_world_state(&world_state);
+    assert_eq!(
+        vec!["\n\n<INSTRUCTIONS>\nunknown\n"],
+        fragments
+            .into_iter()
+            .map(|fragment| fragment.body())
+            .collect::<Vec<_>>()
+    );
+    assert!(rollout_item.is_some_and(|item| item.full));
+
+    let (fragments, rollout_item) = history.update_world_state(&world_state);
+    assert!(fragments.is_empty());
+    assert_eq!(rollout_item, None);
+}
+
 fn user_msg(text: &str) -> TranscriptItem {
     TranscriptItem::Message {
         id: None,
