@@ -13,6 +13,7 @@ async fn exec_approval_emits_proposed_command_and_decision_history() {
         call_id: "call-short".into(),
         approval_id: Some("call-short".into()),
         turn_id: "turn-short".into(),
+        environment_id: Some("remote".to_string()),
         command: vec!["bash".into(), "-lc".into(), "echo hello world".into()],
         cwd: AbsolutePathBuf::current_dir().expect("current dir"),
         reason: Some(
@@ -330,6 +331,7 @@ async fn exec_approval_uses_approval_id_when_present() {
             call_id: "call-parent".into(),
             approval_id: Some("approval-subcommand".into()),
             turn_id: "turn-short".into(),
+            environment_id: None,
             command: vec!["bash".into(), "-lc".into(), "echo hello world".into()],
             cwd: AbsolutePathBuf::current_dir().expect("current dir"),
             reason: Some(
@@ -372,6 +374,7 @@ async fn exec_approval_decision_truncates_multiline_and_long_commands() {
         call_id: "call-multi".into(),
         approval_id: Some("call-multi".into()),
         turn_id: "turn-multi".into(),
+        environment_id: None,
         command: vec!["bash".into(), "-lc".into(), "echo line1\necho line2".into()],
         cwd: AbsolutePathBuf::current_dir().expect("current dir"),
         reason: Some(
@@ -423,6 +426,7 @@ async fn exec_approval_decision_truncates_multiline_and_long_commands() {
         call_id: "call-long".into(),
         approval_id: Some("call-long".into()),
         turn_id: "turn-long".into(),
+        environment_id: None,
         command: vec!["bash".into(), "-lc".into(), long],
         cwd: AbsolutePathBuf::current_dir().expect("current dir"),
         reason: None,
