@@ -1,5 +1,6 @@
 use super::*;
 use crate::config::ConfigBuilder;
+use crate::context::ContextualUserFragment;
 use crate::environment_selection::TurnEnvironmentSnapshot;
 use crate::session::turn_context::TurnEnvironment;
 use codex_exec_server::Environment;
@@ -207,6 +208,93 @@ fn loaded_instructions_with_only_empty_or_whitespace_entries_are_empty() {
     assert!(whitespace.is_empty());
 }
 
+#[test]
+fn foreign_agents_md_uses_environment_native_paths() {
+    let (cwd, rendered_cwd) = if cfg!(windows) {
+        (
+            PathUri::parse("file:///codex%20runtime").expect("POSIX cwd URI"),
+            "/codex runtime",
+        )
+    } else {
+        (
+            PathUri::parse("file:///C:/codex%20runtime").expect("Windows cwd URI"),
+            r"C:\codex runtime",
+        )
+    };
+    let source_path = cwd.join("AGENTS.md").expect("AGENTS.md URI");
+    let loaded = LoadedAgentsMd {
+        entries: vec![InstructionEntry {
+            contents: "remote instructions".to_string(),
+            provenance: InstructionProvenance::Project {
+                source_path: source_path.clone(),
+                environment_id: "remote".to_string(),
+                cwd,
+            },
+        }],
+    };
+
+    assert_eq!(
+        loaded.contextual_user_fragment().render(),
+        format!(
+            "# AGENTS.md instructions for {rendered_cwd}
+
+<INSTRUCTIONS>
+remote instructions
+</INSTRUCTIONS>"
+        )
+    );
+    assert_eq!(loaded.sources().collect::<Vec<_>>(), vec![source_path]);
+}
+
+#[test]
+fn multi_environment_agents_md_renders_mixed_path_conventions() {
+    let posix_cwd = PathUri::parse("file:///srv/project").expect("POSIX cwd URI");
+    let windows_cwd = PathUri::parse("file:///C:/workspace").expect("Windows cwd URI");
+    let posix_source = posix_cwd.join("AGENTS.md").expect("POSIX AGENTS.md URI");
+    let windows_source = windows_cwd
+        .join("AGENTS.md")
+        .expect("Windows AGENTS.md URI");
+    let loaded = LoadedAgentsMd {
+        entries: vec![
+            InstructionEntry {
+                contents: "POSIX instructions".to_string(),
+                provenance: InstructionProvenance::Project {
+                    source_path: posix_source.clone(),
+                    environment_id: "posix".to_string(),
+                    cwd: posix_cwd,
+                },
+            },
+            InstructionEntry {
+                contents: "Windows instructions".to_string(),
+                provenance: InstructionProvenance::Project {
+                    source_path: windows_source.clone(),
+                    environment_id: "windows".to_string(),
+                    cwd: windows_cwd,
+                },
+            },
+        ],
+    };
+
+    assert_eq!(
+        loaded.contextual_user_fragment().render(),
+        r#"# AGENTS.md instructions
+
+<INSTRUCTIONS>
+for `posix` with root /srv/project
+
+POSIX instructions
+
+for `windows` with root C:\workspace
+
+Windows instructions
+</INSTRUCTIONS>"#
+    );
+    assert_eq!(
+        loaded.sources().collect::<Vec<_>>(),
+        vec![posix_source, windows_source]
+    );
+}
+
 /// Small file within the byte-limit is returned unmodified.
 #[tokio::test]
 async fn doc_smaller_than_limit_is_returned() {
@@ -343,6 +431,207 @@ async fn merges_existing_instructions_with_agents_md() {
     let expected = format!("{INSTRUCTIONS}{AGENTS_MD_SEPARATOR}{}", "proj doc");
 
     assert_eq!(res, expected);
+}
+
+#[tokio::test]
+async fn multiple_environment_docs_use_labeled_layout_and_preserve_source_order() {
+    let primary = tempfile::tempdir().expect("primary tempdir");
+    let secondary = tempfile::tempdir().expect("secondary tempdir");
+    fs::create_dir(primary.path().join(".git")).unwrap();
+    fs::write(primary.path().join("AGENTS.md"), "primary root doc").unwrap();
+    let primary_nested = primary.path().join("nested");
+    fs::create_dir(&primary_nested).unwrap();
+    fs::write(primary_nested.join("AGENTS.md"), "primary nested doc").unwrap();
+    fs::write(secondary.path().join("AGENTS.md"), "secondary doc").unwrap();
+    let mut config = make_config(&primary, /*limit*/ 4096, Some("global instructions")).await;
+    config.cwd = primary_nested.abs();
+    let environments = resolved_local_environments([
+        ("primary", config.cwd.clone()),
+        ("secondary", secondary.abs()),
+    ]);
+
+    let loaded =
+        load_project_instructions(&config, config.user_instructions.clone(), &environments)
+            .await
+            .expect("instructions expected");
+    let inner = format!(
+        r#"global instructions
+
+for `primary` with root {}
+
+primary root doc
+
+primary nested doc
+
+for `secondary` with root {}
+
+secondary doc"#,
+        primary_nested.display(),
+        secondary.path().display(),
+    );
+
+    assert_eq!(loaded.environment_labeled_text(), inner);
+    assert_eq!(loaded.text(), inner);
+    let expected_fragment = format!(
+        r#"# AGENTS.md instructions
+
+<INSTRUCTIONS>
+{inner}
+</INSTRUCTIONS>"#
+    );
+    assert_eq!(
+        loaded.contextual_user_fragment().render(),
+        expected_fragment
+    );
+    assert_eq!(
+        loaded.sources().collect::<Vec<_>>(),
+        vec![
+            PathUri::from_abs_path(&config.codex_home.join(DEFAULT_AGENTS_MD_FILENAME)),
+            PathUri::from_abs_path(&primary.path().join("AGENTS.md").abs()),
+            PathUri::from_abs_path(&primary_nested.join("AGENTS.md").abs()),
+            PathUri::from_abs_path(&secondary.path().join("AGENTS.md").abs()),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn secondary_only_project_doc_uses_single_contributor_layout() {
+    let primary = tempfile::tempdir().expect("primary tempdir");
+    let secondary = tempfile::tempdir().expect("secondary tempdir");
+    fs::write(secondary.path().join("AGENTS.md"), "secondary doc").unwrap();
+    let config = make_config(&primary, /*limit*/ 4096, Some("global instructions")).await;
+    let environments = resolved_local_environments([
+        ("primary", config.cwd.clone()),
+        ("secondary", secondary.abs()),
+    ]);
+
+    let loaded =
+        load_project_instructions(&config, config.user_instructions.clone(), &environments)
+            .await
+            .expect("instructions expected");
+    let inner = format!("global instructions{AGENTS_MD_SEPARATOR}secondary doc");
+
+    assert_eq!(loaded.legacy_text(), inner);
+    assert_eq!(loaded.text(), inner);
+    let expected_fragment = format!(
+        "# AGENTS.md instructions for {}\n\n<INSTRUCTIONS>\n{inner}\n</INSTRUCTIONS>",
+        secondary.path().display()
+    );
+    assert_eq!(
+        loaded.contextual_user_fragment().render(),
+        expected_fragment
+    );
+}
+
+#[tokio::test]
+async fn primary_only_project_doc_preserves_legacy_layout_with_multiple_bound_environments() {
+    let primary = tempfile::tempdir().expect("primary tempdir");
+    let secondary = tempfile::tempdir().expect("secondary tempdir");
+    fs::write(primary.path().join("AGENTS.md"), "primary doc").unwrap();
+    let config = make_config(&primary, /*limit*/ 4096, Some("global instructions")).await;
+    let environments = resolved_local_environments([
+        ("primary", config.cwd.clone()),
+        ("secondary", secondary.abs()),
+    ]);
+
+    let loaded =
+        load_project_instructions(&config, config.user_instructions.clone(), &environments)
+            .await
+            .expect("instructions expected");
+    let inner = format!("global instructions{AGENTS_MD_SEPARATOR}primary doc");
+
+    assert_eq!(loaded.legacy_text(), inner);
+    assert_eq!(loaded.text(), inner);
+    let expected_fragment = format!(
+        "# AGENTS.md instructions for {}\n\n<INSTRUCTIONS>\n{inner}\n</INSTRUCTIONS>",
+        primary.path().display()
+    );
+    assert_eq!(
+        loaded.contextual_user_fragment().render(),
+        expected_fragment
+    );
+}
+
+#[tokio::test]
+async fn project_doc_byte_limit_is_applied_independently_per_environment() {
+    let primary = tempfile::tempdir().expect("primary tempdir");
+    let secondary = tempfile::tempdir().expect("secondary tempdir");
+    fs::write(primary.path().join("AGENTS.md"), "ABCDE").unwrap();
+    fs::write(secondary.path().join("AGENTS.md"), "VWXYZ").unwrap();
+    let config = make_config(&primary, /*limit*/ 3, /*instructions*/ None).await;
+    let environments = resolved_local_environments([
+        ("primary", config.cwd.clone()),
+        ("secondary", secondary.abs()),
+    ]);
+
+    let loaded =
+        load_project_instructions(&config, config.user_instructions.clone(), &environments)
+            .await
+            .expect("instructions expected");
+
+    assert_eq!(
+        loaded.text(),
+        format!(
+            "for `primary` with root {}\n\nABC\n\nfor `secondary` with root {}\n\nVWX",
+            primary.path().display(),
+            secondary.path().display()
+        )
+    );
+}
+
+#[tokio::test]
+async fn multiple_environments_can_exceed_single_environment_project_doc_limit() {
+    // TODO(anp): Add an aggregate cap across environments instead of allowing the combined
+    // project instructions to grow by one full per-environment budget for every binding.
+    const LIMIT: usize = 8;
+    let primary = tempfile::tempdir().expect("primary tempdir");
+    let secondary = tempfile::tempdir().expect("secondary tempdir");
+    let primary_doc = "P".repeat(LIMIT);
+    let secondary_doc = "S".repeat(LIMIT);
+    fs::write(primary.path().join("AGENTS.md"), &primary_doc).unwrap();
+    fs::write(secondary.path().join("AGENTS.md"), &secondary_doc).unwrap();
+    let config = make_config(&primary, LIMIT, /*instructions*/ None).await;
+    let environments = resolved_local_environments([
+        ("primary", config.cwd.clone()),
+        ("secondary", secondary.abs()),
+    ]);
+
+    let loaded =
+        load_project_instructions(&config, /*global_instructions*/ None, &environments)
+            .await
+            .expect("instructions expected");
+    let project_bytes = loaded
+        .entries
+        .iter()
+        .filter(|entry| matches!(&entry.provenance, InstructionProvenance::Project { .. }))
+        .map(|entry| entry.contents.len())
+        .sum::<usize>();
+
+    assert_eq!(project_bytes, LIMIT * 2);
+    assert!(project_bytes > config.project_doc_max_bytes);
+    assert!(loaded.text().contains(&primary_doc));
+    assert!(loaded.text().contains(&secondary_doc));
+}
+
+#[tokio::test]
+async fn secondary_environment_invalid_utf8_does_not_suppress_other_docs() {
+    let primary = tempfile::tempdir().expect("primary tempdir");
+    let secondary = tempfile::tempdir().expect("secondary tempdir");
+    fs::write(primary.path().join("AGENTS.md"), "primary doc").unwrap();
+    fs::write(secondary.path().join("AGENTS.md"), b"secondary\xFFdoc").unwrap();
+    let config = make_config(&primary, /*limit*/ 4096, /*instructions*/ None).await;
+    let environments = resolved_local_environments([
+        ("primary", config.cwd.clone()),
+        ("secondary", secondary.abs()),
+    ]);
+
+    let loaded =
+        load_project_instructions(&config, /*global_instructions*/ None, &environments)
+            .await
+            .expect("instructions expected");
+
+    assert!(loaded.text().contains("primary doc"));
+    assert!(loaded.text().contains("secondary\u{FFFD}doc"));
 }
 
 #[tokio::test]
