@@ -5,14 +5,15 @@ use codex_config::types::McpServerConfig;
 use codex_config::types::McpServerTransportConfig;
 use codex_core::config::Config;
 use codex_features::Feature;
-use codex_login::CodexAuth;
-use codex_models_manager::bundled_models_response;
 use codex_protocol::dynamic_tools::DynamicToolSpec;
 use core_test_support::apps_test_server::AppsTestServer;
 use core_test_support::apps_test_server::AppsTestToolLoading;
 use core_test_support::apps_test_server::DIRECT_CALENDAR_APP_ONLY_TOOL;
+use core_test_support::apps_test_server::EXPLICIT_CALENDAR_MCP_SERVER_NAME;
+use core_test_support::apps_test_server::EXPLICIT_CALENDAR_TIMEZONE_OPTION_99_TOOL;
 use core_test_support::apps_test_server::recorded_apps_tool_calls;
 use core_test_support::apps_test_server::search_capable_apps_builder;
+use core_test_support::apps_test_server::search_capable_explicit_calendar_mcp_builder;
 use core_test_support::assert_regex_match;
 use core_test_support::responses;
 use core_test_support::responses::ResponseMock;
@@ -588,7 +589,7 @@ async fn code_mode_only_restricts_prompt_tools() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn code_mode_only_guides_deferred_app_tools_without_eager_listing() -> Result<()> {
+async fn code_mode_only_guides_all_tools_search_and_calls_deferred_mcp_tools() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
@@ -602,7 +603,7 @@ async fn code_mode_only_guides_deferred_app_tools_without_eager_listing() -> Res
                 "exec",
                 r#"
 const tool = ALL_TOOLS.find(
-  ({ name }) => name === "mcp__codex_apps__calendar_timezone_option_99"
+  ({ name }) => name === "mcp__calendar__calendar_timezone_option_99"
 );
 if (!tool) {
   text(JSON.stringify({ found: false }));
@@ -629,14 +630,11 @@ if (!tool) {
     )
     .await;
 
-    let apps_base_url = apps_server.hosted_base_url.clone();
-    let mut builder = test_codex()
-        .with_auth(CodexAuth::create_dummy_api_key_auth_for_testing())
-        .with_config(move |config| {
-            config
-                .features
-                .enable(Feature::Apps)
-                .expect("test config should allow feature update");
+    // The fixed upstream test uses host-owned codex_apps. Astral exercises the same
+    // deferred MCP runtime through an explicitly configured server because the
+    // apps/OAuth runtime is outside this port.
+    let mut builder = search_capable_explicit_calendar_mcp_builder(apps_server.hosted_base_url)
+        .with_config(|config| {
             config
                 .features
                 .enable(Feature::CodeMode)
@@ -645,19 +643,9 @@ if (!tool) {
                 .features
                 .enable(Feature::CodeModeOnly)
                 .expect("test config should allow feature update");
-            let mut model_catalog = bundled_models_response()
-                .unwrap_or_else(|err| panic!("bundled models.json should parse: {err}"));
-            let model = model_catalog
-                .models
-                .iter_mut()
-                .find(|model| model.slug == "gpt-5.4")
-                .expect("gpt-5.4 exists in bundled models.json");
-            config.hosted_base_url = apps_base_url;
-            config.model = Some("gpt-5.4".to_string());
-            model.supports_search_tool = true;
-            config.model_catalog = Some(model_catalog);
         });
     let test = builder.build(&server).await?;
+    wait_for_mcp_server(&test.codex, EXPLICIT_CALENDAR_MCP_SERVER_NAME).await?;
     test.submit_turn("inspect tools in code mode only").await?;
 
     let first_body = resp_mock.single_request().body_json();
@@ -692,6 +680,7 @@ if (!tool) {
         })
         .expect("exec description should be present");
     assert!(exec_description.contains("filter `ALL_TOOLS` by `name` and `description`"));
+    assert!(exec_description.contains("Shared MCP Types:"));
     assert!(!exec_description.contains("calendar_timezone_option_99"));
 
     let request = follow_up_mock.single_request();
@@ -705,7 +694,11 @@ if (!tool) {
     assert_eq!(
         parsed,
         serde_json::json!({
-            "found": false,
+            "found": true,
+            "isError": false,
+            "text": format!(
+                "called {EXPLICIT_CALENDAR_TIMEZONE_OPTION_99_TOOL} for  at  with "
+            ),
         })
     );
 
