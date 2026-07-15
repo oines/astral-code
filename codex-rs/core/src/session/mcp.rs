@@ -334,11 +334,8 @@ impl Session {
             *guard = cancel_token;
         }
 
-        self.services.publish_mcp_runtime(
-            Arc::new(mcp_config),
-            mcp_runtime_context,
-            refreshed_manager,
-        );
+        self.services
+            .publish_mcp_runtime(Arc::new(mcp_config), refreshed_manager);
     }
 
     pub(crate) async fn refresh_mcp_servers_if_requested(

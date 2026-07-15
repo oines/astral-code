@@ -992,20 +992,6 @@ impl Session {
             }
 
             let services = SessionServices {
-                // Initialize the MCP connection manager with an uninitialized
-                // instance. It will be replaced with one created via
-                // McpConnectionManager::new() once all its constructor args are
-                // available. This also ensures `SessionConfigured` is emitted
-                // before any MCP-related events. It is reasonable to consider
-                // changing this to use Option or OnceCell, though the current
-                // setup is straightforward enough and performs well.
-                mcp_connection_manager: Arc::new(arc_swap::ArcSwap::from_pointee(
-                    McpConnectionManager::new_uninitialized_with_permission_profile(
-                        &config.permissions.approval_policy,
-                        config.permissions.permission_profile(),
-                        config.prefix_mcp_tool_names(),
-                    ),
-                )),
                 mcp_runtime: arc_swap::ArcSwapOption::empty(),
                 mcp_startup_cancellation_token: Mutex::new(CancellationToken::new()),
                 unified_exec_manager: UnifiedExecProcessManager::new(
@@ -1192,11 +1178,9 @@ impl Session {
                 session_init.required_mcp_server_count = required_mcp_server_count,
             ))
             .await;
-            let mcp_runtime = sess.services.publish_mcp_runtime(
-                Arc::new(mcp_config),
-                mcp_runtime_context,
-                mcp_connection_manager,
-            );
+            let mcp_runtime = sess
+                .services
+                .publish_mcp_runtime(Arc::new(mcp_config), mcp_connection_manager);
             {
                 let mut cancel_guard = sess.services.mcp_startup_cancellation_token.lock().await;
                 if cancel_guard.is_cancelled() {

@@ -3,26 +3,16 @@ use std::sync::Arc;
 
 use codex_mcp::McpConfig;
 use codex_mcp::McpConnectionManager;
-use codex_mcp::McpRuntimeContext;
 
-/// MCP config, exact environment bindings, and manager used by one model request.
+/// MCP config and manager used by one model request.
 pub struct McpRuntimeSnapshot {
     config: Arc<McpConfig>,
     manager: Arc<McpConnectionManager>,
-    runtime_context: McpRuntimeContext,
 }
 
 impl McpRuntimeSnapshot {
-    pub(crate) fn new(
-        config: Arc<McpConfig>,
-        manager: Arc<McpConnectionManager>,
-        runtime_context: McpRuntimeContext,
-    ) -> Self {
-        Self {
-            config,
-            manager,
-            runtime_context,
-        }
+    pub(crate) fn new(config: Arc<McpConfig>, manager: Arc<McpConnectionManager>) -> Self {
+        Self { config, manager }
     }
 
     pub fn config(&self) -> &McpConfig {
@@ -37,13 +27,8 @@ impl McpRuntimeSnapshot {
         Arc::clone(&self.manager)
     }
 
-    pub fn runtime_context(&self) -> &McpRuntimeContext {
-        &self.runtime_context
-    }
-
     #[cfg(test)]
     pub(crate) fn new_uninitialized_for_test(config: &crate::config::Config) -> Arc<Self> {
-        use codex_exec_server::EnvironmentManager;
         use codex_features::Feature;
         use rmcp::model::ElicitationCapability;
 
@@ -73,15 +58,7 @@ impl McpRuntimeSnapshot {
             config.permissions.permission_profile(),
             config.prefix_mcp_tool_names(),
         );
-        let runtime_context = McpRuntimeContext::new(
-            Arc::new(EnvironmentManager::default_for_tests()),
-            config.cwd.to_path_buf(),
-        );
-        Arc::new(Self::new(
-            Arc::new(mcp_config),
-            Arc::new(manager),
-            runtime_context,
-        ))
+        Arc::new(Self::new(Arc::new(mcp_config), Arc::new(manager)))
     }
 }
 

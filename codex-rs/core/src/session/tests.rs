@@ -5091,7 +5091,6 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         crate::session::McpRuntimeSnapshot::new_uninitialized_for_test(config.as_ref());
 
     let services = SessionServices {
-        mcp_connection_manager: Arc::new(arc_swap::ArcSwap::from(mcp_runtime.manager_arc())),
         mcp_runtime: arc_swap::ArcSwapOption::from(Some(mcp_runtime)),
         mcp_startup_cancellation_token: Mutex::new(CancellationToken::new()),
         unified_exec_manager: UnifiedExecProcessManager::new(
@@ -7128,7 +7127,6 @@ where
         crate::session::McpRuntimeSnapshot::new_uninitialized_for_test(config.as_ref());
 
     let services = SessionServices {
-        mcp_connection_manager: Arc::new(arc_swap::ArcSwap::from(mcp_runtime.manager_arc())),
         mcp_runtime: arc_swap::ArcSwapOption::from(Some(mcp_runtime)),
         mcp_startup_cancellation_token: Mutex::new(CancellationToken::new()),
         unified_exec_manager: UnifiedExecProcessManager::new(

@@ -29,7 +29,6 @@ use codex_hooks::Hooks;
 use codex_login::AuthManager;
 use codex_mcp::McpConfig;
 use codex_mcp::McpConnectionManager;
-use codex_mcp::McpRuntimeContext;
 use codex_models_manager::manager::SharedModelsManager;
 use codex_otel::SessionTelemetry;
 use codex_rollout::state_db::StateDbHandle;
@@ -42,8 +41,6 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 pub(crate) struct SessionServices {
-    /// The latest manager; callers retain an owned handle while performing MCP I/O.
-    pub(crate) mcp_connection_manager: Arc<ArcSwap<McpConnectionManager>>,
     /// The latest atomically published MCP config and manager pair.
     pub(crate) mcp_runtime: ArcSwapOption<McpRuntimeSnapshot>,
     pub(crate) mcp_startup_cancellation_token: Mutex<CancellationToken>,
@@ -92,14 +89,10 @@ impl SessionServices {
     pub(crate) fn publish_mcp_runtime(
         &self,
         config: Arc<McpConfig>,
-        runtime_context: McpRuntimeContext,
         manager: McpConnectionManager,
     ) -> Arc<McpRuntimeSnapshot> {
         let manager = Arc::new(manager);
-        // Publish the manager mirror first. Once the paired snapshot is visible, every
-        // model-scoped consumer observes this exact manager and configuration.
-        self.mcp_connection_manager.store(Arc::clone(&manager));
-        let runtime = Arc::new(McpRuntimeSnapshot::new(config, manager, runtime_context));
+        let runtime = Arc::new(McpRuntimeSnapshot::new(config, manager));
         self.mcp_runtime.store(Some(Arc::clone(&runtime)));
         runtime
     }
