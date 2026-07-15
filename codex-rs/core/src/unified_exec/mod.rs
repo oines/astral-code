@@ -32,8 +32,8 @@ use codex_exec_server::Environment;
 use codex_network_proxy::NetworkProxy;
 use codex_protocol::models::AdditionalPermissionProfile;
 use codex_tools::UnifiedExecShellMode;
-use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_output_truncation::TruncationPolicy;
+use codex_utils_path_uri::PathUri;
 use rand::Rng;
 use rand::rng;
 use serde::Serialize;
@@ -98,8 +98,8 @@ pub(crate) struct ExecCommandRequest {
     pub yield_time_ms: u64,
     pub timeout_ms: Option<u64>,
     pub max_output_tokens: Option<usize>,
-    pub cwd: AbsolutePathBuf,
-    pub sandbox_cwd: AbsolutePathBuf,
+    pub cwd: PathUri,
+    pub sandbox_cwd: PathUri,
     pub environment: Arc<Environment>,
     pub shell_mode: UnifiedExecShellMode,
     pub network: Option<NetworkProxy>,
@@ -185,7 +185,7 @@ struct ProcessEntry {
     process_id: i32,
     hook_command: String,
     tty: bool,
-    cwd: AbsolutePathBuf,
+    cwd: PathUri,
     network_approval: Option<DeferredNetworkApproval>,
     session: Weak<Session>,
     started_at: tokio::time::Instant,

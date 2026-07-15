@@ -10088,6 +10088,9 @@
         "title": "ItemStartedNotification",
         "type": "object"
       },
+      "LegacyAppPathString": {
+        "type": "string"
+      },
       "ListMcpServerStatusParams": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {
@@ -17817,7 +17820,7 @@
       "TurnEnvironmentParams": {
         "properties": {
           "cwd": {
-            "$ref": "#/definitions/v2/AbsolutePathBuf"
+            "$ref": "#/definitions/v2/LegacyAppPathString"
           },
           "environmentId": {
             "type": "string"

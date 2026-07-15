@@ -389,7 +389,7 @@ fn resolve_edit_path(turn_context: &TurnContext, file_path: &str) -> PathBuf {
         turn_context
             .environments
             .single_local_environment_cwd()
-            .unwrap_or(&turn_context.config.cwd)
+            .unwrap_or_else(|| turn_context.config.cwd.clone())
             .join(path)
             .to_path_buf()
     }

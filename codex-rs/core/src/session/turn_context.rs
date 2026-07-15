@@ -40,13 +40,7 @@ impl TurnSkillsContext {
 pub(crate) struct TurnEnvironment {
     pub(crate) environment_id: String,
     pub(crate) environment: Arc<Environment>,
-    // Keep both representations together while cwd consumers migrate to URI semantics. Keeping
-    // them synchronized means neither representation can be exposed through a mutable reference;
-    // updates must rebuild the validated pair through `TurnEnvironment::new`. Once
-    // `TurnEnvironment::cwd` itself becomes a `PathUri`, convert only at native filesystem and
-    // process-launch boundaries and remove this paired migration state.
-    cwd: AbsolutePathBuf,
-    cwd_uri: PathUri,
+    cwd: PathUri,
     pub(crate) shell: Option<shell::Shell>,
 }
 
@@ -54,25 +48,19 @@ impl TurnEnvironment {
     pub(crate) fn new(
         environment_id: String,
         environment: Arc<Environment>,
-        cwd: AbsolutePathBuf,
+        cwd: PathUri,
         shell: Option<shell::Shell>,
     ) -> Self {
-        let cwd_uri = PathUri::from_abs_path(&cwd);
         Self {
             environment_id,
             environment,
             cwd,
-            cwd_uri,
             shell,
         }
     }
 
-    pub(crate) fn cwd(&self) -> &AbsolutePathBuf {
+    pub(crate) fn cwd(&self) -> &PathUri {
         &self.cwd
-    }
-
-    pub(crate) fn cwd_uri(&self) -> &PathUri {
-        &self.cwd_uri
     }
 
     pub(crate) fn selection(&self) -> TurnEnvironmentSelection {
@@ -744,9 +732,11 @@ impl Session {
             ResolvedTurnEnvironments::default()
         });
         let primary_turn_environment = turn_environments.primary().cloned();
+        // TODO(anp): Migrate per-turn config and legacy TurnContext cwd consumers to PathUri so
+        // a foreign primary environment does not fall back to the session's host cwd.
         let cwd = primary_turn_environment
             .as_ref()
-            .map(|turn_environment| turn_environment.cwd().clone())
+            .and_then(|turn_environment| turn_environment.cwd().to_abs_path().ok())
             .unwrap_or_else(|| session_configuration.cwd().clone());
         let per_turn_config = Self::build_per_turn_config(&session_configuration, cwd.clone());
         {

@@ -10,6 +10,7 @@ use codex_protocol::permissions::FileSystemSpecialPath;
 use codex_protocol::protocol::TurnContextItem;
 use codex_protocol::protocol::TurnContextNetworkItem;
 use codex_utils_absolute_path::AbsolutePathBuf;
+use codex_utils_path_uri::PathUri;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -31,12 +32,12 @@ pub(crate) struct EnvironmentContext {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct EnvironmentContextEnvironment {
     pub(crate) id: String,
-    pub(crate) cwd: AbsolutePathBuf,
+    pub(crate) cwd: PathUri,
     pub(crate) shell: String,
 }
 
 impl EnvironmentContextEnvironment {
-    fn legacy(cwd: AbsolutePathBuf, shell: String) -> Self {
+    fn legacy(cwd: PathUri, shell: String) -> Self {
         Self {
             id: String::new(),
             cwd,
@@ -391,7 +392,10 @@ impl EnvironmentContext {
         let before_filesystem = Self::filesystem_from_turn_context_item(before);
         let environments = match &after.environments {
             EnvironmentContextEnvironments::Single(environment) => {
-                if before.cwd.as_path() != environment.cwd.as_path() {
+                let before_cwd = AbsolutePathBuf::try_from(before.cwd.clone())
+                    .ok()
+                    .map(|cwd| PathUri::from_abs_path(&cwd));
+                if before_cwd.as_ref() != Some(&environment.cwd) {
                     EnvironmentContextEnvironments::Single(EnvironmentContextEnvironment::legacy(
                         environment.cwd.clone(),
                         environment.shell.clone(),
@@ -455,7 +459,8 @@ impl EnvironmentContext {
         };
         Self::new_with_environments(
             EnvironmentContextEnvironments::from_vec(vec![EnvironmentContextEnvironment::legacy(
-                cwd, shell,
+                PathUri::from_abs_path(&cwd),
+                shell,
             )]),
             Some(turn_context_item.model.clone()),
             turn_context_item.current_date.clone(),
@@ -555,7 +560,7 @@ impl ContextualUserFragment for EnvironmentContext {
             EnvironmentContextEnvironments::Single(environment) => {
                 lines.push(format!(
                     "  <cwd>{}</cwd>",
-                    environment.cwd.to_string_lossy()
+                    environment.cwd.inferred_native_path_string()
                 ));
                 lines.push(format!("  <shell>{}</shell>", environment.shell));
             }
@@ -565,7 +570,7 @@ impl ContextualUserFragment for EnvironmentContext {
                     lines.push(format!("    <environment id=\"{}\">", environment.id));
                     lines.push(format!(
                         "      <cwd>{}</cwd>",
-                        environment.cwd.to_string_lossy()
+                        environment.cwd.inferred_native_path_string()
                     ));
                     lines.push(format!("      <shell>{}</shell>", environment.shell));
                     lines.push("    </environment>".to_string());

@@ -183,7 +183,7 @@ async fn remote_test_env_can_connect_and_use_filesystem() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn remote_test_env_exposes_bash_shell_to_model() -> Result<()> {
+async fn remote_test_env_exposes_target_shell_to_model() -> Result<()> {
     let Some(_remote_env) = get_remote_test_env() else {
         return Ok(());
     };
@@ -211,8 +211,9 @@ async fn remote_test_env_exposes_bash_shell_to_model() -> Result<()> {
     assert_eq!(
         environment_context
             .lines()
-            .find(|line| line.trim_start().starts_with("<shell>")),
-        Some("  <shell>bash</shell>"),
+            .find(|line| line.trim_start().starts_with("<shell>"))
+            .map(str::trim),
+        Some("<shell>bash</shell>"),
     );
 
     Ok(())
@@ -356,7 +357,7 @@ async fn exec_command_routes_to_selected_remote_environment() -> Result<()> {
         .await?;
     let remote_selection = TurnEnvironmentSelection {
         environment_id: REMOTE_ENVIRONMENT_ID.to_string(),
-        cwd: remote_cwd.clone(),
+        cwd: PathUri::from_abs_path(&remote_cwd),
     };
     let multi_env_output = exec_command_routing_output(
         &test,
@@ -514,7 +515,7 @@ async fn remote_request_permissions_grant_unblocks_later_remote_exec() -> Result
             local(local_cwd.path().abs()),
             TurnEnvironmentSelection {
                 environment_id: REMOTE_ENVIRONMENT_ID.to_string(),
-                cwd: remote_cwd.clone(),
+                cwd: PathUri::from_abs_path(&remote_cwd),
             },
         ],
     )
@@ -651,7 +652,7 @@ async fn apply_patch_freeform_routes_to_selected_remote_environment() -> Result<
             local(local_cwd.path().abs()),
             TurnEnvironmentSelection {
                 environment_id: REMOTE_ENVIRONMENT_ID.to_string(),
-                cwd: remote_cwd.clone(),
+                cwd: PathUri::from_abs_path(&remote_cwd),
             },
         ]),
     )
@@ -734,7 +735,7 @@ async fn apply_patch_approvals_are_remembered_per_environment() -> Result<()> {
         local(local_cwd.path().abs()),
         TurnEnvironmentSelection {
             environment_id: REMOTE_ENVIRONMENT_ID.to_string(),
-            cwd: remote_cwd.clone(),
+            cwd: PathUri::from_abs_path(&remote_cwd),
         },
     ];
     let local_patch = format!(
@@ -932,7 +933,7 @@ async fn apply_patch_intercepted_exec_command_routes_to_selected_remote_environm
             local(local_cwd.path().abs()),
             TurnEnvironmentSelection {
                 environment_id: REMOTE_ENVIRONMENT_ID.to_string(),
-                cwd: remote_cwd.clone(),
+                cwd: PathUri::from_abs_path(&remote_cwd),
             },
         ]),
     )

@@ -20,7 +20,6 @@ use crate::tools::network_approval::NetworkApprovalSpec;
 use crate::tools::runtimes::RuntimePathPrepends;
 #[cfg(unix)]
 use crate::tools::runtimes::apply_zsh_fork_path_prepend;
-use crate::tools::runtimes::build_sandbox_command;
 use crate::tools::runtimes::disable_powershell_profile_for_elevated_windows_sandbox;
 use crate::tools::runtimes::exec_env_for_sandbox_permissions;
 use crate::tools::runtimes::maybe_wrap_shell_lc_with_snapshot;
@@ -47,14 +46,16 @@ use codex_protocol::error::CodexErr;
 use codex_protocol::error::SandboxErr;
 use codex_protocol::models::AdditionalPermissionProfile;
 use codex_protocol::protocol::ReviewDecision;
+use codex_sandboxing::SandboxCommand;
 use codex_sandboxing::SandboxablePreference;
 use codex_shell_command::powershell::prefix_powershell_script_with_utf8;
 use codex_tools::UnifiedExecShellMode;
-use codex_utils_absolute_path::AbsolutePathBuf;
+use codex_utils_path_uri::PathUri;
 use futures::future::BoxFuture;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
+use tracing::error;
 
 /// Request payload used by the unified-exec runtime after approvals and
 /// sandbox preferences have been resolved for the current turn.
@@ -65,8 +66,8 @@ pub struct UnifiedExecRequest {
     pub hook_command: String,
     pub process_id: i32,
     pub timeout_ms: Option<u64>,
-    pub cwd: AbsolutePathBuf,
-    pub sandbox_cwd: AbsolutePathBuf,
+    pub cwd: PathUri,
+    pub sandbox_cwd: PathUri,
     pub environment: Arc<Environment>,
     pub env: HashMap<String, String>,
     pub exec_server_env_config: Option<ExecServerEnvConfig>,
@@ -86,7 +87,7 @@ pub struct UnifiedExecRequest {
 #[derive(serde::Serialize, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct UnifiedExecApprovalKey {
     pub command: Vec<String>,
-    pub cwd: AbsolutePathBuf,
+    pub cwd: PathUri,
     pub tty: bool,
     pub sandbox_permissions: SandboxPermissions,
     pub additional_permissions: Option<AdditionalPermissionProfile>,
@@ -111,6 +112,24 @@ fn unified_exec_options(
         expiration,
         capture_policy: ExecCapturePolicy::ShellTool,
     }
+}
+
+fn build_unified_exec_sandbox_command(
+    command: &[String],
+    cwd: &PathUri,
+    env: &HashMap<String, String>,
+    additional_permissions: Option<AdditionalPermissionProfile>,
+) -> Result<SandboxCommand, ToolError> {
+    let (program, args) = command
+        .split_first()
+        .ok_or_else(|| ToolError::Rejected("command args are empty".to_string()))?;
+    Ok(SandboxCommand {
+        program: program.clone().into(),
+        args: args.to_vec(),
+        cwd: cwd.clone(),
+        env: env.clone(),
+        additional_permissions,
+    })
 }
 
 impl<'a> UnifiedExecRuntime<'a> {
@@ -156,11 +175,18 @@ impl Approvable<UnifiedExecRequest> for UnifiedExecRuntime<'_> {
         let turn = ctx.turn;
         let call_id = ctx.call_id.to_string();
         let command = req.command.clone();
-        let cwd = req.cwd.clone();
         let retry_reason = ctx.retry_reason.clone();
         let reason = retry_reason.clone().or_else(|| req.justification.clone());
         let guardian_review_id = ctx.guardian_review_id.clone();
         Box::pin(async move {
+            let native_cwd = match req.cwd.to_abs_path() {
+                Ok(cwd) => cwd,
+                Err(err) => {
+                    // TODO(anp): Make approval APIs operate on PathUri for remote environments.
+                    error!(cwd = %req.cwd, %err, "got non-native path in start_approval_async");
+                    return ReviewDecision::Abort;
+                }
+            };
             if let Some(review_id) = guardian_review_id {
                 return review_approval_request(
                     session,
@@ -169,7 +195,7 @@ impl Approvable<UnifiedExecRequest> for UnifiedExecRuntime<'_> {
                     GuardianApprovalRequest::ExecCommand {
                         id: call_id,
                         command,
-                        cwd: cwd.clone(),
+                        cwd: native_cwd.clone(),
                         sandbox_permissions: req.sandbox_permissions,
                         additional_permissions: req.additional_permissions.clone(),
                         justification: req.justification.clone(),
@@ -187,7 +213,7 @@ impl Approvable<UnifiedExecRequest> for UnifiedExecRuntime<'_> {
                         call_id,
                         /*approval_id*/ None,
                         command,
-                        cwd.clone(),
+                        native_cwd,
                         reason,
                         ctx.network_approval_context.clone(),
                         req.exec_approval_requirement
@@ -225,7 +251,7 @@ impl Approvable<UnifiedExecRequest> for UnifiedExecRuntime<'_> {
 }
 
 impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRuntime<'a> {
-    fn sandbox_cwd<'b>(&self, req: &'b UnifiedExecRequest) -> Option<&'b AbsolutePathBuf> {
+    fn sandbox_cwd<'b>(&self, req: &'b UnifiedExecRequest) -> Option<&'b PathUri> {
         Some(&req.sandbox_cwd)
     }
 
@@ -248,7 +274,7 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
                 call_id: ctx.call_id.clone(),
                 tool_name: flat_tool_name(&ctx.tool_name).into_owned(),
                 command: req.command.clone(),
-                cwd: req.cwd.clone(),
+                cwd: req.cwd.to_abs_path().ok()?,
                 sandbox_permissions: req.sandbox_permissions,
                 additional_permissions: req.additional_permissions.clone(),
                 justification: req.justification.clone(),
@@ -266,6 +292,16 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
     ) -> Result<UnifiedExecProcess, ToolError> {
         let base_command = &req.command;
         let session_shell = ctx.session.user_shell();
+        let environment_is_remote = req.environment.is_remote();
+        let native_cwd = if environment_is_remote {
+            None
+        } else {
+            Some(
+                req.cwd
+                    .to_abs_path()
+                    .map_err(|err| ToolError::Rejected(err.to_string()))?,
+            )
+        };
         let (file_system_sandbox_policy, _) = attempt.permissions.to_runtime_permissions();
         let launch_sandbox_permissions = sandbox_permissions_preserving_denied_reads(
             req.sandbox_permissions,
@@ -279,7 +315,6 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
         if let Some(network) = managed_network {
             network.apply_to_env(&mut env);
         }
-        let environment_is_remote = req.environment.is_remote();
         let explicit_env_overrides = req.explicit_env_overrides.clone();
         #[cfg(unix)]
         let runtime_path_prepends = {
@@ -304,10 +339,13 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
         let command = if environment_is_remote {
             base_command.to_vec()
         } else {
+            let native_cwd = native_cwd.as_ref().ok_or_else(|| {
+                ToolError::Rejected("local environment cwd is not host-native".to_string())
+            })?;
             maybe_wrap_shell_lc_with_snapshot(
                 base_command,
                 session_shell.as_ref(),
-                &req.cwd,
+                native_cwd,
                 &explicit_env_overrides,
                 &env,
                 &runtime_path_prepends,
@@ -326,14 +364,18 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
         };
 
         if let UnifiedExecShellMode::ZshFork(zsh_fork_config) = &self.shell_mode {
-            let command =
-                build_sandbox_command(&command, &req.cwd, &env, req.additional_permissions.clone())
-                    .map_err(|error| match error {
-                        ToolError::Rejected(_) => {
-                            ToolError::Rejected("missing command line for PTY".to_string())
-                        }
-                        error @ ToolError::Codex(_) => error,
-                    })?;
+            let command = build_unified_exec_sandbox_command(
+                &command,
+                &req.cwd,
+                &env,
+                req.additional_permissions.clone(),
+            )
+            .map_err(|error| match error {
+                ToolError::Rejected(_) => {
+                    ToolError::Rejected("missing command line for PTY".to_string())
+                }
+                error @ ToolError::Codex(_) => error,
+            })?;
             let options = unified_exec_options(
                 req.timeout_ms,
                 attempt.network_denial_cancellation_token.clone(),
@@ -385,14 +427,18 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
                 }
             }
         }
-        let command =
-            build_sandbox_command(&command, &req.cwd, &env, req.additional_permissions.clone())
-                .map_err(|error| match error {
-                    ToolError::Rejected(_) => {
-                        ToolError::Rejected("missing command line for PTY".to_string())
-                    }
-                    error @ ToolError::Codex(_) => error,
-                })?;
+        let command = build_unified_exec_sandbox_command(
+            &command,
+            &req.cwd,
+            &env,
+            req.additional_permissions.clone(),
+        )
+        .map_err(|error| match error {
+            ToolError::Rejected(_) => {
+                ToolError::Rejected("missing command line for PTY".to_string())
+            }
+            error @ ToolError::Codex(_) => error,
+        })?;
         let options = unified_exec_options(
             req.timeout_ms,
             attempt.network_denial_cancellation_token.clone(),
@@ -429,6 +475,7 @@ mod tests {
     use crate::tools::sandboxing::ToolRuntime;
     use codex_exec_server::Environment;
     use codex_tools::ZshForkConfig;
+    use codex_utils_absolute_path::AbsolutePathBuf;
     use std::time::Duration;
     use tempfile::tempdir;
 
@@ -483,8 +530,8 @@ mod tests {
             hook_command: "pwd".to_string(),
             process_id: 1000,
             timeout_ms: None,
-            cwd,
-            sandbox_cwd: sandbox_cwd.clone(),
+            cwd: cwd.into(),
+            sandbox_cwd: sandbox_cwd.clone().into(),
             environment: Arc::new(Environment::default_for_tests()),
             env: HashMap::new(),
             exec_server_env_config: None,
@@ -502,7 +549,10 @@ mod tests {
             },
         };
 
-        assert_eq!(runtime.sandbox_cwd(&request), Some(&sandbox_cwd));
+        assert_eq!(
+            runtime.sandbox_cwd(&request),
+            Some(&PathUri::from_abs_path(&sandbox_cwd))
+        );
     }
 
     #[tokio::test]
@@ -583,8 +633,8 @@ mod tests {
             hook_command: "echo hi".to_string(),
             process_id: 1000,
             timeout_ms: None,
-            cwd: cwd.clone(),
-            sandbox_cwd: cwd,
+            cwd: cwd.clone().into(),
+            sandbox_cwd: cwd.into(),
             environment: Arc::new(Environment::default_for_tests()),
             env: HashMap::new(),
             exec_server_env_config: None,

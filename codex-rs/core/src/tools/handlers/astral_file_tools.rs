@@ -230,7 +230,16 @@ impl AstralFileToolHandler {
                 self.name()
             )));
         };
-        let cwd = turn_environment.cwd().clone();
+        // Astral's Claude-style file tools still use host-native permission profiles and file
+        // change events. Keep the conversion at this single boundary until those contracts carry
+        // PathUri; Codex-surface tools and unified exec retain target-native paths end to end.
+        let cwd = turn_environment.cwd().to_abs_path().map_err(|err| {
+            FunctionCallError::RespondToModel(format!(
+                "{} cwd `{}` is not native to the Codex host: {err}",
+                self.name(),
+                turn_environment.cwd()
+            ))
+        })?;
         let read_state = session
             .services
             .session_extension_data

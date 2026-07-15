@@ -225,8 +225,11 @@ impl Approvable<AstralFileToolRequest> for AstralFileToolRuntime {
 impl ToolRuntime<AstralFileToolRequest, Result<AstralFileToolExecutionOutput, FunctionCallError>>
     for AstralFileToolRuntime
 {
-    fn sandbox_cwd<'a>(&self, req: &'a AstralFileToolRequest) -> Option<&'a AbsolutePathBuf> {
-        Some(&req.cwd)
+    fn sandbox_cwd<'a>(
+        &self,
+        req: &'a AstralFileToolRequest,
+    ) -> Option<&'a codex_utils_path_uri::PathUri> {
+        Some(req.turn_environment.cwd())
     }
 
     async fn run(

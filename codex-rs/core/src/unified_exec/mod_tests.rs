@@ -10,6 +10,7 @@ use crate::tools::context::ExecCommandToolOutput;
 use crate::unified_exec::WriteStdinRequest;
 use crate::unified_exec::process::OutputHandles;
 use codex_sandboxing::SandboxType;
+use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_output_truncation::TruncationPolicy;
 use codex_utils_output_truncation::approx_token_count;
 use core_test_support::get_remote_test_env;
@@ -118,7 +119,7 @@ async fn exec_command_with_tty(
             process_id,
             hook_command: cmd.to_string(),
             tty,
-            cwd,
+            cwd: cwd.into(),
             network_approval: None,
             session: Arc::downgrade(session),
             started_at,

@@ -22,7 +22,7 @@ fn test_turn_environment(environment_id: &str) -> crate::session::turn_context::
     crate::session::turn_context::TurnEnvironment::new(
         environment_id.to_string(),
         Arc::new(codex_exec_server::Environment::default_for_tests()),
-        std::env::temp_dir().abs(),
+        PathUri::from_abs_path(&std::env::temp_dir().abs()),
         /*shell*/ None,
     )
 }

@@ -58,6 +58,7 @@ use codex_protocol::protocol::SandboxPolicy;
 use codex_protocol::protocol::TurnEnvironmentSelections;
 use codex_protocol::request_permissions::PermissionGrantScope;
 use codex_protocol::request_permissions::RequestPermissionProfile;
+use codex_utils_path_uri::PathUri;
 use tracing::Span;
 
 use crate::rollout::recorder::RolloutRecorder;
@@ -4128,7 +4129,7 @@ fn turn_environments_for_tests(
         turn_environments: vec![TurnEnvironment::new(
             codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
             Arc::clone(environment),
-            cwd.clone(),
+            PathUri::from_abs_path(cwd),
             /*shell*/ None,
         )],
     }
@@ -4704,6 +4705,7 @@ async fn session_update_settings_does_not_rewrite_sticky_environment_cwds() {
             .environment_selections()
             .to_vec()
     };
+    let expected_environments = current_environments.clone();
     std::fs::create_dir_all(updated_cwd.as_path()).expect("create project dir");
 
     session
@@ -4717,21 +4719,28 @@ async fn session_update_settings_does_not_rewrite_sticky_environment_cwds() {
         .await
         .expect("cwd update should succeed");
 
-    let session_cwd = {
+    let (session_cwd, stored_environments) = {
         let state = session.state.lock().await;
-        state.session_configuration.cwd().clone()
+        (
+            state.session_configuration.cwd().clone(),
+            state
+                .session_configuration
+                .environment_selections()
+                .to_vec(),
+        )
     };
     let config = session.get_config().await;
     let next_turn = session.new_default_turn().await;
 
     assert_eq!(session_cwd, updated_cwd);
+    assert_eq!(stored_environments, expected_environments);
     #[allow(deprecated)]
     let turn_cwd = turn_context.cwd.clone();
     #[allow(deprecated)]
     let next_turn_cwd = next_turn.cwd.clone();
     assert_eq!(config.cwd, turn_cwd);
-    assert_eq!(next_turn_cwd, updated_cwd);
-    assert_eq!(next_turn.config.cwd, updated_cwd);
+    assert_eq!(next_turn_cwd, turn_cwd);
+    assert_eq!(next_turn.config.cwd, turn_cwd);
 }
 
 #[tokio::test]
@@ -4767,7 +4776,7 @@ async fn relative_cwd_update_without_environments_resolves_under_session_cwd() {
 }
 
 #[tokio::test]
-async fn cwd_update_rewrites_sticky_environment_cwd() {
+async fn environment_settings_preserve_explicit_primary_cwd() {
     let (session, _turn_context) = make_session_and_context().await;
     let (original_cwd, environment_cwd, environments) = {
         let mut state = session.state.lock().await;
@@ -4795,9 +4804,8 @@ async fn cwd_update_rewrites_sticky_environment_cwd() {
     assert_eq!(state.session_configuration.cwd(), &updated_cwd);
     assert_eq!(
         state.session_configuration.environment_selections()[0].cwd,
-        updated_cwd
+        PathUri::from_abs_path(&environment_cwd)
     );
-    assert_ne!(environment_cwd, updated_cwd);
 }
 
 #[tokio::test]
@@ -5757,7 +5765,7 @@ async fn request_permissions_tool_resolves_relative_paths_against_selected_envir
     turn_context_mut.environments.turn_environments[0] = TurnEnvironment::new(
         "remote".to_string(),
         current_environment.environment,
-        environment_cwd.clone(),
+        PathUri::from_abs_path(&environment_cwd),
         current_environment.shell,
     );
 
@@ -6348,13 +6356,14 @@ async fn primary_environment_uses_first_turn_environment() {
     let first_environment = turn_context.environments.turn_environments[0].clone();
     #[allow(deprecated)]
     let second_cwd = turn_context.cwd.join("second");
+    let second_cwd_uri = PathUri::from_abs_path(&second_cwd);
     turn_context
         .environments
         .turn_environments
         .push(TurnEnvironment::new(
             "second".to_string(),
             Arc::clone(&first_environment.environment),
-            second_cwd.clone(),
+            second_cwd_uri.clone(),
             /*shell*/ None,
         ));
 
@@ -6374,12 +6383,12 @@ async fn primary_environment_uses_first_turn_environment() {
             .find(|environment| environment.environment_id == "second")
             .expect("second environment")
             .cwd(),
-        &second_cwd
+        &second_cwd_uri
     );
     assert_eq!(turn_context.environments.turn_environments.len(), 2);
     assert_eq!(
         turn_context.environments.turn_environments[1].cwd(),
-        &second_cwd
+        &second_cwd_uri
     );
 }
 
@@ -8147,6 +8156,26 @@ fn file_system_policy_with_unreadable_glob(turn_context: &TurnContext) -> FileSy
         access: FileSystemAccessMode::Deny,
     });
     policy
+}
+
+#[tokio::test]
+async fn turn_context_item_stores_local_cwd() {
+    let (_session, mut turn_context) = make_session_and_context().await;
+    let environment = turn_context.environments.turn_environments[0].clone();
+    let cwd = PathUri::parse("file:///C:/windows").expect("Windows cwd URI");
+    turn_context.environments.turn_environments[0] = TurnEnvironment::new(
+        "remote".to_string(),
+        environment.environment,
+        cwd,
+        environment.shell,
+    );
+
+    #[allow(deprecated)]
+    let local_cwd = turn_context.cwd.clone();
+    assert_eq!(
+        turn_context.to_turn_context_item().cwd.as_path(),
+        local_cwd.as_path()
+    );
 }
 
 #[tokio::test]
