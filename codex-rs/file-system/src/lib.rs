@@ -1,3 +1,9 @@
+mod find_up;
+
+pub use find_up::FindUpErrorPolicy;
+pub use find_up::find_nearest_ancestor_with_markers;
+pub use find_up::find_nearest_native_ancestor_with_markers;
+
 use async_trait::async_trait;
 use codex_protocol::config_types::WindowsSandboxLevel;
 use codex_protocol::models::PermissionProfile;
