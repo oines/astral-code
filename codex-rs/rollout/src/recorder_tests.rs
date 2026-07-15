@@ -16,6 +16,7 @@ use codex_protocol::protocol::SessionMetaLine;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::TurnContextItem;
 use codex_protocol::protocol::UserMessageEvent;
+use codex_protocol::protocol::WorldStateItem;
 use pretty_assertions::assert_eq;
 use std::fs;
 use std::fs::File;
@@ -215,6 +216,38 @@ async fn load_rollout_items_skips_legacy_ghost_snapshot_lines() -> std::io::Resu
         items[1],
         RolloutItem::TranscriptItem(TranscriptItem::Message { .. })
     ));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn load_rollout_items_preserves_world_state_records() -> std::io::Result<()> {
+    let home = TempDir::new().expect("temp dir");
+    let rollout_path = home.path().join("rollout.jsonl");
+    let world_state = WorldStateItem::full(serde_json::json!({
+        "environments": {"model": "deepseek-v3.2"}
+    }));
+    let line = RolloutLine {
+        timestamp: "2026-06-24T12:00:00Z".to_string(),
+        item: RolloutItem::WorldState(world_state.clone()),
+    };
+    fs::write(
+        &rollout_path,
+        format!(
+            "{}\n",
+            serde_json::to_string(&line).expect("serialize line")
+        ),
+    )?;
+
+    let (items, loaded_thread_id, parse_errors) =
+        RolloutRecorder::load_rollout_items(&rollout_path).await?;
+
+    assert_eq!(loaded_thread_id, None);
+    assert_eq!(parse_errors, 0);
+    let [RolloutItem::WorldState(loaded)] = items.as_slice() else {
+        panic!("expected one world-state rollout item");
+    };
+    assert_eq!(loaded, &world_state);
 
     Ok(())
 }

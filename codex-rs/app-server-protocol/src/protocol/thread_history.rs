@@ -232,7 +232,9 @@ impl ThreadHistoryBuilder {
             RolloutItem::EventMsg(event) => self.handle_event(event),
             RolloutItem::Compacted(payload) => self.handle_compacted(payload),
             RolloutItem::TranscriptItem(item) => self.handle_response_item(item),
-            RolloutItem::TurnContext(_) | RolloutItem::SessionMeta(_) => {}
+            RolloutItem::TurnContext(_)
+            | RolloutItem::WorldState(_)
+            | RolloutItem::SessionMeta(_) => {}
         }
     }
 

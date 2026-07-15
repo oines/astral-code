@@ -120,6 +120,7 @@ use codex_protocol::protocol::TurnContextNetworkItem;
 use codex_protocol::protocol::TurnEnvironmentSelection;
 use codex_protocol::protocol::TurnEnvironmentSelections;
 use codex_protocol::protocol::W3cTraceContext;
+use codex_protocol::protocol::WorldStateItem;
 use codex_protocol::request_permissions::PermissionGrantScope;
 use codex_protocol::request_permissions::RequestPermissionProfile;
 use codex_protocol::request_permissions::RequestPermissionsArgs;
@@ -2566,8 +2567,14 @@ impl Session {
             self.build_world_state_for_environments(turn_context, &step_context.environments)
                 .await,
         );
+        // Derive the model update and persisted patch from the same two snapshots.
+        let previous_snapshot = previous_world_state.snapshot();
+        let world_state_snapshot = world_state.snapshot();
+        let world_state_item = world_state_snapshot
+            .merge_patch_from(&previous_snapshot)
+            .map(WorldStateItem::patch);
         let items = crate::context_manager::updates::merge_contextual_fragments(
-            world_state.render_diff(&previous_world_state.snapshot()),
+            world_state.render_diff(&previous_snapshot),
         );
         if !items.is_empty() {
             self.record_conversation_items(turn_context, &items).await;
@@ -2578,7 +2585,12 @@ impl Session {
             .lock()
             .await
             .history
-            .set_world_state_baseline(world_state.snapshot());
+            .set_world_state_baseline(world_state_snapshot);
+        // Record the patch after the context it describes is present in model history.
+        if let Some(world_state_item) = world_state_item {
+            self.persist_rollout_items(&[RolloutItem::WorldState(world_state_item)])
+                .await;
+        }
         world_state
     }
 
@@ -2664,13 +2676,15 @@ impl Session {
         world_state_baseline: Option<Arc<WorldState>>,
         compacted_item: CompactedItem,
     ) {
+        // Compaction starts a new history window, so its WorldState baseline must be full.
+        let mut world_state_item = None;
         {
             let mut state = self.state.lock().await;
             state.replace_history(items, reference_context_item.clone());
             if let Some(world_state) = world_state_baseline {
-                state
-                    .history
-                    .set_world_state_baseline(world_state.snapshot());
+                let snapshot = world_state.snapshot();
+                world_state_item = Some(WorldStateItem::full(snapshot.clone().into_value()));
+                state.history.set_world_state_baseline(snapshot);
             }
             state.start_next_auto_compact_window();
         }
@@ -2681,6 +2695,11 @@ impl Session {
 
         self.persist_rollout_items(&[RolloutItem::Compacted(compacted_item)])
             .await;
+        // Persist the baseline after the replacement history that established it.
+        if let Some(world_state_item) = world_state_item {
+            self.persist_rollout_items(&[RolloutItem::WorldState(world_state_item)])
+                .await;
+        }
         if let Some(turn_context_item) = reference_context_item {
             self.persist_rollout_items(&[RolloutItem::TurnContext(turn_context_item)])
                 .await;
@@ -3080,12 +3099,15 @@ impl Session {
             let state = self.state.lock().await;
             state.reference_context_item()
         };
+        let turn_context_item = turn_context.to_turn_context_item();
+        let turn_context_changed = reference_context_item.as_ref() != Some(&turn_context_item);
         let should_inject_full_context = reference_context_item.is_none();
         let world_state = Arc::new(
             self.build_world_state_for_environments(turn_context, environments)
                 .await,
         );
-        let context_items = if should_inject_full_context {
+        // Full initial context resets the baseline; later turns persist only its changes.
+        let (context_items, world_state_item) = if should_inject_full_context {
             let context_items = self
                 .build_initial_context_with_mcp_and_world_state(
                     turn_context,
@@ -3093,30 +3115,50 @@ impl Session {
                     world_state.as_ref(),
                 )
                 .await;
+            let snapshot = world_state.snapshot();
             self.state
                 .lock()
                 .await
                 .history
-                .set_world_state_baseline(world_state.snapshot());
-            context_items
+                .set_world_state_baseline(snapshot.clone());
+            (
+                context_items,
+                Some(WorldStateItem::full(snapshot.into_value())),
+            )
         } else {
             // Steady-state path: append only built-in context diffs to minimize token overhead.
             let mut context_items = self
                 .build_settings_update_items(reference_context_item.as_ref(), turn_context)
                 .await;
-            let world_state_items = {
+            let (world_state_items, world_state_item) = {
                 let mut state = self.state.lock().await;
-                crate::context_manager::updates::merge_contextual_fragments(
-                    state.history.update_world_state(world_state.as_ref()),
+                let (fragments, rollout_item) =
+                    state.history.update_world_state(world_state.as_ref());
+                (
+                    crate::context_manager::updates::merge_contextual_fragments(fragments),
+                    rollout_item,
                 )
             };
             context_items.extend(world_state_items);
-            context_items
+            (context_items, world_state_item)
         };
-        let turn_context_item = turn_context.to_turn_context_item();
+        // A snapshot can change without producing model-visible or TurnContext updates.
+        let only_world_state_changed = !turn_context_changed && context_items.is_empty();
+        if only_world_state_changed && world_state_item.is_none() {
+            return world_state;
+        }
         if !context_items.is_empty() {
             self.record_conversation_items(turn_context, &context_items)
                 .await;
+        }
+        // Persist state only after any model-visible context generated from it.
+        if let Some(world_state_item) = world_state_item {
+            self.persist_rollout_items(&[RolloutItem::WorldState(world_state_item)])
+                .await;
+        }
+        // A snapshot-only change does not require a duplicate TurnContext record.
+        if only_world_state_changed {
+            return world_state;
         }
         // Persist one `TurnContextItem` per real user turn so resume/lazy replay can recover the
         // latest durable baseline even when this turn emitted no model-visible context diffs.
