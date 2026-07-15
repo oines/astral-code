@@ -69,6 +69,25 @@ async fn permission_request_payload_uses_astral_tool_name_and_input() {
 }
 
 #[tokio::test]
+async fn approval_action_preserves_astral_file_tool_context() {
+    let cwd = std::env::temp_dir().join("astral-file-approval").abs();
+    let req = test_request(&cwd, None);
+
+    assert_eq!(
+        AstralFileToolRuntime::build_approval_action(&req, "call-1"),
+        ApprovalAction::Shell {
+            id: "call-1".to_string(),
+            environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
+            command: req.approval_command.clone(),
+            cwd: PathUri::from_abs_path(&cwd),
+            sandbox_permissions: req.sandbox_permissions,
+            additional_permissions: None,
+            justification: None,
+        }
+    );
+}
+
+#[tokio::test]
 async fn file_system_sandbox_context_uses_active_attempt() {
     let cwd = std::env::temp_dir().join("astral-file-runtime-cwd").abs();
     let extra_read = cwd.join("outside.txt");

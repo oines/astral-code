@@ -1,6 +1,4 @@
 use crate::exec::is_likely_sandbox_denied;
-use crate::guardian::GuardianApprovalRequest;
-use crate::guardian::review_approval_request;
 use crate::sandboxing::SandboxPermissions;
 use crate::session::turn_context::TurnEnvironment;
 use crate::tools::handlers::astral_file_tools::AstralFileToolExecutionOutput;
@@ -8,6 +6,7 @@ use crate::tools::handlers::astral_file_tools::FileReadStateStore;
 use crate::tools::handlers::astral_file_tools::execute_astral_file_tool;
 use crate::tools::hook_names::HookToolName;
 use crate::tools::sandboxing::Approvable;
+use crate::tools::sandboxing::ApprovalAction;
 use crate::tools::sandboxing::ApprovalCtx;
 use crate::tools::sandboxing::ExecApprovalRequirement;
 use crate::tools::sandboxing::PermissionRequestPayload;
@@ -30,6 +29,7 @@ use codex_sandboxing::SandboxablePreference;
 use codex_sandboxing::policy_transforms::effective_permission_profile;
 use codex_tools::FunctionCallError;
 use codex_utils_absolute_path::AbsolutePathBuf;
+use codex_utils_path_uri::PathUri;
 use futures::future::BoxFuture;
 use serde_json::Value;
 use std::sync::Arc;
@@ -68,6 +68,18 @@ pub(crate) struct AstralFileToolRuntime;
 impl AstralFileToolRuntime {
     pub(crate) fn new() -> Self {
         Self
+    }
+
+    fn build_approval_action(req: &AstralFileToolRequest, call_id: &str) -> ApprovalAction {
+        ApprovalAction::Shell {
+            id: call_id.to_string(),
+            environment_id: req.turn_environment.environment_id.clone(),
+            command: req.approval_command.clone(),
+            cwd: PathUri::from_abs_path(&req.cwd),
+            sandbox_permissions: req.sandbox_permissions,
+            additional_permissions: req.additional_permissions.clone(),
+            justification: None,
+        }
     }
 
     pub(crate) fn file_system_sandbox_context_for_attempt(
@@ -142,25 +154,7 @@ impl Approvable<AstralFileToolRequest> for AstralFileToolRuntime {
         let session = ctx.session;
         let turn = ctx.turn;
         let call_id = ctx.call_id.to_string();
-        let guardian_review_id = ctx.guardian_review_id.clone();
         Box::pin(async move {
-            if let Some(review_id) = guardian_review_id {
-                return review_approval_request(
-                    session,
-                    turn,
-                    review_id,
-                    GuardianApprovalRequest::Shell {
-                        id: call_id,
-                        command,
-                        cwd: cwd.clone(),
-                        sandbox_permissions: req.sandbox_permissions,
-                        additional_permissions: req.additional_permissions.clone(),
-                        justification: None,
-                    },
-                    retry_reason,
-                )
-                .await;
-            }
             if req.permissions_preapproved && retry_reason.is_none() {
                 return ReviewDecision::Approved;
             }
@@ -190,6 +184,14 @@ impl Approvable<AstralFileToolRequest> for AstralFileToolRuntime {
             )
             .await
         })
+    }
+
+    fn approval_action(
+        &self,
+        req: &AstralFileToolRequest,
+        ctx: &ApprovalCtx<'_>,
+    ) -> std::io::Result<ApprovalAction> {
+        Ok(Self::build_approval_action(req, ctx.call_id))
     }
 
     fn wants_no_sandbox_approval(&self, policy: AskForApproval) -> bool {
