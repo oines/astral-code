@@ -1125,7 +1125,7 @@ impl UnifiedExecProcessManager {
             timeout_ms: request.timeout_ms,
             cwd,
             sandbox_cwd: request.sandbox_cwd.clone(),
-            environment: Arc::clone(&request.environment),
+            turn_environment: request.turn_environment.clone(),
             env,
             exec_server_env_config: Some(exec_server_env_config),
             explicit_env_overrides: context.turn.shell_environment_policy.r#set.clone(),

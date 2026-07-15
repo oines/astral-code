@@ -2,9 +2,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::RwLock;
 
-use futures::FutureExt;
-use futures::future::BoxFuture;
-
 use crate::ExecServerError;
 use crate::ExecServerRuntimePaths;
 use crate::ExecutorFileSystem;
@@ -292,40 +289,11 @@ impl EnvironmentManager {
 pub struct Environment {
     exec_server_url: Option<String>,
     remote_transport: Option<ExecServerTransportParams>,
-    info_provider: Arc<dyn EnvironmentInfoProvider>,
+    remote_client: Option<LazyRemoteExecServerClient>,
     exec_backend: Arc<dyn ExecBackend>,
     filesystem: Arc<dyn ExecutorFileSystem>,
     http_client: Arc<dyn HttpClient>,
     local_runtime_paths: Option<ExecServerRuntimePaths>,
-}
-
-/// Provides environment metadata from either a local environment or a remote exec-server.
-trait EnvironmentInfoProvider: Send + Sync {
-    fn info(&self) -> BoxFuture<'_, Result<EnvironmentInfo, ExecServerError>>;
-}
-
-struct LocalEnvironmentInfoProvider;
-
-impl EnvironmentInfoProvider for LocalEnvironmentInfoProvider {
-    fn info(&self) -> BoxFuture<'_, Result<EnvironmentInfo, ExecServerError>> {
-        std::future::ready(Ok(EnvironmentInfo::local())).boxed()
-    }
-}
-
-struct RemoteEnvironmentInfoProvider {
-    client: LazyRemoteExecServerClient,
-}
-
-impl RemoteEnvironmentInfoProvider {
-    fn new(client: LazyRemoteExecServerClient) -> Self {
-        Self { client }
-    }
-}
-
-impl EnvironmentInfoProvider for RemoteEnvironmentInfoProvider {
-    fn info(&self) -> BoxFuture<'_, Result<EnvironmentInfo, ExecServerError>> {
-        async move { self.client.environment_info().await }.boxed()
-    }
 }
 
 impl Environment {
@@ -334,7 +302,7 @@ impl Environment {
         Self {
             exec_server_url: None,
             remote_transport: None,
-            info_provider: Arc::new(LocalEnvironmentInfoProvider),
+            remote_client: None,
             exec_backend: Arc::new(LocalProcess::default()),
             filesystem: Arc::new(LocalFileSystem::unsandboxed()),
             http_client: Arc::new(ReqwestHttpClient),
@@ -391,7 +359,7 @@ impl Environment {
         Self {
             exec_server_url: None,
             remote_transport: None,
-            info_provider: Arc::new(LocalEnvironmentInfoProvider),
+            remote_client: None,
             exec_backend: Arc::new(LocalProcess::default()),
             filesystem: Arc::new(LocalFileSystem::with_runtime_paths(
                 local_runtime_paths.clone(),
@@ -430,7 +398,7 @@ impl Environment {
         Self {
             exec_server_url,
             remote_transport: Some(remote_transport),
-            info_provider: Arc::new(RemoteEnvironmentInfoProvider::new(client.clone())),
+            remote_client: Some(client.clone()),
             exec_backend,
             filesystem,
             http_client: Arc::new(client),
@@ -453,7 +421,18 @@ impl Environment {
 
     /// Returns environment information from the selected execution/filesystem environment.
     pub async fn info(&self) -> Result<EnvironmentInfo, ExecServerError> {
-        self.info_provider.info().await
+        match &self.remote_client {
+            Some(client) => client.environment_info().await,
+            None => Ok(EnvironmentInfo::local()),
+        }
+    }
+
+    /// Waits until the selected environment can serve requests.
+    pub async fn wait_until_ready(&self) -> Result<(), ExecServerError> {
+        match &self.remote_client {
+            Some(client) => client.get().await.map(drop),
+            None => Ok(()),
+        }
     }
 
     pub fn get_exec_backend(&self) -> Arc<dyn ExecBackend> {

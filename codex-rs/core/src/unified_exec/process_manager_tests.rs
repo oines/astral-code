@@ -185,10 +185,11 @@ async fn failed_initial_end_for_unstored_process_uses_fallback_output() {
         cwd: turn.cwd.clone().into(),
         #[allow(deprecated)]
         sandbox_cwd: turn.cwd.clone().into(),
-        environment: turn
+        turn_environment: turn
             .environments
-            .primary_environment()
-            .expect("primary environment"),
+            .primary()
+            .expect("primary environment")
+            .clone(),
         shell_mode: codex_tools::UnifiedExecShellMode::Direct,
         network: None,
         tty: true,

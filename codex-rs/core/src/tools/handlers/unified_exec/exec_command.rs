@@ -348,7 +348,7 @@ impl ExecCommandHandler {
                     max_output_tokens,
                     cwd,
                     sandbox_cwd: environment_cwd,
-                    environment,
+                    turn_environment: turn_environment.clone(),
                     shell_mode,
                     network: context.turn.network.clone(),
                     tty,
