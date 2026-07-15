@@ -930,7 +930,12 @@ async fn environment_tools_follow_the_step_context() {
     let environments = turn.environments.clone();
     turn.environments.turn_environments.clear();
     let mcp = crate::session::McpRuntimeSnapshot::new_uninitialized_for_test(&turn.config);
-    let step_context = Arc::new(StepContext::new(Arc::new(turn), environments, mcp));
+    let step_context = Arc::new(StepContext::new(
+        Arc::new(turn),
+        environments,
+        /*loaded_agents_md*/ None,
+        mcp,
+    ));
 
     let plan = ToolPlanProbe::from_router(ToolRouter::from_context(
         step_context.as_ref(),

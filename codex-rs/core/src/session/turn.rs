@@ -153,11 +153,7 @@ pub(crate) async fn run_turn(
     let first_step_context = sess.capture_step_context(Arc::clone(&turn_context)).await;
     // Keep the exact model-visible state used by this turn and its inline compactions.
     let mut world_state = sess
-        .record_context_updates_and_set_reference_context_item_with_mcp(
-            first_step_context.turn.as_ref(),
-            &first_step_context.environments,
-            first_step_context.mcp.as_ref(),
-        )
+        .record_context_updates_and_set_reference_context_item(first_step_context.as_ref())
         .await;
 
     let (injection_items, explicitly_enabled_connectors) = build_skills_and_plugins(
@@ -234,11 +230,7 @@ pub(crate) async fn run_turn(
             .enabled(Feature::DeferredExecutor)
         {
             world_state = sess
-                .record_step_environment_context_if_changed(
-                    turn_context.as_ref(),
-                    &world_state,
-                    step_context.as_ref(),
-                )
+                .record_step_world_state_if_changed(&world_state, step_context.as_ref())
                 .await;
         }
 

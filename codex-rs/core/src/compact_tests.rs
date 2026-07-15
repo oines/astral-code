@@ -8,21 +8,20 @@ async fn process_compacted_history_with_test_session(
     previous_turn_settings: Option<&PreviousTurnSettings>,
 ) -> (Vec<TranscriptItem>, Vec<TranscriptItem>) {
     let (session, turn_context) = crate::session::tests::make_session_and_context().await;
+    let turn_context = Arc::new(turn_context);
     session
         .set_previous_turn_settings(previous_turn_settings.cloned())
         .await;
     let world_state = Arc::new(
-        session
-            .build_world_state_for_environments(&turn_context, &turn_context.environments)
-            .await,
+        crate::session::tests::build_world_state_from_turn_context(&session, &turn_context).await,
     );
     let initial_context = session
-        .build_initial_context_with_world_state(&turn_context, world_state.as_ref())
+        .build_initial_context_with_world_state(turn_context.as_ref(), world_state.as_ref())
         .await;
     let initial_context_injection = InitialContextInjection::BeforeLastUserMessage(world_state);
     let (refreshed, _) = crate::compact::process_compacted_history(
         &session,
-        &turn_context,
+        turn_context.as_ref(),
         compacted_history,
         &initial_context_injection,
     )

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::agents_md::LoadedAgentsMd;
 use crate::environment_selection::TurnEnvironmentSnapshot;
 use crate::session::McpRuntimeSnapshot;
 use crate::session::turn_context::TurnContext;
@@ -11,6 +12,8 @@ use tokio::sync::OnceCell;
 pub(crate) struct StepContext {
     pub(crate) turn: Arc<TurnContext>,
     pub(crate) environments: TurnEnvironmentSnapshot,
+    /// The canonical AGENTS.md value observed with this environment snapshot.
+    pub(crate) loaded_agents_md: Option<Arc<LoadedAgentsMd>>,
     /// The exact MCP config and manager used to advertise and execute tools for this step.
     pub(crate) mcp: Arc<McpRuntimeSnapshot>,
     /// The fixed MCP tool list used for this exact sampling request.
@@ -21,11 +24,13 @@ impl StepContext {
     pub(crate) fn new(
         turn: Arc<TurnContext>,
         environments: TurnEnvironmentSnapshot,
+        loaded_agents_md: Option<Arc<LoadedAgentsMd>>,
         mcp: Arc<McpRuntimeSnapshot>,
     ) -> Self {
         Self {
             turn,
             environments,
+            loaded_agents_md,
             mcp,
             mcp_tool_snapshot: OnceCell::new(),
         }
