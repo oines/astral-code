@@ -52,9 +52,20 @@ pub(crate) struct AgentRequestBuildParams<'a> {
 pub(crate) fn build_agent_request(params: AgentRequestBuildParams<'_>) -> Result<AgentRequest> {
     let formatted_input = params.prompt.get_formatted_input();
     let tool_specs = provider_neutral_tool_specs(&params.prompt.tools, &formatted_input);
+    let freeform_tool_names = tool_specs
+        .iter()
+        .filter_map(|spec| match spec {
+            ToolSpec::Freeform(tool) => Some(tool.name.clone()),
+            ToolSpec::Function(_)
+            | ToolSpec::Namespace(_)
+            | ToolSpec::ToolSearch { .. }
+            | ToolSpec::ImageGeneration { .. }
+            | ToolSpec::WebSearch { .. } => None,
+        })
+        .collect();
     let tools = codex_tools::create_agent_tools_for_provider_neutral_request(&tool_specs)
         .map_err(|err| CodexErr::InvalidRequest(format!("failed to convert tools: {err}")))?;
-    let messages = response_items_to_agent_messages(&formatted_input);
+    let messages = response_items_to_agent_messages(&formatted_input, &freeform_tool_names);
 
     let mut provider = params.provider_request_body.unwrap_or_default();
     if let Some(provider_flavor) = params.provider_flavor {
@@ -227,16 +238,26 @@ fn build_reasoning_config(
     Some(ReasoningConfig { effort, summary })
 }
 
-fn response_items_to_agent_messages(items: &[TranscriptItem]) -> Vec<AgentMessage> {
+fn response_items_to_agent_messages(
+    items: &[TranscriptItem],
+    freeform_tool_names: &BTreeSet<String>,
+) -> Vec<AgentMessage> {
     let mut skipped_function_call_ids = BTreeSet::new();
     items
         .iter()
-        .filter_map(|item| response_item_to_agent_message(item, &mut skipped_function_call_ids))
+        .filter_map(|item| {
+            response_item_to_agent_message(
+                item,
+                freeform_tool_names,
+                &mut skipped_function_call_ids,
+            )
+        })
         .collect()
 }
 
 fn response_item_to_agent_message(
     item: &TranscriptItem,
+    freeform_tool_names: &BTreeSet<String>,
     skipped_function_call_ids: &mut BTreeSet<String>,
 ) -> Option<AgentMessage> {
     match item {
@@ -300,7 +321,11 @@ fn response_item_to_agent_message(
             content: vec![ContentBlock::ToolUse {
                 id: call_id.clone(),
                 name: name.clone(),
-                input: parse_tool_input(arguments),
+                input: if freeform_tool_names.contains(name) {
+                    json!({ "input": arguments })
+                } else {
+                    parse_tool_input(arguments)
+                },
             }],
             id: None,
         }),

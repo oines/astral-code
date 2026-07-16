@@ -1,5 +1,7 @@
 #![allow(clippy::expect_used)]
 
+use std::io::Write;
+use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
@@ -7,6 +9,13 @@ use anyhow::Result;
 use codex_features::Feature;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::WireApi;
+use codex_protocol::ThreadId;
+use codex_protocol::models::FunctionCallOutputPayload;
+use codex_protocol::models::TranscriptItem;
+use codex_protocol::protocol::RolloutItem;
+use codex_protocol::protocol::RolloutLine;
+use codex_protocol::protocol::SessionMeta;
+use codex_protocol::protocol::SessionMetaLine;
 use core_test_support::responses;
 use core_test_support::responses::ResponseMock;
 use core_test_support::skip_if_no_network;
@@ -14,6 +23,7 @@ use core_test_support::test_codex::test_codex;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 use serde_json::json;
+use tempfile::TempDir;
 use wiremock::Mock;
 use wiremock::Respond;
 use wiremock::ResponseTemplate;
@@ -282,6 +292,135 @@ async fn anthropic_messages_exec_function_payload_runs_and_returns_tool_result()
         })
         .expect("function output should be projected as an Anthropic tool_result");
     assert!(tool_result.to_string().contains("provider-neutral-exec"));
+
+    Ok(())
+}
+
+async fn legacy_custom_exec_history_replayed_to_function_provider(
+    target_wire_api: WireApi,
+) -> Result<Value> {
+    let target_server = responses::start_mock_server().await;
+    let target_mock = match target_wire_api {
+        WireApi::ChatCompletions => {
+            responses::mount_chat_completions_sse_sequence(
+                &target_server,
+                vec![responses::chat_completions_text_sse("second turn done")],
+            )
+            .await
+        }
+        WireApi::AnthropicMessages => {
+            mount_anthropic_sequence(&target_server, vec![anthropic_text_sse("second turn done")])
+                .await
+        }
+        WireApi::Responses => panic!("target must use a function-only wire API"),
+    };
+
+    let target_provider = provider(&target_server, target_wire_api);
+    let codex_home = Arc::new(TempDir::new()?);
+    let rollout_path = codex_home.path().join("legacy-custom-exec-rollout.jsonl");
+    let rollout = [
+        RolloutLine {
+            timestamp: "2024-01-01T00:00:00.000Z".to_string(),
+            item: RolloutItem::SessionMeta(SessionMetaLine {
+                meta: SessionMeta {
+                    id: ThreadId::default(),
+                    timestamp: "2024-01-01T00:00:00Z".to_string(),
+                    cwd: ".".into(),
+                    originator: "test_originator".to_string(),
+                    cli_version: "test_version".to_string(),
+                    ..Default::default()
+                },
+                git: None,
+            }),
+        },
+        RolloutLine {
+            timestamp: "2024-01-01T00:00:01.000Z".to_string(),
+            item: RolloutItem::TranscriptItem(TranscriptItem::CustomToolCall {
+                id: Some("custom-exec".to_string()),
+                status: Some("completed".to_string()),
+                call_id: CALL_ID.to_string(),
+                name: "exec".to_string(),
+                input: CODE.to_string(),
+            }),
+        },
+        RolloutLine {
+            timestamp: "2024-01-01T00:00:02.000Z".to_string(),
+            item: RolloutItem::TranscriptItem(TranscriptItem::CustomToolCallOutput {
+                call_id: CALL_ID.to_string(),
+                name: Some("exec".to_string()),
+                output: FunctionCallOutputPayload::from_text("provider-neutral-exec".to_string()),
+            }),
+        },
+    ];
+    let mut file = std::fs::File::create(&rollout_path)?;
+    for line in rollout {
+        writeln!(file, "{}", serde_json::to_string(&line)?)?;
+    }
+
+    let mut builder = test_codex()
+        .with_model("test-gpt-5.1-codex")
+        .with_config(move |config| {
+            config.model_provider = target_provider;
+            config
+                .features
+                .enable(Feature::CodeMode)
+                .expect("enable code mode");
+        });
+    let test = builder
+        .resume(&target_server, codex_home, rollout_path)
+        .await?;
+    test.submit_turn("continue after legacy custom exec")
+        .await?;
+
+    Ok(target_mock.single_request().body_json())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn legacy_custom_exec_history_resumes_to_chat_completions_with_function_input() -> Result<()>
+{
+    skip_if_no_network!(Ok(()));
+
+    let body =
+        legacy_custom_exec_history_replayed_to_function_provider(WireApi::ChatCompletions).await?;
+    let arguments = body
+        .get("messages")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|message| message.get("tool_calls").and_then(Value::as_array))
+        .flatten()
+        .find(|call| call.pointer("/function/name").and_then(Value::as_str) == Some("exec"))
+        .and_then(|call| call.pointer("/function/arguments"))
+        .and_then(Value::as_str)
+        .expect("legacy custom exec should become a Chat Completions function call");
+    assert_eq!(
+        serde_json::from_str::<Value>(arguments)?,
+        json!({ "input": CODE })
+    );
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn legacy_custom_exec_history_resumes_to_anthropic_with_function_input() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let body = legacy_custom_exec_history_replayed_to_function_provider(WireApi::AnthropicMessages)
+        .await?;
+    let input = body
+        .get("messages")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|message| message.get("content").and_then(Value::as_array))
+        .flatten()
+        .find(|block| {
+            block.get("type").and_then(Value::as_str) == Some("tool_use")
+                && block.get("name").and_then(Value::as_str) == Some("exec")
+        })
+        .and_then(|block| block.get("input"))
+        .expect("legacy custom exec should become an Anthropic function call");
+    assert_eq!(input, &json!({ "input": CODE }));
 
     Ok(())
 }
