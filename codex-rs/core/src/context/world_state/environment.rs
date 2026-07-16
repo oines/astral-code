@@ -229,6 +229,15 @@ impl RenderedEnvironments {
     fn replacement(snapshot: &EnvironmentsSnapshot) -> Self {
         let mut rendered = Self::full(snapshot);
         rendered.legacy_single = false;
+        rendered.subagents = snapshot
+            .subagents
+            .clone()
+            .map_or(RenderedSubagents::Cleared, RenderedSubagents::Current);
+        rendered.truncation = if snapshot.truncated {
+            RenderedTruncation::Current
+        } else {
+            RenderedTruncation::Cleared
+        };
         rendered.replacement = true;
         rendered
     }
@@ -281,17 +290,30 @@ impl ContextualUserFragment for RenderedEnvironments {
             rendered.push_str("  <environments mode=\"replace\" />\n");
         }
         push_optional_element(&mut rendered, "model", self.model.as_deref());
+        if self.replacement && self.model.is_none() {
+            push_cleared_element(&mut rendered, "model");
+        }
         push_optional_element(&mut rendered, "current_date", self.current_date.as_deref());
+        if self.replacement && self.current_date.is_none() {
+            push_cleared_element(&mut rendered, "current_date");
+        }
         push_optional_element(&mut rendered, "timezone", self.timezone.as_deref());
+        if self.replacement && self.timezone.is_none() {
+            push_cleared_element(&mut rendered, "timezone");
+        }
         if let Some(network) = &self.network {
             rendered.push_str("  ");
             rendered.push_str(network);
             rendered.push('\n');
+        } else if self.replacement {
+            push_cleared_element(&mut rendered, "network");
         }
         if let Some(filesystem) = &self.filesystem {
             rendered.push_str("  ");
             rendered.push_str(filesystem);
             rendered.push('\n');
+        } else if self.replacement {
+            push_cleared_element(&mut rendered, "filesystem");
         }
         match &self.subagents {
             RenderedSubagents::Omitted => {}
@@ -347,6 +369,12 @@ fn push_optional_element(rendered: &mut String, name: &str, value: Option<&str>)
     rendered.push_str("</");
     rendered.push_str(name);
     rendered.push_str(">\n");
+}
+
+fn push_cleared_element(rendered: &mut String, name: &str) {
+    rendered.push_str("  <");
+    rendered.push_str(name);
+    rendered.push_str(" />\n");
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

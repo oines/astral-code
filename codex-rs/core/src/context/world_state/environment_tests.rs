@@ -427,6 +427,20 @@ fn oversized_environment_diff_uses_bounded_replacement_snapshot() -> Result<()> 
     Ok(())
 }
 
+#[test]
+fn replacement_snapshot_explicitly_clears_missing_values() {
+    let rendered = RenderedEnvironments::replacement(&EnvironmentsSnapshot::default()).render();
+
+    assert!(rendered.contains("<environments mode=\"replace\" />"));
+    assert!(rendered.contains("<model />"));
+    assert!(rendered.contains("<current_date />"));
+    assert!(rendered.contains("<timezone />"));
+    assert!(rendered.contains("<network />"));
+    assert!(rendered.contains("<filesystem />"));
+    assert!(rendered.contains("<subagents />"));
+    assert!(rendered.contains("<truncated>false</truncated>"));
+}
+
 fn available(cwd: &str, shell: &str) -> Result<EnvironmentState> {
     Ok(EnvironmentState {
         cwd: PathUri::parse(cwd)?,
