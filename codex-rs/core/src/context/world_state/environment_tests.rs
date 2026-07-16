@@ -218,6 +218,45 @@ fn model_change_renders_a_diff() {
 }
 
 #[test]
+fn subagent_roster_change_renders_a_diff() {
+    let mut previous = WorldState::default();
+    previous
+        .add_section(EnvironmentsState::default().with_subagents("- worker: Atlas".to_string()));
+    let mut current = WorldState::default();
+    current
+        .add_section(EnvironmentsState::default().with_subagents("- worker: Juniper".to_string()));
+
+    assert_eq!(
+        vec![user_message(
+            r#"<environment_context>
+  <subagents>
+    - worker: Juniper
+  </subagents>
+</environment_context>"#,
+        )],
+        render_fragments(current.render_diff(&previous.snapshot())),
+    );
+}
+
+#[test]
+fn removed_subagent_roster_renders_an_explicit_empty_update() {
+    let mut previous = WorldState::default();
+    previous
+        .add_section(EnvironmentsState::default().with_subagents("- worker: Atlas".to_string()));
+    let mut current = WorldState::default();
+    current.add_section(EnvironmentsState::default());
+
+    assert_eq!(
+        vec![user_message(
+            r#"<environment_context>
+  <subagents />
+</environment_context>"#,
+        )],
+        render_fragments(current.render_diff(&previous.snapshot())),
+    );
+}
+
+#[test]
 fn single_environment_diff_ignores_unknown_shell() -> Result<()> {
     let previous = EnvironmentsState {
         environments: [(

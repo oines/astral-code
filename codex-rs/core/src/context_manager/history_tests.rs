@@ -1,5 +1,6 @@
 use super::*;
 use crate::context::UserInstructions;
+use crate::context::world_state::EnvironmentsState;
 use crate::context::world_state::WorldState;
 use crate::context::world_state::WorldStateSection;
 use base64::Engine;
@@ -120,6 +121,50 @@ fn world_state_baseline_deduplicates_until_history_is_replaced() {
     assert!(replacement_item.is_some_and(|item| item.full));
 }
 
+#[test]
+fn world_state_baseline_tracks_subagent_roster_updates() {
+    let world_state = |subagents: Option<&str>| {
+        let mut state = WorldState::default();
+        let environments = subagents.map_or_else(EnvironmentsState::default, |subagents| {
+            EnvironmentsState::default().with_subagents(subagents.to_string())
+        });
+        state.add_section(environments);
+        state
+    };
+    let mut history = ContextManager::new();
+
+    let (initial_fragments, _) = history.update_world_state(&world_state(Some("- worker: Atlas")));
+    assert_eq!(
+        vec!["\n  <subagents>\n    - worker: Atlas\n  </subagents>\n"],
+        initial_fragments
+            .into_iter()
+            .map(|fragment| fragment.body())
+            .collect::<Vec<_>>()
+    );
+
+    let (changed_fragments, _) =
+        history.update_world_state(&world_state(Some("- worker: Juniper")));
+    assert_eq!(
+        vec!["\n  <subagents>\n    - worker: Juniper\n  </subagents>\n"],
+        changed_fragments
+            .into_iter()
+            .map(|fragment| fragment.body())
+            .collect::<Vec<_>>()
+    );
+
+    let (removed_fragments, _) = history.update_world_state(&world_state(None));
+    assert_eq!(
+        vec!["\n  <subagents />\n"],
+        removed_fragments
+            .into_iter()
+            .map(|fragment| fragment.body())
+            .collect::<Vec<_>>()
+    );
+
+    let (unchanged_fragments, unchanged_item) = history.update_world_state(&world_state(None));
+    assert!(unchanged_fragments.is_empty());
+    assert_eq!(unchanged_item, None);
+}
 fn user_msg(text: &str) -> TranscriptItem {
     TranscriptItem::Message {
         id: None,

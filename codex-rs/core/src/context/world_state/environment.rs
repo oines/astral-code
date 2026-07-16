@@ -65,7 +65,10 @@ impl EnvironmentsState {
             timezone: self.timezone.clone(),
             network: self.network.clone(),
             filesystem: self.filesystem.clone(),
-            subagents: self.subagents.clone(),
+            subagents: self
+                .subagents
+                .clone()
+                .map_or(RenderedSubagents::Omitted, RenderedSubagents::Current),
         }
     }
 }
@@ -110,7 +113,8 @@ impl WorldStateSection for EnvironmentsState {
             || current.current_date != previous.current_date
             || current.timezone != previous.timezone
             || current.network != previous.network
-            || current.filesystem != previous.filesystem;
+            || current.filesystem != previous.filesystem
+            || current.subagents != previous.subagents;
         let mut updates = self
             .environments
             .iter()
@@ -143,7 +147,11 @@ impl WorldStateSection for EnvironmentsState {
                 timezone: self.timezone.clone(),
                 network: self.network.clone(),
                 filesystem: self.filesystem.clone(),
-                subagents: self.subagents.clone(),
+                subagents: match (&self.subagents, &previous.subagents) {
+                    (Some(subagents), _) => RenderedSubagents::Current(subagents.clone()),
+                    (None, Some(_)) => RenderedSubagents::Cleared,
+                    (None, None) => RenderedSubagents::Omitted,
+                },
             }) as Box<dyn ContextualUserFragment>
         })
     }
@@ -175,7 +183,13 @@ struct RenderedEnvironments {
     timezone: Option<String>,
     network: Option<NetworkContext>,
     filesystem: Option<FileSystemContext>,
-    subagents: Option<String>,
+    subagents: RenderedSubagents,
+}
+
+enum RenderedSubagents {
+    Omitted,
+    Current(String),
+    Cleared,
 }
 
 enum EnvironmentUpdate {
@@ -236,14 +250,18 @@ impl ContextualUserFragment for RenderedEnvironments {
             rendered.push_str(&filesystem.render());
             rendered.push('\n');
         }
-        if let Some(subagents) = &self.subagents {
-            rendered.push_str("  <subagents>\n");
-            for line in subagents.lines() {
-                rendered.push_str("    ");
-                rendered.push_str(line);
-                rendered.push('\n');
+        match &self.subagents {
+            RenderedSubagents::Omitted => {}
+            RenderedSubagents::Current(subagents) => {
+                rendered.push_str("  <subagents>\n");
+                for line in subagents.lines() {
+                    rendered.push_str("    ");
+                    rendered.push_str(line);
+                    rendered.push('\n');
+                }
+                rendered.push_str("  </subagents>\n");
             }
-            rendered.push_str("  </subagents>\n");
+            RenderedSubagents::Cleared => rendered.push_str("  <subagents />\n"),
         }
         rendered
     }
