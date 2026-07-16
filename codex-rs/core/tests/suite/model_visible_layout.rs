@@ -203,9 +203,7 @@ async fn snapshot_model_visible_layout_turn_overrides() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-// TODO(ccunningham): Diff `user_instructions` and emit updates when AGENTS.md content changes
-// (for example after cwd changes), then update this test to assert refreshed AGENTS content.
-async fn snapshot_model_visible_layout_cwd_change_does_not_refresh_agents() -> Result<()> {
+async fn snapshot_model_visible_layout_cwd_change_refreshes_agents() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
@@ -313,18 +311,33 @@ async fn snapshot_model_visible_layout_cwd_change_does_not_refresh_agents() -> R
     assert_eq!(requests.len(), 2, "expected two requests");
     assert_eq!(
         user_instructions_wrapper_count(&requests[0]),
-        0,
-        "expected first request to omit the serialized user-instructions wrapper when cwd-only project docs are introduced after session init"
+        1,
+        "the first selected cwd should load its AGENTS.md instructions"
     );
     assert_eq!(
         user_instructions_wrapper_count(&requests[1]),
-        0,
-        "expected second request to keep omitting the serialized user-instructions wrapper after cwd change with the current session-scoped project doc behavior"
+        2,
+        "the second selected cwd should append one replacement AGENTS.md fragment"
     );
+    let first_context = requests[0].message_input_texts("user");
+    assert!(
+        first_context
+            .iter()
+            .any(|text| text.contains("Turn one agents instructions."))
+    );
+    let second_context = requests[1].message_input_texts("user");
+    assert!(
+        second_context
+            .iter()
+            .any(|text| text.contains("Turn two agents instructions."))
+    );
+    assert!(second_context.iter().any(|text| text.contains(
+        "These AGENTS.md instructions replace all previously provided AGENTS.md instructions."
+    )));
     insta::assert_snapshot!(
-        "model_visible_layout_cwd_change_does_not_refresh_agents",
+        "model_visible_layout_cwd_change_refreshes_agents",
         format_labeled_requests_snapshot(
-            "Second turn changes cwd to a directory with different AGENTS.md; current behavior does not emit refreshed AGENTS instructions.",
+            "Second turn changes cwd to a directory with different AGENTS.md and emits a replacement fragment.",
             &[
                 ("First Request (agents_one)", &requests[0]),
                 ("Second Request (agents_two cwd)", &requests[1]),
