@@ -12,10 +12,6 @@ path = "src/lib.rs"
 name = "codex-write-config-schema"
 path = "src/bin/config_schema.rs"
 
-[[bin]]
-name = "test_stdio_server"
-path = "../rmcp-client/src/bin/test_stdio_server.rs"
-
 [lints]
 workspace = true
 

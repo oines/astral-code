@@ -550,8 +550,10 @@ fn create_config_toml(codex_home: &Path, server_uri: &str) -> std::io::Result<()
 model = "mock-model"
 approval_policy = "untrusted"
 sandbox_policy = "workspace-write"
-
 model_provider = "mock_provider"
+
+[tools]
+surface = "codex"
 
 [model_providers.mock_provider]
 name = "Mock provider for test"

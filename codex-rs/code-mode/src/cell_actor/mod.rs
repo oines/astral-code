@@ -602,5 +602,5 @@ fn begin_termination(
 }
 
 #[cfg(test)]
-#[path = "tests.rs"]
+#[path = "cell_actor_tests.rs"]
 mod tests;

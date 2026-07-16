@@ -309,5 +309,5 @@ fn actor_error(cell_id: &CellId, error: CellError) -> Error {
 }
 
 #[cfg(test)]
-#[path = "tests.rs"]
+#[path = "session_runtime_tests.rs"]
 mod tests;
