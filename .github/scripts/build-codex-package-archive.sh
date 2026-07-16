@@ -94,8 +94,8 @@ fi
 
 case "$bundle" in
   primary)
-    variant="codex"
-    entrypoint="codex"
+    variant="astral"
+    entrypoint="astral"
     archive_stem="codex-package"
     ;;
   app-server)
