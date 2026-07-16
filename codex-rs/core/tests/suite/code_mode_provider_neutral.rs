@@ -32,6 +32,13 @@ use wiremock::matchers::path_regex;
 
 const CODE: &str = "text('provider-neutral-exec');";
 const CALL_ID: &str = "call-provider-neutral-exec";
+const LEGACY_OUTPUT: &str = "legacy-provider-neutral-output";
+
+#[derive(Clone, Copy)]
+enum CodeModeState {
+    Enabled,
+    Disabled,
+}
 
 fn provider(server: &wiremock::MockServer, wire_api: WireApi) -> ModelProviderInfo {
     ModelProviderInfo {
@@ -298,6 +305,7 @@ async fn anthropic_messages_exec_function_payload_runs_and_returns_tool_result()
 
 async fn legacy_custom_exec_history_replayed_to_function_provider(
     target_wire_api: WireApi,
+    code_mode: CodeModeState,
 ) -> Result<Value> {
     let target_server = responses::start_mock_server().await;
     let target_mock = match target_wire_api {
@@ -348,7 +356,7 @@ async fn legacy_custom_exec_history_replayed_to_function_provider(
             item: RolloutItem::TranscriptItem(TranscriptItem::CustomToolCallOutput {
                 call_id: CALL_ID.to_string(),
                 name: Some("exec".to_string()),
-                output: FunctionCallOutputPayload::from_text("provider-neutral-exec".to_string()),
+                output: FunctionCallOutputPayload::from_text(LEGACY_OUTPUT.to_string()),
             }),
         },
     ];
@@ -361,6 +369,12 @@ async fn legacy_custom_exec_history_replayed_to_function_provider(
         .with_model("test-gpt-5.1-codex")
         .with_config(move |config| {
             config.model_provider = target_provider;
+            if matches!(code_mode, CodeModeState::Enabled) {
+                config
+                    .features
+                    .enable(Feature::CodeMode)
+                    .expect("enable code mode");
+            }
         });
     let test = builder
         .resume(&target_server, codex_home, rollout_path)
@@ -387,14 +401,14 @@ fn assert_exec_tool_not_advertised(body: &Value) {
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn legacy_custom_exec_history_resumes_to_chat_completions_with_function_input() -> Result<()>
-{
-    skip_if_no_network!(Ok(()));
+fn assert_exec_tool_advertisement(body: &Value, code_mode: CodeModeState) {
+    match code_mode {
+        CodeModeState::Enabled => assert_exec_function_schema(body),
+        CodeModeState::Disabled => assert_exec_tool_not_advertised(body),
+    }
+}
 
-    let body =
-        legacy_custom_exec_history_replayed_to_function_provider(WireApi::ChatCompletions).await?;
-    assert_exec_tool_not_advertised(&body);
+fn assert_chat_completions_legacy_exec_input(body: &Value) -> Result<()> {
     let arguments = body
         .get("messages")
         .and_then(Value::as_array)
@@ -410,17 +424,11 @@ async fn legacy_custom_exec_history_resumes_to_chat_completions_with_function_in
         serde_json::from_str::<Value>(arguments)?,
         json!({ "input": CODE })
     );
-
+    assert!(body.to_string().contains(LEGACY_OUTPUT));
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn legacy_custom_exec_history_resumes_to_anthropic_with_function_input() -> Result<()> {
-    skip_if_no_network!(Ok(()));
-
-    let body = legacy_custom_exec_history_replayed_to_function_provider(WireApi::AnthropicMessages)
-        .await?;
-    assert_exec_tool_not_advertised(&body);
+fn assert_anthropic_legacy_exec_input(body: &Value) {
     let input = body
         .get("messages")
         .and_then(Value::as_array)
@@ -435,6 +443,71 @@ async fn legacy_custom_exec_history_resumes_to_anthropic_with_function_input() -
         .and_then(|block| block.get("input"))
         .expect("legacy custom exec should become an Anthropic function call");
     assert_eq!(input, &json!({ "input": CODE }));
+    assert!(body.to_string().contains(LEGACY_OUTPUT));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn legacy_custom_exec_history_resumes_to_chat_completions_with_code_mode_disabled()
+-> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let code_mode = CodeModeState::Disabled;
+    let body = legacy_custom_exec_history_replayed_to_function_provider(
+        WireApi::ChatCompletions,
+        code_mode,
+    )
+    .await?;
+    assert_exec_tool_advertisement(&body, code_mode);
+    assert_chat_completions_legacy_exec_input(&body)?;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn legacy_custom_exec_history_resumes_to_chat_completions_with_code_mode_enabled()
+-> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let code_mode = CodeModeState::Enabled;
+    let body = legacy_custom_exec_history_replayed_to_function_provider(
+        WireApi::ChatCompletions,
+        code_mode,
+    )
+    .await?;
+    assert_exec_tool_advertisement(&body, code_mode);
+    assert_chat_completions_legacy_exec_input(&body)?;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn legacy_custom_exec_history_resumes_to_anthropic_with_code_mode_disabled() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let code_mode = CodeModeState::Disabled;
+    let body = legacy_custom_exec_history_replayed_to_function_provider(
+        WireApi::AnthropicMessages,
+        code_mode,
+    )
+    .await?;
+    assert_exec_tool_advertisement(&body, code_mode);
+    assert_anthropic_legacy_exec_input(&body);
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn legacy_custom_exec_history_resumes_to_anthropic_with_code_mode_enabled() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let code_mode = CodeModeState::Enabled;
+    let body = legacy_custom_exec_history_replayed_to_function_provider(
+        WireApi::AnthropicMessages,
+        code_mode,
+    )
+    .await?;
+    assert_exec_tool_advertisement(&body, code_mode);
+    assert_anthropic_legacy_exec_input(&body);
 
     Ok(())
 }

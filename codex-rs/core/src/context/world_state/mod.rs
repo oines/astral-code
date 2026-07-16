@@ -15,16 +15,7 @@ use std::fmt;
 pub(crate) use agents_md::AgentsMdState;
 pub(crate) use environment::EnvironmentsState;
 
-// WorldState user fragments are merged into one model-visible user item. Keep their combined
-// UTF-8 payload below 10K tokens even for providers whose tokenization approaches one byte per
-// token, while reserving useful space for both instruction and environment state.
-const MAX_WORLD_STATE_USER_ITEM_BYTES: usize = 8 * 1024;
-const MAX_AGENTS_MD_FRAGMENT_BYTES: usize = 5 * 1024;
 const MAX_ENVIRONMENTS_FRAGMENT_BYTES: usize = 3 * 1024;
-const _: () = assert!(
-    MAX_AGENTS_MD_FRAGMENT_BYTES + MAX_ENVIRONMENTS_FRAGMENT_BYTES
-        <= MAX_WORLD_STATE_USER_ITEM_BYTES
-);
 
 const TRUNCATION_NOTICE: &str = "\n[additional world-state content truncated]";
 

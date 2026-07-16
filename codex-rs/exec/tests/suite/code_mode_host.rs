@@ -14,6 +14,7 @@ use std::process::Command;
 
 const CALL_ID: &str = "packaged-code-mode-call";
 const OUTPUT_MARKER: &str = "packaged-host-marker";
+// Split the marker so invalid-host request history cannot satisfy the execution-output assertion.
 const EXEC_SOURCE: &str = "text(['packaged', 'host', 'marker'].join('-'));";
 
 fn chat_completions_exec_sse() -> String {

@@ -158,6 +158,53 @@ fn persisted_turn_context_values_render_a_diff() -> Result<()> {
 }
 
 #[test]
+fn removed_turn_context_values_render_explicit_clears() -> Result<()> {
+    let environments = [(
+        LOCAL_ENVIRONMENT_ID.to_string(),
+        available("file:///repo", "zsh")?,
+    )]
+    .into_iter()
+    .collect();
+    let previous = EnvironmentsState {
+        environments,
+        model: Some("gpt-5".to_string()),
+        current_date: Some("2026-06-20".to_string()),
+        timezone: Some("UTC".to_string()),
+        network: Some(NetworkContext::new(
+            vec!["old.example.com".to_string()],
+            vec![],
+        )),
+        filesystem: Some(FileSystemContext::from_permission_profile(
+            &PermissionProfile::Disabled,
+            &[],
+        )),
+        ..Default::default()
+    };
+    let current = EnvironmentsState {
+        environments: previous.environments.clone(),
+        ..Default::default()
+    };
+    let previous = WorldStateSection::snapshot(&previous);
+
+    assert_eq!(
+        Some(user_message(
+            r#"<environment_context>
+  <model />
+  <current_date />
+  <timezone />
+  <network />
+  <filesystem />
+</environment_context>"#,
+        )),
+        render_fragment(WorldStateSection::render_diff(
+            &current,
+            PreviousSectionState::Known(&previous),
+        )),
+    );
+    Ok(())
+}
+
+#[test]
 fn persisted_snapshot_uses_model_visible_path_and_context_values() -> Result<()> {
     let mut world_state = WorldState::default();
     world_state.add_section(EnvironmentsState {
@@ -355,11 +402,56 @@ fn oversized_environment_state_is_bounded_before_snapshot_and_render() -> Result
 
     assert!(snapshot.truncated);
     assert!(rendered.len() <= MAX_ENVIRONMENTS_FRAGMENT_BYTES);
+    assert!(rendered.contains("<truncated>true</truncated>"));
     assert!(rendered.contains(TRUNCATED_CONTEXT_NOTICE));
     assert!(
         WorldStateSection::render_diff(&state, PreviousSectionState::Known(&snapshot)).is_none()
     );
     Ok(())
+}
+
+#[test]
+fn turn_context_projection_accounts_for_worst_case_xml_escaping() {
+    let worst_case = "'".repeat(MAX_TURN_CONTEXT_VALUE_BYTES * 2);
+    let state = EnvironmentsState {
+        model: Some(worst_case.clone()),
+        current_date: Some(worst_case.clone()),
+        timezone: Some(worst_case),
+        ..Default::default()
+    };
+
+    let snapshot = WorldStateSection::snapshot(&state);
+    let rendered = RenderedEnvironments::replacement(&snapshot).render();
+
+    assert!(snapshot.truncated);
+    assert!(rendered.len() <= MAX_ENVIRONMENTS_FRAGMENT_BYTES);
+    assert!(rendered.contains("<truncated>true</truncated>"));
+}
+
+#[test]
+fn truncation_state_uses_boolean_values() {
+    let previous = EnvironmentsState {
+        model: Some("'".repeat(MAX_TURN_CONTEXT_VALUE_BYTES * 2)),
+        ..Default::default()
+    };
+    let current = EnvironmentsState {
+        model: Some("gpt-5".to_string()),
+        ..Default::default()
+    };
+    let previous = WorldStateSection::snapshot(&previous);
+
+    assert_eq!(
+        Some(user_message(
+            r#"<environment_context>
+  <model>gpt-5</model>
+  <truncated>false</truncated>
+</environment_context>"#,
+        )),
+        render_fragment(WorldStateSection::render_diff(
+            &current,
+            PreviousSectionState::Known(&previous),
+        )),
+    );
 }
 
 #[test]
@@ -417,9 +509,12 @@ fn oversized_environment_diff_uses_bounded_replacement_snapshot() -> Result<()> 
     assert!(previous_snapshot.truncated);
     assert!(current_snapshot.truncated);
     assert!(rendered.len() <= MAX_ENVIRONMENTS_FRAGMENT_BYTES);
+    assert!(rendered.contains(REPLACEMENT_NOTICE));
     assert!(rendered.contains("<environments mode=\"replace\">"));
     assert!(rendered.contains("new-environment-000"));
     assert!(!rendered.contains("old-environment-000"));
+    assert!(rendered.contains("<truncated>true</truncated>"));
+    assert!(rendered.contains(TRUNCATED_CONTEXT_NOTICE));
     assert!(
         WorldStateSection::render_diff(&current, PreviousSectionState::Known(&current_snapshot),)
             .is_none()
@@ -428,17 +523,15 @@ fn oversized_environment_diff_uses_bounded_replacement_snapshot() -> Result<()> 
 }
 
 #[test]
-fn replacement_snapshot_explicitly_clears_missing_values() {
+fn replacement_snapshot_notice_invalidates_omitted_values() {
     let rendered = RenderedEnvironments::replacement(&EnvironmentsSnapshot::default()).render();
 
-    assert!(rendered.contains("<environments mode=\"replace\" />"));
-    assert!(rendered.contains("<model />"));
-    assert!(rendered.contains("<current_date />"));
-    assert!(rendered.contains("<timezone />"));
-    assert!(rendered.contains("<network />"));
-    assert!(rendered.contains("<filesystem />"));
-    assert!(rendered.contains("<subagents />"));
-    assert!(rendered.contains("<truncated>false</truncated>"));
+    assert_eq!(
+        format!(
+            "<environment_context>\n  {REPLACEMENT_NOTICE}\n  <environments mode=\"replace\" />\n</environment_context>"
+        ),
+        rendered,
+    );
 }
 
 fn available(cwd: &str, shell: &str) -> Result<EnvironmentState> {

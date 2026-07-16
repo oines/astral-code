@@ -34,8 +34,7 @@ const UPDATED_AGENTS: &str = "WORLD_STATE_UPDATED_AGENTS";
 const REPLACEMENT_NOTICE: &str =
     "These AGENTS.md instructions replace all previously provided AGENTS.md instructions.";
 const REMOVAL_NOTICE: &str = "The previously provided AGENTS.md instructions no longer apply.";
-const MAX_AGENTS_MD_FRAGMENT_BYTES: usize = 5 * 1024;
-const MAX_WORLD_STATE_USER_ITEM_BYTES: usize = 8 * 1024;
+const PROJECT_AFTER_5_KIB_MARKER: &str = "PROJECT_INSTRUCTIONS_AFTER_5_KIB";
 
 async fn submit_turn(thread: &Arc<CodexThread>, prompt: &str) -> Result<()> {
     thread
@@ -105,8 +104,7 @@ async fn agents_world_state_keeps_hot_session_snapshot_until_selection_changes()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn agents_world_state_hard_cap_cannot_be_bypassed_by_config_or_global_instructions()
--> Result<()> {
+async fn agents_world_state_respects_configured_project_doc_budget() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
@@ -119,14 +117,8 @@ async fn agents_world_state_hard_cap_cannot_be_bypassed_by_config_or_global_inst
         ])],
     )
     .await;
-    let global = format!(
-        "GLOBAL_AGENTS_PREFIX\n{}",
-        "global instruction\n".repeat(20_000)
-    );
-    let project = format!(
-        "PROJECT_AGENTS_PREFIX\n{}",
-        "project instruction\n".repeat(20_000)
-    );
+    let global = "GLOBAL_AGENTS_PREFIX\n".to_string();
+    let project = format!("{}\n{PROJECT_AFTER_5_KIB_MARKER}", "p".repeat(6 * 1024));
     let mut builder = test_codex()
         .with_pre_build_hook(move |home| {
             fs::write(home.join("AGENTS.md"), global).expect("write global AGENTS.md");
@@ -142,11 +134,12 @@ async fn agents_world_state_hard_cap_cannot_be_bypassed_by_config_or_global_inst
             Ok::<(), anyhow::Error>(())
         })
         .with_config(|config| {
-            config.project_doc_max_bytes = 1_000_000;
+            config.project_doc_max_bytes = 8 * 1024;
         });
     let test = builder.build(&server).await?;
 
-    test.submit_turn("verify bounded AGENTS.md").await?;
+    test.submit_turn("verify configured AGENTS.md budget")
+        .await?;
 
     let request = response_mock.single_request();
     let agents_fragment = request
@@ -154,19 +147,12 @@ async fn agents_world_state_hard_cap_cannot_be_bypassed_by_config_or_global_inst
         .into_iter()
         .find(|text| text.starts_with("# AGENTS.md instructions"))
         .context("model request should contain AGENTS.md instructions")?;
-    assert!(agents_fragment.len() <= MAX_AGENTS_MD_FRAGMENT_BYTES);
     assert!(agents_fragment.contains("GLOBAL_AGENTS_PREFIX"));
-    assert!(agents_fragment.contains("additional world-state content truncated"));
-    let world_state_bytes = request
-        .message_input_texts("user")
-        .into_iter()
-        .filter(|text| {
-            text.starts_with("# AGENTS.md instructions")
-                || text.starts_with("<environment_context>")
-        })
-        .map(|text| text.len())
-        .sum::<usize>();
-    assert!(world_state_bytes <= MAX_WORLD_STATE_USER_ITEM_BYTES);
+    let marker_offset = agents_fragment
+        .find(PROJECT_AFTER_5_KIB_MARKER)
+        .context("project instructions beyond the former WorldState cap should reach the model")?;
+    assert!(marker_offset > 5 * 1024);
+    assert!(!agents_fragment.contains("additional world-state content truncated"));
     Ok(())
 }
 

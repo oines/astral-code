@@ -1,4 +1,3 @@
-use super::MAX_AGENTS_MD_FRAGMENT_BYTES;
 use super::PreviousSectionState;
 use super::WorldStateSection;
 use super::truncate_world_state_text;
@@ -34,16 +33,6 @@ impl AgentsMdState {
                 instructions.directory = instructions.directory.map(|directory| {
                     truncate_world_state_text(&directory, MAX_AGENTS_MD_DIRECTORY_BYTES)
                 });
-                let replacement_overhead = UserInstructions {
-                    directory: instructions.directory.clone(),
-                    text: format!("{REPLACEMENT_NOTICE}\n\n"),
-                }
-                .render()
-                .len();
-                instructions.text = truncate_world_state_text(
-                    &instructions.text,
-                    MAX_AGENTS_MD_FRAGMENT_BYTES.saturating_sub(replacement_overhead),
-                );
                 instructions
             }),
         }

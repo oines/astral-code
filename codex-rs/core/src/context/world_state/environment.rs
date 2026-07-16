@@ -20,8 +20,12 @@ use projection::project_snapshot;
 
 const MAX_ENVIRONMENT_ID_BYTES: usize = 256;
 const MAX_ENVIRONMENT_VALUE_BYTES: usize = 1024;
+// These three values enter the snapshot before dynamic fit checks. XML escaping can expand one
+// input byte to six output bytes, so 128 * 3 * 6 leaves room inside the 3 KiB replacement budget.
 const MAX_TURN_CONTEXT_VALUE_BYTES: usize = 128;
 const MAX_SUBAGENTS_BYTES: usize = 1024;
+const REPLACEMENT_NOTICE: &str = "This environment context replaces all previously provided \
+environment state. Fields not listed below no longer apply.";
 const TRUNCATED_CONTEXT_NOTICE: &str =
     "Additional environment context was omitted to fit the model context limit.";
 
@@ -118,34 +122,36 @@ impl WorldStateSection for EnvironmentsState {
             && updates
                 .values()
                 .all(|update| matches!(update, EnvironmentUpdate::Current(_)));
-        (!updates.is_empty() || turn_context_values_changed).then(|| {
-            let rendered = RenderedEnvironments {
-                updates,
-                legacy_single,
-                model: current.model.clone(),
-                current_date: current.current_date.clone(),
-                timezone: current.timezone.clone(),
-                network: current.network.clone(),
-                filesystem: current.filesystem.clone(),
-                subagents: match (&current.subagents, &previous.subagents) {
-                    (Some(subagents), _) => RenderedSubagents::Current(subagents.clone()),
-                    (None, Some(_)) => RenderedSubagents::Cleared,
-                    (None, None) => RenderedSubagents::Omitted,
-                },
-                truncation: match (current.truncated, previous.truncated) {
-                    (true, _) => RenderedTruncation::Current,
-                    (false, true) => RenderedTruncation::Cleared,
-                    (false, false) => RenderedTruncation::Omitted,
-                },
-                replacement: false,
-            };
-            let rendered = if rendered.render().len() <= MAX_ENVIRONMENTS_FRAGMENT_BYTES {
-                rendered
-            } else {
-                RenderedEnvironments::replacement(&current)
-            };
-            Box::new(rendered) as Box<dyn ContextualUserFragment>
-        })
+        if updates.is_empty() && !turn_context_values_changed {
+            return None;
+        }
+
+        let rendered = RenderedEnvironments {
+            updates,
+            legacy_single,
+            model: RenderedValue::from_diff(&current.model, &previous.model),
+            current_date: RenderedValue::from_diff(&current.current_date, &previous.current_date),
+            timezone: RenderedValue::from_diff(&current.timezone, &previous.timezone),
+            network: RenderedValue::from_diff(&current.network, &previous.network),
+            filesystem: RenderedValue::from_diff(&current.filesystem, &previous.filesystem),
+            subagents: match (&current.subagents, &previous.subagents) {
+                (Some(subagents), _) => RenderedSubagents::Current(subagents.clone()),
+                (None, Some(_)) => RenderedSubagents::Cleared,
+                (None, None) => RenderedSubagents::Omitted,
+            },
+            truncation: match (current.truncated, previous.truncated) {
+                (true, _) => RenderedTruncation::Current,
+                (false, true) => RenderedTruncation::Cleared,
+                (false, false) => RenderedTruncation::Omitted,
+            },
+            replacement: false,
+        };
+        let rendered = if rendered.render().len() <= MAX_ENVIRONMENTS_FRAGMENT_BYTES {
+            rendered
+        } else {
+            RenderedEnvironments::replacement(&current)
+        };
+        Some(Box::new(rendered))
     }
 }
 
@@ -170,14 +176,36 @@ impl ContextualUserFragment for EnvironmentsState {
 struct RenderedEnvironments {
     updates: BTreeMap<String, EnvironmentUpdate>,
     legacy_single: bool,
-    model: Option<String>,
-    current_date: Option<String>,
-    timezone: Option<String>,
-    network: Option<String>,
-    filesystem: Option<String>,
+    model: RenderedValue,
+    current_date: RenderedValue,
+    timezone: RenderedValue,
+    network: RenderedValue,
+    filesystem: RenderedValue,
     subagents: RenderedSubagents,
     truncation: RenderedTruncation,
     replacement: bool,
+}
+
+enum RenderedValue {
+    Omitted,
+    Current(String),
+    Cleared,
+}
+
+impl RenderedValue {
+    fn from_current(current: &Option<String>) -> Self {
+        current
+            .clone()
+            .map_or(Self::Omitted, RenderedValue::Current)
+    }
+
+    fn from_diff(current: &Option<String>, previous: &Option<String>) -> Self {
+        match (current, previous) {
+            (Some(current), _) => Self::Current(current.clone()),
+            (None, Some(_)) => Self::Cleared,
+            (None, None) => Self::Omitted,
+        }
+    }
 }
 
 enum RenderedSubagents {
@@ -208,11 +236,11 @@ impl RenderedEnvironments {
                 })
                 .collect(),
             legacy_single: is_legacy_single(&snapshot.environments),
-            model: snapshot.model.clone(),
-            current_date: snapshot.current_date.clone(),
-            timezone: snapshot.timezone.clone(),
-            network: snapshot.network.clone(),
-            filesystem: snapshot.filesystem.clone(),
+            model: RenderedValue::from_current(&snapshot.model),
+            current_date: RenderedValue::from_current(&snapshot.current_date),
+            timezone: RenderedValue::from_current(&snapshot.timezone),
+            network: RenderedValue::from_current(&snapshot.network),
+            filesystem: RenderedValue::from_current(&snapshot.filesystem),
             subagents: snapshot
                 .subagents
                 .clone()
@@ -229,15 +257,6 @@ impl RenderedEnvironments {
     fn replacement(snapshot: &EnvironmentsSnapshot) -> Self {
         let mut rendered = Self::full(snapshot);
         rendered.legacy_single = false;
-        rendered.subagents = snapshot
-            .subagents
-            .clone()
-            .map_or(RenderedSubagents::Cleared, RenderedSubagents::Current);
-        rendered.truncation = if snapshot.truncated {
-            RenderedTruncation::Current
-        } else {
-            RenderedTruncation::Cleared
-        };
         rendered.replacement = true;
         rendered
     }
@@ -258,6 +277,11 @@ impl ContextualUserFragment for RenderedEnvironments {
 
     fn body(&self) -> String {
         let mut rendered = "\n".to_string();
+        if self.replacement {
+            rendered.push_str("  ");
+            rendered.push_str(REPLACEMENT_NOTICE);
+            rendered.push('\n');
+        }
         if self.legacy_single {
             if let Some(EnvironmentUpdate::Current(environment)) = self.updates.values().next() {
                 push_environment_values(&mut rendered, environment, "  ");
@@ -289,32 +313,11 @@ impl ContextualUserFragment for RenderedEnvironments {
         } else if self.replacement {
             rendered.push_str("  <environments mode=\"replace\" />\n");
         }
-        push_optional_element(&mut rendered, "model", self.model.as_deref());
-        if self.replacement && self.model.is_none() {
-            push_cleared_element(&mut rendered, "model");
-        }
-        push_optional_element(&mut rendered, "current_date", self.current_date.as_deref());
-        if self.replacement && self.current_date.is_none() {
-            push_cleared_element(&mut rendered, "current_date");
-        }
-        push_optional_element(&mut rendered, "timezone", self.timezone.as_deref());
-        if self.replacement && self.timezone.is_none() {
-            push_cleared_element(&mut rendered, "timezone");
-        }
-        if let Some(network) = &self.network {
-            rendered.push_str("  ");
-            rendered.push_str(network);
-            rendered.push('\n');
-        } else if self.replacement {
-            push_cleared_element(&mut rendered, "network");
-        }
-        if let Some(filesystem) = &self.filesystem {
-            rendered.push_str("  ");
-            rendered.push_str(filesystem);
-            rendered.push('\n');
-        } else if self.replacement {
-            push_cleared_element(&mut rendered, "filesystem");
-        }
+        push_rendered_element(&mut rendered, "model", &self.model);
+        push_rendered_element(&mut rendered, "current_date", &self.current_date);
+        push_rendered_element(&mut rendered, "timezone", &self.timezone);
+        push_rendered_context(&mut rendered, "network", &self.network);
+        push_rendered_context(&mut rendered, "filesystem", &self.filesystem);
         match &self.subagents {
             RenderedSubagents::Omitted => {}
             RenderedSubagents::Current(subagents) => {
@@ -331,13 +334,38 @@ impl ContextualUserFragment for RenderedEnvironments {
         match self.truncation {
             RenderedTruncation::Omitted => {}
             RenderedTruncation::Current => {
-                push_optional_element(&mut rendered, "truncated", Some(TRUNCATED_CONTEXT_NOTICE));
+                push_optional_element(&mut rendered, "truncated", Some("true"));
+                rendered.push_str("  ");
+                rendered.push_str(TRUNCATED_CONTEXT_NOTICE);
+                rendered.push('\n');
             }
             RenderedTruncation::Cleared => {
                 push_optional_element(&mut rendered, "truncated", Some("false"));
             }
         }
         rendered
+    }
+}
+
+fn push_rendered_element(rendered: &mut String, name: &str, value: &RenderedValue) {
+    match value {
+        RenderedValue::Omitted => {}
+        RenderedValue::Current(value) => {
+            push_optional_element(rendered, name, Some(value.as_str()))
+        }
+        RenderedValue::Cleared => push_cleared_element(rendered, name),
+    }
+}
+
+fn push_rendered_context(rendered: &mut String, name: &str, value: &RenderedValue) {
+    match value {
+        RenderedValue::Omitted => {}
+        RenderedValue::Current(value) => {
+            rendered.push_str("  ");
+            rendered.push_str(value);
+            rendered.push('\n');
+        }
+        RenderedValue::Cleared => push_cleared_element(rendered, name),
     }
 }
 
