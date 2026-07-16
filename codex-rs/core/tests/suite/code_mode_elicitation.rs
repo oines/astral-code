@@ -12,8 +12,11 @@ use codex_protocol::models::PermissionProfile;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::ElicitationAction;
 use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::McpServerRefreshConfig;
 use codex_protocol::protocol::Op;
 use codex_protocol::protocol::ReviewDecision;
+use codex_protocol::protocol::ReviewRequest;
+use codex_protocol::protocol::ReviewTarget;
 use codex_protocol::request_permissions::PermissionGrantScope;
 use codex_protocol::request_permissions::RequestPermissionsResponse;
 use codex_protocol::user_input::UserInput;
@@ -269,7 +272,7 @@ await tools.request_permissions({
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn code_mode_holds_nested_mcp_result_during_server_elicitation() -> Result<()> {
+async fn code_mode_pending_mcp_elicitation_survives_runtime_refresh() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
@@ -359,6 +362,39 @@ text(JSON.stringify(result.structuredContent));"#,
         _ => None,
     })
     .await;
+
+    let mut refreshed_servers = test.config.mcp_servers.get().clone();
+    let refreshed_server = refreshed_servers
+        .get_mut("rmcp")
+        .expect("configured MCP server");
+    let McpServerTransportConfig::Stdio { env, .. } = &mut refreshed_server.transport else {
+        panic!("test MCP server should use stdio transport");
+    };
+    *env = Some(HashMap::from([(
+        "MCP_TEST_VALUE".to_string(),
+        "refreshed-runtime".to_string(),
+    )]));
+    test.codex
+        .submit(Op::RefreshMcpServers {
+            config: McpServerRefreshConfig {
+                mcp_servers: serde_json::to_value(refreshed_servers)?,
+                mcp_oauth_credentials_store_mode: serde_json::to_value(
+                    test.config.mcp_oauth_credentials_store_mode,
+                )?,
+            },
+        })
+        .await?;
+    test.codex
+        .submit(Op::Review {
+            review_request: ReviewRequest {
+                target: ReviewTarget::Custom {
+                    instructions: String::new(),
+                },
+                user_facing_hint: None,
+            },
+        })
+        .await?;
+    wait_for_event(&test.codex, |event| matches!(event, EventMsg::Error(_))).await;
 
     tokio::time::sleep(Duration::from_millis(YIELD_TIME_MS + 250)).await;
     assert_eq!(

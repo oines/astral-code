@@ -44,10 +44,12 @@ use tokio::time::sleep;
 use wiremock::MockServer;
 
 const SPAWN_CALL_ID: &str = "spawn-call-1";
+const CLOSE_CALL_ID: &str = "close-call-1";
 const MULTI_AGENT_V1_NAMESPACE: &str = "multi_agent_v1";
 const TURN_0_FORK_PROMPT: &str = "seed fork context";
 const TURN_1_PROMPT: &str = "spawn a child and continue";
 const TURN_2_NO_WAIT_PROMPT: &str = "follow up without wait";
+const CLOSE_CHILD_PROMPT: &str = "close the spawned child";
 const CHILD_PROMPT: &str = "child: do work";
 const INHERITED_MODEL: &str = "gpt-5.3-codex";
 const INHERITED_REASONING_EFFORT: ReasoningEffort = ReasoningEffort::XHigh;
@@ -445,6 +447,118 @@ async fn setup_turn_one_with_custom_spawned_child(
     let spawned_id = wait_for_spawned_thread_id(&test).await?;
 
     Ok((test, spawned_id, child_request_log))
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn real_subagent_roster_projects_and_clears_across_sampling_boundaries() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = start_mock_server().await;
+    let spawn_args = serde_json::to_string(&json!({
+        "message": CHILD_PROMPT,
+    }))?;
+    mount_sse_once_match(
+        &server,
+        |req: &wiremock::Request| body_contains(req, TURN_1_PROMPT),
+        sse(vec![
+            ev_response_created("resp-spawn-1"),
+            ev_function_call_with_namespace(
+                SPAWN_CALL_ID,
+                MULTI_AGENT_V1_NAMESPACE,
+                "spawn_agent",
+                &spawn_args,
+            ),
+            ev_completed("resp-spawn-1"),
+        ]),
+    )
+    .await;
+    mount_sse_once_match(
+        &server,
+        |req: &wiremock::Request| {
+            body_contains(req, CHILD_PROMPT) && !body_contains(req, SPAWN_CALL_ID)
+        },
+        sse(vec![
+            ev_response_created("resp-roster-child"),
+            ev_assistant_message("msg-roster-child", "child done"),
+            ev_completed("resp-roster-child"),
+        ]),
+    )
+    .await;
+    let spawn_followup = mount_sse_once_match(
+        &server,
+        |req: &wiremock::Request| body_contains(req, SPAWN_CALL_ID),
+        sse(vec![
+            ev_response_created("resp-spawn-2"),
+            ev_assistant_message("msg-spawn-2", "parent saw child"),
+            ev_completed("resp-spawn-2"),
+        ]),
+    )
+    .await;
+
+    let mut builder = test_codex().with_config(|config| {
+        config
+            .features
+            .enable(Feature::Collab)
+            .expect("test config should allow feature update");
+        config
+            .features
+            .enable(Feature::DeferredExecutor)
+            .expect("test config should allow feature update");
+    });
+    let test = builder.build(&server).await?;
+    test.submit_turn(TURN_1_PROMPT).await?;
+    let spawned_id = wait_for_spawned_thread_id(&test).await?;
+
+    let spawn_request = spawn_followup.single_request();
+    let spawned_roster = spawn_request
+        .message_input_texts("user")
+        .into_iter()
+        .find(|text| text.contains("<subagents>"))
+        .ok_or_else(|| anyhow::anyhow!("spawn follow-up should contain a subagent roster"))?;
+    assert!(spawned_roster.contains(&spawned_id));
+
+    let close_args = serde_json::to_string(&json!({"target": spawned_id}))?;
+    mount_sse_once_match(
+        &server,
+        |req: &wiremock::Request| body_contains(req, CLOSE_CHILD_PROMPT),
+        sse(vec![
+            ev_response_created("resp-close-1"),
+            ev_function_call_with_namespace(
+                CLOSE_CALL_ID,
+                MULTI_AGENT_V1_NAMESPACE,
+                "close_agent",
+                &close_args,
+            ),
+            ev_completed("resp-close-1"),
+        ]),
+    )
+    .await;
+    let close_followup = mount_sse_once_match(
+        &server,
+        |req: &wiremock::Request| body_contains(req, CLOSE_CALL_ID),
+        sse(vec![
+            ev_response_created("resp-close-2"),
+            ev_assistant_message("msg-close-2", "parent saw child close"),
+            ev_completed("resp-close-2"),
+        ]),
+    )
+    .await;
+
+    test.submit_turn(CLOSE_CHILD_PROMPT).await?;
+
+    let close_request = close_followup.single_request();
+    assert!(close_request.body_contains_text("previous_status"));
+    let roster_updates = close_request
+        .message_input_texts("user")
+        .into_iter()
+        .filter(|text| text.contains("<subagents"))
+        .collect::<Vec<_>>();
+    assert_eq!(roster_updates.len(), 2);
+    assert!(roster_updates[0].contains(&spawned_id));
+    assert!(roster_updates[1].contains("<subagents />"));
+    assert!(!roster_updates[1].contains(&spawned_id));
+
+    Ok(())
 }
 
 async fn spawn_child_and_capture_snapshot(

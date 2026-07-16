@@ -35,12 +35,14 @@ use codex_protocol::protocol::RolloutItem;
 use codex_protocol::protocol::RolloutLine;
 use codex_protocol::protocol::SessionSource as CoreSessionSource;
 use codex_protocol::protocol::SubAgentSource;
+use codex_protocol::protocol::WorldStateItem;
 use core_test_support::responses;
 use pretty_assertions::assert_eq;
 use std::cmp::Reverse;
 use std::fs;
 use std::fs::FileTimes;
 use std::fs::OpenOptions;
+use std::io::Write;
 use std::path::Path;
 use tempfile::TempDir;
 use tokio::time::timeout;
@@ -196,6 +198,101 @@ async fn thread_list_basic_empty() -> Result<()> {
     .await?;
     assert!(data.is_empty());
     assert_eq!(next_cursor, None);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn thread_list_and_search_ignore_internal_world_state() -> Result<()> {
+    const USER_PREVIEW: &str = "visible user preview";
+    const WORLD_STATE_SECRET: &str = "INTERNAL_WORLD_STATE_SECRET_9E4C";
+
+    let codex_home = TempDir::new()?;
+    create_minimal_config(codex_home.path())?;
+    let timestamp = "2025-01-02T10-00-00";
+    let thread_id = create_fake_rollout(
+        codex_home.path(),
+        timestamp,
+        "2025-01-02T10:00:00Z",
+        USER_PREVIEW,
+        Some("mock_provider"),
+        /*git_info*/ None,
+    )?;
+    let world_state_line = RolloutLine {
+        timestamp: "2025-01-02T10:00:01Z".to_string(),
+        item: RolloutItem::WorldState(WorldStateItem::full(serde_json::json!({
+            "agents_md": {"text": WORLD_STATE_SECRET},
+        }))),
+    };
+    writeln!(
+        OpenOptions::new().append(true).open(rollout_path(
+            codex_home.path(),
+            timestamp,
+            &thread_id
+        ))?,
+        "{}",
+        serde_json::to_string(&world_state_line)?
+    )?;
+
+    let mut mcp = init_mcp(codex_home.path()).await?;
+    let ThreadListResponse { data, .. } = list_threads(
+        &mut mcp,
+        /*cursor*/ None,
+        Some(10),
+        Some(vec!["mock_provider".to_string()]),
+        /*source_kinds*/ None,
+        /*archived*/ None,
+    )
+    .await?;
+    assert_eq!(data.len(), 1);
+    assert_eq!(data[0].preview, USER_PREVIEW);
+
+    let list_request_id = mcp
+        .send_thread_list_request(codex_app_server_protocol::ThreadListParams {
+            cursor: None,
+            limit: Some(10),
+            sort_key: None,
+            sort_direction: None,
+            model_providers: Some(vec!["mock_provider".to_string()]),
+            source_kinds: None,
+            archived: None,
+            cwd: None,
+            use_state_db_only: false,
+            search_term: Some(WORLD_STATE_SECRET.to_string()),
+        })
+        .await?;
+    let list_response: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(list_request_id)),
+    )
+    .await??;
+    assert!(
+        to_response::<ThreadListResponse>(list_response)?
+            .data
+            .is_empty()
+    );
+
+    let search_request_id = mcp
+        .send_thread_search_request(codex_app_server_protocol::ThreadSearchParams {
+            cursor: None,
+            limit: Some(10),
+            sort_key: None,
+            sort_direction: None,
+            source_kinds: None,
+            archived: None,
+            search_term: WORLD_STATE_SECRET.to_string(),
+        })
+        .await?;
+    let search_response: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(search_request_id)),
+    )
+    .await??;
+    assert!(
+        to_response::<ThreadSearchResponse>(search_response)?
+            .data
+            .is_empty()
+    );
 
     Ok(())
 }

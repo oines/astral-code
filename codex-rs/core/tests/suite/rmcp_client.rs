@@ -33,8 +33,11 @@ use codex_protocol::openai_models::InputModality;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::McpInvocation;
+use codex_protocol::protocol::McpServerRefreshConfig;
 use codex_protocol::protocol::McpToolCallBeginEvent;
 use codex_protocol::protocol::Op;
+use codex_protocol::protocol::ReviewRequest;
+use codex_protocol::protocol::ReviewTarget;
 use codex_protocol::user_input::UserInput;
 use codex_utils_cargo_bin::cargo_bin;
 use codex_utils_path_uri::PathUri;
@@ -44,6 +47,8 @@ use core_test_support::responses;
 use core_test_support::responses::mount_sse_once;
 use core_test_support::skip_if_no_network;
 use core_test_support::stdio_server_bin;
+use core_test_support::streaming_sse::StreamingSseChunk;
+use core_test_support::streaming_sse::start_streaming_sse_server;
 use core_test_support::test_codex::TestCodex;
 use core_test_support::test_codex::test_codex;
 use core_test_support::test_codex::turn_permission_fields;
@@ -57,6 +62,7 @@ use serial_test::serial;
 use tempfile::tempdir;
 use tokio::process::Child;
 use tokio::process::Command;
+use tokio::sync::oneshot;
 use tokio::time::Instant;
 use tokio::time::sleep;
 use wiremock::MockServer;
@@ -547,6 +553,180 @@ async fn stdio_server_round_trip() -> anyhow::Result<()> {
 
     server.verify().await;
 
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mcp_step_context_pins_advertised_runtime_through_streamed_dispatch() -> anyhow::Result<()>
+{
+    skip_if_no_network!(Ok(()));
+
+    let server_name = "pinned_runtime";
+    let namespace = format!("mcp__{server_name}");
+    let first_call_id = "call-old-runtime";
+    let second_call_id = "call-new-runtime";
+    let (tool_call_gate_tx, tool_call_gate_rx) = oneshot::channel();
+    let (streaming_server, _completions) = start_streaming_sse_server(vec![
+        vec![
+            StreamingSseChunk {
+                gate: None,
+                body: responses::sse(vec![responses::ev_response_created("resp-old")]),
+            },
+            StreamingSseChunk {
+                gate: Some(tool_call_gate_rx),
+                body: responses::sse(vec![
+                    responses::ev_function_call_with_namespace(
+                        first_call_id,
+                        &namespace,
+                        "echo",
+                        r#"{"message":"old"}"#,
+                    ),
+                    responses::ev_completed("resp-old"),
+                ]),
+            },
+        ],
+        vec![StreamingSseChunk {
+            gate: None,
+            body: responses::sse(vec![
+                responses::ev_assistant_message("msg-old", "old runtime done"),
+                responses::ev_completed("resp-old-done"),
+            ]),
+        }],
+        vec![StreamingSseChunk {
+            gate: None,
+            body: responses::sse(vec![
+                responses::ev_response_created("resp-new"),
+                responses::ev_function_call_with_namespace(
+                    second_call_id,
+                    &namespace,
+                    "echo",
+                    r#"{"message":"new"}"#,
+                ),
+                responses::ev_completed("resp-new"),
+            ]),
+        }],
+        vec![StreamingSseChunk {
+            gate: None,
+            body: responses::sse(vec![
+                responses::ev_assistant_message("msg-new", "new runtime done"),
+                responses::ev_completed("resp-new-done"),
+            ]),
+        }],
+    ])
+    .await;
+    let command = stdio_server_bin()?;
+    let initial_command = command.clone();
+    let fixture = test_codex()
+        .with_config(move |config| {
+            insert_mcp_server(
+                config,
+                server_name,
+                stdio_transport(
+                    initial_command,
+                    Some(HashMap::from([(
+                        "MCP_TEST_VALUE".to_string(),
+                        "old-runtime".to_string(),
+                    )])),
+                    Vec::new(),
+                ),
+                TestMcpServerOptions::default(),
+            );
+        })
+        .build_with_streaming_server(&streaming_server)
+        .await?;
+    wait_for_mcp_server(&fixture.codex, server_name).await?;
+
+    fixture
+        .codex
+        .submit(read_only_user_turn(&fixture, "call the old runtime"))
+        .await?;
+    streaming_server.wait_for_request_count(1).await;
+
+    let mut refreshed_servers = fixture.config.mcp_servers.get().clone();
+    refreshed_servers
+        .get_mut(server_name)
+        .expect("configured MCP server")
+        .transport = stdio_transport(
+        command,
+        Some(HashMap::from([(
+            "MCP_TEST_VALUE".to_string(),
+            "new-runtime".to_string(),
+        )])),
+        Vec::new(),
+    );
+    fixture
+        .codex
+        .submit(Op::RefreshMcpServers {
+            config: McpServerRefreshConfig {
+                mcp_servers: serde_json::to_value(refreshed_servers)?,
+                mcp_oauth_credentials_store_mode: serde_json::to_value(
+                    fixture.config.mcp_oauth_credentials_store_mode,
+                )?,
+            },
+        })
+        .await?;
+    fixture
+        .codex
+        .submit(Op::Review {
+            review_request: ReviewRequest {
+                target: ReviewTarget::Custom {
+                    instructions: String::new(),
+                },
+                user_facing_hint: None,
+            },
+        })
+        .await?;
+    wait_for_event(&fixture.codex, |event| matches!(event, EventMsg::Error(_))).await;
+
+    tool_call_gate_tx
+        .send(())
+        .expect("release streamed MCP tool call");
+    let old_end = wait_for_event(&fixture.codex, |event| {
+        matches!(event, EventMsg::McpToolCallEnd(_))
+    })
+    .await;
+    let EventMsg::McpToolCallEnd(old_end) = old_end else {
+        unreachable!("event guard guarantees MCP tool completion");
+    };
+    let old_result = old_end.result.as_ref().expect("old MCP runtime result");
+    assert_eq!(
+        old_result
+            .structured_content
+            .as_ref()
+            .and_then(|content| content.get("env")),
+        Some(&json!("old-runtime"))
+    );
+    wait_for_event(&fixture.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+
+    fixture
+        .codex
+        .submit(read_only_user_turn(&fixture, "call the new runtime"))
+        .await?;
+    let new_end = wait_for_event(&fixture.codex, |event| {
+        matches!(event, EventMsg::McpToolCallEnd(_))
+    })
+    .await;
+    let EventMsg::McpToolCallEnd(new_end) = new_end else {
+        unreachable!("event guard guarantees MCP tool completion");
+    };
+    let new_result = new_end.result.as_ref().expect("new MCP runtime result");
+    assert_eq!(
+        new_result
+            .structured_content
+            .as_ref()
+            .and_then(|content| content.get("env")),
+        Some(&json!("new-runtime"))
+    );
+    wait_for_event(&fixture.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+
+    fixture.codex.shutdown_and_wait().await?;
+    streaming_server.shutdown().await;
     Ok(())
 }
 
