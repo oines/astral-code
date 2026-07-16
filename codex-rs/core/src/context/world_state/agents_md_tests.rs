@@ -81,6 +81,31 @@ fn unknown_previous_state_is_explicitly_superseded() {
     );
 }
 
+#[test]
+fn oversized_instructions_are_bounded_before_snapshot_and_render() {
+    let loaded = LoadedAgentsMd::from_text_for_testing("instruction\n".repeat(20_000));
+    let state = AgentsMdState::new(Some(&loaded));
+    let snapshot = WorldStateSection::snapshot(&state);
+    let full = WorldStateSection::render_diff(&state, PreviousSectionState::Absent)
+        .expect("oversized instructions should render")
+        .render();
+    let replacement = WorldStateSection::render_diff(&state, PreviousSectionState::Unknown)
+        .expect("oversized replacement instructions should render")
+        .render();
+
+    assert!(full.len() <= MAX_AGENTS_MD_FRAGMENT_BYTES);
+    assert!(replacement.len() <= MAX_AGENTS_MD_FRAGMENT_BYTES);
+    assert!(
+        snapshot
+            .text
+            .as_deref()
+            .is_some_and(|text| text.contains("additional world-state content truncated"))
+    );
+    assert!(
+        WorldStateSection::render_diff(&state, PreviousSectionState::Known(&snapshot)).is_none()
+    );
+}
+
 fn render_fragments(fragments: Vec<Box<dyn ContextualUserFragment>>) -> Vec<TranscriptItem> {
     fragments
         .into_iter()

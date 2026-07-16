@@ -1,5 +1,6 @@
 use super::PreviousSectionState;
 use super::WorldStateSection;
+use super::truncate_world_state_text;
 use crate::context::ContextualUserFragment;
 use crate::context::environment_context::FileSystemContext;
 use crate::context::environment_context::NetworkContext;
@@ -10,6 +11,19 @@ use codex_utils_path_uri::PathUri;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
+
+#[path = "environment_projection.rs"]
+mod projection;
+
+use projection::project_snapshot;
+
+const MAX_ENVIRONMENTS_FRAGMENT_BYTES: usize = 8 * 1024;
+const MAX_ENVIRONMENT_ID_BYTES: usize = 256;
+const MAX_ENVIRONMENT_VALUE_BYTES: usize = 1024;
+const MAX_TURN_CONTEXT_VALUE_BYTES: usize = 256;
+const MAX_SUBAGENTS_BYTES: usize = 1024;
+const TRUNCATED_CONTEXT_NOTICE: &str =
+    "Additional environment context was omitted to fit the model context limit.";
 
 /// Environment values visible to the model.
 #[derive(Clone, Debug, Default)]
@@ -52,25 +66,7 @@ impl EnvironmentsState {
     }
 
     fn rendered_full(&self) -> RenderedEnvironments {
-        RenderedEnvironments {
-            updates: self
-                .environments
-                .iter()
-                .map(|(id, environment)| {
-                    (id.clone(), EnvironmentUpdate::Current(environment.clone()))
-                })
-                .collect(),
-            legacy_single: is_legacy_single(&self.environments),
-            model: self.model.clone(),
-            current_date: self.current_date.clone(),
-            timezone: self.timezone.clone(),
-            network: self.network.clone(),
-            filesystem: self.filesystem.clone(),
-            subagents: self
-                .subagents
-                .clone()
-                .map_or(RenderedSubagents::Omitted, RenderedSubagents::Current),
-        }
+        RenderedEnvironments::full(&self.snapshot())
     }
 }
 
@@ -79,28 +75,7 @@ impl WorldStateSection for EnvironmentsState {
     type Snapshot = EnvironmentsSnapshot;
 
     fn snapshot(&self) -> Self::Snapshot {
-        EnvironmentsSnapshot {
-            environments: self
-                .environments
-                .iter()
-                .map(|(id, environment)| {
-                    (
-                        id.clone(),
-                        EnvironmentSnapshot {
-                            cwd: environment.cwd.inferred_native_path_string(),
-                            status: environment.status,
-                            shell: environment.shell.clone(),
-                        },
-                    )
-                })
-                .collect(),
-            model: self.model.clone(),
-            current_date: self.current_date.clone(),
-            timezone: self.timezone.clone(),
-            network: self.network.as_ref().map(NetworkContext::render),
-            filesystem: self.filesystem.as_ref().map(FileSystemContext::render),
-            subagents: self.subagents.clone(),
-        }
+        project_snapshot(self)
     }
 
     fn render_diff(
@@ -118,8 +93,9 @@ impl WorldStateSection for EnvironmentsState {
             || current.timezone != previous.timezone
             || current.network != previous.network
             || current.filesystem != previous.filesystem
-            || current.subagents != previous.subagents;
-        let mut updates = self
+            || current.subagents != previous.subagents
+            || current.truncated != previous.truncated;
+        let mut updates = current
             .environments
             .iter()
             .filter(|(id, _)| {
@@ -135,10 +111,10 @@ impl WorldStateSection for EnvironmentsState {
             previous
                 .environments
                 .keys()
-                .filter(|id| !self.environments.contains_key(*id))
+                .filter(|id| !current.environments.contains_key(*id))
                 .map(|id| (id.clone(), EnvironmentUpdate::Unavailable)),
         );
-        let legacy_single = is_legacy_single(&self.environments)
+        let legacy_single = is_legacy_single(&current.environments)
             && updates
                 .values()
                 .all(|update| matches!(update, EnvironmentUpdate::Current(_)));
@@ -146,15 +122,20 @@ impl WorldStateSection for EnvironmentsState {
             Box::new(RenderedEnvironments {
                 updates,
                 legacy_single,
-                model: self.model.clone(),
-                current_date: self.current_date.clone(),
-                timezone: self.timezone.clone(),
-                network: self.network.clone(),
-                filesystem: self.filesystem.clone(),
-                subagents: match (&self.subagents, &previous.subagents) {
+                model: current.model.clone(),
+                current_date: current.current_date.clone(),
+                timezone: current.timezone.clone(),
+                network: current.network.clone(),
+                filesystem: current.filesystem.clone(),
+                subagents: match (&current.subagents, &previous.subagents) {
                     (Some(subagents), _) => RenderedSubagents::Current(subagents.clone()),
                     (None, Some(_)) => RenderedSubagents::Cleared,
                     (None, None) => RenderedSubagents::Omitted,
+                },
+                truncation: match (current.truncated, previous.truncated) {
+                    (true, _) => RenderedTruncation::Current,
+                    (false, true) => RenderedTruncation::Cleared,
+                    (false, false) => RenderedTruncation::Omitted,
                 },
             }) as Box<dyn ContextualUserFragment>
         })
@@ -185,9 +166,10 @@ struct RenderedEnvironments {
     model: Option<String>,
     current_date: Option<String>,
     timezone: Option<String>,
-    network: Option<NetworkContext>,
-    filesystem: Option<FileSystemContext>,
+    network: Option<String>,
+    filesystem: Option<String>,
     subagents: RenderedSubagents,
+    truncation: RenderedTruncation,
 }
 
 enum RenderedSubagents {
@@ -196,9 +178,44 @@ enum RenderedSubagents {
     Cleared,
 }
 
+enum RenderedTruncation {
+    Omitted,
+    Current,
+    Cleared,
+}
+
 enum EnvironmentUpdate {
-    Current(EnvironmentState),
+    Current(EnvironmentSnapshot),
     Unavailable,
+}
+
+impl RenderedEnvironments {
+    fn full(snapshot: &EnvironmentsSnapshot) -> Self {
+        Self {
+            updates: snapshot
+                .environments
+                .iter()
+                .map(|(id, environment)| {
+                    (id.clone(), EnvironmentUpdate::Current(environment.clone()))
+                })
+                .collect(),
+            legacy_single: is_legacy_single(&snapshot.environments),
+            model: snapshot.model.clone(),
+            current_date: snapshot.current_date.clone(),
+            timezone: snapshot.timezone.clone(),
+            network: snapshot.network.clone(),
+            filesystem: snapshot.filesystem.clone(),
+            subagents: snapshot
+                .subagents
+                .clone()
+                .map_or(RenderedSubagents::Omitted, RenderedSubagents::Current),
+            truncation: if snapshot.truncated {
+                RenderedTruncation::Current
+            } else {
+                RenderedTruncation::Omitted
+            },
+        }
+    }
 }
 
 impl ContextualUserFragment for RenderedEnvironments {
@@ -246,12 +263,12 @@ impl ContextualUserFragment for RenderedEnvironments {
         push_optional_element(&mut rendered, "timezone", self.timezone.as_deref());
         if let Some(network) = &self.network {
             rendered.push_str("  ");
-            rendered.push_str(&network.render());
+            rendered.push_str(network);
             rendered.push('\n');
         }
         if let Some(filesystem) = &self.filesystem {
             rendered.push_str("  ");
-            rendered.push_str(&filesystem.render());
+            rendered.push_str(filesystem);
             rendered.push('\n');
         }
         match &self.subagents {
@@ -267,14 +284,23 @@ impl ContextualUserFragment for RenderedEnvironments {
             }
             RenderedSubagents::Cleared => rendered.push_str("  <subagents />\n"),
         }
+        match self.truncation {
+            RenderedTruncation::Omitted => {}
+            RenderedTruncation::Current => {
+                push_optional_element(&mut rendered, "truncated", Some(TRUNCATED_CONTEXT_NOTICE));
+            }
+            RenderedTruncation::Cleared => {
+                push_optional_element(&mut rendered, "truncated", Some("false"));
+            }
+        }
         rendered
     }
 }
 
-fn push_environment_values(rendered: &mut String, environment: &EnvironmentState, indent: &str) {
+fn push_environment_values(rendered: &mut String, environment: &EnvironmentSnapshot, indent: &str) {
     rendered.push_str(indent);
     rendered.push_str("<cwd>");
-    push_xml_escaped_text(rendered, &environment.cwd.inferred_native_path_string());
+    push_xml_escaped_text(rendered, &environment.cwd);
     rendered.push_str("</cwd>\n");
     if environment.status == EnvironmentStatus::Starting {
         rendered.push_str(indent);
@@ -308,7 +334,7 @@ struct EnvironmentState {
     shell: Option<String>,
 }
 
-#[derive(Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 pub(crate) struct EnvironmentsSnapshot {
     environments: BTreeMap<String, EnvironmentSnapshot>,
     model: Option<String>,
@@ -317,9 +343,11 @@ pub(crate) struct EnvironmentsSnapshot {
     network: Option<String>,
     filesystem: Option<String>,
     subagents: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    truncated: bool,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 struct EnvironmentSnapshot {
     cwd: String,
     status: EnvironmentStatus,
@@ -375,7 +403,7 @@ fn environment_states(snapshot: &TurnEnvironmentSnapshot) -> BTreeMap<String, En
     environments
 }
 
-fn is_legacy_single(environments: &BTreeMap<String, EnvironmentState>) -> bool {
+fn is_legacy_single(environments: &BTreeMap<String, EnvironmentSnapshot>) -> bool {
     environments.len() == 1
         && environments
             .values()

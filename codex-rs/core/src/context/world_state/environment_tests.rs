@@ -321,6 +321,75 @@ fn removed_legacy_environment_renders_unavailable() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn oversized_environment_state_is_bounded_before_snapshot_and_render() -> Result<()> {
+    let environments = (0..100)
+        .map(|index| {
+            let id = format!("environment-{index:03}");
+            let cwd = format!("file:///workspace/{index:03}/{}", "segment".repeat(200));
+            Ok((id, available(&cwd, &"shell".repeat(100))?))
+        })
+        .collect::<Result<BTreeMap<_, _>>>()?;
+    let state = EnvironmentsState {
+        environments,
+        model: Some("model&".repeat(200)),
+        current_date: Some("date&".repeat(200)),
+        timezone: Some("timezone&".repeat(200)),
+        network: Some(NetworkContext::new(
+            (0..1_000)
+                .map(|index| format!("allowed-{index}.example.com"))
+                .collect(),
+            (0..1_000)
+                .map(|index| format!("denied-{index}.example.com"))
+                .collect(),
+        )),
+        filesystem: Some(FileSystemContext::from_permission_profile(
+            &PermissionProfile::Disabled,
+            &[],
+        )),
+        subagents: Some("- worker\n".repeat(2_000)),
+    };
+
+    let snapshot = WorldStateSection::snapshot(&state);
+    let rendered = state.render();
+
+    assert!(snapshot.truncated);
+    assert!(rendered.len() <= MAX_ENVIRONMENTS_FRAGMENT_BYTES);
+    assert!(rendered.contains(TRUNCATED_CONTEXT_NOTICE));
+    assert!(
+        WorldStateSection::render_diff(&state, PreviousSectionState::Known(&snapshot)).is_none()
+    );
+    Ok(())
+}
+
+#[test]
+fn changes_to_omitted_environment_state_do_not_advance_the_model_baseline() -> Result<()> {
+    let make_state = |last_shell: &str| -> Result<EnvironmentsState> {
+        let environments = (0..100)
+            .map(|index| {
+                let shell = if index == 99 { last_shell } else { "bash" };
+                let cwd = format!("file:///workspace/{index:03}/{}", "segment".repeat(200));
+                Ok((format!("environment-{index:03}"), available(&cwd, shell)?))
+            })
+            .collect::<Result<BTreeMap<_, _>>>()?;
+        Ok(EnvironmentsState {
+            environments,
+            ..Default::default()
+        })
+    };
+    let previous = make_state("bash")?;
+    let current = make_state("zsh")?;
+    let previous_snapshot = WorldStateSection::snapshot(&previous);
+
+    assert!(previous_snapshot.truncated);
+    assert_eq!(previous_snapshot, WorldStateSection::snapshot(&current));
+    assert!(
+        WorldStateSection::render_diff(&current, PreviousSectionState::Known(&previous_snapshot),)
+            .is_none()
+    );
+    Ok(())
+}
+
 fn available(cwd: &str, shell: &str) -> Result<EnvironmentState> {
     Ok(EnvironmentState {
         cwd: PathUri::parse(cwd)?,

@@ -898,6 +898,18 @@ async fn thread_title_from_thread_store(
     (!title.is_empty() && thread.preview.trim() != title).then(|| title.to_string())
 }
 
+fn render_world_state_sections(
+    fragments: Vec<Box<dyn ContextualUserFragment>>,
+) -> Vec<(String, String)> {
+    fragments
+        .into_iter()
+        .filter_map(|fragment| {
+            let role = fragment.role().to_string();
+            matches!(role.as_str(), "developer" | "user").then(|| (role, fragment.render()))
+        })
+        .collect()
+}
+
 impl Session {
     pub(crate) async fn app_server_client_metadata(&self) -> AppServerClientMetadata {
         let state = self.state.lock().await;
@@ -2770,15 +2782,19 @@ impl Session {
         world_state: &WorldState,
     ) -> Vec<TranscriptItem> {
         let mcp = self.services.latest_mcp_runtime();
-        self.build_initial_context_with_mcp_and_world_state(turn_context, &mcp, world_state)
-            .await
+        self.build_initial_context_with_mcp_and_world_state_fragments(
+            turn_context,
+            &mcp,
+            render_world_state_sections(world_state.render_full()),
+        )
+        .await
     }
 
-    async fn build_initial_context_with_mcp_and_world_state(
+    async fn build_initial_context_with_mcp_and_world_state_fragments(
         &self,
         turn_context: &TurnContext,
         mcp: &McpRuntimeSnapshot,
-        world_state: &WorldState,
+        world_state_sections: Vec<(String, String)>,
     ) -> Vec<TranscriptItem> {
         let mut developer_sections = Vec::<String>::with_capacity(8);
         let mut contextual_user_sections = Vec::<String>::with_capacity(2);
@@ -2935,10 +2951,10 @@ impl Session {
                 }
             }
         }
-        for fragment in world_state.render_full() {
-            match fragment.role() {
-                "developer" => developer_sections.push(fragment.render()),
-                "user" => contextual_user_sections.push(fragment.render()),
+        for (role, rendered) in world_state_sections {
+            match role.as_str() {
+                "developer" => developer_sections.push(rendered),
+                "user" => contextual_user_sections.push(rendered),
                 _ => {}
             }
         }
@@ -3061,23 +3077,19 @@ impl Session {
         let world_state = Arc::new(self.build_world_state_for_step(step_context).await);
         // Full initial context resets the baseline; later turns persist only its changes.
         let (context_items, world_state_item) = if should_inject_full_context {
+            let (fragments, world_state_item) = {
+                let mut state = self.state.lock().await;
+                state.history.initialize_world_state(world_state.as_ref())
+            };
+            let world_state_sections = render_world_state_sections(fragments);
             let context_items = self
-                .build_initial_context_with_mcp_and_world_state(
+                .build_initial_context_with_mcp_and_world_state_fragments(
                     turn_context,
                     step_context.mcp.as_ref(),
-                    world_state.as_ref(),
+                    world_state_sections,
                 )
                 .await;
-            let snapshot = world_state.snapshot();
-            self.state
-                .lock()
-                .await
-                .history
-                .set_world_state_baseline(snapshot.clone());
-            (
-                context_items,
-                Some(WorldStateItem::full(snapshot.into_value())),
-            )
+            (context_items, Some(world_state_item))
         } else {
             // Steady-state path: append only built-in context diffs to minimize token overhead.
             let mut context_items = self

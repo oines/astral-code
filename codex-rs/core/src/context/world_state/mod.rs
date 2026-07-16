@@ -15,6 +15,28 @@ use std::fmt;
 pub(crate) use agents_md::AgentsMdState;
 pub(crate) use environment::EnvironmentsState;
 
+const TRUNCATION_NOTICE: &str = "\n[additional world-state content truncated]";
+
+fn truncate_world_state_text(text: &str, max_bytes: usize) -> String {
+    if text.len() <= max_bytes {
+        return text.to_string();
+    }
+
+    if max_bytes <= TRUNCATION_NOTICE.len() {
+        let mut end = max_bytes;
+        while !TRUNCATION_NOTICE.is_char_boundary(end) {
+            end = end.saturating_sub(1);
+        }
+        return TRUNCATION_NOTICE[..end].to_string();
+    }
+
+    let mut end = max_bytes - TRUNCATION_NOTICE.len();
+    while !text.is_char_boundary(end) {
+        end = end.saturating_sub(1);
+    }
+    format!("{}{TRUNCATION_NOTICE}", &text[..end])
+}
+
 trait ErasedWorldStateSection: Send + Sync {
     fn snapshot(&self) -> Option<Value>;
 

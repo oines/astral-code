@@ -1,5 +1,6 @@
 use super::PreviousSectionState;
 use super::WorldStateSection;
+use super::truncate_world_state_text;
 use crate::agents_md::LoadedAgentsMd;
 use crate::context::ContextualUserFragment;
 use crate::context::UserInstructions;
@@ -9,6 +10,8 @@ use serde::Serialize;
 const REPLACEMENT_NOTICE: &str =
     "These AGENTS.md instructions replace all previously provided AGENTS.md instructions.";
 const REMOVAL_NOTICE: &str = "The previously provided AGENTS.md instructions no longer apply.";
+const MAX_AGENTS_MD_FRAGMENT_BYTES: usize = 24 * 1024;
+const MAX_AGENTS_MD_DIRECTORY_BYTES: usize = 1024;
 
 /// The AGENTS.md instructions currently visible to the model.
 #[derive(Clone, Debug, Default)]
@@ -26,7 +29,23 @@ pub(crate) struct AgentsMdSnapshot {
 impl AgentsMdState {
     pub(crate) fn new(loaded: Option<&LoadedAgentsMd>) -> Self {
         Self {
-            instructions: loaded.map(LoadedAgentsMd::contextual_user_fragment),
+            instructions: loaded.map(|loaded| {
+                let mut instructions = loaded.contextual_user_fragment();
+                instructions.directory = instructions.directory.map(|directory| {
+                    truncate_world_state_text(&directory, MAX_AGENTS_MD_DIRECTORY_BYTES)
+                });
+                let replacement_overhead = UserInstructions {
+                    directory: instructions.directory.clone(),
+                    text: format!("{REPLACEMENT_NOTICE}\n\n"),
+                }
+                .render()
+                .len();
+                instructions.text = truncate_world_state_text(
+                    &instructions.text,
+                    MAX_AGENTS_MD_FRAGMENT_BYTES.saturating_sub(replacement_overhead),
+                );
+                instructions
+            }),
         }
     }
 }

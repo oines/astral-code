@@ -104,6 +104,19 @@ impl ContextManager {
         (fragments, rollout_item)
     }
 
+    /// Establishes a full persisted baseline while reconciling any matching legacy fragments
+    /// already retained in model history.
+    pub(crate) fn initialize_world_state(
+        &mut self,
+        world_state: &WorldState,
+    ) -> (Vec<Box<dyn ContextualUserFragment>>, WorldStateItem) {
+        let snapshot = world_state.snapshot();
+        let fragments = world_state.render_history_diff(/*previous*/ None, &self.items);
+        let rollout_item = WorldStateItem::full(snapshot.clone().into_value());
+        self.world_state_baseline = Some(snapshot);
+        (fragments, rollout_item)
+    }
+
     pub(crate) fn set_world_state_baseline(&mut self, snapshot: WorldStateSnapshot) {
         self.world_state_baseline = Some(snapshot);
     }
