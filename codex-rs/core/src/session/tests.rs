@@ -23,6 +23,7 @@ use codex_config::RequirementSource;
 use codex_config::Sourced;
 use codex_config::loader::project_trust_key;
 use codex_config::types::McpServerConfig;
+use codex_config::types::McpServerTransportConfig;
 use codex_config::types::ToolSuggestDisabledTool;
 use core_test_support::test_codex::local_selections;
 
@@ -7308,6 +7309,126 @@ async fn built_tools_uses_the_step_mcp_runtime() -> anyhow::Result<()> {
             .iter()
             .any(|name| name.to_string() == "list_mcp_resources")
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn mcp_tool_declaration_and_dispatch_share_the_step_runtime() -> anyhow::Result<()> {
+    let command = core_test_support::stdio_server_bin()?;
+    let server_config = |value: &str| McpServerConfig {
+        transport: McpServerTransportConfig::Stdio {
+            command: command.clone(),
+            args: Vec::new(),
+            env: Some(HashMap::from([(
+                "MCP_TEST_VALUE".to_string(),
+                value.to_string(),
+            )])),
+            env_vars: Vec::new(),
+            cwd: None,
+        },
+        environment_id: codex_config::DEFAULT_MCP_SERVER_ENVIRONMENT_ID.to_string(),
+        enabled: true,
+        required: false,
+        supports_parallel_tool_calls: false,
+        disabled_reason: None,
+        startup_timeout_sec: Some(Duration::from_secs(10)),
+        tool_timeout_sec: None,
+        default_tools_approval_mode: None,
+        enabled_tools: None,
+        disabled_tools: None,
+        scopes: None,
+        oauth: None,
+        oauth_resource: None,
+        tools: HashMap::new(),
+    };
+    let (session, turn_context, _rx) = make_session_and_context_with_rx().await;
+    session
+        .refresh_mcp_servers_now(
+            turn_context.as_ref(),
+            HashMap::from([("rmcp".to_string(), server_config("old-runtime"))]),
+            turn_context.config.mcp_oauth_credentials_store_mode,
+            /*elicitation_reviewer*/ None,
+        )
+        .await;
+    let old_step = session
+        .capture_step_context(Arc::clone(&turn_context))
+        .await;
+    let old_router = crate::session::turn::built_tools(
+        session.as_ref(),
+        old_step.as_ref(),
+        &CancellationToken::new(),
+    )
+    .await?;
+    let registered_tool_names = old_router.registered_tool_names_for_test();
+    let echo_tool_name = registered_tool_names
+        .iter()
+        .find(|name| name.name == "echo" && name.namespace.as_deref() == Some("mcp__rmcp"))
+        .cloned()
+        .unwrap_or_else(|| {
+            panic!("old step should advertise the rmcp echo tool: {registered_tool_names:?}")
+        });
+
+    session
+        .refresh_mcp_servers_now(
+            turn_context.as_ref(),
+            HashMap::from([("rmcp".to_string(), server_config("new-runtime"))]),
+            turn_context.config.mcp_oauth_credentials_store_mode,
+            /*elicitation_reviewer*/ None,
+        )
+        .await;
+
+    let old_result = old_router
+        .dispatch_tool_call_with_code_mode_result(
+            Arc::clone(&session),
+            Arc::clone(&old_step),
+            CancellationToken::new(),
+            Arc::new(Mutex::new(TurnDiffTracker::new())),
+            crate::tools::router::ToolCall {
+                tool_name: echo_tool_name.clone(),
+                call_id: "old-runtime-call".to_string(),
+                payload: crate::tools::context::ToolPayload::Function {
+                    arguments: json!({ "message": "snapshot" }).to_string(),
+                },
+            },
+            crate::tools::context::ToolCallSource::Direct,
+        )
+        .await?
+        .code_mode_result();
+    assert_eq!(
+        old_result.pointer("/structuredContent/env"),
+        Some(&json!("old-runtime"))
+    );
+
+    let new_step = session.capture_step_context(turn_context).await;
+    assert!(!Arc::ptr_eq(&old_step.mcp, &new_step.mcp));
+    let new_router = crate::session::turn::built_tools(
+        session.as_ref(),
+        new_step.as_ref(),
+        &CancellationToken::new(),
+    )
+    .await?;
+    let new_result = new_router
+        .dispatch_tool_call_with_code_mode_result(
+            Arc::clone(&session),
+            new_step,
+            CancellationToken::new(),
+            Arc::new(Mutex::new(TurnDiffTracker::new())),
+            crate::tools::router::ToolCall {
+                tool_name: echo_tool_name,
+                call_id: "new-runtime-call".to_string(),
+                payload: crate::tools::context::ToolPayload::Function {
+                    arguments: json!({ "message": "snapshot" }).to_string(),
+                },
+            },
+            crate::tools::context::ToolCallSource::Direct,
+        )
+        .await?
+        .code_mode_result();
+    assert_eq!(
+        new_result.pointer("/structuredContent/env"),
+        Some(&json!("new-runtime"))
+    );
+
     Ok(())
 }
 
