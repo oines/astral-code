@@ -9,6 +9,9 @@ use crate::PUBLIC_TOOL_NAME;
 const MAX_JS_SAFE_INTEGER: u64 = (1_u64 << 53) - 1;
 const DEFERRED_NESTED_TOOLS_GUIDANCE: &str = r#"Some deferred nested tools may be omitted from this description. They are still available on the global `tools` object and listed in `ALL_TOOLS`.
 To find one, filter `ALL_TOOLS` by `name` and `description`."#;
+const TRUNCATED_NESTED_TOOLS_GUIDANCE: &str = r#"Some enabled nested tool declarations were omitted from this description to keep the model-visible tool definition bounded. Every enabled tool remains available on the global `tools` object and in `ALL_TOOLS`; inspect the matching `ALL_TOOLS` entry for its full declaration."#;
+const MAX_EXEC_TOOL_DESCRIPTION_BYTES: usize = 9 * 1024;
+const MAX_INLINE_NESTED_SECTION_BYTES: usize = 2 * 1024;
 const EXEC_DESCRIPTION_TEMPLATE: &str = r#"Run JavaScript code to orchestrate/compose tool calls
 - Evaluates the provided JavaScript code in a fresh V8 isolate as an async module.
 - All nested tools are available on the global `tools` object, for example `await tools.exec_command(...)`. Tool names are exposed as normalized JavaScript identifiers, for example `await tools.mcp__ologs__get_profile(...)`.
@@ -276,6 +279,10 @@ pub fn build_exec_tool_description(
     if !enabled_tools.is_empty() {
         let mut current_namespace: Option<&str> = None;
         let mut nested_tool_sections = Vec::with_capacity(enabled_tools.len());
+        let mut reference_truncated = false;
+        let fixed_sections_bytes =
+            sections.iter().map(String::len).sum::<usize>() + sections.len().saturating_sub(1) * 2;
+        let mut nested_sections_bytes = 0;
 
         for tool in enabled_tools {
             let name = tool.name.as_str();
@@ -287,14 +294,24 @@ pub fn build_exec_tool_description(
                 .and_then(|namespace| namespace_descriptions.get(namespace));
             let next_namespace = namespace_description
                 .map(|namespace_description| namespace_description.name.as_str());
+            let mut tool_sections = Vec::new();
             if next_namespace != current_namespace {
                 if let Some(namespace_description) = namespace_description {
                     let namespace_description_text = namespace_description.description.trim();
                     if !namespace_description_text.is_empty() {
-                        nested_tool_sections.push(format!(
+                        let namespace_section = format!(
                             "## {}\n{namespace_description_text}",
                             namespace_description.name
-                        ));
+                        );
+                        if namespace_section.len() <= MAX_INLINE_NESTED_SECTION_BYTES {
+                            tool_sections.push(namespace_section);
+                        } else {
+                            tool_sections.push(
+                                "## Nested tool namespace\nNamespace guidance omitted from the inline reference; inspect `ALL_TOOLS` for the full tool declarations."
+                                    .to_string(),
+                            );
+                            reference_truncated = true;
+                        }
                     }
                 }
                 current_namespace = next_namespace;
@@ -302,21 +319,59 @@ pub fn build_exec_tool_description(
 
             let global_name = normalize_code_mode_identifier(name);
             let nested_description = nested_description.trim();
-            if nested_description.is_empty() {
-                nested_tool_sections.push(render_tool_heading(&global_name, name));
+            let heading = render_tool_heading(&global_name, name);
+            let tool_section = if nested_description.is_empty() {
+                heading
             } else {
-                nested_tool_sections.push(format!(
-                    "{}\n{nested_description}",
-                    render_tool_heading(&global_name, name)
-                ));
+                format!("{heading}\n{nested_description}")
+            };
+            if tool_section.len() <= MAX_INLINE_NESTED_SECTION_BYTES {
+                tool_sections.push(tool_section);
+            } else {
+                tool_sections.push(
+                    "### Nested tool declaration omitted\nThis declaration exceeds the inline reference limit; find the tool by name in `ALL_TOOLS` for its full description and TypeScript declaration."
+                        .to_string(),
+                );
+                reference_truncated = true;
             }
+
+            let tool_sections = tool_sections.join("\n\n");
+            let separator_bytes = usize::from(!nested_tool_sections.is_empty()) * 2;
+            let projected_bytes = fixed_sections_bytes
+                + usize::from(!sections.is_empty()) * 2
+                + nested_sections_bytes
+                + separator_bytes
+                + tool_sections.len()
+                + 2
+                + TRUNCATED_NESTED_TOOLS_GUIDANCE.len();
+            if projected_bytes > MAX_EXEC_TOOL_DESCRIPTION_BYTES {
+                reference_truncated = true;
+                break;
+            }
+            nested_sections_bytes += separator_bytes + tool_sections.len();
+            nested_tool_sections.push(tool_sections);
         }
 
-        let nested_tool_reference = nested_tool_sections.join("\n\n");
-        sections.push(nested_tool_reference);
+        if !nested_tool_sections.is_empty() {
+            sections.push(nested_tool_sections.join("\n\n"));
+        }
+        if reference_truncated {
+            sections.push(TRUNCATED_NESTED_TOOLS_GUIDANCE.to_string());
+        }
     }
 
-    sections.join("\n\n")
+    let mut description = sections.join("\n\n");
+    if description.len() > MAX_EXEC_TOOL_DESCRIPTION_BYTES {
+        const NOTICE: &str =
+            "\n\n[Description truncated; inspect `ALL_TOOLS` for nested tool details.]";
+        let mut truncate_at = MAX_EXEC_TOOL_DESCRIPTION_BYTES.saturating_sub(NOTICE.len());
+        while !description.is_char_boundary(truncate_at) {
+            truncate_at = truncate_at.saturating_sub(1);
+        }
+        description.truncate(truncate_at);
+        description.push_str(NOTICE);
+    }
+    description
 }
 
 pub fn build_wait_tool_description() -> &'static str {
@@ -709,6 +764,7 @@ fn render_json_schema_literal(value: &JsonValue) -> String {
 #[cfg(test)]
 mod tests {
     use super::CodeModeToolKind;
+    use super::MAX_EXEC_TOOL_DESCRIPTION_BYTES;
     use super::ParsedExecSource;
     use super::ToolDefinition;
     use super::ToolNamespaceDescription;
@@ -874,6 +930,99 @@ mod tests {
 bar"
         ));
         assert!(!description.contains("do not attempt to use any other tools directly"));
+    }
+
+    #[test]
+    fn code_mode_only_description_bounds_oversized_dynamic_tool() {
+        let description = build_exec_tool_description(
+            &[ToolDefinition {
+                name: "oversized_dynamic_tool".to_string(),
+                tool_name: ToolName::plain("oversized_dynamic_tool"),
+                description: "D".repeat(MAX_EXEC_TOOL_DESCRIPTION_BYTES * 2),
+                kind: CodeModeToolKind::Function,
+                input_schema: Some(json!({
+                    "type": "object",
+                    "description": "S".repeat(MAX_EXEC_TOOL_DESCRIPTION_BYTES * 2),
+                    "properties": {}
+                })),
+                output_schema: None,
+            }],
+            &[],
+            &BTreeMap::new(),
+            /*code_mode_only*/ true,
+        );
+
+        assert!(description.len() <= MAX_EXEC_TOOL_DESCRIPTION_BYTES);
+        assert!(description.contains("Nested tool declaration omitted"));
+        assert!(description.contains("Every enabled tool remains available"));
+    }
+
+    #[test]
+    fn code_mode_only_description_bounds_oversized_mcp_schema() {
+        let description = build_exec_tool_description(
+            &[ToolDefinition {
+                name: "mcp__sample__oversized".to_string(),
+                tool_name: ToolName::namespaced("mcp__sample__", "oversized"),
+                description: "MCP tool".to_string(),
+                kind: CodeModeToolKind::Function,
+                input_schema: Some(json!({
+                    "type": "object",
+                    "properties": {}
+                })),
+                output_schema: Some(mcp_call_tool_result_schema(json!({
+                    "type": "object",
+                    "properties": {
+                        "value": {
+                            "type": "string",
+                            "description": "S".repeat(MAX_EXEC_TOOL_DESCRIPTION_BYTES * 2)
+                        }
+                    },
+                    "required": ["value"],
+                    "additionalProperties": false
+                }))),
+            }],
+            &[],
+            &BTreeMap::new(),
+            /*code_mode_only*/ true,
+        );
+
+        assert!(description.len() <= MAX_EXEC_TOOL_DESCRIPTION_BYTES);
+        assert!(description.contains("Shared MCP Types:"));
+        assert!(description.contains("Nested tool declaration omitted"));
+        assert!(description.contains("Every enabled tool remains available"));
+        assert!(!description.contains("mcp__sample__oversized"));
+        assert!(!description.contains(&"S".repeat(MAX_EXEC_TOOL_DESCRIPTION_BYTES)));
+    }
+
+    #[test]
+    fn code_mode_only_description_bounds_many_nested_tools() {
+        let tools = (0..100)
+            .map(|index| ToolDefinition {
+                name: format!("tool_{index}"),
+                tool_name: ToolName::plain(format!("tool_{index}")),
+                description: "T".repeat(512),
+                kind: CodeModeToolKind::Function,
+                input_schema: Some(json!({
+                    "type": "object",
+                    "properties": {
+                        "value": { "type": "string" }
+                    }
+                })),
+                output_schema: None,
+            })
+            .collect::<Vec<_>>();
+
+        let description = build_exec_tool_description(
+            &tools,
+            &[],
+            &BTreeMap::new(),
+            /*code_mode_only*/ true,
+        );
+
+        assert!(description.len() <= MAX_EXEC_TOOL_DESCRIPTION_BYTES);
+        assert!(description.contains("### `tool_0`"));
+        assert!(!description.contains("### `tool_99`"));
+        assert!(description.contains("Every enabled tool remains available"));
     }
 
     #[test]
