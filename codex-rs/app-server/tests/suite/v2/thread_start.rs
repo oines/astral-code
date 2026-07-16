@@ -479,6 +479,7 @@ async fn thread_start_without_selected_environment_includes_only_global_instruct
                 text: "inspect instructions".to_string(),
                 text_elements: Vec::new(),
             }],
+            cwd: Some(workspace.path().to_path_buf()),
             ..Default::default()
         })
         .await?;

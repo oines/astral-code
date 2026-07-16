@@ -1,6 +1,7 @@
 use super::*;
 use codex_protocol::protocol::AdditionalContextEntry as CoreAdditionalContextEntry;
 use codex_protocol::protocol::AdditionalContextKind as CoreAdditionalContextKind;
+use codex_utils_path_uri::PathUri;
 
 #[derive(Clone)]
 pub(crate) struct TurnRequestProcessor {
@@ -56,6 +57,12 @@ struct ThreadSettingsBuildParams {
     summary: Option<ReasoningSummary>,
     collaboration_mode: Option<CollaborationMode>,
     personality: Option<Personality>,
+}
+
+#[derive(Clone, Copy)]
+enum CwdOnlyEnvironmentBehavior {
+    PreserveStickySelections,
+    RetargetDefaultSelections,
 }
 
 impl TurnRequestProcessor {
@@ -388,7 +395,12 @@ impl TurnRequestProcessor {
         let turn_has_input = !mapped_items.is_empty();
         let cwd = resolve_request_cwd(params.cwd)?;
         let environments = self
-            .build_environment_override(thread.as_ref(), cwd, environment_selections)
+            .build_environment_override(
+                thread.as_ref(),
+                cwd,
+                environment_selections,
+                CwdOnlyEnvironmentBehavior::PreserveStickySelections,
+            )
             .await;
         let thread_settings = self
             .build_thread_settings_overrides(
@@ -467,13 +479,29 @@ impl TurnRequestProcessor {
         thread: &CodexThread,
         cwd: Option<AbsolutePathBuf>,
         environment_selections: Option<Vec<TurnEnvironmentSelection>>,
+        cwd_only_behavior: CwdOnlyEnvironmentBehavior,
     ) -> Option<TurnEnvironmentSelections> {
         match (cwd, environment_selections) {
             (None, None) => None,
-            (Some(cwd), None) => {
+            (Some(cwd), None)
+                if matches!(
+                    cwd_only_behavior,
+                    CwdOnlyEnvironmentBehavior::RetargetDefaultSelections
+                ) =>
+            {
                 let environment_selections =
                     self.thread_manager.default_environment_selections(&cwd);
                 Some(TurnEnvironmentSelections::new(cwd, environment_selections))
+            }
+            (Some(cwd), None) => {
+                let mut environments = thread.config_snapshot().await.environments;
+                environments.legacy_fallback_cwd = cwd.clone();
+                for selection in &mut environments.environments {
+                    if selection.environment_id == LOCAL_ENVIRONMENT_ID {
+                        selection.cwd = PathUri::from_abs_path(&cwd);
+                    }
+                }
+                Some(environments)
             }
             (cwd, Some(environment_selections)) => {
                 let legacy_fallback_cwd = match cwd {
@@ -661,7 +689,12 @@ impl TurnRequestProcessor {
         let (_, thread) = self.load_thread(&params.thread_id).await?;
         let cwd = resolve_request_cwd(params.cwd)?;
         let environments = self
-            .build_environment_override(thread.as_ref(), cwd, /*environment_selections*/ None)
+            .build_environment_override(
+                thread.as_ref(),
+                cwd,
+                /*environment_selections*/ None,
+                CwdOnlyEnvironmentBehavior::RetargetDefaultSelections,
+            )
             .await;
         let thread_settings = self
             .build_thread_settings_overrides(
