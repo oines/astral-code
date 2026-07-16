@@ -1,12 +1,16 @@
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::Result;
+use codex_config::types::McpServerConfig;
+use codex_config::types::McpServerTransportConfig;
 use codex_core::config::Config;
 use codex_features::Feature;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::protocol::AskForApproval;
+use codex_protocol::protocol::ElicitationAction;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::Op;
 use codex_protocol::protocol::ReviewDecision;
@@ -21,12 +25,15 @@ use core_test_support::responses::ev_custom_tool_call;
 use core_test_support::responses::ev_response_created;
 use core_test_support::responses::sse;
 use core_test_support::skip_if_no_network;
+use core_test_support::stdio_server_bin;
 use core_test_support::test_codex::TestCodex;
 use core_test_support::test_codex::test_codex;
 use core_test_support::test_codex::turn_permission_fields;
 use core_test_support::wait_for_event;
 use core_test_support::wait_for_event_match;
 use core_test_support::wait_for_event_with_timeout;
+use core_test_support::wait_for_mcp_server;
+use serde_json::json;
 use wiremock::MockServer;
 
 const YIELD_TIME_MS: u64 = 1_000;
@@ -258,5 +265,138 @@ await tools.request_permissions({
         })
         .await?;
     harness.finish().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn code_mode_holds_nested_mcp_result_during_server_elicitation() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = responses::start_mock_server().await;
+    let rmcp_test_server_bin = stdio_server_bin()?;
+    let mut builder = test_codex()
+        .with_model("test-gpt-5.1-codex")
+        .with_config(move |config| {
+            config
+                .features
+                .enable(Feature::CodeMode)
+                .expect("enable code mode");
+            config
+                .features
+                .enable(Feature::AuthElicitation)
+                .expect("enable MCP elicitation capability");
+            let mut servers = config.mcp_servers.get().clone();
+            servers.insert(
+                "rmcp".to_string(),
+                McpServerConfig {
+                    transport: McpServerTransportConfig::Stdio {
+                        command: rmcp_test_server_bin,
+                        args: Vec::new(),
+                        env: None,
+                        env_vars: Vec::new(),
+                        cwd: None,
+                    },
+                    environment_id: "local".to_string(),
+                    enabled: true,
+                    required: false,
+                    supports_parallel_tool_calls: false,
+                    disabled_reason: None,
+                    startup_timeout_sec: Some(Duration::from_secs(10)),
+                    tool_timeout_sec: None,
+                    default_tools_approval_mode: None,
+                    enabled_tools: None,
+                    disabled_tools: None,
+                    scopes: None,
+                    oauth: None,
+                    oauth_resource: None,
+                    tools: HashMap::new(),
+                },
+            );
+            config
+                .mcp_servers
+                .set(servers)
+                .expect("set MCP test server");
+        });
+    let test = builder.build(&server).await?;
+    wait_for_mcp_server(&test.codex, "rmcp").await?;
+    let response_mock = responses::mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_custom_tool_call(
+                    "call-1",
+                    "exec",
+                    r#"// @exec: {"yield_time_ms": 1000}
+const result = await tools.mcp__rmcp__elicit({});
+text(JSON.stringify(result.structuredContent));"#,
+                ),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-2"),
+                responses::ev_function_call(
+                    "call-2",
+                    "wait",
+                    &json!({
+                        "cell_id": "1",
+                        "yield_time_ms": 10_000,
+                    })
+                    .to_string(),
+                ),
+                ev_completed("resp-2"),
+            ]),
+            sse(vec![
+                ev_assistant_message("msg-1", "done"),
+                ev_completed("resp-3"),
+            ]),
+        ],
+    )
+    .await;
+    let turn_id = submit_turn(&test, PermissionProfile::Disabled).await?;
+    let request = wait_for_event_match(&test.codex, |event| match event {
+        EventMsg::ElicitationRequest(request) => Some(request.clone()),
+        _ => None,
+    })
+    .await;
+
+    tokio::time::sleep(Duration::from_millis(YIELD_TIME_MS + 250)).await;
+    assert_eq!(
+        response_mock.requests().len(),
+        1,
+        "nested MCP result must remain held while its elicitation is unresolved"
+    );
+    test.codex
+        .submit(Op::ResolveElicitation {
+            server_name: request.server_name,
+            request_id: request.id,
+            decision: ElicitationAction::Accept,
+            content: Some(json!({ "answer": "accepted" })),
+            meta: None,
+        })
+        .await?;
+    wait_for_event_with_timeout(
+        &test.codex,
+        |event| match event {
+            EventMsg::TurnComplete(event) => event.turn_id == turn_id,
+            _ => false,
+        },
+        TURN_COMPLETE_TIMEOUT,
+    )
+    .await;
+    let requests = response_mock.requests();
+    assert_eq!(requests.len(), 3);
+    let exec_output = requests[1].custom_tool_call_output("call-1");
+    assert!(
+        exec_output
+            .to_string()
+            .contains("Script running with cell ID 1")
+    );
+    let output = requests[2].function_call_output("call-2");
+    assert!(
+        output.to_string().contains("accepted"),
+        "accepted MCP elicitation content should reach the nested JS promise: {output}"
+    );
+
     Ok(())
 }

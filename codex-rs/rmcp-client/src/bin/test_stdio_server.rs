@@ -11,6 +11,10 @@ use rmcp::ServiceExt;
 use rmcp::handler::server::ServerHandler;
 use rmcp::model::CallToolRequestParams;
 use rmcp::model::CallToolResult;
+use rmcp::model::ClientResult;
+use rmcp::model::CreateElicitationRequest;
+use rmcp::model::CreateElicitationRequestParams;
+use rmcp::model::ElicitationSchema;
 use rmcp::model::JsonObject;
 use rmcp::model::ListResourceTemplatesResult;
 use rmcp::model::ListResourcesResult;
@@ -25,6 +29,7 @@ use rmcp::model::ResourceContents;
 use rmcp::model::ResourceTemplate;
 use rmcp::model::ServerCapabilities;
 use rmcp::model::ServerInfo;
+use rmcp::model::ServerRequest;
 use rmcp::model::Tool;
 use rmcp::model::ToolAnnotations;
 use serde::Deserialize;
@@ -73,6 +78,7 @@ impl TestToolServer {
             Self::sync_readonly_tool(),
             Self::image_tool(),
             Self::image_scenario_tool(),
+            Self::elicitation_tool(),
             sandbox_meta_tool,
         ];
         let resources = vec![Self::memo_resource()];
@@ -162,6 +168,23 @@ impl TestToolServer {
         }))
         .expect("cwd tool output schema should deserialize");
         tool.output_schema = Some(Arc::new(output_schema));
+        tool.annotations = Some(ToolAnnotations::new().read_only(true));
+        tool
+    }
+
+    fn elicitation_tool() -> Tool {
+        #[expect(clippy::expect_used)]
+        let schema: JsonObject = serde_json::from_value(json!({
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+        }))
+        .expect("elicitation tool schema should deserialize");
+        let mut tool = Tool::new(
+            Cow::Borrowed("elicit"),
+            Cow::Borrowed("Request structured user input through MCP elicitation."),
+            Arc::new(schema),
+        );
         tool.annotations = Some(ToolAnnotations::new().read_only(true));
         tool
     }
@@ -512,6 +535,39 @@ impl ServerHandler for TestToolServer {
                 });
 
                 Ok(Self::structured_result(structured_content))
+            }
+            "elicit" => {
+                let requested_schema = ElicitationSchema::builder()
+                    .required_string_property("answer", |schema| schema)
+                    .build()
+                    .map_err(|err| McpError::internal_error(err.to_string(), None))?;
+                let response = context
+                    .peer
+                    .send_request(ServerRequest::CreateElicitationRequest(
+                        CreateElicitationRequest::new(
+                            CreateElicitationRequestParams::FormElicitationParams {
+                                meta: None,
+                                message: "Provide the MCP test answer.".to_string(),
+                                requested_schema,
+                            },
+                        ),
+                    ))
+                    .await
+                    .map_err(|err| McpError::internal_error(err.to_string(), None))?;
+                let response = match response {
+                    ClientResult::CustomResult(result) => result.0,
+                    ClientResult::CreateElicitationResult(result) => {
+                        serde_json::to_value(result)
+                            .map_err(|err| McpError::internal_error(err.to_string(), None))?
+                    }
+                    other => {
+                        return Err(McpError::internal_error(
+                            format!("unexpected elicitation response: {other:?}"),
+                            None,
+                        ));
+                    }
+                };
+                Ok(Self::structured_result(response))
             }
             "image" => {
                 // Read a data URL (e.g. data:image/png;base64,AAA...) from env and convert to
