@@ -88,17 +88,31 @@ pub(crate) async fn load_project_instructions(
     environments: &TurnEnvironmentSnapshot,
 ) -> Option<LoadedAgentsMd> {
     let mut loaded = global_instructions.unwrap_or_default();
+    let mut remaining_project_doc_bytes = config.project_doc_max_bytes;
     for turn_environment in &environments.turn_environments {
+        if remaining_project_doc_bytes == 0 {
+            break;
+        }
         let filesystem = turn_environment.environment.get_filesystem();
         match read_agents_md(
             config,
             filesystem.as_ref(),
             &turn_environment.environment_id,
             turn_environment.cwd(),
+            remaining_project_doc_bytes,
         )
         .await
         {
-            Ok(Some(docs)) => loaded.entries.extend(docs.entries),
+            Ok(Some(docs)) => {
+                let loaded_bytes = docs
+                    .entries
+                    .iter()
+                    .map(|entry| entry.contents.len())
+                    .sum::<usize>();
+                remaining_project_doc_bytes =
+                    remaining_project_doc_bytes.saturating_sub(loaded_bytes);
+                loaded.entries.extend(docs.entries);
+            }
             Ok(None) => {}
             Err(e) => {
                 error!(
@@ -130,9 +144,8 @@ async fn read_agents_md(
     fs: &dyn ExecutorFileSystem,
     environment_id: &str,
     cwd: &PathUri,
+    max_total: usize,
 ) -> io::Result<Option<LoadedAgentsMd>> {
-    let max_total = config.project_doc_max_bytes;
-
     if max_total == 0 {
         return Ok(None);
     }
@@ -168,8 +181,17 @@ async fn read_agents_md(
             );
         }
 
-        let text = String::from_utf8_lossy(&data).to_string();
+        let mut text = String::from_utf8_lossy(&data).into_owned();
+        let remaining_bytes = remaining as usize;
+        if text.len() > remaining_bytes {
+            let mut truncate_at = remaining_bytes;
+            while !text.is_char_boundary(truncate_at) {
+                truncate_at = truncate_at.saturating_sub(1);
+            }
+            text.truncate(truncate_at);
+        }
         if !text.trim().is_empty() {
+            let text_bytes = text.len() as u64;
             loaded.entries.push(InstructionEntry {
                 contents: text,
                 provenance: InstructionProvenance::Project {
@@ -178,7 +200,7 @@ async fn read_agents_md(
                     cwd: cwd.clone(),
                 },
             });
-            remaining = remaining.saturating_sub(data.len() as u64);
+            remaining = remaining.saturating_sub(text_bytes);
         }
     }
 

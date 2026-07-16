@@ -233,9 +233,10 @@ async fn read_agents_md_propagates_metadata_errors() {
     };
     let cwd = PathUri::from_abs_path(&config.cwd);
 
-    let err = super::super::read_agents_md(&config, &fs, "local", &cwd)
-        .await
-        .expect_err("metadata error");
+    let err =
+        super::super::read_agents_md(&config, &fs, "local", &cwd, config.project_doc_max_bytes)
+            .await
+            .expect_err("metadata error");
 
     assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
 }
@@ -252,9 +253,10 @@ async fn read_agents_md_propagates_read_errors() {
     };
     let cwd = PathUri::from_abs_path(&config.cwd);
 
-    let err = super::super::read_agents_md(&config, &fs, "local", &cwd)
-        .await
-        .expect_err("read error");
+    let err =
+        super::super::read_agents_md(&config, &fs, "local", &cwd, config.project_doc_max_bytes)
+            .await
+            .expect_err("read error");
 
     assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
 }
@@ -271,9 +273,10 @@ async fn read_agents_md_ignores_files_removed_after_discovery() {
     };
     let cwd = PathUri::from_abs_path(&config.cwd);
 
-    let loaded = super::super::read_agents_md(&config, &fs, "local", &cwd)
-        .await
-        .expect("removed file is recoverable");
+    let loaded =
+        super::super::read_agents_md(&config, &fs, "local", &cwd, config.project_doc_max_bytes)
+            .await
+            .expect("removed file is recoverable");
 
     assert_eq!(loaded, None);
 }

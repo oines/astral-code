@@ -556,7 +556,7 @@ async fn primary_only_project_doc_preserves_legacy_layout_with_multiple_bound_en
 }
 
 #[tokio::test]
-async fn project_doc_byte_limit_is_applied_independently_per_environment() {
+async fn project_doc_byte_limit_is_shared_across_environments() {
     let primary = tempfile::tempdir().expect("primary tempdir");
     let secondary = tempfile::tempdir().expect("secondary tempdir");
     fs::write(primary.path().join("AGENTS.md"), "ABCDE").unwrap();
@@ -572,20 +572,11 @@ async fn project_doc_byte_limit_is_applied_independently_per_environment() {
             .await
             .expect("instructions expected");
 
-    assert_eq!(
-        loaded.text(),
-        format!(
-            "for `primary` with root {}\n\nABC\n\nfor `secondary` with root {}\n\nVWX",
-            primary.path().display(),
-            secondary.path().display()
-        )
-    );
+    assert_eq!(loaded.text(), "ABC");
 }
 
 #[tokio::test]
-async fn multiple_environments_can_exceed_single_environment_project_doc_limit() {
-    // TODO(anp): Add an aggregate cap across environments instead of allowing the combined
-    // project instructions to grow by one full per-environment budget for every binding.
+async fn multiple_environments_respect_aggregate_project_doc_limit() {
     const LIMIT: usize = 8;
     let primary = tempfile::tempdir().expect("primary tempdir");
     let secondary = tempfile::tempdir().expect("secondary tempdir");
@@ -610,10 +601,37 @@ async fn multiple_environments_can_exceed_single_environment_project_doc_limit()
         .map(|entry| entry.contents.len())
         .sum::<usize>();
 
-    assert_eq!(project_bytes, LIMIT * 2);
-    assert!(project_bytes > config.project_doc_max_bytes);
+    assert_eq!(project_bytes, LIMIT);
     assert!(loaded.text().contains(&primary_doc));
-    assert!(loaded.text().contains(&secondary_doc));
+    assert!(!loaded.text().contains(&secondary_doc));
+}
+
+#[tokio::test]
+async fn later_environment_uses_remaining_project_doc_budget() {
+    const LIMIT: usize = 8;
+    let primary = tempfile::tempdir().expect("primary tempdir");
+    let secondary = tempfile::tempdir().expect("secondary tempdir");
+    fs::write(primary.path().join("AGENTS.md"), "PPP").unwrap();
+    fs::write(secondary.path().join("AGENTS.md"), "SSSSSS").unwrap();
+    let config = make_config(&primary, LIMIT, /*instructions*/ None).await;
+    let environments = resolved_local_environments([
+        ("primary", config.cwd.clone()),
+        ("secondary", secondary.abs()),
+    ]);
+
+    let loaded =
+        load_project_instructions(&config, /*global_instructions*/ None, &environments)
+            .await
+            .expect("instructions expected");
+
+    assert_eq!(
+        loaded.text(),
+        format!(
+            "for `primary` with root {}\n\nPPP\n\nfor `secondary` with root {}\n\nSSSSS",
+            primary.path().display(),
+            secondary.path().display()
+        )
+    );
 }
 
 #[tokio::test]
