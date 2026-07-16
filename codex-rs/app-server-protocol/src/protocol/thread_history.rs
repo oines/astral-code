@@ -1253,6 +1253,7 @@ mod tests {
     use codex_protocol::protocol::TurnStartedEvent;
     use codex_protocol::protocol::UserMessageEvent;
     use codex_protocol::protocol::WebSearchEndEvent;
+    use codex_protocol::protocol::WorldStateItem;
     use codex_utils_absolute_path::test_support::PathBufExt;
     use codex_utils_absolute_path::test_support::test_path_buf;
     use pretty_assertions::assert_eq;
@@ -1366,6 +1367,37 @@ mod tests {
                 phase: None,
                 memory_citation: None,
             }
+        );
+    }
+
+    #[test]
+    fn world_state_rollout_items_do_not_appear_in_thread_history() {
+        let visible_items = vec![
+            RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+                client_id: None,
+                message: "hello".into(),
+                images: None,
+                text_elements: Vec::new(),
+                local_images: Vec::new(),
+                ..Default::default()
+            })),
+            RolloutItem::EventMsg(EventMsg::AgentMessage(AgentMessageEvent {
+                message: "hi".into(),
+                phase: None,
+                memory_citation: None,
+            })),
+        ];
+        let items_with_world_state = vec![
+            visible_items[0].clone(),
+            RolloutItem::WorldState(WorldStateItem::full(serde_json::json!({
+                "environment": {"internal": "not user visible"}
+            }))),
+            visible_items[1].clone(),
+        ];
+
+        assert_eq!(
+            build_turns_from_rollout_items(&items_with_world_state),
+            build_turns_from_rollout_items(&visible_items),
         );
     }
 
