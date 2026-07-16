@@ -390,6 +390,43 @@ fn changes_to_omitted_environment_state_do_not_advance_the_model_baseline() -> R
     Ok(())
 }
 
+#[test]
+fn oversized_environment_diff_uses_bounded_replacement_snapshot() -> Result<()> {
+    let make_state = |prefix: &str| -> Result<EnvironmentsState> {
+        let environments = (0..100)
+            .map(|index| {
+                let id = format!("{prefix}-environment-{index:03}");
+                let cwd = format!("file:///workspace/{prefix}/{index:03}");
+                Ok((id, available(&cwd, "bash")?))
+            })
+            .collect::<Result<BTreeMap<_, _>>>()?;
+        Ok(EnvironmentsState {
+            environments,
+            ..Default::default()
+        })
+    };
+    let previous = make_state("old")?;
+    let current = make_state("new")?;
+    let previous_snapshot = WorldStateSection::snapshot(&previous);
+    let current_snapshot = WorldStateSection::snapshot(&current);
+    let rendered =
+        WorldStateSection::render_diff(&current, PreviousSectionState::Known(&previous_snapshot))
+            .expect("disjoint environment snapshots should render")
+            .render();
+
+    assert!(previous_snapshot.truncated);
+    assert!(current_snapshot.truncated);
+    assert!(rendered.len() <= MAX_ENVIRONMENTS_FRAGMENT_BYTES);
+    assert!(rendered.contains("<environments mode=\"replace\">"));
+    assert!(rendered.contains("new-environment-000"));
+    assert!(!rendered.contains("old-environment-000"));
+    assert!(
+        WorldStateSection::render_diff(&current, PreviousSectionState::Known(&current_snapshot),)
+            .is_none()
+    );
+    Ok(())
+}
+
 fn available(cwd: &str, shell: &str) -> Result<EnvironmentState> {
     Ok(EnvironmentState {
         cwd: PathUri::parse(cwd)?,

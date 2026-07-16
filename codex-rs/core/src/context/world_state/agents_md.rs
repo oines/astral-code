@@ -1,3 +1,4 @@
+use super::MAX_AGENTS_MD_FRAGMENT_BYTES;
 use super::PreviousSectionState;
 use super::WorldStateSection;
 use super::truncate_world_state_text;
@@ -10,7 +11,6 @@ use serde::Serialize;
 const REPLACEMENT_NOTICE: &str =
     "These AGENTS.md instructions replace all previously provided AGENTS.md instructions.";
 const REMOVAL_NOTICE: &str = "The previously provided AGENTS.md instructions no longer apply.";
-const MAX_AGENTS_MD_FRAGMENT_BYTES: usize = 24 * 1024;
 const MAX_AGENTS_MD_DIRECTORY_BYTES: usize = 1024;
 
 /// The AGENTS.md instructions currently visible to the model.

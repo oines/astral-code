@@ -361,10 +361,6 @@ async fn legacy_custom_exec_history_replayed_to_function_provider(
         .with_model("test-gpt-5.1-codex")
         .with_config(move |config| {
             config.model_provider = target_provider;
-            config
-                .features
-                .enable(Feature::CodeMode)
-                .expect("enable code mode");
         });
     let test = builder
         .resume(&target_server, codex_home, rollout_path)
@@ -375,6 +371,22 @@ async fn legacy_custom_exec_history_replayed_to_function_provider(
     Ok(target_mock.single_request().body_json())
 }
 
+fn assert_exec_tool_not_advertised(body: &Value) {
+    let exec_advertised = body
+        .get("tools")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .any(|tool| {
+            tool.pointer("/function/name").and_then(Value::as_str) == Some("exec")
+                || tool.get("name").and_then(Value::as_str) == Some("exec")
+        });
+    assert!(
+        !exec_advertised,
+        "legacy replay must not require the current tool plan"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn legacy_custom_exec_history_resumes_to_chat_completions_with_function_input() -> Result<()>
 {
@@ -382,6 +394,7 @@ async fn legacy_custom_exec_history_resumes_to_chat_completions_with_function_in
 
     let body =
         legacy_custom_exec_history_replayed_to_function_provider(WireApi::ChatCompletions).await?;
+    assert_exec_tool_not_advertised(&body);
     let arguments = body
         .get("messages")
         .and_then(Value::as_array)
@@ -407,6 +420,7 @@ async fn legacy_custom_exec_history_resumes_to_anthropic_with_function_input() -
 
     let body = legacy_custom_exec_history_replayed_to_function_provider(WireApi::AnthropicMessages)
         .await?;
+    assert_exec_tool_not_advertised(&body);
     let input = body
         .get("messages")
         .and_then(Value::as_array)

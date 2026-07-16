@@ -91,7 +91,8 @@ pub(super) fn project_snapshot(state: &EnvironmentsState) -> EnvironmentsSnapsho
 
     projected.truncated = truncated;
     debug_assert!(
-        RenderedEnvironments::full(&projected).render().len() <= MAX_ENVIRONMENTS_FRAGMENT_BYTES
+        RenderedEnvironments::replacement(&projected).render().len()
+            <= MAX_ENVIRONMENTS_FRAGMENT_BYTES
     );
     projected
 }
@@ -108,5 +109,5 @@ fn project_optional_text(value: Option<&str>, max_bytes: usize) -> (Option<Strin
 fn projected_snapshot_fits(snapshot: &EnvironmentsSnapshot) -> bool {
     let mut guarded = snapshot.clone();
     guarded.truncated = true;
-    RenderedEnvironments::full(&guarded).render().len() <= MAX_ENVIRONMENTS_FRAGMENT_BYTES
+    RenderedEnvironments::replacement(&guarded).render().len() <= MAX_ENVIRONMENTS_FRAGMENT_BYTES
 }

@@ -1,3 +1,4 @@
+use super::MAX_ENVIRONMENTS_FRAGMENT_BYTES;
 use super::PreviousSectionState;
 use super::WorldStateSection;
 use super::truncate_world_state_text;
@@ -17,10 +18,9 @@ mod projection;
 
 use projection::project_snapshot;
 
-const MAX_ENVIRONMENTS_FRAGMENT_BYTES: usize = 8 * 1024;
 const MAX_ENVIRONMENT_ID_BYTES: usize = 256;
 const MAX_ENVIRONMENT_VALUE_BYTES: usize = 1024;
-const MAX_TURN_CONTEXT_VALUE_BYTES: usize = 256;
+const MAX_TURN_CONTEXT_VALUE_BYTES: usize = 128;
 const MAX_SUBAGENTS_BYTES: usize = 1024;
 const TRUNCATED_CONTEXT_NOTICE: &str =
     "Additional environment context was omitted to fit the model context limit.";
@@ -119,7 +119,7 @@ impl WorldStateSection for EnvironmentsState {
                 .values()
                 .all(|update| matches!(update, EnvironmentUpdate::Current(_)));
         (!updates.is_empty() || turn_context_values_changed).then(|| {
-            Box::new(RenderedEnvironments {
+            let rendered = RenderedEnvironments {
                 updates,
                 legacy_single,
                 model: current.model.clone(),
@@ -137,7 +137,14 @@ impl WorldStateSection for EnvironmentsState {
                     (false, true) => RenderedTruncation::Cleared,
                     (false, false) => RenderedTruncation::Omitted,
                 },
-            }) as Box<dyn ContextualUserFragment>
+                replacement: false,
+            };
+            let rendered = if rendered.render().len() <= MAX_ENVIRONMENTS_FRAGMENT_BYTES {
+                rendered
+            } else {
+                RenderedEnvironments::replacement(&current)
+            };
+            Box::new(rendered) as Box<dyn ContextualUserFragment>
         })
     }
 }
@@ -170,6 +177,7 @@ struct RenderedEnvironments {
     filesystem: Option<String>,
     subagents: RenderedSubagents,
     truncation: RenderedTruncation,
+    replacement: bool,
 }
 
 enum RenderedSubagents {
@@ -214,7 +222,15 @@ impl RenderedEnvironments {
             } else {
                 RenderedTruncation::Omitted
             },
+            replacement: false,
         }
+    }
+
+    fn replacement(snapshot: &EnvironmentsSnapshot) -> Self {
+        let mut rendered = Self::full(snapshot);
+        rendered.legacy_single = false;
+        rendered.replacement = true;
+        rendered
     }
 }
 
@@ -238,7 +254,11 @@ impl ContextualUserFragment for RenderedEnvironments {
                 push_environment_values(&mut rendered, environment, "  ");
             }
         } else if !self.updates.is_empty() {
-            rendered.push_str("  <environments>\n");
+            if self.replacement {
+                rendered.push_str("  <environments mode=\"replace\">\n");
+            } else {
+                rendered.push_str("  <environments>\n");
+            }
             for (id, update) in &self.updates {
                 match update {
                     EnvironmentUpdate::Current(environment) => {
@@ -257,6 +277,8 @@ impl ContextualUserFragment for RenderedEnvironments {
                 }
             }
             rendered.push_str("  </environments>\n");
+        } else if self.replacement {
+            rendered.push_str("  <environments mode=\"replace\" />\n");
         }
         push_optional_element(&mut rendered, "model", self.model.as_deref());
         push_optional_element(&mut rendered, "current_date", self.current_date.as_deref());

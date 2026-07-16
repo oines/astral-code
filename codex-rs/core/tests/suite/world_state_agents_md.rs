@@ -34,7 +34,8 @@ const UPDATED_AGENTS: &str = "WORLD_STATE_UPDATED_AGENTS";
 const REPLACEMENT_NOTICE: &str =
     "These AGENTS.md instructions replace all previously provided AGENTS.md instructions.";
 const REMOVAL_NOTICE: &str = "The previously provided AGENTS.md instructions no longer apply.";
-const MAX_AGENTS_MD_FRAGMENT_BYTES: usize = 24 * 1024;
+const MAX_AGENTS_MD_FRAGMENT_BYTES: usize = 5 * 1024;
+const MAX_WORLD_STATE_USER_ITEM_BYTES: usize = 8 * 1024;
 
 async fn submit_turn(thread: &Arc<CodexThread>, prompt: &str) -> Result<()> {
     thread
@@ -156,6 +157,16 @@ async fn agents_world_state_hard_cap_cannot_be_bypassed_by_config_or_global_inst
     assert!(agents_fragment.len() <= MAX_AGENTS_MD_FRAGMENT_BYTES);
     assert!(agents_fragment.contains("GLOBAL_AGENTS_PREFIX"));
     assert!(agents_fragment.contains("additional world-state content truncated"));
+    let world_state_bytes = request
+        .message_input_texts("user")
+        .into_iter()
+        .filter(|text| {
+            text.starts_with("# AGENTS.md instructions")
+                || text.starts_with("<environment_context>")
+        })
+        .map(|text| text.len())
+        .sum::<usize>();
+    assert!(world_state_bytes <= MAX_WORLD_STATE_USER_ITEM_BYTES);
     Ok(())
 }
 
