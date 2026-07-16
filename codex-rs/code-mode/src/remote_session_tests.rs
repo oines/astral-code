@@ -107,6 +107,24 @@ async fn provider_falls_back_to_in_process_session_when_host_is_missing() {
     );
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn provider_does_not_fallback_when_host_exits_during_handshake() {
+    let provider = ProcessOwnedCodeModeSessionProvider::with_host_program("/usr/bin/false".into());
+
+    let error = provider
+        .create_session(Arc::new(NoopCodeModeSessionDelegate))
+        .await
+        .err()
+        .expect("an existing host program that exits must fail explicitly");
+
+    assert_eq!(error, "code-mode host exited during handshake");
+    assert!(
+        provider.process_host().is_some(),
+        "non-NotFound host failures must not switch the provider to in-process mode"
+    );
+}
+
 #[tokio::test]
 async fn shutdown_before_open_does_not_spawn_the_host() {
     let session = ProcessOwnedCodeModeSession::new();
