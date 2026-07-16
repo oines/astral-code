@@ -4289,6 +4289,108 @@ async fn post_tool_use_spills_large_feedback_message() -> Result<()> {
 }
 
 #[tokio::test]
+async fn post_tool_use_blocks_when_exec_session_completes_via_write_stdin() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    skip_if_windows!(Ok(()));
+
+    let server = start_mock_server().await;
+    let start_call_id = "posttooluse-exec-session-start";
+    let poll_call_id = "posttooluse-exec-session-poll";
+    let command = "sleep 1; printf session-post-hook-output".to_string();
+    let start_args = serde_json::json!({
+        "cmd": command,
+        "shell": "/bin/sh",
+        "login": false,
+        "tty": false,
+        "yield_time_ms": 250,
+    });
+    let poll_args = serde_json::json!({
+        "session_id": 1000,
+        "chars": "",
+        "yield_time_ms": 5_000,
+    });
+    let feedback = "blocked by session post hook";
+    let responses = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                core_test_support::responses::ev_function_call(
+                    start_call_id,
+                    "exec_command",
+                    &serde_json::to_string(&start_args)?,
+                ),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-2"),
+                core_test_support::responses::ev_function_call(
+                    poll_call_id,
+                    "write_stdin",
+                    &serde_json::to_string(&poll_args)?,
+                ),
+                ev_completed("resp-2"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-3"),
+                ev_assistant_message("msg-1", "session post hook observed"),
+                ev_completed("resp-3"),
+            ]),
+        ],
+    )
+    .await;
+
+    let mut builder = test_codex()
+        .with_pre_build_hook(|home| {
+            write_logging_pre_and_blocking_post_tool_use_hooks(home, feedback)
+                .expect("failed to write tool use hook test fixture");
+        })
+        .with_config(|config| {
+            config.use_experimental_unified_exec_tool = true;
+            trust_discovered_hooks(config);
+            config
+                .features
+                .enable(Feature::UnifiedExec)
+                .expect("test config should allow feature update");
+        });
+    let test = builder.build(&server).await?;
+
+    test.submit_turn("run the exec command session with post hook")
+        .await?;
+
+    let requests = responses.requests();
+    assert_eq!(requests.len(), 3);
+    let output_item = requests[2].function_call_output(poll_call_id);
+    let output = output_item
+        .get("output")
+        .and_then(Value::as_str)
+        .expect("write_stdin output string");
+    assert_eq!(output, feedback);
+
+    let pre_hook_inputs = read_pre_tool_use_hook_inputs(test.codex_home_path())?;
+    assert_eq!(pre_hook_inputs.len(), 1);
+    assert_eq!(pre_hook_inputs[0]["tool_name"], "Bash");
+    assert_eq!(pre_hook_inputs[0]["tool_use_id"], start_call_id);
+    assert_eq!(pre_hook_inputs[0]["tool_input"]["command"], command);
+
+    let post_hook_inputs = read_post_tool_use_hook_inputs(test.codex_home_path())?;
+    assert_eq!(post_hook_inputs.len(), 1);
+    assert_eq!(post_hook_inputs[0]["hook_event_name"], "PostToolUse");
+    assert_eq!(post_hook_inputs[0]["tool_name"], "Bash");
+    assert_eq!(post_hook_inputs[0]["tool_use_id"], start_call_id);
+    assert_eq!(post_hook_inputs[0]["tool_input"]["command"], command);
+    assert!(
+        post_hook_inputs[0]["tool_response"]
+            .as_str()
+            .is_some_and(|tool_response| tool_response.contains("session-post-hook-output")),
+        "PostToolUse should see the final session output, got {:?}",
+        post_hook_inputs[0]["tool_response"]
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn post_tool_use_blocks_when_exec_session_completes_via_read_task_output() -> Result<()> {
     skip_if_no_network!(Ok(()));
     skip_if_windows!(Ok(()));
