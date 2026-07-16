@@ -262,12 +262,21 @@ async fn run_code_mode_turn_with_config(
     code: &str,
     configure: impl FnOnce(&mut Config) + Send + 'static,
 ) -> Result<(TestCodex, ResponseMock)> {
-    let builder = test_codex()
-        .with_model("test-gpt-5.1-codex")
-        .with_config(move |config| {
-            let _ = config.features.enable(Feature::CodeMode);
-            configure(config);
-        });
+    run_code_mode_turn_with_model_and_config(server, prompt, code, "test-gpt-5.1-codex", configure)
+        .await
+}
+
+async fn run_code_mode_turn_with_model_and_config(
+    server: &MockServer,
+    prompt: &str,
+    code: &str,
+    model: &'static str,
+    configure: impl FnOnce(&mut Config) + Send + 'static,
+) -> Result<(TestCodex, ResponseMock)> {
+    let builder = test_codex().with_model(model).with_config(move |config| {
+        let _ = config.features.enable(Feature::CodeMode);
+        configure(config);
+    });
     run_code_mode_turn_with_builder(server, prompt, code, builder).await
 }
 
@@ -971,9 +980,202 @@ text(JSON.stringify(results));
     Ok(())
 }
 
+// This model uses token-based tool-output truncation, giving the downstream
+// history assertions a stable `…N tokens truncated…` marker.
+const TOKEN_POLICY_TEST_MODEL: &str = "gpt-5.4";
+
 #[cfg_attr(windows, ignore = "no exec_command on Windows")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn code_mode_exec_command_explicit_max_output_tokens_truncates() -> Result<()> {
+async fn code_mode_exec_nested_limit_preserves_result_variable_before_default_history_truncation()
+-> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = responses::start_mock_server().await;
+    let (_test, second_mock) = run_code_mode_turn_with_model_and_config(
+        &server,
+        "use exec_command from code mode",
+        r#"// @exec: {"max_output_tokens": 20000}
+const result = await tools.exec_command({
+  cmd: "python3 -c \"import sys; sys.stdout.write('x' * 50000)\"",
+  max_output_tokens: 20000
+});
+const resultVariableWasTruncated = result.output.length !== 50000;
+text(`Variable truncated: ${resultVariableWasTruncated ? "True" : "False"}. Variable: ${result.output}`);
+"#,
+        TOKEN_POLICY_TEST_MODEL,
+        |_| {},
+    )
+    .await?;
+
+    let items = custom_tool_output_items(&second_mock.single_request(), "call-1");
+    let output = text_item(&items, /*index*/ 1);
+    assert_regex_match(
+        r"^Variable truncated: False\. Variable: x+…\d+ tokens truncated…x+$",
+        output,
+    );
+
+    Ok(())
+}
+
+#[cfg_attr(windows, ignore = "no exec_command on Windows")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn code_mode_exec_nested_limit_truncates_result_variable_when_exceeded() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = responses::start_mock_server().await;
+    let (_test, second_mock) = run_code_mode_turn_with_model_and_config(
+        &server,
+        "use exec_command from code mode",
+        r#"// @exec: {"max_output_tokens": 25000}
+const result = await tools.exec_command({
+  cmd: "python3 -c \"import sys; sys.stdout.write('A' * 90000)\"",
+  max_output_tokens: 20000
+});
+const resultVariableWasTruncated = result.output.includes("…2500 tokens truncated…");
+text(`Variable truncated: ${resultVariableWasTruncated ? "True" : "False"}. Variable: ${result.output}`);
+"#,
+        TOKEN_POLICY_TEST_MODEL,
+        |_| {},
+    )
+    .await?;
+
+    let items = custom_tool_output_items(&second_mock.single_request(), "call-1");
+    let output = text_item(&items, /*index*/ 1);
+    // The nested 20,000-token budget leaves about 80,000 characters. This
+    // ceiling independently proves that history applied its smaller cap.
+    assert!(
+        output.len() < 60_000,
+        "expected history to truncate the emitted value, got {} bytes",
+        output.len()
+    );
+    // The boolean describes the nested result; the marker below comes from
+    // history truncating the value emitted with `text` afterward.
+    assert_regex_match(
+        r"(?s)^Variable truncated: True\. Variable: .*…\d+ tokens truncated…A+$",
+        output,
+    );
+
+    Ok(())
+}
+
+#[cfg_attr(windows, ignore = "no exec_command on Windows")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn code_mode_exec_nested_limit_preserves_result_variable_before_configured_history_truncation()
+-> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = responses::start_mock_server().await;
+    let (_test, second_mock) = run_code_mode_turn_with_model_and_config(
+        &server,
+        "use exec_command from code mode",
+        r#"// @exec: {"max_output_tokens": 20000}
+const result = await tools.exec_command({
+  cmd: "python3 -c \"import sys; sys.stdout.write('x' * 50000)\"",
+  max_output_tokens: 20000
+});
+const resultVariableWasTruncated = result.output.length !== 50000;
+text(`Variable truncated: ${resultVariableWasTruncated ? "True" : "False"}. Variable: ${result.output}`);
+"#,
+        TOKEN_POLICY_TEST_MODEL,
+        |config| {
+            config.tool_output_token_limit = Some(50);
+        },
+    )
+    .await?;
+
+    let items = custom_tool_output_items(&second_mock.single_request(), "call-1");
+    let output = text_item(&items, /*index*/ 1);
+    // The 50-token override must shrink this 50,000-character value far below
+    // what the default 10,000-token history cap would retain.
+    assert!(
+        output.len() < 1_000,
+        "expected configured history cap to truncate the emitted value, got {} bytes",
+        output.len()
+    );
+    assert_regex_match(
+        r"^Variable truncated: False\. Variable: x+…\d+ tokens truncated…x+$",
+        output,
+    );
+
+    Ok(())
+}
+
+#[cfg_attr(windows, ignore = "no exec_command on Windows")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn code_mode_exec_without_nested_limit_preserves_result_variable_before_default_history_truncation()
+-> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = responses::start_mock_server().await;
+    let (_test, second_mock) = run_code_mode_turn_with_model_and_config(
+        &server,
+        "use exec_command from code mode",
+        r#"// @exec: {"max_output_tokens": 20000}
+const result = await tools.exec_command({
+  cmd: "python3 -c \"import sys; sys.stdout.write('x' * 50000)\""
+});
+const resultVariableWasTruncated = result.output.length !== 50000;
+text(`Variable truncated: ${resultVariableWasTruncated ? "True" : "False"}. Variable: ${result.output}`);
+"#,
+        TOKEN_POLICY_TEST_MODEL,
+        |_| {},
+    )
+    .await?;
+
+    let items = custom_tool_output_items(&second_mock.single_request(), "call-1");
+    let output = text_item(&items, /*index*/ 1);
+    assert_regex_match(
+        r"^Variable truncated: False\. Variable: x+…\d+ tokens truncated…x+$",
+        output,
+    );
+
+    Ok(())
+}
+
+#[cfg_attr(windows, ignore = "no exec_command on Windows")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn code_mode_exec_without_nested_limit_preserves_result_variable_before_configured_history_truncation()
+-> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = responses::start_mock_server().await;
+    let (_test, second_mock) = run_code_mode_turn_with_model_and_config(
+        &server,
+        "use exec_command from code mode",
+        r#"// @exec: {"max_output_tokens": 20000}
+const result = await tools.exec_command({
+  cmd: "python3 -c \"import sys; sys.stdout.write('x' * 50000)\""
+});
+const resultVariableWasTruncated = result.output.length !== 50000;
+text(`Variable truncated: ${resultVariableWasTruncated ? "True" : "False"}. Variable: ${result.output}`);
+"#,
+        TOKEN_POLICY_TEST_MODEL,
+        |config| {
+            config.tool_output_token_limit = Some(50);
+        },
+    )
+    .await?;
+
+    let items = custom_tool_output_items(&second_mock.single_request(), "call-1");
+    let output = text_item(&items, /*index*/ 1);
+    // The 50-token override must shrink this 50,000-character value far below
+    // what the default 10,000-token history cap would retain.
+    assert!(
+        output.len() < 1_000,
+        "expected configured history cap to truncate the emitted value, got {} bytes",
+        output.len()
+    );
+    assert_regex_match(
+        r"^Variable truncated: False\. Variable: x+…\d+ tokens truncated…x+$",
+        output,
+    );
+
+    Ok(())
+}
+
+#[cfg_attr(windows, ignore = "no exec_command on Windows")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn code_mode_exec_nested_limit_formats_truncated_result_with_warning() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
@@ -1162,7 +1364,7 @@ text(result.output);
 
 #[cfg_attr(windows, ignore = "no exec_command on Windows")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn code_mode_exec_explicit_max_output_tokens_truncates() -> Result<()> {
+async fn code_mode_exec_outer_limit_truncates_emitted_output() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
