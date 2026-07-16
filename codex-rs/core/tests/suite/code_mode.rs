@@ -311,35 +311,6 @@ async fn run_code_mode_turn_with_builder(
     Ok((test, second_mock))
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn missing_process_host_falls_back_to_in_process_code_mode() -> Result<()> {
-    skip_if_no_network!(Ok(()));
-
-    let server = responses::start_mock_server().await;
-    let builder = test_codex()
-        .with_model("test-gpt-5.1-codex")
-        .with_code_mode_host_program("codex-code-mode-host-does-not-exist".into())
-        .with_config(|config| {
-            config
-                .features
-                .enable(Feature::CodeMode)
-                .expect("code mode should be enabled");
-        });
-    let (_test, follow_up_mock) =
-        run_code_mode_turn_with_builder(&server, "Run code mode", "text('fallback')", builder)
-            .await?;
-
-    assert_eq!(
-        text_item(
-            &custom_tool_output_items(&follow_up_mock.single_request(), "call-1"),
-            /*index*/ 1,
-        ),
-        "fallback"
-    );
-
-    Ok(())
-}
-
 async fn run_code_mode_turn_with_rmcp(
     server: &MockServer,
     prompt: &str,

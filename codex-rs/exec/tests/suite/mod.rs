@@ -4,6 +4,7 @@ mod agents_md;
 mod apply_patch;
 mod approval_policy;
 mod auth_env;
+mod code_mode_host;
 mod ephemeral;
 mod mcp_required_exit;
 mod originator;

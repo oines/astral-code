@@ -41,7 +41,6 @@ mod cli_stream;
 mod client;
 mod code_mode;
 mod code_mode_elicitation;
-mod code_mode_host_smoke;
 mod code_mode_provider_neutral;
 mod codex_delegate;
 mod collaboration_instructions;
