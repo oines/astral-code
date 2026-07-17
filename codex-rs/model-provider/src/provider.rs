@@ -7,6 +7,7 @@ use codex_api::SharedAuthProvider;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
 use codex_model_provider_info::ModelProviderInfo;
+use codex_model_provider_info::WireApi;
 use codex_models_manager::manager::OpenAiModelsManager;
 use codex_models_manager::manager::SharedModelsManager;
 use codex_models_manager::manager::StaticModelsManager;
@@ -181,8 +182,8 @@ impl ModelProvider for ConfiguredModelProvider {
                     }
                     Some(auth)
                 })
-                .and_then(|auth| match auth {
-                    CodexAuth::ApiKey(_) => Some(ProviderAccount::ApiKey),
+                .map(|auth| match auth {
+                    CodexAuth::ApiKey(_) => ProviderAccount::ApiKey,
                 })
         };
 
@@ -197,12 +198,22 @@ impl ModelProvider for ConfiguredModelProvider {
         codex_home: PathBuf,
         config_model_catalog: Option<ModelsResponse>,
     ) -> SharedModelsManager {
-        match config_model_catalog {
-            Some(model_catalog) => Arc::new(StaticModelsManager::new(
+        if let Some(model_catalog) = config_model_catalog {
+            return Arc::new(StaticModelsManager::new(
                 self.auth_manager.clone(),
                 model_catalog,
+            ));
+        }
+
+        match self.info.wire_api {
+            // Anthropic-compatible providers commonly expose Messages without a
+            // model catalog. Do not infer discovery support from the wire format;
+            // callers can opt in with `model_catalog_json` above.
+            WireApi::AnthropicMessages => Arc::new(StaticModelsManager::new(
+                self.auth_manager.clone(),
+                ModelsResponse { models: Vec::new() },
             )),
-            None => {
+            WireApi::Responses | WireApi::ChatCompletions => {
                 let endpoint = Arc::new(OpenAiModelsEndpoint::new(
                     self.info.clone(),
                     self.auth_manager.clone(),
@@ -222,7 +233,6 @@ mod tests {
     use std::num::NonZeroU64;
 
     use codex_model_provider_info::ModelProviderAwsAuthInfo;
-    use codex_model_provider_info::WireApi;
     use codex_models_manager::manager::RefreshStrategy;
     use codex_protocol::config_types::ModelProviderAuthInfo;
     use codex_protocol::openai_models::ModelInfo;
@@ -584,6 +594,33 @@ mod tests {
                 .models
                 .iter()
                 .any(|model| model.slug == "provider-model")
+        );
+    }
+
+    #[tokio::test]
+    async fn anthropic_provider_models_manager_skips_remote_model_discovery() {
+        let server = MockServer::start().await;
+        let mut provider_info = provider_for(server.uri());
+        provider_info.wire_api = WireApi::AnthropicMessages;
+        provider_info.experimental_bearer_token = Some("provider-token".to_string());
+        let provider = create_model_provider(provider_info, /*auth_manager*/ None);
+
+        let manager =
+            provider.models_manager(test_codex_home(), /*config_model_catalog*/ None);
+        let catalog = manager.raw_model_catalog(RefreshStrategy::Online).await;
+        let configured_model = manager
+            .get_default_model(
+                &Some("deepseek-v4-pro".to_string()),
+                RefreshStrategy::Online,
+            )
+            .await;
+        let requests = server.received_requests().await.unwrap_or_default();
+
+        assert_eq!(catalog, ModelsResponse { models: Vec::new() });
+        assert_eq!(configured_model, "deepseek-v4-pro");
+        assert!(
+            requests.is_empty(),
+            "Anthropic providers must not request a remote model catalog"
         );
     }
 }
