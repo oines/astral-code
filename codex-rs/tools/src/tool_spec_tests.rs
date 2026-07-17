@@ -298,7 +298,7 @@ fn create_agent_tools_converts_apply_patch_freeform_tool() {
         .expect("apply_patch freeform should convert to provider-neutral function"),
         vec![AgentTool {
             name: "apply_patch".to_string(),
-            description: "Apply a patch".to_string(),
+            description: "Use the `apply_patch` tool to edit files. Set the `input` string to the complete raw patch text, including the `*** Begin Patch` and `*** End Patch` envelope.".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {

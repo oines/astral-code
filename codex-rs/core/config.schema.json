@@ -1524,6 +1524,9 @@
         },
         "supports_vision": {
           "type": "boolean"
+        },
+        "tool_mode": {
+          "$ref": "#/definitions/ToolMode"
         }
       },
       "type": "object"
@@ -2883,6 +2886,14 @@
           "type": "object"
         }
       ]
+    },
+    "ToolMode": {
+      "enum": [
+        "direct",
+        "code_mode",
+        "code_mode_only"
+      ],
+      "type": "string"
     },
     "ToolSuggestConfig": {
       "additionalProperties": false,

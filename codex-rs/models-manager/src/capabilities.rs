@@ -4,6 +4,7 @@ use codex_protocol::openai_models::InputModality;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::openai_models::ReasoningEffortPreset;
+use codex_protocol::openai_models::ToolMode;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
@@ -71,6 +72,8 @@ pub struct ModelCapability {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_mode: Option<ToolMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_context_window: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_output_tokens: Option<u64>,
@@ -105,6 +108,7 @@ impl ModelCapability {
         Self {
             litellm_provider: hint.litellm_provider,
             mode: hint.mode,
+            tool_mode: None,
             max_context_window: hint.max_input_tokens,
             max_output_tokens: hint.max_output_tokens.or(hint.max_tokens),
             supports_tools: hint.supports_function_calling,
@@ -119,6 +123,10 @@ impl ModelCapability {
     }
 
     pub fn apply_to_model_info(&self, model: &mut ModelInfo) {
+        if let Some(tool_mode) = self.tool_mode {
+            model.tool_mode = Some(tool_mode);
+        }
+
         if let Some(max_context_window) = self.max_context_window.and_then(u64_to_i64) {
             if model.max_context_window.is_none() {
                 model.max_context_window = Some(max_context_window);
@@ -162,6 +170,7 @@ impl ModelCapability {
     fn has_signal(&self) -> bool {
         self.litellm_provider.is_some()
             || self.mode.is_some()
+            || self.tool_mode.is_some()
             || self.max_context_window.is_some()
             || self.max_output_tokens.is_some()
             || self.supports_tools.is_some()

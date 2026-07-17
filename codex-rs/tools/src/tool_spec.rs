@@ -17,6 +17,7 @@ use std::collections::BTreeSet;
 use thiserror::Error;
 
 const PROVIDER_NEUTRAL_TOOL_NAME_DELIMITER: &str = "__";
+const PROVIDER_NEUTRAL_APPLY_PATCH_DESCRIPTION: &str = "Use the `apply_patch` tool to edit files. Set the `input` string to the complete raw patch text, including the `*** Begin Patch` and `*** End Patch` envelope.";
 
 /// When serialized as JSON, this produces a valid OpenAI-compatible tool.
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -217,7 +218,10 @@ fn responses_api_tool_to_agent_tool(
 fn freeform_tool_to_agent_tool(tool: &FreeformTool, input_description: &str) -> AgentTool {
     AgentTool {
         name: tool.name.clone(),
-        description: tool.description.clone(),
+        description: match tool.name.as_str() {
+            "apply_patch" => PROVIDER_NEUTRAL_APPLY_PATCH_DESCRIPTION.to_string(),
+            _ => tool.description.clone(),
+        },
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {

@@ -49,6 +49,7 @@ use codex_protocol::config_types::WindowsSandboxLevel;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::openai_models::InputModality;
 use codex_protocol::openai_models::ReasoningEffort;
+use codex_protocol::openai_models::ToolMode;
 use codex_protocol::permissions::NetworkSandboxPolicy;
 use codex_protocol::protocol::AskForApproval;
 use codex_utils_absolute_path::AbsolutePathBuf;
@@ -494,6 +495,7 @@ pub type ModelCapabilitiesToml = BTreeMap<String, ModelCapabilityToml>;
 pub struct ModelCapabilityToml {
     pub litellm_provider: Option<String>,
     pub mode: Option<String>,
+    pub tool_mode: Option<ToolMode>,
     pub context_window: Option<u64>,
     pub max_context_window: Option<u64>,
     pub max_output_tokens: Option<u64>,

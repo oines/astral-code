@@ -85,6 +85,7 @@ use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_WORKSPACE;
 use codex_protocol::models::ManagedFileSystemPermissions;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::models::SandboxEnforcement;
+use codex_protocol::openai_models::ToolMode;
 use codex_protocol::permissions::FileSystemAccessMode;
 use codex_protocol::permissions::FileSystemPath;
 use codex_protocol::permissions::FileSystemSandboxEntry;
@@ -5256,16 +5257,21 @@ fn config_toml_parses_explicit_model_capabilities() {
         r#"
 [model_capabilities."mimo/mimo-v2.5"]
 supports_vision = true
+tool_mode = "code_mode"
 "#,
     )
     .expect("parse config model capabilities");
 
     assert_eq!(
-        cfg.model_capabilities
-            .as_ref()
-            .and_then(|capabilities| capabilities.get("mimo/mimo-v2.5"))
-            .and_then(|capability| capability.supports_vision),
-        Some(true)
+        cfg.model_capabilities,
+        Some(BTreeMap::from([(
+            "mimo/mimo-v2.5".to_string(),
+            ModelCapabilityToml {
+                tool_mode: Some(ToolMode::CodeMode),
+                supports_vision: Some(true),
+                ..Default::default()
+            }
+        )]))
     );
 }
 
@@ -5281,6 +5287,7 @@ generated_at_unix_seconds = 0
 
 [models."mimo/mimo-v2.5"]
 supports_vision = false
+tool_mode = "direct"
 "#,
     )?;
 
@@ -5288,6 +5295,7 @@ supports_vision = false
     model_capabilities.insert(
         "mimo/mimo-v2.5".to_string(),
         ModelCapabilityToml {
+            tool_mode: Some(ToolMode::CodeMode),
             supports_vision: Some(true),
             ..Default::default()
         },
@@ -5309,8 +5317,12 @@ supports_vision = false
             .model_capabilities
             .as_ref()
             .and_then(|capabilities| capabilities.lookup("mimo/mimo-v2.5"))
-            .and_then(|capability| capability.supports_vision),
-        Some(true)
+            .cloned(),
+        Some(ModelCapability {
+            tool_mode: Some(ToolMode::CodeMode),
+            supports_vision: Some(true),
+            ..Default::default()
+        })
     );
 
     Ok(())

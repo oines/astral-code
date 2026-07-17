@@ -1,3 +1,4 @@
+use codex_protocol::config_types::Personality;
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::openai_models::ConfigShellToolType;
 use codex_protocol::openai_models::InputModality;
@@ -14,11 +15,45 @@ use codex_utils_output_truncation::approx_bytes_for_tokens;
 use tracing::info;
 
 pub const BASE_INSTRUCTIONS: &str = include_str!("../prompt.md");
+pub const BASE_INSTRUCTIONS_WITH_APPLY_PATCH: &str =
+    include_str!("../prompt_with_apply_patch_instructions.md");
 const DEFAULT_PERSONALITY_HEADER: &str = "You are Astral, an agentic coding assistant running inside astral-code. You and the user share one workspace. Help the user complete software engineering tasks end to end.";
 const LOCAL_FRIENDLY_TEMPLATE: &str =
     "You optimize for team morale and being a supportive teammate as much as code quality.";
 const LOCAL_PRAGMATIC_TEMPLATE: &str = "You are a deeply pragmatic, effective software engineer.";
 const PERSONALITY_PLACEHOLDER: &str = "{{ personality }}";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BaseInstructionsFlavor {
+    Default,
+    WithApplyPatchInstructions,
+}
+
+pub fn model_instructions(
+    model: &ModelInfo,
+    personality: Option<Personality>,
+    flavor: BaseInstructionsFlavor,
+) -> String {
+    match flavor {
+        BaseInstructionsFlavor::Default => model.get_model_instructions(personality),
+        BaseInstructionsFlavor::WithApplyPatchInstructions => {
+            let personality_message = model
+                .model_messages
+                .as_ref()
+                .and_then(|messages| messages.get_personality_message(personality))
+                .unwrap_or_default();
+            if personality_message.is_empty() {
+                BASE_INSTRUCTIONS_WITH_APPLY_PATCH.to_string()
+            } else {
+                BASE_INSTRUCTIONS_WITH_APPLY_PATCH.replacen(
+                    DEFAULT_PERSONALITY_HEADER,
+                    &format!("{DEFAULT_PERSONALITY_HEADER}\n\n{personality_message}"),
+                    /*count*/ 1,
+                )
+            }
+        }
+    }
+}
 
 pub fn with_config_overrides(mut model: ModelInfo, config: &ModelsManagerConfig) -> ModelInfo {
     if let Some(input_modalities) = &config.model_input_modalities {

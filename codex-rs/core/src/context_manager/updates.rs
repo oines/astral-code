@@ -149,7 +149,7 @@ pub(crate) fn build_model_instructions_update_item(
         return None;
     }
 
-    let model_instructions = next.model_info.get_model_instructions(next.personality);
+    let model_instructions = crate::tools::model_instructions_for_turn(next, next.personality);
     if model_instructions.is_empty() {
         return None;
     }

@@ -19,11 +19,17 @@ pub(crate) mod tool_dispatch_trace;
 
 use std::borrow::Cow;
 
+use crate::config::ManagedFeatures;
 use crate::config::ToolSurface;
 use crate::session::turn_context::TurnContext;
 use codex_features::Feature;
+use codex_models_manager::model_info::BaseInstructionsFlavor;
+use codex_models_manager::model_info::model_instructions;
+use codex_protocol::config_types::Personality;
 use codex_protocol::exec_output::ExecToolCallOutput;
+use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ToolMode;
+use codex_protocol::protocol::SessionSource;
 use codex_tools::ToolName;
 use codex_utils_output_truncation::TruncationPolicy;
 use codex_utils_output_truncation::formatted_truncate_text;
@@ -37,14 +43,26 @@ pub(crate) const TELEMETRY_PREVIEW_TRUNCATION_NOTICE: &str =
     "[... telemetry preview truncated ...]";
 
 pub(crate) fn effective_tool_mode(turn_context: &TurnContext) -> ToolMode {
-    if crate::guardian::is_guardian_reviewer_source(&turn_context.session_source) {
+    effective_tool_mode_for_session(
+        &turn_context.session_source,
+        &turn_context.model_info,
+        &turn_context.features,
+    )
+}
+
+pub(crate) fn effective_tool_mode_for_session(
+    session_source: &SessionSource,
+    model_info: &ModelInfo,
+    features: &ManagedFeatures,
+) -> ToolMode {
+    if crate::guardian::is_guardian_reviewer_source(session_source) {
         return ToolMode::Direct;
     }
 
-    turn_context.model_info.tool_mode.unwrap_or_else(|| {
-        if turn_context.config.features.enabled(Feature::CodeModeOnly) {
+    model_info.tool_mode.unwrap_or_else(|| {
+        if features.enabled(Feature::CodeModeOnly) {
             ToolMode::CodeModeOnly
-        } else if turn_context.config.features.enabled(Feature::CodeMode) {
+        } else if features.enabled(Feature::CodeMode) {
             ToolMode::CodeMode
         } else {
             ToolMode::Direct
@@ -53,14 +71,63 @@ pub(crate) fn effective_tool_mode(turn_context: &TurnContext) -> ToolMode {
 }
 
 pub(crate) fn effective_tool_surface(turn_context: &TurnContext) -> ToolSurface {
+    effective_tool_surface_for_session(
+        &turn_context.session_source,
+        &turn_context.model_info,
+        &turn_context.features,
+        turn_context.config.tool_surface,
+    )
+}
+
+pub(crate) fn effective_tool_surface_for_session(
+    session_source: &SessionSource,
+    model_info: &ModelInfo,
+    features: &ManagedFeatures,
+    configured_surface: ToolSurface,
+) -> ToolSurface {
     if matches!(
-        effective_tool_mode(turn_context),
+        effective_tool_mode_for_session(session_source, model_info, features),
         ToolMode::CodeMode | ToolMode::CodeModeOnly
     ) {
         ToolSurface::Codex
     } else {
-        turn_context.config.tool_surface
+        configured_surface
     }
+}
+
+pub(crate) fn model_instructions_for_session(
+    session_source: &SessionSource,
+    model_info: &ModelInfo,
+    features: &ManagedFeatures,
+    configured_surface: ToolSurface,
+    personality: Option<Personality>,
+) -> String {
+    let flavor = match effective_tool_surface_for_session(
+        session_source,
+        model_info,
+        features,
+        configured_surface,
+    ) {
+        ToolSurface::Claude => BaseInstructionsFlavor::Default,
+        ToolSurface::Codex => BaseInstructionsFlavor::WithApplyPatchInstructions,
+    };
+    model_instructions(model_info, personality, flavor)
+}
+
+pub(crate) fn model_instructions_for_turn(
+    turn_context: &TurnContext,
+    personality: Option<Personality>,
+) -> String {
+    if let Some(base_instructions) = &turn_context.config.base_instructions {
+        return base_instructions.clone();
+    }
+    model_instructions_for_session(
+        &turn_context.session_source,
+        &turn_context.model_info,
+        &turn_context.features,
+        turn_context.config.tool_surface,
+        personality,
+    )
 }
 
 pub(crate) const SANDBOX_INTERVENTION_HINT: &str = "\

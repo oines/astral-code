@@ -34,6 +34,7 @@ mod agent_execution;
 mod agent_jobs;
 mod agents_md;
 mod apply_patch_cli;
+mod apply_patch_prompt;
 #[cfg(not(target_os = "windows"))]
 mod approvals;
 mod auto_review;
@@ -68,6 +69,7 @@ mod mcp_turn_metadata;
 mod model_overrides;
 mod model_runtime_selectors;
 mod model_switching;
+mod model_tool_mode_config;
 mod model_visible_layout;
 mod models_cache_ttl;
 mod models_etag_responses;

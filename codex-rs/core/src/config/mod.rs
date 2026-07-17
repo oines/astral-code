@@ -1807,6 +1807,7 @@ fn model_capability_from_config(capability: ModelCapabilityToml) -> ModelCapabil
     ModelCapability {
         litellm_provider: capability.litellm_provider,
         mode: capability.mode,
+        tool_mode: capability.tool_mode,
         max_context_window: capability.max_context_window.or(capability.context_window),
         max_output_tokens: capability.max_output_tokens,
         supports_tools: capability.supports_tools,

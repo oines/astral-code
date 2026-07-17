@@ -563,7 +563,15 @@ impl Codex {
             .base_instructions
             .clone()
             .or_else(|| conversation_history.get_base_instructions().map(|s| s.text))
-            .unwrap_or_else(|| model_info.get_model_instructions(config.personality));
+            .unwrap_or_else(|| {
+                crate::tools::model_instructions_for_session(
+                    &session_source,
+                    &model_info,
+                    &config.features,
+                    config.tool_surface,
+                    config.personality,
+                )
+            });
 
         // Dynamic tools are defined at thread start and persisted in rollout session metadata.
         let dynamic_tools = if dynamic_tools.is_empty() {
@@ -2871,7 +2879,11 @@ impl Session {
         {
             let model_info = turn_context.model_info.clone();
             let has_baked_personality = model_info.supports_personality()
-                && base_instructions == model_info.get_model_instructions(Some(personality));
+                && base_instructions
+                    == crate::tools::model_instructions_for_turn(
+                        turn_context,
+                        /*personality*/ Some(personality),
+                    );
             if !has_baked_personality
                 && let Some(personality_message) =
                     crate::context_manager::updates::personality_message_for(
