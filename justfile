@@ -14,11 +14,24 @@ help:
 # `codex`
 alias c := codex
 codex *args:
-    cargo run --bin codex -- {args}
+    cargo run --bin astral -- {args}
 
 # `codex exec`
 exec *args:
-    cargo run --bin codex -- exec {args}
+    cargo run --bin astral -- exec {args}
+
+# Run a redacting transparent proxy for provider cache black-box tests.
+[no-cd]
+cache-proxy *args:
+    node {{ justfile_directory() }}/scripts/cache-proxy.mjs {args}
+
+[no-cd]
+test-cache-proxy:
+    node --test {{ justfile_directory() }}/scripts/cache-proxy.test.mjs {{ justfile_directory() }}/scripts/cache-proxy-report.test.mjs
+
+[no-cd]
+cache-proxy-report *args:
+    node {{ justfile_directory() }}/scripts/cache-proxy-report.mjs {args}
 
 # Start `codex exec-server` and run codex-tui.
 [no-cd]
