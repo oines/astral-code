@@ -1035,7 +1035,11 @@ async fn run_sampling_request(
             Ok(mut output) => {
                 if turn_context.config.experimental_session_memory_compact {
                     output.session_memory_prompt_template =
-                        Some(crate::session_memory::PromptTemplate::from_prompt(&prompt));
+                        Some(crate::session_memory::PromptTemplate::from_prompt(
+                            &prompt,
+                            turn_context.as_ref(),
+                            router.as_ref(),
+                        ));
                 }
                 return Ok(output);
             }

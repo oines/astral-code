@@ -17,6 +17,7 @@ use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
 use codex_protocol::models::TranscriptItem;
 use codex_protocol::openai_models::InputModality;
+use codex_protocol::openai_models::ToolMode;
 use codex_protocol::protocol::CompactedItem;
 use serde::Deserialize;
 use serde::Serialize;
@@ -54,26 +55,40 @@ static RUNNING_EXTRACTIONS: LazyLock<Mutex<HashSet<String>>> =
 #[derive(Clone, Debug)]
 pub(crate) struct PromptTemplate {
     prompt: Prompt,
+    tool_context: SessionMemoryToolContext,
 }
 
 impl PromptTemplate {
-    pub(crate) fn from_prompt(prompt: &Prompt) -> Self {
+    pub(crate) fn from_prompt(
+        prompt: &Prompt,
+        turn_context: &TurnContext,
+        router: &crate::tools::ToolRouter,
+    ) -> Self {
         let mut prompt = prompt.clone();
         prompt.input.clear();
         prompt.compact_input_placeholders = false;
-        Self { prompt }
+        Self {
+            prompt,
+            tool_context: SessionMemoryToolContext {
+                surface: crate::tools::effective_tool_surface(turn_context),
+                mode: crate::tools::effective_tool_mode(turn_context),
+                code_mode_tool_definitions: router.code_mode_tool_definitions().to_vec(),
+            },
+        }
     }
+}
 
-    fn with_input(&self, input: Vec<TranscriptItem>) -> Prompt {
-        let mut prompt = self.prompt.clone();
-        prompt.input = input;
-        prompt
-    }
+#[derive(Clone, Debug)]
+struct SessionMemoryToolContext {
+    surface: crate::config::ToolSurface,
+    mode: ToolMode,
+    code_mode_tool_definitions: Vec<codex_code_mode::ToolDefinition>,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct ExtractionCandidate {
     prompt: Prompt,
+    tool_context: SessionMemoryToolContext,
     raw_boundary: Option<ExtractionBoundary>,
     active_context_tokens: i64,
     natural_break: bool,
@@ -87,10 +102,15 @@ impl ExtractionCandidate {
         active_context_tokens: i64,
         natural_break: bool,
     ) -> Self {
+        let PromptTemplate {
+            mut prompt,
+            tool_context,
+        } = template;
         let raw_boundary = extraction_boundary(history.raw_items());
-        let input = history.for_prompt(input_modalities);
+        prompt.input = history.for_prompt(input_modalities);
         Self {
-            prompt: template.with_input(input),
+            prompt,
+            tool_context,
             raw_boundary,
             active_context_tokens,
             natural_break,
