@@ -43,7 +43,8 @@ use codex_utils_output_truncation::formatted_truncate_text_content_items_with_po
 use codex_utils_output_truncation::truncate_function_output_items_with_policy;
 
 use delegate::CodeModeDispatchBroker;
-use delegate::CodeModeDispatchWorker;
+pub(crate) use delegate::CodeModeDispatchHost;
+pub(crate) use delegate::CodeModeDispatchWorker;
 pub(crate) use execute_handler::CodeModeExecuteHandler;
 use response_adapter::into_function_call_output_content_items;
 pub(crate) use wait_handler::CodeModeWaitHandler;
@@ -61,6 +62,12 @@ pub(crate) fn is_exec_tool_name(tool_name: &ToolName) -> bool {
 pub(crate) struct ExecContext {
     pub(super) session: Arc<Session>,
     pub(super) turn: Arc<TurnContext>,
+}
+
+impl ExecContext {
+    pub(crate) fn new(session: Arc<Session>, turn: Arc<TurnContext>) -> Self {
+        Self { session, turn }
+    }
 }
 
 pub(crate) struct CodeModeService {
@@ -154,6 +161,13 @@ impl CodeModeService {
         )
     }
 
+    pub(crate) fn start_dispatch_worker<H>(&self, host: Arc<H>) -> CodeModeDispatchWorker
+    where
+        H: CodeModeDispatchHost,
+    {
+        self.dispatch_broker.start_worker(host)
+    }
+
     async fn session(&self) -> Result<Arc<dyn CodeModeSession>, String> {
         if self.shutting_down.load(Ordering::Acquire) {
             return Err("code mode session is shutting down".to_string());
@@ -178,7 +192,7 @@ impl CodeModeService {
     }
 }
 
-pub(super) async fn handle_runtime_response(
+pub(crate) async fn handle_runtime_response(
     exec: &ExecContext,
     response: RuntimeResponse,
     max_output_tokens: Option<usize>,
@@ -314,7 +328,7 @@ async fn call_nested_tool(
     Ok(result.code_mode_result())
 }
 
-fn build_nested_tool_payload(
+pub(crate) fn build_nested_tool_payload(
     tool_kind: CodeModeToolKind,
     tool_name: &ToolName,
     input: Option<JsonValue>,

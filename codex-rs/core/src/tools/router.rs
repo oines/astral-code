@@ -35,6 +35,7 @@ pub struct ToolCall {
 pub struct ToolRouter {
     registry: ToolRegistry,
     model_visible_specs: Vec<ToolSpec>,
+    code_mode_tool_definitions: Vec<codex_code_mode::ToolDefinition>,
 }
 
 pub(crate) struct ToolRouterParams<'a> {
@@ -50,15 +51,33 @@ impl ToolRouter {
         build_tool_router(step_context, params)
     }
 
+    #[cfg(test)]
     pub(crate) fn from_parts(registry: ToolRegistry, model_visible_specs: Vec<ToolSpec>) -> Self {
         Self {
             registry,
             model_visible_specs,
+            code_mode_tool_definitions: Vec::new(),
+        }
+    }
+
+    pub(crate) fn from_planned_parts(
+        registry: ToolRegistry,
+        model_visible_specs: Vec<ToolSpec>,
+        code_mode_tool_definitions: Vec<codex_code_mode::ToolDefinition>,
+    ) -> Self {
+        Self {
+            registry,
+            model_visible_specs,
+            code_mode_tool_definitions,
         }
     }
 
     pub fn model_visible_specs(&self) -> Vec<ToolSpec> {
         self.model_visible_specs.clone()
+    }
+
+    pub(crate) fn code_mode_tool_definitions(&self) -> &[codex_code_mode::ToolDefinition] {
+        &self.code_mode_tool_definitions
     }
 
     #[cfg(test)]

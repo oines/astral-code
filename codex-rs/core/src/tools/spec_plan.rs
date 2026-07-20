@@ -116,6 +116,7 @@ type PlannedRuntime = Arc<dyn CoreToolRuntime>;
 struct PlannedTools {
     runtimes: Vec<PlannedRuntime>,
     hosted_specs: Vec<ToolSpec>,
+    code_mode_tool_definitions: Vec<codex_code_mode::ToolDefinition>,
 }
 
 impl PlannedTools {
@@ -170,14 +171,19 @@ pub(crate) fn build_tool_router(
     step_context: &StepContext,
     params: ToolRouterParams<'_>,
 ) -> ToolRouter {
-    let (model_visible_specs, registry) = build_tool_specs_and_registry(step_context, params);
-    ToolRouter::from_parts(registry, model_visible_specs)
+    let (model_visible_specs, registry, code_mode_tool_definitions) =
+        build_tool_specs_and_registry(step_context, params);
+    ToolRouter::from_planned_parts(registry, model_visible_specs, code_mode_tool_definitions)
 }
 
 fn build_tool_specs_and_registry(
     step_context: &StepContext,
     params: ToolRouterParams<'_>,
-) -> (Vec<ToolSpec>, ToolRegistry) {
+) -> (
+    Vec<ToolSpec>,
+    ToolRegistry,
+    Vec<codex_code_mode::ToolDefinition>,
+) {
     let turn_context = step_context.turn.as_ref();
     let ToolRouterParams {
         mcp_tools,
@@ -238,10 +244,15 @@ fn apply_direct_model_only_namespace_overrides(
 fn build_model_visible_specs_and_registry(
     turn_context: &TurnContext,
     planned_tools: PlannedTools,
-) -> (Vec<ToolSpec>, ToolRegistry) {
+) -> (
+    Vec<ToolSpec>,
+    ToolRegistry,
+    Vec<codex_code_mode::ToolDefinition>,
+) {
     let PlannedTools {
         runtimes,
         hosted_specs,
+        code_mode_tool_definitions,
     } = planned_tools;
     let mut specs = Vec::new();
     let mut seen_tool_names = HashSet::new();
@@ -267,7 +278,7 @@ fn build_model_visible_specs_and_registry(
         })
         .collect();
 
-    (model_visible_specs, registry)
+    (model_visible_specs, registry, code_mode_tool_definitions)
 }
 
 fn spec_for_model_request(
@@ -399,10 +410,13 @@ fn is_excluded_from_code_mode(turn_context: &TurnContext, tool_name: &ToolName) 
 fn build_code_mode_executors(
     turn_context: &TurnContext,
     executors: &[Arc<dyn CoreToolRuntime>],
-) -> Vec<Arc<dyn CoreToolRuntime>> {
+) -> (
+    Vec<Arc<dyn CoreToolRuntime>>,
+    Vec<codex_code_mode::ToolDefinition>,
+) {
     let tool_mode = effective_tool_mode(turn_context);
     if !matches!(tool_mode, ToolMode::CodeMode | ToolMode::CodeModeOnly) {
-        return vec![];
+        return (Vec::new(), Vec::new());
     }
 
     let mut code_mode_nested_tool_specs = Vec::new();
@@ -444,7 +458,9 @@ fn build_code_mode_executors(
     let deferred_tools =
         collect_code_mode_exec_prompt_tool_definitions(deferred_exec_prompt_tool_specs.iter());
 
-    vec![
+    let code_mode_tool_definitions =
+        codex_tools::collect_code_mode_tool_definitions(&code_mode_nested_tool_specs);
+    let runtimes: Vec<Arc<dyn CoreToolRuntime>> = vec![
         Arc::new(CodeModeExecuteHandler::new(
             create_code_mode_tool(
                 &enabled_tools,
@@ -455,7 +471,8 @@ fn build_code_mode_executors(
             code_mode_nested_tool_specs,
         )),
         Arc::new(CodeModeWaitHandler),
-    ]
+    ];
+    (runtimes, code_mode_tool_definitions)
 }
 
 fn merge_into_namespaces(specs: Vec<ToolSpec>) -> Vec<ToolSpec> {
@@ -1089,7 +1106,9 @@ fn prepend_code_mode_executors(
     planned_tools: &mut PlannedTools,
 ) {
     let turn_context = context.step_context.turn.as_ref();
-    let code_mode_executors = build_code_mode_executors(turn_context, planned_tools.runtimes());
+    let (code_mode_executors, code_mode_tool_definitions) =
+        build_code_mode_executors(turn_context, planned_tools.runtimes());
+    planned_tools.code_mode_tool_definitions = code_mode_tool_definitions;
     planned_tools.runtimes.splice(0..0, code_mode_executors);
 }
 
