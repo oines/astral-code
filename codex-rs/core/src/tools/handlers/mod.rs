@@ -1,6 +1,7 @@
 pub(crate) mod agent_jobs;
 pub(crate) mod agent_jobs_spec;
 pub(crate) mod apply_patch;
+pub(crate) mod apply_patch_payload;
 pub(crate) mod apply_patch_spec;
 mod astral_ask_user_question;
 mod astral_background_tasks;

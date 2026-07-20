@@ -24,6 +24,7 @@ use crate::tools::context::boxed_tool_output;
 use crate::tools::events::ToolEmitter;
 use crate::tools::events::ToolEventCtx;
 use crate::tools::handlers::apply_granted_turn_permissions;
+use crate::tools::handlers::apply_patch_payload::apply_patch_input_from_payload;
 use crate::tools::handlers::apply_patch_spec::create_apply_patch_freeform_tool;
 use crate::tools::handlers::resolve_tool_environment;
 use crate::tools::handlers::updated_hook_command;
@@ -265,31 +266,6 @@ fn write_permissions_for_paths(
 /// Extracts the raw patch text used as the command-shaped hook input for apply_patch.
 fn apply_patch_payload_command(payload: &ToolPayload) -> Option<String> {
     apply_patch_input_from_payload(payload).ok()
-}
-
-fn apply_patch_input_from_payload(payload: &ToolPayload) -> Result<String, FunctionCallError> {
-    match payload {
-        ToolPayload::Custom { input } => Ok(input.clone()),
-        ToolPayload::Function { arguments } => apply_patch_input_from_function_arguments(arguments),
-        ToolPayload::ToolSearch { .. } => Err(FunctionCallError::RespondToModel(
-            "apply_patch handler received unsupported payload".to_string(),
-        )),
-    }
-}
-
-fn apply_patch_input_from_function_arguments(arguments: &str) -> Result<String, FunctionCallError> {
-    let value: serde_json::Value = serde_json::from_str(arguments).map_err(|err| {
-        FunctionCallError::RespondToModel(format!("failed to parse apply_patch arguments: {err}"))
-    })?;
-    if let Some(input) = value.as_str() {
-        return Ok(input.to_string());
-    }
-    if let Some(input) = value.get("input").and_then(serde_json::Value::as_str) {
-        return Ok(input.to_string());
-    }
-    Err(FunctionCallError::RespondToModel(
-        "apply_patch handler received invalid function arguments".to_string(),
-    ))
 }
 
 async fn effective_patch_permissions(
