@@ -75,9 +75,12 @@ const APPLY_PATCH_GRAMMAR_GUIDANCE: &str =
 const APPLY_PATCH_TOOL_GUIDANCE: &str = "Use the `apply_patch` tool to edit files.";
 const UPSTREAM_SHELL_APPLY_PATCH_GUIDANCE: &str =
     "Use the `apply_patch` shell command to edit files.";
-const DIRECT_APPLY_PATCH_GUIDANCE: &str = "In direct tool mode, call `apply_patch` with the complete patch text in its `input` string argument";
+const APPLY_PATCH_INTERFACE_GUIDANCE: &str =
+    "Use the `apply_patch` interface exposed by the current tool definitions";
+const DIRECT_APPLY_PATCH_GUIDANCE: &str =
+    "If `apply_patch` is available as a top-level tool, follow that tool's schema";
 const CODE_MODE_APPLY_PATCH_GUIDANCE: &str =
-    "In Code Mode, pass that same raw patch string directly to the nested tool";
+    "If `apply_patch` is available through Code Mode, invoke it from `exec` as a nested tool";
 const PROVIDER_NEUTRAL_APPLY_PATCH_DESCRIPTION: &str = "Use the `apply_patch` tool to edit files. Set the `input` string to the complete raw patch text, including the `*** Begin Patch` and `*** End Patch` envelope.";
 
 fn provider(server: &wiremock::MockServer, protocol: ProtocolScenario) -> ModelProviderInfo {
@@ -237,6 +240,7 @@ async fn provider_requests_select_apply_patch_prompt_from_effective_tool_surface
                     for guidance in [
                         APPLY_PATCH_GRAMMAR_GUIDANCE,
                         APPLY_PATCH_TOOL_GUIDANCE,
+                        APPLY_PATCH_INTERFACE_GUIDANCE,
                         DIRECT_APPLY_PATCH_GUIDANCE,
                         CODE_MODE_APPLY_PATCH_GUIDANCE,
                     ] {
