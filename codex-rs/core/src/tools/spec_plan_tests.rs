@@ -57,6 +57,7 @@ struct ToolPlanProbe {
     visible_specs: Vec<ToolSpec>,
     visible_names: Vec<String>,
     namespace_functions: BTreeMap<String, Vec<String>>,
+    code_mode_names: Vec<String>,
     registered_names: Vec<String>,
     exposures: BTreeMap<String, ToolExposure>,
 }
@@ -64,6 +65,11 @@ struct ToolPlanProbe {
 impl ToolPlanProbe {
     fn from_router(router: ToolRouter) -> Self {
         let visible_specs = router.model_visible_specs();
+        let code_mode_names = router
+            .code_mode_tool_definitions()
+            .iter()
+            .map(|definition| definition.name.clone())
+            .collect();
         let visible_names = visible_specs
             .iter()
             .map(|spec| spec.name().to_string())
@@ -106,6 +112,7 @@ impl ToolPlanProbe {
             visible_specs,
             visible_names,
             namespace_functions,
+            code_mode_names,
             registered_names,
             exposures,
         }
@@ -1897,17 +1904,19 @@ async fn hosted_and_extension_web_tools_follow_surface() {
     codex_standalone_web_search.assert_visible_contains(&["web"]);
     codex_standalone_web_search.assert_visible_lacks(&["web_search"]);
 
+    let provider_neutral_web_inputs = || ToolPlanInputs {
+        extension_tool_executors: vec![
+            Arc::new(WebNamespaceExtensionTool { name: "search" }),
+            Arc::new(WebNamespaceExtensionTool { name: "fetch" }),
+        ],
+        ..Default::default()
+    };
+
     let provider_neutral_web_tools_disabled = probe_with(
         |turn| {
             set_web_search_mode(turn, WebSearchMode::Cached);
         },
-        ToolPlanInputs {
-            extension_tool_executors: vec![
-                Arc::new(WebNamespaceExtensionTool { name: "search" }),
-                Arc::new(WebNamespaceExtensionTool { name: "fetch" }),
-            ],
-            ..Default::default()
-        },
+        provider_neutral_web_inputs(),
     )
     .await;
     provider_neutral_web_tools_disabled.assert_visible_lacks(&["web"]);
@@ -1917,13 +1926,7 @@ async fn hosted_and_extension_web_tools_follow_surface() {
         |turn| {
             set_web_search_mode(turn, WebSearchMode::Live);
         },
-        ToolPlanInputs {
-            extension_tool_executors: vec![
-                Arc::new(WebNamespaceExtensionTool { name: "search" }),
-                Arc::new(WebNamespaceExtensionTool { name: "fetch" }),
-            ],
-            ..Default::default()
-        },
+        provider_neutral_web_inputs(),
     )
     .await;
     provider_neutral_web_tools.assert_visible_contains(&["web"]);
@@ -1932,6 +1935,89 @@ async fn hosted_and_extension_web_tools_follow_surface() {
         &["fetch".to_string(), "search".to_string()]
     );
     provider_neutral_web_tools.assert_registered_contains(&["websearch", "webfetch"]);
+
+    let codex_provider_neutral_web_tools = probe_with(
+        |turn| {
+            set_tool_surface(turn, ToolSurface::Codex);
+            set_web_search_mode(turn, WebSearchMode::Live);
+        },
+        provider_neutral_web_inputs(),
+    )
+    .await;
+    codex_provider_neutral_web_tools.assert_visible_contains(&["web"]);
+    assert_eq!(
+        codex_provider_neutral_web_tools.namespace_function_names("web"),
+        &["fetch".to_string(), "search".to_string()]
+    );
+    codex_provider_neutral_web_tools.assert_registered_contains(&["websearch", "webfetch"]);
+
+    let code_mode_provider_neutral_web_tools = probe_with(
+        |turn| {
+            set_features(turn, &[Feature::CodeMode]);
+            set_web_search_mode(turn, WebSearchMode::Live);
+        },
+        provider_neutral_web_inputs(),
+    )
+    .await;
+    code_mode_provider_neutral_web_tools.assert_visible_contains(&["exec", "wait", "web"]);
+    assert_eq!(
+        code_mode_provider_neutral_web_tools.namespace_function_names("web"),
+        &["fetch".to_string(), "search".to_string()]
+    );
+    assert!(
+        code_mode_provider_neutral_web_tools
+            .code_mode_names
+            .iter()
+            .any(|name| name == "web__search")
+    );
+    assert!(
+        code_mode_provider_neutral_web_tools
+            .code_mode_names
+            .iter()
+            .any(|name| name == "web__fetch")
+    );
+    let code_mode_only_provider_neutral_web_tools = probe_with(
+        |turn| {
+            set_features(turn, &[Feature::CodeMode, Feature::CodeModeOnly]);
+            set_web_search_mode(turn, WebSearchMode::Live);
+        },
+        provider_neutral_web_inputs(),
+    )
+    .await;
+    code_mode_only_provider_neutral_web_tools.assert_visible_contains(&["exec", "wait"]);
+    code_mode_only_provider_neutral_web_tools.assert_visible_lacks(&["web"]);
+    assert!(
+        code_mode_only_provider_neutral_web_tools
+            .code_mode_names
+            .iter()
+            .any(|name| name == "web__search")
+    );
+    assert!(
+        code_mode_only_provider_neutral_web_tools
+            .code_mode_names
+            .iter()
+            .any(|name| name == "web__fetch")
+    );
+    let codex_web_namespace_tools = probe_with(
+        |turn| {
+            set_tool_surface(turn, ToolSurface::Codex);
+            set_feature(turn, Feature::StandaloneWebSearch, /*enabled*/ true);
+            set_web_search_mode(turn, WebSearchMode::Live);
+        },
+        ToolPlanInputs {
+            extension_tool_executors: vec![
+                Arc::new(WebRunExtensionTool),
+                Arc::new(WebNamespaceExtensionTool { name: "search" }),
+                Arc::new(WebNamespaceExtensionTool { name: "fetch" }),
+            ],
+            ..Default::default()
+        },
+    )
+    .await;
+    assert_eq!(
+        codex_web_namespace_tools.namespace_function_names("web"),
+        &["fetch".to_string(), "run".to_string(), "search".to_string()]
+    );
 
     let unsupported_provider = probe(|turn| {
         set_tool_surface(turn, ToolSurface::Codex);

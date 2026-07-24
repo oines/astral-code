@@ -1148,19 +1148,16 @@ fn append_extension_tool_executors(
 
     for executor in executors.iter().cloned() {
         let tool_name = executor.tool_name();
+        if is_provider_neutral_web_tool(&tool_name) && !provider_neutral_web_tools_enabled {
+            continue;
+        }
         match surface {
             ToolSurface::Claude => {
                 if tool_name == ToolName::namespaced("web", "run") {
                     continue;
                 }
-                if is_provider_neutral_web_tool(&tool_name) && !provider_neutral_web_tools_enabled {
-                    continue;
-                }
             }
             ToolSurface::Codex => {
-                if is_provider_neutral_web_tool(&tool_name) {
-                    continue;
-                }
                 if tool_name == ToolName::namespaced("web", "run")
                     && (!standalone_web_search_enabled || !web_search_mode_on)
                 {

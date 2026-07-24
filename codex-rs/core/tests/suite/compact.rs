@@ -1,4 +1,7 @@
 #![allow(clippy::expect_used)]
+use codex_config::config_toml::SecretString;
+use codex_config::config_toml::WebSearchProvider;
+use codex_config::config_toml::WebSearchRuntimeConfig;
 use codex_config::types::McpServerConfig;
 use codex_config::types::McpServerTransportConfig;
 use codex_core::compact::SUMMARIZATION_PROMPT;
@@ -6,12 +9,15 @@ use codex_core::compact::SUMMARY_PREFIX;
 use codex_core::compact::compact_user_summary_message;
 use codex_core::config::Config;
 use codex_core::config::ToolSurface;
+use codex_extension_api::ExtensionRegistry;
+use codex_extension_api::ExtensionRegistryBuilder;
 use codex_features::Feature;
 use codex_login::CodexAuth;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::WireApi;
 use codex_models_manager::bundled_models_response;
 use codex_protocol::config_types::AutoCompactTokenLimitScope;
+use codex_protocol::config_types::WebSearchMode;
 use codex_protocol::items::TurnItem;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::openai_models::ModelInfo;
@@ -27,6 +33,7 @@ use codex_protocol::protocol::RolloutItem;
 use codex_protocol::protocol::RolloutLine;
 use codex_protocol::protocol::WarningEvent;
 use codex_protocol::user_input::UserInput;
+use codex_web_search_extension::install as install_web_search_extension;
 use core_test_support::PathBufExt;
 use core_test_support::context_snapshot;
 use core_test_support::context_snapshot::ContextSnapshotOptions;
@@ -63,6 +70,7 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -155,6 +163,27 @@ fn enable_test_session_memory_compact(config: &mut Config) {
     config.session_memory_minimum_message_tokens_to_init = 10_000;
     config.session_memory_minimum_tokens_between_update = 5_000;
     config.session_memory_tool_calls_between_updates = 3;
+}
+
+fn session_memory_web_extensions(auth: &CodexAuth) -> Arc<ExtensionRegistry<Config>> {
+    let auth_manager = codex_core::test_support::auth_manager_from_auth(auth.clone());
+    let mut extension_builder = ExtensionRegistryBuilder::<Config>::new();
+    install_web_search_extension(&mut extension_builder, auth_manager);
+    Arc::new(extension_builder.build())
+}
+
+fn enable_test_web_search(config: &mut Config) {
+    config
+        .web_search_mode
+        .set(WebSearchMode::Live)
+        .expect("web search mode should be accepted");
+    config.web_search_runtime_config = Some(WebSearchRuntimeConfig {
+        provider: WebSearchProvider::Tavily,
+        api_key: SecretString::new("test-web-search-key".to_string())
+            .expect("web search key should be valid"),
+        default_limit: 5,
+        max_limit: 20,
+    });
 }
 
 fn ev_completed_with_usage(id: &str, input_tokens: i64, output_tokens: i64) -> Value {
@@ -491,11 +520,16 @@ async fn run_session_memory_matrix_case(
         SessionMemoryProtocol::ChatCompletions => chat_completions_mock_model_provider(&server),
         SessionMemoryProtocol::AnthropicMessages => anthropic_messages_mock_model_provider(&server),
     };
+    let auth = CodexAuth::from_api_key("dummy");
+    let extensions = session_memory_web_extensions(&auth);
     let mut builder = test_codex()
+        .with_auth(auth)
+        .with_extensions(extensions)
         .with_model("test-gpt-5.1-codex")
         .with_config(move |config| {
             config.model_provider = model_provider;
             enable_test_session_memory_compact(config);
+            enable_test_web_search(config);
             config.session_memory_minimum_message_tokens_to_init = 1;
             surface.configure(config);
         });
@@ -636,6 +670,11 @@ async fn run_session_memory_matrix_case(
         assert!(tool_names.contains(&"exec".to_string()));
         assert!(tool_names.contains(&"wait".to_string()));
         assert!(!tool_names.contains(&"apply_patch".to_string()));
+        assert!(!tool_names.contains(&"web__search".to_string()));
+        assert!(!tool_names.contains(&"web__fetch".to_string()));
+    } else {
+        assert!(tool_names.contains(&"web__search".to_string()));
+        assert!(tool_names.contains(&"web__fetch".to_string()));
     }
     if surface.uses_code_mode_exec() {
         assert!(sidechain_text.contains("tools.apply_patch"));
@@ -665,11 +704,16 @@ async fn run_session_memory_code_mode_retry_case(protocol: SessionMemoryProtocol
         SessionMemoryProtocol::ChatCompletions => chat_completions_mock_model_provider(&server),
         SessionMemoryProtocol::AnthropicMessages => anthropic_messages_mock_model_provider(&server),
     };
+    let auth = CodexAuth::from_api_key("dummy");
+    let extensions = session_memory_web_extensions(&auth);
     let mut builder = test_codex()
+        .with_auth(auth)
+        .with_extensions(extensions)
         .with_model("test-gpt-5.1-codex")
         .with_config(move |config| {
             config.model_provider = model_provider;
             enable_test_session_memory_compact(config);
+            enable_test_web_search(config);
             config.session_memory_minimum_message_tokens_to_init = 1;
             SessionMemorySurface::CodeModeOnly.configure(config);
         });
@@ -685,7 +729,7 @@ async fn run_session_memory_code_mode_retry_case(protocol: SessionMemoryProtocol
         "*** Begin Patch\n*** Update File: {}\n@@\n _What is actively being worked on right now? Pending tasks not yet completed. Immediate next steps._\n+- {marker}\n \n # Task specification\n*** End Patch",
         summary_path.display()
     );
-    let forbidden_source = "await tools.exec_command({cmd: 'pwd'});";
+    let forbidden_source = "await tools.web__search({query: 'session memory'});";
     let valid_source = format!(
         "const patch = {};\nawait tools.apply_patch(patch);",
         serde_json::to_string(&patch).expect("serialize retry patch")
