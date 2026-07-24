@@ -37,6 +37,7 @@ use crate::responses_retry::handle_retryable_response_stream_error;
 use crate::session::PreviousTurnSettings;
 use crate::session::TurnInput;
 use crate::session::session::Session;
+use crate::session::step_context::StepContext;
 use crate::session::turn_context::TurnContext;
 use crate::stream_events_utils::HandleOutputCtx;
 use crate::stream_events_utils::TurnItemContributorPolicy;
@@ -69,6 +70,7 @@ use codex_async_utils::OrCancelExt;
 use codex_core_skills::injection::InjectedHostSkillPrompts;
 use codex_extension_api::TurnInputContext;
 use codex_extension_api::TurnInputEnvironment;
+use codex_features::Feature;
 use codex_git_utils::get_git_repo_root_with_fs;
 use codex_protocol::config_types::AutoCompactTokenLimitScope;
 use codex_protocol::config_types::ModeKind;
@@ -148,11 +150,19 @@ pub(crate) async fn run_turn(
         return None;
     }
 
-    sess.record_context_updates_and_set_reference_context_item(turn_context.as_ref())
+    let first_step_context = sess.capture_step_context(Arc::clone(&turn_context)).await;
+    // Keep the exact model-visible state used by this turn and its inline compactions.
+    let mut world_state = sess
+        .record_context_updates_and_set_reference_context_item(first_step_context.as_ref())
         .await;
 
-    let (injection_items, explicitly_enabled_connectors) =
-        build_skills_and_plugins(&sess, turn_context.as_ref(), &input, &cancellation_token).await?;
+    let (injection_items, explicitly_enabled_connectors) = build_skills_and_plugins(
+        &sess,
+        first_step_context.as_ref(),
+        &input,
+        &cancellation_token,
+    )
+    .await?;
 
     if run_pending_session_start_hooks(&sess, &turn_context).await {
         return None;
@@ -193,6 +203,7 @@ pub(crate) async fn run_turn(
     // 1. At the start of a turn, so the fresh turn input in `input` gets sampled first.
     // 2. After auto-compact, when model/tool continuation needs to resume before any steer.
 
+    let mut next_step_context = Some(first_step_context);
     loop {
         // Note that pending_input would be something like a message the user
         // submitted through the UI while the model was running. Though the UI
@@ -205,6 +216,22 @@ pub(crate) async fn run_turn(
 
         if run_hooks_and_record_inputs(&sess, &turn_context, &pending_input).await {
             break;
+        }
+
+        // Capture once so context, advertised tools, and tool calls share one request view.
+        let step_context = match next_step_context.take() {
+            Some(step_context) => step_context,
+            None => sess.capture_step_context(Arc::clone(&turn_context)).await,
+        };
+
+        if turn_context
+            .config
+            .features
+            .enabled(Feature::DeferredExecutor)
+        {
+            world_state = sess
+                .record_step_world_state_if_changed(&world_state, step_context.as_ref())
+                .await;
         }
 
         // Construct the input that we will send to the model.
@@ -220,7 +247,7 @@ pub(crate) async fn run_turn(
             .current_header_value_for_model_request(&window_id);
         match run_sampling_request(
             Arc::clone(&sess),
-            Arc::clone(&turn_context),
+            Arc::clone(&step_context),
             Arc::clone(&turn_extension_data),
             Arc::clone(&turn_diff_tracker),
             &mut client_session,
@@ -287,7 +314,7 @@ pub(crate) async fn run_turn(
                         &sess,
                         &turn_context,
                         &mut client_session,
-                        InitialContextInjection::BeforeLastUserMessage,
+                        InitialContextInjection::BeforeLastUserMessage(Arc::clone(&world_state)),
                         CompactionReason::ContextLimit,
                         CompactionPhase::MidTurn,
                     )
@@ -396,13 +423,16 @@ pub(crate) async fn run_turn(
 async fn turn_diff_display_roots(turn_context: &TurnContext) -> Vec<(String, PathBuf)> {
     let mut display_roots = Vec::new();
     for turn_environment in &turn_context.environments.turn_environments {
-        let root = get_git_repo_root_with_fs(
-            turn_environment.environment.get_filesystem().as_ref(),
-            &turn_environment.cwd,
-        )
-        .await
-        .unwrap_or_else(|| turn_environment.cwd.clone())
-        .into_path_buf();
+        // TODO(anp): Migrate git-root discovery and diff display roots to PathUri so foreign
+        // environment roots can participate without host-native conversion.
+        let Ok(cwd) = turn_environment.cwd().to_abs_path() else {
+            continue;
+        };
+        let root =
+            get_git_repo_root_with_fs(turn_environment.environment.get_filesystem().as_ref(), &cwd)
+                .await
+                .unwrap_or(cwd)
+                .into_path_buf();
         display_roots.push((turn_environment.environment_id.clone(), root));
     }
     display_roots
@@ -436,16 +466,13 @@ async fn run_hooks_and_record_inputs(
     blocked_input && !accepted_user_input
 }
 
-#[expect(
-    clippy::await_holding_invalid_type,
-    reason = "MCP tool listing borrows the read guard across cancellation-aware await"
-)]
 async fn build_skills_and_plugins(
     sess: &Arc<Session>,
-    turn_context: &TurnContext,
+    step_context: &StepContext,
     input: &[TurnInput],
     cancellation_token: &CancellationToken,
 ) -> Option<(Vec<TranscriptItem>, HashSet<String>)> {
+    let turn_context = step_context.turn.as_ref();
     let user_input = input
         .iter()
         .filter_map(|item| match item {
@@ -473,16 +500,8 @@ async fn build_skills_and_plugins(
         // Plugin mentions need raw MCP/app inventory even when app tools
         // are normally hidden so we can describe the plugin's currently
         // usable capabilities for this turn.
-        match sess
-            .services
-            .mcp_connection_manager
-            .read()
-            .await
-            .list_all_tools()
-            .or_cancel(cancellation_token)
-            .await
-        {
-            Ok(mcp_tools) => mcp_tools,
+        match step_context.mcp_tools().or_cancel(cancellation_token).await {
+            Ok(mcp_tools) => mcp_tools.to_vec(),
             Err(_) if turn_context.apps_enabled() => return None,
             Err(_) => Vec::new(),
         }
@@ -613,10 +632,14 @@ async fn build_extension_turn_input_items(
         .turn_environments
         .iter()
         .enumerate()
-        .map(|(index, environment)| TurnInputEnvironment {
-            environment_id: environment.environment_id.clone(),
-            cwd: environment.cwd.as_path().to_path_buf(),
-            is_primary: index == 0,
+        .filter_map(|(index, environment)| {
+            // TODO(anp): Migrate extension turn-input environments to PathUri so foreign cwd
+            // values are not omitted from extension context.
+            Some(TurnInputEnvironment {
+                environment_id: environment.environment_id.clone(),
+                cwd: environment.cwd().to_abs_path().ok()?.into_path_buf(),
+                is_primary: index == 0,
+            })
         })
         .collect::<Vec<_>>();
 
@@ -947,14 +970,14 @@ pub(crate) fn build_prompt(
 #[instrument(level = "trace",
     skip_all,
     fields(
-        turn_id = %turn_context.sub_id,
-        model = %turn_context.model_info.slug,
-        cwd = %turn_context.cwd.display()
+        turn_id = %step_context.turn.sub_id,
+        model = %step_context.turn.model_info.slug,
+        cwd = %step_context.turn.cwd.display()
     )
 )]
 async fn run_sampling_request(
     sess: Arc<Session>,
-    turn_context: Arc<TurnContext>,
+    step_context: Arc<StepContext>,
     turn_store: Arc<codex_extension_api::ExtensionData>,
     turn_diff_tracker: SharedTurnDiffTracker,
     client_session: &mut ModelClientSession,
@@ -962,19 +985,20 @@ async fn run_sampling_request(
     input: Vec<TranscriptItem>,
     cancellation_token: CancellationToken,
 ) -> CodexResult<SamplingRequestResult> {
-    let router = built_tools(sess.as_ref(), turn_context.as_ref(), &cancellation_token).await?;
+    let turn_context = Arc::clone(&step_context.turn);
+    let router = built_tools(sess.as_ref(), step_context.as_ref(), &cancellation_token).await?;
 
     let base_instructions = sess.get_base_instructions().await;
 
     let tool_runtime = ToolCallRuntime::new(
         Arc::clone(&router),
         Arc::clone(&sess),
-        Arc::clone(&turn_context),
+        Arc::clone(&step_context),
         Arc::clone(&turn_diff_tracker),
     );
     let _code_mode_worker = sess.services.code_mode_service.start_turn_worker(
         &sess,
-        &turn_context,
+        Arc::clone(&step_context),
         Arc::clone(&router),
         Arc::clone(&turn_diff_tracker),
     );
@@ -1011,7 +1035,11 @@ async fn run_sampling_request(
             Ok(mut output) => {
                 if turn_context.config.experimental_session_memory_compact {
                     output.session_memory_prompt_template =
-                        Some(crate::session_memory::PromptTemplate::from_prompt(&prompt));
+                        Some(crate::session_memory::PromptTemplate::from_prompt(
+                            &prompt,
+                            turn_context.as_ref(),
+                            router.as_ref(),
+                        ));
                 }
                 return Ok(output);
             }
@@ -1047,35 +1075,27 @@ async fn run_sampling_request(
     }
 }
 
-#[expect(
-    clippy::await_holding_invalid_type,
-    reason = "tool router construction reads through the session-owned manager guard"
-)]
 #[instrument(level = "trace",
     skip_all,
     fields(
-        turn_id = %turn_context.sub_id,
-        model = %turn_context.model_info.slug,
-        apps_enabled = turn_context.apps_enabled()
+        turn_id = %step_context.turn.sub_id,
+        model = %step_context.turn.model_info.slug,
+        apps_enabled = step_context.turn.apps_enabled()
     )
 )]
 pub(crate) async fn built_tools(
     sess: &Session,
-    turn_context: &TurnContext,
+    step_context: &StepContext,
     cancellation_token: &CancellationToken,
 ) -> CodexResult<Arc<ToolRouter>> {
-    let mcp_connection_manager = sess
-        .services
-        .mcp_connection_manager
-        .read()
-        .instrument(trace_span!("read_mcp_connection_manager"))
-        .await;
+    let turn_context = step_context.turn.as_ref();
+    let mcp_connection_manager = step_context.mcp.manager();
     let has_mcp_servers = mcp_connection_manager.has_servers();
-    let all_mcp_tools = mcp_connection_manager
-        .list_all_tools()
+    let all_mcp_tools = step_context
+        .mcp_tools()
         .or_cancel(cancellation_token)
-        .await?;
-    drop(mcp_connection_manager);
+        .await?
+        .to_vec();
     let loaded_plugins = sess
         .services
         .plugins_manager
@@ -1148,8 +1168,8 @@ pub(crate) async fn built_tools(
     );
     let mcp_tools = has_mcp_servers.then_some(mcp_tool_exposure.direct_tools);
     let deferred_mcp_tools = mcp_tool_exposure.deferred_tools;
-    Ok(Arc::new(ToolRouter::from_turn_context(
-        turn_context,
+    Ok(Arc::new(ToolRouter::from_context(
+        step_context,
         ToolRouterParams {
             mcp_tools,
             deferred_mcp_tools,

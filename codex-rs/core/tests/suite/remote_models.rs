@@ -39,6 +39,7 @@ use core_test_support::skip_if_sandbox;
 use core_test_support::test_codex::TestCodex;
 use core_test_support::test_codex::local_selections;
 use core_test_support::test_codex::test_codex;
+use core_test_support::test_codex::test_codex_with_codex_surface;
 use core_test_support::test_codex::turn_permission_fields;
 use core_test_support::wait_for_event;
 use core_test_support::wait_for_event_match;
@@ -545,7 +546,7 @@ async fn remote_models_remote_model_uses_unified_exec() -> Result<()> {
     )
     .await;
 
-    let mut builder = test_codex()
+    let mut builder = test_codex_with_codex_surface()
         .with_auth(CodexAuth::create_dummy_api_key_auth_for_testing())
         .with_config(|config| {
             config.model = Some("gpt-5.4".to_string());

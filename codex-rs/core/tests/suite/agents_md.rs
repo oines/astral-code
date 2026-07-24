@@ -1,6 +1,7 @@
 use anyhow::Result;
 use codex_exec_server::CreateDirectoryOptions;
 use codex_utils_absolute_path::AbsolutePathBuf;
+use codex_utils_path_uri::PathUri;
 use core_test_support::create_directory_symlink;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_response_created;
@@ -28,7 +29,7 @@ async fn agents_instructions(mut builder: TestCodexBuilder) -> Result<String> {
     request
         .message_input_texts("user")
         .into_iter()
-        .find(|text| text.starts_with("# AGENTS.md instructions for "))
+        .find(|text| text.starts_with("# AGENTS.md instructions"))
         .ok_or_else(|| anyhow::anyhow!("instructions message not found"))
 }
 
@@ -38,10 +39,12 @@ async fn agents_override_is_preferred_over_agents_md() -> Result<()> {
         agents_instructions(test_codex().with_workspace_setup(|cwd, fs| async move {
             let agents_md = cwd.join("AGENTS.md");
             let override_md = cwd.join("AGENTS.override.md");
-            fs.write_file(&agents_md, b"base doc".to_vec(), /*sandbox*/ None)
+            let agents_md_uri = PathUri::from_abs_path(&agents_md);
+            let override_md_uri = PathUri::from_abs_path(&override_md);
+            fs.write_file(&agents_md_uri, b"base doc".to_vec(), /*sandbox*/ None)
                 .await?;
             fs.write_file(
-                &override_md,
+                &override_md_uri,
                 b"override doc".to_vec(),
                 /*sandbox*/ None,
             )
@@ -72,14 +75,20 @@ async fn configured_fallback_is_used_when_agents_candidate_is_directory() -> Res
             .with_workspace_setup(|cwd, fs| async move {
                 let agents_dir = cwd.join("AGENTS.md");
                 let fallback = cwd.join("WORKFLOW.md");
+                let agents_dir_uri = PathUri::from_abs_path(&agents_dir);
+                let fallback_uri = PathUri::from_abs_path(&fallback);
                 fs.create_directory(
-                    &agents_dir,
+                    &agents_dir_uri,
                     CreateDirectoryOptions { recursive: true },
                     /*sandbox*/ None,
                 )
                 .await?;
-                fs.write_file(&fallback, b"fallback doc".to_vec(), /*sandbox*/ None)
-                    .await?;
+                fs.write_file(
+                    &fallback_uri,
+                    b"fallback doc".to_vec(),
+                    /*sandbox*/ None,
+                )
+                .await?;
                 Ok::<(), anyhow::Error>(())
             }),
     )
@@ -109,23 +118,35 @@ async fn agents_docs_are_concatenated_from_project_root_to_cwd() -> Result<()> {
                 let root_agents = root.join("AGENTS.md");
                 let git_marker = root.join(".git");
                 let nested_agents = nested.join("AGENTS.md");
+                let nested_uri = PathUri::from_abs_path(&nested);
+                let root_agents_uri = PathUri::from_abs_path(&root_agents);
+                let git_marker_uri = PathUri::from_abs_path(&git_marker);
+                let nested_agents_uri = PathUri::from_abs_path(&nested_agents);
 
                 fs.create_directory(
-                    &nested,
+                    &nested_uri,
                     CreateDirectoryOptions { recursive: true },
                     /*sandbox*/ None,
                 )
                 .await?;
-                fs.write_file(&root_agents, b"root doc".to_vec(), /*sandbox*/ None)
-                    .await?;
                 fs.write_file(
-                    &git_marker,
+                    &root_agents_uri,
+                    b"root doc".to_vec(),
+                    /*sandbox*/ None,
+                )
+                .await?;
+                fs.write_file(
+                    &git_marker_uri,
                     b"gitdir: /tmp/mock-git-dir\n".to_vec(),
                     /*sandbox*/ None,
                 )
                 .await?;
-                fs.write_file(&nested_agents, b"child doc".to_vec(), /*sandbox*/ None)
-                    .await?;
+                fs.write_file(
+                    &nested_agents_uri,
+                    b"child doc".to_vec(),
+                    /*sandbox*/ None,
+                )
+                .await?;
                 Ok::<(), anyhow::Error>(())
             }),
     )
@@ -206,8 +227,8 @@ async fn symlinked_cwd_uses_logical_parent_for_agents_discovery() -> Result<()> 
     assert_eq!(
         test.codex.instruction_sources().await,
         vec![
-            logical_root.join("AGENTS.md"),
-            test.config.cwd.join("AGENTS.md")
+            PathUri::from_abs_path(&logical_root.join("AGENTS.md")),
+            PathUri::from_abs_path(&test.config.cwd.join("AGENTS.md"))
         ]
     );
 
@@ -216,7 +237,7 @@ async fn symlinked_cwd_uses_logical_parent_for_agents_discovery() -> Result<()> 
         .single_request()
         .message_input_texts("user")
         .into_iter()
-        .find(|text| text.starts_with("# AGENTS.md instructions for "))
+        .find(|text| text.starts_with("# AGENTS.md instructions"))
         .expect("instructions message");
     assert!(instructions.contains("logical parent doc"));
     assert!(instructions.contains("workspace doc"));
@@ -240,8 +261,9 @@ async fn selected_environment_sources_match_model_visible_instructions() -> Resu
     let mut builder = test_codex()
         .with_home(home)
         .with_workspace_setup(|cwd, fs| async move {
+            let agents_md_uri = PathUri::from_abs_path(&cwd.join("AGENTS.md"));
             fs.write_file(
-                &cwd.join("AGENTS.md"),
+                &agents_md_uri,
                 b"project doc".to_vec(),
                 /*sandbox*/ None,
             )
@@ -254,7 +276,10 @@ async fn selected_environment_sources_match_model_visible_instructions() -> Resu
 
     assert_eq!(
         test.codex.instruction_sources().await,
-        vec![global_agents, project_agents]
+        vec![
+            PathUri::from_abs_path(&global_agents),
+            PathUri::from_abs_path(&project_agents)
+        ]
     );
 
     test.submit_turn("hello").await?;
@@ -262,7 +287,7 @@ async fn selected_environment_sources_match_model_visible_instructions() -> Resu
         .single_request()
         .message_input_texts("user")
         .into_iter()
-        .find(|text| text.starts_with("# AGENTS.md instructions for "))
+        .find(|text| text.starts_with("# AGENTS.md instructions"))
         .expect("instructions message");
     assert!(instructions.contains("global doc\n\n--- project-doc ---\n\nproject doc"));
 

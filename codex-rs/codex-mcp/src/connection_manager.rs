@@ -18,6 +18,7 @@ use crate::codex_apps::CodexAppsToolsCacheContext;
 use crate::codex_apps::CodexAppsToolsCacheKey;
 use crate::codex_apps::write_cached_codex_apps_tools_if_needed;
 use crate::elicitation::ElicitationRequestManager;
+use crate::elicitation::ElicitationRequestRouter;
 use crate::elicitation::ElicitationReviewerHandle;
 use crate::mcp::CODEX_APPS_MCP_SERVER_NAME;
 use crate::mcp::ToolPluginProvenance;
@@ -140,6 +141,8 @@ impl McpConnectionManager {
                 approval_policy.value(),
                 permission_profile.clone(),
                 /*reviewer*/ None,
+                /*lifecycle*/ None,
+                ElicitationRequestRouter::default(),
             ),
             startup_cancellation_token: CancellationToken::new(),
         }
@@ -149,22 +152,19 @@ impl McpConnectionManager {
         !self.clients.is_empty()
     }
 
-    /// Drain all MCP clients from this manager and return a future that stops
-    /// them and terminates their stdio server processes.
-    pub fn begin_shutdown(&mut self) -> impl std::future::Future<Output = ()> + Send + 'static {
+    /// Stop all MCP clients owned by this manager and terminate stdio server processes.
+    pub async fn shutdown(&self) {
         self.startup_cancellation_token.cancel();
-        let clients = std::mem::take(&mut self.clients);
-        self.server_metadata.clear();
-        async move {
-            for client in clients.into_values() {
+        let clients = self.clients.values().cloned().collect::<Vec<_>>();
+        // Keep cleanup alive if an interrupt cancels the refresh that requested it.
+        let shutdown_task = tokio::spawn(async move {
+            for client in clients {
                 client.shutdown().await;
             }
+        });
+        if let Err(error) = shutdown_task.await {
+            warn!("MCP client shutdown task failed: {error}");
         }
-    }
-
-    /// Stop all MCP clients owned by this manager and terminate stdio server processes.
-    pub async fn shutdown(&mut self) {
-        self.begin_shutdown().await;
     }
 
     pub fn server_origin(&self, server_name: &str) -> Option<&str> {
@@ -209,6 +209,10 @@ impl McpConnectionManager {
         self.elicitation_requests.set_auto_deny(auto_deny);
     }
 
+    pub fn elicitation_router(&self) -> ElicitationRequestRouter {
+        self.elicitation_requests.router()
+    }
+
     #[allow(clippy::new_ret_no_self, clippy::too_many_arguments)]
     pub async fn new(
         mcp_servers: &HashMap<String, EffectiveMcpServer>,
@@ -227,6 +231,8 @@ impl McpConnectionManager {
         tool_plugin_provenance: ToolPluginProvenance,
         _auth: Option<&CodexAuth>,
         elicitation_reviewer: Option<ElicitationReviewerHandle>,
+        elicitation_lifecycle: Option<crate::ElicitationLifecycle>,
+        elicitation_router: ElicitationRequestRouter,
     ) -> (Self, CancellationToken) {
         let cancel_token = CancellationToken::new();
         let mut clients = HashMap::new();
@@ -236,6 +242,8 @@ impl McpConnectionManager {
             approval_policy.value(),
             initial_permission_profile,
             elicitation_reviewer,
+            elicitation_lifecycle,
+            elicitation_router,
         );
         let tool_plugin_provenance = Arc::new(tool_plugin_provenance);
         let startup_submit_id = submit_id.clone();

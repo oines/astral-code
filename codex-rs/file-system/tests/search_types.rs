@@ -4,12 +4,12 @@ use codex_file_system::GlobSearchResponse;
 use codex_file_system::GrepOutputMode;
 use codex_file_system::GrepSearchRequest;
 use codex_file_system::GrepSearchResponse;
-use codex_utils_absolute_path::AbsolutePathBuf;
+use codex_utils_path_uri::PathUri;
 use pretty_assertions::assert_eq;
 
 #[test]
 fn search_types_serde_round_trip() -> anyhow::Result<()> {
-    let root = AbsolutePathBuf::from_absolute_path(std::env::current_dir()?.join("src"))?;
+    let root = PathUri::from_host_native_path(std::env::current_dir()?.join("src"))?;
     let glob_request = GlobSearchRequest {
         root: root.clone(),
         pattern: "**/*.rs".to_string(),
@@ -17,7 +17,7 @@ fn search_types_serde_round_trip() -> anyhow::Result<()> {
     };
     let glob_response = GlobSearchResponse {
         matches: vec![GlobSearchMatch {
-            path: root.join("lib.rs"),
+            path: root.join("lib.rs")?,
             modified_at_ms: 123,
         }],
         truncated: true,

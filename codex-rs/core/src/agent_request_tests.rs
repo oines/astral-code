@@ -556,7 +556,9 @@ fn build_agent_request_filters_malformed_function_calls_without_dropping_valid_h
                 content: vec![ContentBlock::ToolUse {
                     id: "call-custom".to_string(),
                     name: "apply_patch".to_string(),
-                    input: json!("*** Begin Patch\nraw patch text\n*** End Patch"),
+                    input: json!({
+                        "input": "*** Begin Patch\nraw patch text\n*** End Patch"
+                    }),
                 }],
                 id: None,
             },
@@ -566,6 +568,68 @@ fn build_agent_request_filters_malformed_function_calls_without_dropping_valid_h
                     tool_use_id: "call-custom".to_string(),
                     content: vec![ToolResultContent::Text {
                         text: "patch applied".to_string(),
+                    }],
+                    is_error: false,
+                }],
+                id: None,
+            },
+        ]
+    );
+}
+
+#[test]
+fn build_agent_request_wraps_legacy_custom_history_without_current_tool() {
+    let raw_input = "text('legacy js repl');";
+    let prompt = Prompt {
+        input: vec![
+            TranscriptItem::CustomToolCall {
+                id: Some("custom-fc".to_string()),
+                status: Some("completed".to_string()),
+                call_id: "call-custom".to_string(),
+                name: "js_repl".to_string(),
+                input: raw_input.to_string(),
+            },
+            TranscriptItem::CustomToolCallOutput {
+                call_id: "call-custom".to_string(),
+                name: Some("js_repl".to_string()),
+                output: FunctionCallOutputPayload::from_text("legacy output".to_string()),
+            },
+        ],
+        tools: Vec::new(),
+        ..Prompt::default()
+    };
+
+    let request = build_agent_request(AgentRequestBuildParams {
+        prompt: &prompt,
+        model_info: &test_model_info(/*supports_reasoning_summaries*/ false),
+        effort: None,
+        summary: ReasoningSummaryConfig::None,
+        service_tier: None,
+        prompt_cache_key: "thread-1".to_string(),
+        provider_request_body: None,
+        provider_request_body_remove: Vec::new(),
+        provider_flavor: None,
+    })
+    .expect("build agent request");
+
+    assert_eq!(
+        request.messages,
+        vec![
+            AgentMessage {
+                role: MessageRole::Assistant,
+                content: vec![ContentBlock::ToolUse {
+                    id: "call-custom".to_string(),
+                    name: "js_repl".to_string(),
+                    input: json!({ "input": raw_input }),
+                }],
+                id: None,
+            },
+            AgentMessage {
+                role: MessageRole::User,
+                content: vec![ContentBlock::ToolResult {
+                    tool_use_id: "call-custom".to_string(),
+                    content: vec![ToolResultContent::Text {
+                        text: "legacy output".to_string(),
                     }],
                     is_error: false,
                 }],

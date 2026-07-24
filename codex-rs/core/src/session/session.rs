@@ -1,6 +1,6 @@
 use super::input_queue::InputQueue;
 use super::*;
-use crate::agents_md::LoadedAgentsMd;
+use crate::agents_md_manager::AgentsMdManager;
 use crate::config::ConstraintError;
 use crate::skills::SkillError;
 use crate::state::ActiveTurn;
@@ -24,7 +24,6 @@ pub(crate) struct Session {
     pub(crate) installation_id: String,
     pub(super) tx_event: Sender<Event>,
     pub(super) agent_status: watch::Sender<AgentStatus>,
-    pub(super) out_of_band_elicitation_paused: watch::Sender<bool>,
     pub(super) state: Mutex<SessionState>,
     /// Serializes rebuild/apply cycles for the running proxy; each cycle
     /// rebuilds from the current SessionState while holding this lock.
@@ -53,10 +52,6 @@ pub(crate) struct SessionConfiguration {
 
     /// Developer instructions that supplement the base instructions.
     pub(super) developer_instructions: Option<String>,
-
-    /// Model instructions that are appended to the base instructions and the
-    /// files that supplied them.
-    pub(super) user_instructions: Option<LoadedAgentsMd>,
 
     /// Personality preference for the model.
     pub(super) personality: Option<Personality>,
@@ -111,7 +106,6 @@ pub(crate) struct SessionConfiguration {
     /// Optional analytics source classification for this thread.
     pub(super) thread_source: Option<ThreadSource>,
     pub(super) dynamic_tools: Vec<DynamicToolSpec>,
-    pub(super) inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
     pub(super) user_shell_override: Option<shell::Shell>,
 }
 
@@ -469,17 +463,11 @@ pub(crate) struct AppServerClientMetadata {
 
 async fn warm_plugins_and_skills_for_session_init(
     config: Arc<Config>,
-    environment_manager: Arc<EnvironmentManager>,
     plugins_manager: Arc<PluginsManager>,
     skills_manager: Arc<SkillsManager>,
-    environments: Vec<TurnEnvironmentSelection>,
+    environments: &TurnEnvironmentSnapshot,
 ) -> Vec<SkillError> {
-    let fs = crate::environment_selection::resolve_environment_selections(
-        environment_manager.as_ref(),
-        &environments,
-    )
-    .ok()
-    .and_then(|resolved| resolved.primary_filesystem());
+    let fs = environments.primary_filesystem();
     let plugins_input = config.plugins_config_input();
     let plugin_outcome = plugins_manager.plugins_for_config(&plugins_input).await;
     let effective_skill_roots = plugin_outcome.effective_plugin_skill_roots();
@@ -503,10 +491,6 @@ impl Session {
 
     #[instrument(name = "session_init", level = "info", skip_all)]
     #[allow(clippy::too_many_arguments)]
-    #[expect(
-        clippy::await_holding_invalid_type,
-        reason = "session initialization must serialize access through session-owned manager guards"
-    )]
     pub(crate) async fn new(
         mut session_configuration: SessionConfiguration,
         config: Arc<Config>,
@@ -521,9 +505,11 @@ impl Session {
         skills_manager: Arc<SkillsManager>,
         plugins_manager: Arc<PluginsManager>,
         mcp_manager: Arc<McpManager>,
+        code_mode_session_provider: Arc<dyn codex_code_mode::CodeModeSessionProvider>,
         extensions: Arc<codex_extension_api::ExtensionRegistry<crate::config::Config>>,
         agent_control: AgentControl,
         environment_manager: Arc<EnvironmentManager>,
+        inherited_environments: Option<TurnEnvironmentSnapshot>,
         analytics_events_client: Option<AnalyticsEventsClient>,
         thread_store: Arc<dyn ThreadStore>,
         parent_rollout_thread_trace: ThreadTraceContext,
@@ -650,57 +636,39 @@ impl Session {
 
         let auth_manager_clone = Arc::clone(&auth_manager);
         let config_for_mcp = Arc::clone(&config);
-        let mcp_manager_for_mcp = Arc::clone(&mcp_manager);
+        let plugins_manager_for_mcp = Arc::clone(&plugins_manager);
         let auth_and_mcp_fut = async move {
             let auth = auth_manager_clone.auth().await;
-            let mcp_servers = mcp_manager_for_mcp
-                .effective_servers(&config_for_mcp, auth.as_ref())
+            let mcp_config = config_for_mcp
+                .to_mcp_config(plugins_manager_for_mcp.as_ref())
                 .await;
+            let mcp_servers = codex_mcp::effective_mcp_servers(&mcp_config, auth.as_ref());
             let auth_statuses = compute_auth_statuses(
                 mcp_servers.iter(),
-                config_for_mcp.mcp_oauth_credentials_store_mode,
+                mcp_config.mcp_oauth_credentials_store_mode,
                 auth.as_ref(),
             )
             .await;
-            (auth, mcp_servers, auth_statuses)
+            let tool_plugin_provenance = codex_mcp::tool_plugin_provenance(&mcp_config);
+            (
+                auth,
+                mcp_config,
+                mcp_servers,
+                auth_statuses,
+                tool_plugin_provenance,
+            )
         }
         .instrument(info_span!(
             "session_init.auth_mcp",
             otel.name = "session_init.auth_mcp",
         ));
 
-        let plugin_and_skill_warmup_fut = warm_plugins_and_skills_for_session_init(
-            Arc::clone(&config),
-            Arc::clone(&environment_manager),
-            Arc::clone(&plugins_manager),
-            Arc::clone(&skills_manager),
-            session_configuration.environment_selections().to_vec(),
-        )
-        .instrument(info_span!(
-            "session_init.plugin_skill_warmup",
-            otel.name = "session_init.plugin_skill_warmup",
-        ));
-
         // Join all independent futures.
         let (
             thread_persistence_result,
             state_db_ctx,
-            (auth, mcp_servers, auth_statuses),
-            plugin_skill_errors,
-        ) = tokio::join!(
-            thread_persistence_fut,
-            state_db_fut,
-            auth_and_mcp_fut,
-            plugin_and_skill_warmup_fut
-        );
-
-        for err in &plugin_skill_errors {
-            error!(
-                "failed to load skill {}: {}",
-                err.path.display(),
-                err.message
-            );
-        }
+            (auth, mcp_config, mcp_servers, auth_statuses, tool_plugin_provenance),
+        ) = tokio::join!(thread_persistence_fut, state_db_fut, auth_and_mcp_fut);
 
         let mut live_thread_init =
             LiveThreadInitGuard::new(thread_persistence_result.map_err(|e| {
@@ -854,7 +822,7 @@ impl Session {
             );
 
             let use_zsh_fork_shell = config.features.enabled(Feature::ShellZshFork);
-            let mut default_shell = if let Some(user_shell_override) =
+            let default_shell = if let Some(user_shell_override) =
                 session_configuration.user_shell_override.clone()
             {
                 user_shell_override
@@ -874,27 +842,47 @@ impl Session {
             } else {
                 shell::default_user_shell()
             };
-            // Create the mutable state for the Session.
-            let shell_snapshot_tx = if config.features.enabled(Feature::ShellSnapshot) {
-                if let Some(snapshot) = session_configuration.inherited_shell_snapshot.clone() {
-                    let (tx, rx) = watch::channel(Some(snapshot));
-                    default_shell.shell_snapshot = rx;
-                    tx
-                } else {
-                    ShellSnapshot::start_snapshotting(
-                        config.codex_home.clone(),
-                        thread_id,
-                        session_configuration.cwd().clone(),
-                        &mut default_shell,
-                        session_telemetry.clone(),
-                        state_db_ctx.clone(),
-                    )
-                }
+            let shell_snapshot = if config.features.enabled(Feature::ShellSnapshot) {
+                ShellSnapshot::new(
+                    config.codex_home.clone(),
+                    thread_id,
+                    session_telemetry.clone(),
+                    state_db_ctx.clone(),
+                )
             } else {
-                let (tx, rx) = watch::channel(None);
-                default_shell.shell_snapshot = rx;
-                tx
+                ShellSnapshot::disabled()
             };
+            let turn_environments = Arc::new(ThreadEnvironments::new(
+                Arc::clone(&environment_manager),
+                default_shell.clone(),
+                shell_snapshot,
+                inherited_environments.unwrap_or_default(),
+                config.features.enabled(Feature::DeferredExecutor),
+            ));
+            turn_environments.update_selections(session_configuration.environment_selections());
+            let resolved_environments = turn_environments.snapshot().await;
+            let agents_md_manager = Arc::new(AgentsMdManager::new(config.user_instructions.clone()));
+            agents_md_manager
+                .refresh(config.as_ref(), &resolved_environments)
+                .await;
+            let plugin_skill_errors = warm_plugins_and_skills_for_session_init(
+                Arc::clone(&config),
+                Arc::clone(&plugins_manager),
+                Arc::clone(&skills_manager),
+                &resolved_environments,
+            )
+            .instrument(info_span!(
+                "session_init.plugin_skill_warmup",
+                otel.name = "session_init.plugin_skill_warmup",
+            ))
+            .await;
+            for err in &plugin_skill_errors {
+                error!(
+                    "failed to load skill {}: {}",
+                    err.path.display(),
+                    err.message
+                );
+            }
             let thread_name =
                 thread_title_from_thread_store(live_thread_init.as_ref(), &thread_store, thread_id)
                     .instrument(info_span!(
@@ -1004,31 +992,18 @@ impl Session {
             }
 
             let services = SessionServices {
-                // Initialize the MCP connection manager with an uninitialized
-                // instance. It will be replaced with one created via
-                // McpConnectionManager::new() once all its constructor args are
-                // available. This also ensures `SessionConfigured` is emitted
-                // before any MCP-related events. It is reasonable to consider
-                // changing this to use Option or OnceCell, though the current
-                // setup is straightforward enough and performs well.
-                mcp_connection_manager: Arc::new(RwLock::new(
-                    McpConnectionManager::new_uninitialized_with_permission_profile(
-                        &config.permissions.approval_policy,
-                        config.permissions.permission_profile(),
-                        config.prefix_mcp_tool_names(),
-                    ),
-                )),
+                mcp_runtime: arc_swap::ArcSwapOption::empty(),
                 mcp_startup_cancellation_token: Mutex::new(CancellationToken::new()),
                 unified_exec_manager: UnifiedExecProcessManager::new(
                     config.background_terminal_max_timeout,
                 ),
+                elicitations: crate::elicitation::ElicitationService::new(),
                 shell_zsh_path: config.zsh_path.clone(),
                 main_execve_wrapper_exe: config.main_execve_wrapper_exe.clone(),
                 analytics_events_client,
                 hooks: arc_swap::ArcSwap::from_pointee(hooks),
                 rollout_thread_trace,
                 user_shell: Arc::new(default_shell),
-                shell_snapshot_tx,
                 show_raw_agent_reasoning: config.show_raw_agent_reasoning,
                 exec_policy,
                 auth_manager: Arc::clone(&auth_manager),
@@ -1039,6 +1014,7 @@ impl Session {
                 guardian_rejection_circuit_breaker: Mutex::new(Default::default()),
                 runtime_handle: tokio::runtime::Handle::current(),
                 skills_manager,
+                agents_md_manager,
                 plugins_manager: Arc::clone(&plugins_manager),
                 mcp_manager: Arc::clone(&mcp_manager),
                 extensions,
@@ -1074,21 +1050,19 @@ impl Session {
                         session_configuration.parent_thread_id,
                     ),
                 ),
-                code_mode_service: crate::tools::code_mode::CodeModeService::new(),
-                environment_manager,
+                code_mode_service: crate::tools::code_mode::CodeModeService::new(Arc::clone(
+                    &code_mode_session_provider,
+                )),
+                turn_environments: Arc::clone(&turn_environments),
             };
             services
                 .model_client
                 .set_window_generation(window_generation);
-            let (out_of_band_elicitation_paused, _out_of_band_elicitation_paused_rx) =
-                watch::channel(false);
-
             let sess = Arc::new(Session {
                 thread_id,
                 installation_id,
                 tx_event: tx_event.clone(),
                 agent_status,
-                out_of_band_elicitation_paused,
                 state: Mutex::new(state),
                 managed_network_proxy_refresh_lock: Semaphore::new(/*permits*/ 1),
                 features: config.features.clone(),
@@ -1151,7 +1125,6 @@ impl Session {
             let enabled_mcp_server_count =
                 mcp_servers.values().filter(|server| server.enabled()).count();
             let required_mcp_server_count = required_mcp_servers.len();
-            let tool_plugin_provenance = mcp_manager.tool_plugin_provenance(config.as_ref()).await;
             let host_owned_codex_apps_enabled =
                 mcp_servers.contains_key(codex_mcp::CODEX_APPS_MCP_SERVER_NAME);
             let client_elicitation_capability = if config.features.enabled(Feature::AuthElicitation) {
@@ -1167,25 +1140,14 @@ impl Session {
                 cancel_guard.cancel();
                 *cancel_guard = CancellationToken::new();
             }
-            let turn_environment = crate::environment_selection::resolve_environment_selections(
-                sess.services.environment_manager.as_ref(),
-                session_configuration.environment_selections(),
-            )
-            .map_err(|err| {
-                CodexErr::InvalidRequest(err.to_string().replace(
-                    "unknown turn environment id",
-                    "unknown stored MCP environment id",
-                ))
-            })?
-            .primary()
-            .cloned();
-            let mcp_runtime_context = match turn_environment {
+            let environment_manager = turn_environments.environment_manager();
+            let mcp_runtime_context = match resolved_environments.primary() {
                 Some(turn_environment) => McpRuntimeContext::new(
-                    Arc::clone(&sess.services.environment_manager),
-                    turn_environment.cwd.to_path_buf(),
+                    Arc::clone(&environment_manager),
+                    turn_environment.cwd().to_path_buf(),
                 ),
                 None => McpRuntimeContext::new(
-                    Arc::clone(&sess.services.environment_manager),
+                    environment_manager,
                     session_configuration.cwd().to_path_buf(),
                 ),
             };
@@ -1197,7 +1159,7 @@ impl Session {
                 INITIAL_SUBMIT_ID.to_owned(),
                 tx_event.clone(),
                 session_configuration.permission_profile(),
-                mcp_runtime_context,
+                mcp_runtime_context.clone(),
                 config.codex_home.to_path_buf(),
                 codex_apps_tools_cache_key(auth),
                 host_owned_codex_apps_enabled,
@@ -1206,6 +1168,8 @@ impl Session {
                 tool_plugin_provenance,
                 auth,
                 Some(sess.mcp_elicitation_reviewer()),
+                Some(sess.mcp_elicitation_lifecycle()),
+                codex_mcp::ElicitationRequestRouter::default(),
             )
             .instrument(info_span!(
                 "session_init.mcp_manager_init",
@@ -1214,10 +1178,9 @@ impl Session {
                 session_init.required_mcp_server_count = required_mcp_server_count,
             ))
             .await;
-            {
-                let mut manager_guard = sess.services.mcp_connection_manager.write().await;
-                *manager_guard = mcp_connection_manager;
-            }
+            let mcp_runtime = sess
+                .services
+                .publish_mcp_runtime(Arc::new(mcp_config), mcp_connection_manager);
             {
                 let mut cancel_guard = sess.services.mcp_startup_cancellation_token.lock().await;
                 if cancel_guard.is_cancelled() {
@@ -1226,11 +1189,8 @@ impl Session {
                 *cancel_guard = cancel_token;
             }
             if !required_mcp_servers.is_empty() {
-                let failures = sess
-                    .services
-                    .mcp_connection_manager
-                    .read()
-                    .await
+                let failures = mcp_runtime
+                    .manager()
                     .required_startup_failures(&required_mcp_servers)
                     .instrument(info_span!(
                         "session_init.required_mcp_wait",

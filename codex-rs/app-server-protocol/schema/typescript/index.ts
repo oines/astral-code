@@ -39,6 +39,7 @@ export type { InitializeParams } from "./InitializeParams";
 export type { InitializeResponse } from "./InitializeResponse";
 export type { InputModality } from "./InputModality";
 export type { InternalSessionSource } from "./InternalSessionSource";
+export type { LegacyAppPathString } from "./LegacyAppPathString";
 export type { LocalShellAction } from "./LocalShellAction";
 export type { LocalShellExecAction } from "./LocalShellExecAction";
 export type { LocalShellStatus } from "./LocalShellStatus";

@@ -1,16 +1,23 @@
 #![allow(clippy::expect_used)]
+use codex_config::config_toml::SecretString;
+use codex_config::config_toml::WebSearchProvider;
+use codex_config::config_toml::WebSearchRuntimeConfig;
 use codex_config::types::McpServerConfig;
 use codex_config::types::McpServerTransportConfig;
 use codex_core::compact::SUMMARIZATION_PROMPT;
 use codex_core::compact::SUMMARY_PREFIX;
 use codex_core::compact::compact_user_summary_message;
 use codex_core::config::Config;
+use codex_core::config::ToolSurface;
+use codex_extension_api::ExtensionRegistry;
+use codex_extension_api::ExtensionRegistryBuilder;
 use codex_features::Feature;
 use codex_login::CodexAuth;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::WireApi;
 use codex_models_manager::bundled_models_response;
 use codex_protocol::config_types::AutoCompactTokenLimitScope;
+use codex_protocol::config_types::WebSearchMode;
 use codex_protocol::items::TurnItem;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::openai_models::ModelInfo;
@@ -26,11 +33,14 @@ use codex_protocol::protocol::RolloutItem;
 use codex_protocol::protocol::RolloutLine;
 use codex_protocol::protocol::WarningEvent;
 use codex_protocol::user_input::UserInput;
+use codex_web_search_extension::install as install_web_search_extension;
 use core_test_support::PathBufExt;
 use core_test_support::context_snapshot;
 use core_test_support::context_snapshot::ContextSnapshotOptions;
 use core_test_support::context_snapshot::ContextSnapshotRenderMode;
 use core_test_support::hooks::trust_discovered_hooks;
+use core_test_support::responses;
+use core_test_support::responses::ResponseMock;
 use core_test_support::responses::ev_reasoning_item;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::local_selections;
@@ -60,6 +70,7 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -152,6 +163,27 @@ fn enable_test_session_memory_compact(config: &mut Config) {
     config.session_memory_minimum_message_tokens_to_init = 10_000;
     config.session_memory_minimum_tokens_between_update = 5_000;
     config.session_memory_tool_calls_between_updates = 3;
+}
+
+fn session_memory_web_extensions(auth: &CodexAuth) -> Arc<ExtensionRegistry<Config>> {
+    let auth_manager = codex_core::test_support::auth_manager_from_auth(auth.clone());
+    let mut extension_builder = ExtensionRegistryBuilder::<Config>::new();
+    install_web_search_extension(&mut extension_builder, auth_manager);
+    Arc::new(extension_builder.build())
+}
+
+fn enable_test_web_search(config: &mut Config) {
+    config
+        .web_search_mode
+        .set(WebSearchMode::Live)
+        .expect("web search mode should be accepted");
+    config.web_search_runtime_config = Some(WebSearchRuntimeConfig {
+        provider: WebSearchProvider::Tavily,
+        api_key: SecretString::new("test-web-search-key".to_string())
+            .expect("web search key should be valid"),
+        default_limit: 5,
+        max_limit: 20,
+    });
 }
 
 fn ev_completed_with_usage(id: &str, input_tokens: i64, output_tokens: i64) -> Value {
@@ -407,6 +439,432 @@ async fn session_memory_sidechain_updates_summary_without_polluting_main_history
     assert!(
         !next_main_request.contains("session-memory-edit"),
         "next main request must not include sidechain tool transcript"
+    );
+}
+
+#[derive(Clone, Copy, Debug)]
+enum SessionMemoryProtocol {
+    ChatCompletions,
+    AnthropicMessages,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum SessionMemorySurface {
+    Claude,
+    Codex,
+    CodeMode,
+    CodeModeOnly,
+}
+
+impl SessionMemorySurface {
+    fn configure(self, config: &mut Config) {
+        match self {
+            Self::Claude => config.tool_surface = ToolSurface::Claude,
+            Self::Codex => config.tool_surface = ToolSurface::Codex,
+            Self::CodeMode => {
+                config.tool_surface = ToolSurface::Claude;
+                config
+                    .features
+                    .enable(Feature::CodeMode)
+                    .expect("enable code mode");
+            }
+            Self::CodeModeOnly => {
+                config.tool_surface = ToolSurface::Claude;
+                config
+                    .features
+                    .enable(Feature::CodeMode)
+                    .expect("enable code mode");
+                config
+                    .features
+                    .enable(Feature::CodeModeOnly)
+                    .expect("enable code mode only");
+            }
+        }
+    }
+
+    fn uses_code_mode_exec(self) -> bool {
+        matches!(self, Self::CodeModeOnly)
+    }
+}
+
+#[test]
+fn session_memory_sidechain_supports_provider_and_tool_surface_matrix() {
+    run_session_memory_test_on_large_stack(
+        "session_memory_sidechain_supports_provider_and_tool_surface_matrix",
+        || async {
+            for protocol in [
+                SessionMemoryProtocol::ChatCompletions,
+                SessionMemoryProtocol::AnthropicMessages,
+            ] {
+                for surface in [
+                    SessionMemorySurface::Claude,
+                    SessionMemorySurface::Codex,
+                    SessionMemorySurface::CodeMode,
+                    SessionMemorySurface::CodeModeOnly,
+                ] {
+                    run_session_memory_matrix_case(protocol, surface).await;
+                }
+            }
+        },
+    );
+}
+
+async fn run_session_memory_matrix_case(
+    protocol: SessionMemoryProtocol,
+    surface: SessionMemorySurface,
+) {
+    skip_if_no_network!();
+
+    let server = start_mock_server().await;
+    let model_provider = match protocol {
+        SessionMemoryProtocol::ChatCompletions => chat_completions_mock_model_provider(&server),
+        SessionMemoryProtocol::AnthropicMessages => anthropic_messages_mock_model_provider(&server),
+    };
+    let auth = CodexAuth::from_api_key("dummy");
+    let extensions = session_memory_web_extensions(&auth);
+    let mut builder = test_codex()
+        .with_auth(auth)
+        .with_extensions(extensions)
+        .with_model("test-gpt-5.1-codex")
+        .with_config(move |config| {
+            config.model_provider = model_provider;
+            enable_test_session_memory_compact(config);
+            enable_test_web_search(config);
+            config.session_memory_minimum_message_tokens_to_init = 1;
+            surface.configure(config);
+        });
+    let test = builder.build(&server).await.expect("build matrix test");
+    let summary_path = test
+        .config
+        .codex_home
+        .join("session-memory")
+        .join(test.session_configured.thread_id.to_string())
+        .join("summary.md");
+    let marker = format!("MATRIX_{protocol:?}_{surface:?}");
+    let old = "_What is actively being worked on right now? Pending tasks not yet completed. Immediate next steps._\n\n# Task specification";
+    let new = format!(
+        "_What is actively being worked on right now? Pending tasks not yet completed. Immediate next steps._\n- {marker}\n\n# Task specification"
+    );
+    let patch = format!(
+        "*** Begin Patch\n*** Update File: {}\n@@\n _What is actively being worked on right now? Pending tasks not yet completed. Immediate next steps._\n+- {marker}\n \n # Task specification\n*** End Patch",
+        summary_path.display()
+    );
+    let (tool_name, arguments) = match surface {
+        SessionMemorySurface::Claude => (
+            "Edit",
+            json!({
+                "file_path": summary_path,
+                "old_string": old,
+                "new_string": new,
+            }),
+        ),
+        SessionMemorySurface::Codex | SessionMemorySurface::CodeMode => {
+            ("apply_patch", json!({ "input": patch }))
+        }
+        SessionMemorySurface::CodeModeOnly => {
+            let source = format!(
+                "const patch = {};\nawait tools.apply_patch(patch);",
+                serde_json::to_string(&patch).expect("serialize patch source")
+            );
+            ("exec", json!({ "input": source }))
+        }
+    };
+    let main_response = match protocol {
+        SessionMemoryProtocol::ChatCompletions => {
+            chat_completions_text_sse("matrix-main", "main complete")
+        }
+        SessionMemoryProtocol::AnthropicMessages => {
+            anthropic_messages_text_sse("matrix-main", "main complete")
+        }
+    };
+    let sidechain_response = match protocol {
+        SessionMemoryProtocol::ChatCompletions => chat_completions_tool_call_sse(
+            "matrix-sidechain",
+            "matrix-update",
+            tool_name,
+            arguments,
+        ),
+        SessionMemoryProtocol::AnthropicMessages => anthropic_messages_tool_call_sse(
+            "matrix-sidechain",
+            "matrix-update",
+            tool_name,
+            arguments,
+        ),
+    };
+    let mock = match protocol {
+        SessionMemoryProtocol::ChatCompletions => {
+            mount_chat_completions_sse_sequence(&server, vec![main_response, sidechain_response])
+                .await
+        }
+        SessionMemoryProtocol::AnthropicMessages => {
+            mount_anthropic_messages_sse_sequence(&server, vec![main_response, sidechain_response])
+                .await
+        }
+    };
+
+    let user_prompt = format!("matrix turn for {protocol:?} {surface:?}");
+    test.submit_turn(&user_prompt)
+        .await
+        .expect("submit matrix turn");
+    let requests = wait_for_request_count(&mock, 2).await;
+    wait_for_file_contains(&summary_path, &marker).await;
+    sleep(Duration::from_millis(50)).await;
+    assert_eq!(mock.requests().len(), 2, "successful extraction must stop");
+
+    let main = requests[0].body_json();
+    let sidechain = requests[1].body_json();
+    assert_eq!(
+        main.get("tools"),
+        sidechain.get("tools"),
+        "sidechain must preserve the exact main tool schema for {protocol:?} {surface:?}"
+    );
+    assert_eq!(
+        main.get("parallel_tool_calls"),
+        sidechain.get("parallel_tool_calls"),
+        "sidechain must preserve parallel tool settings"
+    );
+    assert_eq!(
+        main.get("system"),
+        sidechain.get("system"),
+        "Anthropic system blocks must remain byte-for-byte stable"
+    );
+    if matches!(protocol, SessionMemoryProtocol::ChatCompletions) {
+        let instruction_messages = |body: &Value| {
+            body.get("messages")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter(|message| {
+                    matches!(
+                        message.get("role").and_then(Value::as_str),
+                        Some("system" | "developer")
+                    )
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            instruction_messages(&main),
+            instruction_messages(&sidechain),
+            "Chat Completions instruction messages must remain byte-for-byte stable"
+        );
+    }
+    let sidechain_text = sidechain.to_string();
+    assert!(
+        body_contains_text(
+            &sidechain_text,
+            "IMPORTANT: This message and these instructions are NOT part of the actual user conversation."
+        ),
+        "sidechain updater prompt must be appended"
+    );
+    if matches!(surface, SessionMemorySurface::Claude) {
+        assert!(body_contains_text(&sidechain_text, "use the Edit tool"));
+    } else {
+        assert!(body_contains_text(
+            &sidechain_text,
+            "update the notes file with apply_patch"
+        ));
+    }
+    let tool_names = request_tool_names(&sidechain);
+    if matches!(surface, SessionMemorySurface::CodeModeOnly) {
+        assert!(tool_names.contains(&"exec".to_string()));
+        assert!(tool_names.contains(&"wait".to_string()));
+        assert!(!tool_names.contains(&"apply_patch".to_string()));
+        assert!(!tool_names.contains(&"web__search".to_string()));
+        assert!(!tool_names.contains(&"web__fetch".to_string()));
+    } else {
+        assert!(tool_names.contains(&"web__search".to_string()));
+        assert!(tool_names.contains(&"web__fetch".to_string()));
+    }
+    if surface.uses_code_mode_exec() {
+        assert!(sidechain_text.contains("tools.apply_patch"));
+    }
+}
+
+#[test]
+fn session_memory_code_mode_only_rejects_nested_tools_then_retries_in_same_extraction() {
+    run_session_memory_test_on_large_stack(
+        "session_memory_code_mode_only_rejects_nested_tools_then_retries_in_same_extraction",
+        || async {
+            for protocol in [
+                SessionMemoryProtocol::ChatCompletions,
+                SessionMemoryProtocol::AnthropicMessages,
+            ] {
+                run_session_memory_code_mode_retry_case(protocol).await;
+            }
+        },
+    );
+}
+
+async fn run_session_memory_code_mode_retry_case(protocol: SessionMemoryProtocol) {
+    skip_if_no_network!();
+
+    let server = start_mock_server().await;
+    let model_provider = match protocol {
+        SessionMemoryProtocol::ChatCompletions => chat_completions_mock_model_provider(&server),
+        SessionMemoryProtocol::AnthropicMessages => anthropic_messages_mock_model_provider(&server),
+    };
+    let auth = CodexAuth::from_api_key("dummy");
+    let extensions = session_memory_web_extensions(&auth);
+    let mut builder = test_codex()
+        .with_auth(auth)
+        .with_extensions(extensions)
+        .with_model("test-gpt-5.1-codex")
+        .with_config(move |config| {
+            config.model_provider = model_provider;
+            enable_test_session_memory_compact(config);
+            enable_test_web_search(config);
+            config.session_memory_minimum_message_tokens_to_init = 1;
+            SessionMemorySurface::CodeModeOnly.configure(config);
+        });
+    let test = builder.build(&server).await.expect("build retry test");
+    let summary_path = test
+        .config
+        .codex_home
+        .join("session-memory")
+        .join(test.session_configured.thread_id.to_string())
+        .join("summary.md");
+    let marker = format!("RETRY_{protocol:?}");
+    let patch = format!(
+        "*** Begin Patch\n*** Update File: {}\n@@\n _What is actively being worked on right now? Pending tasks not yet completed. Immediate next steps._\n+- {marker}\n \n # Task specification\n*** End Patch",
+        summary_path.display()
+    );
+    let forbidden_source = "await tools.web__search({query: 'session memory'});";
+    let valid_source = format!(
+        "const patch = {};\nawait tools.apply_patch(patch);",
+        serde_json::to_string(&patch).expect("serialize retry patch")
+    );
+    let main_response = match protocol {
+        SessionMemoryProtocol::ChatCompletions => {
+            chat_completions_text_sse("retry-main", "main complete")
+        }
+        SessionMemoryProtocol::AnthropicMessages => {
+            anthropic_messages_text_sse("retry-main", "main complete")
+        }
+    };
+    let tool_response = |id: &str, call_id: &str, source: &str| match protocol {
+        SessionMemoryProtocol::ChatCompletions => {
+            chat_completions_tool_call_sse(id, call_id, "exec", json!({ "input": source }))
+        }
+        SessionMemoryProtocol::AnthropicMessages => {
+            anthropic_messages_tool_call_sse(id, call_id, "exec", json!({ "input": source }))
+        }
+    };
+    let top_level_forbidden_response = match protocol {
+        SessionMemoryProtocol::ChatCompletions => chat_completions_tool_call_sse(
+            "retry-top-level-forbidden",
+            "retry-top-level-forbidden-call",
+            "Read",
+            json!({ "file_path": summary_path }),
+        ),
+        SessionMemoryProtocol::AnthropicMessages => anthropic_messages_tool_call_sse(
+            "retry-top-level-forbidden",
+            "retry-top-level-forbidden-call",
+            "Read",
+            json!({ "file_path": summary_path }),
+        ),
+    };
+    let responses = vec![
+        main_response,
+        top_level_forbidden_response,
+        tool_response("retry-forbidden", "retry-forbidden-call", forbidden_source),
+        tool_response("retry-valid", "retry-valid-call", &valid_source),
+    ];
+    let mock = match protocol {
+        SessionMemoryProtocol::ChatCompletions => {
+            mount_chat_completions_sse_sequence(&server, responses).await
+        }
+        SessionMemoryProtocol::AnthropicMessages => {
+            mount_anthropic_messages_sse_sequence(&server, responses).await
+        }
+    };
+
+    test.submit_turn("retry nested tool in session memory")
+        .await
+        .expect("submit retry turn");
+    let requests = wait_for_request_count(&mock, 4).await;
+    wait_for_file_contains(&summary_path, &marker).await;
+    sleep(Duration::from_millis(50)).await;
+    assert_eq!(mock.requests().len(), 4, "retry success must stop");
+    assert!(
+        requests[2]
+            .body_json()
+            .to_string()
+            .contains("only apply_patch on"),
+        "the rejected top-level tool result must be included in the next request of the same extraction"
+    );
+    assert!(
+        requests[3]
+            .body_json()
+            .to_string()
+            .contains("only apply_patch on"),
+        "the rejected nested tool result must be included in the next request of the same extraction"
+    );
+    assert_eq!(
+        requests[0].body_json().get("tools"),
+        requests[1].body_json().get("tools")
+    );
+    assert_eq!(
+        requests[2].body_json().get("tools"),
+        requests[3].body_json().get("tools")
+    );
+}
+
+#[test]
+fn session_memory_sidechain_without_edit_does_not_advance_boundary() {
+    run_session_memory_test_on_large_stack(
+        "session_memory_sidechain_without_edit_does_not_advance_boundary",
+        session_memory_sidechain_without_edit_does_not_advance_boundary_impl,
+    );
+}
+
+async fn session_memory_sidechain_without_edit_does_not_advance_boundary_impl() {
+    skip_if_no_network!();
+
+    let server = start_mock_server().await;
+    let model_provider = chat_completions_mock_model_provider(&server);
+    let mut builder = test_codex().with_config(move |config| {
+        config.model_provider = model_provider;
+        enable_test_session_memory_compact(config);
+        config.session_memory_minimum_message_tokens_to_init = 1;
+        config.tool_surface = ToolSurface::Codex;
+    });
+    let test = builder.build(&server).await.expect("build no-edit test");
+    let memory_dir = test
+        .config
+        .codex_home
+        .join("session-memory")
+        .join(test.session_configured.thread_id.to_string());
+    let state_path = memory_dir.join("state.json");
+    let summary_path = memory_dir.join("summary.md");
+    let mock = mount_chat_completions_sse_sequence(
+        &server,
+        vec![
+            chat_completions_text_sse("no-edit-main", "main complete"),
+            chat_completions_text_sse("no-edit-sidechain", "nothing to update"),
+        ],
+    )
+    .await;
+
+    test.submit_turn("sidechain returns without editing")
+        .await
+        .expect("submit no-edit turn");
+    wait_for_request_count(&mock, 2).await;
+    wait_for_file_contains(&state_path, "completed without updating summary.md").await;
+    let state: Value = serde_json::from_slice(
+        &tokio::fs::read(&state_path)
+            .await
+            .expect("read session-memory state"),
+    )
+    .expect("parse session-memory state");
+    assert_eq!(state.get("last_summary_index"), Some(&Value::Null));
+    assert_eq!(state.get("last_summary_fingerprint"), Some(&Value::Null));
+    assert_eq!(state.get("last_summary_tokens"), Some(&Value::Null));
+    assert!(
+        tokio::fs::read_to_string(summary_path)
+            .await
+            .expect("read summary")
+            .contains("# Current State")
     );
 }
 
@@ -1143,11 +1601,79 @@ fn anthropic_messages_text_sse(id: &str, text: &str) -> String {
     .join("")
 }
 
+fn chat_completions_tool_call_sse(id: &str, call_id: &str, name: &str, arguments: Value) -> String {
+    responses::chat_completions_sse(vec![json!({
+        "id": id,
+        "model": "astral-test-model",
+        "choices": [{
+            "delta": {
+                "role": "assistant",
+                "tool_calls": [{
+                    "index": 0,
+                    "id": call_id,
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "arguments": arguments.to_string(),
+                    },
+                }],
+            },
+            "finish_reason": "tool_calls",
+        }],
+    })])
+}
+
+fn anthropic_messages_tool_call_sse(
+    id: &str,
+    call_id: &str,
+    name: &str,
+    arguments: Value,
+) -> String {
+    [
+        json!({
+            "type": "message_start",
+            "message": {
+                "id": id,
+                "model": "astral-test-model",
+                "usage": { "input_tokens": 1 }
+            }
+        }),
+        json!({
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {
+                "type": "tool_use",
+                "id": call_id,
+                "name": name,
+                "input": {}
+            }
+        }),
+        json!({
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {
+                "type": "input_json_delta",
+                "partial_json": arguments.to_string()
+            }
+        }),
+        json!({ "type": "content_block_stop", "index": 0 }),
+        json!({
+            "type": "message_delta",
+            "delta": { "stop_reason": "tool_use" },
+            "usage": { "output_tokens": 1 }
+        }),
+        json!({ "type": "message_stop" }),
+    ]
+    .into_iter()
+    .map(|event| format!("data: {event}\n\n"))
+    .collect()
+}
+
 async fn mount_provider_neutral_sse_sequence(
     server: &MockServer,
     endpoint_pattern: &str,
     bodies: Vec<String>,
-) {
+) -> ResponseMock {
     struct SeqResponder {
         num_calls: AtomicUsize,
         responses: Vec<String>,
@@ -1170,22 +1696,31 @@ async fn mount_provider_neutral_sse_sequence(
         num_calls: AtomicUsize::new(0),
         responses: bodies,
     };
+    let response_mock = ResponseMock::new();
 
     Mock::given(method("POST"))
         .and(path_regex(endpoint_pattern))
+        .and(response_mock.clone())
         .respond_with(responder)
         .up_to_n_times(num_calls as u64)
         .expect(num_calls as u64)
         .mount(server)
         .await;
+    response_mock
 }
 
-async fn mount_chat_completions_sse_sequence(server: &MockServer, bodies: Vec<String>) {
-    mount_provider_neutral_sse_sequence(server, ".*/chat/completions$", bodies).await;
+async fn mount_chat_completions_sse_sequence(
+    server: &MockServer,
+    bodies: Vec<String>,
+) -> ResponseMock {
+    mount_provider_neutral_sse_sequence(server, ".*/chat/completions$", bodies).await
 }
 
-async fn mount_anthropic_messages_sse_sequence(server: &MockServer, bodies: Vec<String>) {
-    mount_provider_neutral_sse_sequence(server, ".*/messages$", bodies).await;
+async fn mount_anthropic_messages_sse_sequence(
+    server: &MockServer,
+    bodies: Vec<String>,
+) -> ResponseMock {
+    mount_provider_neutral_sse_sequence(server, ".*/messages$", bodies).await
 }
 
 fn model_info_with_context_window(slug: &str, context_window: i64) -> ModelInfo {
@@ -2130,7 +2665,7 @@ async fn multiple_auto_compact_per_task_runs_after_token_limit_hit() {
                 !item
                     .get("text")
                     .and_then(|text| text.as_str())
-                    .is_some_and(|text| text.starts_with("# AGENTS.md instructions for "))
+                    .is_some_and(|text| text.starts_with("# AGENTS.md instructions"))
             })
             .cloned()
             .collect::<Vec<_>>();

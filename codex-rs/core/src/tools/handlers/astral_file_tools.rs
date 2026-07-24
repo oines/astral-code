@@ -15,6 +15,7 @@ use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
 use crate::tools::context::boxed_tool_output;
+use crate::tools::effective_tool_surface;
 use crate::tools::format_exec_output_for_model;
 use crate::tools::handlers::ViewImageOutput;
 use crate::tools::handlers::apply_granted_turn_permissions;
@@ -63,6 +64,7 @@ use codex_tools::astral_core_tool_by_name;
 use codex_tools::parse_tool_input_schema_without_compaction;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_output_truncation::approx_token_count;
+use codex_utils_path_uri::PathUri;
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -173,7 +175,6 @@ impl AstralFileToolKind {
     }
 }
 
-#[async_trait::async_trait]
 impl ToolExecutor<ToolInvocation> for AstralFileToolHandler {
     fn tool_name(&self) -> ToolName {
         ToolName::plain(self.name())
@@ -190,13 +191,20 @@ impl ToolExecutor<ToolInvocation> for AstralFileToolHandler {
         )
     }
 
-    async fn handle(
+    fn handle(&self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'_> {
+        Box::pin(self.handle_call(invocation))
+    }
+}
+
+impl AstralFileToolHandler {
+    async fn handle_call(
         &self,
         invocation: ToolInvocation,
     ) -> Result<Box<dyn crate::tools::context::ToolOutput>, FunctionCallError> {
         let ToolInvocation {
             session,
             turn,
+            step_context,
             payload,
             tracker,
             call_id,
@@ -216,14 +224,23 @@ impl ToolExecutor<ToolInvocation> for AstralFileToolHandler {
         let hook_input = parse_arguments::<Value>(&arguments)?;
         let environment_id = file_environment_id(&arguments)?;
         let Some(turn_environment) =
-            resolve_tool_environment(turn.as_ref(), environment_id.as_deref())?
+            resolve_tool_environment(&step_context.environments, environment_id.as_deref())?
         else {
             return Err(FunctionCallError::RespondToModel(format!(
                 "{} is unavailable in this session",
                 self.name()
             )));
         };
-        let cwd = turn_environment.cwd.clone();
+        // Astral's Claude-style file tools still use host-native permission profiles and file
+        // change events. Keep the conversion at this single boundary until those contracts carry
+        // PathUri; Codex-surface tools and unified exec retain target-native paths end to end.
+        let cwd = turn_environment.cwd().to_abs_path().map_err(|err| {
+            FunctionCallError::RespondToModel(format!(
+                "{} cwd `{}` is not native to the Codex host: {err}",
+                self.name(),
+                turn_environment.cwd()
+            ))
+        })?;
         let read_state = session
             .services
             .session_extension_data
@@ -387,9 +404,13 @@ async fn read_file(
         reject_oversized_unbounded_read(size)?;
     }
 
-    let bytes = fs.read_file(&path, Some(sandbox)).await.map_err(|err| {
-        FunctionCallError::RespondToModel(format!("unable to read `{}`: {err}", path.display()))
-    })?;
+    let path_uri = PathUri::from_abs_path(&path);
+    let bytes = fs
+        .read_file(&path_uri, Some(sandbox))
+        .await
+        .map_err(|err| {
+            FunctionCallError::RespondToModel(format!("unable to read `{}`: {err}", path.display()))
+        })?;
     if args.limit.is_none() && metadata.size.is_none() {
         reject_oversized_unbounded_read(bytes.len() as u64)?;
     }
@@ -824,7 +845,7 @@ fn file_tool_error_to_function_call(error: ToolError, turn: &TurnContext) -> Fun
         ToolError::Rejected(message) => FunctionCallError::RespondToModel(message),
         ToolError::Codex(CodexErr::Sandbox(SandboxErr::Denied { output, .. })) => {
             let mut response = format_exec_output_for_model(&output, turn.truncation_policy);
-            append_sandbox_intervention_hint(&mut response);
+            append_sandbox_intervention_hint(&mut response, effective_tool_surface(turn));
             FunctionCallError::RespondToModel(response)
         }
         ToolError::Codex(CodexErr::Sandbox(SandboxErr::Timeout { output })) => {
@@ -1064,13 +1085,19 @@ async fn read_metadata(
     cwd: &AbsolutePathBuf,
     path: &AbsolutePathBuf,
 ) -> Result<FileMetadata, FunctionCallError> {
-    fs.get_metadata(path, Some(sandbox)).await.map_err(|err| {
-        if err.kind() == ErrorKind::NotFound {
-            file_does_not_exist_error(cwd)
-        } else {
-            FunctionCallError::RespondToModel(format!("unable to read `{}`: {err}", path.display()))
-        }
-    })
+    let path_uri = PathUri::from_abs_path(path);
+    fs.get_metadata(&path_uri, Some(sandbox))
+        .await
+        .map_err(|err| {
+            if err.kind() == ErrorKind::NotFound {
+                file_does_not_exist_error(cwd)
+            } else {
+                FunctionCallError::RespondToModel(format!(
+                    "unable to read `{}`: {err}",
+                    path.display()
+                ))
+            }
+        })
 }
 
 async fn optional_file_metadata(
@@ -1078,7 +1105,8 @@ async fn optional_file_metadata(
     sandbox: &FileSystemSandboxContext,
     path: &AbsolutePathBuf,
 ) -> Result<Option<FileMetadata>, FunctionCallError> {
-    fs.get_metadata(path, Some(sandbox))
+    let path_uri = PathUri::from_abs_path(path);
+    fs.get_metadata(&path_uri, Some(sandbox))
         .await
         .map(Some)
         .or_else(|err| {
@@ -1109,13 +1137,20 @@ async fn read_existing_text(
             path.display()
         )));
     }
-    let bytes = fs.read_file(path, Some(sandbox)).await.map_err(|err| {
-        if err.kind() == ErrorKind::NotFound {
-            file_does_not_exist_error(cwd)
-        } else {
-            FunctionCallError::RespondToModel(format!("unable to read `{}`: {err}", path.display()))
-        }
-    })?;
+    let path_uri = PathUri::from_abs_path(path);
+    let bytes = fs
+        .read_file(&path_uri, Some(sandbox))
+        .await
+        .map_err(|err| {
+            if err.kind() == ErrorKind::NotFound {
+                file_does_not_exist_error(cwd)
+            } else {
+                FunctionCallError::RespondToModel(format!(
+                    "unable to read `{}`: {err}",
+                    path.display()
+                ))
+            }
+        })?;
     let text = String::from_utf8(bytes).map_err(|err| {
         FunctionCallError::RespondToModel(format!(
             "unable to edit `{}` because it is not valid UTF-8: {err}",
@@ -1130,9 +1165,13 @@ async fn read_text_lossy(
     sandbox: &FileSystemSandboxContext,
     path: &AbsolutePathBuf,
 ) -> Result<String, FunctionCallError> {
-    let bytes = fs.read_file(path, Some(sandbox)).await.map_err(|err| {
-        FunctionCallError::RespondToModel(format!("unable to read `{}`: {err}", path.display()))
-    })?;
+    let path_uri = PathUri::from_abs_path(path);
+    let bytes = fs
+        .read_file(&path_uri, Some(sandbox))
+        .await
+        .map_err(|err| {
+            FunctionCallError::RespondToModel(format!("unable to read `{}`: {err}", path.display()))
+        })?;
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
@@ -1142,15 +1181,19 @@ async fn read_state_key(
     environment_id: &str,
     path: &AbsolutePathBuf,
 ) -> Result<FileReadStateKey, FunctionCallError> {
-    let canonical = fs.canonicalize(path, Some(sandbox)).await.map_err(|err| {
-        FunctionCallError::RespondToModel(format!(
-            "unable to canonicalize `{}`: {err}",
-            path.display()
-        ))
-    })?;
+    let path_uri = PathUri::from_abs_path(path);
+    let canonical = fs
+        .canonicalize(&path_uri, Some(sandbox))
+        .await
+        .map_err(|err| {
+            FunctionCallError::RespondToModel(format!(
+                "unable to canonicalize `{}`: {err}",
+                path.display()
+            ))
+        })?;
     Ok(FileReadStateKey {
         environment_id: environment_id.to_string(),
-        path: canonical.to_string_lossy().into_owned(),
+        path: canonical.to_string(),
     })
 }
 
@@ -1160,13 +1203,14 @@ async fn best_effort_read_state_key(
     environment_id: &str,
     path: &AbsolutePathBuf,
 ) -> FileReadStateKey {
+    let path_uri = PathUri::from_abs_path(path);
     let canonical = fs
-        .canonicalize(path, Some(sandbox))
+        .canonicalize(&path_uri, Some(sandbox))
         .await
-        .unwrap_or_else(|_| path.clone());
+        .unwrap_or(path_uri);
     FileReadStateKey {
         environment_id: environment_id.to_string(),
-        path: canonical.to_string_lossy().into_owned(),
+        path: canonical.to_string(),
     }
 }
 
@@ -1211,8 +1255,9 @@ async fn record_full_file_state(
     content: String,
 ) {
     let key = best_effort_read_state_key(fs, sandbox, environment_id, path).await;
+    let path_uri = PathUri::from_abs_path(path);
     let modified_at_ms = fs
-        .get_metadata(path, Some(sandbox))
+        .get_metadata(&path_uri, Some(sandbox))
         .await
         .map(|metadata| metadata.modified_at_ms)
         .unwrap_or(0);
@@ -1242,7 +1287,8 @@ async fn write_file_contents(
     contents: Vec<u8>,
 ) -> Result<(), FunctionCallError> {
     ensure_parent_directory(fs, sandbox, path).await?;
-    fs.write_file(path, contents, Some(sandbox))
+    let path_uri = PathUri::from_abs_path(path);
+    fs.write_file(&path_uri, contents, Some(sandbox))
         .await
         .map_err(|err| {
             FunctionCallError::RespondToModel(format!(
@@ -1257,17 +1303,13 @@ async fn ensure_parent_directory(
     sandbox: &FileSystemSandboxContext,
     path: &AbsolutePathBuf,
 ) -> Result<(), FunctionCallError> {
-    let parent = fs.parent(path).await.map_err(|err| {
-        FunctionCallError::RespondToModel(format!(
-            "unable to resolve parent for `{}`: {err}",
-            path.display()
-        ))
-    })?;
+    let parent = path.parent();
     let Some(parent) = parent else {
         return Ok(());
     };
+    let parent_uri = PathUri::from_abs_path(&parent);
     fs.create_directory(
-        &parent,
+        &parent_uri,
         CreateDirectoryOptions { recursive: true },
         Some(sandbox),
     )
@@ -1298,10 +1340,11 @@ async fn glob_files(
     if let Some(path) = args.path.as_deref() {
         validate_glob_path(fs, sandbox, &root, path, cwd).await?;
     }
+    let root_uri = PathUri::from_abs_path(&root);
     let response = fs
         .glob_search(
             GlobSearchRequest {
-                root,
+                root: root_uri,
                 pattern: args.pattern,
                 max_results: DEFAULT_GLOB_RESULT_LIMIT,
             },
@@ -1366,10 +1409,11 @@ async fn grep_files(
         .line_numbers
         .unwrap_or(output_mode == GrepOutputMode::Content);
     let limit = args.head_limit.unwrap_or(DEFAULT_GREP_HEAD_LIMIT);
+    let root_uri = PathUri::from_abs_path(&root);
     let response = fs
         .grep_search(
             GrepSearchRequest {
-                root: root.clone(),
+                root: root_uri,
                 pattern: args.pattern,
                 glob: args.glob,
                 file_type: args.file_type,
@@ -1403,19 +1447,23 @@ async fn validate_glob_path(
     if is_unc_path(path) {
         return Ok(());
     }
-    let metadata = fs.get_metadata(root, Some(sandbox)).await.map_err(|err| {
-        if err.kind() == ErrorKind::NotFound {
-            FunctionCallError::RespondToModel(format!(
-                "Directory does not exist: {path}. Note: your current working directory is {}.",
-                cwd.display()
-            ))
-        } else {
-            FunctionCallError::RespondToModel(format!(
-                "unable to inspect `{}`: {err}",
-                root.display()
-            ))
-        }
-    })?;
+    let root_uri = PathUri::from_abs_path(root);
+    let metadata = fs
+        .get_metadata(&root_uri, Some(sandbox))
+        .await
+        .map_err(|err| {
+            if err.kind() == ErrorKind::NotFound {
+                FunctionCallError::RespondToModel(format!(
+                    "Directory does not exist: {path}. Note: your current working directory is {}.",
+                    cwd.display()
+                ))
+            } else {
+                FunctionCallError::RespondToModel(format!(
+                    "unable to inspect `{}`: {err}",
+                    root.display()
+                ))
+            }
+        })?;
     if !metadata.is_directory {
         return Err(FunctionCallError::RespondToModel(format!(
             "Path is not a directory: {path}"
@@ -1434,19 +1482,22 @@ async fn validate_grep_path(
     if is_unc_path(path) {
         return Ok(());
     }
-    fs.get_metadata(root, Some(sandbox)).await.map_err(|err| {
-        if err.kind() == ErrorKind::NotFound {
-            FunctionCallError::RespondToModel(format!(
-                "Path does not exist: {path}. Note: your current working directory is {}.",
-                cwd.display()
-            ))
-        } else {
-            FunctionCallError::RespondToModel(format!(
-                "unable to inspect `{}`: {err}",
-                root.display()
-            ))
-        }
-    })?;
+    let root_uri = PathUri::from_abs_path(root);
+    fs.get_metadata(&root_uri, Some(sandbox))
+        .await
+        .map_err(|err| {
+            if err.kind() == ErrorKind::NotFound {
+                FunctionCallError::RespondToModel(format!(
+                    "Path does not exist: {path}. Note: your current working directory is {}.",
+                    cwd.display()
+                ))
+            } else {
+                FunctionCallError::RespondToModel(format!(
+                    "unable to inspect `{}`: {err}",
+                    root.display()
+                ))
+            }
+        })?;
     Ok(())
 }
 
@@ -1529,7 +1580,13 @@ fn format_glob_response(
     let mut lines = response
         .matches
         .into_iter()
-        .map(|matched| display_path(&matched.path, cwd))
+        .map(|matched| match matched.path.to_abs_path() {
+            Ok(path) => display_path(&path, cwd),
+            Err(_) => matched
+                .path
+                .inferred_native_path_string()
+                .replace('\\', "/"),
+        })
         .collect::<Vec<_>>();
     if lines.is_empty() {
         return "No files found".to_string();

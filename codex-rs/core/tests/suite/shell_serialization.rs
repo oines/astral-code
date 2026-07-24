@@ -12,7 +12,7 @@ use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_codex::test_codex_with_codex_surface as test_codex;
 use pretty_assertions::assert_eq;
 use regex_lite::Regex;
 use serde_json::Value;
@@ -57,12 +57,6 @@ fn shell_responses(call_id: &str, command: Vec<&str>) -> Result<Vec<String>> {
     ])
 }
 
-fn unified_shell_output_pattern(exit_code: i32, output_pattern: &str) -> String {
-    format!(
-        r"(?s)^(?:Chunk ID: [^\n]+\n)?Wall time: [0-9]+(?:\.[0-9]+)? seconds\nProcess exited with code {exit_code}(?:\nOriginal token count: \d+)?\nOutput:\n{output_pattern}$"
-    )
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn shell_output_preserves_fixture_json_as_freeform() -> Result<()> {
     skip_if_no_network!(Ok(()));
@@ -103,12 +97,7 @@ async fn shell_output_preserves_fixture_json_as_freeform() -> Result<()> {
         .split_once("Output:\n")
         .expect("shell output contains an Output section");
     assert_regex_match(
-        concat!(
-            r"(?s)^(?:Chunk ID: [^\n]+\n)?",
-            r"Wall time: [0-9]+(?:\.[0-9]+)? seconds\n",
-            r"Process exited with code 0",
-            r"(?:\nOriginal token count: \d+)?$",
-        ),
+        r"(?s)^Exit code: 0\nWall time: [0-9]+(?:\.[0-9]+)? seconds$",
         header.trim_end(),
     );
     assert_eq!(
@@ -141,13 +130,10 @@ async fn shell_output_records_duration() -> Result<()> {
         .and_then(Value::as_str)
         .expect("shell output string");
 
-    let expected_pattern = concat!(
-        r"(?s)^(?:Chunk ID: [^\n]+\n)?",
-        r"Wall time: [0-9]+(?:\.[0-9]+)? seconds\n",
-        r"Process exited with code 0",
-        r"(?:\nOriginal token count: \d+)?\n",
-        r"Output:\n$",
-    );
+    let expected_pattern = r#"(?s)^Exit code: 0
+Wall time: [0-9]+(?:\.[0-9]+)? seconds
+Output:
+$"#;
     assert_regex_match(expected_pattern, output);
 
     let wall_time_regex = Regex::new(r"(?m)^Wall (?:time|Clock): ([0-9]+(?:\.[0-9]+)?) seconds$")
@@ -158,8 +144,8 @@ async fn shell_output_records_duration() -> Result<()> {
         .and_then(|value| value.as_str().parse::<f32>().ok())
         .expect("expected shell output to contain wall time seconds");
     assert!(
-        wall_time_seconds >= 0.0,
-        "expected wall time to be non-negative, got {wall_time_seconds}"
+        wall_time_seconds > 0.1,
+        "expected wall time to be greater than zero seconds, got {wall_time_seconds}"
     );
 
     Ok(())
@@ -304,8 +290,11 @@ async fn shell_output_is_freeform_for_nonzero_exit() -> Result<()> {
         .and_then(Value::as_str)
         .expect("shell output string");
 
-    let expected_pattern = unified_shell_output_pattern(42, "");
-    assert_regex_match(&expected_pattern, output);
+    let expected_pattern = r"(?s)^Exit code: 42
+Wall time: [0-9]+(?:\.[0-9]+)? seconds
+Output:
+?$";
+    assert_regex_match(expected_pattern, output);
 
     Ok(())
 }
@@ -352,8 +341,12 @@ async fn shell_command_output_is_freeform() -> Result<()> {
         .and_then(Value::as_str)
         .expect("shell_command output string");
 
-    let expected_pattern = unified_shell_output_pattern(0, "shell command\n?");
-    assert_regex_match(&expected_pattern, output);
+    let expected_pattern = r"(?s)^Exit code: 0
+Wall time: [0-9]+(?:\.[0-9]+)? seconds
+Output:
+shell command
+?$";
+    assert_regex_match(expected_pattern, output);
 
     Ok(())
 }
@@ -400,8 +393,11 @@ async fn shell_command_output_is_not_truncated_under_10k_bytes() -> Result<()> {
         .and_then(Value::as_str)
         .expect("shell_command output string");
 
-    let expected_pattern = unified_shell_output_pattern(0, "1{10000}");
-    assert_regex_match(&expected_pattern, output);
+    let expected_pattern = r"(?s)^Exit code: 0
+Wall time: [0-9]+(?:\.[0-9]+)? seconds
+Output:
+1{10000}$";
+    assert_regex_match(expected_pattern, output);
 
     Ok(())
 }
@@ -448,11 +444,11 @@ async fn shell_command_output_is_not_truncated_over_10k_bytes() -> Result<()> {
         .and_then(Value::as_str)
         .expect("shell_command output string");
 
-    let expected_pattern = unified_shell_output_pattern(
-        0,
-        r"(?:Total output lines: 1\n\n)?1*…\d+ (?:tokens|chars) truncated…1*",
-    );
-    assert_regex_match(&expected_pattern, output);
+    let expected_pattern = r"(?s)^Exit code: 0
+Wall time: [0-9]+(?:\.[0-9]+)? seconds
+Output:
+1*…1 chars truncated…1*$";
+    assert_regex_match(expected_pattern, output);
 
     Ok(())
 }

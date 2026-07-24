@@ -835,7 +835,8 @@ impl ThreadRequestProcessor {
                 "`permissions` cannot be combined with `sandbox`",
             ));
         }
-        let environment_selections = self.parse_environment_selections(environments)?;
+        let environment_selections =
+            resolve_turn_environment_selections(self.thread_manager.as_ref(), environments)?;
         let runtime_workspace_roots = runtime_workspace_roots.map(resolve_runtime_workspace_roots);
         let mut typesafe_overrides = self.build_thread_config_overrides(
             model,
@@ -1097,7 +1098,7 @@ impl ThreadRequestProcessor {
         )
         .await?;
 
-        let instruction_sources = thread.instruction_sources().await;
+        let instruction_sources = thread.legacy_instruction_sources().await;
         let config_snapshot = thread
             .config_snapshot()
             .instrument(tracing::info_span!(
@@ -1235,27 +1236,6 @@ impl ThreadRequestProcessor {
             personality,
             ..Default::default()
         }
-    }
-
-    fn parse_environment_selections(
-        &self,
-        environments: Option<Vec<TurnEnvironmentParams>>,
-    ) -> Result<Option<Vec<TurnEnvironmentSelection>>, JSONRPCErrorError> {
-        let environment_selections = environments.map(|environments| {
-            environments
-                .into_iter()
-                .map(|environment| TurnEnvironmentSelection {
-                    environment_id: environment.environment_id,
-                    cwd: environment.cwd,
-                })
-                .collect::<Vec<_>>()
-        });
-        if let Some(environment_selections) = environment_selections.as_ref() {
-            self.thread_manager
-                .validate_environment_selections(environment_selections)
-                .map_err(|err| invalid_request(environment_selection_error_message(err)))?;
-        }
-        Ok(environment_selections)
     }
 
     async fn thread_archive_inner(
@@ -2539,7 +2519,7 @@ impl ThreadRequestProcessor {
                     self.outgoing.send_error(request_id, err).await;
                     return Ok(());
                 }
-                let instruction_sources = codex_thread.instruction_sources().await;
+                let instruction_sources = codex_thread.legacy_instruction_sources().await;
                 let SessionConfiguredEvent { rollout_path, .. } = session_configured;
                 let Some(rollout_path) = rollout_path else {
                     let error =
@@ -2840,7 +2820,7 @@ impl ThreadRequestProcessor {
                 /*include_turns*/ false,
             );
             thread_summary.session_id = existing_thread.session_configured().session_id.to_string();
-            let instruction_sources = existing_thread.instruction_sources().await;
+            let instruction_sources = existing_thread.legacy_instruction_sources().await;
 
             let listener_command_tx = {
                 let thread_state = thread_state.lock().await;
@@ -3268,7 +3248,7 @@ impl ThreadRequestProcessor {
                 .map_err(|err| core_thread_write_error("inherit source thread name", err))?;
         }
 
-        let instruction_sources = forked_thread.instruction_sources().await;
+        let instruction_sources = forked_thread.legacy_instruction_sources().await;
 
         // Auto-attach a conversation listener when forking a thread.
         log_listener_attach_result(

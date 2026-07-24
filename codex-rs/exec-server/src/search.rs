@@ -18,6 +18,7 @@ use codex_file_system::GlobSearchResponse;
 use codex_file_system::GrepOutputMode;
 use codex_file_system::GrepSearchRequest;
 use codex_file_system::GrepSearchResponse;
+use codex_utils_path_uri::PathUri;
 use grep_regex::RegexMatcher;
 use grep_regex::RegexMatcherBuilder;
 use grep_searcher::BinaryDetection;
@@ -47,7 +48,7 @@ struct SearchCandidate {
 
 #[derive(Debug)]
 struct GlobCandidate {
-    path: codex_utils_absolute_path::AbsolutePathBuf,
+    path: PathUri,
     relative_slash_path: String,
     modified_at_ms: i64,
 }
@@ -79,7 +80,8 @@ pub(crate) async fn grep_search(request: GrepSearchRequest) -> io::Result<GrepSe
 }
 
 fn glob_search_blocking(request: GlobSearchRequest) -> io::Result<GlobSearchResponse> {
-    let (root, pattern) = glob_root_and_pattern(request.root.as_path(), &request.pattern);
+    let native_root = request.root.to_abs_path()?;
+    let (root, pattern) = glob_root_and_pattern(native_root.as_path(), &request.pattern);
     let override_matcher = build_overrides(root.as_path(), &[pattern])?;
     let candidates = glob_candidates(root.as_path(), &override_matcher)?;
     let max_results = request.max_results;
@@ -108,7 +110,7 @@ fn glob_candidates(root: &Path, override_matcher: &Override) -> io::Result<Vec<G
         }
         let path = codex_utils_absolute_path::AbsolutePathBuf::from_absolute_path(root)?;
         return Ok(vec![GlobCandidate {
-            path,
+            path: PathUri::from_abs_path(&path),
             relative_slash_path: root
                 .file_name()
                 .map(|name| name.to_string_lossy().into_owned())
@@ -163,7 +165,7 @@ fn glob_candidates(root: &Path, override_matcher: &Override) -> io::Result<Vec<G
                 return WalkState::Quit;
             };
             candidates.push(GlobCandidate {
-                path,
+                path: PathUri::from_abs_path(&path),
                 relative_slash_path,
                 modified_at_ms,
             });
@@ -242,7 +244,8 @@ fn grep_overrides(request: &GrepSearchRequest) -> io::Result<Override> {
             }
         }));
     }
-    build_overrides(request.root.as_path(), &patterns)
+    let root = request.root.to_abs_path()?;
+    build_overrides(root.as_path(), &patterns)
 }
 
 fn grep_type_matcher(file_type: Option<&str>) -> io::Result<Option<Types>> {
@@ -261,10 +264,11 @@ fn grep_files_with_matches(
     overrides: &Override,
     type_matcher: Option<&Types>,
 ) -> io::Result<Vec<String>> {
-    let metadata = std::fs::metadata(request.root.as_path())?;
+    let root = request.root.to_abs_path()?;
+    let metadata = std::fs::metadata(root.as_path())?;
     if metadata.is_file() {
         let mut searcher = files_with_matches_searcher(request.multiline);
-        if !path_has_match(&mut searcher, matcher, request.root.as_path()) {
+        if !path_has_match(&mut searcher, matcher, root.as_path()) {
             return Ok(Vec::new());
         }
         return Ok(vec![String::new()]);
@@ -274,9 +278,10 @@ fn grep_files_with_matches(
     }
 
     let matches = Arc::new(Mutex::new(Vec::new()));
-    let builder = grep_walk_builder(request.root.as_path(), overrides, type_matcher);
+    let builder = grep_walk_builder(root.as_path(), overrides, type_matcher);
     builder.build_parallel().run(|| {
         let matches = Arc::clone(&matches);
+        let root = root.clone();
         let mut searcher = files_with_matches_searcher(request.multiline);
         Box::new(move |result| {
             let Ok(entry) = result else {
@@ -288,7 +293,7 @@ fn grep_files_with_matches(
             if !path_has_match(&mut searcher, matcher, entry.path()) {
                 return WalkState::Continue;
             }
-            let relative_slash_path = relative_slash_path(entry.path(), request.root.as_path());
+            let relative_slash_path = relative_slash_path(entry.path(), root.as_path());
             let modified_at_ms = entry
                 .metadata()
                 .ok()
@@ -316,7 +321,8 @@ fn grep_count_or_content(
     overrides: &Override,
     type_matcher: Option<&Types>,
 ) -> io::Result<Vec<String>> {
-    let candidates = grep_candidates(request.root.as_path(), overrides, type_matcher)?;
+    let root = request.root.to_abs_path()?;
+    let candidates = grep_candidates(root.as_path(), overrides, type_matcher)?;
     let mut output = Vec::new();
     let mut searcher = count_or_content_searcher(request);
     for candidate in candidates {

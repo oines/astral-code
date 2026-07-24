@@ -77,6 +77,8 @@ async fn test_apply_patch_tool() -> anyhow::Result<()> {
     test.cmd_with_server(&server)
         .arg("--skip-git-repo-check")
         .arg("--dangerously-bypass-approvals-and-sandbox")
+        .arg("-c")
+        .arg("tools.surface=\"codex\"")
         .arg("foo")
         .assert()
         .success();
@@ -133,6 +135,8 @@ async fn test_apply_patch_freeform_tool() -> anyhow::Result<()> {
     test.cmd_with_server(&server)
         .arg("--skip-git-repo-check")
         .arg("--dangerously-bypass-approvals-and-sandbox")
+        .arg("-c")
+        .arg("tools.surface=\"codex\"")
         .arg("foo")
         .assert()
         .success();

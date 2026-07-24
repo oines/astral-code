@@ -27,6 +27,7 @@ use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::TestCodex;
 use core_test_support::test_codex::test_codex;
+use core_test_support::test_codex::test_codex_with_codex_surface;
 use core_test_support::test_codex::turn_permission_fields;
 use core_test_support::wait_for_event;
 use core_test_support::wait_for_event_match;
@@ -343,7 +344,7 @@ where
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex();
+    let mut builder = test_codex_with_codex_surface();
     let TestCodex {
         codex,
         cwd,
@@ -414,7 +415,7 @@ where
     assert_eq!(success, None);
     assert_eq!(
         output,
-        "request_user_input is internal in Astral; call AskUserQuestion when you need a user clarification."
+        format!("request_user_input is unavailable in {mode_name} mode")
     );
 
     Ok(())

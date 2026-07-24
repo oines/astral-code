@@ -69,7 +69,7 @@ pub fn format_response_items_snapshot(items: &[Value], options: &ContextSnapshot
             && is_capability_instruction_text(text))
             || (options.strip_agents_md_user_context
                 && role == "user"
-                && text.starts_with("# AGENTS.md instructions for "))
+                && text.starts_with("# AGENTS.md instructions"))
     };
 
     items
@@ -397,7 +397,7 @@ fn canonicalize_snapshot_text(text: &str) -> String {
     if text.starts_with(PLUGINS_INSTRUCTIONS_OPEN_TAG) {
         return "<PLUGINS_INSTRUCTIONS>".to_string();
     }
-    if text.starts_with("# AGENTS.md instructions for ") {
+    if text.starts_with("# AGENTS.md instructions") {
         return "<AGENTS_MD>".to_string();
     }
     if text.starts_with("<environment_context>") {

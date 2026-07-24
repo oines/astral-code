@@ -39,7 +39,9 @@ pub struct DynamicToolHandler {
 impl DynamicToolHandler {
     pub fn new(tool: &DynamicToolSpec) -> Option<Self> {
         let tool_name = ToolName::new(tool.namespace.clone(), tool.name.clone());
-        let output_tool = dynamic_tool_to_responses_api_tool(tool).ok()?;
+        let mut output_tool = dynamic_tool_to_responses_api_tool(tool).ok()?;
+        // Exposure controls deferral; tool search restores this marker for deferred results.
+        output_tool.defer_loading = None;
         let spec = match tool.namespace.as_ref() {
             Some(namespace) => ToolSpec::Namespace(ResponsesApiNamespace {
                 name: namespace.clone(),
@@ -61,7 +63,6 @@ impl DynamicToolHandler {
     }
 }
 
-#[async_trait::async_trait]
 impl ToolExecutor<ToolInvocation> for DynamicToolHandler {
     fn tool_name(&self) -> ToolName {
         self.tool_name.clone()
@@ -86,7 +87,13 @@ impl ToolExecutor<ToolInvocation> for DynamicToolHandler {
         )
     }
 
-    async fn handle(
+    fn handle(&self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'_> {
+        Box::pin(self.handle_call(invocation))
+    }
+}
+
+impl DynamicToolHandler {
+    async fn handle_call(
         &self,
         invocation: ToolInvocation,
     ) -> Result<Box<dyn crate::tools::context::ToolOutput>, FunctionCallError> {

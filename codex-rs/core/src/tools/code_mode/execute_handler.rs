@@ -91,13 +91,13 @@ impl CodeModeExecuteHandler {
                 .code_mode_service
                 .finish_cell_dispatch(&cell_id);
         }
+        exec.session.services.elicitations.wait_until_clear().await;
         handle_runtime_response(&exec, response, args.max_output_tokens, started_at)
             .await
             .map_err(FunctionCallError::RespondToModel)
     }
 }
 
-#[async_trait::async_trait]
 impl ToolExecutor<ToolInvocation> for CodeModeExecuteHandler {
     fn tool_name(&self) -> ToolName {
         ToolName::plain(PUBLIC_TOOL_NAME)
@@ -107,7 +107,13 @@ impl ToolExecutor<ToolInvocation> for CodeModeExecuteHandler {
         self.spec.clone()
     }
 
-    async fn handle(
+    fn handle(&self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'_> {
+        Box::pin(self.handle_call(invocation))
+    }
+}
+
+impl CodeModeExecuteHandler {
+    async fn handle_call(
         &self,
         invocation: ToolInvocation,
     ) -> Result<Box<dyn crate::tools::context::ToolOutput>, FunctionCallError> {

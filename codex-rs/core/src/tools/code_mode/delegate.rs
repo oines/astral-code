@@ -16,9 +16,28 @@ use tokio_util::sync::CancellationToken;
 
 use super::ExecContext;
 use super::call_nested_tool;
+use crate::session::step_context::StepContext;
 use crate::tools::ToolRouter;
 use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::parallel::ToolCallRuntime;
+
+/// Handles the tool and notification callbacks issued by one code-mode
+/// dispatch worker. Implementations define which runtime capabilities a cell
+/// is allowed to reach.
+pub(crate) trait CodeModeDispatchHost: Send + Sync + 'static {
+    fn invoke_tool(
+        &self,
+        invocation: CodeModeNestedToolCall,
+        cancellation_token: CancellationToken,
+    ) -> impl std::future::Future<Output = Result<JsonValue, String>> + Send;
+
+    fn notify(
+        &self,
+        call_id: String,
+        cell_id: CellId,
+        text: String,
+    ) -> impl std::future::Future<Output = Result<(), String>> + Send;
+}
 
 pub(super) struct CodeModeDispatchBroker {
     dispatch_tx: async_channel::Sender<DispatchMessage>,
@@ -48,15 +67,19 @@ impl CodeModeDispatchBroker {
         &self,
         exec: ExecContext,
         router: Arc<ToolRouter>,
+        step_context: Arc<StepContext>,
         tracker: SharedTurnDiffTracker,
     ) -> CodeModeDispatchWorker {
-        let tool_runtime = ToolCallRuntime::new(
-            router,
-            Arc::clone(&exec.session),
-            Arc::clone(&exec.turn),
-            tracker,
-        );
+        let tool_runtime =
+            ToolCallRuntime::new(router, Arc::clone(&exec.session), step_context, tracker);
         let host = Arc::new(CoreTurnHost { exec, tool_runtime });
+        self.start_worker(host)
+    }
+
+    pub(crate) fn start_worker<H>(&self, host: Arc<H>) -> CodeModeDispatchWorker
+    where
+        H: CodeModeDispatchHost,
+    {
         let dispatch_rx = self.dispatch_rx.clone();
         let dispatch_gates = Arc::clone(&self.dispatch_gates);
         let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
@@ -275,7 +298,7 @@ struct CoreTurnHost {
     tool_runtime: ToolCallRuntime,
 }
 
-impl CoreTurnHost {
+impl CodeModeDispatchHost for CoreTurnHost {
     async fn invoke_tool(
         &self,
         invocation: CodeModeNestedToolCall,

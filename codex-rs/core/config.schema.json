@@ -358,6 +358,13 @@
     "CodeModeConfigToml": {
       "additionalProperties": false,
       "properties": {
+        "direct_only_tool_namespaces": {
+          "description": "Exact tool namespaces to expose only as direct model tools. These tools bypass deferral, remain top-level in code-mode-only sessions, and are omitted from the nested code-mode tool surface.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "enabled": {
           "type": "boolean"
         },
@@ -445,6 +452,9 @@
             "code_mode": {
               "$ref": "#/definitions/FeatureToml_for_CodeModeConfigToml"
             },
+            "code_mode_host": {
+              "type": "boolean"
+            },
             "code_mode_only": {
               "type": "boolean"
             },
@@ -467,6 +477,9 @@
               "type": "boolean"
             },
             "default_mode_request_user_input": {
+              "type": "boolean"
+            },
+            "deferred_executor": {
               "type": "boolean"
             },
             "elevated_windows_sandbox": {
@@ -1511,6 +1524,9 @@
         },
         "supports_vision": {
           "type": "boolean"
+        },
+        "tool_mode": {
+          "$ref": "#/definitions/ToolMode"
         }
       },
       "type": "object"
@@ -2871,6 +2887,14 @@
         }
       ]
     },
+    "ToolMode": {
+      "enum": [
+        "direct",
+        "code_mode",
+        "code_mode_only"
+      ],
+      "type": "string"
+    },
     "ToolSuggestConfig": {
       "additionalProperties": false,
       "properties": {
@@ -2930,11 +2954,21 @@
       ],
       "type": "string"
     },
+    "ToolSurface": {
+      "enum": [
+        "claude",
+        "codex"
+      ],
+      "type": "string"
+    },
     "ToolsToml": {
       "additionalProperties": false,
       "properties": {
         "experimental_request_user_input": {
           "$ref": "#/definitions/ExperimentalRequestUserInput"
+        },
+        "surface": {
+          "$ref": "#/definitions/ToolSurface"
         },
         "web_search": {
           "allOf": [
@@ -4783,6 +4817,9 @@
         "code_mode": {
           "$ref": "#/definitions/FeatureToml_for_CodeModeConfigToml"
         },
+        "code_mode_host": {
+          "type": "boolean"
+        },
         "code_mode_only": {
           "type": "boolean"
         },
@@ -4805,6 +4842,9 @@
           "type": "boolean"
         },
         "default_mode_request_user_input": {
+          "type": "boolean"
+        },
+        "deferred_executor": {
           "type": "boolean"
         },
         "elevated_windows_sandbox": {

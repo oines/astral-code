@@ -74,7 +74,9 @@ pub(crate) async fn build_prompt_input_from_session(
     input: Vec<UserInput>,
 ) -> CodexResult<Vec<TranscriptItem>> {
     let turn_context = sess.new_default_turn().await;
-    sess.record_context_updates_and_set_reference_context_item(turn_context.as_ref())
+    // Prompt debugging builds a standalone request without entering run_turn.
+    let step_context = sess.capture_step_context(Arc::clone(&turn_context)).await;
+    sess.record_context_updates_and_set_reference_context_item(step_context.as_ref())
         .await;
 
     if !input.is_empty() {
@@ -88,7 +90,7 @@ pub(crate) async fn build_prompt_input_from_session(
         .clone_history()
         .await
         .for_prompt(&turn_context.model_info.input_modalities);
-    let router = built_tools(sess, turn_context.as_ref(), &CancellationToken::new()).await?;
+    let router = built_tools(sess, step_context.as_ref(), &CancellationToken::new()).await?;
     let base_instructions = sess.get_base_instructions().await;
     let prompt = build_prompt(
         prompt_input,

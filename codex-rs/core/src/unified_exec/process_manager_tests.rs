@@ -74,7 +74,7 @@ fn env_overlay_for_exec_server_keeps_runtime_changes_only() {
 }
 
 #[test]
-fn exec_server_params_use_env_policy_overlay_contract() {
+fn exec_server_params_use_path_uri_and_env_policy_overlay_contract() {
     let cwd: codex_utils_absolute_path::AbsolutePathBuf = std::env::current_dir()
         .expect("current dir")
         .try_into()
@@ -85,7 +85,7 @@ fn exec_server_params_use_env_policy_overlay_contract() {
     let permission_profile = codex_protocol::models::PermissionProfile::Disabled;
     let request = ExecRequest {
         command: vec!["bash".to_string(), "-lc".to_string(), "true".to_string()],
-        cwd: cwd.clone(),
+        cwd: cwd.clone().into(),
         env: HashMap::from([
             ("HOME".to_string(), "/client-home".to_string()),
             ("PATH".to_string(), "/sandbox-path".to_string()),
@@ -108,7 +108,7 @@ fn exec_server_params_use_env_policy_overlay_contract() {
         expiration: crate::exec::ExecExpiration::DefaultTimeout,
         capture_policy: crate::exec::ExecCapturePolicy::ShellTool,
         sandbox: codex_sandboxing::SandboxType::None,
-        windows_sandbox_policy_cwd: cwd.clone(),
+        windows_sandbox_policy_cwd: cwd.clone().into(),
         windows_sandbox_workspace_roots: vec![cwd],
         windows_sandbox_level: codex_protocol::config_types::WindowsSandboxLevel::Disabled,
         windows_sandbox_private_desktop: false,
@@ -123,6 +123,7 @@ fn exec_server_params_use_env_policy_overlay_contract() {
         exec_server_params_for_request(/*process_id*/ 123, &request, /*tty*/ true);
 
     assert_eq!(params.process_id.as_str(), "123");
+    assert_eq!(params.cwd, request.cwd);
     assert!(params.env_policy.is_some());
     assert_eq!(
         params.env,
@@ -181,13 +182,14 @@ async fn failed_initial_end_for_unstored_process_uses_fallback_output() {
         timeout_ms: None,
         max_output_tokens: None,
         #[allow(deprecated)]
-        cwd: turn.cwd.clone(),
+        cwd: turn.cwd.clone().into(),
         #[allow(deprecated)]
-        sandbox_cwd: turn.cwd.clone(),
-        environment: turn
+        sandbox_cwd: turn.cwd.clone().into(),
+        turn_environment: turn
             .environments
-            .primary_environment()
-            .expect("primary environment"),
+            .primary()
+            .expect("primary environment")
+            .clone(),
         shell_mode: codex_tools::UnifiedExecShellMode::Direct,
         network: None,
         tty: true,
@@ -209,7 +211,7 @@ async fn failed_initial_end_for_unstored_process_uses_fallback_output() {
         &context,
         &request,
         #[allow(deprecated)]
-        turn.cwd.clone(),
+        turn.cwd.clone().into(),
         transcript,
         "PRE_DENIAL_MARKER".to_string(),
         "Network access denied".to_string(),

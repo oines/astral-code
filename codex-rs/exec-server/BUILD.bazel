@@ -4,8 +4,8 @@ codex_rust_crate(
     name = "exec-server",
     crate_name = "codex_exec_server",
     deps_extra = [
-        "@crates//:grep_regex",
-        "@crates//:grep_searcher",
+        "@crates//:grep-regex",
+        "@crates//:grep-searcher",
         "@crates//:ignore",
         "@crates//:toml",
     ],

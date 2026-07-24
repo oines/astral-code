@@ -135,8 +135,9 @@ def _windows_runfile_env_exports(ctx):
         executable = runfile_dep[DefaultInfo].files_to_run.executable
         if executable == None:
             fail("{} does not provide an executable for runfile_env".format(runfile_dep.label))
-        lines.append('call :resolve_runfile {} "{}"'.format(env_var, executable.short_path))
+        lines.append('call :resolve_runfile "{}"'.format(executable.short_path))
         lines.append("if errorlevel 1 exit /b 1")
+        lines.append('set "{}=!resolve_runfile_result!"'.format(env_var))
     return "\n".join(lines)
 
 def _bash_workspace_root_setup(ctx):

@@ -1,12 +1,16 @@
 use crate::test_codex::TestCodexBuilder;
 use crate::test_codex::test_codex;
 use anyhow::Result;
+use codex_config::types::McpServerConfig;
+use codex_config::types::McpServerTransportConfig;
 use codex_core::config::Config;
 use codex_features::Feature;
 use codex_login::CodexAuth;
 use codex_models_manager::bundled_models_response;
 use serde_json::Value;
 use serde_json::json;
+use std::collections::HashMap;
+use std::time::Duration;
 use wiremock::Mock;
 use wiremock::MockServer;
 use wiremock::Request;
@@ -39,6 +43,10 @@ pub const SEARCH_CALENDAR_APP_ONLY_TOOL: &str = "_app_only_action";
 pub const SEARCH_CALENDAR_CREATE_TOOL: &str = "_create_event";
 pub const SEARCH_CALENDAR_EXTRACT_TEXT_TOOL: &str = "_extract_text";
 pub const SEARCH_CALENDAR_LIST_TOOL: &str = "_list_events";
+pub const EXPLICIT_CALENDAR_MCP_SERVER_NAME: &str = "calendar";
+pub const EXPLICIT_CALENDAR_MCP_NAMESPACE: &str = "mcp__calendar";
+pub const EXPLICIT_CALENDAR_CREATE_TOOL: &str = CALENDAR_CREATE_EVENT_TOOL_NAME;
+pub const EXPLICIT_CALENDAR_TIMEZONE_OPTION_99_TOOL: &str = "calendar_timezone_option_99";
 pub const CALENDAR_CREATE_EVENT_RESOURCE_URI: &str =
     "connector://calendar/tools/calendar_create_event";
 pub const CALENDAR_CREATE_EVENT_MCP_APP_RESOURCE_URI: &str =
@@ -162,6 +170,50 @@ pub fn search_capable_apps_builder(apps_base_url: impl Into<String>) -> TestCode
                 .enable(Feature::ToolSearchAlwaysDeferMcpTools)
                 .expect("test config should allow feature update");
         })
+}
+
+pub fn search_capable_explicit_calendar_mcp_builder(
+    apps_base_url: impl Into<String>,
+) -> TestCodexBuilder {
+    let server_url = format!("{}/api/codex/apps", apps_base_url.into());
+    test_codex().with_config(move |config| {
+        configure_search_capable_model(config);
+        config
+            .features
+            .enable(Feature::ToolSearchAlwaysDeferMcpTools)
+            .expect("test config should allow feature update");
+
+        let mut servers = config.mcp_servers.get().clone();
+        servers.insert(
+            EXPLICIT_CALENDAR_MCP_SERVER_NAME.to_string(),
+            McpServerConfig {
+                transport: McpServerTransportConfig::StreamableHttp {
+                    url: server_url,
+                    bearer_token_env_var: None,
+                    http_headers: None,
+                    env_http_headers: None,
+                },
+                environment_id: "local".to_string(),
+                enabled: true,
+                required: false,
+                supports_parallel_tool_calls: false,
+                disabled_reason: None,
+                startup_timeout_sec: Some(Duration::from_secs(10)),
+                tool_timeout_sec: None,
+                default_tools_approval_mode: None,
+                enabled_tools: None,
+                disabled_tools: None,
+                scopes: None,
+                oauth: None,
+                oauth_resource: None,
+                tools: HashMap::new(),
+            },
+        );
+        config
+            .mcp_servers
+            .set(servers)
+            .expect("test mcp servers should accept any configuration");
+    })
 }
 
 fn apps_tool_call_id(body: &Value) -> Option<&str> {

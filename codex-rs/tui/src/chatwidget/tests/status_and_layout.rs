@@ -1459,6 +1459,7 @@ async fn status_widget_and_approval_modal_snapshot() {
         call_id: "call-approve-exec".into(),
         approval_id: Some("call-approve-exec".into()),
         turn_id: "turn-approve-exec".into(),
+        environment_id: None,
         command: vec!["echo".into(), "hello world".into()],
         cwd: test_path_buf("/tmp").abs(),
         reason: Some(
@@ -1564,6 +1565,22 @@ async fn warning_event_adds_warning_history_cell() {
     assert!(
         rendered.contains("test warning message"),
         "warning cell missing content: {rendered}"
+    );
+}
+
+#[tokio::test]
+async fn unsupported_code_mode_warning_renders_as_warning_history_cell() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    handle_warning(
+        &mut chat,
+        "Code Mode is enabled in configuration, but model `gpt-5.4` does not advertise Code Mode support. This may degrade model performance. Disable `features.code_mode` and `features.code_mode_only`, or select a model whose metadata enables Code Mode.",
+    );
+
+    let cells = drain_insert_history(&mut rx);
+    assert_eq!(cells.len(), 1, "expected one warning history cell");
+    insta::assert_snapshot!(
+        "unsupported_code_mode_warning",
+        lines_to_single_string(&cells[0])
     );
 }
 

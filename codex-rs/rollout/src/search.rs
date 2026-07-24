@@ -276,7 +276,8 @@ fn conversation_text_from_item(item: &RolloutItem) -> Option<String> {
         | RolloutItem::TurnContext(_)
         | RolloutItem::EventMsg(_)
         | RolloutItem::TranscriptItem(_)
-        | RolloutItem::Compacted(_) => None,
+        | RolloutItem::Compacted(_)
+        | RolloutItem::WorldState(_) => None,
     }
 }
 

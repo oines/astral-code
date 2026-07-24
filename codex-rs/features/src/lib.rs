@@ -85,6 +85,8 @@ pub enum Feature {
     // Experimental
     /// Enable JavaScript code mode backed by the in-process V8 runtime.
     CodeMode,
+    /// Run JavaScript code mode in the standalone host process.
+    CodeModeHost,
     /// Restrict model-visible tools to code mode entrypoints (`exec`, `wait`).
     CodeModeOnly,
     /// Use the single unified PTY-backed exec tool.
@@ -119,6 +121,8 @@ pub enum Feature {
     UseLegacyLandlock,
     /// Experimental shell snapshotting.
     ShellSnapshot,
+    /// Allow turns to start while selected executors are still starting.
+    DeferredExecutor,
     /// Enable runtime metrics snapshots via a manual reader.
     RuntimeMetrics,
     /// Enable startup memory extraction and file-backed memory consolidation.
@@ -763,6 +767,12 @@ pub const FEATURES: &[FeatureSpec] = &[
         default_enabled: true,
     },
     FeatureSpec {
+        id: Feature::DeferredExecutor,
+        key: "deferred_executor",
+        stage: Stage::UnderDevelopment,
+        default_enabled: false,
+    },
+    FeatureSpec {
         id: Feature::JsRepl,
         key: "js_repl",
         stage: Stage::Removed,
@@ -773,6 +783,12 @@ pub const FEATURES: &[FeatureSpec] = &[
         key: "code_mode",
         stage: Stage::UnderDevelopment,
         default_enabled: false,
+    },
+    FeatureSpec {
+        id: Feature::CodeModeHost,
+        key: "code_mode_host",
+        stage: Stage::Stable,
+        default_enabled: true,
     },
     FeatureSpec {
         id: Feature::CodeModeOnly,

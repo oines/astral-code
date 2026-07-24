@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Instant;
 
 use crate::function_tool::FunctionCallError;
@@ -26,7 +27,6 @@ use super::serialize_function_output;
 
 pub struct ReadMcpResourceHandler;
 
-#[async_trait::async_trait]
 impl ToolExecutor<ToolInvocation> for ReadMcpResourceHandler {
     fn tool_name(&self) -> ToolName {
         ToolName::plain("read_mcp_resource")
@@ -40,17 +40,25 @@ impl ToolExecutor<ToolInvocation> for ReadMcpResourceHandler {
         true
     }
 
-    async fn handle(
+    fn handle(&self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'_> {
+        Box::pin(self.handle_call(invocation))
+    }
+}
+
+impl ReadMcpResourceHandler {
+    async fn handle_call(
         &self,
         invocation: ToolInvocation,
     ) -> Result<Box<dyn crate::tools::context::ToolOutput>, FunctionCallError> {
         let ToolInvocation {
             session,
-            turn,
+            step_context,
             call_id,
             payload,
             ..
         } = invocation;
+        let turn = Arc::clone(&step_context.turn);
+        let manager = step_context.mcp.manager();
 
         let arguments = match payload {
             ToolPayload::Function { arguments } => arguments,
@@ -77,7 +85,7 @@ impl ToolExecutor<ToolInvocation> for ReadMcpResourceHandler {
         let start = Instant::now();
 
         let payload_result: Result<ReadResourcePayload, FunctionCallError> = async {
-            let result = session
+            let result = manager
                 .read_resource(&server, ReadResourceRequestParams::new(uri.clone()))
                 .await
                 .map_err(|err| {

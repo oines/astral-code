@@ -7,6 +7,14 @@ use codex_utils_output_truncation::TruncationPolicy;
 use codex_utils_output_truncation::approx_token_count;
 use pretty_assertions::assert_eq;
 
+fn test_tool_context() -> SessionMemoryToolContext {
+    SessionMemoryToolContext {
+        surface: crate::config::ToolSurface::Claude,
+        mode: codex_protocol::openai_models::ToolMode::Direct,
+        code_mode_tool_definitions: Vec::new(),
+    }
+}
+
 fn user_message(text: &str) -> TranscriptItem {
     TranscriptItem::Message {
         id: None,
@@ -248,7 +256,10 @@ fn extraction_candidate_records_raw_boundary_for_normalized_image_history() {
     history.record_items(items.iter(), TruncationPolicy::Tokens(10_000));
 
     let candidate = ExtractionCandidate::from_history(
-        PromptTemplate::from_prompt(&Prompt::default()),
+        PromptTemplate {
+            prompt: Prompt::default(),
+            tool_context: test_tool_context(),
+        },
         history,
         &[InputModality::Text],
         20_000,
@@ -296,6 +307,7 @@ fn compact_baseline_resets_to_post_compact_tokens() {
 
     let candidate = ExtractionCandidate {
         prompt: Prompt::default(),
+        tool_context: test_tool_context(),
         raw_boundary: None,
         active_context_tokens: 25_000,
         natural_break: true,
@@ -522,6 +534,7 @@ fn updater_prompt_includes_full_current_notes_for_condensation() {
     );
     let prompt = super::sidechain::updater_prompt(
         None,
+        super::sidechain::SummaryUpdateTool::Edit,
         std::path::Path::new("/tmp/summary.md"),
         &current_notes,
         "",
@@ -535,6 +548,7 @@ fn updater_prompt_includes_full_current_notes_for_condensation() {
 fn custom_updater_prompt_matches_custom_template_with_substitution() {
     let prompt = super::sidechain::updater_prompt(
         Some("CUSTOM\n{{currentNotes}}\n{{notesPath}}"),
+        super::sidechain::SummaryUpdateTool::ApplyPatch,
         std::path::Path::new("/tmp/summary.md"),
         "current notes",
         "",
@@ -552,6 +566,7 @@ fn should_extract_requires_initial_token_threshold() {
     };
     let candidate = ExtractionCandidate {
         prompt,
+        tool_context: test_tool_context(),
         raw_boundary: None,
         active_context_tokens: test_thresholds().minimum_message_tokens_to_init - 1,
         natural_break: true,
@@ -568,6 +583,7 @@ fn should_not_extract_on_natural_break_before_token_threshold() {
     };
     let candidate = ExtractionCandidate {
         prompt: Prompt::default(),
+        tool_context: test_tool_context(),
         raw_boundary: None,
         active_context_tokens: test_thresholds().minimum_message_tokens_to_init + 1,
         natural_break: true,
@@ -584,6 +600,7 @@ fn should_extract_on_natural_break_after_token_threshold() {
     };
     let candidate = ExtractionCandidate {
         prompt: Prompt::default(),
+        tool_context: test_tool_context(),
         raw_boundary: None,
         active_context_tokens: test_thresholds().minimum_message_tokens_to_init
             + test_thresholds().minimum_tokens_between_update,
@@ -609,6 +626,7 @@ fn should_not_extract_on_tool_calls_without_token_threshold() {
             ],
             ..Default::default()
         },
+        tool_context: test_tool_context(),
         raw_boundary: None,
         active_context_tokens: test_thresholds().minimum_message_tokens_to_init + 1,
         natural_break: false,
@@ -629,6 +647,7 @@ fn should_extract_honors_custom_thresholds() {
             input: vec![function_call("call-1"), function_call("call-2")],
             ..Default::default()
         },
+        tool_context: test_tool_context(),
         raw_boundary: None,
         active_context_tokens: 3_000,
         natural_break: false,

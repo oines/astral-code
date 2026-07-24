@@ -21,11 +21,13 @@ use codex_protocol::protocol::PatchApplyStatus;
 use codex_protocol::protocol::TurnDiffEvent;
 use codex_shell_command::parse_command::parse_command;
 use codex_utils_absolute_path::AbsolutePathBuf;
+use codex_utils_path_uri::PathUri;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use super::append_sandbox_intervention_hint;
+use super::effective_tool_surface;
 use super::format_exec_output_str;
 
 #[derive(Clone, Copy)]
@@ -134,7 +136,7 @@ pub(crate) enum ToolEmitter {
     },
     UnifiedExec {
         command: Vec<String>,
-        cwd: AbsolutePathBuf,
+        cwd: PathUri,
         source: ExecCommandSource,
         parsed_cmd: Vec<ParsedCommand>,
         process_id: Option<String>,
@@ -166,7 +168,7 @@ impl ToolEmitter {
 
     pub fn unified_exec(
         command: &[String],
-        cwd: AbsolutePathBuf,
+        cwd: PathUri,
         source: ExecCommandSource,
         process_id: Option<String>,
     ) -> Self {
@@ -321,11 +323,15 @@ impl ToolEmitter {
                 },
                 stage,
             ) => {
+                // TODO(anp): Migrate exec command protocol events to PathUri.
+                let Ok(cwd) = cwd.to_abs_path() else {
+                    return;
+                };
                 emit_exec_stage(
                     ctx,
                     ExecCommandInput::new(
                         command,
-                        cwd,
+                        &cwd,
                         parsed_cmd,
                         *source,
                         /*interaction_input*/ None,
@@ -379,7 +385,7 @@ impl ToolEmitter {
             }
             Err(ToolError::Codex(CodexErr::Sandbox(SandboxErr::Denied { output, .. }))) => {
                 let mut response = self.format_exec_output_for_model(&output, ctx);
-                append_sandbox_intervention_hint(&mut response);
+                append_sandbox_intervention_hint(&mut response, effective_tool_surface(ctx.turn));
                 // apply_patch can be denied after it has already committed a
                 // known prefix. Reuse the output-bearing path so the visible
                 // item still fails while the turn diff consumes that prefix.
@@ -631,7 +637,7 @@ mod tests {
     use codex_protocol::exec_output::StreamOutput;
     use codex_protocol::items::TurnItem;
     use codex_protocol::protocol::PatchApplyStatus;
-    use codex_utils_absolute_path::AbsolutePathBuf;
+    use codex_utils_path_uri::PathUri;
     use std::sync::Arc;
     use tempfile::tempdir;
     use tokio::sync::Mutex;
@@ -644,7 +650,7 @@ mod tests {
             make_session_and_context_with_dynamic_tools_and_rx(Vec::new()).await;
         let tracker = Arc::new(Mutex::new(TurnDiffTracker::new()));
         let dir = tempdir().expect("tempdir");
-        let cwd = AbsolutePathBuf::from_absolute_path(dir.path()).expect("absolute cwd");
+        let cwd = PathUri::from_host_native_path(dir.path()).expect("absolute cwd");
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
         let delta = codex_apply_patch::apply_patch(

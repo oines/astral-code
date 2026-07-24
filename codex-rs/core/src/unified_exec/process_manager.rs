@@ -57,8 +57,8 @@ use codex_protocol::error::CodexErr;
 use codex_protocol::error::SandboxErr;
 use codex_protocol::protocol::ExecCommandSource;
 use codex_tools::ToolName;
-use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_output_truncation::approx_token_count;
+use codex_utils_path_uri::PathUri;
 
 const UNIFIED_EXEC_ENV: [(&str, &str); 10] = [
     ("NO_COLOR", "1"),
@@ -157,7 +157,7 @@ fn exec_server_params_for_request(
     codex_exec_server::ExecParams {
         process_id: exec_server_process_id(process_id).into(),
         argv: request.command.clone(),
-        cwd: request.cwd.to_path_buf(),
+        cwd: request.cwd.clone(),
         env_policy,
         env,
         tty,
@@ -283,7 +283,7 @@ async fn emit_failed_initial_exec_end_if_unstored(
     process_started_alive: bool,
     context: &UnifiedExecContext,
     request: &ExecCommandRequest,
-    cwd: AbsolutePathBuf,
+    cwd: PathUri,
     transcript: Arc<tokio::sync::Mutex<HeadTailBuffer>>,
     fallback_output: String,
     message: String,
@@ -418,7 +418,7 @@ impl UnifiedExecProcessManager {
                     BackgroundTaskSnapshot {
                         task_id: entry.process_id,
                         command: entry.hook_command.clone(),
-                        cwd: entry.cwd.to_string_lossy().to_string(),
+                        cwd: entry.cwd.inferred_native_path_string(),
                         status,
                         exit_code: entry.process.exit_code(),
                         tty: entry.tty,
@@ -520,11 +520,7 @@ impl UnifiedExecProcessManager {
             &output_closed,
             &output_closed_notify,
             &cancellation_token,
-            Some(
-                context
-                    .session
-                    .subscribe_out_of_band_elicitation_pause_state(),
-            ),
+            Some(context.session.subscribe_elicitation_pause_state()),
             deadline,
         )
         .await;
@@ -858,7 +854,7 @@ impl UnifiedExecProcessManager {
         let pause_state = entry
             .session
             .upgrade()
-            .map(|session| session.subscribe_out_of_band_elicitation_pause_state());
+            .map(|session| session.subscribe_elicitation_pause_state());
         let session = entry.session.upgrade();
 
         Ok(PreparedProcessHandles {
@@ -884,7 +880,7 @@ impl UnifiedExecProcessManager {
         context: &UnifiedExecContext,
         command: &[String],
         hook_command: String,
-        cwd: AbsolutePathBuf,
+        cwd: PathUri,
         started_at: Instant,
         process_id: i32,
         tty: bool,
@@ -941,6 +937,13 @@ impl UnifiedExecProcessManager {
 
         #[cfg(target_os = "windows")]
         if request.sandbox == codex_sandboxing::SandboxType::WindowsRestrictedToken {
+            let native_cwd =
+                request
+                    .cwd
+                    .to_abs_path()
+                    .map_err(|_| UnifiedExecError::ForeignPath {
+                        path: request.cwd.clone(),
+                    })?;
             let codex_home = crate::config::find_codex_home().map_err(|err| {
                 UnifiedExecError::create_process(format!(
                     "windows sandbox: failed to resolve codex_home: {err}"
@@ -975,7 +978,7 @@ impl UnifiedExecProcessManager {
                         request.windows_sandbox_workspace_roots.as_slice(),
                         codex_home.as_ref(),
                         request.command.clone(),
-                        request.cwd.as_path(),
+                        native_cwd.as_path(),
                         request.env.clone(),
                         None,
                         elevated_read_roots_override.as_deref(),
@@ -996,7 +999,7 @@ impl UnifiedExecProcessManager {
                         request.windows_sandbox_workspace_roots.as_slice(),
                         codex_home.as_ref(),
                         request.command.clone(),
-                        request.cwd.as_path(),
+                        native_cwd.as_path(),
                         request.env.clone(),
                         None,
                         &additional_deny_read_paths,
@@ -1032,6 +1035,13 @@ impl UnifiedExecProcessManager {
             return UnifiedExecProcess::from_exec_server_started(started, request.sandbox).await;
         }
 
+        let native_cwd = request
+            .cwd
+            .to_abs_path()
+            .map_err(|_| UnifiedExecError::ForeignPath {
+                path: request.cwd.clone(),
+            })?;
+
         let (program, args) = request
             .command
             .split_first()
@@ -1040,7 +1050,7 @@ impl UnifiedExecProcessManager {
             codex_utils_pty::pty::spawn_process_with_inherited_fds(
                 program,
                 args,
-                request.cwd.as_path(),
+                native_cwd.as_path(),
                 &request.env,
                 &request.arg0,
                 codex_utils_pty::TerminalSize::default(),
@@ -1051,7 +1061,7 @@ impl UnifiedExecProcessManager {
             codex_utils_pty::pipe::spawn_process_no_stdin_with_inherited_fds(
                 program,
                 args,
-                request.cwd.as_path(),
+                native_cwd.as_path(),
                 &request.env,
                 &request.arg0,
                 &inherited_fds,
@@ -1067,7 +1077,7 @@ impl UnifiedExecProcessManager {
     pub(super) async fn open_session_with_sandbox(
         &self,
         request: &ExecCommandRequest,
-        cwd: AbsolutePathBuf,
+        cwd: PathUri,
         context: &UnifiedExecContext,
     ) -> Result<(UnifiedExecProcess, Option<DeferredNetworkApproval>), UnifiedExecError> {
         let local_policy_env = create_env(
@@ -1111,7 +1121,7 @@ impl UnifiedExecProcessManager {
             timeout_ms: request.timeout_ms,
             cwd,
             sandbox_cwd: request.sandbox_cwd.clone(),
-            environment: Arc::clone(&request.environment),
+            turn_environment: request.turn_environment.clone(),
             env,
             exec_server_env_config: Some(exec_server_env_config),
             explicit_env_overrides: context.turn.shell_environment_policy.r#set.clone(),

@@ -1,5 +1,6 @@
 use crate::agent::AgentStatus;
 use crate::config::ConstraintResult;
+use crate::elicitation::ElicitationRegistration;
 use crate::session::Codex;
 use crate::session::SessionSettingsUpdate;
 use crate::session::SteerInputError;
@@ -41,6 +42,8 @@ use codex_thread_store::ThreadMetadataPatch;
 use codex_thread_store::ThreadStoreError;
 use codex_thread_store::ThreadStoreResult;
 use codex_utils_absolute_path::AbsolutePathBuf;
+use codex_utils_path_uri::LegacyAppPathString;
+use codex_utils_path_uri::PathUri;
 use rmcp::model::ReadResourceRequestParams;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -160,7 +163,13 @@ pub struct CodexThread {
     pub(crate) session_source: SessionSource,
     session_configured: SessionConfiguredEvent,
     rollout_path: Option<PathBuf>,
-    out_of_band_elicitation_count: Mutex<u64>,
+    out_of_band_elicitations: Mutex<OutOfBandElicitations>,
+}
+
+#[derive(Default)]
+struct OutOfBandElicitations {
+    count: i64,
+    registration: Option<ElicitationRegistration>,
 }
 
 /// Conduit for the bidirectional stream of messages that compose a thread
@@ -177,7 +186,7 @@ impl CodexThread {
             session_source,
             session_configured,
             rollout_path,
-            out_of_band_elicitation_count: Mutex::new(0),
+            out_of_band_elicitations: Mutex::new(OutOfBandElicitations::default()),
         }
     }
 
@@ -441,9 +450,15 @@ impl CodexThread {
 
         let turn_context = self.codex.session.new_default_turn().await;
         if self.codex.session.reference_context_item().await.is_none() {
+            // This history-only API runs without run_turn, so it owns its initial step.
+            let step_context = self
+                .codex
+                .session
+                .capture_step_context(Arc::clone(&turn_context))
+                .await;
             self.codex
                 .session
-                .record_context_updates_and_set_reference_context_item(turn_context.as_ref())
+                .record_context_updates_and_set_reference_context_item(step_context.as_ref())
                 .await;
         }
         self.codex
@@ -529,8 +544,17 @@ impl CodexThread {
     }
 
     /// Returns the files that supplied the thread's loaded model instructions.
-    pub async fn instruction_sources(&self) -> Vec<AbsolutePathBuf> {
+    pub async fn instruction_sources(&self) -> Vec<PathUri> {
         self.codex.instruction_sources().await
+    }
+
+    /// Returns loaded instruction sources rendered as legacy app-server path strings.
+    pub async fn legacy_instruction_sources(&self) -> Vec<LegacyAppPathString> {
+        self.instruction_sources()
+            .await
+            .into_iter()
+            .map(Into::into)
+            .collect()
     }
 
     pub async fn config(&self) -> Arc<crate::config::Config> {
@@ -583,38 +607,30 @@ impl CodexThread {
         self.codex.enabled(feature)
     }
 
-    pub async fn increment_out_of_band_elicitation_count(&self) -> CodexResult<u64> {
-        let mut guard = self.out_of_band_elicitation_count.lock().await;
-        let was_zero = *guard == 0;
-        *guard = guard.checked_add(1).ok_or_else(|| {
+    pub async fn increment_out_of_band_elicitation_count(&self) -> CodexResult<i64> {
+        let mut elicitations = self.out_of_band_elicitations.lock().await;
+        let incremented = elicitations.count.checked_add(1).ok_or_else(|| {
             CodexErr::Fatal("out-of-band elicitation count overflowed".to_string())
         })?;
-
-        if was_zero {
-            self.codex
-                .session
-                .set_out_of_band_elicitation_pause_state(/*paused*/ true);
+        if elicitations.count == 0 {
+            elicitations.registration = Some(self.codex.session.services.elicitations.register());
         }
-
-        Ok(*guard)
+        elicitations.count = incremented;
+        Ok(incremented)
     }
 
-    pub async fn decrement_out_of_band_elicitation_count(&self) -> CodexResult<u64> {
-        let mut guard = self.out_of_band_elicitation_count.lock().await;
-        if *guard == 0 {
+    pub async fn decrement_out_of_band_elicitation_count(&self) -> CodexResult<i64> {
+        let mut elicitations = self.out_of_band_elicitations.lock().await;
+        if elicitations.count == 0 {
             return Err(CodexErr::InvalidRequest(
                 "out-of-band elicitation count is already zero".to_string(),
             ));
         }
 
-        *guard -= 1;
-        let now_zero = *guard == 0;
-        if now_zero {
-            self.codex
-                .session
-                .set_out_of_band_elicitation_pause_state(/*paused*/ false);
+        elicitations.count -= 1;
+        if elicitations.count == 0 {
+            elicitations.registration = None;
         }
-
-        Ok(*guard)
+        Ok(elicitations.count)
     }
 }

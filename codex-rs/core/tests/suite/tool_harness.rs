@@ -25,8 +25,10 @@ use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::TestCodex;
 use core_test_support::test_codex::test_codex;
+use core_test_support::test_codex::test_codex_with_codex_surface;
 use core_test_support::test_codex::turn_permission_fields;
 use core_test_support::wait_for_event;
+use pretty_assertions::assert_eq;
 use serde_json::Value;
 use serde_json::json;
 fn call_output(req: &ResponsesRequest, call_id: &str) -> (String, Option<bool>) {
@@ -71,7 +73,7 @@ async fn shell_command_tool_executes_command_and_streams_output() -> anyhow::Res
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_model("test-gpt-5-codex");
+    let mut builder = test_codex_with_codex_surface().with_model("test-gpt-5-codex");
     let TestCodex {
         codex,
         cwd,
@@ -135,7 +137,7 @@ async fn shell_command_tool_executes_command_and_streams_output() -> anyhow::Res
     let req = second_mock.single_request();
     let (output_text, _) = call_output(&req, call_id);
     assert_regex_match(
-        r"(?s)^(?:Chunk ID: [^\n]+\n)?Wall time: [0-9]+(?:\.[0-9]+)? seconds\nProcess exited with code 0(?:\nOriginal token count: \d+)?\nOutput:\ntool harness\n?$",
+        r"(?s)^Exit code: 0\nWall time: [0-9]+(?:\.[0-9]+)? seconds\nOutput:\ntool harness\n?$",
         &output_text,
     );
 
@@ -351,7 +353,7 @@ async fn apply_patch_tool_executes_and_emits_patch_events() -> anyhow::Result<()
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex();
+    let mut builder = test_codex_with_codex_surface();
     let TestCodex {
         codex,
         cwd,
@@ -489,12 +491,126 @@ A {file_name}
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn apply_patch_function_payload_executes_and_projects_chat_output() -> anyhow::Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = start_mock_server().await;
+
+    let mut builder = test_codex_with_codex_surface();
+    let TestCodex {
+        codex,
+        cwd,
+        session_configured,
+        ..
+    } = builder.build(&server).await?;
+
+    let file_name = "function-payload.txt";
+    let file_path = cwd.path().join(file_name);
+    let call_id = "apply-patch-function-call";
+    let patch_content = format!(
+        r#"*** Begin Patch
+*** Add File: {file_name}
++Function payload apply patch
+*** End Patch"#
+    );
+    let arguments = json!({ "input": patch_content }).to_string();
+
+    let first_response = sse(vec![
+        ev_response_created("resp-1"),
+        ev_function_call(call_id, "apply_patch", &arguments),
+        ev_completed("resp-1"),
+    ]);
+    let second_response = sse(vec![
+        ev_assistant_message("msg-1", "patch complete"),
+        ev_completed("resp-2"),
+    ]);
+    let request_log =
+        responses::mount_sse_sequence(&server, vec![first_response, second_response]).await;
+
+    let session_model = session_configured.model.clone();
+    let cwd_path = cwd.abs();
+    let (sandbox_policy, permission_profile) =
+        turn_permission_fields(PermissionProfile::Disabled, cwd_path.as_path());
+
+    codex
+        .submit(Op::UserInput {
+            items: vec![UserInput::Text {
+                text: "please apply a function payload patch".into(),
+                text_elements: Vec::new(),
+            }],
+            final_output_json_schema: None,
+            model_client_metadata: None,
+            additional_context: Default::default(),
+            thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
+                environments: Some(local_selections(cwd_path)),
+                approval_policy: Some(AskForApproval::Never),
+                sandbox_policy: Some(sandbox_policy),
+                permission_profile,
+                collaboration_mode: Some(codex_protocol::config_types::CollaborationMode {
+                    mode: codex_protocol::config_types::ModeKind::Default,
+                    settings: codex_protocol::config_types::Settings {
+                        model: session_model,
+                        reasoning_effort: None,
+                        developer_instructions: None,
+                    },
+                }),
+                ..Default::default()
+            },
+        })
+        .await?;
+
+    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+
+    let requests = request_log.requests();
+    assert_eq!(requests.len(), 2);
+    let request = &requests[1];
+    let body = request.body_json();
+    let messages = body
+        .get("messages")
+        .and_then(Value::as_array)
+        .expect("chat request should contain messages");
+    let tool_call = messages
+        .iter()
+        .filter(|message| message.get("role").and_then(Value::as_str) == Some("assistant"))
+        .filter_map(|message| message.get("tool_calls").and_then(Value::as_array))
+        .flatten()
+        .find(|tool_call| tool_call.get("id").and_then(Value::as_str) == Some(call_id))
+        .expect("chat request should retain the apply_patch function call");
+    assert_eq!(
+        tool_call.pointer("/function/name").and_then(Value::as_str),
+        Some("apply_patch")
+    );
+    assert_eq!(
+        tool_call
+            .pointer("/function/arguments")
+            .and_then(Value::as_str),
+        Some(arguments.as_str())
+    );
+    let output_text = messages
+        .iter()
+        .find(|message| {
+            message.get("role").and_then(Value::as_str) == Some("tool")
+                && message.get("tool_call_id").and_then(Value::as_str) == Some(call_id)
+        })
+        .and_then(|message| message.get("content"))
+        .and_then(Value::as_str)
+        .expect("chat request should contain the matching function output");
+    assert!(output_text.contains("Success. Updated the following files:"));
+    assert_eq!(
+        fs::read_to_string(file_path)?,
+        "Function payload apply patch\n"
+    );
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn apply_patch_reports_parse_diagnostics() -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex();
+    let mut builder = test_codex_with_codex_surface();
     let TestCodex {
         codex,
         cwd,

@@ -18,6 +18,7 @@ use codex_protocol::protocol::ExecCommandSource;
 use codex_protocol::protocol::ExecCommandStatus;
 use codex_protocol::protocol::Op;
 use codex_protocol::user_input::UserInput;
+use codex_utils_path_uri::PathUri;
 use core_test_support::TempDirExt;
 use core_test_support::assert_regex_match;
 use core_test_support::managed_network_requirements_loader;
@@ -37,7 +38,8 @@ use core_test_support::skip_if_sandbox;
 use core_test_support::skip_if_windows;
 use core_test_support::test_codex::TestCodex;
 use core_test_support::test_codex::TestCodexHarness;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_codex::test_codex_with_claude_surface;
+use core_test_support::test_codex::test_codex_with_codex_surface as test_codex;
 use core_test_support::test_codex::turn_permission_fields;
 use core_test_support::wait_for_event;
 use core_test_support::wait_for_event_match;
@@ -87,7 +89,7 @@ fn parse_unified_exec_output(raw: &str) -> Result<ParsedUnifiedExecOutput> {
     static OUTPUT_REGEX: OnceLock<Regex> = OnceLock::new();
     let regex = OUTPUT_REGEX.get_or_init(|| {
         Regex::new(concat!(
-            r#"(?s)^(?:Total output lines: \d+\n\n)?"#,
+            r#"(?s)^(?:Warning: truncated output \(original token count: \d+\)\n)?(?:Total output lines: \d+\n\n)?"#,
             r#"(?:Chunk ID: (?P<chunk_id>[^\n]+)\n)?"#,
             r#"Wall time: (?P<wall_time>-?\d+(?:\.\d+)?) seconds\n"#,
             r#"(?:Process exited with code (?P<exit_code>-?\d+)\n)?"#,
@@ -262,9 +264,10 @@ async fn create_workspace_directory(
     rel_path: impl AsRef<std::path::Path>,
 ) -> Result<std::path::PathBuf> {
     let abs_path = test.config.cwd.join(rel_path.as_ref());
+    let abs_path_uri = PathUri::from_abs_path(&abs_path);
     test.fs()
         .create_directory(
-            &abs_path,
+            &abs_path_uri,
             CreateDirectoryOptions { recursive: true },
             /*sandbox*/ None,
         )
@@ -646,7 +649,7 @@ async fn unified_exec_emits_exec_command_end_event() -> Result<()> {
             ev_response_created("resp-2"),
             ev_function_call(
                 poll_call_id,
-                "ReadTaskOutput",
+                "write_stdin",
                 &serde_json::to_string(&poll_args)?,
             ),
             ev_completed("resp-2"),
@@ -1030,7 +1033,7 @@ async fn wait_for_unified_exec_end(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn unified_exec_emits_terminal_interaction_for_send_task_input() -> Result<()> {
+async fn unified_exec_emits_terminal_interaction_for_write_stdin() -> Result<()> {
     skip_if_no_network!(Ok(()));
     skip_if_sandbox!(Ok(()));
     skip_if_windows!(Ok(()));
@@ -1074,7 +1077,7 @@ async fn unified_exec_emits_terminal_interaction_for_send_task_input() -> Result
             ev_response_created("resp-2"),
             ev_function_call(
                 stdin_call_id,
-                "SendTaskInput",
+                "write_stdin",
                 &serde_json::to_string(&stdin_args)?,
             ),
             ev_completed("resp-2"),
@@ -1120,7 +1123,7 @@ async fn astral_background_task_tools_round_trip_through_unified_exec() -> Resul
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_codex_with_claude_surface().with_config(|config| {
         config
             .features
             .enable(Feature::UnifiedExec)
@@ -1343,7 +1346,7 @@ async fn unified_exec_terminal_interaction_captures_delayed_output() -> Result<(
             ev_response_created("resp-2"),
             ev_function_call(
                 first_poll_call_id,
-                "SendTaskInput",
+                "write_stdin",
                 &serde_json::to_string(&first_poll_args)?,
             ),
             ev_completed("resp-2"),
@@ -1352,7 +1355,7 @@ async fn unified_exec_terminal_interaction_captures_delayed_output() -> Result<(
             ev_response_created("resp-3"),
             ev_function_call(
                 second_poll_call_id,
-                "SendTaskInput",
+                "write_stdin",
                 &serde_json::to_string(&second_poll_args)?,
             ),
             ev_completed("resp-3"),
@@ -1361,7 +1364,7 @@ async fn unified_exec_terminal_interaction_captures_delayed_output() -> Result<(
             ev_response_created("resp-4"),
             ev_function_call(
                 third_poll_call_id,
-                "SendTaskInput",
+                "write_stdin",
                 &serde_json::to_string(&third_poll_args)?,
             ),
             ev_completed("resp-4"),
@@ -1419,7 +1422,7 @@ async fn unified_exec_terminal_interaction_captures_delayed_output() -> Result<(
         "begin event should include process_id for a live session"
     );
 
-    // We expect three terminal interactions matching the three SendTaskInput calls.
+    // We expect three terminal interactions matching the three write_stdin calls.
     assert_eq!(
         terminal_events.len(),
         3,
@@ -1506,7 +1509,7 @@ async fn unified_exec_emits_one_begin_and_one_end_event() -> Result<()> {
             ev_response_created("resp-2"),
             ev_function_call(
                 poll_call_id,
-                "ReadTaskOutput",
+                "write_stdin",
                 &serde_json::to_string(&poll_args)?,
             ),
             ev_completed("resp-2"),
@@ -1561,7 +1564,7 @@ async fn unified_exec_emits_one_begin_and_one_end_event() -> Result<()> {
     assert_eq!(
         end_events.len(),
         1,
-        "expected end event for the ReadTaskOutput call"
+        "expected end event for the write_stdin call"
     );
     assert!(
         terminal_interactions.is_empty(),
@@ -1727,7 +1730,7 @@ async fn exec_command_clamps_model_requested_max_output_tokens_to_policy() -> Re
     assert_eq!(output.original_token_count, Some(8_991));
     let output_text = output.output.replace("\r\n", "\n");
     assert_regex_match(
-        r"^Total output lines: 999\n\nEXEC-LINE-0001 x{20}\nEXEC-LINE-0002 x{20}\nEXEC-LINE-0003 x{13}…8941 tokens truncated…E-0997 x{20}\nEXEC-LINE-0998 x{20}\nEXEC-LINE-0999 x{20}\n$",
+        r"^Warning: truncated output \(original token count: 8991\)\nTotal output lines: 999\n\nEXEC-LINE-0001 x{20}\nEXEC-LINE-0002 x{20}\nEXEC-LINE-0003 x{13}…8941 tokens truncated…E-0997 x{20}\nEXEC-LINE-0998 x{20}\nEXEC-LINE-0999 x{20}\n$",
         &output_text,
     );
 
@@ -1740,7 +1743,7 @@ async fn exec_command_clamps_model_requested_max_output_tokens_to_policy() -> Re
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn send_task_input_clamps_model_requested_max_output_tokens_to_policy() -> Result<()> {
+async fn write_stdin_clamps_model_requested_max_output_tokens_to_policy() -> Result<()> {
     skip_if_no_network!(Ok(()));
     skip_if_sandbox!(Ok(()));
     skip_if_windows!(Ok(()));
@@ -1786,7 +1789,7 @@ async fn send_task_input_clamps_model_requested_max_output_tokens_to_policy() ->
             ev_response_created("resp-2"),
             ev_function_call(
                 stdin_call_id,
-                "SendTaskInput",
+                "write_stdin",
                 &serde_json::to_string(&stdin_args)?,
             ),
             ev_completed("resp-2"),
@@ -1801,7 +1804,7 @@ async fn send_task_input_clamps_model_requested_max_output_tokens_to_policy() ->
 
     submit_unified_exec_turn(
         &test,
-        "run clamped SendTaskInput output test",
+        "run clamped write_stdin output test",
         PermissionProfile::Disabled,
     )
     .await?;
@@ -1809,14 +1812,14 @@ async fn send_task_input_clamps_model_requested_max_output_tokens_to_policy() ->
     let start_output = wait_for_raw_unified_exec_output(&test, start_call_id).await?;
     assert!(
         start_output.process_id.is_some(),
-        "start command should leave a running process for SendTaskInput"
+        "start command should leave a running process for write_stdin"
     );
 
     let stdin_output = wait_for_raw_unified_exec_output(&test, stdin_call_id).await?;
     assert_eq!(stdin_output.original_token_count, Some(9_492));
     let stdin_output_text = stdin_output.output.replace("\r\n", "\n");
     assert_regex_match(
-        r"^Total output lines: 1000\n\ngo\nSTDIN-LINE-0001 y{20}\nSTDIN-LINE-0002 y{20}\nSTDIN-LINE-0003 yyyy…9442 tokens truncated…7 y{20}\nSTDIN-LINE-0998 y{20}\nSTDIN-LINE-0999 y{20}\n$",
+        r"^Warning: truncated output \(original token count: 9492\)\nTotal output lines: 1000\n\ngo\nSTDIN-LINE-0001 y{20}\nSTDIN-LINE-0002 y{20}\nSTDIN-LINE-0003 yyyy…9442 tokens truncated…7 y{20}\nSTDIN-LINE-0998 y{20}\nSTDIN-LINE-0999 y{20}\n$",
         &stdin_output_text,
     );
 
@@ -2047,7 +2050,7 @@ async fn unified_exec_respects_early_exit_notifications() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn send_task_input_returns_exit_metadata_and_clears_session() -> Result<()> {
+async fn write_stdin_returns_exit_metadata_and_clears_session() -> Result<()> {
     skip_if_no_network!(Ok(()));
     skip_if_sandbox!(Ok(()));
     skip_if_windows!(Ok(()));
@@ -2096,7 +2099,7 @@ async fn send_task_input_returns_exit_metadata_and_clears_session() -> Result<()
             ev_response_created("resp-2"),
             ev_function_call(
                 send_call_id,
-                "SendTaskInput",
+                "write_stdin",
                 &serde_json::to_string(&send_args)?,
             ),
             ev_completed("resp-2"),
@@ -2105,7 +2108,7 @@ async fn send_task_input_returns_exit_metadata_and_clears_session() -> Result<()
             ev_response_created("resp-3"),
             ev_function_call(
                 exit_call_id,
-                "SendTaskInput",
+                "write_stdin",
                 &serde_json::to_string(&exit_args)?,
             ),
             ev_completed("resp-3"),
@@ -2119,7 +2122,7 @@ async fn send_task_input_returns_exit_metadata_and_clears_session() -> Result<()
 
     submit_unified_exec_turn(
         &test,
-        "test SendTaskInput exit behavior",
+        "test write_stdin exit behavior",
         PermissionProfile::Disabled,
     )
     .await?;
@@ -2156,7 +2159,7 @@ async fn send_task_input_returns_exit_metadata_and_clears_session() -> Result<()
 
     let send_output = outputs
         .get(send_call_id)
-        .expect("missing SendTaskInput echo output");
+        .expect("missing write_stdin echo output");
     let echoed = send_output.output.as_str();
     assert!(
         echoed.contains("hello unified exec"),
@@ -2165,14 +2168,14 @@ async fn send_task_input_returns_exit_metadata_and_clears_session() -> Result<()
     let echoed_session = send_output
         .process_id
         .clone()
-        .expect("SendTaskInput should return process id while process is running");
+        .expect("write_stdin should return process id while process is running");
     assert_eq!(
         echoed_session, process_id,
-        "SendTaskInput should reuse existing process id"
+        "write_stdin should reuse existing process id"
     );
     assert!(
         send_output.exit_code.is_none(),
-        "SendTaskInput should not include exit_code while process is running"
+        "write_stdin should not include exit_code while process is running"
     );
 
     let exit_output = outputs
@@ -2251,7 +2254,7 @@ async fn unified_exec_emits_end_event_when_session_dies_via_stdin() -> Result<()
             ev_response_created("resp-2"),
             ev_function_call(
                 echo_call_id,
-                "SendTaskInput",
+                "write_stdin",
                 &serde_json::to_string(&echo_args)?,
             ),
             ev_completed("resp-2"),
@@ -2260,7 +2263,7 @@ async fn unified_exec_emits_end_event_when_session_dies_via_stdin() -> Result<()
             ev_response_created("resp-3"),
             ev_function_call(
                 exit_call_id,
-                "SendTaskInput",
+                "write_stdin",
                 &serde_json::to_string(&exit_args)?,
             ),
             ev_completed("resp-3"),
@@ -2543,7 +2546,7 @@ async fn unified_exec_reuses_session_via_stdin() -> Result<()> {
             ev_response_created("resp-2"),
             ev_function_call(
                 second_call_id,
-                "SendTaskInput",
+                "write_stdin",
                 &serde_json::to_string(&second_args)?,
             ),
             ev_completed("resp-2"),
@@ -2661,7 +2664,7 @@ PY
             ev_response_created("resp-2"),
             ev_function_call(
                 second_call_id,
-                "ReadTaskOutput",
+                "write_stdin",
                 &serde_json::to_string(&second_args)?,
             ),
             ev_completed("resp-2"),
@@ -2756,7 +2759,7 @@ async fn unified_exec_timeout_and_followup_poll() -> Result<()> {
             ev_response_created("resp-2"),
             ev_function_call(
                 second_call_id,
-                "ReadTaskOutput",
+                "write_stdin",
                 &serde_json::to_string(&second_args)?,
             ),
             ev_completed("resp-2"),
@@ -2926,7 +2929,7 @@ PY
     let large_output = outputs.get(call_id).expect("missing large output summary");
 
     let output_text = large_output.output.replace("\r\n", "\n");
-    let truncated_pattern = r"(?s)^Total output lines: \d+\n\n(token token \n){5,}.*…\d+ tokens truncated….*(token token \n){5,}$";
+    let truncated_pattern = r"(?s)^Warning: truncated output \(original token count: \d+\)\nTotal output lines: \d+\n\n(token token \n){5,}.*…\d+ tokens truncated….*(token token \n){5,}$";
     assert_regex_match(truncated_pattern, &output_text);
 
     let original_tokens = large_output
@@ -3216,7 +3219,7 @@ async fn unified_exec_interactive_prompt_under_seatbelt() -> Result<()> {
             ev_response_created("resp-2"),
             ev_function_call(
                 exit_call_id,
-                "SendTaskInput",
+                "write_stdin",
                 &serde_json::to_string(&exit_args)?,
             ),
             ev_completed("resp-2"),
@@ -3426,7 +3429,7 @@ async fn unified_exec_prunes_exited_sessions_first() -> Result<()> {
     });
     events.push(ev_function_call(
         keep_write_call_id,
-        "SendTaskInput",
+        "write_stdin",
         &serde_json::to_string(&keep_write_args)?,
     ));
 
@@ -3438,7 +3441,7 @@ async fn unified_exec_prunes_exited_sessions_first() -> Result<()> {
     });
     events.push(ev_function_call(
         probe_call_id,
-        "SendTaskInput",
+        "write_stdin",
         &serde_json::to_string(&probe_args)?,
     ));
 

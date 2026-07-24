@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::io;
-use std::path::Path;
 use std::time::Duration;
 
 use pretty_assertions::assert_eq;
@@ -33,6 +32,7 @@ use codex_protocol::permissions::FileSystemSandboxPolicy;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::FileChange;
 use codex_utils_absolute_path::AbsolutePathBuf;
+use codex_utils_path_uri::PathUri;
 use core_test_support::PathExt;
 
 use super::AstralFileToolTextOutput;
@@ -227,70 +227,67 @@ async fn edit_remote(
 impl ExecutorFileSystem for RecordingFileSystem {
     async fn canonicalize(
         &self,
-        path: &AbsolutePathBuf,
+        path: &PathUri,
         _sandbox: Option<&FileSystemSandboxContext>,
-    ) -> FileSystemResult<AbsolutePathBuf> {
+    ) -> FileSystemResult<PathUri> {
         Ok(path.clone())
-    }
-
-    async fn join(
-        &self,
-        base_path: &AbsolutePathBuf,
-        path: &Path,
-    ) -> FileSystemResult<AbsolutePathBuf> {
-        Ok(base_path.join(path))
-    }
-
-    async fn parent(&self, path: &AbsolutePathBuf) -> FileSystemResult<Option<AbsolutePathBuf>> {
-        Ok(path.parent())
     }
 
     async fn read_file(
         &self,
-        path: &AbsolutePathBuf,
+        path: &PathUri,
         _sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<Vec<u8>> {
-        self.record("read_file", path).await;
-        self.file_contents(path).await.ok_or_else(|| {
+        let native_path = path.to_abs_path()?;
+        self.record("read_file", &native_path).await;
+        self.file_contents(&native_path).await.ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::NotFound,
-                format!("{} not found", path.display()),
+                format!("{} not found", path.inferred_native_path_string()),
             )
         })
     }
 
     async fn write_file(
         &self,
-        path: &AbsolutePathBuf,
+        path: &PathUri,
         contents: Vec<u8>,
         _sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<()> {
-        self.record("write_file", path).await;
-        self.insert_file(path, contents).await;
+        let native_path = path.to_abs_path()?;
+        self.record("write_file", &native_path).await;
+        self.insert_file(&native_path, contents).await;
         Ok(())
     }
 
     async fn create_directory(
         &self,
-        path: &AbsolutePathBuf,
+        path: &PathUri,
         create_directory_options: CreateDirectoryOptions,
         _sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<()> {
+        let native_path = path.to_abs_path()?;
         self.calls.lock().await.push(format!(
             "create_directory:{}:{}",
-            path.display(),
+            path.inferred_native_path_string(),
             create_directory_options.recursive
         ));
-        self.insert_directory(path).await;
+        self.insert_directory(&native_path).await;
         Ok(())
     }
 
     async fn get_metadata(
         &self,
-        path: &AbsolutePathBuf,
+        path: &PathUri,
         _sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<FileMetadata> {
-        if self.directories.lock().await.contains(&path_key(path)) {
+        let native_path = path.to_abs_path()?;
+        if self
+            .directories
+            .lock()
+            .await
+            .contains(&path_key(&native_path))
+        {
             Ok(FileMetadata {
                 is_directory: true,
                 is_file: false,
@@ -299,7 +296,7 @@ impl ExecutorFileSystem for RecordingFileSystem {
                 created_at_ms: 0,
                 modified_at_ms: 0,
             })
-        } else if let Some(contents) = self.file_contents(path).await {
+        } else if let Some(contents) = self.file_contents(&native_path).await {
             let reported_file_size = *self.reported_file_size.lock().await;
             let size = reported_file_size.unwrap_or(Some(contents.len() as u64));
             Ok(FileMetadata {
@@ -313,14 +310,14 @@ impl ExecutorFileSystem for RecordingFileSystem {
         } else {
             Err(io::Error::new(
                 io::ErrorKind::NotFound,
-                format!("{} not found", path.display()),
+                format!("{} not found", path.inferred_native_path_string()),
             ))
         }
     }
 
     async fn read_directory(
         &self,
-        _path: &AbsolutePathBuf,
+        _path: &PathUri,
         _sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<Vec<ReadDirectoryEntry>> {
         Err(io::Error::new(
@@ -331,7 +328,7 @@ impl ExecutorFileSystem for RecordingFileSystem {
 
     async fn remove(
         &self,
-        _path: &AbsolutePathBuf,
+        _path: &PathUri,
         _remove_options: RemoveOptions,
         _sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<()> {
@@ -343,8 +340,8 @@ impl ExecutorFileSystem for RecordingFileSystem {
 
     async fn copy(
         &self,
-        _source_path: &AbsolutePathBuf,
-        _destination_path: &AbsolutePathBuf,
+        _source_path: &PathUri,
+        _destination_path: &PathUri,
         _copy_options: CopyOptions,
         _sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<()> {
@@ -359,11 +356,10 @@ impl ExecutorFileSystem for RecordingFileSystem {
         request: GlobSearchRequest,
         _sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<GlobSearchResponse> {
-        self.calls.lock().await.push(format!(
-            "glob_search:{}:{}",
-            request.root.display(),
-            request.pattern
-        ));
+        self.calls
+            .lock()
+            .await
+            .push(format!("glob_search:{}:{}", request.root, request.pattern));
         Ok(self
             .glob_response
             .lock()
@@ -380,11 +376,10 @@ impl ExecutorFileSystem for RecordingFileSystem {
         request: GrepSearchRequest,
         _sandbox: Option<&FileSystemSandboxContext>,
     ) -> FileSystemResult<GrepSearchResponse> {
-        self.calls.lock().await.push(format!(
-            "grep_search:{}:{}",
-            request.root.display(),
-            request.pattern
-        ));
+        self.calls
+            .lock()
+            .await
+            .push(format!("grep_search:{}:{}", request.root, request.pattern));
         Ok(self
             .grep_response
             .lock()
@@ -1204,7 +1199,7 @@ async fn glob_uses_executor_search_backend() {
     fs.insert_directory(&cwd.join("src")).await;
     fs.set_glob_response(GlobSearchResponse {
         matches: vec![GlobSearchMatch {
-            path: cwd.join("src/lib.rs"),
+            path: PathUri::from_abs_path(&cwd.join("src/lib.rs")),
             modified_at_ms: 42,
         }],
         truncated: false,
@@ -1224,7 +1219,10 @@ async fn glob_uses_executor_search_backend() {
     assert_eq!(output, "src/lib.rs");
     assert_eq!(
         fs.calls().await,
-        vec![format!("glob_search:{}:**/*.rs", cwd.join("src").display())]
+        vec![format!(
+            "glob_search:{}:**/*.rs",
+            PathUri::from_abs_path(&cwd.join("src"))
+        )]
     );
 }
 
@@ -1262,7 +1260,10 @@ async fn grep_uses_executor_search_backend() {
     assert_eq!(output, "src/lib.rs:1:needle");
     assert_eq!(
         fs.calls().await,
-        vec![format!("grep_search:{}:needle", cwd.join("src").display())]
+        vec![format!(
+            "grep_search:{}:needle",
+            PathUri::from_abs_path(&cwd.join("src"))
+        )]
     );
 }
 
@@ -1285,7 +1286,7 @@ async fn glob_formats_empty_and_truncated_results_like_claude() {
 
     fs.set_glob_response(GlobSearchResponse {
         matches: vec![GlobSearchMatch {
-            path: cwd.join("src/lib.rs"),
+            path: PathUri::from_abs_path(&cwd.join("src/lib.rs")),
             modified_at_ms: 42,
         }],
         truncated: true,
@@ -1397,7 +1398,10 @@ async fn grep_omitted_path_searches_cwd() {
 
     assert_eq!(
         fs.calls().await,
-        vec![format!("grep_search:{}:needle", cwd.display())]
+        vec![format!(
+            "grep_search:{}:needle",
+            PathUri::from_abs_path(&cwd)
+        )]
     );
 }
 

@@ -15,7 +15,6 @@ use crate::memory_usage::emit_metric_for_tool_read;
 use crate::sandbox_tags::permission_profile_policy_tag;
 use crate::sandbox_tags::permission_profile_sandbox_tag;
 use crate::session::turn_context::TurnContext;
-use crate::tools::astral_tool_bridge::canonicalize_astral_tool_call;
 use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolOutput;
@@ -257,7 +256,6 @@ struct ExposureOverride {
     exposure: ToolExposure,
 }
 
-#[async_trait::async_trait]
 impl ToolExecutor<ToolInvocation> for ExposureOverride {
     fn tool_name(&self) -> ToolName {
         self.handler.tool_name()
@@ -279,11 +277,8 @@ impl ToolExecutor<ToolInvocation> for ExposureOverride {
         self.handler.search_info()
     }
 
-    async fn handle(
-        &self,
-        invocation: ToolInvocation,
-    ) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
-        self.handler.handle(invocation).await
+    fn handle(&self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'_> {
+        self.handler.handle(invocation)
     }
 }
 
@@ -435,10 +430,7 @@ impl ToolRegistry {
         mut invocation: ToolInvocation,
         terminal_outcome_reached: Option<Arc<AtomicBool>>,
     ) -> Result<AnyToolResult, FunctionCallError> {
-        let (tool_name, payload) =
-            canonicalize_astral_tool_call(invocation.tool_name, invocation.payload);
-        invocation.tool_name = self.canonical_runtime_tool_name(tool_name);
-        invocation.payload = payload;
+        invocation.tool_name = self.canonical_runtime_tool_name(invocation.tool_name);
 
         let tool_name = invocation.tool_name.clone();
         let tool_name_flat = flat_tool_name(&tool_name);
@@ -492,51 +484,6 @@ impl ToolRegistry {
                 return Err(err);
             }
         };
-        if tool.exposure() == ToolExposure::Hidden
-            && !(tool_name.name == "apply_patch"
-                && matches!(
-                    invocation.payload,
-                    ToolPayload::Custom { .. } | ToolPayload::Function { .. }
-                ))
-            && !(tool_name.name == "view_image"
-                && matches!(invocation.payload, ToolPayload::Function { .. }))
-        {
-            let message = match tool_name.name.as_str() {
-                "exec_command" | "shell_command" => {
-                    "Bash is the public command execution tool in Astral; call Bash instead of internal shell tools.".to_string()
-                }
-                "write_stdin" => {
-                    "write_stdin is internal in Astral; call ReadTaskOutput to poll output or SendTaskInput to send interactive stdin.".to_string()
-                }
-                "update_plan" => {
-                    "update_plan is internal in Astral; call TodoWrite for checklist-style progress updates.".to_string()
-                }
-                "request_user_input" => {
-                    "request_user_input is internal in Astral; call AskUserQuestion when you need a user clarification.".to_string()
-                }
-                "request_permissions" => {
-                    "request_permissions is internal in Astral; call RequestPermissions when you need elevated permissions.".to_string()
-                }
-                _ => format!(
-                    "{tool_name} is an internal Astral tool and cannot be called directly."
-                ),
-            };
-            let log_payload = invocation.payload.log_payload();
-            otel.tool_result_with_tags(
-                tool_name_flat.as_ref(),
-                &call_id_owned,
-                log_payload.as_ref(),
-                Duration::ZERO,
-                /*success*/ false,
-                &message,
-                &base_tool_result_tags,
-                /*extra_trace_fields*/ &[],
-            );
-            let err = FunctionCallError::RespondToModel(message);
-            dispatch_trace.record_failed(&err);
-            return Err(err);
-        }
-
         let telemetry_tags = tool.telemetry_tags(&invocation).await;
         let mut tool_result_tags =
             Vec::with_capacity(base_tool_result_tags.len() + telemetry_tags.len());
@@ -682,32 +629,9 @@ impl ToolRegistry {
                 outcome.additional_contexts.clone(),
             )
             .await;
-            let replacement_text = if outcome.should_stop {
-                Some(
-                    outcome
-                        .feedback_message
-                        .clone()
-                        .or_else(|| outcome.stop_reason.clone())
-                        .unwrap_or_else(|| "PostToolUse hook stopped execution".to_string()),
-                )
-            } else {
-                outcome.feedback_message.clone()
-            };
-            if let Some(replacement_text) = replacement_text {
-                let mut guard = response_cell.lock().await;
-                if let Some(mut result) = guard.take() {
-                    result.result = Box::new(PostToolUseFeedbackOutput {
-                        original: result.result,
-                        model_visible: FunctionToolOutput::from_text(
-                            replacement_text,
-                            /*success*/ None,
-                        ),
-                    });
-                    *guard = Some(result);
-                }
-            }
         }
 
+        // A PostToolUse block rejects the result, not the already-completed tool execution.
         let lifecycle_outcome = match &result {
             Ok(_) => {
                 let guard = response_cell.lock().await;
@@ -761,9 +685,28 @@ impl ToolRegistry {
         match result {
             Ok(_) => {
                 let mut guard = response_cell.lock().await;
-                let result = guard.take().ok_or_else(|| {
+                let mut result = guard.take().ok_or_else(|| {
                     FunctionCallError::Fatal("tool produced no output".to_string())
                 })?;
+                if let Some(outcome) = post_tool_use_outcome {
+                    if outcome.should_block {
+                        let message = outcome.feedback_message.unwrap_or_else(|| {
+                            "PostToolUse hook blocked the tool result".to_string()
+                        });
+                        let err = FunctionCallError::RespondToModel(message);
+                        dispatch_trace.record_failed(&err);
+                        return Err(err);
+                    }
+                    if let Some(feedback_message) = outcome.feedback_message {
+                        result.result = Box::new(PostToolUseFeedbackOutput {
+                            original: result.result,
+                            model_visible: FunctionToolOutput::from_text(
+                                feedback_message,
+                                /*success*/ None,
+                            ),
+                        });
+                    }
+                }
                 dispatch_trace.record_completed(
                     &invocation,
                     &result.call_id,

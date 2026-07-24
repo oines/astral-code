@@ -47,9 +47,22 @@ impl AstralBashHandler {
             backend: AstralBashBackend::ShellCommand(ShellCommandHandler::new(options)),
         }
     }
+
+    async fn handle_call(
+        &self,
+        invocation: ToolInvocation,
+    ) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
+        match &self.backend {
+            AstralBashBackend::UnifiedExec(exec) => {
+                exec.handle(to_exec_invocation(invocation)?).await
+            }
+            AstralBashBackend::ShellCommand(shell) => {
+                shell.handle(to_shell_command_invocation(invocation)?).await
+            }
+        }
+    }
 }
 
-#[async_trait::async_trait]
 impl ToolExecutor<ToolInvocation> for AstralBashHandler {
     fn tool_name(&self) -> ToolName {
         ToolName::plain(BASH_TOOL_NAME)
@@ -78,18 +91,8 @@ impl ToolExecutor<ToolInvocation> for AstralBashHandler {
         true
     }
 
-    async fn handle(
-        &self,
-        invocation: ToolInvocation,
-    ) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
-        match &self.backend {
-            AstralBashBackend::UnifiedExec(exec) => {
-                exec.handle(to_exec_invocation(invocation)?).await
-            }
-            AstralBashBackend::ShellCommand(shell) => {
-                shell.handle(to_shell_command_invocation(invocation)?).await
-            }
-        }
+    fn handle(&self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'_> {
+        Box::pin(self.handle_call(invocation))
     }
 }
 

@@ -44,7 +44,6 @@ where
     })
 }
 
-#[async_trait::async_trait]
 impl ToolExecutor<ToolInvocation> for CodeModeWaitHandler {
     fn tool_name(&self) -> ToolName {
         ToolName::plain(WAIT_TOOL_NAME)
@@ -54,7 +53,13 @@ impl ToolExecutor<ToolInvocation> for CodeModeWaitHandler {
         create_wait_tool()
     }
 
-    async fn handle(
+    fn handle(&self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'_> {
+        Box::pin(self.handle_call(invocation))
+    }
+}
+
+impl CodeModeWaitHandler {
+    async fn handle_call(
         &self,
         invocation: ToolInvocation,
     ) -> Result<Box<dyn crate::tools::context::ToolOutput>, FunctionCallError> {
@@ -115,6 +120,7 @@ impl ToolExecutor<ToolInvocation> for CodeModeWaitHandler {
                         .code_mode_service
                         .finish_cell_dispatch(runtime_cell_id);
                 }
+                exec.session.services.elicitations.wait_until_clear().await;
                 handle_runtime_response(&exec, wait_response.into(), args.max_tokens, started_at)
                     .await
                     .map(boxed_tool_output)

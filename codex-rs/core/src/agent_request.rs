@@ -300,7 +300,10 @@ fn response_item_to_agent_message(
             content: vec![ContentBlock::ToolUse {
                 id: call_id.clone(),
                 name: name.clone(),
-                input: parse_tool_input(arguments),
+                // Custom tool calls persist raw freeform input. Their history can outlive the
+                // surface or feature that originally exposed the tool, so normalization must not
+                // depend on the tools advertised by the current request.
+                input: json!({ "input": arguments }),
             }],
             id: None,
         }),
@@ -472,10 +475,6 @@ fn reasoning_blocks(
             signature,
         }]
     })
-}
-
-fn parse_tool_input(input: &str) -> Value {
-    serde_json::from_str(input).unwrap_or_else(|_| Value::String(input.to_string()))
 }
 
 fn parse_function_call_input(input: &str) -> Option<Value> {

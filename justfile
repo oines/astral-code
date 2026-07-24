@@ -14,11 +14,24 @@ help:
 # `codex`
 alias c := codex
 codex *args:
-    cargo run --bin codex -- {args}
+    cargo run --bin astral -- {args}
 
 # `codex exec`
 exec *args:
-    cargo run --bin codex -- exec {args}
+    cargo run --bin astral -- exec {args}
+
+# Run a redacting transparent proxy for provider cache black-box tests.
+[no-cd]
+cache-proxy *args:
+    node {{ justfile_directory() }}/scripts/cache-proxy.mjs {args}
+
+[no-cd]
+test-cache-proxy:
+    node --test {{ justfile_directory() }}/scripts/cache-proxy.test.mjs {{ justfile_directory() }}/scripts/cache-proxy-report.test.mjs
+
+[no-cd]
+cache-proxy-report *args:
+    node {{ justfile_directory() }}/scripts/cache-proxy-report.mjs {args}
 
 # Start `codex exec-server` and run codex-tui.
 [no-cd]
@@ -30,6 +43,10 @@ tui-with-exec-server *args:
 # Run the CLI version of the file-search crate.
 file-search *args:
     cargo run --bin codex-file-search -- {args}
+
+# Run the standalone code-mode host from source.
+code-mode-host *args:
+    cargo run --bin codex-code-mode-host -- {args}
 
 # Build the CLI and run the app-server test client
 app-server-test-client *args:
@@ -106,6 +123,16 @@ bazel-codex *args:
 [windows]
 bazel-codex *args:
     bazel run //codex-rs/cli:codex --run_under='cd /d "{{ invocation_directory_native() }}" &&' -- @($args | Select-Object -Skip 1)
+
+# Build and run the standalone code-mode host from source using Bazel.
+[no-cd]
+[unix]
+bazel-code-mode-host *args:
+    bazel run //codex-rs/code-mode-host:codex-code-mode-host --run_under="cd $PWD &&" -- "$@"
+
+[windows]
+bazel-code-mode-host *args:
+    bazel run //codex-rs/code-mode-host:codex-code-mode-host --run_under='cd /d "{{ invocation_directory_native() }}" &&' -- @($args | Select-Object -Skip 1)
 
 [no-cd]
 bazel-lock-update:

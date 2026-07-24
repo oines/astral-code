@@ -5,6 +5,7 @@ use crate::config::AgentRoleConfig;
 use crate::config::DEFAULT_AGENT_MAX_DEPTH;
 use crate::function_tool::FunctionCallError;
 use crate::init_state_db;
+use crate::session::step_context::StepContext;
 use crate::session::tests::make_session_and_context;
 use crate::session_prefix::format_subagent_notification_message;
 use crate::thread_manager::thread_store_from_config;
@@ -81,8 +82,10 @@ fn invocation(
     tool_name: &str,
     payload: ToolPayload,
 ) -> ToolInvocation {
+    let step_context = StepContext::for_test(Arc::clone(&turn));
     ToolInvocation {
         session,
+        step_context,
         turn,
         cancellation_token: CancellationToken::new(),
         tracker: Arc::new(Mutex::new(TurnDiffTracker::default())),
@@ -4778,7 +4781,6 @@ async fn build_agent_spawn_config_preserves_base_user_instructions() {
         "base-user".to_string(),
         base_config.codex_home.join("AGENTS.md"),
     ));
-    turn.user_instructions = Some("resolved-user".to_string());
     turn.config = Arc::new(base_config.clone());
     let base_instructions = BaseInstructions {
         text: "base".to_string(),

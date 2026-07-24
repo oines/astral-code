@@ -16,6 +16,7 @@ use codex_config::CloudConfigBundleLoader;
 use codex_core::CodexThread;
 use codex_core::ThreadManager;
 use codex_core::config::Config;
+use codex_core::config::ToolSurface;
 use codex_core::resolve_installation_id;
 use codex_core::shell::Shell;
 use codex_core::shell::get_shell_by_model_provided_path;
@@ -43,6 +44,7 @@ use codex_protocol::protocol::TurnEnvironmentSelection;
 use codex_protocol::protocol::TurnEnvironmentSelections;
 use codex_protocol::user_input::UserInput;
 use codex_utils_absolute_path::AbsolutePathBuf;
+use codex_utils_path_uri::PathUri;
 use futures::future::BoxFuture;
 use serde_json::Value;
 use tempfile::TempDir;
@@ -75,7 +77,7 @@ const SUBMIT_TURN_COMPLETE_TIMEOUT: Duration = Duration::from_secs(30);
 pub fn local(cwd: AbsolutePathBuf) -> TurnEnvironmentSelection {
     TurnEnvironmentSelection {
         environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
-        cwd,
+        cwd: cwd.into(),
     }
 }
 
@@ -153,10 +155,11 @@ pub async fn test_env() -> Result<TestEnv> {
             let environment =
                 codex_exec_server::Environment::create_for_tests(Some(websocket_url.clone()))?;
             let cwd = remote_aware_cwd_path();
+            let cwd_uri = PathUri::from_abs_path(&cwd);
             environment
                 .get_filesystem()
                 .create_directory(
-                    &cwd,
+                    &cwd_uri,
                     CreateDirectoryOptions { recursive: true },
                     /*sandbox*/ None,
                 )
@@ -269,6 +272,12 @@ impl TestCodexBuilder {
         let new_model = model.to_string();
         self.with_config(move |config| {
             config.model = Some(new_model);
+        })
+    }
+
+    pub fn with_tool_surface(self, tool_surface: ToolSurface) -> Self {
+        self.with_config(move |config| {
+            config.tool_surface = tool_surface;
         })
     }
 
@@ -948,35 +957,45 @@ impl TestCodexHarness {
     ) -> Result<()> {
         let abs_path = self.path_abs(rel);
         if let Some(parent) = abs_path.parent() {
+            let parent_uri = PathUri::from_abs_path(&parent);
             self.test
                 .fs()
                 .create_directory(
-                    &parent,
+                    &parent_uri,
                     CreateDirectoryOptions { recursive: true },
                     /*sandbox*/ None,
                 )
                 .await?;
         }
+        let abs_path_uri = PathUri::from_abs_path(&abs_path);
         self.test
             .fs()
-            .write_file(&abs_path, contents.as_ref().to_vec(), /*sandbox*/ None)
+            .write_file(
+                &abs_path_uri,
+                contents.as_ref().to_vec(),
+                /*sandbox*/ None,
+            )
             .await?;
         Ok(())
     }
 
     pub async fn read_file_text(&self, rel: impl AsRef<Path>) -> Result<String> {
+        let path = self.path_abs(rel);
+        let path_uri = PathUri::from_abs_path(&path);
         Ok(self
             .test
             .fs()
-            .read_file_text(&self.path_abs(rel), /*sandbox*/ None)
+            .read_file_text(&path_uri, /*sandbox*/ None)
             .await?)
     }
 
     pub async fn create_dir_all(&self, rel: impl AsRef<Path>) -> Result<()> {
+        let path = self.path_abs(rel);
+        let path_uri = PathUri::from_abs_path(&path);
         self.test
             .fs()
             .create_directory(
-                &self.path_abs(rel),
+                &path_uri,
                 CreateDirectoryOptions { recursive: true },
                 /*sandbox*/ None,
             )
@@ -989,10 +1008,11 @@ impl TestCodexHarness {
     }
 
     pub async fn remove_abs_path(&self, path: &AbsolutePathBuf) -> Result<()> {
+        let path_uri = PathUri::from_abs_path(path);
         self.test
             .fs()
             .remove(
-                path,
+                &path_uri,
                 RemoveOptions {
                     recursive: false,
                     force: true,
@@ -1004,7 +1024,13 @@ impl TestCodexHarness {
     }
 
     pub async fn abs_path_exists(&self, path: &AbsolutePathBuf) -> Result<bool> {
-        match self.test.fs().get_metadata(path, /*sandbox*/ None).await {
+        let path_uri = PathUri::from_abs_path(path);
+        match self
+            .test
+            .fs()
+            .get_metadata(&path_uri, /*sandbox*/ None)
+            .await
+        {
             Ok(_) => Ok(true),
             Err(err) if err.kind() == ErrorKind::NotFound => Ok(false),
             Err(err) => Err(err.into()),
@@ -1123,6 +1149,14 @@ pub fn test_codex() -> TestCodexBuilder {
         exec_server_url: None,
         extensions: empty_extension_registry(),
     }
+}
+
+pub fn test_codex_with_codex_surface() -> TestCodexBuilder {
+    test_codex().with_tool_surface(ToolSurface::Codex)
+}
+
+pub fn test_codex_with_claude_surface() -> TestCodexBuilder {
+    test_codex().with_tool_surface(ToolSurface::Claude)
 }
 
 #[cfg(test)]

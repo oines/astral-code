@@ -17,6 +17,7 @@ use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
 use codex_protocol::models::TranscriptItem;
 use codex_protocol::openai_models::InputModality;
+use codex_protocol::openai_models::ToolMode;
 use codex_protocol::protocol::CompactedItem;
 use serde::Deserialize;
 use serde::Serialize;
@@ -54,26 +55,40 @@ static RUNNING_EXTRACTIONS: LazyLock<Mutex<HashSet<String>>> =
 #[derive(Clone, Debug)]
 pub(crate) struct PromptTemplate {
     prompt: Prompt,
+    tool_context: SessionMemoryToolContext,
 }
 
 impl PromptTemplate {
-    pub(crate) fn from_prompt(prompt: &Prompt) -> Self {
+    pub(crate) fn from_prompt(
+        prompt: &Prompt,
+        turn_context: &TurnContext,
+        router: &crate::tools::ToolRouter,
+    ) -> Self {
         let mut prompt = prompt.clone();
         prompt.input.clear();
         prompt.compact_input_placeholders = false;
-        Self { prompt }
+        Self {
+            prompt,
+            tool_context: SessionMemoryToolContext {
+                surface: crate::tools::effective_tool_surface(turn_context),
+                mode: crate::tools::effective_tool_mode(turn_context),
+                code_mode_tool_definitions: router.code_mode_tool_definitions().to_vec(),
+            },
+        }
     }
+}
 
-    fn with_input(&self, input: Vec<TranscriptItem>) -> Prompt {
-        let mut prompt = self.prompt.clone();
-        prompt.input = input;
-        prompt
-    }
+#[derive(Clone, Debug)]
+struct SessionMemoryToolContext {
+    surface: crate::config::ToolSurface,
+    mode: ToolMode,
+    code_mode_tool_definitions: Vec<codex_code_mode::ToolDefinition>,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct ExtractionCandidate {
     prompt: Prompt,
+    tool_context: SessionMemoryToolContext,
     raw_boundary: Option<ExtractionBoundary>,
     active_context_tokens: i64,
     natural_break: bool,
@@ -87,10 +102,15 @@ impl ExtractionCandidate {
         active_context_tokens: i64,
         natural_break: bool,
     ) -> Self {
+        let PromptTemplate {
+            mut prompt,
+            tool_context,
+        } = template;
         let raw_boundary = extraction_boundary(history.raw_items());
-        let input = history.for_prompt(input_modalities);
+        prompt.input = history.for_prompt(input_modalities);
         Self {
-            prompt: template.with_input(input),
+            prompt,
+            tool_context,
             raw_boundary,
             active_context_tokens,
             natural_break,
@@ -289,7 +309,7 @@ pub(crate) async fn maybe_spawn_post_sampling_extraction(
 pub(crate) async fn try_compact(
     sess: Arc<Session>,
     turn_context: Arc<TurnContext>,
-    initial_context_injection: InitialContextInjection,
+    initial_context_injection: &InitialContextInjection,
     _is_auto_compact: bool,
     compaction_item: &codex_protocol::items::TurnItem,
 ) -> CodexResult<SessionMemoryCompactOutcome> {
@@ -334,7 +354,7 @@ async fn try_compact_inner(
     sess: Arc<Session>,
     turn_context: Arc<TurnContext>,
     store: &SessionMemoryStore,
-    initial_context_injection: InitialContextInjection,
+    initial_context_injection: &InitialContextInjection,
     compaction_item: &codex_protocol::items::TurnItem,
     state: &mut SessionMemoryState,
 ) -> CodexResult<String> {
@@ -356,14 +376,21 @@ async fn try_compact_inner(
         &store.summary_path,
     );
     let mut new_history = build_session_memory_compacted_history(tail, summary_text.clone());
+    let (initial_context, world_state_baseline) = crate::compact::build_compaction_initial_context(
+        sess.as_ref(),
+        turn_context.as_ref(),
+        initial_context_injection,
+    )
+    .await;
+    if !initial_context.is_empty() {
+        new_history = crate::compact::insert_initial_context_before_last_real_user_or_summary(
+            new_history,
+            initial_context,
+        );
+    }
     let reference_context_item = match initial_context_injection {
         InitialContextInjection::DoNotInject => None,
-        InitialContextInjection::BeforeLastUserMessage => {
-            let initial_context = sess.build_initial_context(turn_context.as_ref()).await;
-            new_history = crate::compact::insert_initial_context_before_last_real_user_or_summary(
-                new_history,
-                initial_context,
-            );
+        InitialContextInjection::BeforeLastUserMessage(_) => {
             Some(turn_context.to_turn_context_item())
         }
     };
@@ -378,8 +405,13 @@ async fn try_compact_inner(
         message: summary_text.clone(),
         replacement_history: Some(new_history.clone()),
     };
-    sess.replace_compacted_history(new_history, reference_context_item, compacted_item)
-        .await;
+    sess.replace_compacted_history(
+        new_history,
+        reference_context_item,
+        world_state_baseline,
+        compacted_item,
+    )
+    .await;
     sess.recompute_token_usage(turn_context.as_ref()).await;
     let post_compact_baseline_tokens = sess.get_total_token_usage().await;
     sess.emit_turn_item_completed(turn_context.as_ref(), compaction_item.clone())

@@ -2120,6 +2120,14 @@
           ],
           "description": "The command's working directory."
         },
+        "environmentId": {
+          "default": null,
+          "description": "Environment in which the command will run.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "itemId": {
           "type": "string"
         },
@@ -10088,6 +10096,9 @@
         "title": "ItemStartedNotification",
         "type": "object"
       },
+      "LegacyAppPathString": {
+        "type": "string"
+      },
       "ListMcpServerStatusParams": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {
@@ -14702,9 +14713,9 @@
           },
           "instructionSources": {
             "default": [],
-            "description": "Instruction source files currently loaded for this thread.",
+            "description": "Environment-native paths to instruction source files currently loaded for this thread.",
             "items": {
-              "$ref": "#/definitions/v2/AbsolutePathBuf"
+              "$ref": "#/definitions/v2/LegacyAppPathString"
             },
             "type": "array"
           },
@@ -16398,9 +16409,9 @@
           },
           "instructionSources": {
             "default": [],
-            "description": "Instruction source files currently loaded for this thread.",
+            "description": "Environment-native paths to instruction source files currently loaded for this thread.",
             "items": {
-              "$ref": "#/definitions/v2/AbsolutePathBuf"
+              "$ref": "#/definitions/v2/LegacyAppPathString"
             },
             "type": "array"
           },
@@ -16819,9 +16830,9 @@
           },
           "instructionSources": {
             "default": [],
-            "description": "Instruction source files currently loaded for this thread.",
+            "description": "Environment-native paths to instruction source files currently loaded for this thread.",
             "items": {
-              "$ref": "#/definitions/v2/AbsolutePathBuf"
+              "$ref": "#/definitions/v2/LegacyAppPathString"
             },
             "type": "array"
           },
@@ -17817,7 +17828,7 @@
       "TurnEnvironmentParams": {
         "properties": {
           "cwd": {
-            "$ref": "#/definitions/v2/AbsolutePathBuf"
+            "$ref": "#/definitions/v2/LegacyAppPathString"
           },
           "environmentId": {
             "type": "string"

@@ -78,6 +78,11 @@ impl Session {
         Arc::new(GuardianMcpElicitationReviewer::new(self))
     }
 
+    pub(crate) fn mcp_elicitation_lifecycle(&self) -> codex_mcp::ElicitationLifecycle {
+        let elicitations = self.services.elicitations.clone();
+        codex_mcp::ElicitationLifecycle::new(move || elicitations.register())
+    }
+
     #[expect(
         clippy::await_holding_invalid_type,
         reason = "active turn checks and turn state updates must remain atomic"
@@ -90,9 +95,8 @@ impl Session {
     ) -> McpServerElicitationOutcome {
         if self
             .services
-            .mcp_connection_manager
-            .read()
-            .await
+            .latest_mcp_runtime()
+            .manager()
             .elicitations_auto_deny()
         {
             return McpServerElicitationOutcome {
@@ -143,6 +147,7 @@ impl Session {
             },
         };
 
+        let _elicitation = self.services.elicitations.register();
         let (tx_response, rx_response) = oneshot::channel();
         let prev_entry = {
             let mut active = self.active_turn.lock().await;
@@ -225,68 +230,24 @@ impl Session {
         }
 
         self.services
-            .mcp_connection_manager
-            .read()
-            .await
+            .latest_mcp_runtime()
+            .manager_arc()
             .resolve_elicitation(server_name, id, response)
             .await
     }
 
-    #[expect(
-        clippy::await_holding_invalid_type,
-        reason = "MCP resource calls are serialized through the session-owned manager guard"
-    )]
-    pub async fn list_resources(
-        &self,
-        server: &str,
-        params: Option<PaginatedRequestParams>,
-    ) -> anyhow::Result<ListResourcesResult> {
-        self.services
-            .mcp_connection_manager
-            .read()
-            .await
-            .list_resources(server, params)
-            .await
-    }
-
-    #[expect(
-        clippy::await_holding_invalid_type,
-        reason = "MCP resource calls are serialized through the session-owned manager guard"
-    )]
-    pub async fn list_resource_templates(
-        &self,
-        server: &str,
-        params: Option<PaginatedRequestParams>,
-    ) -> anyhow::Result<ListResourceTemplatesResult> {
-        self.services
-            .mcp_connection_manager
-            .read()
-            .await
-            .list_resource_templates(server, params)
-            .await
-    }
-
-    #[expect(
-        clippy::await_holding_invalid_type,
-        reason = "MCP resource calls are serialized through the session-owned manager guard"
-    )]
     pub async fn read_resource(
         &self,
         server: &str,
         params: ReadResourceRequestParams,
     ) -> anyhow::Result<ReadResourceResult> {
         self.services
-            .mcp_connection_manager
-            .read()
-            .await
+            .latest_mcp_runtime()
+            .manager_arc()
             .read_resource(server, params)
             .await
     }
 
-    #[expect(
-        clippy::await_holding_invalid_type,
-        reason = "MCP tool calls are serialized through the session-owned manager guard"
-    )]
     pub async fn call_tool(
         &self,
         server: &str,
@@ -295,9 +256,8 @@ impl Session {
         meta: Option<serde_json::Value>,
     ) -> anyhow::Result<CallToolResult> {
         self.services
-            .mcp_connection_manager
-            .read()
-            .await
+            .latest_mcp_runtime()
+            .manager_arc()
             .call_tool(server, tool, arguments, meta)
             .await
     }
@@ -311,59 +271,61 @@ impl Session {
     ) {
         let auth = self.services.auth_manager.auth().await;
         let config = self.get_config().await;
-        let mcp_config = config
+        let mut mcp_config = config
             .to_mcp_config(self.services.plugins_manager.as_ref())
             .await;
-        let tool_plugin_provenance = self
-            .services
-            .mcp_manager
-            .tool_plugin_provenance(config.as_ref())
-            .await;
-        let mcp_servers =
-            effective_mcp_servers_from_configured(mcp_servers, &mcp_config, auth.as_ref());
+        mcp_config.mcp_oauth_credentials_store_mode = store_mode;
+        mcp_config.configured_mcp_servers = mcp_servers;
+        let tool_plugin_provenance = codex_mcp::tool_plugin_provenance(&mcp_config);
+        let mcp_servers = effective_mcp_servers(&mcp_config, auth.as_ref());
         let host_owned_codex_apps_enabled =
             host_owned_codex_apps_enabled(&mcp_config, auth.as_ref());
-        let auth_statuses =
-            compute_auth_statuses(mcp_servers.iter(), store_mode, auth.as_ref()).await;
+        let auth_statuses = compute_auth_statuses(
+            mcp_servers.iter(),
+            mcp_config.mcp_oauth_credentials_store_mode,
+            auth.as_ref(),
+        )
+        .await;
         let mcp_runtime_context = match turn_context.environments.primary() {
             Some(turn_environment) => McpRuntimeContext::new(
-                Arc::clone(&self.services.environment_manager),
-                turn_environment.cwd.to_path_buf(),
+                self.services.turn_environments.environment_manager(),
+                turn_environment.cwd().to_path_buf(),
             ),
             None => McpRuntimeContext::new(
-                Arc::clone(&self.services.environment_manager),
+                self.services.turn_environments.environment_manager(),
                 #[allow(deprecated)]
                 turn_context.cwd.to_path_buf(),
             ),
         };
         {
             let mut guard = self.services.mcp_startup_cancellation_token.lock().await;
-            guard.cancel();
+            // The previous runtime owns its token and may still be serving an in-flight step.
             *guard = CancellationToken::new();
         }
+        let current_runtime = self.services.latest_mcp_runtime();
         let (refreshed_manager, cancel_token) = McpConnectionManager::new(
             &mcp_servers,
-            store_mode,
+            mcp_config.mcp_oauth_credentials_store_mode,
             auth_statuses,
             &turn_context.approval_policy,
             turn_context.sub_id.clone(),
             self.get_tx_event(),
             turn_context.permission_profile(),
-            mcp_runtime_context,
-            config.codex_home.to_path_buf(),
+            mcp_runtime_context.clone(),
+            mcp_config.codex_home.clone(),
             codex_apps_tools_cache_key(auth.as_ref()),
             host_owned_codex_apps_enabled,
             mcp_config.prefix_mcp_tool_names,
-            mcp_config.client_elicitation_capability,
+            mcp_config.client_elicitation_capability.clone(),
             tool_plugin_provenance,
             auth.as_ref(),
             elicitation_reviewer,
+            Some(self.mcp_elicitation_lifecycle()),
+            current_runtime.manager().elicitation_router(),
         )
         .await;
-        {
-            let current_manager = self.services.mcp_connection_manager.read().await;
-            refreshed_manager.set_elicitations_auto_deny(current_manager.elicitations_auto_deny());
-        }
+        refreshed_manager
+            .set_elicitations_auto_deny(current_runtime.manager().elicitations_auto_deny());
         {
             let mut guard = self.services.mcp_startup_cancellation_token.lock().await;
             if guard.is_cancelled() {
@@ -372,11 +334,8 @@ impl Session {
             *guard = cancel_token;
         }
 
-        let mut old_manager = {
-            let mut manager = self.services.mcp_connection_manager.write().await;
-            std::mem::replace(&mut *manager, refreshed_manager)
-        };
-        old_manager.shutdown().await;
+        self.services
+            .publish_mcp_runtime(Arc::new(mcp_config), refreshed_manager);
     }
 
     pub(crate) async fn refresh_mcp_servers_if_requested(

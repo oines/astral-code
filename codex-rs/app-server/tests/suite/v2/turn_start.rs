@@ -70,6 +70,7 @@ use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_DANGER_FULL_ACCESS;
 use codex_protocol::models::ImageDetail;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::user_input::MAX_USER_INPUT_TEXT_CHARS;
+use codex_utils_absolute_path::test_support::PathExt;
 use core_test_support::responses;
 use core_test_support::responses::request_input_items;
 use core_test_support::skip_if_no_network;
@@ -1323,7 +1324,10 @@ async fn turn_start_rejects_unknown_environment_before_starting_turn() -> Result
             }],
             environments: Some(vec![TurnEnvironmentParams {
                 environment_id: "missing".to_string(),
-                cwd: codex_home.path().to_path_buf().try_into()?,
+                cwd: codex_utils_absolute_path::AbsolutePathBuf::try_from(
+                    codex_home.path().to_path_buf(),
+                )?
+                .into(),
             }]),
             ..Default::default()
         })
@@ -2074,6 +2078,7 @@ async fn turn_start_exec_approval_toggle_v2() -> Result<()> {
         panic!("expected CommandExecutionRequestApproval request");
     };
     assert_eq!(params.item_id, "call1");
+    assert_eq!(params.environment_id.as_deref(), Some("local"));
     let resolved_request_id = request_id.clone();
 
     // Approve and wait for task completion
@@ -2682,7 +2687,7 @@ async fn run_environment_selection_case(
         .send_thread_start_request(ThreadStartParams {
             model: Some("mock-model".to_string()),
             cwd: Some(workspace.to_string_lossy().into_owned()),
-            environments: environment_params(case.sticky, workspace)?,
+            environments: environment_params(case.sticky, workspace),
             ..Default::default()
         })
         .await?;
@@ -2701,7 +2706,7 @@ async fn run_environment_selection_case(
                 text: format!("run {}", case.name),
                 text_elements: Vec::new(),
             }],
-            environments: environment_params(case.turn, workspace)?,
+            environments: environment_params(case.turn, workspace),
             cwd: Some(workspace.to_path_buf()),
             model: Some("mock-model".to_string()),
             ..Default::default()
@@ -2748,21 +2753,15 @@ async fn run_environment_selection_case(
     Ok(())
 }
 
-fn environment_params(
-    ids: Option<&[&str]>,
-    cwd: &Path,
-) -> Result<Option<Vec<TurnEnvironmentParams>>> {
+fn environment_params(ids: Option<&[&str]>, cwd: &Path) -> Option<Vec<TurnEnvironmentParams>> {
     ids.map(|ids| {
         ids.iter()
-            .map(|id| {
-                Ok(TurnEnvironmentParams {
-                    environment_id: (*id).to_string(),
-                    cwd: cwd.to_path_buf().try_into()?,
-                })
+            .map(|id| TurnEnvironmentParams {
+                environment_id: (*id).to_string(),
+                cwd: cwd.abs().into(),
             })
             .collect()
     })
-    .transpose()
 }
 
 #[tokio::test]
@@ -3106,6 +3105,7 @@ async fn turn_start_streams_apply_patch_change_updates_v2() -> Result<()> {
             (Feature::ShellSnapshot, false),
         ]),
     )?;
+    configure_codex_tool_surface(&codex_home)?;
     write_models_cache(&codex_home)?;
     let cache_path = codex_home.join("models_cache.json");
     let mut cache: serde_json::Value =
@@ -3936,6 +3936,7 @@ async fn command_execution_notifications_include_process_id() -> Result<()> {
         &BTreeMap::from([(Feature::UnifiedExec, true)]),
         "danger-full-access",
     )?;
+    configure_codex_tool_surface(codex_home.path())?;
 
     let mut mcp = TestAppServer::new(codex_home.path()).await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
@@ -4183,6 +4184,15 @@ stream_max_retries = 0
     )?;
     write_mock_model_capabilities_cache(codex_home, "mock_provider")?;
     write_models_cache(codex_home)
+}
+
+fn configure_codex_tool_surface(codex_home: &Path) -> std::io::Result<()> {
+    let config_path = codex_home.join("config.toml");
+    let config = std::fs::read_to_string(&config_path)?;
+    std::fs::write(
+        config_path,
+        format!("{config}\n[tools]\nsurface = \"codex\"\n"),
+    )
 }
 
 fn mock_model_capabilities_toml(model_provider_id: &str) -> String {

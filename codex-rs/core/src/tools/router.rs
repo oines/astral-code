@@ -1,7 +1,6 @@
 use crate::function_tool::FunctionCallError;
 use crate::session::session::Session;
-use crate::session::turn_context::TurnContext;
-use crate::tools::astral_tool_bridge::canonical_astral_tool_name;
+use crate::session::step_context::StepContext;
 use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
@@ -36,6 +35,7 @@ pub struct ToolCall {
 pub struct ToolRouter {
     registry: ToolRegistry,
     model_visible_specs: Vec<ToolSpec>,
+    code_mode_tool_definitions: Vec<codex_code_mode::ToolDefinition>,
 }
 
 pub(crate) struct ToolRouterParams<'a> {
@@ -47,19 +47,37 @@ pub(crate) struct ToolRouterParams<'a> {
 }
 
 impl ToolRouter {
-    pub fn from_turn_context(turn_context: &TurnContext, params: ToolRouterParams<'_>) -> Self {
-        build_tool_router(turn_context, params)
+    pub fn from_context(step_context: &StepContext, params: ToolRouterParams<'_>) -> Self {
+        build_tool_router(step_context, params)
     }
 
+    #[cfg(test)]
     pub(crate) fn from_parts(registry: ToolRegistry, model_visible_specs: Vec<ToolSpec>) -> Self {
         Self {
             registry,
             model_visible_specs,
+            code_mode_tool_definitions: Vec::new(),
+        }
+    }
+
+    pub(crate) fn from_planned_parts(
+        registry: ToolRegistry,
+        model_visible_specs: Vec<ToolSpec>,
+        code_mode_tool_definitions: Vec<codex_code_mode::ToolDefinition>,
+    ) -> Self {
+        Self {
+            registry,
+            model_visible_specs,
+            code_mode_tool_definitions,
         }
     }
 
     pub fn model_visible_specs(&self) -> Vec<ToolSpec> {
         self.model_visible_specs.clone()
+    }
+
+    pub(crate) fn code_mode_tool_definitions(&self) -> &[codex_code_mode::ToolDefinition] {
+        &self.code_mode_tool_definitions
     }
 
     #[cfg(test)]
@@ -79,19 +97,18 @@ impl ToolRouter {
         &self,
         tool_name: &ToolName,
     ) -> Option<Box<dyn ToolArgumentDiffConsumer>> {
-        self.registry
-            .create_diff_consumer(&canonical_astral_tool_name(tool_name))
+        self.registry.create_diff_consumer(tool_name)
     }
 
     pub fn tool_supports_parallel(&self, call: &ToolCall) -> bool {
         self.registry
-            .supports_parallel_tool_calls(&canonical_astral_tool_name(&call.tool_name))
+            .supports_parallel_tool_calls(&call.tool_name)
             .unwrap_or(false)
     }
 
     pub fn tool_waits_for_runtime_cancellation(&self, call: &ToolCall) -> bool {
         self.registry
-            .waits_for_runtime_cancellation(&canonical_astral_tool_name(&call.tool_name))
+            .waits_for_runtime_cancellation(&call.tool_name)
             .unwrap_or(false)
     }
 
@@ -164,7 +181,7 @@ impl ToolRouter {
     pub async fn dispatch_tool_call_with_code_mode_result(
         &self,
         session: Arc<Session>,
-        turn: Arc<TurnContext>,
+        step_context: Arc<StepContext>,
         cancellation_token: CancellationToken,
         tracker: SharedTurnDiffTracker,
         call: ToolCall,
@@ -172,7 +189,7 @@ impl ToolRouter {
     ) -> Result<AnyToolResult, FunctionCallError> {
         self.dispatch_tool_call_with_code_mode_result_inner(
             session,
-            turn,
+            step_context,
             cancellation_token,
             tracker,
             call,
@@ -187,7 +204,7 @@ impl ToolRouter {
     pub(crate) async fn dispatch_tool_call_with_terminal_outcome(
         &self,
         session: Arc<Session>,
-        turn: Arc<TurnContext>,
+        step_context: Arc<StepContext>,
         cancellation_token: CancellationToken,
         tracker: SharedTurnDiffTracker,
         call: ToolCall,
@@ -196,7 +213,7 @@ impl ToolRouter {
     ) -> Result<AnyToolResult, FunctionCallError> {
         self.dispatch_tool_call_with_code_mode_result_inner(
             session,
-            turn,
+            step_context,
             cancellation_token,
             tracker,
             call,
@@ -210,7 +227,7 @@ impl ToolRouter {
     async fn dispatch_tool_call_with_code_mode_result_inner(
         &self,
         session: Arc<Session>,
-        turn: Arc<TurnContext>,
+        step_context: Arc<StepContext>,
         cancellation_token: CancellationToken,
         tracker: SharedTurnDiffTracker,
         call: ToolCall,
@@ -223,9 +240,12 @@ impl ToolRouter {
             payload,
         } = call;
 
+        // Keep the legacy ToolInvocation.turn field tied to the same request state until handlers migrate.
+        let turn = Arc::clone(&step_context.turn);
         let invocation = ToolInvocation {
             session,
             turn,
+            step_context,
             cancellation_token,
             tracker,
             call_id,

@@ -1,5 +1,5 @@
-use crate::agents_md::AgentsMdManager;
 pub use crate::agents_md::LoadedAgentsMd;
+use crate::agents_md::load_global_instructions;
 use crate::config::edit::ConfigEdit;
 use crate::config::edit::ConfigEditsBuilder;
 use crate::path_utils::normalize_for_native_workdir;
@@ -33,6 +33,7 @@ use codex_config::config_toml::ProjectConfig;
 use codex_config::config_toml::RealtimeAudioConfig;
 use codex_config::config_toml::RealtimeConfig;
 use codex_config::config_toml::ThreadStoreToml;
+pub use codex_config::config_toml::ToolSurface;
 use codex_config::config_toml::WebSearchRuntimeConfig;
 use codex_config::config_toml::validate_model_providers;
 use codex_config::loader::load_config_layers_state;
@@ -115,6 +116,7 @@ use codex_protocol::protocol::SandboxPolicy;
 pub use codex_thread_store::ExtraConfig;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_absolute_path::AbsolutePathBufGuard;
+use codex_utils_path_uri::PathUri;
 use rmcp::model::ElicitationCapability;
 use rmcp::model::FormElicitationCapability;
 use rmcp::model::UrlElicitationCapability;
@@ -1015,6 +1017,9 @@ pub struct Config {
     /// Whether to register the experimental request_user_input tool.
     pub experimental_request_user_input_enabled: bool,
 
+    /// Selects the model-visible core tool surface outside code mode.
+    pub tool_surface: ToolSurface,
+
     /// Configuration for the experimental code-mode tool surface.
     pub code_mode: CodeModeConfig,
 
@@ -1081,6 +1086,7 @@ pub struct Config {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct CodeModeConfig {
     pub excluded_tool_namespaces: Vec<String>,
+    pub direct_only_tool_namespaces: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1801,6 +1807,7 @@ fn model_capability_from_config(capability: ModelCapabilityToml) -> ModelCapabil
     ModelCapability {
         litellm_provider: capability.litellm_provider,
         mode: capability.mode,
+        tool_mode: capability.tool_mode,
         max_context_window: capability.max_context_window.or(capability.context_window),
         max_output_tokens: capability.max_output_tokens,
         supports_tools: capability.supports_tools,
@@ -2458,12 +2465,24 @@ fn resolve_experimental_request_user_input_enabled(config_toml: &ConfigToml) -> 
         .is_none_or(|config| config.enabled)
 }
 
+fn resolve_tool_surface(config_toml: &ConfigToml) -> ToolSurface {
+    config_toml
+        .tools
+        .as_ref()
+        .and_then(|tools| tools.surface)
+        .unwrap_or_default()
+}
+
 fn resolve_code_mode_config(config_toml: &ConfigToml) -> CodeModeConfig {
     let base = code_mode_toml_config(config_toml.features.as_ref());
 
     CodeModeConfig {
         excluded_tool_namespaces: base
             .and_then(|config| config.excluded_tool_namespaces.as_ref())
+            .cloned()
+            .unwrap_or_default(),
+        direct_only_tool_namespaces: base
+            .and_then(|config| config.direct_only_tool_namespaces.as_ref())
             .cloned()
             .unwrap_or_default(),
     }
@@ -2759,7 +2778,7 @@ impl Config {
             .startup_warnings()
             .unwrap_or_default()
             .to_vec();
-        let user_instructions = AgentsMdManager::load_global_instructions(
+        let user_instructions = load_global_instructions(
             LOCAL_FS.as_ref(),
             Some(&codex_home),
             &mut startup_warnings,
@@ -3195,6 +3214,7 @@ impl Config {
         let web_search_runtime_config = resolve_web_search_runtime_config(&cfg);
         let experimental_request_user_input_enabled =
             resolve_experimental_request_user_input_enabled(&cfg);
+        let tool_surface = resolve_tool_surface(&cfg);
         let code_mode = resolve_code_mode_config(&cfg);
         let multi_agent_v2 = resolve_multi_agent_v2_config(&cfg);
         let apps_mcp_path_override = if features.enabled(Feature::AppsMcpPathOverride) {
@@ -3795,6 +3815,7 @@ impl Config {
             web_search_config,
             web_search_runtime_config,
             experimental_request_user_input_enabled,
+            tool_surface,
             code_mode,
             use_experimental_unified_exec_tool,
             experimental_anthropic_cached_fold: cfg
@@ -3893,8 +3914,9 @@ impl Config {
             return Ok(None);
         };
 
+        let path_uri = PathUri::from_abs_path(path);
         let contents = fs
-            .read_file_text(path, /*sandbox*/ None)
+            .read_file_text(&path_uri, /*sandbox*/ None)
             .await
             .map_err(|e| {
                 std::io::Error::new(

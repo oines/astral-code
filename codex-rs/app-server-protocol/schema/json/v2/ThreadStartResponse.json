@@ -545,6 +545,9 @@
       ],
       "type": "string"
     },
+    "LegacyAppPathString": {
+      "type": "string"
+    },
     "McpToolCallError": {
       "properties": {
         "message": {
@@ -2321,9 +2324,9 @@
     },
     "instructionSources": {
       "default": [],
-      "description": "Instruction source files currently loaded for this thread.",
+      "description": "Environment-native paths to instruction source files currently loaded for this thread.",
       "items": {
-        "$ref": "#/definitions/AbsolutePathBuf"
+        "$ref": "#/definitions/LegacyAppPathString"
       },
       "type": "array"
     },

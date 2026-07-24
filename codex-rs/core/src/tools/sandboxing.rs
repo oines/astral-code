@@ -21,12 +21,12 @@ use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::ReviewDecision;
 use codex_sandboxing::SandboxCommand;
 use codex_sandboxing::SandboxManager;
-use codex_sandboxing::SandboxTransformError;
 use codex_sandboxing::SandboxTransformRequest;
 use codex_sandboxing::SandboxType;
 use codex_sandboxing::SandboxablePreference;
 use codex_tools::ToolName;
 use codex_utils_absolute_path::AbsolutePathBuf;
+use codex_utils_path_uri::PathUri;
 use futures::Future;
 use futures::future::BoxFuture;
 use serde::Serialize;
@@ -120,16 +120,11 @@ pub(crate) struct ApprovalCtx<'a> {
     pub session: &'a Arc<Session>,
     pub turn: &'a Arc<TurnContext>,
     pub call_id: &'a str,
-    /// Guardian review lifecycle ID for this approval, when guardian is reviewing it.
-    ///
-    /// This is separate from `call_id`: `call_id` identifies the tool item under
-    /// review, while this ID identifies the review itself. Keeping both lets
-    /// denial handling, overrides, and app-server notifications refer to the
-    /// review without overloading the tool call ID as a review ID.
-    pub guardian_review_id: Option<String>,
     pub retry_reason: Option<String>,
     pub network_approval_context: Option<NetworkApprovalContext>,
 }
+
+pub(crate) use super::approvals::ApprovalAction;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PermissionRequestPayload {
@@ -367,6 +362,8 @@ pub(crate) trait Approvable<Req> {
         req: &'a Req,
         ctx: ApprovalCtx<'a>,
     ) -> BoxFuture<'a, ReviewDecision>;
+
+    fn approval_action(&self, req: &Req, ctx: &ApprovalCtx<'_>) -> std::io::Result<ApprovalAction>;
 }
 
 pub(crate) trait Sandboxable {
@@ -394,7 +391,7 @@ pub(crate) trait ToolRuntime<Req, Out>: Approvable<Req> + Sandboxable {
         None
     }
 
-    fn sandbox_cwd<'a>(&self, _req: &'a Req) -> Option<&'a AbsolutePathBuf> {
+    fn sandbox_cwd<'a>(&self, _req: &'a Req) -> Option<&'a PathUri> {
         None
     }
 
@@ -411,7 +408,7 @@ pub(crate) struct SandboxAttempt<'a> {
     pub permissions: &'a codex_protocol::models::PermissionProfile,
     pub enforce_managed_network: bool,
     pub(crate) manager: &'a SandboxManager,
-    pub(crate) sandbox_cwd: &'a AbsolutePathBuf,
+    pub(crate) sandbox_cwd: &'a PathUri,
     pub(crate) workspace_roots: &'a [AbsolutePathBuf],
     pub codex_linux_sandbox_exe: Option<&'a std::path::PathBuf>,
     pub use_legacy_landlock: bool,
@@ -426,8 +423,9 @@ impl<'a> SandboxAttempt<'a> {
         command: SandboxCommand,
         options: ExecOptions,
         network: Option<&NetworkProxy>,
-    ) -> Result<crate::sandboxing::ExecRequest, SandboxTransformError> {
-        self.manager
+    ) -> Result<crate::sandboxing::ExecRequest, CodexErr> {
+        let request = self
+            .manager
             .transform(SandboxTransformRequest {
                 command,
                 permissions: self.permissions,
@@ -442,19 +440,12 @@ impl<'a> SandboxAttempt<'a> {
                 windows_sandbox_level: self.windows_sandbox_level,
                 windows_sandbox_private_desktop: self.windows_sandbox_private_desktop,
             })
-            .map(|request| {
-                let windows_sandbox_policy_cwd =
-                    codex_utils_absolute_path::AbsolutePathBuf::try_from(
-                        self.sandbox_cwd.to_path_buf(),
-                    )
-                    .unwrap_or_else(|_| request.cwd.clone());
-                crate::sandboxing::ExecRequest::from_sandbox_exec_request(
-                    request,
-                    options,
-                    windows_sandbox_policy_cwd,
-                    self.workspace_roots.to_vec(),
-                )
-            })
+            .map_err(CodexErr::from)?;
+        Ok(crate::sandboxing::ExecRequest::from_sandbox_exec_request(
+            request,
+            options,
+            self.workspace_roots.to_vec(),
+        ))
     }
 }
 

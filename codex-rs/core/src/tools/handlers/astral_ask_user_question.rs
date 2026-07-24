@@ -28,9 +28,17 @@ impl AstralAskUserQuestionHandler {
             request_user_input: RequestUserInputHandler { available_modes },
         }
     }
+
+    async fn handle_call(
+        &self,
+        invocation: ToolInvocation,
+    ) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
+        self.request_user_input
+            .handle(to_request_user_input_invocation(invocation)?)
+            .await
+    }
 }
 
-#[async_trait::async_trait]
 impl ToolExecutor<ToolInvocation> for AstralAskUserQuestionHandler {
     fn tool_name(&self) -> ToolName {
         ToolName::plain(ASK_USER_QUESTION_TOOL_NAME)
@@ -57,13 +65,8 @@ impl ToolExecutor<ToolInvocation> for AstralAskUserQuestionHandler {
         })
     }
 
-    async fn handle(
-        &self,
-        invocation: ToolInvocation,
-    ) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
-        self.request_user_input
-            .handle(to_request_user_input_invocation(invocation)?)
-            .await
+    fn handle(&self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'_> {
+        Box::pin(self.handle_call(invocation))
     }
 }
 

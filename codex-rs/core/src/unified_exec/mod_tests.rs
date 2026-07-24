@@ -10,6 +10,7 @@ use crate::tools::context::ExecCommandToolOutput;
 use crate::unified_exec::WriteStdinRequest;
 use crate::unified_exec::process::OutputHandles;
 use codex_sandboxing::SandboxType;
+use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_output_truncation::TruncationPolicy;
 use codex_utils_output_truncation::approx_token_count;
 use core_test_support::get_remote_test_env;
@@ -118,7 +119,7 @@ async fn exec_command_with_tty(
             process_id,
             hook_command: cmd.to_string(),
             tty,
-            cwd,
+            cwd: cwd.into(),
             network_approval: None,
             session: Arc::downgrade(session),
             started_at,
@@ -146,7 +147,7 @@ async fn exec_command_with_tty(
         &output_closed,
         &output_closed_notify,
         &cancellation_token,
-        Some(session.subscribe_out_of_band_elicitation_pause_state()),
+        Some(session.subscribe_elicitation_pause_state()),
         deadline,
     )
     .await;
@@ -423,12 +424,11 @@ async fn unified_exec_pause_blocks_yield_timeout() -> anyhow::Result<()> {
     skip_if_sandbox!(Ok(()));
 
     let (session, turn) = test_session_and_turn().await;
-    session.set_out_of_band_elicitation_pause_state(/*paused*/ true);
+    let elicitation = session.services.elicitations.register();
 
-    let paused_session = Arc::clone(&session);
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_secs(2)).await;
-        paused_session.set_out_of_band_elicitation_pause_state(/*paused*/ false);
+        drop(elicitation);
     });
 
     let started = tokio::time::Instant::now();

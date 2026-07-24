@@ -181,6 +181,10 @@ async fn prompt_tools_are_consistent_across_requests() -> anyhow::Result<()> {
     let request1 = req2.single_request();
     let body1 = request1.body_json();
     assert_eq!(request1.instructions_text(), instructions0);
+    assert_eq!(
+        body1["tools"], body0["tools"],
+        "the same tool surface should preserve complete tool schemas and order"
+    );
     assert_eq!(request_tool_names(&body1), tool_names0);
 
     Ok(())

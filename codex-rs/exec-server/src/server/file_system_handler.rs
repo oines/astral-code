@@ -23,10 +23,6 @@ use crate::protocol::FsGlobParams;
 use crate::protocol::FsGlobResponse;
 use crate::protocol::FsGrepParams;
 use crate::protocol::FsGrepResponse;
-use crate::protocol::FsJoinParams;
-use crate::protocol::FsJoinResponse;
-use crate::protocol::FsParentParams;
-use crate::protocol::FsParentResponse;
 use crate::protocol::FsReadDirectoryEntry;
 use crate::protocol::FsReadDirectoryParams;
 use crate::protocol::FsReadDirectoryResponse;
@@ -75,12 +71,7 @@ impl FileSystemHandler {
                 "{FS_WRITE_FILE_METHOD} requires valid base64 dataBase64: {err}"
             ))
         })?;
-        if let Some(parent) = self
-            .file_system
-            .parent(&params.path)
-            .await
-            .map_err(map_fs_error)?
-        {
+        if let Some(parent) = params.path.parent() {
             self.file_system
                 .create_directory(
                     &parent,
@@ -142,30 +133,6 @@ impl FileSystemHandler {
             .await
             .map_err(map_fs_error)?;
         Ok(FsCanonicalizeResponse { path })
-    }
-
-    pub(crate) async fn join(
-        &self,
-        params: FsJoinParams,
-    ) -> Result<FsJoinResponse, JSONRPCErrorError> {
-        let path = self
-            .file_system
-            .join(&params.base_path, &params.path)
-            .await
-            .map_err(map_fs_error)?;
-        Ok(FsJoinResponse { path })
-    }
-
-    pub(crate) async fn parent(
-        &self,
-        params: FsParentParams,
-    ) -> Result<FsParentResponse, JSONRPCErrorError> {
-        let path = self
-            .file_system
-            .parent(&params.path)
-            .await
-            .map_err(map_fs_error)?;
-        Ok(FsParentResponse { path })
     }
 
     pub(crate) async fn read_directory(
@@ -261,7 +228,7 @@ fn map_fs_error(err: io::Error) -> JSONRPCErrorError {
 mod tests {
     use codex_protocol::protocol::NetworkAccess;
     use codex_protocol::protocol::SandboxPolicy;
-    use codex_utils_absolute_path::AbsolutePathBuf;
+    use codex_utils_path_uri::PathUri;
     use pretty_assertions::assert_eq;
 
     use super::*;
@@ -278,8 +245,14 @@ mod tests {
         )
         .expect("runtime paths");
         let handler = FileSystemHandler::new(runtime_paths);
-        let sandbox_cwd =
-            AbsolutePathBuf::from_absolute_path(temp_dir.path()).expect("absolute tempdir");
+        let sandbox_cwd = PathUri::from_host_native_path(temp_dir.path()).expect("tempdir URI");
+        let sandbox_context = |sandbox_policy| {
+            FileSystemSandboxContext::from_legacy_sandbox_policy(
+                sandbox_policy,
+                sandbox_cwd.clone(),
+            )
+            .expect("sandbox context")
+        };
 
         for (file_name, sandbox_policy) in [
             ("danger.txt", SandboxPolicy::DangerFullAccess),
@@ -291,17 +264,13 @@ mod tests {
             ),
         ] {
             let path =
-                AbsolutePathBuf::from_absolute_path(temp_dir.path().join(file_name).as_path())
-                    .expect("absolute path");
+                PathUri::from_host_native_path(temp_dir.path().join(file_name)).expect("path URI");
 
             handler
                 .write_file(FsWriteFileParams {
                     path: path.clone(),
                     data_base64: STANDARD.encode("ok"),
-                    sandbox: Some(FileSystemSandboxContext::from_legacy_sandbox_policy(
-                        sandbox_policy.clone(),
-                        sandbox_cwd.clone(),
-                    )),
+                    sandbox: Some(sandbox_context(sandbox_policy.clone())),
                 })
                 .await
                 .expect("write file");
@@ -309,10 +278,7 @@ mod tests {
             let response = handler
                 .read_file(FsReadFileParams {
                     path,
-                    sandbox: Some(FileSystemSandboxContext::from_legacy_sandbox_policy(
-                        sandbox_policy,
-                        sandbox_cwd.clone(),
-                    )),
+                    sandbox: Some(sandbox_context(sandbox_policy)),
                 })
                 .await
                 .expect("read file");

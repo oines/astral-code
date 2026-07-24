@@ -26,9 +26,17 @@ impl AstralRequestPermissionsHandler {
             request_permissions: RequestPermissionsHandler,
         }
     }
+
+    async fn handle_call(
+        &self,
+        invocation: ToolInvocation,
+    ) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
+        self.request_permissions
+            .handle(to_request_permissions_invocation(invocation)?)
+            .await
+    }
 }
 
-#[async_trait::async_trait]
 impl ToolExecutor<ToolInvocation> for AstralRequestPermissionsHandler {
     fn tool_name(&self) -> ToolName {
         ToolName::plain(REQUEST_PERMISSIONS_TOOL_NAME)
@@ -55,13 +63,8 @@ impl ToolExecutor<ToolInvocation> for AstralRequestPermissionsHandler {
         })
     }
 
-    async fn handle(
-        &self,
-        invocation: ToolInvocation,
-    ) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
-        self.request_permissions
-            .handle(to_request_permissions_invocation(invocation)?)
-            .await
+    fn handle(&self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'_> {
+        Box::pin(self.handle_call(invocation))
     }
 }
 

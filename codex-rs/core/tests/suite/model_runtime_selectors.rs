@@ -21,6 +21,7 @@ use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_response_created;
 use core_test_support::responses::mount_models_once;
 use core_test_support::responses::mount_sse_once;
+use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::request_tool_names;
 use core_test_support::responses::sse;
 use core_test_support::skip_if_no_network;
@@ -36,6 +37,12 @@ use tokio::time::sleep;
 const CHILD_MODEL: &str = "test-multi-agent-child";
 const ROOT_MODEL: &str = "test-multi-agent-root";
 const ROOT_PROMPT: &str = "spawn a child";
+const UNSUPPORTED_CODE_MODE_WARNING: &str = "does not advertise Code Mode support";
+
+struct RemoteModelResponse {
+    body: Value,
+    warnings: Vec<String>,
+}
 
 fn remote_model(slug: &str) -> ModelInfo {
     ModelInfo {
@@ -68,10 +75,10 @@ async fn wait_for_model_available(manager: &SharedModelsManager, slug: &str) -> 
     }
 }
 
-async fn response_body_for_remote_model(
+async fn response_for_remote_model(
     remote_model: ModelInfo,
     configure: impl FnOnce(&mut Config) + Send + 'static,
-) -> Result<Value> {
+) -> Result<RemoteModelResponse> {
     let server = wiremock::MockServer::start().await;
     let model_slug = remote_model.slug.clone();
     let models_mock = mount_models_once(
@@ -124,12 +131,28 @@ async fn response_body_for_remote_model(
             thread_settings: Default::default(),
         })
         .await?;
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
+    let mut warnings = Vec::new();
+    loop {
+        match wait_for_event(&test.codex, |_| true).await {
+            EventMsg::Warning(warning) => warnings.push(warning.message),
+            EventMsg::TurnComplete(_) => break,
+            _ => {}
+        }
+    }
 
-    Ok(response_mock.single_request().body_json())
+    Ok(RemoteModelResponse {
+        body: response_mock.single_request().body_json(),
+        warnings,
+    })
+}
+
+async fn response_body_for_remote_model(
+    remote_model: ModelInfo,
+    configure: impl FnOnce(&mut Config) + Send + 'static,
+) -> Result<Value> {
+    Ok(response_for_remote_model(remote_model, configure)
+        .await?
+        .body)
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -164,8 +187,122 @@ async fn remote_tool_mode_selector_overrides_feature_flags() -> Result<()> {
             // Code-mode entrypoints.
             codex_code_mode::PUBLIC_TOOL_NAME.to_string(),
             codex_code_mode::WAIT_TOOL_NAME.to_string(),
+            // Direct-model-only exception.
+            "request_user_input".to_string(),
         ]
     );
+
+    let unsupported_model = remote_model("test-tool-mode-unsupported");
+    let unsupported_response = response_for_remote_model(unsupported_model, |config| {
+        config
+            .features
+            .enable(Feature::CodeModeOnly)
+            .expect("test config should allow feature update");
+    })
+    .await?;
+    assert!(
+        tool_names(&unsupported_response.body)
+            .iter()
+            .any(|name| name == codex_code_mode::PUBLIC_TOOL_NAME)
+    );
+    assert_eq!(
+        unsupported_response
+            .warnings
+            .iter()
+            .filter(|warning| warning.contains(UNSUPPORTED_CODE_MODE_WARNING))
+            .count(),
+        1
+    );
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn unsupported_code_mode_warning_is_emitted_each_turn() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = wiremock::MockServer::start().await;
+    let model_slug = "test-tool-mode-warning-each-turn";
+    let models_mock = mount_models_once(
+        &server,
+        ModelsResponse {
+            models: vec![remote_model(model_slug)],
+        },
+    )
+    .await;
+    let response_mock = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_assistant_message("msg-1", "done"),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-2"),
+                ev_assistant_message("msg-2", "done"),
+                ev_completed("resp-2"),
+            ]),
+        ],
+    )
+    .await;
+    let test = test_codex()
+        .with_auth(CodexAuth::create_dummy_api_key_auth_for_testing())
+        .with_config(move |config| {
+            config.model = Some(model_slug.to_string());
+            config
+                .features
+                .enable(Feature::CodeMode)
+                .expect("test config should allow feature update");
+        })
+        .build(&server)
+        .await?;
+    let models_manager = test.thread_manager.get_models_manager();
+    let available_model = wait_for_model_available(&models_manager, model_slug).await;
+    assert_eq!(available_model.model, model_slug);
+    assert_eq!(models_mock.requests().len(), 1);
+
+    submit_thread_settings(
+        &test.codex,
+        ThreadSettingsOverrides {
+            model: Some(model_slug.to_string()),
+            ..Default::default()
+        },
+    )
+    .await?;
+
+    let mut warning_counts = Vec::new();
+    for prompt in ["first turn", "second turn"] {
+        test.codex
+            .submit(Op::UserInput {
+                items: vec![UserInput::Text {
+                    text: prompt.to_string(),
+                    text_elements: Vec::new(),
+                }],
+                final_output_json_schema: None,
+                model_client_metadata: None,
+                additional_context: Default::default(),
+                thread_settings: Default::default(),
+            })
+            .await?;
+
+        let mut warning_count = 0;
+        loop {
+            match wait_for_event(&test.codex, |_| true).await {
+                EventMsg::Warning(warning)
+                    if warning.message.contains(UNSUPPORTED_CODE_MODE_WARNING) =>
+                {
+                    warning_count += 1;
+                }
+                EventMsg::TurnComplete(_) => break,
+                _ => {}
+            }
+        }
+        warning_counts.push(warning_count);
+    }
+
+    assert_eq!(warning_counts, vec![1, 1]);
+    assert_eq!(response_mock.requests().len(), 2);
 
     Ok(())
 }

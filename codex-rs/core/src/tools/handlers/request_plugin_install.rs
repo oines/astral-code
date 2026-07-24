@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use codex_app_server_protocol::AppInfo;
 use codex_config::types::ToolSuggestDisabledTool;
@@ -48,7 +49,6 @@ impl RequestPluginInstallHandler {
     }
 }
 
-#[async_trait::async_trait]
 impl ToolExecutor<ToolInvocation> for RequestPluginInstallHandler {
     fn tool_name(&self) -> ToolName {
         ToolName::plain(REQUEST_PLUGIN_INSTALL_TOOL_NAME)
@@ -62,17 +62,25 @@ impl ToolExecutor<ToolInvocation> for RequestPluginInstallHandler {
         true
     }
 
-    async fn handle(
+    fn handle(&self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'_> {
+        Box::pin(self.handle_call(invocation))
+    }
+}
+
+impl RequestPluginInstallHandler {
+    async fn handle_call(
         &self,
         invocation: ToolInvocation,
     ) -> Result<Box<dyn crate::tools::context::ToolOutput>, FunctionCallError> {
         let ToolInvocation {
             payload,
             session,
-            turn,
+            step_context,
             call_id,
             ..
         } = invocation;
+        let turn = Arc::clone(&step_context.turn);
+        let manager = step_context.mcp.manager();
 
         let arguments = match payload {
             ToolPayload::Function { arguments } => arguments,
@@ -140,7 +148,8 @@ impl ToolExecutor<ToolInvocation> for RequestPluginInstallHandler {
 
         let auth = session.services.auth_manager.auth().await;
         let completed = if user_confirmed {
-            verify_request_plugin_install_completed(&session, &turn, &tool, auth.as_ref()).await
+            verify_request_plugin_install_completed(&session, &turn, manager, &tool, auth.as_ref())
+                .await
         } else {
             false
         };
@@ -258,13 +267,14 @@ fn disabled_install_request(tool: &DiscoverableTool) -> ToolSuggestDisabledTool 
 async fn verify_request_plugin_install_completed(
     session: &crate::session::session::Session,
     turn: &crate::session::turn_context::TurnContext,
+    manager: &codex_mcp::McpConnectionManager,
     tool: &DiscoverableTool,
     auth: Option<&codex_login::CodexAuth>,
 ) -> bool {
     match tool {
         DiscoverableTool::Connector(connector) => refresh_missing_requested_connectors(
-            session,
             turn,
+            manager,
             auth,
             std::slice::from_ref(&connector.id),
             connector.id.as_str(),
@@ -286,8 +296,8 @@ async fn verify_request_plugin_install_completed(
                 session.services.plugins_manager.as_ref(),
             );
             let _ = refresh_missing_requested_connectors(
-                session,
                 turn,
+                manager,
                 auth,
                 &plugin.app_connector_ids,
                 plugin.id.as_str(),
@@ -304,13 +314,9 @@ fn is_remote_plugin_install_suggestion(plugin_id: &str) -> bool {
         .is_some_and(|(_, marketplace_name)| marketplace_name == REMOTE_GLOBAL_MARKETPLACE_NAME)
 }
 
-#[expect(
-    clippy::await_holding_invalid_type,
-    reason = "connector cache refresh reads through the session-owned manager guard"
-)]
 async fn refresh_missing_requested_connectors(
-    session: &crate::session::session::Session,
     turn: &crate::session::turn_context::TurnContext,
+    manager: &codex_mcp::McpConnectionManager,
     auth: Option<&codex_login::CodexAuth>,
     expected_connector_ids: &[String],
     tool_id: &str,
@@ -319,7 +325,6 @@ async fn refresh_missing_requested_connectors(
         return Some(Vec::new());
     }
 
-    let manager = session.services.mcp_connection_manager.read().await;
     let mcp_tools = manager.list_all_tools().await;
     let accessible_connectors = connectors::with_app_enabled_state(
         connectors::accessible_connectors_from_mcp_tools(&mcp_tools),

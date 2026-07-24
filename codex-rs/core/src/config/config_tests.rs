@@ -21,6 +21,7 @@ use codex_config::config_toml::RealtimeTransport;
 use codex_config::config_toml::RealtimeWsMode;
 use codex_config::config_toml::RealtimeWsVersion;
 use codex_config::config_toml::SecretString;
+use codex_config::config_toml::ToolSurface;
 use codex_config::config_toml::ToolsToml;
 use codex_config::config_toml::WebSearchProvider;
 use codex_config::config_toml::WebSearchToolConfig;
@@ -84,6 +85,7 @@ use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_WORKSPACE;
 use codex_protocol::models::ManagedFileSystemPermissions;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::models::SandboxEnforcement;
+use codex_protocol::openai_models::ToolMode;
 use codex_protocol::permissions::FileSystemAccessMode;
 use codex_protocol::permissions::FileSystemPath;
 use codex_protocol::permissions::FileSystemSandboxEntry;
@@ -94,6 +96,7 @@ use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::NetworkAccess;
 use codex_protocol::protocol::RealtimeVoice;
 use codex_protocol::protocol::SandboxPolicy;
+use codex_utils_path_uri::PathUri;
 use serde::Deserialize;
 use tempfile::tempdir;
 
@@ -245,7 +248,7 @@ async fn load_config_loads_global_agents_instructions() -> std::io::Result<()> {
     assert_eq!(user_instructions.text(), "global instructions");
     assert_eq!(
         user_instructions.sources().collect::<Vec<_>>(),
-        vec![&global_agents_path]
+        vec![PathUri::from_abs_path(&global_agents_path)]
     );
     Ok(())
 }
@@ -274,7 +277,7 @@ async fn load_config_prefers_global_agents_override_instructions() -> std::io::R
     assert_eq!(user_instructions.text(), "local override instructions");
     assert_eq!(
         user_instructions.sources().collect::<Vec<_>>(),
-        vec![&global_agents_override_path]
+        vec![PathUri::from_abs_path(&global_agents_override_path)]
     );
     Ok(())
 }
@@ -429,6 +432,7 @@ web_search = true
     assert_eq!(
         cfg.tools,
         Some(ToolsToml {
+            surface: None,
             web_search: None,
             experimental_request_user_input: None,
         })
@@ -448,6 +452,7 @@ web_search = false
     assert_eq!(
         cfg.tools,
         Some(ToolsToml {
+            surface: None,
             web_search: None,
             experimental_request_user_input: None,
         })
@@ -466,6 +471,7 @@ fn tools_experimental_request_user_input_defaults_to_enabled() {
     assert_eq!(
         cfg.tools,
         Some(ToolsToml {
+            surface: None,
             web_search: None,
             experimental_request_user_input: Some(ExperimentalRequestUserInput { enabled: true }),
         })
@@ -485,6 +491,7 @@ enabled = false
     assert_eq!(
         cfg.tools,
         Some(ToolsToml {
+            surface: None,
             web_search: None,
             experimental_request_user_input: Some(ExperimentalRequestUserInput { enabled: false }),
         })
@@ -497,6 +504,7 @@ async fn load_config_resolves_experimental_request_user_input_enabled() -> std::
     let config = Config::load_from_base_config_with_overrides(
         ConfigToml {
             tools: Some(ToolsToml {
+                surface: None,
                 web_search: None,
                 experimental_request_user_input: Some(ExperimentalRequestUserInput {
                     enabled: false,
@@ -514,6 +522,33 @@ async fn load_config_resolves_experimental_request_user_input_enabled() -> std::
 }
 
 #[tokio::test]
+async fn load_config_resolves_tool_surface() -> std::io::Result<()> {
+    let codex_home = tempdir()?;
+    let default_config = Config::load_from_base_config_with_overrides(
+        ConfigToml::default(),
+        ConfigOverrides::default(),
+        codex_home.abs(),
+    )
+    .await?;
+    assert_eq!(default_config.tool_surface, ToolSurface::Claude);
+
+    let codex_config = Config::load_from_base_config_with_overrides(
+        toml::from_str(
+            r#"
+[tools]
+surface = "codex"
+"#,
+        )
+        .expect("tool surface should deserialize"),
+        ConfigOverrides::default(),
+        codex_home.abs(),
+    )
+    .await?;
+    assert_eq!(codex_config.tool_surface, ToolSurface::Codex);
+    Ok(())
+}
+
+#[tokio::test]
 async fn load_config_resolves_code_mode_config() -> std::io::Result<()> {
     let codex_home = tempdir()?;
     let config_toml: ConfigToml = toml::from_str(
@@ -521,6 +556,7 @@ async fn load_config_resolves_code_mode_config() -> std::io::Result<()> {
 [features.code_mode]
 enabled = true
 excluded_tool_namespaces = ["mcp__codex_apps", "multi_agent_v1"]
+direct_only_tool_namespaces = ["mcp__history", "mcp__notes"]
 "#,
     )
     .expect("TOML deserialization should succeed");
@@ -534,6 +570,10 @@ excluded_tool_namespaces = ["mcp__codex_apps", "multi_agent_v1"]
     assert_eq!(
         config.code_mode.excluded_tool_namespaces,
         vec!["mcp__codex_apps".to_string(), "multi_agent_v1".to_string()]
+    );
+    assert_eq!(
+        config.code_mode.direct_only_tool_namespaces,
+        vec!["mcp__history".to_string(), "mcp__notes".to_string()]
     );
     assert!(config.features.enabled(Feature::CodeMode));
     Ok(())
@@ -5217,16 +5257,21 @@ fn config_toml_parses_explicit_model_capabilities() {
         r#"
 [model_capabilities."mimo/mimo-v2.5"]
 supports_vision = true
+tool_mode = "code_mode"
 "#,
     )
     .expect("parse config model capabilities");
 
     assert_eq!(
-        cfg.model_capabilities
-            .as_ref()
-            .and_then(|capabilities| capabilities.get("mimo/mimo-v2.5"))
-            .and_then(|capability| capability.supports_vision),
-        Some(true)
+        cfg.model_capabilities,
+        Some(BTreeMap::from([(
+            "mimo/mimo-v2.5".to_string(),
+            ModelCapabilityToml {
+                tool_mode: Some(ToolMode::CodeMode),
+                supports_vision: Some(true),
+                ..Default::default()
+            }
+        )]))
     );
 }
 
@@ -5242,6 +5287,7 @@ generated_at_unix_seconds = 0
 
 [models."mimo/mimo-v2.5"]
 supports_vision = false
+tool_mode = "direct"
 "#,
     )?;
 
@@ -5249,6 +5295,7 @@ supports_vision = false
     model_capabilities.insert(
         "mimo/mimo-v2.5".to_string(),
         ModelCapabilityToml {
+            tool_mode: Some(ToolMode::CodeMode),
             supports_vision: Some(true),
             ..Default::default()
         },
@@ -5270,8 +5317,12 @@ supports_vision = false
             .model_capabilities
             .as_ref()
             .and_then(|capabilities| capabilities.lookup("mimo/mimo-v2.5"))
-            .and_then(|capability| capability.supports_vision),
-        Some(true)
+            .cloned(),
+        Some(ModelCapability {
+            tool_mode: Some(ToolMode::CodeMode),
+            supports_vision: Some(true),
+            ..Default::default()
+        })
     );
 
     Ok(())

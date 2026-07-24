@@ -1,11 +1,11 @@
 use super::*;
+use crate::session::step_context::StepContext;
 use pretty_assertions::assert_eq;
 
 struct TestHandler {
     tool_name: codex_tools::ToolName,
 }
 
-#[async_trait::async_trait]
 impl ToolExecutor<ToolInvocation> for TestHandler {
     fn tool_name(&self) -> codex_tools::ToolName {
         self.tool_name.clone()
@@ -15,13 +15,15 @@ impl ToolExecutor<ToolInvocation> for TestHandler {
         test_spec(&self.tool_name)
     }
 
-    async fn handle(
-        &self,
-        _invocation: ToolInvocation,
-    ) -> Result<Box<dyn crate::tools::context::ToolOutput>, FunctionCallError> {
-        Ok(Box::new(
-            crate::tools::context::FunctionToolOutput::from_text("ok".to_string(), Some(true)),
-        ))
+    fn handle(&self, _invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'_> {
+        Box::pin(async {
+            Ok(
+                Box::new(crate::tools::context::FunctionToolOutput::from_text(
+                    "ok".to_string(),
+                    Some(true),
+                )) as Box<dyn crate::tools::context::ToolOutput>,
+            )
+        })
     }
 }
 
@@ -38,7 +40,6 @@ struct LifecycleTestHandler {
     result: LifecycleTestResult,
 }
 
-#[async_trait::async_trait]
 impl ToolExecutor<ToolInvocation> for LifecycleTestHandler {
     fn tool_name(&self) -> codex_tools::ToolName {
         self.tool_name.clone()
@@ -48,9 +49,14 @@ impl ToolExecutor<ToolInvocation> for LifecycleTestHandler {
         test_spec(&self.tool_name)
     }
 
-    async fn handle(
+    fn handle(&self, _invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'_> {
+        Box::pin(self.handle_call())
+    }
+}
+
+impl LifecycleTestHandler {
+    async fn handle_call(
         &self,
-        _invocation: ToolInvocation,
     ) -> Result<Box<dyn crate::tools::context::ToolOutput>, FunctionCallError> {
         match self.result.clone() {
             LifecycleTestResult::Ok { success } => Ok(Box::new(
@@ -58,7 +64,8 @@ impl ToolExecutor<ToolInvocation> for LifecycleTestHandler {
                     "ok".to_string(),
                     Some(success),
                 ),
-            )),
+            )
+                as Box<dyn crate::tools::context::ToolOutput>),
             LifecycleTestResult::Err => Err(FunctionCallError::RespondToModel(
                 "handler failed".to_string(),
             )),
@@ -356,7 +363,7 @@ async fn write_stdin_does_not_expose_default_pre_tool_use_payload() {
 }
 
 #[tokio::test]
-async fn hidden_tools_are_not_directly_callable_by_model() {
+async fn hidden_tools_remain_dispatchable_by_internal_runtimes() {
     let (session, turn) = crate::session::tests::make_session_and_context().await;
     let tool_name = codex_tools::ToolName::plain("write_stdin");
     let registry = ToolRegistry::from_tools([override_tool_exposure(
@@ -367,15 +374,10 @@ async fn hidden_tools_are_not_directly_callable_by_model() {
     )]);
     let invocation = test_invocation(Arc::new(session), Arc::new(turn), "call-1", tool_name);
 
-    let err = match registry.dispatch_any(invocation).await {
-        Ok(_) => panic!("hidden tool should be rejected before handler execution"),
-        Err(err) => err,
-    };
-
-    assert_eq!(
-        err.to_string(),
-        "write_stdin is internal in Astral; call ReadTaskOutput to poll output or SendTaskInput to send interactive stdin."
-    );
+    registry
+        .dispatch_any(invocation)
+        .await
+        .expect("hidden runtimes are excluded from specs, not dispatch");
 }
 
 #[test]
@@ -517,8 +519,10 @@ fn test_invocation(
     call_id: &str,
     tool_name: codex_tools::ToolName,
 ) -> ToolInvocation {
+    let step_context = StepContext::for_test(Arc::clone(&turn));
     ToolInvocation {
         session,
+        step_context,
         turn,
         cancellation_token: tokio_util::sync::CancellationToken::new(),
         tracker: Arc::new(tokio::sync::Mutex::new(

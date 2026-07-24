@@ -6,5 +6,6 @@ codex_rust_crate(
     compile_data = [
         "models.json",
         "prompt.md",
+        "prompt_with_apply_patch_instructions.md",
     ],
 )

@@ -1,4 +1,8 @@
 use super::*;
+use crate::context::UserInstructions;
+use crate::context::world_state::EnvironmentsState;
+use crate::context::world_state::WorldState;
+use crate::context::world_state::WorldStateSection;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use codex_protocol::AgentPath;
@@ -68,6 +72,132 @@ fn create_history_with_items(items: Vec<TranscriptItem>) -> ContextManager {
     // behavior, not on a specific model's token limit.
     h.record_items(items.iter(), TruncationPolicy::Tokens(10_000));
     h
+}
+
+struct TestWorldStateSection;
+
+impl WorldStateSection for TestWorldStateSection {
+    const ID: &'static str = "test";
+    type Snapshot = bool;
+
+    fn snapshot(&self) -> Self::Snapshot {
+        true
+    }
+
+    fn matches_legacy_fragment(role: &str, text: &str) -> bool {
+        role == "user" && UserInstructions::matches_text(text)
+    }
+
+    fn render_diff(
+        &self,
+        previous: crate::context::world_state::PreviousSectionState<'_, Self::Snapshot>,
+    ) -> Option<Box<dyn crate::context::ContextualUserFragment>> {
+        let text = match previous {
+            crate::context::world_state::PreviousSectionState::Known(true) => return None,
+            crate::context::world_state::PreviousSectionState::Unknown => "unknown",
+            crate::context::world_state::PreviousSectionState::Absent
+            | crate::context::world_state::PreviousSectionState::Known(false) => "test",
+        };
+        Some(Box::new(UserInstructions {
+            directory: None,
+            text: text.to_string(),
+        })
+            as Box<dyn crate::context::ContextualUserFragment>)
+    }
+}
+
+#[test]
+fn world_state_baseline_deduplicates_until_history_is_replaced() {
+    let world_state = || {
+        let mut state = WorldState::default();
+        state.add_section(TestWorldStateSection);
+        state
+    };
+    let mut history = ContextManager::new();
+
+    let (initial_fragments, initial_item) = history.update_world_state(&world_state());
+    assert_eq!(1, initial_fragments.len());
+    assert!(initial_item.is_some_and(|item| item.full));
+
+    let (unchanged_fragments, unchanged_item) = history.update_world_state(&world_state());
+    assert!(unchanged_fragments.is_empty());
+    assert_eq!(unchanged_item, None);
+
+    history.replace(Vec::new());
+
+    let (replacement_fragments, replacement_item) = history.update_world_state(&world_state());
+    assert_eq!(1, replacement_fragments.len());
+    assert!(replacement_item.is_some_and(|item| item.full));
+}
+
+#[test]
+fn world_state_baseline_tracks_subagent_roster_updates() {
+    let world_state = |subagents: Option<&str>| {
+        let mut state = WorldState::default();
+        let environments = subagents.map_or_else(EnvironmentsState::default, |subagents| {
+            EnvironmentsState::default().with_subagents(subagents.to_string())
+        });
+        state.add_section(environments);
+        state
+    };
+    let mut history = ContextManager::new();
+
+    let (initial_fragments, _) = history.update_world_state(&world_state(Some("- worker: Atlas")));
+    assert_eq!(
+        vec!["\n  <subagents>\n    - worker: Atlas\n  </subagents>\n"],
+        initial_fragments
+            .into_iter()
+            .map(|fragment| fragment.body())
+            .collect::<Vec<_>>()
+    );
+
+    let (changed_fragments, _) =
+        history.update_world_state(&world_state(Some("- worker: Juniper")));
+    assert_eq!(
+        vec!["\n  <subagents>\n    - worker: Juniper\n  </subagents>\n"],
+        changed_fragments
+            .into_iter()
+            .map(|fragment| fragment.body())
+            .collect::<Vec<_>>()
+    );
+
+    let (removed_fragments, _) = history.update_world_state(&world_state(None));
+    assert_eq!(
+        vec!["\n  <subagents />\n"],
+        removed_fragments
+            .into_iter()
+            .map(|fragment| fragment.body())
+            .collect::<Vec<_>>()
+    );
+
+    let (unchanged_fragments, unchanged_item) = history.update_world_state(&world_state(None));
+    assert!(unchanged_fragments.is_empty());
+    assert_eq!(unchanged_item, None);
+}
+
+#[test]
+fn world_state_reconciles_matching_legacy_history_once() {
+    let item = crate::context::ContextualUserFragment::into(UserInstructions {
+        directory: None,
+        text: "legacy".to_string(),
+    });
+    let mut history = create_history_with_items(vec![item]);
+    let mut world_state = WorldState::default();
+    world_state.add_section(TestWorldStateSection);
+
+    let (fragments, rollout_item) = history.update_world_state(&world_state);
+    assert_eq!(
+        vec!["\n\n<INSTRUCTIONS>\nunknown\n"],
+        fragments
+            .into_iter()
+            .map(|fragment| fragment.body())
+            .collect::<Vec<_>>()
+    );
+    assert!(rollout_item.is_some_and(|item| item.full));
+
+    let (fragments, rollout_item) = history.update_world_state(&world_state);
+    assert!(fragments.is_empty());
+    assert_eq!(rollout_item, None);
 }
 
 fn user_msg(text: &str) -> TranscriptItem {

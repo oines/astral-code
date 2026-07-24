@@ -10,6 +10,7 @@ use codex_protocol::openai_models::InputModality;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_image::PromptImageMode;
 use codex_utils_image::load_for_prompt_bytes;
+use codex_utils_path_uri::PathUri;
 use serde::Deserialize;
 
 use crate::function_tool::FunctionCallError;
@@ -101,8 +102,9 @@ pub(crate) async fn load_view_image_output(
         ));
     }
 
+    let path_uri = PathUri::from_abs_path(&abs_path);
     let metadata = fs
-        .get_metadata(&abs_path, Some(sandbox))
+        .get_metadata(&path_uri, Some(sandbox))
         .await
         .map_err(|error| {
             FunctionCallError::RespondToModel(format!(
@@ -118,7 +120,7 @@ pub(crate) async fn load_view_image_output(
         )));
     }
     let file_bytes = fs
-        .read_file(&abs_path, Some(sandbox))
+        .read_file(&path_uri, Some(sandbox))
         .await
         .map_err(|error| {
             FunctionCallError::RespondToModel(format!(
@@ -164,7 +166,6 @@ pub(crate) async fn load_view_image_output(
     })
 }
 
-#[async_trait::async_trait]
 impl ToolExecutor<ToolInvocation> for ViewImageHandler {
     fn tool_name(&self) -> ToolName {
         ToolName::plain("view_image")
@@ -178,13 +179,20 @@ impl ToolExecutor<ToolInvocation> for ViewImageHandler {
         true
     }
 
-    async fn handle(
+    fn handle(&self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'_> {
+        Box::pin(self.handle_call(invocation))
+    }
+}
+
+impl ViewImageHandler {
+    async fn handle_call(
         &self,
         invocation: ToolInvocation,
     ) -> Result<Box<dyn crate::tools::context::ToolOutput>, FunctionCallError> {
         let ToolInvocation {
             session,
             turn,
+            step_context,
             payload,
             call_id,
             ..
@@ -209,15 +217,25 @@ impl ToolExecutor<ToolInvocation> for ViewImageHandler {
         let detail = parse_view_image_detail(detail.as_deref())?;
 
         let Some(turn_environment) =
-            resolve_tool_environment(turn.as_ref(), environment_id.as_deref())?
+            resolve_tool_environment(&step_context.environments, environment_id.as_deref())?
         else {
             return Err(FunctionCallError::RespondToModel(
                 "view_image is unavailable in this session".to_string(),
             ));
         };
-        let cwd = turn_environment.cwd.clone();
+        // TODO(anp): Resolve tool paths using the selected environment's native path convention
+        // so view_image can support relative paths in foreign environments.
+        let cwd = turn_environment.cwd().to_abs_path().map_err(|err| {
+            FunctionCallError::RespondToModel(format!(
+                "environment cwd `{}` is not native to the Codex host: {err}",
+                turn_environment.cwd()
+            ))
+        })?;
         let abs_path = cwd.join(path);
-        let sandbox = turn.file_system_sandbox_context(/*additional_permissions*/ None, &cwd);
+        let sandbox = turn.file_system_sandbox_context(
+            /*additional_permissions*/ None,
+            turn_environment.cwd(),
+        );
         let fs = turn_environment.environment.get_filesystem();
 
         Ok(boxed_tool_output(
@@ -279,16 +297,34 @@ impl ToolOutput for ViewImageOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::session::step_context::StepContext;
     use crate::session::tests::make_session_and_context;
+    use crate::session::turn_context::TurnEnvironment;
     use crate::tools::context::ToolCallSource;
     use crate::tools::context::ToolInvocation;
     use crate::turn_diff_tracker::TurnDiffTracker;
     use codex_protocol::models::PermissionProfile;
+    use codex_utils_absolute_path::AbsolutePathBuf;
     use core_test_support::TempDirExt;
     use pretty_assertions::assert_eq;
     use serde_json::json;
     use std::sync::Arc;
     use tokio::sync::Mutex;
+
+    fn replace_primary_environment_cwd(turn: &mut crate::TurnContext, cwd: AbsolutePathBuf) {
+        let current = turn
+            .environments
+            .turn_environments
+            .first()
+            .cloned()
+            .expect("default local turn environment");
+        turn.environments.turn_environments[0] = TurnEnvironment::new(
+            current.environment_id,
+            current.environment,
+            cwd.into(),
+            current.shell,
+        );
+    }
 
     #[test]
     fn code_mode_result_returns_image_url_object() {
@@ -316,19 +352,17 @@ mod tests {
         let image_dir = tempfile::tempdir().expect("create image temp dir");
         let image_cwd = image_dir.abs();
 
-        turn.environments
-            .turn_environments
-            .first_mut()
-            .expect("default local turn environment")
-            .cwd = image_cwd.clone();
+        replace_primary_environment_cwd(&mut turn, image_cwd.clone());
         let image_path = image_cwd.join("image.png");
         std::fs::write(image_path.as_path(), b"not a real image").expect("write test image");
         turn.permission_profile = PermissionProfile::read_only();
+        let turn = Arc::new(turn);
 
         let result = ViewImageHandler::default()
             .handle(ToolInvocation {
                 session: Arc::new(session),
-                turn: Arc::new(turn),
+                step_context: StepContext::for_test(Arc::clone(&turn)),
+                turn,
                 cancellation_token: tokio_util::sync::CancellationToken::new(),
                 tracker: Arc::new(Mutex::new(TurnDiffTracker::new())),
                 call_id: "call-view-image".to_string(),
@@ -352,11 +386,13 @@ mod tests {
     #[tokio::test]
     async fn handle_rejects_unsupported_detail() {
         let (session, turn) = make_session_and_context().await;
+        let turn = Arc::new(turn);
 
         let result = ViewImageHandler::default()
             .handle(ToolInvocation {
                 session: Arc::new(session),
-                turn: Arc::new(turn),
+                step_context: StepContext::for_test(Arc::clone(&turn)),
+                turn,
                 cancellation_token: tokio_util::sync::CancellationToken::new(),
                 tracker: Arc::new(Mutex::new(TurnDiffTracker::new())),
                 call_id: "call-view-image".to_string(),
@@ -383,19 +419,17 @@ mod tests {
         let image_dir = tempfile::tempdir().expect("create image temp dir");
         let image_cwd = image_dir.abs();
 
-        turn.environments
-            .turn_environments
-            .first_mut()
-            .expect("default local turn environment")
-            .cwd = image_cwd.clone();
+        replace_primary_environment_cwd(&mut turn, image_cwd.clone());
         let image_path = image_cwd.join("image.png");
         std::fs::write(image_path.as_path(), b"not a real image").expect("write test image");
         turn.permission_profile = PermissionProfile::Disabled;
+        let turn = Arc::new(turn);
 
         let result = ViewImageHandler::default()
             .handle(ToolInvocation {
                 session: Arc::new(session),
-                turn: Arc::new(turn),
+                step_context: StepContext::for_test(Arc::clone(&turn)),
+                turn,
                 cancellation_token: tokio_util::sync::CancellationToken::new(),
                 tracker: Arc::new(Mutex::new(TurnDiffTracker::new())),
                 call_id: "call-view-image".to_string(),

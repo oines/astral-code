@@ -1551,6 +1551,7 @@ mod tests {
     use codex_utils_absolute_path::AbsolutePathBuf;
     use codex_utils_absolute_path::test_support::PathBufExt;
     use codex_utils_absolute_path::test_support::test_path_buf;
+    use codex_utils_path_uri::LegacyAppPathString;
     use pretty_assertions::assert_eq;
     use serde_json::json;
     use std::path::PathBuf;
@@ -1843,6 +1844,7 @@ mod tests {
             params: v2::EnvironmentAddParams {
                 environment_id: "remote-a".to_string(),
                 exec_server_url: "ws://127.0.0.1:8765".to_string(),
+                connect_timeout_ms: None,
             },
         };
         assert_eq!(
@@ -2314,7 +2316,9 @@ mod tests {
                 service_tier: None,
                 cwd,
                 runtime_workspace_roots: Vec::new(),
-                instruction_sources: vec![absolute_path("/tmp/AGENTS.md")],
+                instruction_sources: vec![LegacyAppPathString::from_abs_path(&absolute_path(
+                    "/tmp/AGENTS.md",
+                ))],
                 approval_policy: v2::AskForApproval::OnFailure,
                 approvals_reviewer: v2::ApprovalsReviewer::User,
                 sandbox: v2::SandboxPolicy::DangerFullAccess,
@@ -2522,6 +2526,7 @@ mod tests {
             params: v2::EnvironmentAddParams {
                 environment_id: "remote-a".to_string(),
                 exec_server_url: "ws://127.0.0.1:8765".to_string(),
+                connect_timeout_ms: Some(300_000),
             },
         };
         assert_eq!(
@@ -2530,7 +2535,8 @@ mod tests {
                 "id": 9,
                 "params": {
                     "environmentId": "remote-a",
-                    "execServerUrl": "ws://127.0.0.1:8765"
+                    "execServerUrl": "ws://127.0.0.1:8765",
+                    "connectTimeoutMs": 300000
                 }
             }),
             serde_json::to_value(&request)?,
@@ -2843,6 +2849,7 @@ mod tests {
             params: v2::EnvironmentAddParams {
                 environment_id: "remote-a".to_string(),
                 exec_server_url: "ws://127.0.0.1:8765".to_string(),
+                connect_timeout_ms: None,
             },
         };
         let reason = crate::experimental_api::ExperimentalApi::experimental_reason(&request);
@@ -3048,6 +3055,7 @@ mod tests {
             item_id: "call_123".to_string(),
             started_at_ms: 0,
             approval_id: None,
+            environment_id: None,
             reason: None,
             network_approval_context: None,
             command: Some("cat file".to_string()),

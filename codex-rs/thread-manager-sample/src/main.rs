@@ -274,6 +274,7 @@ fn new_config(model: Option<String>, arg0_paths: Arg0DispatchPaths) -> anyhow::R
         web_search_config: None,
         web_search_runtime_config: None,
         experimental_request_user_input_enabled: true,
+        tool_surface: Default::default(),
         code_mode: Default::default(),
         use_experimental_unified_exec_tool: false,
         experimental_anthropic_cached_fold: false,

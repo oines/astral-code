@@ -1,3 +1,4 @@
+use crate::config::ToolSurface;
 use crate::guardian::GuardianApprovalRequest;
 use crate::guardian::GuardianNetworkAccessTrigger;
 use crate::guardian::guardian_rejection_message;
@@ -8,6 +9,8 @@ use crate::guardian::routes_approval_to_guardian;
 use crate::hook_runtime::run_permission_request_hooks;
 use crate::network_policy_decision::denied_network_policy_message;
 use crate::session::session::Session;
+use crate::session::turn_context::TurnContext;
+use crate::tools::effective_tool_surface;
 use crate::tools::sandboxing::PermissionRequestPayload;
 use crate::tools::sandboxing::ToolError;
 use codex_hooks::PermissionRequestDecision;
@@ -224,6 +227,7 @@ struct ActiveNetworkApprovalCall {
     turn_id: String,
     trigger: GuardianNetworkAccessTrigger,
     command: String,
+    tool_surface: ToolSurface,
     cancellation_token: CancellationToken,
 }
 
@@ -267,6 +271,7 @@ impl NetworkApprovalService {
         turn_id: String,
         trigger: GuardianNetworkAccessTrigger,
         command: String,
+        tool_surface: ToolSurface,
         cancellation_token: CancellationToken,
     ) {
         let mut calls = self.calls.lock().await;
@@ -278,6 +283,7 @@ impl NetworkApprovalService {
                 turn_id,
                 trigger,
                 command,
+                tool_surface,
                 cancellation_token,
             }),
         );
@@ -361,12 +367,18 @@ impl NetworkApprovalService {
     }
 
     pub(crate) async fn record_blocked_request(&self, blocked: BlockedRequest) {
-        let Some(message) = denied_network_policy_message(&blocked) else {
+        let Some(owner_call) = self.resolve_single_active_call().await else {
+            return;
+        };
+        let Some(message) = denied_network_policy_message(&blocked, owner_call.tool_surface) else {
             return;
         };
 
-        self.record_outcome_for_single_active_call(NetworkApprovalOutcome::DeniedByPolicy(message))
-            .await;
+        self.record_call_outcome(
+            &owner_call.registration_id,
+            NetworkApprovalOutcome::DeniedByPolicy(message),
+        )
+        .await;
     }
 
     async fn active_turn_context(
@@ -524,6 +536,7 @@ impl NetworkApprovalService {
                     turn_context.as_ref(),
                     guardian_approval_id,
                     /*approval_id*/ None,
+                    /*environment_id*/ None,
                     prompt_command,
                     #[allow(deprecated)]
                     turn_context.cwd.clone(),
@@ -702,7 +715,7 @@ pub(crate) fn build_network_policy_decider(
 
 pub(crate) async fn begin_network_approval(
     session: &Session,
-    turn_id: &str,
+    turn: &TurnContext,
     managed_network_active: bool,
     spec: Option<NetworkApprovalSpec>,
 ) -> Option<ActiveNetworkApproval> {
@@ -723,9 +736,10 @@ pub(crate) async fn begin_network_approval(
         .network_approval
         .register_call(
             registration_id.clone(),
-            turn_id.to_string(),
+            turn.sub_id.clone(),
             trigger,
             command,
+            effective_tool_surface(turn),
             cancellation_token.clone(),
         )
         .await;

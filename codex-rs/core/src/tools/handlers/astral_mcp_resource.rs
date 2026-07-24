@@ -24,9 +24,17 @@ impl AstralListMcpResourcesHandler {
             list_resources: ListMcpResourcesHandler,
         }
     }
+
+    async fn handle_call(
+        &self,
+        invocation: ToolInvocation,
+    ) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
+        self.list_resources
+            .handle(to_internal_invocation(invocation, "list_mcp_resources")?)
+            .await
+    }
 }
 
-#[async_trait::async_trait]
 impl ToolExecutor<ToolInvocation> for AstralListMcpResourcesHandler {
     fn tool_name(&self) -> ToolName {
         ToolName::plain(LIST_MCP_RESOURCES_TOOL_NAME)
@@ -40,13 +48,8 @@ impl ToolExecutor<ToolInvocation> for AstralListMcpResourcesHandler {
         true
     }
 
-    async fn handle(
-        &self,
-        invocation: ToolInvocation,
-    ) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
-        self.list_resources
-            .handle(to_internal_invocation(invocation, "list_mcp_resources")?)
-            .await
+    fn handle(&self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'_> {
+        Box::pin(self.handle_call(invocation))
     }
 }
 
@@ -66,9 +69,17 @@ impl AstralReadMcpResourceHandler {
             read_resource: ReadMcpResourceHandler,
         }
     }
+
+    async fn handle_call(
+        &self,
+        invocation: ToolInvocation,
+    ) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
+        self.read_resource
+            .handle(to_internal_invocation(invocation, "read_mcp_resource")?)
+            .await
+    }
 }
 
-#[async_trait::async_trait]
 impl ToolExecutor<ToolInvocation> for AstralReadMcpResourceHandler {
     fn tool_name(&self) -> ToolName {
         ToolName::plain(READ_MCP_RESOURCE_TOOL_NAME)
@@ -82,13 +93,8 @@ impl ToolExecutor<ToolInvocation> for AstralReadMcpResourceHandler {
         true
     }
 
-    async fn handle(
-        &self,
-        invocation: ToolInvocation,
-    ) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
-        self.read_resource
-            .handle(to_internal_invocation(invocation, "read_mcp_resource")?)
-            .await
+    fn handle(&self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'_> {
+        Box::pin(self.handle_call(invocation))
     }
 }
 

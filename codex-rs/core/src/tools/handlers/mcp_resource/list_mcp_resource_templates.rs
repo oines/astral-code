@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Instant;
 
 use crate::function_tool::FunctionCallError;
@@ -26,7 +27,6 @@ use super::serialize_function_output;
 
 pub struct ListMcpResourceTemplatesHandler;
 
-#[async_trait::async_trait]
 impl ToolExecutor<ToolInvocation> for ListMcpResourceTemplatesHandler {
     fn tool_name(&self) -> ToolName {
         ToolName::plain("list_mcp_resource_templates")
@@ -40,21 +40,25 @@ impl ToolExecutor<ToolInvocation> for ListMcpResourceTemplatesHandler {
         true
     }
 
-    #[expect(
-        clippy::await_holding_invalid_type,
-        reason = "MCP resource template listing reads through the session-owned manager guard"
-    )]
-    async fn handle(
+    fn handle(&self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'_> {
+        Box::pin(self.handle_call(invocation))
+    }
+}
+
+impl ListMcpResourceTemplatesHandler {
+    async fn handle_call(
         &self,
         invocation: ToolInvocation,
     ) -> Result<Box<dyn crate::tools::context::ToolOutput>, FunctionCallError> {
         let ToolInvocation {
             session,
-            turn,
+            step_context,
             call_id,
             payload,
             ..
         } = invocation;
+        let turn = Arc::clone(&step_context.turn);
+        let manager = step_context.mcp.manager();
 
         let arguments = match payload {
             ToolPayload::Function { arguments } => arguments,
@@ -85,7 +89,7 @@ impl ToolExecutor<ToolInvocation> for ListMcpResourceTemplatesHandler {
                 let params = cursor
                     .clone()
                     .map(|value| PaginatedRequestParams::default().with_cursor(Some(value)));
-                let result = session
+                let result = manager
                     .list_resource_templates(&server_name, params)
                     .await
                     .map_err(|err| {
@@ -104,13 +108,7 @@ impl ToolExecutor<ToolInvocation> for ListMcpResourceTemplatesHandler {
                     ));
                 }
 
-                let templates = session
-                    .services
-                    .mcp_connection_manager
-                    .read()
-                    .await
-                    .list_all_resource_templates()
-                    .await;
+                let templates = manager.list_all_resource_templates().await;
                 Ok(ListResourceTemplatesPayload::from_all_servers(templates))
             }
         }

@@ -5,7 +5,6 @@ Concrete ToolRuntime implementations for specific tools. Each runtime stays
 small and focused and reuses the orchestrator for approvals + sandbox + retry.
 */
 use crate::exec_env::ASTRAL_THREAD_ID_ENV_VAR;
-use crate::path_utils;
 use crate::sandboxing::SandboxPermissions;
 use crate::shell::Shell;
 use crate::shell::ShellType;
@@ -25,6 +24,7 @@ use codex_protocol::models::AdditionalPermissionProfile;
 use codex_sandboxing::SandboxCommand;
 use codex_sandboxing::SandboxType;
 use codex_utils_absolute_path::AbsolutePathBuf;
+use codex_utils_path_uri::PathUri;
 use std::collections::HashMap;
 #[cfg(unix)]
 use std::path::Path;
@@ -45,10 +45,11 @@ pub(crate) fn build_sandbox_command(
     let (program, args) = command
         .split_first()
         .ok_or_else(|| ToolError::Rejected("command args are empty".to_string()))?;
+    let cwd = PathUri::from_abs_path(cwd);
     Ok(SandboxCommand {
         program: program.clone().into(),
         args: args.to_vec(),
-        cwd: cwd.clone(),
+        cwd,
         env: env.clone(),
         additional_permissions,
     })
@@ -250,7 +251,7 @@ pub(crate) fn disable_powershell_profile_for_elevated_windows_sandbox(
 pub(crate) fn maybe_wrap_shell_lc_with_snapshot(
     command: &[String],
     session_shell: &Shell,
-    cwd: &AbsolutePathBuf,
+    shell_snapshot: Option<&AbsolutePathBuf>,
     explicit_env_overrides: &HashMap<String, String>,
     env: &HashMap<String, String>,
     runtime_path_prepends: &RuntimePathPrepends,
@@ -259,15 +260,11 @@ pub(crate) fn maybe_wrap_shell_lc_with_snapshot(
         return command.to_vec();
     }
 
-    let Some(snapshot) = session_shell.shell_snapshot() else {
+    let Some(snapshot) = shell_snapshot else {
         return command.to_vec();
     };
 
-    if !snapshot.path.exists() {
-        return command.to_vec();
-    }
-
-    if !path_utils::paths_match_after_normalization(snapshot.cwd.as_path(), cwd) {
+    if !snapshot.exists() {
         return command.to_vec();
     }
 
@@ -280,7 +277,7 @@ pub(crate) fn maybe_wrap_shell_lc_with_snapshot(
         return command.to_vec();
     }
 
-    let snapshot_path = snapshot.path.to_string_lossy();
+    let snapshot_path = snapshot.to_string_lossy();
     let shell_path = session_shell.shell_path.to_string_lossy();
     let original_shell = shell_single_quote(&command[0]);
     let original_script = shell_single_quote(&command[2]);

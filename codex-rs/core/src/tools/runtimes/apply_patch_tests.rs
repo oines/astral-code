@@ -11,16 +11,17 @@ use codex_sandboxing::SandboxManager;
 use codex_sandboxing::SandboxType;
 use codex_sandboxing::policy_transforms::effective_file_system_sandbox_policy;
 use codex_sandboxing::policy_transforms::effective_network_sandbox_policy;
+use codex_utils_path_uri::PathUri;
 use core_test_support::PathBufExt;
 use pretty_assertions::assert_eq;
 use std::collections::HashMap;
 fn test_turn_environment(environment_id: &str) -> crate::session::turn_context::TurnEnvironment {
-    crate::session::turn_context::TurnEnvironment {
-        environment_id: environment_id.to_string(),
-        environment: std::sync::Arc::new(codex_exec_server::Environment::default_for_tests()),
-        cwd: std::env::temp_dir().abs(),
-        shell: None,
-    }
+    crate::session::turn_context::TurnEnvironment::new(
+        environment_id.to_string(),
+        std::sync::Arc::new(codex_exec_server::Environment::default_for_tests()),
+        PathUri::from_abs_path(&std::env::temp_dir().abs()),
+        /*shell*/ None,
+    )
 }
 
 #[test]
@@ -48,10 +49,9 @@ fn wants_no_sandbox_approval_granular_respects_sandbox_flag() {
 }
 
 #[tokio::test]
-async fn guardian_review_request_includes_patch_context() {
-    let path = std::env::temp_dir()
-        .join("guardian-apply-patch-test.txt")
-        .abs();
+async fn approval_action_preserves_patch_path_uris() {
+    let path = PathUri::parse("file:///C:/workspace/guardian-apply-patch-test.txt")
+        .expect("valid foreign path URI");
     let action = ApplyPatchAction::new_add_for_test(&path, "hello".to_string());
     let expected_cwd = action.cwd.clone();
     let expected_patch = action.patch.clone();
@@ -59,12 +59,7 @@ async fn guardian_review_request_includes_patch_context() {
         turn_environment: test_turn_environment(codex_exec_server::LOCAL_ENVIRONMENT_ID),
         action,
         file_paths: vec![path.clone()],
-        changes: HashMap::from([(
-            path.to_path_buf(),
-            FileChange::Add {
-                content: "hello".to_string(),
-            },
-        )]),
+        changes: HashMap::new(),
         exec_approval_requirement: ExecApprovalRequirement::NeedsApproval {
             reason: None,
             proposed_execpolicy_amendment: None,
@@ -73,14 +68,15 @@ async fn guardian_review_request_includes_patch_context() {
         permissions_preapproved: false,
     };
 
-    let guardian_request = ApplyPatchRuntime::build_guardian_review_request(&request, "call-1");
+    let approval_action = ApplyPatchRuntime::build_approval_action(&request, "call-1");
 
     assert_eq!(
-        guardian_request,
-        GuardianApprovalRequest::ApplyPatch {
+        approval_action,
+        ApprovalAction::ApplyPatch {
             id: "call-1".to_string(),
+            environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
             cwd: expected_cwd,
-            files: request.file_paths,
+            files: vec![path],
             patch: expected_patch,
         }
     );
@@ -92,12 +88,13 @@ async fn permission_request_payload_uses_apply_patch_hook_name_and_aliases() {
     let path = std::env::temp_dir()
         .join("apply-patch-permission-request-payload.txt")
         .abs();
-    let action = ApplyPatchAction::new_add_for_test(&path, "hello".to_string());
+    let path_uri = PathUri::from_abs_path(&path);
+    let action = ApplyPatchAction::new_add_for_test(&path_uri, "hello".to_string());
     let expected_patch = action.patch.clone();
     let req = ApplyPatchRequest {
         turn_environment: test_turn_environment(codex_exec_server::LOCAL_ENVIRONMENT_ID),
         action,
-        file_paths: vec![path],
+        file_paths: vec![path_uri],
         changes: HashMap::new(),
         exec_approval_requirement: ExecApprovalRequirement::NeedsApproval {
             reason: None,
@@ -128,10 +125,11 @@ async fn approval_keys_include_environment_id() {
     let path = std::env::temp_dir()
         .join("apply-patch-approval-key.txt")
         .abs();
+    let path_uri = PathUri::from_abs_path(&path);
     let req = ApplyPatchRequest {
         turn_environment: test_turn_environment("remote"),
-        action: ApplyPatchAction::new_add_for_test(&path, "hello".to_string()),
-        file_paths: vec![path.clone()],
+        action: ApplyPatchAction::new_add_for_test(&path_uri, "hello".to_string()),
+        file_paths: vec![path_uri.clone()],
         changes: HashMap::new(),
         exec_approval_requirement: ExecApprovalRequirement::Skip {
             bypass_sandbox: false,
@@ -148,7 +146,7 @@ async fn approval_keys_include_environment_id() {
         serde_json::json!([
             {
                 "environment_id": "remote",
-                "path": path,
+                "path": path_uri,
             }
         ])
     );
@@ -160,10 +158,11 @@ async fn sandbox_cwd_uses_patch_action_cwd() {
     let path = std::env::temp_dir()
         .join("apply-patch-runtime-sandbox-cwd.txt")
         .abs();
+    let path_uri = PathUri::from_abs_path(&path);
     let req = ApplyPatchRequest {
         turn_environment: test_turn_environment(codex_exec_server::LOCAL_ENVIRONMENT_ID),
-        action: ApplyPatchAction::new_add_for_test(&path, "hello".to_string()),
-        file_paths: vec![path.clone()],
+        action: ApplyPatchAction::new_add_for_test(&path_uri, "hello".to_string()),
+        file_paths: vec![path_uri],
         changes: HashMap::new(),
         exec_approval_requirement: ExecApprovalRequirement::Skip {
             bypass_sandbox: false,
@@ -181,6 +180,7 @@ async fn file_system_sandbox_context_uses_active_attempt() {
     let path = std::env::temp_dir()
         .join("apply-patch-runtime-attempt.txt")
         .abs();
+    let path_uri = PathUri::from_abs_path(&path);
     let additional_permissions = AdditionalPermissionProfile {
         network: None,
         file_system: Some(FileSystemPermissions::from_read_write_roots(
@@ -190,8 +190,8 @@ async fn file_system_sandbox_context_uses_active_attempt() {
     };
     let req = ApplyPatchRequest {
         turn_environment: test_turn_environment(codex_exec_server::LOCAL_ENVIRONMENT_ID),
-        action: ApplyPatchAction::new_add_for_test(&path, "hello".to_string()),
-        file_paths: vec![path.clone()],
+        action: ApplyPatchAction::new_add_for_test(&path_uri, "hello".to_string()),
+        file_paths: vec![path_uri],
         changes: HashMap::new(),
         exec_approval_requirement: ExecApprovalRequirement::Skip {
             bypass_sandbox: false,
@@ -206,12 +206,13 @@ async fn file_system_sandbox_context_uses_active_attempt() {
         NetworkSandboxPolicy::Restricted,
     );
     let manager = SandboxManager::new();
+    let sandbox_policy_cwd = PathUri::from_abs_path(&path);
     let attempt = SandboxAttempt {
         sandbox: SandboxType::MacosSeatbelt,
         permissions: &permissions,
         enforce_managed_network: false,
         manager: &manager,
-        sandbox_cwd: &path,
+        sandbox_cwd: &sandbox_policy_cwd,
         workspace_roots: std::slice::from_ref(&path),
         codex_linux_sandbox_exe: None,
         use_legacy_landlock: true,
@@ -232,7 +233,7 @@ async fn file_system_sandbox_context_uses_active_attempt() {
     let expected_permissions =
         PermissionProfile::from_runtime_permissions(&file_system_policy, network_policy);
     assert_eq!(sandbox.permissions, expected_permissions);
-    assert_eq!(sandbox.cwd, Some(path.clone()));
+    assert_eq!(sandbox.cwd, Some(PathUri::from_abs_path(&path)));
     assert_eq!(
         sandbox.windows_sandbox_level,
         WindowsSandboxLevel::RestrictedToken
@@ -246,10 +247,11 @@ async fn no_sandbox_attempt_has_no_file_system_context() {
     let path = std::env::temp_dir()
         .join("apply-patch-runtime-none.txt")
         .abs();
+    let path_uri = PathUri::from_abs_path(&path);
     let req = ApplyPatchRequest {
         turn_environment: test_turn_environment(codex_exec_server::LOCAL_ENVIRONMENT_ID),
-        action: ApplyPatchAction::new_add_for_test(&path, "hello".to_string()),
-        file_paths: vec![path.clone()],
+        action: ApplyPatchAction::new_add_for_test(&path_uri, "hello".to_string()),
+        file_paths: vec![path_uri],
         changes: HashMap::new(),
         exec_approval_requirement: ExecApprovalRequirement::Skip {
             bypass_sandbox: false,
@@ -260,12 +262,13 @@ async fn no_sandbox_attempt_has_no_file_system_context() {
     };
     let permissions = PermissionProfile::Disabled;
     let manager = SandboxManager::new();
+    let sandbox_policy_cwd = PathUri::from_abs_path(&path);
     let attempt = SandboxAttempt {
         sandbox: SandboxType::None,
         permissions: &permissions,
         enforce_managed_network: false,
         manager: &manager,
-        sandbox_cwd: &path,
+        sandbox_cwd: &sandbox_policy_cwd,
         workspace_roots: std::slice::from_ref(&path),
         codex_linux_sandbox_exe: None,
         use_legacy_landlock: false,

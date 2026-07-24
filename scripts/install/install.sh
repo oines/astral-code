@@ -7,6 +7,7 @@ NON_INTERACTIVE="${ASTRAL_NON_INTERACTIVE:-false}"
 
 BIN_DIR="${ASTRAL_INSTALL_DIR:-$HOME/.local/bin}"
 BIN_PATH="$BIN_DIR/astral"
+CODE_MODE_HOST_BIN_PATH="$BIN_DIR/codex-code-mode-host"
 ASTRAL_HOME_DIR="${ASTRAL_HOME:-$HOME/.astral-code}"
 STANDALONE_ROOT="$ASTRAL_HOME_DIR/packages/standalone"
 RELEASES_DIR="$STANDALONE_ROOT/releases"
@@ -677,7 +678,10 @@ install_package_release() {
   rm -rf "$stage_release"
   mkdir -p "$stage_release"
   tar -xzf "$archive_path" -C "$stage_release"
-  chmod 0755 "$stage_release/bin/astral" "$stage_release/codex-path/rg"
+  chmod 0755 \
+    "$stage_release/bin/astral" \
+    "$stage_release/bin/codex-code-mode-host" \
+    "$stage_release/codex-path/rg"
   if [ -f "$stage_release/codex-resources/bwrap" ]; then
     chmod 0755 "$stage_release/codex-resources/bwrap"
   fi
@@ -730,6 +734,7 @@ release_dir_is_complete() {
     package)
       [ -f "$release_dir/codex-package.json" ] &&
         [ -x "$release_dir/bin/astral" ] &&
+        [ -x "$release_dir/bin/codex-code-mode-host" ] &&
         [ -x "$release_dir/astral" ] &&
         [ -x "$release_dir/codex-path/rg" ] ||
         return 1
@@ -774,10 +779,23 @@ update_visible_command() {
   astral_relative_path="$(release_astral_relative_path "$release_dir")"
 
   replace_path_with_symlink "$BIN_PATH" "$CURRENT_LINK/$astral_relative_path" "$tmp_link"
+
+  if [ "$os" = "darwin" ] && [ -x "$release_dir/bin/codex-code-mode-host" ]; then
+    replace_path_with_symlink \
+      "$CODE_MODE_HOST_BIN_PATH" \
+      "$CURRENT_LINK/bin/codex-code-mode-host" \
+      "$tmp_link"
+  elif [ "$(readlink "$CODE_MODE_HOST_BIN_PATH" 2>/dev/null || true)" = \
+    "$CURRENT_LINK/bin/codex-code-mode-host" ]; then
+    rm -f "$CODE_MODE_HOST_BIN_PATH"
+  fi
 }
 
 verify_visible_command() {
   "$BIN_PATH" --version >/dev/null
+  if [ "$os" = "darwin" ] && [ "$install_layout" = "package" ]; then
+    [ -x "$CODE_MODE_HOST_BIN_PATH" ]
+  fi
 }
 
 parse_args "$@"

@@ -1,6 +1,5 @@
 use super::*;
 use codex_core_skills::HostLoadedSkills;
-use codex_protocol::openai_models::ToolMode;
 use std::sync::atomic::AtomicBool;
 
 /// Spawn a review thread using the given prompt.
@@ -47,15 +46,6 @@ pub(super) async fn spawn_review_thread(
     let mut per_turn_config = (*config).clone();
     per_turn_config.model = Some(model.clone());
     per_turn_config.features = review_features.clone();
-    let tool_mode = model_info.tool_mode.unwrap_or_else(|| {
-        if per_turn_config.features.enabled(Feature::CodeModeOnly) {
-            ToolMode::CodeModeOnly
-        } else if per_turn_config.features.enabled(Feature::CodeMode) {
-            ToolMode::CodeMode
-        } else {
-            ToolMode::Direct
-        }
-    });
     if let Err(err) = per_turn_config.web_search_mode.set(review_web_search_mode) {
         let fallback_value = per_turn_config.web_search_mode.value();
         tracing::warn!(
@@ -114,7 +104,6 @@ pub(super) async fn spawn_review_thread(
         config: per_turn_config,
         auth_manager: auth_manager_for_context,
         model_info: model_info.clone(),
-        tool_mode,
         session_telemetry: session_telemetry_for_context,
         provider: provider_for_context,
         reasoning_effort,
@@ -131,7 +120,6 @@ pub(super) async fn spawn_review_thread(
         timezone: parent_turn_context.timezone.clone(),
         app_server_client_name: parent_turn_context.app_server_client_name.clone(),
         developer_instructions: None,
-        user_instructions: None,
         compact_prompt: parent_turn_context.compact_prompt.clone(),
         compact_continuation_prompt: parent_turn_context.compact_continuation_prompt.clone(),
         session_memory_template: parent_turn_context.session_memory_template.clone(),

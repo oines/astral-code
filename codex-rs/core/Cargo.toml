@@ -12,10 +12,6 @@ path = "src/lib.rs"
 name = "codex-write-config-schema"
 path = "src/bin/config_schema.rs"
 
-[[bin]]
-name = "test_stdio_server"
-path = "../rmcp-client/src/bin/test_stdio_server.rs"
-
 [lints]
 workspace = true
 
@@ -43,6 +39,7 @@ codex-exec-server = { workspace = true }
 codex-extension-api = { workspace = true }
 codex-features = { workspace = true }
 codex-feedback = { workspace = true }
+codex-file-system = { workspace = true }
 codex-login = { workspace = true }
 codex-memories-read = { workspace = true }
 codex-mcp = { workspace = true }
@@ -74,6 +71,7 @@ codex-utils-image = { workspace = true }
 codex-utils-home-dir = { workspace = true }
 codex-utils-output-truncation = { workspace = true }
 codex-utils-path = { workspace = true }
+codex-utils-path-uri = { workspace = true }
 codex-utils-plugins = { workspace = true }
 codex-utils-pty = { workspace = true }
 codex-utils-string = { workspace = true }

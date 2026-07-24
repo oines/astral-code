@@ -33,6 +33,7 @@ use codex_protocol::permissions::NetworkSandboxPolicy;
 use codex_sandboxing::policy_transforms::effective_file_system_sandbox_policy;
 use codex_sandboxing::policy_transforms::effective_network_sandbox_policy;
 use codex_utils_absolute_path::AbsolutePathBuf;
+use codex_utils_path_uri::PathUri;
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;
 use test_case::test_case;
@@ -83,6 +84,10 @@ fn absolute_path(path: std::path::PathBuf) -> AbsolutePathBuf {
         Ok(path) => path,
         Err(err) => panic!("path should be absolute: {err}"),
     }
+}
+
+fn path_uri(path: std::path::PathBuf) -> PathUri {
+    PathUri::from_abs_path(&absolute_path(path))
 }
 
 fn read_only_sandbox(readable_root: std::path::PathBuf) -> FileSystemSandboxContext {
@@ -259,7 +264,7 @@ async fn sandboxed_file_system_helper_finds_bwrap_on_preserved_path() -> Result<
 
     file_system
         .write_file(
-            &absolute_path(file_path.clone()),
+            &path_uri(file_path.clone()),
             b"written through fs helper".to_vec(),
             Some(&sandbox),
         )
@@ -290,7 +295,7 @@ async fn file_system_get_metadata_returns_expected_fields(use_remote: bool) -> R
     std::fs::write(&file_path, "hello")?;
 
     let metadata = file_system
-        .get_metadata(&absolute_path(file_path.clone()), /*sandbox*/ None)
+        .get_metadata(&path_uri(file_path.clone()), /*sandbox*/ None)
         .await
         .with_context(|| format!("mode={use_remote}"))?;
     assert_eq!(metadata.is_directory, false);
@@ -302,7 +307,7 @@ async fn file_system_get_metadata_returns_expected_fields(use_remote: bool) -> R
     let symlink_path = tmp.path().join("note-link.txt");
     symlink(&file_path, &symlink_path)?;
     let symlink_metadata = file_system
-        .get_metadata(&absolute_path(symlink_path.clone()), /*sandbox*/ None)
+        .get_metadata(&path_uri(symlink_path.clone()), /*sandbox*/ None)
         .await
         .with_context(|| format!("mode={use_remote}"))?;
     assert_eq!(symlink_metadata.is_directory, false);
@@ -316,7 +321,7 @@ async fn file_system_get_metadata_returns_expected_fields(use_remote: bool) -> R
     let dir_symlink_path = tmp.path().join("notes-link");
     symlink(&dir_path, &dir_symlink_path)?;
     let dir_symlink_metadata = file_system
-        .get_metadata(&absolute_path(dir_symlink_path), /*sandbox*/ None)
+        .get_metadata(&path_uri(dir_symlink_path), /*sandbox*/ None)
         .await
         .with_context(|| format!("mode={use_remote}"))?;
     assert_eq!(dir_symlink_metadata.is_directory, true);
@@ -343,7 +348,7 @@ async fn file_system_methods_cover_surface_area(use_remote: bool) -> Result<()> 
 
     file_system
         .create_directory(
-            &absolute_path(nested_dir.clone()),
+            &path_uri(nested_dir.clone()),
             CreateDirectoryOptions { recursive: true },
             /*sandbox*/ None,
         )
@@ -352,7 +357,7 @@ async fn file_system_methods_cover_surface_area(use_remote: bool) -> Result<()> 
 
     file_system
         .write_file(
-            &absolute_path(nested_file.clone()),
+            &path_uri(nested_file.clone()),
             b"hello from trait".to_vec(),
             /*sandbox*/ None,
         )
@@ -360,7 +365,7 @@ async fn file_system_methods_cover_surface_area(use_remote: bool) -> Result<()> 
         .with_context(|| format!("mode={use_remote}"))?;
     file_system
         .write_file(
-            &absolute_path(source_file.clone()),
+            &path_uri(source_file.clone()),
             b"hello from source root".to_vec(),
             /*sandbox*/ None,
         )
@@ -369,63 +374,48 @@ async fn file_system_methods_cover_surface_area(use_remote: bool) -> Result<()> 
 
     let source_link = tmp.path().join("source-link");
     symlink(&source_dir, &source_link)?;
-    let joined_nested = file_system
-        .join(
-            &absolute_path(source_link.clone()),
-            Path::new("nested/note.txt"),
-        )
-        .await
-        .with_context(|| format!("mode={use_remote}"))?;
+    let joined_nested = path_uri(source_link.clone()).join("nested/note.txt")?;
     assert_eq!(
         joined_nested,
-        absolute_path(source_link.join("nested").join("note.txt"))
+        path_uri(source_link.join("nested").join("note.txt"))
     );
-    let joined_parent = file_system
-        .parent(&joined_nested)
-        .await
-        .with_context(|| format!("mode={use_remote}"))?;
-    assert_eq!(
-        joined_parent,
-        Some(absolute_path(source_link.join("nested")))
-    );
-    let joined_parent_traversal = file_system
-        .join(&absolute_path(source_dir.clone()), Path::new("../outside"))
-        .await
-        .with_context(|| format!("mode={use_remote}"))?;
+    let joined_parent = joined_nested.parent();
+    assert_eq!(joined_parent, Some(path_uri(source_link.join("nested"))));
+    let joined_parent_traversal = path_uri(source_dir.clone()).join("../outside")?;
     assert_eq!(
         joined_parent_traversal,
-        absolute_path(source_dir.join("../outside"))
+        path_uri(source_dir.join("../outside"))
     );
     let canonical_nested = file_system
         .canonicalize(
-            &absolute_path(source_link.join("nested").join("note.txt")),
+            &path_uri(source_link.join("nested").join("note.txt")),
             /*sandbox*/ None,
         )
         .await
         .with_context(|| format!("mode={use_remote}"))?;
     assert_eq!(
         canonical_nested,
-        absolute_path(std::fs::canonicalize(
+        path_uri(std::fs::canonicalize(
             source_dir.join("nested").join("note.txt")
         )?)
     );
 
     let nested_file_contents = file_system
-        .read_file(&absolute_path(nested_file.clone()), /*sandbox*/ None)
+        .read_file(&path_uri(nested_file.clone()), /*sandbox*/ None)
         .await
         .with_context(|| format!("mode={use_remote}"))?;
     assert_eq!(nested_file_contents, b"hello from trait");
 
     let nested_file_text = file_system
-        .read_file_text(&absolute_path(nested_file.clone()), /*sandbox*/ None)
+        .read_file_text(&path_uri(nested_file.clone()), /*sandbox*/ None)
         .await
         .with_context(|| format!("mode={use_remote}"))?;
     assert_eq!(nested_file_text, "hello from trait");
 
     file_system
         .copy(
-            &absolute_path(nested_file),
-            &absolute_path(copied_file.clone()),
+            &path_uri(nested_file),
+            &path_uri(copied_file.clone()),
             CopyOptions { recursive: false },
             /*sandbox*/ None,
         )
@@ -435,8 +425,8 @@ async fn file_system_methods_cover_surface_area(use_remote: bool) -> Result<()> 
 
     file_system
         .copy(
-            &absolute_path(source_dir.clone()),
-            &absolute_path(copied_dir.clone()),
+            &path_uri(source_dir.clone()),
+            &path_uri(copied_dir.clone()),
             CopyOptions { recursive: true },
             /*sandbox*/ None,
         )
@@ -453,7 +443,7 @@ async fn file_system_methods_cover_surface_area(use_remote: bool) -> Result<()> 
     )?;
 
     let mut entries = file_system
-        .read_directory(&absolute_path(source_dir), /*sandbox*/ None)
+        .read_directory(&path_uri(source_dir), /*sandbox*/ None)
         .await
         .with_context(|| format!("mode={use_remote}"))?;
     entries.sort_by(|left, right| left.file_name.cmp(&right.file_name));
@@ -475,7 +465,7 @@ async fn file_system_methods_cover_surface_area(use_remote: bool) -> Result<()> 
 
     file_system
         .remove(
-            &absolute_path(copied_dir.clone()),
+            &path_uri(copied_dir.clone()),
             RemoveOptions {
                 recursive: true,
                 force: true,
@@ -501,7 +491,7 @@ async fn file_system_write_file_creates_missing_parent(use_remote: bool) -> Resu
 
     file_system
         .write_file(
-            &absolute_path(missing_parent_path.clone()),
+            &path_uri(missing_parent_path.clone()),
             b"hello from trait".to_vec(),
             /*sandbox*/ None,
         )
@@ -529,8 +519,8 @@ async fn file_system_copy_rejects_directory_without_recursive(use_remote: bool) 
 
     let error = file_system
         .copy(
-            &absolute_path(source_dir),
-            &absolute_path(tmp.path().join("dest")),
+            &path_uri(source_dir),
+            &path_uri(tmp.path().join("dest")),
             CopyOptions { recursive: false },
             /*sandbox*/ None,
         )
@@ -563,7 +553,7 @@ async fn file_system_sandboxed_read_allows_readable_root(use_remote: bool) -> Re
     let sandbox = read_only_sandbox(allowed_dir);
 
     let contents = file_system
-        .read_file(&absolute_path(file_path), Some(&sandbox))
+        .read_file(&path_uri(file_path), Some(&sandbox))
         .await
         .with_context(|| format!("mode={use_remote}"))?;
     assert_eq!(contents, b"sandboxed hello");
@@ -586,13 +576,10 @@ async fn file_system_sandboxed_canonicalize_allows_readable_root(use_remote: boo
     let sandbox = read_only_sandbox(allowed_dir);
 
     let canonical_path = file_system
-        .canonicalize(&absolute_path(file_path.clone()), Some(&sandbox))
+        .canonicalize(&path_uri(file_path.clone()), Some(&sandbox))
         .await
         .with_context(|| format!("mode={use_remote}"))?;
-    assert_eq!(
-        canonical_path,
-        absolute_path(std::fs::canonicalize(file_path)?)
-    );
+    assert_eq!(canonical_path, path_uri(std::fs::canonicalize(file_path)?));
 
     Ok(())
 }
@@ -610,7 +597,7 @@ async fn file_system_sandboxed_write_rejects_unwritable_path(use_remote: bool) -
     let sandbox = read_only_sandbox(tmp.path().to_path_buf());
     let error = match file_system
         .write_file(
-            &absolute_path(blocked_path.clone()),
+            &path_uri(blocked_path.clone()),
             b"nope".to_vec(),
             Some(&sandbox),
         )
@@ -644,7 +631,7 @@ async fn file_system_sandboxed_write_allows_explicit_alias_roots(use_remote: boo
 
     file_system
         .write_file(
-            &absolute_path(file_path.clone()),
+            &path_uri(file_path.clone()),
             b"created".to_vec(),
             Some(&sandbox),
         )
@@ -693,7 +680,7 @@ async fn file_system_sandboxed_write_allows_additional_write_root(use_remote: bo
 
     file_system
         .write_file(
-            &absolute_path(file_path.clone()),
+            &path_uri(file_path.clone()),
             b"created".to_vec(),
             Some(&sandbox),
         )
@@ -722,7 +709,7 @@ async fn file_system_sandboxed_read_rejects_symlink_escape(use_remote: bool) -> 
     let requested_path = allowed_dir.join("link").join("secret.txt");
     let sandbox = read_only_sandbox(allowed_dir);
     let error = match file_system
-        .read_file(&absolute_path(requested_path.clone()), Some(&sandbox))
+        .read_file(&path_uri(requested_path.clone()), Some(&sandbox))
         .await
     {
         Ok(_) => anyhow::bail!("read should be blocked"),
@@ -751,7 +738,7 @@ async fn file_system_sandboxed_read_rejects_symlink_parent_dotdot_escape(
     std::fs::write(&secret_path, "nope")?;
     symlink(&outside_dir, allowed_dir.join("link"))?;
 
-    let requested_path = absolute_path(allowed_dir.join("link").join("..").join("secret.txt"));
+    let requested_path = path_uri(allowed_dir.join("link").join("..").join("secret.txt"));
     let sandbox = read_only_sandbox(allowed_dir);
     let error = match file_system.read_file(&requested_path, Some(&sandbox)).await {
         Ok(_) => anyhow::bail!("read should fail after path normalization"),
@@ -785,7 +772,7 @@ async fn file_system_sandboxed_write_rejects_symlink_escape(use_remote: bool) ->
     let sandbox = workspace_write_sandbox(allowed_dir);
     let error = match file_system
         .write_file(
-            &absolute_path(requested_path.clone()),
+            &path_uri(requested_path.clone()),
             b"nope".to_vec(),
             Some(&sandbox),
         )
@@ -821,7 +808,7 @@ async fn file_system_sandboxed_write_preserves_existing_hard_link(use_remote: bo
     let sandbox = workspace_write_sandbox(allowed_dir);
     file_system
         .write_file(
-            &absolute_path(hard_link.clone()),
+            &path_uri(hard_link.clone()),
             b"updated through existing hard link\n".to_vec(),
             Some(&sandbox),
         )
@@ -865,7 +852,7 @@ async fn file_system_create_directory_rejects_symlink_escape(use_remote: bool) -
     let sandbox = workspace_write_sandbox(allowed_dir);
     let error = match file_system
         .create_directory(
-            &absolute_path(requested_path.clone()),
+            &path_uri(requested_path.clone()),
             CreateDirectoryOptions { recursive: false },
             Some(&sandbox),
         )
@@ -898,7 +885,7 @@ async fn file_system_read_directory_rejects_symlink_escape(use_remote: bool) -> 
     let requested_path = allowed_dir.join("link");
     let sandbox = read_only_sandbox(allowed_dir);
     let error = match file_system
-        .read_directory(&absolute_path(requested_path.clone()), Some(&sandbox))
+        .read_directory(&path_uri(requested_path.clone()), Some(&sandbox))
         .await
     {
         Ok(_) => anyhow::bail!("read_directory should be blocked"),
@@ -928,8 +915,8 @@ async fn file_system_copy_rejects_symlink_escape_destination(use_remote: bool) -
     let sandbox = workspace_write_sandbox(allowed_dir.clone());
     let error = match file_system
         .copy(
-            &absolute_path(allowed_dir.join("source.txt")),
-            &absolute_path(requested_destination.clone()),
+            &path_uri(allowed_dir.join("source.txt")),
+            &path_uri(requested_destination.clone()),
             CopyOptions { recursive: false },
             Some(&sandbox),
         )
@@ -964,7 +951,7 @@ async fn file_system_remove_removes_symlink_not_target(use_remote: bool) -> Resu
     let sandbox = workspace_write_sandbox(allowed_dir);
     file_system
         .remove(
-            &absolute_path(symlink_path.clone()),
+            &path_uri(symlink_path.clone()),
             RemoveOptions {
                 recursive: false,
                 force: false,
@@ -1002,8 +989,8 @@ async fn file_system_copy_preserves_symlink_source(use_remote: bool) -> Result<(
     let sandbox = workspace_write_sandbox(allowed_dir.clone());
     file_system
         .copy(
-            &absolute_path(source_symlink),
-            &absolute_path(copied_symlink.clone()),
+            &path_uri(source_symlink),
+            &path_uri(copied_symlink.clone()),
             CopyOptions { recursive: false },
             Some(&sandbox),
         )
@@ -1037,7 +1024,7 @@ async fn file_system_remove_rejects_symlink_escape(use_remote: bool) -> Result<(
     let sandbox = workspace_write_sandbox(allowed_dir);
     let error = match file_system
         .remove(
-            &absolute_path(requested_path.clone()),
+            &path_uri(requested_path.clone()),
             RemoveOptions {
                 recursive: false,
                 force: false,
@@ -1076,8 +1063,8 @@ async fn file_system_copy_rejects_symlink_escape_source(use_remote: bool) -> Res
     let sandbox = workspace_write_sandbox(allowed_dir);
     let error = match file_system
         .copy(
-            &absolute_path(requested_source.clone()),
-            &absolute_path(requested_destination.clone()),
+            &path_uri(requested_source.clone()),
+            &path_uri(requested_destination.clone()),
             CopyOptions { recursive: false },
             Some(&sandbox),
         )
@@ -1107,8 +1094,8 @@ async fn file_system_copy_rejects_copying_directory_into_descendant(
 
     let error = file_system
         .copy(
-            &absolute_path(source_dir.clone()),
-            &absolute_path(source_dir.join("nested").join("copy")),
+            &path_uri(source_dir.clone()),
+            &path_uri(source_dir.join("nested").join("copy")),
             CopyOptions { recursive: true },
             /*sandbox*/ None,
         )
@@ -1142,8 +1129,8 @@ async fn file_system_copy_preserves_symlinks_in_recursive_copy(use_remote: bool)
 
     file_system
         .copy(
-            &absolute_path(source_dir),
-            &absolute_path(copied_dir.clone()),
+            &path_uri(source_dir),
+            &path_uri(copied_dir.clone()),
             CopyOptions { recursive: true },
             /*sandbox*/ None,
         )
@@ -1188,8 +1175,8 @@ async fn file_system_copy_ignores_unknown_special_files_in_recursive_copy(
 
     file_system
         .copy(
-            &absolute_path(source_dir),
-            &absolute_path(copied_dir.clone()),
+            &path_uri(source_dir),
+            &path_uri(copied_dir.clone()),
             CopyOptions { recursive: true },
             /*sandbox*/ None,
         )
@@ -1225,8 +1212,8 @@ async fn file_system_copy_rejects_standalone_fifo_source(use_remote: bool) -> Re
 
     let error = file_system
         .copy(
-            &absolute_path(fifo_path),
-            &absolute_path(tmp.path().join("copied")),
+            &path_uri(fifo_path),
+            &path_uri(tmp.path().join("copied")),
             CopyOptions { recursive: false },
             /*sandbox*/ None,
         )

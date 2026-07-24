@@ -4,6 +4,7 @@ use crate::init_state_db;
 use crate::installation_id::INSTALLATION_ID_FILENAME;
 use crate::rollout::RolloutRecorder;
 use crate::session::session::SessionSettingsUpdate;
+use crate::session::tests::build_world_state_from_turn_context;
 use crate::session::tests::make_session_and_context;
 use crate::tasks::InterruptedTurnHistoryMarker;
 use crate::tasks::interrupted_turn_history_marker;
@@ -22,6 +23,7 @@ use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::ThreadSource;
 use codex_protocol::protocol::TurnStartedEvent;
 use codex_protocol::protocol::UserMessageEvent;
+use codex_utils_path_uri::PathUri;
 use core_test_support::PathBufExt;
 use core_test_support::PathExt;
 use core_test_support::responses::mount_models_once;
@@ -226,7 +228,11 @@ fn out_of_range_truncation_drops_pre_user_active_turn_prefix() {
 #[tokio::test]
 async fn ignores_session_prefix_messages_when_truncating() {
     let (session, turn_context) = make_session_and_context().await;
-    let mut items = session.build_initial_context(&turn_context).await;
+    let turn_context = Arc::new(turn_context);
+    let world_state = build_world_state_from_turn_context(&session, &turn_context).await;
+    let mut items = session
+        .build_initial_context_with_world_state(&turn_context, &world_state)
+        .await;
     items.push(user_msg("feature request"));
     items.push(assistant_msg("ack"));
     items.push(user_msg("second question"));
@@ -300,54 +306,61 @@ async fn shutdown_all_threads_bounded_submits_shutdown_to_every_thread() {
 }
 
 #[tokio::test]
-async fn start_thread_rejects_explicit_local_environment_when_default_provider_is_disabled() {
+async fn code_mode_session_provider_is_shared_across_threads() {
     let temp_dir = tempdir().expect("tempdir");
     let mut config = test_config().await;
     config.codex_home = temp_dir.path().join("codex-home").abs();
     config.cwd = config.codex_home.abs();
     std::fs::create_dir_all(&config.codex_home).expect("create codex home");
 
-    let runtime_paths = codex_exec_server::ExecServerRuntimePaths::new(
-        std::env::current_exe().expect("current exe path"),
-        /*codex_linux_sandbox_exe*/ None,
-    )
-    .expect("runtime paths");
-    let environment_manager = Arc::new(
-        codex_exec_server::EnvironmentManager::create_for_tests(
-            Some("none".to_string()),
-            Some(runtime_paths),
-        )
-        .await,
-    );
     let manager = ThreadManager::with_models_provider_and_home_for_tests(
         CodexAuth::from_api_key("dummy"),
         config.model_provider.clone(),
         config.codex_home.to_path_buf(),
-        environment_manager,
+        Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
     );
+    let first = manager
+        .start_thread(config.clone())
+        .await
+        .expect("start first thread");
+    let second = manager
+        .start_thread(config)
+        .await
+        .expect("start second thread");
 
-    let result = manager
-        .start_thread_with_options(StartThreadOptions {
-            config: config.clone(),
-            initial_history: InitialHistory::New,
-            session_source: None,
-            thread_source: None,
-            dynamic_tools: Vec::new(),
-            metrics_service_name: None,
-            parent_trace: None,
-            environments: vec![TurnEnvironmentSelection {
-                environment_id: "local".to_string(),
-                cwd: config.cwd.clone(),
-            }],
-        })
+    let first_provider = first
+        .thread
+        .codex
+        .session
+        .services
+        .code_mode_service
+        .session_provider();
+    let second_provider = second
+        .thread
+        .codex
+        .session
+        .services
+        .code_mode_service
+        .session_provider();
+    assert!(Arc::ptr_eq(&first_provider, &second_provider));
+    assert!(Arc::ptr_eq(
+        &first_provider,
+        &manager.state.code_mode_session_provider
+    ));
+
+    let mut completed = vec![first.thread_id, second.thread_id];
+    completed.sort_by_key(std::string::ToString::to_string);
+    let report = manager
+        .shutdown_all_threads_bounded(Duration::from_secs(10))
         .await;
-    let err = match result {
-        Ok(_) => panic!("explicit local environment should not resolve when provider is disabled"),
-        Err(err) => err,
-    };
-
-    assert_eq!(err.to_string(), "unknown turn environment id `local`");
-    assert!(manager.list_thread_ids().await.is_empty());
+    assert_eq!(
+        report,
+        ThreadShutdownReport {
+            completed,
+            submit_failed: Vec::new(),
+            timed_out: Vec::new(),
+        }
+    );
 }
 
 #[tokio::test]
@@ -418,7 +431,7 @@ async fn resume_and_fork_do_not_restore_thread_environments_from_rollout() {
         AbsolutePathBuf::try_from(config.cwd.as_path().join("selected")).expect("absolute path");
     let environments = vec![TurnEnvironmentSelection {
         environment_id: "local".to_string(),
-        cwd: selected_cwd.clone(),
+        cwd: PathUri::from_abs_path(&selected_cwd),
     }];
     let default_cwd = config.cwd.clone();
     let source = manager
@@ -469,12 +482,12 @@ async fn resume_and_fork_do_not_restore_thread_environments_from_rollout() {
         .expect("build resumed turn context");
     assert_eq!(resumed_turn.environments.turn_environments.len(), 1);
     assert_eq!(
-        resumed_turn.environments.turn_environments[0].cwd,
-        default_cwd
+        resumed_turn.environments.turn_environments[0].cwd(),
+        &PathUri::from_abs_path(&default_cwd)
     );
     assert_ne!(
-        resumed_turn.environments.turn_environments[0].cwd,
-        selected_cwd
+        resumed_turn.environments.turn_environments[0].cwd(),
+        &PathUri::from_abs_path(&selected_cwd)
     );
 
     let forked = manager
@@ -496,12 +509,12 @@ async fn resume_and_fork_do_not_restore_thread_environments_from_rollout() {
         .expect("build forked turn context");
     assert_eq!(forked_turn.environments.turn_environments.len(), 1);
     assert_eq!(
-        forked_turn.environments.turn_environments[0].cwd,
-        default_cwd
+        forked_turn.environments.turn_environments[0].cwd(),
+        &PathUri::from_abs_path(&default_cwd)
     );
     assert_ne!(
-        forked_turn.environments.turn_environments[0].cwd,
-        selected_cwd
+        forked_turn.environments.turn_environments[0].cwd(),
+        &PathUri::from_abs_path(&selected_cwd)
     );
 }
 

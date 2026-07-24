@@ -344,8 +344,11 @@ It is important to remember:
 - You must prefix new lines with `+` even when creating a new file
 - File references can only be relative, NEVER ABSOLUTE.
 
-You can invoke apply_patch like:
+Use the `apply_patch` interface exposed by the current tool definitions. The current top-level tool list and the Code Mode `exec` description are authoritative for how it is invoked.
 
-```
-shell {"command":["apply_patch","*** Begin Patch\n*** Add File: hello.txt\n+Hello, world!\n*** End Patch\n"]}
+- If `apply_patch` is available as a top-level tool, follow that tool's schema.
+- If `apply_patch` is available through Code Mode, invoke it from `exec` as a nested tool and pass the complete raw patch string:
+
+```js
+await tools.apply_patch(patch)
 ```

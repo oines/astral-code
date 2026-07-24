@@ -6,26 +6,32 @@ mod wait_handler;
 pub(crate) mod wait_spec;
 
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use codex_code_mode::CellId;
 use codex_code_mode::CodeModeNestedToolCall;
 use codex_code_mode::CodeModeSession;
+use codex_code_mode::CodeModeSessionProvider;
 use codex_code_mode::CodeModeToolKind;
 use codex_code_mode::RuntimeResponse;
 use codex_protocol::models::FunctionCallOutputContentItem;
 use serde_json::Value as JsonValue;
+use tokio::sync::OnceCell;
 use tokio_util::sync::CancellationToken;
 
 use crate::function_tool::FunctionCallError;
 use crate::original_image_detail::can_request_original_image_detail;
 use crate::original_image_detail::sanitize_original_image_detail as sanitize_image_detail_items;
 use crate::session::session::Session;
+use crate::session::step_context::StepContext;
 use crate::session::turn_context::TurnContext;
 use crate::tools::ToolRouter;
 use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::context::ToolPayload;
+use crate::tools::effective_tool_mode;
 use crate::tools::parallel::ToolCallRuntime;
 use crate::tools::router::ToolCall;
 use crate::tools::router::ToolCallSource;
@@ -37,7 +43,8 @@ use codex_utils_output_truncation::formatted_truncate_text_content_items_with_po
 use codex_utils_output_truncation::truncate_function_output_items_with_policy;
 
 use delegate::CodeModeDispatchBroker;
-use delegate::CodeModeDispatchWorker;
+pub(crate) use delegate::CodeModeDispatchHost;
+pub(crate) use delegate::CodeModeDispatchWorker;
 pub(crate) use execute_handler::CodeModeExecuteHandler;
 use response_adapter::into_function_call_output_content_items;
 pub(crate) use wait_handler::CodeModeWaitHandler;
@@ -57,47 +64,69 @@ pub(crate) struct ExecContext {
     pub(super) turn: Arc<TurnContext>,
 }
 
+impl ExecContext {
+    pub(crate) fn new(session: Arc<Session>, turn: Arc<TurnContext>) -> Self {
+        Self { session, turn }
+    }
+}
+
 pub(crate) struct CodeModeService {
-    session: Option<Arc<dyn CodeModeSession>>,
+    session: OnceCell<Arc<dyn CodeModeSession>>,
+    session_provider: Arc<dyn CodeModeSessionProvider>,
     dispatch_broker: Arc<CodeModeDispatchBroker>,
+    shutting_down: AtomicBool,
 }
 
 impl CodeModeService {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(session_provider: Arc<dyn CodeModeSessionProvider>) -> Self {
         let dispatch_broker = Arc::new(CodeModeDispatchBroker::new());
         Self {
-            session: Some(Arc::new(codex_code_mode::CodeModeService::with_delegate(
-                dispatch_broker.clone(),
-            ))),
+            session: OnceCell::new(),
+            session_provider,
             dispatch_broker,
+            shutting_down: AtomicBool::new(false),
         }
+    }
+
+    pub(crate) fn session_provider(&self) -> Arc<dyn CodeModeSessionProvider> {
+        Arc::clone(&self.session_provider)
     }
 
     pub(crate) async fn execute(
         &self,
         request: codex_code_mode::ExecuteRequest,
     ) -> Result<codex_code_mode::StartedCell, String> {
-        self.session()?.execute(request).await
+        self.session().await?.execute(request).await
     }
 
     pub(crate) async fn wait(
         &self,
         request: codex_code_mode::WaitRequest,
     ) -> Result<codex_code_mode::WaitOutcome, String> {
-        self.session()?.wait(request).await
+        self.session().await?.wait(request).await
     }
 
     pub(crate) async fn terminate(
         &self,
         cell_id: CellId,
     ) -> Result<codex_code_mode::WaitOutcome, String> {
-        self.session()?.terminate(cell_id).await
+        self.session().await?.terminate(cell_id).await
     }
 
     pub(crate) async fn shutdown(&self) -> Result<(), String> {
-        match &self.session {
-            Some(session) => session.shutdown().await,
-            None => Ok(()),
+        self.shutting_down.store(true, Ordering::Release);
+        // Join any initialization already in progress without initializing an unused service.
+        match self
+            .session
+            .get_or_try_init(|| async {
+                Err::<Arc<dyn CodeModeSession>, String>(
+                    "code mode session is shutting down".to_string(),
+                )
+            })
+            .await
+        {
+            Ok(session) => session.shutdown().await,
+            Err(_) => Ok(()),
         }
     }
 
@@ -112,13 +141,13 @@ impl CodeModeService {
     pub(crate) fn start_turn_worker(
         &self,
         session: &Arc<Session>,
-        turn: &Arc<TurnContext>,
+        step_context: Arc<StepContext>,
         router: Arc<ToolRouter>,
         tracker: SharedTurnDiffTracker,
     ) -> Option<CodeModeDispatchWorker> {
-        if !matches!(turn.tool_mode, ToolMode::CodeMode | ToolMode::CodeModeOnly)
-            || self.session.is_none()
-        {
+        let turn = &step_context.turn;
+        let tool_mode = effective_tool_mode(turn);
+        if !matches!(tool_mode, ToolMode::CodeMode | ToolMode::CodeModeOnly) {
             return None;
         }
 
@@ -128,18 +157,42 @@ impl CodeModeService {
         };
         Some(
             self.dispatch_broker
-                .start_turn_worker(exec, router, tracker),
+                .start_turn_worker(exec, router, step_context, tracker),
         )
     }
 
-    fn session(&self) -> Result<&Arc<dyn CodeModeSession>, String> {
+    pub(crate) fn start_dispatch_worker<H>(&self, host: Arc<H>) -> CodeModeDispatchWorker
+    where
+        H: CodeModeDispatchHost,
+    {
+        self.dispatch_broker.start_worker(host)
+    }
+
+    async fn session(&self) -> Result<Arc<dyn CodeModeSession>, String> {
+        if self.shutting_down.load(Ordering::Acquire) {
+            return Err("code mode session is shutting down".to_string());
+        }
         self.session
-            .as_ref()
-            .ok_or_else(|| "code mode is unavailable".to_string())
+            .get_or_try_init(|| async {
+                if self.shutting_down.load(Ordering::Acquire) {
+                    return Err("code mode session is shutting down".to_string());
+                }
+                let session = self
+                    .session_provider
+                    .create_session(self.dispatch_broker.clone())
+                    .await?;
+                if self.shutting_down.load(Ordering::Acquire) {
+                    let _ = session.shutdown().await;
+                    return Err("code mode session is shutting down".to_string());
+                }
+                Ok(session)
+            })
+            .await
+            .map(Arc::clone)
     }
 }
 
-pub(super) async fn handle_runtime_response(
+pub(crate) async fn handle_runtime_response(
     exec: &ExecContext,
     response: RuntimeResponse,
     max_output_tokens: Option<usize>,
@@ -275,7 +328,7 @@ async fn call_nested_tool(
     Ok(result.code_mode_result())
 }
 
-fn build_nested_tool_payload(
+pub(crate) fn build_nested_tool_payload(
     tool_kind: CodeModeToolKind,
     tool_name: &ToolName,
     input: Option<JsonValue>,
@@ -320,9 +373,18 @@ fn build_freeform_tool_payload(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use super::CodeModeService;
     use super::build_nested_tool_payload;
+    use super::truncate_code_mode_result;
     use crate::tools::context::ToolPayload;
     use codex_code_mode::CodeModeToolKind;
+    use codex_code_mode::ExecuteRequest;
+    use codex_code_mode::FunctionCallOutputContentItem as CodeModeOutputContentItem;
+    use codex_code_mode::ProcessOwnedCodeModeSessionProvider;
+    use codex_code_mode::RuntimeResponse;
+    use codex_protocol::models::FunctionCallOutputContentItem;
     use codex_tools::ToolName;
     use serde_json::json;
 
@@ -358,5 +420,59 @@ mod tests {
             }
             other => panic!("expected freeform payload, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn truncated_text_output_starts_with_warning() {
+        let items = vec![FunctionCallOutputContentItem::InputText {
+            text: "0123456789012345678901234567890123456789".to_string(),
+        }];
+
+        assert_eq!(
+            truncate_code_mode_result(items, Some(5)),
+            vec![FunctionCallOutputContentItem::InputText {
+                text: concat!(
+                    "Warning: truncated output (original token count: 10)\n",
+                    "Total output lines: 1\n\n",
+                    "0123456789…5 tokens truncated…0123456789"
+                )
+                .to_string(),
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_process_host_falls_back_to_in_process_session() {
+        let service = CodeModeService::new(Arc::new(
+            ProcessOwnedCodeModeSessionProvider::with_host_program(
+                "codex-code-mode-host-does-not-exist".into(),
+            ),
+        ));
+
+        let response = service
+            .execute(ExecuteRequest {
+                tool_call_id: "call-1".to_string(),
+                enabled_tools: Vec::new(),
+                source: "text('fallback')".to_string(),
+                yield_time_ms: None,
+                max_output_tokens: None,
+            })
+            .await
+            .expect("missing host should fall back to an in-process session")
+            .initial_response()
+            .await
+            .expect("read fallback response");
+
+        assert_eq!(
+            response,
+            RuntimeResponse::Result {
+                cell_id: codex_code_mode::CellId::new("1".to_string()),
+                content_items: vec![CodeModeOutputContentItem::InputText {
+                    text: "fallback".to_string(),
+                }],
+                error_text: None,
+            }
+        );
+        service.shutdown().await.expect("shutdown service");
     }
 }

@@ -33,35 +33,8 @@ impl AstralReadTaskOutputHandler {
             write_stdin: WriteStdinHandler,
         }
     }
-}
 
-pub(crate) struct AstralSendTaskInputHandler {
-    write_stdin: WriteStdinHandler,
-}
-
-impl AstralSendTaskInputHandler {
-    pub(crate) fn new() -> Self {
-        Self {
-            write_stdin: WriteStdinHandler,
-        }
-    }
-}
-
-pub(crate) struct AstralListBackgroundTasksHandler;
-
-pub(crate) struct AstralStopBackgroundTaskHandler;
-
-#[async_trait::async_trait]
-impl ToolExecutor<ToolInvocation> for AstralReadTaskOutputHandler {
-    fn tool_name(&self) -> ToolName {
-        ToolName::plain(READ_TASK_OUTPUT_TOOL_NAME)
-    }
-
-    fn spec(&self) -> ToolSpec {
-        astral_task_tool_spec(READ_TASK_OUTPUT_TOOL_NAME)
-    }
-
-    async fn handle(
+    async fn handle_call(
         &self,
         invocation: ToolInvocation,
     ) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
@@ -75,35 +48,18 @@ impl ToolExecutor<ToolInvocation> for AstralReadTaskOutputHandler {
     }
 }
 
-impl CoreToolRuntime for AstralReadTaskOutputHandler {
-    fn matches_kind(&self, payload: &ToolPayload) -> bool {
-        matches!(payload, ToolPayload::Function { .. })
-    }
-
-    fn pre_tool_use_payload(&self, _invocation: &ToolInvocation) -> Option<PreToolUsePayload> {
-        None
-    }
-
-    fn post_tool_use_payload(
-        &self,
-        invocation: &ToolInvocation,
-        result: &dyn ToolOutput,
-    ) -> Option<PostToolUsePayload> {
-        self.write_stdin.post_tool_use_payload(invocation, result)
-    }
+pub(crate) struct AstralSendTaskInputHandler {
+    write_stdin: WriteStdinHandler,
 }
 
-#[async_trait::async_trait]
-impl ToolExecutor<ToolInvocation> for AstralSendTaskInputHandler {
-    fn tool_name(&self) -> ToolName {
-        ToolName::plain(SEND_TASK_INPUT_TOOL_NAME)
+impl AstralSendTaskInputHandler {
+    pub(crate) fn new() -> Self {
+        Self {
+            write_stdin: WriteStdinHandler,
+        }
     }
 
-    fn spec(&self) -> ToolSpec {
-        astral_task_tool_spec(SEND_TASK_INPUT_TOOL_NAME)
-    }
-
-    async fn handle(
+    async fn handle_call(
         &self,
         invocation: ToolInvocation,
     ) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
@@ -117,39 +73,10 @@ impl ToolExecutor<ToolInvocation> for AstralSendTaskInputHandler {
     }
 }
 
-impl CoreToolRuntime for AstralSendTaskInputHandler {
-    fn matches_kind(&self, payload: &ToolPayload) -> bool {
-        matches!(payload, ToolPayload::Function { .. })
-    }
+pub(crate) struct AstralListBackgroundTasksHandler;
 
-    fn pre_tool_use_payload(&self, _invocation: &ToolInvocation) -> Option<PreToolUsePayload> {
-        None
-    }
-
-    fn post_tool_use_payload(
-        &self,
-        invocation: &ToolInvocation,
-        result: &dyn ToolOutput,
-    ) -> Option<PostToolUsePayload> {
-        self.write_stdin.post_tool_use_payload(invocation, result)
-    }
-}
-
-#[async_trait::async_trait]
-impl ToolExecutor<ToolInvocation> for AstralListBackgroundTasksHandler {
-    fn tool_name(&self) -> ToolName {
-        ToolName::plain(LIST_BACKGROUND_TASKS_TOOL_NAME)
-    }
-
-    fn spec(&self) -> ToolSpec {
-        astral_task_tool_spec(LIST_BACKGROUND_TASKS_TOOL_NAME)
-    }
-
-    fn supports_parallel_tool_calls(&self) -> bool {
-        true
-    }
-
-    async fn handle(
+impl AstralListBackgroundTasksHandler {
+    async fn handle_call(
         &self,
         invocation: ToolInvocation,
     ) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
@@ -173,27 +100,10 @@ impl ToolExecutor<ToolInvocation> for AstralListBackgroundTasksHandler {
     }
 }
 
-impl CoreToolRuntime for AstralListBackgroundTasksHandler {
-    fn matches_kind(&self, payload: &ToolPayload) -> bool {
-        matches!(payload, ToolPayload::Function { .. })
-    }
+pub(crate) struct AstralStopBackgroundTaskHandler;
 
-    fn pre_tool_use_payload(&self, _invocation: &ToolInvocation) -> Option<PreToolUsePayload> {
-        None
-    }
-}
-
-#[async_trait::async_trait]
-impl ToolExecutor<ToolInvocation> for AstralStopBackgroundTaskHandler {
-    fn tool_name(&self) -> ToolName {
-        ToolName::plain(STOP_BACKGROUND_TASK_TOOL_NAME)
-    }
-
-    fn spec(&self) -> ToolSpec {
-        astral_task_tool_spec(STOP_BACKGROUND_TASK_TOOL_NAME)
-    }
-
-    async fn handle(
+impl AstralStopBackgroundTaskHandler {
+    async fn handle_call(
         &self,
         invocation: ToolInvocation,
     ) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
@@ -224,6 +134,112 @@ impl ToolExecutor<ToolInvocation> for AstralStopBackgroundTaskHandler {
             output,
             Some(true),
         )))
+    }
+}
+
+impl ToolExecutor<ToolInvocation> for AstralReadTaskOutputHandler {
+    fn tool_name(&self) -> ToolName {
+        ToolName::plain(READ_TASK_OUTPUT_TOOL_NAME)
+    }
+
+    fn spec(&self) -> ToolSpec {
+        astral_task_tool_spec(READ_TASK_OUTPUT_TOOL_NAME)
+    }
+
+    fn handle(&self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'_> {
+        Box::pin(self.handle_call(invocation))
+    }
+}
+
+impl CoreToolRuntime for AstralReadTaskOutputHandler {
+    fn matches_kind(&self, payload: &ToolPayload) -> bool {
+        matches!(payload, ToolPayload::Function { .. })
+    }
+
+    fn pre_tool_use_payload(&self, _invocation: &ToolInvocation) -> Option<PreToolUsePayload> {
+        None
+    }
+
+    fn post_tool_use_payload(
+        &self,
+        invocation: &ToolInvocation,
+        result: &dyn ToolOutput,
+    ) -> Option<PostToolUsePayload> {
+        self.write_stdin.post_tool_use_payload(invocation, result)
+    }
+}
+
+impl ToolExecutor<ToolInvocation> for AstralSendTaskInputHandler {
+    fn tool_name(&self) -> ToolName {
+        ToolName::plain(SEND_TASK_INPUT_TOOL_NAME)
+    }
+
+    fn spec(&self) -> ToolSpec {
+        astral_task_tool_spec(SEND_TASK_INPUT_TOOL_NAME)
+    }
+
+    fn handle(&self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'_> {
+        Box::pin(self.handle_call(invocation))
+    }
+}
+
+impl CoreToolRuntime for AstralSendTaskInputHandler {
+    fn matches_kind(&self, payload: &ToolPayload) -> bool {
+        matches!(payload, ToolPayload::Function { .. })
+    }
+
+    fn pre_tool_use_payload(&self, _invocation: &ToolInvocation) -> Option<PreToolUsePayload> {
+        None
+    }
+
+    fn post_tool_use_payload(
+        &self,
+        invocation: &ToolInvocation,
+        result: &dyn ToolOutput,
+    ) -> Option<PostToolUsePayload> {
+        self.write_stdin.post_tool_use_payload(invocation, result)
+    }
+}
+
+impl ToolExecutor<ToolInvocation> for AstralListBackgroundTasksHandler {
+    fn tool_name(&self) -> ToolName {
+        ToolName::plain(LIST_BACKGROUND_TASKS_TOOL_NAME)
+    }
+
+    fn spec(&self) -> ToolSpec {
+        astral_task_tool_spec(LIST_BACKGROUND_TASKS_TOOL_NAME)
+    }
+
+    fn supports_parallel_tool_calls(&self) -> bool {
+        true
+    }
+
+    fn handle(&self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'_> {
+        Box::pin(self.handle_call(invocation))
+    }
+}
+
+impl CoreToolRuntime for AstralListBackgroundTasksHandler {
+    fn matches_kind(&self, payload: &ToolPayload) -> bool {
+        matches!(payload, ToolPayload::Function { .. })
+    }
+
+    fn pre_tool_use_payload(&self, _invocation: &ToolInvocation) -> Option<PreToolUsePayload> {
+        None
+    }
+}
+
+impl ToolExecutor<ToolInvocation> for AstralStopBackgroundTaskHandler {
+    fn tool_name(&self) -> ToolName {
+        ToolName::plain(STOP_BACKGROUND_TASK_TOOL_NAME)
+    }
+
+    fn spec(&self) -> ToolSpec {
+        astral_task_tool_spec(STOP_BACKGROUND_TASK_TOOL_NAME)
+    }
+
+    fn handle(&self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'_> {
+        Box::pin(self.handle_call(invocation))
     }
 }
 

@@ -6,7 +6,9 @@ use crate::codex_apps::load_startup_cached_codex_apps_tools_snapshot;
 use crate::codex_apps::read_cached_codex_apps_tools;
 use crate::codex_apps::write_cached_codex_apps_tools;
 use crate::codex_apps::write_cached_codex_apps_tools_if_needed;
+use crate::elicitation::ElicitationLifecycle;
 use crate::elicitation::ElicitationRequestManager;
+use crate::elicitation::ElicitationRequestRouter;
 use crate::elicitation::elicitation_is_rejected_by_policy;
 use crate::rmcp_client::AsyncManagedClient;
 use crate::rmcp_client::ManagedClient;
@@ -36,6 +38,7 @@ use rmcp::model::NumberOrString;
 use rmcp::model::Tool;
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
 use tempfile::tempdir;
 
 fn create_test_tool(server_name: &str, tool_name: &str) -> ToolInfo {
@@ -217,6 +220,8 @@ async fn disabled_permissions_auto_accept_elicitation_with_empty_form_schema() {
         AskForApproval::Never,
         PermissionProfile::Disabled,
         /*reviewer*/ None,
+        /*lifecycle*/ None,
+        ElicitationRequestRouter::default(),
     );
     let (tx_event, _rx_event) = async_channel::bounded(1);
     let sender = manager.make_sender("server".to_string(), tx_event);
@@ -250,6 +255,8 @@ async fn disabled_permissions_do_not_auto_accept_elicitation_with_requested_fiel
         AskForApproval::Never,
         PermissionProfile::Disabled,
         /*reviewer*/ None,
+        /*lifecycle*/ None,
+        ElicitationRequestRouter::default(),
     );
     let (tx_event, _rx_event) = async_channel::bounded(1);
     let sender = manager.make_sender("server".to_string(), tx_event);
@@ -279,6 +286,118 @@ async fn disabled_permissions_do_not_auto_accept_elicitation_with_requested_fiel
             meta: None,
         }
     );
+}
+
+#[tokio::test]
+async fn shared_elicitation_router_targets_the_exact_pending_request() {
+    struct Registration(Arc<AtomicUsize>);
+
+    impl Drop for Registration {
+        fn drop(&mut self) {
+            self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    let router = ElicitationRequestRouter::default();
+    let outstanding = Arc::new(AtomicUsize::new(0));
+    let lifecycle = ElicitationLifecycle::new({
+        let outstanding = Arc::clone(&outstanding);
+        move || {
+            outstanding.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Registration(Arc::clone(&outstanding))
+        }
+    });
+    let manager_a = ElicitationRequestManager::new(
+        AskForApproval::OnRequest,
+        PermissionProfile::default(),
+        /*reviewer*/ None,
+        Some(lifecycle.clone()),
+        router.clone(),
+    );
+    let manager_b = ElicitationRequestManager::new(
+        AskForApproval::OnRequest,
+        PermissionProfile::default(),
+        /*reviewer*/ None,
+        Some(lifecycle),
+        router,
+    );
+    let (tx_event, rx_event) = async_channel::bounded(2);
+    let sender_a = manager_a.make_sender("server".to_string(), tx_event.clone());
+    let sender_b = manager_b.make_sender("server".to_string(), tx_event);
+    let elicitation = CreateElicitationRequestParams::FormElicitationParams {
+        meta: None,
+        message: "Which runtime?".to_string(),
+        requested_schema: rmcp::model::ElicitationSchema::builder()
+            .required_property(
+                "runtime",
+                rmcp::model::PrimitiveSchema::String(rmcp::model::StringSchema::new()),
+            )
+            .build()
+            .expect("schema should build"),
+    };
+
+    let pending_a = tokio::spawn(sender_a(NumberOrString::Number(1), elicitation.clone()));
+    let EventMsg::ElicitationRequest(request_a) = rx_event.recv().await.expect("request A").msg
+    else {
+        panic!("expected elicitation request");
+    };
+    let pending_b = tokio::spawn(sender_b(NumberOrString::Number(1), elicitation));
+    let EventMsg::ElicitationRequest(request_b) = rx_event.recv().await.expect("request B").msg
+    else {
+        panic!("expected elicitation request");
+    };
+    assert_eq!(outstanding.load(std::sync::atomic::Ordering::SeqCst), 2);
+    let (
+        codex_protocol::mcp::RequestId::String(request_a_id),
+        codex_protocol::mcp::RequestId::String(request_b_id),
+    ) = (request_a.id, request_b.id)
+    else {
+        panic!("expected Codex-owned string request IDs");
+    };
+    assert_ne!(request_a_id, request_b_id);
+
+    let response_a = ElicitationResponse {
+        action: ElicitationAction::Accept,
+        content: Some(serde_json::json!({"runtime": "a"})),
+        meta: None,
+    };
+    manager_b
+        .resolve(
+            "server".to_string(),
+            NumberOrString::String(request_a_id.into()),
+            response_a.clone(),
+        )
+        .await
+        .expect("runtime B should route a response to runtime A");
+    let response_b = ElicitationResponse {
+        action: ElicitationAction::Accept,
+        content: Some(serde_json::json!({"runtime": "b"})),
+        meta: None,
+    };
+    manager_a
+        .resolve(
+            "server".to_string(),
+            NumberOrString::String(request_b_id.into()),
+            response_b.clone(),
+        )
+        .await
+        .expect("runtime A should route a response to runtime B");
+
+    assert_eq!(
+        pending_a
+            .await
+            .expect("request A task")
+            .expect("request A response"),
+        response_a
+    );
+    assert_eq!(
+        pending_b
+            .await
+            .expect("request B task")
+            .expect("request B response"),
+        response_b
+    );
+    assert_eq!(outstanding.load(std::sync::atomic::Ordering::SeqCst), 0);
 }
 
 #[test]
@@ -956,6 +1075,58 @@ async fn list_all_tools_blocks_while_client_is_pending_without_cached_tool_info_
 }
 
 #[tokio::test]
+async fn shutdown_continues_after_caller_is_aborted() {
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+    let (completed_tx, completed_rx) = tokio::sync::oneshot::channel();
+    let release = Arc::new(tokio::sync::Notify::new());
+    let release_for_client = Arc::clone(&release);
+    let blocking_client = async move {
+        let _ = started_tx.send(());
+        release_for_client.notified().await;
+        let _ = completed_tx.send(());
+        Err(StartupOutcomeError::Cancelled)
+    }
+    .boxed()
+    .shared();
+    let approval_policy = Constrained::allow_any(AskForApproval::OnFailure);
+    let permission_profile = Constrained::allow_any(PermissionProfile::default());
+    let mut manager = McpConnectionManager::new_uninitialized(
+        &approval_policy,
+        &permission_profile,
+        /*prefix_mcp_tool_names*/ true,
+    );
+    manager.clients.insert(
+        CODEX_APPS_MCP_SERVER_NAME.to_string(),
+        AsyncManagedClient {
+            client: blocking_client,
+            cached_tool_info_snapshot: None,
+            cached_server_info: None,
+            startup_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            tool_plugin_provenance: Arc::new(ToolPluginProvenance::default()),
+            cancel_token: CancellationToken::new(),
+        },
+    );
+    let manager = Arc::new(manager);
+    let shutdown_task = tokio::spawn({
+        let manager = Arc::clone(&manager);
+        async move { manager.shutdown().await }
+    });
+
+    started_rx.await.expect("client shutdown should start");
+    shutdown_task.abort();
+    let shutdown_error = shutdown_task
+        .await
+        .expect_err("caller shutdown task should be aborted");
+    assert!(shutdown_error.is_cancelled());
+    release.notify_one();
+
+    tokio::time::timeout(Duration::from_secs(1), completed_rx)
+        .await
+        .expect("client shutdown should survive caller cancellation")
+        .expect("client shutdown completion sender should stay alive");
+}
+
+#[tokio::test]
 async fn list_all_tools_does_not_block_when_cached_tool_info_snapshot_is_empty() {
     let pending_client = futures::future::pending::<Result<ManagedClient, StartupOutcomeError>>()
         .boxed()
@@ -1162,6 +1333,8 @@ async fn no_local_runtime_fails_local_stdio_but_keeps_local_http_server() {
         ToolPluginProvenance::default(),
         /*auth*/ None,
         /*elicitation_reviewer*/ None,
+        /*elicitation_lifecycle*/ None,
+        ElicitationRequestRouter::default(),
     )
     .await;
 

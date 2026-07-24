@@ -1,3 +1,6 @@
+use crate::context::ContextualUserFragment;
+use crate::context::world_state::WorldState;
+use crate::context::world_state::WorldStateSnapshot;
 use crate::context_manager::normalize;
 use crate::event_mapping::has_non_contextual_dev_message_content;
 use crate::event_mapping::is_contextual_dev_message_content;
@@ -17,6 +20,7 @@ use codex_protocol::protocol::InterAgentCommunication;
 use codex_protocol::protocol::TokenUsage;
 use codex_protocol::protocol::TokenUsageInfo;
 use codex_protocol::protocol::TurnContextItem;
+use codex_protocol::protocol::WorldStateItem;
 use codex_utils_cache::BlockingLruCache;
 use codex_utils_cache::sha1_digest;
 use codex_utils_output_truncation::TruncationPolicy;
@@ -48,6 +52,8 @@ pub(crate) struct ContextManager {
     /// also clear this when it trims a mixed initial-context developer bundle
     /// whose non-diff fragments no longer exist in the surviving history.
     reference_context_item: Option<TurnContextItem>,
+    /// World state most recently appended to model-visible history.
+    world_state_baseline: Option<WorldStateSnapshot>,
 }
 
 impl ContextManager {
@@ -59,6 +65,7 @@ impl ContextManager {
                 &None, &None, /*model_context_window*/ None,
             ),
             reference_context_item: None,
+            world_state_baseline: None,
         }
     }
 
@@ -76,6 +83,42 @@ impl ContextManager {
 
     pub(crate) fn reference_context_item(&self) -> Option<TurnContextItem> {
         self.reference_context_item.clone()
+    }
+
+    pub(crate) fn update_world_state(
+        &mut self,
+        world_state: &WorldState,
+    ) -> (Vec<Box<dyn ContextualUserFragment>>, Option<WorldStateItem>) {
+        let snapshot = world_state.snapshot();
+        let fragments =
+            world_state.render_history_diff(self.world_state_baseline.as_ref(), &self.items);
+        let rollout_item = self.world_state_baseline.as_ref().map_or_else(
+            || Some(WorldStateItem::full(snapshot.clone().into_value())),
+            |previous| {
+                snapshot
+                    .merge_patch_from(previous)
+                    .map(WorldStateItem::patch)
+            },
+        );
+        self.world_state_baseline = Some(snapshot);
+        (fragments, rollout_item)
+    }
+
+    /// Establishes a full persisted baseline while reconciling any matching legacy fragments
+    /// already retained in model history.
+    pub(crate) fn initialize_world_state(
+        &mut self,
+        world_state: &WorldState,
+    ) -> (Vec<Box<dyn ContextualUserFragment>>, WorldStateItem) {
+        let snapshot = world_state.snapshot();
+        let fragments = world_state.render_history_diff(/*previous*/ None, &self.items);
+        let rollout_item = WorldStateItem::full(snapshot.clone().into_value());
+        self.world_state_baseline = Some(snapshot);
+        (fragments, rollout_item)
+    }
+
+    pub(crate) fn set_world_state_baseline(&mut self, snapshot: WorldStateSnapshot) {
+        self.world_state_baseline = Some(snapshot);
     }
 
     pub(crate) fn set_token_usage_full(&mut self, context_window: i64) {
@@ -130,10 +173,9 @@ impl ContextManager {
     // Estimate token usage using byte-based heuristics from the truncation helpers.
     // This is a coarse lower bound, not a tokenizer-accurate count.
     pub(crate) fn estimate_token_count(&self, turn_context: &TurnContext) -> Option<i64> {
-        let model_info = &turn_context.model_info;
         let personality = turn_context.personality.or(turn_context.config.personality);
         let base_instructions = BaseInstructions {
-            text: model_info.get_model_instructions(personality),
+            text: crate::tools::model_instructions_for_turn(turn_context, personality),
         };
         self.estimate_token_count_with_base_instructions(&base_instructions)
     }
@@ -163,12 +205,14 @@ impl ContextManager {
             // its corresponding counterpart to keep the invariants intact without
             // running a full normalization pass.
             normalize::remove_corresponding_for(&mut self.items, &removed);
+            self.world_state_baseline = None;
         }
     }
 
     pub(crate) fn replace(&mut self, items: Vec<TranscriptItem>) {
         self.items = items;
         self.history_version = self.history_version.saturating_add(1);
+        self.world_state_baseline = None;
     }
 
     /// Replace image content in the last turn if it originated from a tool output.

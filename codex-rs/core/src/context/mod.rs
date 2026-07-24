@@ -26,6 +26,7 @@ mod subagent_notification;
 mod turn_aborted;
 mod user_instructions;
 mod user_shell_command;
+pub(crate) mod world_state;
 
 pub(crate) use approved_command_prefix_saved::ApprovedCommandPrefixSaved;
 pub(crate) use apps_instructions::AppsInstructions;
@@ -40,7 +41,6 @@ pub(crate) use codex_core_skills::SkillInstructions;
 pub(crate) use collaboration_mode_instructions::CollaborationModeInstructions;
 pub(crate) use contextual_user_message::is_contextual_user_fragment;
 pub(crate) use contextual_user_message::parse_visible_hook_prompt_message;
-pub(crate) use environment_context::EnvironmentContext;
 pub(crate) use guardian_followup_review_reminder::GuardianFollowupReviewReminder;
 pub(crate) use hook_additional_context::HookAdditionalContext;
 pub(crate) use image_generation_instructions::ImageGenerationInstructions;
