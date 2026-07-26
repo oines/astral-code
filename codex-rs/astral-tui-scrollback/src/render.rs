@@ -1,3 +1,4 @@
+use codex_app_server_protocol::PatchChangeKind;
 use ratatui::style::Color;
 use ratatui::style::Styled;
 use ratatui::style::Stylize;
@@ -217,10 +218,23 @@ fn render_tool(tool: &ToolPresentation, options: RenderOptions) -> Text<'static>
         );
         for change in &tool.changes {
             let (added, removed) = diff_counts(&change.diff);
+            let (operation, path) = match &change.kind {
+                PatchChangeKind::Add => ("A".green(), change.path.clone()),
+                PatchChangeKind::Delete => ("D".red(), change.path.clone()),
+                PatchChangeKind::Update {
+                    move_path: Some(move_path),
+                } => (
+                    "R".magenta(),
+                    format!("{} → {}", change.path, move_path.display()),
+                ),
+                PatchChangeKind::Update { move_path: None } => ("M".cyan(), change.path.clone()),
+            };
             lines.push(
                 vec![
                     "  ".into(),
-                    change.path.clone().dim(),
+                    operation,
+                    " ".dim(),
+                    path.dim(),
                     format!("  +{added}").green(),
                     format!(" -{removed}").red(),
                 ]
@@ -317,10 +331,18 @@ fn status_style(status: ToolStatus) -> ratatui::style::Style {
 }
 
 fn tool_verb(kind: ToolKind, status: ToolStatus) -> &'static str {
+    match status {
+        ToolStatus::Failed => return "Failed",
+        ToolStatus::Declined => return "Declined",
+        ToolStatus::Interrupted => return "Interrupted",
+        ToolStatus::Running | ToolStatus::Success => {}
+    }
     let running = status == ToolStatus::Running;
     match (kind, running) {
         (ToolKind::Execute, true) => "Running",
         (ToolKind::Execute, false) => "Ran",
+        (ToolKind::Background, true) => "Running background",
+        (ToolKind::Background, false) => "Finished background",
         (ToolKind::Read, true) => "Reading",
         (ToolKind::Read, false) => "Read",
         (ToolKind::Edit, true) => "Editing",
@@ -337,8 +359,10 @@ fn tool_verb(kind: ToolKind, status: ToolStatus) -> &'static str {
         (ToolKind::Skill, false) => "Loaded",
         (ToolKind::Collab, true) => "Coordinating",
         (ToolKind::Collab, false) => "Coordinated",
-        (ToolKind::Media, true) => "Creating",
-        (ToolKind::Media, false) => "Created",
+        (ToolKind::ImageView, true) => "Viewing",
+        (ToolKind::ImageView, false) => "Viewed",
+        (ToolKind::ImageGeneration, true) => "Generating",
+        (ToolKind::ImageGeneration, false) => "Generated",
         (ToolKind::Other, true) => "Using",
         (ToolKind::Other, false) => "Used",
     }

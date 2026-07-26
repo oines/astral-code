@@ -16,6 +16,7 @@ pub enum TimelineStream {
         content: Vec<String>,
     },
     Command {
+        process_id: Option<String>,
         output: String,
         terminal_input: Vec<String>,
     },
@@ -61,10 +62,16 @@ impl TimelineStream {
         output.push_str(delta);
     }
 
-    pub fn append_terminal_input(&mut self, stdin: &str) {
-        let Self::Command { terminal_input, .. } = self.ensure_command() else {
+    pub fn append_terminal_input(&mut self, process_id: &str, stdin: &str) {
+        let Self::Command {
+            process_id: current_process_id,
+            terminal_input,
+            ..
+        } = self.ensure_command()
+        else {
             unreachable!("ensure_command always returns command state");
         };
+        *current_process_id = Some(process_id.to_owned());
         terminal_input.push(stdin.to_owned());
     }
 
@@ -98,6 +105,7 @@ impl TimelineStream {
     fn ensure_command(&mut self) -> &mut Self {
         if !matches!(self, Self::Command { .. }) {
             *self = Self::Command {
+                process_id: None,
                 output: String::new(),
                 terminal_input: Vec::new(),
             };

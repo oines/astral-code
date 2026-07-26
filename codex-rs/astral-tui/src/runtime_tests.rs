@@ -2,12 +2,17 @@ use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ThreadTokenUsage;
 use codex_app_server_protocol::ThreadTokenUsageUpdatedNotification;
 use codex_app_server_protocol::TokenUsageBreakdown;
+use codex_app_server_protocol::Turn;
+use codex_app_server_protocol::TurnCompletedNotification;
+use codex_app_server_protocol::TurnError;
+use codex_app_server_protocol::TurnStatus;
 use pretty_assertions::assert_eq;
 
 use super::RunOptions;
 use super::RunViewport;
 use super::handle_notification;
 use super::viewport_rows;
+use crate::SurfaceActivity;
 use crate::SurfaceState;
 
 #[test]
@@ -41,6 +46,46 @@ fn token_usage_notification_updates_the_active_surface() {
     );
 
     assert_eq!(surface.token_usage(), Some(&token_usage));
+}
+
+#[test]
+fn turn_completion_preserves_terminal_activity_states() {
+    let mut surface = SurfaceState::new("thread-1");
+
+    handle_notification(&mut surface, &turn_completed(TurnStatus::Interrupted, None));
+    assert_eq!(surface.activity(), &SurfaceActivity::Interrupted);
+
+    handle_notification(
+        &mut surface,
+        &turn_completed(
+            TurnStatus::Failed,
+            Some(TurnError {
+                message: "tool failed".to_string(),
+                codex_error_info: None,
+                additional_details: None,
+            }),
+        ),
+    );
+    assert_eq!(surface.activity(), &SurfaceActivity::Ready);
+
+    handle_notification(&mut surface, &turn_completed(TurnStatus::Completed, None));
+    assert_eq!(surface.activity(), &SurfaceActivity::Ready);
+}
+
+fn turn_completed(status: TurnStatus, error: Option<TurnError>) -> ServerNotification {
+    ServerNotification::TurnCompleted(TurnCompletedNotification {
+        thread_id: "thread-1".to_string(),
+        turn: Turn {
+            id: "turn-1".to_string(),
+            items: Vec::new(),
+            items_view: Default::default(),
+            status,
+            error,
+            started_at: Some(1),
+            completed_at: Some(2),
+            duration_ms: Some(1_000),
+        },
+    })
 }
 
 fn usage(total_tokens: i64) -> TokenUsageBreakdown {

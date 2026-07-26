@@ -82,6 +82,7 @@ impl PresentationBlock {
             ThreadItem::CommandExecution {
                 command,
                 cwd,
+                process_id,
                 status,
                 command_actions,
                 aggregated_output,
@@ -89,13 +90,31 @@ impl PresentationBlock {
                 duration_ms,
                 ..
             } => {
-                let (kind, title) = command_presentation(command, command_actions);
-                let streamed_output = match stream {
-                    TimelineStream::Command { output, .. } => output.as_str(),
-                    _ => "",
+                let (mut kind, title) = command_presentation(command, command_actions);
+                let (stream_process_id, streamed_output, terminal_input) = match stream {
+                    TimelineStream::Command {
+                        process_id,
+                        output,
+                        terminal_input,
+                    } => (
+                        process_id.as_deref(),
+                        output.as_str(),
+                        terminal_input.as_slice(),
+                    ),
+                    _ => (None, "", &[][..]),
                 };
+                let process_id = process_id.as_deref().or(stream_process_id);
+                if process_id.is_some() {
+                    kind = ToolKind::Background;
+                }
                 let output = merge_output(aggregated_output.as_deref(), streamed_output);
                 let mut details = vec![format!("cwd {}", cwd.as_path().display())];
+                if let Some(process_id) = process_id {
+                    details.push(format!("process {process_id}"));
+                }
+                if let Some(detail) = terminal_input_detail(terminal_input) {
+                    details.push(detail);
+                }
                 if let Some(exit_code) = exit_code {
                     details.push(format!("exit {exit_code}"));
                 }
@@ -231,7 +250,7 @@ impl PresentationBlock {
                 duration_ms: None,
             })),
             ThreadItem::ImageView { path, .. } => Some(Self::Tool(ToolPresentation {
-                kind: ToolKind::Media,
+                kind: ToolKind::ImageView,
                 status: ToolStatus::Success,
                 name: "view_image".to_string(),
                 title: compact_path(path.as_path()),
@@ -246,7 +265,7 @@ impl PresentationBlock {
                 revised_prompt,
                 ..
             } => Some(Self::Tool(ToolPresentation {
-                kind: ToolKind::Media,
+                kind: ToolKind::ImageGeneration,
                 status: status_from_text(status),
                 name: "image_generation".to_string(),
                 title: saved_path.as_ref().map_or_else(
@@ -289,16 +308,33 @@ impl PresentationBlock {
                 },
                 running: true,
             }),
-            TimelineStream::Command { output, .. } => Some(Self::Tool(ToolPresentation {
-                kind: ToolKind::Execute,
-                status: ToolStatus::Running,
-                name: "command".to_string(),
-                title: "Running command".to_string(),
-                details: Vec::new(),
-                output: non_empty(output.clone()),
-                changes: Vec::new(),
-                duration_ms: None,
-            })),
+            TimelineStream::Command {
+                process_id,
+                output,
+                terminal_input,
+            } => {
+                let mut details = process_id
+                    .as_ref()
+                    .map(|process_id| vec![format!("process {process_id}")])
+                    .unwrap_or_default();
+                if let Some(detail) = terminal_input_detail(terminal_input) {
+                    details.push(detail);
+                }
+                Some(Self::Tool(ToolPresentation {
+                    kind: if process_id.is_some() {
+                        ToolKind::Background
+                    } else {
+                        ToolKind::Execute
+                    },
+                    status: ToolStatus::Running,
+                    name: "command".to_string(),
+                    title: "Running command".to_string(),
+                    details,
+                    output: non_empty(output.clone()),
+                    changes: Vec::new(),
+                    duration_ms: None,
+                }))
+            }
             TimelineStream::FileChange {
                 output, changes, ..
             } => Some(Self::Tool(ToolPresentation {
@@ -313,6 +349,22 @@ impl PresentationBlock {
             })),
         }
     }
+}
+
+fn terminal_input_detail(terminal_input: &[String]) -> Option<String> {
+    terminal_input.last().map(|stdin| {
+        if stdin.is_empty() {
+            "waiting for background output".to_string()
+        } else {
+            let mut escaped = stdin.escape_debug();
+            let preview = escaped.by_ref().take(80).collect::<String>();
+            if escaped.next().is_some() {
+                format!("stdin {preview}…")
+            } else {
+                format!("stdin {preview}")
+            }
+        }
+    })
 }
 
 fn user_content(content: &[UserInput]) -> (String, Vec<String>) {

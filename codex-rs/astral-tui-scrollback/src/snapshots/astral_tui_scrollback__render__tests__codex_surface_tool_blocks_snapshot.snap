@@ -9,6 +9,9 @@ expression: rendered
   │ PASS presentation
   │ PASS renderer
   │ PASS app shell
-◆ Edited render.rs
-  astral-tui/src/render.rs  +2 -1
+◆ Edited 4 files
+  M astral-tui/src/render.rs  +2 -1
+  A astral-tui/src/new.rs  +1 -0
+  D astral-tui/src/obsolete.rs  +0 -1
+  R astral-tui/src/old_name.rs → astral-tui/src/new_name.rs  +0 -0
 ◆ Searched Ratatui inline viewport
