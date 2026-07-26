@@ -91,6 +91,188 @@ fn command_session_approval_preserves_typed_decision() {
 }
 
 #[test]
+fn command_approval_respects_available_decisions() {
+    let mut state = SurfaceState::new("thread-1");
+    state.pending_requests_mut().note(request(json!({
+        "method": "item/commandExecution/requestApproval",
+        "id": 8,
+        "params": {
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "itemId": "call-1",
+            "startedAtMs": 100,
+            "availableDecisions": ["accept", "decline"]
+        }
+    })));
+
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Char('a'))),
+        InputAction::None
+    );
+    assert_eq!(state.pending_requests().len(), 1);
+}
+
+#[test]
+fn file_change_and_permission_approvals_preserve_scope() {
+    let mut state = SurfaceState::new("thread-1");
+    state.pending_requests_mut().note(request(json!({
+        "method": "item/fileChange/requestApproval",
+        "id": "edit-1",
+        "params": {
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "itemId": "edit-1",
+            "startedAtMs": 101,
+            "reason": "update source",
+            "grantRoot": null
+        }
+    })));
+
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Char('a'))),
+        InputAction::Resolve(RequestResolution::Success {
+            request_id: RequestId::String("edit-1".to_string()),
+            result: json!({"decision": "acceptForSession"}),
+        })
+    );
+
+    state.pending_requests_mut().note(request(json!({
+        "method": "item/permissions/requestApproval",
+        "id": "permissions-1",
+        "params": {
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "itemId": "call-1",
+            "environmentId": null,
+            "startedAtMs": 102,
+            "cwd": "/workspace",
+            "reason": "read generated files",
+            "permissions": {
+                "network": {"enabled": true},
+                "fileSystem": {
+                    "read": ["/workspace/generated"],
+                    "write": null
+                }
+            }
+        }
+    })));
+
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Char('a'))),
+        InputAction::Resolve(RequestResolution::Success {
+            request_id: RequestId::String("permissions-1".to_string()),
+            result: json!({
+                "permissions": {
+                    "network": {"enabled": true},
+                    "fileSystem": {
+                        "read": ["/workspace/generated"],
+                        "write": null
+                    }
+                },
+                "scope": "session"
+            }),
+        })
+    );
+}
+
+#[test]
+fn declining_permissions_rejects_the_request() {
+    let mut state = SurfaceState::new("thread-1");
+    state.pending_requests_mut().note(request(json!({
+        "method": "item/permissions/requestApproval",
+        "id": 9,
+        "params": {
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "itemId": "call-1",
+            "environmentId": null,
+            "startedAtMs": 102,
+            "cwd": "/workspace",
+            "reason": null,
+            "permissions": {
+                "network": null,
+                "fileSystem": null
+            }
+        }
+    })));
+
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Char('n'))),
+        InputAction::Resolve(RequestResolution::Reject {
+            request_id: RequestId::Integer(9),
+            error: codex_app_server_protocol::JSONRPCErrorError {
+                code: -32000,
+                message: "permission request declined".to_string(),
+                data: None,
+            },
+        })
+    );
+}
+
+#[test]
+fn mcp_form_and_url_elicitations_keep_typed_actions() {
+    let mut state = SurfaceState::new("thread-1");
+    state.pending_requests_mut().note(request(json!({
+        "method": "mcpServer/elicitation/request",
+        "id": "mcp-form",
+        "params": {
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "serverName": "astral",
+            "mode": "form",
+            "_meta": null,
+            "message": "Choose settings",
+            "requestedSchema": {
+                "type": "object",
+                "properties": {
+                    "confirmed": {"type": "boolean"}
+                }
+            }
+        }
+    })));
+    state.composer_mut().push_str(r#"{"confirmed":true}"#);
+
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Enter)),
+        InputAction::Resolve(RequestResolution::Success {
+            request_id: RequestId::String("mcp-form".to_string()),
+            result: json!({
+                "action": "accept",
+                "content": {"confirmed": true},
+                "_meta": null
+            }),
+        })
+    );
+
+    state.pending_requests_mut().note(request(json!({
+        "method": "mcpServer/elicitation/request",
+        "id": "mcp-url",
+        "params": {
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "serverName": "astral",
+            "mode": "url",
+            "_meta": null,
+            "message": "Open authorization page",
+            "url": "https://example.com/auth",
+            "elicitationId": "elicit-1"
+        }
+    })));
+
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Char('y'))),
+        InputAction::Resolve(RequestResolution::Success {
+            request_id: RequestId::String("mcp-url".to_string()),
+            result: json!({
+                "action": "accept",
+                "content": null,
+                "_meta": null
+            }),
+        })
+    );
+}
+
+#[test]
 fn user_input_supports_multiple_question_answers() {
     let mut state = SurfaceState::new("thread-1");
     state.pending_requests_mut().note(request(json!({

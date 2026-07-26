@@ -11,6 +11,9 @@ crossterm = { workspace = true }
 ratatui = { workspace = true }
 unicode-width = { workspace = true }
 
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+
 [features]
 scrolling-regions = ["ratatui/scrolling-regions"]
 

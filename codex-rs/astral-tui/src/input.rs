@@ -101,6 +101,13 @@ fn handle_request_key(
     request: PendingRequest,
     key: KeyEvent,
 ) -> InputAction {
+    let accepts_text_input = match &request {
+        PendingRequest::UserInput { .. } => true,
+        PendingRequest::McpElicitation { params, .. } => {
+            matches!(&params.request, McpServerElicitationRequest::Form { .. })
+        }
+        _ => false,
+    };
     let response = match request.clone() {
         PendingRequest::CommandExecution { params, .. } => command_response(&params, key.code),
         PendingRequest::FileChange { .. } => file_change_response(key.code),
@@ -121,6 +128,9 @@ fn handle_request_key(
     };
 
     let Some(response) = response else {
+        if !accepts_text_input {
+            return InputAction::None;
+        }
         return match key.code {
             KeyCode::Backspace => {
                 state.composer_mut().pop();

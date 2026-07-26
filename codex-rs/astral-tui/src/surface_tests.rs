@@ -3,6 +3,9 @@ use codex_app_server_protocol::ServerRequest;
 use codex_app_server_protocol::Thread;
 use codex_app_server_protocol::ThreadTokenUsage;
 use codex_app_server_protocol::TokenUsageBreakdown;
+use codex_protocol::config_types::CollaborationMode;
+use codex_protocol::config_types::ModeKind;
+use codex_protocol::config_types::Settings;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use serde_json::json;
@@ -70,6 +73,14 @@ fn session_state() -> SessionState {
         model_provider: "anthropic".to_string(),
         service_tier: None,
         active_turn_id: Some("turn-1".to_string()),
+        collaboration_mode: CollaborationMode {
+            mode: ModeKind::Default,
+            settings: Settings {
+                model: "claude-sonnet-4".to_string(),
+                reasoning_effort: None,
+                developer_instructions: None,
+            },
+        },
     }
 }
 
@@ -137,6 +148,78 @@ fn command_approval_surface_snapshot() {
 }
 
 #[test]
+fn typed_approval_surfaces_snapshot() {
+    insta::assert_snapshot!(
+        "file_change_approval_surface",
+        request_surface(
+            json!({
+                "method": "item/fileChange/requestApproval",
+                "id": "edit-1",
+                "params": {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "itemId": "edit-1",
+                    "startedAtMs": 101,
+                    "reason": "update source",
+                    "grantRoot": null
+                }
+            }),
+            ""
+        )
+    );
+    insta::assert_snapshot!(
+        "permissions_approval_surface",
+        request_surface(
+            json!({
+                "method": "item/permissions/requestApproval",
+                "id": "permissions-1",
+                "params": {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "itemId": "call-1",
+                    "environmentId": null,
+                    "startedAtMs": 102,
+                    "cwd": "/workspace",
+                    "reason": "read generated files",
+                    "permissions": {
+                        "network": {"enabled": true},
+                        "fileSystem": {
+                            "read": ["/workspace/generated"],
+                            "write": null
+                        }
+                    }
+                }
+            }),
+            ""
+        )
+    );
+    insta::assert_snapshot!(
+        "mcp_form_elicitation_surface",
+        request_surface(
+            json!({
+                "method": "mcpServer/elicitation/request",
+                "id": "mcp-form",
+                "params": {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "serverName": "astral",
+                    "mode": "form",
+                    "_meta": null,
+                    "message": "Choose settings",
+                    "requestedSchema": {
+                        "type": "object",
+                        "properties": {
+                            "confirmed": {"type": "boolean"}
+                        }
+                    }
+                }
+            }),
+            r#"{"confirmed":true}"#
+        )
+    );
+}
+
+#[test]
 fn fullscreen_surface_keeps_committed_history_snapshot() {
     let mut session = session_state();
     session.thread.turns[0].status = codex_app_server_protocol::TurnStatus::Completed;
@@ -159,6 +242,18 @@ fn scroll_offset_moves_in_both_directions() {
     assert_eq!(state.scroll_offset(), 13);
     state.scroll_to_bottom();
     assert_eq!(state.scroll_offset(), 0);
+}
+
+fn request_surface(value: serde_json::Value, composer: &str) -> String {
+    let session = session_state();
+    let mut state = SurfaceState::from_session(&session);
+    let request: ServerRequest = serde_json::from_value(value).expect("valid server request");
+    state.pending_requests_mut().note(request);
+    state.composer_mut().push_str(composer);
+    let area = Rect::new(0, 0, 72, 12);
+    let mut buffer = Buffer::empty(area);
+    render_surface(&state, &session, area, &mut buffer);
+    buffer_text(&buffer)
 }
 
 fn buffer_text(buffer: &Buffer) -> String {

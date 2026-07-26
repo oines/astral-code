@@ -1,0 +1,16 @@
+---
+source: astral-tui/src/surface_tests.rs
+expression: "request_surface(json!({\n    \"method\": \"item/fileChange/requestApproval\", \"id\": \"edit-1\", \"params\":\n    {\n        \"threadId\": \"thread-1\", \"turnId\": \"turn-1\", \"itemId\": \"edit-1\",\n        \"startedAtMs\": 101, \"reason\": \"update source\", \"grantRoot\": null\n    }\n}), \"\")"
+---
+❯ inspect this repo
+
+I’m tracing the relevant data flow.
+
+
+
+
+
+
+◇ Action required
+  Edit files · update source
+  [y] allow · [a] allow session · [n] deny · [esc] cancel

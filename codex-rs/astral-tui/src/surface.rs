@@ -416,7 +416,12 @@ fn request_lines(
             lines.push(
                 vec![
                     "  Permissions · ".into(),
-                    format!("{:?}", params.permissions).dim(),
+                    params
+                        .reason
+                        .as_deref()
+                        .unwrap_or("additional access")
+                        .to_string()
+                        .dim(),
                 ]
                 .into(),
             );
