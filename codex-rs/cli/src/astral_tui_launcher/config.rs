@@ -117,8 +117,7 @@ impl PreparedLaunch {
         } = self;
         let mut oss_provider_to_persist = None;
         if oss_provider_selection_required {
-            let (provider, manually_selected) =
-                codex_tui::select_oss_provider_for_launch().await?;
+            let (provider, manually_selected) = codex_tui::select_oss_provider_for_launch().await?;
             if provider == "__CANCELLED__" {
                 return Err(io::Error::other(
                     "OSS provider selection was cancelled by user",

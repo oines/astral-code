@@ -385,11 +385,10 @@ fn common_params(
                 ),
             ];
             for root in &cli.add_dir {
-                let root =
-                    codex_utils_absolute_path::AbsolutePathBuf::resolve_path_against_base(
-                        root,
-                        effective_cwd,
-                    );
+                let root = codex_utils_absolute_path::AbsolutePathBuf::resolve_path_against_base(
+                    root,
+                    effective_cwd,
+                );
                 if !roots.contains(&root) {
                     roots.push(root);
                 }
@@ -399,7 +398,10 @@ fn common_params(
     };
     let request_config = if preserve_thread_context {
         cli.bypass_hook_trust.then(|| {
-            HashMap::from([("bypass_hook_trust".to_string(), serde_json::Value::Bool(true))])
+            HashMap::from([(
+                "bypass_hook_trust".to_string(),
+                serde_json::Value::Bool(true),
+            )])
         })
     } else {
         Some(config_request_overrides(config))
