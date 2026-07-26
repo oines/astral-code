@@ -80,7 +80,7 @@ Flicker-free rendering using the DCS synchronized output protocol:
 ## Performance
 
 - **Colored JSON**: ~186μs per operation
-- **Plain text**: ~75μs per operation  
+- **Plain text**: ~75μs per operation
 - **Zero allocations** in hot path
 - **Single-pass parsing** for all text processing
 
