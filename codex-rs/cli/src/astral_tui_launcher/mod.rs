@@ -10,6 +10,7 @@ use codex_arg0::Arg0DispatchPaths;
 use codex_config::LoaderOverrides;
 use codex_config::types::UiVariant;
 use codex_protocol::ThreadId;
+use codex_protocol::config_types::AltScreenMode;
 use codex_tui::AppExitInfo;
 use codex_tui::Cli;
 use codex_tui::ExitReason;
@@ -42,7 +43,10 @@ pub(crate) async fn run_main(
         explicit_remote_endpoint.clone(),
     )
     .await?;
-    if selected_ui_variant(explicit_ui, prepared.configured_ui()) == UiVariant::Classic {
+    let viewport = selected_viewport(cli.no_alt_screen, prepared.configured_alt_screen());
+    if selected_ui_variant(explicit_ui, prepared.configured_ui()) == UiVariant::Classic
+        || prepared.requires_classic_preflight()
+    {
         return codex_tui::run_main(cli, arg0_paths, loader_overrides, explicit_remote_endpoint)
             .await;
     }
@@ -67,11 +71,7 @@ pub(crate) async fn run_main(
     let mut options = LaunchOptions::new(thread);
     options.initial_input = initial_input(prompt, images);
     options.runtime = RunOptions {
-        viewport: if cli.no_alt_screen {
-            RunViewport::Inline
-        } else {
-            RunViewport::Fullscreen
-        },
+        viewport,
         ..RunOptions::default()
     };
 
@@ -111,6 +111,14 @@ fn token_usage_from_astral(usage: &codex_app_server_protocol::ThreadTokenUsage) 
 
 fn selected_ui_variant(explicit: Option<UiVariant>, configured: UiVariant) -> UiVariant {
     explicit.unwrap_or(configured)
+}
+
+fn selected_viewport(no_alt_screen: bool, configured: AltScreenMode) -> RunViewport {
+    if no_alt_screen || configured == AltScreenMode::Never {
+        RunViewport::Inline
+    } else {
+        RunViewport::Fullscreen
+    }
 }
 
 fn initial_input(prompt: Option<String>, images: Vec<std::path::PathBuf>) -> Vec<UserInput> {

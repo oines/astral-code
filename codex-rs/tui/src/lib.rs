@@ -170,6 +170,15 @@ mod session_archive_commands;
 mod session_log;
 mod session_resume;
 mod session_state;
+
+/// Runs the existing local-provider picker for another first-party CLI surface.
+///
+/// The boolean reports whether the user made an explicit selection that should
+/// be persisted as their default.
+pub async fn select_oss_provider_for_launch() -> std::io::Result<(String, bool)> {
+    let selection = oss_selection::select_oss_provider().await?;
+    Ok((selection.provider, selection.manually_selected))
+}
 mod shimmer;
 mod skills_helpers;
 mod slash_command;
