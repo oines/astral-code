@@ -79,6 +79,7 @@ pub(super) struct ThreadConfigLoader {
     loader_overrides: LoaderOverrides,
     strict_config: bool,
     cloud_config_bundle: CloudConfigBundleLoader,
+    sandbox_mode: Option<SandboxMode>,
 }
 
 impl ThreadConfigLoader {
@@ -92,6 +93,7 @@ impl ThreadConfigLoader {
             .harness_overrides(ConfigOverrides {
                 cwd: Some(cwd.to_path_buf()),
                 additional_writable_roots: additional_writable_roots.to_vec(),
+                sandbox_mode: self.sandbox_mode,
                 ..Default::default()
             })
             .loader_overrides(self.loader_overrides.clone())
@@ -172,6 +174,7 @@ impl PreparedLaunch {
             loader_overrides: loader_overrides.clone(),
             strict_config,
             cloud_config_bundle: cloud_config_bundle.clone(),
+            sandbox_mode: cli_permission_overrides(&cli).0,
         };
         let target_mode = target.params_mode();
         let client = start_client(
@@ -273,17 +276,7 @@ async fn build_config(
             .and_then(get_default_model_for_oss_provider)
             .map(str::to_string)
     });
-    let (sandbox_mode, approval_policy) = if cli.dangerously_bypass_approvals_and_sandbox {
-        (
-            Some(SandboxMode::DangerFullAccess),
-            Some(AskForApproval::Never),
-        )
-    } else {
-        (
-            cli.sandbox_mode.map(Into::<SandboxMode>::into),
-            cli.approval_policy.map(Into::into),
-        )
-    };
+    let (sandbox_mode, approval_policy) = cli_permission_overrides(cli);
     let overrides = ConfigOverrides {
         model,
         approval_policy,
@@ -314,6 +307,20 @@ async fn build_config(
         ensure_oss_provider_ready(&provider, &config).await?;
     }
     Ok(config)
+}
+
+fn cli_permission_overrides(cli: &Cli) -> (Option<SandboxMode>, Option<AskForApproval>) {
+    if cli.dangerously_bypass_approvals_and_sandbox {
+        (
+            Some(SandboxMode::DangerFullAccess),
+            Some(AskForApproval::Never),
+        )
+    } else {
+        (
+            cli.sandbox_mode.map(Into::<SandboxMode>::into),
+            cli.approval_policy.map(Into::into),
+        )
+    }
 }
 
 async fn resolve_launch_model_provider(
