@@ -3,6 +3,8 @@ use codex_app_server_protocol::CommandExecutionStatus;
 use codex_app_server_protocol::CoreToolCallStatus;
 use codex_app_server_protocol::DynamicToolCallStatus;
 use codex_app_server_protocol::FileUpdateChange;
+use codex_app_server_protocol::McpToolCallError;
+use codex_app_server_protocol::McpToolCallStatus;
 use codex_app_server_protocol::PatchApplyStatus;
 use codex_app_server_protocol::PatchChangeKind;
 use codex_app_server_protocol::ThreadItem;
@@ -217,6 +219,66 @@ fn web_and_image_tool_blocks_snapshot() {
                 AbsolutePathBuf::try_from("/workspace/astral.png".to_string())
                     .expect("absolute path"),
             ),
+        },
+    ];
+
+    let rendered = items
+        .into_iter()
+        .map(|item| render(item, true))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_snapshot!(rendered);
+}
+
+#[test]
+fn terminal_tool_states_snapshot() {
+    let items = [
+        ThreadItem::CommandExecution {
+            id: "command-declined".to_string(),
+            command: "cargo publish".to_string(),
+            cwd: AbsolutePathBuf::try_from("/workspace".to_string()).expect("absolute path"),
+            process_id: None,
+            source: Default::default(),
+            status: CommandExecutionStatus::Declined,
+            command_actions: vec![CommandAction::Unknown {
+                command: "cargo publish".to_string(),
+            }],
+            aggregated_output: None,
+            exit_code: None,
+            duration_ms: None,
+        },
+        ThreadItem::CoreToolCall {
+            id: "bash-interrupted".to_string(),
+            tool: "Bash".to_string(),
+            arguments: json!({"command": "cargo test"}),
+            status: CoreToolCallStatus::Interrupted,
+            result: Some("stopped by user".to_string()),
+            error: None,
+            duration_ms: Some(510),
+        },
+        ThreadItem::DynamicToolCall {
+            id: "dynamic-failed".to_string(),
+            namespace: Some("workspace".to_string()),
+            tool: "open_artifact".to_string(),
+            arguments: json!({"path": "missing.html"}),
+            status: DynamicToolCallStatus::Failed,
+            content_items: None,
+            success: Some(false),
+            duration_ms: Some(12),
+        },
+        ThreadItem::McpToolCall {
+            id: "mcp-failed".to_string(),
+            server: "docs".to_string(),
+            tool: "search".to_string(),
+            status: McpToolCallStatus::Failed,
+            arguments: json!({"query": "Astral TUI"}),
+            mcp_app_resource_uri: None,
+            plugin_id: None,
+            result: None,
+            error: Some(McpToolCallError {
+                message: "server unavailable".to_string(),
+            }),
+            duration_ms: Some(1_200),
         },
     ];
 

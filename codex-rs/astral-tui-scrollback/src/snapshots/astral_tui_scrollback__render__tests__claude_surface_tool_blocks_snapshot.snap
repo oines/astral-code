@@ -4,7 +4,7 @@ expression: rendered
 ---
 ◆ Read main.rs  16ms
   │ fn main() {}
-× Edited main.rs  22ms
+× Failed main.rs  22ms
   │ old_string was not unique
 ◇ Running cargo check
   │ Checking astral-tui

@@ -331,6 +331,12 @@ fn status_style(status: ToolStatus) -> ratatui::style::Style {
 }
 
 fn tool_verb(kind: ToolKind, status: ToolStatus) -> &'static str {
+    match status {
+        ToolStatus::Failed => return "Failed",
+        ToolStatus::Declined => return "Declined",
+        ToolStatus::Interrupted => return "Interrupted",
+        ToolStatus::Running | ToolStatus::Success => {}
+    }
     let running = status == ToolStatus::Running;
     match (kind, running) {
         (ToolKind::Execute, true) => "Running",
