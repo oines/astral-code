@@ -6,6 +6,7 @@
 //! semantics.
 
 mod request;
+mod session;
 mod timeline;
 
 pub use astral_tui_scrollback::PresentationBlock;
@@ -20,6 +21,9 @@ pub use request::PendingRequestError;
 pub use request::PendingRequestResponse;
 pub use request::PendingRequests;
 pub use request::RequestResolution;
+pub use session::AstralSession;
+pub use session::SessionError;
+pub use session::SessionState;
 pub use timeline::ReduceOutcome;
 pub use timeline::TimelineEntry;
 pub use timeline::TimelineState;
