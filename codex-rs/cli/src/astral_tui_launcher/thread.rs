@@ -1,0 +1,353 @@
+use std::io;
+
+use astral_tui::ThreadLaunch;
+use codex_app_server_client::AppServerClient;
+use codex_app_server_protocol::ClientRequest;
+use codex_app_server_protocol::RequestId;
+use codex_app_server_protocol::Thread;
+use codex_app_server_protocol::ThreadForkParams;
+use codex_app_server_protocol::ThreadListCwdFilter;
+use codex_app_server_protocol::ThreadListParams;
+use codex_app_server_protocol::ThreadListResponse;
+use codex_app_server_protocol::ThreadReadParams;
+use codex_app_server_protocol::ThreadReadResponse;
+use codex_app_server_protocol::ThreadResumeParams;
+use codex_app_server_protocol::ThreadSortKey;
+use codex_app_server_protocol::ThreadSource;
+use codex_app_server_protocol::ThreadSourceKind;
+use codex_app_server_protocol::ThreadStartParams;
+use codex_app_server_protocol::ThreadStartSource;
+use codex_core::config::Config;
+use codex_protocol::ThreadId;
+use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
+use codex_protocol::models::PermissionProfile;
+use codex_tui::Cli;
+
+use super::config::ThreadParamsMode;
+
+pub(super) async fn resolve_launch(
+    client: &AppServerClient,
+    cli: &Cli,
+    config: &Config,
+    mode: ThreadParamsMode,
+) -> io::Result<ThreadLaunch> {
+    if cli.resume_session_id.is_some() || cli.resume_last || cli.resume_picker {
+        let thread_id = resolve_thread_id(
+            client,
+            cli.resume_session_id.as_deref(),
+            cli.resume_show_all,
+            cli.resume_include_non_interactive,
+            config,
+            mode,
+            cli.cwd.as_deref(),
+        )
+        .await?;
+        return Ok(ThreadLaunch::Resume(resume_params(
+            thread_id, cli, config, mode,
+        )));
+    }
+    if cli.fork_session_id.is_some() || cli.fork_last || cli.fork_picker {
+        let thread_id = resolve_thread_id(
+            client,
+            cli.fork_session_id.as_deref(),
+            cli.fork_show_all,
+            false,
+            config,
+            mode,
+            cli.cwd.as_deref(),
+        )
+        .await?;
+        return Ok(ThreadLaunch::Fork(fork_params(
+            thread_id, cli, config, mode,
+        )));
+    }
+    Ok(ThreadLaunch::Start(start_params(cli, config, mode)))
+}
+
+async fn resolve_thread_id(
+    client: &AppServerClient,
+    id_or_name: Option<&str>,
+    show_all: bool,
+    include_non_interactive: bool,
+    config: &Config,
+    mode: ThreadParamsMode,
+    remote_cwd: Option<&std::path::Path>,
+) -> io::Result<String> {
+    if let Some(id_or_name) = id_or_name {
+        return lookup_thread(client, id_or_name, include_non_interactive, config, mode)
+            .await?
+            .map(|thread| thread.id)
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::NotFound, "no matching Astral session found")
+            });
+    }
+    let response = list_threads(
+        client,
+        thread_list_params(
+            None,
+            show_all,
+            include_non_interactive,
+            config,
+            mode,
+            remote_cwd,
+            None,
+        ),
+    )
+    .await?;
+    response
+        .data
+        .into_iter()
+        .next()
+        .map(|thread| thread.id)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no Astral sessions found"))
+}
+
+async fn lookup_thread(
+    client: &AppServerClient,
+    id_or_name: &str,
+    include_non_interactive: bool,
+    config: &Config,
+    mode: ThreadParamsMode,
+) -> io::Result<Option<Thread>> {
+    if ThreadId::from_string(id_or_name).is_ok() {
+        let response: ThreadReadResponse = client
+            .request_typed(ClientRequest::ThreadRead {
+                request_id: RequestId::Integer(0),
+                params: ThreadReadParams {
+                    thread_id: id_or_name.to_string(),
+                    include_turns: false,
+                },
+            })
+            .await
+            .map_err(io::Error::other)?;
+        return Ok(Some(response.thread));
+    }
+    let mut cursor = None;
+    loop {
+        let response = list_threads(
+            client,
+            thread_list_params(
+                Some(id_or_name),
+                /*show_all*/ true,
+                include_non_interactive,
+                config,
+                mode,
+                /*remote_cwd*/ None,
+                cursor,
+            ),
+        )
+        .await?;
+        if let Some(thread) = response
+            .data
+            .into_iter()
+            .find(|thread| thread.name.as_deref() == Some(id_or_name))
+        {
+            return Ok(Some(thread));
+        }
+        let Some(next_cursor) = response.next_cursor else {
+            return Ok(None);
+        };
+        cursor = Some(next_cursor);
+    }
+}
+
+async fn list_threads(
+    client: &AppServerClient,
+    params: ThreadListParams,
+) -> io::Result<ThreadListResponse> {
+    client
+        .request_typed(ClientRequest::ThreadList {
+            request_id: RequestId::Integer(0),
+            params,
+        })
+        .await
+        .map_err(io::Error::other)
+}
+
+fn thread_list_params(
+    id_or_name: Option<&str>,
+    show_all: bool,
+    include_non_interactive: bool,
+    config: &Config,
+    mode: ThreadParamsMode,
+    remote_cwd: Option<&std::path::Path>,
+    cursor: Option<String>,
+) -> ThreadListParams {
+    let mut source_kinds = vec![ThreadSourceKind::Cli, ThreadSourceKind::VsCode];
+    if include_non_interactive {
+        source_kinds.extend([ThreadSourceKind::Exec, ThreadSourceKind::AppServer]);
+    }
+    ThreadListParams {
+        cursor,
+        limit: Some(if id_or_name.is_some() { 100 } else { 1 }),
+        sort_key: Some(ThreadSortKey::UpdatedAt),
+        sort_direction: None,
+        model_providers: matches!(mode, ThreadParamsMode::Local)
+            .then(|| vec![config.model_provider_id.clone()]),
+        source_kinds: Some(source_kinds),
+        archived: Some(false),
+        cwd: if show_all {
+            None
+        } else {
+            match mode {
+                ThreadParamsMode::Local => Some(ThreadListCwdFilter::One(
+                    config.cwd.to_string_lossy().to_string(),
+                )),
+                ThreadParamsMode::Remote => remote_cwd
+                    .map(|cwd| ThreadListCwdFilter::One(cwd.to_string_lossy().to_string())),
+            }
+        },
+        use_state_db_only: false,
+        search_term: id_or_name.map(str::to_string),
+    }
+}
+
+fn start_params(cli: &Cli, config: &Config, mode: ThreadParamsMode) -> ThreadStartParams {
+    let mut params = common_params(cli, config, mode);
+    ThreadStartParams {
+        model: params.model.take(),
+        model_provider: params.model_provider.take(),
+        service_tier: params.service_tier.take(),
+        cwd: params.cwd.take(),
+        runtime_workspace_roots: params.runtime_workspace_roots.take(),
+        approval_policy: params.approval_policy.take(),
+        approvals_reviewer: params.approvals_reviewer.take(),
+        sandbox: params.sandbox.take(),
+        permissions: params.permissions.take(),
+        config: params.config.take(),
+        base_instructions: config.base_instructions.clone(),
+        developer_instructions: config.developer_instructions.clone(),
+        personality: config.personality,
+        ephemeral: Some(config.ephemeral),
+        session_start_source: Some(ThreadStartSource::Startup),
+        thread_source: Some(ThreadSource::User),
+        ..ThreadStartParams::default()
+    }
+}
+
+fn resume_params(
+    thread_id: String,
+    cli: &Cli,
+    config: &Config,
+    mode: ThreadParamsMode,
+) -> ThreadResumeParams {
+    let params = common_params(cli, config, mode);
+    ThreadResumeParams {
+        thread_id,
+        model: params.model,
+        model_provider: params.model_provider,
+        service_tier: params.service_tier,
+        cwd: params.cwd,
+        runtime_workspace_roots: params.runtime_workspace_roots,
+        approval_policy: params.approval_policy,
+        approvals_reviewer: params.approvals_reviewer,
+        sandbox: params.sandbox,
+        permissions: params.permissions,
+        config: params.config,
+        base_instructions: config.base_instructions.clone(),
+        developer_instructions: config.developer_instructions.clone(),
+        personality: config.personality,
+        ..ThreadResumeParams::default()
+    }
+}
+
+fn fork_params(
+    thread_id: String,
+    cli: &Cli,
+    config: &Config,
+    mode: ThreadParamsMode,
+) -> ThreadForkParams {
+    let params = common_params(cli, config, mode);
+    ThreadForkParams {
+        thread_id,
+        model: params.model,
+        model_provider: params.model_provider,
+        service_tier: params.service_tier,
+        cwd: params.cwd,
+        runtime_workspace_roots: params.runtime_workspace_roots,
+        approval_policy: params.approval_policy,
+        approvals_reviewer: params.approvals_reviewer,
+        sandbox: params.sandbox,
+        permissions: params.permissions,
+        config: params.config,
+        base_instructions: config.base_instructions.clone(),
+        developer_instructions: config.developer_instructions.clone(),
+        ephemeral: config.ephemeral,
+        thread_source: Some(ThreadSource::User),
+        ..ThreadForkParams::default()
+    }
+}
+
+struct CommonParams {
+    model: Option<String>,
+    model_provider: Option<String>,
+    service_tier: Option<Option<String>>,
+    cwd: Option<String>,
+    runtime_workspace_roots: Option<Vec<codex_utils_absolute_path::AbsolutePathBuf>>,
+    approval_policy: Option<codex_app_server_protocol::AskForApproval>,
+    approvals_reviewer: Option<codex_app_server_protocol::ApprovalsReviewer>,
+    sandbox: Option<codex_app_server_protocol::SandboxMode>,
+    permissions: Option<String>,
+    config: Option<std::collections::HashMap<String, serde_json::Value>>,
+}
+
+fn common_params(cli: &Cli, config: &Config, mode: ThreadParamsMode) -> CommonParams {
+    let permissions = matches!(mode, ThreadParamsMode::Local)
+        .then(|| config.permissions.active_permission_profile())
+        .flatten()
+        .map(|profile| profile.id);
+    let sandbox = permissions.is_none().then(|| {
+        sandbox_mode_from_permission_profile(
+            &config.permissions.effective_permission_profile(),
+            config.cwd.as_path(),
+        )
+    });
+    CommonParams {
+        model: config.model.clone(),
+        model_provider: matches!(mode, ThreadParamsMode::Local)
+            .then(|| config.model_provider_id.clone()),
+        service_tier: config.service_tier.clone().map(Some).or_else(|| {
+            (config.notices.fast_default_opt_out == Some(true))
+                .then(|| Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string()))
+        }),
+        cwd: match mode {
+            ThreadParamsMode::Local => Some(config.cwd.to_string_lossy().to_string()),
+            ThreadParamsMode::Remote => cli
+                .cwd
+                .as_ref()
+                .map(|cwd| cwd.to_string_lossy().to_string()),
+        },
+        runtime_workspace_roots: matches!(mode, ThreadParamsMode::Local)
+            .then(|| config.workspace_roots.clone()),
+        approval_policy: Some(config.permissions.approval_policy.value().into()),
+        approvals_reviewer: Some(config.approvals_reviewer.into()),
+        sandbox: sandbox.flatten(),
+        permissions,
+        config: None,
+    }
+}
+
+fn sandbox_mode_from_permission_profile(
+    profile: &PermissionProfile,
+    cwd: &std::path::Path,
+) -> Option<codex_app_server_protocol::SandboxMode> {
+    match profile {
+        PermissionProfile::Disabled => {
+            Some(codex_app_server_protocol::SandboxMode::DangerFullAccess)
+        }
+        PermissionProfile::External { .. } => None,
+        PermissionProfile::Managed { .. } => {
+            let filesystem = profile.file_system_sandbox_policy();
+            if filesystem.has_full_disk_write_access() {
+                profile
+                    .network_sandbox_policy()
+                    .is_enabled()
+                    .then_some(codex_app_server_protocol::SandboxMode::DangerFullAccess)
+            } else if filesystem.can_write_path_with_cwd(cwd, cwd) {
+                Some(codex_app_server_protocol::SandboxMode::WorkspaceWrite)
+            } else {
+                Some(codex_app_server_protocol::SandboxMode::ReadOnly)
+            }
+        }
+    }
+}

@@ -32,6 +32,7 @@ use supports_color::Stream;
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 mod app_cmd;
+mod astral_tui_launcher;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 mod doctor;
 mod marketplace_cmd;
@@ -2008,7 +2009,7 @@ async fn run_interactive_tui(
         Err(err) => return Err(err),
     };
     let start_tui = || {
-        codex_tui::run_main(
+        astral_tui_launcher::run_main(
             interactive.clone(),
             arg0_paths.clone(),
             codex_config::LoaderOverrides::default(),
