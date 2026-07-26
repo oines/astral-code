@@ -1,0 +1,11 @@
+[package]
+name = "astral-tui-scrollback"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+codex-app-server-protocol = { workspace = true }
+
+[lints]
+workspace = true

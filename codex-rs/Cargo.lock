@@ -572,6 +572,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "astral-tui-scrollback"
+version = "0.0.0"
+dependencies = [
+ "codex-app-server-protocol",
+]
+
+[[package]]
 name = "async-broadcast"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
