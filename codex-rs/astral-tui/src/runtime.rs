@@ -7,6 +7,7 @@ use codex_app_server_protocol::DynamicToolCallResponse;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ServerRequest;
+use codex_app_server_protocol::ThreadTokenUsage;
 use codex_app_server_protocol::TurnStatus;
 use codex_app_server_protocol::UserInput;
 use crossterm::event::Event;
@@ -66,9 +67,11 @@ pub enum RunExitReason {
     Disconnected,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RunExit {
     pub thread_id: String,
+    pub thread_name: Option<String>,
+    pub token_usage: Option<ThreadTokenUsage>,
     pub reason: RunExitReason,
 }
 
@@ -139,8 +142,15 @@ pub async fn run(mut session: AstralSession, options: RunOptions) -> Result<RunE
             return Err(error);
         }
     };
+    let thread_name = session.state().and_then(|state| state.thread.name.clone());
+    let token_usage = surface.token_usage().cloned();
     session.shutdown().await?;
-    Ok(RunExit { thread_id, reason })
+    Ok(RunExit {
+        thread_id,
+        thread_name,
+        token_usage,
+        reason,
+    })
 }
 
 async fn run_loop(
@@ -412,6 +422,11 @@ fn handle_notification(surface: &mut SurfaceState, notification: &ServerNotifica
             surface
                 .pending_requests_mut()
                 .remove_resolved(&params.request_id);
+        }
+        ServerNotification::ThreadTokenUsageUpdated(params)
+            if params.thread_id == surface.conversation().timeline().thread_id() =>
+        {
+            surface.set_token_usage(params.token_usage.clone());
         }
         ServerNotification::Error(params) => surface.set_notice(params.error.message.clone()),
         ServerNotification::Warning(params) => surface.set_notice(params.message.clone()),

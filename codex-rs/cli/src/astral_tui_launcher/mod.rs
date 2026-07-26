@@ -79,6 +79,11 @@ pub(crate) async fn run_main(
         .await
         .map_err(io::Error::other)?;
     let thread_id = ThreadId::from_string(&exit.thread_id).ok();
+    let token_usage = exit
+        .token_usage
+        .as_ref()
+        .map(token_usage_from_astral)
+        .unwrap_or_default();
     let exit_reason = match exit.reason {
         RunExitReason::UserRequested => ExitReason::UserRequested,
         RunExitReason::Disconnected => {
@@ -86,12 +91,22 @@ pub(crate) async fn run_main(
         }
     };
     Ok(AppExitInfo {
-        token_usage: TokenUsage::default(),
+        token_usage,
         thread_id,
-        thread_name: None,
+        thread_name: exit.thread_name,
         update_action: None,
         exit_reason,
     })
+}
+
+fn token_usage_from_astral(usage: &codex_app_server_protocol::ThreadTokenUsage) -> TokenUsage {
+    TokenUsage {
+        input_tokens: usage.total.input_tokens,
+        cached_input_tokens: usage.total.cached_input_tokens,
+        output_tokens: usage.total.output_tokens,
+        reasoning_output_tokens: usage.total.reasoning_output_tokens,
+        total_tokens: usage.total.total_tokens,
+    }
 }
 
 fn selected_ui_variant(explicit: Option<UiVariant>, configured: UiVariant) -> UiVariant {

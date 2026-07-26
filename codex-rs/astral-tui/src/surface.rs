@@ -1,4 +1,5 @@
 use codex_app_server_protocol::McpServerElicitationRequest;
+use codex_app_server_protocol::ThreadTokenUsage;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Position;
 use ratatui::layout::Rect;
@@ -37,6 +38,7 @@ pub struct SurfaceState {
     pending_requests: PendingRequests,
     composer: String,
     activity: SurfaceActivity,
+    token_usage: Option<ThreadTokenUsage>,
     notice: Option<String>,
     scroll_offset: usize,
 }
@@ -48,6 +50,7 @@ impl SurfaceState {
             pending_requests: PendingRequests::default(),
             composer: String::new(),
             activity: SurfaceActivity::Ready,
+            token_usage: None,
             notice: None,
             scroll_offset: 0,
         }
@@ -66,6 +69,7 @@ impl SurfaceState {
             } else {
                 SurfaceActivity::Ready
             },
+            token_usage: None,
             notice: None,
             scroll_offset: 0,
         }
@@ -105,6 +109,14 @@ impl SurfaceState {
 
     pub fn set_activity(&mut self, activity: SurfaceActivity) {
         self.activity = activity;
+    }
+
+    pub fn token_usage(&self) -> Option<&ThreadTokenUsage> {
+        self.token_usage.as_ref()
+    }
+
+    pub fn set_token_usage(&mut self, token_usage: ThreadTokenUsage) {
+        self.token_usage = Some(token_usage);
     }
 
     pub fn set_notice(&mut self, notice: impl Into<String>) {
@@ -281,6 +293,16 @@ fn composer_lines(state: &SurfaceState, session: &SessionState, _width: u16) -> 
         " · ".dim(),
         session.model_provider.clone().dim(),
     ];
+    if let Some(token_usage) = state.token_usage() {
+        status_line.push(" · ".dim());
+        status_line.push(
+            token_status(
+                token_usage.last.total_tokens,
+                token_usage.model_context_window,
+            )
+            .dim(),
+        );
+    }
     if state.conversation.timeline().skipped_events() > 0 {
         status_line.push(
             format!(
@@ -305,6 +327,32 @@ fn composer_lines(state: &SurfaceState, session: &SessionState, _width: u16) -> 
             .dim()
             .into(),
     ]
+}
+
+fn token_status(used: i64, context_window: Option<i64>) -> String {
+    let used = compact_token_count(used);
+    context_window.map_or(used.clone(), |context_window| {
+        format!("{used} / {}", compact_token_count(context_window))
+    })
+}
+
+fn compact_token_count(tokens: i64) -> String {
+    let absolute = tokens.saturating_abs();
+    if absolute >= 1_000_000 {
+        compact_scaled(tokens, 1_000_000, "M")
+    } else if absolute >= 1_000 {
+        compact_scaled(tokens, 1_000, "K")
+    } else {
+        tokens.to_string()
+    }
+}
+
+fn compact_scaled(value: i64, divisor: i64, suffix: &str) -> String {
+    if value % divisor == 0 {
+        format!("{}{suffix}", value / divisor)
+    } else {
+        format!("{:.1}{suffix}", value as f64 / divisor as f64)
+    }
 }
 
 fn request_lines(

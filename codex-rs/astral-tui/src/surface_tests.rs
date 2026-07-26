@@ -1,6 +1,8 @@
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerRequest;
 use codex_app_server_protocol::Thread;
+use codex_app_server_protocol::ThreadTokenUsage;
+use codex_app_server_protocol::TokenUsageBreakdown;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use serde_json::json;
@@ -76,6 +78,23 @@ fn working_surface_snapshot() {
     let session = session_state();
     let mut state = SurfaceState::from_session(&session);
     state.set_activity(SurfaceActivity::Working);
+    state.set_token_usage(ThreadTokenUsage {
+        total: TokenUsageBreakdown {
+            total_tokens: 12_345,
+            input_tokens: 10_000,
+            cached_input_tokens: 4_000,
+            output_tokens: 2_000,
+            reasoning_output_tokens: 345,
+        },
+        last: TokenUsageBreakdown {
+            total_tokens: 9_200,
+            input_tokens: 8_000,
+            cached_input_tokens: 4_000,
+            output_tokens: 1_000,
+            reasoning_output_tokens: 200,
+        },
+        model_context_window: Some(500_000),
+    });
     state.composer_mut().push_str("follow the projection");
     let area = Rect::new(0, 0, 72, 12);
     let mut buffer = Buffer::empty(area);
