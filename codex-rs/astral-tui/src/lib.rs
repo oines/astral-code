@@ -5,6 +5,7 @@
 //! state; it does not emulate Grok's ACP payloads or duplicate Astral runtime
 //! semantics.
 
+mod client_tools;
 mod conversation;
 mod input;
 mod request;
@@ -19,6 +20,8 @@ pub use astral_tui_scrollback::ToolKind;
 pub use astral_tui_scrollback::ToolPresentation;
 pub use astral_tui_scrollback::ToolStatus;
 pub use astral_tui_scrollback::render_block;
+pub use client_tools::ClientToolError;
+pub use client_tools::ClientToolRegistry;
 pub use conversation::CommittedBlock;
 pub use conversation::ConversationState;
 pub use input::InputAction;
