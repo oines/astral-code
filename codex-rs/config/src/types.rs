@@ -690,10 +690,23 @@ pub struct ModelAvailabilityNuxConfig {
 /// Fallback resize-reflow row cap when Codex cannot identify a terminal-specific scrollback size.
 pub const DEFAULT_TERMINAL_RESIZE_REFLOW_FALLBACK_MAX_ROWS: usize = 1_000;
 
+/// Terminal UI implementation selected for interactive Astral sessions.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum UiVariant {
+    #[default]
+    Astral,
+    Classic,
+}
+
 /// Collection of settings that are specific to the TUI.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct Tui {
+    /// Interactive terminal UI implementation. Defaults to `astral`.
+    #[serde(default)]
+    pub variant: UiVariant,
+
     #[serde(default, flatten)]
     pub notification_settings: TuiNotificationSettings,
 
