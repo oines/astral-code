@@ -124,7 +124,13 @@ pub async fn run(mut session: AstralSession, options: RunOptions) -> Result<RunE
     drop(terminal);
     guard.restore();
 
-    let reason = result?;
+    let reason = match result {
+        Ok(reason) => reason,
+        Err(error) => {
+            let _ = session.shutdown().await;
+            return Err(error);
+        }
+    };
     session.shutdown().await?;
     Ok(RunExit { thread_id, reason })
 }

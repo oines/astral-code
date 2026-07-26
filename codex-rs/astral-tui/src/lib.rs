@@ -8,6 +8,7 @@
 mod client_tools;
 mod conversation;
 mod input;
+mod launch;
 mod request;
 mod runtime;
 mod session;
@@ -28,6 +29,10 @@ pub use conversation::ConversationState;
 pub use input::InputAction;
 pub use input::handle_key;
 pub use input::handle_paste;
+pub use launch::LaunchError;
+pub use launch::LaunchOptions;
+pub use launch::ThreadLaunch;
+pub use launch::run_main;
 pub use request::PendingRequest;
 pub use request::PendingRequestError;
 pub use request::PendingRequestResponse;
