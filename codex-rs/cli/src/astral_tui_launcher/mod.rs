@@ -16,6 +16,10 @@ use codex_tui::TokenUsage;
 mod config;
 mod thread;
 
+#[cfg(test)]
+#[path = "tests.rs"]
+mod tests;
+
 pub(crate) async fn run_main(
     cli: Cli,
     arg0_paths: Arg0DispatchPaths,

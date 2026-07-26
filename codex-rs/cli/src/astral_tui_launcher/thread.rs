@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io;
 
 use astral_tui::ThreadLaunch;
@@ -288,7 +289,7 @@ struct CommonParams {
     approvals_reviewer: Option<codex_app_server_protocol::ApprovalsReviewer>,
     sandbox: Option<codex_app_server_protocol::SandboxMode>,
     permissions: Option<String>,
-    config: Option<std::collections::HashMap<String, serde_json::Value>>,
+    config: Option<HashMap<String, serde_json::Value>>,
 }
 
 fn common_params(cli: &Cli, config: &Config, mode: ThreadParamsMode) -> CommonParams {
@@ -323,7 +324,7 @@ fn common_params(cli: &Cli, config: &Config, mode: ThreadParamsMode) -> CommonPa
         approvals_reviewer: Some(config.approvals_reviewer.into()),
         sandbox: sandbox.flatten(),
         permissions,
-        config: None,
+        config: Some(config_request_overrides(config)),
     }
 }
 
@@ -351,3 +352,45 @@ fn sandbox_mode_from_permission_profile(
         }
     }
 }
+
+fn config_request_overrides(config: &Config) -> HashMap<String, serde_json::Value> {
+    let mut overrides = HashMap::new();
+    let mut insert = |key: &str, value: Option<String>| {
+        if let Some(value) = value {
+            overrides.insert(key.to_string(), value.into());
+        }
+    };
+    insert(
+        "model_reasoning_effort",
+        config
+            .model_reasoning_effort
+            .as_ref()
+            .map(ToString::to_string),
+    );
+    insert(
+        "model_reasoning_summary",
+        config
+            .model_reasoning_summary
+            .map(|value| value.to_string()),
+    );
+    insert(
+        "model_verbosity",
+        config.model_verbosity.map(|value| value.to_string()),
+    );
+    insert(
+        "personality",
+        config.personality.map(|value| value.to_string()),
+    );
+    insert(
+        "web_search",
+        Some(config.web_search_mode.value().to_string()),
+    );
+    if config.bypass_hook_trust {
+        overrides.insert("bypass_hook_trust".to_string(), true.into());
+    }
+    overrides
+}
+
+#[cfg(test)]
+#[path = "thread_tests.rs"]
+mod tests;

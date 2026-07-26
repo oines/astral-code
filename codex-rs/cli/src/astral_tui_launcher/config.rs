@@ -335,3 +335,7 @@ async fn start_client(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "config_tests.rs"]
+mod tests;
