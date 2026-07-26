@@ -1,0 +1,11 @@
+---
+source: astral-tui-scrollback/src/render_tests.rs
+expression: rendered
+---
+❯ 把两个工具面统一渲染到 Astral TUI
+  ↳ @render.rs (astral-tui/src/render.rs)
+
+◆ Thinking
+  先把协议事件归约成稳定 UI 语义。
+
+已经统一：渲染器不再识别 Claude 或 Codex 的原始工具名。
