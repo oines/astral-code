@@ -1,5 +1,7 @@
 use codex_app_server_protocol::FileUpdateChange;
 
+use crate::SubagentPresentation;
+
 /// Stable, renderer-facing transcript block.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PresentationBlock {
@@ -19,6 +21,7 @@ pub enum PresentationBlock {
         running: bool,
     },
     Tool(ToolPresentation),
+    Subagent(SubagentPresentation),
     System {
         title: String,
         detail: Option<String>,

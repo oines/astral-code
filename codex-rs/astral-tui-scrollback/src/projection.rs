@@ -4,14 +4,12 @@ use codex_app_server_protocol::UserInput;
 use serde_json::Value;
 
 use crate::PresentationBlock;
+use crate::SubagentPresentation;
 use crate::TimelineStream;
 use crate::ToolKind;
 use crate::ToolPresentation;
 use crate::ToolStatus;
 use crate::tool_semantics::classify_tool_name;
-use crate::tool_semantics::collab_name;
-use crate::tool_semantics::collab_status;
-use crate::tool_semantics::collab_title;
 use crate::tool_semantics::command_presentation;
 use crate::tool_semantics::command_status;
 use crate::tool_semantics::compact_path;
@@ -209,17 +207,19 @@ impl PresentationBlock {
                 status,
                 receiver_thread_ids,
                 prompt,
+                model,
+                reasoning_effort,
+                agents_states,
                 ..
-            } => Some(Self::Tool(ToolPresentation {
-                kind: ToolKind::Collab,
-                status: collab_status(status),
-                name: collab_name(tool).to_string(),
-                title: collab_title(tool, receiver_thread_ids),
-                details: prompt.iter().cloned().collect(),
-                output: None,
-                changes: Vec::new(),
-                duration_ms: None,
-            })),
+            } => Some(Self::Subagent(SubagentPresentation::from_collab(
+                tool,
+                status,
+                receiver_thread_ids,
+                prompt.as_deref(),
+                model.as_deref(),
+                reasoning_effort.as_ref().map(ToString::to_string),
+                agents_states,
+            ))),
             ThreadItem::WebSearch { query, .. } => Some(Self::Tool(ToolPresentation {
                 kind: ToolKind::WebSearch,
                 status: ToolStatus::Success,
