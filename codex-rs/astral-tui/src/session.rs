@@ -126,6 +126,9 @@ impl SessionState {
             ServerNotification::ThreadClosed(params) if params.thread_id == self.thread.id => {
                 self.active_turn_id = None;
             }
+            ServerNotification::ThreadNameUpdated(params) if params.thread_id == self.thread.id => {
+                self.thread.name.clone_from(&params.thread_name);
+            }
             _ => {}
         }
     }

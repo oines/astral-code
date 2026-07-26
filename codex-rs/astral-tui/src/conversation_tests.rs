@@ -108,3 +108,26 @@ fn later_completed_turn_does_not_jump_past_running_frontier() {
     assert!(state.drain_committable().is_empty());
     assert_eq!(state.live_blocks().len(), 2);
 }
+
+#[test]
+fn last_agent_response_ignores_later_non_message_items() {
+    let mut state = ConversationState::new("thread-1");
+    state.apply(&completed_item(
+        "turn-1",
+        agent_message("message-1", "copy this response"),
+    ));
+    state.apply(&completed_item(
+        "turn-1",
+        ThreadItem::CoreToolCall {
+            id: "tool-1".to_string(),
+            tool: "Read".to_string(),
+            arguments: serde_json::json!({"file_path": "src/lib.rs"}),
+            status: CoreToolCallStatus::Completed,
+            result: Some("done".to_string()),
+            error: None,
+            duration_ms: Some(10),
+        },
+    ));
+
+    assert_eq!(state.last_agent_response(), Some("copy this response"));
+}

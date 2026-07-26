@@ -6,6 +6,7 @@
 //! semantics.
 
 mod client_tools;
+mod clipboard;
 mod conversation;
 mod input;
 mod launch;
@@ -44,15 +45,18 @@ pub use runtime::RunError;
 pub use runtime::RunExit;
 pub use runtime::RunExitReason;
 pub use runtime::RunOptions;
+pub use runtime::RunViewport;
 pub use runtime::run;
 pub use session::AstralSession;
 pub use session::SessionError;
 pub use session::SessionState;
 pub use surface::SurfaceActivity;
 pub use surface::SurfaceState;
+pub(crate) use surface::TranscriptView;
 pub use surface::committed_height;
 pub use surface::paint_committed;
 pub use surface::render_surface;
+pub(crate) use surface::render_surface_with_view;
 pub use thread_picker::ThreadPickerAction;
 pub use thread_picker::ThreadPickerOptions;
 pub use thread_picker::run_thread_picker;

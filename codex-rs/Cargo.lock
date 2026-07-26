@@ -575,6 +575,7 @@ dependencies = [
 name = "astral-tui"
 version = "0.0.0"
 dependencies = [
+ "arboard",
  "astral-terminal-inline",
  "astral-tui-scrollback",
  "codex-app-server-client",

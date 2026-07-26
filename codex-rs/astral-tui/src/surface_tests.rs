@@ -1,13 +1,17 @@
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerRequest;
 use codex_app_server_protocol::Thread;
+use codex_app_server_protocol::ThreadTokenUsage;
+use codex_app_server_protocol::TokenUsageBreakdown;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use serde_json::json;
 
 use super::SurfaceActivity;
 use super::SurfaceState;
+use super::TranscriptView;
 use super::render_surface;
+use super::render_surface_with_view;
 use crate::SessionState;
 
 fn session_state() -> SessionState {
@@ -74,6 +78,23 @@ fn working_surface_snapshot() {
     let session = session_state();
     let mut state = SurfaceState::from_session(&session);
     state.set_activity(SurfaceActivity::Working);
+    state.set_token_usage(ThreadTokenUsage {
+        total: TokenUsageBreakdown {
+            total_tokens: 12_345,
+            input_tokens: 10_000,
+            cached_input_tokens: 4_000,
+            output_tokens: 2_000,
+            reasoning_output_tokens: 345,
+        },
+        last: TokenUsageBreakdown {
+            total_tokens: 9_200,
+            input_tokens: 8_000,
+            cached_input_tokens: 4_000,
+            output_tokens: 1_000,
+            reasoning_output_tokens: 200,
+        },
+        model_context_window: Some(500_000),
+    });
     state.composer_mut().push_str("follow the projection");
     let area = Rect::new(0, 0, 72, 12);
     let mut buffer = Buffer::empty(area);
@@ -113,6 +134,31 @@ fn command_approval_surface_snapshot() {
     render_surface(&state, &session, area, &mut buffer);
 
     insta::assert_snapshot!(buffer_text(&buffer));
+}
+
+#[test]
+fn fullscreen_surface_keeps_committed_history_snapshot() {
+    let mut session = session_state();
+    session.thread.turns[0].status = codex_app_server_protocol::TurnStatus::Completed;
+    session.thread.turns[0].completed_at = Some(2);
+    session.active_turn_id = None;
+    let mut state = SurfaceState::from_session(&session);
+    assert_eq!(state.drain_committable().len(), 2);
+    let area = Rect::new(0, 0, 72, 12);
+    let mut buffer = Buffer::empty(area);
+    render_surface_with_view(&state, &session, TranscriptView::Full, area, &mut buffer);
+
+    insta::assert_snapshot!(buffer_text(&buffer));
+}
+
+#[test]
+fn scroll_offset_moves_in_both_directions() {
+    let mut state = SurfaceState::new("thread-1");
+    state.scroll_up(/*lines*/ 20);
+    state.scroll_down(/*lines*/ 7);
+    assert_eq!(state.scroll_offset(), 13);
+    state.scroll_to_bottom();
+    assert_eq!(state.scroll_offset(), 0);
 }
 
 fn buffer_text(buffer: &Buffer) -> String {

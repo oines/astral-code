@@ -1,4 +1,5 @@
 use codex_app_server_protocol::McpServerElicitationRequest;
+use codex_app_server_protocol::ThreadTokenUsage;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Position;
 use ratatui::layout::Rect;
@@ -25,13 +26,21 @@ pub enum SurfaceActivity {
     Disconnected(String),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TranscriptView {
+    Live,
+    Full,
+}
+
 #[derive(Debug)]
 pub struct SurfaceState {
     conversation: ConversationState,
     pending_requests: PendingRequests,
     composer: String,
     activity: SurfaceActivity,
+    token_usage: Option<ThreadTokenUsage>,
     notice: Option<String>,
+    scroll_offset: usize,
 }
 
 impl SurfaceState {
@@ -41,7 +50,9 @@ impl SurfaceState {
             pending_requests: PendingRequests::default(),
             composer: String::new(),
             activity: SurfaceActivity::Ready,
+            token_usage: None,
             notice: None,
+            scroll_offset: 0,
         }
     }
 
@@ -58,7 +69,9 @@ impl SurfaceState {
             } else {
                 SurfaceActivity::Ready
             },
+            token_usage: None,
             notice: None,
+            scroll_offset: 0,
         }
     }
 
@@ -98,12 +111,40 @@ impl SurfaceState {
         self.activity = activity;
     }
 
+    pub fn token_usage(&self) -> Option<&ThreadTokenUsage> {
+        self.token_usage.as_ref()
+    }
+
+    pub fn set_token_usage(&mut self, token_usage: ThreadTokenUsage) {
+        self.token_usage = Some(token_usage);
+    }
+
     pub fn set_notice(&mut self, notice: impl Into<String>) {
         self.notice = Some(notice.into());
     }
 
     pub fn clear_notice(&mut self) {
         self.notice = None;
+    }
+
+    pub fn scroll_up(&mut self, lines: usize) {
+        self.scroll_offset = self.scroll_offset.saturating_add(lines);
+    }
+
+    pub fn scroll_down(&mut self, lines: usize) {
+        self.scroll_offset = self.scroll_offset.saturating_sub(lines);
+    }
+
+    pub fn scroll_to_bottom(&mut self) {
+        self.scroll_offset = 0;
+    }
+
+    pub fn scroll_offset(&self) -> usize {
+        self.scroll_offset
+    }
+
+    pub fn last_agent_response(&self) -> Option<&str> {
+        self.conversation.last_agent_response()
     }
 
     pub fn drain_committable(&mut self) -> Vec<CommittedBlock> {
@@ -143,6 +184,16 @@ pub fn render_surface(
     area: Rect,
     buffer: &mut Buffer,
 ) -> Option<Position> {
+    render_surface_with_view(state, session, TranscriptView::Live, area, buffer)
+}
+
+pub(crate) fn render_surface_with_view(
+    state: &SurfaceState,
+    session: &SessionState,
+    transcript_view: TranscriptView,
+    area: Rect,
+    buffer: &mut Buffer,
+) -> Option<Position> {
     Clear.render(area, buffer);
     if area.is_empty() {
         return None;
@@ -156,15 +207,17 @@ pub fn render_surface(
         .unwrap_or(u16::MAX)
         .min(area.height);
     let live_height = area.height.saturating_sub(footer_height);
-    let live_lines = live_lines(state, area.width);
-    let visible_live = live_lines
-        .into_iter()
-        .rev()
-        .take(usize::from(live_height))
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect::<Vec<_>>();
+    let live_lines = conversation_lines(state, transcript_view, area.width);
+    let visible_height = usize::from(live_height);
+    let scroll_offset = match transcript_view {
+        TranscriptView::Live => 0,
+        TranscriptView::Full => state
+            .scroll_offset
+            .min(live_lines.len().saturating_sub(visible_height)),
+    };
+    let end = live_lines.len().saturating_sub(scroll_offset);
+    let start = end.saturating_sub(visible_height);
+    let visible_live = live_lines[start..end].to_vec();
 
     Paragraph::new(Text::from(visible_live)).render(
         Rect {
@@ -204,9 +257,17 @@ pub fn render_surface(
     })
 }
 
-fn live_lines(state: &SurfaceState, width: u16) -> Vec<Line<'static>> {
+fn conversation_lines(
+    state: &SurfaceState,
+    transcript_view: TranscriptView,
+    width: u16,
+) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
-    for block in state.conversation.live_blocks() {
+    let blocks = match transcript_view {
+        TranscriptView::Live => state.conversation.live_blocks(),
+        TranscriptView::Full => state.conversation.all_blocks(),
+    };
+    for block in blocks {
         if !lines.is_empty() {
             lines.push(Line::default());
         }
@@ -232,6 +293,16 @@ fn composer_lines(state: &SurfaceState, session: &SessionState, _width: u16) -> 
         " · ".dim(),
         session.model_provider.clone().dim(),
     ];
+    if let Some(token_usage) = state.token_usage() {
+        status_line.push(" · ".dim());
+        status_line.push(
+            token_status(
+                token_usage.last.total_tokens,
+                token_usage.model_context_window,
+            )
+            .dim(),
+        );
+    }
     if state.conversation.timeline().skipped_events() > 0 {
         status_line.push(
             format!(
@@ -245,11 +316,43 @@ fn composer_lines(state: &SurfaceState, session: &SessionState, _width: u16) -> 
         status_line.push(" · ".dim());
         status_line.push(notice.to_string().cyan());
     }
+    if state.scroll_offset > 0 {
+        status_line.push(" · ".dim());
+        status_line.push(format!("history ↑{}", state.scroll_offset).cyan());
+    }
     vec![
         status_line.into(),
         vec!["❯ ".cyan(), state.composer.clone().into()].into(),
-        "  Enter send · Ctrl+C interrupt · Ctrl+D exit".dim().into(),
+        "  Enter send · PgUp/PgDn scroll · Ctrl+O copy · Ctrl+D exit"
+            .dim()
+            .into(),
     ]
+}
+
+fn token_status(used: i64, context_window: Option<i64>) -> String {
+    let used = compact_token_count(used);
+    context_window.map_or(used.clone(), |context_window| {
+        format!("{used} / {}", compact_token_count(context_window))
+    })
+}
+
+fn compact_token_count(tokens: i64) -> String {
+    let absolute = tokens.saturating_abs();
+    if absolute >= 1_000_000 {
+        compact_scaled(tokens, 1_000_000, "M")
+    } else if absolute >= 1_000 {
+        compact_scaled(tokens, 1_000, "K")
+    } else {
+        tokens.to_string()
+    }
+}
+
+fn compact_scaled(value: i64, divisor: i64, suffix: &str) -> String {
+    if value % divisor == 0 {
+        format!("{}{suffix}", value / divisor)
+    } else {
+        format!("{:.1}{suffix}", value as f64 / divisor as f64)
+    }
 }
 
 fn request_lines(

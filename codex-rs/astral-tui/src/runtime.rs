@@ -7,6 +7,7 @@ use codex_app_server_protocol::DynamicToolCallResponse;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ServerRequest;
+use codex_app_server_protocol::ThreadTokenUsage;
 use codex_app_server_protocol::TurnStatus;
 use codex_app_server_protocol::UserInput;
 use crossterm::event::Event;
@@ -25,17 +26,21 @@ use crate::PendingRequestResponse;
 use crate::SessionError;
 use crate::SurfaceActivity;
 use crate::SurfaceState;
+use crate::TranscriptView;
+use crate::clipboard::copy_to_clipboard;
 use crate::committed_height;
 use crate::handle_key;
 use crate::handle_paste;
 use crate::paint_committed;
 use crate::render_surface;
+use crate::render_surface_with_view;
 use crate::terminal_guard::TerminalGuard;
 
 type AstralTerminal = Terminal<CrosstermBackend<Stdout>>;
 
 #[derive(Clone)]
 pub struct RunOptions {
+    pub viewport: RunViewport,
     pub viewport_rows: u16,
     pub client_tools: ClientToolRegistry,
 }
@@ -43,10 +48,17 @@ pub struct RunOptions {
 impl Default for RunOptions {
     fn default() -> Self {
         Self {
+            viewport: RunViewport::Fullscreen,
             viewport_rows: 12,
             client_tools: ClientToolRegistry::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunViewport {
+    Fullscreen,
+    Inline,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,9 +67,11 @@ pub enum RunExitReason {
     Disconnected,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RunExit {
     pub thread_id: String,
+    pub thread_name: Option<String>,
+    pub token_usage: Option<ThreadTokenUsage>,
     pub reason: RunExitReason,
 }
 
@@ -104,15 +118,16 @@ pub async fn run(mut session: AstralSession, options: RunOptions) -> Result<RunE
     let initial_state = session.state().cloned().ok_or(RunError::NoThread)?;
     let thread_id = initial_state.thread.id.clone();
     let mut surface = SurfaceState::from_session(&initial_state);
-    let mut guard = TerminalGuard::enter_inline()?;
-    let viewport_rows = desired_viewport_rows(options.viewport_rows)?;
+    let mut guard = match options.viewport {
+        RunViewport::Fullscreen => TerminalGuard::enter_alternate()?,
+        RunViewport::Inline => TerminalGuard::enter_inline()?,
+    };
+    let viewport = match options.viewport {
+        RunViewport::Fullscreen => Viewport::Fullscreen,
+        RunViewport::Inline => Viewport::Inline(desired_viewport_rows(options.viewport_rows)?),
+    };
     let backend = CrosstermBackend::new(std::io::stdout());
-    let mut terminal = AstralTerminal::with_options(
-        backend,
-        TerminalOptions {
-            viewport: Viewport::Inline(viewport_rows),
-        },
-    )?;
+    let mut terminal = AstralTerminal::with_options(backend, TerminalOptions { viewport })?;
     terminal.hide_cursor()?;
 
     let result = run_loop(&mut terminal, &mut session, &mut surface, options).await;
@@ -127,8 +142,15 @@ pub async fn run(mut session: AstralSession, options: RunOptions) -> Result<RunE
             return Err(error);
         }
     };
+    let thread_name = session.state().and_then(|state| state.thread.name.clone());
+    let token_usage = surface.token_usage().cloned();
     session.shutdown().await?;
-    Ok(RunExit { thread_id, reason })
+    Ok(RunExit {
+        thread_id,
+        thread_name,
+        token_usage,
+        reason,
+    })
 }
 
 async fn run_loop(
@@ -139,9 +161,10 @@ async fn run_loop(
 ) -> Result<RunExitReason, RunError> {
     let mut input = EventStream::new();
     let mut client_tool_tasks = JoinSet::new();
+    let mut _clipboard_lease = None;
 
     loop {
-        draw(terminal, session, surface, options.viewport_rows)?;
+        draw(terminal, session, surface, &options)?;
 
         tokio::select! {
             terminal_event = input.next() => {
@@ -149,13 +172,49 @@ async fn run_loop(
                     surface.set_activity(SurfaceActivity::Disconnected(
                         "terminal input closed".to_string(),
                     ));
-                    draw(terminal, session, surface, options.viewport_rows)?;
+                    draw(terminal, session, surface, &options)?;
                     reject_pending(session, surface).await;
                     return Ok(RunExitReason::Disconnected);
                 };
                 match terminal_event? {
                     Event::Key(key) => {
-                        let action = handle_key(surface, key);
+                        let action = match handle_key(surface, key) {
+                            InputAction::ScrollUp => {
+                                if options.viewport == RunViewport::Fullscreen {
+                                    let page_rows =
+                                        usize::from(terminal.viewport_area().height.max(1));
+                                    surface.scroll_up(page_rows);
+                                } else {
+                                    surface.set_notice(
+                                        "Use the terminal's native scrollback in inline mode",
+                                    );
+                                }
+                                InputAction::None
+                            }
+                            InputAction::ScrollDown => {
+                                if options.viewport == RunViewport::Fullscreen {
+                                    let page_rows =
+                                        usize::from(terminal.viewport_area().height.max(1));
+                                    surface.scroll_down(page_rows);
+                                }
+                                InputAction::None
+                            }
+                            InputAction::CopyLastResponse => {
+                                let response = surface.last_agent_response().map(str::to_string);
+                                match response {
+                                    Some(response) => match copy_to_clipboard(&response) {
+                                        Ok(lease) => {
+                                            _clipboard_lease = Some(lease);
+                                            surface.set_notice("Copied last agent response");
+                                        }
+                                        Err(error) => surface.set_notice(error),
+                                    },
+                                    None => surface.set_notice("No agent response to copy"),
+                                }
+                                InputAction::None
+                            }
+                            action => action,
+                        };
                         if let Some(reason) =
                             apply_input_action(session, surface, action).await?
                         {
@@ -175,7 +234,7 @@ async fn run_loop(
                     surface.set_activity(SurfaceActivity::Disconnected(
                         "app-server event stream closed".to_string(),
                     ));
-                    draw(terminal, session, surface, options.viewport_rows)?;
+                    draw(terminal, session, surface, &options)?;
                     reject_pending(session, surface).await;
                     return Ok(RunExitReason::Disconnected);
                 };
@@ -206,31 +265,43 @@ fn draw(
     terminal: &mut AstralTerminal,
     session: &AstralSession,
     surface: &mut SurfaceState,
-    configured_rows: u16,
+    options: &RunOptions,
 ) -> Result<(), RunError> {
     terminal.autoresize()?;
-    let terminal_rows = terminal.size()?.height;
-    let viewport_rows = viewport_rows(configured_rows, terminal_rows);
-    if terminal.viewport_area().height != viewport_rows {
-        terminal.set_viewport_height(viewport_rows)?;
-    }
+    if options.viewport == RunViewport::Inline {
+        let terminal_rows = terminal.size()?.height;
+        let viewport_rows = viewport_rows(options.viewport_rows, terminal_rows);
+        if terminal.viewport_area().height != viewport_rows {
+            terminal.set_viewport_height(viewport_rows)?;
+        }
 
-    let width = terminal.viewport_area().width;
-    for block in surface.drain_committable() {
-        let height = committed_height(&block, width);
-        if height > 0 {
-            terminal.insert_before(height, move |buffer| {
-                paint_committed(&block, buffer);
-            })?;
-            terminal.insert_before(1, |_buffer| {})?;
+        let width = terminal.viewport_area().width;
+        for block in surface.drain_committable() {
+            let height = committed_height(&block, width);
+            if height > 0 {
+                terminal.insert_before(height, move |buffer| {
+                    paint_committed(&block, buffer);
+                })?;
+                terminal.insert_before(1, |_buffer| {})?;
+            }
         }
     }
 
     let session_state = session.state().ok_or(RunError::NoThread)?;
     terminal.draw(|frame| {
-        if let Some(position) =
-            render_surface(surface, session_state, frame.area(), frame.buffer_mut())
-        {
+        let position = match options.viewport {
+            RunViewport::Fullscreen => render_surface_with_view(
+                surface,
+                session_state,
+                TranscriptView::Full,
+                frame.area(),
+                frame.buffer_mut(),
+            ),
+            RunViewport::Inline => {
+                render_surface(surface, session_state, frame.area(), frame.buffer_mut())
+            }
+        };
+        if let Some(position) = position {
             frame.set_cursor_position(position);
         }
     })?;
@@ -246,6 +317,7 @@ async fn apply_input_action(
     match action {
         InputAction::None | InputAction::Redraw => {}
         InputAction::Submit(prompt) => {
+            surface.scroll_to_bottom();
             surface.set_activity(SurfaceActivity::Working);
             if let Err(error) = session
                 .start_turn(vec![UserInput::Text {
@@ -264,6 +336,7 @@ async fn apply_input_action(
             Err(error) => surface.set_notice(error.to_string()),
         },
         InputAction::Exit => return Ok(Some(RunExitReason::UserRequested)),
+        InputAction::ScrollUp | InputAction::ScrollDown | InputAction::CopyLastResponse => {}
         InputAction::Resolve(resolution) => {
             if let Err(error) = session.resolve(resolution).await {
                 surface.set_notice(error.to_string());
@@ -349,6 +422,11 @@ fn handle_notification(surface: &mut SurfaceState, notification: &ServerNotifica
             surface
                 .pending_requests_mut()
                 .remove_resolved(&params.request_id);
+        }
+        ServerNotification::ThreadTokenUsageUpdated(params)
+            if params.thread_id == surface.conversation().timeline().thread_id() =>
+        {
+            surface.set_token_usage(params.token_usage.clone());
         }
         ServerNotification::Error(params) => surface.set_notice(params.error.message.clone()),
         ServerNotification::Warning(params) => surface.set_notice(params.message.clone()),
