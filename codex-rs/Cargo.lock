@@ -572,6 +572,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "astral-tui"
+version = "0.0.0"
+dependencies = [
+ "astral-tui-scrollback",
+ "codex-app-server-protocol",
+ "pretty_assertions",
+]
+
+[[package]]
 name = "astral-tui-scrollback"
 version = "0.0.0"
 dependencies = [
