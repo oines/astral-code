@@ -2,6 +2,16 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 #[test]
+fn tui_variant_defaults_to_astral_and_accepts_classic() {
+    let default: Tui = toml::from_str("").expect("deserialize default TUI settings");
+    let classic: Tui =
+        toml::from_str(r#"variant = "classic""#).expect("deserialize classic TUI variant");
+
+    assert_eq!(default.variant, UiVariant::Astral);
+    assert_eq!(classic.variant, UiVariant::Classic);
+}
+
+#[test]
 fn deserialize_skill_config_with_name_selector() {
     let cfg: SkillConfig = toml::from_str(
         r#"

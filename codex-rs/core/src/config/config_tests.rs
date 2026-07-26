@@ -66,6 +66,7 @@ use codex_config::types::Tui;
 use codex_config::types::TuiKeymap;
 use codex_config::types::TuiNotificationSettings;
 use codex_config::types::TuiPetAnchor;
+use codex_config::types::UiVariant;
 use codex_config::types::WindowsSandboxModeToml;
 use codex_config::types::WindowsToml;
 use codex_core_plugins::PluginsManager;
@@ -733,6 +734,7 @@ fn config_toml_deserializes_model_availability_nux() {
     assert_eq!(
         cfg.tui.expect("tui config should deserialize"),
         Tui {
+            variant: UiVariant::Astral,
             notification_settings: TuiNotificationSettings::default(),
             animations: true,
             show_tooltips: true,
@@ -3481,6 +3483,7 @@ fn tui_config_missing_notifications_field_defaults_to_enabled() {
     assert_eq!(
         tui,
         Tui {
+            variant: UiVariant::Astral,
             notification_settings: TuiNotificationSettings::default(),
             animations: true,
             show_tooltips: true,
@@ -3499,6 +3502,33 @@ fn tui_config_missing_notifications_field_defaults_to_enabled() {
             terminal_resize_reflow_max_rows: None,
         }
     );
+}
+
+#[tokio::test]
+async fn runtime_config_resolves_tui_variant() {
+    let default = Config::load_from_base_config_with_overrides(
+        ConfigToml::default(),
+        ConfigOverrides::default(),
+        tempdir().expect("tempdir").abs(),
+    )
+    .await
+    .expect("load default config");
+    let classic = Config::load_from_base_config_with_overrides(
+        ConfigToml {
+            tui: Some(Tui {
+                variant: UiVariant::Classic,
+                ..Tui::default()
+            }),
+            ..ConfigToml::default()
+        },
+        ConfigOverrides::default(),
+        tempdir().expect("tempdir").abs(),
+    )
+    .await
+    .expect("load classic TUI config");
+
+    assert_eq!(default.tui_variant, UiVariant::Astral);
+    assert_eq!(classic.tui_variant, UiVariant::Classic);
 }
 
 #[tokio::test]

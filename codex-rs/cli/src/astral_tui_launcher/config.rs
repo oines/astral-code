@@ -15,6 +15,7 @@ use codex_app_server_protocol::ConfigWarningNotification;
 use codex_arg0::Arg0DispatchPaths;
 use codex_config::CloudConfigBundleLoader;
 use codex_config::LoaderOverrides;
+use codex_config::types::UiVariant;
 use codex_core::config::Config;
 use codex_core::config::ConfigBuilder;
 use codex_core::config::ConfigOverrides;
@@ -61,12 +62,47 @@ pub(super) struct LaunchContext {
     pub target: ThreadParamsMode,
 }
 
-pub(super) async fn launch_context(
+pub(super) struct PreparedLaunch {
+    arg0_paths: Arg0DispatchPaths,
+    cli_kv_overrides: Vec<(String, toml::Value)>,
+    loader_overrides: LoaderOverrides,
+    strict_config: bool,
+    cloud_config_bundle: CloudConfigBundleLoader,
+    config: Arc<Config>,
+    target: AppServerTarget,
+}
+
+impl PreparedLaunch {
+    pub fn configured_ui(&self) -> UiVariant {
+        self.config.tui_variant
+    }
+
+    pub async fn start(self) -> io::Result<LaunchContext> {
+        let target_mode = self.target.params_mode();
+        let client = start_client(
+            self.target,
+            self.arg0_paths,
+            Arc::clone(&self.config),
+            self.cli_kv_overrides,
+            self.loader_overrides,
+            self.strict_config,
+            self.cloud_config_bundle,
+        )
+        .await?;
+        Ok(LaunchContext {
+            client,
+            config: self.config,
+            target: target_mode,
+        })
+    }
+}
+
+pub(super) async fn prepare_launch(
     cli: &Cli,
     arg0_paths: Arg0DispatchPaths,
     loader_overrides: LoaderOverrides,
     explicit_remote_endpoint: Option<RemoteAppServerEndpoint>,
-) -> io::Result<LaunchContext> {
+) -> io::Result<PreparedLaunch> {
     let strict_config = cli.strict_config;
     let mut raw_overrides = cli.config_overrides.raw_overrides.clone();
     if cli.web_search {
@@ -94,22 +130,15 @@ pub(super) async fn launch_context(
         cli.bypass_hook_trust,
     )
     .await?;
-    let params_mode = target.params_mode();
     let config = Arc::new(config);
-    let client = start_client(
-        target,
+    Ok(PreparedLaunch {
         arg0_paths,
-        Arc::clone(&config),
         cli_kv_overrides,
         loader_overrides,
         strict_config,
         cloud_config_bundle,
-    )
-    .await?;
-    Ok(LaunchContext {
-        client,
         config,
-        target: params_mode,
+        target,
     })
 }
 
@@ -335,3 +364,7 @@ async fn start_client(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "config_tests.rs"]
+mod tests;

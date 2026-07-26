@@ -57,6 +57,7 @@ use codex_config::types::ToolSuggestDiscoverable;
 use codex_config::types::TuiKeymap;
 use codex_config::types::TuiNotificationSettings;
 use codex_config::types::TuiPetAnchor;
+use codex_config::types::UiVariant;
 use codex_config::types::UriBasedFileOpener;
 use codex_config::types::WindowsSandboxModeToml;
 use codex_core_plugins::PluginsConfigInput;
@@ -738,6 +739,9 @@ pub struct Config {
 
     /// TUI notification settings, including enabled events, delivery method, and focus condition.
     pub tui_notifications: TuiNotificationSettings,
+
+    /// Interactive terminal UI implementation selected by `[tui] variant`.
+    pub tui_variant: UiVariant,
 
     /// Enable ASCII animations and shimmer effects in the TUI.
     pub animations: bool,
@@ -3848,6 +3852,7 @@ impl Config {
                 .as_ref()
                 .map(|t| t.notification_settings.clone())
                 .unwrap_or_default(),
+            tui_variant: cfg.tui.as_ref().map(|t| t.variant).unwrap_or_default(),
             animations: cfg.tui.as_ref().map(|t| t.animations).unwrap_or(true),
             show_tooltips: cfg.tui.as_ref().map(|t| t.show_tooltips).unwrap_or(true),
             model_availability_nux: cfg
