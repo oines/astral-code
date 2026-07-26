@@ -373,6 +373,37 @@ fn common_params(
     let send_approval_override = !preserve_thread_context
         || cli.approval_policy.is_some()
         || cli.dangerously_bypass_approvals_and_sandbox;
+    let runtime_workspace_roots = match (mode, preserve_thread_context, cli.add_dir.is_empty()) {
+        (ThreadParamsMode::Remote, _, _) => None,
+        (ThreadParamsMode::Local, false, _) => Some(config.workspace_roots.clone()),
+        (ThreadParamsMode::Local, true, true) => None,
+        (ThreadParamsMode::Local, true, false) => {
+            let mut roots = vec![
+                codex_utils_absolute_path::AbsolutePathBuf::resolve_path_against_base(
+                    ".",
+                    effective_cwd,
+                ),
+            ];
+            for root in &cli.add_dir {
+                let root =
+                    codex_utils_absolute_path::AbsolutePathBuf::resolve_path_against_base(
+                        root,
+                        effective_cwd,
+                    );
+                if !roots.contains(&root) {
+                    roots.push(root);
+                }
+            }
+            Some(roots)
+        }
+    };
+    let request_config = if preserve_thread_context {
+        cli.bypass_hook_trust.then(|| {
+            HashMap::from([("bypass_hook_trust".to_string(), serde_json::Value::Bool(true))])
+        })
+    } else {
+        Some(config_request_overrides(config))
+    };
     CommonParams {
         model: send_model_override.then(|| config.model.clone()).flatten(),
         model_provider: (matches!(mode, ThreadParamsMode::Local) && send_model_override)
@@ -392,16 +423,13 @@ fn common_params(
                 .as_ref()
                 .map(|cwd| cwd.to_string_lossy().to_string()),
         },
-        runtime_workspace_roots: (matches!(mode, ThreadParamsMode::Local)
-            && !preserve_thread_context)
-            .then(|| config.workspace_roots.clone()),
+        runtime_workspace_roots,
         approval_policy: send_approval_override
             .then(|| config.permissions.approval_policy.value().into()),
-        approvals_reviewer: (!preserve_thread_context)
-            .then(|| config.approvals_reviewer.into()),
+        approvals_reviewer: (!preserve_thread_context).then(|| config.approvals_reviewer.into()),
         sandbox,
         permissions,
-        config: (!preserve_thread_context).then(|| config_request_overrides(config)),
+        config: request_config,
     }
 }
 

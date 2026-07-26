@@ -9,6 +9,7 @@ use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::config_types::Verbosity;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_tui::Cli;
+use codex_utils_absolute_path::AbsolutePathBuf;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 
@@ -102,6 +103,45 @@ async fn explicit_local_cwd_overrides_recorded_thread_cwd() {
     );
     assert!(params.runtime_workspace_roots.is_some());
     assert!(params.config.is_some());
+}
+
+#[tokio::test]
+async fn local_resume_preserves_explicit_add_dir_and_hook_trust_bypass() {
+    let current = tempfile::tempdir().expect("create current cwd");
+    let history = tempfile::tempdir().expect("create historical cwd");
+    let extra = tempfile::tempdir().expect("create additional cwd");
+    let cli = Cli::try_parse_from([
+        "astral",
+        "--add-dir",
+        extra.path().to_str().expect("utf-8 additional cwd"),
+        "--dangerously-bypass-hook-trust",
+    ])
+    .expect("parse CLI");
+    let config = ConfigBuilder::default()
+        .codex_home(current.path().to_path_buf())
+        .fallback_cwd(Some(current.path().to_path_buf()))
+        .build()
+        .await
+        .expect("build isolated config");
+    let thread = thread("thread-1", history.path());
+
+    let params = resume_params(&thread, &cli, &config, ThreadParamsMode::Local);
+
+    assert_eq!(
+        params.runtime_workspace_roots,
+        Some(vec![
+            AbsolutePathBuf::try_from(history.path().to_path_buf()).expect("absolute history cwd"),
+            AbsolutePathBuf::try_from(extra.path().to_path_buf()).expect("absolute additional cwd"),
+        ])
+    );
+    assert_eq!(
+        params.config,
+        Some(HashMap::from([(
+            "bypass_hook_trust".to_string(),
+            json!(true),
+        )]))
+    );
+    assert_eq!(params.permissions, None);
 }
 
 #[tokio::test]
