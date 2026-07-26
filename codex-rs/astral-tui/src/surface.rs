@@ -195,7 +195,10 @@ pub fn render_surface(
             .map(Line::width)
             .unwrap_or(2);
         Position::new(
-            area.x + u16::try_from(prompt).unwrap_or(area.width).min(area.width),
+            area.x
+                + u16::try_from(prompt)
+                    .unwrap_or(area.width)
+                    .min(area.width.saturating_sub(1)),
             area.y + area.height.saturating_sub(2),
         )
     })
