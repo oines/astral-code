@@ -106,8 +106,36 @@ async fn oss_uses_the_configured_provider() {
     .await
     .expect("resolve provider");
 
-    assert_eq!(provider.id.as_deref(), Some("ollama"));
-    assert_eq!(provider.persist, None);
+    assert_eq!(provider.as_deref(), Some("ollama"));
+}
+
+#[tokio::test]
+async fn oss_without_configuration_defers_interactive_selection() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let config_path = temp_dir.path().join("config.toml");
+    std::fs::write(&config_path, "").expect("write config");
+    let cli = Cli::parse_from([
+        "astral",
+        "--oss",
+        "-C",
+        temp_dir.path().to_str().expect("utf-8 path"),
+    ]);
+    let loader_overrides = LoaderOverrides {
+        user_config_path: Some(AbsolutePathBuf::try_from(config_path).expect("absolute config")),
+        ..LoaderOverrides::without_managed_config_for_tests()
+    };
+
+    let provider = resolve_launch_model_provider(
+        &cli,
+        &[],
+        &loader_overrides,
+        CloudConfigBundleLoader::default(),
+        /*uses_remote_workspace*/ false,
+    )
+    .await
+    .expect("resolve provider");
+
+    assert_eq!(provider, None);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
