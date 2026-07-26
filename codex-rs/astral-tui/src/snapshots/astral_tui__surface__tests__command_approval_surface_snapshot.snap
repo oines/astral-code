@@ -1,0 +1,16 @@
+---
+source: astral-tui/src/surface_tests.rs
+expression: buffer_text(&buffer)
+---
+❯ inspect this repo
+
+I’m tracing the relevant data flow.
+
+
+
+
+
+◇ Action required
+  $ cargo test --workspace
+  needs network access
+  [y] allow · [a] allow session · [n] deny · [esc] cancel

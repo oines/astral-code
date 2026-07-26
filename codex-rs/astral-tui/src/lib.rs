@@ -8,6 +8,7 @@
 mod conversation;
 mod request;
 mod session;
+mod surface;
 mod timeline;
 
 pub use astral_tui_scrollback::PresentationBlock;
@@ -27,6 +28,11 @@ pub use request::RequestResolution;
 pub use session::AstralSession;
 pub use session::SessionError;
 pub use session::SessionState;
+pub use surface::SurfaceActivity;
+pub use surface::SurfaceState;
+pub use surface::committed_height;
+pub use surface::paint_committed;
+pub use surface::render_surface;
 pub use timeline::ReduceOutcome;
 pub use timeline::TimelineEntry;
 pub use timeline::TimelineState;

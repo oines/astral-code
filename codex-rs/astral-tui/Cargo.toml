@@ -8,9 +8,11 @@ license.workspace = true
 astral-tui-scrollback = { workspace = true }
 codex-app-server-client = { workspace = true }
 codex-app-server-protocol = { workspace = true }
+ratatui = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
+insta = { workspace = true }
 pretty_assertions = { workspace = true }
 
 [lints]
