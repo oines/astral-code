@@ -576,6 +576,7 @@ name = "astral-tui-scrollback"
 version = "0.0.0"
 dependencies = [
  "codex-app-server-protocol",
+ "serde_json",
 ]
 
 [[package]]
