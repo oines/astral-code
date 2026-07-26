@@ -7,7 +7,9 @@ use serde_json::json;
 
 use super::SurfaceActivity;
 use super::SurfaceState;
+use super::TranscriptView;
 use super::render_surface;
+use super::render_surface_with_view;
 use crate::SessionState;
 
 fn session_state() -> SessionState {
@@ -111,6 +113,21 @@ fn command_approval_surface_snapshot() {
     let area = Rect::new(0, 0, 72, 12);
     let mut buffer = Buffer::empty(area);
     render_surface(&state, &session, area, &mut buffer);
+
+    insta::assert_snapshot!(buffer_text(&buffer));
+}
+
+#[test]
+fn fullscreen_surface_keeps_committed_history_snapshot() {
+    let mut session = session_state();
+    session.thread.turns[0].status = codex_app_server_protocol::TurnStatus::Completed;
+    session.thread.turns[0].completed_at = Some(2);
+    session.active_turn_id = None;
+    let mut state = SurfaceState::from_session(&session);
+    assert_eq!(state.drain_committable().len(), 2);
+    let area = Rect::new(0, 0, 72, 12);
+    let mut buffer = Buffer::empty(area);
+    render_surface_with_view(&state, &session, TranscriptView::Full, area, &mut buffer);
 
     insta::assert_snapshot!(buffer_text(&buffer));
 }

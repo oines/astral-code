@@ -25,17 +25,20 @@ use crate::PendingRequestResponse;
 use crate::SessionError;
 use crate::SurfaceActivity;
 use crate::SurfaceState;
+use crate::TranscriptView;
 use crate::committed_height;
 use crate::handle_key;
 use crate::handle_paste;
 use crate::paint_committed;
 use crate::render_surface;
+use crate::render_surface_with_view;
 use crate::terminal_guard::TerminalGuard;
 
 type AstralTerminal = Terminal<CrosstermBackend<Stdout>>;
 
 #[derive(Clone)]
 pub struct RunOptions {
+    pub viewport: RunViewport,
     pub viewport_rows: u16,
     pub client_tools: ClientToolRegistry,
 }
@@ -43,10 +46,17 @@ pub struct RunOptions {
 impl Default for RunOptions {
     fn default() -> Self {
         Self {
+            viewport: RunViewport::Fullscreen,
             viewport_rows: 12,
             client_tools: ClientToolRegistry::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunViewport {
+    Fullscreen,
+    Inline,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -104,15 +114,16 @@ pub async fn run(mut session: AstralSession, options: RunOptions) -> Result<RunE
     let initial_state = session.state().cloned().ok_or(RunError::NoThread)?;
     let thread_id = initial_state.thread.id.clone();
     let mut surface = SurfaceState::from_session(&initial_state);
-    let mut guard = TerminalGuard::enter_inline()?;
-    let viewport_rows = desired_viewport_rows(options.viewport_rows)?;
+    let mut guard = match options.viewport {
+        RunViewport::Fullscreen => TerminalGuard::enter_alternate()?,
+        RunViewport::Inline => TerminalGuard::enter_inline()?,
+    };
+    let viewport = match options.viewport {
+        RunViewport::Fullscreen => Viewport::Fullscreen,
+        RunViewport::Inline => Viewport::Inline(desired_viewport_rows(options.viewport_rows)?),
+    };
     let backend = CrosstermBackend::new(std::io::stdout());
-    let mut terminal = AstralTerminal::with_options(
-        backend,
-        TerminalOptions {
-            viewport: Viewport::Inline(viewport_rows),
-        },
-    )?;
+    let mut terminal = AstralTerminal::with_options(backend, TerminalOptions { viewport })?;
     terminal.hide_cursor()?;
 
     let result = run_loop(&mut terminal, &mut session, &mut surface, options).await;
@@ -141,7 +152,7 @@ async fn run_loop(
     let mut client_tool_tasks = JoinSet::new();
 
     loop {
-        draw(terminal, session, surface, options.viewport_rows)?;
+        draw(terminal, session, surface, &options)?;
 
         tokio::select! {
             terminal_event = input.next() => {
@@ -149,7 +160,7 @@ async fn run_loop(
                     surface.set_activity(SurfaceActivity::Disconnected(
                         "terminal input closed".to_string(),
                     ));
-                    draw(terminal, session, surface, options.viewport_rows)?;
+                    draw(terminal, session, surface, &options)?;
                     reject_pending(session, surface).await;
                     return Ok(RunExitReason::Disconnected);
                 };
@@ -175,7 +186,7 @@ async fn run_loop(
                     surface.set_activity(SurfaceActivity::Disconnected(
                         "app-server event stream closed".to_string(),
                     ));
-                    draw(terminal, session, surface, options.viewport_rows)?;
+                    draw(terminal, session, surface, &options)?;
                     reject_pending(session, surface).await;
                     return Ok(RunExitReason::Disconnected);
                 };
@@ -206,31 +217,43 @@ fn draw(
     terminal: &mut AstralTerminal,
     session: &AstralSession,
     surface: &mut SurfaceState,
-    configured_rows: u16,
+    options: &RunOptions,
 ) -> Result<(), RunError> {
     terminal.autoresize()?;
-    let terminal_rows = terminal.size()?.height;
-    let viewport_rows = viewport_rows(configured_rows, terminal_rows);
-    if terminal.viewport_area().height != viewport_rows {
-        terminal.set_viewport_height(viewport_rows)?;
-    }
+    if options.viewport == RunViewport::Inline {
+        let terminal_rows = terminal.size()?.height;
+        let viewport_rows = viewport_rows(options.viewport_rows, terminal_rows);
+        if terminal.viewport_area().height != viewport_rows {
+            terminal.set_viewport_height(viewport_rows)?;
+        }
 
-    let width = terminal.viewport_area().width;
-    for block in surface.drain_committable() {
-        let height = committed_height(&block, width);
-        if height > 0 {
-            terminal.insert_before(height, move |buffer| {
-                paint_committed(&block, buffer);
-            })?;
-            terminal.insert_before(1, |_buffer| {})?;
+        let width = terminal.viewport_area().width;
+        for block in surface.drain_committable() {
+            let height = committed_height(&block, width);
+            if height > 0 {
+                terminal.insert_before(height, move |buffer| {
+                    paint_committed(&block, buffer);
+                })?;
+                terminal.insert_before(1, |_buffer| {})?;
+            }
         }
     }
 
     let session_state = session.state().ok_or(RunError::NoThread)?;
     terminal.draw(|frame| {
-        if let Some(position) =
-            render_surface(surface, session_state, frame.area(), frame.buffer_mut())
-        {
+        let position = match options.viewport {
+            RunViewport::Fullscreen => render_surface_with_view(
+                surface,
+                session_state,
+                TranscriptView::Full,
+                frame.area(),
+                frame.buffer_mut(),
+            ),
+            RunViewport::Inline => {
+                render_surface(surface, session_state, frame.area(), frame.buffer_mut())
+            }
+        };
+        if let Some(position) = position {
             frame.set_cursor_position(position);
         }
     })?;

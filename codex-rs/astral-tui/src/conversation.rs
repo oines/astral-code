@@ -102,6 +102,14 @@ impl ConversationState {
             .collect()
     }
 
+    pub fn all_blocks(&self) -> Vec<PresentationBlock> {
+        self.timeline
+            .entries()
+            .iter()
+            .filter_map(project_entry)
+            .collect()
+    }
+
     pub fn committed_entries(&self) -> usize {
         self.committed_entries
     }

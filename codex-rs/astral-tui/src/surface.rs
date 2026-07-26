@@ -25,6 +25,12 @@ pub enum SurfaceActivity {
     Disconnected(String),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TranscriptView {
+    Live,
+    Full,
+}
+
 #[derive(Debug)]
 pub struct SurfaceState {
     conversation: ConversationState,
@@ -143,6 +149,16 @@ pub fn render_surface(
     area: Rect,
     buffer: &mut Buffer,
 ) -> Option<Position> {
+    render_surface_with_view(state, session, TranscriptView::Live, area, buffer)
+}
+
+pub(crate) fn render_surface_with_view(
+    state: &SurfaceState,
+    session: &SessionState,
+    transcript_view: TranscriptView,
+    area: Rect,
+    buffer: &mut Buffer,
+) -> Option<Position> {
     Clear.render(area, buffer);
     if area.is_empty() {
         return None;
@@ -156,7 +172,7 @@ pub fn render_surface(
         .unwrap_or(u16::MAX)
         .min(area.height);
     let live_height = area.height.saturating_sub(footer_height);
-    let live_lines = live_lines(state, area.width);
+    let live_lines = conversation_lines(state, transcript_view, area.width);
     let visible_live = live_lines
         .into_iter()
         .rev()
@@ -204,9 +220,17 @@ pub fn render_surface(
     })
 }
 
-fn live_lines(state: &SurfaceState, width: u16) -> Vec<Line<'static>> {
+fn conversation_lines(
+    state: &SurfaceState,
+    transcript_view: TranscriptView,
+    width: u16,
+) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
-    for block in state.conversation.live_blocks() {
+    let blocks = match transcript_view {
+        TranscriptView::Live => state.conversation.live_blocks(),
+        TranscriptView::Full => state.conversation.all_blocks(),
+    };
+    for block in blocks {
         if !lines.is_empty() {
             lines.push(Line::default());
         }

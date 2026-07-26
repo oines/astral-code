@@ -3,6 +3,7 @@ use std::io;
 use astral_tui::LaunchOptions;
 use astral_tui::RunExitReason;
 use astral_tui::RunOptions;
+use astral_tui::RunViewport;
 use codex_app_server_client::RemoteAppServerEndpoint;
 use codex_app_server_protocol::UserInput;
 use codex_arg0::Arg0DispatchPaths;
@@ -65,7 +66,14 @@ pub(crate) async fn run_main(
     };
     let mut options = LaunchOptions::new(thread);
     options.initial_input = initial_input(prompt, images);
-    options.runtime = RunOptions::default();
+    options.runtime = RunOptions {
+        viewport: if cli.no_alt_screen {
+            RunViewport::Inline
+        } else {
+            RunViewport::Fullscreen
+        },
+        ..RunOptions::default()
+    };
 
     let exit = astral_tui::run_main(context.client, options)
         .await

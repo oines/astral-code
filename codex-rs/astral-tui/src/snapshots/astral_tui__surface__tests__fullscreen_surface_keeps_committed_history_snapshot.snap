@@ -1,0 +1,16 @@
+---
+source: astral-tui/src/surface_tests.rs
+expression: buffer_text(&buffer)
+---
+❯ inspect this repo
+
+I’m tracing the relevant data flow.
+
+
+
+
+
+
+◆ Ready  claude-sonnet-4 · anthropic
+❯
+  Enter send · Ctrl+C interrupt · Ctrl+D exit
