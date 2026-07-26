@@ -164,3 +164,65 @@ fn conversation_blocks_snapshot() {
         .join("\n\n");
     assert_snapshot!(rendered);
 }
+
+#[test]
+fn subagent_lifecycle_blocks_snapshot() {
+    let items = [
+        ThreadItem::CollabAgentToolCall {
+            id: "spawn-1".to_string(),
+            tool: CollabAgentTool::SpawnAgent,
+            status: CollabAgentToolCallStatus::Completed,
+            sender_thread_id: "root".to_string(),
+            receiver_thread_ids: vec!["agent-research".to_string()],
+            prompt: Some("Inspect the Grok subagent rendering semantics".to_string()),
+            model: Some("grok-code-fast".to_string()),
+            reasoning_effort: None,
+            agents_states: HashMap::from([(
+                "agent-research".to_string(),
+                CollabAgentState {
+                    status: CollabAgentStatus::Running,
+                    message: None,
+                },
+            )]),
+        },
+        ThreadItem::CollabAgentToolCall {
+            id: "wait-1".to_string(),
+            tool: CollabAgentTool::Wait,
+            status: CollabAgentToolCallStatus::Failed,
+            sender_thread_id: "root".to_string(),
+            receiver_thread_ids: vec!["agent-research".to_string(), "agent-tests".to_string()],
+            prompt: None,
+            model: None,
+            reasoning_effort: None,
+            agents_states: HashMap::from([
+                (
+                    "agent-research".to_string(),
+                    CollabAgentState {
+                        status: CollabAgentStatus::Completed,
+                        message: Some("Mapped spawn, wait, resume and close.".to_string()),
+                    },
+                ),
+                (
+                    "agent-tests".to_string(),
+                    CollabAgentState {
+                        status: CollabAgentStatus::Errored,
+                        message: Some("snapshot mismatch".to_string()),
+                    },
+                ),
+            ]),
+        },
+    ];
+
+    let rendered = items
+        .into_iter()
+        .map(|item| render(item, false))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_snapshot!(rendered);
+}
+use std::collections::HashMap;
+
+use codex_app_server_protocol::CollabAgentState;
+use codex_app_server_protocol::CollabAgentStatus;
+use codex_app_server_protocol::CollabAgentTool;
+use codex_app_server_protocol::CollabAgentToolCallStatus;

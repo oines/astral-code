@@ -1,7 +1,5 @@
 use std::path::Path;
 
-use codex_app_server_protocol::CollabAgentTool;
-use codex_app_server_protocol::CollabAgentToolCallStatus;
 use codex_app_server_protocol::CommandAction;
 use codex_app_server_protocol::CommandExecutionStatus;
 use codex_app_server_protocol::CoreToolCallStatus;
@@ -155,39 +153,6 @@ pub(super) fn core_tool_status(status: CoreToolCallStatus) -> ToolStatus {
         CoreToolCallStatus::Completed => ToolStatus::Success,
         CoreToolCallStatus::Failed => ToolStatus::Failed,
         CoreToolCallStatus::Interrupted => ToolStatus::Interrupted,
-    }
-}
-
-pub(super) fn collab_status(status: &CollabAgentToolCallStatus) -> ToolStatus {
-    match status {
-        CollabAgentToolCallStatus::InProgress => ToolStatus::Running,
-        CollabAgentToolCallStatus::Completed => ToolStatus::Success,
-        CollabAgentToolCallStatus::Failed => ToolStatus::Failed,
-    }
-}
-
-pub(super) fn collab_name(tool: &CollabAgentTool) -> &'static str {
-    match tool {
-        CollabAgentTool::SpawnAgent => "spawn_agent",
-        CollabAgentTool::SendInput => "send_input",
-        CollabAgentTool::ResumeAgent => "resume_agent",
-        CollabAgentTool::Wait => "wait",
-        CollabAgentTool::CloseAgent => "close_agent",
-    }
-}
-
-pub(super) fn collab_title(tool: &CollabAgentTool, receiver_thread_ids: &[String]) -> String {
-    let action = match tool {
-        CollabAgentTool::SpawnAgent => "Spawned agent",
-        CollabAgentTool::SendInput => "Sent input",
-        CollabAgentTool::ResumeAgent => "Resumed agent",
-        CollabAgentTool::Wait => "Waited for agent",
-        CollabAgentTool::CloseAgent => "Closed agent",
-    };
-    if receiver_thread_ids.is_empty() {
-        action.to_string()
-    } else {
-        format!("{action} {}", receiver_thread_ids.join(", "))
     }
 }
 
