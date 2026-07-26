@@ -24,6 +24,7 @@ use wiremock::matchers::method;
 use wiremock::matchers::path;
 
 use super::AppServerTarget;
+use super::ThreadConfigLoader;
 use super::can_reuse_daemon;
 use super::config_lookup_cwd;
 use super::resolve_launch_model_provider;
@@ -77,6 +78,61 @@ fn local_config_loading_uses_explicit_absolute_cwd() {
         config_lookup_cwd(Some(cwd.as_path()), /*uses_remote_workspace*/ false,)
             .expect("local cwd"),
         Some(cwd)
+    );
+}
+
+#[tokio::test]
+async fn historical_workspace_roots_append_explicit_add_dirs() {
+    let codex_home = tempfile::tempdir().expect("temporary Astral home");
+    let history = tempfile::tempdir().expect("historical cwd");
+    let configured = tempfile::tempdir().expect("configured writable root");
+    let additional = tempfile::tempdir().expect("additional writable root");
+    let config_path = codex_home.path().join("config.toml");
+    std::fs::write(
+        &config_path,
+        format!(
+            r#"
+sandbox_mode = "workspace-write"
+
+[sandbox_workspace_write]
+writable_roots = [{}]
+
+[projects.{}]
+trust_level = "trusted"
+"#,
+            serde_json::json!(configured.path().to_string_lossy()),
+            serde_json::json!(history.path().to_string_lossy()),
+        ),
+    )
+    .expect("write config");
+    let loader = ThreadConfigLoader {
+        cli_kv_overrides: Vec::new(),
+        loader_overrides: LoaderOverrides {
+            user_config_path: Some(
+                AbsolutePathBuf::try_from(config_path).expect("absolute config path"),
+            ),
+            ..LoaderOverrides::without_managed_config_for_tests()
+        },
+        strict_config: false,
+        cloud_config_bundle: CloudConfigBundleLoader::default(),
+    };
+    let history =
+        AbsolutePathBuf::try_from(history.path().to_path_buf()).expect("absolute history");
+
+    let roots = loader
+        .workspace_roots_for_cwd(&history, &[additional.path().to_path_buf()])
+        .await
+        .expect("load historical workspace roots");
+
+    assert_eq!(
+        roots,
+        vec![
+            history,
+            AbsolutePathBuf::try_from(additional.path().to_path_buf())
+                .expect("absolute additional root"),
+            AbsolutePathBuf::try_from(configured.path().to_path_buf())
+                .expect("absolute configured root"),
+        ]
     );
 }
 

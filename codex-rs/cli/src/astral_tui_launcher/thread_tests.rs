@@ -59,7 +59,13 @@ async fn local_resume_preserves_recorded_thread_cwd() {
     let cli = Cli::try_parse_from(["astral"]).expect("parse CLI");
     let thread = thread("thread-1", history.path());
 
-    let params = resume_params(&thread, &cli, &config, ThreadParamsMode::Local);
+    let params = resume_params(
+        &thread,
+        &cli,
+        &config,
+        ThreadParamsMode::Local,
+        /*preserved_workspace_roots*/ None,
+    );
 
     assert_eq!(
         params.cwd.as_deref(),
@@ -95,7 +101,13 @@ async fn explicit_local_cwd_overrides_recorded_thread_cwd() {
         .expect("build isolated config");
     let thread = thread("thread-1", history.path());
 
-    let params = resume_params(&thread, &cli, &config, ThreadParamsMode::Local);
+    let params = resume_params(
+        &thread,
+        &cli,
+        &config,
+        ThreadParamsMode::Local,
+        /*preserved_workspace_roots*/ None,
+    );
 
     assert_eq!(
         params.cwd.as_deref(),
@@ -125,14 +137,21 @@ async fn local_resume_preserves_explicit_add_dir_and_hook_trust_bypass() {
         .expect("build isolated config");
     let thread = thread("thread-1", history.path());
 
-    let params = resume_params(&thread, &cli, &config, ThreadParamsMode::Local);
+    let preserved_workspace_roots = vec![
+        AbsolutePathBuf::try_from(history.path().to_path_buf()).expect("absolute history cwd"),
+        AbsolutePathBuf::try_from(extra.path().to_path_buf()).expect("absolute additional cwd"),
+    ];
+    let params = resume_params(
+        &thread,
+        &cli,
+        &config,
+        ThreadParamsMode::Local,
+        Some(preserved_workspace_roots.clone()),
+    );
 
     assert_eq!(
         params.runtime_workspace_roots,
-        Some(vec![
-            AbsolutePathBuf::try_from(history.path().to_path_buf()).expect("absolute history cwd"),
-            AbsolutePathBuf::try_from(extra.path().to_path_buf()).expect("absolute additional cwd"),
-        ])
+        Some(preserved_workspace_roots)
     );
     assert_eq!(
         params.config,

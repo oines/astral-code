@@ -56,6 +56,7 @@ pub(crate) async fn run_main(
         &cli,
         context.config.as_ref(),
         context.target,
+        &context.thread_config_loader,
     )
     .await?;
     let Some(thread) = launch else {

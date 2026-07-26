@@ -26,6 +26,7 @@ use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
 use codex_protocol::models::PermissionProfile;
 use codex_tui::Cli;
 
+use super::config::ThreadConfigLoader;
 use super::config::ThreadParamsMode;
 
 pub(super) async fn resolve_launch(
@@ -33,6 +34,7 @@ pub(super) async fn resolve_launch(
     cli: &Cli,
     config: &Config,
     mode: ThreadParamsMode,
+    config_loader: &ThreadConfigLoader,
 ) -> io::Result<Option<ThreadLaunch>> {
     if cli.resume_session_id.is_some() || cli.resume_last || cli.resume_picker {
         if cli.resume_picker {
@@ -53,8 +55,14 @@ pub(super) async fn resolve_launch(
             let Some(thread) = selected else {
                 return Ok(None);
             };
+            let workspace_roots =
+                preserved_workspace_roots(config_loader, &thread, cli, mode).await?;
             return Ok(Some(ThreadLaunch::Resume(resume_params(
-                &thread, cli, config, mode,
+                &thread,
+                cli,
+                config,
+                mode,
+                workspace_roots,
             ))));
         }
         let thread = resolve_thread(
@@ -68,7 +76,11 @@ pub(super) async fn resolve_launch(
         )
         .await?;
         return Ok(Some(match thread {
-            Some(thread) => ThreadLaunch::Resume(resume_params(&thread, cli, config, mode)),
+            Some(thread) => {
+                let workspace_roots =
+                    preserved_workspace_roots(config_loader, &thread, cli, mode).await?;
+                ThreadLaunch::Resume(resume_params(&thread, cli, config, mode, workspace_roots))
+            }
             None => ThreadLaunch::Start(start_params(cli, config, mode)),
         }));
     }
@@ -91,8 +103,14 @@ pub(super) async fn resolve_launch(
             let Some(thread) = selected else {
                 return Ok(None);
             };
+            let workspace_roots =
+                preserved_workspace_roots(config_loader, &thread, cli, mode).await?;
             return Ok(Some(ThreadLaunch::Fork(fork_params(
-                &thread, cli, config, mode,
+                &thread,
+                cli,
+                config,
+                mode,
+                workspace_roots,
             ))));
         }
         let thread = resolve_thread(
@@ -106,7 +124,11 @@ pub(super) async fn resolve_launch(
         )
         .await?;
         return Ok(Some(match thread {
-            Some(thread) => ThreadLaunch::Fork(fork_params(&thread, cli, config, mode)),
+            Some(thread) => {
+                let workspace_roots =
+                    preserved_workspace_roots(config_loader, &thread, cli, mode).await?;
+                ThreadLaunch::Fork(fork_params(&thread, cli, config, mode, workspace_roots))
+            }
             None => ThreadLaunch::Start(start_params(cli, config, mode)),
         }));
     }
@@ -244,7 +266,9 @@ fn thread_list_params(
 }
 
 fn start_params(cli: &Cli, config: &Config, mode: ThreadParamsMode) -> ThreadStartParams {
-    let mut params = common_params(cli, config, mode, /*existing_thread*/ None);
+    let mut params = common_params(
+        cli, config, mode, /*existing_thread*/ None, /*preserved_workspace_roots*/ None,
+    );
     ThreadStartParams {
         model: params.model.take(),
         model_provider: params.model_provider.take(),
@@ -271,8 +295,9 @@ fn resume_params(
     cli: &Cli,
     config: &Config,
     mode: ThreadParamsMode,
+    preserved_workspace_roots: Option<Vec<codex_utils_absolute_path::AbsolutePathBuf>>,
 ) -> ThreadResumeParams {
-    let params = common_params(cli, config, mode, Some(thread));
+    let params = common_params(cli, config, mode, Some(thread), preserved_workspace_roots);
     let preserve_thread_context = preserves_thread_context(cli, mode);
     ThreadResumeParams {
         thread_id: thread.id.clone(),
@@ -304,8 +329,9 @@ fn fork_params(
     cli: &Cli,
     config: &Config,
     mode: ThreadParamsMode,
+    preserved_workspace_roots: Option<Vec<codex_utils_absolute_path::AbsolutePathBuf>>,
 ) -> ThreadForkParams {
-    let params = common_params(cli, config, mode, Some(thread));
+    let params = common_params(cli, config, mode, Some(thread), preserved_workspace_roots);
     let preserve_thread_context = preserves_thread_context(cli, mode);
     ThreadForkParams {
         thread_id: thread.id.clone(),
@@ -349,6 +375,7 @@ fn common_params(
     config: &Config,
     mode: ThreadParamsMode,
     existing_thread: Option<&Thread>,
+    preserved_workspace_roots: Option<Vec<codex_utils_absolute_path::AbsolutePathBuf>>,
 ) -> CommonParams {
     let preserve_thread_context = existing_thread.is_some() && preserves_thread_context(cli, mode);
     let effective_cwd = existing_thread
@@ -373,28 +400,10 @@ fn common_params(
     let send_approval_override = !preserve_thread_context
         || cli.approval_policy.is_some()
         || cli.dangerously_bypass_approvals_and_sandbox;
-    let runtime_workspace_roots = match (mode, preserve_thread_context, cli.add_dir.is_empty()) {
-        (ThreadParamsMode::Remote, _, _) => None,
-        (ThreadParamsMode::Local, false, _) => Some(config.workspace_roots.clone()),
-        (ThreadParamsMode::Local, true, true) => None,
-        (ThreadParamsMode::Local, true, false) => {
-            let mut roots = vec![
-                codex_utils_absolute_path::AbsolutePathBuf::resolve_path_against_base(
-                    ".",
-                    effective_cwd,
-                ),
-            ];
-            for root in &cli.add_dir {
-                let root = codex_utils_absolute_path::AbsolutePathBuf::resolve_path_against_base(
-                    root,
-                    effective_cwd,
-                );
-                if !roots.contains(&root) {
-                    roots.push(root);
-                }
-            }
-            Some(roots)
-        }
+    let runtime_workspace_roots = match (mode, preserve_thread_context) {
+        (ThreadParamsMode::Remote, _) => None,
+        (ThreadParamsMode::Local, false) => Some(config.workspace_roots.clone()),
+        (ThreadParamsMode::Local, true) => preserved_workspace_roots,
     };
     let request_config = if preserve_thread_context {
         cli.bypass_hook_trust.then(|| {
@@ -437,6 +446,21 @@ fn common_params(
 
 fn preserves_thread_context(cli: &Cli, mode: ThreadParamsMode) -> bool {
     matches!(mode, ThreadParamsMode::Local) && cli.cwd.is_none()
+}
+
+async fn preserved_workspace_roots(
+    config_loader: &ThreadConfigLoader,
+    thread: &Thread,
+    cli: &Cli,
+    mode: ThreadParamsMode,
+) -> io::Result<Option<Vec<codex_utils_absolute_path::AbsolutePathBuf>>> {
+    if !preserves_thread_context(cli, mode) || cli.add_dir.is_empty() {
+        return Ok(None);
+    }
+    config_loader
+        .workspace_roots_for_cwd(&thread.cwd, &cli.add_dir)
+        .await
+        .map(Some)
 }
 
 fn sandbox_mode_from_permission_profile(

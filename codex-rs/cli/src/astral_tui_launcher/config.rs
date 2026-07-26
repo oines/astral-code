@@ -71,6 +71,36 @@ pub(super) struct LaunchContext {
     pub client: AppServerClient,
     pub config: Arc<Config>,
     pub target: ThreadParamsMode,
+    pub thread_config_loader: ThreadConfigLoader,
+}
+
+pub(super) struct ThreadConfigLoader {
+    cli_kv_overrides: Vec<(String, toml::Value)>,
+    loader_overrides: LoaderOverrides,
+    strict_config: bool,
+    cloud_config_bundle: CloudConfigBundleLoader,
+}
+
+impl ThreadConfigLoader {
+    pub async fn workspace_roots_for_cwd(
+        &self,
+        cwd: &AbsolutePathBuf,
+        additional_writable_roots: &[std::path::PathBuf],
+    ) -> io::Result<Vec<AbsolutePathBuf>> {
+        let config = ConfigBuilder::default()
+            .cli_overrides(self.cli_kv_overrides.clone())
+            .harness_overrides(ConfigOverrides {
+                cwd: Some(cwd.to_path_buf()),
+                additional_writable_roots: additional_writable_roots.to_vec(),
+                ..Default::default()
+            })
+            .loader_overrides(self.loader_overrides.clone())
+            .strict_config(self.strict_config)
+            .cloud_config_bundle(self.cloud_config_bundle.clone())
+            .build()
+            .await?;
+        Ok(config.workspace_roots)
+    }
 }
 
 pub(super) struct PreparedLaunch {
@@ -137,6 +167,12 @@ impl PreparedLaunch {
             );
             oss_provider_to_persist = manually_selected.then_some(provider);
         }
+        let thread_config_loader = ThreadConfigLoader {
+            cli_kv_overrides: cli_kv_overrides.clone(),
+            loader_overrides: loader_overrides.clone(),
+            strict_config,
+            cloud_config_bundle: cloud_config_bundle.clone(),
+        };
         let target_mode = target.params_mode();
         let client = start_client(
             target,
@@ -157,6 +193,7 @@ impl PreparedLaunch {
             client,
             config,
             target: target_mode,
+            thread_config_loader,
         })
     }
 }
