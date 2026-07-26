@@ -578,6 +578,7 @@ dependencies = [
  "astral-tui-scrollback",
  "codex-app-server-protocol",
  "pretty_assertions",
+ "serde_json",
 ]
 
 [[package]]
