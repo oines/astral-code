@@ -1,0 +1,280 @@
+use std::collections::HashMap;
+
+use codex_app_server_protocol::CommandExecutionApprovalDecision;
+use codex_app_server_protocol::FileChangeApprovalDecision;
+use codex_app_server_protocol::GrantedPermissionProfile;
+use codex_app_server_protocol::McpServerElicitationAction;
+use codex_app_server_protocol::McpServerElicitationRequest;
+use codex_app_server_protocol::McpServerElicitationRequestResponse;
+use codex_app_server_protocol::PermissionGrantScope;
+use codex_app_server_protocol::PermissionsRequestApprovalResponse;
+use codex_app_server_protocol::ToolRequestUserInputAnswer;
+use codex_app_server_protocol::ToolRequestUserInputResponse;
+use crossterm::event::KeyCode;
+use crossterm::event::KeyEvent;
+use crossterm::event::KeyEventKind;
+use crossterm::event::KeyModifiers;
+
+use crate::PendingRequest;
+use crate::PendingRequestResponse;
+use crate::RequestResolution;
+use crate::SurfaceActivity;
+use crate::SurfaceState;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum InputAction {
+    None,
+    Redraw,
+    Submit(String),
+    Interrupt,
+    Exit,
+    Resolve(RequestResolution),
+    Notice(String),
+}
+
+pub fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
+    if key.kind == KeyEventKind::Release {
+        return InputAction::None;
+    }
+    if let Some(request) = state.pending_requests().front().cloned() {
+        return handle_request_key(state, request, key);
+    }
+    handle_composer_key(state, key)
+}
+
+pub fn handle_paste(state: &mut SurfaceState, text: &str) -> InputAction {
+    state.composer_mut().push_str(text);
+    InputAction::Redraw
+}
+
+fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
+    match (key.code, key.modifiers) {
+        (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
+            if matches!(state.activity(), SurfaceActivity::Working) {
+                InputAction::Interrupt
+            } else if state.composer().is_empty() {
+                InputAction::Exit
+            } else {
+                state.composer_mut().clear();
+                InputAction::Redraw
+            }
+        }
+        (KeyCode::Char('d'), KeyModifiers::CONTROL) if state.composer().is_empty() => {
+            InputAction::Exit
+        }
+        (KeyCode::Enter, modifiers)
+            if !modifiers.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) =>
+        {
+            let prompt = state.take_composer();
+            if prompt.trim().is_empty() {
+                InputAction::None
+            } else {
+                InputAction::Submit(prompt)
+            }
+        }
+        (KeyCode::Enter, _) => {
+            state.composer_mut().push('\n');
+            InputAction::Redraw
+        }
+        (KeyCode::Backspace, _) => {
+            state.composer_mut().pop();
+            InputAction::Redraw
+        }
+        (KeyCode::Char(character), modifiers)
+            if !modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::SUPER) =>
+        {
+            state.composer_mut().push(character);
+            InputAction::Redraw
+        }
+        _ => InputAction::None,
+    }
+}
+
+fn handle_request_key(
+    state: &mut SurfaceState,
+    request: PendingRequest,
+    key: KeyEvent,
+) -> InputAction {
+    let response = match request.clone() {
+        PendingRequest::CommandExecution { params, .. } => command_response(&params, key.code),
+        PendingRequest::FileChange { .. } => file_change_response(key.code),
+        PendingRequest::Permissions { params, .. } => permissions_response(&params, key.code),
+        PendingRequest::UserInput { params, .. } => {
+            user_input_response(state.composer(), &params, key.code)
+        }
+        PendingRequest::McpElicitation { params, .. } => {
+            mcp_response(state.composer(), &params.request, key.code)
+        }
+        PendingRequest::DynamicTool { .. } | PendingRequest::Attestation { .. } => None,
+        PendingRequest::LegacyApplyPatch { .. } | PendingRequest::LegacyExecCommand { .. } => {
+            Some(PendingRequestResponse::Reject {
+                code: -32601,
+                message: "Astral TUI accepts app-server v2 requests only".to_string(),
+            })
+        }
+    };
+
+    let Some(response) = response else {
+        return match key.code {
+            KeyCode::Backspace => {
+                state.composer_mut().pop();
+                InputAction::Redraw
+            }
+            KeyCode::Char(character)
+                if !key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::SUPER) =>
+            {
+                state.composer_mut().push(character);
+                InputAction::Redraw
+            }
+            _ => InputAction::None,
+        };
+    };
+
+    let request_id = request.request_id().clone();
+    match state.pending_requests_mut().resolve(&request_id, response) {
+        Ok(resolution) => {
+            state.composer_mut().clear();
+            InputAction::Resolve(resolution)
+        }
+        Err(error) => InputAction::Notice(error.to_string()),
+    }
+}
+
+fn command_response(
+    params: &codex_app_server_protocol::CommandExecutionRequestApprovalParams,
+    key: KeyCode,
+) -> Option<PendingRequestResponse> {
+    let decision = match key {
+        KeyCode::Char('y') => CommandExecutionApprovalDecision::Accept,
+        KeyCode::Char('a') => CommandExecutionApprovalDecision::AcceptForSession,
+        KeyCode::Char('e') => CommandExecutionApprovalDecision::AcceptWithExecpolicyAmendment {
+            execpolicy_amendment: params.proposed_execpolicy_amendment.clone()?,
+        },
+        KeyCode::Char('p') => CommandExecutionApprovalDecision::ApplyNetworkPolicyAmendment {
+            network_policy_amendment: params
+                .proposed_network_policy_amendments
+                .as_ref()?
+                .first()?
+                .clone(),
+        },
+        KeyCode::Char('n') => CommandExecutionApprovalDecision::Decline,
+        KeyCode::Esc => CommandExecutionApprovalDecision::Cancel,
+        _ => return None,
+    };
+    if params
+        .available_decisions
+        .as_ref()
+        .is_some_and(|available| !available.contains(&decision))
+    {
+        return None;
+    }
+    Some(PendingRequestResponse::CommandExecution(decision))
+}
+
+fn file_change_response(key: KeyCode) -> Option<PendingRequestResponse> {
+    let decision = match key {
+        KeyCode::Char('y') => FileChangeApprovalDecision::Accept,
+        KeyCode::Char('a') => FileChangeApprovalDecision::AcceptForSession,
+        KeyCode::Char('n') => FileChangeApprovalDecision::Decline,
+        KeyCode::Esc => FileChangeApprovalDecision::Cancel,
+        _ => return None,
+    };
+    Some(PendingRequestResponse::FileChange(decision))
+}
+
+fn permissions_response(
+    params: &codex_app_server_protocol::PermissionsRequestApprovalParams,
+    key: KeyCode,
+) -> Option<PendingRequestResponse> {
+    let scope = match key {
+        KeyCode::Char('y') => PermissionGrantScope::Turn,
+        KeyCode::Char('a') => PermissionGrantScope::Session,
+        KeyCode::Char('n') | KeyCode::Esc => {
+            return Some(PendingRequestResponse::Reject {
+                code: -32000,
+                message: "permission request declined".to_string(),
+            });
+        }
+        _ => return None,
+    };
+    Some(PendingRequestResponse::Permissions(
+        PermissionsRequestApprovalResponse {
+            permissions: GrantedPermissionProfile {
+                network: params.permissions.network.clone(),
+                file_system: params.permissions.file_system.clone(),
+            },
+            scope,
+            strict_auto_review: None,
+        },
+    ))
+}
+
+fn user_input_response(
+    composer: &str,
+    params: &codex_app_server_protocol::ToolRequestUserInputParams,
+    key: KeyCode,
+) -> Option<PendingRequestResponse> {
+    if key == KeyCode::Esc {
+        return Some(PendingRequestResponse::Reject {
+            code: -32000,
+            message: "user input cancelled".to_string(),
+        });
+    }
+    if key != KeyCode::Enter || composer.trim().is_empty() {
+        return None;
+    }
+    let values = composer.split('|').map(str::trim).collect::<Vec<_>>();
+    let answers = params
+        .questions
+        .iter()
+        .enumerate()
+        .map(|(index, question)| {
+            let value = values
+                .get(index)
+                .or_else(|| values.last())
+                .copied()
+                .unwrap_or_default();
+            (
+                question.id.clone(),
+                ToolRequestUserInputAnswer {
+                    answers: vec![value.to_string()],
+                },
+            )
+        })
+        .collect::<HashMap<_, _>>();
+    Some(PendingRequestResponse::UserInput(
+        ToolRequestUserInputResponse { answers },
+    ))
+}
+
+fn mcp_response(
+    composer: &str,
+    request: &McpServerElicitationRequest,
+    key: KeyCode,
+) -> Option<PendingRequestResponse> {
+    let (action, content) = match key {
+        KeyCode::Char('n') => (McpServerElicitationAction::Decline, None),
+        KeyCode::Esc => (McpServerElicitationAction::Cancel, None),
+        KeyCode::Char('y') if matches!(request, McpServerElicitationRequest::Url { .. }) => {
+            (McpServerElicitationAction::Accept, None)
+        }
+        KeyCode::Enter if matches!(request, McpServerElicitationRequest::Form { .. }) => {
+            let content = serde_json::from_str(composer).ok()?;
+            (McpServerElicitationAction::Accept, Some(content))
+        }
+        _ => return None,
+    };
+    Some(PendingRequestResponse::McpElicitation(
+        McpServerElicitationRequestResponse {
+            action,
+            content,
+            meta: None,
+        },
+    ))
+}
+
+#[cfg(test)]
+#[path = "input_tests.rs"]
+mod tests;

@@ -6,6 +6,7 @@
 //! semantics.
 
 mod conversation;
+mod input;
 mod request;
 mod session;
 mod surface;
@@ -20,6 +21,9 @@ pub use astral_tui_scrollback::ToolStatus;
 pub use astral_tui_scrollback::render_block;
 pub use conversation::CommittedBlock;
 pub use conversation::ConversationState;
+pub use input::InputAction;
+pub use input::handle_key;
+pub use input::handle_paste;
 pub use request::PendingRequest;
 pub use request::PendingRequestError;
 pub use request::PendingRequestResponse;
