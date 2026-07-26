@@ -1,0 +1,14 @@
+---
+source: astral-tui-scrollback/src/render_tests.rs
+expression: rendered
+---
+◆ Ran just test -p astral-tui  2.4s
+  cwd /workspace
+  exit 0
+  │ PASS timeline reducer
+  │ PASS presentation
+  │ PASS renderer
+  │ PASS app shell
+◆ Edited render.rs
+  astral-tui/src/render.rs  +2 -1
+◆ Searched Ratatui inline viewport

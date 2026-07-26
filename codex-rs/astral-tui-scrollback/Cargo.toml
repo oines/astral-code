@@ -6,7 +6,13 @@ license.workspace = true
 
 [dependencies]
 codex-app-server-protocol = { workspace = true }
+ratatui = { workspace = true }
 serde_json = { workspace = true }
+textwrap = { workspace = true }
+
+[dev-dependencies]
+codex-utils-absolute-path = { workspace = true }
+insta = { workspace = true }
 
 [lints]
 workspace = true

@@ -576,7 +576,11 @@ name = "astral-tui-scrollback"
 version = "0.0.0"
 dependencies = [
  "codex-app-server-protocol",
+ "codex-utils-absolute-path",
+ "insta",
+ "ratatui",
  "serde_json",
+ "textwrap 0.16.2",
 ]
 
 [[package]]
