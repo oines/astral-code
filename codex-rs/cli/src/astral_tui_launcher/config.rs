@@ -71,17 +71,51 @@ pub(super) struct LaunchContext {
     pub client: AppServerClient,
     pub config: Arc<Config>,
     pub target: ThreadParamsMode,
+    pub thread_config_loader: ThreadConfigLoader,
+}
+
+pub(super) struct ThreadConfigLoader {
+    cli_kv_overrides: Vec<(String, toml::Value)>,
+    loader_overrides: LoaderOverrides,
+    strict_config: bool,
+    cloud_config_bundle: CloudConfigBundleLoader,
+    sandbox_mode: Option<SandboxMode>,
+}
+
+impl ThreadConfigLoader {
+    pub async fn workspace_roots_for_cwd(
+        &self,
+        cwd: &AbsolutePathBuf,
+        additional_writable_roots: &[std::path::PathBuf],
+    ) -> io::Result<Vec<AbsolutePathBuf>> {
+        let config = ConfigBuilder::default()
+            .cli_overrides(self.cli_kv_overrides.clone())
+            .harness_overrides(ConfigOverrides {
+                cwd: Some(cwd.to_path_buf()),
+                additional_writable_roots: additional_writable_roots.to_vec(),
+                sandbox_mode: self.sandbox_mode,
+                ..Default::default()
+            })
+            .loader_overrides(self.loader_overrides.clone())
+            .strict_config(self.strict_config)
+            .cloud_config_bundle(self.cloud_config_bundle.clone())
+            .build()
+            .await?;
+        Ok(config.workspace_roots)
+    }
 }
 
 pub(super) struct PreparedLaunch {
+    cli: Cli,
     arg0_paths: Arg0DispatchPaths,
     cli_kv_overrides: Vec<(String, toml::Value)>,
     loader_overrides: LoaderOverrides,
     strict_config: bool,
     cloud_config_bundle: CloudConfigBundleLoader,
+    uses_remote_workspace: bool,
     config: Arc<Config>,
     target: AppServerTarget,
-    oss_provider_to_persist: Option<String>,
+    oss_provider_selection_required: bool,
 }
 
 impl PreparedLaunch {
@@ -101,26 +135,68 @@ impl PreparedLaunch {
     }
 
     pub async fn start(self) -> io::Result<LaunchContext> {
-        let target_mode = self.target.params_mode();
+        let Self {
+            cli,
+            arg0_paths,
+            cli_kv_overrides,
+            loader_overrides,
+            strict_config,
+            cloud_config_bundle,
+            uses_remote_workspace,
+            mut config,
+            target,
+            oss_provider_selection_required,
+        } = self;
+        let mut oss_provider_to_persist = None;
+        if oss_provider_selection_required {
+            let (provider, manually_selected) = codex_tui::select_oss_provider_for_launch().await?;
+            if provider == "__CANCELLED__" {
+                return Err(io::Error::other(
+                    "OSS provider selection was cancelled by user",
+                ));
+            }
+            config = Arc::new(
+                build_config(
+                    &cli,
+                    &arg0_paths,
+                    &cli_kv_overrides,
+                    &loader_overrides,
+                    cloud_config_bundle.clone(),
+                    uses_remote_workspace,
+                    Some(provider.clone()),
+                )
+                .await?,
+            );
+            oss_provider_to_persist = manually_selected.then_some(provider);
+        }
+        let thread_config_loader = ThreadConfigLoader {
+            cli_kv_overrides: cli_kv_overrides.clone(),
+            loader_overrides: loader_overrides.clone(),
+            strict_config,
+            cloud_config_bundle: cloud_config_bundle.clone(),
+            sandbox_mode: cli_permission_overrides(&cli).0,
+        };
+        let target_mode = target.params_mode();
         let client = start_client(
-            self.target,
-            self.arg0_paths,
-            Arc::clone(&self.config),
-            self.cli_kv_overrides,
-            self.loader_overrides,
-            self.strict_config,
-            self.cloud_config_bundle,
+            target,
+            arg0_paths,
+            Arc::clone(&config),
+            cli_kv_overrides,
+            loader_overrides,
+            strict_config,
+            cloud_config_bundle,
         )
         .await?;
-        if let Some(provider) = self.oss_provider_to_persist.as_deref()
+        if let Some(provider) = oss_provider_to_persist.as_deref()
             && let Err(error) = persist_oss_provider(&client, provider).await
         {
             warn!(%error, %provider, "failed to persist selected OSS provider");
         }
         Ok(LaunchContext {
             client,
-            config: self.config,
+            config,
             target: target_mode,
+            thread_config_loader,
         })
     }
 }
@@ -150,6 +226,7 @@ pub(super) async fn prepare_launch(
         uses_remote_workspace,
     )
     .await?;
+    let oss_provider_selection_required = cli.oss && model_provider.is_none();
     let config = build_config(
         cli,
         &arg0_paths,
@@ -157,7 +234,7 @@ pub(super) async fn prepare_launch(
         &loader_overrides,
         cloud_config_bundle.clone(),
         uses_remote_workspace,
-        model_provider.id.clone(),
+        model_provider,
     )
     .await?;
     let target = target_for_launch(
@@ -171,14 +248,16 @@ pub(super) async fn prepare_launch(
     .await?;
     let config = Arc::new(config);
     Ok(PreparedLaunch {
+        cli: cli.clone(),
         arg0_paths,
         cli_kv_overrides,
         loader_overrides,
         strict_config,
         cloud_config_bundle,
+        uses_remote_workspace,
         config,
         target,
-        oss_provider_to_persist: model_provider.persist,
+        oss_provider_selection_required,
     })
 }
 
@@ -197,17 +276,7 @@ async fn build_config(
             .and_then(get_default_model_for_oss_provider)
             .map(str::to_string)
     });
-    let (sandbox_mode, approval_policy) = if cli.dangerously_bypass_approvals_and_sandbox {
-        (
-            Some(SandboxMode::DangerFullAccess),
-            Some(AskForApproval::Never),
-        )
-    } else {
-        (
-            cli.sandbox_mode.map(Into::<SandboxMode>::into),
-            cli.approval_policy.map(Into::into),
-        )
-    };
+    let (sandbox_mode, approval_policy) = cli_permission_overrides(cli);
     let overrides = ConfigOverrides {
         model,
         approval_policy,
@@ -240,10 +309,18 @@ async fn build_config(
     Ok(config)
 }
 
-#[derive(Debug, Default, PartialEq, Eq)]
-struct ResolvedModelProvider {
-    id: Option<String>,
-    persist: Option<String>,
+fn cli_permission_overrides(cli: &Cli) -> (Option<SandboxMode>, Option<AskForApproval>) {
+    if cli.dangerously_bypass_approvals_and_sandbox {
+        (
+            Some(SandboxMode::DangerFullAccess),
+            Some(AskForApproval::Never),
+        )
+    } else {
+        (
+            cli.sandbox_mode.map(Into::<SandboxMode>::into),
+            cli.approval_policy.map(Into::into),
+        )
+    }
 }
 
 async fn resolve_launch_model_provider(
@@ -252,15 +329,12 @@ async fn resolve_launch_model_provider(
     loader_overrides: &LoaderOverrides,
     cloud_config_bundle: CloudConfigBundleLoader,
     uses_remote_workspace: bool,
-) -> io::Result<ResolvedModelProvider> {
+) -> io::Result<Option<String>> {
     if !cli.oss {
-        return Ok(ResolvedModelProvider::default());
+        return Ok(None);
     }
     if let Some(provider) = cli.oss_provider.as_ref() {
-        return Ok(ResolvedModelProvider {
-            id: Some(provider.clone()),
-            persist: None,
-        });
+        return Ok(Some(provider.clone()));
     }
     let codex_home = find_codex_home()?;
     let cwd = config_lookup_cwd(cli.cwd.as_deref(), uses_remote_workspace)?;
@@ -275,22 +349,10 @@ async fn resolve_launch_model_provider(
         },
     )
     .await?;
-    if let Some(provider) = resolve_oss_provider(/*explicit_provider*/ None, &config_toml) {
-        return Ok(ResolvedModelProvider {
-            id: Some(provider),
-            persist: None,
-        });
-    }
-    let (provider, manually_selected) = codex_tui::select_oss_provider_for_launch().await?;
-    if provider == "__CANCELLED__" {
-        return Err(io::Error::other(
-            "OSS provider selection was cancelled by user",
-        ));
-    }
-    Ok(ResolvedModelProvider {
-        persist: manually_selected.then(|| provider.clone()),
-        id: Some(provider),
-    })
+    Ok(resolve_oss_provider(
+        /*explicit_provider*/ None,
+        &config_toml,
+    ))
 }
 
 async fn persist_oss_provider(client: &AppServerClient, provider: &str) -> io::Result<()> {

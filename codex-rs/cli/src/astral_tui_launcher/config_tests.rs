@@ -24,7 +24,10 @@ use wiremock::matchers::method;
 use wiremock::matchers::path;
 
 use super::AppServerTarget;
+use super::ThreadConfigLoader;
+use super::build_config;
 use super::can_reuse_daemon;
+use super::cli_permission_overrides;
 use super::config_lookup_cwd;
 use super::resolve_launch_model_provider;
 use super::start_client;
@@ -81,6 +84,134 @@ fn local_config_loading_uses_explicit_absolute_cwd() {
 }
 
 #[tokio::test]
+async fn historical_workspace_roots_append_explicit_add_dirs() {
+    let codex_home = tempfile::tempdir().expect("temporary Astral home");
+    let history = tempfile::tempdir().expect("historical cwd");
+    let configured = tempfile::tempdir().expect("configured writable root");
+    let additional = tempfile::tempdir().expect("additional writable root");
+    let config_path = codex_home.path().join("config.toml");
+    std::fs::write(
+        &config_path,
+        format!(
+            r#"
+sandbox_mode = "workspace-write"
+
+[sandbox_workspace_write]
+writable_roots = [{}]
+
+[projects.{}]
+trust_level = "trusted"
+"#,
+            serde_json::json!(configured.path().to_string_lossy()),
+            serde_json::json!(history.path().to_string_lossy()),
+        ),
+    )
+    .expect("write config");
+    let loader = ThreadConfigLoader {
+        cli_kv_overrides: Vec::new(),
+        loader_overrides: LoaderOverrides {
+            user_config_path: Some(
+                AbsolutePathBuf::try_from(config_path).expect("absolute config path"),
+            ),
+            ..LoaderOverrides::without_managed_config_for_tests()
+        },
+        strict_config: false,
+        cloud_config_bundle: CloudConfigBundleLoader::default(),
+        sandbox_mode: None,
+    };
+    let history =
+        AbsolutePathBuf::try_from(history.path().to_path_buf()).expect("absolute history");
+
+    let roots = loader
+        .workspace_roots_for_cwd(&history, &[additional.path().to_path_buf()])
+        .await
+        .expect("load historical workspace roots");
+
+    assert_eq!(
+        roots,
+        vec![
+            history,
+            AbsolutePathBuf::try_from(additional.path().to_path_buf())
+                .expect("absolute additional root"),
+            AbsolutePathBuf::try_from(configured.path().to_path_buf())
+                .expect("absolute configured root"),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn historical_workspace_roots_match_explicit_sandbox_semantics() {
+    let codex_home = tempfile::tempdir().expect("temporary Astral home");
+    let history = tempfile::tempdir().expect("historical cwd");
+    let profile_root = tempfile::tempdir().expect("profile writable root");
+    let additional = tempfile::tempdir().expect("additional writable root");
+    let config_path = codex_home.path().join("config.toml");
+    std::fs::write(
+        &config_path,
+        format!(
+            r#"
+default_permissions = "dev"
+
+[permissions.dev.workspace_roots]
+{} = true
+
+[permissions.dev.filesystem.":workspace_roots"]
+"." = "write"
+
+[projects.{}]
+trust_level = "trusted"
+"#,
+            serde_json::json!(profile_root.path().to_string_lossy()),
+            serde_json::json!(history.path().to_string_lossy()),
+        ),
+    )
+    .expect("write config");
+    let loader_overrides = LoaderOverrides {
+        user_config_path: Some(
+            AbsolutePathBuf::try_from(config_path).expect("absolute config path"),
+        ),
+        ..LoaderOverrides::without_managed_config_for_tests()
+    };
+    let cli = Cli::parse_from([
+        "astral",
+        "--sandbox",
+        "workspace-write",
+        "--add-dir",
+        additional.path().to_str().expect("utf-8 additional root"),
+        "-C",
+        history.path().to_str().expect("utf-8 historical cwd"),
+    ]);
+    let expected = build_config(
+        &cli,
+        &Arg0DispatchPaths::default(),
+        &[],
+        &loader_overrides,
+        CloudConfigBundleLoader::default(),
+        /*uses_remote_workspace*/ false,
+        /*model_provider*/ None,
+    )
+    .await
+    .expect("build launch config")
+    .workspace_roots;
+    let loader = ThreadConfigLoader {
+        cli_kv_overrides: Vec::new(),
+        loader_overrides,
+        strict_config: false,
+        cloud_config_bundle: CloudConfigBundleLoader::default(),
+        sandbox_mode: cli_permission_overrides(&cli).0,
+    };
+    let history =
+        AbsolutePathBuf::try_from(history.path().to_path_buf()).expect("absolute history");
+
+    let roots = loader
+        .workspace_roots_for_cwd(&history, &[additional.path().to_path_buf()])
+        .await
+        .expect("load historical workspace roots");
+
+    assert_eq!(roots, expected);
+}
+
+#[tokio::test]
 async fn oss_uses_the_configured_provider() {
     let temp_dir = tempfile::tempdir().expect("tempdir");
     let config_path = temp_dir.path().join("config.toml");
@@ -106,8 +237,36 @@ async fn oss_uses_the_configured_provider() {
     .await
     .expect("resolve provider");
 
-    assert_eq!(provider.id.as_deref(), Some("ollama"));
-    assert_eq!(provider.persist, None);
+    assert_eq!(provider.as_deref(), Some("ollama"));
+}
+
+#[tokio::test]
+async fn oss_without_configuration_defers_interactive_selection() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let config_path = temp_dir.path().join("config.toml");
+    std::fs::write(&config_path, "").expect("write config");
+    let cli = Cli::parse_from([
+        "astral",
+        "--oss",
+        "-C",
+        temp_dir.path().to_str().expect("utf-8 path"),
+    ]);
+    let loader_overrides = LoaderOverrides {
+        user_config_path: Some(AbsolutePathBuf::try_from(config_path).expect("absolute config")),
+        ..LoaderOverrides::without_managed_config_for_tests()
+    };
+
+    let provider = resolve_launch_model_provider(
+        &cli,
+        &[],
+        &loader_overrides,
+        CloudConfigBundleLoader::default(),
+        /*uses_remote_workspace*/ false,
+    )
+    .await
+    .expect("resolve provider");
+
+    assert_eq!(provider, None);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
