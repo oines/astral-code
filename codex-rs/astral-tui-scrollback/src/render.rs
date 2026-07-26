@@ -321,6 +321,8 @@ fn tool_verb(kind: ToolKind, status: ToolStatus) -> &'static str {
     match (kind, running) {
         (ToolKind::Execute, true) => "Running",
         (ToolKind::Execute, false) => "Ran",
+        (ToolKind::Background, true) => "Running background",
+        (ToolKind::Background, false) => "Finished background",
         (ToolKind::Read, true) => "Reading",
         (ToolKind::Read, false) => "Read",
         (ToolKind::Edit, true) => "Editing",
@@ -337,8 +339,10 @@ fn tool_verb(kind: ToolKind, status: ToolStatus) -> &'static str {
         (ToolKind::Skill, false) => "Loaded",
         (ToolKind::Collab, true) => "Coordinating",
         (ToolKind::Collab, false) => "Coordinated",
-        (ToolKind::Media, true) => "Creating",
-        (ToolKind::Media, false) => "Created",
+        (ToolKind::ImageView, true) => "Viewing",
+        (ToolKind::ImageView, false) => "Viewed",
+        (ToolKind::ImageGeneration, true) => "Generating",
+        (ToolKind::ImageGeneration, false) => "Generated",
         (ToolKind::Other, true) => "Using",
         (ToolKind::Other, false) => "Used",
     }

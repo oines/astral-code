@@ -32,6 +32,7 @@ pub enum PresentationBlock {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolKind {
     Execute,
+    Background,
     Read,
     Edit,
     List,
@@ -41,7 +42,8 @@ pub enum ToolKind {
     Mcp,
     Skill,
     Collab,
-    Media,
+    ImageView,
+    ImageGeneration,
     Other,
 }
 

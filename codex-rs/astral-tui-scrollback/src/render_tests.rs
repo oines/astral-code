@@ -14,6 +14,7 @@ use serde_json::json;
 use super::RenderOptions;
 use super::render_block;
 use crate::PresentationBlock;
+use crate::TimelineStream;
 
 fn render(item: ThreadItem, expanded: bool) -> String {
     let block = PresentationBlock::from_item(&item, &crate::TimelineStream::None)
@@ -122,6 +123,87 @@ fn claude_surface_tool_blocks_snapshot() {
     let rendered = items
         .into_iter()
         .map(|item| render(item, false))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_snapshot!(rendered);
+}
+
+#[test]
+fn background_command_lifecycle_snapshot() {
+    let item = ThreadItem::CommandExecution {
+        id: "command-bg".to_string(),
+        command: "just test -p codex-cli".to_string(),
+        cwd: AbsolutePathBuf::try_from("/workspace".to_string()).expect("absolute path"),
+        process_id: Some("process-7".to_string()),
+        source: Default::default(),
+        status: CommandExecutionStatus::InProgress,
+        command_actions: vec![CommandAction::Unknown {
+            command: "just test -p codex-cli".to_string(),
+        }],
+        aggregated_output: None,
+        exit_code: None,
+        duration_ms: None,
+    };
+    let mut stream = TimelineStream::default();
+    stream.append_command_output("Compiling astral-tui\n");
+    stream.append_terminal_input("process-7", "continue\n");
+    let block = PresentationBlock::from_item(&item, &stream)
+        .expect("command should produce a presentation block");
+    let rendered = render_block(
+        &block,
+        RenderOptions {
+            width: 68,
+            expanded: true,
+            max_output_lines: 3,
+        },
+    )
+    .lines
+    .iter()
+    .map(std::string::ToString::to_string)
+    .collect::<Vec<_>>()
+    .join("\n");
+
+    assert_snapshot!(rendered);
+}
+
+#[test]
+fn web_and_image_tool_blocks_snapshot() {
+    let items = [
+        ThreadItem::WebSearch {
+            id: "search-1".to_string(),
+            query: "Ratatui inline viewport".to_string(),
+            action: None,
+        },
+        ThreadItem::DynamicToolCall {
+            id: "fetch-1".to_string(),
+            namespace: Some("web".to_string()),
+            tool: "WebFetch".to_string(),
+            arguments: json!({"url": "https://ratatui.rs"}),
+            status: DynamicToolCallStatus::Completed,
+            content_items: None,
+            success: Some(true),
+            duration_ms: Some(82),
+        },
+        ThreadItem::ImageView {
+            id: "image-view-1".to_string(),
+            path: AbsolutePathBuf::try_from("/workspace/diagram.png".to_string())
+                .expect("absolute path"),
+        },
+        ThreadItem::ImageGeneration {
+            id: "image-generation-1".to_string(),
+            status: "completed".to_string(),
+            revised_prompt: Some("A terminal interface under a night sky".to_string()),
+            result: "image-data".to_string(),
+            saved_path: Some(
+                AbsolutePathBuf::try_from("/workspace/astral.png".to_string())
+                    .expect("absolute path"),
+            ),
+        },
+    ];
+
+    let rendered = items
+        .into_iter()
+        .map(|item| render(item, true))
         .collect::<Vec<_>>()
         .join("\n");
     assert_snapshot!(rendered);

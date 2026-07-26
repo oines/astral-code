@@ -1,0 +1,11 @@
+---
+source: astral-tui-scrollback/src/render_tests.rs
+expression: rendered
+---
+◆ Searched Ratatui inline viewport
+◆ Fetched https://ratatui.rs  82ms
+  web
+◆ Viewed diagram.png
+  /workspace/diagram.png
+◆ Generated astral.png
+  A terminal interface under a night sky

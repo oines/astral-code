@@ -50,7 +50,7 @@ pub(super) fn classify_tool_name(name: &str) -> ToolKind {
         "bash" | "shell" | "shellcommand" | "exec" | "execcommand" | "writestdin" => {
             ToolKind::Execute
         }
-        "read" | "readfile" | "viewimage" | "readmcpresource" => ToolKind::Read,
+        "read" | "readfile" | "readmcpresource" => ToolKind::Read,
         "edit" | "write" | "applypatch" | "notebookedit" => ToolKind::Edit,
         "glob" | "list" | "listdir" | "ls" => ToolKind::List,
         "grep" | "rg" | "search" | "find" | "searchquery" => ToolKind::Search,
@@ -59,7 +59,8 @@ pub(super) fn classify_tool_name(name: &str) -> ToolKind {
         "skill" => ToolKind::Skill,
         "spawnagent" | "sendmessage" | "sendinput" | "waitagent" | "wait" | "closeagent"
         | "resumeagent" => ToolKind::Collab,
-        "imagegen" | "imagegeneration" | "generateimage" => ToolKind::Media,
+        "viewimage" => ToolKind::ImageView,
+        "imagegen" | "imagegeneration" | "generateimage" => ToolKind::ImageGeneration,
         _ => ToolKind::Other,
     }
 }

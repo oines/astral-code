@@ -92,6 +92,7 @@ pub struct TimelineState {
     thread_id: String,
     entries: Vec<TimelineEntry>,
     entry_indices: HashMap<String, usize>,
+    process_indices: HashMap<String, usize>,
     turn_plan: Option<TurnPlanUpdatedNotification>,
     turn_diff: Option<String>,
     skipped_events: usize,
@@ -103,6 +104,7 @@ impl TimelineState {
             thread_id: thread_id.into(),
             entries: Vec::new(),
             entry_indices: HashMap::new(),
+            process_indices: HashMap::new(),
             turn_plan: None,
             turn_diff: None,
             skipped_events: 0,
@@ -139,25 +141,31 @@ impl TimelineState {
                 if !self.is_active_thread(&event.thread_id) {
                     return ReduceOutcome::DifferentThread;
                 }
-                let entry = self.entry_mut(event.item.id(), &event.turn_id);
-                entry.turn_id.clone_from(&event.turn_id);
-                entry.id = event.item.id().to_owned();
-                entry.item = Some(event.item.clone());
-                entry.finalized = false;
-                entry.started_at_ms = Some(event.started_at_ms);
+                {
+                    let entry = self.entry_mut(event.item.id(), &event.turn_id);
+                    entry.turn_id.clone_from(&event.turn_id);
+                    entry.id = event.item.id().to_owned();
+                    entry.item = Some(event.item.clone());
+                    entry.finalized = false;
+                    entry.started_at_ms = Some(event.started_at_ms);
+                }
+                self.index_process(&event.item);
                 ReduceOutcome::Applied
             }
             ServerNotification::ItemCompleted(event) => {
                 if !self.is_active_thread(&event.thread_id) {
                     return ReduceOutcome::DifferentThread;
                 }
-                let entry = self.entry_mut(event.item.id(), &event.turn_id);
-                entry.turn_id.clone_from(&event.turn_id);
-                entry.id = event.item.id().to_owned();
-                entry.item = Some(event.item.clone());
-                entry.stream = TimelineStream::None;
-                entry.finalized = true;
-                entry.completed_at_ms = Some(event.completed_at_ms);
+                {
+                    let entry = self.entry_mut(event.item.id(), &event.turn_id);
+                    entry.turn_id.clone_from(&event.turn_id);
+                    entry.id = event.item.id().to_owned();
+                    entry.item = Some(event.item.clone());
+                    entry.stream = TimelineStream::None;
+                    entry.finalized = true;
+                    entry.completed_at_ms = Some(event.completed_at_ms);
+                }
+                self.index_process(&event.item);
                 ReduceOutcome::Applied
             }
             ServerNotification::AgentMessageDelta(event) => {
@@ -215,9 +223,18 @@ impl TimelineState {
                 if !self.is_active_thread(&event.thread_id) {
                     return ReduceOutcome::DifferentThread;
                 }
-                self.entry_mut(&event.item_id, &event.turn_id)
+                let index = self
+                    .process_indices
+                    .get(&event.process_id)
+                    .copied()
+                    .unwrap_or_else(|| {
+                        let index = self.entry_index(&event.item_id, &event.turn_id);
+                        self.process_indices.insert(event.process_id.clone(), index);
+                        index
+                    });
+                self.entries[index]
                     .stream
-                    .append_terminal_input(&event.stdin);
+                    .append_terminal_input(&event.process_id, &event.stdin);
                 ReduceOutcome::Applied
             }
             ServerNotification::FileChangeOutputDelta(event) => {
@@ -264,12 +281,16 @@ impl TimelineState {
     ) {
         self.entries.clear();
         self.entry_indices.clear();
+        self.process_indices.clear();
         for (turn_id, items) in turns {
             for item in items {
-                let entry = self.entry_mut(item.id(), turn_id);
-                entry.item = Some(item.clone());
-                entry.stream = TimelineStream::None;
-                entry.finalized = true;
+                {
+                    let entry = self.entry_mut(item.id(), turn_id);
+                    entry.item = Some(item.clone());
+                    entry.stream = TimelineStream::None;
+                    entry.finalized = true;
+                }
+                self.index_process(item);
             }
         }
     }
@@ -279,7 +300,12 @@ impl TimelineState {
     }
 
     fn entry_mut(&mut self, item_id: &str, turn_id: &str) -> &mut TimelineEntry {
-        let index = match self.entry_indices.get(item_id).copied() {
+        let index = self.entry_index(item_id, turn_id);
+        &mut self.entries[index]
+    }
+
+    fn entry_index(&mut self, item_id: &str, turn_id: &str) -> usize {
+        match self.entry_indices.get(item_id).copied() {
             Some(index) => index,
             None => {
                 let index = self.entries.len();
@@ -290,7 +316,20 @@ impl TimelineState {
                 self.entry_indices.insert(item_id.to_owned(), index);
                 index
             }
+        }
+    }
+
+    fn index_process(&mut self, item: &ThreadItem) {
+        let ThreadItem::CommandExecution { id, process_id, .. } = item else {
+            return;
         };
-        &mut self.entries[index]
+        let Some(index) = self.entry_indices.get(id).copied() else {
+            return;
+        };
+        self.process_indices
+            .retain(|_, current_index| *current_index != index);
+        if let Some(process_id) = process_id {
+            self.process_indices.insert(process_id.clone(), index);
+        }
     }
 }
