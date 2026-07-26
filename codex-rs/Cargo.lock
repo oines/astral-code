@@ -558,6 +558,7 @@ version = "0.0.0"
 dependencies = [
  "anstyle-parse",
  "crossterm",
+ "pretty_assertions",
  "ratatui",
  "unicode-width 0.2.1",
 ]
@@ -580,6 +581,7 @@ dependencies = [
  "astral-tui-scrollback",
  "codex-app-server-client",
  "codex-app-server-protocol",
+ "codex-protocol",
  "crossterm",
  "insta",
  "pretty_assertions",
@@ -2376,6 +2378,7 @@ dependencies = [
  "url",
  "which 8.0.0",
  "windows-sys 0.52.0",
+ "wiremock",
 ]
 
 [[package]]
