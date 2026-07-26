@@ -45,6 +45,28 @@ fn composer_submit_and_interrupt_are_distinct_actions() {
 }
 
 #[test]
+fn transcript_shortcuts_are_distinct_from_composer_input() {
+    let mut state = SurfaceState::new("thread-1");
+
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::PageUp)),
+        InputAction::ScrollUp
+    );
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::PageDown)),
+        InputAction::ScrollDown
+    );
+    assert_eq!(
+        handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL),
+        ),
+        InputAction::CopyLastResponse
+    );
+    assert!(state.composer().is_empty());
+}
+
+#[test]
 fn command_session_approval_preserves_typed_decision() {
     let mut state = SurfaceState::new("thread-1");
     state.pending_requests_mut().note(request(json!({

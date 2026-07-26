@@ -26,6 +26,7 @@ use crate::SessionError;
 use crate::SurfaceActivity;
 use crate::SurfaceState;
 use crate::TranscriptView;
+use crate::clipboard::copy_to_clipboard;
 use crate::committed_height;
 use crate::handle_key;
 use crate::handle_paste;
@@ -150,6 +151,7 @@ async fn run_loop(
 ) -> Result<RunExitReason, RunError> {
     let mut input = EventStream::new();
     let mut client_tool_tasks = JoinSet::new();
+    let mut _clipboard_lease = None;
 
     loop {
         draw(terminal, session, surface, &options)?;
@@ -166,7 +168,43 @@ async fn run_loop(
                 };
                 match terminal_event? {
                     Event::Key(key) => {
-                        let action = handle_key(surface, key);
+                        let action = match handle_key(surface, key) {
+                            InputAction::ScrollUp => {
+                                if options.viewport == RunViewport::Fullscreen {
+                                    let page_rows =
+                                        usize::from(terminal.viewport_area().height.max(1));
+                                    surface.scroll_up(page_rows);
+                                } else {
+                                    surface.set_notice(
+                                        "Use the terminal's native scrollback in inline mode",
+                                    );
+                                }
+                                InputAction::None
+                            }
+                            InputAction::ScrollDown => {
+                                if options.viewport == RunViewport::Fullscreen {
+                                    let page_rows =
+                                        usize::from(terminal.viewport_area().height.max(1));
+                                    surface.scroll_down(page_rows);
+                                }
+                                InputAction::None
+                            }
+                            InputAction::CopyLastResponse => {
+                                let response = surface.last_agent_response().map(str::to_string);
+                                match response {
+                                    Some(response) => match copy_to_clipboard(&response) {
+                                        Ok(lease) => {
+                                            _clipboard_lease = Some(lease);
+                                            surface.set_notice("Copied last agent response");
+                                        }
+                                        Err(error) => surface.set_notice(error),
+                                    },
+                                    None => surface.set_notice("No agent response to copy"),
+                                }
+                                InputAction::None
+                            }
+                            action => action,
+                        };
                         if let Some(reason) =
                             apply_input_action(session, surface, action).await?
                         {
@@ -269,6 +307,7 @@ async fn apply_input_action(
     match action {
         InputAction::None | InputAction::Redraw => {}
         InputAction::Submit(prompt) => {
+            surface.scroll_to_bottom();
             surface.set_activity(SurfaceActivity::Working);
             if let Err(error) = session
                 .start_turn(vec![UserInput::Text {
@@ -287,6 +326,7 @@ async fn apply_input_action(
             Err(error) => surface.set_notice(error.to_string()),
         },
         InputAction::Exit => return Ok(Some(RunExitReason::UserRequested)),
+        InputAction::ScrollUp | InputAction::ScrollDown | InputAction::CopyLastResponse => {}
         InputAction::Resolve(resolution) => {
             if let Err(error) = session.resolve(resolution).await {
                 surface.set_notice(error.to_string());

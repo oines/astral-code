@@ -28,6 +28,9 @@ pub enum InputAction {
     Submit(String),
     Interrupt,
     Exit,
+    ScrollUp,
+    ScrollDown,
+    CopyLastResponse,
     Resolve(RequestResolution),
     Notice(String),
 }
@@ -62,6 +65,9 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
         (KeyCode::Char('d'), KeyModifiers::CONTROL) if state.composer().is_empty() => {
             InputAction::Exit
         }
+        (KeyCode::Char('o'), KeyModifiers::CONTROL) => InputAction::CopyLastResponse,
+        (KeyCode::PageUp, _) => InputAction::ScrollUp,
+        (KeyCode::PageDown, _) => InputAction::ScrollDown,
         (KeyCode::Enter, modifiers)
             if !modifiers.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) =>
         {

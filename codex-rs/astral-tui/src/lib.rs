@@ -6,6 +6,7 @@
 //! semantics.
 
 mod client_tools;
+mod clipboard;
 mod conversation;
 mod input;
 mod launch;

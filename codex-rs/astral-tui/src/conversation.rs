@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use codex_app_server_protocol::ServerNotification;
+use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::Turn;
 use codex_app_server_protocol::TurnStatus;
 
@@ -108,6 +109,18 @@ impl ConversationState {
             .iter()
             .filter_map(project_entry)
             .collect()
+    }
+
+    pub fn last_agent_response(&self) -> Option<&str> {
+        self.timeline
+            .entries()
+            .iter()
+            .rev()
+            .filter_map(TimelineEntry::item)
+            .find_map(|item| match item {
+                ThreadItem::AgentMessage { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
     }
 
     pub fn committed_entries(&self) -> usize {

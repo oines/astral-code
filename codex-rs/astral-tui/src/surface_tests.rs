@@ -132,6 +132,16 @@ fn fullscreen_surface_keeps_committed_history_snapshot() {
     insta::assert_snapshot!(buffer_text(&buffer));
 }
 
+#[test]
+fn scroll_offset_moves_in_both_directions() {
+    let mut state = SurfaceState::new("thread-1");
+    state.scroll_up(/*lines*/ 20);
+    state.scroll_down(/*lines*/ 7);
+    assert_eq!(state.scroll_offset(), 13);
+    state.scroll_to_bottom();
+    assert_eq!(state.scroll_offset(), 0);
+}
+
 fn buffer_text(buffer: &Buffer) -> String {
     let area = buffer.area;
     (area.y..area.y + area.height)

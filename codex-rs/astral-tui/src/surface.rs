@@ -38,6 +38,7 @@ pub struct SurfaceState {
     composer: String,
     activity: SurfaceActivity,
     notice: Option<String>,
+    scroll_offset: usize,
 }
 
 impl SurfaceState {
@@ -48,6 +49,7 @@ impl SurfaceState {
             composer: String::new(),
             activity: SurfaceActivity::Ready,
             notice: None,
+            scroll_offset: 0,
         }
     }
 
@@ -65,6 +67,7 @@ impl SurfaceState {
                 SurfaceActivity::Ready
             },
             notice: None,
+            scroll_offset: 0,
         }
     }
 
@@ -110,6 +113,26 @@ impl SurfaceState {
 
     pub fn clear_notice(&mut self) {
         self.notice = None;
+    }
+
+    pub fn scroll_up(&mut self, lines: usize) {
+        self.scroll_offset = self.scroll_offset.saturating_add(lines);
+    }
+
+    pub fn scroll_down(&mut self, lines: usize) {
+        self.scroll_offset = self.scroll_offset.saturating_sub(lines);
+    }
+
+    pub fn scroll_to_bottom(&mut self) {
+        self.scroll_offset = 0;
+    }
+
+    pub fn scroll_offset(&self) -> usize {
+        self.scroll_offset
+    }
+
+    pub fn last_agent_response(&self) -> Option<&str> {
+        self.conversation.last_agent_response()
     }
 
     pub fn drain_committable(&mut self) -> Vec<CommittedBlock> {
@@ -173,14 +196,16 @@ pub(crate) fn render_surface_with_view(
         .min(area.height);
     let live_height = area.height.saturating_sub(footer_height);
     let live_lines = conversation_lines(state, transcript_view, area.width);
-    let visible_live = live_lines
-        .into_iter()
-        .rev()
-        .take(usize::from(live_height))
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect::<Vec<_>>();
+    let visible_height = usize::from(live_height);
+    let scroll_offset = match transcript_view {
+        TranscriptView::Live => 0,
+        TranscriptView::Full => state
+            .scroll_offset
+            .min(live_lines.len().saturating_sub(visible_height)),
+    };
+    let end = live_lines.len().saturating_sub(scroll_offset);
+    let start = end.saturating_sub(visible_height);
+    let visible_live = live_lines[start..end].to_vec();
 
     Paragraph::new(Text::from(visible_live)).render(
         Rect {
@@ -269,10 +294,16 @@ fn composer_lines(state: &SurfaceState, session: &SessionState, _width: u16) -> 
         status_line.push(" · ".dim());
         status_line.push(notice.to_string().cyan());
     }
+    if state.scroll_offset > 0 {
+        status_line.push(" · ".dim());
+        status_line.push(format!("history ↑{}", state.scroll_offset).cyan());
+    }
     vec![
         status_line.into(),
         vec!["❯ ".cyan(), state.composer.clone().into()].into(),
-        "  Enter send · Ctrl+C interrupt · Ctrl+D exit".dim().into(),
+        "  Enter send · PgUp/PgDn scroll · Ctrl+O copy · Ctrl+D exit"
+            .dim()
+            .into(),
     ]
 }
 
