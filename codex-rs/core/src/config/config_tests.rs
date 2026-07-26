@@ -3505,6 +3505,33 @@ fn tui_config_missing_notifications_field_defaults_to_enabled() {
 }
 
 #[tokio::test]
+async fn runtime_config_resolves_tui_variant() {
+    let default = Config::load_from_base_config_with_overrides(
+        ConfigToml::default(),
+        ConfigOverrides::default(),
+        tempdir().expect("tempdir").abs(),
+    )
+    .await
+    .expect("load default config");
+    let classic = Config::load_from_base_config_with_overrides(
+        ConfigToml {
+            tui: Some(Tui {
+                variant: UiVariant::Classic,
+                ..Tui::default()
+            }),
+            ..ConfigToml::default()
+        },
+        ConfigOverrides::default(),
+        tempdir().expect("tempdir").abs(),
+    )
+    .await
+    .expect("load classic TUI config");
+
+    assert_eq!(default.tui_variant, UiVariant::Astral);
+    assert_eq!(classic.tui_variant, UiVariant::Classic);
+}
+
+#[tokio::test]
 async fn runtime_config_resolves_terminal_resize_reflow_defaults_and_overrides() {
     let cfg = Config::load_from_base_config_with_overrides(
         ConfigToml::default(),

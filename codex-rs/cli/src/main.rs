@@ -101,6 +101,9 @@ struct MultitoolCli {
     remote: InteractiveRemoteOptions,
 
     #[clap(flatten)]
+    ui: UiSelectionCli,
+
+    #[clap(flatten)]
     interactive: TuiCli,
 
     #[clap(subcommand)]
@@ -302,6 +305,9 @@ struct ResumeCommand {
     remote: InteractiveRemoteOptions,
 
     #[clap(flatten)]
+    ui: UiSelectionCli,
+
+    #[clap(flatten)]
     config_overrides: SessionTuiCli,
 }
 
@@ -348,6 +354,9 @@ struct ForkCommand {
 
     #[clap(flatten)]
     remote: InteractiveRemoteOptions,
+
+    #[clap(flatten)]
+    ui: UiSelectionCli,
 
     #[clap(flatten)]
     config_overrides: SessionTuiCli,
@@ -782,6 +791,21 @@ struct InteractiveRemoteOptions {
     remote_auth_token_env: Option<String>,
 }
 
+#[derive(Debug, Args, Clone, Copy, Default)]
+struct UiSelectionCli {
+    /// Select the interactive terminal UI implementation.
+    #[arg(long = "ui", value_name = "VARIANT", value_parser = parse_ui_variant)]
+    ui: Option<codex_config::types::UiVariant>,
+}
+
+fn parse_ui_variant(value: &str) -> Result<codex_config::types::UiVariant, String> {
+    match value {
+        "astral" => Ok(codex_config::types::UiVariant::Astral),
+        "classic" => Ok(codex_config::types::UiVariant::Classic),
+        _ => Err("expected `astral` or `classic`".to_string()),
+    }
+}
+
 impl FeatureToggles {
     fn to_overrides(&self) -> anyhow::Result<Vec<String>> {
         let mut v = Vec::new();
@@ -849,6 +873,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
         config_overrides: mut root_config_overrides,
         feature_toggles,
         remote,
+        ui,
         mut interactive,
         subcommand,
     } = MultitoolCli::parse();
@@ -858,7 +883,9 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
     root_config_overrides.raw_overrides.extend(toggle_overrides);
     let root_remote = remote.remote;
     let root_remote_auth_token_env = remote.remote_auth_token_env;
+    let root_ui = ui.ui;
     let root_strict_config = interactive.strict_config;
+    reject_ui_for_subcommand(root_ui, &subcommand)?;
     reject_root_strict_config_for_subcommand(root_strict_config, &subcommand)?;
     if let Some(subcommand) = subcommand.as_ref() {
         profile_v2_for_subcommand(&interactive, subcommand)?;
@@ -872,6 +899,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
             );
             let exit_info = run_interactive_tui(
                 interactive,
+                root_ui,
                 root_remote.clone(),
                 root_remote_auth_token_env.clone(),
                 arg0_paths.clone(),
@@ -1126,6 +1154,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
             all,
             include_non_interactive,
             remote,
+            ui,
             config_overrides,
         })) => {
             let SessionTuiCli(config_overrides) = config_overrides;
@@ -1140,6 +1169,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
             );
             let exit_info = run_interactive_tui(
                 interactive,
+                ui.ui.or(root_ui),
                 remote.remote.or(root_remote.clone()),
                 remote
                     .remote_auth_token_env
@@ -1180,6 +1210,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
             last,
             all,
             remote,
+            ui,
             config_overrides,
         })) => {
             let SessionTuiCli(config_overrides) = config_overrides;
@@ -1193,6 +1224,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
             );
             let exit_info = run_interactive_tui(
                 interactive,
+                ui.ui.or(root_ui),
                 remote.remote.or(root_remote.clone()),
                 remote
                     .remote_auth_token_env
@@ -1817,6 +1849,21 @@ fn reject_remote_mode_for_subcommand(
     Ok(())
 }
 
+fn reject_ui_for_subcommand(
+    ui: Option<codex_config::types::UiVariant>,
+    subcommand: &Option<Subcommand>,
+) -> anyhow::Result<()> {
+    if ui.is_none()
+        || matches!(
+            subcommand,
+            None | Some(Subcommand::Resume(_)) | Some(Subcommand::Fork(_))
+        )
+    {
+        return Ok(());
+    }
+    anyhow::bail!("`--ui` is only supported for interactive TUI commands")
+}
+
 fn reject_root_strict_config_for_subcommand(
     strict_config: bool,
     subcommand: &Option<Subcommand>,
@@ -1974,6 +2021,7 @@ fn read_remote_auth_token_from_env_var(env_var_name: &str) -> anyhow::Result<Str
 
 async fn run_interactive_tui(
     mut interactive: TuiCli,
+    ui: Option<codex_config::types::UiVariant>,
     remote: Option<String>,
     remote_auth_token_env: Option<String>,
     arg0_paths: Arg0DispatchPaths,
@@ -2014,6 +2062,7 @@ async fn run_interactive_tui(
             arg0_paths.clone(),
             codex_config::LoaderOverrides::default(),
             remote_endpoint.clone(),
+            ui,
         )
     };
     let mut attempted_repair = false;
@@ -2299,6 +2348,7 @@ mod tests {
             subcommand,
             feature_toggles: _,
             remote: _,
+            ui: _,
         } = cli;
 
         let Subcommand::Resume(ResumeCommand {
@@ -2307,6 +2357,7 @@ mod tests {
             all,
             include_non_interactive,
             remote: _,
+            ui: _,
             config_overrides: resume_cli,
         }) = subcommand.expect("resume present")
         else {
@@ -2333,6 +2384,7 @@ mod tests {
             subcommand,
             feature_toggles: _,
             remote: _,
+            ui: _,
         } = cli;
 
         let Subcommand::Fork(ForkCommand {
@@ -2340,6 +2392,7 @@ mod tests {
             last,
             all,
             remote: _,
+            ui: _,
             config_overrides: fork_cli,
         }) = subcommand.expect("fork present")
         else {
@@ -2358,6 +2411,7 @@ mod tests {
             subcommand,
             feature_toggles: _,
             remote: _,
+            ui: _,
         } = cli;
 
         let Subcommand::Archive(SessionArchiveCommand {
@@ -3249,6 +3303,33 @@ mod tests {
         let cli = MultitoolCli::try_parse_from(["astral", "--remote", "unix://codex.sock"])
             .expect("parse");
         assert_eq!(cli.remote.remote.as_deref(), Some("unix://codex.sock"));
+    }
+
+    #[test]
+    fn ui_variant_parses_for_interactive_commands() {
+        let root =
+            MultitoolCli::try_parse_from(["astral", "--ui", "classic"]).expect("parse root UI");
+        assert_eq!(root.ui.ui, Some(codex_config::types::UiVariant::Classic));
+
+        let resume = MultitoolCli::try_parse_from(["astral", "resume", "--ui", "astral"])
+            .expect("parse resume UI");
+        let Some(Subcommand::Resume(ResumeCommand { ui, .. })) = resume.subcommand else {
+            panic!("expected resume subcommand");
+        };
+        assert_eq!(ui.ui, Some(codex_config::types::UiVariant::Astral));
+    }
+
+    #[test]
+    fn ui_variant_is_rejected_for_non_interactive_commands() {
+        let cli = MultitoolCli::try_parse_from(["astral", "--ui", "classic", "exec"])
+            .expect("parse root UI before exec");
+        let err = reject_ui_for_subcommand(cli.ui.ui, &cli.subcommand)
+            .expect_err("exec should reject --ui");
+
+        assert_eq!(
+            err.to_string(),
+            "`--ui` is only supported for interactive TUI commands"
+        );
     }
 
     #[test]
