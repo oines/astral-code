@@ -258,6 +258,82 @@ mod links {
         );
     }
 
+    #[test]
+    fn insert_before_commits_consecutive_blocks_without_moving_viewport() {
+        let mut terminal = Terminal::with_options(
+            RecordingBackend::default(),
+            TerminalOptions {
+                viewport: Viewport::Inline(3),
+            },
+        )
+        .unwrap();
+        terminal.set_viewport_area(Rect::new(0, 21, 80, 3));
+        let before = terminal.backend().appended_lines;
+
+        terminal
+            .insert_before(2, |buffer| {
+                buffer.set_string(0, 0, "first", Style::default());
+                buffer.set_string(0, 1, "second", Style::default());
+            })
+            .unwrap();
+        terminal
+            .insert_before(1, |buffer| {
+                buffer.set_string(0, 0, "third", Style::default());
+            })
+            .unwrap();
+
+        let output = String::from_utf8(terminal.backend().buf.clone()).unwrap();
+        assert!(output.contains("first"));
+        assert!(output.contains("second"));
+        assert!(output.contains("third"));
+        assert_eq!(terminal.backend().appended_lines - before, 3);
+        assert_eq!(terminal.viewport_area(), Rect::new(0, 21, 80, 3));
+    }
+
+    #[test]
+    fn insert_before_streams_blocks_taller_than_the_screen() {
+        let mut terminal = Terminal::with_options(
+            RecordingBackend::default(),
+            TerminalOptions {
+                viewport: Viewport::Inline(3),
+            },
+        )
+        .unwrap();
+        terminal.set_viewport_area(Rect::new(0, 21, 80, 3));
+        let before = terminal.backend().appended_lines;
+
+        terminal
+            .insert_before(30, |buffer| {
+                buffer.set_string(0, 0, "top", Style::default());
+                buffer.set_string(0, 29, "bottom", Style::default());
+            })
+            .unwrap();
+
+        let output = String::from_utf8(terminal.backend().buf.clone()).unwrap();
+        assert!(output.contains("top"));
+        assert!(output.contains("bottom"));
+        assert_eq!(terminal.backend().appended_lines - before, 30);
+        assert_eq!(terminal.viewport_area(), Rect::new(0, 21, 80, 3));
+    }
+
+    #[test]
+    fn insert_before_zero_height_keeps_viewport_stable() {
+        let mut terminal = Terminal::with_options(
+            RecordingBackend::default(),
+            TerminalOptions {
+                viewport: Viewport::Inline(3),
+            },
+        )
+        .unwrap();
+        terminal.set_viewport_area(Rect::new(0, 21, 80, 3));
+        let before = terminal.backend().appended_lines;
+
+        terminal.insert_before(0, |_| {}).unwrap();
+
+        assert_eq!(terminal.backend().appended_lines - before, 0);
+        assert_eq!(terminal.viewport_area(), Rect::new(0, 21, 80, 3));
+    }
+
     /// Regression: `set_viewport_height` must judge grow-vs-shrink against the
     /// live `viewport_area.height`, not the stored `Viewport::Inline(height)`.
     ///
