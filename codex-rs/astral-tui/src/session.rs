@@ -18,6 +18,10 @@ use codex_app_server_protocol::TurnInterruptResponse;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::UserInput;
+use codex_protocol::config_types::CollaborationMode;
+use codex_protocol::config_types::ModeKind;
+use codex_protocol::config_types::Settings;
+use codex_protocol::openai_models::ReasoningEffort;
 
 use crate::RequestResolution;
 
@@ -73,20 +77,26 @@ pub struct SessionState {
     pub model_provider: String,
     pub service_tier: Option<String>,
     pub active_turn_id: Option<String>,
+    pub collaboration_mode: CollaborationMode,
 }
 
 impl SessionState {
     fn from_start(response: ThreadStartResponse) -> Self {
+        let collaboration_mode =
+            default_collaboration_mode(response.model.clone(), response.reasoning_effort);
         Self {
             thread: response.thread,
             model: response.model,
             model_provider: response.model_provider,
             service_tier: response.service_tier,
             active_turn_id: None,
+            collaboration_mode,
         }
     }
 
     fn from_resume(response: ThreadResumeResponse) -> Self {
+        let collaboration_mode =
+            default_collaboration_mode(response.model.clone(), response.reasoning_effort);
         let active_turn_id = response
             .thread
             .turns
@@ -100,16 +110,20 @@ impl SessionState {
             model_provider: response.model_provider,
             service_tier: response.service_tier,
             active_turn_id,
+            collaboration_mode,
         }
     }
 
     fn from_fork(response: ThreadForkResponse) -> Self {
+        let collaboration_mode =
+            default_collaboration_mode(response.model.clone(), response.reasoning_effort);
         Self {
             thread: response.thread,
             model: response.model,
             model_provider: response.model_provider,
             service_tier: response.service_tier,
             active_turn_id: None,
+            collaboration_mode,
         }
     }
 
@@ -128,6 +142,19 @@ impl SessionState {
             }
             ServerNotification::ThreadNameUpdated(params) if params.thread_id == self.thread.id => {
                 self.thread.name.clone_from(&params.thread_name);
+            }
+            ServerNotification::ThreadSettingsUpdated(params)
+                if params.thread_id == self.thread.id =>
+            {
+                self.model.clone_from(&params.thread_settings.model);
+                self.model_provider
+                    .clone_from(&params.thread_settings.model_provider);
+                self.service_tier
+                    .clone_from(&params.thread_settings.service_tier);
+                self.collaboration_mode = default_collaboration_mode(
+                    params.thread_settings.model.clone(),
+                    params.thread_settings.effort.clone(),
+                );
             }
             _ => {}
         }
@@ -202,10 +229,20 @@ impl AstralSession {
             .as_ref()
             .map(|state| state.thread.id.clone())
             .ok_or(SessionError::NoThread)?;
+        let collaboration_mode = self
+            .state
+            .as_ref()
+            .map(|state| state.collaboration_mode.clone())
+            .ok_or(SessionError::NoThread)?;
         let request_id = self.next_request_id();
         let response: TurnStartResponse = self
             .client
-            .request_typed(turn_start_request(request_id, thread_id, input))
+            .request_typed(turn_start_request(
+                request_id,
+                thread_id,
+                input,
+                collaboration_mode,
+            ))
             .await?;
         if let Some(state) = self.state.as_mut() {
             state.active_turn_id = Some(response.turn.id.clone());
@@ -270,6 +307,7 @@ fn turn_start_request(
     request_id: RequestId,
     thread_id: String,
     input: Vec<UserInput>,
+    collaboration_mode: CollaborationMode,
 ) -> ClientRequest {
     ClientRequest::TurnStart {
         request_id,
@@ -293,7 +331,21 @@ fn turn_start_request(
             summary: None,
             personality: None,
             output_schema: None,
-            collaboration_mode: None,
+            collaboration_mode: Some(collaboration_mode),
+        },
+    }
+}
+
+fn default_collaboration_mode(
+    model: String,
+    reasoning_effort: Option<ReasoningEffort>,
+) -> CollaborationMode {
+    CollaborationMode {
+        mode: ModeKind::Default,
+        settings: Settings {
+            model,
+            reasoning_effort,
+            developer_instructions: None,
         },
     }
 }
