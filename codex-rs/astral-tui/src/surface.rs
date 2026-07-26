@@ -148,7 +148,7 @@ pub fn render_surface(
         return None;
     }
 
-    let mut footer = request_lines(state.pending_requests.front(), area.width);
+    let mut footer = request_lines(state.pending_requests.front(), state.composer(), area.width);
     if footer.is_empty() {
         footer = composer_lines(state, session, area.width);
     }
@@ -182,7 +182,12 @@ pub fn render_surface(
         buffer,
     );
 
-    state.pending_requests.is_empty().then(|| {
+    (state.pending_requests.is_empty()
+        || state
+            .pending_requests
+            .front()
+            .is_some_and(request_uses_composer))
+    .then(|| {
         let prompt = footer
             .iter()
             .rev()
@@ -244,7 +249,11 @@ fn composer_lines(state: &SurfaceState, session: &SessionState, _width: u16) -> 
     ]
 }
 
-fn request_lines(request: Option<&PendingRequest>, _width: u16) -> Vec<Line<'static>> {
+fn request_lines(
+    request: Option<&PendingRequest>,
+    composer: &str,
+    _width: u16,
+) -> Vec<Line<'static>> {
     let Some(request) = request else {
         return Vec::new();
     };
@@ -265,11 +274,18 @@ fn request_lines(request: Option<&PendingRequest>, _width: u16) -> Vec<Line<'sta
             if let Some(reason) = params.reason.as_deref() {
                 lines.push(vec!["  ".into(), reason.to_string().dim()].into());
             }
-            lines.push(
-                "  [y] allow · [a] allow session · [n] deny · [esc] cancel"
-                    .dim()
-                    .into(),
-            );
+            let mut choices = "[y] allow · [a] allow session · [n] deny · [esc] cancel".to_string();
+            if params.proposed_execpolicy_amendment.is_some() {
+                choices.push_str(" · [e] trust pattern");
+            }
+            if params
+                .proposed_network_policy_amendments
+                .as_ref()
+                .is_some_and(|amendments| !amendments.is_empty())
+            {
+                choices.push_str(" · [p] network rule");
+            }
+            lines.push(vec!["  ".into(), choices.dim()].into());
         }
         PendingRequest::FileChange { params, .. } => {
             lines.push(
@@ -322,7 +338,12 @@ fn request_lines(request: Option<&PendingRequest>, _width: u16) -> Vec<Line<'sta
                     );
                 }
             }
-            lines.push("  Type an answer and press Enter · Esc cancel".dim().into());
+            lines.push(vec!["❯ ".cyan(), composer.to_string().into()].into());
+            lines.push(
+                "  Enter answer · separate multiple answers with | · Esc cancel"
+                    .dim()
+                    .into(),
+            );
         }
         PendingRequest::McpElicitation { params, .. } => {
             let message = match &params.request {
@@ -330,7 +351,19 @@ fn request_lines(request: Option<&PendingRequest>, _width: u16) -> Vec<Line<'sta
                 | McpServerElicitationRequest::Url { message, .. } => message,
             };
             lines.push(vec!["  ".into(), message.clone().into()].into());
-            lines.push("  [y] accept · [n] decline · [esc] cancel".dim().into());
+            match &params.request {
+                McpServerElicitationRequest::Form { .. } => {
+                    lines.push(vec!["❯ ".cyan(), composer.to_string().into()].into());
+                    lines.push(
+                        "  Enter JSON response · [n] decline · [esc] cancel"
+                            .dim()
+                            .into(),
+                    );
+                }
+                McpServerElicitationRequest::Url { .. } => {
+                    lines.push("  [y] accept · [n] decline · [esc] cancel".dim().into());
+                }
+            }
         }
         PendingRequest::DynamicTool { params, .. } => {
             lines.push(
@@ -365,6 +398,15 @@ fn request_lines(request: Option<&PendingRequest>, _width: u16) -> Vec<Line<'sta
         }
     }
     lines
+}
+
+fn request_uses_composer(request: &PendingRequest) -> bool {
+    matches!(request, PendingRequest::UserInput { .. })
+        || matches!(
+            request,
+            PendingRequest::McpElicitation { params, .. }
+                if matches!(params.request, McpServerElicitationRequest::Form { .. })
+        )
 }
 
 #[cfg(test)]
