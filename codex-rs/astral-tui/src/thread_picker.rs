@@ -153,7 +153,7 @@ enum PickerInput {
     None,
     Redraw,
     LoadNext,
-    Select(String),
+    Select(Box<Thread>),
     Cancel,
 }
 
@@ -164,7 +164,7 @@ enum PickerInput {
 pub async fn run_thread_picker(
     client: &AppServerClient,
     mut options: ThreadPickerOptions,
-) -> io::Result<Option<String>> {
+) -> io::Result<Option<Thread>> {
     options.list_params.limit = Some(100);
     let page = load_page(client, &options.list_params, /*request_id*/ 0).await?;
     let mut state = PickerState::new(options.action, page);
@@ -193,7 +193,7 @@ pub async fn run_thread_picker(
         };
         match action {
             PickerInput::None | PickerInput::Redraw => {}
-            PickerInput::Select(thread_id) => break Ok(Some(thread_id)),
+            PickerInput::Select(thread) => break Ok(Some(*thread)),
             PickerInput::Cancel => break Ok(None),
             PickerInput::LoadNext => {
                 let Some(cursor) = state.next_cursor.clone() else {
@@ -242,14 +242,16 @@ fn handle_key(state: &mut PickerState, key: KeyEvent, terminal_height: u16) -> P
         (KeyCode::Esc, _) | (KeyCode::Char('c'), KeyModifiers::CONTROL) => PickerInput::Cancel,
         (KeyCode::Enter, _) => state
             .selected_thread()
-            .map(|thread| PickerInput::Select(thread.id.clone()))
+            .cloned()
+            .map(Box::new)
+            .map(PickerInput::Select)
             .unwrap_or(PickerInput::None),
         (KeyCode::Up, _) | (KeyCode::Char('k'), KeyModifiers::NONE) => {
             state.move_up();
             PickerInput::Redraw
         }
         (KeyCode::Down, _) | (KeyCode::Char('j'), KeyModifiers::NONE) => {
-            if state.query.is_empty() && state.at_end() && state.next_cursor.is_some() {
+            if state.at_end() && state.next_cursor.is_some() {
                 PickerInput::LoadNext
             } else {
                 state.move_down();

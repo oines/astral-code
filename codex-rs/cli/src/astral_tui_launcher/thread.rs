@@ -50,14 +50,14 @@ pub(super) async fn resolve_launch(
                 ThreadPickerOptions::new(ThreadPickerAction::Resume, params),
             )
             .await?;
-            let Some(thread_id) = selected else {
+            let Some(thread) = selected else {
                 return Ok(None);
             };
             return Ok(Some(ThreadLaunch::Resume(resume_params(
-                thread_id, cli, config, mode,
+                &thread, cli, config, mode,
             ))));
         }
-        let thread_id = resolve_thread_id(
+        let thread = resolve_thread(
             client,
             cli.resume_session_id.as_deref(),
             cli.resume_show_all,
@@ -67,8 +67,8 @@ pub(super) async fn resolve_launch(
             cli.cwd.as_deref(),
         )
         .await?;
-        return Ok(Some(match thread_id {
-            Some(thread_id) => ThreadLaunch::Resume(resume_params(thread_id, cli, config, mode)),
+        return Ok(Some(match thread {
+            Some(thread) => ThreadLaunch::Resume(resume_params(&thread, cli, config, mode)),
             None => ThreadLaunch::Start(start_params(cli, config, mode)),
         }));
     }
@@ -88,14 +88,14 @@ pub(super) async fn resolve_launch(
                 ThreadPickerOptions::new(ThreadPickerAction::Fork, params),
             )
             .await?;
-            let Some(thread_id) = selected else {
+            let Some(thread) = selected else {
                 return Ok(None);
             };
             return Ok(Some(ThreadLaunch::Fork(fork_params(
-                thread_id, cli, config, mode,
+                &thread, cli, config, mode,
             ))));
         }
-        let thread_id = resolve_thread_id(
+        let thread = resolve_thread(
             client,
             cli.fork_session_id.as_deref(),
             cli.fork_show_all,
@@ -105,15 +105,15 @@ pub(super) async fn resolve_launch(
             cli.cwd.as_deref(),
         )
         .await?;
-        return Ok(Some(match thread_id {
-            Some(thread_id) => ThreadLaunch::Fork(fork_params(thread_id, cli, config, mode)),
+        return Ok(Some(match thread {
+            Some(thread) => ThreadLaunch::Fork(fork_params(&thread, cli, config, mode)),
             None => ThreadLaunch::Start(start_params(cli, config, mode)),
         }));
     }
     Ok(Some(ThreadLaunch::Start(start_params(cli, config, mode))))
 }
 
-async fn resolve_thread_id(
+async fn resolve_thread(
     client: &AppServerClient,
     id_or_name: Option<&str>,
     show_all: bool,
@@ -121,11 +121,11 @@ async fn resolve_thread_id(
     config: &Config,
     mode: ThreadParamsMode,
     remote_cwd: Option<&std::path::Path>,
-) -> io::Result<Option<String>> {
+) -> io::Result<Option<Thread>> {
     if let Some(id_or_name) = id_or_name {
         return lookup_thread(client, id_or_name, include_non_interactive, config, mode)
             .await?
-            .map(|thread| Some(thread.id))
+            .map(Some)
             .ok_or_else(|| {
                 io::Error::new(io::ErrorKind::NotFound, "no matching Astral session found")
             });
@@ -143,7 +143,7 @@ async fn resolve_thread_id(
         ),
     )
     .await?;
-    Ok(response.data.into_iter().next().map(|thread| thread.id))
+    Ok(response.data.into_iter().next())
 }
 
 async fn lookup_thread(
@@ -168,19 +168,16 @@ async fn lookup_thread(
     }
     let mut cursor = None;
     loop {
-        let response = list_threads(
-            client,
-            thread_list_params(
-                Some(id_or_name),
-                /*show_all*/ true,
-                include_non_interactive,
-                config,
-                mode,
-                /*remote_cwd*/ None,
-                cursor,
-            ),
-        )
-        .await?;
+        let params = thread_list_params(
+            Some(id_or_name),
+            /*show_all*/ true,
+            include_non_interactive,
+            config,
+            mode,
+            /*remote_cwd*/ None,
+            cursor,
+        );
+        let response = list_threads(client, params).await?;
         if let Some(thread) = response
             .data
             .into_iter()
@@ -226,7 +223,7 @@ fn thread_list_params(
         limit: Some(if id_or_name.is_some() { 100 } else { 1 }),
         sort_key: Some(ThreadSortKey::UpdatedAt),
         sort_direction: None,
-        model_providers: matches!(mode, ThreadParamsMode::Local)
+        model_providers: (id_or_name.is_none() && matches!(mode, ThreadParamsMode::Local))
             .then(|| vec![config.model_provider_id.clone()]),
         source_kinds: Some(source_kinds),
         archived: Some(false),
@@ -247,7 +244,7 @@ fn thread_list_params(
 }
 
 fn start_params(cli: &Cli, config: &Config, mode: ThreadParamsMode) -> ThreadStartParams {
-    let mut params = common_params(cli, config, mode);
+    let mut params = common_params(cli, config, mode, /*existing_thread*/ None);
     ThreadStartParams {
         model: params.model.take(),
         model_provider: params.model_provider.take(),
@@ -270,14 +267,15 @@ fn start_params(cli: &Cli, config: &Config, mode: ThreadParamsMode) -> ThreadSta
 }
 
 fn resume_params(
-    thread_id: String,
+    thread: &Thread,
     cli: &Cli,
     config: &Config,
     mode: ThreadParamsMode,
 ) -> ThreadResumeParams {
-    let params = common_params(cli, config, mode);
+    let params = common_params(cli, config, mode, Some(thread));
+    let preserve_thread_context = preserves_thread_context(cli, mode);
     ThreadResumeParams {
-        thread_id,
+        thread_id: thread.id.clone(),
         model: params.model,
         model_provider: params.model_provider,
         service_tier: params.service_tier,
@@ -288,22 +286,29 @@ fn resume_params(
         sandbox: params.sandbox,
         permissions: params.permissions,
         config: params.config,
-        base_instructions: config.base_instructions.clone(),
-        developer_instructions: config.developer_instructions.clone(),
-        personality: config.personality,
+        base_instructions: (!preserve_thread_context)
+            .then(|| config.base_instructions.clone())
+            .flatten(),
+        developer_instructions: (!preserve_thread_context)
+            .then(|| config.developer_instructions.clone())
+            .flatten(),
+        personality: (!preserve_thread_context)
+            .then_some(config.personality)
+            .flatten(),
         ..ThreadResumeParams::default()
     }
 }
 
 fn fork_params(
-    thread_id: String,
+    thread: &Thread,
     cli: &Cli,
     config: &Config,
     mode: ThreadParamsMode,
 ) -> ThreadForkParams {
-    let params = common_params(cli, config, mode);
+    let params = common_params(cli, config, mode, Some(thread));
+    let preserve_thread_context = preserves_thread_context(cli, mode);
     ThreadForkParams {
-        thread_id,
+        thread_id: thread.id.clone(),
         model: params.model,
         model_provider: params.model_provider,
         service_tier: params.service_tier,
@@ -314,8 +319,12 @@ fn fork_params(
         sandbox: params.sandbox,
         permissions: params.permissions,
         config: params.config,
-        base_instructions: config.base_instructions.clone(),
-        developer_instructions: config.developer_instructions.clone(),
+        base_instructions: (!preserve_thread_context)
+            .then(|| config.base_instructions.clone())
+            .flatten(),
+        developer_instructions: (!preserve_thread_context)
+            .then(|| config.developer_instructions.clone())
+            .flatten(),
         ephemeral: config.ephemeral,
         thread_source: Some(ThreadSource::User),
         ..ThreadForkParams::default()
@@ -335,40 +344,69 @@ struct CommonParams {
     config: Option<HashMap<String, serde_json::Value>>,
 }
 
-fn common_params(cli: &Cli, config: &Config, mode: ThreadParamsMode) -> CommonParams {
-    let permissions = matches!(mode, ThreadParamsMode::Local)
+fn common_params(
+    cli: &Cli,
+    config: &Config,
+    mode: ThreadParamsMode,
+    existing_thread: Option<&Thread>,
+) -> CommonParams {
+    let preserve_thread_context = existing_thread.is_some() && preserves_thread_context(cli, mode);
+    let effective_cwd = existing_thread
+        .filter(|_| preserve_thread_context)
+        .map_or(config.cwd.as_path(), |thread| thread.cwd.as_path());
+    let permissions = (matches!(mode, ThreadParamsMode::Local) && !preserve_thread_context)
         .then(|| config.permissions.active_permission_profile())
         .flatten()
         .map(|profile| profile.id);
-    let sandbox = permissions.is_none().then(|| {
-        sandbox_mode_from_permission_profile(
-            &config.permissions.effective_permission_profile(),
-            config.cwd.as_path(),
-        )
-    });
+    let send_sandbox_override = !preserve_thread_context
+        || cli.sandbox_mode.is_some()
+        || cli.dangerously_bypass_approvals_and_sandbox;
+    let sandbox = (permissions.is_none() && send_sandbox_override)
+        .then(|| {
+            sandbox_mode_from_permission_profile(
+                &config.permissions.effective_permission_profile(),
+                effective_cwd,
+            )
+        })
+        .flatten();
+    let send_model_override = !preserve_thread_context || cli.model.is_some() || cli.oss;
+    let send_approval_override = !preserve_thread_context
+        || cli.approval_policy.is_some()
+        || cli.dangerously_bypass_approvals_and_sandbox;
     CommonParams {
-        model: config.model.clone(),
-        model_provider: matches!(mode, ThreadParamsMode::Local)
+        model: send_model_override.then(|| config.model.clone()).flatten(),
+        model_provider: (matches!(mode, ThreadParamsMode::Local) && send_model_override)
             .then(|| config.model_provider_id.clone()),
-        service_tier: config.service_tier.clone().map(Some).or_else(|| {
-            (config.notices.fast_default_opt_out == Some(true))
-                .then(|| Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string()))
-        }),
+        service_tier: (!preserve_thread_context)
+            .then(|| {
+                config.service_tier.clone().map(Some).or_else(|| {
+                    (config.notices.fast_default_opt_out == Some(true))
+                        .then(|| Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string()))
+                })
+            })
+            .flatten(),
         cwd: match mode {
-            ThreadParamsMode::Local => Some(config.cwd.to_string_lossy().to_string()),
+            ThreadParamsMode::Local => Some(effective_cwd.to_string_lossy().to_string()),
             ThreadParamsMode::Remote => cli
                 .cwd
                 .as_ref()
                 .map(|cwd| cwd.to_string_lossy().to_string()),
         },
-        runtime_workspace_roots: matches!(mode, ThreadParamsMode::Local)
+        runtime_workspace_roots: (matches!(mode, ThreadParamsMode::Local)
+            && !preserve_thread_context)
             .then(|| config.workspace_roots.clone()),
-        approval_policy: Some(config.permissions.approval_policy.value().into()),
-        approvals_reviewer: Some(config.approvals_reviewer.into()),
-        sandbox: sandbox.flatten(),
+        approval_policy: send_approval_override
+            .then(|| config.permissions.approval_policy.value().into()),
+        approvals_reviewer: (!preserve_thread_context)
+            .then(|| config.approvals_reviewer.into()),
+        sandbox,
         permissions,
-        config: Some(config_request_overrides(config)),
+        config: (!preserve_thread_context).then(|| config_request_overrides(config)),
     }
+}
+
+fn preserves_thread_context(cli: &Cli, mode: ThreadParamsMode) -> bool {
+    matches!(mode, ThreadParamsMode::Local) && cli.cwd.is_none()
 }
 
 fn sandbox_mode_from_permission_profile(

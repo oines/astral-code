@@ -98,7 +98,7 @@ fn search_and_selection_use_visible_thread() {
             KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
             13,
         ),
-        PickerInput::Select(thread_id) if thread_id == "thread-2"
+        PickerInput::Select(thread) if thread.id == "thread-2"
     ));
 }
 
@@ -106,6 +106,21 @@ fn search_and_selection_use_visible_thread() {
 fn down_at_loaded_end_requests_next_page() {
     let mut state = state();
     state.selected = 1;
+
+    assert!(matches!(
+        handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+            13,
+        ),
+        PickerInput::LoadNext
+    ));
+}
+
+#[test]
+fn down_with_unmatched_search_requests_next_page() {
+    let mut state = state();
+    state.query = "older session".to_string();
 
     assert!(matches!(
         handle_key(
