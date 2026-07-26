@@ -1,0 +1,16 @@
+astral-terminal-inline includes code derived from xai-ratatui-inline and the
+Ratatui terminal UI library.
+
+xai-ratatui-inline:
+Upstream: https://github.com/xai-org/grok-build
+Copyright 2023-2026 xAI
+Licensed under the Apache License, Version 2.0.
+
+Ratatui:
+Upstream: https://github.com/ratatui/ratatui
+Copyright (c) 2023-2024 The Ratatui Developers
+Copyright (c) Florian Dehau (original tui-rs lineage, where applicable)
+Licensed under the MIT License or the Apache License, Version 2.0.
+
+Astral Code modifications include crate renaming, workspace integration, and
+adaptation for the Astral TUI. See the repository root LICENSE and NOTICE.
