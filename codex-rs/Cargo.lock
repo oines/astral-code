@@ -578,7 +578,9 @@ dependencies = [
  "astral-tui-scrollback",
  "codex-app-server-client",
  "codex-app-server-protocol",
+ "insta",
  "pretty_assertions",
+ "ratatui",
  "serde_json",
 ]
 

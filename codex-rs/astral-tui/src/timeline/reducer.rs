@@ -24,6 +24,7 @@ pub struct TimelineEntry {
     turn_id: String,
     item: Option<ThreadItem>,
     stream: TimelineStream,
+    finalized: bool,
     started_at_ms: Option<i64>,
     completed_at_ms: Option<i64>,
 }
@@ -35,6 +36,7 @@ impl TimelineEntry {
             turn_id,
             item: None,
             stream: TimelineStream::None,
+            finalized: false,
             started_at_ms: None,
             completed_at_ms: None,
         }
@@ -54,6 +56,10 @@ impl TimelineEntry {
 
     pub fn stream(&self) -> &TimelineStream {
         &self.stream
+    }
+
+    pub fn is_finalized(&self) -> bool {
+        self.finalized
     }
 
     pub fn started_at_ms(&self) -> Option<i64> {
@@ -137,6 +143,7 @@ impl TimelineState {
                 entry.turn_id.clone_from(&event.turn_id);
                 entry.id = event.item.id().to_owned();
                 entry.item = Some(event.item.clone());
+                entry.finalized = false;
                 entry.started_at_ms = Some(event.started_at_ms);
                 ReduceOutcome::Applied
             }
@@ -149,6 +156,7 @@ impl TimelineState {
                 entry.id = event.item.id().to_owned();
                 entry.item = Some(event.item.clone());
                 entry.stream = TimelineStream::None;
+                entry.finalized = true;
                 entry.completed_at_ms = Some(event.completed_at_ms);
                 ReduceOutcome::Applied
             }
@@ -261,6 +269,7 @@ impl TimelineState {
                 let entry = self.entry_mut(item.id(), turn_id);
                 entry.item = Some(item.clone());
                 entry.stream = TimelineStream::None;
+                entry.finalized = true;
             }
         }
     }
