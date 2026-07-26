@@ -56,11 +56,30 @@ fn codex_surface_tool_blocks_snapshot() {
         },
         ThreadItem::FileChange {
             id: "patch-1".to_string(),
-            changes: vec![FileUpdateChange {
-                path: "astral-tui/src/render.rs".to_string(),
-                kind: PatchChangeKind::Update { move_path: None },
-                diff: "@@\n-old\n+new\n+another".to_string(),
-            }],
+            changes: vec![
+                FileUpdateChange {
+                    path: "astral-tui/src/render.rs".to_string(),
+                    kind: PatchChangeKind::Update { move_path: None },
+                    diff: "@@\n-old\n+new\n+another".to_string(),
+                },
+                FileUpdateChange {
+                    path: "astral-tui/src/new.rs".to_string(),
+                    kind: PatchChangeKind::Add,
+                    diff: "@@\n+new module".to_string(),
+                },
+                FileUpdateChange {
+                    path: "astral-tui/src/obsolete.rs".to_string(),
+                    kind: PatchChangeKind::Delete,
+                    diff: "@@\n-old module".to_string(),
+                },
+                FileUpdateChange {
+                    path: "astral-tui/src/old_name.rs".to_string(),
+                    kind: PatchChangeKind::Update {
+                        move_path: Some(std::path::PathBuf::from("astral-tui/src/new_name.rs")),
+                    },
+                    diff: String::new(),
+                },
+            ],
             status: PatchApplyStatus::Completed,
         },
         ThreadItem::WebSearch {

@@ -1,3 +1,4 @@
+use codex_app_server_protocol::PatchChangeKind;
 use ratatui::style::Color;
 use ratatui::style::Styled;
 use ratatui::style::Stylize;
@@ -217,10 +218,23 @@ fn render_tool(tool: &ToolPresentation, options: RenderOptions) -> Text<'static>
         );
         for change in &tool.changes {
             let (added, removed) = diff_counts(&change.diff);
+            let (operation, path) = match &change.kind {
+                PatchChangeKind::Add => ("A".green(), change.path.clone()),
+                PatchChangeKind::Delete => ("D".red(), change.path.clone()),
+                PatchChangeKind::Update {
+                    move_path: Some(move_path),
+                } => (
+                    "R".magenta(),
+                    format!("{} → {}", change.path, move_path.display()),
+                ),
+                PatchChangeKind::Update { move_path: None } => ("M".cyan(), change.path.clone()),
+            };
             lines.push(
                 vec![
                     "  ".into(),
-                    change.path.clone().dim(),
+                    operation,
+                    " ".dim(),
+                    path.dim(),
                     format!("  +{added}").green(),
                     format!(" -{removed}").red(),
                 ]
