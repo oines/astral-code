@@ -9,13 +9,8 @@ use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ServerRequest;
 use codex_app_server_protocol::TurnStatus;
 use codex_app_server_protocol::UserInput;
-use crossterm::event::DisableBracketedPaste;
-use crossterm::event::EnableBracketedPaste;
 use crossterm::event::Event;
 use crossterm::event::EventStream;
-use crossterm::execute;
-use crossterm::terminal::disable_raw_mode;
-use crossterm::terminal::enable_raw_mode;
 use ratatui::TerminalOptions;
 use ratatui::Viewport;
 use ratatui::backend::CrosstermBackend;
@@ -35,6 +30,7 @@ use crate::handle_key;
 use crate::handle_paste;
 use crate::paint_committed;
 use crate::render_surface;
+use crate::terminal_guard::TerminalGuard;
 
 type AstralTerminal = Terminal<CrosstermBackend<Stdout>>;
 
@@ -108,7 +104,7 @@ pub async fn run(mut session: AstralSession, options: RunOptions) -> Result<RunE
     let initial_state = session.state().cloned().ok_or(RunError::NoThread)?;
     let thread_id = initial_state.thread.id.clone();
     let mut surface = SurfaceState::from_session(&initial_state);
-    let mut guard = TerminalGuard::enter()?;
+    let mut guard = TerminalGuard::enter_inline()?;
     let viewport_rows = desired_viewport_rows(options.viewport_rows)?;
     let backend = CrosstermBackend::new(std::io::stdout());
     let mut terminal = AstralTerminal::with_options(
@@ -417,36 +413,6 @@ fn viewport_rows(configured_rows: u16, terminal_rows: u16) -> u16 {
     configured_rows
         .max(5)
         .min(terminal_rows.saturating_sub(1).max(3))
-}
-
-struct TerminalGuard {
-    active: bool,
-}
-
-impl TerminalGuard {
-    fn enter() -> io::Result<Self> {
-        execute!(std::io::stdout(), EnableBracketedPaste)?;
-        if let Err(error) = enable_raw_mode() {
-            let _ = execute!(std::io::stdout(), DisableBracketedPaste);
-            return Err(error);
-        }
-        Ok(Self { active: true })
-    }
-
-    fn restore(&mut self) {
-        if !self.active {
-            return;
-        }
-        let _ = disable_raw_mode();
-        let _ = execute!(std::io::stdout(), DisableBracketedPaste);
-        self.active = false;
-    }
-}
-
-impl Drop for TerminalGuard {
-    fn drop(&mut self) {
-        self.restore();
-    }
 }
 
 #[cfg(test)]

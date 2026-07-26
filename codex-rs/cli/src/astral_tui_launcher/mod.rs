@@ -46,13 +46,23 @@ pub(crate) async fn run_main(
             .await;
     }
     let context = prepared.start().await?;
-    let thread = thread::resolve_launch(
+    let launch = thread::resolve_launch(
         &context.client,
         &cli,
         context.config.as_ref(),
         context.target,
     )
     .await?;
+    let Some(thread) = launch else {
+        context.client.shutdown().await?;
+        return Ok(AppExitInfo {
+            token_usage: TokenUsage::default(),
+            thread_id: None,
+            thread_name: None,
+            update_action: None,
+            exit_reason: ExitReason::UserRequested,
+        });
+    };
     let mut options = LaunchOptions::new(thread);
     options.initial_input = initial_input(prompt, images);
     options.runtime = RunOptions::default();

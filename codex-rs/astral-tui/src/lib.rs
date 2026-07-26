@@ -13,6 +13,8 @@ mod request;
 mod runtime;
 mod session;
 mod surface;
+mod terminal_guard;
+mod thread_picker;
 mod timeline;
 
 pub use astral_tui_scrollback::PresentationBlock;
@@ -51,6 +53,9 @@ pub use surface::SurfaceState;
 pub use surface::committed_height;
 pub use surface::paint_committed;
 pub use surface::render_surface;
+pub use thread_picker::ThreadPickerAction;
+pub use thread_picker::ThreadPickerOptions;
+pub use thread_picker::run_thread_picker;
 pub use timeline::ReduceOutcome;
 pub use timeline::TimelineEntry;
 pub use timeline::TimelineState;

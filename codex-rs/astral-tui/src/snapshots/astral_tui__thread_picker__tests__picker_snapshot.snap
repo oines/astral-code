@@ -1,0 +1,16 @@
+---
+source: astral-tui/src/thread_picker_tests.rs
+expression: buffer_text(&buffer)
+---
+◆ Resume Astral session
+  Search:
+
+────────────────────────────────────────────────────────────────────────
+❯ Astral TUI integration
+    /workspace/astral-code · updated 200
+  Fix daemon reconnect
+    /workspace/astral-code · updated 100
+
+
+
+1/2  ↑/↓ navigate · Enter select · Esc cancel · more available

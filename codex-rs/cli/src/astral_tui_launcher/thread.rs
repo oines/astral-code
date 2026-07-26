@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::io;
 
 use astral_tui::ThreadLaunch;
+use astral_tui::ThreadPickerAction;
+use astral_tui::ThreadPickerOptions;
 use codex_app_server_client::AppServerClient;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::RequestId;
@@ -31,8 +33,30 @@ pub(super) async fn resolve_launch(
     cli: &Cli,
     config: &Config,
     mode: ThreadParamsMode,
-) -> io::Result<ThreadLaunch> {
+) -> io::Result<Option<ThreadLaunch>> {
     if cli.resume_session_id.is_some() || cli.resume_last || cli.resume_picker {
+        if cli.resume_picker {
+            let params = thread_list_params(
+                None,
+                cli.resume_show_all,
+                cli.resume_include_non_interactive,
+                config,
+                mode,
+                cli.cwd.as_deref(),
+                None,
+            );
+            let selected = astral_tui::run_thread_picker(
+                client,
+                ThreadPickerOptions::new(ThreadPickerAction::Resume, params),
+            )
+            .await?;
+            let Some(thread_id) = selected else {
+                return Ok(None);
+            };
+            return Ok(Some(ThreadLaunch::Resume(resume_params(
+                thread_id, cli, config, mode,
+            ))));
+        }
         let thread_id = resolve_thread_id(
             client,
             cli.resume_session_id.as_deref(),
@@ -43,11 +67,34 @@ pub(super) async fn resolve_launch(
             cli.cwd.as_deref(),
         )
         .await?;
-        return Ok(ThreadLaunch::Resume(resume_params(
-            thread_id, cli, config, mode,
-        )));
+        return Ok(Some(match thread_id {
+            Some(thread_id) => ThreadLaunch::Resume(resume_params(thread_id, cli, config, mode)),
+            None => ThreadLaunch::Start(start_params(cli, config, mode)),
+        }));
     }
     if cli.fork_session_id.is_some() || cli.fork_last || cli.fork_picker {
+        if cli.fork_picker {
+            let params = thread_list_params(
+                None,
+                cli.fork_show_all,
+                /*include_non_interactive*/ false,
+                config,
+                mode,
+                cli.cwd.as_deref(),
+                None,
+            );
+            let selected = astral_tui::run_thread_picker(
+                client,
+                ThreadPickerOptions::new(ThreadPickerAction::Fork, params),
+            )
+            .await?;
+            let Some(thread_id) = selected else {
+                return Ok(None);
+            };
+            return Ok(Some(ThreadLaunch::Fork(fork_params(
+                thread_id, cli, config, mode,
+            ))));
+        }
         let thread_id = resolve_thread_id(
             client,
             cli.fork_session_id.as_deref(),
@@ -58,11 +105,12 @@ pub(super) async fn resolve_launch(
             cli.cwd.as_deref(),
         )
         .await?;
-        return Ok(ThreadLaunch::Fork(fork_params(
-            thread_id, cli, config, mode,
-        )));
+        return Ok(Some(match thread_id {
+            Some(thread_id) => ThreadLaunch::Fork(fork_params(thread_id, cli, config, mode)),
+            None => ThreadLaunch::Start(start_params(cli, config, mode)),
+        }));
     }
-    Ok(ThreadLaunch::Start(start_params(cli, config, mode)))
+    Ok(Some(ThreadLaunch::Start(start_params(cli, config, mode))))
 }
 
 async fn resolve_thread_id(
@@ -73,11 +121,11 @@ async fn resolve_thread_id(
     config: &Config,
     mode: ThreadParamsMode,
     remote_cwd: Option<&std::path::Path>,
-) -> io::Result<String> {
+) -> io::Result<Option<String>> {
     if let Some(id_or_name) = id_or_name {
         return lookup_thread(client, id_or_name, include_non_interactive, config, mode)
             .await?
-            .map(|thread| thread.id)
+            .map(|thread| Some(thread.id))
             .ok_or_else(|| {
                 io::Error::new(io::ErrorKind::NotFound, "no matching Astral session found")
             });
@@ -95,12 +143,7 @@ async fn resolve_thread_id(
         ),
     )
     .await?;
-    response
-        .data
-        .into_iter()
-        .next()
-        .map(|thread| thread.id)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no Astral sessions found"))
+    Ok(response.data.into_iter().next().map(|thread| thread.id))
 }
 
 async fn lookup_thread(
