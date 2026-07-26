@@ -4,10 +4,12 @@ use codex_app_server_protocol::ThreadTokenUsage;
 use codex_app_server_protocol::TokenUsageBreakdown;
 use codex_app_server_protocol::UserInput;
 use codex_config::types::UiVariant;
+use codex_protocol::config_types::AltScreenMode;
 use pretty_assertions::assert_eq;
 
 use super::initial_input;
 use super::selected_ui_variant;
+use super::selected_viewport;
 use super::token_usage_from_astral;
 
 #[test]
@@ -19,6 +21,22 @@ fn explicit_ui_overrides_configured_variant() {
     assert_eq!(
         selected_ui_variant(None, UiVariant::Classic),
         UiVariant::Classic
+    );
+}
+
+#[test]
+fn viewport_respects_cli_and_config_inline_selection() {
+    assert_eq!(
+        selected_viewport(/*no_alt_screen*/ false, AltScreenMode::Auto),
+        astral_tui::RunViewport::Fullscreen
+    );
+    assert_eq!(
+        selected_viewport(/*no_alt_screen*/ false, AltScreenMode::Never),
+        astral_tui::RunViewport::Inline
+    );
+    assert_eq!(
+        selected_viewport(/*no_alt_screen*/ true, AltScreenMode::Always),
+        astral_tui::RunViewport::Inline
     );
 }
 
