@@ -164,7 +164,7 @@ fn foreign_thread_notification_is_ignored_without_state_change() {
 }
 
 #[test]
-fn replay_upserts_same_item_id_in_place() {
+fn replay_scopes_reused_item_ids_to_their_turn() {
     let mut timeline = TimelineState::new("thread-1");
     let first = agent_message("message-1", "first");
     let replacement = agent_message("message-1", "replacement");
@@ -175,10 +175,38 @@ fn replay_upserts_same_item_id_in_place() {
         ("turn-2", &[replacement.clone(), second.clone()]),
     ]);
 
+    assert_eq!(timeline.entries().len(), 3);
+    assert_eq!(timeline.entries()[0].item(), Some(&first));
+    assert_eq!(timeline.entries()[0].turn_id(), "turn-1");
+    assert_eq!(timeline.entries()[1].item(), Some(&replacement));
+    assert_eq!(timeline.entries()[1].turn_id(), "turn-2");
+    assert_eq!(timeline.entries()[2].item(), Some(&second));
+}
+
+#[test]
+fn empty_provider_item_ids_keep_distinct_turn_positions() {
+    let mut timeline = TimelineState::new("thread-1");
+    let first = ThreadItem::Reasoning {
+        id: String::new(),
+        summary: vec!["first thought".to_string()],
+        content: Vec::new(),
+    };
+    let second = ThreadItem::Reasoning {
+        id: String::new(),
+        summary: vec!["second thought".to_string()],
+        content: Vec::new(),
+    };
+
+    timeline.replace_from_turns([
+        ("turn-1", std::slice::from_ref(&first)),
+        ("turn-2", std::slice::from_ref(&second)),
+    ]);
+
     assert_eq!(timeline.entries().len(), 2);
-    assert_eq!(timeline.entries()[0].item(), Some(&replacement));
+    assert_eq!(timeline.entries()[0].item(), Some(&first));
     assert_eq!(timeline.entries()[0].turn_id(), "turn-1");
     assert_eq!(timeline.entries()[1].item(), Some(&second));
+    assert_eq!(timeline.entries()[1].turn_id(), "turn-2");
 }
 
 #[test]

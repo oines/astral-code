@@ -16,8 +16,10 @@ pub enum ReduceOutcome {
 /// One stable transcript position.
 ///
 /// App-server may intentionally reuse a core tool call id for the structured
-/// file-change item that supersedes it. Upserting by id therefore preserves the
-/// correct position and naturally avoids duplicate Edit/Write rows.
+/// file-change item that supersedes it within one turn. Upserting by turn and
+/// item id therefore preserves the correct position and naturally avoids
+/// duplicate Edit/Write rows without conflating provider-generated ids across
+/// different turns.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TimelineEntry {
     id: String,
@@ -91,7 +93,7 @@ impl TimelineEntry {
 pub struct TimelineState {
     thread_id: String,
     entries: Vec<TimelineEntry>,
-    entry_indices: HashMap<String, usize>,
+    entry_indices: HashMap<String, HashMap<String, usize>>,
     process_indices: HashMap<String, usize>,
     turn_plan: Option<TurnPlanUpdatedNotification>,
     turn_diff: Option<String>,
@@ -149,7 +151,7 @@ impl TimelineState {
                     entry.finalized = false;
                     entry.started_at_ms = Some(event.started_at_ms);
                 }
-                self.index_process(&event.item);
+                self.index_process(&event.turn_id, &event.item);
                 ReduceOutcome::Applied
             }
             ServerNotification::ItemCompleted(event) => {
@@ -165,7 +167,7 @@ impl TimelineState {
                     entry.finalized = true;
                     entry.completed_at_ms = Some(event.completed_at_ms);
                 }
-                self.index_process(&event.item);
+                self.index_process(&event.turn_id, &event.item);
                 ReduceOutcome::Applied
             }
             ServerNotification::AgentMessageDelta(event) => {
@@ -290,7 +292,7 @@ impl TimelineState {
                     entry.stream = TimelineStream::None;
                     entry.finalized = true;
                 }
-                self.index_process(item);
+                self.index_process(turn_id, item);
             }
         }
     }
@@ -305,25 +307,36 @@ impl TimelineState {
     }
 
     fn entry_index(&mut self, item_id: &str, turn_id: &str) -> usize {
-        match self.entry_indices.get(item_id).copied() {
-            Some(index) => index,
-            None => {
-                let index = self.entries.len();
-                self.entries.push(TimelineEntry::pending(
-                    item_id.to_owned(),
-                    turn_id.to_owned(),
-                ));
-                self.entry_indices.insert(item_id.to_owned(), index);
-                index
-            }
+        if let Some(index) = self
+            .entry_indices
+            .get(turn_id)
+            .and_then(|entries| entries.get(item_id))
+            .copied()
+        {
+            return index;
         }
+        let index = self.entries.len();
+        self.entries.push(TimelineEntry::pending(
+            item_id.to_owned(),
+            turn_id.to_owned(),
+        ));
+        self.entry_indices
+            .entry(turn_id.to_owned())
+            .or_default()
+            .insert(item_id.to_owned(), index);
+        index
     }
 
-    fn index_process(&mut self, item: &ThreadItem) {
+    fn index_process(&mut self, turn_id: &str, item: &ThreadItem) {
         let ThreadItem::CommandExecution { id, process_id, .. } = item else {
             return;
         };
-        let Some(index) = self.entry_indices.get(id).copied() else {
+        let Some(index) = self
+            .entry_indices
+            .get(turn_id)
+            .and_then(|entries| entries.get(id))
+            .copied()
+        else {
             return;
         };
         self.process_indices

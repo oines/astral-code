@@ -93,7 +93,7 @@ pub(crate) fn render_transcript(
             }
             render_turn_block(&mut lines, block, turn, width, theme);
             sections.push(TranscriptSection {
-                item_id: block.item_id.clone(),
+                item_id: section_id(&turn.id, &block.item_id),
                 lines: start..lines.len(),
             });
         }
@@ -109,6 +109,10 @@ pub(crate) fn render_transcript(
         }
     }
     TranscriptLayout { lines, sections }
+}
+
+fn section_id(turn_id: &str, item_id: &str) -> String {
+    format!("{turn_id}\0{item_id}")
 }
 
 pub(crate) fn render_committed_block(
