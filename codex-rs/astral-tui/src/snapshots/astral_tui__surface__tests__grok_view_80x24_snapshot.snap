@@ -1,0 +1,27 @@
+---
+source: astral-tui/src/surface_tests.rs
+expression: "render_at_size(&state, &session, 80, 24)"
+---
+
+  ⎇ main  /workspace
+
+  ❯ inspect this repo
+
+  I’m tracing the relevant data flow.
+
+
+
+
+
+
+
+
+
+
+  ◇ Working
+
+  ╭──────────────────────────────────────────────────────── Astral session ──╮
+  │ ❯ trace the projection                                                   │
+  ╰──────────────────────────────────────────── claude-sonnet-4 · anthropic ─╯
+
+  Enter:send  │  PgUp/PgDn:scroll  │  Ctrl+O:copy  claude-sonnet-4 · anthropic

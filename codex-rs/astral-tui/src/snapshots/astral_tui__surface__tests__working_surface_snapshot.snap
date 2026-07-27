@@ -2,15 +2,15 @@
 source: astral-tui/src/surface_tests.rs
 expression: buffer_text(&buffer)
 ---
-❯ inspect this repo
+ ⎇ main  /workspace                                         9.2K / 500K
+ ❯ inspect this repo
 
-I’m tracing the relevant data flow.
-
-
-
+ I’m tracing the relevant data flow.
 
 
 
-◇ Working  claude-sonnet-4 · anthropic · 9.2K / 500K
-❯ follow the projection
-  Enter send · PgUp/PgDn scroll · Ctrl+O copy · Ctrl+D exit
+ ◇ Working
+ ╭────────────────────────────────────────────────────────────────────╮
+ │ ❯ follow the projection                                            │
+ ╰────────────────────────────────────── claude-sonnet-4 · anthropic ─╯
+ Enter:send  │  PgUp/PgDn:scroll  │  Ctrl+O:copy

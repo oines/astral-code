@@ -2,15 +2,15 @@
 source: astral-tui/src/surface_tests.rs
 expression: "request_surface(json!({\n    \"method\": \"mcpServer/elicitation/request\", \"id\": \"mcp-form\", \"params\":\n    {\n        \"threadId\": \"thread-1\", \"turnId\": \"turn-1\", \"serverName\": \"astral\",\n        \"mode\": \"form\", \"_meta\": null, \"message\": \"Choose settings\",\n        \"requestedSchema\":\n        {\n            \"type\": \"object\", \"properties\":\n            { \"confirmed\": {\"type\": \"boolean\"} }\n        }\n    }\n}), r#\"{\"confirmed\":true}\"#)"
 ---
-❯ inspect this repo
+ ⎇ main  /workspace
+ ❯ inspect this repo
 
-I’m tracing the relevant data flow.
-
-
-
+ I’m tracing the relevant data flow.
 
 
-◇ Action required
-  Choose settings
-❯ {"confirmed":true}
-  Enter JSON response · [n] decline · [esc] cancel
+
+ ◇ Action required
+   Choose settings
+ ❯ {"confirmed":true}
+   Enter JSON response · [n] decline · [esc] cancel
+ Enter:send  │  PgUp/PgDn:scroll  │  Ctrl+O:copy

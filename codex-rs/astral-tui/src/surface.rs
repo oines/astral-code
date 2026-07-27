@@ -3,6 +3,7 @@ use codex_app_server_protocol::ThreadTokenUsage;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Position;
 use ratatui::layout::Rect;
+use ratatui::style::Style;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::text::Text;
@@ -17,6 +18,15 @@ use crate::PendingRequests;
 use crate::RenderOptions;
 use crate::SessionState;
 use crate::render_block;
+use crate::view::AgentViewLayout;
+use crate::view::AgentViewLayoutInput;
+use crate::view::AstralTheme;
+use crate::view::LayoutConfig;
+use crate::view::PaneHeights;
+use crate::view::PromptChrome;
+use crate::view::ScrollbarConfig;
+use crate::view::ShortcutsBar;
+use crate::view::StatusBar;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SurfaceActivity {
@@ -198,17 +208,38 @@ pub(crate) fn render_surface_with_view(
     if area.is_empty() {
         return None;
     }
+    let theme = AstralTheme::default();
+    buffer.set_style(area, Style::default().bg(theme.bg_base));
 
-    let mut footer = request_lines(state.pending_requests.front(), state.composer(), area.width);
-    if footer.is_empty() {
-        footer = composer_lines(state, session, area.width);
-    }
-    let footer_height = u16::try_from(footer.len())
-        .unwrap_or(u16::MAX)
-        .min(area.height);
-    let live_height = area.height.saturating_sub(footer_height);
-    let live_lines = conversation_lines(state, transcript_view, area.width);
-    let visible_height = usize::from(live_height);
+    let request = request_lines(state.pending_requests.front(), state.composer(), area.width);
+    let prompt_height = if request.is_empty() {
+        composer_height(state.composer())
+    } else {
+        u16::try_from(request.len()).unwrap_or(u16::MAX).max(3)
+    };
+    let turn_status = request
+        .is_empty()
+        .then(|| turn_status_line(state, theme))
+        .flatten();
+    let layout = AgentViewLayout::compute(AgentViewLayoutInput {
+        area,
+        layout: LayoutConfig::default(),
+        scrollbar: ScrollbarConfig::default(),
+        panes: PaneHeights {
+            prompt: prompt_height,
+            turn_status: u16::from(turn_status.is_some()),
+            prompt_gap: u16::from(area.height > 16),
+            shortcuts: 1,
+            ..PaneHeights::default()
+        },
+        timeline_width: 0,
+        compact: false,
+    });
+
+    render_status_bar(state, session, layout.status_bar, buffer, theme);
+
+    let live_lines = conversation_lines(state, transcript_view, layout.scrollback_content.width);
+    let visible_height = usize::from(layout.scrollback_content.height);
     let scroll_offset = match transcript_view {
         TranscriptView::Live => 0,
         TranscriptView::Full => state
@@ -219,42 +250,46 @@ pub(crate) fn render_surface_with_view(
     let start = end.saturating_sub(visible_height);
     let visible_live = live_lines[start..end].to_vec();
 
-    Paragraph::new(Text::from(visible_live)).render(
-        Rect {
-            height: live_height,
-            ..area
-        },
-        buffer,
-    );
-    Paragraph::new(Text::from(footer.clone())).render(
-        Rect {
-            y: area.y + live_height,
-            height: footer_height,
-            ..area
-        },
-        buffer,
-    );
+    Paragraph::new(Text::from(visible_live)).render(layout.scrollback_content, buffer);
+    if let Some(turn_status) = turn_status {
+        buffer.set_line(
+            layout.turn_status.x,
+            layout.turn_status.y,
+            &turn_status,
+            layout.turn_status.width,
+        );
+    }
 
-    (state.pending_requests.is_empty()
-        || state
+    let cursor = if request.is_empty() {
+        let flags = [session.model_provider.as_str()];
+        PromptChrome {
+            text: state.composer(),
+            title: session.thread.name.as_deref(),
+            model: &session.model,
+            flags: &flags,
+            focused: true,
+        }
+        .render(layout.prompt, buffer, theme)
+    } else {
+        Paragraph::new(Text::from(request.clone())).render(layout.prompt, buffer);
+        state
             .pending_requests
             .front()
-            .is_some_and(request_uses_composer))
-    .then(|| {
-        let prompt = footer
-            .iter()
-            .rev()
-            .find(|line| line.to_string().starts_with("❯ "))
-            .map(Line::width)
-            .unwrap_or(2);
-        Position::new(
-            area.x
-                + u16::try_from(prompt)
-                    .unwrap_or(area.width)
-                    .min(area.width.saturating_sub(1)),
-            area.y + area.height.saturating_sub(2),
-        )
-    })
+            .filter(|request| request_uses_composer(request))
+            .and_then(|_| request_cursor(&request, layout.prompt))
+    };
+
+    let right = format!("{} · {}", session.model, session.model_provider);
+    ShortcutsBar {
+        hints: &[
+            ("Enter", "send"),
+            ("PgUp/PgDn", "scroll"),
+            ("Ctrl+O", "copy"),
+        ],
+        right: Some(&right),
+    }
+    .render(layout.shortcuts, buffer, theme);
+    cursor
 }
 
 fn conversation_lines(
@@ -276,57 +311,109 @@ fn conversation_lines(
     lines
 }
 
-fn composer_lines(state: &SurfaceState, session: &SessionState, _width: u16) -> Vec<Line<'static>> {
-    let (marker, status) = match &state.activity {
-        SurfaceActivity::Ready => ("◆ ".green(), "Ready".to_string().dim()),
-        SurfaceActivity::Working => ("◇ ".magenta(), "Working".to_string().magenta()),
-        SurfaceActivity::Interrupted => ("◆ ".magenta(), "Interrupted".to_string().magenta()),
-        SurfaceActivity::Disconnected(message) => {
-            ("◆ ".red(), format!("Disconnected · {message}").red())
+fn turn_status_line(state: &SurfaceState, theme: AstralTheme) -> Option<Line<'static>> {
+    let (marker, status, color) = match &state.activity {
+        SurfaceActivity::Ready => ("◆ ", None, theme.gray),
+        SurfaceActivity::Working => ("◇ ", Some("Working".to_string()), theme.accent_running),
+        SurfaceActivity::Interrupted => {
+            ("◆ ", Some("Interrupted".to_string()), theme.accent_running)
         }
+        SurfaceActivity::Disconnected(message) => (
+            "◆ ",
+            Some(format!("Disconnected · {message}")),
+            theme.accent_error,
+        ),
     };
-    let mut status_line = vec![
-        marker,
-        status,
-        "  ".into(),
-        session.model.clone().dim(),
-        " · ".dim(),
-        session.model_provider.clone().dim(),
-    ];
-    if let Some(token_usage) = state.token_usage() {
-        status_line.push(" · ".dim());
-        status_line.push(
-            token_status(
-                token_usage.last.total_tokens,
-                token_usage.model_context_window,
-            )
-            .dim(),
-        );
+    let mut spans = status
+        .map(|status| vec![marker.to_string().fg(color), status.fg(color)])
+        .unwrap_or_default();
+    if let Some(notice) = state.notice.as_deref() {
+        if !spans.is_empty() {
+            spans.push(" · ".dim());
+        }
+        spans.push(notice.to_string().cyan());
     }
     if state.conversation.timeline().skipped_events() > 0 {
-        status_line.push(
+        if !spans.is_empty() {
+            spans.push(" · ".dim());
+        }
+        spans.push(
             format!(
-                " · {} events skipped",
+                "{} events skipped",
                 state.conversation.timeline().skipped_events()
             )
             .cyan(),
         );
     }
-    if let Some(notice) = state.notice.as_deref() {
-        status_line.push(" · ".dim());
-        status_line.push(notice.to_string().cyan());
-    }
     if state.scroll_offset > 0 {
-        status_line.push(" · ".dim());
-        status_line.push(format!("history ↑{}", state.scroll_offset).cyan());
+        if !spans.is_empty() {
+            spans.push(" · ".dim());
+        }
+        spans.push(format!("history ↑{}", state.scroll_offset).cyan());
     }
-    vec![
-        status_line.into(),
-        vec!["❯ ".cyan(), state.composer.clone().into()].into(),
-        "  Enter send · PgUp/PgDn scroll · Ctrl+O copy · Ctrl+D exit"
-            .dim()
-            .into(),
-    ]
+    (!spans.is_empty()).then(|| spans.into())
+}
+
+fn composer_height(composer: &str) -> u16 {
+    let rows = composer.split('\n').count().max(1);
+    u16::try_from(rows)
+        .unwrap_or(u16::MAX)
+        .saturating_add(2)
+        .min(8)
+}
+
+fn render_status_bar(
+    state: &SurfaceState,
+    session: &SessionState,
+    area: Rect,
+    buffer: &mut Buffer,
+    theme: AstralTheme,
+) {
+    let cwd = collapse_home(&session.thread.cwd.to_string_lossy());
+    let branch = session
+        .thread
+        .git_info
+        .as_ref()
+        .and_then(|git| git.branch.as_deref())
+        .filter(|branch| !branch.is_empty());
+    let left = match branch {
+        Some(branch) => vec![
+            "⎇ ".fg(theme.text_secondary).dim(),
+            branch.to_string().fg(theme.text_secondary).dim(),
+            "  ".into(),
+            cwd.fg(theme.gray_dim),
+        ]
+        .into(),
+        None => cwd.fg(theme.gray_dim).into(),
+    };
+    let right = state.token_usage().map(|usage| {
+        token_status(usage.last.total_tokens, usage.model_context_window)
+            .fg(theme.gray)
+            .into()
+    });
+    StatusBar { left, right }.render(area, buffer, theme);
+}
+
+fn collapse_home(path: &str) -> String {
+    std::env::var("HOME")
+        .ok()
+        .and_then(|home| path.strip_prefix(&home).map(|suffix| format!("~{suffix}")))
+        .unwrap_or_else(|| path.to_string())
+}
+
+fn request_cursor(lines: &[Line<'_>], area: Rect) -> Option<Position> {
+    lines
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, line)| line.to_string().starts_with("❯ "))
+        .map(|(row, line)| {
+            let width = u16::try_from(line.width()).unwrap_or(u16::MAX);
+            Position::new(
+                (area.x + width).min(area.right().saturating_sub(1)),
+                area.y + u16::try_from(row).unwrap_or(u16::MAX),
+            )
+        })
 }
 
 fn token_status(used: i64, context_window: Option<i64>) -> String {
