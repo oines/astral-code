@@ -13,4 +13,4 @@ expression: buffer_text(&buffer)
    $ cargo test --workspace
    needs network access
    [y] allow · [a] allow session · [n] deny · [esc] cancel
- Enter:send  │  PgUp/PgDn:scroll  │  Ctrl+O:copy
+ Shift+Tab:mode

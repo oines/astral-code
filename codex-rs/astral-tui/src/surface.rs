@@ -1,6 +1,7 @@
 use codex_app_server_protocol::McpServerElicitationRequest;
 use codex_app_server_protocol::Model;
 use codex_app_server_protocol::ThreadTokenUsage;
+use codex_protocol::config_types::ModeKind;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Position;
 use ratatui::layout::Rect;
@@ -21,6 +22,9 @@ use crate::SessionState;
 use crate::modal::ModalState;
 use crate::model_command::ModelResolveError;
 use crate::model_command::ModelSelection;
+use crate::permission_picker::PermissionPickerState;
+use crate::permission_picker::display_permission_mode;
+use crate::permission_picker::render_picker as render_permission_picker;
 use crate::render_block;
 use crate::slash::SlashCommandId;
 use crate::slash::SlashController;
@@ -67,6 +71,7 @@ pub struct SurfaceState {
     slash: SlashController,
     modal: Option<ModalState>,
     thread_picker: Option<PickerState>,
+    permission_picker: Option<PermissionPickerState>,
 }
 
 impl SurfaceState {
@@ -82,6 +87,7 @@ impl SurfaceState {
             slash: SlashController::default(),
             modal: None,
             thread_picker: None,
+            permission_picker: None,
         }
     }
 
@@ -104,6 +110,7 @@ impl SurfaceState {
             slash: SlashController::default(),
             modal: None,
             thread_picker: None,
+            permission_picker: None,
         }
     }
 
@@ -247,6 +254,22 @@ impl SurfaceState {
         self.thread_picker = None;
     }
 
+    pub(crate) fn permission_picker(&self) -> Option<&PermissionPickerState> {
+        self.permission_picker.as_ref()
+    }
+
+    pub(crate) fn permission_picker_mut(&mut self) -> Option<&mut PermissionPickerState> {
+        self.permission_picker.as_mut()
+    }
+
+    pub(crate) fn open_permission_picker(&mut self, picker: PermissionPickerState) {
+        self.permission_picker = Some(picker);
+    }
+
+    pub(crate) fn close_permission_picker(&mut self) {
+        self.permission_picker = None;
+    }
+
     pub(crate) fn set_model_catalog(
         &mut self,
         models: Vec<Model>,
@@ -382,8 +405,18 @@ pub(crate) fn render_surface_with_view(
         SlashMenu { snapshot: slash }.render(layout.banner, buffer, theme);
     }
 
+    let mode = if session.collaboration_mode.mode == ModeKind::Plan {
+        "plan"
+    } else {
+        display_permission_mode(
+            session
+                .active_permission_profile
+                .as_ref()
+                .map(|profile| profile.id.as_str()),
+        )
+    };
     let cursor = if request.is_empty() {
-        let flags = [session.model_provider.as_str()];
+        let flags = [mode];
         PromptChrome {
             text: state.composer(),
             title: session.thread.name.as_deref(),
@@ -402,12 +435,7 @@ pub(crate) fn render_surface_with_view(
             .and_then(|_| request_cursor(&request, layout.prompt))
     };
 
-    let right = format!("{} · {}", session.model, session.model_provider);
-    let default_hints = [
-        ("Enter", "send"),
-        ("PgUp/PgDn", "scroll"),
-        ("Ctrl+O", "copy"),
-    ];
+    let default_hints = [("Shift+Tab", "mode")];
     let slash_hints = [("↑/↓", "navigate"), ("Tab", "complete"), ("Esc", "close")];
     ShortcutsBar {
         hints: if slash.open {
@@ -415,10 +443,13 @@ pub(crate) fn render_surface_with_view(
         } else {
             &default_hints
         },
-        right: Some(&right),
+        right: None,
     }
     .render(layout.shortcuts, buffer, theme);
-    if let Some(picker) = state.thread_picker() {
+    if let Some(picker) = state.permission_picker() {
+        render_permission_picker(picker, area, buffer);
+        None
+    } else if let Some(picker) = state.thread_picker() {
         render_picker(picker, area, buffer);
         None
     } else if let Some(modal) = state.modal() {

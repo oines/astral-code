@@ -3,6 +3,9 @@ use std::io;
 use codex_app_server_client::AppServerClient;
 use codex_app_server_client::AppServerEvent;
 use codex_app_server_client::TypedRequestError;
+use codex_app_server_protocol::ActivePermissionProfile;
+use codex_app_server_protocol::ApprovalsReviewer;
+use codex_app_server_protocol::AskForApproval;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::Model;
 use codex_app_server_protocol::ModelListParams;
@@ -39,6 +42,7 @@ use codex_protocol::openai_models::ReasoningEffort;
 
 use crate::RequestResolution;
 use crate::model_command::ModelSelection;
+use crate::permission_picker::PermissionSelection;
 
 #[derive(Debug)]
 pub enum SessionError {
@@ -93,6 +97,9 @@ pub struct SessionState {
     pub service_tier: Option<String>,
     pub active_turn_id: Option<String>,
     pub collaboration_mode: CollaborationMode,
+    pub approval_policy: AskForApproval,
+    pub approvals_reviewer: ApprovalsReviewer,
+    pub active_permission_profile: Option<ActivePermissionProfile>,
 }
 
 impl SessionState {
@@ -106,6 +113,9 @@ impl SessionState {
             service_tier: response.service_tier,
             active_turn_id: None,
             collaboration_mode,
+            approval_policy: response.approval_policy,
+            approvals_reviewer: response.approvals_reviewer,
+            active_permission_profile: response.active_permission_profile,
         }
     }
 
@@ -126,6 +136,9 @@ impl SessionState {
             service_tier: response.service_tier,
             active_turn_id,
             collaboration_mode,
+            approval_policy: response.approval_policy,
+            approvals_reviewer: response.approvals_reviewer,
+            active_permission_profile: response.active_permission_profile,
         }
     }
 
@@ -139,6 +152,9 @@ impl SessionState {
             service_tier: response.service_tier,
             active_turn_id: None,
             collaboration_mode,
+            approval_policy: response.approval_policy,
+            approvals_reviewer: response.approvals_reviewer,
+            active_permission_profile: response.active_permission_profile,
         }
     }
 
@@ -166,10 +182,11 @@ impl SessionState {
                     .clone_from(&params.thread_settings.model_provider);
                 self.service_tier
                     .clone_from(&params.thread_settings.service_tier);
-                self.collaboration_mode = default_collaboration_mode(
-                    params.thread_settings.model.clone(),
-                    params.thread_settings.effort.clone(),
-                );
+                self.collaboration_mode = params.thread_settings.collaboration_mode.clone();
+                self.approval_policy = params.thread_settings.approval_policy;
+                self.approvals_reviewer = params.thread_settings.approvals_reviewer;
+                self.active_permission_profile
+                    .clone_from(&params.thread_settings.active_permission_profile);
             }
             _ => {}
         }
@@ -242,6 +259,12 @@ impl AstralSession {
             model_provider: Some(state.model_provider.clone()),
             service_tier: Some(state.service_tier.clone()),
             cwd: Some(state.thread.cwd.to_string_lossy().to_string()),
+            approval_policy: Some(state.approval_policy),
+            approvals_reviewer: Some(state.approvals_reviewer),
+            permissions: state
+                .active_permission_profile
+                .as_ref()
+                .map(|profile| profile.id.clone()),
             session_start_source: Some(ThreadStartSource::Startup),
             thread_source: Some(ThreadSource::User),
             ..ThreadStartParams::default()
@@ -433,6 +456,77 @@ impl AstralSession {
                 },
             })
             .await?;
+        Ok(())
+    }
+
+    pub(crate) async fn update_collaboration_mode(
+        &mut self,
+        mode: ModeKind,
+    ) -> Result<(), SessionError> {
+        let (thread_id, model, reasoning_effort) = self
+            .state
+            .as_ref()
+            .map(|state| {
+                (
+                    state.thread.id.clone(),
+                    state.model.clone(),
+                    state.collaboration_mode.settings.reasoning_effort.clone(),
+                )
+            })
+            .ok_or(SessionError::NoThread)?;
+        let collaboration_mode = CollaborationMode {
+            mode,
+            settings: Settings {
+                model,
+                reasoning_effort,
+                developer_instructions: None,
+            },
+        };
+        let request_id = self.next_request_id();
+        let _: ThreadSettingsUpdateResponse = self
+            .client
+            .request_typed(ClientRequest::ThreadSettingsUpdate {
+                request_id,
+                params: ThreadSettingsUpdateParams {
+                    thread_id,
+                    collaboration_mode: Some(collaboration_mode.clone()),
+                    ..ThreadSettingsUpdateParams::default()
+                },
+            })
+            .await?;
+        if let Some(state) = self.state.as_mut() {
+            state.collaboration_mode = collaboration_mode;
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn update_permissions(
+        &mut self,
+        selection: PermissionSelection,
+    ) -> Result<(), SessionError> {
+        let thread_id = self
+            .state
+            .as_ref()
+            .map(|state| state.thread.id.clone())
+            .ok_or(SessionError::NoThread)?;
+        let request_id = self.next_request_id();
+        let _: ThreadSettingsUpdateResponse = self
+            .client
+            .request_typed(ClientRequest::ThreadSettingsUpdate {
+                request_id,
+                params: ThreadSettingsUpdateParams {
+                    thread_id,
+                    approval_policy: Some(selection.approval_policy()),
+                    permissions: Some(selection.profile_id().to_string()),
+                    ..ThreadSettingsUpdateParams::default()
+                },
+            })
+            .await?;
+        if let Some(state) = self.state.as_mut() {
+            state.approval_policy = selection.approval_policy();
+            state.active_permission_profile =
+                Some(ActivePermissionProfile::new(selection.profile_id()));
+        }
         Ok(())
     }
 

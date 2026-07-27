@@ -1,0 +1,19 @@
+---
+source: astral-tui/src/permission_picker_tests.rs
+expression: buffer_text(&buffer)
+---
+
+
+                ┌─ Update Astral permissions ──────────────[×]─┐
+                │                                              │
+                │    Read only                                 │
+                │      Read files; ask before edits or networ  │
+                │  ❯ Workspace (current)                       │
+                │      Edit workspace; ask for external acces  │
+                │    Full access                               │
+                │      Edit anywhere; use network without ask  │
+                │                                              │
+                │                                              │
+                │                                              │
+                │   ↑/↓ navigate · Enter select · Esc cancel   │
+                └──────────────────────────────────────────────┘

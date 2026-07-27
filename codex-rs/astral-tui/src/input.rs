@@ -23,6 +23,9 @@ use crate::SlashInvocation;
 use crate::SurfaceActivity;
 use crate::SurfaceState;
 use crate::ThreadPickerAction;
+use crate::permission_picker::PermissionPickerInput;
+use crate::permission_picker::PermissionSelection;
+use crate::permission_picker::handle_key as handle_permission_picker_key;
 use crate::thread_picker::PickerInput;
 use crate::thread_picker::handle_key as handle_thread_picker_key;
 
@@ -42,6 +45,8 @@ pub enum InputAction {
         action: ThreadPickerAction,
         thread: Box<Thread>,
     },
+    SelectPermission(PermissionSelection),
+    CycleMode,
     Resolve(RequestResolution),
     Notice(String),
 }
@@ -56,6 +61,9 @@ pub fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
     if state.thread_picker().is_some() {
         return handle_thread_picker_input(state, key);
     }
+    if state.permission_picker().is_some() {
+        return handle_permission_picker_input(state, key);
+    }
     if state.modal().is_some() {
         return match key.code {
             KeyCode::Esc => {
@@ -69,6 +77,9 @@ pub fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
 }
 
 pub fn handle_paste(state: &mut SurfaceState, text: &str) -> InputAction {
+    if state.permission_picker().is_some() {
+        return InputAction::None;
+    }
     if let Some(picker) = state.thread_picker_mut() {
         picker.paste(text);
         return InputAction::Redraw;
@@ -76,6 +87,24 @@ pub fn handle_paste(state: &mut SurfaceState, text: &str) -> InputAction {
     state.composer_mut().push_str(text);
     state.refresh_slash();
     InputAction::Redraw
+}
+
+fn handle_permission_picker_input(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
+    let Some(picker) = state.permission_picker_mut() else {
+        return InputAction::None;
+    };
+    match handle_permission_picker_key(picker, key) {
+        PermissionPickerInput::None => InputAction::None,
+        PermissionPickerInput::Redraw => InputAction::Redraw,
+        PermissionPickerInput::Select(selection) => {
+            state.close_permission_picker();
+            InputAction::SelectPermission(selection)
+        }
+        PermissionPickerInput::Cancel => {
+            state.close_permission_picker();
+            InputAction::Redraw
+        }
+    }
 }
 
 fn handle_thread_picker_input(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
@@ -99,6 +128,11 @@ fn handle_thread_picker_input(state: &mut SurfaceState, key: KeyEvent) -> InputA
 }
 
 fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
+    if key.code == KeyCode::BackTab
+        || (key.code == KeyCode::Tab && key.modifiers.contains(KeyModifiers::SHIFT))
+    {
+        return InputAction::CycleMode;
+    }
     if state.slash().open {
         match key.code {
             KeyCode::Esc => {

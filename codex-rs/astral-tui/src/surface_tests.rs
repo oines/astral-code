@@ -1,3 +1,6 @@
+use codex_app_server_protocol::ActivePermissionProfile;
+use codex_app_server_protocol::ApprovalsReviewer;
+use codex_app_server_protocol::AskForApproval;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerRequest;
 use codex_app_server_protocol::Thread;
@@ -6,6 +9,7 @@ use codex_app_server_protocol::TokenUsageBreakdown;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::Settings;
+use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_WORKSPACE;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use serde_json::json;
@@ -87,6 +91,11 @@ fn session_state() -> SessionState {
                 developer_instructions: None,
             },
         },
+        approval_policy: AskForApproval::OnRequest,
+        approvals_reviewer: ApprovalsReviewer::User,
+        active_permission_profile: Some(ActivePermissionProfile::new(
+            BUILT_IN_PERMISSION_PROFILE_WORKSPACE,
+        )),
     }
 }
 

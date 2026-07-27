@@ -16,5 +16,5 @@ expression: "render_at_size(&state, &session, 48, 16)"
  ◇ Working
  ╭────────────────────────── Astral session ──╮
  │ ❯ trace the projection                     │
- ╰────────────── claude-sonnet-4 · anthropic ─╯
- Enter:send  │  PgUp/PgDn:scroll  │
+ ╰────────────── claude-sonnet-4 · workspace ─╯
+ Shift+Tab:mode
