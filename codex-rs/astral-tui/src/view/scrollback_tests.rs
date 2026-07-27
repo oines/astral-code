@@ -117,6 +117,21 @@ fn manual_anchor_does_not_move_when_the_tail_grows() {
 }
 
 #[test]
+fn manual_anchor_does_not_move_when_a_new_turn_appends() {
+    let initial = transcript_layout(&[("read", 15), ("tail", 10)]);
+    let mut navigation = ScrollbackNavigation::default();
+    navigation.prepare(&initial, 40, 5);
+    navigation.scroll_up(/*lines*/ 12);
+    let before = navigation.prepare(&initial, 40, 5);
+    assert_eq!(before.first_visible_line, 8);
+
+    let appended = transcript_layout(&[("read", 15), ("tail", 10), ("next-user", 3)]);
+    let after = navigation.prepare(&appended, 40, 5);
+    assert_eq!(after.first_visible_line, 8);
+    assert_eq!(navigation.distance_from_bottom(), 15);
+}
+
+#[test]
 fn item_anchor_survives_reflow_before_and_inside_the_item() {
     let initial = transcript_layout(&[("before", 10), ("anchor", 10)]);
     let mut navigation = ScrollbackNavigation::default();
@@ -131,13 +146,17 @@ fn item_anchor_survives_reflow_before_and_inside_the_item() {
 }
 
 #[test]
-fn reaching_the_bottom_reenables_follow_mode() {
+fn scrolling_past_the_bottom_reenables_follow_mode() {
     let initial = transcript_layout(&[("history", 20)]);
     let mut navigation = ScrollbackNavigation::default();
     navigation.prepare(&initial, 40, 5);
     navigation.scroll_up(/*lines*/ 5);
     navigation.scroll_down(/*lines*/ 5);
     assert_eq!(navigation.distance_from_bottom(), 0);
+    assert!(!navigation.follow_mode);
+
+    navigation.scroll_down(/*lines*/ 1);
+    assert!(navigation.follow_mode);
 
     let grown = transcript_layout(&[("history", 25)]);
     let viewport = navigation.prepare(&grown, 40, 5);

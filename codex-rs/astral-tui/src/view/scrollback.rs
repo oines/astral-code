@@ -165,8 +165,9 @@ impl ScrollbackNavigation {
             return;
         }
         let max_top = self.total_lines.saturating_sub(self.viewport_lines);
+        let was_at_bottom = self.first_visible_line == max_top;
         self.first_visible_line = self.first_visible_line.saturating_add(lines).min(max_top);
-        self.follow_mode = self.first_visible_line == max_top;
+        self.follow_mode = was_at_bottom;
         self.refresh_anchor();
     }
 
