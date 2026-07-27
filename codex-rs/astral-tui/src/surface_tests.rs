@@ -23,6 +23,8 @@ use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::Settings;
 use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_WORKSPACE;
+use crossterm::event::KeyCode;
+use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
 use crossterm::event::MouseButton;
 use crossterm::event::MouseEvent;
@@ -38,6 +40,8 @@ use super::TranscriptView;
 use super::render_surface;
 use super::render_surface_with_view;
 use crate::SessionState;
+use crate::handle_key;
+use crate::handle_paste;
 use crate::mention::MentionCandidate;
 use crate::mention::MentionCatalog;
 use crate::mention::MentionKind;
@@ -544,6 +548,70 @@ fn typed_approval_surfaces_snapshot() {
             ""
         )
     );
+}
+
+#[test]
+fn user_question_confirmation_surface_snapshot() {
+    let session = session_state();
+    let mut state = SurfaceState::from_session(&session);
+    state.pending_requests_mut().note(request(json!({
+        "method": "item/tool/requestUserInput",
+        "id": "question-1",
+        "params": {
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "itemId": "call-1",
+            "questions": [
+                {"id": "first", "header": "First", "question": "First?", "options": null},
+                {"id": "second", "header": "Second", "question": "Second?", "options": null}
+            ]
+        }
+    })));
+    handle_key(
+        &mut state,
+        KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL),
+    );
+    handle_paste(&mut state, "answered");
+    handle_key(
+        &mut state,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+    );
+
+    insta::assert_snapshot!(render_at_size(&mut state, &session, 72, 18));
+}
+
+#[test]
+fn user_question_long_options_keep_selection_visible_snapshot() {
+    let session = session_state();
+    let mut state = SurfaceState::from_session(&session);
+    let options = (1..=14)
+        .map(|index| {
+            json!({
+                "label": format!("Option {index}"),
+                "description": format!("Description {index}")
+            })
+        })
+        .collect::<Vec<_>>();
+    state.pending_requests_mut().note(request(json!({
+        "method": "item/tool/requestUserInput",
+        "id": "question-1",
+        "params": {
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "itemId": "call-1",
+            "questions": [{
+                "id": "choice",
+                "header": "Choose one",
+                "question": "The selected option must stay visible.",
+                "options": options
+            }]
+        }
+    })));
+    for _ in 0..11 {
+        handle_key(&mut state, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    }
+
+    insta::assert_snapshot!(render_at_size(&mut state, &session, 72, 18));
 }
 
 #[test]
@@ -1115,11 +1183,14 @@ fn selection_mask(buffer: &Buffer, selection_background: ratatui::style::Color) 
         .to_string()
 }
 
+fn request(value: serde_json::Value) -> ServerRequest {
+    serde_json::from_value(value).expect("valid server request")
+}
+
 fn request_surface(value: serde_json::Value, composer: &str) -> String {
     let session = session_state();
     let mut state = SurfaceState::from_session(&session);
-    let request: ServerRequest = serde_json::from_value(value).expect("valid server request");
-    state.pending_requests_mut().note(request);
+    state.pending_requests_mut().note(request(value));
     state.set_composer(composer);
     let area = Rect::new(0, 0, 72, 18);
     let mut buffer = Buffer::empty(area);

@@ -610,3 +610,45 @@ fn user_input_option_navigation_submits_the_selected_label() {
         })
     );
 }
+
+#[test]
+fn user_input_confirms_before_submitting_unanswered_questions() {
+    let mut state = SurfaceState::new("thread-1");
+    state.pending_requests_mut().note(request(json!({
+        "method": "item/tool/requestUserInput",
+        "id": "question-1",
+        "params": {
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "itemId": "call-1",
+            "questions": [
+                {"id": "first", "header": "First", "question": "First?", "options": null},
+                {"id": "second", "header": "Second", "question": "Second?", "options": null}
+            ]
+        }
+    })));
+    let next_question = KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL);
+    assert_eq!(handle_key(&mut state, next_question), InputAction::Redraw);
+    assert_eq!(handle_paste(&mut state, "answered"), InputAction::Redraw);
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Enter)),
+        InputAction::Redraw
+    );
+    assert_eq!(state.request_user_input().confirmation_choice(), Some(0));
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Down)),
+        InputAction::Redraw
+    );
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Enter)),
+        InputAction::Resolve(RequestResolution::Success {
+            request_id: RequestId::String("question-1".to_string()),
+            result: json!({
+                "answers": {
+                    "first": {"answers": []},
+                    "second": {"answers": ["answered"]}
+                }
+            }),
+        })
+    );
+}
