@@ -25,7 +25,9 @@ use crate::model_command::ModelResolveError;
 use crate::model_command::ModelSelection;
 use crate::permission_picker::PermissionPickerState;
 use crate::permission_picker::display_permission_mode;
+use crate::request::PendingRequest;
 use crate::request_pane::RequestPane;
+use crate::request_user_input::RequestUserInputState;
 use crate::slash::SlashCommandId;
 use crate::slash::SlashCommandState;
 use crate::slash::SlashController;
@@ -76,6 +78,7 @@ pub(crate) enum TranscriptView {
 pub struct SurfaceState {
     conversation: ConversationState,
     pending_requests: PendingRequests,
+    request_user_input: RequestUserInputState,
     composer: ComposerState,
     activity: SurfaceActivity,
     token_usage: Option<ThreadTokenUsage>,
@@ -98,6 +101,7 @@ impl SurfaceState {
         Self {
             conversation: ConversationState::new(thread_id),
             pending_requests: PendingRequests::default(),
+            request_user_input: RequestUserInputState::default(),
             composer: ComposerState::default(),
             activity: SurfaceActivity::Ready,
             token_usage: None,
@@ -123,6 +127,7 @@ impl SurfaceState {
                 &session.thread.turns,
             ),
             pending_requests: PendingRequests::default(),
+            request_user_input: RequestUserInputState::default(),
             composer: ComposerState::default(),
             activity: if session.active_turn_id.is_some() {
                 SurfaceActivity::Working
@@ -159,6 +164,31 @@ impl SurfaceState {
 
     pub fn pending_requests_mut(&mut self) -> &mut PendingRequests {
         &mut self.pending_requests
+    }
+
+    pub(crate) fn sync_request_user_input(&mut self) {
+        let params = self
+            .pending_requests
+            .front()
+            .and_then(|request| match request {
+                PendingRequest::UserInput { params, .. } => Some(params.clone()),
+                _ => None,
+            });
+        if let Some(params) = params {
+            self.request_user_input.sync(&params);
+        }
+    }
+
+    pub(crate) fn request_user_input(&self) -> &RequestUserInputState {
+        &self.request_user_input
+    }
+
+    pub(crate) fn request_user_input_mut(&mut self) -> &mut RequestUserInputState {
+        &mut self.request_user_input
+    }
+
+    pub(crate) fn reset_request_user_input(&mut self) {
+        self.request_user_input.reset();
     }
 
     pub fn composer(&self) -> &str {
@@ -422,12 +452,19 @@ pub(crate) fn render_surface_with_view(
     }
     let theme = state.theme();
     buffer.set_style(area, Style::default().bg(theme.bg_base));
+    state.sync_request_user_input();
 
     let has_request = state.pending_requests.front().is_some();
     let prompt_height = state.pending_requests.front().map_or_else(
         || prompt_height(state.composer(), state.composer_cursor(), area.width),
         |request| {
-            RequestPane::new(request, state.composer(), state.composer_cursor()).height(area.height)
+            RequestPane::new(
+                request,
+                state.request_user_input(),
+                state.composer(),
+                state.composer_cursor(),
+            )
+            .height(area.height)
         },
     );
     let slash = state.slash().clone();
@@ -557,10 +594,14 @@ pub(crate) fn render_surface_with_view(
                 .map(|profile| profile.id.as_str()),
         )
     };
-    let request_pane = state
-        .pending_requests
-        .front()
-        .map(|request| RequestPane::new(request, state.composer(), state.composer_cursor()));
+    let request_pane = state.pending_requests.front().map(|request| {
+        RequestPane::new(
+            request,
+            state.request_user_input(),
+            state.composer(),
+            state.composer_cursor(),
+        )
+    });
     let cursor = if let Some(pane) = request_pane {
         pane.render(layout.prompt, buffer, theme)
     } else {

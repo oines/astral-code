@@ -181,9 +181,8 @@ fn suggestion(candidate: &MentionCandidate, query: &str) -> Option<(MentionSugge
         .iter()
         .filter_map(|term| fuzzy_match(term, query).map(|(score, _)| score))
         .max();
-    let (score, indices) = display_match
-        .map(|(score, indices)| (score, indices))
-        .or_else(|| fallback_score.map(|score| (score, Vec::new())))?;
+    let (score, indices) =
+        display_match.or_else(|| fallback_score.map(|score| (score, Vec::new())))?;
     Some((
         MentionSuggestion {
             kind: candidate.kind,

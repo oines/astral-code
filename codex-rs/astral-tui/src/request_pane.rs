@@ -7,10 +7,14 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Position;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
+use ratatui::style::Styled;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
 
 use crate::PendingRequest;
+use crate::request_user_input::OTHER_OPTION_LABEL;
+use crate::request_user_input::RequestUserInputState;
+use crate::request_user_input::option_count;
 use crate::view::AstralTheme;
 
 const APPROVAL_HINTS: &[(&str, &str)] = &[
@@ -20,7 +24,17 @@ const APPROVAL_HINTS: &[(&str, &str)] = &[
     ("Esc", "cancel"),
 ];
 const PERMISSION_HINTS: &[(&str, &str)] = &[("Y", "turn"), ("A", "session"), ("N", "deny")];
-const INPUT_HINTS: &[(&str, &str)] = &[("Enter", "submit"), ("Esc", "cancel")];
+const INPUT_OPTION_HINTS: &[(&str, &str)] = &[
+    ("↑/↓", "navigate"),
+    ("Enter", "select"),
+    ("Tab", "notes"),
+    ("Esc", "cancel"),
+];
+const INPUT_TEXT_HINTS: &[(&str, &str)] = &[
+    ("Enter", "next"),
+    ("Ctrl+P/N", "question"),
+    ("Esc", "cancel"),
+];
 const MCP_FORM_HINTS: &[(&str, &str)] = &[("Enter", "submit"), ("N", "decline"), ("Esc", "cancel")];
 const MCP_URL_HINTS: &[(&str, &str)] = &[("Y", "accept"), ("N", "decline"), ("Esc", "cancel")];
 const WAITING_HINTS: &[(&str, &str)] = &[];
@@ -28,14 +42,21 @@ const WAITING_HINTS: &[(&str, &str)] = &[];
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct RequestPane<'a> {
     request: &'a PendingRequest,
+    request_user_input: &'a RequestUserInputState,
     composer: &'a str,
     cursor_byte: usize,
 }
 
 impl<'a> RequestPane<'a> {
-    pub(crate) fn new(request: &'a PendingRequest, composer: &'a str, cursor_byte: usize) -> Self {
+    pub(crate) fn new(
+        request: &'a PendingRequest,
+        request_user_input: &'a RequestUserInputState,
+        composer: &'a str,
+        cursor_byte: usize,
+    ) -> Self {
         Self {
             request,
+            request_user_input,
             composer,
             cursor_byte,
         }
@@ -52,7 +73,18 @@ impl<'a> RequestPane<'a> {
                 APPROVAL_HINTS
             }
             PendingRequest::Permissions { .. } => PERMISSION_HINTS,
-            PendingRequest::UserInput { .. } => INPUT_HINTS,
+            PendingRequest::UserInput { params, .. } => {
+                if params
+                    .questions
+                    .get(self.request_user_input.current_question())
+                    .is_some_and(crate::request_user_input::has_options)
+                    && !self.request_user_input.notes_visible()
+                {
+                    INPUT_OPTION_HINTS
+                } else {
+                    INPUT_TEXT_HINTS
+                }
+            }
             PendingRequest::McpElicitation { params, .. } => match params.request {
                 McpServerElicitationRequest::Form { .. } => MCP_FORM_HINTS,
                 McpServerElicitationRequest::Url { .. } => MCP_URL_HINTS,
@@ -114,11 +146,41 @@ impl<'a> RequestPane<'a> {
                         content_width,
                     );
                 }
-                PaneRow::Option { label, detail } => {
-                    let mut spans = vec!["○ ".fg(theme.gray), label.into()];
+                PaneRow::Option {
+                    label,
+                    detail,
+                    selected,
+                    committed,
+                } => {
+                    let row_area =
+                        Rect::new(area.x.saturating_add(1), y, area.width.saturating_sub(1), 1);
+                    let text_style = if selected {
+                        let style = Style::default()
+                            .fg(theme.text_primary)
+                            .bg(theme.panel_selected);
+                        buffer.set_style(row_area, style);
+                        style
+                    } else {
+                        Style::default()
+                    };
+                    let marker = if committed {
+                        "●"
+                    } else if selected {
+                        "›"
+                    } else {
+                        "○"
+                    };
+                    let mut spans = vec![
+                        format!("{marker} ").set_style(text_style.fg(if selected {
+                            theme.accent_running
+                        } else {
+                            theme.gray
+                        })),
+                        label.set_style(text_style),
+                    ];
                     if let Some(detail) = detail {
-                        spans.push(" — ".fg(theme.gray_dim));
-                        spans.push(detail.fg(theme.text_secondary));
+                        spans.push(" — ".set_style(text_style.fg(theme.gray_dim)));
+                        spans.push(detail.set_style(text_style.fg(theme.text_secondary)));
                     }
                     buffer.set_line(content_x, y, &Line::from(spans), content_width);
                 }
@@ -229,41 +291,61 @@ impl<'a> RequestPane<'a> {
                 ]);
             }
             PendingRequest::UserInput { params, .. } => {
-                let question_count = params.questions.len();
-                for (index, question) in params.questions.iter().enumerate() {
-                    let counter = if question_count > 1 {
-                        format!(" · {}/{}", index + 1, question_count)
+                if let Some(question) = params
+                    .questions
+                    .get(self.request_user_input.current_question())
+                {
+                    let current = self.request_user_input.current_question();
+                    let counter = if params.questions.len() > 1 {
+                        format!(" · {}/{}", current + 1, params.questions.len())
                     } else {
                         String::new()
                     };
                     rows.push(PaneRow::Title(format!("{}{counter}", question.header)));
                     rows.push(PaneRow::Body(question.question.clone()));
                     if let Some(options) = &question.options {
-                        rows.extend(
-                            options.iter().map(|option| PaneRow::Option {
-                                label: option.label.clone(),
+                        let selected = self.request_user_input.selected_option();
+                        let committed = self.request_user_input.option_committed();
+                        rows.extend(options.iter().enumerate().map(|(index, option)| {
+                            PaneRow::Option {
+                                label: format!("{}. {}", index + 1, option.label),
                                 detail: (!option.description.is_empty())
                                     .then(|| option.description.clone()),
-                            }),
-                        );
+                                selected: selected == Some(index),
+                                committed: committed && selected == Some(index),
+                            }
+                        }));
+                        if option_count(question) > options.len() {
+                            let index = options.len();
+                            rows.push(PaneRow::Option {
+                                label: format!("{}. {OTHER_OPTION_LABEL}", index + 1),
+                                detail: Some("Add details in notes if needed".to_string()),
+                                selected: selected == Some(index),
+                                committed: committed && selected == Some(index),
+                            });
+                        }
                     }
-                    if index + 1 < question_count {
+                    if !crate::request_user_input::has_options(question)
+                        || self.request_user_input.notes_visible()
+                    {
                         rows.push(PaneRow::Blank);
+                        let secret = question.is_secret;
+                        let editor = self.request_user_input.editor();
+                        rows.push(PaneRow::Input {
+                            text: if secret {
+                                "•".repeat(editor.chars().count())
+                            } else {
+                                editor.to_string()
+                            },
+                            cursor_column: input_cursor_width(
+                                editor,
+                                self.request_user_input.editor_cursor(),
+                                secret,
+                            ),
+                        });
+                        input = true;
                     }
                 }
-                rows.push(PaneRow::Blank);
-                let text = if params.questions.iter().any(|question| question.is_secret) {
-                    "•".repeat(self.composer.chars().count())
-                } else {
-                    self.composer.to_string()
-                };
-                rows.push(PaneRow::Input {
-                    text,
-                    cursor_column: self.input_cursor_width(
-                        params.questions.iter().any(|question| question.is_secret),
-                    ),
-                });
-                input = true;
             }
             PendingRequest::McpElicitation { params, .. } => match &params.request {
                 McpServerElicitationRequest::Form { message, .. } => {
@@ -275,7 +357,7 @@ impl<'a> RequestPane<'a> {
                     rows.push(PaneRow::Blank);
                     rows.push(PaneRow::Input {
                         text: self.composer.to_string(),
-                        cursor_column: self.input_cursor_width(false),
+                        cursor_column: input_cursor_width(self.composer, self.cursor_byte, false),
                     });
                     input = true;
                 }
@@ -318,14 +400,14 @@ impl<'a> RequestPane<'a> {
         }
         PaneContent::bounded(rows, input, usize::from(max_rows))
     }
+}
 
-    fn input_cursor_width(self, secret: bool) -> usize {
-        let cursor = self.cursor_byte.min(self.composer.len());
-        if secret {
-            self.composer[..cursor].chars().count()
-        } else {
-            Line::from(&self.composer[..cursor]).width()
-        }
+fn input_cursor_width(text: &str, cursor_byte: usize, secret: bool) -> usize {
+    let cursor = cursor_byte.min(text.len());
+    if secret {
+        text[..cursor].chars().count()
+    } else {
+        Line::from(&text[..cursor]).width()
     }
 }
 
@@ -360,6 +442,8 @@ enum PaneRow {
     Option {
         label: String,
         detail: Option<String>,
+        selected: bool,
+        committed: bool,
     },
     Choice {
         key: &'static str,
