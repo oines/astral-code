@@ -27,8 +27,9 @@ fn navigation_wraps_and_accepts_the_selected_command() {
         Some(SlashCommandId::Quit)
     );
 
-    let mut composer = "/".to_string();
-    assert!(controller.accept_selection(&mut composer, false));
+    let composer = controller
+        .accept_selection(false)
+        .expect("selected command should complete");
     assert_eq!(composer, "/quit");
 }
 

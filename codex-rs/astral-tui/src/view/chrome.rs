@@ -5,6 +5,7 @@ use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::text::Span;
+use std::ops::Range;
 
 use super::AstralTheme;
 
@@ -31,6 +32,7 @@ impl StatusBar<'_> {
 
 pub(crate) struct PromptChrome<'a> {
     pub(crate) text: &'a str,
+    pub(crate) cursor_byte: usize,
     pub(crate) title: Option<&'a str>,
     pub(crate) model: &'a str,
     pub(crate) flags: &'a [&'a str],
@@ -78,10 +80,21 @@ impl PromptChrome<'_> {
         }
 
         let content_x = area.x + 2;
-        let lines = self.text.split('\n').collect::<Vec<_>>();
+        let content_width = area.width.saturating_sub(4);
+        let layout = prompt_layout(self.text, self.cursor_byte, content_width);
         let visible_rows = usize::from(area.height.saturating_sub(2));
-        for (row, text) in lines.iter().take(visible_rows).enumerate() {
-            let y = area.y + 1 + u16::try_from(row).unwrap_or(u16::MAX);
+        let first_visible = layout
+            .cursor_row
+            .saturating_sub(visible_rows.saturating_sub(1));
+        for (visible_row, (row, text)) in layout
+            .rows
+            .iter()
+            .enumerate()
+            .skip(first_visible)
+            .take(visible_rows)
+            .enumerate()
+        {
+            let y = area.y + 1 + u16::try_from(visible_row).unwrap_or(u16::MAX);
             if row == 0 {
                 buffer.set_string(
                     content_x,
@@ -99,7 +112,8 @@ impl PromptChrome<'_> {
                 Style::default().fg(theme.text_primary).bg(bg),
             );
         }
-        if lines.len() == 1
+        if layout.rows.len() == 1
+            && self.cursor_byte == self.text.len()
             && let Some(ghost) = self.ghost
         {
             let text_width = u16::try_from(Line::from(self.text).width()).unwrap_or(u16::MAX);
@@ -114,17 +128,136 @@ impl PromptChrome<'_> {
         }
         render_prompt_info(area, buffer, theme, self.model, self.flags, self.focused);
 
-        let cursor_row = lines
-            .len()
-            .saturating_sub(1)
-            .min(visible_rows.saturating_sub(1));
-        let cursor_text = lines.get(cursor_row).copied().unwrap_or_default();
-        let prefix = u16::from(cursor_row == 0) * 2;
-        let cursor_width = u16::try_from(Line::from(cursor_text).width()).unwrap_or(u16::MAX);
+        let cursor_visible_row = layout.cursor_row.saturating_sub(first_visible);
+        let prefix = u16::from(layout.cursor_row == 0) * 2;
+        let cursor_width = u16::try_from(layout.cursor_column).unwrap_or(u16::MAX);
         Some(Position::new(
             (content_x + prefix + cursor_width).min(area.right().saturating_sub(2)),
-            area.y + 1 + u16::try_from(cursor_row).unwrap_or(u16::MAX),
+            area.y + 1 + u16::try_from(cursor_visible_row).unwrap_or(u16::MAX),
         ))
+    }
+}
+
+pub(crate) fn prompt_height(text: &str, cursor_byte: usize, width: u16) -> u16 {
+    let rows = prompt_layout(text, cursor_byte, width.saturating_sub(4))
+        .rows
+        .len();
+    u16::try_from(rows)
+        .unwrap_or(u16::MAX)
+        .saturating_add(2)
+        .clamp(3, 8)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct PromptLayout {
+    rows: Vec<String>,
+    cursor_row: usize,
+    cursor_column: usize,
+}
+
+fn prompt_layout(text: &str, cursor_byte: usize, width: u16) -> PromptLayout {
+    let cursor_byte = cursor_byte.min(text.len());
+    let width = usize::from(width).max(1);
+    let ranges = prompt_ranges(text, width);
+    let mut cursor = None;
+    let rows = ranges
+        .iter()
+        .enumerate()
+        .map(|(index, range)| {
+            if cursor.is_none() {
+                if cursor_byte >= range.start && cursor_byte <= range.end {
+                    cursor = Some((index, Line::from(&text[range.start..cursor_byte]).width()));
+                } else if cursor_byte < range.start {
+                    cursor = Some((index, 0));
+                }
+            }
+            text[range.clone()].to_string()
+        })
+        .collect::<Vec<_>>();
+    let (cursor_row, cursor_column) = cursor.unwrap_or_else(|| {
+        let index = ranges.len().saturating_sub(1);
+        let range = &ranges[index];
+        (index, Line::from(&text[range.clone()]).width())
+    });
+    PromptLayout {
+        rows,
+        cursor_row,
+        cursor_column,
+    }
+}
+
+fn prompt_ranges(text: &str, width: usize) -> Vec<Range<usize>> {
+    let mut ranges = Vec::new();
+    let mut logical_start = 0;
+    for (newline, _) in text.match_indices('\n') {
+        wrap_logical_line(text, logical_start, newline, width, &mut ranges);
+        logical_start = newline + 1;
+    }
+    wrap_logical_line(text, logical_start, text.len(), width, &mut ranges);
+    ranges
+}
+
+fn wrap_logical_line(
+    text: &str,
+    start: usize,
+    end: usize,
+    width: usize,
+    ranges: &mut Vec<Range<usize>>,
+) {
+    if start == end {
+        ranges.push(start..end);
+        return;
+    }
+
+    let mut row_start = start;
+    while row_start < end {
+        let capacity = if ranges.is_empty() {
+            width.saturating_sub(2).max(1)
+        } else {
+            width
+        };
+        let mut used = 0_usize;
+        let mut overflow = None;
+        let mut last_whitespace = None;
+        for (offset, character) in text[row_start..end].char_indices() {
+            let byte = row_start + offset;
+            let character_width = Line::from(character.to_string()).width();
+            if used.saturating_add(character_width) > capacity {
+                overflow = Some(byte);
+                break;
+            }
+            used = used.saturating_add(character_width);
+            if character.is_whitespace() {
+                last_whitespace = Some(byte);
+            }
+        }
+
+        let Some(overflow) = overflow else {
+            ranges.push(row_start..end);
+            break;
+        };
+        if overflow == row_start {
+            let next = row_start
+                + text[row_start..end]
+                    .chars()
+                    .next()
+                    .map_or(1, char::len_utf8);
+            ranges.push(row_start..next);
+            row_start = next;
+            continue;
+        }
+        let break_at = last_whitespace
+            .filter(|whitespace| *whitespace > row_start)
+            .unwrap_or(overflow);
+        ranges.push(row_start..break_at);
+        row_start = if break_at == overflow {
+            overflow
+        } else {
+            text[break_at..end]
+                .char_indices()
+                .find(|(_, character)| !character.is_whitespace())
+                .map_or(end, |(offset, _)| break_at + offset)
+        };
     }
 }
 

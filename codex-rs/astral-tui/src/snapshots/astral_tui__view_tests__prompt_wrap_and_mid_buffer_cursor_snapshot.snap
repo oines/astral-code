@@ -1,0 +1,10 @@
+---
+source: astral-tui/src/view_tests.rs
+expression: buffer_text(&buffer)
+---
+╭────────────────────────────────╮
+│ ❯ A long prompt wraps before   │
+│ this                           │
+│ and keeps editing here         │
+│                                │
+╰────────────── gpt-5 · default ─╯
