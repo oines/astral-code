@@ -130,6 +130,13 @@ fn slash_errors_stay_local_to_the_tui() {
         handle_key(&mut state, key(KeyCode::Enter)),
         InputAction::Notice("/model is unavailable while Astral is working".to_string())
     );
+
+    state.set_composer("/compact");
+    state.set_activity(SurfaceActivity::Disconnected("connection lost".to_string()));
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Enter)),
+        InputAction::Notice("/compact requires an app-server connection".to_string())
+    );
 }
 
 #[test]

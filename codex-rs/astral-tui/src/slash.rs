@@ -44,23 +44,54 @@ enum Args {
     Required(&'static str),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SlashCommandState {
+    Idle,
+    Working,
+    Disconnected,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CommandAvailability {
+    Always,
+    Connected,
+    Idle,
+}
+
+impl CommandAvailability {
+    fn allows(self, state: SlashCommandState) -> bool {
+        match (self, state) {
+            (
+                Self::Always,
+                SlashCommandState::Idle
+                | SlashCommandState::Working
+                | SlashCommandState::Disconnected,
+            )
+            | (Self::Connected, SlashCommandState::Idle | SlashCommandState::Working)
+            | (Self::Idle, SlashCommandState::Idle) => true,
+            (Self::Connected | Self::Idle, SlashCommandState::Disconnected)
+            | (Self::Idle, SlashCommandState::Working) => false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct CommandSpec {
     id: SlashCommandId,
     name: &'static str,
     description: &'static str,
     args: Args,
-    available_while_working: bool,
+    availability: CommandAvailability,
 }
 
 macro_rules! command {
-    ($id:ident, $name:literal, $description:literal, $args:expr, $working:literal) => {
+    ($id:ident, $name:literal, $description:literal, $args:expr, $availability:ident) => {
         CommandSpec {
             id: SlashCommandId::$id,
             name: $name,
             description: $description,
             args: $args,
-            available_while_working: $working,
+            availability: CommandAvailability::$availability,
         }
     };
 }
@@ -71,86 +102,92 @@ const COMMANDS: &[CommandSpec] = &[
         "model",
         "Choose model and reasoning effort",
         Args::Required("model"),
-        false
+        Idle
     ),
     command!(
         Permissions,
         "permissions",
         "Choose what Astral can do",
         Args::None,
-        false
+        Idle
     ),
     command!(
         Compact,
         "compact",
         "Compact the current conversation",
         Args::None,
-        false
+        Idle
     ),
-    command!(Plan, "plan", "Switch collaboration mode", Args::None, false),
-    command!(New, "new", "Start a new conversation", Args::None, false),
+    command!(Plan, "plan", "Switch collaboration mode", Args::None, Idle),
+    command!(New, "new", "Start a new conversation", Args::None, Idle),
     command!(
         Resume,
         "resume",
         "Resume a saved conversation",
         Args::None,
-        false
+        Idle
     ),
     command!(
         Fork,
         "fork",
         "Fork the current conversation",
         Args::None,
-        false
+        Idle
     ),
     command!(
         Rename,
         "rename",
         "Rename this conversation",
         Args::Required("name"),
-        true
+        Connected
     ),
     command!(
         Status,
         "status",
         "Show session and context status",
         Args::None,
-        true
+        Always
     ),
-    command!(Copy, "copy", "Copy the last response", Args::None, true),
+    command!(Copy, "copy", "Copy the last response", Args::None, Always),
     command!(
         Theme,
         "theme",
         "Choose the Astral theme",
         Args::Optional("theme"),
-        true
+        Always
     ),
     command!(
         Timeline,
         "timeline",
         "Toggle the timeline rail",
         Args::None,
-        true
+        Always
     ),
     command!(
         Mcp,
         "mcp",
         "Show configured MCP servers",
         Args::Optional("verbose"),
-        true
+        Connected
     ),
     command!(
         Skills,
         "skills",
         "Browse available skills",
         Args::None,
-        true
+        Connected
     ),
-    command!(Hooks, "hooks", "View lifecycle hooks", Args::None, true),
-    command!(Apps, "apps", "Manage connected apps", Args::None, true),
-    command!(Plugins, "plugins", "Browse plugins", Args::None, true),
-    command!(Exit, "exit", "Exit Astral", Args::None, true),
-    command!(Quit, "quit", "Exit Astral", Args::None, true),
+    command!(
+        Hooks,
+        "hooks",
+        "View lifecycle hooks",
+        Args::None,
+        Connected
+    ),
+    command!(Apps, "apps", "Manage connected apps", Args::None, Connected),
+    command!(Plugins, "plugins", "Browse plugins", Args::None, Connected),
+    command!(Exit, "exit", "Exit Astral", Args::None, Always),
+    command!(Quit, "quit", "Exit Astral", Args::None, Always),
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -191,7 +228,8 @@ pub struct SlashInvocation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SlashError {
     Unknown(String),
-    Unavailable(String),
+    UnavailableWhileWorking(String),
+    RequiresConnection(String),
     MissingArgument {
         command: String,
         placeholder: &'static str,
@@ -202,11 +240,14 @@ impl std::fmt::Display for SlashError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Unknown(command) => write!(formatter, "Unknown command: /{command}"),
-            Self::Unavailable(command) => {
+            Self::UnavailableWhileWorking(command) => {
                 write!(
                     formatter,
                     "/{command} is unavailable while Astral is working"
                 )
+            }
+            Self::RequiresConnection(command) => {
+                write!(formatter, "/{command} requires an app-server connection")
             }
             Self::MissingArgument {
                 command,
@@ -229,14 +270,18 @@ impl SlashController {
         &self.snapshot
     }
 
-    pub fn refresh(&mut self, text: &str, working: bool) {
+    pub fn refresh(&mut self, text: &str, state: SlashCommandState) {
         let previous = self.snapshot.selection().map(|row| row.insert_text.clone());
         let Some((query, has_args)) = leading_query(text) else {
             self.snapshot = SlashSnapshot::default();
             return;
         };
         let exact = find_spec(query);
-        if has_args && exact.is_some_and(|spec| spec.id == SlashCommandId::Model) {
+        if has_args
+            && exact.is_some_and(|spec| {
+                spec.id == SlashCommandId::Model && spec.availability.allows(state)
+            })
+        {
             let args = parse_invocation(text)
                 .map(|(_, args)| args)
                 .unwrap_or_default();
@@ -275,7 +320,7 @@ impl SlashController {
         let mut ranked = COMMANDS
             .iter()
             .enumerate()
-            .filter(|(_, spec)| !working || spec.available_while_working)
+            .filter(|(_, spec)| spec.availability.allows(state))
             .filter_map(|(order, spec)| {
                 fuzzy_match(spec.name, query).map(|(score, indices)| {
                     let recency = self.mru.get(&spec.id).copied().unwrap_or_default();
@@ -321,8 +366,10 @@ impl SlashController {
             matches,
             selected,
             ghost,
-            recognized: exact
-                .is_some_and(|spec| !matches!(spec.args, Args::Required(_)) || has_args),
+            recognized: exact.is_some_and(|spec| {
+                spec.availability.allows(state)
+                    && (!matches!(spec.args, Args::Required(_)) || has_args)
+            }),
         };
     }
 
@@ -343,19 +390,19 @@ impl SlashController {
         self.snapshot.open = false;
     }
 
-    pub fn accept_selection(&mut self, working: bool) -> Option<String> {
+    pub fn accept_selection(&mut self, state: SlashCommandState) -> Option<String> {
         let insert_text = self
             .snapshot
             .selection()
             .map(|selection| selection.insert_text.clone())?;
-        self.refresh(&insert_text, working);
+        self.refresh(&insert_text, state);
         Some(insert_text)
     }
 
     pub fn invocation(
         &self,
         text: &str,
-        working: bool,
+        state: SlashCommandState,
     ) -> Result<Option<SlashInvocation>, SlashError> {
         let Some((name, args)) = parse_invocation(text) else {
             return Ok(None);
@@ -363,8 +410,12 @@ impl SlashController {
         let Some(spec) = find_spec(name) else {
             return Err(SlashError::Unknown(name.to_string()));
         };
-        if working && !spec.available_while_working {
-            return Err(SlashError::Unavailable(name.to_string()));
+        if !spec.availability.allows(state) {
+            return Err(match state {
+                SlashCommandState::Working => SlashError::UnavailableWhileWorking(name.to_string()),
+                SlashCommandState::Disconnected => SlashError::RequiresConnection(name.to_string()),
+                SlashCommandState::Idle => unreachable!("idle commands are available while idle"),
+            });
         }
         if let Args::Required(placeholder) = spec.args
             && args.is_empty()

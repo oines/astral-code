@@ -160,6 +160,18 @@ fn slash_command_menu_snapshot() {
 }
 
 #[test]
+fn disconnected_slash_command_menu_snapshot() {
+    let session = session_state();
+    let mut state = SurfaceState::from_session(&session);
+    state.set_activity(SurfaceActivity::Disconnected(
+        "app-server connection lost".to_string(),
+    ));
+    state.set_composer("/");
+
+    insta::assert_snapshot!(render_at_size(&state, &session, 80, 24));
+}
+
+#[test]
 fn model_argument_menu_snapshot() {
     let session = session_state();
     let mut state = SurfaceState::from_session(&session);

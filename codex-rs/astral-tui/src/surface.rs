@@ -28,6 +28,7 @@ use crate::permission_picker::display_permission_mode;
 use crate::render_block;
 use crate::request_pane::RequestPane;
 use crate::slash::SlashCommandId;
+use crate::slash::SlashCommandState;
 use crate::slash::SlashController;
 use crate::slash::SlashError;
 use crate::slash::SlashInvocation;
@@ -218,9 +219,9 @@ impl SurfaceState {
     }
 
     pub fn refresh_slash(&mut self) {
-        let working = matches!(self.activity, SurfaceActivity::Working);
         if self.composer.cursor() == self.composer.text().len() {
-            self.slash.refresh(self.composer.text(), working);
+            self.slash
+                .refresh(self.composer.text(), self.slash_command_state());
         } else {
             self.slash.close();
         }
@@ -235,8 +236,7 @@ impl SurfaceState {
     }
 
     pub fn accept_slash_selection(&mut self) -> bool {
-        let working = matches!(self.activity, SurfaceActivity::Working);
-        let Some(completion) = self.slash.accept_selection(working) else {
+        let Some(completion) = self.slash.accept_selection(self.slash_command_state()) else {
             return false;
         };
         self.composer.replace(completion);
@@ -244,14 +244,20 @@ impl SurfaceState {
     }
 
     pub fn slash_invocation(&self) -> Result<Option<SlashInvocation>, SlashError> {
-        self.slash.invocation(
-            self.composer.text(),
-            matches!(self.activity, SurfaceActivity::Working),
-        )
+        self.slash
+            .invocation(self.composer.text(), self.slash_command_state())
     }
 
     pub fn record_slash(&mut self, command: SlashCommandId) {
         self.slash.record(command);
+    }
+
+    fn slash_command_state(&self) -> SlashCommandState {
+        match self.activity {
+            SurfaceActivity::Ready | SurfaceActivity::Interrupted => SlashCommandState::Idle,
+            SurfaceActivity::Working => SlashCommandState::Working,
+            SurfaceActivity::Disconnected(_) => SlashCommandState::Disconnected,
+        }
     }
 
     pub(crate) fn modal(&self) -> Option<&ModalState> {

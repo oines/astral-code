@@ -1,0 +1,27 @@
+---
+source: astral-tui/src/surface_tests.rs
+expression: "render_at_size(&state, &session, 80, 24)"
+---
+
+  ⎇ main  /workspace
+
+  ❯ inspect this repo
+
+  I’m tracing the relevant data flow.
+
+
+
+  ╭─ commands ───────────────────────────────────────────────────────────────╮
+  │› /status         Show session and context status                         │
+  │  /copy           Copy the last response                                  │
+  │  /theme          Choose the Astral theme                                 │
+  │  /timeline       Toggle the timeline rail                                │
+  │  /exit           Exit Astral                                             │
+  │  /quit           Exit Astral                                             │
+  ╰──────────────────────────────────────────────────────────────────────────╯
+
+  ╭──────────────────────────────────────────────────────────────────────────╮
+  │ ❯ /status                                                                │
+  ╰──────────────────────────────────────────── claude-sonnet-4 · workspace ─╯
+
+  ↑/↓:navigate  │  Tab:complete  │  Esc:close
