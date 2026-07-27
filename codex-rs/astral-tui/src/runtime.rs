@@ -353,7 +353,8 @@ async fn apply_input_action(
     match action {
         InputAction::None | InputAction::Redraw => {}
         InputAction::Submit(prompt) => {
-            surface.scroll_to_bottom();
+            // Follow mode already tracks the new turn. Keep a manual reading
+            // anchor in place while the submitted turn appends below it.
             surface.set_activity(SurfaceActivity::Working);
             if let Err(error) = session
                 .start_turn(vec![UserInput::Text {

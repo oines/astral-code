@@ -1,0 +1,9 @@
+---
+source: astral-tui/src/view/scrollback_tests.rs
+expression: buffer_text(&buffer)
+---
+read line 08
+read line 09     █
+read line 10
+read line 11
+read line 12

@@ -4,8 +4,11 @@ use pretty_assertions::assert_eq;
 use crate::conversation::TranscriptBlock;
 use crate::conversation::TranscriptTurn;
 
+use super::AstralTheme;
+use super::TranscriptSection;
 use super::format_duration;
 use super::item_duration_ms;
+use super::render_transcript;
 
 #[test]
 fn duration_format_matches_grok_turn_markers() {
@@ -46,4 +49,49 @@ fn turn_projection_keeps_block_and_timing_together() {
     };
     assert_eq!(turn.blocks[0].item_id, "agent-1");
     assert_eq!(turn.duration_ms, Some(2_400));
+}
+
+#[test]
+fn transcript_layout_assigns_stable_item_sections() {
+    let turn = TranscriptTurn {
+        id: "turn-1".to_string(),
+        blocks: vec![
+            TranscriptBlock {
+                item_id: "agent-1".to_string(),
+                block: PresentationBlock::Assistant {
+                    text: "first".to_string(),
+                },
+                started_at_ms: Some(1_000),
+                completed_at_ms: Some(2_000),
+            },
+            TranscriptBlock {
+                item_id: "agent-2".to_string(),
+                block: PresentationBlock::Assistant {
+                    text: "second".to_string(),
+                },
+                started_at_ms: Some(2_000),
+                completed_at_ms: Some(3_000),
+            },
+        ],
+        started_at_ms: Some(1_000),
+        completed_at_ms: Some(3_400),
+        duration_ms: Some(2_400),
+    };
+
+    let layout = render_transcript(&[turn], 80, AstralTheme::default());
+
+    assert_eq!(
+        layout.sections,
+        vec![
+            TranscriptSection {
+                item_id: "agent-1".to_string(),
+                lines: 0..1,
+            },
+            TranscriptSection {
+                item_id: "agent-2".to_string(),
+                lines: 1..4,
+            },
+        ]
+    );
+    assert_eq!(layout.lines.len(), 4);
 }
