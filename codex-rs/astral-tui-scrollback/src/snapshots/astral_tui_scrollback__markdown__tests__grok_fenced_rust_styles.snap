@@ -1,0 +1,15 @@
+---
+source: astral-tui-scrollback/src/markdown_tests.rs
+expression: style_signature(&rendered)
+---
+Some(Rgb(203, 166, 247))/NONE:fn
+Some(Rgb(137, 180, 250))/ITALIC:main
+Some(Rgb(147, 153, 178))/NONE:(
+Some(Rgb(147, 153, 178))/NONE:)
+Some(Rgb(147, 153, 178))/NONE:{
+Some(Rgb(203, 166, 247))/NONE:let
+Some(Rgb(205, 214, 244))/NONE:answer
+Some(Rgb(148, 226, 213))/NONE:=
+Some(Rgb(250, 179, 135))/NONE:42
+Some(Rgb(147, 153, 178))/NONE:;
+Some(Rgb(147, 153, 178))/NONE:}

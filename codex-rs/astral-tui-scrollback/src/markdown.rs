@@ -16,19 +16,23 @@ use pulldown_cmark::TagEnd;
 use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::text::Span;
-use textwrap::WordSeparator;
-use textwrap::WordSplitter;
 
+#[path = "markdown/code.rs"]
+mod code;
 #[path = "markdown/style.rs"]
 mod style;
+#[path = "markdown/syntax.rs"]
+mod syntax;
 #[path = "markdown/table.rs"]
 mod table;
 #[path = "markdown/wrapping.rs"]
 mod wrapping;
 
+use code::render_code_line;
 pub use style::MarkdownStyle;
+pub use style::MarkdownSyntaxTheme;
+use syntax::highlight_code;
 use table::TableState;
-use wrapping::padded_background_line;
 use wrapping::wrap_segments;
 
 pub fn render_markdown(text: &str, width: u16, style: MarkdownStyle) -> Vec<Line<'static>> {
@@ -73,6 +77,7 @@ struct LinkContext {
 #[derive(Debug)]
 struct CodeContext {
     source: String,
+    fence_info: Option<String>,
 }
 
 struct MarkdownWriter {
@@ -158,12 +163,13 @@ impl MarkdownWriter {
             }
             Tag::CodeBlock(kind) => {
                 self.flush_rich_block();
-                let _language = match kind {
+                let fence_info = match kind {
                     CodeBlockKind::Fenced(language) => Some(language.into_string()),
                     CodeBlockKind::Indented => None,
                 };
                 self.code = Some(CodeContext {
                     source: String::new(),
+                    fence_info,
                 });
             }
             Tag::List(start) => {
@@ -325,58 +331,27 @@ impl MarkdownWriter {
         let Some(code) = self.code.take() else {
             return;
         };
+        let source = code.source.strip_suffix('\n').unwrap_or(&code.source);
+        let highlighted = code
+            .fence_info
+            .as_deref()
+            .and_then(|fence_info| highlight_code(source, fence_info, self.style.syntax_theme));
         let mut rendered = Vec::new();
-        for source_line in code
-            .source
-            .strip_suffix('\n')
-            .unwrap_or(&code.source)
-            .split('\n')
-        {
-            rendered.extend(self.render_code_line(source_line));
+        for (index, source_line) in source.split('\n').enumerate() {
+            let (initial_prefix, subsequent_prefix) = self.prefixes();
+            rendered.extend(render_code_line(
+                self.width,
+                self.style,
+                source_line,
+                highlighted
+                    .as_ref()
+                    .and_then(|lines| lines.get(index))
+                    .map(Vec::as_slice),
+                initial_prefix,
+                subsequent_prefix,
+            ));
         }
         self.push_output(rendered, BlockKind::Code);
-    }
-
-    fn render_code_line(&mut self, source: &str) -> Vec<Line<'static>> {
-        let (initial_prefix, subsequent_prefix) = self.prefixes();
-        let prefix_width = Line::from(initial_prefix.clone()).width();
-        let content_width = usize::from(self.width).saturating_sub(prefix_width).max(1);
-        let leading = source
-            .chars()
-            .take_while(|character| *character == ' ')
-            .count();
-        let indent = " ".repeat(leading.min(content_width.saturating_sub(1)));
-        let options = textwrap::Options::new(content_width)
-            .initial_indent(&indent)
-            .subsequent_indent(&indent)
-            .word_separator(WordSeparator::AsciiSpace)
-            .word_splitter(WordSplitter::NoHyphenation)
-            .break_words(true);
-        let body = source.trim_start_matches(' ');
-        let wrapped = if body.is_empty() {
-            vec![String::new()]
-        } else {
-            textwrap::wrap(body, &options)
-                .into_iter()
-                .map(std::borrow::Cow::into_owned)
-                .collect()
-        };
-        wrapped
-            .into_iter()
-            .enumerate()
-            .map(|(index, content)| {
-                let mut spans = if index == 0 {
-                    initial_prefix.clone()
-                } else {
-                    subsequent_prefix.clone()
-                };
-                spans.push(Span::styled(
-                    content,
-                    self.style.code.patch(self.style.code_background),
-                ));
-                padded_background_line(spans, self.width, self.style.code_background)
-            })
-            .collect()
     }
 
     fn flush_rich_block(&mut self) {

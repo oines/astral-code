@@ -11,6 +11,7 @@ pub use block::ToolKind;
 pub use block::ToolPresentation;
 pub use block::ToolStatus;
 pub use markdown::MarkdownStyle;
+pub use markdown::MarkdownSyntaxTheme;
 pub use markdown::render_markdown;
 pub use render::RenderOptions;
 pub use render::render_block;

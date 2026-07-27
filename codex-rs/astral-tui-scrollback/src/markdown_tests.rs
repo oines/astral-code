@@ -42,6 +42,28 @@ fn plain(lines: &[Line<'_>]) -> String {
         .join("\n")
 }
 
+fn style_signature(lines: &[Line<'_>]) -> String {
+    lines
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .filter(|span| !span.content.trim().is_empty())
+                .map(|span| {
+                    format!(
+                        "{:?}/{:?}:{}",
+                        span.style.fg,
+                        span.style.add_modifier,
+                        span.content.trim()
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .collect::<Vec<_>>()
+        .join("\n--\n")
+}
+
 #[test]
 fn grok_markdown_semantics_snapshot() {
     let rendered = render_markdown(MARKDOWN_FIXTURE, 52, MarkdownStyle::default());
@@ -109,6 +131,23 @@ fn code_block_background_fills_each_visual_line() {
             .iter()
             .all(|line| line.style.bg == Some(background) && line.width() == 24)
     );
+}
+
+#[test]
+fn fenced_code_language_applies_syntax_styles() {
+    let rendered = render_markdown(
+        "```rust\nfn main() { let answer = 42; }\n```",
+        48,
+        MarkdownStyle::default(),
+    );
+    let colors = rendered
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .filter_map(|span| span.style.fg)
+        .collect::<std::collections::HashSet<_>>();
+
+    assert!(colors.len() > 1);
+    assert_snapshot!("grok_fenced_rust_styles", style_signature(&rendered));
 }
 
 #[test]
