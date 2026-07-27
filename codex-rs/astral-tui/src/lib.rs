@@ -17,9 +17,6 @@ mod surface;
 mod terminal_guard;
 mod thread_picker;
 mod timeline;
-// This review-bounded foundation is wired into `surface` by the immediately
-// following stacked change. Keep the intermediate commit warning-free.
-#[allow(dead_code, unused_imports)]
 mod view;
 
 #[cfg(test)]

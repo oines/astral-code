@@ -36,7 +36,11 @@ fn session_state() -> SessionState {
         "threadSource": "user",
         "agentNickname": null,
         "agentRole": null,
-        "gitInfo": null,
+        "gitInfo": {
+            "sha": "0123456789abcdef",
+            "branch": "main",
+            "originUrl": "https://example.com/astral-code.git"
+        },
         "name": null,
         "turns": [{
             "id": "turn-1",
@@ -112,6 +116,24 @@ fn working_surface_snapshot() {
     render_surface(&state, &session, area, &mut buffer);
 
     insta::assert_snapshot!(buffer_text(&buffer));
+}
+
+#[test]
+fn grok_view_80x24_snapshot() {
+    let (state, session) = named_working_surface();
+    insta::assert_snapshot!(render_at_size(&state, &session, 80, 24));
+}
+
+#[test]
+fn grok_view_120x32_snapshot() {
+    let (state, session) = named_working_surface();
+    insta::assert_snapshot!(render_at_size(&state, &session, 120, 32));
+}
+
+#[test]
+fn grok_view_narrow_snapshot() {
+    let (state, session) = named_working_surface();
+    insta::assert_snapshot!(render_at_size(&state, &session, 48, 16));
 }
 
 #[test]
@@ -254,6 +276,22 @@ fn request_surface(value: serde_json::Value, composer: &str) -> String {
     let mut buffer = Buffer::empty(area);
     render_surface(&state, &session, area, &mut buffer);
     buffer_text(&buffer)
+}
+
+fn render_at_size(state: &SurfaceState, session: &SessionState, width: u16, height: u16) -> String {
+    let area = Rect::new(0, 0, width, height);
+    let mut buffer = Buffer::empty(area);
+    render_surface(state, session, area, &mut buffer);
+    buffer_text(&buffer)
+}
+
+fn named_working_surface() -> (SurfaceState, SessionState) {
+    let mut session = session_state();
+    session.thread.name = Some("Astral session".to_string());
+    let mut state = SurfaceState::from_session(&session);
+    state.set_activity(SurfaceActivity::Working);
+    state.composer_mut().push_str("trace the projection");
+    (state, session)
 }
 
 fn buffer_text(buffer: &Buffer) -> String {
