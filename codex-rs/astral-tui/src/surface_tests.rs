@@ -1,3 +1,5 @@
+use chrono::Local;
+use chrono::TimeZone;
 use codex_app_server_protocol::ActivePermissionProfile;
 use codex_app_server_protocol::ApprovalsReviewer;
 use codex_app_server_protocol::AskForApproval;
@@ -38,6 +40,7 @@ use crate::shortcuts::shortcuts_modal;
 use crate::view::AstralThemeId;
 
 fn session_state() -> SessionState {
+    let started_at = local_timestamp_seconds(/*hour*/ 0, /*minute*/ 0, /*second*/ 1);
     let thread: Thread = serde_json::from_value(json!({
         "id": "thread-1",
         "sessionId": "session-1",
@@ -85,7 +88,7 @@ fn session_state() -> SessionState {
             "itemsView": "full",
             "status": "inProgress",
             "error": null,
-            "startedAt": 1,
+            "startedAt": started_at,
             "completedAt": null,
             "durationMs": null
         }]
@@ -111,6 +114,14 @@ fn session_state() -> SessionState {
             BUILT_IN_PERMISSION_PROFILE_WORKSPACE,
         )),
     }
+}
+
+fn local_timestamp_seconds(hour: u32, minute: u32, second: u32) -> i64 {
+    Local
+        .with_ymd_and_hms(2023, 1, 15, hour, minute, second)
+        .single()
+        .expect("unambiguous local test timestamp")
+        .timestamp()
 }
 
 #[test]
@@ -286,6 +297,8 @@ fn theme_picker_surface_snapshot() {
 #[test]
 fn timeline_rail_surface_snapshot() {
     let mut session = session_state();
+    let second_started_at =
+        local_timestamp_seconds(/*hour*/ 0, /*minute*/ 0, /*second*/ 3);
     session.thread.turns.push(
         serde_json::from_value(json!({
             "id": "turn-2",
@@ -310,8 +323,8 @@ fn timeline_rail_surface_snapshot() {
             "itemsView": "full",
             "status": "completed",
             "error": null,
-            "startedAt": 3,
-            "completedAt": 4,
+            "startedAt": second_started_at,
+            "completedAt": second_started_at + 1,
             "durationMs": 1000
         }))
         .expect("valid second turn"),
@@ -492,7 +505,9 @@ fn typed_approval_surfaces_snapshot() {
 fn fullscreen_surface_keeps_committed_history_snapshot() {
     let mut session = session_state();
     session.thread.turns[0].status = codex_app_server_protocol::TurnStatus::Completed;
-    session.thread.turns[0].completed_at = Some(2);
+    session.thread.turns[0].completed_at = Some(local_timestamp_seconds(
+        /*hour*/ 0, /*minute*/ 0, /*second*/ 2,
+    ));
     session.active_turn_id = None;
     let mut state = SurfaceState::from_session(&session);
     assert_eq!(state.drain_committable().len(), 2);
@@ -512,6 +527,8 @@ fn fullscreen_surface_keeps_committed_history_snapshot() {
 #[test]
 fn fullscreen_scrollback_viewport_snapshot() {
     let mut session = session_state();
+    let base_timestamp =
+        local_timestamp_seconds(/*hour*/ 22, /*minute*/ 13, /*second*/ 20);
     let template = session.thread.turns[0].clone();
     session.thread.turns = (0..8)
         .map(|index| {
@@ -536,8 +553,8 @@ fn fullscreen_scrollback_viewport_snapshot() {
                 },
             ];
             turn.status = TurnStatus::Completed;
-            turn.started_at = Some(1_700_000_000 + index);
-            turn.completed_at = Some(1_700_000_001 + index);
+            turn.started_at = Some(base_timestamp + index);
+            turn.completed_at = Some(base_timestamp + index + 1);
             turn.duration_ms = Some(1_000);
             turn
         })
@@ -561,6 +578,9 @@ fn fullscreen_scrollback_viewport_snapshot() {
 #[test]
 fn grok_layered_turn_139x35_snapshot() {
     let mut session = session_state();
+    let base_timestamp =
+        local_timestamp_seconds(/*hour*/ 22, /*minute*/ 13, /*second*/ 20);
+    let base_timestamp_ms = base_timestamp * 1_000;
     let mut turn = session.thread.turns.remove(0);
     session.active_turn_id = None;
     let mut state = SurfaceState::new("thread-1");
@@ -588,7 +608,7 @@ fn grok_layered_turn_139x35_snapshot() {
     turn.id = "turn-layered".to_string();
     turn.items.clear();
     turn.status = TurnStatus::InProgress;
-    turn.started_at = Some(1_700_000_000);
+    turn.started_at = Some(base_timestamp);
     turn.completed_at = None;
     turn.duration_ms = None;
     state
@@ -598,9 +618,17 @@ fn grok_layered_turn_139x35_snapshot() {
             turn: turn.clone(),
         }));
     for (item, started_at_ms, completed_at_ms) in [
-        (items[0].clone(), 1_700_000_000_000, 1_700_000_000_050),
-        (items[1].clone(), 1_700_000_000_050, 1_700_000_000_550),
-        (items[2].clone(), 1_700_000_000_550, 1_700_000_002_400),
+        (items[0].clone(), base_timestamp_ms, base_timestamp_ms + 50),
+        (
+            items[1].clone(),
+            base_timestamp_ms + 50,
+            base_timestamp_ms + 550,
+        ),
+        (
+            items[2].clone(),
+            base_timestamp_ms + 550,
+            base_timestamp_ms + 2_400,
+        ),
     ] {
         state
             .conversation_mut()
@@ -623,7 +651,7 @@ fn grok_layered_turn_139x35_snapshot() {
     }
     turn.items = items;
     turn.status = TurnStatus::Completed;
-    turn.completed_at = Some(1_700_000_002);
+    turn.completed_at = Some(base_timestamp + 2);
     turn.duration_ms = Some(2_400);
     state
         .conversation_mut()
@@ -678,6 +706,8 @@ fn grok_layered_turn_139x35_snapshot() {
 #[test]
 fn reused_provider_item_ids_preserve_turn_order_snapshot() {
     let mut session = session_state();
+    let base_timestamp =
+        local_timestamp_seconds(/*hour*/ 22, /*minute*/ 13, /*second*/ 20);
     let template = session.thread.turns.remove(0);
     session.thread.turns = ["first", "second"]
         .into_iter()
@@ -707,8 +737,8 @@ fn reused_provider_item_ids_preserve_turn_order_snapshot() {
                 },
             ];
             turn.status = TurnStatus::Completed;
-            turn.started_at = Some(1_700_000_000 + index as i64 * 10);
-            turn.completed_at = Some(1_700_000_002 + index as i64 * 10);
+            turn.started_at = Some(base_timestamp + index as i64 * 10);
+            turn.completed_at = Some(base_timestamp + index as i64 * 10 + 2);
             turn.duration_ms = Some(2_000);
             turn
         })
