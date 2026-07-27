@@ -199,26 +199,26 @@ fn skill_and_plugin_mention_menu_snapshot() {
     state.set_mention_catalog(MentionCatalog {
         candidates: vec![
             MentionCandidate {
-            kind: MentionKind::Plugin,
-            display: "Browser Use".to_string(),
-            description: "Control the active browser".to_string(),
-            insert_text: "@Browser-Use".to_string(),
-            search_terms: vec!["browser-use".to_string()],
-            target: MentionTarget::Plugin {
-                name: "Browser Use".to_string(),
-                path: "plugin://browser-use@bundled".to_string(),
-            },
+                kind: MentionKind::Plugin,
+                display: "Browser Use".to_string(),
+                description: "Control the active browser".to_string(),
+                insert_text: "@Browser-Use".to_string(),
+                search_terms: vec!["browser-use".to_string()],
+                target: MentionTarget::Plugin {
+                    name: "Browser Use".to_string(),
+                    path: "plugin://browser-use@bundled".to_string(),
+                },
             },
             MentionCandidate {
-            kind: MentionKind::Skill,
-            display: "Code Review".to_string(),
-            description: "Review a pull request".to_string(),
-            insert_text: "$code-review".to_string(),
-            search_terms: vec!["code-review".to_string()],
-            target: MentionTarget::Skill {
-                name: "code-review".to_string(),
-                path: "/workspace/.codex/skills/code-review/SKILL.md".into(),
-            },
+                kind: MentionKind::Skill,
+                display: "Code Review".to_string(),
+                description: "Review a pull request".to_string(),
+                insert_text: "$code-review".to_string(),
+                search_terms: vec!["code-review".to_string()],
+                target: MentionTarget::Skill {
+                    name: "code-review".to_string(),
+                    path: "/workspace/.codex/skills/code-review/SKILL.md".into(),
+                },
             },
         ],
     });
