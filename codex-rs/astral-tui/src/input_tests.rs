@@ -69,9 +69,9 @@ fn transcript_shortcuts_are_distinct_from_composer_input() {
 }
 
 #[test]
-fn slash_completion_and_dispatch_do_not_submit_model_prompts() {
+fn slash_completion_and_dispatch_stay_local_to_the_tui() {
     let mut state = SurfaceState::new("thread-1");
-    for character in "/mo".chars() {
+    for character in "/co".chars() {
         assert_eq!(
             handle_key(&mut state, key(KeyCode::Char(character))),
             InputAction::Redraw
@@ -81,12 +81,12 @@ fn slash_completion_and_dispatch_do_not_submit_model_prompts() {
         handle_key(&mut state, key(KeyCode::Enter)),
         InputAction::Redraw
     );
-    assert_eq!(state.composer(), "/model");
+    assert_eq!(state.composer(), "/compact");
     assert_eq!(
         handle_key(&mut state, key(KeyCode::Enter)),
         InputAction::Slash(SlashInvocation {
-            command: SlashCommandId::Model,
-            name: "model",
+            command: SlashCommandId::Compact,
+            name: "compact",
             args: String::new(),
         })
     );

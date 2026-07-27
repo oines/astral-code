@@ -4,13 +4,20 @@ use codex_app_server_client::AppServerClient;
 use codex_app_server_client::AppServerEvent;
 use codex_app_server_client::TypedRequestError;
 use codex_app_server_protocol::ClientRequest;
+use codex_app_server_protocol::Model;
+use codex_app_server_protocol::ModelListParams;
+use codex_app_server_protocol::ModelListResponse;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::Thread;
+use codex_app_server_protocol::ThreadCompactStartParams;
+use codex_app_server_protocol::ThreadCompactStartResponse;
 use codex_app_server_protocol::ThreadForkParams;
 use codex_app_server_protocol::ThreadForkResponse;
 use codex_app_server_protocol::ThreadResumeParams;
 use codex_app_server_protocol::ThreadResumeResponse;
+use codex_app_server_protocol::ThreadSettingsUpdateParams;
+use codex_app_server_protocol::ThreadSettingsUpdateResponse;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
 use codex_app_server_protocol::TurnInterruptParams;
@@ -24,6 +31,7 @@ use codex_protocol::config_types::Settings;
 use codex_protocol::openai_models::ReasoningEffort;
 
 use crate::RequestResolution;
+use crate::model_command::ModelSelection;
 
 #[derive(Debug)]
 pub enum SessionError {
@@ -263,6 +271,79 @@ impl AstralSession {
         let _: TurnInterruptResponse = self
             .client
             .request_typed(ClientRequest::TurnInterrupt { request_id, params })
+            .await?;
+        Ok(())
+    }
+
+    pub(crate) async fn list_models(&mut self) -> Result<Vec<Model>, SessionError> {
+        let mut cursor = None;
+        let mut models = Vec::new();
+        for _ in 0..5 {
+            let request_id = self.next_request_id();
+            let response: ModelListResponse = self
+                .client
+                .request_typed(ClientRequest::ModelList {
+                    request_id,
+                    params: ModelListParams {
+                        cursor,
+                        model_provider: None,
+                        limit: Some(100),
+                        include_hidden: Some(false),
+                    },
+                })
+                .await?;
+            models.extend(response.data);
+            if models.len() >= 500 {
+                models.truncate(500);
+                break;
+            }
+            let Some(next_cursor) = response.next_cursor else {
+                break;
+            };
+            cursor = Some(next_cursor);
+        }
+        Ok(models)
+    }
+
+    pub(crate) async fn compact(&mut self) -> Result<(), SessionError> {
+        let thread_id = self
+            .state
+            .as_ref()
+            .map(|state| state.thread.id.clone())
+            .ok_or(SessionError::NoThread)?;
+        let request_id = self.next_request_id();
+        let _: ThreadCompactStartResponse = self
+            .client
+            .request_typed(ClientRequest::ThreadCompactStart {
+                request_id,
+                params: ThreadCompactStartParams { thread_id },
+            })
+            .await?;
+        Ok(())
+    }
+
+    pub(crate) async fn update_model(
+        &mut self,
+        selection: &ModelSelection,
+    ) -> Result<(), SessionError> {
+        let thread_id = self
+            .state
+            .as_ref()
+            .map(|state| state.thread.id.clone())
+            .ok_or(SessionError::NoThread)?;
+        let request_id = self.next_request_id();
+        let _: ThreadSettingsUpdateResponse = self
+            .client
+            .request_typed(ClientRequest::ThreadSettingsUpdate {
+                request_id,
+                params: ThreadSettingsUpdateParams {
+                    thread_id,
+                    model: Some(selection.model.clone()),
+                    model_provider: Some(selection.model_provider.clone()),
+                    effort: Some(selection.effort.clone()),
+                    ..ThreadSettingsUpdateParams::default()
+                },
+            })
             .await?;
         Ok(())
     }

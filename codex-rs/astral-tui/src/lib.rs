@@ -10,6 +10,7 @@ mod clipboard;
 mod conversation;
 mod input;
 mod launch;
+mod model_command;
 mod request;
 mod runtime;
 mod session;

@@ -6,6 +6,12 @@
 
 use std::collections::HashMap;
 
+use codex_app_server_protocol::Model;
+
+use crate::model_command::ModelCatalog;
+use crate::model_command::ModelResolveError;
+use crate::model_command::ModelSelection;
+
 const MAX_MATCHES: usize = 20;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -47,163 +53,111 @@ struct CommandSpec {
     available_while_working: bool,
 }
 
+macro_rules! command {
+    ($id:ident, $name:literal, $description:literal, $args:expr, $working:literal) => {
+        CommandSpec {
+            id: SlashCommandId::$id,
+            name: $name,
+            description: $description,
+            args: $args,
+            available_while_working: $working,
+        }
+    };
+}
+
 const COMMANDS: &[CommandSpec] = &[
-    command(
-        SlashCommandId::Model,
+    command!(
+        Model,
         "model",
         "Choose model and reasoning effort",
-        Args::None,
-        false,
+        Args::Required("model"),
+        false
     ),
-    command(
-        SlashCommandId::Permissions,
+    command!(
+        Permissions,
         "permissions",
         "Choose what Astral can do",
         Args::None,
-        false,
+        false
     ),
-    command(
-        SlashCommandId::Compact,
+    command!(
+        Compact,
         "compact",
         "Compact the current conversation",
         Args::None,
-        false,
+        false
     ),
-    command(
-        SlashCommandId::Plan,
-        "plan",
-        "Switch collaboration mode",
-        Args::None,
-        false,
-    ),
-    command(
-        SlashCommandId::New,
-        "new",
-        "Start a new conversation",
-        Args::None,
-        false,
-    ),
-    command(
-        SlashCommandId::Resume,
+    command!(Plan, "plan", "Switch collaboration mode", Args::None, false),
+    command!(New, "new", "Start a new conversation", Args::None, false),
+    command!(
+        Resume,
         "resume",
         "Resume a saved conversation",
         Args::None,
-        false,
+        false
     ),
-    command(
-        SlashCommandId::Fork,
+    command!(
+        Fork,
         "fork",
         "Fork the current conversation",
         Args::None,
-        false,
+        false
     ),
-    command(
-        SlashCommandId::Rename,
+    command!(
+        Rename,
         "rename",
         "Rename this conversation",
         Args::Required("name"),
-        true,
+        true
     ),
-    command(
-        SlashCommandId::Status,
+    command!(
+        Status,
         "status",
         "Show session and context status",
         Args::None,
-        true,
+        true
     ),
-    command(
-        SlashCommandId::Copy,
-        "copy",
-        "Copy the last response",
-        Args::None,
-        true,
-    ),
-    command(
-        SlashCommandId::Theme,
+    command!(Copy, "copy", "Copy the last response", Args::None, true),
+    command!(
+        Theme,
         "theme",
         "Choose the terminal theme",
         Args::None,
-        true,
+        true
     ),
-    command(
-        SlashCommandId::Timeline,
+    command!(
+        Timeline,
         "timeline",
         "Toggle the timeline rail",
         Args::None,
-        true,
+        true
     ),
-    command(
-        SlashCommandId::Mcp,
+    command!(
+        Mcp,
         "mcp",
         "Show configured MCP servers",
         Args::Optional("verbose"),
-        true,
+        true
     ),
-    command(
-        SlashCommandId::Skills,
+    command!(
+        Skills,
         "skills",
         "Browse available skills",
         Args::None,
-        true,
+        true
     ),
-    command(
-        SlashCommandId::Hooks,
-        "hooks",
-        "View lifecycle hooks",
-        Args::None,
-        true,
-    ),
-    command(
-        SlashCommandId::Apps,
-        "apps",
-        "Manage connected apps",
-        Args::None,
-        true,
-    ),
-    command(
-        SlashCommandId::Plugins,
-        "plugins",
-        "Browse plugins",
-        Args::None,
-        true,
-    ),
-    command(
-        SlashCommandId::Exit,
-        "exit",
-        "Exit Astral",
-        Args::None,
-        true,
-    ),
-    command(
-        SlashCommandId::Quit,
-        "quit",
-        "Exit Astral",
-        Args::None,
-        true,
-    ),
+    command!(Hooks, "hooks", "View lifecycle hooks", Args::None, true),
+    command!(Apps, "apps", "Manage connected apps", Args::None, true),
+    command!(Plugins, "plugins", "Browse plugins", Args::None, true),
+    command!(Exit, "exit", "Exit Astral", Args::None, true),
+    command!(Quit, "quit", "Exit Astral", Args::None, true),
 ];
-
-const fn command(
-    id: SlashCommandId,
-    name: &'static str,
-    description: &'static str,
-    args: Args,
-    available_while_working: bool,
-) -> CommandSpec {
-    CommandSpec {
-        id,
-        name,
-        description,
-        args,
-        available_while_working,
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SlashSuggestion {
     pub command: SlashCommandId,
     pub display: String,
-    pub description: &'static str,
+    pub description: String,
     pub insert_text: String,
     pub indices: Vec<usize>,
 }
@@ -212,6 +166,7 @@ pub struct SlashSuggestion {
 pub struct SlashSnapshot {
     pub active: bool,
     pub open: bool,
+    pub title: &'static str,
     pub query: String,
     pub matches: Vec<SlashSuggestion>,
     pub selected: usize,
@@ -266,6 +221,7 @@ pub struct SlashController {
     snapshot: SlashSnapshot,
     mru: HashMap<SlashCommandId, u64>,
     clock: u64,
+    models: ModelCatalog,
 }
 
 impl SlashController {
@@ -274,12 +230,48 @@ impl SlashController {
     }
 
     pub fn refresh(&mut self, text: &str, working: bool) {
-        let previous = self.snapshot.selection().map(|row| row.command);
+        let previous = self.snapshot.selection().map(|row| row.insert_text.clone());
         let Some((query, has_args)) = leading_query(text) else {
             self.snapshot = SlashSnapshot::default();
             return;
         };
         let exact = find_spec(query);
+        if has_args && exact.is_some_and(|spec| spec.id == SlashCommandId::Model) {
+            let args = parse_invocation(text)
+                .map(|(_, args)| args)
+                .unwrap_or_default();
+            let matches = self
+                .models
+                .suggestions(args)
+                .into_iter()
+                .take(MAX_MATCHES)
+                .map(|suggestion| SlashSuggestion {
+                    command: SlashCommandId::Model,
+                    display: suggestion.display,
+                    description: suggestion.description,
+                    insert_text: suggestion.insert_text,
+                    indices: Vec::new(),
+                })
+                .collect::<Vec<_>>();
+            let selected = previous
+                .and_then(|insert_text| {
+                    matches
+                        .iter()
+                        .position(|row| row.insert_text == insert_text)
+                })
+                .unwrap_or_default();
+            self.snapshot = SlashSnapshot {
+                active: true,
+                open: !matches.is_empty(),
+                title: "models",
+                query: args.to_string(),
+                matches,
+                selected,
+                ghost: None,
+                recognized: self.models.resolve(args).is_ok(),
+            };
+            return;
+        }
         let mut ranked = COMMANDS
             .iter()
             .enumerate()
@@ -302,7 +294,7 @@ impl SlashController {
             .map(|(spec, _, _, _, indices)| SlashSuggestion {
                 command: spec.id,
                 display: format!("/{}", spec.name),
-                description: spec.description,
+                description: spec.description.to_string(),
                 insert_text: match spec.args {
                     Args::None => format!("/{}", spec.name),
                     Args::Optional(_) | Args::Required(_) => format!("/{} ", spec.name),
@@ -311,7 +303,11 @@ impl SlashController {
             })
             .collect::<Vec<_>>();
         let selected = previous
-            .and_then(|command| matches.iter().position(|row| row.command == command))
+            .and_then(|insert_text| {
+                matches
+                    .iter()
+                    .position(|row| row.insert_text == insert_text)
+            })
             .unwrap_or_default();
         let ghost = (!has_args)
             .then(|| matches.get(selected))
@@ -320,11 +316,13 @@ impl SlashController {
         self.snapshot = SlashSnapshot {
             active: true,
             open: !has_args && !matches.is_empty(),
+            title: "commands",
             query: query.to_string(),
             matches,
             selected,
             ghost,
-            recognized: exact.is_some(),
+            recognized: exact
+                .is_some_and(|spec| !matches!(spec.args, Args::Required(_)) || has_args),
         };
     }
 
@@ -392,6 +390,27 @@ impl SlashController {
         self.clock = self.clock.saturating_add(1);
         self.mru.insert(command, self.clock);
     }
+
+    pub fn set_models(
+        &mut self,
+        models: Vec<Model>,
+        current_model: impl Into<String>,
+        current_provider: impl Into<String>,
+    ) {
+        self.models.replace(models, current_model, current_provider);
+    }
+
+    pub fn update_current_model(
+        &mut self,
+        model: impl Into<String>,
+        model_provider: impl Into<String>,
+    ) {
+        self.models.update_current(model, model_provider);
+    }
+
+    pub fn resolve_model(&self, args: &str) -> Result<ModelSelection, ModelResolveError> {
+        self.models.resolve(args)
+    }
 }
 
 fn leading_query(text: &str) -> Option<(&str, bool)> {
@@ -420,7 +439,7 @@ fn prefix_ghost(query: &str, candidate: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-fn fuzzy_match(candidate: &str, query: &str) -> Option<(u32, Vec<usize>)> {
+pub(crate) fn fuzzy_match(candidate: &str, query: &str) -> Option<(u32, Vec<usize>)> {
     if query.is_empty() {
         return Some((0, Vec::new()));
     }
