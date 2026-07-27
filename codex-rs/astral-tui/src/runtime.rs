@@ -52,6 +52,8 @@ use crate::thread_picker::PickerState;
 use crate::view::AstralThemeId;
 use crate::view::ColorLevel;
 
+mod mentions;
+
 type AstralTerminal = Terminal<CrosstermBackend<Stdout>>;
 
 #[derive(Clone)]
@@ -148,6 +150,7 @@ pub async fn run(mut session: AstralSession, options: RunOptions) -> Result<RunE
         ),
         Err(error) => surface.set_notice(format!("Could not load model catalog: {error}")),
     }
+    mentions::refresh_catalog(&mut session, &mut surface).await;
     let mut guard = match options.viewport {
         RunViewport::Fullscreen => TerminalGuard::enter_alternate()?,
         RunViewport::Inline => TerminalGuard::enter_inline()?,
@@ -398,10 +401,7 @@ async fn apply_input_action(
             // anchor in place while the submitted turn appends below it.
             surface.set_activity(SurfaceActivity::Working);
             if let Err(error) = session.start_turn(submission.user_input()).await {
-                surface
-                    .composer_state_mut()
-                    .restore_submission(submission);
-                surface.refresh_slash();
+                surface.restore_submission(submission);
                 surface.set_activity(SurfaceActivity::Ready);
                 surface.set_notice(error.to_string());
             }
@@ -678,6 +678,7 @@ async fn reset_surface(session: &mut AstralSession, surface: &mut SurfaceState) 
         }
         Err(error) => surface.set_notice(format!("Could not load model catalog: {error}")),
     }
+    mentions::refresh_catalog(session, surface).await;
 }
 
 async fn handle_app_event(
