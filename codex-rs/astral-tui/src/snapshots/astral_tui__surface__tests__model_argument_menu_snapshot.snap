@@ -22,6 +22,6 @@ expression: "render_at_size(&state, &session, 80, 24)"
 
   ╭──────────────────────────────────────────────────────────────────────────╮
   │ ❯ /model                                                                 │
-  ╰──────────────────────────────────────────── claude-sonnet-4 · anthropic ─╯
+  ╰──────────────────────────────────────────── claude-sonnet-4 · workspace ─╯
 
-  ↑/↓:navigate  │  Tab:complete  │  Esc:close      claude-sonnet-4 · anthropic
+  ↑/↓:navigate  │  Tab:complete  │  Esc:close

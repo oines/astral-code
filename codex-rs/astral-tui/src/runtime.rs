@@ -10,6 +10,7 @@ use codex_app_server_protocol::ServerRequest;
 use codex_app_server_protocol::ThreadTokenUsage;
 use codex_app_server_protocol::TurnStatus;
 use codex_app_server_protocol::UserInput;
+use codex_protocol::config_types::ModeKind;
 use crossterm::event::Event;
 use crossterm::event::EventStream;
 use ratatui::TerminalOptions;
@@ -36,6 +37,7 @@ use crate::handle_paste;
 use crate::modal::ModalRow;
 use crate::modal::ModalState;
 use crate::paint_committed;
+use crate::permission_picker::PermissionPickerState;
 use crate::render_surface;
 use crate::render_surface_with_view;
 use crate::terminal_guard::TerminalGuard;
@@ -391,6 +393,26 @@ async fn apply_input_action(
                 Err(error) => surface.set_notice(error.to_string()),
             }
         }
+        InputAction::SelectPermission(selection) => {
+            let label = selection.label();
+            match session.update_permissions(selection).await {
+                Ok(()) => surface.set_notice(format!("Switching permissions to {label}")),
+                Err(error) => surface.set_notice(error.to_string()),
+            }
+        }
+        InputAction::CycleMode => {
+            let mode = session
+                .state()
+                .map(|state| {
+                    if state.collaboration_mode.mode == ModeKind::Plan {
+                        ModeKind::Default
+                    } else {
+                        ModeKind::Plan
+                    }
+                })
+                .unwrap_or(ModeKind::Default);
+            set_collaboration_mode(session, surface, mode).await;
+        }
         InputAction::Slash(invocation) => match invocation.command {
             SlashCommandId::Exit | SlashCommandId::Quit => {
                 return Ok(Some(RunExitReason::UserRequested));
@@ -440,6 +462,16 @@ async fn apply_input_action(
                     Err(error) => surface.set_notice(error.to_string()),
                 }
             }
+            SlashCommandId::Plan => {
+                set_collaboration_mode(session, surface, ModeKind::Plan).await;
+            }
+            SlashCommandId::Permissions => {
+                let current_profile = session
+                    .state()
+                    .and_then(|state| state.active_permission_profile.as_ref())
+                    .map(|profile| profile.id.clone());
+                surface.open_permission_picker(PermissionPickerState::new(current_profile));
+            }
             SlashCommandId::Status => {
                 if let Some(state) = session.state() {
                     let tokens = surface.token_usage().map_or_else(
@@ -467,6 +499,19 @@ async fn apply_input_action(
                                 "Model",
                                 format!("{} · {}", state.model, state.model_provider),
                             ),
+                            ModalRow::new(
+                                "Mode",
+                                format!("{:?}", state.collaboration_mode.mode).to_lowercase(),
+                            ),
+                            ModalRow::new(
+                                "Permissions",
+                                crate::permission_picker::display_permission_mode(
+                                    state
+                                        .active_permission_profile
+                                        .as_ref()
+                                        .map(|profile| profile.id.as_str()),
+                                ),
+                            ),
                             ModalRow::new("Working directory", state.thread.cwd.to_string_lossy()),
                             ModalRow::new("Context", tokens),
                         ],
@@ -486,6 +531,20 @@ async fn apply_input_action(
         InputAction::Notice(message) => surface.set_notice(message),
     }
     Ok(None)
+}
+
+async fn set_collaboration_mode(
+    session: &mut AstralSession,
+    surface: &mut SurfaceState,
+    mode: ModeKind,
+) {
+    match session.update_collaboration_mode(mode).await {
+        Ok(()) => {
+            let mode = format!("{mode:?}").to_lowercase();
+            surface.set_notice(format!("Switched to {mode} mode"));
+        }
+        Err(error) => surface.set_notice(error.to_string()),
+    }
 }
 
 async fn reset_surface(session: &mut AstralSession, surface: &mut SurfaceState) {

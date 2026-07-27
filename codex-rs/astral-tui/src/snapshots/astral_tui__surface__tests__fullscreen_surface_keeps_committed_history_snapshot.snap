@@ -12,5 +12,5 @@ expression: buffer_text(&buffer)
 
  ╭────────────────────────────────────────────────────────────────────╮
  │ ❯                                                                  │
- ╰────────────────────────────────────── claude-sonnet-4 · anthropic ─╯
- Enter:send  │  PgUp/PgDn:scroll  │  Ctrl+O:copy
+ ╰────────────────────────────────────── claude-sonnet-4 · workspace ─╯
+ Shift+Tab:mode

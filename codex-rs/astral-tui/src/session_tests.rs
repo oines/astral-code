@@ -82,6 +82,9 @@ fn thread_name_notifications_update_exit_metadata() {
         service_tier: None,
         active_turn_id: None,
         collaboration_mode: default_collaboration_mode("gpt-5".to_string(), None),
+        approval_policy: AskForApproval::OnRequest,
+        approvals_reviewer: ApprovalsReviewer::User,
+        active_permission_profile: None,
     };
 
     state.observe_notification(&ServerNotification::ThreadNameUpdated(
@@ -96,7 +99,7 @@ fn thread_name_notifications_update_exit_metadata() {
 }
 
 #[test]
-fn plan_thread_settings_are_reset_to_default_for_the_next_turn() {
+fn thread_settings_notification_preserves_explicit_collaboration_mode() {
     let mut state = SessionState {
         thread: thread(),
         model: "gpt-5".to_string(),
@@ -104,6 +107,9 @@ fn plan_thread_settings_are_reset_to_default_for_the_next_turn() {
         service_tier: None,
         active_turn_id: None,
         collaboration_mode: default_collaboration_mode("gpt-5".to_string(), None),
+        approval_policy: AskForApproval::OnRequest,
+        approvals_reviewer: ApprovalsReviewer::User,
+        active_permission_profile: None,
     };
 
     state.observe_notification(&ServerNotification::ThreadSettingsUpdated(
@@ -143,12 +149,23 @@ fn plan_thread_settings_are_reset_to_default_for_the_next_turn() {
             state.model_provider,
             state.service_tier,
             state.collaboration_mode,
+            state.approval_policy,
+            state.approvals_reviewer,
         ),
         (
             "gpt-5.2".to_string(),
             "astral".to_string(),
             Some("fast".to_string()),
-            default_collaboration_mode("gpt-5.2".to_string(), Some(ReasoningEffort::High)),
+            CollaborationMode {
+                mode: ModeKind::Plan,
+                settings: Settings {
+                    model: "gpt-5.2".to_string(),
+                    reasoning_effort: Some(ReasoningEffort::High),
+                    developer_instructions: None,
+                },
+            },
+            AskForApproval::OnRequest,
+            ApprovalsReviewer::AutoReview,
         )
     );
 }

@@ -75,6 +75,20 @@ fn transcript_shortcuts_are_distinct_from_composer_input() {
 }
 
 #[test]
+fn shift_tab_cycles_mode_without_consuming_the_draft() {
+    for key in [
+        KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE),
+        KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT),
+        KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT),
+    ] {
+        let mut state = SurfaceState::new("thread-1");
+        state.composer_mut().push_str("keep this draft");
+        assert_eq!(handle_key(&mut state, key), InputAction::CycleMode);
+        assert_eq!(state.composer(), "keep this draft");
+    }
+}
+
+#[test]
 fn slash_completion_and_dispatch_stay_local_to_the_tui() {
     let mut state = SurfaceState::new("thread-1");
     for character in "/co".chars() {
