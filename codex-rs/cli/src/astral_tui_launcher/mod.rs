@@ -9,6 +9,9 @@ use codex_app_server_protocol::UserInput;
 use codex_arg0::Arg0DispatchPaths;
 use codex_config::LoaderOverrides;
 use codex_config::types::UiVariant;
+use codex_core::config::Config;
+use codex_core::config::edit::ConfigEditsBuilder;
+use codex_core::config::edit::syntax_theme_edit;
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::AltScreenMode;
 use codex_tui::AppExitInfo;
@@ -69,16 +72,24 @@ pub(crate) async fn run_main(
             exit_reason: ExitReason::UserRequested,
         });
     };
+    let config = context.config.clone();
     let mut options = LaunchOptions::new(thread);
     options.initial_input = initial_input(prompt, images);
     options.runtime = RunOptions {
         viewport,
+        initial_theme: config.tui_theme.clone(),
         ..RunOptions::default()
     };
 
     let exit = astral_tui::run_main(context.client, options)
         .await
         .map_err(io::Error::other)?;
+    if let Some(theme) = exit.theme_selection.as_deref()
+        && let Err(error) = persist_astral_theme(config.as_ref(), theme).await
+    {
+        tracing::warn!(%error, %theme, "failed to persist Astral theme");
+        eprintln!("Warning: failed to save Astral theme: {error}");
+    }
     let thread_id = ThreadId::from_string(&exit.thread_id).ok();
     let token_usage = exit
         .token_usage
@@ -98,6 +109,13 @@ pub(crate) async fn run_main(
         update_action: None,
         exit_reason,
     })
+}
+
+async fn persist_astral_theme(config: &Config, theme: &str) -> anyhow::Result<()> {
+    ConfigEditsBuilder::for_config(config)
+        .with_edits([syntax_theme_edit(theme)])
+        .apply()
+        .await
 }
 
 fn token_usage_from_astral(usage: &codex_app_server_protocol::ThreadTokenUsage) -> TokenUsage {
