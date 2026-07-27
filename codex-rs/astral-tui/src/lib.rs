@@ -12,6 +12,7 @@ mod conversation;
 mod ecosystem;
 mod input;
 mod launch;
+mod mcp_form;
 mod mcp_form_schema;
 mod mention;
 mod modal;
