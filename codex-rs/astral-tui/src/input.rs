@@ -108,6 +108,9 @@ pub fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
             _ => InputAction::None,
         };
     }
+    if key.code == KeyCode::Esc && state.clear_scrollback_selection() {
+        return InputAction::Redraw;
+    }
     handle_composer_key(state, key)
 }
 

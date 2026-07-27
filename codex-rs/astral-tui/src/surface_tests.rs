@@ -23,6 +23,10 @@ use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::Settings;
 use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_WORKSPACE;
+use crossterm::event::KeyModifiers;
+use crossterm::event::MouseButton;
+use crossterm::event::MouseEvent;
+use crossterm::event::MouseEventKind;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Modifier;
@@ -525,6 +529,61 @@ fn fullscreen_surface_keeps_committed_history_snapshot() {
 }
 
 #[test]
+fn fullscreen_selection_overlay_snapshot() {
+    let session = session_state();
+    let mut state = SurfaceState::from_session(&session);
+    state.set_theme(AstralThemeId::Day);
+    let theme = state.theme();
+    let area = Rect::new(0, 0, 72, 16);
+    let mut buffer = Buffer::empty(area);
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        area,
+        &mut buffer,
+    );
+    let start = find_symbol(&buffer, "I").expect("assistant response is visible");
+    let end_column = start.0.saturating_add(9);
+
+    state.handle_scrollback_mouse(mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        start.0,
+        start.1,
+    ));
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        area,
+        &mut buffer,
+    );
+    state.handle_scrollback_mouse(mouse(
+        MouseEventKind::Drag(MouseButton::Left),
+        end_column,
+        start.1,
+    ));
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        area,
+        &mut buffer,
+    );
+
+    assert_eq!(buffer[(start.0, start.1)].fg, theme.bg_base);
+    assert_eq!(buffer[(start.0, start.1)].bg, theme.text_primary);
+    insta::assert_snapshot!(
+        "fullscreen_selection_overlay",
+        format!(
+            "{}\n\nselection mask:\n{}",
+            buffer_text(&buffer),
+            selection_mask(&buffer, theme.text_primary)
+        )
+    );
+}
+
+#[test]
 fn fullscreen_scrollback_viewport_snapshot() {
     let mut session = session_state();
     let base_timestamp =
@@ -829,6 +888,48 @@ fn scroll_offset_moves_in_both_directions() {
     assert_eq!(state.scroll_offset(), 13);
     state.scroll_to_bottom();
     assert_eq!(state.scroll_offset(), 0);
+}
+
+fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+    MouseEvent {
+        kind,
+        column,
+        row,
+        modifiers: KeyModifiers::NONE,
+    }
+}
+
+fn find_symbol(buffer: &Buffer, symbol: &str) -> Option<(u16, u16)> {
+    let area = buffer.area;
+    for y in area.y..area.bottom() {
+        for x in area.x..area.right() {
+            if buffer[(x, y)].symbol() == symbol {
+                return Some((x, y));
+            }
+        }
+    }
+    None
+}
+
+fn selection_mask(buffer: &Buffer, selection_background: ratatui::style::Color) -> String {
+    let area = buffer.area;
+    (area.y..area.bottom())
+        .map(|y| {
+            let mask = (area.x..area.right())
+                .map(|x| {
+                    if buffer[(x, y)].bg == selection_background {
+                        '^'
+                    } else {
+                        ' '
+                    }
+                })
+                .collect::<String>();
+            mask.trim_end().to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim_end()
+        .to_string()
 }
 
 fn request_surface(value: serde_json::Value, composer: &str) -> String {

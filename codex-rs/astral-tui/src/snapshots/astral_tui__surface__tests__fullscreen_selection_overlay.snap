@@ -1,0 +1,28 @@
+---
+source: astral-tui/src/surface_tests.rs
+expression: "format!(\"{}\\n\\nselection mask:\\n{}\", buffer_text(&buffer),\nselection_mask(&buffer, theme.text_primary))"
+---
+ ⎇ main  /workspace
+
+ › inspect this repo                                           12:00 AM
+
+
+ I’m tracing the relevant data flow.
+
+
+
+
+
+ ◇ Working
+ ╭────────────────────────────────────────────────────────────────────╮
+ │ ❯                                                                  │
+ ╰────────────────────────────────────── claude-sonnet-4 · workspace ─╯
+ Shift+Tab:mode  │  Ctrl+.:shortcuts
+
+selection mask:
+
+
+
+
+
+ ^^^^^^^^^^
