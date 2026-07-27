@@ -14,10 +14,14 @@ use std::cmp::Ordering;
 use std::ops::Range;
 use std::time::Duration;
 use std::time::Instant;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 use super::AstralTheme;
 use super::ScrollbackViewport;
 use super::transcript::TranscriptLayout;
+use super::transcript::TranscriptSelectableLine as SelectableLine;
+use super::transcript::TranscriptSelectableRange as SelectableRange;
 
 const DEFAULT_SELECTION_HIGHLIGHT_DURATION: Duration = Duration::from_millis(150);
 
@@ -50,17 +54,6 @@ struct SelectionFrame {
     viewport: ScrollbackViewport,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct SelectableLine {
-    line: usize,
-    columns: Range<u16>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct SelectableRange {
-    lines: Vec<SelectableLine>,
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct SelectionModel {
     ranges: Vec<SelectableRange>,
@@ -68,33 +61,9 @@ struct SelectionModel {
 
 impl SelectionModel {
     fn from_layout(layout: &TranscriptLayout) -> Self {
-        let ranges = layout
-            .sections
-            .iter()
-            .filter_map(|section| {
-                let lines = section
-                    .lines
-                    .clone()
-                    .filter_map(|line_index| {
-                        let text = layout.lines.get(line_index)?.to_string();
-                        let content = text.trim();
-                        if content.is_empty() {
-                            return None;
-                        }
-                        let leading_bytes = text.len().saturating_sub(text.trim_start().len());
-                        let start =
-                            u16::try_from(line_width(&text[..leading_bytes])).unwrap_or(u16::MAX);
-                        let end = u16::try_from(line_width(text.trim_end())).unwrap_or(u16::MAX);
-                        (start < end).then_some(SelectableLine {
-                            line: line_index,
-                            columns: start..end,
-                        })
-                    })
-                    .collect::<Vec<_>>();
-                (!lines.is_empty()).then_some(SelectableRange { lines })
-            })
-            .collect();
-        Self { ranges }
+        Self {
+            ranges: layout.selectable_ranges.clone(),
+        }
     }
 
     fn hit_test(&self, frame: SelectionFrame, column: u16, row: u16) -> Option<SelectionPoint> {
@@ -110,7 +79,10 @@ impl SelectionModel {
             .iter()
             .enumerate()
             .find_map(|(range_index, range)| {
-                let line = range.lines.iter().find(|line| line.line == line_index)?;
+                let line = range
+                    .lines
+                    .iter()
+                    .find(|line| line.line == line_index && !line.columns.is_empty())?;
                 Some(SelectionPoint {
                     range: range_index,
                     line: line_index,
@@ -130,6 +102,9 @@ impl SelectionModel {
         let relative_column = column.saturating_sub(frame.area.x);
         let mut best: Option<((u16, u16), usize, SelectionPoint)> = None;
         for line in &range.lines {
+            if line.columns.is_empty() {
+                continue;
+            }
             if !(frame.viewport.first_visible_line..frame.viewport.end_visible_line)
                 .contains(&line.line)
             {
@@ -336,12 +311,17 @@ impl ScrollbackSelection {
             return None;
         }
         let selectable_range = self.model.ranges.get(start.range)?;
-        let mut selected = Vec::new();
+        let mut selected = String::new();
+        let mut first = true;
         for selectable_line in selectable_range
             .lines
             .iter()
             .filter(|line| (start.line..=end.line).contains(&line.line))
         {
+            if !first {
+                selected.push_str(selectable_line.joiner_to_previous.as_str());
+            }
+            first = false;
             let line_index = selectable_line.line;
             let line = self.lines.get(line_index)?;
             let columns = if start.line == end.line {
@@ -353,9 +333,9 @@ impl ScrollbackSelection {
             } else {
                 selectable_line.columns.clone()
             };
-            selected.push(slice_display_columns(line, columns));
+            selected.push_str(&slice_display_columns(line, columns));
         }
-        Some(selected.join("\n").trim_end_matches('\n').to_string())
+        (!first).then_some(selected)
     }
 }
 
@@ -456,21 +436,23 @@ fn expand_display_columns(text: &str, columns: Range<u16>) -> Range<u16> {
 }
 
 fn display_column_to_byte(text: &str, column: usize, include_cell: bool) -> usize {
-    for (byte, character) in text.char_indices() {
-        let end = byte + character.len_utf8();
-        let next_width = line_width(&text[..end]);
+    let mut width: usize = 0;
+    for (byte, grapheme) in text.grapheme_indices(true) {
+        let end = byte + grapheme.len();
+        let next_width = width.saturating_add(UnicodeWidthStr::width(grapheme));
         if column < next_width {
             return if include_cell { end } else { byte };
         }
         if column == next_width {
             return end;
         }
+        width = next_width;
     }
     text.len()
 }
 
 fn line_width(text: &str) -> usize {
-    Line::from(text).width()
+    UnicodeWidthStr::width(text)
 }
 
 #[cfg(test)]

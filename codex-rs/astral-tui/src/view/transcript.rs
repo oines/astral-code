@@ -2,12 +2,13 @@
 // presentation at commit 47348d13ec4508dcfe440e34c6d511bb02998fb2
 // (Apache-2.0). Modified for Astral app-server turn and item metadata.
 
+use astral_tui_scrollback::LineJoiner;
 use astral_tui_scrollback::MarkdownStyle;
 use astral_tui_scrollback::MarkdownSyntaxTheme;
 use astral_tui_scrollback::PresentationBlock;
 use astral_tui_scrollback::RenderOptions;
 use astral_tui_scrollback::render_block;
-use astral_tui_scrollback::render_markdown;
+use astral_tui_scrollback::render_markdown_with_metadata;
 use chrono::Local;
 use chrono::TimeZone;
 use ratatui::style::Modifier;
@@ -30,6 +31,18 @@ const TIMESTAMP_WIDTH: usize = 8;
 pub(crate) struct TranscriptSection {
     pub(crate) item_id: String,
     pub(crate) lines: Range<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TranscriptSelectableLine {
+    pub(crate) line: usize,
+    pub(crate) columns: Range<u16>,
+    pub(crate) joiner_to_previous: LineJoiner,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct TranscriptSelectableRange {
+    pub(crate) lines: Vec<TranscriptSelectableLine>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,6 +81,7 @@ impl TranscriptAnchor {
 pub(crate) struct TranscriptLayout {
     pub(crate) lines: Vec<Line<'static>>,
     pub(crate) sections: Vec<TranscriptSection>,
+    pub(crate) selectable_ranges: Vec<TranscriptSelectableRange>,
 }
 
 impl TranscriptLayout {
@@ -85,30 +99,51 @@ pub(crate) fn render_transcript(
 ) -> TranscriptLayout {
     let mut lines = Vec::new();
     let mut sections = Vec::new();
+    let mut selectable_ranges = Vec::new();
     for turn in turns {
         for (index, block) in turn.blocks.iter().enumerate() {
             let start = lines.len();
+            let mut selectable_lines = Vec::new();
             if index == 0 && !lines.is_empty() {
-                lines.push(Line::default());
+                push_transcript_line(
+                    &mut lines,
+                    &mut selectable_lines,
+                    Line::default(),
+                    0..0,
+                    LineJoiner::HardBreak,
+                );
             }
-            render_turn_block(&mut lines, block, turn, width, theme);
+            render_turn_block(&mut lines, &mut selectable_lines, block, turn, width, theme);
             sections.push(TranscriptSection {
                 item_id: section_id(&turn.id, &block.item_id),
                 lines: start..lines.len(),
             });
+            selectable_ranges.push(TranscriptSelectableRange {
+                lines: selectable_lines,
+            });
         }
         if let Some(duration_ms) = turn_duration_ms(turn) {
-            lines.push(
-                format!("Worked for {}", format_duration(duration_ms))
-                    .dim()
-                    .into(),
-            );
+            let line = Line::from(format!("Worked for {}", format_duration(duration_ms)).dim());
+            let columns = selectable_columns(&line, width);
+            let line_index = lines.len();
+            lines.push(line);
             if let Some(section) = sections.last_mut() {
                 section.lines.end = lines.len();
             }
+            if let Some(selectable_range) = selectable_ranges.last_mut() {
+                selectable_range.lines.push(TranscriptSelectableLine {
+                    line: line_index,
+                    columns,
+                    joiner_to_previous: LineJoiner::HardBreak,
+                });
+            }
         }
     }
-    TranscriptLayout { lines, sections }
+    TranscriptLayout {
+        lines,
+        sections,
+        selectable_ranges,
+    }
 }
 
 fn section_id(turn_id: &str, item_id: &str) -> String {
@@ -133,7 +168,15 @@ pub(crate) fn render_committed_block(
         duration_ms: committed.turn_duration_ms,
     };
     let mut lines = Vec::new();
-    render_turn_block(&mut lines, &turn.blocks[0], &turn, width, theme);
+    let mut selectable_lines = Vec::new();
+    render_turn_block(
+        &mut lines,
+        &mut selectable_lines,
+        &turn.blocks[0],
+        &turn,
+        width,
+        theme,
+    );
     if committed.ends_turn
         && let Some(duration_ms) = turn_duration_ms(&turn)
     {
@@ -148,6 +191,7 @@ pub(crate) fn render_committed_block(
 
 fn render_turn_block(
     lines: &mut Vec<Line<'static>>,
+    selectable_lines: &mut Vec<TranscriptSelectableLine>,
     block: &TranscriptBlock,
     turn: &TranscriptTurn,
     width: u16,
@@ -156,25 +200,57 @@ fn render_turn_block(
     match &block.block {
         PresentationBlock::User { .. } => {
             if !lines.is_empty() {
-                lines.push(Line::default());
+                push_transcript_line(
+                    lines,
+                    selectable_lines,
+                    Line::default(),
+                    0..0,
+                    LineJoiner::HardBreak,
+                );
             }
             let timestamp = turn.started_at_ms.and_then(format_timestamp);
             let content_width = reserved_content_width(width, timestamp.as_deref());
             let rendered = render_block(&block.block, RenderOptions::compact(content_width));
-            lines.push(band_line(Line::default(), width, theme.panel_selected));
-            lines.extend(rendered.lines.into_iter().map(|line| {
-                timestamped_line(
+            push_transcript_line(
+                lines,
+                selectable_lines,
+                band_line(Line::default(), width, theme.panel_selected),
+                0..0,
+                LineJoiner::HardBreak,
+            );
+            for line in rendered.lines {
+                let columns = selectable_columns(&line, content_width);
+                let line = timestamped_line(
                     line,
                     timestamp.as_deref(),
                     width,
                     Some(theme.panel_selected),
-                )
-            }));
-            lines.push(band_line(Line::default(), width, theme.panel_selected));
+                );
+                push_transcript_line(
+                    lines,
+                    selectable_lines,
+                    line,
+                    columns,
+                    LineJoiner::HardBreak,
+                );
+            }
+            push_transcript_line(
+                lines,
+                selectable_lines,
+                band_line(Line::default(), width, theme.panel_selected),
+                0..0,
+                LineJoiner::HardBreak,
+            );
         }
         PresentationBlock::Thinking { running, .. } => {
             if !lines.is_empty() {
-                lines.push(Line::default());
+                push_transcript_line(
+                    lines,
+                    selectable_lines,
+                    Line::default(),
+                    0..0,
+                    LineJoiner::HardBreak,
+                );
             }
             let duration_ms = item_duration_ms(block);
             let label = if *running {
@@ -185,24 +261,50 @@ fn render_turn_block(
                     |duration_ms| format!("Thought for {}", format_duration(duration_ms)),
                 )
             };
-            lines.push(vec!["◆ ".fg(theme.gray), label.bold().fg(theme.gray)].into());
+            let line = vec!["◆ ".fg(theme.gray), label.bold().fg(theme.gray)].into();
+            let columns = selectable_columns(&line, width);
+            push_transcript_line(
+                lines,
+                selectable_lines,
+                line,
+                columns,
+                LineJoiner::HardBreak,
+            );
             if *running {
                 let rendered = render_block(&block.block, RenderOptions::compact(width));
-                lines.extend(rendered.lines.into_iter().skip(1));
+                for line in rendered.lines.into_iter().skip(1) {
+                    let columns = selectable_columns(&line, width);
+                    push_transcript_line(
+                        lines,
+                        selectable_lines,
+                        line,
+                        columns,
+                        LineJoiner::HardBreak,
+                    );
+                }
             }
         }
         PresentationBlock::Assistant { text } => {
             if !lines.is_empty() {
-                lines.push(Line::default());
+                push_transcript_line(
+                    lines,
+                    selectable_lines,
+                    Line::default(),
+                    0..0,
+                    LineJoiner::HardBreak,
+                );
             }
             let timestamp = block
                 .completed_at_ms
                 .or(turn.completed_at_ms)
                 .and_then(format_timestamp);
             let content_width = reserved_content_width(width, timestamp.as_deref());
-            let rendered = render_markdown(text, content_width, markdown_style(theme));
-            for (index, line) in rendered.into_iter().enumerate() {
-                lines.push(timestamped_line(
+            let rendered =
+                render_markdown_with_metadata(text, content_width, markdown_style(theme));
+            for (index, rendered_line) in rendered.into_iter().enumerate() {
+                let line = rendered_line.line;
+                let columns = selectable_columns(&line, content_width);
+                let line = timestamped_line(
                     line,
                     if index == 0 {
                         timestamp.as_deref()
@@ -211,16 +313,60 @@ fn render_turn_block(
                     },
                     width,
                     None,
-                ));
+                );
+                push_transcript_line(
+                    lines,
+                    selectable_lines,
+                    line,
+                    columns,
+                    rendered_line.joiner_to_previous,
+                );
             }
         }
         _ => {
             if !lines.is_empty() {
-                lines.push(Line::default());
+                push_transcript_line(
+                    lines,
+                    selectable_lines,
+                    Line::default(),
+                    0..0,
+                    LineJoiner::HardBreak,
+                );
             }
-            lines.extend(render_block(&block.block, RenderOptions::compact(width)).lines);
+            for line in render_block(&block.block, RenderOptions::compact(width)).lines {
+                let columns = selectable_columns(&line, width);
+                push_transcript_line(
+                    lines,
+                    selectable_lines,
+                    line,
+                    columns,
+                    LineJoiner::HardBreak,
+                );
+            }
         }
     }
+}
+
+fn selectable_columns(line: &Line<'_>, width: u16) -> Range<u16> {
+    let text = line.to_string();
+    0..u16::try_from(Line::from(text.trim_end()).width())
+        .unwrap_or(u16::MAX)
+        .min(width)
+}
+
+fn push_transcript_line(
+    lines: &mut Vec<Line<'static>>,
+    selectable_lines: &mut Vec<TranscriptSelectableLine>,
+    line: Line<'static>,
+    columns: Range<u16>,
+    joiner_to_previous: LineJoiner,
+) {
+    selectable_lines.push(TranscriptSelectableLine {
+        line: lines.len(),
+        columns,
+        joiner_to_previous,
+    });
+    lines.push(line);
 }
 
 fn markdown_style(theme: AstralTheme) -> MarkdownStyle {

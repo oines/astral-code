@@ -1,3 +1,4 @@
+use astral_tui_scrollback::LineJoiner;
 use crossterm::event::KeyModifiers;
 use crossterm::event::MouseButton;
 use crossterm::event::MouseEvent;
@@ -20,6 +21,8 @@ use super::slice_display_columns;
 use crate::view::AstralTheme;
 use crate::view::transcript::TranscriptLayout;
 use crate::view::transcript::TranscriptSection;
+use crate::view::transcript::TranscriptSelectableLine;
+use crate::view::transcript::TranscriptSelectableRange;
 
 fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
     MouseEvent {
@@ -43,15 +46,47 @@ fn layout() -> TranscriptLayout {
                 lines: 2..3,
             },
         ],
+        selectable_ranges: vec![
+            TranscriptSelectableRange {
+                lines: vec![
+                    TranscriptSelectableLine {
+                        line: 0,
+                        columns: 0..5,
+                        joiner_to_previous: LineJoiner::HardBreak,
+                    },
+                    TranscriptSelectableLine {
+                        line: 1,
+                        columns: 0..6,
+                        joiner_to_previous: LineJoiner::HardBreak,
+                    },
+                ],
+            },
+            TranscriptSelectableRange {
+                lines: vec![TranscriptSelectableLine {
+                    line: 2,
+                    columns: 0..5,
+                    joiner_to_previous: LineJoiner::HardBreak,
+                }],
+            },
+        ],
     }
 }
 
 fn render(selection: &mut ScrollbackSelection, viewport: ScrollbackViewport, area: Rect) -> Buffer {
     let layout = layout();
+    render_layout(selection, &layout, viewport, area)
+}
+
+fn render_layout(
+    selection: &mut ScrollbackSelection,
+    layout: &TranscriptLayout,
+    viewport: ScrollbackViewport,
+    area: Rect,
+) -> Buffer {
     let mut buffer = Buffer::empty(area);
     let visible = layout.lines[viewport.first_visible_line..viewport.end_visible_line].to_vec();
     Paragraph::new(Text::from(visible)).render(area, &mut buffer);
-    selection.render(&layout, viewport, area, &mut buffer, AstralTheme::default());
+    selection.render(layout, viewport, area, &mut buffer, AstralTheme::default());
     buffer
 }
 
@@ -80,7 +115,7 @@ fn drag_selection_copies_across_ascii_and_cjk_lines() {
 }
 
 #[test]
-fn persistent_selection_reprojects_after_scrolling() {
+fn active_selection_reprojects_during_edge_scroll() {
     let area = Rect::new(0, 0, 12, 2);
     let first = ScrollbackViewport::from_first(3, 2, 0);
     let mut selection = ScrollbackSelection::default();
@@ -89,7 +124,6 @@ fn persistent_selection_reprojects_after_scrolling() {
     render(&mut selection, first, area);
     selection.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), 2, 1));
     render(&mut selection, first, area);
-    selection.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), 2, 1));
 
     let scrolled = ScrollbackViewport::from_first(3, 2, 1);
     let buffer = render(&mut selection, scrolled, area);
@@ -99,6 +133,44 @@ fn persistent_selection_reprojects_after_scrolling() {
     assert_eq!(buffer[(0, 0)].fg, theme.bg_base);
     assert_eq!(buffer[(2, 0)].bg, theme.text_primary);
     assert_eq!(buffer[(4, 0)].bg, Color::Reset);
+}
+
+#[test]
+fn copied_selection_uses_renderer_owned_soft_wrap_joiners() {
+    let layout = TranscriptLayout {
+        lines: vec!["alpha beta".into(), "gamma".into()],
+        sections: vec![TranscriptSection {
+            item_id: "assistant".to_string(),
+            lines: 0..2,
+        }],
+        selectable_ranges: vec![TranscriptSelectableRange {
+            lines: vec![
+                TranscriptSelectableLine {
+                    line: 0,
+                    columns: 0..10,
+                    joiner_to_previous: LineJoiner::HardBreak,
+                },
+                TranscriptSelectableLine {
+                    line: 1,
+                    columns: 0..5,
+                    joiner_to_previous: LineJoiner::Space,
+                },
+            ],
+        }],
+    };
+    let area = Rect::new(0, 0, 12, 2);
+    let viewport = ScrollbackViewport::from_first(2, 2, 0);
+    let mut selection = ScrollbackSelection::default();
+    render_layout(&mut selection, &layout, viewport, area);
+    selection.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 0, 0));
+    render_layout(&mut selection, &layout, viewport, area);
+    selection.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), 4, 1));
+    render_layout(&mut selection, &layout, viewport, area);
+
+    assert_eq!(
+        selection.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), 4, 1)),
+        ScrollbackSelectionAction::Copy("alpha beta gamma".to_string())
+    );
 }
 
 #[test]
@@ -120,6 +192,56 @@ fn drag_head_stays_inside_the_anchor_range() {
     let theme = AstralTheme::default();
     assert_eq!(buffer[(0, 1)].bg, theme.text_primary);
     assert_eq!(buffer[(0, 2)].bg, Color::Reset);
+}
+
+#[test]
+fn semantic_geometry_excludes_timestamp_padding_and_preserves_blank_lines() {
+    let layout = TranscriptLayout {
+        lines: vec!["alpha           6:42 PM".into(), "".into(), "omega".into()],
+        sections: vec![TranscriptSection {
+            item_id: "assistant".to_string(),
+            lines: 0..3,
+        }],
+        selectable_ranges: vec![TranscriptSelectableRange {
+            lines: vec![
+                TranscriptSelectableLine {
+                    line: 0,
+                    columns: 0..5,
+                    joiner_to_previous: LineJoiner::HardBreak,
+                },
+                TranscriptSelectableLine {
+                    line: 1,
+                    columns: 0..0,
+                    joiner_to_previous: LineJoiner::HardBreak,
+                },
+                TranscriptSelectableLine {
+                    line: 2,
+                    columns: 0..5,
+                    joiner_to_previous: LineJoiner::HardBreak,
+                },
+            ],
+        }],
+    };
+    let area = Rect::new(0, 0, 24, 3);
+    let viewport = ScrollbackViewport::from_first(3, 3, 0);
+    let mut selection = ScrollbackSelection::default();
+    render_layout(&mut selection, &layout, viewport, area);
+    selection.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 0, 0));
+    render_layout(&mut selection, &layout, viewport, area);
+    selection.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), 4, 2));
+    render_layout(&mut selection, &layout, viewport, area);
+
+    assert_eq!(
+        selection.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), 4, 2)),
+        ScrollbackSelectionAction::Copy("alpha\n\nomega".to_string())
+    );
+    let buffer = render_layout(&mut selection, &layout, viewport, area);
+    let theme = AstralTheme::default();
+    assert_eq!(buffer[(4, 0)].bg, theme.text_primary);
+    assert_eq!(buffer[(5, 0)].bg, Color::Reset);
+    assert_eq!(buffer[(16, 0)].bg, Color::Reset);
+    assert_eq!(buffer[(0, 1)].bg, Color::Reset);
+    assert_eq!(buffer[(4, 2)].bg, theme.text_primary);
 }
 
 #[test]
@@ -165,4 +287,6 @@ fn copied_selection_expires_after_the_grok_flash_duration() {
 fn display_column_slicing_keeps_wide_characters_whole() {
     assert_eq!(slice_display_columns("a你好z", 1..4), "你好");
     assert_eq!(slice_display_columns("a你好z", 2..3), "你");
+    assert_eq!(slice_display_columns("e\u{301}x", 0..1), "e\u{301}");
+    assert_eq!(slice_display_columns("👨‍👩‍👧‍👦x", 0..1), "👨‍👩‍👧‍👦");
 }

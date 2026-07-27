@@ -1,3 +1,4 @@
+use astral_tui_scrollback::LineJoiner;
 use astral_tui_scrollback::PresentationBlock;
 use chrono::Local;
 use chrono::TimeZone;
@@ -110,6 +111,37 @@ fn transcript_layout_assigns_stable_item_sections() {
         ]
     );
     assert_eq!(layout.lines.len(), 4);
+}
+
+#[test]
+fn selectable_geometry_excludes_timestamp_chrome_and_tracks_soft_wraps() {
+    let timestamp = Local
+        .with_ymd_and_hms(2023, 1, 15, 22, 13, 20)
+        .single()
+        .expect("unambiguous local test timestamp");
+    let turn = TranscriptTurn {
+        id: "turn-1".to_string(),
+        blocks: vec![TranscriptBlock {
+            item_id: "agent-1".to_string(),
+            block: PresentationBlock::Assistant {
+                text: "alpha beta gamma".to_string(),
+            },
+            started_at_ms: None,
+            completed_at_ms: Some(timestamp.timestamp_millis()),
+        }],
+        started_at_ms: None,
+        completed_at_ms: None,
+        duration_ms: None,
+    };
+
+    let layout = render_transcript(&[turn], 24, AstralTheme::default());
+    let selectable = &layout.selectable_ranges[0].lines;
+
+    assert_eq!(layout.lines[0].width(), 24);
+    assert_eq!(selectable[0].columns, 0..10);
+    assert_eq!(selectable[0].joiner_to_previous, LineJoiner::HardBreak);
+    assert_eq!(selectable[1].columns, 0..5);
+    assert_eq!(selectable[1].joiner_to_previous, LineJoiner::Space);
 }
 
 #[test]
