@@ -2,7 +2,7 @@
 source: astral-tui-scrollback/src/render_tests.rs
 expression: rendered
 ---
-◇ Running background just test -p codex-cli
+◇ Run just test -p codex-cli
   cwd /workspace
   process process-7
   stdin continue\n

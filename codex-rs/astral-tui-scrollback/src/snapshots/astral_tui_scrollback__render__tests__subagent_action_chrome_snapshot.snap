@@ -1,0 +1,8 @@
+---
+source: astral-tui-scrollback/src/render_tests.rs
+expression: rendered
+---
+◇ Subagent sending input to agent-review
+◆ Subagent resumed agent-review
+◆ Subagent wait completed
+× Subagent close failed for agent-review

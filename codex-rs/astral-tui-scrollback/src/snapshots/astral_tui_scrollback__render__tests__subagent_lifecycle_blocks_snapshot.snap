@@ -2,8 +2,7 @@
 source: astral-tui-scrollback/src/render_tests.rs
 expression: rendered
 ---
-◆ Spawned agent-research  (grok-code-fast)
-  “Inspect the Grok subagent rendering semantics”
-× Wait finished with errors
+◆ Subagent started: “Inspect the Grok subagent rendering semantic…” (grok-code-fast)
+× Subagent wait finished with errors
   └ agent-research: Completed — “Mapped spawn, wait, resume and close.”
   └ agent-tests: Failed — “snapshot mismatch”

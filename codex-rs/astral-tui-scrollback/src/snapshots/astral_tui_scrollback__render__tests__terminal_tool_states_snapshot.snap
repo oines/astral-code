@@ -2,12 +2,12 @@
 source: astral-tui-scrollback/src/render_tests.rs
 expression: rendered
 ---
-– Declined cargo publish
+– Run cargo publish
   cwd /workspace
-■ Interrupted cargo test  510ms
+■ Run cargo test  510ms
   │ stopped by user
-× Failed missing.html  12ms
+× Use missing.html  12ms
   workspace
-× Failed Astral TUI  1.2s
+× docs search · Astral TUI  1.2s
   MCP · docs
   │ server unavailable
