@@ -19,6 +19,7 @@ use crate::modal::ModalRow;
 use crate::modal::ModalState;
 use crate::thread_picker::PickerState;
 use crate::thread_picker::ThreadPickerAction;
+use crate::view::AstralThemeId;
 
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
@@ -174,6 +175,23 @@ fn modal_inventory_scrolls_without_touching_the_composer() {
     );
     assert_eq!(state.modal().map(|modal| modal.scroll_offset), Some(19));
     assert!(state.composer().is_empty());
+}
+
+#[test]
+fn theme_cancel_restores_the_original_preview() {
+    let mut state = SurfaceState::new("thread-1");
+    state.open_theme_picker();
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Down)),
+        InputAction::Redraw
+    );
+    assert_eq!(state.theme_id(), AstralThemeId::Day);
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Esc)),
+        InputAction::Redraw
+    );
+    assert_eq!(state.theme_id(), AstralThemeId::Night);
+    assert!(state.theme_picker().is_none());
 }
 
 #[test]

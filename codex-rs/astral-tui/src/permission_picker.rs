@@ -150,8 +150,12 @@ pub(crate) fn handle_key(
     }
 }
 
-pub(crate) fn render_picker(state: &PermissionPickerState, area: Rect, buffer: &mut Buffer) {
-    let theme = AstralTheme::default();
+pub(crate) fn render_picker(
+    state: &PermissionPickerState,
+    area: Rect,
+    buffer: &mut Buffer,
+    theme: AstralTheme,
+) {
     if state.stage == PermissionStage::ConfirmFullAccess {
         render_confirmation(area, buffer, theme);
         return;

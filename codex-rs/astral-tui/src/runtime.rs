@@ -48,6 +48,7 @@ use crate::render_surface;
 use crate::render_surface_with_view;
 use crate::terminal_guard::TerminalGuard;
 use crate::thread_picker::PickerState;
+use crate::view::AstralThemeId;
 
 type AstralTerminal = Terminal<CrosstermBackend<Stdout>>;
 
@@ -478,6 +479,26 @@ async fn apply_input_action(
                     .map(|profile| profile.id.clone());
                 surface.open_permission_picker(PermissionPickerState::new(current_profile));
             }
+            SlashCommandId::Theme => {
+                let name = invocation.args.trim();
+                if name.is_empty() {
+                    surface.open_theme_picker();
+                } else if let Some(theme) = AstralThemeId::from_name(name) {
+                    surface.set_theme(theme);
+                    surface.set_notice(format!("Switched to {}", theme.label()));
+                } else {
+                    surface
+                        .set_notice("Unknown theme. Available: astral-night, astral-day, terminal");
+                }
+            }
+            SlashCommandId::Timeline => {
+                let visible = surface.toggle_timeline();
+                surface.set_notice(if visible {
+                    "Timeline rail enabled"
+                } else {
+                    "Timeline rail hidden"
+                });
+            }
             SlashCommandId::Status => {
                 if let Some(state) = session.state() {
                     let tokens = surface.token_usage().map_or_else(
@@ -554,10 +575,6 @@ async fn apply_input_action(
                 Ok(response) => surface.open_modal(plugins_panel(response)),
                 Err(error) => surface.set_notice(error.to_string()),
             },
-            command => surface.set_notice(format!(
-                "/{} is recognized; its Astral action is not available yet ({command:?})",
-                invocation.name
-            )),
         },
         InputAction::Resolve(resolution) => {
             if let Err(error) = session.resolve(resolution).await {
@@ -588,7 +605,11 @@ async fn reset_surface(session: &mut AstralSession, surface: &mut SurfaceState) 
         surface.set_notice("No Astral thread is active");
         return;
     };
+    let theme = surface.theme_id();
+    let timeline_visible = surface.timeline_visible();
     *surface = SurfaceState::from_session(&state);
+    surface.set_theme(theme);
+    surface.set_timeline_visible(timeline_visible);
     match session.list_models().await {
         Ok(models) => {
             surface.set_model_catalog(models, state.model.clone(), state.model_provider.clone())

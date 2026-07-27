@@ -20,8 +20,10 @@ mod session;
 mod slash;
 mod surface;
 mod terminal_guard;
+mod theme_picker;
 mod thread_picker;
 mod timeline;
+mod timeline_rail;
 mod view;
 
 #[cfg(test)]

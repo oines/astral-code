@@ -23,3 +23,4 @@ pub(crate) use modal::ModalHeight;
 pub(crate) use modal::render_modal_frame;
 pub(crate) use slash_menu::SlashMenu;
 pub(crate) use theme::AstralTheme;
+pub(crate) use theme::AstralThemeId;

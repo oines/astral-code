@@ -306,11 +306,20 @@ pub(crate) fn handle_key(
 }
 
 fn draw_picker(frame: &mut Frame<'_>, state: &PickerState) {
-    render_picker(state, frame.area(), frame.buffer_mut());
+    render_picker(
+        state,
+        frame.area(),
+        frame.buffer_mut(),
+        AstralTheme::default(),
+    );
 }
 
-pub(crate) fn render_picker(state: &PickerState, area: Rect, buffer: &mut Buffer) {
-    let theme = AstralTheme::default();
+pub(crate) fn render_picker(
+    state: &PickerState,
+    area: Rect,
+    buffer: &mut Buffer,
+    theme: AstralTheme,
+) {
     let title = format!("{} Astral session", state.action.verb());
     let Some(content) = render_modal_frame(
         area,
