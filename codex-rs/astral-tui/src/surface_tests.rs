@@ -584,6 +584,122 @@ fn fullscreen_selection_overlay_snapshot() {
 }
 
 #[test]
+fn copied_selection_clears_on_scroll_and_reflow() {
+    let session = session_state();
+    let mut state = SurfaceState::from_session(&session);
+    state.set_theme(AstralThemeId::Day);
+    let theme = state.theme();
+    let area = Rect::new(0, 0, 72, 16);
+    let mut buffer = Buffer::empty(area);
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        area,
+        &mut buffer,
+    );
+    let start = find_symbol(&buffer, "I").expect("assistant response is visible");
+    let end_column = start.0.saturating_add(4);
+
+    state.handle_scrollback_mouse(mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        start.0,
+        start.1,
+    ));
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        area,
+        &mut buffer,
+    );
+    state.handle_scrollback_mouse(mouse(
+        MouseEventKind::Drag(MouseButton::Left),
+        end_column,
+        start.1,
+    ));
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        area,
+        &mut buffer,
+    );
+    assert!(
+        state
+            .handle_scrollback_mouse(mouse(
+                MouseEventKind::Up(MouseButton::Left),
+                end_column,
+                start.1,
+            ))
+            .is_some()
+    );
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        area,
+        &mut buffer,
+    );
+    assert_eq!(buffer[start].bg, theme.text_primary);
+
+    state.scroll_up(/*lines*/ 0);
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        area,
+        &mut buffer,
+    );
+    assert_ne!(buffer[start].bg, theme.text_primary);
+
+    state.handle_scrollback_mouse(mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        start.0,
+        start.1,
+    ));
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        area,
+        &mut buffer,
+    );
+    state.handle_scrollback_mouse(mouse(
+        MouseEventKind::Drag(MouseButton::Left),
+        end_column,
+        start.1,
+    ));
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        area,
+        &mut buffer,
+    );
+    assert!(
+        state
+            .handle_scrollback_mouse(mouse(
+                MouseEventKind::Up(MouseButton::Left),
+                end_column,
+                start.1,
+            ))
+            .is_some()
+    );
+
+    let narrower = Rect::new(0, 0, 71, 16);
+    let mut narrower_buffer = Buffer::empty(narrower);
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        narrower,
+        &mut narrower_buffer,
+    );
+    assert_ne!(narrower_buffer[start].bg, theme.text_primary);
+}
+
+#[test]
 fn fullscreen_scrollback_viewport_snapshot() {
     let mut session = session_state();
     let base_timestamp =

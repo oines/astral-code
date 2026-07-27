@@ -1,3 +1,4 @@
+use astral_tui_scrollback::LineJoiner;
 use insta::assert_snapshot;
 use pretty_assertions::assert_eq;
 use ratatui::buffer::Buffer;
@@ -10,10 +11,13 @@ use super::ScrollbackViewport;
 use crate::view::AstralTheme;
 use crate::view::transcript::TranscriptLayout;
 use crate::view::transcript::TranscriptSection;
+use crate::view::transcript::TranscriptSelectableLine;
+use crate::view::transcript::TranscriptSelectableRange;
 
 fn transcript_layout(sections: &[(&str, usize)]) -> TranscriptLayout {
     let mut lines = Vec::new();
     let mut ranges = Vec::new();
+    let mut selectable_ranges = Vec::new();
     for (item_id, height) in sections {
         let start = lines.len();
         lines.extend((0..*height).map(|line| Line::from(format!("{item_id} line {line:02}"))));
@@ -21,10 +25,20 @@ fn transcript_layout(sections: &[(&str, usize)]) -> TranscriptLayout {
             item_id: (*item_id).to_string(),
             lines: start..lines.len(),
         });
+        selectable_ranges.push(TranscriptSelectableRange {
+            lines: (start..lines.len())
+                .map(|line| TranscriptSelectableLine {
+                    line,
+                    columns: 0..u16::try_from(lines[line].width()).unwrap_or(u16::MAX),
+                    joiner_to_previous: LineJoiner::HardBreak,
+                })
+                .collect(),
+        });
     }
     TranscriptLayout {
         lines,
         sections: ranges,
+        selectable_ranges,
     }
 }
 

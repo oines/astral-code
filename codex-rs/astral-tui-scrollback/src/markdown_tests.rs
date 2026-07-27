@@ -5,8 +5,10 @@ use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::text::Line;
 
+use super::LineJoiner;
 use super::MarkdownStyle;
 use super::render_markdown;
+use super::render_markdown_with_metadata;
 
 const MARKDOWN_FIXTURE: &str = r#"# Astral Markdown
 
@@ -78,6 +80,45 @@ fn width_change_reflows_the_same_markdown_snapshot() {
 
     assert_snapshot!("grok_markdown_narrow", plain(&narrow));
     assert_snapshot!("grok_markdown_wide", plain(&wide));
+}
+
+#[test]
+fn metadata_distinguishes_word_and_midword_wraps() {
+    let words = render_markdown_with_metadata("alpha beta gamma", 10, MarkdownStyle::default());
+    let midword = render_markdown_with_metadata("abcdefghij", 5, MarkdownStyle::default());
+    let paragraphs = render_markdown_with_metadata("alpha\n\nomega", 10, MarkdownStyle::default());
+
+    assert_eq!(
+        words
+            .iter()
+            .map(|line| (line.line.to_string(), line.joiner_to_previous))
+            .collect::<Vec<_>>(),
+        vec![
+            ("alpha beta".to_string(), LineJoiner::HardBreak),
+            ("gamma".to_string(), LineJoiner::Space),
+        ]
+    );
+    assert_eq!(
+        midword
+            .iter()
+            .map(|line| (line.line.to_string(), line.joiner_to_previous))
+            .collect::<Vec<_>>(),
+        vec![
+            ("abcde".to_string(), LineJoiner::HardBreak),
+            ("fghij".to_string(), LineJoiner::None),
+        ]
+    );
+    assert_eq!(
+        paragraphs
+            .iter()
+            .map(|line| (line.line.to_string(), line.joiner_to_previous))
+            .collect::<Vec<_>>(),
+        vec![
+            ("alpha".to_string(), LineJoiner::HardBreak),
+            (String::new(), LineJoiner::HardBreak),
+            ("omega".to_string(), LineJoiner::HardBreak),
+        ]
+    );
 }
 
 #[test]

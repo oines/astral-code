@@ -33,9 +33,46 @@ pub use style::MarkdownStyle;
 pub use style::MarkdownSyntaxTheme;
 use syntax::highlight_code;
 use table::TableState;
-use wrapping::wrap_segments;
+use wrapping::wrap_segments_with_joiners;
 
 pub fn render_markdown(text: &str, width: u16, style: MarkdownStyle) -> Vec<Line<'static>> {
+    render_markdown_with_metadata(text, width, style)
+        .into_iter()
+        .map(|line| line.line)
+        .collect()
+}
+
+/// Separator required before a rendered line when reconstructing selected text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LineJoiner {
+    HardBreak,
+    Space,
+    None,
+}
+
+impl LineJoiner {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::HardBreak => "\n",
+            Self::Space => " ",
+            Self::None => "",
+        }
+    }
+}
+
+/// One rendered Markdown line and its relationship to the preceding line.
+#[derive(Debug, Clone)]
+pub struct MarkdownLine {
+    pub line: Line<'static>,
+    pub joiner_to_previous: LineJoiner,
+}
+
+/// Renders Markdown while retaining hard-break and soft-wrap metadata.
+pub fn render_markdown_with_metadata(
+    text: &str,
+    width: u16,
+    style: MarkdownStyle,
+) -> Vec<MarkdownLine> {
     MarkdownWriter::new(width, style).render(text)
 }
 
@@ -84,6 +121,7 @@ struct MarkdownWriter {
     width: u16,
     style: MarkdownStyle,
     lines: Vec<Line<'static>>,
+    joiners: Vec<LineJoiner>,
     segments: Vec<Segment>,
     inline_styles: Vec<Style>,
     lists: Vec<ListContext>,
@@ -102,6 +140,7 @@ impl MarkdownWriter {
             width: width.max(1),
             style,
             lines: Vec::new(),
+            joiners: Vec::new(),
             segments: Vec::new(),
             inline_styles: vec![style.text],
             lists: Vec::new(),
@@ -115,7 +154,7 @@ impl MarkdownWriter {
         }
     }
 
-    fn render(mut self, text: &str) -> Vec<Line<'static>> {
+    fn render(mut self, text: &str) -> Vec<MarkdownLine> {
         let options =
             Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS | Options::ENABLE_TABLES;
         for event in Parser::new_ext(text, options) {
@@ -124,8 +163,16 @@ impl MarkdownWriter {
         self.flush_rich_block();
         while self.lines.last().is_some_and(|line| line.spans.is_empty()) {
             self.lines.pop();
+            self.joiners.pop();
         }
         self.lines
+            .into_iter()
+            .zip(self.joiners)
+            .map(|(line, joiner_to_previous)| MarkdownLine {
+                line,
+                joiner_to_previous,
+            })
+            .collect()
     }
 
     fn event(&mut self, event: Event<'_>) {
@@ -371,21 +418,21 @@ impl MarkdownWriter {
         let prefix_width = Line::from(initial_prefix.clone()).width();
         let content_width = usize::from(self.width).saturating_sub(prefix_width).max(1);
         let segments = std::mem::take(&mut self.segments);
-        let wrapped = wrap_segments(&segments, content_width);
+        let wrapped = wrap_segments_with_joiners(&segments, content_width);
         let lines = wrapped
             .into_iter()
             .enumerate()
-            .map(|(index, mut content)| {
+            .map(|(index, mut wrapped)| {
                 let mut spans = if index == 0 {
                     initial_prefix.clone()
                 } else {
                     subsequent_prefix.clone()
                 };
-                spans.append(&mut content);
-                Line::from(spans)
+                spans.append(&mut wrapped.spans);
+                (Line::from(spans), wrapped.joiner_to_previous)
             })
             .collect();
-        self.push_output(lines, kind);
+        self.push_wrapped_output(lines, kind);
     }
 
     fn prefixes(&mut self) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
@@ -420,6 +467,26 @@ impl MarkdownWriter {
         if lines.is_empty() {
             return;
         }
+        self.insert_block_gap(kind);
+        self.joiners
+            .extend(std::iter::repeat_n(LineJoiner::HardBreak, lines.len()));
+        self.lines.extend(lines);
+        self.last_kind = Some(kind);
+    }
+
+    fn push_wrapped_output(&mut self, lines: Vec<(Line<'static>, LineJoiner)>, kind: BlockKind) {
+        if lines.is_empty() {
+            return;
+        }
+        self.insert_block_gap(kind);
+        for (line, joiner) in lines {
+            self.lines.push(line);
+            self.joiners.push(joiner);
+        }
+        self.last_kind = Some(kind);
+    }
+
+    fn insert_block_gap(&mut self, kind: BlockKind) {
         let needs_blank = !self.lines.is_empty()
             && !matches!(
                 (self.last_kind, kind),
@@ -427,9 +494,8 @@ impl MarkdownWriter {
             );
         if needs_blank && self.lines.last().is_some_and(|line| !line.spans.is_empty()) {
             self.lines.push(Line::default());
+            self.joiners.push(LineJoiner::HardBreak);
         }
-        self.lines.extend(lines);
-        self.last_kind = Some(kind);
     }
 
     fn push_inline_style(&mut self, style: Style) {

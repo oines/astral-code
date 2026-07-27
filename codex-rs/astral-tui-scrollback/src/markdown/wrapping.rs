@@ -6,9 +6,25 @@ use ratatui::text::Span;
 use textwrap::WordSeparator;
 use textwrap::WordSplitter;
 
+use super::LineJoiner;
 use super::Segment;
 
+pub(super) struct WrappedSegments {
+    pub(super) spans: Vec<Span<'static>>,
+    pub(super) joiner_to_previous: LineJoiner,
+}
+
 pub(super) fn wrap_segments(segments: &[Segment], width: usize) -> Vec<Vec<Span<'static>>> {
+    wrap_segments_with_joiners(segments, width)
+        .into_iter()
+        .map(|wrapped| wrapped.spans)
+        .collect()
+}
+
+pub(super) fn wrap_segments_with_joiners(
+    segments: &[Segment],
+    width: usize,
+) -> Vec<WrappedSegments> {
     let logical_lines = split_logical_lines(segments);
     let mut output = Vec::new();
     for logical in logical_lines {
@@ -17,7 +33,10 @@ pub(super) fn wrap_segments(segments: &[Segment], width: usize) -> Vec<Vec<Span<
             .map(|segment| segment.text.as_str())
             .collect::<String>();
         if plain.is_empty() {
-            output.push(Vec::new());
+            output.push(WrappedSegments {
+                spans: Vec::new(),
+                joiner_to_previous: LineJoiner::HardBreak,
+            });
             continue;
         }
         let options = textwrap::Options::new(width.max(1))
@@ -31,7 +50,17 @@ pub(super) fn wrap_segments(segments: &[Segment], width: usize) -> Vec<Vec<Span<
                 .find(wrapped)
                 .map_or(cursor, |relative| cursor + relative);
             let end = start + wrapped.len();
-            output.push(styled_range(&logical, start, end));
+            let joiner_to_previous = if cursor == 0 {
+                LineJoiner::HardBreak
+            } else if plain[cursor..start].chars().any(char::is_whitespace) {
+                LineJoiner::Space
+            } else {
+                LineJoiner::None
+            };
+            output.push(WrappedSegments {
+                spans: styled_range(&logical, start, end),
+                joiner_to_previous,
+            });
             cursor = end;
         }
     }
