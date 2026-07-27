@@ -3,11 +3,11 @@ source: astral-tui/src/surface_tests.rs
 expression: "render_at_size(&state, &session, 48, 16)"
 ---
  ⎇ main  /workspace
- ❯ inspect this repo
+
+ › inspect this repo                   12:00 AM
+
 
  I’m tracing the relevant data flow.
-
-
 
 
 

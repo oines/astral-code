@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 astral-terminal-inline = { workspace = true }
 astral-tui-scrollback = { workspace = true }
+chrono = { workspace = true }
 codex-app-server-client = { workspace = true }
 codex-app-server-protocol = { workspace = true }
 codex-protocol = { workspace = true }

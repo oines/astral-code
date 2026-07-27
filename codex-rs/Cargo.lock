@@ -579,6 +579,7 @@ dependencies = [
  "arboard",
  "astral-terminal-inline",
  "astral-tui-scrollback",
+ "chrono",
  "codex-app-server-client",
  "codex-app-server-protocol",
  "codex-protocol",

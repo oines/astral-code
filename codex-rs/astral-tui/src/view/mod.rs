@@ -10,6 +10,7 @@ mod modal;
 mod scrollback;
 mod slash_menu;
 mod theme;
+mod transcript;
 
 pub(crate) use chrome::PromptChrome;
 pub(crate) use chrome::ShortcutsBar;
@@ -28,3 +29,5 @@ pub(crate) use scrollback::render_follow_indicator;
 pub(crate) use slash_menu::SlashMenu;
 pub(crate) use theme::AstralTheme;
 pub(crate) use theme::AstralThemeId;
+pub(crate) use transcript::render_committed_block;
+pub(crate) use transcript::render_transcript;

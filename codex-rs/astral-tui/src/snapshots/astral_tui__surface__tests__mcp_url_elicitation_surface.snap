@@ -3,11 +3,11 @@ source: astral-tui/src/surface_tests.rs
 expression: "request_surface(json!({\n    \"method\": \"mcpServer/elicitation/request\", \"id\": \"mcp-url\", \"params\":\n    {\n        \"threadId\": \"thread-1\", \"turnId\": \"turn-1\", \"serverName\": \"linear\",\n        \"mode\": \"url\", \"_meta\": null, \"message\": \"Connect Linear to continue\",\n        \"url\": \"https://linear.app/oauth/authorize\", \"elicitationId\": \"auth-1\"\n    }\n}), \"\")"
 ---
  ⎇ main  /workspace
- ❯ inspect this repo
+
+ › inspect this repo                                           12:00 AM
+
 
  I’m tracing the relevant data flow.
-
-
 
 
 

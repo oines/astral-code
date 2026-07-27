@@ -5,11 +5,11 @@ expression: "render_at_size(&state, &session, 120, 32)"
 
   ⎇ main  /workspace
 
-  ❯ inspect this repo
+
+  › inspect this repo                                                                                         12:00 AM
+
 
   I’m tracing the relevant data flow.
-
-
 
 
 

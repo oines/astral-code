@@ -5,11 +5,11 @@ expression: "render_at_size(&state, &session, 80, 24)"
 
   ⎇ main  /workspace
 
-  ❯ inspect this repo
-                ┌─ Choose Astral theme ────────────────────[×]─┐
-  I’m tracing th│                                              │
+
+  › inspect this┌─ Choose Astral theme ────────────────────[×]─┐      12:00 AM
+                │                                              │
                 │  ❯ Astral Night (current)                    │
-                │      Dark palette with violet accents        │
+  I’m tracing th│      Dark palette with violet accents        │
                 │    Astral Day                                │
                 │      Light palette for bright environments   │
                 │    Terminal                                  │
