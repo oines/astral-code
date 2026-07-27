@@ -4,8 +4,11 @@ use codex_app_server_protocol::AskForApproval;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerRequest;
 use codex_app_server_protocol::Thread;
+use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::ThreadTokenUsage;
 use codex_app_server_protocol::TokenUsageBreakdown;
+use codex_app_server_protocol::TurnStatus;
+use codex_app_server_protocol::UserInput;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::Settings;
@@ -485,6 +488,49 @@ fn fullscreen_surface_keeps_committed_history_snapshot() {
     let mut state = SurfaceState::from_session(&session);
     assert_eq!(state.drain_committable().len(), 2);
     let area = Rect::new(0, 0, 72, 12);
+    let mut buffer = Buffer::empty(area);
+    render_surface_with_view(&state, &session, TranscriptView::Full, area, &mut buffer);
+
+    insta::assert_snapshot!(buffer_text(&buffer));
+}
+
+#[test]
+fn fullscreen_scrollback_viewport_snapshot() {
+    let mut session = session_state();
+    let template = session.thread.turns[0].clone();
+    session.thread.turns = (0..8)
+        .map(|index| {
+            let mut turn = template.clone();
+            turn.id = format!("turn-{index}");
+            turn.items = vec![
+                ThreadItem::UserMessage {
+                    id: format!("user-{index}"),
+                    client_id: None,
+                    content: vec![UserInput::Text {
+                        text: format!("question {index}: inspect the layered transcript"),
+                        text_elements: Vec::new(),
+                    }],
+                },
+                ThreadItem::AgentMessage {
+                    id: format!("agent-{index}"),
+                    text: format!(
+                        "Response {index} keeps enough content to make the transcript overflow."
+                    ),
+                    phase: None,
+                    memory_citation: None,
+                },
+            ];
+            turn.status = TurnStatus::Completed;
+            turn.started_at = Some(1_700_000_000 + index);
+            turn.completed_at = Some(1_700_000_001 + index);
+            turn.duration_ms = Some(1_000);
+            turn
+        })
+        .collect();
+    session.active_turn_id = None;
+    let mut state = SurfaceState::from_session(&session);
+    state.scroll_up(/*lines*/ 5);
+    let area = Rect::new(0, 0, 80, 24);
     let mut buffer = Buffer::empty(area);
     render_surface_with_view(&state, &session, TranscriptView::Full, area, &mut buffer);
 
