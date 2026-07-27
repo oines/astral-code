@@ -1,5 +1,6 @@
 //! Grok-style prompt-area projection for typed app-server client requests.
 
+mod mcp_form;
 mod user_input;
 
 use codex_app_server_protocol::CommandExecutionApprovalDecision;
@@ -14,6 +15,7 @@ use ratatui::style::Stylize;
 use ratatui::text::Line;
 
 use crate::PendingRequest;
+use crate::mcp_form::McpFormState;
 use crate::request_user_input::RequestUserInputState;
 use crate::view::AstralTheme;
 
@@ -24,7 +26,6 @@ const APPROVAL_HINTS: &[(&str, &str)] = &[
     ("Esc", "cancel"),
 ];
 const PERMISSION_HINTS: &[(&str, &str)] = &[("Y", "turn"), ("A", "session"), ("N", "deny")];
-const MCP_FORM_HINTS: &[(&str, &str)] = &[("Enter", "submit"), ("N", "decline"), ("Esc", "cancel")];
 const MCP_URL_HINTS: &[(&str, &str)] = &[("Y", "accept"), ("N", "decline"), ("Esc", "cancel")];
 const WAITING_HINTS: &[(&str, &str)] = &[];
 
@@ -32,22 +33,19 @@ const WAITING_HINTS: &[(&str, &str)] = &[];
 pub(crate) struct RequestPane<'a> {
     request: &'a PendingRequest,
     request_user_input: &'a RequestUserInputState,
-    composer: &'a str,
-    cursor_byte: usize,
+    mcp_form: &'a McpFormState,
 }
 
 impl<'a> RequestPane<'a> {
     pub(crate) fn new(
         request: &'a PendingRequest,
         request_user_input: &'a RequestUserInputState,
-        composer: &'a str,
-        cursor_byte: usize,
+        mcp_form: &'a McpFormState,
     ) -> Self {
         Self {
             request,
             request_user_input,
-            composer,
-            cursor_byte,
+            mcp_form,
         }
     }
 
@@ -66,7 +64,7 @@ impl<'a> RequestPane<'a> {
                 user_input::shortcuts(params, self.request_user_input)
             }
             PendingRequest::McpElicitation { params, .. } => match params.request {
-                McpServerElicitationRequest::Form { .. } => MCP_FORM_HINTS,
+                McpServerElicitationRequest::Form { .. } => mcp_form::shortcuts(self.mcp_form),
                 McpServerElicitationRequest::Url { .. } => MCP_URL_HINTS,
             },
             PendingRequest::DynamicTool { .. }
@@ -275,43 +273,14 @@ impl<'a> RequestPane<'a> {
                     user_input::push_content(&mut rows, params, self.request_user_input, max_rows);
             }
             PendingRequest::McpElicitation { params, .. } => match &params.request {
-                McpServerElicitationRequest::Form {
-                    message,
-                    requested_schema,
-                    ..
-                } => {
-                    rows.push(PaneRow::Title(format!(
-                        "{} needs structured input",
-                        params.server_name
-                    )));
-                    rows.push(PaneRow::Body(message.clone()));
-                    let fields = crate::mcp_form::compile_fields(requested_schema);
-                    for field in fields.iter().take(3) {
-                        let required = if field.schema.required {
-                            " · required"
-                        } else {
-                            ""
-                        };
-                        let detail = field
-                            .control
-                            .preview_detail()
-                            .map(|detail| format!(" · {detail}"))
-                            .unwrap_or_default();
-                        rows.push(PaneRow::Body(format!(
-                            "{} · {}{detail}{required}",
-                            field.schema.title,
-                            field.schema.kind.label(),
-                        )));
-                    }
-                    if fields.len() > 3 {
-                        rows.push(PaneRow::Body(format!("… {} more fields", fields.len() - 3)));
-                    }
-                    rows.push(PaneRow::Blank);
-                    rows.push(PaneRow::Input {
-                        text: self.composer.to_string(),
-                        cursor_column: input_cursor_width(self.composer, self.cursor_byte, false),
-                    });
-                    input = true;
+                McpServerElicitationRequest::Form { message, .. } => {
+                    input = mcp_form::push_content(
+                        &mut rows,
+                        &params.server_name,
+                        message,
+                        self.mcp_form,
+                        max_rows,
+                    );
                 }
                 McpServerElicitationRequest::Url { message, url, .. } => {
                     rows.push(PaneRow::Title(format!(

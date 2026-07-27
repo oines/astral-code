@@ -1,18 +1,25 @@
+use codex_app_server_protocol::McpServerElicitationRequest;
+
 use super::SurfaceState;
 use crate::PendingRequest;
+use crate::mcp_form::McpFormState;
 use crate::request_user_input::RequestUserInputState;
 
 impl SurfaceState {
-    pub(crate) fn sync_request_user_input(&mut self) {
-        let params = self
-            .pending_requests
-            .front()
-            .and_then(|request| match request {
-                PendingRequest::UserInput { params, .. } => Some(params.clone()),
-                _ => None,
-            });
-        if let Some(params) = params {
-            self.request_user_input.sync(&params);
+    pub(crate) fn sync_request_states(&mut self) {
+        match self.pending_requests.front().cloned() {
+            Some(PendingRequest::UserInput { params, .. }) => {
+                self.request_user_input.sync(&params);
+            }
+            Some(PendingRequest::McpElicitation { params, .. }) => {
+                if let McpServerElicitationRequest::Form {
+                    requested_schema, ..
+                } = params.request
+                {
+                    self.mcp_form.sync(&requested_schema);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -26,5 +33,17 @@ impl SurfaceState {
 
     pub(crate) fn reset_request_user_input(&mut self) {
         self.request_user_input.reset();
+    }
+
+    pub(crate) fn mcp_form(&self) -> &McpFormState {
+        &self.mcp_form
+    }
+
+    pub(crate) fn mcp_form_mut(&mut self) -> &mut McpFormState {
+        &mut self.mcp_form
+    }
+
+    pub(crate) fn reset_mcp_form(&mut self) {
+        self.mcp_form.reset();
     }
 }

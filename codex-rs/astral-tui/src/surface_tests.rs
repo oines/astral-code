@@ -491,12 +491,17 @@ fn typed_approval_surfaces_snapshot() {
                     "requestedSchema": {
                         "type": "object",
                         "properties": {
-                            "confirmed": {"type": "boolean"}
-                        }
+                            "confirmed": {
+                                "type": "boolean",
+                                "title": "Confirm changes",
+                                "description": "Allow the MCP server to apply these settings"
+                            }
+                        },
+                        "required": ["confirmed"]
                     }
                 }
             }),
-            r#"{"confirmed":true}"#
+            "keep this prompt draft"
         )
     );
     insta::assert_snapshot!(

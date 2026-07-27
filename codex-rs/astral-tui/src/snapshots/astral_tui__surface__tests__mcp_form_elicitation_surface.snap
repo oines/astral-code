@@ -1,6 +1,6 @@
 ---
 source: astral-tui/src/surface_tests.rs
-expression: "request_surface(json!({\n    \"method\": \"mcpServer/elicitation/request\", \"id\": \"mcp-form\", \"params\":\n    {\n        \"threadId\": \"thread-1\", \"turnId\": \"turn-1\", \"serverName\": \"astral\",\n        \"mode\": \"form\", \"_meta\": null, \"message\": \"Choose settings\",\n        \"requestedSchema\":\n        {\n            \"type\": \"object\", \"properties\":\n            { \"confirmed\": {\"type\": \"boolean\"} }\n        }\n    }\n}), r#\"{\"confirmed\":true}\"#)"
+expression: "request_surface(json!({\n    \"method\": \"mcpServer/elicitation/request\", \"id\": \"mcp-form\", \"params\":\n    {\n        \"threadId\": \"thread-1\", \"turnId\": \"turn-1\", \"serverName\": \"astral\",\n        \"mode\": \"form\", \"_meta\": null, \"message\": \"Choose settings\",\n        \"requestedSchema\":\n        {\n            \"type\": \"object\", \"properties\":\n            {\n                \"confirmed\":\n                {\n                    \"type\": \"boolean\", \"title\": \"Confirm changes\",\n                    \"description\":\n                    \"Allow the MCP server to apply these settings\"\n                }\n            }, \"required\": [\"confirmed\"]\n        }\n    }\n}), \"keep this prompt draft\")"
 ---
  ⎇ main  /workspace
 
@@ -11,12 +11,12 @@ expression: "request_surface(json!({\n    \"method\": \"mcpServer/elicitation/re
 
 
 
-
-
  ┃
- ┃  astral needs structured input
+ ┃  astral needs input
  ┃  Choose settings
- ┃  confirmed · yes/no · 2 options
  ┃
- ┃  ❯ {"confirmed":true}
- Enter:submit  │  N:decline  │  Esc:cancel
+ ┃  Confirm changes · yes/no · required · 1/1
+ ┃  Allow the MCP server to apply these settings
+ ┃  › Yes
+ ┃  ○ No
+ Space:choose  │  Enter:next  │  Ctrl+D:decline  │  Esc:cancel
