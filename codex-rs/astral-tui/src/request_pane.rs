@@ -1,5 +1,7 @@
 //! Grok-style prompt-area projection for typed app-server client requests.
 
+mod user_input;
+
 use codex_app_server_protocol::CommandExecutionApprovalDecision;
 use codex_app_server_protocol::CommandExecutionRequestApprovalParams;
 use codex_app_server_protocol::McpServerElicitationRequest;
@@ -12,9 +14,7 @@ use ratatui::style::Stylize;
 use ratatui::text::Line;
 
 use crate::PendingRequest;
-use crate::request_user_input::OTHER_OPTION_LABEL;
 use crate::request_user_input::RequestUserInputState;
-use crate::request_user_input::option_count;
 use crate::view::AstralTheme;
 
 const APPROVAL_HINTS: &[(&str, &str)] = &[
@@ -24,19 +24,6 @@ const APPROVAL_HINTS: &[(&str, &str)] = &[
     ("Esc", "cancel"),
 ];
 const PERMISSION_HINTS: &[(&str, &str)] = &[("Y", "turn"), ("A", "session"), ("N", "deny")];
-const INPUT_OPTION_HINTS: &[(&str, &str)] = &[
-    ("↑/↓", "navigate"),
-    ("Enter", "select"),
-    ("Tab", "notes"),
-    ("Esc", "cancel"),
-];
-const INPUT_TEXT_HINTS: &[(&str, &str)] = &[
-    ("Enter", "next"),
-    ("Ctrl+P/N", "question"),
-    ("Esc", "cancel"),
-];
-const INPUT_CONFIRM_HINTS: &[(&str, &str)] =
-    &[("↑/↓", "navigate"), ("Enter", "confirm"), ("Esc", "back")];
 const MCP_FORM_HINTS: &[(&str, &str)] = &[("Enter", "submit"), ("N", "decline"), ("Esc", "cancel")];
 const MCP_URL_HINTS: &[(&str, &str)] = &[("Y", "accept"), ("N", "decline"), ("Esc", "cancel")];
 const WAITING_HINTS: &[(&str, &str)] = &[];
@@ -76,18 +63,7 @@ impl<'a> RequestPane<'a> {
             }
             PendingRequest::Permissions { .. } => PERMISSION_HINTS,
             PendingRequest::UserInput { params, .. } => {
-                if self.request_user_input.confirmation_choice().is_some() {
-                    INPUT_CONFIRM_HINTS
-                } else if params
-                    .questions
-                    .get(self.request_user_input.current_question())
-                    .is_some_and(crate::request_user_input::has_options)
-                    && !self.request_user_input.notes_visible()
-                {
-                    INPUT_OPTION_HINTS
-                } else {
-                    INPUT_TEXT_HINTS
-                }
+                user_input::shortcuts(params, self.request_user_input)
             }
             PendingRequest::McpElicitation { params, .. } => match params.request {
                 McpServerElicitationRequest::Form { .. } => MCP_FORM_HINTS,
@@ -295,101 +271,8 @@ impl<'a> RequestPane<'a> {
                 ]);
             }
             PendingRequest::UserInput { params, .. } => {
-                if let Some(choice) = self.request_user_input.confirmation_choice() {
-                    let unanswered = self.request_user_input.unanswered_count(params);
-                    rows.push(PaneRow::Title(
-                        "Submit with unanswered questions?".to_string(),
-                    ));
-                    rows.push(PaneRow::Body(format!(
-                        "{unanswered} question{} unanswered",
-                        if unanswered == 1 { "" } else { "s" }
-                    )));
-                    rows.push(PaneRow::Blank);
-                    rows.extend([
-                        PaneRow::Option {
-                            label: "Go back".to_string(),
-                            detail: Some("Return to the first unanswered question".to_string()),
-                            selected: choice == 0,
-                            committed: false,
-                        },
-                        PaneRow::Option {
-                            label: "Proceed".to_string(),
-                            detail: Some("Submit empty answers where needed".to_string()),
-                            selected: choice == 1,
-                            committed: false,
-                        },
-                    ]);
-                } else if let Some(question) = params
-                    .questions
-                    .get(self.request_user_input.current_question())
-                {
-                    let current = self.request_user_input.current_question();
-                    let counter = if params.questions.len() > 1 {
-                        format!(" · {}/{}", current + 1, params.questions.len())
-                    } else {
-                        String::new()
-                    };
-                    rows.push(PaneRow::Title(format!("{}{counter}", question.header)));
-                    rows.push(PaneRow::Body(question.question.clone()));
-                    if let Some(options) = &question.options {
-                        let selected = self.request_user_input.selected_option();
-                        let committed = self.request_user_input.option_committed();
-                        let mut option_rows = options
-                            .iter()
-                            .enumerate()
-                            .map(|(index, option)| PaneRow::Option {
-                                label: format!("{}. {}", index + 1, option.label),
-                                detail: (!option.description.is_empty())
-                                    .then(|| option.description.clone()),
-                                selected: selected == Some(index),
-                                committed: committed && selected == Some(index),
-                            })
-                            .collect::<Vec<_>>();
-                        if option_count(question) > options.len() {
-                            let index = options.len();
-                            option_rows.push(PaneRow::Option {
-                                label: format!("{}. {OTHER_OPTION_LABEL}", index + 1),
-                                detail: Some("Add details in notes if needed".to_string()),
-                                selected: selected == Some(index),
-                                committed: committed && selected == Some(index),
-                            });
-                        }
-                        let reserve_after_options = if self.request_user_input.notes_visible() {
-                            2
-                        } else {
-                            0
-                        };
-                        let capacity = usize::from(max_rows)
-                            .saturating_sub(rows.len() + reserve_after_options)
-                            .max(1);
-                        push_visible_options(
-                            &mut rows,
-                            option_rows,
-                            selected.unwrap_or_default(),
-                            capacity,
-                        );
-                    }
-                    if !crate::request_user_input::has_options(question)
-                        || self.request_user_input.notes_visible()
-                    {
-                        rows.push(PaneRow::Blank);
-                        let secret = question.is_secret;
-                        let editor = self.request_user_input.editor();
-                        rows.push(PaneRow::Input {
-                            text: if secret {
-                                "•".repeat(editor.chars().count())
-                            } else {
-                                editor.to_string()
-                            },
-                            cursor_column: input_cursor_width(
-                                editor,
-                                self.request_user_input.editor_cursor(),
-                                secret,
-                            ),
-                        });
-                        input = true;
-                    }
-                }
+                input =
+                    user_input::push_content(&mut rows, params, self.request_user_input, max_rows);
             }
             PendingRequest::McpElicitation { params, .. } => match &params.request {
                 McpServerElicitationRequest::Form { message, .. } => {
