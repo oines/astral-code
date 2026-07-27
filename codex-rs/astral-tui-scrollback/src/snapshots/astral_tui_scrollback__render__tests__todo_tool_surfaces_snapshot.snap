@@ -1,0 +1,12 @@
+---
+source: astral-tui-scrollback/src/render_tests.rs
+expression: rendered
+---
+◆ Todos
+  Keep the checklist current.
+✓ Trace events
+▶ Render todos
+□ Run PTY checks
+◆ Todos
+✓ Map Codex semantics
+▶ Verify snapshots

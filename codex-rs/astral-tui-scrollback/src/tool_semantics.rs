@@ -39,7 +39,7 @@ pub(super) fn command_presentation(command: &str, actions: &[CommandAction]) -> 
     (ToolKind::Execute, command.to_string())
 }
 
-pub(super) fn classify_tool_name(name: &str) -> ToolKind {
+pub fn classify_tool_name(name: &str) -> ToolKind {
     let leaf = name.rsplit(['/', ':']).next().unwrap_or(name);
     let normalized = leaf
         .chars()
@@ -61,6 +61,7 @@ pub(super) fn classify_tool_name(name: &str) -> ToolKind {
         | "resumeagent" => ToolKind::Collab,
         "viewimage" => ToolKind::ImageView,
         "imagegen" | "imagegeneration" | "generateimage" => ToolKind::ImageGeneration,
+        "todowrite" | "updateplan" => ToolKind::Todo,
         _ => ToolKind::Other,
     }
 }
@@ -69,6 +70,7 @@ pub(super) fn tool_call_title(kind: ToolKind, tool: &str, arguments: &Value) -> 
     let summary = summarize_tool_call(tool, arguments);
     match kind {
         ToolKind::Read | ToolKind::Edit => compact_path(Path::new(&summary)),
+        ToolKind::Todo => "Update checklist".to_string(),
         _ => summary,
     }
 }

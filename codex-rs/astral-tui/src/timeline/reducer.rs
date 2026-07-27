@@ -1,9 +1,15 @@
 use std::collections::HashMap;
 
+use astral_tui_scrollback::PresentationBlock;
 use astral_tui_scrollback::TimelineStream;
+use astral_tui_scrollback::TodoPresentation;
+use astral_tui_scrollback::ToolKind;
+use astral_tui_scrollback::classify_tool_name;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::TurnPlanUpdatedNotification;
+
+const TURN_PLAN_ITEM_ID: &str = "astral:turn-plan";
 
 /// Whether a notification changed the active timeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,6 +31,7 @@ pub struct TimelineEntry {
     id: String,
     turn_id: String,
     item: Option<ThreadItem>,
+    presentation: Option<PresentationBlock>,
     stream: TimelineStream,
     finalized: bool,
     started_at_ms: Option<i64>,
@@ -37,6 +44,7 @@ impl TimelineEntry {
             id,
             turn_id,
             item: None,
+            presentation: None,
             stream: TimelineStream::None,
             finalized: false,
             started_at_ms: None,
@@ -54,6 +62,10 @@ impl TimelineEntry {
 
     pub fn item(&self) -> Option<&ThreadItem> {
         self.item.as_ref()
+    }
+
+    pub fn presentation(&self) -> Option<&PresentationBlock> {
+        self.presentation.as_ref()
     }
 
     pub fn stream(&self) -> &TimelineStream {
@@ -261,7 +273,19 @@ impl TimelineState {
                 if !self.is_active_thread(&event.thread_id) {
                     return ReduceOutcome::DifferentThread;
                 }
+                let presentation = PresentationBlock::Todo(TodoPresentation::from(event));
                 self.turn_plan = Some(event.clone());
+                let index = self
+                    .entries
+                    .iter()
+                    .rposition(|entry| {
+                        entry.turn_id() == event.turn_id
+                            && entry.item().is_some_and(is_todo_tool_item)
+                    })
+                    .unwrap_or_else(|| self.entry_index(TURN_PLAN_ITEM_ID, &event.turn_id));
+                let entry = &mut self.entries[index];
+                entry.presentation = Some(presentation);
+                entry.finalized = true;
                 ReduceOutcome::Applied
             }
             ServerNotification::TurnDiffUpdated(event) => {
@@ -344,5 +368,14 @@ impl TimelineState {
         if let Some(process_id) = process_id {
             self.process_indices.insert(process_id.clone(), index);
         }
+    }
+}
+
+fn is_todo_tool_item(item: &ThreadItem) -> bool {
+    match item {
+        ThreadItem::CoreToolCall { tool, .. } | ThreadItem::DynamicToolCall { tool, .. } => {
+            classify_tool_name(tool) == ToolKind::Todo
+        }
+        _ => false,
     }
 }

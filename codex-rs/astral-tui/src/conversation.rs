@@ -228,6 +228,9 @@ fn seconds_to_millis(seconds: i64) -> i64 {
 }
 
 fn project_entry(entry: &TimelineEntry) -> Option<PresentationBlock> {
+    if let Some(presentation) = entry.presentation() {
+        return Some(presentation.clone());
+    }
     match entry.item() {
         Some(item) => PresentationBlock::from_item(item, entry.stream()),
         None => PresentationBlock::from_stream(entry.stream()),

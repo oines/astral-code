@@ -1,0 +1,31 @@
+---
+source: astral-tui/src/surface_tests.rs
+expression: rendered
+---
+
+  ⎇ main  /workspace
+
+
+  › inspect this repo                                                                     12:00 AM
+
+
+  I’m tracing the relevant data flow.
+
+  ◆ Todos
+    Keep the provider-neutral projection visible.
+  ✓ Trace app-server notification
+  ▶ Render Grok-style todo rows
+  □ Verify Claude and Codex surfaces
+
+
+
+
+
+
+  ◇ Working
+
+  ╭──────────────────────────────────────────────────────────────────────────────────────────────╮
+  │ ❯                                                                                            │
+  ╰──────────────────────────────────────────────────────────────── claude-sonnet-4 · workspace ─╯
+
+  Shift+Tab:mode  │  Ctrl+.:shortcuts

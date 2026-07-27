@@ -11,6 +11,9 @@ use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::ThreadTokenUsage;
 use codex_app_server_protocol::TokenUsageBreakdown;
 use codex_app_server_protocol::TurnCompletedNotification;
+use codex_app_server_protocol::TurnPlanStep;
+use codex_app_server_protocol::TurnPlanStepStatus;
+use codex_app_server_protocol::TurnPlanUpdatedNotification;
 use codex_app_server_protocol::TurnStartedNotification;
 use codex_app_server_protocol::TurnStatus;
 use codex_app_server_protocol::UserInput;
@@ -742,6 +745,50 @@ fn reused_provider_item_ids_preserve_turn_order_snapshot() {
         "turns must render in chronological order:\n{rendered}"
     );
     insta::assert_snapshot!("reused_provider_item_ids_preserve_turn_order", rendered);
+}
+
+#[test]
+fn todo_notification_surface_snapshot() {
+    let session = session_state();
+    let mut state = SurfaceState::from_session(&session);
+    state
+        .conversation_mut()
+        .apply(&ServerNotification::TurnPlanUpdated(
+            TurnPlanUpdatedNotification {
+                thread_id: "thread-1".to_string(),
+                turn_id: "turn-1".to_string(),
+                explanation: Some("Keep the provider-neutral projection visible.".to_string()),
+                plan: vec![
+                    TurnPlanStep {
+                        step: "Trace app-server notification".to_string(),
+                        status: TurnPlanStepStatus::Completed,
+                    },
+                    TurnPlanStep {
+                        step: "Render Grok-style todo rows".to_string(),
+                        status: TurnPlanStepStatus::InProgress,
+                    },
+                    TurnPlanStep {
+                        step: "Verify Claude and Codex surfaces".to_string(),
+                        status: TurnPlanStepStatus::Pending,
+                    },
+                ],
+            },
+        ));
+    let area = Rect::new(0, 0, 100, 28);
+    let mut buffer = Buffer::empty(area);
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        area,
+        &mut buffer,
+    );
+
+    let rendered = buffer_text(&buffer);
+    assert!(rendered.contains("✓ Trace app-server notification"));
+    assert!(rendered.contains("▶ Render Grok-style todo rows"));
+    assert!(rendered.contains("□ Verify Claude and Codex surfaces"));
+    insta::assert_snapshot!("todo_notification_surface", rendered);
 }
 
 #[test]
