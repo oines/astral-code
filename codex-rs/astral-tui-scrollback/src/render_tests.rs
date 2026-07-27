@@ -196,6 +196,55 @@ fn todo_tool_surfaces_snapshot() {
 }
 
 #[test]
+fn background_task_action_tool_surfaces_snapshot() {
+    let items = [
+        ThreadItem::CoreToolCall {
+            id: "task-read".to_string(),
+            tool: "ReadTaskOutput".to_string(),
+            arguments: json!({"task_id": "task-7"}),
+            status: CoreToolCallStatus::Completed,
+            result: Some("tests passed".to_string()),
+            error: None,
+            duration_ms: Some(12),
+        },
+        ThreadItem::CoreToolCall {
+            id: "task-send".to_string(),
+            tool: "SendTaskInput".to_string(),
+            arguments: json!({"task_id": "task-7", "input": "continue\n"}),
+            status: CoreToolCallStatus::Completed,
+            result: Some("input sent".to_string()),
+            error: None,
+            duration_ms: Some(2),
+        },
+        ThreadItem::CoreToolCall {
+            id: "task-list".to_string(),
+            tool: "ListBackgroundTasks".to_string(),
+            arguments: json!({}),
+            status: CoreToolCallStatus::Completed,
+            result: Some("task-7 running".to_string()),
+            error: None,
+            duration_ms: Some(1),
+        },
+        ThreadItem::CoreToolCall {
+            id: "task-stop".to_string(),
+            tool: "StopBackgroundTask".to_string(),
+            arguments: json!({"task_id": "task-7"}),
+            status: CoreToolCallStatus::Failed,
+            result: None,
+            error: Some("task already exited".to_string()),
+            duration_ms: Some(2),
+        },
+    ];
+
+    let rendered = items
+        .into_iter()
+        .map(|item| render(item, true))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_snapshot!(rendered);
+}
+
+#[test]
 fn background_command_lifecycle_snapshot() {
     let item = ThreadItem::CommandExecution {
         id: "command-bg".to_string(),

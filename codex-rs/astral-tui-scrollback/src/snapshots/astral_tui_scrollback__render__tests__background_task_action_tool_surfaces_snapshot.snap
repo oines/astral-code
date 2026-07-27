@@ -1,0 +1,12 @@
+---
+source: astral-tui-scrollback/src/render_tests.rs
+expression: rendered
+---
+◆ Poll task-7  12ms
+  │ tests passed
+◆ Input task-7  2ms
+  │ input sent
+◆ List background tasks  1ms
+  │ task-7 running
+× Stop task-7  2ms
+  │ task already exited

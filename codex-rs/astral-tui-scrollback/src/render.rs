@@ -365,6 +365,10 @@ fn status_style(status: ToolStatus) -> ratatui::style::Style {
 fn tool_label(kind: ToolKind) -> &'static str {
     match kind {
         ToolKind::Execute | ToolKind::Background => "Run",
+        ToolKind::BackgroundPoll => "Poll",
+        ToolKind::BackgroundInput => "Input",
+        ToolKind::BackgroundList => "List",
+        ToolKind::BackgroundStop => "Stop",
         ToolKind::Read => "Read",
         ToolKind::Edit => "Edit",
         ToolKind::List => "List",
