@@ -192,8 +192,18 @@ async fn run_loop(
 
     loop {
         draw(terminal, session, surface, &options)?;
+        let selection_expiry = surface
+            .scrollback_selection_expiry()
+            .map(tokio::time::Instant::from_std);
 
         tokio::select! {
+            _ = async {
+                if let Some(expiry) = selection_expiry {
+                    tokio::time::sleep_until(expiry).await;
+                }
+            }, if selection_expiry.is_some() => {
+                surface.expire_scrollback_selection();
+            }
             terminal_event = input.next() => {
                 let Some(terminal_event) = terminal_event else {
                     surface.set_activity(SurfaceActivity::Disconnected(

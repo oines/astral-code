@@ -12,12 +12,18 @@ use ratatui::style::Modifier;
 use ratatui::text::Line;
 use std::cmp::Ordering;
 use std::ops::Range;
+use std::time::Duration;
+use std::time::Instant;
 
 use super::AstralTheme;
 use super::ScrollbackViewport;
+use super::transcript::TranscriptLayout;
+
+const DEFAULT_SELECTION_HIGHLIGHT_DURATION: Duration = Duration::from_millis(150);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct SelectionPoint {
+    range: usize,
     line: usize,
     column: u16,
 }
@@ -45,6 +51,116 @@ struct SelectionFrame {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct SelectableLine {
+    line: usize,
+    columns: Range<u16>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct SelectableRange {
+    lines: Vec<SelectableLine>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct SelectionModel {
+    ranges: Vec<SelectableRange>,
+}
+
+impl SelectionModel {
+    fn from_layout(layout: &TranscriptLayout) -> Self {
+        let ranges = layout
+            .sections
+            .iter()
+            .filter_map(|section| {
+                let lines = section
+                    .lines
+                    .clone()
+                    .filter_map(|line_index| {
+                        let text = layout.lines.get(line_index)?.to_string();
+                        let content = text.trim();
+                        if content.is_empty() {
+                            return None;
+                        }
+                        let leading_bytes = text.len().saturating_sub(text.trim_start().len());
+                        let start =
+                            u16::try_from(line_width(&text[..leading_bytes])).unwrap_or(u16::MAX);
+                        let end = u16::try_from(line_width(text.trim_end())).unwrap_or(u16::MAX);
+                        (start < end).then_some(SelectableLine {
+                            line: line_index,
+                            columns: start..end,
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                (!lines.is_empty()).then_some(SelectableRange { lines })
+            })
+            .collect();
+        Self { ranges }
+    }
+
+    fn hit_test(&self, frame: SelectionFrame, column: u16, row: u16) -> Option<SelectionPoint> {
+        if !frame.area.contains((column, row).into()) {
+            return None;
+        }
+        let line_index = frame
+            .viewport
+            .first_visible_line
+            .saturating_add(usize::from(row.saturating_sub(frame.area.y)));
+        let relative_column = column.saturating_sub(frame.area.x);
+        self.ranges
+            .iter()
+            .enumerate()
+            .find_map(|(range_index, range)| {
+                let line = range.lines.iter().find(|line| line.line == line_index)?;
+                Some(SelectionPoint {
+                    range: range_index,
+                    line: line_index,
+                    column: clamp_column(&line.columns, relative_column),
+                })
+            })
+    }
+
+    fn hit_test_nearest(
+        &self,
+        frame: SelectionFrame,
+        anchor: SelectionPoint,
+        column: u16,
+        row: u16,
+    ) -> Option<SelectionPoint> {
+        let range = self.ranges.get(anchor.range)?;
+        let relative_column = column.saturating_sub(frame.area.x);
+        let mut best: Option<((u16, u16), usize, SelectionPoint)> = None;
+        for line in &range.lines {
+            if !(frame.viewport.first_visible_line..frame.viewport.end_visible_line)
+                .contains(&line.line)
+            {
+                continue;
+            }
+            let screen_row = frame.area.y.saturating_add(
+                u16::try_from(line.line.saturating_sub(frame.viewport.first_visible_line))
+                    .unwrap_or(u16::MAX),
+            );
+            let column_distance = distance_to_columns(&line.columns, relative_column);
+            let key = (screen_row.abs_diff(row), column_distance);
+            let anchor_distance = line.line.abs_diff(anchor.line);
+            let point = SelectionPoint {
+                range: anchor.range,
+                line: line.line,
+                column: clamp_column(&line.columns, relative_column),
+            };
+            if best
+                .as_ref()
+                .is_none_or(|(best_key, best_anchor_distance, _)| {
+                    key < *best_key || (key == *best_key && anchor_distance > *best_anchor_distance)
+                })
+            {
+                best = Some((key, anchor_distance, point));
+            }
+        }
+        best.map(|(_, _, point)| point)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ScrollbackSelectionAction {
     Ignored,
     Redraw,
@@ -55,14 +171,17 @@ pub(crate) enum ScrollbackSelectionAction {
 
 /// Mouse-driven text selection owned by Astral's scrollback buffer.
 ///
-/// Keeping the selection in transcript coordinates lets the overlay survive
-/// manual scrolling without falling back to the terminal's native selection.
+/// The per-frame selection model mirrors Grok's `(entry, range)` boundary:
+/// drag heads stay inside the anchor block instead of sweeping unrelated
+/// transcript rows.
 #[derive(Debug, Default)]
 pub(crate) struct ScrollbackSelection {
     frame: Option<SelectionFrame>,
+    model: SelectionModel,
     pending: Option<SelectionPoint>,
     active: Option<SelectionRange>,
     persistent: Option<SelectionRange>,
+    persistent_created_at: Option<Instant>,
     lines: Vec<String>,
     render_width: u16,
 }
@@ -81,6 +200,7 @@ impl ScrollbackSelection {
                 self.pending = Some(point);
                 self.active = None;
                 self.persistent = None;
+                self.persistent_created_at = None;
                 ScrollbackSelectionAction::Redraw
             }
             MouseEventKind::Drag(MouseButton::Left) => {
@@ -90,7 +210,7 @@ impl ScrollbackSelection {
                 else {
                     return ScrollbackSelectionAction::Ignored;
                 };
-                let Some(head) = self.hit_test_nearest(mouse.column, mouse.row) else {
+                let Some(head) = self.hit_test_nearest(anchor, mouse.column, mouse.row) else {
                     return ScrollbackSelectionAction::Ignored;
                 };
                 if head != anchor || self.active.is_some() {
@@ -112,15 +232,16 @@ impl ScrollbackSelection {
                     self.pending = None;
                     return ScrollbackSelectionAction::Redraw;
                 };
-                if let Some(head) = self.hit_test_nearest(mouse.column, mouse.row) {
+                if let Some(head) = self.hit_test_nearest(range.anchor, mouse.column, mouse.row) {
                     range.head = head;
                 }
                 self.pending = None;
+                let Some(text) = self.copy_text(range).filter(|text| !text.is_empty()) else {
+                    return ScrollbackSelectionAction::Redraw;
+                };
                 self.persistent = Some(range);
-                self.copy_text(range)
-                    .filter(|text| !text.is_empty())
-                    .map(ScrollbackSelectionAction::Copy)
-                    .unwrap_or(ScrollbackSelectionAction::Redraw)
+                self.persistent_created_at = Some(Instant::now());
+                ScrollbackSelectionAction::Copy(text)
             }
             _ => ScrollbackSelectionAction::Ignored,
         }
@@ -128,7 +249,7 @@ impl ScrollbackSelection {
 
     pub(crate) fn render(
         &mut self,
-        lines: &[Line<'static>],
+        layout: &TranscriptLayout,
         viewport: ScrollbackViewport,
         area: Rect,
         buffer: &mut Buffer,
@@ -139,13 +260,22 @@ impl ScrollbackSelection {
         }
         self.render_width = area.width;
         self.frame = Some(SelectionFrame { area, viewport });
+        self.model = SelectionModel::from_layout(layout);
         if self.is_tracking() {
-            self.lines = lines.iter().map(Line::to_string).collect();
+            self.lines = layout.lines.iter().map(Line::to_string).collect();
         } else {
             self.lines.clear();
         }
         if let Some(range) = self.active.or(self.persistent) {
-            render_selection_overlay(range, &self.lines, viewport, area, buffer, theme);
+            render_selection_overlay(
+                range,
+                &self.model,
+                &self.lines,
+                viewport,
+                area,
+                buffer,
+                theme,
+            );
         }
     }
 
@@ -153,10 +283,32 @@ impl ScrollbackSelection {
         let changed = self.pending.take().is_some()
             || self.active.take().is_some()
             || self.persistent.take().is_some();
+        self.persistent_created_at = None;
         if changed {
             self.lines.clear();
         }
         changed
+    }
+
+    pub(crate) fn clear_persistent(&mut self) -> bool {
+        let changed = self.persistent.take().is_some();
+        self.persistent_created_at = None;
+        if changed && self.pending.is_none() && self.active.is_none() {
+            self.lines.clear();
+        }
+        changed
+    }
+
+    pub(crate) fn expiry(&self) -> Option<Instant> {
+        self.persistent_created_at
+            .and_then(|created| created.checked_add(DEFAULT_SELECTION_HIGHLIGHT_DURATION))
+    }
+
+    pub(crate) fn expire_if_due(&mut self, now: Instant) -> bool {
+        if self.expiry().is_some_and(|expiry| expiry <= now) {
+            return self.clear_persistent();
+        }
+        false
     }
 
     fn is_tracking(&self) -> bool {
@@ -165,36 +317,41 @@ impl ScrollbackSelection {
 
     fn hit_test(&self, column: u16, row: u16) -> Option<SelectionPoint> {
         let frame = self.frame?;
-        if !frame.area.contains((column, row).into()) {
-            return None;
-        }
-        Some(point_in_frame(frame, column, row))
+        self.model.hit_test(frame, column, row)
     }
 
-    fn hit_test_nearest(&self, column: u16, row: u16) -> Option<SelectionPoint> {
+    fn hit_test_nearest(
+        &self,
+        anchor: SelectionPoint,
+        column: u16,
+        row: u16,
+    ) -> Option<SelectionPoint> {
         let frame = self.frame?;
-        if frame.area.is_empty() {
-            return None;
-        }
-        let column = column.clamp(frame.area.x, frame.area.right().saturating_sub(1));
-        let row = row.clamp(frame.area.y, frame.area.bottom().saturating_sub(1));
-        Some(point_in_frame(frame, column, row))
+        self.model.hit_test_nearest(frame, anchor, column, row)
     }
 
     fn copy_text(&self, range: SelectionRange) -> Option<String> {
         let (start, end) = range.normalized();
+        if start.range != end.range {
+            return None;
+        }
+        let selectable_range = self.model.ranges.get(start.range)?;
         let mut selected = Vec::new();
-        for line_index in start.line..=end.line {
-            let line = self.lines.get(line_index)?.trim_end();
-            let width = line_width(line);
+        for selectable_line in selectable_range
+            .lines
+            .iter()
+            .filter(|line| (start.line..=end.line).contains(&line.line))
+        {
+            let line_index = selectable_line.line;
+            let line = self.lines.get(line_index)?;
             let columns = if start.line == end.line {
                 start.column..end.column.saturating_add(1)
             } else if line_index == start.line {
-                start.column..u16::try_from(width).unwrap_or(u16::MAX)
+                start.column..selectable_line.columns.end
             } else if line_index == end.line {
-                0..end.column.saturating_add(1)
+                selectable_line.columns.start..end.column.saturating_add(1)
             } else {
-                0..u16::try_from(width).unwrap_or(u16::MAX)
+                selectable_line.columns.clone()
             };
             selected.push(slice_display_columns(line, columns));
         }
@@ -203,23 +360,26 @@ impl ScrollbackSelection {
 }
 
 fn compare_points(left: SelectionPoint, right: SelectionPoint) -> Ordering {
-    (left.line, left.column).cmp(&(right.line, right.column))
+    (left.range, left.line, left.column).cmp(&(right.range, right.line, right.column))
 }
 
-fn point_in_frame(frame: SelectionFrame, column: u16, row: u16) -> SelectionPoint {
-    let visible_row = usize::from(row.saturating_sub(frame.area.y));
-    SelectionPoint {
-        line: frame
-            .viewport
-            .first_visible_line
-            .saturating_add(visible_row)
-            .min(frame.viewport.total_lines.saturating_sub(1)),
-        column: column.saturating_sub(frame.area.x),
+fn clamp_column(columns: &Range<u16>, column: u16) -> u16 {
+    column.clamp(columns.start, columns.end.saturating_sub(1))
+}
+
+fn distance_to_columns(columns: &Range<u16>, column: u16) -> u16 {
+    if column < columns.start {
+        columns.start - column
+    } else if column >= columns.end {
+        column.saturating_sub(columns.end.saturating_sub(1))
+    } else {
+        0
     }
 }
 
 fn render_selection_overlay(
     range: SelectionRange,
+    model: &SelectionModel,
     lines: &[String],
     viewport: ScrollbackViewport,
     area: Rect,
@@ -227,18 +387,22 @@ fn render_selection_overlay(
     theme: AstralTheme,
 ) {
     let (start, end) = range.normalized();
-    for line_index in start.line..=end.line {
+    let Some(selectable_range) = model.ranges.get(start.range) else {
+        return;
+    };
+    for selectable_line in selectable_range
+        .lines
+        .iter()
+        .filter(|line| (start.line..=end.line).contains(&line.line))
+    {
+        let line_index = selectable_line.line;
         if !(viewport.first_visible_line..viewport.end_visible_line).contains(&line_index) {
             continue;
         }
         let Some(line) = lines.get(line_index) else {
             continue;
         };
-        let width = u16::try_from(line_width(line.trim_end())).unwrap_or(u16::MAX);
-        let columns = expand_display_columns(
-            line.trim_end(),
-            selected_columns(start, end, line_index, width),
-        );
+        let columns = expand_display_columns(line, selected_columns(start, end, selectable_line));
         let y = area.y
             + u16::try_from(line_index.saturating_sub(viewport.first_visible_line))
                 .unwrap_or(u16::MAX);
@@ -253,17 +417,17 @@ fn render_selection_overlay(
 fn selected_columns(
     start: SelectionPoint,
     end: SelectionPoint,
-    line_index: usize,
-    width: u16,
+    line: &SelectableLine,
 ) -> Range<u16> {
+    let line_index = line.line;
     if start.line == end.line {
-        start.column.min(width)..end.column.saturating_add(1).min(width)
+        start.column.max(line.columns.start)..end.column.saturating_add(1).min(line.columns.end)
     } else if line_index == start.line {
-        start.column.min(width)..width
+        start.column.max(line.columns.start)..line.columns.end
     } else if line_index == end.line {
-        0..end.column.saturating_add(1).min(width)
+        line.columns.start..end.column.saturating_add(1).min(line.columns.end)
     } else {
-        0..width
+        line.columns.clone()
     }
 }
 
