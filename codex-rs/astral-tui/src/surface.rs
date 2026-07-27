@@ -20,6 +20,7 @@ use crate::ConversationState;
 use crate::PendingRequests;
 use crate::SessionState;
 use crate::composer::ComposerState;
+use crate::mcp_form::McpFormState;
 use crate::mention::MentionController;
 use crate::modal::ModalState;
 use crate::model_command::ModelResolveError;
@@ -79,6 +80,7 @@ pub struct SurfaceState {
     conversation: ConversationState,
     pending_requests: PendingRequests,
     request_user_input: RequestUserInputState,
+    mcp_form: McpFormState,
     composer: ComposerState,
     activity: SurfaceActivity,
     token_usage: Option<ThreadTokenUsage>,
@@ -102,6 +104,7 @@ impl SurfaceState {
             conversation: ConversationState::new(thread_id),
             pending_requests: PendingRequests::default(),
             request_user_input: RequestUserInputState::default(),
+            mcp_form: McpFormState::default(),
             composer: ComposerState::default(),
             activity: SurfaceActivity::Ready,
             token_usage: None,
@@ -128,6 +131,7 @@ impl SurfaceState {
             ),
             pending_requests: PendingRequests::default(),
             request_user_input: RequestUserInputState::default(),
+            mcp_form: McpFormState::default(),
             composer: ComposerState::default(),
             activity: if session.active_turn_id.is_some() {
                 SurfaceActivity::Working
@@ -427,19 +431,14 @@ pub(crate) fn render_surface_with_view(
     }
     let theme = state.theme();
     buffer.set_style(area, Style::default().bg(theme.bg_base));
-    state.sync_request_user_input();
+    state.sync_request_states();
 
     let has_request = state.pending_requests.front().is_some();
     let prompt_height = state.pending_requests.front().map_or_else(
         || prompt_height(state.composer(), state.composer_cursor(), area.width),
         |request| {
-            RequestPane::new(
-                request,
-                state.request_user_input(),
-                state.composer(),
-                state.composer_cursor(),
-            )
-            .height(area.height)
+            RequestPane::new(request, state.request_user_input(), state.mcp_form())
+                .height(area.height)
         },
     );
     let slash = state.slash().clone();
@@ -569,14 +568,10 @@ pub(crate) fn render_surface_with_view(
                 .map(|profile| profile.id.as_str()),
         )
     };
-    let request_pane = state.pending_requests.front().map(|request| {
-        RequestPane::new(
-            request,
-            state.request_user_input(),
-            state.composer(),
-            state.composer_cursor(),
-        )
-    });
+    let request_pane = state
+        .pending_requests
+        .front()
+        .map(|request| RequestPane::new(request, state.request_user_input(), state.mcp_form()));
     let cursor = if let Some(pane) = request_pane {
         pane.render(layout.prompt, buffer, theme)
     } else {

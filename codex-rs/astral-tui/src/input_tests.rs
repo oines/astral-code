@@ -455,6 +455,7 @@ fn declining_permissions_rejects_the_request() {
 #[test]
 fn mcp_form_and_url_elicitations_keep_typed_actions() {
     let mut state = SurfaceState::new("thread-1");
+    state.set_composer("keep this prompt draft");
     state.pending_requests_mut().note(request(json!({
         "method": "mcpServer/elicitation/request",
         "id": "mcp-form",
@@ -468,24 +469,84 @@ fn mcp_form_and_url_elicitations_keep_typed_actions() {
             "requestedSchema": {
                 "type": "object",
                 "properties": {
-                    "confirmed": {"type": "boolean"}
-                }
+                    "confirmed": {
+                        "type": "boolean",
+                        "title": "Confirm changes"
+                    },
+                    "count": {
+                        "type": "integer",
+                        "title": "Retry count",
+                        "minimum": 1,
+                        "maximum": 5
+                    },
+                    "features": {
+                        "type": "array",
+                        "title": "Features",
+                        "minItems": 1,
+                        "items": {
+                            "type": "string",
+                            "enum": ["search", "edit"]
+                        }
+                    }
+                },
+                "required": ["confirmed", "count", "features"]
             }
         }
     })));
-    state.set_composer(r#"{"confirmed":true}"#);
 
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Char(' '))),
+        InputAction::Redraw
+    );
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Enter)),
+        InputAction::Redraw
+    );
+    assert_eq!(handle_paste(&mut state, "2.5"), InputAction::Redraw);
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Enter)),
+        InputAction::Redraw
+    );
+    assert_eq!(state.mcp_form().error(), Some("Enter a whole number"));
+    for _ in 0..3 {
+        assert_eq!(
+            handle_key(&mut state, key(KeyCode::Backspace)),
+            InputAction::Redraw
+        );
+    }
+    assert_eq!(handle_paste(&mut state, "3"), InputAction::Redraw);
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Enter)),
+        InputAction::Redraw
+    );
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Char(' '))),
+        InputAction::Redraw
+    );
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Down)),
+        InputAction::Redraw
+    );
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Char(' '))),
+        InputAction::Redraw
+    );
     assert_eq!(
         handle_key(&mut state, key(KeyCode::Enter)),
         InputAction::Resolve(RequestResolution::Success {
             request_id: RequestId::String("mcp-form".to_string()),
             result: json!({
                 "action": "accept",
-                "content": {"confirmed": true},
+                "content": {
+                    "confirmed": true,
+                    "count": 3,
+                    "features": ["search", "edit"]
+                },
                 "_meta": null
             }),
         })
     );
+    assert_eq!(state.composer(), "keep this prompt draft");
 
     state.pending_requests_mut().note(request(json!({
         "method": "mcpServer/elicitation/request",
@@ -513,6 +574,7 @@ fn mcp_form_and_url_elicitations_keep_typed_actions() {
             }),
         })
     );
+    assert_eq!(state.composer(), "keep this prompt draft");
 }
 
 #[test]

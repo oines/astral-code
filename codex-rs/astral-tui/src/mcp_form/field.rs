@@ -28,25 +28,6 @@ pub(crate) enum McpFormControl {
     },
 }
 
-impl McpFormControl {
-    pub(crate) fn preview_detail(&self) -> Option<String> {
-        match self {
-            Self::Text { value } if value.is_empty() => None,
-            Self::Text { .. } => Some("default set".to_string()),
-            Self::Select {
-                choices, selected, ..
-            } => {
-                let defaults = if selected.is_empty() {
-                    String::new()
-                } else {
-                    format!(" · {} default", selected.len())
-                };
-                Some(format!("{} options{defaults}", choices.len()))
-            }
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct McpFormField {
     pub(crate) schema: McpFormFieldSchema,

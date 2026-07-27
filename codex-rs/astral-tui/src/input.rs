@@ -20,6 +20,7 @@ use crate::SlashInvocation;
 use crate::SurfaceActivity;
 use crate::SurfaceState;
 use crate::ThreadPickerAction;
+use crate::mcp_form::McpFormEvent;
 use crate::permission_picker::PermissionPickerInput;
 use crate::permission_picker::PermissionSelection;
 use crate::permission_picker::handle_key as handle_permission_picker_key;
@@ -135,6 +136,25 @@ pub fn handle_paste(state: &mut SurfaceState, text: &str) -> InputAction {
         });
     if let Some(params) = user_input {
         return if state.request_user_input_mut().handle_paste(&params, text) {
+            InputAction::Redraw
+        } else {
+            InputAction::None
+        };
+    }
+    let mcp_schema = state
+        .pending_requests()
+        .front()
+        .and_then(|request| match request {
+            PendingRequest::McpElicitation { params, .. } => match &params.request {
+                McpServerElicitationRequest::Form {
+                    requested_schema, ..
+                } => Some(requested_schema.clone()),
+                McpServerElicitationRequest::Url { .. } => None,
+            },
+            _ => None,
+        });
+    if let Some(schema) = mcp_schema {
+        return if state.mcp_form_mut().handle_paste(&schema, text) {
             InputAction::Redraw
         } else {
             InputAction::None
@@ -307,13 +327,6 @@ fn handle_request_key(
     request: PendingRequest,
     key: KeyEvent,
 ) -> InputAction {
-    let accepts_text_input = match &request {
-        PendingRequest::UserInput { .. } => false,
-        PendingRequest::McpElicitation { params, .. } => {
-            matches!(&params.request, McpServerElicitationRequest::Form { .. })
-        }
-        _ => false,
-    };
     let response = match request.clone() {
         PendingRequest::CommandExecution { params, .. } => command_response(&params, key.code),
         PendingRequest::FileChange { .. } => file_change_response(key.code),
@@ -331,9 +344,18 @@ fn handle_request_key(
                 }),
             }
         }
-        PendingRequest::McpElicitation { params, .. } => {
-            mcp_response(state.composer(), &params.request, key.code)
-        }
+        PendingRequest::McpElicitation { params, .. } => match &params.request {
+            McpServerElicitationRequest::Form {
+                requested_schema, ..
+            } => match state.mcp_form_mut().handle_key(requested_schema, key) {
+                McpFormEvent::None => return InputAction::None,
+                McpFormEvent::Redraw => return InputAction::Redraw,
+                McpFormEvent::Submit(response) => {
+                    Some(PendingRequestResponse::McpElicitation(response))
+                }
+            },
+            McpServerElicitationRequest::Url { .. } => mcp_url_response(key.code),
+        },
         PendingRequest::DynamicTool { .. } | PendingRequest::Attestation { .. } => None,
         PendingRequest::LegacyApplyPatch { .. } | PendingRequest::LegacyExecCommand { .. } => {
             Some(PendingRequestResponse::Reject {
@@ -344,14 +366,7 @@ fn handle_request_key(
     };
 
     let Some(response) = response else {
-        if !accepts_text_input {
-            return InputAction::None;
-        }
-        return if state.composer_state_mut().edit_key(key) {
-            InputAction::Redraw
-        } else {
-            InputAction::None
-        };
+        return InputAction::None;
     };
 
     let request_id = request.request_id().clone();
@@ -362,7 +377,7 @@ fn handle_request_key(
                 PendingRequest::McpElicitation { params, .. }
                     if matches!(params.request, McpServerElicitationRequest::Form { .. }) =>
                 {
-                    state.composer_state_mut().clear();
+                    state.reset_mcp_form();
                 }
                 _ => {}
             }
@@ -441,21 +456,11 @@ fn permissions_response(
     ))
 }
 
-fn mcp_response(
-    composer: &str,
-    request: &McpServerElicitationRequest,
-    key: KeyCode,
-) -> Option<PendingRequestResponse> {
+fn mcp_url_response(key: KeyCode) -> Option<PendingRequestResponse> {
     let (action, content) = match key {
         KeyCode::Char('n') => (McpServerElicitationAction::Decline, None),
         KeyCode::Esc => (McpServerElicitationAction::Cancel, None),
-        KeyCode::Char('y') if matches!(request, McpServerElicitationRequest::Url { .. }) => {
-            (McpServerElicitationAction::Accept, None)
-        }
-        KeyCode::Enter if matches!(request, McpServerElicitationRequest::Form { .. }) => {
-            let content = serde_json::from_str(composer).ok()?;
-            (McpServerElicitationAction::Accept, Some(content))
-        }
+        KeyCode::Char('y') => (McpServerElicitationAction::Accept, None),
         _ => return None,
     };
     Some(PendingRequestResponse::McpElicitation(
