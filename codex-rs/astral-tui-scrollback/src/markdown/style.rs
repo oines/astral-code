@@ -2,6 +2,14 @@ use ratatui::style::Color;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum MarkdownSyntaxTheme {
+    #[default]
+    Night,
+    Day,
+    Terminal,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MarkdownStyle {
     pub text: Style,
@@ -19,6 +27,7 @@ pub struct MarkdownStyle {
     pub link_url: Style,
     pub code: Style,
     pub code_background: Style,
+    pub syntax_theme: MarkdownSyntaxTheme,
     pub table_border: Style,
     pub table_header: Style,
 }
@@ -52,6 +61,7 @@ impl Default for MarkdownStyle {
             link_url: Style::default().fg(Color::DarkGray),
             code: Style::default().fg(Color::Gray),
             code_background: Style::default().bg(Color::Black),
+            syntax_theme: MarkdownSyntaxTheme::Night,
             table_border: Style::default().fg(Color::DarkGray),
             table_header: Style::default().add_modifier(Modifier::BOLD),
         }

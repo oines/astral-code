@@ -3,6 +3,7 @@
 // (Apache-2.0). Modified for Astral app-server turn and item metadata.
 
 use astral_tui_scrollback::MarkdownStyle;
+use astral_tui_scrollback::MarkdownSyntaxTheme;
 use astral_tui_scrollback::PresentationBlock;
 use astral_tui_scrollback::RenderOptions;
 use astral_tui_scrollback::render_block;
@@ -20,6 +21,7 @@ use crate::conversation::TranscriptBlock;
 use crate::conversation::TranscriptTurn;
 
 use super::AstralTheme;
+use super::AstralThemeId;
 
 const TIMESTAMP_WIDTH: usize = 8;
 
@@ -186,6 +188,13 @@ fn markdown_style(theme: AstralTheme) -> MarkdownStyle {
         link_url: gray,
         code: secondary,
         code_background: Style::default().bg(theme.panel_background),
+        syntax_theme: if theme == AstralTheme::for_id(AstralThemeId::Day) {
+            MarkdownSyntaxTheme::Day
+        } else if theme == AstralTheme::for_id(AstralThemeId::Terminal) {
+            MarkdownSyntaxTheme::Terminal
+        } else {
+            MarkdownSyntaxTheme::Night
+        },
         table_border: Style::default().fg(theme.gray_dim),
         table_header: primary.add_modifier(Modifier::BOLD),
     }
