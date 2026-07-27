@@ -1,0 +1,19 @@
+---
+source: astral-tui/src/theme_picker_tests.rs
+expression: buffer_text(&buffer)
+---
+
+
+                ┌─ Choose Astral theme ────────────────────[×]─┐
+                │                                              │
+                │  ❯ Astral Night (current)                    │
+                │      Dark palette with violet accents        │
+                │    Astral Day                                │
+                │      Light palette for bright environments   │
+                │    Terminal                                  │
+                │      Use terminal foreground and background  │
+                │                                              │
+                │                                              │
+                │                                              │
+                │   ↑/↓ preview · Enter select · Esc cancel    │
+                └──────────────────────────────────────────────┘

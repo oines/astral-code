@@ -26,6 +26,8 @@ use crate::ThreadPickerAction;
 use crate::permission_picker::PermissionPickerInput;
 use crate::permission_picker::PermissionSelection;
 use crate::permission_picker::handle_key as handle_permission_picker_key;
+use crate::theme_picker::ThemePickerInput;
+use crate::theme_picker::handle_key as handle_theme_picker_key;
 use crate::thread_picker::PickerInput;
 use crate::thread_picker::handle_key as handle_thread_picker_key;
 
@@ -63,6 +65,9 @@ pub fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
     }
     if state.permission_picker().is_some() {
         return handle_permission_picker_input(state, key);
+    }
+    if state.theme_picker().is_some() {
+        return handle_theme_picker_input(state, key);
     }
     if state.modal().is_some() {
         if key.code == KeyCode::Esc {
@@ -104,7 +109,10 @@ pub fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
 }
 
 pub fn handle_paste(state: &mut SurfaceState, text: &str) -> InputAction {
-    if state.permission_picker().is_some() {
+    if state.permission_picker().is_some()
+        || state.theme_picker().is_some()
+        || state.modal().is_some()
+    {
         return InputAction::None;
     }
     if let Some(picker) = state.thread_picker_mut() {
@@ -114,6 +122,34 @@ pub fn handle_paste(state: &mut SurfaceState, text: &str) -> InputAction {
     state.composer_mut().push_str(text);
     state.refresh_slash();
     InputAction::Redraw
+}
+
+fn handle_theme_picker_input(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
+    let original = state
+        .theme_picker()
+        .map(crate::theme_picker::ThemePickerState::original);
+    let Some(picker) = state.theme_picker_mut() else {
+        return InputAction::None;
+    };
+    match handle_theme_picker_key(picker, key) {
+        ThemePickerInput::None => InputAction::None,
+        ThemePickerInput::Preview(theme) => {
+            state.set_theme(theme);
+            InputAction::Redraw
+        }
+        ThemePickerInput::Select(theme) => {
+            state.set_theme(theme);
+            state.close_theme_picker();
+            InputAction::Redraw
+        }
+        ThemePickerInput::Cancel => {
+            if let Some(original) = original {
+                state.set_theme(original);
+            }
+            state.close_theme_picker();
+            InputAction::Redraw
+        }
+    }
 }
 
 fn handle_permission_picker_input(state: &mut SurfaceState, key: KeyEvent) -> InputAction {

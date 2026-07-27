@@ -11,13 +11,14 @@ use super::PermissionPickerState;
 use super::PermissionSelection;
 use super::handle_key;
 use super::render_picker;
+use crate::view::AstralTheme;
 
 #[test]
 fn permission_picker_snapshot() {
     let state = PermissionPickerState::new(Some(BUILT_IN_PERMISSION_PROFILE_WORKSPACE.to_string()));
     let area = Rect::new(0, 0, 80, 18);
     let mut buffer = Buffer::empty(area);
-    render_picker(&state, area, &mut buffer);
+    render_picker(&state, area, &mut buffer, AstralTheme::default());
 
     insta::assert_snapshot!(buffer_text(&buffer));
 }

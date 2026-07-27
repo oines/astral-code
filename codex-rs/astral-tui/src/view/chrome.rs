@@ -55,8 +55,8 @@ impl PromptChrome<'_> {
             theme.prompt_border
         };
         buffer.set_style(area, Style::default().fg(theme.text_primary).bg(bg));
-        render_border_row(area, area.y, '╭', '╮', border, buffer);
-        render_border_row(area, area.bottom() - 1, '╰', '╯', border, buffer);
+        render_border_row(area, area.y, '╭', '╮', border, bg, buffer);
+        render_border_row(area, area.bottom() - 1, '╰', '╯', border, bg, buffer);
         for y in area.y + 1..area.bottom() - 1 {
             set_border_cell(buffer, area.x, y, '│', border, bg);
             set_border_cell(buffer, area.right() - 1, y, '│', border, bg);
@@ -185,9 +185,9 @@ fn render_border_row(
     left: char,
     right: char,
     color: ratatui::style::Color,
+    background: ratatui::style::Color,
     buffer: &mut Buffer,
 ) {
-    let background = AstralTheme::default().bg_base;
     for x in area.x..area.right() {
         let character = if x == area.x {
             left

@@ -22,6 +22,7 @@ use super::render_surface_with_view;
 use crate::SessionState;
 use crate::modal::ModalRow;
 use crate::modal::ModalState;
+use crate::view::AstralThemeId;
 
 fn session_state() -> SessionState {
     let thread: Thread = serde_json::from_value(json!({
@@ -239,6 +240,66 @@ fn ecosystem_modal_scroll_snapshot() {
     state.open_modal(modal);
 
     insta::assert_snapshot!(render_at_size(&state, &session, 80, 24));
+}
+
+#[test]
+fn theme_picker_surface_snapshot() {
+    let session = session_state();
+    let mut state = SurfaceState::from_session(&session);
+    state.open_theme_picker();
+
+    insta::assert_snapshot!(render_at_size(&state, &session, 80, 24));
+}
+
+#[test]
+fn timeline_rail_surface_snapshot() {
+    let mut session = session_state();
+    session.thread.turns.push(
+        serde_json::from_value(json!({
+            "id": "turn-2",
+            "items": [
+                {
+                    "type": "userMessage",
+                    "id": "user-2",
+                    "content": [{
+                        "type": "text",
+                        "text": "continue with the implementation",
+                        "text_elements": []
+                    }]
+                },
+                {
+                    "type": "agentMessage",
+                    "id": "agent-2",
+                    "text": "I’m validating the next layer.",
+                    "phase": null,
+                    "memoryCitation": null
+                }
+            ],
+            "itemsView": "full",
+            "status": "completed",
+            "error": null,
+            "startedAt": 3,
+            "completedAt": 4,
+            "durationMs": 1000
+        }))
+        .expect("valid second turn"),
+    );
+    let mut state = SurfaceState::from_session(&session);
+    state.set_timeline_visible(true);
+
+    insta::assert_snapshot!(render_at_size(&state, &session, 80, 24));
+}
+
+#[test]
+fn selected_theme_controls_the_surface_background() {
+    let session = session_state();
+    let mut state = SurfaceState::from_session(&session);
+    state.set_theme(AstralThemeId::Day);
+    let area = Rect::new(0, 0, 80, 24);
+    let mut buffer = Buffer::empty(area);
+    render_surface(&state, &session, area, &mut buffer);
+
+    assert_eq!(buffer[(0, 0)].bg, state.theme().bg_base);
 }
 
 #[test]

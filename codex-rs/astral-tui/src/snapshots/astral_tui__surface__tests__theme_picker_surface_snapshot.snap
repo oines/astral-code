@@ -1,0 +1,27 @@
+---
+source: astral-tui/src/surface_tests.rs
+expression: "render_at_size(&state, &session, 80, 24)"
+---
+
+  ⎇ main  /workspace
+
+  ❯ inspect this repo
+                ┌─ Choose Astral theme ────────────────────[×]─┐
+  I’m tracing th│                                              │
+                │  ❯ Astral Night (current)                    │
+                │      Dark palette with violet accents        │
+                │    Astral Day                                │
+                │      Light palette for bright environments   │
+                │    Terminal                                  │
+                │      Use terminal foreground and background  │
+                │                                              │
+                │                                              │
+                │                                              │
+                │                                              │
+  ◇ Working     │                                              │
+                │                                              │
+  ╭─────────────│   ↑/↓ preview · Enter select · Esc cancel    │─────────────╮
+  │ ❯           └──────────────────────────────────────────────┘             │
+  ╰──────────────────────────────────────────── claude-sonnet-4 · workspace ─╯
+
+  Shift+Tab:mode

@@ -1,3 +1,5 @@
+mod appearance;
+
 use codex_app_server_protocol::McpServerElicitationRequest;
 use codex_app_server_protocol::Model;
 use codex_app_server_protocol::ThreadTokenUsage;
@@ -24,19 +26,18 @@ use crate::model_command::ModelResolveError;
 use crate::model_command::ModelSelection;
 use crate::permission_picker::PermissionPickerState;
 use crate::permission_picker::display_permission_mode;
-use crate::permission_picker::render_picker as render_permission_picker;
 use crate::render_block;
 use crate::slash::SlashCommandId;
 use crate::slash::SlashController;
 use crate::slash::SlashError;
 use crate::slash::SlashInvocation;
 use crate::slash::SlashSnapshot;
+use crate::theme_picker::ThemePickerState;
 use crate::thread_picker::PickerState;
-use crate::thread_picker::render_picker;
 use crate::view::AgentViewLayout;
 use crate::view::AgentViewLayoutInput;
 use crate::view::AstralTheme;
-use crate::view::InfoModal;
+use crate::view::AstralThemeId;
 use crate::view::LayoutConfig;
 use crate::view::PaneHeights;
 use crate::view::PromptChrome;
@@ -72,6 +73,9 @@ pub struct SurfaceState {
     modal: Option<ModalState>,
     thread_picker: Option<PickerState>,
     permission_picker: Option<PermissionPickerState>,
+    theme_picker: Option<ThemePickerState>,
+    theme: AstralThemeId,
+    timeline_visible: bool,
 }
 
 impl SurfaceState {
@@ -88,6 +92,9 @@ impl SurfaceState {
             modal: None,
             thread_picker: None,
             permission_picker: None,
+            theme_picker: None,
+            theme: AstralThemeId::default(),
+            timeline_visible: false,
         }
     }
 
@@ -111,6 +118,9 @@ impl SurfaceState {
             modal: None,
             thread_picker: None,
             permission_picker: None,
+            theme_picker: None,
+            theme: AstralThemeId::default(),
+            timeline_visible: false,
         }
     }
 
@@ -345,7 +355,7 @@ pub(crate) fn render_surface_with_view(
     if area.is_empty() {
         return None;
     }
-    let theme = AstralTheme::default();
+    let theme = state.theme();
     buffer.set_style(area, Style::default().bg(theme.bg_base));
 
     let request = request_lines(state.pending_requests.front(), state.composer(), area.width);
@@ -366,6 +376,8 @@ pub(crate) fn render_surface_with_view(
     let turn_status = (request.is_empty() && slash_height == 0)
         .then(|| turn_status_line(state, theme))
         .flatten();
+    let turn_count = session.thread.turns.len();
+    let timeline_width = appearance::timeline_width(state, area.width, turn_count);
     let layout = AgentViewLayout::compute(AgentViewLayoutInput {
         area,
         layout: LayoutConfig::default(),
@@ -378,7 +390,7 @@ pub(crate) fn render_surface_with_view(
             shortcuts: 1,
             ..PaneHeights::default()
         },
-        timeline_width: 0,
+        timeline_width,
         compact: false,
     });
 
@@ -397,6 +409,20 @@ pub(crate) fn render_surface_with_view(
     let visible_live = live_lines[start..end].to_vec();
 
     Paragraph::new(Text::from(visible_live)).render(layout.scrollback_content, buffer);
+    if layout.timeline_width > 0 {
+        appearance::render_timeline(
+            buffer,
+            theme,
+            appearance::TimelineFrame {
+                scrollback: layout.scrollback,
+                rail_x: layout.timeline_x,
+                turn_count,
+                scroll_offset,
+                first_visible_line: start,
+                total_lines: live_lines.len(),
+            },
+        );
+    }
     if let Some(turn_status) = turn_status {
         buffer.set_line(
             layout.turn_status.x,
@@ -450,14 +476,7 @@ pub(crate) fn render_surface_with_view(
         right: None,
     }
     .render(layout.shortcuts, buffer, theme);
-    if let Some(picker) = state.permission_picker() {
-        render_permission_picker(picker, area, buffer);
-        None
-    } else if let Some(picker) = state.thread_picker() {
-        render_picker(picker, area, buffer);
-        None
-    } else if let Some(modal) = state.modal() {
-        InfoModal { state: modal }.render(area, buffer, theme);
+    if appearance::render_overlay(state, area, buffer, theme) {
         None
     } else {
         cursor

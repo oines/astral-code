@@ -121,8 +121,8 @@ const COMMANDS: &[CommandSpec] = &[
     command!(
         Theme,
         "theme",
-        "Choose the terminal theme",
-        Args::None,
+        "Choose the Astral theme",
+        Args::Optional("theme"),
         true
     ),
     command!(

@@ -13,6 +13,7 @@ use super::PickerState;
 use super::ThreadPickerAction;
 use super::handle_key;
 use super::render_picker;
+use crate::view::AstralTheme;
 
 fn thread(id: &str, name: Option<&str>, preview: &str, cwd: &str, updated_at: i64) -> Thread {
     serde_json::from_value(json!({
@@ -71,7 +72,7 @@ fn picker_snapshot() {
     let state = state();
     let area = Rect::new(0, 0, 72, 13);
     let mut buffer = Buffer::empty(area);
-    render_picker(&state, area, &mut buffer);
+    render_picker(&state, area, &mut buffer, AstralTheme::default());
 
     insta::assert_snapshot!(buffer_text(&buffer));
 }
