@@ -72,9 +72,33 @@ fn picker_snapshot() {
     let state = state();
     let area = Rect::new(0, 0, 72, 13);
     let mut buffer = Buffer::empty(area);
-    render_picker(&state, area, &mut buffer, AstralTheme::default());
+    let theme = AstralTheme::default();
+    render_picker(&state, area, &mut buffer, theme);
 
     insta::assert_snapshot!(buffer_text(&buffer));
+}
+
+#[test]
+fn picker_owns_row_colors_and_omits_raw_timestamps() {
+    let state = state();
+    let area = Rect::new(0, 0, 72, 13);
+    let mut buffer = Buffer::empty(area);
+    let theme = AstralTheme::default();
+    render_picker(&state, area, &mut buffer, theme);
+
+    let rendered = buffer_text(&buffer);
+    assert!(!rendered.contains("updated"));
+    assert!(!rendered.contains("200"));
+    assert!(!rendered.contains("100"));
+
+    let diamonds = symbol_positions(&buffer, "◆");
+    assert_eq!(diamonds.len(), 2);
+    assert_eq!(buffer[diamonds[0]].bg, theme.panel_selected);
+    assert_eq!(buffer[diamonds[1]].bg, theme.bg_base);
+    assert_eq!(
+        buffer[(diamonds[0].0 + 2, diamonds[0].1)].fg,
+        theme.text_primary
+    );
 }
 
 #[test]
@@ -147,4 +171,17 @@ fn buffer_text(buffer: &Buffer) -> String {
         .join("\n")
         .trim_end()
         .to_string()
+}
+
+fn symbol_positions(buffer: &Buffer, symbol: &str) -> Vec<(u16, u16)> {
+    let area = buffer.area;
+    let mut positions = Vec::new();
+    for y in area.y..area.y + area.height {
+        for x in area.x..area.x + area.width {
+            if buffer[(x, y)].symbol() == symbol {
+                positions.push((x, y));
+            }
+        }
+    }
+    positions
 }
