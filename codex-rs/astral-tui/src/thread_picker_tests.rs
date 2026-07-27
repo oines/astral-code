@@ -83,6 +83,7 @@ fn picker_snapshot() {
 #[test]
 fn picker_owns_row_colors_and_omits_raw_timestamps() {
     let mut state = state();
+    state.query = "a".to_string();
     state.set_notice("load failed");
     let area = Rect::new(0, 0, 72, 13);
     let mut buffer = Buffer::empty(area);
@@ -121,6 +122,10 @@ fn picker_owns_row_colors_and_omits_raw_timestamps() {
 
     let search = text_position(&buffer, "Search:").expect("search label");
     assert_eq!(buffer[search].fg, theme.gray);
+    let query = (search.0.saturating_add(8), search.1);
+    assert_eq!(buffer[query].symbol(), "a");
+    assert_eq!(buffer[query].fg, theme.text_primary);
+    assert_eq!(buffer[query].bg, theme.bg_base);
     let count = text_position(&buffer, "1/2").expect("visible count");
     assert_eq!(buffer[count].fg, theme.gray);
     let more = text_position(&buffer, "more available").expect("pagination hint");
