@@ -17,6 +17,14 @@ code, and an Astral link
 ☑ Finished task
 ☐ Pending task
 
+┌──────────┬───────┐
+│ Feature  │ State │
+├──────────┼───────┤
+│ Markdown │ ready │
+├──────────┼───────┤
+│ Width    │    52 │
+└──────────┴───────┘
+
 ───
 
 fn main() {
