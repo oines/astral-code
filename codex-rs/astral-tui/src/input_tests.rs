@@ -9,6 +9,8 @@ use serde_json::json;
 use super::InputAction;
 use super::handle_key;
 use crate::RequestResolution;
+use crate::SlashCommandId;
+use crate::SlashInvocation;
 use crate::SurfaceActivity;
 use crate::SurfaceState;
 
@@ -64,6 +66,51 @@ fn transcript_shortcuts_are_distinct_from_composer_input() {
         InputAction::CopyLastResponse
     );
     assert!(state.composer().is_empty());
+}
+
+#[test]
+fn slash_completion_and_dispatch_do_not_submit_model_prompts() {
+    let mut state = SurfaceState::new("thread-1");
+    for character in "/mo".chars() {
+        assert_eq!(
+            handle_key(&mut state, key(KeyCode::Char(character))),
+            InputAction::Redraw
+        );
+    }
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Enter)),
+        InputAction::Redraw
+    );
+    assert_eq!(state.composer(), "/model");
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Enter)),
+        InputAction::Slash(SlashInvocation {
+            command: SlashCommandId::Model,
+            name: "model",
+            args: String::new(),
+        })
+    );
+    assert!(state.composer().is_empty());
+}
+
+#[test]
+fn slash_errors_stay_local_to_the_tui() {
+    let mut state = SurfaceState::new("thread-1");
+    state.composer_mut().push_str("/does-not-exist");
+    state.refresh_slash();
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Enter)),
+        InputAction::Notice("Unknown command: /does-not-exist".to_string())
+    );
+    assert_eq!(state.composer(), "/does-not-exist");
+
+    state.composer_mut().clear();
+    state.composer_mut().push_str("/model");
+    state.set_activity(SurfaceActivity::Working);
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Enter)),
+        InputAction::Notice("/model is unavailable while Astral is working".to_string())
+    );
 }
 
 #[test]

@@ -18,6 +18,7 @@ use crossterm::event::KeyModifiers;
 use crate::PendingRequest;
 use crate::PendingRequestResponse;
 use crate::RequestResolution;
+use crate::SlashInvocation;
 use crate::SurfaceActivity;
 use crate::SurfaceState;
 
@@ -31,6 +32,7 @@ pub enum InputAction {
     ScrollUp,
     ScrollDown,
     CopyLastResponse,
+    Slash(SlashInvocation),
     Resolve(RequestResolution),
     Notice(String),
 }
@@ -47,10 +49,36 @@ pub fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
 
 pub fn handle_paste(state: &mut SurfaceState, text: &str) -> InputAction {
     state.composer_mut().push_str(text);
+    state.refresh_slash();
     InputAction::Redraw
 }
 
 fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
+    if state.slash().open {
+        match key.code {
+            KeyCode::Esc => {
+                state.close_slash();
+                return InputAction::Redraw;
+            }
+            KeyCode::Up => {
+                state.move_slash_selection(-1);
+                return InputAction::Redraw;
+            }
+            KeyCode::Down => {
+                state.move_slash_selection(1);
+                return InputAction::Redraw;
+            }
+            KeyCode::Tab | KeyCode::BackTab => {
+                state.accept_slash_selection();
+                return InputAction::Redraw;
+            }
+            KeyCode::Enter if !state.slash().recognized => {
+                state.accept_slash_selection();
+                return InputAction::Redraw;
+            }
+            _ => {}
+        }
+    }
     match (key.code, key.modifiers) {
         (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
             if matches!(state.activity(), SurfaceActivity::Working) {
@@ -59,6 +87,7 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
                 InputAction::Exit
             } else {
                 state.composer_mut().clear();
+                state.refresh_slash();
                 InputAction::Redraw
             }
         }
@@ -71,6 +100,17 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
         (KeyCode::Enter, modifiers)
             if !modifiers.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) =>
         {
+            if state.slash().active {
+                return match state.slash_invocation() {
+                    Ok(Some(invocation)) => {
+                        state.take_composer();
+                        state.record_slash(invocation.command);
+                        InputAction::Slash(invocation)
+                    }
+                    Ok(None) => InputAction::Notice("Choose a slash command".to_string()),
+                    Err(error) => InputAction::Notice(error.to_string()),
+                };
+            }
             let prompt = state.take_composer();
             if prompt.trim().is_empty() {
                 InputAction::None
@@ -80,16 +120,19 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
         }
         (KeyCode::Enter, _) => {
             state.composer_mut().push('\n');
+            state.refresh_slash();
             InputAction::Redraw
         }
         (KeyCode::Backspace, _) => {
             state.composer_mut().pop();
+            state.refresh_slash();
             InputAction::Redraw
         }
         (KeyCode::Char(character), modifiers)
             if !modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::SUPER) =>
         {
             state.composer_mut().push(character);
+            state.refresh_slash();
             InputAction::Redraw
         }
         _ => InputAction::None,
