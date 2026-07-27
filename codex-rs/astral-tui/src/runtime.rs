@@ -24,6 +24,7 @@ use crate::ClientToolRegistry;
 use crate::InputAction;
 use crate::PendingRequestResponse;
 use crate::SessionError;
+use crate::SlashCommandId;
 use crate::SurfaceActivity;
 use crate::SurfaceState;
 use crate::TranscriptView;
@@ -337,6 +338,25 @@ async fn apply_input_action(
         },
         InputAction::Exit => return Ok(Some(RunExitReason::UserRequested)),
         InputAction::ScrollUp | InputAction::ScrollDown | InputAction::CopyLastResponse => {}
+        InputAction::Slash(invocation) => match invocation.command {
+            SlashCommandId::Exit | SlashCommandId::Quit => {
+                return Ok(Some(RunExitReason::UserRequested));
+            }
+            SlashCommandId::Copy => {
+                if let Some(response) = surface.last_agent_response().map(str::to_string) {
+                    match copy_to_clipboard(&response) {
+                        Ok(_) => surface.set_notice("Copied last agent response"),
+                        Err(error) => surface.set_notice(error),
+                    }
+                } else {
+                    surface.set_notice("No agent response to copy");
+                }
+            }
+            command => surface.set_notice(format!(
+                "/{} is recognized; its Astral action is not available yet ({command:?})",
+                invocation.name
+            )),
+        },
         InputAction::Resolve(resolution) => {
             if let Err(error) = session.resolve(resolution).await {
                 surface.set_notice(error.to_string());

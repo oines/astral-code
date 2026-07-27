@@ -18,6 +18,11 @@ use crate::PendingRequests;
 use crate::RenderOptions;
 use crate::SessionState;
 use crate::render_block;
+use crate::slash::SlashCommandId;
+use crate::slash::SlashController;
+use crate::slash::SlashError;
+use crate::slash::SlashInvocation;
+use crate::slash::SlashSnapshot;
 use crate::view::AgentViewLayout;
 use crate::view::AgentViewLayoutInput;
 use crate::view::AstralTheme;
@@ -51,6 +56,7 @@ pub struct SurfaceState {
     token_usage: Option<ThreadTokenUsage>,
     notice: Option<String>,
     scroll_offset: usize,
+    slash: SlashController,
 }
 
 impl SurfaceState {
@@ -63,6 +69,7 @@ impl SurfaceState {
             token_usage: None,
             notice: None,
             scroll_offset: 0,
+            slash: SlashController::default(),
         }
     }
 
@@ -82,6 +89,7 @@ impl SurfaceState {
             token_usage: None,
             notice: None,
             scroll_offset: 0,
+            slash: SlashController::default(),
         }
     }
 
@@ -110,7 +118,9 @@ impl SurfaceState {
     }
 
     pub fn take_composer(&mut self) -> String {
-        std::mem::take(&mut self.composer)
+        let composer = std::mem::take(&mut self.composer);
+        self.refresh_slash();
+        composer
     }
 
     pub fn activity(&self) -> &SurfaceActivity {
@@ -119,6 +129,7 @@ impl SurfaceState {
 
     pub fn set_activity(&mut self, activity: SurfaceActivity) {
         self.activity = activity;
+        self.refresh_slash();
     }
 
     pub fn token_usage(&self) -> Option<&ThreadTokenUsage> {
@@ -159,6 +170,39 @@ impl SurfaceState {
 
     pub fn drain_committable(&mut self) -> Vec<CommittedBlock> {
         self.conversation.drain_committable()
+    }
+
+    pub fn slash(&self) -> &SlashSnapshot {
+        self.slash.snapshot()
+    }
+
+    pub fn refresh_slash(&mut self) {
+        let working = matches!(self.activity, SurfaceActivity::Working);
+        self.slash.refresh(&self.composer, working);
+    }
+
+    pub fn move_slash_selection(&mut self, delta: isize) {
+        self.slash.move_selection(delta);
+    }
+
+    pub fn close_slash(&mut self) {
+        self.slash.close();
+    }
+
+    pub fn accept_slash_selection(&mut self) -> bool {
+        let working = matches!(self.activity, SurfaceActivity::Working);
+        self.slash.accept_selection(&mut self.composer, working)
+    }
+
+    pub fn slash_invocation(&self) -> Result<Option<SlashInvocation>, SlashError> {
+        self.slash.invocation(
+            &self.composer,
+            matches!(self.activity, SurfaceActivity::Working),
+        )
+    }
+
+    pub fn record_slash(&mut self, command: SlashCommandId) {
+        self.slash.record(command);
     }
 }
 
