@@ -19,9 +19,9 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use ratatui::style::Modifier;
+use ratatui::style::Style;
 use ratatui::style::Stylize;
-use ratatui::widgets::Paragraph;
-use ratatui::widgets::Widget;
 use tokio_stream::StreamExt;
 
 use crate::terminal_guard::TerminalGuard;
@@ -335,7 +335,11 @@ pub(crate) fn render_picker(
     buffer.set_line(
         content.x,
         content.y,
-        &vec!["Search: ".dim(), state.query.clone().cyan()].into(),
+        &vec![
+            "Search: ".fg(theme.gray).bg(theme.bg_base),
+            state.query.clone().fg(theme.text_primary).bg(theme.bg_base),
+        ]
+        .into(),
         content.width,
     );
     let list = Rect::new(
@@ -347,31 +351,76 @@ pub(crate) fn render_picker(
     let rows = usize::from(list.height / 2).max(1);
     let indices = state.filtered_indices();
     let start = state.selected.saturating_sub(rows.saturating_sub(1));
-    let mut lines = Vec::new();
-    for (visible_index, thread_index) in indices.iter().enumerate().skip(start).take(rows) {
+    buffer.set_style(
+        list,
+        Style::default().fg(theme.text_primary).bg(theme.bg_base),
+    );
+    let mut rendered_rows = 0;
+    for (row, (visible_index, thread_index)) in indices
+        .iter()
+        .enumerate()
+        .skip(start)
+        .take(rows)
+        .enumerate()
+    {
+        let y = list
+            .y
+            .saturating_add(u16::try_from(row.saturating_mul(2)).unwrap_or(u16::MAX));
+        if y >= list.bottom() {
+            break;
+        }
         let thread = &state.threads[*thread_index];
         let selected = visible_index == state.selected;
-        let marker = if selected { "❯ ".cyan() } else { "  ".into() };
-        let title = if selected {
-            thread_title(thread).bold()
+        let row_background = if selected {
+            theme.panel_selected
         } else {
-            thread_title(thread).into()
+            theme.bg_base
         };
-        lines.push(vec![marker, title].into());
-        lines.push(
-            vec![
-                "    ".into(),
-                thread.cwd.to_string_lossy().to_string().dim(),
-                " · ".dim(),
-                format!("updated {}", thread.updated_at).dim(),
-            ]
-            .into(),
+        buffer.set_style(
+            Rect::new(list.x, y, list.width, 1),
+            Style::default().fg(theme.text_primary).bg(row_background),
+        );
+        buffer.set_stringn(
+            list.x,
+            y,
+            "◆ ",
+            usize::from(list.width),
+            Style::default().fg(theme.gray_dim).bg(row_background),
+        );
+        buffer.set_stringn(
+            list.x.saturating_add(2),
+            y,
+            thread_title(thread),
+            usize::from(list.width.saturating_sub(2)),
+            if selected {
+                Style::default()
+                    .fg(theme.text_primary)
+                    .bg(row_background)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(theme.text_primary).bg(row_background)
+            },
+        );
+        if y + 1 < list.bottom() {
+            buffer.set_stringn(
+                list.x.saturating_add(4),
+                y + 1,
+                thread.cwd.to_string_lossy(),
+                usize::from(list.width.saturating_sub(4)),
+                Style::default().fg(theme.gray).bg(theme.bg_base),
+            );
+        }
+        rendered_rows += 1;
+    }
+    if rendered_rows == 0 {
+        buffer.set_stringn(
+            list.x,
+            list.y,
+            "  No matching Astral sessions",
+            usize::from(list.width),
+            Style::default().fg(theme.gray).bg(theme.bg_base),
         );
     }
-    if lines.is_empty() {
-        lines.push("  No matching Astral sessions".dim().into());
-    }
-    Paragraph::new(lines).render(list, buffer);
 
     let mut footer_line = vec![
         format!(
@@ -379,14 +428,19 @@ pub(crate) fn render_picker(
             state.selected.saturating_add(1).min(indices.len()),
             indices.len()
         )
-        .dim(),
+        .fg(theme.gray)
+        .bg(theme.bg_base),
     ];
     if state.next_cursor.is_some() {
-        footer_line.push(" · more available".cyan());
+        footer_line.push(
+            " · more available"
+                .fg(theme.accent_running)
+                .bg(theme.bg_base),
+        );
     }
     if let Some(notice) = &state.notice {
-        footer_line.push(" · ".dim());
-        footer_line.push(notice.clone().red());
+        footer_line.push(" · ".fg(theme.gray).bg(theme.bg_base));
+        footer_line.push(notice.clone().fg(theme.accent_error).bg(theme.bg_base));
     }
     buffer.set_line(
         content.x,
