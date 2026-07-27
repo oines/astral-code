@@ -4,6 +4,7 @@
 //! separately as app-server `UserInput::Skill` or `UserInput::Mention`.
 
 mod catalog;
+mod inventory;
 mod submission;
 
 pub(crate) use catalog::MentionCandidate;
