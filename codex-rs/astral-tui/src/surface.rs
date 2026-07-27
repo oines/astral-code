@@ -41,6 +41,8 @@ use crate::view::PaneHeights;
 use crate::view::PromptChrome;
 use crate::view::ScrollbackNavigation;
 use crate::view::ScrollbackPane;
+use crate::view::ScrollbackSelection;
+use crate::view::ScrollbackSelectionAction;
 use crate::view::ScrollbackViewport;
 use crate::view::ScrollbarConfig;
 use crate::view::ShortcutsBar;
@@ -75,6 +77,7 @@ pub struct SurfaceState {
     token_usage: Option<ThreadTokenUsage>,
     notice: Option<String>,
     scrollback: ScrollbackNavigation,
+    selection: ScrollbackSelection,
     slash: SlashController,
     modal: Option<ModalState>,
     thread_picker: Option<PickerState>,
@@ -94,6 +97,7 @@ impl SurfaceState {
             token_usage: None,
             notice: None,
             scrollback: ScrollbackNavigation::default(),
+            selection: ScrollbackSelection::default(),
             slash: SlashController::default(),
             modal: None,
             thread_picker: None,
@@ -120,6 +124,7 @@ impl SurfaceState {
             token_usage: None,
             notice: None,
             scrollback: ScrollbackNavigation::default(),
+            selection: ScrollbackSelection::default(),
             slash: SlashController::default(),
             modal: None,
             thread_picker: None,
@@ -208,6 +213,23 @@ impl SurfaceState {
 
     pub fn scroll_offset(&self) -> usize {
         self.scrollback.distance_from_bottom()
+    }
+
+    pub(crate) fn handle_scrollback_mouse(
+        &mut self,
+        mouse: crossterm::event::MouseEvent,
+    ) -> Option<String> {
+        match self.selection.handle_mouse(mouse) {
+            ScrollbackSelectionAction::ScrollUp => self.scroll_up(/*lines*/ 1),
+            ScrollbackSelectionAction::ScrollDown => self.scroll_down(/*lines*/ 1),
+            ScrollbackSelectionAction::Copy(text) => return Some(text),
+            ScrollbackSelectionAction::Ignored | ScrollbackSelectionAction::Redraw => {}
+        }
+        None
+    }
+
+    pub(crate) fn clear_scrollback_selection(&mut self) -> bool {
+        self.selection.clear()
     }
 
     pub fn last_agent_response(&self) -> Option<&str> {
@@ -439,6 +461,15 @@ pub(crate) fn render_surface_with_view(
         buffer,
         theme,
     );
+    if transcript_view == TranscriptView::Full {
+        state.selection.render(
+            &transcript.lines,
+            viewport,
+            layout.scrollback_content,
+            buffer,
+            theme,
+        );
+    }
     render_follow_indicator(
         viewport,
         layout.scrollback,

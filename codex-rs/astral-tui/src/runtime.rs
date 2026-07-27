@@ -258,7 +258,19 @@ async fn run_loop(
                             match mouse.kind {
                                 MouseEventKind::ScrollUp => surface.scroll_up(/*lines*/ 3),
                                 MouseEventKind::ScrollDown => surface.scroll_down(/*lines*/ 3),
-                                _ => {}
+                                _ => {
+                                    if let Some(selection) =
+                                        surface.handle_scrollback_mouse(mouse)
+                                    {
+                                        match copy_to_clipboard(&selection) {
+                                            Ok(lease) => {
+                                                _clipboard_lease = Some(lease);
+                                                surface.set_notice("Copied selection");
+                                            }
+                                            Err(error) => surface.set_notice(error),
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
