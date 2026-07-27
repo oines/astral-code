@@ -86,6 +86,7 @@ fn width_change_reflows_the_same_markdown_snapshot() {
 fn metadata_distinguishes_word_and_midword_wraps() {
     let words = render_markdown_with_metadata("alpha beta gamma", 10, MarkdownStyle::default());
     let midword = render_markdown_with_metadata("abcdefghij", 5, MarkdownStyle::default());
+    let paragraphs = render_markdown_with_metadata("alpha\n\nomega", 10, MarkdownStyle::default());
 
     assert_eq!(
         words
@@ -105,6 +106,17 @@ fn metadata_distinguishes_word_and_midword_wraps() {
         vec![
             ("abcde".to_string(), LineJoiner::HardBreak),
             ("fghij".to_string(), LineJoiner::None),
+        ]
+    );
+    assert_eq!(
+        paragraphs
+            .iter()
+            .map(|line| (line.line.to_string(), line.joiner_to_previous))
+            .collect::<Vec<_>>(),
+        vec![
+            ("alpha".to_string(), LineJoiner::HardBreak),
+            (String::new(), LineJoiner::HardBreak),
+            ("omega".to_string(), LineJoiner::HardBreak),
         ]
     );
 }
