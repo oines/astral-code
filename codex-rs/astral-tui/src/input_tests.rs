@@ -212,6 +212,22 @@ fn theme_cancel_restores_the_original_preview() {
 }
 
 #[test]
+fn theme_selection_reports_the_persisted_name() {
+    let mut state = SurfaceState::new("thread-1");
+    state.open_theme_picker();
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Down)),
+        InputAction::Redraw
+    );
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Enter)),
+        InputAction::SelectTheme("astral-day".to_string())
+    );
+    assert_eq!(state.theme_id(), AstralThemeId::Day);
+    assert!(state.theme_picker().is_none());
+}
+
+#[test]
 fn thread_picker_owns_text_input_until_escape() {
     let mut state = SurfaceState::new("thread-1");
     state.open_thread_picker(PickerState::new(

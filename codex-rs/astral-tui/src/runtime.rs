@@ -60,6 +60,7 @@ pub struct RunOptions {
     pub viewport: RunViewport,
     pub viewport_rows: u16,
     pub client_tools: ClientToolRegistry,
+    pub initial_theme: Option<String>,
 }
 
 impl Default for RunOptions {
@@ -68,6 +69,7 @@ impl Default for RunOptions {
             viewport: RunViewport::Fullscreen,
             viewport_rows: 12,
             client_tools: ClientToolRegistry::default(),
+            initial_theme: None,
         }
     }
 }
@@ -89,6 +91,7 @@ pub struct RunExit {
     pub thread_id: String,
     pub thread_name: Option<String>,
     pub token_usage: Option<ThreadTokenUsage>,
+    pub theme_selection: Option<String>,
     pub reason: RunExitReason,
 }
 
@@ -134,6 +137,9 @@ impl From<SessionError> for RunError {
 pub async fn run(mut session: AstralSession, options: RunOptions) -> Result<RunExit, RunError> {
     let initial_state = session.state().cloned().ok_or(RunError::NoThread)?;
     let mut surface = SurfaceState::from_session(&initial_state);
+    if let Some(theme) = configured_theme(options.initial_theme.as_deref()) {
+        surface.set_theme(theme);
+    }
     surface.set_color_level(ColorLevel::detect());
     match session.list_models().await {
         Ok(models) => surface.set_model_catalog(
@@ -155,7 +161,15 @@ pub async fn run(mut session: AstralSession, options: RunOptions) -> Result<RunE
     let mut terminal = AstralTerminal::with_options(backend, TerminalOptions { viewport })?;
     terminal.hide_cursor()?;
 
-    let result = run_loop(&mut terminal, &mut session, &mut surface, options).await;
+    let mut theme_selection = None;
+    let result = run_loop(
+        &mut terminal,
+        &mut session,
+        &mut surface,
+        &mut theme_selection,
+        options,
+    )
+    .await;
     let _ = terminal.show_cursor();
     drop(terminal);
     guard.restore();
@@ -178,6 +192,7 @@ pub async fn run(mut session: AstralSession, options: RunOptions) -> Result<RunE
         thread_id,
         thread_name,
         token_usage,
+        theme_selection,
         reason,
     })
 }
@@ -186,6 +201,7 @@ async fn run_loop(
     terminal: &mut AstralTerminal,
     session: &mut AstralSession,
     surface: &mut SurfaceState,
+    theme_selection: &mut Option<String>,
     options: RunOptions,
 ) -> Result<RunExitReason, RunError> {
     let mut input = EventStream::new();
@@ -255,7 +271,7 @@ async fn run_loop(
                             action => action,
                         };
                         if let Some(reason) =
-                            apply_input_action(session, surface, action).await?
+                            apply_input_action(session, surface, theme_selection, action).await?
                         {
                             reject_pending(session, surface).await;
                             return Ok(reason);
@@ -373,6 +389,7 @@ fn draw(
 async fn apply_input_action(
     session: &mut AstralSession,
     surface: &mut SurfaceState,
+    theme_selection: &mut Option<String>,
     action: InputAction,
 ) -> Result<Option<RunExitReason>, RunError> {
     match action {
@@ -399,6 +416,10 @@ async fn apply_input_action(
         },
         InputAction::Exit => return Ok(Some(RunExitReason::UserRequested)),
         InputAction::ScrollUp | InputAction::ScrollDown | InputAction::CopyLastResponse => {}
+        InputAction::SelectTheme(name) => {
+            *theme_selection = Some(name.clone());
+            surface.set_notice(format!("Switched to {name}"));
+        }
         InputAction::ThreadPickerLoadNext => {
             let cursor = surface
                 .thread_picker()
@@ -523,6 +544,7 @@ async fn apply_input_action(
                     surface.open_theme_picker();
                 } else if let Some(theme) = AstralThemeId::from_name(name) {
                     surface.set_theme(theme);
+                    *theme_selection = Some(theme.config_name().to_string());
                     surface.set_notice(format!("Switched to {}", theme.label()));
                 } else {
                     surface
@@ -622,6 +644,10 @@ async fn apply_input_action(
         InputAction::Notice(message) => surface.set_notice(message),
     }
     Ok(None)
+}
+
+fn configured_theme(name: Option<&str>) -> Option<AstralThemeId> {
+    name.and_then(AstralThemeId::from_name)
 }
 
 async fn set_collaboration_mode(

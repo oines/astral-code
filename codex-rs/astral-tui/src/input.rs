@@ -47,6 +47,7 @@ pub enum InputAction {
         action: ThreadPickerAction,
         thread: Box<Thread>,
     },
+    SelectTheme(String),
     SelectPermission(PermissionSelection),
     CycleMode,
     OpenShortcuts,
@@ -146,7 +147,7 @@ fn handle_theme_picker_input(state: &mut SurfaceState, key: KeyEvent) -> InputAc
         ThemePickerInput::Select(theme) => {
             state.set_theme(theme);
             state.close_theme_picker();
-            InputAction::Redraw
+            InputAction::SelectTheme(theme.config_name().to_string())
         }
         ThemePickerInput::Cancel => {
             if let Some(original) = original {

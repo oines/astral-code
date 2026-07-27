@@ -30,6 +30,14 @@ impl AstralThemeId {
         }
     }
 
+    pub(crate) fn config_name(self) -> &'static str {
+        match self {
+            Self::Night => "astral-night",
+            Self::Day => "astral-day",
+            Self::Terminal => "terminal",
+        }
+    }
+
     pub(crate) fn from_name(name: &str) -> Option<Self> {
         match name.trim().to_ascii_lowercase().as_str() {
             "night" | "astral-night" => Some(Self::Night),

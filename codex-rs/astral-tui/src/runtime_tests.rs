@@ -10,14 +10,30 @@ use pretty_assertions::assert_eq;
 
 use super::RunOptions;
 use super::RunViewport;
+use super::configured_theme;
 use super::handle_notification;
 use super::viewport_rows;
 use crate::SurfaceActivity;
 use crate::SurfaceState;
+use crate::view::AstralThemeId;
 
 #[test]
 fn fullscreen_is_the_default_viewport() {
     assert_eq!(RunOptions::default().viewport, RunViewport::Fullscreen);
+    assert_eq!(RunOptions::default().initial_theme, None);
+}
+
+#[test]
+fn persisted_astral_theme_is_restored_without_accepting_classic_theme_names() {
+    assert_eq!(
+        configured_theme(Some("astral-day")),
+        Some(AstralThemeId::Day)
+    );
+    assert_eq!(
+        configured_theme(Some("terminal")),
+        Some(AstralThemeId::Terminal)
+    );
+    assert_eq!(configured_theme(Some("dracula")), None);
 }
 
 #[test]
