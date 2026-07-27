@@ -4,8 +4,8 @@ expression: rendered
 ---
 ◆ Read main.rs  16ms
   │ fn main() {}
-× Failed main.rs  22ms
+× Edit main.rs  22ms
   │ old_string was not unique
-◇ Running cargo check
+◇ Run cargo check
   │ Checking astral-tui
-◆ Listed **/*.rs  8ms
+◆ List **/*.rs  8ms

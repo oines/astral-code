@@ -58,24 +58,17 @@ pub fn render_block(block: &PresentationBlock, options: RenderOptions) -> Text<'
 fn render_subagent(subagent: &SubagentPresentation, options: RenderOptions) -> Text<'static> {
     let mut header = vec![
         status_marker(subagent.status).set_style(status_style(subagent.status)),
-        subagent_title(subagent).bold(),
+        "Subagent ".bold().dim(),
+        subagent_summary(subagent, options.width).dim(),
     ];
     let meta = subagent_meta(subagent);
     if !meta.is_empty() {
-        header.push(format!("  {meta}").magenta());
+        header.push(format!(" {meta}").dim());
     }
     let mut lines = vec![Line::from(header)];
 
-    if matches!(subagent.action, SubagentAction::Spawn)
-        && let Some(prompt) = subagent.prompt.as_deref()
-    {
-        lines.extend(indented_lines(
-            &quoted_preview(prompt, 120),
-            options.width,
-            "  ",
-            true,
-        ));
-    } else if options.expanded
+    if options.expanded
+        && !matches!(subagent.action, SubagentAction::Spawn)
         && let Some(prompt) = subagent.prompt.as_deref()
     {
         lines.extend(indented_lines(prompt, options.width, "  ", true));
@@ -87,28 +80,40 @@ fn render_subagent(subagent: &SubagentPresentation, options: RenderOptions) -> T
     Text::from(lines)
 }
 
-fn subagent_title(subagent: &SubagentPresentation) -> String {
+fn subagent_summary(subagent: &SubagentPresentation, width: u16) -> String {
     let target = match subagent.thread_ids.as_slice() {
         [] => "agent".to_string(),
         [thread_id] => thread_id.clone(),
         thread_ids => format!("{} agents", thread_ids.len()),
     };
+    let prompt = subagent
+        .prompt
+        .as_deref()
+        .map(|prompt| quoted_preview(prompt, usize::from(width).saturating_sub(24).max(12)));
     match (subagent.action, subagent.status) {
-        (SubagentAction::Spawn, ToolStatus::Running) => "Starting subagent".to_string(),
-        (SubagentAction::Spawn, ToolStatus::Success) => format!("Spawned {target}"),
-        (SubagentAction::Spawn, _) => "Agent spawn failed".to_string(),
-        (SubagentAction::SendInput, ToolStatus::Running) => format!("Sending input to {target}"),
-        (SubagentAction::SendInput, ToolStatus::Success) => format!("Sent input to {target}"),
-        (SubagentAction::SendInput, _) => format!("Failed to send input to {target}"),
-        (SubagentAction::Resume, ToolStatus::Running) => format!("Resuming {target}"),
-        (SubagentAction::Resume, ToolStatus::Success) => format!("Resumed {target}"),
-        (SubagentAction::Resume, _) => format!("Failed to resume {target}"),
-        (SubagentAction::Wait, ToolStatus::Running) => format!("Waiting for {target}"),
-        (SubagentAction::Wait, ToolStatus::Success) => "Finished waiting".to_string(),
-        (SubagentAction::Wait, _) => "Wait finished with errors".to_string(),
-        (SubagentAction::Close, ToolStatus::Running) => format!("Closing {target}"),
-        (SubagentAction::Close, ToolStatus::Success) => format!("Closed {target}"),
-        (SubagentAction::Close, _) => format!("Failed to close {target}"),
+        (SubagentAction::Spawn, ToolStatus::Running) => {
+            format!("running: {}", prompt.unwrap_or(target))
+        }
+        (SubagentAction::Spawn, ToolStatus::Success) => {
+            format!("started: {}", prompt.unwrap_or(target))
+        }
+        (SubagentAction::Spawn, _) => format!("failed: {}", prompt.unwrap_or(target)),
+        (SubagentAction::SendInput, ToolStatus::Running) => {
+            format!("sending input to {target}")
+        }
+        (SubagentAction::SendInput, ToolStatus::Success) => {
+            format!("input sent to {target}")
+        }
+        (SubagentAction::SendInput, _) => format!("input failed for {target}"),
+        (SubagentAction::Resume, ToolStatus::Running) => format!("resuming {target}"),
+        (SubagentAction::Resume, ToolStatus::Success) => format!("resumed {target}"),
+        (SubagentAction::Resume, _) => format!("resume failed for {target}"),
+        (SubagentAction::Wait, ToolStatus::Running) => format!("waiting for {target}"),
+        (SubagentAction::Wait, ToolStatus::Success) => "wait completed".to_string(),
+        (SubagentAction::Wait, _) => "wait finished with errors".to_string(),
+        (SubagentAction::Close, ToolStatus::Running) => format!("closing {target}"),
+        (SubagentAction::Close, ToolStatus::Success) => format!("closed {target}"),
+        (SubagentAction::Close, _) => format!("close failed for {target}"),
     }
 }
 
@@ -200,11 +205,15 @@ fn render_plan(text: &str, running: bool, options: RenderOptions) -> Text<'stati
 
 fn render_tool(tool: &ToolPresentation, options: RenderOptions) -> Text<'static> {
     let marker = status_marker(tool.status);
-    let mut header = vec![
-        marker.set_style(status_style(tool.status)),
-        format!("{} ", tool_verb(tool.kind, tool.status)).into(),
-        tool.title.clone().bold(),
-    ];
+    let mut header = vec![marker.set_style(status_style(tool.status))];
+    if tool.kind == ToolKind::Mcp {
+        header.extend(mcp_header(tool));
+    } else {
+        header.extend([
+            format!("{} ", tool_label(tool.kind)).bold().dim(),
+            tool.title.clone().dim(),
+        ]);
+    }
     if let Some(duration_ms) = tool.duration_ms {
         header.push(format!("  {}", duration_label(duration_ms)).dim());
     }
@@ -259,6 +268,23 @@ fn render_tool(tool: &ToolPresentation, options: RenderOptions) -> Text<'static>
         lines.extend(output_lines);
     }
     Text::from(lines)
+}
+
+fn mcp_header(tool: &ToolPresentation) -> Vec<Span<'static>> {
+    let (server, action) = tool
+        .name
+        .split_once('/')
+        .unwrap_or(("", tool.name.as_str()));
+    let mut spans = Vec::new();
+    if !server.is_empty() {
+        spans.push(format!("{server} ").bold().dim());
+    }
+    spans.push(action.replace(['_', '-'], " ").dim());
+    if tool.title != action {
+        spans.push(" · ".dim());
+        spans.push(tool.title.clone().dim());
+    }
+    spans
 }
 
 fn wrapped_lines(
@@ -330,41 +356,20 @@ fn status_style(status: ToolStatus) -> ratatui::style::Style {
     }
 }
 
-fn tool_verb(kind: ToolKind, status: ToolStatus) -> &'static str {
-    match status {
-        ToolStatus::Failed => return "Failed",
-        ToolStatus::Declined => return "Declined",
-        ToolStatus::Interrupted => return "Interrupted",
-        ToolStatus::Running | ToolStatus::Success => {}
-    }
-    let running = status == ToolStatus::Running;
-    match (kind, running) {
-        (ToolKind::Execute, true) => "Running",
-        (ToolKind::Execute, false) => "Ran",
-        (ToolKind::Background, true) => "Running background",
-        (ToolKind::Background, false) => "Finished background",
-        (ToolKind::Read, true) => "Reading",
-        (ToolKind::Read, false) => "Read",
-        (ToolKind::Edit, true) => "Editing",
-        (ToolKind::Edit, false) => "Edited",
-        (ToolKind::List, true) => "Listing",
-        (ToolKind::List, false) => "Listed",
-        (ToolKind::Search | ToolKind::WebSearch, true) => "Searching",
-        (ToolKind::Search | ToolKind::WebSearch, false) => "Searched",
-        (ToolKind::WebFetch, true) => "Fetching",
-        (ToolKind::WebFetch, false) => "Fetched",
-        (ToolKind::Mcp, true) => "Calling",
-        (ToolKind::Mcp, false) => "Called",
-        (ToolKind::Skill, true) => "Loading",
-        (ToolKind::Skill, false) => "Loaded",
-        (ToolKind::Collab, true) => "Coordinating",
-        (ToolKind::Collab, false) => "Coordinated",
-        (ToolKind::ImageView, true) => "Viewing",
-        (ToolKind::ImageView, false) => "Viewed",
-        (ToolKind::ImageGeneration, true) => "Generating",
-        (ToolKind::ImageGeneration, false) => "Generated",
-        (ToolKind::Other, true) => "Using",
-        (ToolKind::Other, false) => "Used",
+fn tool_label(kind: ToolKind) -> &'static str {
+    match kind {
+        ToolKind::Execute | ToolKind::Background => "Run",
+        ToolKind::Read => "Read",
+        ToolKind::Edit => "Edit",
+        ToolKind::List => "List",
+        ToolKind::Search | ToolKind::WebSearch => "Search",
+        ToolKind::WebFetch => "Fetch",
+        ToolKind::Mcp => "",
+        ToolKind::Skill => "Skill",
+        ToolKind::Collab => "Subagent",
+        ToolKind::ImageView => "View",
+        ToolKind::ImageGeneration => "Generate",
+        ToolKind::Other => "Use",
     }
 }
 

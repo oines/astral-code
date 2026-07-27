@@ -16,7 +16,10 @@ use serde_json::json;
 use super::RenderOptions;
 use super::render_block;
 use crate::PresentationBlock;
+use crate::SubagentAction;
+use crate::SubagentPresentation;
 use crate::TimelineStream;
+use crate::ToolStatus;
 
 fn render(item: ThreadItem, expanded: bool) -> String {
     let block = PresentationBlock::from_item(&item, &crate::TimelineStream::None)
@@ -379,6 +382,45 @@ fn subagent_lifecycle_blocks_snapshot() {
     let rendered = items
         .into_iter()
         .map(|item| render(item, false))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_snapshot!(rendered);
+}
+
+#[test]
+fn subagent_action_chrome_snapshot() {
+    let blocks = [
+        (
+            SubagentAction::SendInput,
+            ToolStatus::Running,
+            "Check tests",
+        ),
+        (SubagentAction::Resume, ToolStatus::Success, ""),
+        (SubagentAction::Wait, ToolStatus::Success, ""),
+        (SubagentAction::Close, ToolStatus::Failed, ""),
+    ]
+    .map(|(action, status, prompt)| {
+        PresentationBlock::Subagent(SubagentPresentation {
+            action,
+            status,
+            thread_ids: vec!["agent-review".to_string()],
+            prompt: (!prompt.is_empty()).then(|| prompt.to_string()),
+            model: None,
+            reasoning_effort: None,
+            agents: Vec::new(),
+        })
+    });
+
+    let rendered = blocks
+        .iter()
+        .map(|block| {
+            render_block(block, RenderOptions::compact(68))
+                .lines
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
         .collect::<Vec<_>>()
         .join("\n");
     assert_snapshot!(rendered);
