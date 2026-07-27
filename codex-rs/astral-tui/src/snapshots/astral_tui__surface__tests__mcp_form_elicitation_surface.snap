@@ -13,10 +13,10 @@ expression: "request_surface(json!({\n    \"method\": \"mcpServer/elicitation/re
 
 
 
-
  ┃
  ┃  astral needs structured input
  ┃  Choose settings
+ ┃  confirmed · yes/no
  ┃
  ┃  ❯ {"confirmed":true}
  Enter:submit  │  N:decline  │  Esc:cancel

@@ -275,12 +275,28 @@ impl<'a> RequestPane<'a> {
                     user_input::push_content(&mut rows, params, self.request_user_input, max_rows);
             }
             PendingRequest::McpElicitation { params, .. } => match &params.request {
-                McpServerElicitationRequest::Form { message, .. } => {
+                McpServerElicitationRequest::Form {
+                    message,
+                    requested_schema,
+                    ..
+                } => {
                     rows.push(PaneRow::Title(format!(
                         "{} needs structured input",
                         params.server_name
                     )));
                     rows.push(PaneRow::Body(message.clone()));
+                    let fields = crate::mcp_form_schema::project_fields(requested_schema);
+                    for field in fields.iter().take(3) {
+                        let required = if field.required { " · required" } else { "" };
+                        rows.push(PaneRow::Body(format!(
+                            "{} · {}{required}",
+                            field.title,
+                            field.kind.label()
+                        )));
+                    }
+                    if fields.len() > 3 {
+                        rows.push(PaneRow::Body(format!("… {} more fields", fields.len() - 3)));
+                    }
                     rows.push(PaneRow::Blank);
                     rows.push(PaneRow::Input {
                         text: self.composer.to_string(),
