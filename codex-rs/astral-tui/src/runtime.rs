@@ -14,6 +14,7 @@ use codex_app_server_protocol::UserInput;
 use codex_protocol::config_types::ModeKind;
 use crossterm::event::Event;
 use crossterm::event::EventStream;
+use crossterm::event::MouseEventKind;
 use ratatui::TerminalOptions;
 use ratatui::Viewport;
 use ratatui::backend::CrosstermBackend;
@@ -252,7 +253,16 @@ async fn run_loop(
                         let _ = handle_paste(surface, &text);
                     }
                     Event::Resize(_, _) => {}
-                    Event::FocusGained | Event::FocusLost | Event::Mouse(_) => {}
+                    Event::Mouse(mouse) => {
+                        if options.viewport == RunViewport::Fullscreen {
+                            match mouse.kind {
+                                MouseEventKind::ScrollUp => surface.scroll_up(/*lines*/ 3),
+                                MouseEventKind::ScrollDown => surface.scroll_down(/*lines*/ 3),
+                                _ => {}
+                            }
+                        }
+                    }
+                    Event::FocusGained | Event::FocusLost => {}
                 }
             }
             app_event = session.next_event() => {

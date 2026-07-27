@@ -1,7 +1,9 @@
 use std::io;
 
 use crossterm::event::DisableBracketedPaste;
+use crossterm::event::DisableMouseCapture;
 use crossterm::event::EnableBracketedPaste;
+use crossterm::event::EnableMouseCapture;
 use crossterm::execute;
 use crossterm::terminal::EnterAlternateScreen;
 use crossterm::terminal::LeaveAlternateScreen;
@@ -34,7 +36,8 @@ impl TerminalGuard {
             Screen::Alternate => execute!(
                 std::io::stdout(),
                 EnterAlternateScreen,
-                EnableBracketedPaste
+                EnableBracketedPaste,
+                EnableMouseCapture
             )?,
         }
         if let Err(error) = enable_raw_mode() {
@@ -45,6 +48,7 @@ impl TerminalGuard {
                 Screen::Alternate => {
                     let _ = execute!(
                         std::io::stdout(),
+                        DisableMouseCapture,
                         DisableBracketedPaste,
                         LeaveAlternateScreen
                     );
@@ -70,6 +74,7 @@ impl TerminalGuard {
             Screen::Alternate => {
                 let _ = execute!(
                     std::io::stdout(),
+                    DisableMouseCapture,
                     DisableBracketedPaste,
                     LeaveAlternateScreen
                 );

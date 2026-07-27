@@ -7,6 +7,7 @@
 mod chrome;
 mod layout;
 mod modal;
+mod scrollback;
 mod slash_menu;
 mod theme;
 
@@ -22,6 +23,8 @@ pub(crate) use layout::ScrollbarConfig;
 pub(crate) use modal::InfoModal;
 pub(crate) use modal::ModalHeight;
 pub(crate) use modal::render_modal_frame;
+pub(crate) use scrollback::ScrollbackPane;
+pub(crate) use scrollback::render_follow_indicator;
 pub(crate) use slash_menu::SlashMenu;
 pub(crate) use theme::AstralTheme;
 pub(crate) use theme::AstralThemeId;

@@ -1,0 +1,27 @@
+---
+source: astral-tui/src/surface_tests.rs
+expression: buffer_text(&buffer)
+---
+
+  ⎇ main  /workspace
+
+  Response 3 keeps enough content to make the transcript overflow.
+
+  ❯ question 4: inspect the layered transcript
+
+  Response 4 keeps enough content to make the transcript overflow.
+                                                                               █
+  ❯ question 5: inspect the layered transcript                                 █
+                                                                               █
+  Response 5 keeps enough content to make the transcript overflow.             █
+                                                                               █
+  ❯ question 6: inspect the layered transcript
+
+                                        ▼
+  history ↑5
+
+  ╭──────────────────────────────────────────────────────────────────────────╮
+  │ ❯                                                                        │
+  ╰──────────────────────────────────────────── claude-sonnet-4 · workspace ─╯
+
+  Shift+Tab:mode  │  Ctrl+.:shortcuts

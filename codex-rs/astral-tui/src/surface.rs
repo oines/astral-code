@@ -9,7 +9,6 @@ use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
-use ratatui::text::Text;
 use ratatui::widgets::Clear;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
@@ -42,11 +41,13 @@ use crate::view::AstralThemeId;
 use crate::view::LayoutConfig;
 use crate::view::PaneHeights;
 use crate::view::PromptChrome;
+use crate::view::ScrollbackPane;
 use crate::view::ScrollbarConfig;
 use crate::view::ShortcutsBar;
 use crate::view::SlashMenu;
 use crate::view::StatusBar;
 use crate::view::prompt_height;
+use crate::view::render_follow_indicator;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SurfaceActivity {
@@ -423,18 +424,32 @@ pub(crate) fn render_surface_with_view(
     render_status_bar(state, session, layout.status_bar, buffer, theme);
 
     let live_lines = conversation_lines(state, transcript_view, layout.scrollback_content.width);
-    let visible_height = usize::from(layout.scrollback_content.height);
-    let scroll_offset = match transcript_view {
+    let distance_from_bottom = match transcript_view {
         TranscriptView::Live => 0,
-        TranscriptView::Full => state
-            .scroll_offset
-            .min(live_lines.len().saturating_sub(visible_height)),
+        TranscriptView::Full => state.scroll_offset,
     };
-    let end = live_lines.len().saturating_sub(scroll_offset);
-    let start = end.saturating_sub(visible_height);
-    let visible_live = live_lines[start..end].to_vec();
-
-    Paragraph::new(Text::from(visible_live)).render(layout.scrollback_content, buffer);
+    let viewport = ScrollbackPane {
+        lines: &live_lines,
+        distance_from_bottom,
+    }
+    .render(
+        layout.scrollback_content,
+        Rect::new(
+            layout.scrollbar_x,
+            layout.scrollback.y,
+            1,
+            layout.scrollback.height,
+        ),
+        buffer,
+        theme,
+    );
+    render_follow_indicator(
+        viewport,
+        layout.scrollback,
+        layout.scrollback.bottom(),
+        buffer,
+        theme,
+    );
     if layout.timeline_width > 0 {
         appearance::render_timeline(
             buffer,
@@ -443,8 +458,8 @@ pub(crate) fn render_surface_with_view(
                 scrollback: layout.scrollback,
                 rail_x: layout.timeline_x,
                 turn_count,
-                scroll_offset,
-                first_visible_line: start,
+                scroll_offset: viewport.first_visible_line,
+                first_visible_line: viewport.first_visible_line,
                 total_lines: live_lines.len(),
             },
         );
