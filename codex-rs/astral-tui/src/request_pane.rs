@@ -35,6 +35,8 @@ const INPUT_TEXT_HINTS: &[(&str, &str)] = &[
     ("Ctrl+P/N", "question"),
     ("Esc", "cancel"),
 ];
+const INPUT_CONFIRM_HINTS: &[(&str, &str)] =
+    &[("↑/↓", "navigate"), ("Enter", "confirm"), ("Esc", "back")];
 const MCP_FORM_HINTS: &[(&str, &str)] = &[("Enter", "submit"), ("N", "decline"), ("Esc", "cancel")];
 const MCP_URL_HINTS: &[(&str, &str)] = &[("Y", "accept"), ("N", "decline"), ("Esc", "cancel")];
 const WAITING_HINTS: &[(&str, &str)] = &[];
@@ -74,7 +76,9 @@ impl<'a> RequestPane<'a> {
             }
             PendingRequest::Permissions { .. } => PERMISSION_HINTS,
             PendingRequest::UserInput { params, .. } => {
-                if params
+                if self.request_user_input.confirmation_choice().is_some() {
+                    INPUT_CONFIRM_HINTS
+                } else if params
                     .questions
                     .get(self.request_user_input.current_question())
                     .is_some_and(crate::request_user_input::has_options)
@@ -291,7 +295,31 @@ impl<'a> RequestPane<'a> {
                 ]);
             }
             PendingRequest::UserInput { params, .. } => {
-                if let Some(question) = params
+                if let Some(choice) = self.request_user_input.confirmation_choice() {
+                    let unanswered = self.request_user_input.unanswered_count(params);
+                    rows.push(PaneRow::Title(
+                        "Submit with unanswered questions?".to_string(),
+                    ));
+                    rows.push(PaneRow::Body(format!(
+                        "{unanswered} question{} unanswered",
+                        if unanswered == 1 { "" } else { "s" }
+                    )));
+                    rows.push(PaneRow::Blank);
+                    rows.extend([
+                        PaneRow::Option {
+                            label: "Go back".to_string(),
+                            detail: Some("Return to the first unanswered question".to_string()),
+                            selected: choice == 0,
+                            committed: false,
+                        },
+                        PaneRow::Option {
+                            label: "Proceed".to_string(),
+                            detail: Some("Submit empty answers where needed".to_string()),
+                            selected: choice == 1,
+                            committed: false,
+                        },
+                    ]);
+                } else if let Some(question) = params
                     .questions
                     .get(self.request_user_input.current_question())
                 {
@@ -306,24 +334,40 @@ impl<'a> RequestPane<'a> {
                     if let Some(options) = &question.options {
                         let selected = self.request_user_input.selected_option();
                         let committed = self.request_user_input.option_committed();
-                        rows.extend(options.iter().enumerate().map(|(index, option)| {
-                            PaneRow::Option {
+                        let mut option_rows = options
+                            .iter()
+                            .enumerate()
+                            .map(|(index, option)| PaneRow::Option {
                                 label: format!("{}. {}", index + 1, option.label),
                                 detail: (!option.description.is_empty())
                                     .then(|| option.description.clone()),
                                 selected: selected == Some(index),
                                 committed: committed && selected == Some(index),
-                            }
-                        }));
+                            })
+                            .collect::<Vec<_>>();
                         if option_count(question) > options.len() {
                             let index = options.len();
-                            rows.push(PaneRow::Option {
+                            option_rows.push(PaneRow::Option {
                                 label: format!("{}. {OTHER_OPTION_LABEL}", index + 1),
                                 detail: Some("Add details in notes if needed".to_string()),
                                 selected: selected == Some(index),
                                 committed: committed && selected == Some(index),
                             });
                         }
+                        let reserve_after_options = if self.request_user_input.notes_visible() {
+                            2
+                        } else {
+                            0
+                        };
+                        let capacity = usize::from(max_rows)
+                            .saturating_sub(rows.len() + reserve_after_options)
+                            .max(1);
+                        push_visible_options(
+                            &mut rows,
+                            option_rows,
+                            selected.unwrap_or_default(),
+                            capacity,
+                        );
                     }
                     if !crate::request_user_input::has_options(question)
                         || self.request_user_input.notes_visible()
@@ -454,6 +498,53 @@ enum PaneRow {
         cursor_column: usize,
     },
     Error(String),
+}
+
+fn push_visible_options(
+    rows: &mut Vec<PaneRow>,
+    options: Vec<PaneRow>,
+    selected: usize,
+    capacity: usize,
+) {
+    if options.len() <= capacity {
+        rows.extend(options);
+        return;
+    }
+    let total = options.len();
+    let selected = selected.min(total - 1);
+    if capacity == 1 {
+        rows.extend(options.into_iter().skip(selected).take(1));
+        return;
+    }
+    if capacity == 2 {
+        if selected == 0 {
+            rows.extend(options.into_iter().take(1));
+            rows.push(PaneRow::Body(format!("… {} options below", total - 1)));
+        } else {
+            rows.push(PaneRow::Body(format!("… {selected} options above")));
+            rows.extend(options.into_iter().skip(selected).take(1));
+        }
+        return;
+    }
+
+    let (start, end) = if selected < capacity - 1 {
+        (0, capacity - 1)
+    } else if selected >= total.saturating_sub(capacity - 1) {
+        (total - (capacity - 1), total)
+    } else {
+        let visible = capacity.saturating_sub(2).max(1);
+        let start = selected
+            .saturating_sub(visible / 2)
+            .clamp(1, total - visible - 1);
+        (start, start + visible)
+    };
+    if start > 0 {
+        rows.push(PaneRow::Body(format!("… {start} options above")));
+    }
+    rows.extend(options.into_iter().skip(start).take(end - start));
+    if end < total {
+        rows.push(PaneRow::Body(format!("… {} options below", total - end)));
+    }
 }
 
 impl PaneRow {

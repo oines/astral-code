@@ -1,0 +1,22 @@
+---
+source: astral-tui/src/surface_tests.rs
+expression: "render_at_size(&mut state, &session, 72, 18)"
+---
+ ⎇ main  /workspace
+
+ › inspect this repo                                           12:00 AM
+
+
+ I’m tracing the relevant data flow.
+
+
+
+
+
+ ┃
+ ┃  Submit with unanswered questions?
+ ┃  1 question unanswered
+ ┃
+ ┃  › Go back — Return to the first unanswered question
+ ┃  ○ Proceed — Submit empty answers where needed
+ ↑/↓:navigate  │  Enter:confirm  │  Esc:back

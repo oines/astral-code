@@ -32,6 +32,12 @@ struct AnswerState {
     notes_visible: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConfirmationChoice {
+    GoBack,
+    Proceed,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum RequestUserInputEvent {
     None,
@@ -47,6 +53,7 @@ pub(crate) struct RequestUserInputState {
     current_question: usize,
     focus: Focus,
     editor: ComposerState,
+    confirmation: Option<ConfirmationChoice>,
 }
 
 impl Default for RequestUserInputState {
@@ -57,6 +64,7 @@ impl Default for RequestUserInputState {
             current_question: 0,
             focus: Focus::Options,
             editor: ComposerState::default(),
+            confirmation: None,
         }
     }
 }
@@ -87,6 +95,7 @@ impl RequestUserInputState {
             Focus::Notes
         };
         self.editor.clear();
+        self.confirmation = None;
     }
 
     pub(crate) fn reset(&mut self) {
@@ -119,12 +128,31 @@ impl RequestUserInputState {
         self.editor.cursor()
     }
 
+    pub(crate) fn confirmation_choice(&self) -> Option<usize> {
+        self.confirmation.map(|choice| match choice {
+            ConfirmationChoice::GoBack => 0,
+            ConfirmationChoice::Proceed => 1,
+        })
+    }
+
+    pub(crate) fn unanswered_count(&self, params: &ToolRequestUserInputParams) -> usize {
+        params
+            .questions
+            .iter()
+            .enumerate()
+            .filter(|(index, question)| !self.is_answered(*index, question))
+            .count()
+    }
+
     pub(crate) fn handle_key(
         &mut self,
         params: &ToolRequestUserInputParams,
         key: KeyEvent,
     ) -> RequestUserInputEvent {
         self.sync(params);
+        if self.confirmation.is_some() {
+            return self.handle_confirmation(params, key);
+        }
         if key.code == KeyCode::Esc {
             return RequestUserInputEvent::Cancel;
         }
@@ -149,7 +177,7 @@ impl RequestUserInputState {
 
     pub(crate) fn handle_paste(&mut self, params: &ToolRequestUserInputParams, text: &str) -> bool {
         self.sync(params);
-        if text.is_empty() {
+        if text.is_empty() || self.confirmation.is_some() {
             return false;
         }
         if params
@@ -165,6 +193,45 @@ impl RequestUserInputState {
         }
         self.editor.insert_text(text);
         true
+    }
+
+    fn handle_confirmation(
+        &mut self,
+        params: &ToolRequestUserInputParams,
+        key: KeyEvent,
+    ) -> RequestUserInputEvent {
+        match key.code {
+            KeyCode::Esc => {
+                self.confirmation = None;
+                RequestUserInputEvent::Redraw
+            }
+            KeyCode::Up | KeyCode::Down | KeyCode::Char('j' | 'k') => {
+                self.confirmation = self.confirmation.map(|choice| match choice {
+                    ConfirmationChoice::GoBack => ConfirmationChoice::Proceed,
+                    ConfirmationChoice::Proceed => ConfirmationChoice::GoBack,
+                });
+                RequestUserInputEvent::Redraw
+            }
+            KeyCode::Enter if self.confirmation == Some(ConfirmationChoice::Proceed) => {
+                RequestUserInputEvent::Submit(self.response(params))
+            }
+            KeyCode::Enter => {
+                self.confirmation = None;
+                if let Some(index) =
+                    params
+                        .questions
+                        .iter()
+                        .enumerate()
+                        .find_map(|(index, question)| {
+                            (!self.is_answered(index, question)).then_some(index)
+                        })
+                {
+                    self.move_to(params, index);
+                }
+                RequestUserInputEvent::Redraw
+            }
+            _ => RequestUserInputEvent::None,
+        }
     }
 
     fn handle_question_navigation(
@@ -296,7 +363,12 @@ impl RequestUserInputState {
             return RequestUserInputEvent::Redraw;
         }
         self.save_editor();
-        RequestUserInputEvent::Submit(self.response(params))
+        if self.unanswered_count(params) == 0 {
+            RequestUserInputEvent::Submit(self.response(params))
+        } else {
+            self.confirmation = Some(ConfirmationChoice::GoBack);
+            RequestUserInputEvent::Redraw
+        }
     }
 
     fn move_option(&mut self, option_count: usize, next: bool) {
@@ -370,6 +442,17 @@ impl RequestUserInputState {
             })
             .collect();
         ToolRequestUserInputResponse { answers }
+    }
+
+    fn is_answered(&self, index: usize, question: &ToolRequestUserInputQuestion) -> bool {
+        let Some(answer) = self.answers.get(index) else {
+            return false;
+        };
+        if has_options(question) {
+            answer.committed && answer.selected_option.is_some()
+        } else {
+            answer.committed && !answer.draft.trim().is_empty()
+        }
     }
 
     fn question_count(&self) -> usize {

@@ -1,0 +1,22 @@
+---
+source: astral-tui/src/surface_tests.rs
+expression: "render_at_size(&mut state, &session, 72, 18)"
+---
+ ⎇ main  /workspace
+
+ › inspect this repo                                           12:00 AM
+
+
+ I’m tracing the relevant data flow.
+
+ ┃
+ ┃  Choose one
+ ┃  The selected option must stay visible.
+ ┃  … 8 options above
+ ┃  ○ 9. Option 9 — Description 9
+ ┃  ○ 10. Option 10 — Description 10
+ ┃  ○ 11. Option 11 — Description 11
+ ┃  › 12. Option 12 — Description 12
+ ┃  ○ 13. Option 13 — Description 13
+ ┃  ○ 14. Option 14 — Description 14
+ ↑/↓:navigate  │  Enter:select  │  Tab:notes  │  Esc:cancel
