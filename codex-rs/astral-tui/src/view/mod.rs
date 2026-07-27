@@ -7,6 +7,7 @@
 mod chrome;
 mod color_support;
 mod layout;
+mod mention_menu;
 mod modal;
 mod scrollback;
 mod selection;
@@ -24,6 +25,7 @@ pub(crate) use layout::AgentViewLayoutInput;
 pub(crate) use layout::LayoutConfig;
 pub(crate) use layout::PaneHeights;
 pub(crate) use layout::ScrollbarConfig;
+pub(crate) use mention_menu::MentionMenu;
 pub(crate) use modal::InfoModal;
 pub(crate) use modal::ModalHeight;
 pub(crate) use modal::render_modal_frame;

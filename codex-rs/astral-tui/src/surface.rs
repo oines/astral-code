@@ -1,4 +1,5 @@
 mod appearance;
+mod mentions;
 
 use codex_app_server_protocol::Model;
 use codex_app_server_protocol::ThreadTokenUsage;
@@ -18,6 +19,7 @@ use crate::ConversationState;
 use crate::PendingRequests;
 use crate::SessionState;
 use crate::composer::ComposerState;
+use crate::mention::MentionController;
 use crate::modal::ModalState;
 use crate::model_command::ModelResolveError;
 use crate::model_command::ModelSelection;
@@ -38,6 +40,7 @@ use crate::view::AstralTheme;
 use crate::view::AstralThemeId;
 use crate::view::ColorLevel;
 use crate::view::LayoutConfig;
+use crate::view::MentionMenu;
 use crate::view::PaneHeights;
 use crate::view::PromptChrome;
 use crate::view::ScrollbackNavigation;
@@ -80,6 +83,7 @@ pub struct SurfaceState {
     scrollback: ScrollbackNavigation,
     selection: ScrollbackSelection,
     slash: SlashController,
+    mentions: MentionController,
     modal: Option<ModalState>,
     thread_picker: Option<PickerState>,
     permission_picker: Option<PermissionPickerState>,
@@ -101,6 +105,7 @@ impl SurfaceState {
             scrollback: ScrollbackNavigation::default(),
             selection: ScrollbackSelection::default(),
             slash: SlashController::default(),
+            mentions: MentionController::default(),
             modal: None,
             thread_picker: None,
             permission_picker: None,
@@ -129,6 +134,7 @@ impl SurfaceState {
             scrollback: ScrollbackNavigation::default(),
             selection: ScrollbackSelection::default(),
             slash: SlashController::default(),
+            mentions: MentionController::default(),
             modal: None,
             thread_picker: None,
             permission_picker: None,
@@ -165,7 +171,7 @@ impl SurfaceState {
 
     pub fn set_composer(&mut self, text: impl Into<String>) {
         self.composer.replace(text);
-        self.refresh_slash();
+        self.refresh_composer_completions();
     }
 
     pub(crate) fn composer_state_mut(&mut self) -> &mut ComposerState {
@@ -174,7 +180,7 @@ impl SurfaceState {
 
     pub fn take_composer(&mut self) -> String {
         let composer = self.composer.take();
-        self.refresh_slash();
+        self.refresh_composer_completions();
         composer
     }
 
@@ -425,15 +431,23 @@ pub(crate) fn render_surface_with_view(
         },
     );
     let slash = state.slash().clone();
+    let mentions = state.mentions().clone();
     let max_suggestions = if area.height <= 16 { 2 } else { 6 };
-    let slash_height = if !has_request && slash.open {
-        u16::try_from(slash.matches.len().min(max_suggestions))
+    let completion_rows = if mentions.open {
+        mentions.matches.len()
+    } else if slash.open {
+        slash.matches.len()
+    } else {
+        0
+    };
+    let completion_height = if !has_request && completion_rows > 0 {
+        u16::try_from(completion_rows.min(max_suggestions))
             .unwrap_or(u16::MAX)
             .saturating_add(2)
     } else {
         0
     };
-    let turn_status = (!has_request && slash_height == 0)
+    let turn_status = (!has_request && completion_height == 0)
         .then(|| turn_status_line(state, theme))
         .flatten();
     let turn_count = session.thread.turns.len();
@@ -445,7 +459,7 @@ pub(crate) fn render_surface_with_view(
         panes: PaneHeights {
             prompt: prompt_height,
             turn_status: u16::from(turn_status.is_some()),
-            banner: slash_height,
+            banner: completion_height,
             prompt_gap: u16::from(area.height > 16),
             shortcuts: 1,
             ..PaneHeights::default()
@@ -522,8 +536,15 @@ pub(crate) fn render_surface_with_view(
             layout.turn_status.width,
         );
     }
-    if slash_height > 0 {
-        SlashMenu { snapshot: &slash }.render(layout.banner, buffer, theme);
+    if completion_height > 0 {
+        if mentions.open {
+            MentionMenu {
+                snapshot: &mentions,
+            }
+            .render(layout.banner, buffer, theme);
+        } else {
+            SlashMenu { snapshot: &slash }.render(layout.banner, buffer, theme);
+        }
     }
 
     let mode = if session.collaboration_mode.mode == ModeKind::Plan {
@@ -557,10 +578,13 @@ pub(crate) fn render_surface_with_view(
     };
 
     let default_hints = [("Shift+Tab", "mode"), ("Ctrl+.", "shortcuts")];
+    let mention_hints = [("↑/↓", "navigate"), ("Tab", "select"), ("Esc", "close")];
     let slash_hints = [("↑/↓", "navigate"), ("Tab", "complete"), ("Esc", "close")];
     ShortcutsBar {
         hints: if let Some(pane) = request_pane {
             pane.shortcuts()
+        } else if mentions.open {
+            &mention_hints
         } else if slash.open {
             &slash_hints
         } else {

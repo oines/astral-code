@@ -15,6 +15,10 @@ use crate::SlashCommandId;
 use crate::SlashInvocation;
 use crate::SurfaceActivity;
 use crate::SurfaceState;
+use crate::mention::MentionCandidate;
+use crate::mention::MentionCatalog;
+use crate::mention::MentionKind;
+use crate::mention::MentionTarget;
 use crate::modal::ModalRow;
 use crate::modal::ModalState;
 use crate::thread_picker::PickerState;
@@ -53,6 +57,53 @@ fn composer_submit_and_interrupt_are_distinct_actions() {
             KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
         ),
         InputAction::Interrupt
+    );
+}
+
+#[test]
+fn dollar_completion_selects_a_skill_and_submits_structured_input() {
+    let mut state = SurfaceState::new("thread-1");
+    state.set_mention_catalog(MentionCatalog {
+        candidates: vec![MentionCandidate {
+            kind: MentionKind::Skill,
+            display: "Review".to_string(),
+            description: "Review changes".to_string(),
+            insert_text: "$review".to_string(),
+            search_terms: vec!["review".to_string()],
+            target: MentionTarget::Skill {
+                name: "review".to_string(),
+                path: "/skills/review/SKILL.md".into(),
+            },
+        }],
+    });
+    for character in "$rev".chars() {
+        assert_eq!(
+            handle_key(&mut state, key(KeyCode::Char(character))),
+            InputAction::Redraw
+        );
+    }
+    assert!(state.mentions().open);
+
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Enter)),
+        InputAction::Redraw
+    );
+    assert_eq!(state.composer(), "$review ");
+    let InputAction::Submit(submission) = handle_key(&mut state, key(KeyCode::Enter)) else {
+        panic!("selected skill should submit");
+    };
+    assert_eq!(
+        submission.user_input(),
+        vec![
+            codex_app_server_protocol::UserInput::Text {
+                text: "$review ".to_string(),
+                text_elements: Vec::new(),
+            },
+            codex_app_server_protocol::UserInput::Skill {
+                name: "review".to_string(),
+                path: "/skills/review/SKILL.md".into(),
+            },
+        ]
     );
 }
 

@@ -38,6 +38,10 @@ use super::TranscriptView;
 use super::render_surface;
 use super::render_surface_with_view;
 use crate::SessionState;
+use crate::mention::MentionCandidate;
+use crate::mention::MentionCatalog;
+use crate::mention::MentionKind;
+use crate::mention::MentionTarget;
 use crate::modal::ModalRow;
 use crate::modal::ModalState;
 use crate::shortcuts::shortcuts_modal;
@@ -183,6 +187,42 @@ fn slash_command_menu_snapshot() {
     let mut state = SurfaceState::from_session(&session);
     state.set_activity(SurfaceActivity::Ready);
     state.set_composer("/mo");
+
+    insta::assert_snapshot!(render_at_size(&mut state, &session, 80, 24));
+}
+
+#[test]
+fn skill_and_plugin_mention_menu_snapshot() {
+    let session = session_state();
+    let mut state = SurfaceState::from_session(&session);
+    state.set_activity(SurfaceActivity::Ready);
+    state.set_mention_catalog(MentionCatalog {
+        candidates: vec![
+            MentionCandidate {
+            kind: MentionKind::Plugin,
+            display: "Browser Use".to_string(),
+            description: "Control the active browser".to_string(),
+            insert_text: "@Browser-Use".to_string(),
+            search_terms: vec!["browser-use".to_string()],
+            target: MentionTarget::Plugin {
+                name: "Browser Use".to_string(),
+                path: "plugin://browser-use@bundled".to_string(),
+            },
+            },
+            MentionCandidate {
+            kind: MentionKind::Skill,
+            display: "Code Review".to_string(),
+            description: "Review a pull request".to_string(),
+            insert_text: "$code-review".to_string(),
+            search_terms: vec!["code-review".to_string()],
+            target: MentionTarget::Skill {
+                name: "code-review".to_string(),
+                path: "/workspace/.codex/skills/code-review/SKILL.md".into(),
+            },
+            },
+        ],
+    });
+    state.set_composer("$");
 
     insta::assert_snapshot!(render_at_size(&mut state, &session, 80, 24));
 }

@@ -32,6 +32,8 @@ use crate::theme_picker::handle_key as handle_theme_picker_key;
 use crate::thread_picker::PickerInput;
 use crate::thread_picker::handle_key as handle_thread_picker_key;
 
+mod mention_popup;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum InputAction {
     None,
@@ -128,7 +130,7 @@ pub fn handle_paste(state: &mut SurfaceState, text: &str) -> InputAction {
         return InputAction::Redraw;
     }
     state.composer_state_mut().insert_text(text);
-    state.refresh_slash();
+    state.refresh_composer_completions();
     InputAction::Redraw
 }
 
@@ -199,6 +201,11 @@ fn handle_thread_picker_input(state: &mut SurfaceState, key: KeyEvent) -> InputA
 }
 
 fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
+    if state.mentions().open
+        && let Some(action) = mention_popup::handle_key(state, key)
+    {
+        return action;
+    }
     if key.code == KeyCode::BackTab
         || (key.code == KeyCode::Tab && key.modifiers.contains(KeyModifiers::SHIFT))
     {
@@ -240,7 +247,7 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
                 InputAction::Exit
             } else {
                 state.composer_state_mut().clear();
-                state.refresh_slash();
+                state.refresh_composer_completions();
                 InputAction::Redraw
             }
         }
@@ -264,8 +271,7 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
                     Err(error) => InputAction::Notice(error.to_string()),
                 };
             }
-            let submission = state.composer_state_mut().take_submission();
-            state.refresh_slash();
+            let submission = state.take_submission();
             if submission.text().trim().is_empty() {
                 InputAction::None
             } else {
@@ -274,11 +280,11 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
         }
         (KeyCode::Enter, _) => {
             state.composer_state_mut().insert_char('\n');
-            state.refresh_slash();
+            state.refresh_composer_completions();
             InputAction::Redraw
         }
         _ if state.composer_state_mut().edit_key(key) => {
-            state.refresh_slash();
+            state.refresh_composer_completions();
             InputAction::Redraw
         }
         _ => InputAction::None,
