@@ -148,6 +148,47 @@ fn slash_command_menu_snapshot() {
 }
 
 #[test]
+fn model_argument_menu_snapshot() {
+    let session = session_state();
+    let mut state = SurfaceState::from_session(&session);
+    state.set_activity(SurfaceActivity::Ready);
+    state.set_model_catalog(
+        vec![
+            serde_json::from_value(json!({
+                "modelProvider": "anthropic",
+                "modelProviderName": "Anthropic",
+                "id": "claude-sonnet-4",
+                "model": "claude-sonnet-4",
+                "upgrade": null,
+                "upgradeInfo": null,
+                "availabilityNux": null,
+                "displayName": "Claude Sonnet 4",
+                "description": "Fast coding model",
+                "hidden": false,
+                "supportedReasoningEfforts": [
+                    {"reasoningEffort": "high", "description": "Deep reasoning"},
+                    {"reasoningEffort": "xhigh", "description": "Maximum reasoning"}
+                ],
+                "defaultReasoningEffort": "high",
+                "inputModalities": ["text", "image"],
+                "supportsPersonality": true,
+                "additionalSpeedTiers": [],
+                "serviceTiers": [],
+                "defaultServiceTier": null,
+                "isDefault": true
+            }))
+            .expect("valid model"),
+        ],
+        session.model.clone(),
+        session.model_provider.clone(),
+    );
+    state.composer_mut().push_str("/model ");
+    state.refresh_slash();
+
+    insta::assert_snapshot!(render_at_size(&state, &session, 80, 24));
+}
+
+#[test]
 fn command_approval_surface_snapshot() {
     let session = session_state();
     let mut state = SurfaceState::from_session(&session);

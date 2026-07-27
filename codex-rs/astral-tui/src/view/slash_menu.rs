@@ -2,6 +2,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
+use ratatui::text::Line;
 
 use crate::slash::SlashSnapshot;
 
@@ -52,7 +53,7 @@ impl SlashMenu<'_> {
         buffer.set_string(
             area.x + 2,
             area.y,
-            " commands ",
+            format!(" {} ", self.snapshot.title),
             Style::default().fg(theme.gray).bg(theme.bg_base),
         );
 
@@ -104,12 +105,14 @@ impl SlashMenu<'_> {
                     }
                 }
             }
-            let description_x = row.x + 18;
+            let display_width =
+                u16::try_from(Line::from(suggestion.display.as_str()).width()).unwrap_or(u16::MAX);
+            let description_x = (row.x + 2 + display_width + 2).max(row.x + 18);
             if description_x < row.right() {
                 buffer.set_string(
                     description_x,
                     y,
-                    suggestion.description,
+                    suggestion.description.as_str(),
                     if selected {
                         row_style
                     } else {

@@ -1,4 +1,5 @@
 use codex_app_server_protocol::McpServerElicitationRequest;
+use codex_app_server_protocol::Model;
 use codex_app_server_protocol::ThreadTokenUsage;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Position;
@@ -17,6 +18,8 @@ use crate::PendingRequest;
 use crate::PendingRequests;
 use crate::RenderOptions;
 use crate::SessionState;
+use crate::model_command::ModelResolveError;
+use crate::model_command::ModelSelection;
 use crate::render_block;
 use crate::slash::SlashCommandId;
 use crate::slash::SlashController;
@@ -204,6 +207,30 @@ impl SurfaceState {
 
     pub fn record_slash(&mut self, command: SlashCommandId) {
         self.slash.record(command);
+    }
+
+    pub(crate) fn set_model_catalog(
+        &mut self,
+        models: Vec<Model>,
+        current_model: impl Into<String>,
+        current_provider: impl Into<String>,
+    ) {
+        self.slash
+            .set_models(models, current_model, current_provider);
+        self.refresh_slash();
+    }
+
+    pub(crate) fn update_current_model(
+        &mut self,
+        model: impl Into<String>,
+        model_provider: impl Into<String>,
+    ) {
+        self.slash.update_current_model(model, model_provider);
+        self.refresh_slash();
+    }
+
+    pub(crate) fn resolve_model(&self, args: &str) -> Result<ModelSelection, ModelResolveError> {
+        self.slash.resolve_model(args)
     }
 }
 

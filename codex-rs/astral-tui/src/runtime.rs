@@ -119,6 +119,14 @@ pub async fn run(mut session: AstralSession, options: RunOptions) -> Result<RunE
     let initial_state = session.state().cloned().ok_or(RunError::NoThread)?;
     let thread_id = initial_state.thread.id.clone();
     let mut surface = SurfaceState::from_session(&initial_state);
+    match session.list_models().await {
+        Ok(models) => surface.set_model_catalog(
+            models,
+            initial_state.model.clone(),
+            initial_state.model_provider.clone(),
+        ),
+        Err(error) => surface.set_notice(format!("Could not load model catalog: {error}")),
+    }
     let mut guard = match options.viewport {
         RunViewport::Fullscreen => TerminalGuard::enter_alternate()?,
         RunViewport::Inline => TerminalGuard::enter_inline()?,
@@ -352,6 +360,20 @@ async fn apply_input_action(
                     surface.set_notice("No agent response to copy");
                 }
             }
+            SlashCommandId::Model => match surface.resolve_model(&invocation.args) {
+                Ok(selection) => match session.update_model(&selection).await {
+                    Ok(()) => surface.set_notice(format!(
+                        "Switching to {} ({})",
+                        selection.display_name, selection.effort
+                    )),
+                    Err(error) => surface.set_notice(error.to_string()),
+                },
+                Err(error) => surface.set_notice(error.to_string()),
+            },
+            SlashCommandId::Compact => match session.compact().await {
+                Ok(()) => surface.set_notice("Compacting conversation…"),
+                Err(error) => surface.set_notice(error.to_string()),
+            },
             command => surface.set_notice(format!(
                 "/{} is recognized; its Astral action is not available yet ({command:?})",
                 invocation.name
@@ -447,6 +469,16 @@ fn handle_notification(surface: &mut SurfaceState, notification: &ServerNotifica
             if params.thread_id == surface.conversation().timeline().thread_id() =>
         {
             surface.set_token_usage(params.token_usage.clone());
+        }
+        ServerNotification::ThreadSettingsUpdated(params) => {
+            surface.update_current_model(
+                params.thread_settings.model.clone(),
+                params.thread_settings.model_provider.clone(),
+            );
+            surface.set_notice(format!("Model changed to {}", params.thread_settings.model));
+        }
+        ServerNotification::ContextCompacted(_) => {
+            surface.set_notice("Conversation compacted");
         }
         ServerNotification::Error(params) => surface.set_notice(params.error.message.clone()),
         ServerNotification::Warning(params) => surface.set_notice(params.message.clone()),
