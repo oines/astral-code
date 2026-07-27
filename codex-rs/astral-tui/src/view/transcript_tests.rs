@@ -1,4 +1,6 @@
 use astral_tui_scrollback::PresentationBlock;
+use chrono::Local;
+use chrono::TimeZone;
 use pretty_assertions::assert_eq;
 
 use crate::conversation::TranscriptBlock;
@@ -7,6 +9,7 @@ use crate::conversation::TranscriptTurn;
 use super::AstralTheme;
 use super::TranscriptSection;
 use super::format_duration;
+use super::format_timestamp;
 use super::item_duration_ms;
 use super::render_transcript;
 
@@ -15,6 +18,19 @@ fn duration_format_matches_grok_turn_markers() {
     assert_eq!(format_duration(300), "0.3s");
     assert_eq!(format_duration(2_400), "2.4s");
     assert_eq!(format_duration(125_000), "2m5s");
+}
+
+#[test]
+fn timestamp_uses_the_local_timezone() {
+    let timestamp = Local
+        .with_ymd_and_hms(2023, 1, 15, 22, 13, 20)
+        .single()
+        .expect("unambiguous local test timestamp");
+
+    assert_eq!(
+        format_timestamp(timestamp.timestamp_millis()),
+        Some("10:13 PM".to_string())
+    );
 }
 
 #[test]

@@ -8,8 +8,8 @@ use astral_tui_scrollback::PresentationBlock;
 use astral_tui_scrollback::RenderOptions;
 use astral_tui_scrollback::render_block;
 use astral_tui_scrollback::render_markdown;
+use chrono::Local;
 use chrono::TimeZone;
-use chrono::Utc;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::style::Stylize;
@@ -350,7 +350,8 @@ fn format_duration(duration_ms: i64) -> String {
 }
 
 fn format_timestamp(timestamp_ms: i64) -> Option<String> {
-    Utc.timestamp_millis_opt(timestamp_ms)
+    Local
+        .timestamp_millis_opt(timestamp_ms)
         .single()
         .map(|timestamp| timestamp.format("%-I:%M %p").to_string())
 }
