@@ -200,14 +200,17 @@ impl SurfaceState {
     }
 
     pub fn scroll_up(&mut self, lines: usize) {
+        self.selection.clear_persistent();
         self.scrollback.scroll_up(lines);
     }
 
     pub fn scroll_down(&mut self, lines: usize) {
+        self.selection.clear_persistent();
         self.scrollback.scroll_down(lines);
     }
 
     pub fn scroll_to_bottom(&mut self) {
+        self.selection.clear_persistent();
         self.scrollback.scroll_to_bottom();
     }
 
@@ -230,6 +233,14 @@ impl SurfaceState {
 
     pub(crate) fn clear_scrollback_selection(&mut self) -> bool {
         self.selection.clear()
+    }
+
+    pub(crate) fn scrollback_selection_expiry(&self) -> Option<std::time::Instant> {
+        self.selection.expiry()
+    }
+
+    pub(crate) fn expire_scrollback_selection(&mut self) -> bool {
+        self.selection.expire_if_due(std::time::Instant::now())
     }
 
     pub fn last_agent_response(&self) -> Option<&str> {
@@ -463,7 +474,7 @@ pub(crate) fn render_surface_with_view(
     );
     if transcript_view == TranscriptView::Full {
         state.selection.render(
-            &transcript.lines,
+            &transcript,
             viewport,
             layout.scrollback_content,
             buffer,
