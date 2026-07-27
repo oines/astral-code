@@ -310,6 +310,7 @@ fn thread_picker_owns_text_input_until_escape() {
 #[test]
 fn command_session_approval_preserves_typed_decision() {
     let mut state = SurfaceState::new("thread-1");
+    state.set_composer("draft survives approval");
     state.pending_requests_mut().note(request(json!({
         "method": "item/commandExecution/requestApproval",
         "id": 7,
@@ -329,6 +330,7 @@ fn command_session_approval_preserves_typed_decision() {
             result: json!({"decision": "acceptForSession"}),
         })
     );
+    assert_eq!(state.composer(), "draft survives approval");
 }
 
 #[test]
@@ -516,6 +518,7 @@ fn mcp_form_and_url_elicitations_keep_typed_actions() {
 #[test]
 fn user_input_supports_multiple_question_answers() {
     let mut state = SurfaceState::new("thread-1");
+    state.set_composer("keep this prompt draft");
     state.pending_requests_mut().note(request(json!({
         "method": "item/tool/requestUserInput",
         "id": "question-1",
@@ -539,7 +542,22 @@ fn user_input_supports_multiple_question_answers() {
             ]
         }
     })));
-    state.set_composer("Rust | concise");
+    for character in "Rust".chars() {
+        assert_eq!(
+            handle_key(&mut state, key(KeyCode::Char(character))),
+            InputAction::Redraw
+        );
+    }
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Enter)),
+        InputAction::Redraw
+    );
+    for character in "concise".chars() {
+        assert_eq!(
+            handle_key(&mut state, key(KeyCode::Char(character))),
+            InputAction::Redraw
+        );
+    }
 
     assert_eq!(
         handle_key(&mut state, key(KeyCode::Enter)),
@@ -551,6 +569,44 @@ fn user_input_supports_multiple_question_answers() {
                     "style": {"answers": ["concise"]}
                 }
             }),
+        })
+    );
+    assert_eq!(state.composer(), "keep this prompt draft");
+}
+
+#[test]
+fn user_input_option_navigation_submits_the_selected_label() {
+    let mut state = SurfaceState::new("thread-1");
+    state.pending_requests_mut().note(request(json!({
+        "method": "item/tool/requestUserInput",
+        "id": "question-1",
+        "params": {
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "itemId": "call-1",
+            "questions": [{
+                "id": "scope",
+                "header": "Scope",
+                "question": "Which scope?",
+                "isOther": false,
+                "isSecret": false,
+                "options": [
+                    {"label": "Workspace", "description": "Only this repo"},
+                    {"label": "Shared", "description": "Common runtime"}
+                ]
+            }]
+        }
+    })));
+
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Down)),
+        InputAction::Redraw
+    );
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Enter)),
+        InputAction::Resolve(RequestResolution::Success {
+            request_id: RequestId::String("question-1".to_string()),
+            result: json!({"answers": {"scope": {"answers": ["Shared"]}}}),
         })
     );
 }

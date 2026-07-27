@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use codex_app_server_protocol::CommandExecutionApprovalDecision;
 use codex_app_server_protocol::FileChangeApprovalDecision;
 use codex_app_server_protocol::GrantedPermissionProfile;
@@ -9,8 +7,6 @@ use codex_app_server_protocol::McpServerElicitationRequestResponse;
 use codex_app_server_protocol::PermissionGrantScope;
 use codex_app_server_protocol::PermissionsRequestApprovalResponse;
 use codex_app_server_protocol::Thread;
-use codex_app_server_protocol::ToolRequestUserInputAnswer;
-use codex_app_server_protocol::ToolRequestUserInputResponse;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
@@ -27,6 +23,7 @@ use crate::ThreadPickerAction;
 use crate::permission_picker::PermissionPickerInput;
 use crate::permission_picker::PermissionSelection;
 use crate::permission_picker::handle_key as handle_permission_picker_key;
+use crate::request_user_input::RequestUserInputEvent;
 use crate::theme_picker::ThemePickerInput;
 use crate::theme_picker::handle_key as handle_theme_picker_key;
 use crate::thread_picker::PickerInput;
@@ -128,6 +125,20 @@ pub fn handle_paste(state: &mut SurfaceState, text: &str) -> InputAction {
     if let Some(picker) = state.thread_picker_mut() {
         picker.paste(text);
         return InputAction::Redraw;
+    }
+    let user_input = state
+        .pending_requests()
+        .front()
+        .and_then(|request| match request {
+            PendingRequest::UserInput { params, .. } => Some(params.clone()),
+            _ => None,
+        });
+    if let Some(params) = user_input {
+        return if state.request_user_input_mut().handle_paste(&params, text) {
+            InputAction::Redraw
+        } else {
+            InputAction::None
+        };
     }
     state.composer_state_mut().insert_text(text);
     state.refresh_composer_completions();
@@ -297,7 +308,7 @@ fn handle_request_key(
     key: KeyEvent,
 ) -> InputAction {
     let accepts_text_input = match &request {
-        PendingRequest::UserInput { .. } => true,
+        PendingRequest::UserInput { .. } => false,
         PendingRequest::McpElicitation { params, .. } => {
             matches!(&params.request, McpServerElicitationRequest::Form { .. })
         }
@@ -308,7 +319,17 @@ fn handle_request_key(
         PendingRequest::FileChange { .. } => file_change_response(key.code),
         PendingRequest::Permissions { params, .. } => permissions_response(&params, key.code),
         PendingRequest::UserInput { params, .. } => {
-            user_input_response(state.composer(), &params, key.code)
+            match state.request_user_input_mut().handle_key(&params, key) {
+                RequestUserInputEvent::None => return InputAction::None,
+                RequestUserInputEvent::Redraw => return InputAction::Redraw,
+                RequestUserInputEvent::Submit(response) => {
+                    Some(PendingRequestResponse::UserInput(response))
+                }
+                RequestUserInputEvent::Cancel => Some(PendingRequestResponse::Reject {
+                    code: -32000,
+                    message: "user input cancelled".to_string(),
+                }),
+            }
         }
         PendingRequest::McpElicitation { params, .. } => {
             mcp_response(state.composer(), &params.request, key.code)
@@ -336,7 +357,15 @@ fn handle_request_key(
     let request_id = request.request_id().clone();
     match state.pending_requests_mut().resolve(&request_id, response) {
         Ok(resolution) => {
-            state.composer_state_mut().clear();
+            match request {
+                PendingRequest::UserInput { .. } => state.reset_request_user_input(),
+                PendingRequest::McpElicitation { params, .. }
+                    if matches!(params.request, McpServerElicitationRequest::Form { .. }) =>
+                {
+                    state.composer_state_mut().clear();
+                }
+                _ => {}
+            }
             InputAction::Resolve(resolution)
         }
         Err(error) => InputAction::Notice(error.to_string()),
@@ -409,44 +438,6 @@ fn permissions_response(
             scope,
             strict_auto_review: None,
         },
-    ))
-}
-
-fn user_input_response(
-    composer: &str,
-    params: &codex_app_server_protocol::ToolRequestUserInputParams,
-    key: KeyCode,
-) -> Option<PendingRequestResponse> {
-    if key == KeyCode::Esc {
-        return Some(PendingRequestResponse::Reject {
-            code: -32000,
-            message: "user input cancelled".to_string(),
-        });
-    }
-    if key != KeyCode::Enter || composer.trim().is_empty() {
-        return None;
-    }
-    let values = composer.split('|').map(str::trim).collect::<Vec<_>>();
-    let answers = params
-        .questions
-        .iter()
-        .enumerate()
-        .map(|(index, question)| {
-            let value = values
-                .get(index)
-                .or_else(|| values.last())
-                .copied()
-                .unwrap_or_default();
-            (
-                question.id.clone(),
-                ToolRequestUserInputAnswer {
-                    answers: vec![value.to_string()],
-                },
-            )
-        })
-        .collect::<HashMap<_, _>>();
-    Some(PendingRequestResponse::UserInput(
-        ToolRequestUserInputResponse { answers },
     ))
 }
 

@@ -12,11 +12,11 @@ expression: "request_surface(json!({\n    \"method\": \"item/tool/requestUserInp
 
 
 
+
+
  ┃
  ┃  Choose scope
  ┃  Where should the refactor apply?
- ┃  ○ Workspace only — Keep the change local to this repository
- ┃  ○ Shared runtime — Update the common implementation
- ┃
- ┃  ❯ Workspace only
- Enter:submit  │  Esc:cancel
+ ┃  › 1. Workspace only — Keep the change local to this repository
+ ┃  ○ 2. Shared runtime — Update the common implementation
+ ↑/↓:navigate  │  Enter:select  │  Tab:notes  │  Esc:cancel

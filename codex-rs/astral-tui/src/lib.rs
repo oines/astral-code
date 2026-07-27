@@ -18,6 +18,7 @@ mod model_command;
 mod permission_picker;
 mod request;
 mod request_pane;
+mod request_user_input;
 mod runtime;
 mod session;
 mod shortcuts;
