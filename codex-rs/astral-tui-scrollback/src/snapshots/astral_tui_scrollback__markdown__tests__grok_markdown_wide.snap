@@ -1,0 +1,22 @@
+---
+source: astral-tui-scrollback/src/markdown_tests.rs
+expression: plain(&wide)
+---
+Astral Markdown
+
+Paragraph with bold, italic, removed, inline code, and an Astral link
+(https://example.com).
+
+│ A quoted line with structure.
+
+1. First ordered item
+2. Second ordered item
+  • Nested bullet
+☑ Finished task
+☐ Pending task
+
+───
+
+fn main() {
+    println!("hello");
+}

@@ -599,6 +599,8 @@ dependencies = [
  "codex-app-server-protocol",
  "codex-utils-absolute-path",
  "insta",
+ "pretty_assertions",
+ "pulldown-cmark",
  "ratatui",
  "serde_json",
  "textwrap 0.16.2",

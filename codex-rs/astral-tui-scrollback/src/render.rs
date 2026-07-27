@@ -15,6 +15,8 @@ use crate::SubagentPresentation;
 use crate::ToolKind;
 use crate::ToolPresentation;
 use crate::ToolStatus;
+use crate::markdown::MarkdownStyle;
+use crate::markdown::render_markdown;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RenderOptions {
@@ -182,7 +184,7 @@ fn render_user(text: &str, attachments: &[String], width: u16) -> Text<'static> 
 }
 
 fn render_assistant(text: &str, width: u16) -> Text<'static> {
-    Text::from(wrapped_lines(text, width, "", "", false))
+    Text::from(render_markdown(text, width, MarkdownStyle::default()))
 }
 
 fn render_thinking(text: &str, running: bool, options: RenderOptions) -> Text<'static> {
