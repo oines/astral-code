@@ -27,6 +27,8 @@ use crate::slash::SlashController;
 use crate::slash::SlashError;
 use crate::slash::SlashInvocation;
 use crate::slash::SlashSnapshot;
+use crate::thread_picker::PickerState;
+use crate::thread_picker::render_picker;
 use crate::view::AgentViewLayout;
 use crate::view::AgentViewLayoutInput;
 use crate::view::AstralTheme;
@@ -64,6 +66,7 @@ pub struct SurfaceState {
     scroll_offset: usize,
     slash: SlashController,
     modal: Option<ModalState>,
+    thread_picker: Option<PickerState>,
 }
 
 impl SurfaceState {
@@ -78,6 +81,7 @@ impl SurfaceState {
             scroll_offset: 0,
             slash: SlashController::default(),
             modal: None,
+            thread_picker: None,
         }
     }
 
@@ -99,6 +103,7 @@ impl SurfaceState {
             scroll_offset: 0,
             slash: SlashController::default(),
             modal: None,
+            thread_picker: None,
         }
     }
 
@@ -224,6 +229,22 @@ impl SurfaceState {
 
     pub(crate) fn close_modal(&mut self) {
         self.modal = None;
+    }
+
+    pub(crate) fn thread_picker(&self) -> Option<&PickerState> {
+        self.thread_picker.as_ref()
+    }
+
+    pub(crate) fn thread_picker_mut(&mut self) -> Option<&mut PickerState> {
+        self.thread_picker.as_mut()
+    }
+
+    pub(crate) fn open_thread_picker(&mut self, picker: PickerState) {
+        self.thread_picker = Some(picker);
+    }
+
+    pub(crate) fn close_thread_picker(&mut self) {
+        self.thread_picker = None;
     }
 
     pub(crate) fn set_model_catalog(
@@ -397,7 +418,10 @@ pub(crate) fn render_surface_with_view(
         right: Some(&right),
     }
     .render(layout.shortcuts, buffer, theme);
-    if let Some(modal) = state.modal() {
+    if let Some(picker) = state.thread_picker() {
+        render_picker(picker, area, buffer);
+        None
+    } else if let Some(modal) = state.modal() {
         InfoModal { state: modal }.render(area, buffer, theme);
         None
     } else {

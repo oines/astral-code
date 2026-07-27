@@ -18,18 +18,16 @@ use ratatui::Frame;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::buffer::Buffer;
-use ratatui::layout::Constraint;
-use ratatui::layout::Layout;
 use ratatui::layout::Rect;
 use ratatui::style::Stylize;
-use ratatui::widgets::Block;
-use ratatui::widgets::Borders;
-use ratatui::widgets::Clear;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
 use tokio_stream::StreamExt;
 
 use crate::terminal_guard::TerminalGuard;
+use crate::view::AstralTheme;
+use crate::view::ModalHeight;
+use crate::view::render_modal_frame;
 
 type PickerTerminal = Terminal<CrosstermBackend<Stdout>>;
 
@@ -40,7 +38,7 @@ pub enum ThreadPickerAction {
 }
 
 impl ThreadPickerAction {
-    fn verb(self) -> &'static str {
+    pub(crate) fn verb(self) -> &'static str {
         match self {
             Self::Resume => "Resume",
             Self::Fork => "Fork",
@@ -64,7 +62,7 @@ impl ThreadPickerOptions {
 }
 
 #[derive(Debug)]
-struct PickerState {
+pub(crate) struct PickerState {
     action: ThreadPickerAction,
     threads: Vec<Thread>,
     known_ids: HashSet<String>,
@@ -75,7 +73,7 @@ struct PickerState {
 }
 
 impl PickerState {
-    fn new(action: ThreadPickerAction, page: ThreadListResponse) -> Self {
+    pub(crate) fn new(action: ThreadPickerAction, page: ThreadListResponse) -> Self {
         let known_ids = page.data.iter().map(|thread| thread.id.clone()).collect();
         Self {
             action,
@@ -88,7 +86,7 @@ impl PickerState {
         }
     }
 
-    fn append(&mut self, page: ThreadListResponse) {
+    pub(crate) fn append(&mut self, page: ThreadListResponse) {
         self.threads.extend(
             page.data
                 .into_iter()
@@ -96,6 +94,14 @@ impl PickerState {
         );
         self.next_cursor = page.next_cursor;
         self.clamp_selection();
+    }
+
+    pub(crate) fn action(&self) -> ThreadPickerAction {
+        self.action
+    }
+
+    pub(crate) fn next_cursor(&self) -> Option<&str> {
+        self.next_cursor.as_deref()
     }
 
     fn filtered_indices(&self) -> Vec<usize> {
@@ -124,7 +130,7 @@ impl PickerState {
         self.selected = self.selected.saturating_sub(1);
     }
 
-    fn move_down(&mut self) {
+    pub(crate) fn move_down(&mut self) {
         let last = self.filtered_indices().len().saturating_sub(1);
         self.selected = self.selected.saturating_add(1).min(last);
     }
@@ -147,9 +153,18 @@ impl PickerState {
     fn at_end(&self) -> bool {
         self.selected + 1 >= self.filtered_indices().len()
     }
+
+    pub(crate) fn paste(&mut self, text: &str) {
+        self.query.push_str(text);
+        self.clamp_selection();
+    }
+
+    pub(crate) fn set_notice(&mut self, notice: impl Into<String>) {
+        self.notice = Some(notice.into());
+    }
 }
 
-enum PickerInput {
+pub(crate) enum PickerInput {
     None,
     Redraw,
     LoadNext,
@@ -183,8 +198,7 @@ pub async fn run_thread_picker(
         let action = match event? {
             Event::Key(key) => handle_key(&mut state, key, terminal.size()?.height),
             Event::Paste(text) => {
-                state.query.push_str(&text);
-                state.clamp_selection();
+                state.paste(&text);
                 PickerInput::Redraw
             }
             Event::Resize(_, _) | Event::FocusGained | Event::FocusLost | Event::Mouse(_) => {
@@ -233,7 +247,11 @@ async fn load_page(
         .map_err(io::Error::other)
 }
 
-fn handle_key(state: &mut PickerState, key: KeyEvent, terminal_height: u16) -> PickerInput {
+pub(crate) fn handle_key(
+    state: &mut PickerState,
+    key: KeyEvent,
+    terminal_height: u16,
+) -> PickerInput {
     if key.kind == KeyEventKind::Release {
         return PickerInput::None;
     }
@@ -291,27 +309,32 @@ fn draw_picker(frame: &mut Frame<'_>, state: &PickerState) {
     render_picker(state, frame.area(), frame.buffer_mut());
 }
 
-fn render_picker(state: &PickerState, area: Rect, buffer: &mut Buffer) {
-    Clear.render(area, buffer);
-    if area.is_empty() {
+pub(crate) fn render_picker(state: &PickerState, area: Rect, buffer: &mut Buffer) {
+    let theme = AstralTheme::default();
+    let title = format!("{} Astral session", state.action.verb());
+    let Some(content) = render_modal_frame(
+        area,
+        buffer,
+        theme,
+        &title,
+        "↑/↓ navigate · Enter select · Esc cancel",
+        ModalHeight::MinimumContent(7),
+    ) else {
         return;
-    }
-    let [header, list, footer] = Layout::vertical([
-        Constraint::Length(3),
-        Constraint::Min(1),
-        Constraint::Length(2),
-    ])
-    .areas(area);
-    Paragraph::new(vec![
-        vec![
-            "◆ ".magenta(),
-            format!("{} Astral session", state.action.verb()).bold(),
-        ]
-        .into(),
-        vec!["  Search: ".dim(), state.query.clone().cyan()].into(),
-    ])
-    .render(header, buffer);
+    };
 
+    buffer.set_line(
+        content.x,
+        content.y,
+        &vec!["Search: ".dim(), state.query.clone().cyan()].into(),
+        content.width,
+    );
+    let list = Rect::new(
+        content.x,
+        content.y.saturating_add(2),
+        content.width,
+        content.height.saturating_sub(3),
+    );
     let rows = usize::from(list.height / 2).max(1);
     let indices = state.filtered_indices();
     let start = state.selected.saturating_sub(rows.saturating_sub(1));
@@ -339,9 +362,7 @@ fn render_picker(state: &PickerState, area: Rect, buffer: &mut Buffer) {
     if lines.is_empty() {
         lines.push("  No matching Astral sessions".dim().into());
     }
-    Paragraph::new(lines)
-        .block(Block::default().borders(Borders::TOP))
-        .render(list, buffer);
+    Paragraph::new(lines).render(list, buffer);
 
     let mut footer_line = vec![
         format!(
@@ -350,17 +371,20 @@ fn render_picker(state: &PickerState, area: Rect, buffer: &mut Buffer) {
             indices.len()
         )
         .dim(),
-        "  ↑/↓ navigate · Enter select · Esc cancel".dim(),
     ];
     if state.next_cursor.is_some() {
         footer_line.push(" · more available".cyan());
     }
-    let footer_text = if let Some(notice) = &state.notice {
-        vec![footer_line.into(), notice.clone().red().into()]
-    } else {
-        vec![footer_line.into()]
-    };
-    Paragraph::new(footer_text).render(footer, buffer);
+    if let Some(notice) = &state.notice {
+        footer_line.push(" · ".dim());
+        footer_line.push(notice.clone().red());
+    }
+    buffer.set_line(
+        content.x,
+        content.bottom().saturating_sub(1),
+        &footer_line.into(),
+        content.width,
+    );
 }
 
 fn thread_title(thread: &Thread) -> String {

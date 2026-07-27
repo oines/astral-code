@@ -14,12 +14,19 @@ use codex_app_server_protocol::ThreadCompactStartParams;
 use codex_app_server_protocol::ThreadCompactStartResponse;
 use codex_app_server_protocol::ThreadForkParams;
 use codex_app_server_protocol::ThreadForkResponse;
+use codex_app_server_protocol::ThreadListParams;
+use codex_app_server_protocol::ThreadListResponse;
 use codex_app_server_protocol::ThreadResumeParams;
 use codex_app_server_protocol::ThreadResumeResponse;
+use codex_app_server_protocol::ThreadSetNameParams;
+use codex_app_server_protocol::ThreadSetNameResponse;
 use codex_app_server_protocol::ThreadSettingsUpdateParams;
 use codex_app_server_protocol::ThreadSettingsUpdateResponse;
+use codex_app_server_protocol::ThreadSortKey;
+use codex_app_server_protocol::ThreadSource;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
+use codex_app_server_protocol::ThreadStartSource;
 use codex_app_server_protocol::TurnInterruptParams;
 use codex_app_server_protocol::TurnInterruptResponse;
 use codex_app_server_protocol::TurnStartParams;
@@ -226,6 +233,87 @@ impl AstralSession {
             .await?;
         self.state = Some(SessionState::from_fork(response));
         self.state.as_ref().ok_or(SessionError::NoThread)
+    }
+
+    pub(crate) async fn start_new(&mut self) -> Result<&SessionState, SessionError> {
+        let state = self.state.as_ref().ok_or(SessionError::NoThread)?;
+        let params = ThreadStartParams {
+            model: Some(state.model.clone()),
+            model_provider: Some(state.model_provider.clone()),
+            service_tier: Some(state.service_tier.clone()),
+            cwd: Some(state.thread.cwd.to_string_lossy().to_string()),
+            session_start_source: Some(ThreadStartSource::Startup),
+            thread_source: Some(ThreadSource::User),
+            ..ThreadStartParams::default()
+        };
+        self.start(params).await
+    }
+
+    pub(crate) async fn resume_thread(
+        &mut self,
+        thread_id: String,
+    ) -> Result<&SessionState, SessionError> {
+        self.resume(ThreadResumeParams {
+            thread_id,
+            ..ThreadResumeParams::default()
+        })
+        .await
+    }
+
+    pub(crate) async fn fork_current(&mut self) -> Result<&SessionState, SessionError> {
+        let thread_id = self
+            .state
+            .as_ref()
+            .map(|state| state.thread.id.clone())
+            .ok_or(SessionError::NoThread)?;
+        self.fork(ThreadForkParams {
+            thread_id,
+            ..ThreadForkParams::default()
+        })
+        .await
+    }
+
+    pub(crate) async fn list_threads(
+        &mut self,
+        cursor: Option<String>,
+    ) -> Result<ThreadListResponse, SessionError> {
+        let request_id = self.next_request_id();
+        let response = self
+            .client
+            .request_typed(ClientRequest::ThreadList {
+                request_id,
+                params: ThreadListParams {
+                    cursor,
+                    limit: Some(100),
+                    sort_key: Some(ThreadSortKey::UpdatedAt),
+                    sort_direction: None,
+                    model_providers: None,
+                    source_kinds: None,
+                    archived: Some(false),
+                    cwd: None,
+                    use_state_db_only: false,
+                    search_term: None,
+                },
+            })
+            .await?;
+        Ok(response)
+    }
+
+    pub(crate) async fn rename(&mut self, name: String) -> Result<(), SessionError> {
+        let thread_id = self
+            .state
+            .as_ref()
+            .map(|state| state.thread.id.clone())
+            .ok_or(SessionError::NoThread)?;
+        let request_id = self.next_request_id();
+        let _: ThreadSetNameResponse = self
+            .client
+            .request_typed(ClientRequest::ThreadSetName {
+                request_id,
+                params: ThreadSetNameParams { thread_id, name },
+            })
+            .await?;
+        Ok(())
     }
 
     pub async fn start_turn(

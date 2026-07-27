@@ -8,6 +8,7 @@ use codex_app_server_protocol::McpServerElicitationRequest;
 use codex_app_server_protocol::McpServerElicitationRequestResponse;
 use codex_app_server_protocol::PermissionGrantScope;
 use codex_app_server_protocol::PermissionsRequestApprovalResponse;
+use codex_app_server_protocol::Thread;
 use codex_app_server_protocol::ToolRequestUserInputAnswer;
 use codex_app_server_protocol::ToolRequestUserInputResponse;
 use crossterm::event::KeyCode;
@@ -21,6 +22,9 @@ use crate::RequestResolution;
 use crate::SlashInvocation;
 use crate::SurfaceActivity;
 use crate::SurfaceState;
+use crate::ThreadPickerAction;
+use crate::thread_picker::PickerInput;
+use crate::thread_picker::handle_key as handle_thread_picker_key;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum InputAction {
@@ -33,6 +37,11 @@ pub enum InputAction {
     ScrollDown,
     CopyLastResponse,
     Slash(SlashInvocation),
+    ThreadPickerLoadNext,
+    ThreadPickerSelect {
+        action: ThreadPickerAction,
+        thread: Box<Thread>,
+    },
     Resolve(RequestResolution),
     Notice(String),
 }
@@ -43,6 +52,9 @@ pub fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
     }
     if let Some(request) = state.pending_requests().front().cloned() {
         return handle_request_key(state, request, key);
+    }
+    if state.thread_picker().is_some() {
+        return handle_thread_picker_input(state, key);
     }
     if state.modal().is_some() {
         return match key.code {
@@ -57,9 +69,33 @@ pub fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
 }
 
 pub fn handle_paste(state: &mut SurfaceState, text: &str) -> InputAction {
+    if let Some(picker) = state.thread_picker_mut() {
+        picker.paste(text);
+        return InputAction::Redraw;
+    }
     state.composer_mut().push_str(text);
     state.refresh_slash();
     InputAction::Redraw
+}
+
+fn handle_thread_picker_input(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
+    let Some(picker) = state.thread_picker_mut() else {
+        return InputAction::None;
+    };
+    match handle_thread_picker_key(picker, key, /*terminal_height*/ 24) {
+        PickerInput::None => InputAction::None,
+        PickerInput::Redraw => InputAction::Redraw,
+        PickerInput::LoadNext => InputAction::ThreadPickerLoadNext,
+        PickerInput::Select(thread) => {
+            let action = picker.action();
+            state.close_thread_picker();
+            InputAction::ThreadPickerSelect { action, thread }
+        }
+        PickerInput::Cancel => {
+            state.close_thread_picker();
+            InputAction::Redraw
+        }
+    }
 }
 
 fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
