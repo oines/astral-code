@@ -20,6 +20,7 @@ use codex_protocol::config_types::Settings;
 use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_WORKSPACE;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use ratatui::style::Modifier;
 use serde_json::json;
 
 use super::SurfaceActivity;
@@ -564,7 +565,7 @@ fn grok_layered_turn_139x35_snapshot() {
         },
         ThreadItem::AgentMessage {
             id: "agent-layered".to_string(),
-            text: "我是 Astral，一个面向软件工程的交互式助手。\n\n- 读写代码\n- 运行命令\n- 调试和重构".to_string(),
+            text: "我是 **Astral**，一个面向软件工程的交互式助手。\n\n- 读写代码\n- 运行命令\n- 调试和重构".to_string(),
             phase: None,
             memory_citation: None,
         },
@@ -634,6 +635,21 @@ fn grok_layered_turn_139x35_snapshot() {
                 .all(|x| buffer[(x, prompt_row)].bg == band)
             && (content_left..content_right).all(|x| buffer[(x, prompt_row + 1)].bg == band),
         "the user turn row must keep its full-width background band"
+    );
+    let theme = crate::view::AstralTheme::default();
+    assert!(
+        buffer
+            .content
+            .iter()
+            .any(|cell| cell.symbol() == "A" && cell.modifier.contains(Modifier::BOLD)),
+        "assistant Markdown strong text must be bold"
+    );
+    assert!(
+        buffer
+            .content
+            .iter()
+            .any(|cell| cell.symbol() == "•" && cell.fg == theme.gray),
+        "assistant Markdown list markers must use the Astral theme"
     );
     insta::assert_snapshot!(buffer_text(&buffer));
 }

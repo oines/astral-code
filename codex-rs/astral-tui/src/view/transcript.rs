@@ -2,11 +2,14 @@
 // presentation at commit 47348d13ec4508dcfe440e34c6d511bb02998fb2
 // (Apache-2.0). Modified for Astral app-server turn and item metadata.
 
+use astral_tui_scrollback::MarkdownStyle;
 use astral_tui_scrollback::PresentationBlock;
 use astral_tui_scrollback::RenderOptions;
 use astral_tui_scrollback::render_block;
+use astral_tui_scrollback::render_markdown;
 use chrono::TimeZone;
 use chrono::Utc;
+use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
@@ -120,7 +123,7 @@ fn render_turn_block(
                 lines.extend(rendered.lines.into_iter().skip(1));
             }
         }
-        PresentationBlock::Assistant { .. } => {
+        PresentationBlock::Assistant { text } => {
             if !lines.is_empty() {
                 lines.push(Line::default());
             }
@@ -129,8 +132,8 @@ fn render_turn_block(
                 .or(turn.completed_at_ms)
                 .and_then(format_timestamp);
             let content_width = reserved_content_width(width, timestamp.as_deref());
-            let rendered = render_block(&block.block, RenderOptions::compact(content_width));
-            for (index, line) in rendered.lines.into_iter().enumerate() {
+            let rendered = render_markdown(text, content_width, markdown_style(theme));
+            for (index, line) in rendered.into_iter().enumerate() {
                 lines.push(timestamped_line(
                     line,
                     if index == 0 {
@@ -149,6 +152,42 @@ fn render_turn_block(
             }
             lines.extend(render_block(&block.block, RenderOptions::compact(width)).lines);
         }
+    }
+}
+
+fn markdown_style(theme: AstralTheme) -> MarkdownStyle {
+    let primary = Style::default().fg(theme.text_primary);
+    let secondary = Style::default().fg(theme.text_secondary);
+    let gray = Style::default().fg(theme.gray);
+    MarkdownStyle {
+        text: primary,
+        headings: [
+            primary.add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+            primary.add_modifier(Modifier::BOLD),
+            primary.add_modifier(Modifier::BOLD | Modifier::ITALIC),
+            secondary.add_modifier(Modifier::BOLD),
+            secondary.add_modifier(Modifier::ITALIC),
+            secondary.add_modifier(Modifier::ITALIC),
+        ],
+        strong: primary.add_modifier(Modifier::BOLD),
+        emphasis: primary.add_modifier(Modifier::ITALIC),
+        strikethrough: secondary.add_modifier(Modifier::CROSSED_OUT),
+        inline_code: Style::default()
+            .fg(theme.accent_running)
+            .add_modifier(Modifier::BOLD),
+        blockquote: gray,
+        list_marker: gray,
+        task_checked: Style::default().fg(theme.accent_running),
+        task_unchecked: gray,
+        rule: Style::default().fg(theme.gray_dim),
+        link_text: Style::default()
+            .fg(theme.accent_running)
+            .add_modifier(Modifier::UNDERLINED),
+        link_url: gray,
+        code: secondary,
+        code_background: Style::default().bg(theme.panel_background),
+        table_border: Style::default().fg(theme.gray_dim),
+        table_header: primary.add_modifier(Modifier::BOLD),
     }
 }
 

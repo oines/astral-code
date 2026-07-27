@@ -13,71 +13,23 @@ use pulldown_cmark::Options;
 use pulldown_cmark::Parser;
 use pulldown_cmark::Tag;
 use pulldown_cmark::TagEnd;
-use ratatui::style::Color;
-use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use textwrap::WordSeparator;
 use textwrap::WordSplitter;
 
+#[path = "markdown/style.rs"]
+mod style;
+#[path = "markdown/table.rs"]
+mod table;
 #[path = "markdown/wrapping.rs"]
 mod wrapping;
 
+pub use style::MarkdownStyle;
+use table::TableState;
 use wrapping::padded_background_line;
 use wrapping::wrap_segments;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct MarkdownStyle {
-    pub text: Style,
-    pub headings: [Style; 6],
-    pub strong: Style,
-    pub emphasis: Style,
-    pub strikethrough: Style,
-    pub inline_code: Style,
-    pub blockquote: Style,
-    pub list_marker: Style,
-    pub task_checked: Style,
-    pub task_unchecked: Style,
-    pub rule: Style,
-    pub link_text: Style,
-    pub link_url: Style,
-    pub code: Style,
-    pub code_background: Style,
-}
-
-impl Default for MarkdownStyle {
-    fn default() -> Self {
-        Self {
-            text: Style::default(),
-            headings: [
-                Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
-                Style::default().add_modifier(Modifier::BOLD),
-                Style::default().add_modifier(Modifier::BOLD | Modifier::ITALIC),
-                Style::default().add_modifier(Modifier::ITALIC),
-                Style::default().add_modifier(Modifier::ITALIC),
-                Style::default().add_modifier(Modifier::ITALIC),
-            ],
-            strong: Style::default().add_modifier(Modifier::BOLD),
-            emphasis: Style::default().add_modifier(Modifier::ITALIC),
-            strikethrough: Style::default().add_modifier(Modifier::CROSSED_OUT),
-            inline_code: Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-            blockquote: Style::default().fg(Color::DarkGray),
-            list_marker: Style::default().fg(Color::DarkGray),
-            task_checked: Style::default().fg(Color::Green),
-            task_unchecked: Style::default().fg(Color::DarkGray),
-            rule: Style::default().fg(Color::DarkGray),
-            link_text: Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::UNDERLINED),
-            link_url: Style::default().fg(Color::DarkGray),
-            code: Style::default().fg(Color::Gray),
-            code_background: Style::default().bg(Color::Black),
-        }
-    }
-}
 
 pub fn render_markdown(text: &str, width: u16, style: MarkdownStyle) -> Vec<Line<'static>> {
     MarkdownWriter::new(width, style).render(text)
@@ -97,6 +49,7 @@ enum BlockKind {
     Quote,
     Code,
     Rule,
+    Table,
 }
 
 #[derive(Debug)]
@@ -134,6 +87,7 @@ struct MarkdownWriter {
     quote_depth: usize,
     heading: Option<HeadingLevel>,
     code: Option<CodeContext>,
+    table: Option<TableState>,
     last_kind: Option<BlockKind>,
 }
 
@@ -151,12 +105,14 @@ impl MarkdownWriter {
             quote_depth: 0,
             heading: None,
             code: None,
+            table: None,
             last_kind: None,
         }
     }
 
     fn render(mut self, text: &str) -> Vec<Line<'static>> {
-        let options = Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
+        let options =
+            Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS | Options::ENABLE_TABLES;
         for event in Parser::new_ext(text, options) {
             self.event(event);
         }
@@ -225,13 +181,26 @@ impl MarkdownWriter {
                 });
                 self.push_inline_style(self.style.link_text);
             }
-            Tag::HtmlBlock
-            | Tag::FootnoteDefinition(_)
-            | Tag::Table(_)
-            | Tag::TableHead
-            | Tag::TableRow
-            | Tag::TableCell
-            | Tag::MetadataBlock(_) => {}
+            Tag::Table(alignments) => {
+                self.flush_rich_block();
+                self.table = Some(TableState::new(alignments.to_vec()));
+            }
+            Tag::TableHead => {
+                if let Some(table) = self.table.as_mut() {
+                    table.start_head();
+                }
+            }
+            Tag::TableRow => {
+                if let Some(table) = self.table.as_mut() {
+                    table.start_row();
+                }
+            }
+            Tag::TableCell => {
+                if let Some(table) = self.table.as_mut() {
+                    table.start_cell();
+                }
+            }
+            Tag::HtmlBlock | Tag::FootnoteDefinition(_) | Tag::MetadataBlock(_) => {}
         }
     }
 
@@ -260,13 +229,28 @@ impl MarkdownWriter {
                 self.pop_inline_style();
             }
             TagEnd::Link | TagEnd::Image => self.finish_link(),
-            TagEnd::HtmlBlock
-            | TagEnd::FootnoteDefinition
-            | TagEnd::Table
-            | TagEnd::TableHead
-            | TagEnd::TableRow
-            | TagEnd::TableCell
-            | TagEnd::MetadataBlock(_) => {}
+            TagEnd::Table => {
+                if let Some(table) = self.table.take() {
+                    let rendered = table.render(self.width, self.style);
+                    self.push_output(rendered, BlockKind::Table);
+                }
+            }
+            TagEnd::TableHead => {
+                if let Some(table) = self.table.as_mut() {
+                    table.end_head();
+                }
+            }
+            TagEnd::TableRow => {
+                if let Some(table) = self.table.as_mut() {
+                    table.end_row();
+                }
+            }
+            TagEnd::TableCell => {
+                if let Some(table) = self.table.as_mut() {
+                    table.finish_cell();
+                }
+            }
+            TagEnd::HtmlBlock | TagEnd::FootnoteDefinition | TagEnd::MetadataBlock(_) => {}
         }
     }
 
@@ -310,12 +294,21 @@ impl MarkdownWriter {
         if let Some(link) = self.links.last_mut() {
             link.label.push_str(text);
         }
-        if !text.is_empty() {
-            self.segments.push(Segment {
-                text: text.to_string(),
-                style,
-            });
+        if text.is_empty() {
+            return;
         }
+        let segment = Segment {
+            text: text.to_string(),
+            style,
+        };
+        if self
+            .table
+            .as_mut()
+            .is_some_and(|table| table.push(segment.clone()))
+        {
+            return;
+        }
+        self.segments.push(segment);
     }
 
     fn finish_link(&mut self) {

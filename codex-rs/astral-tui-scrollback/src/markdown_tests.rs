@@ -20,6 +20,11 @@ Paragraph with **bold**, *italic*, ~~removed~~, `inline code`, and an [Astral li
 - [x] Finished task
 - [ ] Pending task
 
+| Feature | State |
+|:--|--:|
+| Markdown | **ready** |
+| Width | `52` |
+
 ---
 
 ```rust
@@ -77,11 +82,16 @@ fn inline_styles_survive_width_aware_wrapping() {
         .iter()
         .find(|span| span.content.contains("Astral link"))
         .expect("link span");
+    let table_strong = spans
+        .iter()
+        .find(|span| span.content.contains("ready"))
+        .expect("strong table cell");
 
     assert!(bold.style.add_modifier.contains(Modifier::BOLD));
     assert!(italic.style.add_modifier.contains(Modifier::ITALIC));
     assert!(removed.style.add_modifier.contains(Modifier::CROSSED_OUT));
     assert!(link.style.add_modifier.contains(Modifier::UNDERLINED));
+    assert!(table_strong.style.add_modifier.contains(Modifier::BOLD));
 }
 
 #[test]
@@ -116,4 +126,16 @@ fn cjk_content_is_not_rewritten_with_spaces() {
             .collect::<Vec<_>>(),
         vec!["你好，我是", "Astral，可", "以帮你读写", "代码。"]
     );
+}
+
+#[test]
+fn narrow_tables_fall_back_to_readable_records() {
+    let rendered = render_markdown(
+        "| Feature | State |\n|---|---|\n| Markdown | ready |",
+        12,
+        MarkdownStyle::default(),
+    );
+
+    assert_eq!(plain(&rendered), "Feature:\nMarkdown\nState: ready");
+    assert!(rendered.iter().all(|line| line.width() <= 12));
 }
