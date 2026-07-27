@@ -66,7 +66,7 @@ fn running_turn_stays_live_then_commits_after_structured_replacement() {
     ));
 
     assert!(state.drain_committable().is_empty());
-    assert_eq!(state.live_blocks().len(), 1);
+    assert_eq!(state.live_turns()[0].blocks.len(), 1);
 
     state.apply(&completed_item(
         "turn-1",
@@ -89,7 +89,7 @@ fn running_turn_stays_live_then_commits_after_structured_replacement() {
     };
     assert_eq!(tool.kind, ToolKind::Edit);
     assert_eq!(tool.name, "edit");
-    assert!(state.live_blocks().is_empty());
+    assert!(state.live_turns().is_empty());
 }
 
 #[test]
@@ -106,7 +106,14 @@ fn later_completed_turn_does_not_jump_past_running_frontier() {
     state.apply(&completed_turn("turn-2"));
 
     assert!(state.drain_committable().is_empty());
-    assert_eq!(state.live_blocks().len(), 2);
+    assert_eq!(
+        state
+            .live_turns()
+            .iter()
+            .map(|turn| turn.blocks.len())
+            .sum::<usize>(),
+        2
+    );
 }
 
 #[test]

@@ -16,7 +16,6 @@ use ratatui::widgets::Widget;
 use crate::CommittedBlock;
 use crate::ConversationState;
 use crate::PendingRequests;
-use crate::RenderOptions;
 use crate::SessionState;
 use crate::composer::ComposerState;
 use crate::modal::ModalState;
@@ -24,7 +23,6 @@ use crate::model_command::ModelResolveError;
 use crate::model_command::ModelSelection;
 use crate::permission_picker::PermissionPickerState;
 use crate::permission_picker::display_permission_mode;
-use crate::render_block;
 use crate::request_pane::RequestPane;
 use crate::slash::SlashCommandId;
 use crate::slash::SlashCommandState;
@@ -47,7 +45,9 @@ use crate::view::ShortcutsBar;
 use crate::view::SlashMenu;
 use crate::view::StatusBar;
 use crate::view::prompt_height;
+use crate::view::render_committed_block;
 use crate::view::render_follow_indicator;
+use crate::view::render_transcript;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SurfaceActivity {
@@ -335,29 +335,15 @@ impl SurfaceState {
 }
 
 pub fn committed_height(block: &CommittedBlock, width: u16) -> u16 {
-    render_block(
-        &block.block,
-        RenderOptions {
-            width,
-            expanded: false,
-            max_output_lines: 5,
-        },
-    )
-    .height()
-    .try_into()
-    .unwrap_or(u16::MAX)
+    render_committed_block(block, width, AstralTheme::default())
+        .len()
+        .try_into()
+        .unwrap_or(u16::MAX)
 }
 
 pub fn paint_committed(block: &CommittedBlock, buffer: &mut Buffer) {
-    let text = render_block(
-        &block.block,
-        RenderOptions {
-            width: buffer.area.width,
-            expanded: false,
-            max_output_lines: 5,
-        },
-    );
-    Paragraph::new(text).render(buffer.area, buffer);
+    let lines = render_committed_block(block, buffer.area.width, AstralTheme::default());
+    Paragraph::new(lines).render(buffer.area, buffer);
 }
 
 pub fn render_surface(
@@ -528,16 +514,11 @@ fn conversation_lines(
     width: u16,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
-    let blocks = match transcript_view {
-        TranscriptView::Live => state.conversation.live_blocks(),
-        TranscriptView::Full => state.conversation.all_blocks(),
+    let turns = match transcript_view {
+        TranscriptView::Live => state.conversation.live_turns(),
+        TranscriptView::Full => state.conversation.all_turns(),
     };
-    for block in blocks {
-        if !lines.is_empty() {
-            lines.push(Line::default());
-        }
-        lines.extend(render_block(&block, RenderOptions::compact(width)).lines);
-    }
+    lines.extend(render_transcript(&turns, width, state.theme()));
     lines
 }
 

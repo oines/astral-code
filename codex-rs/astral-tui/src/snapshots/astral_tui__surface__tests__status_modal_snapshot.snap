@@ -5,11 +5,11 @@ expression: "render_at_size(&state, &session, 80, 24)"
 
   ⎇ main  /workspace
 
-  ❯ inspect this repo
-                ┌─ Session status ─────────────────────────[×]─┐
-  I’m tracing th│                                              │
+
+  › inspect this┌─ Session status ─────────────────────────[×]─┐      12:00 AM
+                │                                              │
                 │  Thread             thread-1                 │
-                │  Model              claude-sonnet-4 · anthr  │
+  I’m tracing th│  Model              claude-sonnet-4 · anthr  │
                 │  Working directory  /workspace               │
                 │  Context            9.2K / 500K              │
                 │                                              │

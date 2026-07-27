@@ -3,11 +3,11 @@ source: astral-tui/src/surface_tests.rs
 expression: buffer_text(&buffer)
 ---
  ⎇ main  /workspace
- ❯ inspect this repo
+
+ › inspect this repo                                           12:00 AM
+
 
  I’m tracing the relevant data flow.
-
-
 
 
 

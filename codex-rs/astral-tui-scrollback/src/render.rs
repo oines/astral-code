@@ -172,7 +172,7 @@ fn quoted_preview(value: &str, max_chars: usize) -> String {
 }
 
 fn render_user(text: &str, attachments: &[String], width: u16) -> Text<'static> {
-    let mut lines = prefixed_lines(text, width, "❯ ", "  ", false);
+    let mut lines = prefixed_lines(text, width, "› ", "  ", false);
     lines.extend(
         attachments
             .iter()
@@ -298,7 +298,9 @@ fn wrapped_lines(
     let options = Options::new(width)
         .initial_indent(initial_indent)
         .subsequent_indent(subsequent_indent)
-        .break_words(false);
+        .word_separator(textwrap::WordSeparator::AsciiSpace)
+        .word_splitter(textwrap::WordSplitter::NoHyphenation)
+        .break_words(true);
     value
         .split('\n')
         .flat_map(|line| {

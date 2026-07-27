@@ -5,11 +5,11 @@ expression: "render_at_size(&state, &session, 80, 24)"
 
   ⎇ main  /workspace
 
-  ❯ inspect this repo
-                ┌─ Keyboard shortcuts ─────────────────────[×]─┐
-  I’m tracing th│                                              │
+
+  › inspect this┌─ Keyboard shortcuts ─────────────────────[×]─┐      12:00 AM
+                │                                              │
                 │  Enter      Send / submit focused input      │
-                │  Shift+Tab  Cycle collaboration mode         │
+  I’m tracing th│  Shift+Tab  Cycle collaboration mode         │
                 │  Ctrl+.     Toggle shortcuts window          │
                 │  Ctrl+C     Interrupt / clear / idle exit    │
                 │  Ctrl+D     Exit when the composer is empty  │

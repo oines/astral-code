@@ -5,11 +5,11 @@ expression: "render_at_size(&state, &session, 80, 24)"
 
   ⎇ main  /workspace
 
-  ❯ inspect this repo
-                ┌─ Skills ─────────────────────────────────[×]─┐
-  I’m tracing th│                                              │
+
+  › inspect this┌─ Skills ─────────────────────────────────[×]─┐      12:00 AM
+                │                                              │
                 │  skill-08  user · enabled                    │
-                │  skill-09  repo · enabled                    │
+  I’m tracing th│  skill-09  repo · enabled                    │
                 │  skill-10  user · enabled                    │
                 │  skill-11  user · enabled                    │
                 │  skill-12  repo · enabled                    │

@@ -332,6 +332,31 @@ fn conversation_blocks_snapshot() {
 }
 
 #[test]
+fn wrapping_preserves_cjk_without_inserting_spaces() {
+    let block = PresentationBlock::Assistant {
+        text: "你好，我是 Astral，可以帮你读写代码。".to_string(),
+    };
+
+    let rendered = render_block(
+        &block,
+        RenderOptions {
+            width: 10,
+            expanded: true,
+            max_output_lines: 3,
+        },
+    )
+    .lines
+    .iter()
+    .map(std::string::ToString::to_string)
+    .collect::<Vec<_>>();
+
+    assert_eq!(
+        rendered,
+        vec!["你好，我是", "Astral，可", "以帮你读写", "代码。"]
+    );
+}
+
+#[test]
 fn subagent_lifecycle_blocks_snapshot() {
     let items = [
         ThreadItem::CollabAgentToolCall {

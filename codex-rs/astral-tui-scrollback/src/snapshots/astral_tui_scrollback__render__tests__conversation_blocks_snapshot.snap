@@ -2,7 +2,7 @@
 source: astral-tui-scrollback/src/render_tests.rs
 expression: rendered
 ---
-❯ 把两个工具面统一渲染到 Astral TUI
+› 把两个工具面统一渲染到 Astral TUI
   ↳ @render.rs (astral-tui/src/render.rs)
 
 ◆ Thinking

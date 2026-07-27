@@ -1,12 +1,17 @@
 use codex_app_server_protocol::ActivePermissionProfile;
 use codex_app_server_protocol::ApprovalsReviewer;
 use codex_app_server_protocol::AskForApproval;
+use codex_app_server_protocol::ItemCompletedNotification;
+use codex_app_server_protocol::ItemStartedNotification;
 use codex_app_server_protocol::RequestId;
+use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ServerRequest;
 use codex_app_server_protocol::Thread;
 use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::ThreadTokenUsage;
 use codex_app_server_protocol::TokenUsageBreakdown;
+use codex_app_server_protocol::TurnCompletedNotification;
+use codex_app_server_protocol::TurnStartedNotification;
 use codex_app_server_protocol::TurnStatus;
 use codex_app_server_protocol::UserInput;
 use codex_protocol::config_types::CollaborationMode;
@@ -534,6 +539,102 @@ fn fullscreen_scrollback_viewport_snapshot() {
     let mut buffer = Buffer::empty(area);
     render_surface_with_view(&state, &session, TranscriptView::Full, area, &mut buffer);
 
+    insta::assert_snapshot!(buffer_text(&buffer));
+}
+
+#[test]
+fn grok_layered_turn_139x35_snapshot() {
+    let mut session = session_state();
+    let mut turn = session.thread.turns.remove(0);
+    session.active_turn_id = None;
+    let mut state = SurfaceState::new("thread-1");
+    let items = vec![
+        ThreadItem::UserMessage {
+            id: "user-layered".to_string(),
+            client_id: None,
+            content: vec![UserInput::Text {
+                text: "你是谁".to_string(),
+                text_elements: Vec::new(),
+            }],
+        },
+        ThreadItem::Reasoning {
+            id: "reasoning-layered".to_string(),
+            summary: vec!["Identify the request and answer directly.".to_string()],
+            content: Vec::new(),
+        },
+        ThreadItem::AgentMessage {
+            id: "agent-layered".to_string(),
+            text: "我是 Astral，一个面向软件工程的交互式助手。\n\n- 读写代码\n- 运行命令\n- 调试和重构".to_string(),
+            phase: None,
+            memory_citation: None,
+        },
+    ];
+    turn.id = "turn-layered".to_string();
+    turn.items.clear();
+    turn.status = TurnStatus::InProgress;
+    turn.started_at = Some(1_700_000_000);
+    turn.completed_at = None;
+    turn.duration_ms = None;
+    state
+        .conversation_mut()
+        .apply(&ServerNotification::TurnStarted(TurnStartedNotification {
+            thread_id: "thread-1".to_string(),
+            turn: turn.clone(),
+        }));
+    for (item, started_at_ms, completed_at_ms) in [
+        (items[0].clone(), 1_700_000_000_000, 1_700_000_000_050),
+        (items[1].clone(), 1_700_000_000_050, 1_700_000_000_550),
+        (items[2].clone(), 1_700_000_000_550, 1_700_000_002_400),
+    ] {
+        state
+            .conversation_mut()
+            .apply(&ServerNotification::ItemStarted(ItemStartedNotification {
+                item: item.clone(),
+                thread_id: "thread-1".to_string(),
+                turn_id: turn.id.clone(),
+                started_at_ms,
+            }));
+        state
+            .conversation_mut()
+            .apply(&ServerNotification::ItemCompleted(
+                ItemCompletedNotification {
+                    item,
+                    thread_id: "thread-1".to_string(),
+                    turn_id: turn.id.clone(),
+                    completed_at_ms,
+                },
+            ));
+    }
+    turn.items = items;
+    turn.status = TurnStatus::Completed;
+    turn.completed_at = Some(1_700_000_002);
+    turn.duration_ms = Some(2_400);
+    state
+        .conversation_mut()
+        .apply(&ServerNotification::TurnCompleted(
+            TurnCompletedNotification {
+                thread_id: "thread-1".to_string(),
+                turn,
+            },
+        ));
+    let area = Rect::new(0, 0, 139, 35);
+    let mut buffer = Buffer::empty(area);
+    render_surface_with_view(&state, &session, TranscriptView::Full, area, &mut buffer);
+
+    let prompt_row = (0..area.height)
+        .find(|y| (0..area.width).any(|x| buffer[(x, *y)].symbol() == "›"))
+        .unwrap_or_else(|| panic!("user prompt row missing:\n{}", buffer_text(&buffer)));
+    let band = crate::view::AstralTheme::default().panel_selected;
+    let content_left = area.x + 2;
+    let content_right = area.right() - 3;
+    assert!(
+        (content_left..content_right).all(|x| buffer[(x, prompt_row - 1)].bg == band)
+            && (content_left..content_right)
+                .skip(30)
+                .all(|x| buffer[(x, prompt_row)].bg == band)
+            && (content_left..content_right).all(|x| buffer[(x, prompt_row + 1)].bg == band),
+        "the user turn row must keep its full-width background band"
+    );
     insta::assert_snapshot!(buffer_text(&buffer));
 }
 
