@@ -44,6 +44,15 @@ pub fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
     if let Some(request) = state.pending_requests().front().cloned() {
         return handle_request_key(state, request, key);
     }
+    if state.modal().is_some() {
+        return match key.code {
+            KeyCode::Esc => {
+                state.close_modal();
+                InputAction::Redraw
+            }
+            _ => InputAction::None,
+        };
+    }
     handle_composer_key(state, key)
 }
 

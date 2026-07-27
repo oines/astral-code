@@ -32,6 +32,8 @@ use crate::clipboard::copy_to_clipboard;
 use crate::committed_height;
 use crate::handle_key;
 use crate::handle_paste;
+use crate::modal::ModalRow;
+use crate::modal::ModalState;
 use crate::paint_committed;
 use crate::render_surface;
 use crate::render_surface_with_view;
@@ -374,6 +376,39 @@ async fn apply_input_action(
                 Ok(()) => surface.set_notice("Compacting conversation…"),
                 Err(error) => surface.set_notice(error.to_string()),
             },
+            SlashCommandId::Status => {
+                if let Some(state) = session.state() {
+                    let tokens = surface.token_usage().map_or_else(
+                        || "not reported".to_string(),
+                        |usage| {
+                            usage.model_context_window.map_or_else(
+                                || usage.last.total_tokens.to_string(),
+                                |window| format!("{} / {window}", usage.last.total_tokens),
+                            )
+                        },
+                    );
+                    surface.open_modal(ModalState::info(
+                        "Session status",
+                        vec![
+                            ModalRow::new("Thread", state.thread.id.clone()),
+                            ModalRow::new(
+                                "Name",
+                                state
+                                    .thread
+                                    .name
+                                    .clone()
+                                    .unwrap_or_else(|| "untitled".to_string()),
+                            ),
+                            ModalRow::new(
+                                "Model",
+                                format!("{} · {}", state.model, state.model_provider),
+                            ),
+                            ModalRow::new("Working directory", state.thread.cwd.to_string_lossy()),
+                            ModalRow::new("Context", tokens),
+                        ],
+                    ));
+                }
+            }
             command => surface.set_notice(format!(
                 "/{} is recognized; its Astral action is not available yet ({command:?})",
                 invocation.name

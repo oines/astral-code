@@ -6,6 +6,7 @@
 
 mod chrome;
 mod layout;
+mod modal;
 mod slash_menu;
 mod theme;
 
@@ -17,5 +18,6 @@ pub(crate) use layout::AgentViewLayoutInput;
 pub(crate) use layout::LayoutConfig;
 pub(crate) use layout::PaneHeights;
 pub(crate) use layout::ScrollbarConfig;
+pub(crate) use modal::InfoModal;
 pub(crate) use slash_menu::SlashMenu;
 pub(crate) use theme::AstralTheme;

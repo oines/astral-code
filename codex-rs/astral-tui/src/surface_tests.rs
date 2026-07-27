@@ -16,6 +16,8 @@ use super::TranscriptView;
 use super::render_surface;
 use super::render_surface_with_view;
 use crate::SessionState;
+use crate::modal::ModalRow;
+use crate::modal::ModalState;
 
 fn session_state() -> SessionState {
     let thread: Thread = serde_json::from_value(json!({
@@ -184,6 +186,23 @@ fn model_argument_menu_snapshot() {
     );
     state.composer_mut().push_str("/model ");
     state.refresh_slash();
+
+    insta::assert_snapshot!(render_at_size(&state, &session, 80, 24));
+}
+
+#[test]
+fn status_modal_snapshot() {
+    let session = session_state();
+    let mut state = SurfaceState::from_session(&session);
+    state.open_modal(ModalState::info(
+        "Session status",
+        vec![
+            ModalRow::new("Thread", "thread-1"),
+            ModalRow::new("Model", "claude-sonnet-4 · anthropic"),
+            ModalRow::new("Working directory", "/workspace"),
+            ModalRow::new("Context", "9.2K / 500K"),
+        ],
+    ));
 
     insta::assert_snapshot!(render_at_size(&state, &session, 80, 24));
 }
