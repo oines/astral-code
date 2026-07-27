@@ -36,6 +36,7 @@ use crate::view::AgentViewLayout;
 use crate::view::AgentViewLayoutInput;
 use crate::view::AstralTheme;
 use crate::view::AstralThemeId;
+use crate::view::ColorLevel;
 use crate::view::LayoutConfig;
 use crate::view::PaneHeights;
 use crate::view::PromptChrome;
@@ -84,6 +85,7 @@ pub struct SurfaceState {
     permission_picker: Option<PermissionPickerState>,
     theme_picker: Option<ThemePickerState>,
     theme: AstralThemeId,
+    color_level: ColorLevel,
     timeline_visible: bool,
 }
 
@@ -104,6 +106,7 @@ impl SurfaceState {
             permission_picker: None,
             theme_picker: None,
             theme: AstralThemeId::default(),
+            color_level: ColorLevel::default(),
             timeline_visible: false,
         }
     }
@@ -131,6 +134,7 @@ impl SurfaceState {
             permission_picker: None,
             theme_picker: None,
             theme: AstralThemeId::default(),
+            color_level: ColorLevel::default(),
             timeline_visible: false,
         }
     }
@@ -378,7 +382,15 @@ pub fn committed_height(block: &CommittedBlock, width: u16) -> u16 {
 }
 
 pub fn paint_committed(block: &CommittedBlock, buffer: &mut Buffer) {
-    let lines = render_committed_block(block, buffer.area.width, AstralTheme::default());
+    paint_committed_with_theme(block, buffer, AstralTheme::default());
+}
+
+pub(crate) fn paint_committed_with_theme(
+    block: &CommittedBlock,
+    buffer: &mut Buffer,
+    theme: AstralTheme,
+) {
+    let lines = render_committed_block(block, buffer.area.width, theme);
     Paragraph::new(lines).render(buffer.area, buffer);
 }
 

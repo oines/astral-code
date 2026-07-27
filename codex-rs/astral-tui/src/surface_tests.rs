@@ -42,6 +42,7 @@ use crate::modal::ModalRow;
 use crate::modal::ModalState;
 use crate::shortcuts::shortcuts_modal;
 use crate::view::AstralThemeId;
+use crate::view::ColorLevel;
 
 fn session_state() -> SessionState {
     let started_at = local_timestamp_seconds(/*hour*/ 0, /*minute*/ 0, /*second*/ 1);
@@ -530,9 +531,44 @@ fn fullscreen_surface_keeps_committed_history_snapshot() {
 
 #[test]
 fn fullscreen_selection_overlay_snapshot() {
+    let (buffer, start, theme) = render_day_selection(ColorLevel::TrueColor);
+
+    assert_eq!(buffer[start].fg, theme.bg_base);
+    assert_eq!(buffer[start].bg, theme.text_primary);
+    insta::assert_snapshot!(
+        "fullscreen_selection_overlay",
+        format!(
+            "{}\n\nselection mask:\n{}",
+            buffer_text(&buffer),
+            selection_mask(&buffer, theme.text_primary)
+        )
+    );
+}
+
+#[test]
+fn fullscreen_selection_overlay_ansi256_snapshot() {
+    let (buffer, start, theme) = render_day_selection(ColorLevel::Ansi256);
+
+    assert_eq!(format!("{:?}", theme.bg_base), "Indexed(255)");
+    assert_eq!(format!("{:?}", theme.text_primary), "Indexed(234)");
+    assert_eq!(buffer[start].fg, theme.bg_base);
+    assert_eq!(buffer[start].bg, theme.text_primary);
+    insta::assert_snapshot!(
+        "fullscreen_selection_overlay_ansi256",
+        format!(
+            "selected fg: {:?}\nselected bg: {:?}\n\nselection mask:\n{}",
+            buffer[start].fg,
+            buffer[start].bg,
+            selection_mask(&buffer, theme.text_primary)
+        )
+    );
+}
+
+fn render_day_selection(color_level: ColorLevel) -> (Buffer, (u16, u16), crate::view::AstralTheme) {
     let session = session_state();
     let mut state = SurfaceState::from_session(&session);
     state.set_theme(AstralThemeId::Day);
+    state.set_color_level(color_level);
     let theme = state.theme();
     let area = Rect::new(0, 0, 72, 16);
     let mut buffer = Buffer::empty(area);
@@ -571,16 +607,7 @@ fn fullscreen_selection_overlay_snapshot() {
         &mut buffer,
     );
 
-    assert_eq!(buffer[(start.0, start.1)].fg, theme.bg_base);
-    assert_eq!(buffer[(start.0, start.1)].bg, theme.text_primary);
-    insta::assert_snapshot!(
-        "fullscreen_selection_overlay",
-        format!(
-            "{}\n\nselection mask:\n{}",
-            buffer_text(&buffer),
-            selection_mask(&buffer, theme.text_primary)
-        )
-    );
+    (buffer, start, theme)
 }
 
 #[test]

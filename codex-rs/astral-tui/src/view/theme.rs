@@ -1,5 +1,8 @@
 use ratatui::style::Color;
 
+use super::color_support::ColorLevel;
+use super::color_support::quantize_color;
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum AstralThemeId {
     #[default]
@@ -62,6 +65,27 @@ impl AstralTheme {
             AstralThemeId::Night => Self::astral(),
             AstralThemeId::Day => Self::day(),
             AstralThemeId::Terminal => Self::terminal(),
+        }
+    }
+
+    pub(crate) fn for_color_level(id: AstralThemeId, level: ColorLevel) -> Self {
+        Self::for_id(id).quantized(level)
+    }
+
+    fn quantized(self, level: ColorLevel) -> Self {
+        let quantize = |color| quantize_color(color, level);
+        Self {
+            bg_base: quantize(self.bg_base),
+            text_primary: quantize(self.text_primary),
+            text_secondary: quantize(self.text_secondary),
+            gray_dim: quantize(self.gray_dim),
+            gray: quantize(self.gray),
+            accent_running: quantize(self.accent_running),
+            accent_error: quantize(self.accent_error),
+            panel_background: quantize(self.panel_background),
+            panel_selected: quantize(self.panel_selected),
+            prompt_border: quantize(self.prompt_border),
+            prompt_border_active: quantize(self.prompt_border_active),
         }
     }
 

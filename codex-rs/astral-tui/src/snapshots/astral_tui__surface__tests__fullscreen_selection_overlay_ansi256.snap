@@ -1,0 +1,14 @@
+---
+source: astral-tui/src/surface_tests.rs
+expression: "format!(\"selected fg: {:?}\\nselected bg: {:?}\\n\\nselection mask:\\n{}\",\nbuffer[start].fg, buffer[start].bg,\nselection_mask(&buffer, theme.text_primary))"
+---
+selected fg: Indexed(255)
+selected bg: Indexed(234)
+
+selection mask:
+
+
+
+
+
+ ^^^^^^^^^^
