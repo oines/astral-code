@@ -18,6 +18,7 @@ use crate::PendingRequest;
 use crate::PendingRequests;
 use crate::RenderOptions;
 use crate::SessionState;
+use crate::modal::ModalState;
 use crate::model_command::ModelResolveError;
 use crate::model_command::ModelSelection;
 use crate::render_block;
@@ -29,6 +30,7 @@ use crate::slash::SlashSnapshot;
 use crate::view::AgentViewLayout;
 use crate::view::AgentViewLayoutInput;
 use crate::view::AstralTheme;
+use crate::view::InfoModal;
 use crate::view::LayoutConfig;
 use crate::view::PaneHeights;
 use crate::view::PromptChrome;
@@ -61,6 +63,7 @@ pub struct SurfaceState {
     notice: Option<String>,
     scroll_offset: usize,
     slash: SlashController,
+    modal: Option<ModalState>,
 }
 
 impl SurfaceState {
@@ -74,6 +77,7 @@ impl SurfaceState {
             notice: None,
             scroll_offset: 0,
             slash: SlashController::default(),
+            modal: None,
         }
     }
 
@@ -94,6 +98,7 @@ impl SurfaceState {
             notice: None,
             scroll_offset: 0,
             slash: SlashController::default(),
+            modal: None,
         }
     }
 
@@ -207,6 +212,18 @@ impl SurfaceState {
 
     pub fn record_slash(&mut self, command: SlashCommandId) {
         self.slash.record(command);
+    }
+
+    pub(crate) fn modal(&self) -> Option<&ModalState> {
+        self.modal.as_ref()
+    }
+
+    pub(crate) fn open_modal(&mut self, modal: ModalState) {
+        self.modal = Some(modal);
+    }
+
+    pub(crate) fn close_modal(&mut self) {
+        self.modal = None;
     }
 
     pub(crate) fn set_model_catalog(
@@ -380,7 +397,12 @@ pub(crate) fn render_surface_with_view(
         right: Some(&right),
     }
     .render(layout.shortcuts, buffer, theme);
-    cursor
+    if let Some(modal) = state.modal() {
+        InfoModal { state: modal }.render(area, buffer, theme);
+        None
+    } else {
+        cursor
+    }
 }
 
 fn conversation_lines(

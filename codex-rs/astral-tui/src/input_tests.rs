@@ -13,6 +13,8 @@ use crate::SlashCommandId;
 use crate::SlashInvocation;
 use crate::SurfaceActivity;
 use crate::SurfaceState;
+use crate::modal::ModalRow;
+use crate::modal::ModalState;
 
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
@@ -111,6 +113,26 @@ fn slash_errors_stay_local_to_the_tui() {
         handle_key(&mut state, key(KeyCode::Enter)),
         InputAction::Notice("/model is unavailable while Astral is working".to_string())
     );
+}
+
+#[test]
+fn modal_focus_blocks_composer_input_until_escape() {
+    let mut state = SurfaceState::new("thread-1");
+    state.open_modal(ModalState::info(
+        "Session status",
+        vec![ModalRow::new("Model", "gpt-5")],
+    ));
+
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Char('x'))),
+        InputAction::None
+    );
+    assert!(state.composer().is_empty());
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Esc)),
+        InputAction::Redraw
+    );
+    assert!(state.modal().is_none());
 }
 
 #[test]
