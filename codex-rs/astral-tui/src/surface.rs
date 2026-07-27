@@ -1,6 +1,5 @@
 mod appearance;
 
-use codex_app_server_protocol::McpServerElicitationRequest;
 use codex_app_server_protocol::Model;
 use codex_app_server_protocol::ThreadTokenUsage;
 use codex_protocol::config_types::ModeKind;
@@ -17,7 +16,6 @@ use ratatui::widgets::Widget;
 
 use crate::CommittedBlock;
 use crate::ConversationState;
-use crate::PendingRequest;
 use crate::PendingRequests;
 use crate::RenderOptions;
 use crate::SessionState;
@@ -27,6 +25,7 @@ use crate::model_command::ModelSelection;
 use crate::permission_picker::PermissionPickerState;
 use crate::permission_picker::display_permission_mode;
 use crate::render_block;
+use crate::request_pane::RequestPane;
 use crate::slash::SlashCommandId;
 use crate::slash::SlashController;
 use crate::slash::SlashError;
@@ -358,22 +357,24 @@ pub(crate) fn render_surface_with_view(
     let theme = state.theme();
     buffer.set_style(area, Style::default().bg(theme.bg_base));
 
-    let request = request_lines(state.pending_requests.front(), state.composer(), area.width);
-    let prompt_height = if request.is_empty() {
-        composer_height(state.composer())
-    } else {
-        u16::try_from(request.len()).unwrap_or(u16::MAX).max(3)
-    };
+    let request_pane = state
+        .pending_requests
+        .front()
+        .map(|request| RequestPane::new(request, state.composer()));
+    let prompt_height = request_pane.map_or_else(
+        || composer_height(state.composer()),
+        |pane| pane.height(area.height),
+    );
     let slash = state.slash();
     let max_suggestions = if area.height <= 16 { 2 } else { 6 };
-    let slash_height = if request.is_empty() && slash.open {
+    let slash_height = if request_pane.is_none() && slash.open {
         u16::try_from(slash.matches.len().min(max_suggestions))
             .unwrap_or(u16::MAX)
             .saturating_add(2)
     } else {
         0
     };
-    let turn_status = (request.is_empty() && slash_height == 0)
+    let turn_status = (request_pane.is_none() && slash_height == 0)
         .then(|| turn_status_line(state, theme))
         .flatten();
     let turn_count = session.thread.turns.len();
@@ -445,7 +446,9 @@ pub(crate) fn render_surface_with_view(
                 .map(|profile| profile.id.as_str()),
         )
     };
-    let cursor = if request.is_empty() {
+    let cursor = if let Some(pane) = request_pane {
+        pane.render(layout.prompt, buffer, theme)
+    } else {
         let flags = [mode];
         PromptChrome {
             text: state.composer(),
@@ -456,19 +459,14 @@ pub(crate) fn render_surface_with_view(
             focused: true,
         }
         .render(layout.prompt, buffer, theme)
-    } else {
-        Paragraph::new(Text::from(request.clone())).render(layout.prompt, buffer);
-        state
-            .pending_requests
-            .front()
-            .filter(|request| request_uses_composer(request))
-            .and_then(|_| request_cursor(&request, layout.prompt))
     };
 
     let default_hints = [("Shift+Tab", "mode"), ("Ctrl+.", "shortcuts")];
     let slash_hints = [("↑/↓", "navigate"), ("Tab", "complete"), ("Esc", "close")];
     ShortcutsBar {
-        hints: if slash.open {
+        hints: if let Some(pane) = request_pane {
+            pane.shortcuts()
+        } else if slash.open {
             &slash_hints
         } else {
             &default_hints
@@ -592,21 +590,6 @@ fn collapse_home(path: &str) -> String {
         .unwrap_or_else(|| path.to_string())
 }
 
-fn request_cursor(lines: &[Line<'_>], area: Rect) -> Option<Position> {
-    lines
-        .iter()
-        .enumerate()
-        .rev()
-        .find(|(_, line)| line.to_string().starts_with("❯ "))
-        .map(|(row, line)| {
-            let width = u16::try_from(line.width()).unwrap_or(u16::MAX);
-            Position::new(
-                (area.x + width).min(area.right().saturating_sub(1)),
-                area.y + u16::try_from(row).unwrap_or(u16::MAX),
-            )
-        })
-}
-
 fn token_status(used: i64, context_window: Option<i64>) -> String {
     let used = compact_token_count(used);
     context_window.map_or(used.clone(), |context_window| {
@@ -631,171 +614,6 @@ fn compact_scaled(value: i64, divisor: i64, suffix: &str) -> String {
     } else {
         format!("{:.1}{suffix}", value as f64 / divisor as f64)
     }
-}
-
-fn request_lines(
-    request: Option<&PendingRequest>,
-    composer: &str,
-    _width: u16,
-) -> Vec<Line<'static>> {
-    let Some(request) = request else {
-        return Vec::new();
-    };
-    let mut lines = vec![vec!["◇ ".magenta(), "Action required".magenta().bold()].into()];
-    match request {
-        PendingRequest::CommandExecution { params, .. } => {
-            lines.push(
-                vec![
-                    "  $ ".dim(),
-                    params
-                        .command
-                        .clone()
-                        .unwrap_or_else(|| "command".to_string())
-                        .into(),
-                ]
-                .into(),
-            );
-            if let Some(reason) = params.reason.as_deref() {
-                lines.push(vec!["  ".into(), reason.to_string().dim()].into());
-            }
-            let mut choices = "[y] allow · [a] allow session · [n] deny · [esc] cancel".to_string();
-            if params.proposed_execpolicy_amendment.is_some() {
-                choices.push_str(" · [e] trust pattern");
-            }
-            if params
-                .proposed_network_policy_amendments
-                .as_ref()
-                .is_some_and(|amendments| !amendments.is_empty())
-            {
-                choices.push_str(" · [p] network rule");
-            }
-            lines.push(vec!["  ".into(), choices.dim()].into());
-        }
-        PendingRequest::FileChange { params, .. } => {
-            lines.push(
-                vec![
-                    "  Edit files".into(),
-                    params
-                        .reason
-                        .as_deref()
-                        .map(|reason| format!(" · {reason}"))
-                        .unwrap_or_default()
-                        .dim(),
-                ]
-                .into(),
-            );
-            lines.push(
-                "  [y] allow · [a] allow session · [n] deny · [esc] cancel"
-                    .dim()
-                    .into(),
-            );
-        }
-        PendingRequest::Permissions { params, .. } => {
-            lines.push(
-                vec![
-                    "  Permissions · ".into(),
-                    params
-                        .reason
-                        .as_deref()
-                        .unwrap_or("additional access")
-                        .to_string()
-                        .dim(),
-                ]
-                .into(),
-            );
-            lines.push(
-                "  [y] allow turn · [a] allow session · [n] deny"
-                    .dim()
-                    .into(),
-            );
-        }
-        PendingRequest::UserInput { params, .. } => {
-            for question in &params.questions {
-                lines.push(vec!["  ".into(), question.question.clone().into()].into());
-                if let Some(options) = &question.options {
-                    lines.push(
-                        vec![
-                            "    ".into(),
-                            options
-                                .iter()
-                                .map(|option| option.label.as_str())
-                                .collect::<Vec<_>>()
-                                .join(" · ")
-                                .dim(),
-                        ]
-                        .into(),
-                    );
-                }
-            }
-            lines.push(vec!["❯ ".cyan(), composer.to_string().into()].into());
-            lines.push(
-                "  Enter answer · separate multiple answers with | · Esc cancel"
-                    .dim()
-                    .into(),
-            );
-        }
-        PendingRequest::McpElicitation { params, .. } => {
-            let message = match &params.request {
-                McpServerElicitationRequest::Form { message, .. }
-                | McpServerElicitationRequest::Url { message, .. } => message,
-            };
-            lines.push(vec!["  ".into(), message.clone().into()].into());
-            match &params.request {
-                McpServerElicitationRequest::Form { .. } => {
-                    lines.push(vec!["❯ ".cyan(), composer.to_string().into()].into());
-                    lines.push(
-                        "  Enter JSON response · [n] decline · [esc] cancel"
-                            .dim()
-                            .into(),
-                    );
-                }
-                McpServerElicitationRequest::Url { .. } => {
-                    lines.push("  [y] accept · [n] decline · [esc] cancel".dim().into());
-                }
-            }
-        }
-        PendingRequest::DynamicTool { params, .. } => {
-            lines.push(
-                vec![
-                    "  Client tool · ".into(),
-                    params
-                        .namespace
-                        .as_ref()
-                        .map_or_else(
-                            || params.tool.clone(),
-                            |namespace| format!("{namespace}/{}", params.tool),
-                        )
-                        .cyan(),
-                ]
-                .into(),
-            );
-            lines.push(
-                "  Waiting for registered Astral client handler"
-                    .dim()
-                    .into(),
-            );
-        }
-        PendingRequest::Attestation { .. } => {
-            lines.push("  Waiting for client attestation provider".dim().into());
-        }
-        PendingRequest::LegacyApplyPatch { .. } | PendingRequest::LegacyExecCommand { .. } => {
-            lines.push(
-                "  Legacy request · this surface uses app-server v2"
-                    .red()
-                    .into(),
-            );
-        }
-    }
-    lines
-}
-
-fn request_uses_composer(request: &PendingRequest) -> bool {
-    matches!(request, PendingRequest::UserInput { .. })
-        || matches!(
-            request,
-            PendingRequest::McpElicitation { params, .. }
-                if matches!(params.request, McpServerElicitationRequest::Form { .. })
-        )
 }
 
 #[cfg(test)]

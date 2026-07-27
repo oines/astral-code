@@ -50,6 +50,8 @@ pub(crate) struct AstralTheme {
     pub(crate) gray: Color,
     pub(crate) accent_running: Color,
     pub(crate) accent_error: Color,
+    pub(crate) panel_background: Color,
+    pub(crate) panel_selected: Color,
     pub(crate) prompt_border: Color,
     pub(crate) prompt_border_active: Color,
 }
@@ -75,6 +77,8 @@ impl AstralTheme {
             gray: Color::Rgb(108, 108, 108),
             accent_running: Color::Rgb(187, 154, 247),
             accent_error: Color::Rgb(247, 118, 142),
+            panel_background: Color::Rgb(27, 27, 29),
+            panel_selected: Color::Rgb(45, 43, 50),
             prompt_border: Color::Rgb(50, 50, 55),
             prompt_border_active: Color::Rgb(80, 80, 88),
         }
@@ -90,6 +94,8 @@ impl AstralTheme {
             gray: Color::Rgb(112, 112, 120),
             accent_running: Color::Rgb(108, 76, 184),
             accent_error: Color::Rgb(190, 55, 70),
+            panel_background: Color::Rgb(235, 235, 238),
+            panel_selected: Color::Rgb(218, 215, 226),
             prompt_border: Color::Rgb(208, 208, 214),
             prompt_border_active: Color::Rgb(142, 142, 152),
         }
@@ -104,6 +110,8 @@ impl AstralTheme {
             gray: Color::Gray,
             accent_running: Color::Magenta,
             accent_error: Color::Red,
+            panel_background: Color::Reset,
+            panel_selected: Color::DarkGray,
             prompt_border: Color::DarkGray,
             prompt_border_active: Color::Gray,
         }

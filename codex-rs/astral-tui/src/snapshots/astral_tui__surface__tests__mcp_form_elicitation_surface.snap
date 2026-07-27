@@ -9,8 +9,14 @@ expression: "request_surface(json!({\n    \"method\": \"mcpServer/elicitation/re
 
 
 
- ◇ Action required
-   Choose settings
- ❯ {"confirmed":true}
-   Enter JSON response · [n] decline · [esc] cancel
- Shift+Tab:mode  │  Ctrl+.:shortcuts
+
+
+
+
+
+ ┃
+ ┃  astral needs structured input
+ ┃  Choose settings
+ ┃
+ ┃  ❯ {"confirmed":true}
+ Enter:submit  │  N:decline  │  Esc:cancel
