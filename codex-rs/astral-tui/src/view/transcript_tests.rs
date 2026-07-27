@@ -84,14 +84,44 @@ fn transcript_layout_assigns_stable_item_sections() {
         layout.sections,
         vec![
             TranscriptSection {
-                item_id: "agent-1".to_string(),
+                item_id: "turn-1\0agent-1".to_string(),
                 lines: 0..1,
             },
             TranscriptSection {
-                item_id: "agent-2".to_string(),
+                item_id: "turn-1\0agent-2".to_string(),
                 lines: 1..4,
             },
         ]
     );
     assert_eq!(layout.lines.len(), 4);
+}
+
+#[test]
+fn transcript_sections_scope_empty_item_ids_to_their_turn() {
+    let turns = ["first", "second"].map(|label| TranscriptTurn {
+        id: format!("turn-{label}"),
+        blocks: vec![TranscriptBlock {
+            item_id: String::new(),
+            block: PresentationBlock::Thinking {
+                text: format!("{label} thought"),
+                running: false,
+            },
+            started_at_ms: None,
+            completed_at_ms: None,
+        }],
+        started_at_ms: None,
+        completed_at_ms: None,
+        duration_ms: None,
+    });
+
+    let layout = render_transcript(&turns, 80, AstralTheme::default());
+
+    assert_eq!(
+        layout
+            .sections
+            .iter()
+            .map(|section| section.item_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["turn-first\0", "turn-second\0"]
+    );
 }
