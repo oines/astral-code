@@ -153,6 +153,49 @@ fn claude_surface_tool_blocks_snapshot() {
 }
 
 #[test]
+fn todo_tool_surfaces_snapshot() {
+    let items = [
+        ThreadItem::CoreToolCall {
+            id: "todo-claude".to_string(),
+            tool: "TodoWrite".to_string(),
+            arguments: json!({
+                "explanation": "Keep the checklist current.",
+                "todos": [
+                    {"content": "Trace events", "status": "completed"},
+                    {"content": "Render todos", "status": "in_progress"},
+                    {"content": "Run PTY checks", "status": "pending"}
+                ]
+            }),
+            status: CoreToolCallStatus::Completed,
+            result: Some("Todos updated".to_string()),
+            error: None,
+            duration_ms: Some(4),
+        },
+        ThreadItem::CoreToolCall {
+            id: "todo-codex".to_string(),
+            tool: "update_plan".to_string(),
+            arguments: json!({
+                "plan": [
+                    {"step": "Map Codex semantics", "status": "completed"},
+                    {"step": "Verify snapshots", "status": "in_progress"}
+                ]
+            }),
+            status: CoreToolCallStatus::Completed,
+            result: Some("Plan updated".to_string()),
+            error: None,
+            duration_ms: Some(3),
+        },
+    ];
+
+    let rendered = items
+        .into_iter()
+        .map(|item| render(item, true))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_snapshot!(rendered);
+}
+
+#[test]
 fn background_command_lifecycle_snapshot() {
     let item = ThreadItem::CommandExecution {
         id: "command-bg".to_string(),

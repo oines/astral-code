@@ -17,6 +17,7 @@ use crate::ToolPresentation;
 use crate::ToolStatus;
 use crate::markdown::MarkdownStyle;
 use crate::markdown::render_markdown;
+use crate::todo::render_todo;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RenderOptions {
@@ -43,6 +44,7 @@ pub fn render_block(block: &PresentationBlock, options: RenderOptions) -> Text<'
         PresentationBlock::Assistant { text } => render_assistant(text, options.width),
         PresentationBlock::Thinking { text, running } => render_thinking(text, *running, options),
         PresentationBlock::Plan { text, running } => render_plan(text, *running, options),
+        PresentationBlock::Todo(todo) => render_todo(todo, options.width),
         PresentationBlock::Tool(tool) => render_tool(tool, options),
         PresentationBlock::Subagent(subagent) => render_subagent(subagent, options),
         PresentationBlock::System { title, detail } => {
@@ -373,6 +375,7 @@ fn tool_label(kind: ToolKind) -> &'static str {
         ToolKind::Collab => "Subagent",
         ToolKind::ImageView => "View",
         ToolKind::ImageGeneration => "Generate",
+        ToolKind::Todo => "Todo",
         ToolKind::Other => "Use",
     }
 }

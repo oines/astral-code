@@ -9,12 +9,19 @@ use codex_app_server_protocol::PatchChangeKind;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::TerminalInteractionNotification;
 use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::TurnPlanStep;
+use codex_app_server_protocol::TurnPlanStepStatus;
+use codex_app_server_protocol::TurnPlanUpdatedNotification;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 
 use super::ReduceOutcome;
 use super::TimelineState;
+use astral_tui_scrollback::PresentationBlock;
 use astral_tui_scrollback::TimelineStream;
+use astral_tui_scrollback::TodoItemPresentation;
+use astral_tui_scrollback::TodoPresentation;
+use astral_tui_scrollback::TodoStatus;
 
 fn agent_message(id: &str, text: &str) -> ThreadItem {
     ThreadItem::AgentMessage {
@@ -207,6 +214,96 @@ fn empty_provider_item_ids_keep_distinct_turn_positions() {
     assert_eq!(timeline.entries()[0].turn_id(), "turn-1");
     assert_eq!(timeline.entries()[1].item(), Some(&second));
     assert_eq!(timeline.entries()[1].turn_id(), "turn-2");
+}
+
+#[test]
+fn typed_plan_update_replaces_the_claude_todo_call_in_place() {
+    let mut timeline = TimelineState::new("thread-1");
+    let running = ThreadItem::CoreToolCall {
+        id: "todo-1".to_string(),
+        tool: "TodoWrite".to_string(),
+        arguments: json!({
+            "todos": [{"content": "Inspect projection", "status": "in_progress"}]
+        }),
+        status: CoreToolCallStatus::InProgress,
+        result: None,
+        error: None,
+        duration_ms: None,
+    };
+    timeline.apply(&started("thread-1", "turn-1", running));
+    timeline.apply(&ServerNotification::TurnPlanUpdated(
+        TurnPlanUpdatedNotification {
+            thread_id: "thread-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            explanation: Some("Keep the UI current.".to_string()),
+            plan: vec![TurnPlanStep {
+                step: "Inspect projection".to_string(),
+                status: TurnPlanStepStatus::Completed,
+            }],
+        },
+    ));
+    timeline.apply(&completed(
+        "thread-1",
+        "turn-1",
+        ThreadItem::CoreToolCall {
+            id: "todo-1".to_string(),
+            tool: "TodoWrite".to_string(),
+            arguments: json!({
+                "todos": [{"content": "Inspect projection", "status": "in_progress"}]
+            }),
+            status: CoreToolCallStatus::Completed,
+            result: Some("Todos updated".to_string()),
+            error: None,
+            duration_ms: Some(5),
+        },
+    ));
+
+    assert_eq!(timeline.entries().len(), 1);
+    assert_eq!(timeline.entries()[0].id(), "todo-1");
+    assert_eq!(
+        timeline.entries()[0].presentation(),
+        Some(&PresentationBlock::Todo(TodoPresentation {
+            explanation: Some("Keep the UI current.".to_string()),
+            items: vec![TodoItemPresentation {
+                text: "Inspect projection".to_string(),
+                status: TodoStatus::Completed,
+            }],
+        }))
+    );
+}
+
+#[test]
+fn codex_plan_notifications_update_one_stable_turn_entry() {
+    let mut timeline = TimelineState::new("thread-1");
+    for status in [
+        TurnPlanStepStatus::InProgress,
+        TurnPlanStepStatus::Completed,
+    ] {
+        timeline.apply(&ServerNotification::TurnPlanUpdated(
+            TurnPlanUpdatedNotification {
+                thread_id: "thread-1".to_string(),
+                turn_id: "turn-1".to_string(),
+                explanation: None,
+                plan: vec![TurnPlanStep {
+                    step: "Render checklist".to_string(),
+                    status,
+                }],
+            },
+        ));
+    }
+
+    assert_eq!(timeline.entries().len(), 1);
+    assert_eq!(timeline.entries()[0].id(), "astral:turn-plan");
+    assert_eq!(
+        timeline.entries()[0].presentation(),
+        Some(&PresentationBlock::Todo(TodoPresentation {
+            explanation: None,
+            items: vec![TodoItemPresentation {
+                text: "Render checklist".to_string(),
+                status: TodoStatus::Completed,
+            }],
+        }))
+    );
 }
 
 #[test]

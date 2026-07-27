@@ -6,6 +6,7 @@ use serde_json::Value;
 use crate::PresentationBlock;
 use crate::SubagentPresentation;
 use crate::TimelineStream;
+use crate::TodoPresentation;
 use crate::ToolKind;
 use crate::ToolPresentation;
 use crate::ToolStatus;
@@ -184,9 +185,16 @@ impl PresentationBlock {
                 ..
             } => {
                 let kind = classify_tool_name(tool);
+                let status = dynamic_status(status, *success);
+                if kind == ToolKind::Todo
+                    && status != ToolStatus::Failed
+                    && let Some(todo) = TodoPresentation::from_tool_arguments(arguments)
+                {
+                    return Some(Self::Todo(todo));
+                }
                 Some(Self::Tool(ToolPresentation {
                     kind,
-                    status: dynamic_status(status, *success),
+                    status,
                     name: namespace
                         .as_ref()
                         .map_or_else(|| tool.clone(), |namespace| format!("{namespace}/{tool}")),
@@ -210,9 +218,16 @@ impl PresentationBlock {
                 ..
             } => {
                 let kind = classify_tool_name(tool);
+                let status = core_tool_status(*status);
+                if kind == ToolKind::Todo
+                    && !matches!(status, ToolStatus::Failed | ToolStatus::Interrupted)
+                    && let Some(todo) = TodoPresentation::from_tool_arguments(arguments)
+                {
+                    return Some(Self::Todo(todo));
+                }
                 Some(Self::Tool(ToolPresentation {
                     kind,
-                    status: core_tool_status(*status),
+                    status,
                     name: tool.clone(),
                     title: tool_call_title(kind, tool, arguments),
                     details: Vec::new(),

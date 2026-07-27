@@ -4,6 +4,7 @@ mod projection;
 mod render;
 mod stream;
 mod subagent;
+mod todo;
 mod tool_semantics;
 
 pub use block::PresentationBlock;
@@ -20,3 +21,7 @@ pub use subagent::SubagentAction;
 pub use subagent::SubagentAgent;
 pub use subagent::SubagentAgentStatus;
 pub use subagent::SubagentPresentation;
+pub use todo::TodoItemPresentation;
+pub use todo::TodoPresentation;
+pub use todo::TodoStatus;
+pub use tool_semantics::classify_tool_name;

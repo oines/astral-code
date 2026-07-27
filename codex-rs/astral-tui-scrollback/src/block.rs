@@ -1,6 +1,7 @@
 use codex_app_server_protocol::FileUpdateChange;
 
 use crate::SubagentPresentation;
+use crate::TodoPresentation;
 
 /// Stable, renderer-facing transcript block.
 #[derive(Debug, Clone, PartialEq)]
@@ -20,6 +21,7 @@ pub enum PresentationBlock {
         text: String,
         running: bool,
     },
+    Todo(TodoPresentation),
     Tool(ToolPresentation),
     Subagent(SubagentPresentation),
     System {
@@ -44,6 +46,7 @@ pub enum ToolKind {
     Collab,
     ImageView,
     ImageGeneration,
+    Todo,
     Other,
 }
 
