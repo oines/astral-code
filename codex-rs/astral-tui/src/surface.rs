@@ -1,5 +1,6 @@
 mod appearance;
 mod mentions;
+mod requests;
 
 use codex_app_server_protocol::Model;
 use codex_app_server_protocol::ThreadTokenUsage;
@@ -25,7 +26,6 @@ use crate::model_command::ModelResolveError;
 use crate::model_command::ModelSelection;
 use crate::permission_picker::PermissionPickerState;
 use crate::permission_picker::display_permission_mode;
-use crate::request::PendingRequest;
 use crate::request_pane::RequestPane;
 use crate::request_user_input::RequestUserInputState;
 use crate::slash::SlashCommandId;
@@ -164,31 +164,6 @@ impl SurfaceState {
 
     pub fn pending_requests_mut(&mut self) -> &mut PendingRequests {
         &mut self.pending_requests
-    }
-
-    pub(crate) fn sync_request_user_input(&mut self) {
-        let params = self
-            .pending_requests
-            .front()
-            .and_then(|request| match request {
-                PendingRequest::UserInput { params, .. } => Some(params.clone()),
-                _ => None,
-            });
-        if let Some(params) = params {
-            self.request_user_input.sync(&params);
-        }
-    }
-
-    pub(crate) fn request_user_input(&self) -> &RequestUserInputState {
-        &self.request_user_input
-    }
-
-    pub(crate) fn request_user_input_mut(&mut self) -> &mut RequestUserInputState {
-        &mut self.request_user_input
-    }
-
-    pub(crate) fn reset_request_user_input(&mut self) {
-        self.request_user_input.reset();
     }
 
     pub fn composer(&self) -> &str {

@@ -383,6 +383,53 @@ enum PaneRow {
     Error(String),
 }
 
+fn push_visible_options(
+    rows: &mut Vec<PaneRow>,
+    options: Vec<PaneRow>,
+    selected: usize,
+    capacity: usize,
+) {
+    if options.len() <= capacity {
+        rows.extend(options);
+        return;
+    }
+    let total = options.len();
+    let selected = selected.min(total - 1);
+    if capacity == 1 {
+        rows.extend(options.into_iter().skip(selected).take(1));
+        return;
+    }
+    if capacity == 2 {
+        if selected == 0 {
+            rows.extend(options.into_iter().take(1));
+            rows.push(PaneRow::Body(format!("… {} options below", total - 1)));
+        } else {
+            rows.push(PaneRow::Body(format!("… {selected} options above")));
+            rows.extend(options.into_iter().skip(selected).take(1));
+        }
+        return;
+    }
+
+    let (start, end) = if selected < capacity - 1 {
+        (0, capacity - 1)
+    } else if selected >= total.saturating_sub(capacity - 1) {
+        (total - (capacity - 1), total)
+    } else {
+        let visible = capacity.saturating_sub(2).max(1);
+        let start = selected
+            .saturating_sub(visible / 2)
+            .clamp(1, total - visible - 1);
+        (start, start + visible)
+    };
+    if start > 0 {
+        rows.push(PaneRow::Body(format!("… {start} options above")));
+    }
+    rows.extend(options.into_iter().skip(start).take(end - start));
+    if end < total {
+        rows.push(PaneRow::Body(format!("… {} options below", total - end)));
+    }
+}
+
 impl PaneRow {
     fn choice(key: &'static str, label: &'static str) -> Self {
         Self::Choice { key, label }
