@@ -1,5 +1,6 @@
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerRequest;
+use codex_app_server_protocol::ThreadListResponse;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
@@ -8,6 +9,7 @@ use serde_json::json;
 
 use super::InputAction;
 use super::handle_key;
+use super::handle_paste;
 use crate::RequestResolution;
 use crate::SlashCommandId;
 use crate::SlashInvocation;
@@ -15,6 +17,8 @@ use crate::SurfaceActivity;
 use crate::SurfaceState;
 use crate::modal::ModalRow;
 use crate::modal::ModalState;
+use crate::thread_picker::PickerState;
+use crate::thread_picker::ThreadPickerAction;
 
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
@@ -133,6 +137,32 @@ fn modal_focus_blocks_composer_input_until_escape() {
         InputAction::Redraw
     );
     assert!(state.modal().is_none());
+}
+
+#[test]
+fn thread_picker_owns_text_input_until_escape() {
+    let mut state = SurfaceState::new("thread-1");
+    state.open_thread_picker(PickerState::new(
+        ThreadPickerAction::Resume,
+        ThreadListResponse {
+            data: Vec::new(),
+            next_cursor: None,
+            backwards_cursor: None,
+        },
+    ));
+
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Char('x'))),
+        InputAction::Redraw
+    );
+    assert_eq!(handle_paste(&mut state, "yz"), InputAction::Redraw);
+    assert!(state.thread_picker().is_some());
+    assert!(state.composer().is_empty());
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Esc)),
+        InputAction::Redraw
+    );
+    assert!(state.thread_picker().is_none());
 }
 
 #[test]

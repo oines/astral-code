@@ -27,6 +27,7 @@ use crate::SessionError;
 use crate::SlashCommandId;
 use crate::SurfaceActivity;
 use crate::SurfaceState;
+use crate::ThreadPickerAction;
 use crate::TranscriptView;
 use crate::clipboard::copy_to_clipboard;
 use crate::committed_height;
@@ -38,6 +39,7 @@ use crate::paint_committed;
 use crate::render_surface;
 use crate::render_surface_with_view;
 use crate::terminal_guard::TerminalGuard;
+use crate::thread_picker::PickerState;
 
 type AstralTerminal = Terminal<CrosstermBackend<Stdout>>;
 
@@ -119,7 +121,6 @@ impl From<SessionError> for RunError {
 
 pub async fn run(mut session: AstralSession, options: RunOptions) -> Result<RunExit, RunError> {
     let initial_state = session.state().cloned().ok_or(RunError::NoThread)?;
-    let thread_id = initial_state.thread.id.clone();
     let mut surface = SurfaceState::from_session(&initial_state);
     match session.list_models().await {
         Ok(models) => surface.set_model_catalog(
@@ -154,6 +155,10 @@ pub async fn run(mut session: AstralSession, options: RunOptions) -> Result<RunE
         }
     };
     let thread_name = session.state().and_then(|state| state.thread.name.clone());
+    let thread_id = session
+        .state()
+        .map(|state| state.thread.id.clone())
+        .ok_or(RunError::NoThread)?;
     let token_usage = surface.token_usage().cloned();
     session.shutdown().await?;
     Ok(RunExit {
@@ -348,6 +353,44 @@ async fn apply_input_action(
         },
         InputAction::Exit => return Ok(Some(RunExitReason::UserRequested)),
         InputAction::ScrollUp | InputAction::ScrollDown | InputAction::CopyLastResponse => {}
+        InputAction::ThreadPickerLoadNext => {
+            let cursor = surface
+                .thread_picker()
+                .and_then(|picker| picker.next_cursor())
+                .map(str::to_string);
+            if let Some(cursor) = cursor {
+                match session.list_threads(Some(cursor)).await {
+                    Ok(page) => {
+                        if let Some(picker) = surface.thread_picker_mut() {
+                            picker.append(page);
+                            picker.move_down();
+                        }
+                    }
+                    Err(error) => {
+                        if let Some(picker) = surface.thread_picker_mut() {
+                            picker.set_notice(error.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        InputAction::ThreadPickerSelect { action, thread } => {
+            let result = match action {
+                ThreadPickerAction::Resume => session.resume_thread(thread.id).await,
+                ThreadPickerAction::Fork => {
+                    session
+                        .fork(codex_app_server_protocol::ThreadForkParams {
+                            thread_id: thread.id,
+                            ..codex_app_server_protocol::ThreadForkParams::default()
+                        })
+                        .await
+                }
+            };
+            match result {
+                Ok(_) => reset_surface(session, surface).await,
+                Err(error) => surface.set_notice(error.to_string()),
+            }
+        }
         InputAction::Slash(invocation) => match invocation.command {
             SlashCommandId::Exit | SlashCommandId::Quit => {
                 return Ok(Some(RunExitReason::UserRequested));
@@ -376,6 +419,27 @@ async fn apply_input_action(
                 Ok(()) => surface.set_notice("Compacting conversation…"),
                 Err(error) => surface.set_notice(error.to_string()),
             },
+            SlashCommandId::New => match session.start_new().await {
+                Ok(_) => reset_surface(session, surface).await,
+                Err(error) => surface.set_notice(error.to_string()),
+            },
+            SlashCommandId::Resume => match session.list_threads(None).await {
+                Ok(page) => {
+                    surface.open_thread_picker(PickerState::new(ThreadPickerAction::Resume, page))
+                }
+                Err(error) => surface.set_notice(error.to_string()),
+            },
+            SlashCommandId::Fork => match session.fork_current().await {
+                Ok(_) => reset_surface(session, surface).await,
+                Err(error) => surface.set_notice(error.to_string()),
+            },
+            SlashCommandId::Rename => {
+                let name = invocation.args.trim().to_string();
+                match session.rename(name.clone()).await {
+                    Ok(()) => surface.set_notice(format!("Renamed conversation to {name}")),
+                    Err(error) => surface.set_notice(error.to_string()),
+                }
+            }
             SlashCommandId::Status => {
                 if let Some(state) = session.state() {
                     let tokens = surface.token_usage().map_or_else(
@@ -422,6 +486,20 @@ async fn apply_input_action(
         InputAction::Notice(message) => surface.set_notice(message),
     }
     Ok(None)
+}
+
+async fn reset_surface(session: &mut AstralSession, surface: &mut SurfaceState) {
+    let Some(state) = session.state().cloned() else {
+        surface.set_notice("No Astral thread is active");
+        return;
+    };
+    *surface = SurfaceState::from_session(&state);
+    match session.list_models().await {
+        Ok(models) => {
+            surface.set_model_catalog(models, state.model.clone(), state.model_provider.clone())
+        }
+        Err(error) => surface.set_notice(format!("Could not load model catalog: {error}")),
+    }
 }
 
 async fn handle_app_event(
