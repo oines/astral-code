@@ -154,6 +154,29 @@ fn modal_focus_blocks_composer_input_until_escape() {
 }
 
 #[test]
+fn modal_inventory_scrolls_without_touching_the_composer() {
+    let mut state = SurfaceState::new("thread-1");
+    state.open_modal(ModalState::info(
+        "Skills",
+        (0..20)
+            .map(|index| ModalRow::new(format!("Skill {index}"), "enabled"))
+            .collect(),
+    ));
+
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::PageDown)),
+        InputAction::Redraw
+    );
+    assert_eq!(state.modal().map(|modal| modal.scroll_offset), Some(10));
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::End)),
+        InputAction::Redraw
+    );
+    assert_eq!(state.modal().map(|modal| modal.scroll_offset), Some(19));
+    assert!(state.composer().is_empty());
+}
+
+#[test]
 fn thread_picker_owns_text_input_until_escape() {
     let mut state = SurfaceState::new("thread-1");
     state.open_thread_picker(PickerState::new(

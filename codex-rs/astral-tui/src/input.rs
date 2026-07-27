@@ -65,9 +65,36 @@ pub fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
         return handle_permission_picker_input(state, key);
     }
     if state.modal().is_some() {
+        if key.code == KeyCode::Esc {
+            state.close_modal();
+            return InputAction::Redraw;
+        }
+        let Some(modal) = state.modal_mut() else {
+            return InputAction::None;
+        };
         return match key.code {
-            KeyCode::Esc => {
-                state.close_modal();
+            KeyCode::Up => {
+                modal.scroll_by(-1);
+                InputAction::Redraw
+            }
+            KeyCode::Down => {
+                modal.scroll_by(1);
+                InputAction::Redraw
+            }
+            KeyCode::PageUp => {
+                modal.scroll_by(-10);
+                InputAction::Redraw
+            }
+            KeyCode::PageDown => {
+                modal.scroll_by(10);
+                InputAction::Redraw
+            }
+            KeyCode::Home => {
+                modal.scroll_to_start();
+                InputAction::Redraw
+            }
+            KeyCode::End => {
+                modal.scroll_to_end();
                 InputAction::Redraw
             }
             _ => InputAction::None,

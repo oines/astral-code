@@ -19,6 +19,7 @@ impl ModalRow {
 pub(crate) struct ModalState {
     pub(crate) title: String,
     pub(crate) rows: Vec<ModalRow>,
+    pub(crate) scroll_offset: usize,
 }
 
 impl ModalState {
@@ -26,6 +27,22 @@ impl ModalState {
         Self {
             title: title.into(),
             rows,
+            scroll_offset: 0,
         }
+    }
+
+    pub(crate) fn scroll_by(&mut self, delta: isize) {
+        self.scroll_offset = self
+            .scroll_offset
+            .saturating_add_signed(delta)
+            .min(self.rows.len().saturating_sub(1));
+    }
+
+    pub(crate) fn scroll_to_start(&mut self) {
+        self.scroll_offset = 0;
+    }
+
+    pub(crate) fn scroll_to_end(&mut self) {
+        self.scroll_offset = self.rows.len().saturating_sub(1);
     }
 }
