@@ -673,6 +673,78 @@ fn grok_layered_turn_139x35_snapshot() {
 }
 
 #[test]
+fn reused_provider_item_ids_preserve_turn_order_snapshot() {
+    let mut session = session_state();
+    let template = session.thread.turns.remove(0);
+    session.thread.turns = ["first", "second"]
+        .into_iter()
+        .enumerate()
+        .map(|(index, label)| {
+            let mut turn = template.clone();
+            turn.id = format!("turn-{label}");
+            turn.items = vec![
+                ThreadItem::UserMessage {
+                    id: format!("user-{label}"),
+                    client_id: None,
+                    content: vec![UserInput::Text {
+                        text: format!("{label} question"),
+                        text_elements: Vec::new(),
+                    }],
+                },
+                ThreadItem::Reasoning {
+                    id: String::new(),
+                    summary: vec![format!("{label} thought")],
+                    content: Vec::new(),
+                },
+                ThreadItem::AgentMessage {
+                    id: format!("agent-{label}"),
+                    text: format!("{label} response"),
+                    phase: None,
+                    memory_citation: None,
+                },
+            ];
+            turn.status = TurnStatus::Completed;
+            turn.started_at = Some(1_700_000_000 + index as i64 * 10);
+            turn.completed_at = Some(1_700_000_002 + index as i64 * 10);
+            turn.duration_ms = Some(2_000);
+            turn
+        })
+        .collect();
+    session.active_turn_id = None;
+    let mut state = SurfaceState::from_session(&session);
+    let area = Rect::new(0, 0, 139, 35);
+    let mut buffer = Buffer::empty(area);
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        area,
+        &mut buffer,
+    );
+
+    let rendered = buffer_text(&buffer);
+    let first_question = rendered
+        .find("first question")
+        .unwrap_or_else(|| panic!("first question missing:\n{rendered}"));
+    let first_response = rendered
+        .find("first response")
+        .unwrap_or_else(|| panic!("first response missing:\n{rendered}"));
+    let second_question = rendered
+        .find("second question")
+        .unwrap_or_else(|| panic!("second question missing:\n{rendered}"));
+    let second_response = rendered
+        .find("second response")
+        .unwrap_or_else(|| panic!("second response missing:\n{rendered}"));
+    assert!(
+        first_question < first_response
+            && first_response < second_question
+            && second_question < second_response,
+        "turns must render in chronological order:\n{rendered}"
+    );
+    insta::assert_snapshot!("reused_provider_item_ids_preserve_turn_order", rendered);
+}
+
+#[test]
 fn scroll_offset_moves_in_both_directions() {
     let mut state = SurfaceState::new("thread-1");
     state.scroll_up(/*lines*/ 20);
