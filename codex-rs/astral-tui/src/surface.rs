@@ -31,6 +31,7 @@ use crate::view::PaneHeights;
 use crate::view::PromptChrome;
 use crate::view::ScrollbarConfig;
 use crate::view::ShortcutsBar;
+use crate::view::SlashMenu;
 use crate::view::StatusBar;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -261,8 +262,16 @@ pub(crate) fn render_surface_with_view(
     } else {
         u16::try_from(request.len()).unwrap_or(u16::MAX).max(3)
     };
-    let turn_status = request
-        .is_empty()
+    let slash = state.slash();
+    let max_suggestions = if area.height <= 16 { 2 } else { 6 };
+    let slash_height = if request.is_empty() && slash.open {
+        u16::try_from(slash.matches.len().min(max_suggestions))
+            .unwrap_or(u16::MAX)
+            .saturating_add(2)
+    } else {
+        0
+    };
+    let turn_status = (request.is_empty() && slash_height == 0)
         .then(|| turn_status_line(state, theme))
         .flatten();
     let layout = AgentViewLayout::compute(AgentViewLayoutInput {
@@ -272,6 +281,7 @@ pub(crate) fn render_surface_with_view(
         panes: PaneHeights {
             prompt: prompt_height,
             turn_status: u16::from(turn_status.is_some()),
+            banner: slash_height,
             prompt_gap: u16::from(area.height > 16),
             shortcuts: 1,
             ..PaneHeights::default()
@@ -303,6 +313,9 @@ pub(crate) fn render_surface_with_view(
             layout.turn_status.width,
         );
     }
+    if slash_height > 0 {
+        SlashMenu { snapshot: slash }.render(layout.banner, buffer, theme);
+    }
 
     let cursor = if request.is_empty() {
         let flags = [session.model_provider.as_str()];
@@ -311,6 +324,7 @@ pub(crate) fn render_surface_with_view(
             title: session.thread.name.as_deref(),
             model: &session.model,
             flags: &flags,
+            ghost: slash.ghost.as_deref(),
             focused: true,
         }
         .render(layout.prompt, buffer, theme)
@@ -324,12 +338,18 @@ pub(crate) fn render_surface_with_view(
     };
 
     let right = format!("{} · {}", session.model, session.model_provider);
+    let default_hints = [
+        ("Enter", "send"),
+        ("PgUp/PgDn", "scroll"),
+        ("Ctrl+O", "copy"),
+    ];
+    let slash_hints = [("↑/↓", "navigate"), ("Tab", "complete"), ("Esc", "close")];
     ShortcutsBar {
-        hints: &[
-            ("Enter", "send"),
-            ("PgUp/PgDn", "scroll"),
-            ("Ctrl+O", "copy"),
-        ],
+        hints: if slash.open {
+            &slash_hints
+        } else {
+            &default_hints
+        },
         right: Some(&right),
     }
     .render(layout.shortcuts, buffer, theme);
