@@ -1,0 +1,27 @@
+---
+source: astral-tui/src/surface_tests.rs
+expression: "render_at_size(&mut state, &session, 80, 24)"
+---
+
+  ⎇ main  /workspace
+
+
+  › inspect this repo                                                 12:00 AM
+
+
+  I’m tracing the relevant data flow.
+
+
+
+
+
+  ╭─ skills & plugins ───────────────────────────────────────────────────────╮
+  │› Plugin  Browser Use         Control the active browser                  │
+  │  Skill   Code Review         Review a pull request                       │
+  ╰──────────────────────────────────────────────────────────────────────────╯
+
+  ╭──────────────────────────────────────────────────────────────────────────╮
+  │ ❯ $                                                                      │
+  ╰──────────────────────────────────────────── claude-sonnet-4 · workspace ─╯
+
+  ↑/↓:navigate  │  Tab:select  │  Esc:close

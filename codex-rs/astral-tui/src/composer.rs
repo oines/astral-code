@@ -8,8 +8,8 @@ use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
 
 use crate::mention::MentionBinding;
-use crate::mention::PromptSubmission;
 use crate::mention::MentionTarget;
+use crate::mention::PromptSubmission;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ComposerState {
