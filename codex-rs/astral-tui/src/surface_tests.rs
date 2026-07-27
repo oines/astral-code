@@ -22,6 +22,7 @@ use super::render_surface_with_view;
 use crate::SessionState;
 use crate::modal::ModalRow;
 use crate::modal::ModalState;
+use crate::shortcuts::shortcuts_modal;
 use crate::view::AstralThemeId;
 
 fn session_state() -> SessionState {
@@ -238,6 +239,15 @@ fn ecosystem_modal_scroll_snapshot() {
     );
     modal.scroll_by(8);
     state.open_modal(modal);
+
+    insta::assert_snapshot!(render_at_size(&state, &session, 80, 24));
+}
+
+#[test]
+fn shortcuts_modal_snapshot() {
+    let session = session_state();
+    let mut state = SurfaceState::from_session(&session);
+    state.open_modal(shortcuts_modal());
 
     insta::assert_snapshot!(render_at_size(&state, &session, 80, 24));
 }

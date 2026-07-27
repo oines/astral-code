@@ -46,6 +46,7 @@ use crate::paint_committed;
 use crate::permission_picker::PermissionPickerState;
 use crate::render_surface;
 use crate::render_surface_with_view;
+use crate::shortcuts::shortcuts_modal;
 use crate::terminal_guard::TerminalGuard;
 use crate::thread_picker::PickerState;
 use crate::view::AstralThemeId;
@@ -420,6 +421,7 @@ async fn apply_input_action(
                 .unwrap_or(ModeKind::Default);
             set_collaboration_mode(session, surface, mode).await;
         }
+        InputAction::OpenShortcuts => surface.open_modal(shortcuts_modal()),
         InputAction::Slash(invocation) => match invocation.command {
             SlashCommandId::Exit | SlashCommandId::Quit => {
                 return Ok(Some(RunExitReason::UserRequested));

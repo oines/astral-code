@@ -178,6 +178,18 @@ fn modal_inventory_scrolls_without_touching_the_composer() {
 }
 
 #[test]
+fn shortcuts_toggle_is_global() {
+    let mut state = SurfaceState::new("thread-1");
+    assert_eq!(
+        handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('.'), KeyModifiers::CONTROL)
+        ),
+        InputAction::OpenShortcuts
+    );
+}
+
+#[test]
 fn theme_cancel_restores_the_original_preview() {
     let mut state = SurfaceState::new("thread-1");
     state.open_theme_picker();

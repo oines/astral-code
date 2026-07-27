@@ -13,4 +13,4 @@ expression: buffer_text(&buffer)
  ╭────────────────────────────────────────────────────────────────────╮
  │ ❯ follow the projection                                            │
  ╰────────────────────────────────────── claude-sonnet-4 · workspace ─╯
- Shift+Tab:mode
+ Shift+Tab:mode  │  Ctrl+.:shortcuts
