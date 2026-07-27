@@ -1,0 +1,27 @@
+---
+source: astral-tui/src/surface_tests.rs
+expression: "render_at_size(&state, &session, 80, 24)"
+---
+
+  ⎇ main  /workspace
+
+  ❯ inspect this repo
+                ┌─ Skills ─────────────────────────────────[×]─┐
+  I’m tracing th│                                              │
+                │  skill-08  user · enabled                    │
+                │  skill-09  repo · enabled                    │
+                │  skill-10  user · enabled                    │
+                │  skill-11  user · enabled                    │
+                │  skill-12  repo · enabled                    │
+                │  skill-13  user · enabled                    │
+                │  skill-14  user · enabled                    │
+                │  skill-15  repo · enabled                    │
+                │  skill-16  user · enabled                    │
+                │  skill-17  user · enabled                    │
+  ◇ Working     │  skill-18  repo · enabled                    │
+                │                                              │
+  ╭─────────────│            ↑/↓ scroll · Esc close            │─────────────╮
+  │ ❯           └──────────────────────────────────────────────┘             │
+  ╰──────────────────────────────────────────── claude-sonnet-4 · workspace ─╯
+
+  Shift+Tab:mode

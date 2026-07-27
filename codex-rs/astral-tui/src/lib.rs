@@ -8,6 +8,7 @@
 mod client_tools;
 mod clipboard;
 mod conversation;
+mod ecosystem;
 mod input;
 mod launch;
 mod modal;

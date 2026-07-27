@@ -1,5 +1,7 @@
 use std::io;
 
+mod ecosystem;
+
 use codex_app_server_client::AppServerClient;
 use codex_app_server_client::AppServerEvent;
 use codex_app_server_client::TypedRequestError;

@@ -217,6 +217,31 @@ fn status_modal_snapshot() {
 }
 
 #[test]
+fn ecosystem_modal_scroll_snapshot() {
+    let session = session_state();
+    let mut state = SurfaceState::from_session(&session);
+    let mut modal = ModalState::info(
+        "Skills",
+        (0..30)
+            .map(|index| {
+                ModalRow::new(
+                    format!("skill-{index:02}"),
+                    if index % 3 == 0 {
+                        "repo · enabled"
+                    } else {
+                        "user · enabled"
+                    },
+                )
+            })
+            .collect(),
+    );
+    modal.scroll_by(8);
+    state.open_modal(modal);
+
+    insta::assert_snapshot!(render_at_size(&state, &session, 80, 24));
+}
+
+#[test]
 fn command_approval_surface_snapshot() {
     let session = session_state();
     let mut state = SurfaceState::from_session(&session);

@@ -29,12 +29,17 @@ pub(crate) struct InfoModal<'a> {
 
 impl InfoModal<'_> {
     pub(crate) fn render(self, area: Rect, buffer: &mut Buffer, theme: AstralTheme) {
+        let footer = if self.state.rows.len() > 10 {
+            "↑/↓ scroll · Esc close"
+        } else {
+            "Esc close"
+        };
         let Some(content) = render_modal_frame(
             area,
             buffer,
             theme,
             &self.state.title,
-            "Esc close",
+            footer,
             ModalHeight::Adaptive,
         ) else {
             return;
@@ -50,6 +55,7 @@ impl InfoModal<'_> {
             .state
             .rows
             .iter()
+            .skip(self.state.scroll_offset)
             .take(usize::from(content.height))
             .enumerate()
         {

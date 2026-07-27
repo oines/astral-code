@@ -4,6 +4,7 @@ use std::io::Stdout;
 use astral_terminal_inline::Terminal;
 use codex_app_server_client::AppServerEvent;
 use codex_app_server_protocol::DynamicToolCallResponse;
+use codex_app_server_protocol::McpServerStatusDetail;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ServerRequest;
@@ -32,6 +33,11 @@ use crate::ThreadPickerAction;
 use crate::TranscriptView;
 use crate::clipboard::copy_to_clipboard;
 use crate::committed_height;
+use crate::ecosystem::apps_panel;
+use crate::ecosystem::hooks_panel;
+use crate::ecosystem::mcp_panel;
+use crate::ecosystem::plugins_panel;
+use crate::ecosystem::skills_panel;
 use crate::handle_key;
 use crate::handle_paste;
 use crate::modal::ModalRow;
@@ -518,6 +524,36 @@ async fn apply_input_action(
                     ));
                 }
             }
+            SlashCommandId::Mcp => {
+                let detail = match invocation.args.trim() {
+                    "" => McpServerStatusDetail::ToolsAndAuthOnly,
+                    "verbose" => McpServerStatusDetail::Full,
+                    _ => {
+                        surface.set_notice("Usage: /mcp [verbose]");
+                        return Ok(None);
+                    }
+                };
+                match session.list_mcp_servers(detail).await {
+                    Ok(response) => surface.open_modal(mcp_panel(response, detail)),
+                    Err(error) => surface.set_notice(error.to_string()),
+                }
+            }
+            SlashCommandId::Skills => match session.list_skills().await {
+                Ok(response) => surface.open_modal(skills_panel(response)),
+                Err(error) => surface.set_notice(error.to_string()),
+            },
+            SlashCommandId::Hooks => match session.list_hooks().await {
+                Ok(response) => surface.open_modal(hooks_panel(response)),
+                Err(error) => surface.set_notice(error.to_string()),
+            },
+            SlashCommandId::Apps => match session.list_apps().await {
+                Ok(response) => surface.open_modal(apps_panel(response)),
+                Err(error) => surface.set_notice(error.to_string()),
+            },
+            SlashCommandId::Plugins => match session.list_plugins().await {
+                Ok(response) => surface.open_modal(plugins_panel(response)),
+                Err(error) => surface.set_notice(error.to_string()),
+            },
             command => surface.set_notice(format!(
                 "/{} is recognized; its Astral action is not available yet ({command:?})",
                 invocation.name

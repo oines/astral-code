@@ -230,6 +230,10 @@ impl SurfaceState {
         self.modal.as_ref()
     }
 
+    pub(crate) fn modal_mut(&mut self) -> Option<&mut ModalState> {
+        self.modal.as_mut()
+    }
+
     pub(crate) fn open_modal(&mut self, modal: ModalState) {
         self.modal = Some(modal);
     }
