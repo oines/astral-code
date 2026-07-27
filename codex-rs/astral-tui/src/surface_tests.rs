@@ -338,7 +338,7 @@ fn command_approval_surface_snapshot() {
             .map(super::super::request::PendingRequest::request_id),
         Some(&RequestId::Integer(8))
     );
-    let area = Rect::new(0, 0, 72, 12);
+    let area = Rect::new(0, 0, 72, 18);
     let mut buffer = Buffer::empty(area);
     render_surface(&state, &session, area, &mut buffer);
 
@@ -415,6 +415,55 @@ fn typed_approval_surfaces_snapshot() {
             r#"{"confirmed":true}"#
         )
     );
+    insta::assert_snapshot!(
+        "user_question_surface",
+        request_surface(
+            json!({
+                "method": "item/tool/requestUserInput",
+                "id": "question-1",
+                "params": {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "itemId": "question-1",
+                    "questions": [{
+                        "id": "scope",
+                        "header": "Choose scope",
+                        "question": "Where should the refactor apply?",
+                        "isOther": false,
+                        "isSecret": false,
+                        "options": [{
+                            "label": "Workspace only",
+                            "description": "Keep the change local to this repository"
+                        }, {
+                            "label": "Shared runtime",
+                            "description": "Update the common implementation"
+                        }]
+                    }]
+                }
+            }),
+            "Workspace only"
+        )
+    );
+    insta::assert_snapshot!(
+        "mcp_url_elicitation_surface",
+        request_surface(
+            json!({
+                "method": "mcpServer/elicitation/request",
+                "id": "mcp-url",
+                "params": {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "serverName": "linear",
+                    "mode": "url",
+                    "_meta": null,
+                    "message": "Connect Linear to continue",
+                    "url": "https://linear.app/oauth/authorize",
+                    "elicitationId": "auth-1"
+                }
+            }),
+            ""
+        )
+    );
 }
 
 #[test]
@@ -448,7 +497,7 @@ fn request_surface(value: serde_json::Value, composer: &str) -> String {
     let request: ServerRequest = serde_json::from_value(value).expect("valid server request");
     state.pending_requests_mut().note(request);
     state.composer_mut().push_str(composer);
-    let area = Rect::new(0, 0, 72, 12);
+    let area = Rect::new(0, 0, 72, 18);
     let mut buffer = Buffer::empty(area);
     render_surface(&state, &session, area, &mut buffer);
     buffer_text(&buffer)

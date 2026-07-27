@@ -1,0 +1,22 @@
+---
+source: astral-tui/src/surface_tests.rs
+expression: "request_surface(json!({\n    \"method\": \"item/tool/requestUserInput\", \"id\": \"question-1\", \"params\":\n    {\n        \"threadId\": \"thread-1\", \"turnId\": \"turn-1\", \"itemId\": \"question-1\",\n        \"questions\":\n        [{\n            \"id\": \"scope\", \"header\": \"Choose scope\", \"question\":\n            \"Where should the refactor apply?\", \"isOther\": false, \"isSecret\":\n            false, \"options\":\n            [{\n                \"label\": \"Workspace only\", \"description\":\n                \"Keep the change local to this repository\"\n            },\n            {\n                \"label\": \"Shared runtime\", \"description\":\n                \"Update the common implementation\"\n            }]\n        }]\n    }\n}), \"Workspace only\")"
+---
+ ⎇ main  /workspace
+ ❯ inspect this repo
+
+ I’m tracing the relevant data flow.
+
+
+
+
+
+
+ ┃
+ ┃  Choose scope
+ ┃  Where should the refactor apply?
+ ┃  ○ Workspace only — Keep the change local to this repository
+ ┃  ○ Shared runtime — Update the common implementation
+ ┃
+ ┃  ❯ Workspace only
+ Enter:submit  │  Esc:cancel

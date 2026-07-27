@@ -9,8 +9,14 @@ expression: buffer_text(&buffer)
 
 
 
- ◇ Action required
-   $ cargo test --workspace
-   needs network access
-   [y] allow · [a] allow session · [n] deny · [esc] cancel
- Shift+Tab:mode  │  Ctrl+.:shortcuts
+
+
+ ┃
+ ┃  Allow command execution?
+ ┃  $ cargo test --workspace
+ ┃  Reason · needs network access
+ ┃
+ ┃  y (○) Allow once
+ ┃  a (○) Allow for this session
+ ┃  n (○) Deny
+ Y:allow  │  A:session  │  N:deny  │  Esc:cancel
