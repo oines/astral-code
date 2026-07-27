@@ -29,11 +29,16 @@ const WAITING_HINTS: &[(&str, &str)] = &[];
 pub(crate) struct RequestPane<'a> {
     request: &'a PendingRequest,
     composer: &'a str,
+    cursor_byte: usize,
 }
 
 impl<'a> RequestPane<'a> {
-    pub(crate) fn new(request: &'a PendingRequest, composer: &'a str) -> Self {
-        Self { request, composer }
+    pub(crate) fn new(request: &'a PendingRequest, composer: &'a str, cursor_byte: usize) -> Self {
+        Self {
+            request,
+            composer,
+            cursor_byte,
+        }
     }
 
     pub(crate) fn height(self, screen_height: u16) -> u16 {
@@ -129,7 +134,10 @@ impl<'a> RequestPane<'a> {
                         content_width,
                     );
                 }
-                PaneRow::Input(text) => {
+                PaneRow::Input {
+                    text,
+                    cursor_column,
+                } => {
                     let row_area =
                         Rect::new(area.x.saturating_add(1), y, area.width.saturating_sub(1), 1);
                     buffer.set_style(
@@ -149,11 +157,11 @@ impl<'a> RequestPane<'a> {
                         "❯ ".fg(theme.accent_running).bg(theme.panel_selected),
                         text.clone().bg(theme.panel_selected),
                     ]);
-                    let line_width = u16::try_from(line.width()).unwrap_or(u16::MAX);
                     buffer.set_line(content_x, y, &line, content_width);
                     cursor = Some(Position::new(
                         content_x
-                            .saturating_add(line_width)
+                            .saturating_add(2)
+                            .saturating_add(u16::try_from(cursor_column).unwrap_or(u16::MAX))
                             .min(area.right().saturating_sub(1)),
                         y,
                     ));
@@ -249,7 +257,12 @@ impl<'a> RequestPane<'a> {
                 } else {
                     self.composer.to_string()
                 };
-                rows.push(PaneRow::Input(text));
+                rows.push(PaneRow::Input {
+                    text,
+                    cursor_column: self.input_cursor_width(
+                        params.questions.iter().any(|question| question.is_secret),
+                    ),
+                });
                 input = true;
             }
             PendingRequest::McpElicitation { params, .. } => match &params.request {
@@ -260,7 +273,10 @@ impl<'a> RequestPane<'a> {
                     )));
                     rows.push(PaneRow::Body(message.clone()));
                     rows.push(PaneRow::Blank);
-                    rows.push(PaneRow::Input(self.composer.to_string()));
+                    rows.push(PaneRow::Input {
+                        text: self.composer.to_string(),
+                        cursor_column: self.input_cursor_width(false),
+                    });
                     input = true;
                 }
                 McpServerElicitationRequest::Url { message, url, .. } => {
@@ -302,6 +318,15 @@ impl<'a> RequestPane<'a> {
         }
         PaneContent::bounded(rows, input, usize::from(max_rows))
     }
+
+    fn input_cursor_width(self, secret: bool) -> usize {
+        let cursor = self.cursor_byte.min(self.composer.len());
+        if secret {
+            self.composer[..cursor].chars().count()
+        } else {
+            Line::from(&self.composer[..cursor]).width()
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -340,7 +365,10 @@ enum PaneRow {
         key: &'static str,
         label: &'static str,
     },
-    Input(String),
+    Input {
+        text: String,
+        cursor_column: usize,
+    },
     Error(String),
 }
 

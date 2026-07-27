@@ -123,7 +123,7 @@ fn working_surface_snapshot() {
         },
         model_context_window: Some(500_000),
     });
-    state.composer_mut().push_str("follow the projection");
+    state.set_composer("follow the projection");
     let area = Rect::new(0, 0, 72, 12);
     let mut buffer = Buffer::empty(area);
     render_surface(&state, &session, area, &mut buffer);
@@ -154,8 +154,7 @@ fn slash_command_menu_snapshot() {
     let session = session_state();
     let mut state = SurfaceState::from_session(&session);
     state.set_activity(SurfaceActivity::Ready);
-    state.composer_mut().push_str("/mo");
-    state.refresh_slash();
+    state.set_composer("/mo");
 
     insta::assert_snapshot!(render_at_size(&state, &session, 80, 24));
 }
@@ -195,8 +194,7 @@ fn model_argument_menu_snapshot() {
         session.model.clone(),
         session.model_provider.clone(),
     );
-    state.composer_mut().push_str("/model ");
-    state.refresh_slash();
+    state.set_composer("/model ");
 
     insta::assert_snapshot!(render_at_size(&state, &session, 80, 24));
 }
@@ -496,7 +494,7 @@ fn request_surface(value: serde_json::Value, composer: &str) -> String {
     let mut state = SurfaceState::from_session(&session);
     let request: ServerRequest = serde_json::from_value(value).expect("valid server request");
     state.pending_requests_mut().note(request);
-    state.composer_mut().push_str(composer);
+    state.set_composer(composer);
     let area = Rect::new(0, 0, 72, 18);
     let mut buffer = Buffer::empty(area);
     render_surface(&state, &session, area, &mut buffer);
@@ -515,7 +513,7 @@ fn named_working_surface() -> (SurfaceState, SessionState) {
     session.thread.name = Some("Astral session".to_string());
     let mut state = SurfaceState::from_session(&session);
     state.set_activity(SurfaceActivity::Working);
-    state.composer_mut().push_str("trace the projection");
+    state.set_composer("trace the projection");
     (state, session)
 }
 

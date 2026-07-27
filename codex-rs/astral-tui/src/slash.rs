@@ -343,18 +343,13 @@ impl SlashController {
         self.snapshot.open = false;
     }
 
-    pub fn accept_selection(&mut self, composer: &mut String, working: bool) -> bool {
-        let Some(insert_text) = self
+    pub fn accept_selection(&mut self, working: bool) -> Option<String> {
+        let insert_text = self
             .snapshot
             .selection()
-            .map(|selection| selection.insert_text.clone())
-        else {
-            return false;
-        };
-        composer.clear();
-        composer.push_str(&insert_text);
-        self.refresh(composer, working);
-        true
+            .map(|selection| selection.insert_text.clone())?;
+        self.refresh(&insert_text, working);
+        Some(insert_text)
     }
 
     pub fn invocation(

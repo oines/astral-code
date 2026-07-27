@@ -79,6 +79,7 @@ fn view_chrome_snapshot() {
     .render(Rect::new(0, 0, 80, 1), &mut buffer, theme);
     let cursor = PromptChrome {
         text: "trace the projection",
+        cursor_byte: "trace the projection".len(),
         title: Some("Astral session"),
         model: "claude-sonnet-4",
         flags: &["anthropic"],
@@ -93,6 +94,29 @@ fn view_chrome_snapshot() {
     .render(Rect::new(0, 5, 80, 1), &mut buffer, theme);
 
     assert_eq!(cursor, Some(Position::new(24, 2)));
+    insta::assert_snapshot!(buffer_text(&buffer));
+}
+
+#[test]
+fn prompt_wrap_and_mid_buffer_cursor_snapshot() {
+    let theme = AstralTheme::default();
+    let area = Rect::new(0, 0, 34, 6);
+    let mut buffer = Buffer::empty(area);
+    let text = "A long prompt wraps before this\nand keeps editing here";
+    let cursor_byte = "A long prompt wraps before this\nand keeps ".len();
+
+    let cursor = PromptChrome {
+        text,
+        cursor_byte,
+        title: None,
+        model: "gpt-5",
+        flags: &["default"],
+        ghost: None,
+        focused: true,
+    }
+    .render(area, &mut buffer, theme);
+
+    assert_eq!(cursor, Some(Position::new(12, 3)));
     insta::assert_snapshot!(buffer_text(&buffer));
 }
 

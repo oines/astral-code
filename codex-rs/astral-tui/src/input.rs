@@ -122,7 +122,7 @@ pub fn handle_paste(state: &mut SurfaceState, text: &str) -> InputAction {
         picker.paste(text);
         return InputAction::Redraw;
     }
-    state.composer_mut().push_str(text);
+    state.composer_state_mut().insert_text(text);
     state.refresh_slash();
     InputAction::Redraw
 }
@@ -234,7 +234,7 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
             } else if state.composer().is_empty() {
                 InputAction::Exit
             } else {
-                state.composer_mut().clear();
+                state.composer_state_mut().clear();
                 state.refresh_slash();
                 InputAction::Redraw
             }
@@ -267,19 +267,11 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
             }
         }
         (KeyCode::Enter, _) => {
-            state.composer_mut().push('\n');
+            state.composer_state_mut().insert_char('\n');
             state.refresh_slash();
             InputAction::Redraw
         }
-        (KeyCode::Backspace, _) => {
-            state.composer_mut().pop();
-            state.refresh_slash();
-            InputAction::Redraw
-        }
-        (KeyCode::Char(character), modifiers)
-            if !modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::SUPER) =>
-        {
-            state.composer_mut().push(character);
+        _ if state.composer_state_mut().edit_key(key) => {
             state.refresh_slash();
             InputAction::Redraw
         }
@@ -322,27 +314,17 @@ fn handle_request_key(
         if !accepts_text_input {
             return InputAction::None;
         }
-        return match key.code {
-            KeyCode::Backspace => {
-                state.composer_mut().pop();
-                InputAction::Redraw
-            }
-            KeyCode::Char(character)
-                if !key
-                    .modifiers
-                    .intersects(KeyModifiers::CONTROL | KeyModifiers::SUPER) =>
-            {
-                state.composer_mut().push(character);
-                InputAction::Redraw
-            }
-            _ => InputAction::None,
+        return if state.composer_state_mut().edit_key(key) {
+            InputAction::Redraw
+        } else {
+            InputAction::None
         };
     };
 
     let request_id = request.request_id().clone();
     match state.pending_requests_mut().resolve(&request_id, response) {
         Ok(resolution) => {
-            state.composer_mut().clear();
+            state.composer_state_mut().clear();
             InputAction::Resolve(resolution)
         }
         Err(error) => InputAction::Notice(error.to_string()),
@@ -485,3 +467,7 @@ fn mcp_response(
 #[cfg(test)]
 #[path = "input_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "input_editor_tests.rs"]
+mod editor_tests;

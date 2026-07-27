@@ -83,7 +83,7 @@ fn shift_tab_cycles_mode_without_consuming_the_draft() {
         KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT),
     ] {
         let mut state = SurfaceState::new("thread-1");
-        state.composer_mut().push_str("keep this draft");
+        state.set_composer("keep this draft");
         assert_eq!(handle_key(&mut state, key), InputAction::CycleMode);
         assert_eq!(state.composer(), "keep this draft");
     }
@@ -117,16 +117,14 @@ fn slash_completion_and_dispatch_stay_local_to_the_tui() {
 #[test]
 fn slash_errors_stay_local_to_the_tui() {
     let mut state = SurfaceState::new("thread-1");
-    state.composer_mut().push_str("/does-not-exist");
-    state.refresh_slash();
+    state.set_composer("/does-not-exist");
     assert_eq!(
         handle_key(&mut state, key(KeyCode::Enter)),
         InputAction::Notice("Unknown command: /does-not-exist".to_string())
     );
     assert_eq!(state.composer(), "/does-not-exist");
 
-    state.composer_mut().clear();
-    state.composer_mut().push_str("/model");
+    state.set_composer("/model");
     state.set_activity(SurfaceActivity::Working);
     assert_eq!(
         handle_key(&mut state, key(KeyCode::Enter)),
@@ -396,7 +394,7 @@ fn mcp_form_and_url_elicitations_keep_typed_actions() {
             }
         }
     })));
-    state.composer_mut().push_str(r#"{"confirmed":true}"#);
+    state.set_composer(r#"{"confirmed":true}"#);
 
     assert_eq!(
         handle_key(&mut state, key(KeyCode::Enter)),
@@ -464,7 +462,7 @@ fn user_input_supports_multiple_question_answers() {
             ]
         }
     })));
-    state.composer_mut().push_str("Rust | concise");
+    state.set_composer("Rust | concise");
 
     assert_eq!(
         handle_key(&mut state, key(KeyCode::Enter)),

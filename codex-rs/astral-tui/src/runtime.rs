@@ -352,7 +352,7 @@ async fn apply_input_action(
                 }])
                 .await
             {
-                surface.composer_mut().push_str(&prompt);
+                surface.set_composer(prompt);
                 surface.set_activity(SurfaceActivity::Ready);
                 surface.set_notice(error.to_string());
             }

@@ -19,6 +19,7 @@ use crate::ConversationState;
 use crate::PendingRequests;
 use crate::RenderOptions;
 use crate::SessionState;
+use crate::composer::ComposerState;
 use crate::modal::ModalState;
 use crate::model_command::ModelResolveError;
 use crate::model_command::ModelSelection;
@@ -44,6 +45,7 @@ use crate::view::ScrollbarConfig;
 use crate::view::ShortcutsBar;
 use crate::view::SlashMenu;
 use crate::view::StatusBar;
+use crate::view::prompt_height;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SurfaceActivity {
@@ -63,7 +65,7 @@ pub(crate) enum TranscriptView {
 pub struct SurfaceState {
     conversation: ConversationState,
     pending_requests: PendingRequests,
-    composer: String,
+    composer: ComposerState,
     activity: SurfaceActivity,
     token_usage: Option<ThreadTokenUsage>,
     notice: Option<String>,
@@ -82,7 +84,7 @@ impl SurfaceState {
         Self {
             conversation: ConversationState::new(thread_id),
             pending_requests: PendingRequests::default(),
-            composer: String::new(),
+            composer: ComposerState::default(),
             activity: SurfaceActivity::Ready,
             token_usage: None,
             notice: None,
@@ -104,7 +106,7 @@ impl SurfaceState {
                 &session.thread.turns,
             ),
             pending_requests: PendingRequests::default(),
-            composer: String::new(),
+            composer: ComposerState::default(),
             activity: if session.active_turn_id.is_some() {
                 SurfaceActivity::Working
             } else {
@@ -140,15 +142,24 @@ impl SurfaceState {
     }
 
     pub fn composer(&self) -> &str {
-        &self.composer
+        self.composer.text()
     }
 
-    pub fn composer_mut(&mut self) -> &mut String {
+    pub fn composer_cursor(&self) -> usize {
+        self.composer.cursor()
+    }
+
+    pub fn set_composer(&mut self, text: impl Into<String>) {
+        self.composer.replace(text);
+        self.refresh_slash();
+    }
+
+    pub(crate) fn composer_state_mut(&mut self) -> &mut ComposerState {
         &mut self.composer
     }
 
     pub fn take_composer(&mut self) -> String {
-        let composer = std::mem::take(&mut self.composer);
+        let composer = self.composer.take();
         self.refresh_slash();
         composer
     }
@@ -208,7 +219,11 @@ impl SurfaceState {
 
     pub fn refresh_slash(&mut self) {
         let working = matches!(self.activity, SurfaceActivity::Working);
-        self.slash.refresh(&self.composer, working);
+        if self.composer.cursor() == self.composer.text().len() {
+            self.slash.refresh(self.composer.text(), working);
+        } else {
+            self.slash.close();
+        }
     }
 
     pub fn move_slash_selection(&mut self, delta: isize) {
@@ -221,12 +236,16 @@ impl SurfaceState {
 
     pub fn accept_slash_selection(&mut self) -> bool {
         let working = matches!(self.activity, SurfaceActivity::Working);
-        self.slash.accept_selection(&mut self.composer, working)
+        let Some(completion) = self.slash.accept_selection(working) else {
+            return false;
+        };
+        self.composer.replace(completion);
+        true
     }
 
     pub fn slash_invocation(&self) -> Result<Option<SlashInvocation>, SlashError> {
         self.slash.invocation(
-            &self.composer,
+            self.composer.text(),
             matches!(self.activity, SurfaceActivity::Working),
         )
     }
@@ -360,9 +379,9 @@ pub(crate) fn render_surface_with_view(
     let request_pane = state
         .pending_requests
         .front()
-        .map(|request| RequestPane::new(request, state.composer()));
+        .map(|request| RequestPane::new(request, state.composer(), state.composer_cursor()));
     let prompt_height = request_pane.map_or_else(
-        || composer_height(state.composer()),
+        || prompt_height(state.composer(), state.composer_cursor(), area.width),
         |pane| pane.height(area.height),
     );
     let slash = state.slash();
@@ -452,6 +471,7 @@ pub(crate) fn render_surface_with_view(
         let flags = [mode];
         PromptChrome {
             text: state.composer(),
+            cursor_byte: state.composer_cursor(),
             title: session.thread.name.as_deref(),
             model: &session.model,
             flags: &flags,
@@ -541,14 +561,6 @@ fn turn_status_line(state: &SurfaceState, theme: AstralTheme) -> Option<Line<'st
         spans.push(format!("history ↑{}", state.scroll_offset).cyan());
     }
     (!spans.is_empty()).then(|| spans.into())
-}
-
-fn composer_height(composer: &str) -> u16 {
-    let rows = composer.split('\n').count().max(1);
-    u16::try_from(rows)
-        .unwrap_or(u16::MAX)
-        .saturating_add(2)
-        .min(8)
 }
 
 fn render_status_bar(

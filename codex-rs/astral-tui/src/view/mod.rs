@@ -13,6 +13,7 @@ mod theme;
 pub(crate) use chrome::PromptChrome;
 pub(crate) use chrome::ShortcutsBar;
 pub(crate) use chrome::StatusBar;
+pub(crate) use chrome::prompt_height;
 pub(crate) use layout::AgentViewLayout;
 pub(crate) use layout::AgentViewLayoutInput;
 pub(crate) use layout::LayoutConfig;

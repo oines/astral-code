@@ -7,6 +7,7 @@
 
 mod client_tools;
 mod clipboard;
+mod composer;
 mod conversation;
 mod ecosystem;
 mod input;
