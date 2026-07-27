@@ -5,6 +5,7 @@
 //! (Apache-2.0). Runtime state and commands remain native app-server v2.
 
 mod chrome;
+mod color_support;
 mod layout;
 mod modal;
 mod scrollback;
@@ -17,6 +18,7 @@ pub(crate) use chrome::PromptChrome;
 pub(crate) use chrome::ShortcutsBar;
 pub(crate) use chrome::StatusBar;
 pub(crate) use chrome::prompt_height;
+pub(crate) use color_support::ColorLevel;
 pub(crate) use layout::AgentViewLayout;
 pub(crate) use layout::AgentViewLayoutInput;
 pub(crate) use layout::LayoutConfig;

@@ -43,14 +43,15 @@ use crate::handle_key;
 use crate::handle_paste;
 use crate::modal::ModalRow;
 use crate::modal::ModalState;
-use crate::paint_committed;
 use crate::permission_picker::PermissionPickerState;
 use crate::render_surface;
 use crate::render_surface_with_view;
 use crate::shortcuts::shortcuts_modal;
+use crate::surface::paint_committed_with_theme;
 use crate::terminal_guard::TerminalGuard;
 use crate::thread_picker::PickerState;
 use crate::view::AstralThemeId;
+use crate::view::ColorLevel;
 
 type AstralTerminal = Terminal<CrosstermBackend<Stdout>>;
 
@@ -133,6 +134,7 @@ impl From<SessionError> for RunError {
 pub async fn run(mut session: AstralSession, options: RunOptions) -> Result<RunExit, RunError> {
     let initial_state = session.state().cloned().ok_or(RunError::NoThread)?;
     let mut surface = SurfaceState::from_session(&initial_state);
+    surface.set_color_level(ColorLevel::detect());
     match session.list_models().await {
         Ok(models) => surface.set_model_catalog(
             models,
@@ -334,11 +336,12 @@ fn draw(
         }
 
         let width = terminal.viewport_area().width;
+        let theme = surface.theme();
         for block in surface.drain_committable() {
             let height = committed_height(&block, width);
             if height > 0 {
                 terminal.insert_before(height, move |buffer| {
-                    paint_committed(&block, buffer);
+                    paint_committed_with_theme(&block, buffer, theme);
                 })?;
                 terminal.insert_before(1, |_buffer| {})?;
             }
@@ -641,9 +644,11 @@ async fn reset_surface(session: &mut AstralSession, surface: &mut SurfaceState) 
         return;
     };
     let theme = surface.theme_id();
+    let color_level = surface.color_level();
     let timeline_visible = surface.timeline_visible();
     *surface = SurfaceState::from_session(&state);
     surface.set_theme(theme);
+    surface.set_color_level(color_level);
     surface.set_timeline_visible(timeline_visible);
     match session.list_models().await {
         Ok(models) => {

@@ -15,6 +15,7 @@ use crate::timeline_rail::rail_width;
 use crate::timeline_rail::render_rail;
 use crate::view::AstralTheme;
 use crate::view::AstralThemeId;
+use crate::view::ColorLevel;
 use crate::view::InfoModal;
 
 impl SurfaceState {
@@ -43,7 +44,15 @@ impl SurfaceState {
     }
 
     pub(crate) fn theme(&self) -> AstralTheme {
-        AstralTheme::for_id(self.theme)
+        AstralTheme::for_color_level(self.theme, self.color_level)
+    }
+
+    pub(crate) fn color_level(&self) -> ColorLevel {
+        self.color_level
+    }
+
+    pub(crate) fn set_color_level(&mut self, color_level: ColorLevel) {
+        self.color_level = color_level;
     }
 
     pub(crate) fn timeline_visible(&self) -> bool {
