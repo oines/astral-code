@@ -39,11 +39,14 @@ use crate::view::AstralThemeId;
 use crate::view::LayoutConfig;
 use crate::view::PaneHeights;
 use crate::view::PromptChrome;
+use crate::view::ScrollbackNavigation;
 use crate::view::ScrollbackPane;
+use crate::view::ScrollbackViewport;
 use crate::view::ScrollbarConfig;
 use crate::view::ShortcutsBar;
 use crate::view::SlashMenu;
 use crate::view::StatusBar;
+use crate::view::TranscriptLayout;
 use crate::view::prompt_height;
 use crate::view::render_committed_block;
 use crate::view::render_follow_indicator;
@@ -71,7 +74,7 @@ pub struct SurfaceState {
     activity: SurfaceActivity,
     token_usage: Option<ThreadTokenUsage>,
     notice: Option<String>,
-    scroll_offset: usize,
+    scrollback: ScrollbackNavigation,
     slash: SlashController,
     modal: Option<ModalState>,
     thread_picker: Option<PickerState>,
@@ -90,7 +93,7 @@ impl SurfaceState {
             activity: SurfaceActivity::Ready,
             token_usage: None,
             notice: None,
-            scroll_offset: 0,
+            scrollback: ScrollbackNavigation::default(),
             slash: SlashController::default(),
             modal: None,
             thread_picker: None,
@@ -116,7 +119,7 @@ impl SurfaceState {
             },
             token_usage: None,
             notice: None,
-            scroll_offset: 0,
+            scrollback: ScrollbackNavigation::default(),
             slash: SlashController::default(),
             modal: None,
             thread_picker: None,
@@ -192,19 +195,19 @@ impl SurfaceState {
     }
 
     pub fn scroll_up(&mut self, lines: usize) {
-        self.scroll_offset = self.scroll_offset.saturating_add(lines);
+        self.scrollback.scroll_up(lines);
     }
 
     pub fn scroll_down(&mut self, lines: usize) {
-        self.scroll_offset = self.scroll_offset.saturating_sub(lines);
+        self.scrollback.scroll_down(lines);
     }
 
     pub fn scroll_to_bottom(&mut self) {
-        self.scroll_offset = 0;
+        self.scrollback.scroll_to_bottom();
     }
 
     pub fn scroll_offset(&self) -> usize {
-        self.scroll_offset
+        self.scrollback.distance_from_bottom()
     }
 
     pub fn last_agent_response(&self) -> Option<&str> {
@@ -347,7 +350,7 @@ pub fn paint_committed(block: &CommittedBlock, buffer: &mut Buffer) {
 }
 
 pub fn render_surface(
-    state: &SurfaceState,
+    state: &mut SurfaceState,
     session: &SessionState,
     area: Rect,
     buffer: &mut Buffer,
@@ -356,7 +359,7 @@ pub fn render_surface(
 }
 
 pub(crate) fn render_surface_with_view(
-    state: &SurfaceState,
+    state: &mut SurfaceState,
     session: &SessionState,
     transcript_view: TranscriptView,
     area: Rect,
@@ -369,24 +372,23 @@ pub(crate) fn render_surface_with_view(
     let theme = state.theme();
     buffer.set_style(area, Style::default().bg(theme.bg_base));
 
-    let request_pane = state
-        .pending_requests
-        .front()
-        .map(|request| RequestPane::new(request, state.composer(), state.composer_cursor()));
-    let prompt_height = request_pane.map_or_else(
+    let has_request = state.pending_requests.front().is_some();
+    let prompt_height = state.pending_requests.front().map_or_else(
         || prompt_height(state.composer(), state.composer_cursor(), area.width),
-        |pane| pane.height(area.height),
+        |request| {
+            RequestPane::new(request, state.composer(), state.composer_cursor()).height(area.height)
+        },
     );
-    let slash = state.slash();
+    let slash = state.slash().clone();
     let max_suggestions = if area.height <= 16 { 2 } else { 6 };
-    let slash_height = if request_pane.is_none() && slash.open {
+    let slash_height = if !has_request && slash.open {
         u16::try_from(slash.matches.len().min(max_suggestions))
             .unwrap_or(u16::MAX)
             .saturating_add(2)
     } else {
         0
     };
-    let turn_status = (request_pane.is_none() && slash_height == 0)
+    let turn_status = (!has_request && slash_height == 0)
         .then(|| turn_status_line(state, theme))
         .flatten();
     let turn_count = session.thread.turns.len();
@@ -409,14 +411,22 @@ pub(crate) fn render_surface_with_view(
 
     render_status_bar(state, session, layout.status_bar, buffer, theme);
 
-    let live_lines = conversation_lines(state, transcript_view, layout.scrollback_content.width);
-    let distance_from_bottom = match transcript_view {
-        TranscriptView::Live => 0,
-        TranscriptView::Full => state.scroll_offset,
+    let transcript = conversation_layout(state, transcript_view, layout.scrollback_content.width);
+    let viewport = match transcript_view {
+        TranscriptView::Live => ScrollbackViewport::measure(
+            transcript.lines.len(),
+            usize::from(layout.scrollback_content.height),
+            /*distance_from_bottom*/ 0,
+        ),
+        TranscriptView::Full => state.scrollback.prepare(
+            &transcript,
+            layout.scrollback_content.width,
+            usize::from(layout.scrollback_content.height),
+        ),
     };
     let viewport = ScrollbackPane {
-        lines: &live_lines,
-        distance_from_bottom,
+        lines: &transcript.lines,
+        viewport,
     }
     .render(
         layout.scrollback_content,
@@ -446,7 +456,7 @@ pub(crate) fn render_surface_with_view(
                 turn_count,
                 scroll_offset: viewport.first_visible_line,
                 first_visible_line: viewport.first_visible_line,
-                total_lines: live_lines.len(),
+                total_lines: transcript.lines.len(),
             },
         );
     }
@@ -459,7 +469,7 @@ pub(crate) fn render_surface_with_view(
         );
     }
     if slash_height > 0 {
-        SlashMenu { snapshot: slash }.render(layout.banner, buffer, theme);
+        SlashMenu { snapshot: &slash }.render(layout.banner, buffer, theme);
     }
 
     let mode = if session.collaboration_mode.mode == ModeKind::Plan {
@@ -472,6 +482,10 @@ pub(crate) fn render_surface_with_view(
                 .map(|profile| profile.id.as_str()),
         )
     };
+    let request_pane = state
+        .pending_requests
+        .front()
+        .map(|request| RequestPane::new(request, state.composer(), state.composer_cursor()));
     let cursor = if let Some(pane) = request_pane {
         pane.render(layout.prompt, buffer, theme)
     } else {
@@ -508,18 +522,16 @@ pub(crate) fn render_surface_with_view(
     }
 }
 
-fn conversation_lines(
+fn conversation_layout(
     state: &SurfaceState,
     transcript_view: TranscriptView,
     width: u16,
-) -> Vec<Line<'static>> {
-    let mut lines = Vec::new();
+) -> TranscriptLayout {
     let turns = match transcript_view {
         TranscriptView::Live => state.conversation.live_turns(),
         TranscriptView::Full => state.conversation.all_turns(),
     };
-    lines.extend(render_transcript(&turns, width, state.theme()));
-    lines
+    render_transcript(&turns, width, state.theme())
 }
 
 fn turn_status_line(state: &SurfaceState, theme: AstralTheme) -> Option<Line<'static>> {
@@ -556,11 +568,11 @@ fn turn_status_line(state: &SurfaceState, theme: AstralTheme) -> Option<Line<'st
             .cyan(),
         );
     }
-    if state.scroll_offset > 0 {
+    if state.scroll_offset() > 0 {
         if !spans.is_empty() {
             spans.push(" · ".dim());
         }
-        spans.push(format!("history ↑{}", state.scroll_offset).cyan());
+        spans.push(format!("history ↑{}", state.scroll_offset()).cyan());
     }
     (!spans.is_empty()).then(|| spans.into())
 }

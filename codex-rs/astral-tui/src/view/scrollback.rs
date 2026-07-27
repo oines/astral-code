@@ -11,12 +11,15 @@ use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
 
 use super::AstralTheme;
+use super::transcript::TranscriptAnchor;
+use super::transcript::TranscriptLayout;
+use super::transcript::TranscriptSection;
 
 /// Measured position of a scrollback viewport.
 ///
-/// Astral stores manual scroll distance from the bottom because new streaming
-/// rows naturally stay visible at zero. Rendering uses the equivalent
-/// top-origin offset required by the scrollbar and visible slice.
+/// Follow mode can be measured from the tail, while manual navigation supplies
+/// the anchored top line directly. Both paths resolve to the same visible
+/// slice and scrollbar coordinates.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct ScrollbackViewport {
     pub(crate) first_visible_line: usize,
@@ -37,6 +40,17 @@ impl ScrollbackViewport {
         let max_top = total_lines.saturating_sub(viewport_lines);
         let distance_from_bottom = distance_from_bottom.min(max_top);
         let first_visible_line = max_top.saturating_sub(distance_from_bottom);
+        Self::from_first(total_lines, viewport_lines, first_visible_line)
+    }
+
+    pub(crate) fn from_first(
+        total_lines: usize,
+        viewport_lines: usize,
+        first_visible_line: usize,
+    ) -> Self {
+        let viewport_lines = viewport_lines.max(1);
+        let max_top = total_lines.saturating_sub(viewport_lines);
+        let first_visible_line = first_visible_line.min(max_top);
         let end_visible_line = first_visible_line
             .saturating_add(viewport_lines)
             .min(total_lines);
@@ -55,9 +69,138 @@ impl ScrollbackViewport {
     }
 }
 
+/// Stateful navigation for Astral's fullscreen transcript.
+///
+/// Follow mode stays pinned to the tail. Manual mode stores a stable item
+/// anchor so streaming growth and reflow before that item do not move the
+/// content the user was reading.
+#[derive(Debug)]
+pub(crate) struct ScrollbackNavigation {
+    follow_mode: bool,
+    first_visible_line: usize,
+    total_lines: usize,
+    viewport_lines: usize,
+    width: u16,
+    pending_distance_from_bottom: usize,
+    anchor: Option<TranscriptAnchor>,
+    sections: Vec<TranscriptSection>,
+}
+
+impl Default for ScrollbackNavigation {
+    fn default() -> Self {
+        Self {
+            follow_mode: true,
+            first_visible_line: 0,
+            total_lines: 0,
+            viewport_lines: 0,
+            width: 0,
+            pending_distance_from_bottom: 0,
+            anchor: None,
+            sections: Vec::new(),
+        }
+    }
+}
+
+impl ScrollbackNavigation {
+    pub(crate) fn prepare(
+        &mut self,
+        layout: &TranscriptLayout,
+        width: u16,
+        viewport_lines: usize,
+    ) -> ScrollbackViewport {
+        let viewport_lines = viewport_lines.max(1);
+        let max_top = layout.lines.len().saturating_sub(viewport_lines);
+        if self.follow_mode {
+            self.first_visible_line = max_top;
+        } else if let Some(anchor) = self.anchor.as_ref()
+            && let Some(section) = layout.section(&anchor.item_id)
+        {
+            let section_height = section.lines.len().max(1);
+            let line_offset = if width == self.width {
+                anchor.line_offset
+            } else {
+                anchor
+                    .line_offset
+                    .saturating_mul(section_height)
+                    .checked_div(anchor.section_height)
+                    .unwrap_or(0)
+            };
+            self.first_visible_line = section
+                .lines
+                .start
+                .saturating_add(line_offset.min(section_height - 1));
+        } else if self.viewport_lines == 0 {
+            self.first_visible_line = max_top.saturating_sub(self.pending_distance_from_bottom);
+        }
+        self.first_visible_line = self.first_visible_line.min(max_top);
+        self.total_lines = layout.lines.len();
+        self.viewport_lines = viewport_lines;
+        self.width = width;
+        self.sections.clone_from(&layout.sections);
+        self.pending_distance_from_bottom = 0;
+        self.refresh_anchor();
+        ScrollbackViewport::from_first(
+            self.total_lines,
+            self.viewport_lines,
+            self.first_visible_line,
+        )
+    }
+
+    pub(crate) fn scroll_up(&mut self, lines: usize) {
+        self.follow_mode = false;
+        if self.viewport_lines == 0 {
+            self.pending_distance_from_bottom =
+                self.pending_distance_from_bottom.saturating_add(lines);
+            return;
+        }
+        self.first_visible_line = self.first_visible_line.saturating_sub(lines);
+        self.refresh_anchor();
+    }
+
+    pub(crate) fn scroll_down(&mut self, lines: usize) {
+        if self.viewport_lines == 0 {
+            self.pending_distance_from_bottom =
+                self.pending_distance_from_bottom.saturating_sub(lines);
+            self.follow_mode = self.pending_distance_from_bottom == 0;
+            return;
+        }
+        let max_top = self.total_lines.saturating_sub(self.viewport_lines);
+        self.first_visible_line = self.first_visible_line.saturating_add(lines).min(max_top);
+        self.follow_mode = self.first_visible_line == max_top;
+        self.refresh_anchor();
+    }
+
+    pub(crate) fn scroll_to_bottom(&mut self) {
+        self.follow_mode = true;
+        self.pending_distance_from_bottom = 0;
+        self.first_visible_line = self.total_lines.saturating_sub(self.viewport_lines);
+        self.anchor = None;
+    }
+
+    pub(crate) fn distance_from_bottom(&self) -> usize {
+        if self.viewport_lines == 0 {
+            self.pending_distance_from_bottom
+        } else if self.follow_mode {
+            0
+        } else {
+            self.total_lines
+                .saturating_sub(self.viewport_lines)
+                .saturating_sub(self.first_visible_line)
+        }
+    }
+
+    fn refresh_anchor(&mut self) {
+        self.anchor = (!self.follow_mode)
+            .then(|| {
+                TranscriptAnchor::at(&self.sections, self.total_lines, self.first_visible_line)
+            })
+            .flatten();
+    }
+}
+
 pub(crate) struct ScrollbackPane<'a> {
     pub(crate) lines: &'a [Line<'static>],
-    pub(crate) distance_from_bottom: usize,
+    pub(crate) viewport: ScrollbackViewport,
 }
 
 impl ScrollbackPane<'_> {
@@ -68,11 +211,7 @@ impl ScrollbackPane<'_> {
         buffer: &mut Buffer,
         theme: AstralTheme,
     ) -> ScrollbackViewport {
-        let viewport = ScrollbackViewport::measure(
-            self.lines.len(),
-            usize::from(content_area.height),
-            self.distance_from_bottom,
-        );
+        let viewport = self.viewport;
         if !content_area.is_empty() {
             let visible =
                 self.lines[viewport.first_visible_line..viewport.end_visible_line].to_vec();

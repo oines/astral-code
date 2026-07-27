@@ -15,6 +15,7 @@ use ratatui::style::Style;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::text::Span;
+use std::ops::Range;
 
 use crate::CommittedBlock;
 use crate::conversation::TranscriptBlock;
@@ -25,18 +26,76 @@ use super::AstralThemeId;
 
 const TIMESTAMP_WIDTH: usize = 8;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TranscriptSection {
+    pub(crate) item_id: String,
+    pub(crate) lines: Range<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TranscriptAnchor {
+    pub(crate) item_id: String,
+    pub(crate) line_offset: usize,
+    pub(crate) section_height: usize,
+}
+
+impl TranscriptAnchor {
+    pub(crate) fn at(
+        sections: &[TranscriptSection],
+        total_lines: usize,
+        line: usize,
+    ) -> Option<Self> {
+        let line = line.min(total_lines.checked_sub(1)?);
+        let section = sections
+            .iter()
+            .find(|section| section.lines.contains(&line))
+            .or_else(|| {
+                sections
+                    .iter()
+                    .rev()
+                    .find(|section| section.lines.start <= line)
+            })
+            .or_else(|| sections.first())?;
+        Some(Self {
+            item_id: section.item_id.clone(),
+            line_offset: line.saturating_sub(section.lines.start),
+            section_height: section.lines.len().max(1),
+        })
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct TranscriptLayout {
+    pub(crate) lines: Vec<Line<'static>>,
+    pub(crate) sections: Vec<TranscriptSection>,
+}
+
+impl TranscriptLayout {
+    pub(crate) fn section(&self, item_id: &str) -> Option<&TranscriptSection> {
+        self.sections
+            .iter()
+            .find(|section| section.item_id == item_id)
+    }
+}
+
 pub(crate) fn render_transcript(
     turns: &[TranscriptTurn],
     width: u16,
     theme: AstralTheme,
-) -> Vec<Line<'static>> {
+) -> TranscriptLayout {
     let mut lines = Vec::new();
+    let mut sections = Vec::new();
     for turn in turns {
-        if !lines.is_empty() {
-            lines.push(Line::default());
-        }
-        for block in &turn.blocks {
+        for (index, block) in turn.blocks.iter().enumerate() {
+            let start = lines.len();
+            if index == 0 && !lines.is_empty() {
+                lines.push(Line::default());
+            }
             render_turn_block(&mut lines, block, turn, width, theme);
+            sections.push(TranscriptSection {
+                item_id: block.item_id.clone(),
+                lines: start..lines.len(),
+            });
         }
         if let Some(duration_ms) = turn_duration_ms(turn) {
             lines.push(
@@ -44,9 +103,12 @@ pub(crate) fn render_transcript(
                     .dim()
                     .into(),
             );
+            if let Some(section) = sections.last_mut() {
+                section.lines.end = lines.len();
+            }
         }
     }
-    lines
+    TranscriptLayout { lines, sections }
 }
 
 pub(crate) fn render_committed_block(

@@ -135,27 +135,27 @@ fn working_surface_snapshot() {
     state.set_composer("follow the projection");
     let area = Rect::new(0, 0, 72, 12);
     let mut buffer = Buffer::empty(area);
-    render_surface(&state, &session, area, &mut buffer);
+    render_surface(&mut state, &session, area, &mut buffer);
 
     insta::assert_snapshot!(buffer_text(&buffer));
 }
 
 #[test]
 fn grok_view_80x24_snapshot() {
-    let (state, session) = named_working_surface();
-    insta::assert_snapshot!(render_at_size(&state, &session, 80, 24));
+    let (mut state, session) = named_working_surface();
+    insta::assert_snapshot!(render_at_size(&mut state, &session, 80, 24));
 }
 
 #[test]
 fn grok_view_120x32_snapshot() {
-    let (state, session) = named_working_surface();
-    insta::assert_snapshot!(render_at_size(&state, &session, 120, 32));
+    let (mut state, session) = named_working_surface();
+    insta::assert_snapshot!(render_at_size(&mut state, &session, 120, 32));
 }
 
 #[test]
 fn grok_view_narrow_snapshot() {
-    let (state, session) = named_working_surface();
-    insta::assert_snapshot!(render_at_size(&state, &session, 48, 16));
+    let (mut state, session) = named_working_surface();
+    insta::assert_snapshot!(render_at_size(&mut state, &session, 48, 16));
 }
 
 #[test]
@@ -165,7 +165,7 @@ fn slash_command_menu_snapshot() {
     state.set_activity(SurfaceActivity::Ready);
     state.set_composer("/mo");
 
-    insta::assert_snapshot!(render_at_size(&state, &session, 80, 24));
+    insta::assert_snapshot!(render_at_size(&mut state, &session, 80, 24));
 }
 
 #[test]
@@ -177,7 +177,7 @@ fn disconnected_slash_command_menu_snapshot() {
     ));
     state.set_composer("/");
 
-    insta::assert_snapshot!(render_at_size(&state, &session, 80, 24));
+    insta::assert_snapshot!(render_at_size(&mut state, &session, 80, 24));
 }
 
 #[test]
@@ -217,7 +217,7 @@ fn model_argument_menu_snapshot() {
     );
     state.set_composer("/model ");
 
-    insta::assert_snapshot!(render_at_size(&state, &session, 80, 24));
+    insta::assert_snapshot!(render_at_size(&mut state, &session, 80, 24));
 }
 
 #[test]
@@ -234,7 +234,7 @@ fn status_modal_snapshot() {
         ],
     ));
 
-    insta::assert_snapshot!(render_at_size(&state, &session, 80, 24));
+    insta::assert_snapshot!(render_at_size(&mut state, &session, 80, 24));
 }
 
 #[test]
@@ -259,7 +259,7 @@ fn ecosystem_modal_scroll_snapshot() {
     modal.scroll_by(8);
     state.open_modal(modal);
 
-    insta::assert_snapshot!(render_at_size(&state, &session, 80, 24));
+    insta::assert_snapshot!(render_at_size(&mut state, &session, 80, 24));
 }
 
 #[test]
@@ -268,7 +268,7 @@ fn shortcuts_modal_snapshot() {
     let mut state = SurfaceState::from_session(&session);
     state.open_modal(shortcuts_modal());
 
-    insta::assert_snapshot!(render_at_size(&state, &session, 80, 24));
+    insta::assert_snapshot!(render_at_size(&mut state, &session, 80, 24));
 }
 
 #[test]
@@ -277,7 +277,7 @@ fn theme_picker_surface_snapshot() {
     let mut state = SurfaceState::from_session(&session);
     state.open_theme_picker();
 
-    insta::assert_snapshot!(render_at_size(&state, &session, 80, 24));
+    insta::assert_snapshot!(render_at_size(&mut state, &session, 80, 24));
 }
 
 #[test]
@@ -316,7 +316,7 @@ fn timeline_rail_surface_snapshot() {
     let mut state = SurfaceState::from_session(&session);
     state.set_timeline_visible(true);
 
-    insta::assert_snapshot!(render_at_size(&state, &session, 80, 24));
+    insta::assert_snapshot!(render_at_size(&mut state, &session, 80, 24));
 }
 
 #[test]
@@ -326,7 +326,7 @@ fn selected_theme_controls_the_surface_background() {
     state.set_theme(AstralThemeId::Day);
     let area = Rect::new(0, 0, 80, 24);
     let mut buffer = Buffer::empty(area);
-    render_surface(&state, &session, area, &mut buffer);
+    render_surface(&mut state, &session, area, &mut buffer);
 
     assert_eq!(buffer[(0, 0)].bg, state.theme().bg_base);
 }
@@ -359,7 +359,7 @@ fn command_approval_surface_snapshot() {
     );
     let area = Rect::new(0, 0, 72, 18);
     let mut buffer = Buffer::empty(area);
-    render_surface(&state, &session, area, &mut buffer);
+    render_surface(&mut state, &session, area, &mut buffer);
 
     insta::assert_snapshot!(buffer_text(&buffer));
 }
@@ -495,7 +495,13 @@ fn fullscreen_surface_keeps_committed_history_snapshot() {
     assert_eq!(state.drain_committable().len(), 2);
     let area = Rect::new(0, 0, 72, 12);
     let mut buffer = Buffer::empty(area);
-    render_surface_with_view(&state, &session, TranscriptView::Full, area, &mut buffer);
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        area,
+        &mut buffer,
+    );
 
     insta::assert_snapshot!(buffer_text(&buffer));
 }
@@ -538,7 +544,13 @@ fn fullscreen_scrollback_viewport_snapshot() {
     state.scroll_up(/*lines*/ 5);
     let area = Rect::new(0, 0, 80, 24);
     let mut buffer = Buffer::empty(area);
-    render_surface_with_view(&state, &session, TranscriptView::Full, area, &mut buffer);
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        area,
+        &mut buffer,
+    );
 
     insta::assert_snapshot!(buffer_text(&buffer));
 }
@@ -620,7 +632,13 @@ fn grok_layered_turn_139x35_snapshot() {
         ));
     let area = Rect::new(0, 0, 139, 35);
     let mut buffer = Buffer::empty(area);
-    render_surface_with_view(&state, &session, TranscriptView::Full, area, &mut buffer);
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        area,
+        &mut buffer,
+    );
 
     let prompt_row = (0..area.height)
         .find(|y| (0..area.width).any(|x| buffer[(x, *y)].symbol() == "›"))
@@ -672,11 +690,16 @@ fn request_surface(value: serde_json::Value, composer: &str) -> String {
     state.set_composer(composer);
     let area = Rect::new(0, 0, 72, 18);
     let mut buffer = Buffer::empty(area);
-    render_surface(&state, &session, area, &mut buffer);
+    render_surface(&mut state, &session, area, &mut buffer);
     buffer_text(&buffer)
 }
 
-fn render_at_size(state: &SurfaceState, session: &SessionState, width: u16, height: u16) -> String {
+fn render_at_size(
+    state: &mut SurfaceState,
+    session: &SessionState,
+    width: u16,
+    height: u16,
+) -> String {
     let area = Rect::new(0, 0, width, height);
     let mut buffer = Buffer::empty(area);
     render_surface(state, session, area, &mut buffer);
