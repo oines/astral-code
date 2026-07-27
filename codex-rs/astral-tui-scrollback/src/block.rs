@@ -35,6 +35,10 @@ pub enum PresentationBlock {
 pub enum ToolKind {
     Execute,
     Background,
+    BackgroundPoll,
+    BackgroundInput,
+    BackgroundList,
+    BackgroundStop,
     Read,
     Edit,
     List,

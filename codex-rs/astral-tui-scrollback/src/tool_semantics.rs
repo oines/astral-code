@@ -50,6 +50,10 @@ pub fn classify_tool_name(name: &str) -> ToolKind {
         "bash" | "shell" | "shellcommand" | "exec" | "execcommand" | "writestdin" => {
             ToolKind::Execute
         }
+        "readtaskoutput" => ToolKind::BackgroundPoll,
+        "sendtaskinput" => ToolKind::BackgroundInput,
+        "listbackgroundtasks" => ToolKind::BackgroundList,
+        "stopbackgroundtask" => ToolKind::BackgroundStop,
         "read" | "readfile" | "readmcpresource" => ToolKind::Read,
         "edit" | "write" | "applypatch" | "notebookedit" => ToolKind::Edit,
         "glob" | "list" | "listdir" | "ls" => ToolKind::List,
@@ -71,7 +75,31 @@ pub(super) fn tool_call_title(kind: ToolKind, tool: &str, arguments: &Value) -> 
     match kind {
         ToolKind::Read | ToolKind::Edit => compact_path(Path::new(&summary)),
         ToolKind::Todo => "Update checklist".to_string(),
+        ToolKind::BackgroundPoll
+        | ToolKind::BackgroundInput
+        | ToolKind::BackgroundList
+        | ToolKind::BackgroundStop => background_tool_title(kind, arguments),
         _ => summary,
+    }
+}
+
+fn background_tool_title(kind: ToolKind, arguments: &Value) -> String {
+    let task_id = ["task_id", "process_id"].into_iter().find_map(|key| {
+        let value = arguments.get(key)?;
+        value
+            .as_str()
+            .map(str::to_string)
+            .or_else(|| value.as_i64().map(|value| value.to_string()))
+    });
+    match (kind, task_id) {
+        (ToolKind::BackgroundPoll, Some(task_id))
+        | (ToolKind::BackgroundInput, Some(task_id))
+        | (ToolKind::BackgroundStop, Some(task_id)) => task_id,
+        (ToolKind::BackgroundPoll, None) => "task output".to_string(),
+        (ToolKind::BackgroundInput, None) => "background task".to_string(),
+        (ToolKind::BackgroundList, _) => "background tasks".to_string(),
+        (ToolKind::BackgroundStop, None) => "background task".to_string(),
+        _ => unreachable!("background title requires a background action kind"),
     }
 }
 
