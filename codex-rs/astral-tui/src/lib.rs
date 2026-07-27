@@ -17,6 +17,14 @@ mod surface;
 mod terminal_guard;
 mod thread_picker;
 mod timeline;
+// This review-bounded foundation is wired into `surface` by the immediately
+// following stacked change. Keep the intermediate commit warning-free.
+#[allow(dead_code, unused_imports)]
+mod view;
+
+#[cfg(test)]
+#[path = "view_tests.rs"]
+mod view_tests;
 
 pub use astral_tui_scrollback::PresentationBlock;
 pub use astral_tui_scrollback::RenderOptions;

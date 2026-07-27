@@ -1,0 +1,10 @@
+---
+source: astral-tui/src/view_tests.rs
+expression: buffer_text(&buffer)
+---
+⎇ main  ~/project/astral-code                                        9.2K / 500K
+╭──────────────────────────────────────────────────────────── Astral session ──╮
+│ ❯ trace the projection                                                       │
+╰──────────────────────────────────────────────── claude-sonnet-4 · anthropic ─╯
+
+Enter:send  │  Ctrl+.:shortcuts                      claude-sonnet-4 · anthropic

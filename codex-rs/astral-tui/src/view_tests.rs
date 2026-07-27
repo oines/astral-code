@@ -1,0 +1,112 @@
+use pretty_assertions::assert_eq;
+use ratatui::buffer::Buffer;
+use ratatui::layout::Position;
+use ratatui::layout::Rect;
+use ratatui::style::Stylize;
+
+use super::view::AgentViewLayout;
+use super::view::AgentViewLayoutInput;
+use super::view::AstralTheme;
+use super::view::LayoutConfig;
+use super::view::PaneHeights;
+use super::view::PromptChrome;
+use super::view::ScrollbarConfig;
+use super::view::ShortcutsBar;
+use super::view::StatusBar;
+
+#[test]
+fn standard_agent_view_geometry_matches_the_ported_layout() {
+    let actual = AgentViewLayout::compute(AgentViewLayoutInput {
+        area: Rect::new(0, 0, 80, 24),
+        layout: LayoutConfig::default(),
+        scrollbar: ScrollbarConfig::default(),
+        panes: PaneHeights {
+            prompt: 3,
+            turn_status: 1,
+            prompt_gap: 1,
+            shortcuts: 1,
+            ..PaneHeights::default()
+        },
+        timeline_width: 0,
+        compact: false,
+    });
+    assert_eq!(
+        actual,
+        AgentViewLayout {
+            status_bar: Rect::new(2, 1, 76, 1),
+            scrollback: Rect::new(2, 3, 76, 12),
+            turn_status: Rect::new(2, 16, 76, 1),
+            prompt: Rect::new(2, 18, 76, 3),
+            shortcuts: Rect::new(2, 22, 76, 1),
+            scrollback_content: Rect::new(2, 3, 76, 12),
+            scrollbar_x: 79,
+            timeline_x: 80,
+            ..AgentViewLayout::default()
+        }
+    );
+}
+
+#[test]
+fn short_terminal_keeps_prompt_and_shortcuts_visible() {
+    let actual = AgentViewLayout::compute(AgentViewLayoutInput {
+        area: Rect::new(0, 0, 48, 16),
+        layout: LayoutConfig::default(),
+        scrollbar: ScrollbarConfig::default(),
+        panes: PaneHeights {
+            prompt: 3,
+            turn_status: 1,
+            shortcuts: 1,
+            ..PaneHeights::default()
+        },
+        timeline_width: 0,
+        compact: false,
+    });
+
+    assert_eq!(actual.prompt, Rect::new(1, 12, 46, 3));
+    assert_eq!(actual.shortcuts, Rect::new(1, 15, 46, 1));
+    assert_eq!(actual.scrollback, Rect::new(1, 1, 46, 9));
+}
+
+#[test]
+fn view_chrome_snapshot() {
+    let theme = AstralTheme::default();
+    let area = Rect::new(0, 0, 80, 6);
+    let mut buffer = Buffer::empty(area);
+    StatusBar {
+        left: vec!["⎇ main".dim(), "  ".into(), "~/project/astral-code".dim()].into(),
+        right: Some("9.2K / 500K".dim().into()),
+    }
+    .render(Rect::new(0, 0, 80, 1), &mut buffer, theme);
+    let cursor = PromptChrome {
+        text: "trace the projection",
+        title: Some("Astral session"),
+        model: "claude-sonnet-4",
+        flags: &["anthropic"],
+        focused: true,
+    }
+    .render(Rect::new(0, 1, 80, 3), &mut buffer, theme);
+    ShortcutsBar {
+        hints: &[("Enter", "send"), ("Ctrl+.", "shortcuts")],
+        right: Some("claude-sonnet-4 · anthropic"),
+    }
+    .render(Rect::new(0, 5, 80, 1), &mut buffer, theme);
+
+    assert_eq!(cursor, Some(Position::new(24, 2)));
+    insta::assert_snapshot!(buffer_text(&buffer));
+}
+
+fn buffer_text(buffer: &Buffer) -> String {
+    let area = buffer.area;
+    (area.y..area.bottom())
+        .map(|y| {
+            (area.x..area.right())
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+                .trim_end()
+                .to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim_end()
+        .to_string()
+}
