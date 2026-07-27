@@ -34,6 +34,7 @@ pub(crate) struct PromptChrome<'a> {
     pub(crate) title: Option<&'a str>,
     pub(crate) model: &'a str,
     pub(crate) flags: &'a [&'a str],
+    pub(crate) ghost: Option<&'a str>,
     pub(crate) focused: bool,
 }
 
@@ -96,6 +97,19 @@ impl PromptChrome<'_> {
                 y,
                 truncate(text, available),
                 Style::default().fg(theme.text_primary).bg(bg),
+            );
+        }
+        if lines.len() == 1
+            && let Some(ghost) = self.ghost
+        {
+            let text_width = u16::try_from(Line::from(self.text).width()).unwrap_or(u16::MAX);
+            let x = content_x + 2 + text_width;
+            let available = usize::from(area.right().saturating_sub(2).saturating_sub(x));
+            buffer.set_string(
+                x,
+                area.y + 1,
+                truncate(ghost, available),
+                Style::default().fg(theme.gray_dim).bg(bg),
             );
         }
         render_prompt_info(area, buffer, theme, self.model, self.flags, self.focused);

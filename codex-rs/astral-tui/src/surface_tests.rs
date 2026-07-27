@@ -137,6 +137,17 @@ fn grok_view_narrow_snapshot() {
 }
 
 #[test]
+fn slash_command_menu_snapshot() {
+    let session = session_state();
+    let mut state = SurfaceState::from_session(&session);
+    state.set_activity(SurfaceActivity::Ready);
+    state.composer_mut().push_str("/mo");
+    state.refresh_slash();
+
+    insta::assert_snapshot!(render_at_size(&state, &session, 80, 24));
+}
+
+#[test]
 fn command_approval_surface_snapshot() {
     let session = session_state();
     let mut state = SurfaceState::from_session(&session);

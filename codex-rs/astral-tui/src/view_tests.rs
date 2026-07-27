@@ -82,6 +82,7 @@ fn view_chrome_snapshot() {
         title: Some("Astral session"),
         model: "claude-sonnet-4",
         flags: &["anthropic"],
+        ghost: None,
         focused: true,
     }
     .render(Rect::new(0, 1, 80, 3), &mut buffer, theme);
