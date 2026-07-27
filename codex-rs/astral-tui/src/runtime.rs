@@ -10,7 +10,6 @@ use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ServerRequest;
 use codex_app_server_protocol::ThreadTokenUsage;
 use codex_app_server_protocol::TurnStatus;
-use codex_app_server_protocol::UserInput;
 use codex_protocol::config_types::ModeKind;
 use crossterm::event::Event;
 use crossterm::event::EventStream;
@@ -394,18 +393,15 @@ async fn apply_input_action(
 ) -> Result<Option<RunExitReason>, RunError> {
     match action {
         InputAction::None | InputAction::Redraw => {}
-        InputAction::Submit(prompt) => {
+        InputAction::Submit(submission) => {
             // Follow mode already tracks the new turn. Keep a manual reading
             // anchor in place while the submitted turn appends below it.
             surface.set_activity(SurfaceActivity::Working);
-            if let Err(error) = session
-                .start_turn(vec![UserInput::Text {
-                    text: prompt.clone(),
-                    text_elements: Vec::new(),
-                }])
-                .await
-            {
-                surface.set_composer(prompt);
+            if let Err(error) = session.start_turn(submission.user_input()).await {
+                surface
+                    .composer_state_mut()
+                    .restore_submission(submission);
+                surface.refresh_slash();
                 surface.set_activity(SurfaceActivity::Ready);
                 surface.set_notice(error.to_string());
             }

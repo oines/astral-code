@@ -1,6 +1,8 @@
+use codex_app_server_protocol::UserInput;
 use pretty_assertions::assert_eq;
 
 use super::ComposerState;
+use crate::mention::MentionTarget;
 
 #[test]
 fn edits_at_a_utf8_cursor_and_normalizes_paste_newlines() {
@@ -49,4 +51,61 @@ fn vertical_navigation_preserves_the_preferred_column() {
     assert_eq!(composer.cursor(), 3);
     assert!(composer.move_down());
     assert_eq!(composer.cursor(), "abcd\n中".len());
+}
+
+#[test]
+fn selected_mentions_survive_edits_before_them_and_project_structured_input() {
+    let mut composer = ComposerState::default();
+    composer.replace("use $rev");
+    let (insert_text, target) = skill_mention();
+    composer.insert_mention(4..8, insert_text, target);
+    assert_eq!(composer.text(), "use $review ");
+    composer.move_home();
+    composer.insert_text("please ");
+
+    let submission = composer.take_submission();
+    assert_eq!(submission.text(), "please use $review ");
+    assert_eq!(
+        submission.user_input(),
+        vec![
+            UserInput::Text {
+                text: "please use $review ".to_string(),
+                text_elements: Vec::new(),
+            },
+            UserInput::Skill {
+                name: "review".to_string(),
+                path: "/skills/review/SKILL.md".into(),
+            },
+        ]
+    );
+}
+
+#[test]
+fn editing_inside_a_selected_mention_drops_its_structured_binding() {
+    let mut composer = ComposerState::default();
+    composer.replace("$rev");
+    let (insert_text, target) = skill_mention();
+    composer.insert_mention(0..4, insert_text, target);
+    assert!(composer.move_left());
+    assert!(composer.move_left());
+    composer.insert_char('x');
+
+    let submission = composer.take_submission();
+    assert_eq!(
+        submission.user_input(),
+        vec![UserInput::Text {
+            text: "$reviexw ".to_string(),
+            text_elements: Vec::new(),
+        }]
+    );
+}
+
+fn skill_mention() -> (String, MentionTarget) {
+    (
+        "$review".to_string(),
+        MentionTarget::Skill {
+            name: "review".to_string(),
+            path: "/skills/review/SKILL.md".into(),
+        },
+    )
 }

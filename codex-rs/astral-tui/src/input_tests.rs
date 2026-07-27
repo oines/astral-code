@@ -40,7 +40,10 @@ fn composer_submit_and_interrupt_are_distinct_actions() {
     }
     assert_eq!(
         handle_key(&mut state, key(KeyCode::Enter)),
-        InputAction::Submit("hello".to_string())
+        InputAction::Submit(crate::PromptSubmission {
+            text: "hello".to_string(),
+            mentions: Vec::new(),
+        })
     );
 
     state.set_activity(SurfaceActivity::Working);
