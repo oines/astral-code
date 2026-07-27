@@ -285,13 +285,22 @@ impl<'a> RequestPane<'a> {
                         params.server_name
                     )));
                     rows.push(PaneRow::Body(message.clone()));
-                    let fields = crate::mcp_form_schema::project_fields(requested_schema);
+                    let fields = crate::mcp_form::compile_fields(requested_schema);
                     for field in fields.iter().take(3) {
-                        let required = if field.required { " · required" } else { "" };
+                        let required = if field.schema.required {
+                            " · required"
+                        } else {
+                            ""
+                        };
+                        let detail = field
+                            .control
+                            .preview_detail()
+                            .map(|detail| format!(" · {detail}"))
+                            .unwrap_or_default();
                         rows.push(PaneRow::Body(format!(
-                            "{} · {}{required}",
-                            field.title,
-                            field.kind.label()
+                            "{} · {}{detail}{required}",
+                            field.schema.title,
+                            field.schema.kind.label(),
                         )));
                     }
                     if fields.len() > 3 {
