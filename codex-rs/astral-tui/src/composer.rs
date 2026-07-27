@@ -7,11 +7,16 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
 
+use crate::mention::MentionBinding;
+use crate::mention::PromptSubmission;
+use crate::mention::MentionTarget;
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ComposerState {
     text: String,
     cursor: usize,
     preferred_column: Option<usize>,
+    mention_bindings: Vec<MentionBinding>,
 }
 
 impl ComposerState {
@@ -27,31 +32,67 @@ impl ComposerState {
         self.text = text.into();
         self.cursor = self.text.len();
         self.preferred_column = None;
+        self.mention_bindings.clear();
     }
 
     pub(crate) fn take(&mut self) -> String {
         self.cursor = 0;
         self.preferred_column = None;
+        self.mention_bindings.clear();
         std::mem::take(&mut self.text)
+    }
+
+    pub(crate) fn take_submission(&mut self) -> PromptSubmission {
+        let mentions = self
+            .mention_bindings
+            .drain(..)
+            .filter(|binding| binding_matches_text(&self.text, binding))
+            .collect();
+        self.cursor = 0;
+        self.preferred_column = None;
+        PromptSubmission {
+            text: std::mem::take(&mut self.text),
+            mentions,
+        }
+    }
+
+    pub(crate) fn restore_submission(&mut self, submission: PromptSubmission) {
+        self.text = submission.text;
+        self.mention_bindings = submission.mentions;
+        self.cursor = self.text.len();
+        self.preferred_column = None;
     }
 
     pub(crate) fn clear(&mut self) {
         self.text.clear();
         self.cursor = 0;
         self.preferred_column = None;
+        self.mention_bindings.clear();
     }
 
     pub(crate) fn insert_char(&mut self, character: char) {
-        self.text.insert(self.cursor, character);
-        self.cursor += character.len_utf8();
-        self.preferred_column = None;
+        self.replace_range(self.cursor..self.cursor, &character.to_string());
     }
 
     pub(crate) fn insert_text(&mut self, text: &str) {
         let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
-        self.text.insert_str(self.cursor, &normalized);
-        self.cursor += normalized.len();
-        self.preferred_column = None;
+        self.replace_range(self.cursor..self.cursor, &normalized);
+    }
+
+    pub(crate) fn insert_mention(
+        &mut self,
+        range: std::ops::Range<usize>,
+        insert_text: String,
+        target: MentionTarget,
+    ) {
+        let start = range.start;
+        let inserted = format!("{insert_text} ");
+        self.replace_range(range, &inserted);
+        self.mention_bindings.push(MentionBinding {
+            range: start..start + insert_text.len(),
+            insert_text,
+            target,
+        });
     }
 
     pub(crate) fn edit_key(&mut self, key: KeyEvent) -> bool {
@@ -86,9 +127,7 @@ impl ComposerState {
         let Some(previous) = previous_boundary(&self.text, self.cursor) else {
             return false;
         };
-        self.text.drain(previous..self.cursor);
-        self.cursor = previous;
-        self.preferred_column = None;
+        self.replace_range(previous..self.cursor, "");
         true
     }
 
@@ -96,8 +135,7 @@ impl ComposerState {
         let Some(next) = next_boundary(&self.text, self.cursor) else {
             return false;
         };
-        self.text.drain(self.cursor..next);
-        self.preferred_column = None;
+        self.replace_range(self.cursor..next, "");
         true
     }
 
@@ -118,9 +156,7 @@ impl ComposerState {
         if start == self.cursor {
             return false;
         }
-        self.text.drain(start..self.cursor);
-        self.cursor = start;
-        self.preferred_column = None;
+        self.replace_range(start..self.cursor, "");
         true
     }
 
@@ -224,6 +260,73 @@ impl ComposerState {
         self.preferred_column = Some(column);
         true
     }
+
+    fn replace_range(&mut self, range: std::ops::Range<usize>, replacement: &str) {
+        let removed_len = range.end.saturating_sub(range.start);
+        let inserted_len = replacement.len();
+        self.mention_bindings.retain_mut(|binding| {
+            if range.is_empty() {
+                return adjust_binding_for_insertion(binding, range.start, replacement);
+            }
+            if range.end <= binding.range.start {
+                binding.range.start = shifted_index(binding.range.start, removed_len, inserted_len);
+                binding.range.end = shifted_index(binding.range.end, removed_len, inserted_len);
+                return true;
+            }
+            range.start >= binding.range.end
+        });
+        self.text.replace_range(range.clone(), replacement);
+        self.cursor = range.start.saturating_add(inserted_len);
+        self.preferred_column = None;
+    }
+}
+
+fn adjust_binding_for_insertion(
+    binding: &mut MentionBinding,
+    position: usize,
+    inserted: &str,
+) -> bool {
+    if position < binding.range.start {
+        binding.range.start = binding.range.start.saturating_add(inserted.len());
+        binding.range.end = binding.range.end.saturating_add(inserted.len());
+        return true;
+    }
+    if position == binding.range.start {
+        if !inserted
+            .chars()
+            .next_back()
+            .is_some_and(char::is_whitespace)
+        {
+            return false;
+        }
+        binding.range.start = binding.range.start.saturating_add(inserted.len());
+        binding.range.end = binding.range.end.saturating_add(inserted.len());
+        return true;
+    }
+    if position < binding.range.end {
+        return false;
+    }
+    position != binding.range.end || inserted.chars().next().is_some_and(char::is_whitespace)
+}
+
+fn shifted_index(index: usize, removed_len: usize, inserted_len: usize) -> usize {
+    index
+        .saturating_sub(removed_len)
+        .saturating_add(inserted_len)
+}
+
+fn binding_matches_text(text: &str, binding: &MentionBinding) -> bool {
+    text.get(binding.range.clone()) == Some(binding.insert_text.as_str())
+        && (binding.range.start == 0
+            || text[..binding.range.start]
+                .chars()
+                .next_back()
+                .is_some_and(char::is_whitespace))
+        && (binding.range.end == text.len()
+            || text[binding.range.end..]
+                .chars()
+                .next()
+                .is_some_and(char::is_whitespace))
 }
 
 fn previous_boundary(text: &str, cursor: usize) -> Option<usize> {

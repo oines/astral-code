@@ -18,6 +18,7 @@ use crossterm::event::KeyModifiers;
 
 use crate::PendingRequest;
 use crate::PendingRequestResponse;
+use crate::PromptSubmission;
 use crate::RequestResolution;
 use crate::SlashInvocation;
 use crate::SurfaceActivity;
@@ -35,7 +36,7 @@ use crate::thread_picker::handle_key as handle_thread_picker_key;
 pub enum InputAction {
     None,
     Redraw,
-    Submit(String),
+    Submit(PromptSubmission),
     Interrupt,
     Exit,
     ScrollUp,
@@ -263,11 +264,12 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
                     Err(error) => InputAction::Notice(error.to_string()),
                 };
             }
-            let prompt = state.take_composer();
-            if prompt.trim().is_empty() {
+            let submission = state.composer_state_mut().take_submission();
+            state.refresh_slash();
+            if submission.text().trim().is_empty() {
                 InputAction::None
             } else {
-                InputAction::Submit(prompt)
+                InputAction::Submit(submission)
             }
         }
         (KeyCode::Enter, _) => {
