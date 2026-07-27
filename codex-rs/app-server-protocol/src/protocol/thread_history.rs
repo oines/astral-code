@@ -58,6 +58,8 @@ use std::collections::HashMap;
 use tracing::warn;
 use uuid::Uuid;
 
+mod core_tool_replay;
+
 #[cfg(test)]
 use crate::protocol::v2::CommandAction;
 #[cfg(test)]
@@ -239,29 +241,62 @@ impl ThreadHistoryBuilder {
     }
 
     fn handle_response_item(&mut self, item: &codex_protocol::models::TranscriptItem) {
-        let codex_protocol::models::TranscriptItem::Message {
-            role, content, id, ..
-        } = item
-        else {
-            return;
-        };
-
-        if role != "user" {
-            return;
+        match item {
+            codex_protocol::models::TranscriptItem::Message {
+                role, content, id, ..
+            } if role == "user" => {
+                let Some(hook_prompt) = parse_hook_prompt_message(id.as_ref(), content) else {
+                    return;
+                };
+                self.ensure_turn().items.push(ThreadItem::HookPrompt {
+                    id: hook_prompt.id,
+                    fragments: hook_prompt
+                        .fragments
+                        .into_iter()
+                        .map(crate::protocol::v2::HookPromptFragment::from)
+                        .collect(),
+                });
+            }
+            codex_protocol::models::TranscriptItem::FunctionCall {
+                name,
+                namespace,
+                arguments,
+                call_id,
+                ..
+            } => {
+                if let Some(item) =
+                    core_tool_replay::start(name, namespace.as_deref(), arguments, call_id)
+                {
+                    self.upsert_item_in_current_turn(item);
+                }
+            }
+            codex_protocol::models::TranscriptItem::FunctionCallOutput { call_id, output } => {
+                self.handle_core_tool_call_output(call_id, output);
+            }
+            _ => {}
         }
+    }
 
-        let Some(hook_prompt) = parse_hook_prompt_message(id.as_ref(), content) else {
+    fn handle_core_tool_call_output(
+        &mut self,
+        call_id: &str,
+        output: &codex_protocol::models::FunctionCallOutputPayload,
+    ) {
+        let item = self
+            .current_turn
+            .iter_mut()
+            .flat_map(|turn| turn.items.iter_mut().rev())
+            .chain(
+                self.turns
+                    .iter_mut()
+                    .rev()
+                    .flat_map(|turn| turn.items.iter_mut().rev()),
+            )
+            .find(|item| item.id() == call_id);
+        let Some(item) = item else {
             return;
         };
-
-        self.ensure_turn().items.push(ThreadItem::HookPrompt {
-            id: hook_prompt.id,
-            fragments: hook_prompt
-                .fragments
-                .into_iter()
-                .map(crate::protocol::v2::HookPromptFragment::from)
-                .collect(),
-        });
+        core_tool_replay::complete(item, output);
     }
 
     fn handle_user_message(&mut self, payload: &UserMessageEvent) {
@@ -1010,9 +1045,12 @@ impl ThreadHistoryBuilder {
     }
 
     fn finish_current_turn(&mut self) {
-        if let Some(turn) = self.current_turn.take() {
+        if let Some(mut turn) = self.current_turn.take() {
             if turn.items.is_empty() && !turn.opened_explicitly && !turn.saw_compaction {
                 return;
+            }
+            if turn.status != TurnStatus::InProgress {
+                core_tool_replay::interrupt_pending(&mut turn.items);
             }
             self.turns.push(Turn::from(turn));
         }
@@ -1222,6 +1260,7 @@ impl From<&PendingTurn> for Turn {
 mod tests {
     use super::*;
     use crate::protocol::v2::CommandExecutionSource;
+    use crate::protocol::v2::CoreToolCallStatus;
     use codex_protocol::ThreadId;
     use codex_protocol::dynamic_tools::DynamicToolCallOutputContentItem as CoreDynamicToolCallOutputContentItem;
     use codex_protocol::items::HookPromptFragment as CoreHookPromptFragment;
@@ -3328,6 +3367,131 @@ mod tests {
                 ),
                 additional_details: None,
             })
+        );
+    }
+
+    #[test]
+    fn rebuilds_provider_core_tools_from_persisted_function_calls() {
+        let items = vec![
+            RolloutItem::EventMsg(EventMsg::TurnStarted(TurnStartedEvent {
+                turn_id: "turn-a".into(),
+                trace_id: None,
+                started_at: None,
+                model_context_window: None,
+                collaboration_mode_kind: Default::default(),
+            })),
+            RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+                client_id: None,
+                message: "track the work".into(),
+                images: None,
+                text_elements: Vec::new(),
+                local_images: Vec::new(),
+                ..Default::default()
+            })),
+            RolloutItem::TranscriptItem(codex_protocol::models::TranscriptItem::FunctionCall {
+                id: None,
+                name: "TodoWrite".into(),
+                namespace: None,
+                arguments: r#"{"todos":[{"content":"Trace events","status":"completed"}]}"#.into(),
+                call_id: "todo-1".into(),
+            }),
+            RolloutItem::TranscriptItem(
+                codex_protocol::models::TranscriptItem::FunctionCallOutput {
+                    call_id: "todo-1".into(),
+                    output: codex_protocol::models::FunctionCallOutputPayload {
+                        body: codex_protocol::models::FunctionCallOutputBody::Text(
+                            "Todos updated".into(),
+                        ),
+                        success: Some(true),
+                    },
+                },
+            ),
+            RolloutItem::TranscriptItem(codex_protocol::models::TranscriptItem::FunctionCall {
+                id: None,
+                name: "ReadTaskOutput".into(),
+                namespace: None,
+                arguments: r#"{"task_id":"task-7"}"#.into(),
+                call_id: "task-read".into(),
+            }),
+            RolloutItem::TranscriptItem(
+                codex_protocol::models::TranscriptItem::FunctionCallOutput {
+                    call_id: "task-read".into(),
+                    output: codex_protocol::models::FunctionCallOutputPayload {
+                        body: codex_protocol::models::FunctionCallOutputBody::Text(
+                            "task missing".into(),
+                        ),
+                        success: Some(false),
+                    },
+                },
+            ),
+            RolloutItem::TranscriptItem(codex_protocol::models::TranscriptItem::FunctionCall {
+                id: None,
+                name: "update_plan".into(),
+                namespace: None,
+                arguments: r#"{"plan":[{"step":"Finish PTY","status":"in_progress"}]}"#.into(),
+                call_id: "plan-1".into(),
+            }),
+            RolloutItem::TranscriptItem(codex_protocol::models::TranscriptItem::FunctionCall {
+                id: None,
+                name: "Read".into(),
+                namespace: Some("plugin".into()),
+                arguments: r#"{"path":"secret.txt"}"#.into(),
+                call_id: "namespaced-read".into(),
+            }),
+            RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
+                turn_id: "turn-a".into(),
+                last_agent_message: None,
+                completed_at: None,
+                duration_ms: None,
+                time_to_first_token_ms: None,
+            })),
+        ];
+
+        let turns = build_turns_from_rollout_items(&items);
+
+        assert_eq!(
+            turns[0].items,
+            vec![
+                ThreadItem::UserMessage {
+                    id: "item-1".into(),
+                    client_id: None,
+                    content: vec![UserInput::Text {
+                        text: "track the work".into(),
+                        text_elements: Vec::new(),
+                    }],
+                },
+                ThreadItem::CoreToolCall {
+                    id: "todo-1".into(),
+                    tool: "TodoWrite".into(),
+                    arguments: serde_json::json!({
+                        "todos": [{"content": "Trace events", "status": "completed"}]
+                    }),
+                    status: CoreToolCallStatus::Completed,
+                    result: Some("Todos updated".into()),
+                    error: None,
+                    duration_ms: None,
+                },
+                ThreadItem::CoreToolCall {
+                    id: "task-read".into(),
+                    tool: "ReadTaskOutput".into(),
+                    arguments: serde_json::json!({"task_id": "task-7"}),
+                    status: CoreToolCallStatus::Failed,
+                    result: Some("task missing".into()),
+                    error: None,
+                    duration_ms: None,
+                },
+                ThreadItem::CoreToolCall {
+                    id: "plan-1".into(),
+                    tool: "update_plan".into(),
+                    arguments: serde_json::json!({
+                        "plan": [{"step": "Finish PTY", "status": "in_progress"}]
+                    }),
+                    status: CoreToolCallStatus::Interrupted,
+                    result: None,
+                    error: None,
+                    duration_ms: None,
+                },
+            ]
         );
     }
 
