@@ -17,6 +17,7 @@ mod permission_picker;
 mod request;
 mod runtime;
 mod session;
+mod shortcuts;
 mod slash;
 mod surface;
 mod terminal_guard;

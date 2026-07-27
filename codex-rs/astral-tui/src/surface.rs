@@ -465,7 +465,7 @@ pub(crate) fn render_surface_with_view(
             .and_then(|_| request_cursor(&request, layout.prompt))
     };
 
-    let default_hints = [("Shift+Tab", "mode")];
+    let default_hints = [("Shift+Tab", "mode"), ("Ctrl+.", "shortcuts")];
     let slash_hints = [("↑/↓", "navigate"), ("Tab", "complete"), ("Esc", "close")];
     ShortcutsBar {
         hints: if slash.open {

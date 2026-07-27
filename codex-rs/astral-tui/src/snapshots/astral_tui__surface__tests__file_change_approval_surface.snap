@@ -13,4 +13,4 @@ expression: "request_surface(json!({\n    \"method\": \"item/fileChange/requestA
  ◇ Action required
    Edit files · update source
    [y] allow · [a] allow session · [n] deny · [esc] cancel
- Shift+Tab:mode
+ Shift+Tab:mode  │  Ctrl+.:shortcuts

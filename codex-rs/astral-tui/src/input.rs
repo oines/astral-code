@@ -49,6 +49,7 @@ pub enum InputAction {
     },
     SelectPermission(PermissionSelection),
     CycleMode,
+    OpenShortcuts,
     Resolve(RequestResolution),
     Notice(String),
 }
@@ -70,7 +71,9 @@ pub fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
         return handle_theme_picker_input(state, key);
     }
     if state.modal().is_some() {
-        if key.code == KeyCode::Esc {
+        if key.code == KeyCode::Esc
+            || (key.code == KeyCode::Char('.') && key.modifiers.contains(KeyModifiers::CONTROL))
+        {
             state.close_modal();
             return InputAction::Redraw;
         }
@@ -195,6 +198,9 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
         || (key.code == KeyCode::Tab && key.modifiers.contains(KeyModifiers::SHIFT))
     {
         return InputAction::CycleMode;
+    }
+    if key.code == KeyCode::Char('.') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        return InputAction::OpenShortcuts;
     }
     if state.slash().open {
         match key.code {
