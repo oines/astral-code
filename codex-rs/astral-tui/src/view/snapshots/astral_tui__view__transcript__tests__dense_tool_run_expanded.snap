@@ -1,0 +1,17 @@
+---
+source: astral-tui/src/view/transcript_tests.rs
+expression: expanded
+---
+◈ Ran 13 commands
+◆ Run echo command-1
+◆ Run echo command-2
+◆ Run echo command-3
+◆ Run echo command-4
+◆ Run echo command-5
+◆ Run echo command-6
+◆ Run echo command-7
+◆ Run echo command-8
+◆ Run echo command-9
+◆ Run echo command-10
+◆ Run echo command-11
+◆ Run echo command-12

@@ -6,6 +6,7 @@ use astral_tui_scrollback::PresentationBlock;
 
 use crate::conversation::TranscriptTurn;
 
+use super::entry_group::EntryGroupKind;
 use super::entry_group::scan_turn;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,15 +27,16 @@ pub(crate) struct EntryDisplayState {
     selected: Option<String>,
     entries: Vec<EntryDescriptor>,
     manual_modes: HashMap<String, DisplayMode>,
-    groups: HashSet<String>,
+    groups: HashMap<String, EntryGroupKind>,
     expanded_groups: HashSet<String>,
+    preserve_empty_selection: bool,
 }
 
 impl EntryDisplayState {
     pub(crate) fn observe(&mut self, turns: &[TranscriptTurn]) {
         let mut entries = Vec::new();
         let mut known_ids = HashSet::new();
-        let mut groups_seen = HashSet::new();
+        let mut groups_seen = HashMap::new();
         for turn in turns {
             for block in &turn.blocks {
                 if block.block.is_foldable() {
@@ -42,7 +44,10 @@ impl EntryDisplayState {
                 }
             }
             let groups = scan_turn(turn, self);
-            groups_seen.extend(groups.iter().map(|group| group.id.clone()));
+            for group in &groups {
+                known_ids.insert(group.id.clone());
+                groups_seen.insert(group.id.clone(), group.kind);
+            }
             for (index, block) in turn.blocks.iter().enumerate() {
                 if let Some(group) = groups
                     .iter()
@@ -89,11 +94,12 @@ impl EntryDisplayState {
         {
             self.selected = None;
         }
-        if self.focused && self.selected.is_none() {
+        if self.focused && self.selected.is_none() && !self.preserve_empty_selection {
             self.selected = self.entries.last().map(|entry| entry.id.clone());
         }
         if self.entries.is_empty() {
             self.focused = false;
+            self.preserve_empty_selection = false;
         }
     }
 
@@ -114,6 +120,7 @@ impl EntryDisplayState {
             return false;
         };
         self.focused = true;
+        self.preserve_empty_selection = false;
         if self.selected.is_none() {
             self.selected = Some(last.id.clone());
         }
@@ -122,6 +129,7 @@ impl EntryDisplayState {
 
     pub(crate) fn focus_prompt(&mut self) {
         self.focused = false;
+        self.preserve_empty_selection = false;
     }
 
     pub(crate) fn is_focused(&self) -> bool {
@@ -141,6 +149,7 @@ impl EntryDisplayState {
             return false;
         }
         self.focused = true;
+        self.preserve_empty_selection = false;
         self.selected = Some(entry_id.to_string());
         true
     }
@@ -167,14 +176,17 @@ impl EntryDisplayState {
     }
 
     pub(crate) fn move_selection(&mut self, delta: isize) -> Option<String> {
-        let selected = self.selected.as_deref();
-        let current = selected
+        let last = self.entries.len().checked_sub(1)?;
+        let next = self
+            .selected
+            .as_deref()
             .and_then(|selected| self.entries.iter().position(|entry| entry.id == selected))
-            .unwrap_or_else(|| self.entries.len().saturating_sub(1));
-        let next = current
-            .saturating_add_signed(delta)
-            .min(self.entries.len().saturating_sub(1));
+            .map_or_else(
+                || if delta < 0 { last } else { 0 },
+                |current| current.saturating_add_signed(delta).min(last),
+            );
         let entry = self.entries.get(next)?;
+        self.preserve_empty_selection = false;
         self.selected = Some(entry.id.clone());
         Some(entry.id.clone())
     }
@@ -200,8 +212,10 @@ impl EntryDisplayState {
     pub(crate) fn expand_selected(&mut self) -> Option<String> {
         let entry = self.selected_entry()?.clone();
         if entry.group_header {
-            self.expanded_groups.insert(entry.id.clone());
-            return Some(entry.id);
+            if self.expanded_groups.contains(&entry.id) {
+                return Some(entry.id);
+            }
+            return self.toggle_group(&entry.id);
         }
         self.manual_modes
             .insert(entry.id.clone(), DisplayMode::Expanded);
@@ -211,7 +225,11 @@ impl EntryDisplayState {
     pub(crate) fn collapse_selected(&mut self) -> Option<String> {
         let entry = self.selected_entry()?.clone();
         if entry.group_header {
-            return self.expanded_groups.remove(&entry.id).then_some(entry.id);
+            if self.expanded_groups.remove(&entry.id) {
+                self.preserve_empty_selection = false;
+                return Some(entry.id);
+            }
+            return None;
         }
         let current = self
             .manual_modes
@@ -225,16 +243,22 @@ impl EntryDisplayState {
         }
         let parent = entry.parent_group?;
         self.expanded_groups.remove(&parent);
+        self.preserve_empty_selection = false;
         self.selected = Some(parent.clone());
         Some(parent)
     }
 
     pub(crate) fn toggle_group(&mut self, group_id: &str) -> Option<String> {
-        if !self.groups.contains(group_id) {
-            return None;
-        }
-        if !self.expanded_groups.remove(group_id) {
+        let kind = *self.groups.get(group_id)?;
+        let expanding = !self.expanded_groups.remove(group_id);
+        if expanding {
             self.expanded_groups.insert(group_id.to_string());
+            if kind == EntryGroupKind::Truncation {
+                self.selected = None;
+                self.preserve_empty_selection = true;
+            }
+        } else {
+            self.preserve_empty_selection = false;
         }
         Some(group_id.to_string())
     }

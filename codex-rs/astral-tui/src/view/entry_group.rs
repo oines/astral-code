@@ -12,6 +12,14 @@ use crate::conversation::TranscriptTurn;
 use super::EntryDisplayState;
 use super::entry_state::entry_id;
 
+const MAX_VISIBLE_DENSE_ENTRIES: usize = 10;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EntryGroupKind {
+    VerbRun,
+    Truncation,
+}
+
 /// One view-time fold over a stable range of transcript blocks.
 ///
 /// Grouping remains presentation-only: members keep their original item ids,
@@ -20,8 +28,10 @@ use super::entry_state::entry_id;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct EntryGroupSpan {
     pub(crate) id: String,
+    pub(crate) kind: EntryGroupKind,
     pub(crate) range: std::ops::Range<usize>,
     pub(crate) claimed: Vec<usize>,
+    hidden: Vec<usize>,
     pub(crate) expanded: bool,
     pub(crate) label: String,
     pub(crate) running: bool,
@@ -30,11 +40,11 @@ pub(crate) struct EntryGroupSpan {
 
 impl EntryGroupSpan {
     pub(crate) fn header_owns_selection(&self) -> bool {
-        !self.expanded
+        self.kind == EntryGroupKind::Truncation || !self.expanded
     }
 
     pub(crate) fn hides(&self, index: usize) -> bool {
-        !self.expanded && self.claimed.contains(&index)
+        self.hidden.contains(&index)
     }
 
     pub(crate) fn contains_member(&self, index: usize) -> bool {
@@ -43,11 +53,18 @@ impl EntryGroupSpan {
 }
 
 pub(crate) fn scan_turn(turn: &TranscriptTurn, display: &EntryDisplayState) -> Vec<EntryGroupSpan> {
-    scan_verb_runs(turn, display)
+    let (mut spans, claimed) = scan_verb_runs(turn, display);
+    spans.extend(scan_truncations(turn, display, &claimed));
+    spans.sort_unstable_by_key(|span| span.range.start);
+    spans
 }
 
-fn scan_verb_runs(turn: &TranscriptTurn, display: &EntryDisplayState) -> Vec<EntryGroupSpan> {
+fn scan_verb_runs(
+    turn: &TranscriptTurn,
+    display: &EntryDisplayState,
+) -> (Vec<EntryGroupSpan>, Vec<bool>) {
     let mut spans = Vec::new();
+    let mut claimed = vec![false; turn.blocks.len()];
     let mut index = 0;
     while index < turn.blocks.len() {
         let Some(scan) = scan_verb_run(turn, display, index) else {
@@ -65,10 +82,20 @@ fn scan_verb_runs(turn: &TranscriptTurn, display: &EntryDisplayState) -> Vec<Ent
             scan.claimed.iter().copied(),
             GroupLabelFallback::Members(scan.tool_members),
         );
+        for member in &scan.claimed {
+            claimed[*member] = true;
+        }
+        let hidden = if expanded {
+            Vec::new()
+        } else {
+            scan.claimed.clone()
+        };
         spans.push(EntryGroupSpan {
             id,
+            kind: EntryGroupKind::VerbRun,
             range: index..scan.end,
             claimed: scan.claimed,
+            hidden,
             expanded,
             running: label.running,
             failed: label.failed_count > 0,
@@ -76,7 +103,85 @@ fn scan_verb_runs(turn: &TranscriptTurn, display: &EntryDisplayState) -> Vec<Ent
         });
         index = scan.end;
     }
+    (spans, claimed)
+}
+
+fn scan_truncations(
+    turn: &TranscriptTurn,
+    display: &EntryDisplayState,
+    verb_claimed: &[bool],
+) -> Vec<EntryGroupSpan> {
+    let mut spans = Vec::new();
+    let mut index = 0;
+    while index < turn.blocks.len() {
+        if verb_claimed[index] || !participates_in_truncation(turn, display, index) {
+            index += 1;
+            continue;
+        }
+
+        let start = index;
+        let mut participants = Vec::new();
+        while index < turn.blocks.len()
+            && !verb_claimed[index]
+            && participates_in_truncation(turn, display, index)
+        {
+            participants.push(index);
+            index += 1;
+        }
+        if participants.len() <= MAX_VISIBLE_DENSE_ENTRIES + 1 {
+            continue;
+        }
+
+        let id = entry_id(&turn.id, &turn.blocks[start].item_id);
+        let expanded = display.group_is_expanded(&id);
+        let hidden_count = participants.len() - MAX_VISIBLE_DENSE_ENTRIES;
+        let label_indices = if expanded {
+            participants.as_slice()
+        } else {
+            &participants[..hidden_count]
+        };
+        let label = aggregate_strict_label(turn, label_indices.iter().copied());
+        let fallback = if expanded {
+            format!("{} tool calls & thoughts", participants.len() - 1)
+        } else {
+            format!("{} more", hidden_count - 1)
+        };
+        let hidden = if expanded {
+            vec![start]
+        } else {
+            participants[..hidden_count].to_vec()
+        };
+        spans.push(EntryGroupSpan {
+            id,
+            kind: EntryGroupKind::Truncation,
+            range: start..index,
+            claimed: participants,
+            hidden,
+            expanded,
+            label: label.as_ref().map_or(fallback, |label| label.text.clone()),
+            running: label.as_ref().is_some_and(|label| label.running),
+            failed: label.as_ref().is_some_and(|label| label.failed_count > 0),
+        });
+    }
     spans
+}
+
+fn participates_in_truncation(
+    turn: &TranscriptTurn,
+    display: &EntryDisplayState,
+    index: usize,
+) -> bool {
+    let Some(block) = turn.blocks.get(index) else {
+        return false;
+    };
+    display.mode_for(&turn.id, &block.item_id, &block.block) == DisplayMode::Collapsed
+        && matches!(
+            block.block,
+            PresentationBlock::Thinking { .. }
+                | PresentationBlock::Tool(_)
+                | PresentationBlock::Subagent(_)
+                | PresentationBlock::System { .. }
+        )
 }
 
 struct VerbRunScan {
@@ -173,7 +278,8 @@ fn eager_bucket(kind: ToolKind) -> Option<GroupBucket> {
         ToolKind::Skill => Some(GroupBucket::Skill),
         ToolKind::Search => Some(GroupBucket::Search),
         ToolKind::List => Some(GroupBucket::Dir),
-        ToolKind::WebFetch | ToolKind::WebSearch => Some(GroupBucket::Website),
+        ToolKind::WebFetch => Some(GroupBucket::WebFetch),
+        ToolKind::WebSearch => Some(GroupBucket::WebSearch),
         ToolKind::Collab => Some(GroupBucket::Subagent),
         ToolKind::Execute
         | ToolKind::Background
@@ -196,29 +302,40 @@ enum GroupBucket {
     Skill,
     Search,
     Dir,
-    Website,
+    WebFetch,
+    WebSearch,
     Subagent,
+    Command,
+    EditFile,
+    McpCall,
+    OtherTool,
 }
 
 impl GroupBucket {
     fn verb(self, running: bool) -> &'static str {
         let (past, present) = match self {
             Self::File | Self::Skill => ("Read", "Reading"),
-            Self::Search | Self::Website => ("Searched", "Searching"),
+            Self::Search | Self::WebSearch => ("Searched", "Searching"),
             Self::Dir => ("Listed", "Listing"),
-            Self::Subagent => ("Ran", "Running"),
+            Self::WebFetch => ("Fetched", "Fetching"),
+            Self::Subagent | Self::Command | Self::OtherTool => ("Ran", "Running"),
+            Self::EditFile => ("Edited", "Editing"),
+            Self::McpCall => ("Called", "Calling"),
         };
         if running { present } else { past }
     }
 
     fn noun(self, count: usize) -> &'static str {
         let (singular, plural) = match self {
-            Self::File => ("file", "files"),
+            Self::File | Self::EditFile => ("file", "files"),
             Self::Skill => ("skill", "skills"),
             Self::Search => ("pattern", "patterns"),
             Self::Dir => ("dir", "dirs"),
-            Self::Website => ("website", "websites"),
+            Self::WebFetch | Self::WebSearch => ("website", "websites"),
             Self::Subagent => ("subagent", "subagents"),
+            Self::Command => ("command", "commands"),
+            Self::McpCall => ("MCP tool", "MCP tools"),
+            Self::OtherTool => ("tool", "tools"),
         };
         if count == 1 { singular } else { plural }
     }
@@ -226,9 +343,7 @@ impl GroupBucket {
 
 fn label_bucket(block: &PresentationBlock) -> Option<(GroupBucket, ToolStatus)> {
     match block {
-        PresentationBlock::Tool(tool) => {
-            eager_bucket(tool.kind).map(|bucket| (bucket, tool.status))
-        }
+        PresentationBlock::Tool(tool) => Some((label_tool_bucket(tool.kind), tool.status)),
         PresentationBlock::Subagent(subagent) => Some((GroupBucket::Subagent, subagent.status)),
         PresentationBlock::User { .. }
         | PresentationBlock::Assistant { .. }
@@ -236,6 +351,29 @@ fn label_bucket(block: &PresentationBlock) -> Option<(GroupBucket, ToolStatus)> 
         | PresentationBlock::Plan { .. }
         | PresentationBlock::Todo(_)
         | PresentationBlock::System { .. } => None,
+    }
+}
+
+fn label_tool_bucket(kind: ToolKind) -> GroupBucket {
+    match kind {
+        ToolKind::Read => GroupBucket::File,
+        ToolKind::Skill => GroupBucket::Skill,
+        ToolKind::Search => GroupBucket::Search,
+        ToolKind::List => GroupBucket::Dir,
+        ToolKind::WebFetch => GroupBucket::WebFetch,
+        ToolKind::WebSearch => GroupBucket::WebSearch,
+        ToolKind::Collab => GroupBucket::Subagent,
+        ToolKind::Execute
+        | ToolKind::Background
+        | ToolKind::BackgroundPoll
+        | ToolKind::BackgroundInput
+        | ToolKind::BackgroundList
+        | ToolKind::BackgroundStop => GroupBucket::Command,
+        ToolKind::Edit => GroupBucket::EditFile,
+        ToolKind::Mcp => GroupBucket::McpCall,
+        ToolKind::ImageView | ToolKind::ImageGeneration | ToolKind::Todo | ToolKind::Other => {
+            GroupBucket::OtherTool
+        }
     }
 }
 
@@ -254,6 +392,35 @@ fn aggregate_label(
     indices: impl Iterator<Item = usize>,
     fallback: GroupLabelFallback,
 ) -> GroupLabel {
+    aggregate_known_labels(turn, indices).unwrap_or_else(|| GroupLabel {
+        text: match fallback {
+            GroupLabelFallback::Members(count) => format!("{count} tool calls"),
+        },
+        running: false,
+        failed_count: 0,
+    })
+}
+
+fn aggregate_strict_label(
+    turn: &TranscriptTurn,
+    indices: impl Iterator<Item = usize>,
+) -> Option<GroupLabel> {
+    let indices = indices.collect::<Vec<_>>();
+    if indices.iter().any(|index| {
+        turn.blocks.get(*index).is_some_and(|block| {
+            !matches!(block.block, PresentationBlock::Thinking { .. })
+                && label_bucket(&block.block).is_none()
+        })
+    }) {
+        return None;
+    }
+    aggregate_known_labels(turn, indices.into_iter())
+}
+
+fn aggregate_known_labels(
+    turn: &TranscriptTurn,
+    indices: impl Iterator<Item = usize>,
+) -> Option<GroupLabel> {
     let mut buckets: Vec<(GroupBucket, usize)> = Vec::new();
     let mut running = false;
     let mut failed_count = 0;
@@ -273,24 +440,22 @@ fn aggregate_label(
         running |= status == ToolStatus::Running;
         failed_count += usize::from(status == ToolStatus::Failed);
     }
+    if buckets.is_empty() {
+        return None;
+    }
     let mut text = buckets
         .into_iter()
         .map(|(kind, count)| format!("{} {count} {}", kind.verb(running), kind.noun(count)))
         .collect::<Vec<_>>()
         .join(", ");
-    if text.is_empty() {
-        text = match fallback {
-            GroupLabelFallback::Members(count) => format!("{count} tool calls"),
-        };
-    }
     if failed_count > 0 {
         text.push_str(&format!(" · {failed_count} failed"));
     }
-    GroupLabel {
+    Some(GroupLabel {
         text,
         running,
         failed_count,
-    }
+    })
 }
 
 #[cfg(test)]

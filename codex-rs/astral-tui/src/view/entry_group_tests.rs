@@ -4,6 +4,7 @@ use astral_tui_scrollback::ToolPresentation;
 use astral_tui_scrollback::ToolStatus;
 use pretty_assertions::assert_eq;
 
+use super::EntryGroupKind;
 use super::scan_turn;
 use crate::conversation::TranscriptBlock;
 use crate::conversation::TranscriptTurn;
@@ -105,4 +106,78 @@ fn assistant_text_separates_dense_runs() {
     let display = EntryDisplayState::default();
 
     assert!(scan_turn(&turn, &display).is_empty());
+}
+
+#[test]
+fn long_dense_run_keeps_the_newest_ten_entries_visible() {
+    let blocks = (0..13)
+        .map(|index| tool(&format!("command-{index}"), ToolKind::Execute))
+        .collect();
+    let turn = turn(blocks);
+    let display = EntryDisplayState::default();
+
+    let spans = scan_turn(&turn, &display);
+
+    assert_eq!(spans.len(), 1);
+    assert_eq!(spans[0].kind, EntryGroupKind::Truncation);
+    assert_eq!(spans[0].range, 0..13);
+    assert_eq!(spans[0].claimed, (0..13).collect::<Vec<_>>());
+    assert!(spans[0].hides(0));
+    assert!(spans[0].hides(1));
+    assert!(spans[0].hides(2));
+    assert!(!spans[0].hides(3));
+    assert_eq!(spans[0].label, "Ran 3 commands");
+}
+
+#[test]
+fn dense_run_at_the_grok_fold_threshold_stays_flat() {
+    let blocks = (0..11)
+        .map(|index| tool(&format!("command-{index}"), ToolKind::Execute))
+        .collect();
+    let turn = turn(blocks);
+
+    assert!(scan_turn(&turn, &EntryDisplayState::default()).is_empty());
+}
+
+#[test]
+fn eager_verb_run_claims_before_dense_truncation() {
+    let mut blocks = vec![
+        tool("read-a", ToolKind::Read),
+        tool("read-b", ToolKind::Read),
+    ];
+    blocks.extend((0..12).map(|index| tool(&format!("command-{index}"), ToolKind::Execute)));
+    let turn = turn(blocks);
+
+    let spans = scan_turn(&turn, &EntryDisplayState::default());
+
+    assert_eq!(
+        spans
+            .iter()
+            .map(|span| (span.kind, span.range.clone(), span.label.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            (EntryGroupKind::VerbRun, 0..2, "Read 2 files"),
+            (EntryGroupKind::Truncation, 2..14, "Ran 2 commands"),
+        ]
+    );
+}
+
+#[test]
+fn expanded_truncation_keeps_a_standalone_header() {
+    let blocks = (0..13)
+        .map(|index| tool(&format!("command-{index}"), ToolKind::Execute))
+        .collect();
+    let turn = turn(blocks);
+    let mut display = EntryDisplayState::default();
+    display.observe(std::slice::from_ref(&turn));
+    display.toggle_group("turn-1\0command-0");
+
+    let spans = scan_turn(&turn, &display);
+
+    assert_eq!(spans.len(), 1);
+    assert!(spans[0].expanded);
+    assert!(spans[0].header_owns_selection());
+    assert!(spans[0].hides(0));
+    assert!(!(1..13).any(|index| spans[0].hides(index)));
+    assert_eq!(spans[0].label, "Ran 13 commands");
 }

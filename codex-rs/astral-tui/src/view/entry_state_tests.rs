@@ -180,3 +180,50 @@ fn verb_group_and_first_member_keep_independent_fold_state() {
     assert!(!state.group_is_expanded(&group_id));
     assert_eq!(state.selected_mode(), Some(DisplayMode::Collapsed));
 }
+
+#[test]
+fn expanding_dense_truncation_clears_selection_until_navigation() {
+    let turns = [turn(
+        (0..13)
+            .map(|index| block(&format!("command-{index}"), tool(ToolStatus::Success)))
+            .collect(),
+    )];
+    let group_id = entry_id("turn-1", "command-0");
+    let mut state = EntryDisplayState::default();
+    state.observe(&turns);
+    assert!(state.select(&group_id));
+
+    assert_eq!(state.toggle_selected(), Some(group_id.clone()));
+    state.observe(&turns);
+
+    assert!(state.group_is_expanded(&group_id));
+    assert_eq!(state.selected_id(), None);
+    assert_eq!(state.move_selection(1), Some(group_id.clone()));
+    assert_eq!(
+        state.move_selection(1),
+        Some(entry_id("turn-1", "command-1"))
+    );
+}
+
+#[test]
+fn left_from_dense_group_member_collapses_to_the_group_header() {
+    let turns = [turn(
+        (0..13)
+            .map(|index| block(&format!("command-{index}"), tool(ToolStatus::Success)))
+            .collect(),
+    )];
+    let group_id = entry_id("turn-1", "command-0");
+    let member_id = entry_id("turn-1", "command-2");
+    let mut state = EntryDisplayState::default();
+    state.observe(&turns);
+    state.select(&group_id);
+    state.toggle_selected();
+    state.observe(&turns);
+    state.select(&member_id);
+
+    assert_eq!(state.collapse_selected(), Some(group_id.clone()));
+    state.observe(&turns);
+
+    assert!(!state.group_is_expanded(&group_id));
+    assert_eq!(state.selected_id(), Some(group_id.as_str()));
+}

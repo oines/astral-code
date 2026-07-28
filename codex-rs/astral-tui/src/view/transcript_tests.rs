@@ -32,6 +32,24 @@ fn render(turns: &[TranscriptTurn], width: u16) -> super::TranscriptLayout {
     )
 }
 
+fn command_block(index: usize) -> TranscriptBlock {
+    TranscriptBlock {
+        item_id: format!("command-{index}"),
+        block: PresentationBlock::Tool(ToolPresentation {
+            kind: ToolKind::Execute,
+            status: ToolStatus::Success,
+            name: "exec_command".to_string(),
+            title: format!("echo command-{index}"),
+            details: Vec::new(),
+            output: Some(format!("command-{index}")),
+            changes: Vec::new(),
+            duration_ms: None,
+        }),
+        started_at_ms: None,
+        completed_at_ms: None,
+    }
+}
+
 #[test]
 fn duration_format_matches_grok_turn_markers() {
     assert_eq!(format_duration(300), "0.3s");
@@ -287,4 +305,39 @@ fn full_and_committed_paths_render_identical_entry_boundaries() {
         .collect::<Vec<_>>();
 
     assert_eq!(committed, full);
+}
+
+#[test]
+fn dense_tool_run_matches_grok_truncation_shapes() {
+    let turn = TranscriptTurn {
+        id: "turn-1".to_string(),
+        blocks: (0..13).map(command_block).collect(),
+        started_at_ms: None,
+        completed_at_ms: None,
+        duration_ms: None,
+    };
+    let mut display = EntryDisplayState::default();
+    display.observe(std::slice::from_ref(&turn));
+    let collapsed = render_transcript(
+        std::slice::from_ref(&turn),
+        80,
+        AstralTheme::default(),
+        &display,
+    )
+    .lines
+    .into_iter()
+    .map(|line| line.to_string())
+    .collect::<Vec<_>>()
+    .join("\n");
+    insta::assert_snapshot!("dense_tool_run_collapsed", collapsed);
+
+    display.toggle_group("turn-1\0command-0");
+    display.observe(std::slice::from_ref(&turn));
+    let expanded = render_transcript(&[turn], 80, AstralTheme::default(), &display)
+        .lines
+        .into_iter()
+        .map(|line| line.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    insta::assert_snapshot!("dense_tool_run_expanded", expanded);
 }
