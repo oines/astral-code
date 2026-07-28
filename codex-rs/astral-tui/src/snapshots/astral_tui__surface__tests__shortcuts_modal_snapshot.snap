@@ -1,15 +1,15 @@
 ---
 source: astral-tui/src/surface_tests.rs
-expression: "render_at_size(&state, &session, 80, 24)"
+expression: "render_at_size(&mut state, &session, 80, 24)"
 ---
 
   ⎇ main  /workspace
 
 
-  › inspect this┌─ Keyboard shortcuts ─────────────────────[×]─┐      12:00 AM
+  › inspect this┌─ Keyboard shortcuts ─────────────────────[×]─┐
                 │                                              │
-                │  Enter      Send / submit focused input      │
-  I’m tracing th│  Shift+Tab  Cycle collaboration mode         │
+  I’m tracing th│  Enter      Send / submit focused input      │
+                │  Shift+Tab  Cycle collaboration mode         │
                 │  Ctrl+.     Toggle shortcuts window          │
                 │  Ctrl+C     Interrupt / clear / idle exit    │
                 │  Ctrl+D     Exit when the composer is empty  │

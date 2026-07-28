@@ -5,18 +5,18 @@ expression: buffer_text(&buffer)
 
   ⎇ main  /workspace
 
+  Response 4 keeps enough content to make the transcript overflow.
   Worked for 1.0s
 
+  › question 5: inspect the layered transcript
 
-
-  › question 6: inspect the layered transcript                        10:13 PM
-
-
-  Response 6 keeps enough content to make the transcript overflow.    10:13 PM
-  Worked for 1.0s                                                              █
+  Response 5 keeps enough content to make the transcript overflow.
+  Worked for 1.0s
                                                                                █
+  › question 6: inspect the layered transcript                                 █
                                                                                █
-
+  Response 6 keeps enough content to make the transcript overflow.             █
+  Worked for 1.0s
                                         ▼
   history ↑5
 

@@ -364,7 +364,6 @@ fn draw(
                 terminal.insert_before(height, move |buffer| {
                     paint_committed_with_theme(&block, buffer, theme);
                 })?;
-                terminal.insert_before(1, |_buffer| {})?;
             }
         }
     }

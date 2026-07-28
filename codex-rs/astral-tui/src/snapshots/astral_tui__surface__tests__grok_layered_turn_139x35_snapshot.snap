@@ -6,17 +6,17 @@ expression: buffer_text(&buffer)
   ⎇ main  /workspace
 
 
-  › 你 是 谁                                                                                                                        10:13 PM
-
+  › 你 是 谁
 
   ◆ Thought for 0.5s
-
-  我 是  Astral， 一 个 面 向 软 件 工 程 的 交 互 式 助 手 。                                                                                     10:13 PM
+  我 是  Astral， 一 个 面 向 软 件 工 程 的 交 互 式 助 手 。
 
   • 读 写 代 码
   • 运 行 命 令
   • 调 试 和 重 构
   Worked for 2.4s
+
+
 
 
 

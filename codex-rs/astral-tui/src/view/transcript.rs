@@ -9,8 +9,6 @@ use astral_tui_scrollback::PresentationBlock;
 use astral_tui_scrollback::RenderOptions;
 use astral_tui_scrollback::render_block;
 use astral_tui_scrollback::render_markdown_with_metadata;
-use chrono::Local;
-use chrono::TimeZone;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::style::Stylize;
@@ -24,8 +22,6 @@ use crate::conversation::TranscriptTurn;
 
 use super::AstralTheme;
 use super::AstralThemeId;
-
-const TIMESTAMP_WIDTH: usize = 8;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TranscriptSection {
@@ -101,19 +97,10 @@ pub(crate) fn render_transcript(
     let mut sections = Vec::new();
     let mut selectable_ranges = Vec::new();
     for turn in turns {
-        for (index, block) in turn.blocks.iter().enumerate() {
+        for block in &turn.blocks {
             let start = lines.len();
             let mut selectable_lines = Vec::new();
-            if index == 0 && !lines.is_empty() {
-                push_transcript_line(
-                    &mut lines,
-                    &mut selectable_lines,
-                    Line::default(),
-                    0..0,
-                    LineJoiner::HardBreak,
-                );
-            }
-            render_turn_block(&mut lines, &mut selectable_lines, block, turn, width, theme);
+            render_turn_block(&mut lines, &mut selectable_lines, block, width, theme);
             sections.push(TranscriptSection {
                 item_id: section_id(&turn.id, &block.item_id),
                 lines: start..lines.len(),
@@ -173,7 +160,6 @@ pub(crate) fn render_committed_block(
         &mut lines,
         &mut selectable_lines,
         &turn.blocks[0],
-        &turn,
         width,
         theme,
     );
@@ -193,24 +179,12 @@ fn render_turn_block(
     lines: &mut Vec<Line<'static>>,
     selectable_lines: &mut Vec<TranscriptSelectableLine>,
     block: &TranscriptBlock,
-    turn: &TranscriptTurn,
     width: u16,
     theme: AstralTheme,
 ) {
     match &block.block {
         PresentationBlock::User { .. } => {
-            if !lines.is_empty() {
-                push_transcript_line(
-                    lines,
-                    selectable_lines,
-                    Line::default(),
-                    0..0,
-                    LineJoiner::HardBreak,
-                );
-            }
-            let timestamp = turn.started_at_ms.and_then(format_timestamp);
-            let content_width = reserved_content_width(width, timestamp.as_deref());
-            let rendered = render_block(&block.block, RenderOptions::compact(content_width));
+            let rendered = render_block(&block.block, RenderOptions::compact(width));
             push_transcript_line(
                 lines,
                 selectable_lines,
@@ -219,13 +193,8 @@ fn render_turn_block(
                 LineJoiner::HardBreak,
             );
             for line in rendered.lines {
-                let columns = selectable_columns(&line, content_width);
-                let line = timestamped_line(
-                    line,
-                    timestamp.as_deref(),
-                    width,
-                    Some(theme.panel_selected),
-                );
+                let columns = selectable_columns(&line, width);
+                let line = band_line(line, width, theme.panel_selected);
                 push_transcript_line(
                     lines,
                     selectable_lines,
@@ -243,15 +212,6 @@ fn render_turn_block(
             );
         }
         PresentationBlock::Thinking { running, .. } => {
-            if !lines.is_empty() {
-                push_transcript_line(
-                    lines,
-                    selectable_lines,
-                    Line::default(),
-                    0..0,
-                    LineJoiner::HardBreak,
-                );
-            }
             let duration_ms = item_duration_ms(block);
             let label = if *running {
                 "Thinking…".to_string()
@@ -285,35 +245,10 @@ fn render_turn_block(
             }
         }
         PresentationBlock::Assistant { text } => {
-            if !lines.is_empty() {
-                push_transcript_line(
-                    lines,
-                    selectable_lines,
-                    Line::default(),
-                    0..0,
-                    LineJoiner::HardBreak,
-                );
-            }
-            let timestamp = block
-                .completed_at_ms
-                .or(turn.completed_at_ms)
-                .and_then(format_timestamp);
-            let content_width = reserved_content_width(width, timestamp.as_deref());
-            let rendered =
-                render_markdown_with_metadata(text, content_width, markdown_style(theme));
-            for (index, rendered_line) in rendered.into_iter().enumerate() {
+            let rendered = render_markdown_with_metadata(text, width, markdown_style(theme));
+            for rendered_line in rendered {
                 let line = rendered_line.line;
-                let columns = selectable_columns(&line, content_width);
-                let line = timestamped_line(
-                    line,
-                    if index == 0 {
-                        timestamp.as_deref()
-                    } else {
-                        None
-                    },
-                    width,
-                    None,
-                );
+                let columns = selectable_columns(&line, width);
                 push_transcript_line(
                     lines,
                     selectable_lines,
@@ -324,15 +259,6 @@ fn render_turn_block(
             }
         }
         _ => {
-            if !lines.is_empty() {
-                push_transcript_line(
-                    lines,
-                    selectable_lines,
-                    Line::default(),
-                    0..0,
-                    LineJoiner::HardBreak,
-                );
-            }
             for line in render_block(&block.block, RenderOptions::compact(width)).lines {
                 let columns = selectable_columns(&line, width);
                 push_transcript_line(
@@ -412,32 +338,6 @@ fn markdown_style(theme: AstralTheme) -> MarkdownStyle {
     }
 }
 
-fn timestamped_line(
-    mut line: Line<'static>,
-    timestamp: Option<&str>,
-    width: u16,
-    background: Option<ratatui::style::Color>,
-) -> Line<'static> {
-    let width = usize::from(width);
-    let timestamp_width = timestamp.map_or(0, |timestamp| Line::from(timestamp).width());
-    let padding = width
-        .saturating_sub(line.width())
-        .saturating_sub(timestamp_width);
-    line.spans.push(styled_padding(padding, background));
-    if let Some(timestamp) = timestamp {
-        let mut span = timestamp.to_string().dim();
-        if let Some(background) = background {
-            span = span.bg(background);
-        }
-        line.spans.push(span);
-    }
-    if let Some(background) = background {
-        band_line(line, width as u16, background)
-    } else {
-        line
-    }
-}
-
 fn band_line(
     mut line: Line<'static>,
     width: u16,
@@ -457,14 +357,6 @@ fn styled_padding(width: usize, background: Option<ratatui::style::Color>) -> Sp
         style = style.bg(background);
     }
     Span::styled(" ".repeat(width), style)
-}
-
-fn reserved_content_width(width: u16, timestamp: Option<&str>) -> u16 {
-    if timestamp.is_some() {
-        width.saturating_sub(TIMESTAMP_WIDTH as u16 + 2).max(1)
-    } else {
-        width.max(1)
-    }
 }
 
 fn item_duration_ms(block: &TranscriptBlock) -> Option<i64> {
@@ -493,13 +385,6 @@ fn format_duration(duration_ms: i64) -> String {
         let remaining = seconds - minutes as f64 * 60.0;
         format!("{minutes}m{remaining:.0}s")
     }
-}
-
-fn format_timestamp(timestamp_ms: i64) -> Option<String> {
-    Local
-        .timestamp_millis_opt(timestamp_ms)
-        .single()
-        .map(|timestamp| timestamp.format("%-I:%M %p").to_string())
 }
 
 #[cfg(test)]

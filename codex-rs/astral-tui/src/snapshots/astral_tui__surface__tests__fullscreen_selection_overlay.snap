@@ -4,10 +4,10 @@ expression: "format!(\"{}\\n\\nselection mask:\\n{}\", buffer_text(&buffer),\nse
 ---
  ⎇ main  /workspace
 
- › inspect this repo                                           12:00 AM
-
+ › inspect this repo
 
  I’m tracing the relevant data flow.
+
 
 
 
@@ -20,7 +20,6 @@ expression: "format!(\"{}\\n\\nselection mask:\\n{}\", buffer_text(&buffer),\nse
  Shift+Tab:mode  │  Ctrl+.:shortcuts
 
 selection mask:
-
 
 
 
