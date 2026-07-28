@@ -169,6 +169,19 @@ impl ConversationState {
             .collect()
     }
 
+    pub(crate) fn presentation_block(
+        &self,
+        turn_id: &str,
+        render_id: &str,
+    ) -> Option<PresentationBlock> {
+        let local_id = render_id.strip_prefix("entry-")?.parse::<u64>().ok()?;
+        let turn = self.turns.get(*self.turn_indices.get(turn_id)?)?;
+        turn.entries
+            .iter()
+            .find(|entry| entry.local_id == local_id)
+            .and_then(project_entry)
+    }
+
     pub fn last_agent_response(&self) -> Option<&str> {
         self.last_agent_response.as_deref()
     }

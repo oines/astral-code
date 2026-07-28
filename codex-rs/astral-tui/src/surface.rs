@@ -1,4 +1,5 @@
 mod appearance;
+mod block_viewer;
 mod mentions;
 mod plan_review;
 mod requests;
@@ -21,6 +22,7 @@ use crate::CommittedBlock;
 use crate::ConversationState;
 use crate::PendingRequests;
 use crate::SessionState;
+use crate::block_viewer::BlockViewerState;
 use crate::composer::ComposerState;
 use crate::mcp_form::McpFormState;
 use crate::mention::MentionController;
@@ -105,6 +107,7 @@ pub struct SurfaceState {
     entry_mouse: EntryMouseState,
     slash: SlashController,
     mentions: MentionController,
+    block_viewer: Option<BlockViewerState>,
     modal: Option<ModalState>,
     thread_picker: Option<PickerState>,
     permission_picker: Option<PermissionPickerState>,
@@ -135,6 +138,7 @@ impl SurfaceState {
             entry_mouse: EntryMouseState::default(),
             slash: SlashController::default(),
             mentions: MentionController::default(),
+            block_viewer: None,
             modal: None,
             thread_picker: None,
             permission_picker: None,
@@ -172,6 +176,7 @@ impl SurfaceState {
             entry_mouse: EntryMouseState::default(),
             slash: SlashController::default(),
             mentions: MentionController::default(),
+            block_viewer: None,
             modal: None,
             thread_picker: None,
             permission_picker: None,
@@ -758,9 +763,15 @@ pub(crate) fn render_surface_with_view(
     let fold_action = if state.entry_display.selected_mode() == Some(DisplayMode::Expanded) {
         "collapse"
     } else {
-        "open"
+        "expand"
     };
-    let scrollback_hints = [("←", "collapse"), ("Enter", fold_action), ("Tab", "prompt")];
+    let group_hints = [("Enter", fold_action), ("Tab", "prompt")];
+    let entry_hints = [("e", fold_action), ("Enter", "open"), ("Tab", "prompt")];
+    let scrollback_hints = if state.entry_display.selected_is_group_header() {
+        &group_hints[..]
+    } else {
+        &entry_hints[..]
+    };
     let mention_hints = [("↑/↓", "navigate"), ("Tab", "select"), ("Esc", "close")];
     let slash_hints = [("↑/↓", "navigate"), ("Tab", "complete"), ("Esc", "close")];
     let plan_hints = [
@@ -772,7 +783,7 @@ pub(crate) fn render_surface_with_view(
     let revision_hints = [("Enter", "request changes"), ("Esc", "back")];
     ShortcutsBar {
         hints: if request_pane.is_some() && !request_focused {
-            &scrollback_hints
+            scrollback_hints
         } else if let Some(pane) = request_pane {
             pane.shortcuts()
         } else if revising_plan {
@@ -780,7 +791,7 @@ pub(crate) fn render_surface_with_view(
         } else if plan_review.is_some() {
             &plan_hints
         } else if state.scrollback_focused() {
-            &scrollback_hints
+            scrollback_hints
         } else if mentions.open {
             &mention_hints
         } else if slash.open {

@@ -28,9 +28,23 @@ pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction
             state.expand_selected_entry();
             InputAction::Redraw
         }
-        (KeyCode::Char('e'), KeyModifiers::NONE) | (KeyCode::Enter, _) => {
+        (KeyCode::Char('e'), KeyModifiers::NONE) => {
             state.toggle_selected_entry();
             InputAction::Redraw
+        }
+        (KeyCode::Enter, KeyModifiers::NONE) => {
+            if state.open_selected_entry() {
+                InputAction::Redraw
+            } else {
+                InputAction::None
+            }
+        }
+        (KeyCode::Char('f'), modifiers) if modifiers.contains(KeyModifiers::CONTROL) => {
+            if state.open_selected_entry() {
+                InputAction::Redraw
+            } else {
+                InputAction::None
+            }
         }
         (KeyCode::PageUp, _) => InputAction::ScrollUp,
         (KeyCode::PageDown, _) => InputAction::ScrollDown,

@@ -429,7 +429,7 @@ fn markdown_style(theme: AstralTheme) -> MarkdownStyle {
     }
 }
 
-fn render_options(width: u16, mode: DisplayMode, theme: AstralTheme) -> RenderOptions {
+pub(crate) fn render_options(width: u16, mode: DisplayMode, theme: AstralTheme) -> RenderOptions {
     RenderOptions::for_mode(width, mode).with_diff_style(DiffStyle {
         path: theme.path,
         gutter: theme.diff_gutter,

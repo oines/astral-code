@@ -26,6 +26,7 @@ use crate::theme_picker::handle_key as handle_theme_picker_key;
 use crate::thread_picker::PickerInput;
 use crate::thread_picker::handle_key as handle_thread_picker_key;
 
+mod block_viewer;
 mod mcp_form;
 mod mention_popup;
 mod plan_review;
@@ -63,6 +64,9 @@ pub enum InputAction {
 pub fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
     if key.kind == KeyEventKind::Release {
         return InputAction::None;
+    }
+    if state.block_viewer().is_some() {
+        return block_viewer::handle_key(state, key);
     }
     if let Some(request) = state.pending_requests().front().cloned() {
         state.sync_request_states();
@@ -131,7 +135,8 @@ pub fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
 }
 
 pub fn handle_paste(state: &mut SurfaceState, text: &str) -> InputAction {
-    if state.permission_picker().is_some()
+    if state.block_viewer().is_some()
+        || state.permission_picker().is_some()
         || state.theme_picker().is_some()
         || state.modal().is_some()
     {
@@ -183,6 +188,9 @@ pub fn handle_paste(state: &mut SurfaceState, text: &str) -> InputAction {
 }
 
 pub(crate) fn handle_mouse(state: &mut SurfaceState, mouse: MouseEvent) -> InputAction {
+    if state.block_viewer().is_some() {
+        return block_viewer::handle_mouse(state, mouse);
+    }
     if let Some(request) = state.pending_requests().front().cloned()
         && is_simple_request(&request)
     {

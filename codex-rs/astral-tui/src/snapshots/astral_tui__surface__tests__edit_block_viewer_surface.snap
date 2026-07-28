@@ -1,0 +1,27 @@
+---
+source: astral-tui/src/surface_tests.rs
+expression: viewer
+---
+
+  ┌─ lib.rs ─────────────────────────────────────────────────────────────[×]─┐
+  │                                                                          │
+  │  ◆ Edit lib.rs                                                           │
+  │                                                                          │
+  │    │ @@ -1,4 +1,6 @@                                                     │
+  │    │  pub fn render() {                                                  │
+  │    │ -    draw_old();                                                    │
+  │    │ +    draw_header();                                                 │
+  │    │ +    draw_body();                                                   │
+  │    │  }                                                                  │
+  │    │ +                                                                   │
+  │    │ +pub fn close() {}                                                  │
+  │                                                                          │
+  │                                                                          │
+  │                                                                          │
+  │                                                                          │
+  │                                                                          │
+  │                                                                          │
+  │                                                                          │
+  │                                                                          │
+  │                     ↑/↓ scroll · Esc/q/Ctrl+F close                      │
+  └──────────────────────────────────────────────────────────────────────────┘

@@ -4,6 +4,7 @@
 //! view at commit `47348d13ec4508dcfe440e34c6d511bb02998fb2`
 //! (Apache-2.0). Runtime state and commands remain native app-server v2.
 
+mod block_viewer;
 mod chrome;
 mod color_support;
 mod entry_chrome;
@@ -21,6 +22,7 @@ mod theme;
 mod transcript;
 mod transcript_layout;
 
+pub(crate) use block_viewer::BlockViewerPane;
 pub(crate) use chrome::PromptChrome;
 pub(crate) use chrome::ShortcutsBar;
 pub(crate) use chrome::StatusBar;
@@ -41,6 +43,7 @@ pub(crate) use modal::InfoModal;
 pub(crate) use modal::ModalHeight;
 pub(crate) use modal::modal_choice_style;
 pub(crate) use modal::render_modal_frame;
+pub(crate) use modal::render_modal_frame_with_geometry;
 pub(crate) use plan_review::PlanReviewMouseAction;
 pub(crate) use plan_review::PlanReviewMouseState;
 pub(crate) use plan_review::PlanReviewPane;

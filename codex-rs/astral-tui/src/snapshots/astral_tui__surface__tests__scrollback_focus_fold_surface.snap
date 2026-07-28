@@ -22,7 +22,7 @@ COLLAPSED
  ╭────────────────────────────────────────────────────────────────────────────╮
  │ ❯                                                                          │
  ╰────────────────────────────────────────────── claude-sonnet-4 · workspace ─╯
- ←:collapse  │  Enter:open  │  Tab:prompt
+ e:expand  │  Enter:open  │  Tab:prompt
 
 EXPANDED
  ⎇ main  /workspace
@@ -44,4 +44,4 @@ EXPANDED
  ╭────────────────────────────────────────────────────────────────────────────╮
  │ ❯                                                                          │
  ╰────────────────────────────────────────────── claude-sonnet-4 · workspace ─╯
- ←:collapse  │  Enter:collapse  │  Tab:prompt
+ e:collapse  │  Enter:open  │  Tab:prompt

@@ -15,6 +15,7 @@ use crate::timeline_rail::rail_width;
 use crate::timeline_rail::render_rail;
 use crate::view::AstralTheme;
 use crate::view::AstralThemeId;
+use crate::view::BlockViewerPane;
 use crate::view::ColorLevel;
 use crate::view::InfoModal;
 
@@ -111,12 +112,25 @@ pub(super) fn render_timeline(buffer: &mut Buffer, theme: AstralTheme, frame: Ti
 }
 
 pub(super) fn render_overlay(
-    state: &SurfaceState,
+    state: &mut SurfaceState,
     area: Rect,
     buffer: &mut Buffer,
     theme: AstralTheme,
 ) -> bool {
-    if let Some(picker) = &state.theme_picker {
+    if state.block_viewer().is_some() {
+        let Some(block) = state.current_block_viewer_block() else {
+            state.close_block_viewer();
+            return false;
+        };
+        let Some(viewer) = state.block_viewer_mut() else {
+            return false;
+        };
+        BlockViewerPane {
+            state: viewer,
+            block: &block,
+        }
+        .render(area, buffer, theme);
+    } else if let Some(picker) = &state.theme_picker {
         render_theme_picker(picker, area, buffer, theme);
     } else if let Some(picker) = &state.permission_picker {
         render_permission_picker(picker, area, buffer, theme);

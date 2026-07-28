@@ -58,4 +58,4 @@ EXPANDED
   │ ❯                                                                                │
   ╰──────────────────────────────────────────────────── claude-sonnet-4 · workspace ─╯
 
-  ←:collapse  │  Enter:open  │  Tab:prompt
+  e:expand  │  Enter:open  │  Tab:prompt

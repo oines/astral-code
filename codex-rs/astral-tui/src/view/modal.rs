@@ -18,9 +18,18 @@ use crate::modal::ModalState;
 
 use super::AstralTheme;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ModalHeight {
     Adaptive,
     MinimumContent(u16),
+    FullViewport,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ModalFrame {
+    pub(crate) popup: Rect,
+    pub(crate) content: Rect,
+    pub(crate) close_button: Rect,
 }
 
 pub(crate) struct InfoModal<'a> {
@@ -89,6 +98,18 @@ pub(crate) fn render_modal_frame(
     footer: &str,
     height: ModalHeight,
 ) -> Option<Rect> {
+    render_modal_frame_with_geometry(area, buffer, theme, title, footer, height)
+        .map(|frame| frame.content)
+}
+
+pub(crate) fn render_modal_frame_with_geometry(
+    area: Rect,
+    buffer: &mut Buffer,
+    theme: AstralTheme,
+    title: &str,
+    footer: &str,
+    height: ModalHeight,
+) -> Option<ModalFrame> {
     let popup = popup_area(area, height)?;
     Clear.render(popup, buffer);
     buffer.set_style(popup, Style::default().bg(theme.bg_base));
@@ -106,9 +127,10 @@ pub(crate) fn render_modal_frame(
     let inner = block.inner(popup);
     block.render(popup, buffer);
 
+    let close_button = Rect::new(popup.right().saturating_sub(5), popup.y, 3, 1);
     buffer.set_string(
-        popup.right().saturating_sub(5),
-        popup.y,
+        close_button.x,
+        close_button.y,
         "[×]",
         Style::default()
             .fg(theme.text_secondary)
@@ -124,12 +146,16 @@ pub(crate) fn render_modal_frame(
             Style::default().fg(theme.gray).bg(theme.bg_base),
         );
     }
-    Some(Rect::new(
-        inner.x + 2,
-        inner.y + 1,
-        inner.width.saturating_sub(4),
-        inner.height.saturating_sub(3),
-    ))
+    Some(ModalFrame {
+        popup,
+        content: Rect::new(
+            inner.x + 2,
+            inner.y + 1,
+            inner.width.saturating_sub(4),
+            inner.height.saturating_sub(3),
+        ),
+        close_button,
+    })
 }
 
 /// Shared selected-row treatment for list choices inside Astral modal frames.
@@ -153,10 +179,25 @@ fn popup_area(area: Rect, height: ModalHeight) -> Option<Rect> {
     if area.width < 20 || area.height < 8 {
         return None;
     }
+    if height == ModalHeight::FullViewport {
+        let width = (area.width.saturating_mul(95) / 100)
+            .max(60.min(area.width))
+            .min(area.width);
+        let height = (area.height.saturating_mul(92) / 100)
+            .max(12.min(area.height))
+            .min(area.height);
+        return Some(Rect::new(
+            area.x + (area.width - width) / 2,
+            area.y + (area.height - height) / 2,
+            width,
+            height,
+        ));
+    }
     let width = (area.width.saturating_mul(3) / 5).clamp(44.min(area.width), 120.min(area.width));
     let minimum = match height {
         ModalHeight::Adaptive => 8,
         ModalHeight::MinimumContent(content_height) => content_height.saturating_add(5),
+        ModalHeight::FullViewport => unreachable!("handled above"),
     };
     let height = area.height.saturating_sub(8).max(minimum).min(area.height);
     Some(Rect::new(

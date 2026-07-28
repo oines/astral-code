@@ -1376,6 +1376,50 @@ fn verb_group_double_click_reveals_members_below_the_header_snapshot() {
     let collapsed = buffer_text(&buffer);
     assert!(collapsed.contains("Read 2 files, Searched 1 pattern"));
     assert!(!collapsed.contains("Read a.rs"));
+    assert!(state.focus_scrollback());
+    assert_eq!(
+        handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)
+        ),
+        InputAction::Redraw
+    );
+    assert!(
+        state.block_viewer().is_none(),
+        "Enter on a Grok-style group header toggles the group"
+    );
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        area,
+        &mut buffer,
+    );
+    let expanded_before_viewer = buffer_text(&buffer);
+    assert!(expanded_before_viewer.contains("Read a.rs"));
+    assert_eq!(
+        handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)
+        ),
+        InputAction::Redraw
+    );
+    assert!(
+        state.block_viewer().is_some(),
+        "Enter on an expanded verb slot opens its anchor entry"
+    );
+    assert_eq!(
+        handle_key(&mut state, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        InputAction::Redraw
+    );
+    assert!(state.block_viewer().is_none());
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        area,
+        &mut buffer,
+    );
     let (column, row) = find_text(&buffer, "Read 2 files")
         .unwrap_or_else(|| panic!("group header is visible:\n{collapsed}"));
 
@@ -1391,8 +1435,28 @@ fn verb_group_double_click_reveals_members_below_the_header_snapshot() {
         area,
         &mut buffer,
     );
+    let collapsed_again = buffer_text(&buffer);
+    assert!(collapsed_again.contains("Read 2 files, Searched 1 pattern"));
+    assert!(!collapsed_again.contains("Read a.rs"));
+    let (column, row) = find_text(&buffer, "Read 2 files")
+        .unwrap_or_else(|| panic!("collapsed group header is visible:\n{collapsed_again}"));
+    for _ in 0..2 {
+        state.handle_scrollback_mouse(mouse(MouseEventKind::Down(MouseButton::Left), column, row));
+        state.handle_scrollback_mouse(mouse(MouseEventKind::Up(MouseButton::Left), column, row));
+    }
+
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        area,
+        &mut buffer,
+    );
     let expanded = buffer_text(&buffer);
-    assert!(expanded.contains("◈ Read 2 files, Searched 1 pattern"));
+    assert!(
+        expanded.contains("Read 2 files, Searched 1 pattern"),
+        "{expanded}"
+    );
     assert!(expanded.contains("Read a.rs"));
     assert!(expanded.contains("Search src"));
     assert!(expanded.contains("Read b.rs"));
@@ -1450,6 +1514,71 @@ fn edit_diff_expands_by_default_and_double_click_collapses_snapshot() {
         "edit_diff_mouse_fold_surface",
         format!("EXPANDED\n{expanded}\n\nCOLLAPSED\n{collapsed}")
     );
+}
+
+#[test]
+fn enter_opens_the_selected_edit_in_a_scrollable_viewer_snapshot() {
+    let mut session = session_state();
+    session.thread.turns[0].items.push(ThreadItem::FileChange {
+        id: "edit-viewer".to_string(),
+        changes: vec![FileUpdateChange {
+            path: "src/lib.rs".to_string(),
+            kind: PatchChangeKind::Update { move_path: None },
+            diff: [
+                "@@ -1,4 +1,6 @@",
+                " pub fn render() {",
+                "-    draw_old();",
+                "+    draw_header();",
+                "+    draw_body();",
+                " }",
+                "+",
+                "+pub fn close() {}",
+            ]
+            .join("\n"),
+        }],
+        status: PatchApplyStatus::Completed,
+    });
+    let mut state = SurfaceState::from_session(&session);
+    let area = Rect::new(0, 0, 80, 24);
+    let mut buffer = Buffer::empty(area);
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        area,
+        &mut buffer,
+    );
+    assert!(state.focus_scrollback());
+
+    assert_eq!(
+        handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)
+        ),
+        InputAction::Redraw
+    );
+    assert!(state.block_viewer().is_some());
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        area,
+        &mut buffer,
+    );
+    let viewer = buffer_text(&buffer);
+    assert!(viewer.contains("Edit lib.rs"));
+    assert!(viewer.contains("draw_header"));
+    assert!(viewer.contains("Esc/q/Ctrl+F close"));
+    insta::assert_snapshot!("edit_block_viewer_surface", viewer);
+
+    assert_eq!(
+        handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL),
+        ),
+        InputAction::Redraw
+    );
+    assert!(state.block_viewer().is_none());
 }
 
 #[test]
