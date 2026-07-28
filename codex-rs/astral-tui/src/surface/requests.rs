@@ -4,11 +4,14 @@ use codex_app_server_protocol::RequestId;
 use super::SurfaceState;
 use crate::PendingRequest;
 use crate::mcp_form::McpFormState;
+use crate::request_choice::RequestChoiceState;
 use crate::request_user_input::RequestUserInputState;
 
 impl SurfaceState {
     pub(crate) fn sync_request_states(&mut self) {
-        match self.pending_requests.front().cloned() {
+        let request = self.pending_requests.front().cloned();
+        self.request_choice.sync(request.as_ref());
+        match request {
             Some(PendingRequest::UserInput { params, .. }) => {
                 self.request_user_input.sync(&params);
             }
@@ -22,6 +25,14 @@ impl SurfaceState {
             }
             _ => {}
         }
+    }
+
+    pub(crate) fn request_choice(&self) -> &RequestChoiceState {
+        &self.request_choice
+    }
+
+    pub(crate) fn request_choice_mut(&mut self) -> &mut RequestChoiceState {
+        &mut self.request_choice
     }
 
     pub(crate) fn request_user_input(&self) -> &RequestUserInputState {
@@ -46,6 +57,17 @@ impl SurfaceState {
     ) -> Option<PendingRequest> {
         let request = self.pending_requests.remove_resolved(request_id)?;
         match &request {
+            PendingRequest::CommandExecution { .. }
+            | PendingRequest::FileChange { .. }
+            | PendingRequest::Permissions { .. }
+            | PendingRequest::McpElicitation {
+                params:
+                    codex_app_server_protocol::McpServerElicitationRequestParams {
+                        request: McpServerElicitationRequest::Url { .. },
+                        ..
+                    },
+                ..
+            } => self.request_choice.reset(),
             PendingRequest::UserInput { .. } => self.request_user_input.reset(),
             PendingRequest::McpElicitation { params, .. }
                 if matches!(params.request, McpServerElicitationRequest::Form { .. }) =>

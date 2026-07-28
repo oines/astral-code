@@ -32,6 +32,7 @@ use crate::permission_picker::display_permission_mode;
 use crate::plan_review::CompletedPlan;
 use crate::plan_review::PlanReviewFocus;
 use crate::plan_review::PlanReviewState;
+use crate::request_choice::RequestChoiceState;
 use crate::request_pane::RequestPane;
 use crate::request_user_input::RequestUserInputState;
 use crate::slash::SlashCommandId;
@@ -91,6 +92,7 @@ pub(crate) enum TranscriptView {
 pub struct SurfaceState {
     conversation: ConversationState,
     pending_requests: PendingRequests,
+    request_choice: RequestChoiceState,
     request_user_input: RequestUserInputState,
     mcp_form: McpFormState,
     composer: ComposerState,
@@ -120,6 +122,7 @@ impl SurfaceState {
         Self {
             conversation: ConversationState::new(thread_id),
             pending_requests: PendingRequests::default(),
+            request_choice: RequestChoiceState::default(),
             request_user_input: RequestUserInputState::default(),
             mcp_form: McpFormState::default(),
             composer: ComposerState::default(),
@@ -152,6 +155,7 @@ impl SurfaceState {
                 &session.thread.turns,
             ),
             pending_requests: PendingRequests::default(),
+            request_choice: RequestChoiceState::default(),
             request_user_input: RequestUserInputState::default(),
             mcp_form: McpFormState::default(),
             composer: ComposerState::default(),

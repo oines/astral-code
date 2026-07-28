@@ -20,6 +20,7 @@ mod model_command;
 mod permission_picker;
 mod plan_review;
 mod request;
+mod request_choice;
 mod request_pane;
 mod request_user_input;
 mod runtime;

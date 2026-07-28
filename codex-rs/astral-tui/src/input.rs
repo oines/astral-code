@@ -1,11 +1,4 @@
-use codex_app_server_protocol::CommandExecutionApprovalDecision;
-use codex_app_server_protocol::FileChangeApprovalDecision;
-use codex_app_server_protocol::GrantedPermissionProfile;
-use codex_app_server_protocol::McpServerElicitationAction;
 use codex_app_server_protocol::McpServerElicitationRequest;
-use codex_app_server_protocol::McpServerElicitationRequestResponse;
-use codex_app_server_protocol::PermissionGrantScope;
-use codex_app_server_protocol::PermissionsRequestApprovalResponse;
 use codex_app_server_protocol::Thread;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
@@ -25,6 +18,10 @@ use crate::mcp_form::McpFormEvent;
 use crate::permission_picker::PermissionPickerInput;
 use crate::permission_picker::PermissionSelection;
 use crate::permission_picker::handle_key as handle_permission_picker_key;
+use crate::request_choice::RequestChoiceEvent;
+use crate::request_choice::cancel_response;
+use crate::request_choice::is_simple_request;
+use crate::request_choice::response_for;
 use crate::request_user_input::RequestUserInputEvent;
 use crate::theme_picker::ThemePickerInput;
 use crate::theme_picker::handle_key as handle_theme_picker_key;
@@ -68,6 +65,10 @@ pub fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
         return InputAction::None;
     }
     if let Some(request) = state.pending_requests().front().cloned() {
+        state.sync_request_states();
+        if is_simple_request(&request) && state.scrollback_focused() {
+            return scrollback::handle_key(state, key);
+        }
         return handle_request_key(state, request, key);
     }
     if state.thread_picker().is_some() {
@@ -182,6 +183,20 @@ pub fn handle_paste(state: &mut SurfaceState, text: &str) -> InputAction {
 }
 
 pub(crate) fn handle_mouse(state: &mut SurfaceState, mouse: MouseEvent) -> InputAction {
+    if let Some(request) = state.pending_requests().front().cloned()
+        && is_simple_request(&request)
+    {
+        state.sync_request_states();
+        let event = state.request_choice_mut().handle_mouse(mouse);
+        if matches!(
+            mouse.kind,
+            crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left)
+        ) && event != RequestChoiceEvent::None
+        {
+            state.focus_prompt();
+        }
+        return handle_request_choice_event(state, request, event);
+    }
     if state.plan_review().is_some() {
         return plan_review::handle_mouse(state, mouse);
     }
@@ -357,9 +372,12 @@ fn handle_request_key(
     key: KeyEvent,
 ) -> InputAction {
     let response = match request.clone() {
-        PendingRequest::CommandExecution { params, .. } => command_response(&params, key.code),
-        PendingRequest::FileChange { .. } => file_change_response(key.code),
-        PendingRequest::Permissions { params, .. } => permissions_response(&params, key.code),
+        PendingRequest::CommandExecution { .. }
+        | PendingRequest::FileChange { .. }
+        | PendingRequest::Permissions { .. } => {
+            let event = state.request_choice_mut().handle_key(key);
+            return handle_request_choice_event(state, request, event);
+        }
         PendingRequest::UserInput { params, .. } => {
             match state.request_user_input_mut().handle_key(&params, key) {
                 RequestUserInputEvent::None => return InputAction::None,
@@ -383,7 +401,10 @@ fn handle_request_key(
                     Some(PendingRequestResponse::McpElicitation(response))
                 }
             },
-            McpServerElicitationRequest::Url { .. } => mcp_url_response(key.code),
+            McpServerElicitationRequest::Url { .. } => {
+                let event = state.request_choice_mut().handle_key(key);
+                return handle_request_choice_event(state, request, event);
+            }
         },
         PendingRequest::DynamicTool { .. } | PendingRequest::Attestation { .. } => None,
         PendingRequest::LegacyApplyPatch { .. } | PendingRequest::LegacyExecCommand { .. } => {
@@ -394,10 +415,42 @@ fn handle_request_key(
         }
     };
 
-    let Some(response) = response else {
-        return InputAction::None;
-    };
+    response.map_or(InputAction::None, |response| {
+        resolve_request(state, &request, response)
+    })
+}
 
+fn handle_request_choice_event(
+    state: &mut SurfaceState,
+    request: PendingRequest,
+    event: RequestChoiceEvent,
+) -> InputAction {
+    match event {
+        RequestChoiceEvent::None => InputAction::None,
+        RequestChoiceEvent::Redraw => InputAction::Redraw,
+        RequestChoiceEvent::FocusScrollback => {
+            if state.focus_scrollback() {
+                InputAction::Redraw
+            } else {
+                InputAction::None
+            }
+        }
+        RequestChoiceEvent::Activate(choice) => response_for(&request, choice)
+            .map_or(InputAction::None, |response| {
+                resolve_request(state, &request, response)
+            }),
+        RequestChoiceEvent::Cancel => cancel_response(&request)
+            .map_or(InputAction::None, |response| {
+                resolve_request(state, &request, response)
+            }),
+    }
+}
+
+fn resolve_request(
+    state: &SurfaceState,
+    request: &PendingRequest,
+    response: PendingRequestResponse,
+) -> InputAction {
     let request_id = request.request_id().clone();
     match state
         .pending_requests()
@@ -406,91 +459,6 @@ fn handle_request_key(
         Ok(resolution) => InputAction::Resolve(resolution),
         Err(error) => InputAction::Notice(error.to_string()),
     }
-}
-
-fn command_response(
-    params: &codex_app_server_protocol::CommandExecutionRequestApprovalParams,
-    key: KeyCode,
-) -> Option<PendingRequestResponse> {
-    let decision = match key {
-        KeyCode::Char('y') => CommandExecutionApprovalDecision::Accept,
-        KeyCode::Char('a') => CommandExecutionApprovalDecision::AcceptForSession,
-        KeyCode::Char('e') => CommandExecutionApprovalDecision::AcceptWithExecpolicyAmendment {
-            execpolicy_amendment: params.proposed_execpolicy_amendment.clone()?,
-        },
-        KeyCode::Char('p') => CommandExecutionApprovalDecision::ApplyNetworkPolicyAmendment {
-            network_policy_amendment: params
-                .proposed_network_policy_amendments
-                .as_ref()?
-                .first()?
-                .clone(),
-        },
-        KeyCode::Char('n') => CommandExecutionApprovalDecision::Decline,
-        KeyCode::Esc => CommandExecutionApprovalDecision::Cancel,
-        _ => return None,
-    };
-    if params
-        .available_decisions
-        .as_ref()
-        .is_some_and(|available| !available.contains(&decision))
-    {
-        return None;
-    }
-    Some(PendingRequestResponse::CommandExecution(decision))
-}
-
-fn file_change_response(key: KeyCode) -> Option<PendingRequestResponse> {
-    let decision = match key {
-        KeyCode::Char('y') => FileChangeApprovalDecision::Accept,
-        KeyCode::Char('a') => FileChangeApprovalDecision::AcceptForSession,
-        KeyCode::Char('n') => FileChangeApprovalDecision::Decline,
-        KeyCode::Esc => FileChangeApprovalDecision::Cancel,
-        _ => return None,
-    };
-    Some(PendingRequestResponse::FileChange(decision))
-}
-
-fn permissions_response(
-    params: &codex_app_server_protocol::PermissionsRequestApprovalParams,
-    key: KeyCode,
-) -> Option<PendingRequestResponse> {
-    let scope = match key {
-        KeyCode::Char('y') => PermissionGrantScope::Turn,
-        KeyCode::Char('a') => PermissionGrantScope::Session,
-        KeyCode::Char('n') | KeyCode::Esc => {
-            return Some(PendingRequestResponse::Reject {
-                code: -32000,
-                message: "permission request declined".to_string(),
-            });
-        }
-        _ => return None,
-    };
-    Some(PendingRequestResponse::Permissions(
-        PermissionsRequestApprovalResponse {
-            permissions: GrantedPermissionProfile {
-                network: params.permissions.network.clone(),
-                file_system: params.permissions.file_system.clone(),
-            },
-            scope,
-            strict_auto_review: None,
-        },
-    ))
-}
-
-fn mcp_url_response(key: KeyCode) -> Option<PendingRequestResponse> {
-    let (action, content) = match key {
-        KeyCode::Char('n') => (McpServerElicitationAction::Decline, None),
-        KeyCode::Esc => (McpServerElicitationAction::Cancel, None),
-        KeyCode::Char('y') => (McpServerElicitationAction::Accept, None),
-        _ => return None,
-    };
-    Some(PendingRequestResponse::McpElicitation(
-        McpServerElicitationRequestResponse {
-            action,
-            content,
-            meta: None,
-        },
-    ))
 }
 
 #[cfg(test)]
