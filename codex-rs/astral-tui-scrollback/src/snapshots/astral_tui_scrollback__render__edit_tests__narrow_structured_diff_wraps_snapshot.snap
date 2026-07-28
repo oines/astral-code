@@ -1,0 +1,11 @@
+---
+source: astral-tui-scrollback/src/render_edit_tests.rs
+expression: "rendered(&block, 24, DisplayMode::Expanded)"
+---
+◆ Edit message.rs
+
+  98  let message = "旧
+      的长消息";
+  98  let message = "新
+      的长消息会正确折行
+      ";

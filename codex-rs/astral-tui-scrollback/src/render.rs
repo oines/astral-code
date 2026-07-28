@@ -366,3 +366,7 @@ fn status_style(status: ToolStatus) -> ratatui::style::Style {
 #[cfg(test)]
 #[path = "render_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "render_edit_tests.rs"]
+mod edit_tests;

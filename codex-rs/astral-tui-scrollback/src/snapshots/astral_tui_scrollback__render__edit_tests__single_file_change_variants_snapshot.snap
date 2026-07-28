@@ -1,0 +1,32 @@
+---
+source: astral-tui-scrollback/src/render_edit_tests.rs
+expression: snapshot
+---
+CREATE
+◆ Creating new.rs
+
+  1  fn main() {
+  2      println!("new");
+  3  }
+
+EDIT
+◆ Edit lib.rs
+
+  10  pub fn label() {
+  11      "old"
+  11      "new"
+  12  }
+  … 27 unchanged lines
+  40  fn tail() {
+  41      finish();
+  42  }
+
+DELETE
+◆ Delete obsolete.md
+
+  1  # Old
+  2
+  3  Remove this file.
+
+MOVE
+◆ Move old.rs → new.rs
