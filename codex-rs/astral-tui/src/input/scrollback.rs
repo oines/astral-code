@@ -86,6 +86,27 @@ pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction
             state.toggle_all_thinking();
             InputAction::Redraw
         }
+        (KeyCode::Char('r'), KeyModifiers::NONE) => {
+            if state.toggle_selected_raw() {
+                InputAction::Redraw
+            } else {
+                InputAction::None
+            }
+        }
+        (KeyCode::Char('y'), KeyModifiers::NONE) => {
+            state
+                .selected_copy_text()
+                .map_or(InputAction::None, |text| InputAction::CopyText {
+                    text,
+                    notice: "Copied block content".to_string(),
+                })
+        }
+        (KeyCode::Char('Y'), KeyModifiers::NONE | KeyModifiers::SHIFT) => state
+            .selected_copy_meta()
+            .map_or(InputAction::None, |text| InputAction::CopyText {
+                text,
+                notice: "Copied block metadata".to_string(),
+            }),
         (KeyCode::Enter, KeyModifiers::NONE) => {
             if state.open_selected_entry() {
                 InputAction::Redraw

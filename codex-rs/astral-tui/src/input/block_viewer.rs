@@ -15,6 +15,32 @@ pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction
         state.close_block_viewer();
         return InputAction::Redraw;
     }
+    match (key.code, key.modifiers) {
+        (KeyCode::Char('r'), KeyModifiers::NONE) => {
+            return if state.toggle_block_viewer_raw() {
+                InputAction::Redraw
+            } else {
+                InputAction::None
+            };
+        }
+        (KeyCode::Char('y'), KeyModifiers::NONE) => {
+            return state
+                .block_viewer_copy_text()
+                .map_or(InputAction::None, |text| InputAction::CopyText {
+                    text,
+                    notice: "Copied block content".to_string(),
+                });
+        }
+        (KeyCode::Char('Y'), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
+            return state
+                .block_viewer_copy_meta()
+                .map_or(InputAction::None, |text| InputAction::CopyText {
+                    text,
+                    notice: "Copied block metadata".to_string(),
+                });
+        }
+        _ => {}
+    }
     let Some(viewer) = state.block_viewer_mut() else {
         return InputAction::None;
     };

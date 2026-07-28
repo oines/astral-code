@@ -122,12 +122,14 @@ pub(super) fn render_overlay(
             state.close_block_viewer();
             return false;
         };
+        let text_mode = state.block_viewer_text_mode();
         let Some(viewer) = state.block_viewer_mut() else {
             return false;
         };
         BlockViewerPane {
             state: viewer,
             block: &block,
+            text_mode,
         }
         .render(area, buffer, theme);
     } else if let Some(picker) = &mut state.theme_picker {

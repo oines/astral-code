@@ -2,6 +2,7 @@ use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::text::Text;
+use std::path::Path;
 use textwrap::Options;
 
 use super::RenderOptions;
@@ -17,7 +18,7 @@ pub(super) fn render_inspection(tool: &ToolPresentation, options: RenderOptions)
     let mut lines = vec![tool_header(
         tool,
         inspection_label(tool.kind),
-        &tool.title,
+        &inspection_title(tool),
         collapsed_summary(tool, options.mode),
     )];
     if options.mode == DisplayMode::Collapsed {
@@ -45,6 +46,17 @@ pub(super) fn render_inspection(tool: &ToolPresentation, options: RenderOptions)
         });
     }
     Text::from(lines)
+}
+
+fn inspection_title(tool: &ToolPresentation) -> String {
+    if tool.kind != ToolKind::Read {
+        return tool.title.clone();
+    }
+    Path::new(&tool.title)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .map_or_else(|| tool.title.clone(), str::to_string)
 }
 
 fn inspection_label(kind: ToolKind) -> &'static str {

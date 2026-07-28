@@ -280,18 +280,17 @@ impl ShortcutsBar<'_> {
         let separator_style = label_style.add_modifier(Modifier::DIM);
         let mut x = area.x;
         for (index, (key, label)) in self.hints.iter().enumerate() {
-            if index > 0 {
-                let separator = Span::styled("  │  ", separator_style);
-                if x + 5 >= area.right() {
-                    break;
-                }
-                buffer.set_span(x, area.y, &separator, 5);
-                x += 5;
-            }
+            let separator_width = if index > 0 { 5 } else { 0 };
             let key_width = u16::try_from(Line::from(*key).width()).unwrap_or(u16::MAX);
             let label_width = u16::try_from(Line::from(*label).width()).unwrap_or(u16::MAX);
-            if x + key_width + label_width + 1 >= area.right() {
+            let hint_width = key_width.saturating_add(label_width).saturating_add(1);
+            if x.saturating_add(separator_width).saturating_add(hint_width) >= area.right() {
                 break;
+            }
+            if separator_width > 0 {
+                let separator = Span::styled("  │  ", separator_style);
+                buffer.set_span(x, area.y, &separator, separator_width);
+                x += separator_width;
             }
             buffer.set_string(x, area.y, *key, key_style);
             x += key_width;

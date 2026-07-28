@@ -2,15 +2,13 @@
 // presentation at commit 47348d13ec4508dcfe440e34c6d511bb02998fb2
 // (Apache-2.0). Modified for Astral app-server turn and item metadata.
 
+use astral_tui_scrollback::BlockTextMode;
 use astral_tui_scrollback::DiffStyle;
 use astral_tui_scrollback::DisplayMode;
 use astral_tui_scrollback::LineJoiner;
-use astral_tui_scrollback::MarkdownStyle;
 use astral_tui_scrollback::PresentationBlock;
 use astral_tui_scrollback::RenderOptions;
 use astral_tui_scrollback::render_block;
-use astral_tui_scrollback::render_markdown_with_metadata;
-use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
@@ -26,6 +24,7 @@ use super::EntryDisplayState;
 use super::EntryGroupSpan;
 use super::entry_group::scan_turn;
 use super::entry_state::entry_id;
+use super::markdown_content::render_markdown_content;
 use super::transcript_layout::EntrySpacing;
 pub(crate) use super::transcript_layout::TranscriptAccent;
 pub(crate) use super::transcript_layout::TranscriptAnchor;
@@ -81,9 +80,24 @@ pub(crate) fn render_transcript(
             let start = lines.len();
             let mut selectable_lines = Vec::new();
             let item_id = entry_id(&turn.id, &block.item_id);
-            render_turn_block(&mut lines, &mut selectable_lines, block, width, theme, mode);
+            let text_mode = if display.is_raw(&turn.id, &block.item_id) {
+                BlockTextMode::Raw
+            } else {
+                BlockTextMode::Rendered
+            };
+            render_turn_block(
+                &mut lines,
+                &mut selectable_lines,
+                block,
+                width,
+                theme,
+                mode,
+                text_mode,
+            );
             if display.selected_id() == Some(item_id.as_str()) {
-                highlight_selected_header(&mut lines, start, width, theme, mode);
+                let indicator =
+                    (block.block.is_foldable() && mode == DisplayMode::Collapsed).then_some("›");
+                highlight_selected_entry(&mut lines, start, width, theme, indicator);
             }
             sections.push(TranscriptSection {
                 item_id,
@@ -174,7 +188,12 @@ fn render_group_section(
         } else {
             DisplayMode::Collapsed
         };
-        highlight_selected_header(lines, start, width, theme, mode);
+        let indicator = if mode == DisplayMode::Collapsed {
+            "›"
+        } else {
+            "⌄"
+        };
+        highlight_selected_entry(lines, start, width, theme, Some(indicator));
     }
     sections.push(TranscriptSection {
         item_id: group.id.clone(),
@@ -224,6 +243,7 @@ pub(crate) fn render_committed_block(
         width,
         theme,
         mode,
+        BlockTextMode::Rendered,
     );
     if committed.ends_turn
         && let Some(duration_ms) = turn_duration_ms(&turn)
@@ -246,6 +266,7 @@ fn render_turn_block(
     width: u16,
     theme: AstralTheme,
     mode: DisplayMode,
+    text_mode: BlockTextMode,
 ) {
     match &block.block {
         PresentationBlock::User { .. } => {
@@ -276,7 +297,7 @@ fn render_turn_block(
                 LineJoiner::HardBreak,
             );
         }
-        PresentationBlock::Thinking { running, .. } => {
+        PresentationBlock::Thinking { text, running } => {
             let duration_ms = item_duration_ms(block);
             let label = if *running {
                 "Thinking…".to_string()
@@ -302,22 +323,21 @@ fn render_turn_block(
                 LineJoiner::HardBreak,
             );
             if mode != DisplayMode::Collapsed {
-                let rendered = render_block(&block.block, render_options(width, mode, theme));
-                for line in rendered.lines.into_iter().skip(1) {
+                for rendered_line in render_markdown_content(text, width, theme, text_mode, "  ") {
+                    let line = rendered_line.line;
                     let columns = selectable_columns(&line, width);
                     push_transcript_line(
                         lines,
                         selectable_lines,
                         line,
                         columns,
-                        LineJoiner::HardBreak,
+                        rendered_line.joiner_to_previous,
                     );
                 }
             }
         }
         PresentationBlock::Assistant { text } => {
-            let rendered = render_markdown_with_metadata(text, width, markdown_style(theme));
-            for rendered_line in rendered {
+            for rendered_line in render_markdown_content(text, width, theme, text_mode, "") {
                 let line = rendered_line.line;
                 let columns = selectable_columns(&line, width);
                 push_transcript_line(
@@ -344,25 +364,20 @@ fn render_turn_block(
     }
 }
 
-fn highlight_selected_header(
+fn highlight_selected_entry(
     lines: &mut [Line<'static>],
     start: usize,
     width: u16,
     theme: AstralTheme,
-    mode: DisplayMode,
+    indicator: Option<&str>,
 ) {
     let Some(line) = lines.get_mut(start) else {
         return;
     };
-    if let Some(marker) = line.spans.first_mut() {
+    if let (Some(indicator), Some(marker)) = (indicator, line.spans.first_mut()) {
         let content = marker.content.to_string();
         let mut chars = content.chars();
         if chars.next().is_some() {
-            let indicator = if mode == DisplayMode::Collapsed {
-                "›"
-            } else {
-                "⌄"
-            };
             marker.content = format!("{indicator}{}", chars.as_str()).into();
         }
     }
@@ -390,43 +405,6 @@ fn push_transcript_line(
         joiner_to_previous,
     });
     lines.push(line);
-}
-
-fn markdown_style(theme: AstralTheme) -> MarkdownStyle {
-    let primary = Style::default().fg(theme.text_primary);
-    let secondary = Style::default().fg(theme.text_secondary);
-    let gray = Style::default().fg(theme.gray);
-    MarkdownStyle {
-        text: primary,
-        headings: [
-            primary.add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
-            primary.add_modifier(Modifier::BOLD),
-            primary.add_modifier(Modifier::BOLD | Modifier::ITALIC),
-            secondary.add_modifier(Modifier::BOLD),
-            secondary.add_modifier(Modifier::ITALIC),
-            secondary.add_modifier(Modifier::ITALIC),
-        ],
-        strong: primary.add_modifier(Modifier::BOLD),
-        emphasis: primary.add_modifier(Modifier::ITALIC),
-        strikethrough: secondary.add_modifier(Modifier::CROSSED_OUT),
-        inline_code: Style::default()
-            .fg(theme.accent_running)
-            .add_modifier(Modifier::BOLD),
-        blockquote: gray,
-        list_marker: gray,
-        task_checked: Style::default().fg(theme.accent_running),
-        task_unchecked: gray,
-        rule: Style::default().fg(theme.gray_dim),
-        link_text: Style::default()
-            .fg(theme.accent_running)
-            .add_modifier(Modifier::UNDERLINED),
-        link_url: gray,
-        code: secondary,
-        code_background: Style::default().bg(theme.panel_background),
-        syntax_theme: theme.syntax_theme,
-        table_border: Style::default().fg(theme.gray_dim),
-        table_header: primary.add_modifier(Modifier::BOLD),
-    }
 }
 
 pub(crate) fn render_options(width: u16, mode: DisplayMode, theme: AstralTheme) -> RenderOptions {

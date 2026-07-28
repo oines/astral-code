@@ -22,7 +22,7 @@ COLLAPSED
  ╭────────────────────────────────────────────────────────────────────────────╮
  │ ❯                                                                          │
  ╰────────────────────────────────────────────── claude-sonnet-4 · workspace ─╯
- e:expand  │  Enter:open  │  Ctrl+e:collapse thinking  │  Tab:prompt
+ e:expand  │  Enter:open  │  y:copy  │  Y:copy cmd
 
 EXPANDED
  ⎇ main  /workspace
@@ -32,7 +32,7 @@ EXPANDED
 
  I’m tracing the relevant data flow.
 
-┃⌄ Run cargo test -p astral-tui  2.4s
+┃◆ Run cargo test -p astral-tui  2.4s
 ┃  │ 150 passed
 ┃  │ 0 failed
 
@@ -44,4 +44,4 @@ EXPANDED
  ╭────────────────────────────────────────────────────────────────────────────╮
  │ ❯                                                                          │
  ╰────────────────────────────────────────────── claude-sonnet-4 · workspace ─╯
- e:collapse  │  Enter:open  │  Ctrl+e:collapse thinking  │  Tab:prompt
+ e:collapse  │  Enter:open  │  y:copy  │  Y:copy cmd

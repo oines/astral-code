@@ -1,5 +1,6 @@
 mod appearance;
 mod block_viewer;
+mod content_actions;
 mod mentions;
 mod plan_review;
 mod pointer;
@@ -777,13 +778,29 @@ pub(crate) fn render_surface_with_view(
         ("Ctrl+e", thinking_action),
         ("Tab", "prompt"),
     ];
-    let scrollback_hints = if state.scrollback.selected_is_group_header() {
-        &group_hints[..]
+    let mut scrollback_hints = if state.scrollback.selected_is_group_header() {
+        group_hints.to_vec()
     } else if !state.scrollback.selected_is_foldable() {
-        &plain_entry_hints[..]
+        plain_entry_hints.to_vec()
     } else {
-        &entry_hints[..]
+        entry_hints.to_vec()
     };
+    if !state.scrollback.selected_is_group_header() {
+        let insert_at = scrollback_hints
+            .iter()
+            .position(|(key, _)| *key == "Ctrl+e")
+            .unwrap_or(scrollback_hints.len());
+        if state.selected_supports_copy() {
+            scrollback_hints.insert(insert_at, ("y", "copy"));
+        }
+        if let Some(label) = state.selected_copy_meta_label() {
+            let insert_at = scrollback_hints
+                .iter()
+                .position(|(key, _)| *key == "Ctrl+e")
+                .unwrap_or(scrollback_hints.len());
+            scrollback_hints.insert(insert_at, ("Y", label));
+        }
+    }
     let mention_hints = [("↑/↓", "navigate"), ("Tab", "select"), ("Esc", "close")];
     let slash_hints = [("↑/↓", "navigate"), ("Tab", "complete"), ("Esc", "close")];
     let plan_hints = [
@@ -795,7 +812,7 @@ pub(crate) fn render_surface_with_view(
     let revision_hints = [("Enter", "request changes"), ("Esc", "back")];
     ShortcutsBar {
         hints: if request_pane.is_some() && !request_focused {
-            scrollback_hints
+            &scrollback_hints
         } else if let Some(pane) = request_pane {
             pane.shortcuts()
         } else if revising_plan {
@@ -803,7 +820,7 @@ pub(crate) fn render_surface_with_view(
         } else if plan_review.is_some() {
             &plan_hints
         } else if state.scrollback_focused() {
-            scrollback_hints
+            &scrollback_hints
         } else if mentions.open {
             &mention_hints
         } else if slash.open {

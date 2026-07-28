@@ -58,4 +58,4 @@ EXPANDED
   │ ❯                                                                                │
   ╰──────────────────────────────────────────────────── claude-sonnet-4 · workspace ─╯
 
-  e:expand  │  Enter:open  │  Ctrl+e:expand thinking  │  Tab:prompt
+  e:expand  │  Enter:open  │  y:copy  │  Ctrl+e:expand thinking  │  Tab:prompt

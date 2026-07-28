@@ -58,4 +58,4 @@ COLLAPSED
   │ ❯                                                                        │
   ╰──────────────────────────────────────────── claude-sonnet-4 · workspace ─╯
 
-  e:expand  │  Enter:open  │  Ctrl+e:collapse thinking  │  Tab:prompt
+  e:expand  │  Enter:open  │  y:copy  │  Y:copy path

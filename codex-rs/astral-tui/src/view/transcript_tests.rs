@@ -212,6 +212,46 @@ fn transcript_omits_timestamp_chrome_and_tracks_soft_wraps() {
     assert_eq!(selectable[0].joiner_to_previous, LineJoiner::HardBreak);
     assert_eq!(selectable[1].columns, 0..5);
     assert_eq!(selectable[1].joiner_to_previous, LineJoiner::Space);
+
+    let raw_turn = TranscriptTurn {
+        id: "raw-turn".to_string(),
+        blocks: vec![
+            TranscriptBlock {
+                item_id: "assistant".to_string(),
+                block: PresentationBlock::Assistant {
+                    text: "**bold** [link](https://example.com)".to_string(),
+                },
+                started_at_ms: None,
+                completed_at_ms: None,
+            },
+            TranscriptBlock {
+                item_id: "thinking".to_string(),
+                block: PresentationBlock::Thinking {
+                    text: "## source\n\n`literal`".to_string(),
+                    running: false,
+                },
+                started_at_ms: None,
+                completed_at_ms: None,
+            },
+        ],
+        started_at_ms: None,
+        completed_at_ms: None,
+        duration_ms: None,
+    };
+    let mut display = EntryDisplayState::default();
+    display.observe(std::slice::from_ref(&raw_turn));
+    display.focus_scrollback();
+    display.expand_selected();
+    display.toggle_selected_raw();
+    display.move_selection(-1);
+    display.toggle_selected_raw();
+    let raw = render_transcript(&[raw_turn], 50, AstralTheme::default(), &display)
+        .lines
+        .into_iter()
+        .map(|line| line.to_string().trim_end().to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    insta::assert_snapshot!("transcript_raw_markdown", raw);
 }
 
 #[test]

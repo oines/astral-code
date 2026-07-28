@@ -6,6 +6,7 @@ use astral_tui_scrollback::PresentationBlock;
 
 use crate::conversation::TranscriptTurn;
 
+use super::entry_content::EntryContentState;
 use super::entry_group::EntryGroupKind;
 use super::entry_group::EntryGroupSpan;
 use super::entry_group::scan_turn;
@@ -27,10 +28,7 @@ struct GroupDescriptor {
     range: std::ops::Range<usize>,
 }
 
-/// Fold and focus state owned by the TUI presentation layer.
-///
-/// Entries are keyed by Astral's stable local transcript ids rather than
-/// provider item ids, so provider id reuse cannot move a manual fold.
+/// TUI fold and focus state keyed by Astral's stable local transcript ids.
 #[derive(Debug, Default)]
 pub(crate) struct EntryDisplayState {
     focused: bool,
@@ -39,6 +37,7 @@ pub(crate) struct EntryDisplayState {
     manual_modes: HashMap<String, DisplayMode>,
     groups: HashMap<String, GroupDescriptor>,
     expanded_groups: HashSet<String>,
+    content_state: EntryContentState,
     thinking_mode: Option<DisplayMode>,
     preserve_empty_selection: bool,
     pending_verb_rekey: Option<String>,
@@ -59,7 +58,7 @@ impl EntryDisplayState {
         let mut groups_seen = HashMap::new();
         for (turn, groups) in turns.iter().zip(groups_by_turn) {
             for block in &turn.blocks {
-                if block.block.is_foldable() {
+                if block.block.is_selectable() {
                     known_ids.insert(entry_id(&turn.id, &block.item_id));
                 }
             }
@@ -96,8 +95,10 @@ impl EntryDisplayState {
                     continue;
                 }
                 let thinking = matches!(&block.block, PresentationBlock::Thinking { .. });
+                let id = entry_id(&turn.id, &block.item_id);
+                self.content_state.observe(id.clone(), &block.block);
                 entries.push(EntryDescriptor {
-                    id: entry_id(&turn.id, &block.item_id),
+                    id,
                     default_mode: if thinking {
                         self.thinking_mode
                             .unwrap_or_else(|| block.block.default_display_mode())
@@ -118,6 +119,7 @@ impl EntryDisplayState {
             .retain(|entry_id, _| known_ids.contains(entry_id.as_str()));
         self.expanded_groups
             .retain(|entry_id| known_ids.contains(entry_id.as_str()));
+        self.content_state.retain(&known_ids);
         let visible_ids = self
             .entries
             .iter()
@@ -293,6 +295,28 @@ impl EntryDisplayState {
         self.selected_entry().is_some_and(|entry| entry.foldable)
     }
 
+    pub(crate) fn selected_is_raw(&self) -> bool {
+        self.selected_id()
+            .is_some_and(|entry_id| self.content_state.is_raw(entry_id))
+    }
+
+    pub(crate) fn is_raw_entry(&self, entry_id: &str) -> bool {
+        self.content_state.is_raw(entry_id)
+    }
+
+    pub(crate) fn selected_supports_copy(&self) -> bool {
+        self.selected_id()
+            .is_some_and(|entry_id| self.content_state.supports_copy(entry_id))
+    }
+
+    pub(crate) fn selected_copy_meta_label(&self) -> Option<&'static str> {
+        self.content_state.copy_meta_label(self.selected_id()?)
+    }
+
+    pub(crate) fn is_raw(&self, turn_id: &str, item_id: &str) -> bool {
+        self.content_state.is_raw(&entry_id(turn_id, item_id))
+    }
+
     pub(crate) fn group_is_expanded(&self, group_id: &str) -> bool {
         self.expanded_groups.contains(group_id)
     }
@@ -343,6 +367,16 @@ impl EntryDisplayState {
         self.manual_modes.insert(entry.id.clone(), target);
         self.pending_verb_rekey = Some(entry.id.clone());
         Some(entry.id)
+    }
+
+    pub(crate) fn toggle_selected_raw(&mut self) -> Option<String> {
+        let entry = self.selected_entry()?;
+        let entry_id = entry.id.clone();
+        self.toggle_raw(&entry_id).then_some(entry_id)
+    }
+
+    pub(crate) fn toggle_raw(&mut self, entry_id: &str) -> bool {
+        self.content_state.toggle_raw(entry_id)
     }
 
     pub(crate) fn expand_selected(&mut self) -> Option<String> {

@@ -16,7 +16,7 @@ pub(super) fn command_presentation(command: &str, actions: &[CommandAction]) -> 
     if let [action] = actions {
         match action {
             CommandAction::Read { path, .. } => {
-                return (ToolKind::Read, compact_path(path.as_path()));
+                return (ToolKind::Read, path.as_path().display().to_string());
             }
             CommandAction::ListFiles { path, .. } => {
                 return (

@@ -179,6 +179,22 @@ impl ScrollbackState {
         self.display.selected_is_foldable()
     }
 
+    pub(crate) fn selected_is_raw(&self) -> bool {
+        self.display.selected_is_raw()
+    }
+
+    pub(crate) fn is_raw_entry(&self, entry_id: &str) -> bool {
+        self.display.is_raw_entry(entry_id)
+    }
+
+    pub(crate) fn selected_supports_copy(&self) -> bool {
+        self.display.selected_supports_copy()
+    }
+
+    pub(crate) fn selected_copy_meta_label(&self) -> Option<&'static str> {
+        self.display.selected_copy_meta_label()
+    }
+
     pub(crate) fn hovered_id(&self) -> Option<&str> {
         self.hovered.as_deref()
     }
@@ -269,6 +285,18 @@ impl ScrollbackState {
     pub(crate) fn toggle_selected(&mut self) {
         self.display.toggle_selected();
         self.reveal_selected();
+    }
+
+    pub(crate) fn toggle_selected_raw(&mut self) -> bool {
+        let toggled = self.display.toggle_selected_raw().is_some();
+        if toggled {
+            self.reveal_selected();
+        }
+        toggled
+    }
+
+    pub(crate) fn toggle_raw(&mut self, entry_id: &str) -> bool {
+        self.display.toggle_raw(entry_id)
     }
 
     pub(crate) fn expand_selected(&mut self) {

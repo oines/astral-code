@@ -1,0 +1,10 @@
+---
+source: astral-tui/src/view/transcript_tests.rs
+expression: raw
+---
+**bold** [link](https://example.com)
+
+◆ Thought
+  ## source
+
+  `literal`

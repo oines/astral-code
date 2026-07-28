@@ -77,6 +77,23 @@ pub fn render_markdown_with_metadata(
     MarkdownWriter::new(width, style).render(text)
 }
 
+/// Wrap literal Markdown source while retaining selection joiners.
+pub fn render_literal_with_metadata(text: &str, width: u16, style: Style) -> Vec<MarkdownLine> {
+    wrap_segments_with_joiners(
+        &[Segment {
+            text: text.to_string(),
+            style,
+        }],
+        usize::from(width).max(1),
+    )
+    .into_iter()
+    .map(|wrapped| MarkdownLine {
+        line: Line::from(wrapped.spans),
+        joiner_to_previous: wrapped.joiner_to_previous,
+    })
+    .collect()
+}
+
 #[derive(Debug, Clone)]
 struct Segment {
     text: String,

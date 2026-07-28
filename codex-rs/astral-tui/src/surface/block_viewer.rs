@@ -42,7 +42,7 @@ impl SurfaceState {
         self.presentation_block(entry_id)
     }
 
-    fn presentation_block(&self, entry_id: &str) -> Option<PresentationBlock> {
+    pub(super) fn presentation_block(&self, entry_id: &str) -> Option<PresentationBlock> {
         let (turn_id, render_id) = entry_id.split_once('\0')?;
         self.conversation.presentation_block(turn_id, render_id)
     }

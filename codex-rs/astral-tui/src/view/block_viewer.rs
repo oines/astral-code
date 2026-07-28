@@ -3,6 +3,7 @@
 // Modified to render Astral's provider-neutral PresentationBlock with the same
 // renderer and theme roles used by the surrounding transcript.
 
+use astral_tui_scrollback::BlockTextMode;
 use astral_tui_scrollback::DisplayMode;
 use astral_tui_scrollback::PresentationBlock;
 use astral_tui_scrollback::render_block;
@@ -18,6 +19,7 @@ use super::AstralTheme;
 use super::ModalHeight;
 use super::ScrollbackPane;
 use super::ScrollbackViewport;
+use super::markdown_content::render_markdown_content;
 use super::render_modal_close_button;
 use super::render_modal_frame_with_geometry;
 use super::transcript::render_options;
@@ -25,6 +27,7 @@ use super::transcript::render_options;
 pub(crate) struct BlockViewerPane<'a> {
     pub(crate) state: &'a mut BlockViewerState,
     pub(crate) block: &'a PresentationBlock,
+    pub(crate) text_mode: BlockTextMode,
 }
 
 impl BlockViewerPane<'_> {
@@ -32,12 +35,13 @@ impl BlockViewerPane<'_> {
         Clear.render(area, buffer);
         buffer.set_style(area, Style::default().bg(theme.bg_base));
         let title = block_title(self.block);
+        let footer = block_viewer_footer(self.block);
         let Some(frame) = render_modal_frame_with_geometry(
             area,
             buffer,
             theme,
             &title,
-            "↑/↓ scroll · Esc/q/Ctrl+F close",
+            &footer,
             ModalHeight::FullViewport,
         ) else {
             return;
@@ -62,28 +66,50 @@ impl BlockViewerPane<'_> {
             1,
             frame.content.height,
         );
-        let rendered = render_block(
-            self.block,
-            render_options(body_width, DisplayMode::Expanded, theme)
-                .with_max_output_lines(usize::MAX),
-        );
-        self.state.observe_frame(
-            frame.popup,
-            frame.content,
-            frame.close_button,
-            rendered.lines.len(),
-        );
+        let lines = match self.block {
+            PresentationBlock::Assistant { text } | PresentationBlock::Thinking { text, .. } => {
+                render_markdown_content(text, body_width, theme, self.text_mode, "")
+                    .into_iter()
+                    .map(|line| line.line)
+                    .collect()
+            }
+            _ => {
+                render_block(
+                    self.block,
+                    render_options(body_width, DisplayMode::Expanded, theme)
+                        .with_max_output_lines(usize::MAX),
+                )
+                .lines
+            }
+        };
+        self.state
+            .observe_frame(frame.popup, frame.content, frame.close_button, lines.len());
         let viewport = ScrollbackViewport::from_first(
-            rendered.lines.len(),
+            lines.len(),
             usize::from(body_area.height),
             self.state.scroll_offset(),
         );
         ScrollbackPane {
-            lines: &rendered.lines,
+            lines: &lines,
             viewport,
         }
         .render(body_area, scrollbar_area, buffer, theme);
     }
+}
+
+fn block_viewer_footer(block: &PresentationBlock) -> String {
+    let mut hints = vec!["↑/↓ scroll".to_string()];
+    if block.supports_raw() {
+        hints.push("r raw".to_string());
+    }
+    if block.supports_copy() {
+        hints.push("y copy".to_string());
+    }
+    if let Some(label) = block.copy_meta_label() {
+        hints.push(format!("Y {label}"));
+    }
+    hints.push("Esc/q/Ctrl+F close".to_string());
+    hints.join(" · ")
 }
 
 fn block_title(block: &PresentationBlock) -> String {

@@ -270,6 +270,16 @@ async fn run_loop(
                                 }
                                 InputAction::None
                             }
+                            InputAction::CopyText { text, notice } => {
+                                match copy_to_clipboard(&text) {
+                                    Ok(lease) => {
+                                        _clipboard_lease = Some(lease);
+                                        surface.set_notice(notice);
+                                    }
+                                    Err(error) => surface.set_notice(error),
+                                }
+                                InputAction::None
+                            }
                             action => action,
                         };
                         if let Some(reason) =
@@ -403,7 +413,10 @@ async fn apply_input_action(
             Err(error) => surface.set_notice(error.to_string()),
         },
         InputAction::Exit => return Ok(Some(RunExitReason::UserRequested)),
-        InputAction::ScrollUp | InputAction::ScrollDown | InputAction::CopyLastResponse => {}
+        InputAction::ScrollUp
+        | InputAction::ScrollDown
+        | InputAction::CopyLastResponse
+        | InputAction::CopyText { .. } => {}
         InputAction::SelectTheme(name) => {
             *theme_selection = Some(name.clone());
             surface.set_notice(format!("Switched to {name}"));

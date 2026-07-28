@@ -40,6 +40,10 @@ pub enum InputAction {
     ScrollUp,
     ScrollDown,
     CopyLastResponse,
+    CopyText {
+        text: String,
+        notice: String,
+    },
     Slash {
         invocation: SlashInvocation,
         submission: PromptSubmission,
