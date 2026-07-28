@@ -5,11 +5,16 @@ use codex_protocol::config_types::ModeKind;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
+use crossterm::event::MouseButton;
+use crossterm::event::MouseEvent;
+use crossterm::event::MouseEventKind;
 use pretty_assertions::assert_eq;
+use ratatui::layout::Rect;
 use serde_json::json;
 
 use super::InputAction;
 use super::handle_key;
+use super::handle_mouse;
 use super::handle_paste;
 use crate::RequestResolution;
 use crate::SlashCommandId;
@@ -32,6 +37,15 @@ use crate::view::AstralThemeId;
 
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
+}
+
+fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+    MouseEvent {
+        kind,
+        column,
+        row,
+        modifiers: KeyModifiers::NONE,
+    }
 }
 
 fn request(value: serde_json::Value) -> ServerRequest {
@@ -464,6 +478,64 @@ fn command_session_approval_preserves_typed_decision() {
     );
     assert_eq!(state.composer(), "draft survives approval");
     assert_eq!(state.pending_requests().len(), 1);
+}
+
+#[test]
+fn approval_picker_navigation_resolves_the_selected_decision() {
+    let mut state = SurfaceState::new("thread-1");
+    state.pending_requests_mut().note(request(json!({
+        "method": "item/commandExecution/requestApproval",
+        "id": 71,
+        "params": {
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "itemId": "call-1",
+            "startedAtMs": 100,
+            "availableDecisions": ["accept", "acceptForSession", "decline", "cancel"]
+        }
+    })));
+
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Down)),
+        InputAction::Redraw
+    );
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Enter)),
+        InputAction::Resolve(RequestResolution::Success {
+            request_id: RequestId::Integer(71),
+            result: json!({"decision": "acceptForSession"}),
+        })
+    );
+}
+
+#[test]
+fn approval_picker_second_click_resolves_the_pointed_decision() {
+    let mut state = SurfaceState::new("thread-1");
+    state.pending_requests_mut().note(request(json!({
+        "method": "item/commandExecution/requestApproval",
+        "id": 72,
+        "params": {
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "itemId": "call-1",
+            "startedAtMs": 100,
+            "availableDecisions": ["accept", "decline", "cancel"]
+        }
+    })));
+    state.sync_request_states();
+    state
+        .request_choice_mut()
+        .observe_rows(vec![(1, Rect::new(2, 5, 20, 1))]);
+    let click = mouse(MouseEventKind::Down(MouseButton::Left), 4, 5);
+
+    assert_eq!(handle_mouse(&mut state, click), InputAction::Redraw);
+    assert_eq!(
+        handle_mouse(&mut state, click),
+        InputAction::Resolve(RequestResolution::Success {
+            request_id: RequestId::Integer(72),
+            result: json!({"decision": "decline"}),
+        })
+    );
 }
 
 #[test]

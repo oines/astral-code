@@ -474,3 +474,7 @@ const fn choice(id: RequestChoiceId, shortcut: char, label: &'static str) -> Req
         label,
     }
 }
+
+#[cfg(test)]
+#[path = "request_choice_tests.rs"]
+mod tests;
