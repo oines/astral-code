@@ -6,6 +6,7 @@
 
 mod chrome;
 mod color_support;
+mod entry_mouse;
 mod entry_state;
 mod layout;
 mod mention_menu;
@@ -22,6 +23,8 @@ pub(crate) use chrome::ShortcutsBar;
 pub(crate) use chrome::StatusBar;
 pub(crate) use chrome::prompt_height;
 pub(crate) use color_support::ColorLevel;
+pub(crate) use entry_mouse::EntryMouseAction;
+pub(crate) use entry_mouse::EntryMouseState;
 pub(crate) use entry_state::EntryDisplayState;
 pub(crate) use layout::AgentViewLayout;
 pub(crate) use layout::AgentViewLayoutInput;

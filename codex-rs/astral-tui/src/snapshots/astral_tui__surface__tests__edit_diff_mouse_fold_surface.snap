@@ -1,0 +1,61 @@
+---
+source: astral-tui/src/surface_tests.rs
+expression: "format!(\"EXPANDED\\n{expanded}\\n\\nCOLLAPSED\\n{collapsed}\")"
+---
+EXPANDED
+
+  ⎇ main  /workspace
+
+
+  › inspect this repo
+
+  I’m tracing the relevant data flow.
+  ◆ Edit lib.rs
+    M src/lib.rs  +1/-1
+    │ @@ -1 +1 @@
+    │ -old value
+    │ +new value
+
+
+
+
+
+
+
+
+  ◇ Working
+
+  ╭──────────────────────────────────────────────────────────────────────────╮
+  │ ❯                                                                        │
+  ╰──────────────────────────────────────────── claude-sonnet-4 · workspace ─╯
+
+  Shift+Tab:mode  │  Ctrl+.:shortcuts
+
+COLLAPSED
+
+  ⎇ main  /workspace
+
+
+  › inspect this repo
+
+  I’m tracing the relevant data flow.
+  › Edit lib.rs +1/-1
+
+
+
+
+
+
+
+
+
+
+
+
+  ◇ Working
+
+  ╭──────────────────────────────────────────────────────────────────────────╮
+  │ ❯                                                                        │
+  ╰──────────────────────────────────────────── claude-sonnet-4 · workspace ─╯
+
+  ←:collapse  │  Enter:open  │  Tab:prompt

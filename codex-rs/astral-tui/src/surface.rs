@@ -3,6 +3,7 @@ mod mentions;
 mod plan_review;
 mod requests;
 
+use astral_tui_scrollback::DisplayMode;
 use codex_app_server_protocol::Model;
 use codex_app_server_protocol::ThreadTokenUsage;
 use codex_protocol::config_types::ModeKind;
@@ -47,6 +48,8 @@ use crate::view::AstralTheme;
 use crate::view::AstralThemeId;
 use crate::view::ColorLevel;
 use crate::view::EntryDisplayState;
+use crate::view::EntryMouseAction;
+use crate::view::EntryMouseState;
 use crate::view::LayoutConfig;
 use crate::view::MentionMenu;
 use crate::view::PaneHeights;
@@ -94,6 +97,7 @@ pub struct SurfaceState {
     scrollback: ScrollbackNavigation,
     selection: ScrollbackSelection,
     entry_display: EntryDisplayState,
+    entry_mouse: EntryMouseState,
     slash: SlashController,
     mentions: MentionController,
     modal: Option<ModalState>,
@@ -121,6 +125,7 @@ impl SurfaceState {
             scrollback: ScrollbackNavigation::default(),
             selection: ScrollbackSelection::default(),
             entry_display: EntryDisplayState::default(),
+            entry_mouse: EntryMouseState::default(),
             slash: SlashController::default(),
             mentions: MentionController::default(),
             modal: None,
@@ -155,6 +160,7 @@ impl SurfaceState {
             scrollback: ScrollbackNavigation::default(),
             selection: ScrollbackSelection::default(),
             entry_display: EntryDisplayState::default(),
+            entry_mouse: EntryMouseState::default(),
             slash: SlashController::default(),
             mentions: MentionController::default(),
             modal: None,
@@ -299,11 +305,26 @@ impl SurfaceState {
         &mut self,
         mouse: crossterm::event::MouseEvent,
     ) -> Option<String> {
+        let entry_action = self.entry_mouse.handle_mouse(mouse);
         match self.selection.handle_mouse(mouse) {
             ScrollbackSelectionAction::ScrollUp => self.scroll_up(/*lines*/ 1),
             ScrollbackSelectionAction::ScrollDown => self.scroll_down(/*lines*/ 1),
             ScrollbackSelectionAction::Copy(text) => return Some(text),
             ScrollbackSelectionAction::Ignored | ScrollbackSelectionAction::Redraw => {}
+        }
+        match entry_action {
+            EntryMouseAction::Select(item_id) => {
+                if self.entry_display.select(&item_id) {
+                    self.scrollback.reveal_entry(&item_id);
+                }
+            }
+            EntryMouseAction::Toggle(item_id) => {
+                if self.entry_display.select(&item_id) {
+                    self.entry_display.toggle_selected();
+                    self.scrollback.reveal_entry(&item_id);
+                }
+            }
+            EntryMouseAction::Ignored => {}
         }
         None
     }
@@ -583,6 +604,9 @@ pub(crate) fn render_surface_with_view(
         theme,
     );
     if transcript_view == TranscriptView::Full {
+        state
+            .entry_mouse
+            .observe(&transcript, viewport, layout.scrollback_content);
         state.selection.render(
             &transcript,
             viewport,
@@ -590,6 +614,8 @@ pub(crate) fn render_surface_with_view(
             buffer,
             theme,
         );
+    } else {
+        state.entry_mouse.clear_frame();
     }
     render_follow_indicator(
         viewport,
@@ -677,7 +703,12 @@ pub(crate) fn render_surface_with_view(
     };
 
     let default_hints = [("Shift+Tab", "mode"), ("Ctrl+.", "shortcuts")];
-    let scrollback_hints = [("j/k", "navigate"), ("e", "fold"), ("Tab", "prompt")];
+    let fold_action = if state.entry_display.selected_mode() == Some(DisplayMode::Expanded) {
+        "collapse"
+    } else {
+        "open"
+    };
+    let scrollback_hints = [("←", "collapse"), ("Enter", fold_action), ("Tab", "prompt")];
     let mention_hints = [("↑/↓", "navigate"), ("Tab", "select"), ("Esc", "close")];
     let slash_hints = [("↑/↓", "navigate"), ("Tab", "complete"), ("Esc", "close")];
     let plan_hints = [

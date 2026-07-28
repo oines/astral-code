@@ -4,8 +4,11 @@ use codex_app_server_protocol::ActivePermissionProfile;
 use codex_app_server_protocol::ApprovalsReviewer;
 use codex_app_server_protocol::AskForApproval;
 use codex_app_server_protocol::CoreToolCallStatus;
+use codex_app_server_protocol::FileUpdateChange;
 use codex_app_server_protocol::ItemCompletedNotification;
 use codex_app_server_protocol::ItemStartedNotification;
+use codex_app_server_protocol::PatchApplyStatus;
+use codex_app_server_protocol::PatchChangeKind;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ServerRequest;
@@ -1271,6 +1274,56 @@ fn scrollback_focus_folds_tool_entries_snapshot() {
 }
 
 #[test]
+fn edit_diff_expands_by_default_and_double_click_collapses_snapshot() {
+    let mut session = session_state();
+    session.thread.turns[0].items.push(ThreadItem::FileChange {
+        id: "edit-1".to_string(),
+        changes: vec![FileUpdateChange {
+            path: "src/lib.rs".to_string(),
+            kind: PatchChangeKind::Update { move_path: None },
+            diff: "@@ -1 +1 @@\n-old value\n+new value".to_string(),
+        }],
+        status: PatchApplyStatus::Completed,
+    });
+    let mut state = SurfaceState::from_session(&session);
+    let area = Rect::new(0, 0, 80, 28);
+    let mut buffer = Buffer::empty(area);
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        area,
+        &mut buffer,
+    );
+    let expanded = buffer_text(&buffer);
+    assert!(expanded.contains("-old value"));
+    assert!(expanded.contains("+new value"));
+    let (column, row) = find_text(&buffer, "Edit lib.rs")
+        .unwrap_or_else(|| panic!("edit header is visible:\n{expanded}"));
+
+    for _ in 0..2 {
+        state.handle_scrollback_mouse(mouse(MouseEventKind::Down(MouseButton::Left), column, row));
+        state.handle_scrollback_mouse(mouse(MouseEventKind::Up(MouseButton::Left), column, row));
+    }
+
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        area,
+        &mut buffer,
+    );
+    let collapsed = buffer_text(&buffer);
+    assert!(!collapsed.contains("-old value"));
+    assert!(!collapsed.contains("+new value"));
+    assert!(collapsed.contains("Edit lib.rs +1/-1"));
+    insta::assert_snapshot!(
+        "edit_diff_mouse_fold_surface",
+        format!("EXPANDED\n{expanded}\n\nCOLLAPSED\n{collapsed}")
+    );
+}
+
+#[test]
 fn scroll_offset_moves_in_both_directions() {
     let mut state = SurfaceState::new("thread-1");
     state.scroll_up(/*lines*/ 20);
@@ -1296,6 +1349,20 @@ fn find_symbol(buffer: &Buffer, symbol: &str) -> Option<(u16, u16)> {
             if buffer[(x, y)].symbol() == symbol {
                 return Some((x, y));
             }
+        }
+    }
+    None
+}
+
+fn find_text(buffer: &Buffer, text: &str) -> Option<(u16, u16)> {
+    let area = buffer.area;
+    for y in area.y..area.bottom() {
+        let line = (area.x..area.right())
+            .map(|x| buffer[(x, y)].symbol())
+            .collect::<String>();
+        if let Some(byte_offset) = line.find(text) {
+            let column_offset: u16 = line[..byte_offset].chars().count().try_into().ok()?;
+            return Some((area.x.saturating_add(column_offset), y));
         }
     }
     None

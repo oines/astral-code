@@ -100,6 +100,25 @@ impl EntryDisplayState {
         }
     }
 
+    pub(crate) fn select(&mut self, entry_id: &str) -> bool {
+        if !self.entries.iter().any(|entry| entry.id == entry_id) {
+            return false;
+        }
+        self.focused = true;
+        self.selected = Some(entry_id.to_string());
+        true
+    }
+
+    pub(crate) fn selected_mode(&self) -> Option<DisplayMode> {
+        let entry = self.selected_entry()?;
+        Some(
+            self.manual_modes
+                .get(&entry.id)
+                .copied()
+                .unwrap_or(entry.default_mode),
+        )
+    }
+
     pub(crate) fn move_selection(&mut self, delta: isize) -> Option<String> {
         let selected = self.selected.as_deref();
         let current = selected
