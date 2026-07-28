@@ -10,6 +10,7 @@ use crate::conversation::TranscriptTurn;
 
 use super::EntryDisplayState;
 use super::entry_id;
+use super::scan_turn;
 
 fn block(item_id: &str, block: PresentationBlock) -> TranscriptBlock {
     TranscriptBlock {
@@ -152,8 +153,8 @@ fn verb_group_and_first_member_keep_independent_fold_state() {
         ),
     ])];
     let mut state = EntryDisplayState::default();
-    let group_id = entry_id("turn-1", "read-1");
     state.observe(&turns);
+    let group_id = scan_turn(&turns[0], &state)[0].id.clone();
     assert!(state.focus_scrollback());
     assert_eq!(state.selected_id(), Some(group_id.as_str()));
     assert_eq!(state.selected_mode(), Some(DisplayMode::Collapsed));
@@ -161,10 +162,16 @@ fn verb_group_and_first_member_keep_independent_fold_state() {
     state.toggle_selected();
     state.observe(&turns);
     assert!(state.group_is_expanded(&group_id));
+    assert_eq!(state.selected_id(), Some(group_id.as_str()));
+    assert!(!state.selected_is_group_header());
     assert_eq!(state.selected_mode(), Some(DisplayMode::Collapsed));
 
     state.expand_selected();
     state.observe(&turns);
+    let rekeyed_group_id = scan_turn(&turns[0], &state)[0].id.clone();
+    assert_ne!(rekeyed_group_id, group_id);
+    assert!(state.group_is_expanded(&rekeyed_group_id));
+    assert!(scan_turn(&turns[0], &state)[0].expanded);
     assert_eq!(
         state.mode_for("turn-1", "read-1", &turns[0].blocks[0].block),
         DisplayMode::Expanded
@@ -173,6 +180,7 @@ fn verb_group_and_first_member_keep_independent_fold_state() {
     state.collapse_selected();
     state.observe(&turns);
     assert!(state.group_is_expanded(&group_id));
+    assert!(scan_turn(&turns[0], &state)[0].expanded);
     assert_eq!(state.selected_mode(), Some(DisplayMode::Collapsed));
 
     state.collapse_selected();

@@ -7,6 +7,7 @@ use astral_tui_scrollback::PresentationBlock;
 use crate::conversation::TranscriptTurn;
 
 use super::entry_group::EntryGroupKind;
+use super::entry_group::EntryGroupSpan;
 use super::entry_group::scan_turn;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -15,6 +16,13 @@ struct EntryDescriptor {
     default_mode: DisplayMode,
     parent_group: Option<String>,
     group_header: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GroupDescriptor {
+    kind: EntryGroupKind,
+    turn_id: String,
+    range: std::ops::Range<usize>,
 }
 
 /// Fold and focus state owned by the TUI presentation layer.
@@ -27,26 +35,41 @@ pub(crate) struct EntryDisplayState {
     selected: Option<String>,
     entries: Vec<EntryDescriptor>,
     manual_modes: HashMap<String, DisplayMode>,
-    groups: HashMap<String, EntryGroupKind>,
+    groups: HashMap<String, GroupDescriptor>,
     expanded_groups: HashSet<String>,
     preserve_empty_selection: bool,
+    pending_verb_rekey: Option<String>,
 }
 
 impl EntryDisplayState {
     pub(crate) fn observe(&mut self, turns: &[TranscriptTurn]) {
+        let mut groups_by_turn = turns
+            .iter()
+            .map(|turn| scan_turn(turn, self))
+            .collect::<Vec<_>>();
+        if self.rekey_expanded_verb_group(turns, &groups_by_turn) {
+            groups_by_turn = turns.iter().map(|turn| scan_turn(turn, self)).collect();
+        }
+
         let mut entries = Vec::new();
         let mut known_ids = HashSet::new();
         let mut groups_seen = HashMap::new();
-        for turn in turns {
+        for (turn, groups) in turns.iter().zip(groups_by_turn) {
             for block in &turn.blocks {
                 if block.block.is_foldable() {
                     known_ids.insert(entry_id(&turn.id, &block.item_id));
                 }
             }
-            let groups = scan_turn(turn, self);
             for group in &groups {
                 known_ids.insert(group.id.clone());
-                groups_seen.insert(group.id.clone(), group.kind);
+                groups_seen.insert(
+                    group.id.clone(),
+                    GroupDescriptor {
+                        kind: group.kind,
+                        turn_id: turn.id.clone(),
+                        range: group.range.clone(),
+                    },
+                );
             }
             for (index, block) in turn.blocks.iter().enumerate() {
                 if let Some(group) = groups
@@ -101,6 +124,63 @@ impl EntryDisplayState {
             self.focused = false;
             self.preserve_empty_selection = false;
         }
+    }
+
+    /// Move a verb group's expansion key when opening or closing its anchor
+    /// makes the same run re-anchor on another member.
+    ///
+    /// This preserves Grok Build's `rekey_verb_group_expansion` invariant
+    /// at commit `47348d13ec4508dcfe440e34c6d511bb02998fb2`
+    /// (Apache-2.0) without leaking its index-based state into Astral's view.
+    fn rekey_expanded_verb_group(
+        &mut self,
+        turns: &[TranscriptTurn],
+        groups_by_turn: &[Vec<EntryGroupSpan>],
+    ) -> bool {
+        let Some(pending_entry_id) = self.pending_verb_rekey.take() else {
+            return false;
+        };
+        let Some((turn_index, block_index)) =
+            turns.iter().enumerate().find_map(|(turn_index, turn)| {
+                turn.blocks
+                    .iter()
+                    .position(|block| entry_id(&turn.id, &block.item_id) == pending_entry_id)
+                    .map(|block_index| (turn_index, block_index))
+            })
+        else {
+            return false;
+        };
+        let turn = &turns[turn_index];
+        let next_groups = &groups_by_turn[turn_index];
+        let migration = self.expanded_groups.iter().find_map(|old_id| {
+            let old = self.groups.get(old_id)?;
+            if old.kind != EntryGroupKind::VerbRun || old.turn_id != turn.id {
+                return None;
+            }
+            let next = next_groups
+                .iter()
+                .filter(|next| {
+                    let overlaps =
+                        old.range.start < next.range.end && next.range.start < old.range.end;
+                    next.kind == EntryGroupKind::VerbRun
+                        && next.id != *old_id
+                        && overlaps
+                        && (old.range.contains(&block_index) || next.range.contains(&block_index))
+                })
+                .max_by_key(|next| {
+                    old.range
+                        .end
+                        .min(next.range.end)
+                        .saturating_sub(old.range.start.max(next.range.start))
+                })?;
+            Some((old_id.clone(), next.id.clone()))
+        });
+        let Some((old_id, new_id)) = migration else {
+            return false;
+        };
+        self.expanded_groups.remove(&old_id);
+        self.expanded_groups.insert(new_id);
+        true
     }
 
     pub(crate) fn mode_for(
@@ -171,6 +251,11 @@ impl EntryDisplayState {
         )
     }
 
+    pub(crate) fn selected_is_group_header(&self) -> bool {
+        self.selected_entry()
+            .is_some_and(|entry| entry.group_header)
+    }
+
     pub(crate) fn group_is_expanded(&self, group_id: &str) -> bool {
         self.expanded_groups.contains(group_id)
     }
@@ -206,6 +291,7 @@ impl EntryDisplayState {
             DisplayMode::Expanded => DisplayMode::Collapsed,
         };
         self.manual_modes.insert(entry.id.clone(), target);
+        self.pending_verb_rekey = Some(entry.id.clone());
         Some(entry.id)
     }
 
@@ -219,6 +305,7 @@ impl EntryDisplayState {
         }
         self.manual_modes
             .insert(entry.id.clone(), DisplayMode::Expanded);
+        self.pending_verb_rekey = Some(entry.id.clone());
         Some(entry.id)
     }
 
@@ -239,6 +326,7 @@ impl EntryDisplayState {
         if current != DisplayMode::Collapsed {
             self.manual_modes
                 .insert(entry.id.clone(), DisplayMode::Collapsed);
+            self.pending_verb_rekey = Some(entry.id.clone());
             return Some(entry.id);
         }
         let parent = entry.parent_group?;
@@ -249,7 +337,7 @@ impl EntryDisplayState {
     }
 
     pub(crate) fn toggle_group(&mut self, group_id: &str) -> Option<String> {
-        let kind = *self.groups.get(group_id)?;
+        let kind = self.groups.get(group_id)?.kind;
         let expanding = !self.expanded_groups.remove(group_id);
         if expanding {
             self.expanded_groups.insert(group_id.to_string());
