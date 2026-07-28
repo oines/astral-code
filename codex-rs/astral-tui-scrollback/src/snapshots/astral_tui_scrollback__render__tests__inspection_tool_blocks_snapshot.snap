@@ -1,0 +1,21 @@
+---
+source: astral-tui-scrollback/src/render_tests.rs
+expression: rendered
+---
+COLLAPSED
+◆ Read main.rs (4 lines)  16ms
+◆ List **/*.rs (2 entries)  8ms
+◆ Search render_tool (2 results)  10ms
+
+EXPANDED
+◆ Read main.rs  16ms
+  1  fn main() {
+  2
+  3      println!("astral");
+  4  }
+◆ List **/*.rs  8ms
+  src/main.rs
+  src/lib.rs
+◆ Search render_tool  10ms
+  src/render.rs:18
+  src/render/tool.rs:16

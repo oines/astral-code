@@ -14,19 +14,20 @@ use crate::ToolPresentation;
 
 mod edit;
 mod execute;
+mod inspect;
 
 pub(super) fn render_tool(tool: &ToolPresentation, options: RenderOptions) -> Text<'static> {
     match tool.kind {
         ToolKind::Edit if !tool.changes.is_empty() => edit::render_edit(tool, options),
         ToolKind::Execute | ToolKind::Background => execute::render_execute(tool, options),
+        ToolKind::Read | ToolKind::List | ToolKind::Search => {
+            inspect::render_inspection(tool, options)
+        }
         ToolKind::BackgroundPoll
         | ToolKind::BackgroundInput
         | ToolKind::BackgroundList
         | ToolKind::BackgroundStop
-        | ToolKind::Read
         | ToolKind::Edit
-        | ToolKind::List
-        | ToolKind::Search
         | ToolKind::WebFetch
         | ToolKind::WebSearch
         | ToolKind::Mcp
@@ -99,6 +100,29 @@ fn tool_header(
         spans.push(format!("  {}", duration_label(duration_ms)).dim());
     }
     spans.into()
+}
+
+fn truncate_head_tail(lines: Vec<Line<'static>>, max_lines: usize) -> Vec<Line<'static>> {
+    if lines.len() <= max_lines {
+        return lines;
+    }
+    let first = max_lines.div_ceil(2);
+    let last = max_lines.saturating_sub(first);
+    let hidden = lines.len().saturating_sub(first + last);
+    let mut visible = lines.iter().take(first).cloned().collect::<Vec<_>>();
+    visible.push(vec!["  … ".dim(), format!("{hidden} hidden lines").dim()].into());
+    if last > 0 {
+        visible.extend(
+            lines
+                .into_iter()
+                .rev()
+                .take(last)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev(),
+        );
+    }
+    visible
 }
 
 fn mcp_header(tool: &ToolPresentation) -> Vec<Span<'static>> {

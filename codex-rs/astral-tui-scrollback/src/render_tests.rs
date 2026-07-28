@@ -1,6 +1,7 @@
 use codex_app_server_protocol::CommandAction;
 use codex_app_server_protocol::CommandExecutionStatus;
 use codex_app_server_protocol::CoreToolCallStatus;
+use codex_app_server_protocol::DynamicToolCallOutputContentItem;
 use codex_app_server_protocol::DynamicToolCallStatus;
 use codex_app_server_protocol::FileUpdateChange;
 use codex_app_server_protocol::McpToolCallError;
@@ -320,6 +321,63 @@ fn execute_display_modes_snapshot() {
     ]
     .into_iter()
     .map(|(label, mode)| format!("{label}\n{}", render(item.clone(), mode)))
+    .collect::<Vec<_>>()
+    .join("\n\n");
+
+    assert_snapshot!(rendered);
+}
+
+#[test]
+fn inspection_tool_blocks_snapshot() {
+    let items = [
+        ThreadItem::CoreToolCall {
+            id: "read-raw".to_string(),
+            tool: "Read".to_string(),
+            arguments: json!({"file_path": "/workspace/src/main.rs"}),
+            status: CoreToolCallStatus::Completed,
+            result: Some("fn main() {\n\n    println!(\"astral\");\n}\n".to_string()),
+            error: None,
+            duration_ms: Some(16),
+        },
+        ThreadItem::DynamicToolCall {
+            id: "list-files".to_string(),
+            namespace: Some("claude".to_string()),
+            tool: "Glob".to_string(),
+            arguments: json!({"pattern": "**/*.rs"}),
+            status: DynamicToolCallStatus::Completed,
+            content_items: Some(vec![DynamicToolCallOutputContentItem::InputText {
+                text: "src/main.rs\nsrc/lib.rs".to_string(),
+            }]),
+            success: Some(true),
+            duration_ms: Some(8),
+        },
+        ThreadItem::DynamicToolCall {
+            id: "search-code".to_string(),
+            namespace: Some("claude".to_string()),
+            tool: "Grep".to_string(),
+            arguments: json!({"pattern": "render_tool"}),
+            status: DynamicToolCallStatus::Completed,
+            content_items: Some(vec![DynamicToolCallOutputContentItem::InputText {
+                text: "src/render.rs:18\nsrc/render/tool.rs:16".to_string(),
+            }]),
+            success: Some(true),
+            duration_ms: Some(10),
+        },
+    ];
+    let rendered = [
+        ("COLLAPSED", DisplayMode::Collapsed),
+        ("EXPANDED", DisplayMode::Expanded),
+    ]
+    .into_iter()
+    .map(|(label, mode)| {
+        let body = items
+            .clone()
+            .into_iter()
+            .map(|item| render(item, mode))
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!("{label}\n{body}")
+    })
     .collect::<Vec<_>>()
     .join("\n\n");
 

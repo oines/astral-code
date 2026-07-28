@@ -3,7 +3,7 @@ source: astral-tui-scrollback/src/render_tests.rs
 expression: rendered
 ---
 ◆ Read main.rs  16ms
-  │ fn main() {}
+  1  fn main() {}
 × Edit main.rs  22ms
   │ old_string was not unique
 ◇ Run cargo check
