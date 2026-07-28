@@ -6,6 +6,7 @@ use ratatui::style::Color;
 
 use super::render_entry_chrome;
 use crate::view::AstralTheme;
+use crate::view::EntryChromeState;
 use crate::view::ScrollbackViewport;
 use crate::view::transcript::TranscriptAccent;
 use crate::view::transcript::TranscriptGroup;
@@ -43,7 +44,10 @@ fn accent_and_selection_box_use_separate_gutter_columns() {
         &layout,
         viewport,
         Rect::new(2, 1, 10, 3),
-        Some("entry"),
+        EntryChromeState {
+            selected_id: Some("entry"),
+            ..EntryChromeState::default()
+        },
         &mut buffer,
         AstralTheme::default(),
     );
@@ -105,7 +109,10 @@ fn expanded_verb_group_selection_wraps_the_whole_group() {
         &layout,
         viewport,
         Rect::new(2, 1, 10, 4),
-        Some("two"),
+        EntryChromeState {
+            selected_id: Some("two"),
+            ..EntryChromeState::default()
+        },
         &mut buffer,
         AstralTheme::default(),
     );

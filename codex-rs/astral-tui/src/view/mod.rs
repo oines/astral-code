@@ -29,6 +29,7 @@ pub(crate) use chrome::ShortcutsBar;
 pub(crate) use chrome::StatusBar;
 pub(crate) use chrome::prompt_height;
 pub(crate) use color_support::ColorLevel;
+pub(crate) use entry_chrome::EntryChromeState;
 pub(crate) use entry_chrome::render_entry_chrome;
 pub(crate) use entry_group::EntryGroupSpan;
 pub(crate) use entry_mouse::EntryMouseAction;

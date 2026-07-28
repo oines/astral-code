@@ -64,7 +64,7 @@ impl ScrollbackViewport {
         }
     }
 
-    fn needs_scrollbar(self) -> bool {
+    pub(crate) fn needs_scrollbar(self) -> bool {
         self.total_lines > self.viewport_lines
     }
 }
@@ -178,6 +178,18 @@ impl ScrollbackNavigation {
         self.anchor = None;
     }
 
+    pub(crate) fn scroll_to_top(&mut self) {
+        self.set_scroll_offset(0);
+    }
+
+    pub(crate) fn set_scroll_offset(&mut self, offset: usize) {
+        let max_top = self.total_lines.saturating_sub(self.viewport_lines);
+        self.follow_mode = false;
+        self.pending_distance_from_bottom = 0;
+        self.first_visible_line = offset.min(max_top);
+        self.refresh_anchor();
+    }
+
     pub(crate) fn page_up(&mut self) -> ScrollbackViewport {
         self.scroll_up(self.page_scroll_lines());
         self.viewport()
@@ -224,7 +236,7 @@ impl ScrollbackNavigation {
         &self.sections
     }
 
-    fn viewport(&self) -> ScrollbackViewport {
+    pub(crate) fn viewport(&self) -> ScrollbackViewport {
         ScrollbackViewport::from_first(
             self.total_lines,
             self.viewport_lines,

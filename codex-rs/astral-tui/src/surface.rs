@@ -50,6 +50,7 @@ use crate::view::AgentViewLayoutInput;
 use crate::view::AstralTheme;
 use crate::view::AstralThemeId;
 use crate::view::ColorLevel;
+use crate::view::EntryChromeState;
 use crate::view::LayoutConfig;
 use crate::view::MentionMenu;
 use crate::view::PaneHeights;
@@ -572,28 +573,28 @@ pub(crate) fn render_surface_with_view(
             usize::from(layout.scrollback_content.height),
         ),
     };
+    let scrollbar_area = Rect::new(
+        layout.scrollbar_x,
+        layout.scrollback.y,
+        1,
+        layout.scrollback.height,
+    );
     let viewport = ScrollbackPane {
         lines: &transcript.lines,
         viewport,
     }
-    .render(
-        layout.scrollback_content,
-        Rect::new(
-            layout.scrollbar_x,
-            layout.scrollback.y,
-            1,
-            layout.scrollback.height,
-        ),
-        buffer,
-        theme,
-    );
+    .render(layout.scrollback_content, scrollbar_area, buffer, theme);
     render_entry_chrome(
         &transcript,
         viewport,
         layout.scrollback_content,
-        (transcript_view == TranscriptView::Full)
-            .then(|| state.scrollback.selected_id())
-            .flatten(),
+        EntryChromeState {
+            selected_id: (transcript_view == TranscriptView::Full)
+                .then(|| state.scrollback.selected_id())
+                .flatten(),
+            hovered_id: state.scrollback.hovered_id(),
+            hovered_mode: state.scrollback.hovered_mode(),
+        },
         buffer,
         theme,
     );
@@ -602,6 +603,7 @@ pub(crate) fn render_surface_with_view(
             &transcript,
             viewport,
             layout.scrollback_content,
+            scrollbar_area,
             buffer,
             theme,
         );
@@ -812,12 +814,6 @@ fn turn_status_line(state: &SurfaceState, theme: AstralTheme) -> Option<Line<'st
             spans.push(" · ".dim());
         }
         spans.push(format!("{} events skipped", state.conversation.skipped_events()).cyan());
-    }
-    if state.scroll_offset() > 0 {
-        if !spans.is_empty() {
-            spans.push(" · ".dim());
-        }
-        spans.push(format!("history ↑{}", state.scroll_offset()).cyan());
     }
     (!spans.is_empty()).then(|| spans.into())
 }

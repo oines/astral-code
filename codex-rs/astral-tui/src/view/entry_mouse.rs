@@ -72,6 +72,16 @@ impl EntryMouseState {
         self.frame = None;
         self.sections.clear();
         self.pending = None;
+        self.last_click = None;
+    }
+
+    pub(crate) fn cancel_gesture(&mut self) {
+        self.pending = None;
+        self.last_click = None;
+    }
+
+    pub(crate) fn item_at(&self, column: u16, row: u16) -> Option<(String, TranscriptSectionKind)> {
+        self.hit_test(column, row)
     }
 
     pub(crate) fn handle_mouse(&mut self, mouse: MouseEvent) -> EntryMouseAction {

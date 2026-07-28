@@ -242,7 +242,11 @@ impl EntryDisplayState {
     }
 
     pub(crate) fn selected_mode(&self) -> Option<DisplayMode> {
-        let entry = self.selected_entry()?;
+        self.selected_id().and_then(|entry_id| self.mode(entry_id))
+    }
+
+    pub(crate) fn mode(&self, entry_id: &str) -> Option<DisplayMode> {
+        let entry = self.entries.iter().find(|entry| entry.id == entry_id)?;
         if entry.group_header {
             return Some(if self.expanded_groups.contains(&entry.id) {
                 DisplayMode::Expanded
@@ -256,6 +260,13 @@ impl EntryDisplayState {
                 .copied()
                 .unwrap_or(entry.default_mode),
         )
+    }
+
+    pub(crate) fn is_foldable(&self, entry_id: &str) -> bool {
+        self.entries
+            .iter()
+            .find(|entry| entry.id == entry_id)
+            .is_some_and(|entry| entry.foldable)
     }
 
     pub(crate) fn selected_is_group_header(&self) -> bool {

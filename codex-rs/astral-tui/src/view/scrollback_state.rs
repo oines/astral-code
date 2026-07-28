@@ -36,11 +36,21 @@ pub(crate) struct ScrollbackState {
     display: EntryDisplayState,
     selection: ScrollbackSelection,
     pointer: EntryMouseState,
+    scrollbar: Option<Rect>,
+    scrollbar_dragging: bool,
+    hovered: Option<String>,
 }
 
 impl ScrollbackState {
     pub(crate) fn observe_entries(&mut self, turns: &[TranscriptTurn]) {
         self.display.observe(turns);
+        if self
+            .hovered
+            .as_deref()
+            .is_some_and(|entry_id| !self.display.contains(entry_id))
+        {
+            self.hovered = None;
+        }
     }
 
     pub(crate) fn display(&self) -> &EntryDisplayState {
@@ -61,15 +71,20 @@ impl ScrollbackState {
         layout: &TranscriptLayout,
         viewport: ScrollbackViewport,
         area: Rect,
+        scrollbar_area: Rect,
         buffer: &mut Buffer,
         theme: AstralTheme,
     ) {
         self.pointer.observe(layout, viewport, area);
+        self.scrollbar = viewport.needs_scrollbar().then_some(scrollbar_area);
         self.selection.render(layout, viewport, area, buffer, theme);
     }
 
     pub(crate) fn clear_frame(&mut self) {
         self.pointer.clear_frame();
+        self.scrollbar = None;
+        self.scrollbar_dragging = false;
+        self.hovered = None;
     }
 
     pub(crate) fn scroll_up(&mut self, lines: usize) {
@@ -135,6 +150,18 @@ impl ScrollbackState {
         self.display.selected_is_foldable()
     }
 
+    pub(crate) fn hovered_id(&self) -> Option<&str> {
+        self.hovered.as_deref()
+    }
+
+    pub(crate) fn hovered_mode(&self) -> Option<DisplayMode> {
+        let hovered = self.hovered.as_deref()?;
+        self.display
+            .is_foldable(hovered)
+            .then(|| self.display.mode(hovered))
+            .flatten()
+    }
+
     pub(crate) fn move_selection(&mut self, delta: isize) {
         let previous = self.display.selected_id().map(str::to_owned);
         let selected = self.display.move_selection(delta);
@@ -164,11 +191,46 @@ impl ScrollbackState {
 
     pub(crate) fn handle_mouse(&mut self, mouse: MouseEvent) -> Option<String> {
         match mouse.kind {
+            MouseEventKind::Down(crossterm::event::MouseButton::Left)
+                if self
+                    .scrollbar
+                    .is_some_and(|area| area.contains((mouse.column, mouse.row).into())) =>
+            {
+                self.pointer.cancel_gesture();
+                self.selection.clear();
+                self.hovered = None;
+                self.scrollbar_dragging = true;
+                self.apply_scrollbar_position(mouse.row);
+                return None;
+            }
+            MouseEventKind::Drag(crossterm::event::MouseButton::Left)
+                if self.scrollbar_dragging =>
+            {
+                self.apply_scrollbar_position(mouse.row);
+                return None;
+            }
+            MouseEventKind::Up(crossterm::event::MouseButton::Left) if self.scrollbar_dragging => {
+                self.scrollbar_dragging = false;
+                return None;
+            }
+            MouseEventKind::Moved => {
+                self.hovered = self
+                    .pointer
+                    .item_at(mouse.column, mouse.row)
+                    .map(|(item_id, _)| item_id)
+                    .filter(|item_id| self.display.contains(item_id));
+            }
             MouseEventKind::ScrollUp => {
+                self.pointer.cancel_gesture();
+                self.scrollbar_dragging = false;
+                self.hovered = None;
                 self.scroll_up(/* lines */ 3);
                 return None;
             }
             MouseEventKind::ScrollDown => {
+                self.pointer.cancel_gesture();
+                self.scrollbar_dragging = false;
+                self.hovered = None;
                 self.scroll_down(/* lines */ 3);
                 return None;
             }
@@ -239,6 +301,38 @@ impl ScrollbackState {
         if let Some(selected) = selected {
             self.display.select(&selected.item_id);
         }
+    }
+
+    fn apply_scrollbar_position(&mut self, screen_row: u16) {
+        let Some(area) = self.scrollbar else {
+            return;
+        };
+        if area.height == 0 || screen_row <= area.y {
+            self.navigation.scroll_to_top();
+            return;
+        }
+        if screen_row >= area.bottom().saturating_sub(1) {
+            self.navigation.scroll_to_bottom();
+            return;
+        }
+
+        let viewport = self.navigation.viewport();
+        let track_height = usize::from(area.height);
+        let thumb_height = viewport
+            .viewport_lines
+            .saturating_mul(track_height)
+            .div_ceil(viewport.total_lines)
+            .clamp(1, track_height);
+        let thumb_travel = track_height.saturating_sub(thumb_height);
+        let max_top = viewport.total_lines.saturating_sub(viewport.viewport_lines);
+        let cell = usize::from(screen_row.saturating_sub(area.y));
+        let thumb_top = cell.saturating_sub(thumb_height / 2).min(thumb_travel);
+        let offset = thumb_top
+            .saturating_mul(max_top)
+            .saturating_add(thumb_travel / 2)
+            .checked_div(thumb_travel)
+            .unwrap_or(0);
+        self.navigation.set_scroll_offset(offset);
     }
 }
 
