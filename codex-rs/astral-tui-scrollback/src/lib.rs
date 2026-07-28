@@ -1,4 +1,5 @@
 mod block;
+mod display;
 mod markdown;
 mod projection;
 mod render;
@@ -11,6 +12,7 @@ pub use block::PresentationBlock;
 pub use block::ToolKind;
 pub use block::ToolPresentation;
 pub use block::ToolStatus;
+pub use display::DisplayMode;
 pub use markdown::LineJoiner;
 pub use markdown::MarkdownLine;
 pub use markdown::MarkdownStyle;

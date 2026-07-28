@@ -7,6 +7,7 @@ use ratatui::text::Span;
 use ratatui::text::Text;
 use textwrap::Options;
 
+use crate::DisplayMode;
 use crate::PresentationBlock;
 use crate::SubagentAction;
 use crate::SubagentAgent;
@@ -22,17 +23,38 @@ use crate::todo::render_todo;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RenderOptions {
     pub width: u16,
-    pub expanded: bool,
+    pub mode: DisplayMode,
     pub max_output_lines: usize,
 }
 
 impl RenderOptions {
-    pub fn compact(width: u16) -> Self {
+    pub fn for_mode(width: u16, mode: DisplayMode) -> Self {
         Self {
             width,
-            expanded: false,
+            mode,
             max_output_lines: 3,
         }
+    }
+
+    pub fn compact(width: u16) -> Self {
+        Self::truncated(width)
+    }
+
+    pub fn collapsed(width: u16) -> Self {
+        Self::for_mode(width, DisplayMode::Collapsed)
+    }
+
+    pub fn truncated(width: u16) -> Self {
+        Self::for_mode(width, DisplayMode::Truncated)
+    }
+
+    pub fn expanded(width: u16) -> Self {
+        Self::for_mode(width, DisplayMode::Expanded)
+    }
+
+    pub fn with_max_output_lines(mut self, max_output_lines: usize) -> Self {
+        self.max_output_lines = max_output_lines;
+        self
     }
 }
 
@@ -49,7 +71,7 @@ pub fn render_block(block: &PresentationBlock, options: RenderOptions) -> Text<'
         PresentationBlock::Subagent(subagent) => render_subagent(subagent, options),
         PresentationBlock::System { title, detail } => {
             let mut lines = vec![vec!["◆ ".dim(), title.clone().dim()].into()];
-            if options.expanded
+            if options.mode == DisplayMode::Expanded
                 && let Some(detail) = detail
             {
                 lines.extend(indented_lines(detail, options.width, "  ", true));
@@ -71,14 +93,14 @@ fn render_subagent(subagent: &SubagentPresentation, options: RenderOptions) -> T
     }
     let mut lines = vec![Line::from(header)];
 
-    if options.expanded
+    if options.mode == DisplayMode::Expanded
         && !matches!(subagent.action, SubagentAction::Spawn)
         && let Some(prompt) = subagent.prompt.as_deref()
     {
         lines.extend(indented_lines(prompt, options.width, "  ", true));
     }
 
-    if options.expanded || matches!(subagent.action, SubagentAction::Wait) {
+    if options.mode == DisplayMode::Expanded || matches!(subagent.action, SubagentAction::Wait) {
         lines.extend(subagent.agents.iter().map(render_subagent_state));
     }
     Text::from(lines)
@@ -192,8 +214,9 @@ fn render_assistant(text: &str, width: u16) -> Text<'static> {
 fn render_thinking(text: &str, running: bool, options: RenderOptions) -> Text<'static> {
     let marker = if running { "◇ " } else { "◆ " };
     let mut lines = vec![vec![marker.magenta(), "Thinking".dim().italic()].into()];
-    if options.expanded || running {
-        lines.extend(indented_lines(text, options.width, "  ", true));
+    if options.mode != DisplayMode::Collapsed {
+        let body = indented_lines(text, options.width, "  ", true);
+        lines.extend(limit_lines(body, options));
     }
     Text::from(lines)
 }
@@ -201,8 +224,9 @@ fn render_thinking(text: &str, running: bool, options: RenderOptions) -> Text<'s
 fn render_plan(text: &str, running: bool, options: RenderOptions) -> Text<'static> {
     let marker = if running { "◇ " } else { "◆ " };
     let mut lines = vec![vec![marker.cyan(), "Plan".cyan()].into()];
-    if options.expanded || running {
-        lines.extend(indented_lines(text, options.width, "  ", false));
+    if options.mode != DisplayMode::Collapsed {
+        let body = indented_lines(text, options.width, "  ", false);
+        lines.extend(limit_lines(body, options));
     }
     Text::from(lines)
 }
@@ -223,7 +247,7 @@ fn render_tool(tool: &ToolPresentation, options: RenderOptions) -> Text<'static>
     }
     let mut lines = vec![Line::from(header)];
 
-    if options.expanded {
+    if options.mode == DisplayMode::Expanded {
         lines.extend(
             tool.details
                 .iter()
@@ -256,10 +280,12 @@ fn render_tool(tool: &ToolPresentation, options: RenderOptions) -> Text<'static>
         }
     }
 
-    if let Some(output) = tool.output.as_deref() {
+    if options.mode != DisplayMode::Collapsed
+        && let Some(output) = tool.output.as_deref()
+    {
         let mut output_lines = indented_lines(output, options.width, "  │ ", true);
         let total = output_lines.len();
-        if !options.expanded && total > options.max_output_lines {
+        if options.mode == DisplayMode::Truncated && total > options.max_output_lines {
             output_lines.truncate(options.max_output_lines);
             output_lines.push(
                 vec![
@@ -272,6 +298,16 @@ fn render_tool(tool: &ToolPresentation, options: RenderOptions) -> Text<'static>
         lines.extend(output_lines);
     }
     Text::from(lines)
+}
+
+fn limit_lines(mut lines: Vec<Line<'static>>, options: RenderOptions) -> Vec<Line<'static>> {
+    if options.mode != DisplayMode::Truncated || lines.len() <= options.max_output_lines {
+        return lines;
+    }
+    let hidden = lines.len() - options.max_output_lines;
+    lines.truncate(options.max_output_lines);
+    lines.push(vec!["  └ ".dim(), format!("{hidden} more lines").dim()].into());
+    lines
 }
 
 fn mcp_header(tool: &ToolPresentation) -> Vec<Span<'static>> {

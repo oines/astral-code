@@ -13,6 +13,7 @@ use codex_utils_absolute_path::AbsolutePathBuf;
 use insta::assert_snapshot;
 use serde_json::json;
 
+use super::DisplayMode;
 use super::RenderOptions;
 use super::render_block;
 use crate::PresentationBlock;
@@ -21,22 +22,15 @@ use crate::SubagentPresentation;
 use crate::TimelineStream;
 use crate::ToolStatus;
 
-fn render(item: ThreadItem, expanded: bool) -> String {
+fn render(item: ThreadItem, mode: DisplayMode) -> String {
     let block = PresentationBlock::from_item(&item, &crate::TimelineStream::None)
         .expect("fixture should produce a presentation block");
-    render_block(
-        &block,
-        RenderOptions {
-            width: 68,
-            expanded,
-            max_output_lines: 3,
-        },
-    )
-    .lines
-    .iter()
-    .map(std::string::ToString::to_string)
-    .collect::<Vec<_>>()
-    .join("\n")
+    render_block(&block, RenderOptions::for_mode(68, mode))
+        .lines
+        .iter()
+        .map(std::string::ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[test]
@@ -96,7 +90,7 @@ fn codex_surface_tool_blocks_snapshot() {
 
     let rendered = items
         .into_iter()
-        .map(|item| render(item, true))
+        .map(|item| render(item, DisplayMode::Expanded))
         .collect::<Vec<_>>()
         .join("\n");
     assert_snapshot!(rendered);
@@ -146,7 +140,7 @@ fn claude_surface_tool_blocks_snapshot() {
 
     let rendered = items
         .into_iter()
-        .map(|item| render(item, false))
+        .map(|item| render(item, DisplayMode::Truncated))
         .collect::<Vec<_>>()
         .join("\n");
     assert_snapshot!(rendered);
@@ -189,7 +183,7 @@ fn todo_tool_surfaces_snapshot() {
 
     let rendered = items
         .into_iter()
-        .map(|item| render(item, true))
+        .map(|item| render(item, DisplayMode::Expanded))
         .collect::<Vec<_>>()
         .join("\n");
     assert_snapshot!(rendered);
@@ -238,7 +232,7 @@ fn background_task_action_tool_surfaces_snapshot() {
 
     let rendered = items
         .into_iter()
-        .map(|item| render(item, true))
+        .map(|item| render(item, DisplayMode::Expanded))
         .collect::<Vec<_>>()
         .join("\n");
     assert_snapshot!(rendered);
@@ -265,19 +259,12 @@ fn background_command_lifecycle_snapshot() {
     stream.append_terminal_input("process-7", "continue\n");
     let block = PresentationBlock::from_item(&item, &stream)
         .expect("command should produce a presentation block");
-    let rendered = render_block(
-        &block,
-        RenderOptions {
-            width: 68,
-            expanded: true,
-            max_output_lines: 3,
-        },
-    )
-    .lines
-    .iter()
-    .map(std::string::ToString::to_string)
-    .collect::<Vec<_>>()
-    .join("\n");
+    let rendered = render_block(&block, RenderOptions::expanded(68))
+        .lines
+        .iter()
+        .map(std::string::ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
 
     assert_snapshot!(rendered);
 }
@@ -319,7 +306,7 @@ fn web_and_image_tool_blocks_snapshot() {
 
     let rendered = items
         .into_iter()
-        .map(|item| render(item, true))
+        .map(|item| render(item, DisplayMode::Expanded))
         .collect::<Vec<_>>()
         .join("\n");
     assert_snapshot!(rendered);
@@ -379,7 +366,7 @@ fn terminal_tool_states_snapshot() {
 
     let rendered = items
         .into_iter()
-        .map(|item| render(item, true))
+        .map(|item| render(item, DisplayMode::Expanded))
         .collect::<Vec<_>>()
         .join("\n");
     assert_snapshot!(rendered);
@@ -417,7 +404,7 @@ fn conversation_blocks_snapshot() {
 
     let rendered = items
         .into_iter()
-        .map(|item| render(item, true))
+        .map(|item| render(item, DisplayMode::Expanded))
         .collect::<Vec<_>>()
         .join("\n\n");
     assert_snapshot!(rendered);
@@ -429,18 +416,11 @@ fn wrapping_preserves_cjk_without_inserting_spaces() {
         text: "你好，我是 Astral，可以帮你读写代码。".to_string(),
     };
 
-    let rendered = render_block(
-        &block,
-        RenderOptions {
-            width: 10,
-            expanded: true,
-            max_output_lines: 3,
-        },
-    )
-    .lines
-    .iter()
-    .map(std::string::ToString::to_string)
-    .collect::<Vec<_>>();
+    let rendered = render_block(&block, RenderOptions::expanded(10))
+        .lines
+        .iter()
+        .map(std::string::ToString::to_string)
+        .collect::<Vec<_>>();
 
     assert_eq!(
         rendered,
@@ -498,7 +478,7 @@ fn subagent_lifecycle_blocks_snapshot() {
 
     let rendered = items
         .into_iter()
-        .map(|item| render(item, false))
+        .map(|item| render(item, DisplayMode::Collapsed))
         .collect::<Vec<_>>()
         .join("\n");
     assert_snapshot!(rendered);
@@ -531,12 +511,15 @@ fn subagent_action_chrome_snapshot() {
     let rendered = blocks
         .iter()
         .map(|block| {
-            render_block(block, RenderOptions::compact(68))
-                .lines
-                .iter()
-                .map(std::string::ToString::to_string)
-                .collect::<Vec<_>>()
-                .join("\n")
+            render_block(
+                block,
+                RenderOptions::for_mode(68, block.default_display_mode()),
+            )
+            .lines
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
         })
         .collect::<Vec<_>>()
         .join("\n");
