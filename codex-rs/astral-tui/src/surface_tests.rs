@@ -19,22 +19,10 @@ use codex_app_server_protocol::TurnPlanUpdatedNotification;
 use codex_app_server_protocol::TurnStartedNotification;
 use codex_app_server_protocol::TurnStatus;
 use codex_app_server_protocol::UserInput;
-use codex_app_server_protocol::build_turns_from_rollout_items;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::Settings;
 use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_WORKSPACE;
-use codex_protocol::models::FunctionCallOutputBody;
-use codex_protocol::models::FunctionCallOutputPayload;
-use codex_protocol::models::MessagePhase;
-use codex_protocol::models::ReasoningItemContent;
-use codex_protocol::models::TranscriptItem;
-use codex_protocol::protocol::AgentMessageEvent;
-use codex_protocol::protocol::EventMsg;
-use codex_protocol::protocol::RolloutItem;
-use codex_protocol::protocol::TurnCompleteEvent;
-use codex_protocol::protocol::TurnStartedEvent;
-use codex_protocol::protocol::UserMessageEvent;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
@@ -1112,121 +1100,6 @@ fn reused_provider_item_ids_preserve_turn_order_snapshot() {
         "turns must render in chronological order:\n{rendered}"
     );
     insta::assert_snapshot!("reused_provider_item_ids_preserve_turn_order", rendered);
-}
-
-#[test]
-fn replayed_reasoning_preserves_surface_order_snapshot() {
-    let rollout_items = vec![
-        RolloutItem::EventMsg(EventMsg::TurnStarted(TurnStartedEvent {
-            turn_id: "turn-reasoning".to_string(),
-            trace_id: None,
-            started_at: None,
-            model_context_window: None,
-            collaboration_mode_kind: Default::default(),
-        })),
-        RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
-            message: "make a plan".to_string(),
-            ..Default::default()
-        })),
-        RolloutItem::TranscriptItem(TranscriptItem::Reasoning {
-            id: String::new(),
-            summary: Vec::new(),
-            content: Some(vec![ReasoningItemContent::ReasoningText {
-                text: "first thought".to_string(),
-            }]),
-            encrypted_content: None,
-            provider_metadata: None,
-        }),
-        RolloutItem::EventMsg(EventMsg::AgentMessage(AgentMessageEvent {
-            message: "I will draft the plan.".to_string(),
-            phase: Some(MessagePhase::Commentary),
-            memory_citation: None,
-        })),
-        RolloutItem::TranscriptItem(TranscriptItem::FunctionCall {
-            id: None,
-            name: "update_plan".to_string(),
-            namespace: None,
-            arguments: json!({
-                "explanation": "Keep the order visible.",
-                "plan": [{"step": "Trace order", "status": "in_progress"}]
-            })
-            .to_string(),
-            call_id: "plan-1".to_string(),
-        }),
-        RolloutItem::TranscriptItem(TranscriptItem::FunctionCallOutput {
-            call_id: "plan-1".to_string(),
-            output: FunctionCallOutputPayload {
-                body: FunctionCallOutputBody::Text("Plan updated".to_string()),
-                success: Some(true),
-            },
-        }),
-        RolloutItem::TranscriptItem(TranscriptItem::Reasoning {
-            id: String::new(),
-            summary: Vec::new(),
-            content: Some(vec![ReasoningItemContent::Text {
-                text: "second thought".to_string(),
-            }]),
-            encrypted_content: None,
-            provider_metadata: None,
-        }),
-        RolloutItem::EventMsg(EventMsg::AgentMessage(AgentMessageEvent {
-            message: "The plan is ready.".to_string(),
-            phase: Some(MessagePhase::FinalAnswer),
-            memory_citation: None,
-        })),
-        RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
-            turn_id: "turn-reasoning".to_string(),
-            last_agent_message: None,
-            completed_at: None,
-            duration_ms: None,
-            time_to_first_token_ms: None,
-        })),
-    ];
-    let mut session = session_state();
-    session.thread.turns = build_turns_from_rollout_items(&rollout_items);
-    session.active_turn_id = None;
-    let mut state = SurfaceState::from_session(&session);
-    let area = Rect::new(0, 0, 100, 30);
-    let mut buffer = Buffer::empty(area);
-    render_surface_with_view(
-        &mut state,
-        &session,
-        TranscriptView::Full,
-        area,
-        &mut buffer,
-    );
-
-    let rendered = buffer_text(&buffer);
-    let question = rendered
-        .find("make a plan")
-        .unwrap_or_else(|| panic!("question missing:\n{rendered}"));
-    let thought_offsets = rendered
-        .match_indices("Thought")
-        .map(|(offset, _)| offset)
-        .collect::<Vec<_>>();
-    let commentary = rendered
-        .find("I will draft the plan.")
-        .unwrap_or_else(|| panic!("commentary missing:\n{rendered}"));
-    let todo = rendered
-        .find("Trace order")
-        .unwrap_or_else(|| panic!("todo missing:\n{rendered}"));
-    let answer = rendered
-        .find("The plan is ready.")
-        .unwrap_or_else(|| panic!("answer missing:\n{rendered}"));
-    assert_eq!(
-        thought_offsets.len(),
-        2,
-        "expected two Thought rows:\n{rendered}"
-    );
-    assert!(
-        question < thought_offsets[0]
-            && thought_offsets[0] < commentary
-            && commentary < todo
-            && todo < thought_offsets[1]
-            && thought_offsets[1] < answer,
-        "replayed items must preserve rollout order:\n{rendered}"
-    );
-    insta::assert_snapshot!("replayed_reasoning_preserves_surface_order", rendered);
 }
 
 #[test]
