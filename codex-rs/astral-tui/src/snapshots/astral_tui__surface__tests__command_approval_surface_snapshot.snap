@@ -16,7 +16,7 @@ expression: buffer_text(&buffer)
  ┃  $ cargo test --workspace
  ┃  Reason · needs network access
  ┃
- ┃  y (○) Allow once
- ┃  a (○) Allow for this session
- ┃  n (○) Deny
- Y:allow  │  A:session  │  N:deny  │  Esc:cancel
+ ┃  1 (●) Allow once
+ ┃  2 (○) Allow for this session
+ ┃  3 (○) Deny
+ ↑/↓:navigate  │  Enter:select  │  Tab:transcript  │  Esc:cancel

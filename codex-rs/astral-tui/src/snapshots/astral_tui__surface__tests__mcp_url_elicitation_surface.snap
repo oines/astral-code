@@ -17,6 +17,6 @@ expression: "request_surface(json!({\n    \"method\": \"mcpServer/elicitation/re
  ┃  Connect Linear to continue
  ┃  https://linear.app/oauth/authorize
  ┃
- ┃  y (○) Open and continue
- ┃  n (○) Decline
- Y:accept  │  N:decline  │  Esc:cancel
+ ┃  1 (●) Open and continue
+ ┃  2 (○) Decline
+ ↑/↓:navigate  │  Enter:select  │  Tab:transcript  │  Esc:cancel

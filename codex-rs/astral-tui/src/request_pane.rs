@@ -3,8 +3,6 @@
 mod mcp_form;
 mod user_input;
 
-use codex_app_server_protocol::CommandExecutionApprovalDecision;
-use codex_app_server_protocol::CommandExecutionRequestApprovalParams;
 use codex_app_server_protocol::McpServerElicitationRequest;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Position;
@@ -16,36 +14,41 @@ use ratatui::text::Line;
 
 use crate::PendingRequest;
 use crate::mcp_form::McpFormState;
+use crate::request_choice::RequestChoiceState;
 use crate::request_user_input::RequestUserInputState;
 use crate::view::AstralTheme;
 
 const APPROVAL_HINTS: &[(&str, &str)] = &[
-    ("Y", "allow"),
-    ("A", "session"),
-    ("N", "deny"),
+    ("↑/↓", "navigate"),
+    ("Enter", "select"),
+    ("Tab", "transcript"),
     ("Esc", "cancel"),
 ];
-const PERMISSION_HINTS: &[(&str, &str)] = &[("Y", "turn"), ("A", "session"), ("N", "deny")];
-const MCP_URL_HINTS: &[(&str, &str)] = &[("Y", "accept"), ("N", "decline"), ("Esc", "cancel")];
 const WAITING_HINTS: &[(&str, &str)] = &[];
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct RequestPane<'a> {
     request: &'a PendingRequest,
+    request_choice: &'a RequestChoiceState,
     request_user_input: &'a RequestUserInputState,
     mcp_form: &'a McpFormState,
+    focused: bool,
 }
 
 impl<'a> RequestPane<'a> {
     pub(crate) fn new(
         request: &'a PendingRequest,
+        request_choice: &'a RequestChoiceState,
         request_user_input: &'a RequestUserInputState,
         mcp_form: &'a McpFormState,
+        focused: bool,
     ) -> Self {
         Self {
             request,
+            request_choice,
             request_user_input,
             mcp_form,
+            focused,
         }
     }
 
@@ -59,13 +62,13 @@ impl<'a> RequestPane<'a> {
             PendingRequest::CommandExecution { .. } | PendingRequest::FileChange { .. } => {
                 APPROVAL_HINTS
             }
-            PendingRequest::Permissions { .. } => PERMISSION_HINTS,
+            PendingRequest::Permissions { .. } => APPROVAL_HINTS,
             PendingRequest::UserInput { params, .. } => {
                 user_input::shortcuts(params, self.request_user_input)
             }
             PendingRequest::McpElicitation { params, .. } => match params.request {
                 McpServerElicitationRequest::Form { .. } => mcp_form::shortcuts(self.mcp_form),
-                McpServerElicitationRequest::Url { .. } => MCP_URL_HINTS,
+                McpServerElicitationRequest::Url { .. } => APPROVAL_HINTS,
             },
             PendingRequest::DynamicTool { .. }
             | PendingRequest::Attestation { .. }
@@ -162,14 +165,37 @@ impl<'a> RequestPane<'a> {
                     }
                     buffer.set_line(content_x, y, &Line::from(spans), content_width);
                 }
-                PaneRow::Choice { key, label } => {
+                PaneRow::Choice { index, label } => {
+                    let selected = self.request_choice.selected() == Some(index);
+                    let hovered = self.request_choice.hovered() == Some(index);
+                    let row_area =
+                        Rect::new(area.x.saturating_add(1), y, area.width.saturating_sub(1), 1);
+                    let row_background = if hovered || (selected && self.focused) {
+                        theme.panel_selected
+                    } else {
+                        theme.panel_background
+                    };
+                    buffer.set_style(
+                        row_area,
+                        Style::default().fg(theme.text_primary).bg(row_background),
+                    );
+                    let marker = if selected { "●" } else { "○" };
+                    let label = if selected { label.bold() } else { label.into() };
                     buffer.set_line(
                         content_x,
                         y,
                         &Line::from(vec![
-                            format!("{key} ").fg(theme.accent_running).bold(),
-                            "(○) ".fg(theme.gray),
-                            label.into(),
+                            format!("{} ", index + 1)
+                                .fg(theme.accent_running)
+                                .bg(row_background),
+                            format!("({marker}) ")
+                                .fg(if selected {
+                                    theme.text_primary
+                                } else {
+                                    theme.gray
+                                })
+                                .bg(row_background),
+                            label.bg(row_background),
                         ]),
                         content_width,
                     );
@@ -219,6 +245,31 @@ impl<'a> RequestPane<'a> {
         cursor
     }
 
+    pub(crate) fn choice_hit_rows(self, area: Rect) -> Vec<(usize, Rect)> {
+        if area.is_empty() {
+            return Vec::new();
+        }
+        self.content(area.height)
+            .rows
+            .into_iter()
+            .enumerate()
+            .filter_map(|(row, item)| {
+                let PaneRow::Choice { index, .. } = item else {
+                    return None;
+                };
+                let y = area
+                    .y
+                    .saturating_add(u16::try_from(row).unwrap_or(u16::MAX));
+                (y < area.bottom()).then(|| {
+                    (
+                        index,
+                        Rect::new(area.x.saturating_add(1), y, area.width.saturating_sub(1), 1),
+                    )
+                })
+            })
+            .collect()
+    }
+
     fn content(self, max_rows: u16) -> PaneContent {
         let mut rows = vec![PaneRow::Blank];
         let mut input = false;
@@ -233,7 +284,7 @@ impl<'a> RequestPane<'a> {
                     rows.push(PaneRow::Body(format!("Reason · {reason}")));
                 }
                 rows.push(PaneRow::Blank);
-                push_command_choices(&mut rows, params);
+                push_choices(&mut rows, self.request_choice);
             }
             PendingRequest::FileChange { params, .. } => {
                 rows.push(PaneRow::Title("Allow file changes?".to_string()));
@@ -242,11 +293,7 @@ impl<'a> RequestPane<'a> {
                     std::convert::Into::into,
                 )));
                 rows.push(PaneRow::Blank);
-                rows.extend([
-                    PaneRow::choice("y", "Allow once"),
-                    PaneRow::choice("a", "Allow for this session"),
-                    PaneRow::choice("n", "Deny"),
-                ]);
+                push_choices(&mut rows, self.request_choice);
             }
             PendingRequest::Permissions { params, .. } => {
                 rows.push(PaneRow::Title("Grant additional permissions?".to_string()));
@@ -262,11 +309,7 @@ impl<'a> RequestPane<'a> {
                     params.cwd.to_string_lossy()
                 )));
                 rows.push(PaneRow::Blank);
-                rows.extend([
-                    PaneRow::choice("y", "Allow for this turn"),
-                    PaneRow::choice("a", "Allow for this session"),
-                    PaneRow::choice("n", "Deny"),
-                ]);
+                push_choices(&mut rows, self.request_choice);
             }
             PendingRequest::UserInput { params, .. } => {
                 input =
@@ -290,10 +333,7 @@ impl<'a> RequestPane<'a> {
                     rows.push(PaneRow::Body(message.clone()));
                     rows.push(PaneRow::Body(url.clone()));
                     rows.push(PaneRow::Blank);
-                    rows.extend([
-                        PaneRow::choice("y", "Open and continue"),
-                        PaneRow::choice("n", "Decline"),
-                    ]);
+                    push_choices(&mut rows, self.request_choice);
                 }
             },
             PendingRequest::DynamicTool { params, .. } => {
@@ -367,7 +407,7 @@ enum PaneRow {
         committed: bool,
     },
     Choice {
-        key: &'static str,
+        index: usize,
         label: &'static str,
     },
     Input {
@@ -424,46 +464,15 @@ fn push_visible_options(
     }
 }
 
-impl PaneRow {
-    fn choice(key: &'static str, label: &'static str) -> Self {
-        Self::Choice { key, label }
-    }
-}
-
-fn push_command_choices(rows: &mut Vec<PaneRow>, params: &CommandExecutionRequestApprovalParams) {
-    let available = |decision: &CommandExecutionApprovalDecision| {
-        params
-            .available_decisions
-            .as_ref()
-            .is_none_or(|decisions| decisions.contains(decision))
-    };
-    if available(&CommandExecutionApprovalDecision::Accept) {
-        rows.push(PaneRow::choice("y", "Allow once"));
-    }
-    if available(&CommandExecutionApprovalDecision::AcceptForSession) {
-        rows.push(PaneRow::choice("a", "Allow for this session"));
-    }
-    if available(&CommandExecutionApprovalDecision::Decline) {
-        rows.push(PaneRow::choice("n", "Deny"));
-    }
-    if let Some(amendment) = &params.proposed_execpolicy_amendment {
-        let decision = CommandExecutionApprovalDecision::AcceptWithExecpolicyAmendment {
-            execpolicy_amendment: amendment.clone(),
-        };
-        if available(&decision) {
-            rows.push(PaneRow::choice("e", "Trust the proposed command pattern"));
-        }
-    }
-    if let Some(amendment) = params
-        .proposed_network_policy_amendments
-        .as_ref()
-        .and_then(|amendments| amendments.first())
-    {
-        let decision = CommandExecutionApprovalDecision::ApplyNetworkPolicyAmendment {
-            network_policy_amendment: amendment.clone(),
-        };
-        if available(&decision) {
-            rows.push(PaneRow::choice("p", "Apply the proposed network rule"));
-        }
-    }
+fn push_choices(rows: &mut Vec<PaneRow>, state: &RequestChoiceState) {
+    rows.extend(
+        state
+            .choices()
+            .iter()
+            .enumerate()
+            .map(|(index, choice)| PaneRow::Choice {
+                index,
+                label: choice.label,
+            }),
+    );
 }

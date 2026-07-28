@@ -536,6 +536,12 @@ pub(crate) fn render_surface_with_view(
     state.sync_request_states();
 
     let has_request = state.pending_requests.front().is_some();
+    let request_focused = state
+        .pending_requests
+        .front()
+        .is_some_and(|request| {
+            !crate::request_choice::is_simple_request(request) || !state.scrollback_focused()
+        });
     let plan_review = state.plan_review().cloned();
     let prompt_height = state.pending_requests.front().map_or_else(
         || {
@@ -549,8 +555,14 @@ pub(crate) fn render_surface_with_view(
             }
         },
         |request| {
-            RequestPane::new(request, state.request_user_input(), state.mcp_form())
-                .height(area.height)
+            RequestPane::new(
+                request,
+                state.request_choice(),
+                state.request_user_input(),
+                state.mcp_form(),
+                request_focused,
+            )
+            .height(area.height)
         },
     );
     let slash = state.slash().clone();
@@ -706,14 +718,20 @@ pub(crate) fn render_surface_with_view(
                 .map(|profile| profile.id.as_str()),
         )
     };
-    let request_pane = state
-        .pending_requests
-        .front()
-        .map(|request| RequestPane::new(request, state.request_user_input(), state.mcp_form()));
+    let request_pane = state.pending_requests.front().map(|request| {
+        RequestPane::new(
+            request,
+            state.request_choice(),
+            state.request_user_input(),
+            state.mcp_form(),
+            request_focused,
+        )
+    });
     let revising_plan = plan_review
         .as_ref()
         .is_some_and(|review| review.focus() == PlanReviewFocus::Revision);
-    let prompt_focused = request_pane.is_some() || revising_plan || !state.scrollback_focused();
+    let prompt_focused =
+        (request_pane.is_some() && request_focused) || revising_plan || !state.scrollback_focused();
     let cursor = if let Some(pane) = request_pane {
         pane.render(layout.prompt, buffer, theme)
     } else if plan_review
@@ -756,7 +774,9 @@ pub(crate) fn render_surface_with_view(
     ];
     let revision_hints = [("Enter", "request changes"), ("Esc", "back")];
     ShortcutsBar {
-        hints: if let Some(pane) = request_pane {
+        hints: if request_pane.is_some() && !request_focused {
+            &scrollback_hints
+        } else if let Some(pane) = request_pane {
             pane.shortcuts()
         } else if revising_plan {
             &revision_hints
@@ -774,6 +794,11 @@ pub(crate) fn render_surface_with_view(
         right: None,
     }
     .render(layout.shortcuts, buffer, theme);
+    state.request_choice.observe_rows(
+        request_pane
+            .map(|pane| pane.choice_hit_rows(layout.prompt))
+            .unwrap_or_default(),
+    );
     if appearance::render_overlay(state, area, buffer, theme) {
         None
     } else if prompt_focused {
