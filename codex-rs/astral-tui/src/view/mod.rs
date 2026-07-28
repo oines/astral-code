@@ -6,6 +6,7 @@
 
 mod chrome;
 mod color_support;
+mod entry_chrome;
 mod entry_group;
 mod entry_mouse;
 mod entry_state;
@@ -18,12 +19,14 @@ mod selection;
 mod slash_menu;
 mod theme;
 mod transcript;
+mod transcript_layout;
 
 pub(crate) use chrome::PromptChrome;
 pub(crate) use chrome::ShortcutsBar;
 pub(crate) use chrome::StatusBar;
 pub(crate) use chrome::prompt_height;
 pub(crate) use color_support::ColorLevel;
+pub(crate) use entry_chrome::render_entry_chrome;
 pub(crate) use entry_group::EntryGroupSpan;
 pub(crate) use entry_mouse::EntryMouseAction;
 pub(crate) use entry_mouse::EntryMouseState;
@@ -48,6 +51,6 @@ pub(crate) use selection::ScrollbackSelectionAction;
 pub(crate) use slash_menu::SlashMenu;
 pub(crate) use theme::AstralTheme;
 pub(crate) use theme::AstralThemeId;
-pub(crate) use transcript::TranscriptLayout;
 pub(crate) use transcript::render_committed_block;
 pub(crate) use transcript::render_transcript;
+pub(crate) use transcript_layout::TranscriptLayout;

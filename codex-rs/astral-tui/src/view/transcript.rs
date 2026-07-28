@@ -27,85 +27,18 @@ use super::EntryDisplayState;
 use super::EntryGroupSpan;
 use super::entry_group::scan_turn;
 use super::entry_state::entry_id;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct TranscriptSection {
-    pub(crate) item_id: String,
-    pub(crate) lines: Range<usize>,
-    pub(crate) kind: TranscriptSectionKind,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TranscriptSectionKind {
-    Entry,
-    GroupHeader,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct TranscriptSelectableLine {
-    pub(crate) line: usize,
-    pub(crate) columns: Range<u16>,
-    pub(crate) joiner_to_previous: LineJoiner,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct TranscriptSelectableRange {
-    pub(crate) lines: Vec<TranscriptSelectableLine>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct TranscriptAnchor {
-    pub(crate) item_id: String,
-    pub(crate) line_offset: usize,
-    pub(crate) section_height: usize,
-}
-
-impl TranscriptAnchor {
-    pub(crate) fn at(
-        sections: &[TranscriptSection],
-        total_lines: usize,
-        line: usize,
-    ) -> Option<Self> {
-        let line = line.min(total_lines.checked_sub(1)?);
-        let section = sections
-            .iter()
-            .find(|section| section.lines.contains(&line))
-            .or_else(|| {
-                sections
-                    .iter()
-                    .rev()
-                    .find(|section| section.lines.start <= line)
-            })
-            .or_else(|| sections.first())?;
-        Some(Self {
-            item_id: section.item_id.clone(),
-            line_offset: line.saturating_sub(section.lines.start),
-            section_height: section.lines.len().max(1),
-        })
-    }
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct TranscriptLayout {
-    pub(crate) lines: Vec<Line<'static>>,
-    pub(crate) sections: Vec<TranscriptSection>,
-    pub(crate) selectable_ranges: Vec<TranscriptSelectableRange>,
-}
-
-impl TranscriptLayout {
-    pub(crate) fn section(&self, item_id: &str) -> Option<&TranscriptSection> {
-        self.sections
-            .iter()
-            .find(|section| {
-                section.item_id == item_id && section.kind == TranscriptSectionKind::Entry
-            })
-            .or_else(|| {
-                self.sections
-                    .iter()
-                    .find(|section| section.item_id == item_id)
-            })
-    }
-}
+use super::transcript_layout::EntrySpacing;
+pub(crate) use super::transcript_layout::TranscriptAccent;
+pub(crate) use super::transcript_layout::TranscriptAnchor;
+pub(crate) use super::transcript_layout::TranscriptGroup;
+pub(crate) use super::transcript_layout::TranscriptLayout;
+pub(crate) use super::transcript_layout::TranscriptSection;
+pub(crate) use super::transcript_layout::TranscriptSectionKind;
+pub(crate) use super::transcript_layout::TranscriptSelectableLine;
+pub(crate) use super::transcript_layout::TranscriptSelectableRange;
+use super::transcript_layout::begin_entry;
+use super::transcript_layout::entry_accent;
+use super::transcript_layout::entry_spacing;
 
 pub(crate) fn render_transcript(
     turns: &[TranscriptTurn],
@@ -115,11 +48,17 @@ pub(crate) fn render_transcript(
 ) -> TranscriptLayout {
     let mut lines = Vec::new();
     let mut sections = Vec::new();
+    let mut rendered_groups = Vec::new();
     let mut selectable_ranges = Vec::new();
+    let mut previous_spacing = None;
     for turn in turns {
         let groups = scan_turn(turn, display);
+        let mut block_lines = vec![None; turn.blocks.len()];
         for (index, block) in turn.blocks.iter().enumerate() {
-            if let Some(group) = groups.iter().find(|group| group.range.start == index) {
+            let group = groups.iter().find(|group| group.range.start == index);
+            let mode = display.mode_for(&turn.id, &block.item_id, &block.block);
+            if let Some(group) = group {
+                begin_entry(&mut lines, &mut previous_spacing, EntrySpacing::Dense);
                 render_group_section(
                     &mut lines,
                     &mut sections,
@@ -133,10 +72,16 @@ pub(crate) fn render_transcript(
             if groups.iter().any(|group| group.hides(index)) {
                 continue;
             }
+            if group.is_none() {
+                begin_entry(
+                    &mut lines,
+                    &mut previous_spacing,
+                    entry_spacing(&block.block, mode),
+                );
+            }
             let start = lines.len();
             let mut selectable_lines = Vec::new();
             let item_id = entry_id(&turn.id, &block.item_id);
-            let mode = display.mode_for(&turn.id, &block.item_id, &block.block);
             render_turn_block(&mut lines, &mut selectable_lines, block, width, theme, mode);
             if display.selected_id() == Some(item_id.as_str()) {
                 highlight_selected_header(&mut lines, start, width, theme, mode);
@@ -145,31 +90,61 @@ pub(crate) fn render_transcript(
                 item_id,
                 lines: start..lines.len(),
                 kind: TranscriptSectionKind::Entry,
+                accent: entry_accent(&block.block, mode, theme),
             });
             selectable_ranges.push(TranscriptSelectableRange {
                 lines: selectable_lines,
             });
+            block_lines[index] = Some(start..lines.len());
+            previous_spacing = Some(entry_spacing(&block.block, mode));
+        }
+        for group in &groups {
+            let Some(header) = sections.iter().find(|section| {
+                section.item_id == group.id && section.kind == TranscriptSectionKind::GroupHeader
+            }) else {
+                continue;
+            };
+            let end = if group.expanded {
+                block_lines[group.range.clone()]
+                    .iter()
+                    .filter_map(Option::as_ref)
+                    .next_back()
+                    .map_or(header.lines.end, |lines| lines.end)
+            } else {
+                header.lines.end
+            };
+            rendered_groups.push(TranscriptGroup {
+                lines: header.lines.start..end,
+                member_ids: group
+                    .claimed
+                    .iter()
+                    .map(|index| entry_id(&turn.id, &turn.blocks[*index].item_id))
+                    .collect(),
+                expanded: group.expanded,
+            });
         }
         if let Some(duration_ms) = turn_duration_ms(turn) {
+            begin_entry(&mut lines, &mut previous_spacing, EntrySpacing::Separated);
             let line = Line::from(format!("Worked for {}", format_duration(duration_ms)).dim());
             let columns = selectable_columns(&line, width);
             let line_index = lines.len();
             lines.push(line);
-            if let Some(section) = sections.last_mut() {
-                section.lines.end = lines.len();
-            }
-            if let Some(selectable_range) = selectable_ranges.last_mut() {
-                selectable_range.lines.push(TranscriptSelectableLine {
+            selectable_ranges.push(TranscriptSelectableRange {
+                lines: vec![TranscriptSelectableLine {
                     line: line_index,
                     columns,
                     joiner_to_previous: LineJoiner::HardBreak,
-                });
-            }
+                }],
+            });
         }
+    }
+    if previous_spacing.is_some() {
+        lines.push(Line::default());
     }
     TranscriptLayout {
         lines,
         sections,
+        groups: rendered_groups,
         selectable_ranges,
     }
 }
@@ -206,6 +181,13 @@ fn render_group_section(
         item_id: group.id.clone(),
         lines: start..lines.len(),
         kind: TranscriptSectionKind::GroupHeader,
+        accent: Some(if group.failed {
+            TranscriptAccent::Full(theme.accent_error)
+        } else if group.running {
+            TranscriptAccent::Full(theme.accent_running)
+        } else {
+            TranscriptAccent::Collapsed(theme.gray)
+        }),
     });
     selectable_ranges.push(TranscriptSelectableRange {
         lines: vec![TranscriptSelectableLine {
@@ -247,12 +229,14 @@ pub(crate) fn render_committed_block(
     if committed.ends_turn
         && let Some(duration_ms) = turn_duration_ms(&turn)
     {
+        lines.push(Line::default());
         lines.push(
             format!("Worked for {}", format_duration(duration_ms))
                 .dim()
                 .into(),
         );
     }
+    lines.push(Line::default());
     lines
 }
 

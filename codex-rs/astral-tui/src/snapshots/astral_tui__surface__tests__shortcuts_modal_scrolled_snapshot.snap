@@ -8,8 +8,8 @@ expression: "render_at_size(&mut state, &session, 80, 24)"
 
   › inspect this┌─ Keyboard shortcuts ─────────────────────[×]─┐
                 │                                              │
-  I’m tracing th│  /          Open slash-command discovery     │
-                │  ↑/↓        Navigate menus / scroll lists    │
+                │  /          Open slash-command discovery     │
+  I’m tracing th│  ↑/↓        Navigate menus / scroll lists    │
                 │  Tab        Complete item / switch focus     │
                 │  j/k        Select foldable entry            │
                 │  e / Enter  Toggle selected entry            │

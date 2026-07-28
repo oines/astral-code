@@ -8,8 +8,8 @@ expression: "render_at_size(&mut state, &session, 80, 24)"
 
   › inspect this┌─ Session status ─────────────────────────[×]─┐
                 │                                              │
-  I’m tracing th│  Thread             thread-1                 │
-                │  Model              claude-sonnet-4 · anthr  │
+                │  Thread             thread-1                 │
+  I’m tracing th│  Model              claude-sonnet-4 · anthr  │
                 │  Working directory  /workspace               │
                 │  Context            9.2K / 500K              │
                 │                                              │

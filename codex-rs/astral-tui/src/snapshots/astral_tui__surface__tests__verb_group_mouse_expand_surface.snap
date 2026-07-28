@@ -9,10 +9,10 @@ COLLAPSED
 
   › inspect these files
 
-  ◈ Read 2 files, Searched 1 pattern
+
+ ❙◈ Read 2 files, Searched 1 pattern
+
   The relevant files are loaded.
-
-
 
 
 
@@ -38,14 +38,14 @@ EXPANDED
 
   › inspect these files
 
-  ◈ Read 2 files, Searched 1 pattern
-  › Thought
-  ◆ Read a.rs (1 line)  20ms
-  ◆ Search src (1 result)  30ms
-  ◆ Read b.rs (1 line)  20ms
+┌                                                                                      ┐
+│❙◈ Read 2 files, Searched 1 pattern                                                   │
+│ › Thought                                                                            │
+│ ◆ Read a.rs (1 line)  20ms                                                           │
+│ ◆ Search src (1 result)  30ms                                                        │
+│ ◆ Read b.rs (1 line)  20ms                                                           │
+└                                                                                      ┘
   The relevant files are loaded.
-
-
 
 
 

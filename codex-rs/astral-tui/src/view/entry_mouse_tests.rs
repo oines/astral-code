@@ -37,7 +37,9 @@ fn state_with_kind(section_lines: Range<usize>, kind: TranscriptSectionKind) -> 
             item_id: "turn-1\0tool-1".to_string(),
             lines: section_lines,
             kind,
+            accent: None,
         }],
+        groups: Vec::new(),
         selectable_ranges: Vec::new(),
     };
     let mut state = EntryMouseState::default();

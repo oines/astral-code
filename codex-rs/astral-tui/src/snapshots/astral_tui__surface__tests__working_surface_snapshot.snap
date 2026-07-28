@@ -3,11 +3,11 @@ source: astral-tui/src/surface_tests.rs
 expression: buffer_text(&buffer)
 ---
  ⎇ main  /workspace                                         9.2K / 500K
-
- › inspect this repo
-
- I’m tracing the relevant data flow.
-
+ › inspect this repo                                                   █
+                                                                       █
+                                                                       █
+ I’m tracing the relevant data flow.                                   █
+                                                                       █
 
  ◇ Working
  ╭────────────────────────────────────────────────────────────────────╮

@@ -8,8 +8,8 @@ expression: "render_at_size(&mut state, &session, 80, 24)"
 
   › inspect this┌─ Skills ─────────────────────────────────[×]─┐
                 │                                              │
-  I’m tracing th│  skill-08  user · enabled                    │
-                │  skill-09  repo · enabled                    │
+                │  skill-08  user · enabled                    │
+  I’m tracing th│  skill-09  repo · enabled                    │
                 │  skill-10  user · enabled                    │
                 │  skill-11  user · enabled                    │
                 │  skill-12  repo · enabled                    │

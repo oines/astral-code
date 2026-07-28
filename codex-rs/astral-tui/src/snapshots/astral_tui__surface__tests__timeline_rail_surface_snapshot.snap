@@ -6,17 +6,17 @@ expression: "render_at_size(&mut state, &session, 80, 24)"
   ⎇ main  /workspace
 
 
-  › inspect this repo
-
-  I’m tracing the relevant data flow.
+                                                                               █
+  I’m tracing the relevant data flow.                                          █
+                                                                               █
                                                                                ▲
-  › continue with the implementation                                           ─
-                                                                              ━━
-  I’m validating the next layer.                                               ▼
-  Worked for 1.0s
-
-
-
+  › continue with the implementation                                          ━━
+                                                                               ─
+                                                                               ▼
+  I’m validating the next layer.                                               █
+                                                                               █
+  Worked for 1.0s                                                              █
+                                                                               █
 
   ◇ Working
 

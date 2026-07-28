@@ -8,14 +8,14 @@ expression: rendered
 
   › inspect this repo
 
+
   I’m tracing the relevant data flow.
+
   ◆ Todos
     Keep the provider-neutral projection visible.
   ✓ Trace app-server notification
   ▶ Render Grok-style todo rows
   □ Verify Claude and Codex surfaces
-
-
 
 
 

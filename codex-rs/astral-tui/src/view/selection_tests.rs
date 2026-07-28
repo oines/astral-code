@@ -42,13 +42,16 @@ fn layout() -> TranscriptLayout {
                 item_id: "first".to_string(),
                 lines: 0..2,
                 kind: TranscriptSectionKind::Entry,
+                accent: None,
             },
             TranscriptSection {
                 item_id: "second".to_string(),
                 lines: 2..3,
                 kind: TranscriptSectionKind::Entry,
+                accent: None,
             },
         ],
+        groups: Vec::new(),
         selectable_ranges: vec![
             TranscriptSelectableRange {
                 lines: vec![
@@ -146,7 +149,9 @@ fn copied_selection_uses_renderer_owned_soft_wrap_joiners() {
             item_id: "assistant".to_string(),
             lines: 0..2,
             kind: TranscriptSectionKind::Entry,
+            accent: None,
         }],
+        groups: Vec::new(),
         selectable_ranges: vec![TranscriptSelectableRange {
             lines: vec![
                 TranscriptSelectableLine {
@@ -206,7 +211,9 @@ fn semantic_geometry_excludes_timestamp_padding_and_preserves_blank_lines() {
             item_id: "assistant".to_string(),
             lines: 0..3,
             kind: TranscriptSectionKind::Entry,
+            accent: None,
         }],
+        groups: Vec::new(),
         selectable_ranges: vec![TranscriptSelectableRange {
             lines: vec![
                 TranscriptSelectableLine {

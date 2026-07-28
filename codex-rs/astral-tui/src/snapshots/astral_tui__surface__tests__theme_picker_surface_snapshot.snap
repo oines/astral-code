@@ -8,8 +8,8 @@ expression: "render_at_size(&mut state, &session, 80, 24)"
 
   › inspect this┌─ Choose Astral theme ────────────────────[×]─┐
                 │                                              │
-  I’m tracing th│  ❯ Astral Night (current)                    │
-                │      Dark palette with violet accents        │
+                │  ❯ Astral Night (current)                    │
+  I’m tracing th│      Dark palette with violet accents        │
                 │    Astral Day                                │
                 │      Light palette for bright environments   │
                 │    Terminal                                  │

@@ -26,6 +26,7 @@ fn transcript_layout(sections: &[(&str, usize)]) -> TranscriptLayout {
             item_id: (*item_id).to_string(),
             lines: start..lines.len(),
             kind: TranscriptSectionKind::Entry,
+            accent: None,
         });
         selectable_ranges.push(TranscriptSelectableRange {
             lines: (start..lines.len())
@@ -40,6 +41,7 @@ fn transcript_layout(sections: &[(&str, usize)]) -> TranscriptLayout {
     TranscriptLayout {
         lines,
         sections: ranges,
+        groups: Vec::new(),
         selectable_ranges,
     }
 }

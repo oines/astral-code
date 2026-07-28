@@ -1,6 +1,11 @@
+use astral_tui_scrollback::DisplayMode;
 use astral_tui_scrollback::LineJoiner;
 use astral_tui_scrollback::PresentationBlock;
+use astral_tui_scrollback::ToolKind;
+use astral_tui_scrollback::ToolPresentation;
+use astral_tui_scrollback::ToolStatus;
 use pretty_assertions::assert_eq;
+use ratatui::style::Color;
 use ratatui::text::Line;
 
 use crate::CommittedBlock;
@@ -9,8 +14,10 @@ use crate::conversation::TranscriptTurn;
 
 use super::AstralTheme;
 use super::EntryDisplayState;
+use super::TranscriptAccent;
 use super::TranscriptSection;
 use super::TranscriptSectionKind;
+use super::entry_accent;
 use super::format_duration;
 use super::item_duration_ms;
 use super::render_committed_block;
@@ -44,6 +51,49 @@ fn item_duration_uses_lifecycle_timestamps() {
         completed_at_ms: Some(1_500),
     };
     assert_eq!(item_duration_ms(&block), Some(500));
+}
+
+#[test]
+fn entry_accents_follow_grok_block_semantics() {
+    let theme = AstralTheme::default();
+    let thought = PresentationBlock::Thinking {
+        text: "inspect".to_string(),
+        running: false,
+    };
+    assert_eq!(entry_accent(&thought, DisplayMode::Collapsed, theme), None);
+    assert_eq!(
+        entry_accent(&thought, DisplayMode::Expanded, theme),
+        Some(TranscriptAccent::Full(theme.gray_dim))
+    );
+
+    let tool = |kind, status| {
+        PresentationBlock::Tool(ToolPresentation {
+            kind,
+            status,
+            name: String::new(),
+            title: String::new(),
+            details: Vec::new(),
+            output: None,
+            changes: Vec::new(),
+            duration_ms: None,
+        })
+    };
+    assert_eq!(
+        entry_accent(
+            &tool(ToolKind::Edit, ToolStatus::Success),
+            DisplayMode::Expanded,
+            theme,
+        ),
+        None
+    );
+    assert_eq!(
+        entry_accent(
+            &tool(ToolKind::Execute, ToolStatus::Success),
+            DisplayMode::Collapsed,
+            theme,
+        ),
+        Some(TranscriptAccent::Full(Color::Green))
+    );
 }
 
 #[test]
@@ -102,15 +152,18 @@ fn transcript_layout_assigns_stable_item_sections() {
                 item_id: "turn-1\0agent-1".to_string(),
                 lines: 0..1,
                 kind: TranscriptSectionKind::Entry,
+                accent: None,
             },
             TranscriptSection {
                 item_id: "turn-1\0agent-2".to_string(),
-                lines: 1..3,
+                lines: 2..3,
                 kind: TranscriptSectionKind::Entry,
+                accent: None,
             },
         ]
     );
-    assert_eq!(layout.lines.len(), 3);
+    assert_eq!(layout.lines.len(), 6);
+    assert_eq!(layout.selectable_ranges.len(), 3);
 }
 
 #[test]
@@ -135,7 +188,7 @@ fn transcript_omits_timestamp_chrome_and_tracks_soft_wraps() {
 
     assert_eq!(
         layout.lines.iter().map(Line::width).collect::<Vec<_>>(),
-        vec![10, 5]
+        vec![10, 5, 0]
     );
     assert_eq!(selectable[0].columns, 0..10);
     assert_eq!(selectable[0].joiner_to_previous, LineJoiner::HardBreak);

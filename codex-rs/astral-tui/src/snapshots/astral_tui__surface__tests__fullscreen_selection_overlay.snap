@@ -6,8 +6,8 @@ expression: "format!(\"{}\\n\\nselection mask:\\n{}\", buffer_text(&buffer),\nse
 
  › inspect this repo
 
- I’m tracing the relevant data flow.
 
+ I’m tracing the relevant data flow.
 
 
 
@@ -20,6 +20,7 @@ expression: "format!(\"{}\\n\\nselection mask:\\n{}\", buffer_text(&buffer),\nse
  Shift+Tab:mode  │  Ctrl+.:shortcuts
 
 selection mask:
+
 
 
 

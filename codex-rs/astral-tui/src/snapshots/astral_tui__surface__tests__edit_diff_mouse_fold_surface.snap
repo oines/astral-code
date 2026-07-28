@@ -9,14 +9,14 @@ EXPANDED
 
   › inspect this repo
 
+
   I’m tracing the relevant data flow.
+
   ◆ Edit lib.rs
     M src/lib.rs  +1/-1
     │ @@ -1 +1 @@
     │ -old value
     │ +new value
-
-
 
 
 
@@ -38,11 +38,11 @@ COLLAPSED
 
   › inspect this repo
 
+
   I’m tracing the relevant data flow.
-  › Edit lib.rs +1/-1
-
-
-
+┌                                                                              ┐
+│ › Edit lib.rs +1/-1                                                          │
+└                                                                              ┘
 
 
 

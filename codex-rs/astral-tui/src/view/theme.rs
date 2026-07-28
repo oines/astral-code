@@ -65,6 +65,7 @@ pub(crate) struct AstralTheme {
     pub(crate) panel_selected: Color,
     pub(crate) prompt_border: Color,
     pub(crate) prompt_border_active: Color,
+    pub(crate) selection_border: Color,
 }
 
 impl AstralTheme {
@@ -94,6 +95,7 @@ impl AstralTheme {
             panel_selected: quantize(self.panel_selected),
             prompt_border: quantize(self.prompt_border),
             prompt_border_active: quantize(self.prompt_border_active),
+            selection_border: quantize(self.selection_border),
         }
     }
 
@@ -113,6 +115,7 @@ impl AstralTheme {
             panel_selected: Color::Rgb(45, 43, 50),
             prompt_border: Color::Rgb(50, 50, 55),
             prompt_border_active: Color::Rgb(80, 80, 88),
+            selection_border: Color::Rgb(80, 80, 88),
         }
     }
 
@@ -130,6 +133,7 @@ impl AstralTheme {
             panel_selected: Color::Rgb(218, 215, 226),
             prompt_border: Color::Rgb(208, 208, 214),
             prompt_border_active: Color::Rgb(142, 142, 152),
+            selection_border: Color::Rgb(142, 142, 152),
         }
     }
 
@@ -146,6 +150,7 @@ impl AstralTheme {
             panel_selected: Color::DarkGray,
             prompt_border: Color::DarkGray,
             prompt_border_active: Color::Gray,
+            selection_border: Color::Gray,
         }
     }
 }

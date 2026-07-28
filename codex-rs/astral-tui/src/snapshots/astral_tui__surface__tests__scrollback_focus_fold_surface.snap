@@ -7,10 +7,10 @@ COLLAPSED
 
  › inspect this repo
 
+
  I’m tracing the relevant data flow.
- › Run cargo test -p astral-tui  2.4s
 
-
+┃› Run cargo test -p astral-tui  2.4s
 
 
 
@@ -29,12 +29,12 @@ EXPANDED
 
  › inspect this repo
 
+
  I’m tracing the relevant data flow.
- ⌄ Run cargo test -p astral-tui  2.4s
-   │ 150 passed
-   │ 0 failed
 
-
+┃⌄ Run cargo test -p astral-tui  2.4s
+┃  │ 150 passed
+┃  │ 0 failed
 
 
 

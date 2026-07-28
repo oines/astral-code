@@ -67,6 +67,7 @@ use crate::view::StatusBar;
 use crate::view::TranscriptLayout;
 use crate::view::prompt_height;
 use crate::view::render_committed_block;
+use crate::view::render_entry_chrome;
 use crate::view::render_follow_indicator;
 use crate::view::render_transcript;
 
@@ -606,6 +607,16 @@ pub(crate) fn render_surface_with_view(
             1,
             layout.scrollback.height,
         ),
+        buffer,
+        theme,
+    );
+    render_entry_chrome(
+        &transcript,
+        viewport,
+        layout.scrollback_content,
+        (transcript_view == TranscriptView::Full)
+            .then(|| state.entry_display.selected_id())
+            .flatten(),
         buffer,
         theme,
     );
