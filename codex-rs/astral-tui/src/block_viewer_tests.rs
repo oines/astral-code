@@ -93,7 +93,7 @@ fn viewer_search_uses_rendered_line_order_and_wraps_matches() {
 
     state.open_search();
     for character in "beta".chars() {
-        state.handle_search_key(crossterm::event::KeyEvent::new(
+        state.handle_query_key(crossterm::event::KeyEvent::new(
             crossterm::event::KeyCode::Char(character),
             KeyModifiers::NONE,
         ));
@@ -103,6 +103,37 @@ fn viewer_search_uses_rendered_line_order_and_wraps_matches() {
     assert_eq!(state.selected_line(), Some(3));
     assert!(state.select_next_match());
     assert_eq!(state.selected_line(), Some(1));
+}
+
+#[test]
+fn viewer_filter_keeps_only_matching_rendered_lines() {
+    let mut state = BlockViewerState::new("turn\0entry-1".to_string());
+    state.observe_frame(
+        Rect::new(1, 1, 30, 12),
+        Rect::new(3, 3, 24, 5),
+        Rect::new(27, 1, 3, 1),
+        vec![
+            "alpha".to_string(),
+            "beta".to_string(),
+            "alphabet".to_string(),
+            "gamma".to_string(),
+        ],
+    );
+
+    state.open_filter();
+    for character in "alpha".chars() {
+        state.handle_query_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char(character),
+            KeyModifiers::NONE,
+        ));
+    }
+
+    assert_eq!(
+        (0..3)
+            .map(|line| state.rendered_line(line))
+            .collect::<Vec<_>>(),
+        vec![Some("alpha"), Some("alphabet"), None]
+    );
 }
 
 #[test]

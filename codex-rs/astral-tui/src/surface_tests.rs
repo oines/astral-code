@@ -1649,6 +1649,42 @@ fn enter_opens_the_selected_edit_in_a_scrollable_viewer_snapshot() {
     insta::assert_snapshot!("edit_block_viewer_search_surface", buffer_text(&buffer));
 
     assert_eq!(
+        handle_key(&mut state, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        InputAction::Redraw
+    );
+    assert_eq!(
+        handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE),
+        ),
+        InputAction::Redraw
+    );
+    for character in "draw".chars() {
+        assert_eq!(
+            handle_key(
+                &mut state,
+                KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE),
+            ),
+            InputAction::Redraw
+        );
+    }
+    assert_eq!(
+        handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)
+        ),
+        InputAction::Redraw
+    );
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        area,
+        &mut buffer,
+    );
+    insta::assert_snapshot!("edit_block_viewer_filter_surface", buffer_text(&buffer));
+
+    assert_eq!(
         handle_key(
             &mut state,
             KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL),

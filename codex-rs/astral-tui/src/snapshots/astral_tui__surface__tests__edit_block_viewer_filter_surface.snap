@@ -1,20 +1,13 @@
 ---
 source: astral-tui/src/surface_tests.rs
-expression: "format!(\"{}\\n\\nvisual selection mask:\\n{}\", buffer_text(&buffer),\nselection_mask(&buffer, state.theme().panel_selected))"
+expression: buffer_text(&buffer)
 ---
 
   ┌─ lib.rs ─────────────────────────────────────────────────────────────[×]─┐
   │                                                                          │
-  │  ◆ Edit lib.rs                                                           │
-  │                                                                          │
-  │    │ @@ -1,4 +1,6 @@                                                     │
-  │    │  pub fn render() {                                                  │
   │    │ -    draw_old();                                                    │
   │    │ +    draw_header();                                                 │
   │    │ +    draw_body();                                                   │
-  │    │  }                                                                  │
-  │    │ +                                                                   │
-  │    │ +pub fn close() {}                                                  │
   │                                                                          │
   │                                                                          │
   │                                                                          │
@@ -22,14 +15,13 @@ expression: "format!(\"{}\\n\\nvisual selection mask:\\n{}\", buffer_text(&buffe
   │                                                                          │
   │                                                                          │
   │                                                                          │
+  │                                                                          │
+  │                                                                          │
+  │                                                                          │
+  │                                                                          │
+  │                                                                          │
+  │                                                                          │
+  │                                              [filter: draw · 3 matches]  │
   │                                                                          │
   │    Esc close · / search · f filter · v select · y copy · Y copy path     │
   └──────────────────────────────────────────────────────────────────────────┘
-
-visual selection mask:
-
-
-
-     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

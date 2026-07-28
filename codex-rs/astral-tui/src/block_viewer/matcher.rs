@@ -1,7 +1,7 @@
-// Derived from Grok Build's TextMatcher and ListPane search lifecycle at
+// Derived from Grok Build's TextMatcher and ListPane search/filter lifecycle at
 // commit 47348d13ec4508dcfe440e34c6d511bb02998fb2 (Apache-2.0).
-// This viewer-local version searches Astral's already-rendered lines and does
-// not introduce another transcript projection.
+// This viewer-local version matches Astral's already-rendered lines and does
+// not introduce another transcript projection or touch provider semantics.
 
 use std::ops::Range;
 
@@ -13,18 +13,41 @@ use regex::RegexBuilder;
 
 use crate::composer::ComposerState;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ViewerMatchMode {
+    Search,
+    Filter,
+}
+
+impl ViewerMatchMode {
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            Self::Search => "search",
+            Self::Filter => "filter",
+        }
+    }
+}
+
 #[derive(Debug, Default)]
-pub(super) struct ViewerSearch {
+pub(super) struct ViewerMatcher {
     editor: ComposerState,
+    mode: Option<ViewerMatchMode>,
     input_active: bool,
     matcher: Option<Regex>,
     matcher_error: bool,
     match_lines: Vec<usize>,
+    show_highlights: bool,
 }
 
-impl ViewerSearch {
-    pub(super) fn open(&mut self) {
+impl ViewerMatcher {
+    pub(super) fn open(&mut self, mode: ViewerMatchMode) {
+        let reopen_same = self.matcher.is_some() && self.mode == Some(mode);
+        if !reopen_same {
+            self.clear();
+        }
+        self.mode = Some(mode);
         self.input_active = true;
+        self.show_highlights = true;
     }
 
     pub(super) fn input_active(&self) -> bool {
@@ -33,6 +56,14 @@ impl ViewerSearch {
 
     pub(super) fn is_visible(&self) -> bool {
         self.input_active || self.matcher.is_some()
+    }
+
+    pub(super) fn mode(&self) -> ViewerMatchMode {
+        self.mode.unwrap_or(ViewerMatchMode::Search)
+    }
+
+    pub(super) fn filter_active(&self) -> bool {
+        self.mode == Some(ViewerMatchMode::Filter) && self.matcher.is_some()
     }
 
     pub(super) fn query(&self) -> &str {
@@ -49,6 +80,10 @@ impl ViewerSearch {
 
     pub(super) fn match_count(&self) -> usize {
         self.match_lines.len()
+    }
+
+    pub(super) fn match_lines(&self) -> &[usize] {
+        &self.match_lines
     }
 
     pub(super) fn rebuild(&mut self, lines: &[String]) {
@@ -78,6 +113,7 @@ impl ViewerSearch {
                 self.clear();
             } else {
                 self.input_active = false;
+                self.show_highlights = self.mode != Some(ViewerMatchMode::Filter);
             }
             return None;
         }
@@ -105,7 +141,11 @@ impl ViewerSearch {
             return None;
         }
         self.compile_and_rebuild(lines);
-        self.nearest_match(selected.unwrap_or(0))
+        if self.mode == Some(ViewerMatchMode::Search) {
+            self.nearest_match(selected.unwrap_or(0))
+        } else {
+            None
+        }
     }
 
     pub(super) fn paste(
@@ -123,7 +163,11 @@ impl ViewerSearch {
             .collect::<String>();
         self.editor.insert_text(&single_line);
         self.compile_and_rebuild(lines);
-        self.nearest_match(selected.unwrap_or(0))
+        if self.mode == Some(ViewerMatchMode::Search) {
+            self.nearest_match(selected.unwrap_or(0))
+        } else {
+            None
+        }
     }
 
     pub(super) fn next_match(&self, current: usize) -> Option<usize> {
@@ -150,6 +194,9 @@ impl ViewerSearch {
     }
 
     pub(super) fn match_ranges(&self, text: &str) -> Vec<Range<usize>> {
+        if !self.show_highlights {
+            return Vec::new();
+        }
         self.matcher
             .as_ref()
             .map(|matcher| {
@@ -163,7 +210,18 @@ impl ViewerSearch {
             .unwrap_or_default()
     }
 
+    pub(super) fn clear(&mut self) {
+        self.editor.clear();
+        self.mode = None;
+        self.input_active = false;
+        self.matcher = None;
+        self.matcher_error = false;
+        self.match_lines.clear();
+        self.show_highlights = true;
+    }
+
     fn compile_and_rebuild(&mut self, lines: &[String]) {
+        self.show_highlights = true;
         let query = self.editor.text();
         if query.is_empty() {
             self.matcher = None;
@@ -197,13 +255,5 @@ impl ViewerSearch {
             .get(position)
             .or_else(|| self.match_lines.first())
             .copied()
-    }
-
-    pub(super) fn clear(&mut self) {
-        self.editor.clear();
-        self.input_active = false;
-        self.matcher = None;
-        self.matcher_error = false;
-        self.match_lines.clear();
     }
 }

@@ -8,10 +8,11 @@ use crossterm::event::MouseEvent;
 use crossterm::event::MouseEventKind;
 use ratatui::layout::Rect;
 
-#[path = "block_viewer/search.rs"]
-mod search;
+#[path = "block_viewer/matcher.rs"]
+mod matcher;
 
-use self::search::ViewerSearch;
+use self::matcher::ViewerMatchMode;
+use self::matcher::ViewerMatcher;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BlockViewerMouseAction {
@@ -39,7 +40,8 @@ pub(crate) struct BlockViewerState {
     close_button: Option<Rect>,
     close_hovered: bool,
     rendered_lines: Vec<String>,
-    search: ViewerSearch,
+    visible_line_indices: Vec<usize>,
+    matcher: ViewerMatcher,
 }
 
 impl BlockViewerState {
@@ -57,7 +59,8 @@ impl BlockViewerState {
             close_button: None,
             close_hovered: false,
             rendered_lines: Vec::new(),
-            search: ViewerSearch::default(),
+            visible_line_indices: Vec::new(),
+            matcher: ViewerMatcher::default(),
         }
     }
 
@@ -87,38 +90,46 @@ impl BlockViewerState {
         self.close_hovered
     }
 
-    pub(crate) fn search_input_active(&self) -> bool {
-        self.search.input_active()
+    pub(crate) fn query_input_active(&self) -> bool {
+        self.matcher.input_active()
     }
 
-    pub(crate) fn search_bar_visible(&self) -> bool {
-        self.search.is_visible()
+    pub(crate) fn query_bar_visible(&self) -> bool {
+        self.matcher.is_visible()
     }
 
-    pub(crate) fn search_query(&self) -> &str {
-        self.search.query()
+    pub(crate) fn query_label(&self) -> &'static str {
+        self.matcher.mode().label()
     }
 
-    pub(crate) fn search_cursor(&self) -> usize {
-        self.search.cursor()
+    pub(crate) fn query_text(&self) -> &str {
+        self.matcher.query()
     }
 
-    pub(crate) fn search_is_error(&self) -> bool {
-        self.search.is_error()
+    pub(crate) fn query_cursor(&self) -> usize {
+        self.matcher.cursor()
     }
 
-    pub(crate) fn search_match_count(&self) -> usize {
-        self.search.match_count()
+    pub(crate) fn query_is_error(&self) -> bool {
+        self.matcher.is_error()
     }
 
-    pub(crate) fn search_match_ranges(&self, line: usize) -> Vec<std::ops::Range<usize>> {
-        self.rendered_lines
-            .get(line)
-            .map_or_else(Vec::new, |text| self.search.match_ranges(text))
+    pub(crate) fn match_count(&self) -> usize {
+        self.matcher.match_count()
+    }
+
+    pub(crate) fn match_ranges(&self, line: usize) -> Vec<std::ops::Range<usize>> {
+        self.rendered_line(line)
+            .map_or_else(Vec::new, |text| self.matcher.match_ranges(text))
     }
 
     pub(crate) fn rendered_line(&self, line: usize) -> Option<&str> {
-        self.rendered_lines.get(line).map(String::as_str)
+        let physical = *self.visible_line_indices.get(line)?;
+        self.rendered_lines.get(physical).map(String::as_str)
+    }
+
+    pub(crate) fn visible_line_indices(&self) -> &[usize] {
+        &self.visible_line_indices
     }
 
     pub(crate) fn observe_frame(
@@ -132,57 +143,57 @@ impl BlockViewerState {
         self.content_area = Some(content_area);
         self.close_button = Some(close_button);
         self.page_size = usize::from(content_area.height).max(1);
-        self.total_lines = rendered_lines.len();
-        self.max_scroll_offset = self.total_lines.saturating_sub(self.page_size);
-        self.scroll_offset = self.scroll_offset.min(self.max_scroll_offset);
-        self.selected_line = match self.total_lines {
-            0 => None,
-            _ => Some(self.selected_line.unwrap_or(0).min(self.total_lines - 1)),
-        };
-        self.visual_anchor = match self.total_lines {
-            0 => None,
-            _ => self
-                .visual_anchor
-                .map(|anchor| anchor.min(self.total_lines - 1)),
-        };
+        let selected_physical = self.selected_physical_line();
+        let anchor_physical = self.visual_anchor_physical_line();
         self.rendered_lines = rendered_lines;
-        self.search.rebuild(&self.rendered_lines);
+        self.matcher.rebuild(&self.rendered_lines);
+        self.rebuild_visible_lines(selected_physical, anchor_physical);
         self.reveal_selected_line();
     }
 
     pub(crate) fn open_search(&mut self) {
         self.clear_visual_selection();
-        self.search.open();
+        self.matcher.open(ViewerMatchMode::Search);
+        self.refresh_visible_lines();
     }
 
-    pub(crate) fn clear_search(&mut self) -> bool {
-        if !self.search.is_visible() {
+    pub(crate) fn open_filter(&mut self) {
+        self.clear_visual_selection();
+        self.matcher.open(ViewerMatchMode::Filter);
+        self.refresh_visible_lines();
+    }
+
+    pub(crate) fn clear_matcher(&mut self) -> bool {
+        if !self.matcher.is_visible() {
             return false;
         }
-        self.search.clear();
+        self.matcher.clear();
+        self.refresh_visible_lines();
         true
     }
 
-    pub(crate) fn handle_search_key(&mut self, key: crossterm::event::KeyEvent) {
+    pub(crate) fn handle_query_key(&mut self, key: crossterm::event::KeyEvent) {
         if let Some(target) = self
-            .search
+            .matcher
             .handle_key(key, &self.rendered_lines, self.selected_line)
         {
             self.select_line(target);
         }
+        self.refresh_visible_lines();
     }
 
-    pub(crate) fn handle_search_paste(&mut self, text: &str) {
+    pub(crate) fn handle_query_paste(&mut self, text: &str) {
         let target = self
-            .search
+            .matcher
             .paste(text, &self.rendered_lines, self.selected_line);
         if let Some(target) = target {
             self.select_line(target);
         }
+        self.refresh_visible_lines();
     }
 
     pub(crate) fn select_next_match(&mut self) -> bool {
-        let Some(target) = self.search.next_match(self.selected_line.unwrap_or(0)) else {
+        let Some(target) = self.next_match_line() else {
             return false;
         };
         self.select_line(target);
@@ -190,7 +201,7 @@ impl BlockViewerState {
     }
 
     pub(crate) fn select_previous_match(&mut self) -> bool {
-        let Some(target) = self.search.previous_match(self.selected_line.unwrap_or(0)) else {
+        let Some(target) = self.previous_match_line() else {
             return false;
         };
         self.select_line(target);
@@ -217,7 +228,10 @@ impl BlockViewerState {
 
     pub(crate) fn take_visual_selection_text(&mut self) -> Option<String> {
         let range = self.visual_selection_range()?;
-        let text = self.rendered_lines[range].join("\n");
+        let text = range
+            .filter_map(|line| self.rendered_line(line))
+            .collect::<Vec<_>>()
+            .join("\n");
         self.clear_visual_selection();
         Some(text)
     }
@@ -369,6 +383,72 @@ impl BlockViewerState {
         }
         self.selected_line = Some(line);
         self.reveal_selected_line();
+    }
+
+    fn selected_physical_line(&self) -> Option<usize> {
+        self.selected_line
+            .and_then(|selected| self.visible_line_indices.get(selected))
+            .copied()
+    }
+
+    fn visual_anchor_physical_line(&self) -> Option<usize> {
+        self.visual_anchor
+            .and_then(|anchor| self.visible_line_indices.get(anchor))
+            .copied()
+    }
+
+    fn refresh_visible_lines(&mut self) {
+        let selected_physical = self.selected_physical_line();
+        let anchor_physical = self.visual_anchor_physical_line();
+        self.rebuild_visible_lines(selected_physical, anchor_physical);
+        self.reveal_selected_line();
+    }
+
+    fn rebuild_visible_lines(
+        &mut self,
+        selected_physical: Option<usize>,
+        anchor_physical: Option<usize>,
+    ) {
+        self.visible_line_indices = if self.matcher.filter_active() {
+            self.matcher.match_lines().to_vec()
+        } else {
+            (0..self.rendered_lines.len()).collect()
+        };
+        self.total_lines = self.visible_line_indices.len();
+        self.max_scroll_offset = self.total_lines.saturating_sub(self.page_size);
+        self.scroll_offset = self.scroll_offset.min(self.max_scroll_offset);
+        self.selected_line = match self.total_lines {
+            0 => None,
+            _ => selected_physical
+                .and_then(|physical| {
+                    self.visible_line_indices
+                        .iter()
+                        .position(|candidate| *candidate == physical)
+                })
+                .or_else(|| Some(self.selected_line.unwrap_or(0).min(self.total_lines - 1))),
+        };
+        self.visual_anchor = anchor_physical.and_then(|physical| {
+            self.visible_line_indices
+                .iter()
+                .position(|candidate| *candidate == physical)
+        });
+    }
+
+    fn next_match_line(&self) -> Option<usize> {
+        let selected = self.selected_line.unwrap_or(0);
+        if self.matcher.filter_active() {
+            return (self.total_lines > 0).then(|| (selected + 1) % self.total_lines);
+        }
+        self.matcher.next_match(selected)
+    }
+
+    fn previous_match_line(&self) -> Option<usize> {
+        let selected = self.selected_line.unwrap_or(0);
+        if self.matcher.filter_active() {
+            return (self.total_lines > 0)
+                .then(|| selected.checked_sub(1).unwrap_or(self.total_lines - 1));
+        }
+        self.matcher.previous_match(selected)
     }
 }
 

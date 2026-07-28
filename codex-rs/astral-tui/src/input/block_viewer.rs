@@ -15,10 +15,10 @@ pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction
     }
     if state
         .block_viewer()
-        .is_some_and(BlockViewerState::search_input_active)
+        .is_some_and(BlockViewerState::query_input_active)
     {
         if let Some(viewer) = state.block_viewer_mut() {
-            viewer.handle_search_key(key);
+            viewer.handle_query_key(key);
         }
         return InputAction::Redraw;
     }
@@ -26,7 +26,7 @@ pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction
         let Some(viewer) = state.block_viewer_mut() else {
             return InputAction::None;
         };
-        if viewer.clear_visual_selection() || viewer.clear_search() {
+        if viewer.clear_visual_selection() || viewer.clear_matcher() {
             return InputAction::Redraw;
         }
         state.close_block_viewer();
@@ -45,6 +45,12 @@ pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction
         (KeyCode::Char('/'), KeyModifiers::NONE) => {
             if let Some(viewer) = state.block_viewer_mut() {
                 viewer.open_search();
+            }
+            return InputAction::Redraw;
+        }
+        (KeyCode::Char('f'), KeyModifiers::NONE) => {
+            if let Some(viewer) = state.block_viewer_mut() {
+                viewer.open_filter();
             }
             return InputAction::Redraw;
         }
@@ -189,8 +195,8 @@ pub(super) fn handle_paste(state: &mut SurfaceState, text: &str) -> InputAction 
     let Some(viewer) = state.block_viewer_mut() else {
         return InputAction::None;
     };
-    if viewer.search_input_active() {
-        viewer.handle_search_paste(text);
+    if viewer.query_input_active() {
+        viewer.handle_query_paste(text);
         InputAction::Redraw
     } else {
         InputAction::None

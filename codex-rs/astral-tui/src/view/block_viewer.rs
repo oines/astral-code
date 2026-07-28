@@ -56,12 +56,12 @@ impl BlockViewerPane<'_> {
             self.state.close_hovered(),
         );
 
-        let search_bar_visible = self.state.search_bar_visible();
+        let query_bar_visible = self.state.query_bar_visible();
         let body_width = frame.content.width.saturating_sub(2).max(1);
         let body_height = frame
             .content
             .height
-            .saturating_sub(u16::from(search_bar_visible));
+            .saturating_sub(u16::from(query_bar_visible));
         let body_area = Rect::new(frame.content.x, frame.content.y, body_width, body_height);
         let scrollbar_area = Rect::new(
             frame.content.right().saturating_sub(1),
@@ -96,6 +96,12 @@ impl BlockViewerPane<'_> {
             .collect();
         self.state
             .observe_frame(frame.popup, body_area, frame.close_button, plain_lines);
+        let lines = self
+            .state
+            .visible_line_indices()
+            .iter()
+            .filter_map(|index| lines.get(*index).cloned())
+            .collect::<Vec<_>>();
         let viewport = ScrollbackViewport::from_first(
             lines.len(),
             usize::from(body_area.height),
@@ -120,9 +126,9 @@ impl BlockViewerPane<'_> {
                 selection_style(theme).add_modifier(Modifier::BOLD),
             );
         }
-        render_search_matches(self.state, body_area, viewport, buffer, theme);
-        if search_bar_visible {
-            render_search_bar(
+        render_matches(self.state, body_area, viewport, buffer, theme);
+        if query_bar_visible {
+            render_query_bar(
                 self.state,
                 Rect::new(
                     frame.content.x,
@@ -141,8 +147,8 @@ fn block_viewer_footer(block: &PresentationBlock) -> String {
     let mut hints = vec![
         "Esc close".to_string(),
         "/ search".to_string(),
+        "f filter".to_string(),
         "v select".to_string(),
-        "n/N match".to_string(),
     ];
     if block.supports_raw() {
         hints.push("r raw".to_string());
@@ -187,7 +193,7 @@ fn selection_style(theme: AstralTheme) -> Style {
     }
 }
 
-fn render_search_matches(
+fn render_matches(
     state: &BlockViewerState,
     area: Rect,
     viewport: ScrollbackViewport,
@@ -204,7 +210,7 @@ fn render_search_matches(
         let Some(text) = state.rendered_line(line) else {
             continue;
         };
-        for range in state.search_match_ranges(line) {
+        for range in state.match_ranges(line) {
             let start = UnicodeWidthStr::width(&text[..range.start]);
             let width = UnicodeWidthStr::width(&text[range.clone()]);
             if width == 0 || start >= usize::from(area.width) {
@@ -227,28 +233,23 @@ fn render_search_matches(
     }
 }
 
-fn render_search_bar(
-    state: &BlockViewerState,
-    area: Rect,
-    buffer: &mut Buffer,
-    theme: AstralTheme,
-) {
+fn render_query_bar(state: &BlockViewerState, area: Rect, buffer: &mut Buffer, theme: AstralTheme) {
     if area.width == 0 {
         return;
     }
     buffer.set_style(area, Style::default().bg(theme.panel_background));
-    if state.search_input_active() {
-        let label = if state.search_is_error() {
-            "search! "
+    if state.query_input_active() {
+        let label = if state.query_is_error() {
+            format!("{}! ", state.query_label())
         } else {
-            "search: "
+            format!("{}: ", state.query_label())
         };
         buffer.set_string(
             area.x,
             area.y,
-            label,
+            &label,
             Style::default()
-                .fg(if state.search_is_error() {
+                .fg(if state.query_is_error() {
                     theme.accent_error
                 } else {
                     theme.prompt_border_active
@@ -256,10 +257,10 @@ fn render_search_bar(
                 .bg(theme.panel_background)
                 .add_modifier(Modifier::BOLD),
         );
-        let label_width = UnicodeWidthStr::width(label);
+        let label_width = UnicodeWidthStr::width(label.as_str());
         let available = usize::from(area.width).saturating_sub(label_width);
-        let query = state.search_query();
-        let (visible, cursor_width) = search_input_window(query, state.search_cursor(), available);
+        let query = state.query_text();
+        let (visible, cursor_width) = query_input_window(query, state.query_cursor(), available);
         buffer.set_stringn(
             area.x
                 .saturating_add(u16::try_from(label_width).unwrap_or(u16::MAX)),
@@ -282,9 +283,10 @@ fn render_search_bar(
         }
     } else {
         let status = format!(
-            "[search: {} · {} matches]",
-            state.search_query(),
-            state.search_match_count()
+            "[{}: {} · {} matches]",
+            state.query_label(),
+            state.query_text(),
+            state.match_count()
         );
         let width = UnicodeWidthStr::width(status.as_str());
         let x = area
@@ -303,7 +305,7 @@ fn render_search_bar(
     }
 }
 
-fn search_input_window(query: &str, cursor: usize, width: usize) -> (String, usize) {
+fn query_input_window(query: &str, cursor: usize, width: usize) -> (String, usize) {
     if width == 0 {
         return (String::new(), 0);
     }
