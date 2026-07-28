@@ -19,7 +19,6 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::style::Stylize;
 use tokio_stream::StreamExt;
@@ -27,6 +26,7 @@ use tokio_stream::StreamExt;
 use crate::terminal_guard::TerminalGuard;
 use crate::view::AstralTheme;
 use crate::view::ModalHeight;
+use crate::view::modal_choice_style;
 use crate::view::render_modal_frame;
 
 type PickerTerminal = Terminal<CrosstermBackend<Stdout>>;
@@ -371,15 +371,9 @@ pub(crate) fn render_picker(
         }
         let thread = &state.threads[*thread_index];
         let selected = visible_index == state.selected;
-        let row_background = if selected {
-            theme.panel_selected
-        } else {
-            theme.bg_base
-        };
-        buffer.set_style(
-            Rect::new(list.x, y, list.width, 1),
-            Style::default().fg(theme.text_primary).bg(row_background),
-        );
+        let row_style = modal_choice_style(theme, selected);
+        let row_background = row_style.bg.unwrap_or(theme.bg_base);
+        buffer.set_style(Rect::new(list.x, y, list.width, 1), row_style);
         buffer.set_stringn(
             list.x,
             y,
@@ -392,14 +386,7 @@ pub(crate) fn render_picker(
             y,
             thread_title(thread),
             usize::from(list.width.saturating_sub(2)),
-            if selected {
-                Style::default()
-                    .fg(theme.text_primary)
-                    .bg(row_background)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(theme.text_primary).bg(row_background)
-            },
+            row_style,
         );
         if y + 1 < list.bottom() {
             buffer.set_stringn(

@@ -1,0 +1,8 @@
+---
+source: astral-tui/src/permission_picker_tests.rs
+expression: "style_summary(&buffer, selected, row_fill, description, unselected)"
+---
+selected: fg=Rgb(225, 225, 225) bg=Rgb(45, 43, 50) modifiers=BOLD
+row-fill: bg=Rgb(45, 43, 50)
+description: bg=Rgb(20, 20, 20)
+unselected: bg=Rgb(20, 20, 20) modifiers=NONE

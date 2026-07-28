@@ -10,6 +10,7 @@ use ratatui::style::Style;
 use crate::view::AstralTheme;
 use crate::view::AstralThemeId;
 use crate::view::ModalHeight;
+use crate::view::modal_choice_style;
 use crate::view::render_modal_frame;
 
 #[derive(Debug)]
@@ -99,18 +100,14 @@ pub(crate) fn render_picker(
         let current = *option == state.original;
         let marker = if selected { "❯ " } else { "  " };
         let suffix = if current { " (current)" } else { "" };
+        let row_style = modal_choice_style(theme, selected);
+        buffer.set_style(Rect::new(content.x, y, content.width, 1), row_style);
         buffer.set_stringn(
             content.x,
             y,
             format!("{marker}{}{suffix}", option.label()),
             usize::from(content.width),
-            if selected {
-                Style::default()
-                    .fg(theme.text_primary)
-                    .bg(theme.prompt_border)
-            } else {
-                Style::default().fg(theme.text_primary).bg(theme.bg_base)
-            },
+            row_style,
         );
         if y + 1 < content.bottom() {
             buffer.set_stringn(

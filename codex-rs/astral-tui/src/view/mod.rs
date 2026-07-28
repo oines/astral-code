@@ -28,6 +28,7 @@ pub(crate) use layout::ScrollbarConfig;
 pub(crate) use mention_menu::MentionMenu;
 pub(crate) use modal::InfoModal;
 pub(crate) use modal::ModalHeight;
+pub(crate) use modal::modal_choice_style;
 pub(crate) use modal::render_modal_frame;
 pub(crate) use scrollback::ScrollbackNavigation;
 pub(crate) use scrollback::ScrollbackPane;
