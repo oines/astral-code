@@ -1,5 +1,6 @@
 use ratatui::layout::Rect;
 
+use crate::mcp_form::McpFormHit;
 use crate::request_user_input::RequestUserInputHit;
 
 use super::PaneRow;
@@ -8,6 +9,7 @@ use super::RequestPane;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum PaneHit {
     UserInput(RequestUserInputHit),
+    McpForm(McpFormHit),
 }
 
 impl RequestPane<'_> {
@@ -26,6 +28,20 @@ impl RequestPane<'_> {
             }
             | PaneRow::Input {
                 hit: Some(PaneHit::UserInput(hit)),
+                ..
+            } => Some(*hit),
+            _ => None,
+        })
+    }
+
+    pub(crate) fn mcp_form_hit_rows(self, area: Rect) -> Vec<(McpFormHit, Rect)> {
+        self.hit_rows(area, |row| match row {
+            PaneRow::Option {
+                hit: Some(PaneHit::McpForm(hit)),
+                ..
+            }
+            | PaneRow::Input {
+                hit: Some(PaneHit::McpForm(hit)),
                 ..
             } => Some(*hit),
             _ => None,

@@ -1,0 +1,22 @@
+---
+source: astral-tui/src/surface_tests.rs
+expression: "request_surface(json!({\n    \"method\": \"mcpServer/elicitation/request\", \"id\": \"mcp-multi-form\",\n    \"params\":\n    {\n        \"threadId\": \"thread-1\", \"turnId\": \"turn-1\", \"serverName\": \"astral\",\n        \"mode\": \"form\", \"_meta\": null, \"message\": \"Choose capabilities\",\n        \"requestedSchema\":\n        {\n            \"type\": \"object\", \"properties\":\n            {\n                \"features\":\n                {\n                    \"type\": \"array\", \"title\": \"Capabilities\", \"description\":\n                    \"Select every capability this server may use\", \"items\":\n                    {\n                        \"type\": \"string\", \"enum\": [\"search\", \"edit\", \"terminal\"]\n                    }, \"default\": [\"edit\"]\n                }\n            }, \"required\": [\"features\"]\n        }\n    }\n}), \"keep this prompt draft\")"
+---
+ ⎇ main  /workspace
+
+ › inspect this repo
+
+
+ I’m tracing the relevant data flow.
+
+
+ ┃
+ ┃  astral needs input
+ ┃  Choose capabilities
+ ┃
+ ┃  Capabilities · multi select · required · 1/1
+ ┃  Select every capability this server may use
+ ┃  1 [ ] search
+ ┃  2 [x] edit
+ ┃  3 [ ] terminal
+ Space:toggle  │  Enter:next  │  Ctrl+D:decline  │  Esc:cancel

@@ -2,6 +2,7 @@
 
 mod hit_test;
 mod mcp_form;
+mod option_row;
 mod user_input;
 
 use codex_app_server_protocol::McpServerElicitationRequest;
@@ -9,18 +10,18 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Position;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
-use ratatui::style::Styled;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
 
 use crate::PendingRequest;
 use crate::mcp_form::McpFormState;
 use crate::request_choice::RequestChoiceState;
-use crate::request_user_input::RequestUserInputHit;
 use crate::request_user_input::RequestUserInputState;
 use crate::view::AstralTheme;
 
 use self::hit_test::PaneHit;
+use self::option_row::OptionMarker;
+use self::option_row::OptionRowRender;
 
 const APPROVAL_HINTS: &[(&str, &str)] = &[
     ("↑/↓", "navigate"),
@@ -133,76 +134,29 @@ impl<'a> RequestPane<'a> {
                 }
                 PaneRow::Option {
                     hit,
+                    marker,
                     label,
                     detail,
                     selected,
                     committed,
                 } => {
-                    let hovered = hit.is_some_and(|hit| match hit {
-                        PaneHit::UserInput(hit) => self.request_user_input.hovered() == Some(hit),
-                    });
-                    let row_area =
-                        Rect::new(area.x.saturating_add(1), y, area.width.saturating_sub(1), 1);
-                    let row_background = if hovered || (selected && self.focused) {
-                        theme.panel_selected
-                    } else {
-                        theme.panel_background
-                    };
-                    let text_style = Style::default().fg(theme.text_primary).bg(row_background);
-                    buffer.set_style(row_area, text_style);
-                    let shortcut = hit.and_then(|hit| match hit {
-                        PaneHit::UserInput(
-                            RequestUserInputHit::Option(index)
-                            | RequestUserInputHit::Confirmation(index),
-                        ) => Some(index + 1),
-                        PaneHit::UserInput(RequestUserInputHit::Editor) => None,
-                    });
-                    let marker_selected = committed
-                        || matches!(
+                    option_row::render(
+                        buffer,
+                        Rect::new(area.x.saturating_add(1), y, area.width.saturating_sub(1), 1),
+                        content_x,
+                        content_width,
+                        OptionRowRender {
                             hit,
-                            Some(PaneHit::UserInput(RequestUserInputHit::Confirmation(_)))
-                        ) && selected;
-                    let marker = if marker_selected { "●" } else { "○" };
-                    let mut spans = Vec::new();
-                    if let Some(shortcut) = shortcut {
-                        spans.push(
-                            format!("{shortcut} ")
-                                .fg(theme.accent_running)
-                                .bg(row_background),
-                        );
-                        spans.push(
-                            format!("({marker}) ")
-                                .fg(if marker_selected {
-                                    theme.text_primary
-                                } else {
-                                    theme.gray
-                                })
-                                .bg(row_background),
-                        );
-                    } else {
-                        let marker = if committed {
-                            "●"
-                        } else if selected {
-                            "›"
-                        } else {
-                            "○"
-                        };
-                        spans.push(format!("{marker} ").set_style(text_style.fg(if selected {
-                            theme.accent_running
-                        } else {
-                            theme.gray
-                        })));
-                    }
-                    spans.push(if selected {
-                        label.bold().bg(row_background)
-                    } else {
-                        label.set_style(text_style)
-                    });
-                    if let Some(detail) = detail {
-                        spans.push(" — ".set_style(text_style.fg(theme.gray_dim)));
-                        spans.push(detail.set_style(text_style.fg(theme.text_secondary)));
-                    }
-                    buffer.set_line(content_x, y, &Line::from(spans), content_width);
+                            marker,
+                            label,
+                            detail,
+                            selected,
+                            committed,
+                            focused: self.focused,
+                            hovered: hit.is_some_and(|hit| self.hit_hovered(hit)),
+                        },
+                        theme,
+                    );
                 }
                 PaneRow::Choice { index, label } => {
                     let selected = self.request_choice.selected() == Some(index);
@@ -376,6 +330,13 @@ impl<'a> RequestPane<'a> {
         }
         PaneContent::bounded(rows, input, usize::from(max_rows))
     }
+
+    fn hit_hovered(self, hit: PaneHit) -> bool {
+        match hit {
+            PaneHit::UserInput(hit) => self.request_user_input.hovered() == Some(hit),
+            PaneHit::McpForm(hit) => self.mcp_form.hovered() == Some(hit),
+        }
+    }
 }
 
 fn input_cursor_width(text: &str, cursor_byte: usize, secret: bool) -> usize {
@@ -417,6 +378,7 @@ enum PaneRow {
     Body(String),
     Option {
         hit: Option<PaneHit>,
+        marker: OptionMarker,
         label: String,
         detail: Option<String>,
         selected: bool,

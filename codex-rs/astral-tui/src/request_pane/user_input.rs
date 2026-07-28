@@ -9,6 +9,7 @@ use crate::request_user_input::option_count;
 use super::PaneHit;
 use super::PaneRow;
 use super::input_cursor_width;
+use super::option_row::OptionMarker;
 use super::push_visible_options;
 
 const OPTION_HINTS: &[(&str, &str)] = &[
@@ -62,6 +63,7 @@ pub(super) fn push_content(
         rows.extend([
             PaneRow::Option {
                 hit: Some(PaneHit::UserInput(RequestUserInputHit::Confirmation(0))),
+                marker: OptionMarker::Radio,
                 label: "Go back".to_string(),
                 detail: Some("Return to the first unanswered question".to_string()),
                 selected: choice == 0,
@@ -69,6 +71,7 @@ pub(super) fn push_content(
             },
             PaneRow::Option {
                 hit: Some(PaneHit::UserInput(RequestUserInputHit::Confirmation(1))),
+                marker: OptionMarker::Radio,
                 label: "Proceed".to_string(),
                 detail: Some("Submit empty answers where needed".to_string()),
                 selected: choice == 1,
@@ -97,6 +100,7 @@ pub(super) fn push_content(
             .enumerate()
             .map(|(index, option)| PaneRow::Option {
                 hit: Some(PaneHit::UserInput(RequestUserInputHit::Option(index))),
+                marker: OptionMarker::Radio,
                 label: option.label.clone(),
                 detail: (!option.description.is_empty()).then(|| option.description.clone()),
                 selected: selected == Some(index),
@@ -107,6 +111,7 @@ pub(super) fn push_content(
             let index = options.len();
             option_rows.push(PaneRow::Option {
                 hit: Some(PaneHit::UserInput(RequestUserInputHit::Option(index))),
+                marker: OptionMarker::Radio,
                 label: OTHER_OPTION_LABEL.to_string(),
                 detail: Some("Add details in notes if needed".to_string()),
                 selected: selected == Some(index),

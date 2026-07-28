@@ -17,6 +17,6 @@ expression: "request_surface(json!({\n    \"method\": \"mcpServer/elicitation/re
  ┃
  ┃  Confirm changes · yes/no · required · 1/1
  ┃  Allow the MCP server to apply these settings
- ┃  › Yes
- ┃  ○ No
+ ┃  1 (○) Yes
+ ┃  2 (○) No
  Space:choose  │  Enter:next  │  Ctrl+D:decline  │  Esc:cancel

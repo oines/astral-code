@@ -797,8 +797,12 @@ pub(crate) fn render_surface_with_view(
     let user_input_hit_rows = request_pane
         .map(|pane| pane.user_input_hit_rows(layout.prompt))
         .unwrap_or_default();
+    let mcp_form_hit_rows = request_pane
+        .map(|pane| pane.mcp_form_hit_rows(layout.prompt))
+        .unwrap_or_default();
     state.request_choice.observe_rows(choice_hit_rows);
     state.request_user_input.observe_rows(user_input_hit_rows);
+    state.mcp_form.observe_rows(mcp_form_hit_rows);
     if appearance::render_overlay(state, area, buffer, theme) {
         None
     } else if prompt_focused {

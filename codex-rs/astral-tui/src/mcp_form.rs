@@ -4,6 +4,7 @@
 //! primary prompt composer.
 
 mod field;
+mod pointer;
 
 use codex_app_server_protocol::McpElicitationSchema;
 use codex_app_server_protocol::McpServerElicitationAction;
@@ -16,6 +17,7 @@ use serde_json::Value;
 
 use crate::composer::ComposerState;
 
+use self::pointer::McpFormPointerState;
 pub(crate) use field::McpFormControl;
 pub(crate) use field::McpFormField;
 
@@ -38,6 +40,12 @@ pub(crate) enum McpFormEvent {
     Submit(McpServerElicitationRequestResponse),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum McpFormHit {
+    Choice(usize),
+    Editor,
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct McpFormState {
     schema: Option<McpElicitationSchema>,
@@ -45,6 +53,7 @@ pub(crate) struct McpFormState {
     current: usize,
     editor: ComposerState,
     error: Option<String>,
+    pointer: McpFormPointerState,
 }
 
 impl McpFormState {
@@ -56,6 +65,7 @@ impl McpFormState {
         self.fields = compile_fields(schema);
         self.current = 0;
         self.error = None;
+        self.pointer.reset();
         self.load_editor();
     }
 
@@ -144,6 +154,13 @@ impl McpFormState {
                 self.clear_choice();
                 McpFormEvent::Redraw
             }
+            KeyCode::Char(character) if !self.current_is_text() => {
+                let Some(index) = self.choice_index_for_digit(character) else {
+                    return McpFormEvent::None;
+                };
+                self.select_choice_at(index);
+                self.advance_or_submit()
+            }
             _ if self.current_is_text() && self.editor.edit_key(key) => {
                 self.error = None;
                 McpFormEvent::Redraw
@@ -153,10 +170,24 @@ impl McpFormState {
     }
 
     fn handle_field_navigation(&mut self, key: KeyEvent) -> bool {
-        let previous = key.code == KeyCode::PageUp
-            || (key.code == KeyCode::Char('p') && key.modifiers.contains(KeyModifiers::CONTROL));
-        let next = key.code == KeyCode::PageDown
-            || (key.code == KeyCode::Char('n') && key.modifiers.contains(KeyModifiers::CONTROL));
+        let previous = matches!(
+            (key.code, key.modifiers),
+            (KeyCode::PageUp, KeyModifiers::NONE) | (KeyCode::Char('p'), KeyModifiers::CONTROL)
+        ) || self.fields.len() > 1
+            && !self.current_is_text()
+            && matches!(
+                (key.code, key.modifiers),
+                (KeyCode::Left | KeyCode::Char('h'), KeyModifiers::NONE)
+            );
+        let next = matches!(
+            (key.code, key.modifiers),
+            (KeyCode::PageDown, KeyModifiers::NONE) | (KeyCode::Char('n'), KeyModifiers::CONTROL)
+        ) || self.fields.len() > 1
+            && !self.current_is_text()
+            && matches!(
+                (key.code, key.modifiers),
+                (KeyCode::Right | KeyCode::Char('l'), KeyModifiers::NONE)
+            );
         if (!previous && !next) || self.fields.len() < 2 {
             return false;
         }
@@ -193,6 +224,13 @@ impl McpFormState {
     }
 
     fn toggle_choice(&mut self) {
+        let Some(index) = self.choice_cursor() else {
+            return;
+        };
+        self.toggle_choice_at(index);
+    }
+
+    fn toggle_choice_at(&mut self, index: usize) {
         let Some(McpFormControl::Select {
             choices,
             cursor,
@@ -205,14 +243,15 @@ impl McpFormState {
         else {
             return;
         };
-        if choices.is_empty() {
+        if index >= choices.len() {
             return;
         }
+        *cursor = index;
         if !*multiple {
             selected.clear();
         }
-        if !selected.remove(cursor) {
-            selected.insert(*cursor);
+        if !selected.remove(&index) {
+            selected.insert(index);
         }
         self.error = None;
     }
@@ -236,6 +275,47 @@ impl McpFormState {
         if !choices.is_empty() && (required || !selected.is_empty()) {
             selected.clear();
             selected.insert(*cursor);
+        }
+    }
+
+    fn select_choice_at(&mut self, index: usize) {
+        let Some(McpFormControl::Select {
+            choices,
+            cursor,
+            selected,
+            multiple,
+        }) = self
+            .fields
+            .get_mut(self.current)
+            .map(|field| &mut field.control)
+        else {
+            return;
+        };
+        if index >= choices.len() {
+            return;
+        }
+        *cursor = index;
+        if !*multiple {
+            selected.clear();
+        }
+        selected.insert(index);
+        self.error = None;
+    }
+
+    fn choice_cursor(&self) -> Option<usize> {
+        match self.current_field().map(|field| &field.control) {
+            Some(McpFormControl::Select { cursor, .. }) => Some(*cursor),
+            Some(McpFormControl::Text { .. }) | None => None,
+        }
+    }
+
+    fn choice_index_for_digit(&self, character: char) -> Option<usize> {
+        let index = usize::try_from(character.to_digit(10)?)
+            .ok()?
+            .checked_sub(1)?;
+        match self.current_field().map(|field| &field.control) {
+            Some(McpFormControl::Select { choices, .. }) if index < choices.len() => Some(index),
+            Some(McpFormControl::Select { .. }) | Some(McpFormControl::Text { .. }) | None => None,
         }
     }
 

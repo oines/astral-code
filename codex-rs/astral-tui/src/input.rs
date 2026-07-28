@@ -14,7 +14,6 @@ use crate::SlashInvocation;
 use crate::SurfaceActivity;
 use crate::SurfaceState;
 use crate::ThreadPickerAction;
-use crate::mcp_form::McpFormEvent;
 use crate::permission_picker::PermissionPickerInput;
 use crate::permission_picker::PermissionSelection;
 use crate::permission_picker::handle_key as handle_permission_picker_key;
@@ -27,6 +26,7 @@ use crate::theme_picker::handle_key as handle_theme_picker_key;
 use crate::thread_picker::PickerInput;
 use crate::thread_picker::handle_key as handle_thread_picker_key;
 
+mod mcp_form;
 mod mention_popup;
 mod plan_review;
 mod scrollback;
@@ -202,6 +202,15 @@ pub(crate) fn handle_mouse(state: &mut SurfaceState, mouse: MouseEvent) -> Input
     {
         let params = params.clone();
         return user_input::handle_mouse(state, request, &params, mouse);
+    }
+    if let Some(request) = state.pending_requests().front().cloned()
+        && let PendingRequest::McpElicitation { params, .. } = &request
+        && let McpServerElicitationRequest::Form {
+            requested_schema, ..
+        } = &params.request
+    {
+        let schema = requested_schema.clone();
+        return mcp_form::handle_mouse(state, request, &schema, mouse);
     }
     if state.plan_review().is_some() {
         return plan_review::handle_mouse(state, mouse);
@@ -390,13 +399,7 @@ fn handle_request_key(
         PendingRequest::McpElicitation { params, .. } => match &params.request {
             McpServerElicitationRequest::Form {
                 requested_schema, ..
-            } => match state.mcp_form_mut().handle_key(requested_schema, key) {
-                McpFormEvent::None => return InputAction::None,
-                McpFormEvent::Redraw => return InputAction::Redraw,
-                McpFormEvent::Submit(response) => {
-                    Some(PendingRequestResponse::McpElicitation(response))
-                }
-            },
+            } => return mcp_form::handle_key(state, request, requested_schema, key),
             McpServerElicitationRequest::Url { .. } => {
                 let event = state.request_choice_mut().handle_key(key);
                 return handle_request_choice_event(state, request, event);

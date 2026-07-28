@@ -533,6 +533,40 @@ fn typed_approval_surfaces_snapshot() {
         )
     );
     insta::assert_snapshot!(
+        "mcp_multi_select_elicitation_surface",
+        request_surface(
+            json!({
+                "method": "mcpServer/elicitation/request",
+                "id": "mcp-multi-form",
+                "params": {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "serverName": "astral",
+                    "mode": "form",
+                    "_meta": null,
+                    "message": "Choose capabilities",
+                    "requestedSchema": {
+                        "type": "object",
+                        "properties": {
+                            "features": {
+                                "type": "array",
+                                "title": "Capabilities",
+                                "description": "Select every capability this server may use",
+                                "items": {
+                                    "type": "string",
+                                    "enum": ["search", "edit", "terminal"]
+                                },
+                                "default": ["edit"]
+                            }
+                        },
+                        "required": ["features"]
+                    }
+                }
+            }),
+            "keep this prompt draft"
+        )
+    );
+    insta::assert_snapshot!(
         "user_question_surface",
         request_surface(
             json!({

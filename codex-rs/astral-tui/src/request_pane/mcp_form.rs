@@ -1,8 +1,11 @@
 use crate::mcp_form::McpFormControl;
+use crate::mcp_form::McpFormHit;
 use crate::mcp_form::McpFormState;
 
+use super::PaneHit;
 use super::PaneRow;
 use super::input_cursor_width;
+use super::option_row::OptionMarker;
 use super::push_visible_options;
 
 const TEXT_HINTS: &[(&str, &str)] = &[
@@ -78,7 +81,7 @@ pub(super) fn push_content(
     match &field.control {
         McpFormControl::Text { .. } => {
             rows.push(PaneRow::Input {
-                hit: None,
+                hit: Some(PaneHit::McpForm(McpFormHit::Editor)),
                 text: state.editor().to_string(),
                 cursor_column: input_cursor_width(
                     state.editor(),
@@ -92,13 +95,18 @@ pub(super) fn push_content(
             choices,
             cursor,
             selected,
-            ..
+            multiple,
         } => {
             let options = choices
                 .iter()
                 .enumerate()
                 .map(|(index, choice)| PaneRow::Option {
-                    hit: None,
+                    hit: Some(PaneHit::McpForm(McpFormHit::Choice(index))),
+                    marker: if *multiple {
+                        OptionMarker::Checkbox
+                    } else {
+                        OptionMarker::Radio
+                    },
                     label: choice.label.clone(),
                     detail: None,
                     selected: *cursor == index,
