@@ -30,7 +30,7 @@ fn render(item: ThreadItem, mode: DisplayMode) -> String {
     render_block(&block, RenderOptions::for_mode(68, mode))
         .lines
         .iter()
-        .map(std::string::ToString::to_string)
+        .map(|line| line.to_string().trim_end().to_string())
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -130,7 +130,7 @@ fn edit_defaults_to_an_expanded_diff_snapshot() {
     )
     .lines
     .iter()
-    .map(std::string::ToString::to_string)
+    .map(|line| line.to_string().trim_end().to_string())
     .collect::<Vec<_>>()
     .join("\n");
 

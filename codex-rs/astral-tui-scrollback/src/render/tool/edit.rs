@@ -1,3 +1,8 @@
+//! File-change card presentation derived from Grok Build's edit block at
+//! `47348d13ec4508dcfe440e34c6d511bb02998fb2` (Apache-2.0).
+//!
+//! The card remains a pure view over app-server `FileUpdateChange` values.
+
 use std::path::Path;
 
 use codex_app_server_protocol::FileUpdateChange;
@@ -5,17 +10,17 @@ use codex_app_server_protocol::PatchChangeKind;
 use ratatui::style::Style;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
-use ratatui::text::Span;
 use ratatui::text::Text;
-use textwrap::Options;
 
 use super::RenderOptions;
-use super::tool_header;
+use super::tool_header_with_title_style;
 use crate::DisplayMode;
 use crate::ToolPresentation;
 
+mod diff;
+
 pub(super) fn render_edit(tool: &ToolPresentation, options: RenderOptions) -> Text<'static> {
-    let (added, removed) = change_counts(&tool.changes);
+    let (added, removed) = diff::change_counts(&tool.changes);
     let suffix = if options.mode == DisplayMode::Collapsed && (added > 0 || removed > 0) {
         vec![
             format!(" +{added}").green(),
@@ -25,28 +30,80 @@ pub(super) fn render_edit(tool: &ToolPresentation, options: RenderOptions) -> Te
     } else {
         Vec::new()
     };
-    let mut lines = vec![tool_header(
+    let mut lines = vec![tool_header_with_title_style(
         tool,
         edit_label(&tool.changes),
         &edit_title(tool),
+        Style::default().fg(options.diff_style.path),
         suffix,
     )];
     if options.mode == DisplayMode::Collapsed {
         return Text::from(lines);
     }
 
-    let mut body = tool
-        .changes
-        .iter()
-        .flat_map(|change| render_change(change, options.width))
-        .collect::<Vec<_>>();
+    let mut body = render_changes(&tool.changes, options);
     if options.mode == DisplayMode::Truncated && body.len() > options.max_output_lines {
         let hidden = body.len() - options.max_output_lines;
         body.truncate(options.max_output_lines);
         body.push(vec!["  └ ".dim(), format!("{hidden} more lines").dim()].into());
     }
-    lines.extend(body);
+    if !body.is_empty() {
+        lines.push(Line::default());
+        lines.extend(body);
+    }
     Text::from(lines)
+}
+
+fn render_changes(changes: &[FileUpdateChange], options: RenderOptions) -> Vec<Line<'static>> {
+    match changes {
+        [] => Vec::new(),
+        [change] => diff::render_file_change(change, options.width, options.diff_style, "  "),
+        changes => {
+            let mut lines = Vec::new();
+            for (index, change) in changes.iter().enumerate() {
+                if index > 0 {
+                    lines.push(Line::default());
+                }
+                lines.push(render_change_header(change, options));
+                lines.extend(diff::render_file_change(
+                    change,
+                    options.width,
+                    options.diff_style,
+                    "    ",
+                ));
+            }
+            lines
+        }
+    }
+}
+
+fn render_change_header(change: &FileUpdateChange, options: RenderOptions) -> Line<'static> {
+    let (added, removed) = diff::change_counts(std::slice::from_ref(change));
+    let (operation, path) = match &change.kind {
+        PatchChangeKind::Add => ("A".green(), change.path.clone()),
+        PatchChangeKind::Delete => ("D".red(), change.path.clone()),
+        PatchChangeKind::Update {
+            move_path: Some(move_path),
+        } => (
+            "R".magenta(),
+            format!("{} → {}", change.path, move_path.display()),
+        ),
+        PatchChangeKind::Update { move_path: None } => ("M".cyan(), change.path.clone()),
+    };
+    let mut spans = vec![
+        "  ".into(),
+        operation,
+        " ".into(),
+        path.fg(options.diff_style.path),
+    ];
+    if added > 0 || removed > 0 {
+        spans.extend([
+            format!("  +{added}").green(),
+            "/".dim(),
+            format!("-{removed}").red(),
+        ]);
+    }
+    spans.into()
 }
 
 fn edit_label(changes: &[FileUpdateChange]) -> &'static str {
@@ -56,7 +113,7 @@ fn edit_label(changes: &[FileUpdateChange]) -> &'static str {
                 kind: PatchChangeKind::Add,
                 ..
             },
-        ] => "Create",
+        ] => "Creating",
         [
             FileUpdateChange {
                 kind: PatchChangeKind::Delete,
@@ -91,139 +148,10 @@ fn edit_title(tool: &ToolPresentation) -> String {
     }
 }
 
-fn render_change(change: &FileUpdateChange, width: u16) -> Vec<Line<'static>> {
-    let (added, removed) = change_counts(std::slice::from_ref(change));
-    let (operation, path) = match &change.kind {
-        PatchChangeKind::Add => ("A".green(), change.path.clone()),
-        PatchChangeKind::Delete => ("D".red(), change.path.clone()),
-        PatchChangeKind::Update {
-            move_path: Some(move_path),
-        } => (
-            "R".magenta(),
-            format!("{} → {}", change.path, move_path.display()),
-        ),
-        PatchChangeKind::Update { move_path: None } => ("M".cyan(), change.path.clone()),
-    };
-    let mut lines = vec![
-        vec![
-            "  ".into(),
-            operation,
-            " ".dim(),
-            path.dim(),
-            format!("  +{added}").green(),
-            "/".dim(),
-            format!("-{removed}").red(),
-        ]
-        .into(),
-    ];
-    lines.extend(diff_lines(change).flat_map(|line| wrap_diff_line(&line.text, line.kind, width)));
-    lines
-}
-
-fn diff_lines(change: &FileUpdateChange) -> impl Iterator<Item = DiffLine> + '_ {
-    change
-        .diff
-        .lines()
-        .filter_map(move |line| match &change.kind {
-            PatchChangeKind::Add => Some(DiffLine::new(format!("+{line}"), DiffLineKind::Added)),
-            PatchChangeKind::Delete => {
-                Some(DiffLine::new(format!("-{line}"), DiffLineKind::Removed))
-            }
-            PatchChangeKind::Update { .. }
-                if line.starts_with("--- ")
-                    || line.starts_with("+++ ")
-                    || line.starts_with("diff --git ")
-                    || line.starts_with("index ")
-                    || line.starts_with("Moved to: ") =>
-            {
-                None
-            }
-            PatchChangeKind::Update { .. } if line.starts_with("@@") => {
-                Some(DiffLine::new(line.to_string(), DiffLineKind::Hunk))
-            }
-            PatchChangeKind::Update { .. } if line.starts_with('+') => {
-                Some(DiffLine::new(line.to_string(), DiffLineKind::Added))
-            }
-            PatchChangeKind::Update { .. } if line.starts_with('-') => {
-                Some(DiffLine::new(line.to_string(), DiffLineKind::Removed))
-            }
-            PatchChangeKind::Update { .. } if line.starts_with('\\') => {
-                Some(DiffLine::new(line.to_string(), DiffLineKind::Note))
-            }
-            PatchChangeKind::Update { .. } => {
-                Some(DiffLine::new(line.to_string(), DiffLineKind::Context))
-            }
-        })
-}
-
-fn wrap_diff_line(text: &str, kind: DiffLineKind, width: u16) -> Vec<Line<'static>> {
-    let options = Options::new(usize::from(width).max(1))
-        .initial_indent("  │ ")
-        .subsequent_indent("  │   ")
-        .word_separator(textwrap::WordSeparator::AsciiSpace)
-        .word_splitter(textwrap::WordSplitter::NoHyphenation)
-        .break_words(true);
-    textwrap::wrap(text, &options)
-        .into_iter()
-        .map(|line| Line::from(Span::styled(line.into_owned(), kind.style())))
-        .collect()
-}
-
-fn change_counts(changes: &[FileUpdateChange]) -> (usize, usize) {
-    changes.iter().fold((0, 0), |(added, removed), change| {
-        let (change_added, change_removed) = match &change.kind {
-            PatchChangeKind::Add => (change.diff.lines().count(), 0),
-            PatchChangeKind::Delete => (0, change.diff.lines().count()),
-            PatchChangeKind::Update { .. } => change
-                .diff
-                .lines()
-                .filter(|line| !line.starts_with("+++") && !line.starts_with("---"))
-                .fold((0, 0), |(added, removed), line| {
-                    (
-                        added + usize::from(line.starts_with('+')),
-                        removed + usize::from(line.starts_with('-')),
-                    )
-                }),
-        };
-        (added + change_added, removed + change_removed)
-    })
-}
-
 fn compact_path(path: &str) -> String {
     Path::new(path)
         .file_name()
         .and_then(|name| name.to_str())
         .filter(|name| !name.is_empty())
         .map_or_else(|| path.to_string(), str::to_string)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DiffLineKind {
-    Hunk,
-    Added,
-    Removed,
-    Context,
-    Note,
-}
-
-impl DiffLineKind {
-    fn style(self) -> Style {
-        match self {
-            Self::Hunk => Style::default().cyan().dim(),
-            Self::Added => Style::default().green(),
-            Self::Removed => Style::default().red(),
-            Self::Context | Self::Note => Style::default().dim(),
-        }
-    }
-}
-
-struct DiffLine {
-    text: String,
-    kind: DiffLineKind,
-}
-
-impl DiffLine {
-    fn new(text: String, kind: DiffLineKind) -> Self {
-        Self { text, kind }
-    }
 }

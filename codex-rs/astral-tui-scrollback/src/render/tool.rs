@@ -1,3 +1,4 @@
+use ratatui::style::Style;
 use ratatui::style::Styled;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
@@ -90,10 +91,20 @@ fn tool_header(
     title: &str,
     suffix: Vec<Span<'static>>,
 ) -> Line<'static> {
+    tool_header_with_title_style(tool, label, title, Style::default().dim(), suffix)
+}
+
+fn tool_header_with_title_style(
+    tool: &ToolPresentation,
+    label: &str,
+    title: &str,
+    title_style: ratatui::style::Style,
+    suffix: Vec<Span<'static>>,
+) -> Line<'static> {
     let mut spans = vec![
         status_marker(tool.status).set_style(status_style(tool.status)),
         format!("{label} ").bold().dim(),
-        title.to_string().dim(),
+        Span::styled(title.to_string(), title_style),
     ];
     spans.extend(suffix);
     if let Some(duration_ms) = tool.duration_ms {

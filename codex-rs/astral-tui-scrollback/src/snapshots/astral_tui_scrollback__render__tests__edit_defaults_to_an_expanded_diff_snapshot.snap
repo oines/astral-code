@@ -3,13 +3,16 @@ source: astral-tui-scrollback/src/render_tests.rs
 expression: rendered
 ---
 ◆ Edit 4 files
+
   M astral-tui/src/render.rs  +2/-1
-  │ @@ -1 +1,2 @@
-  │ -old
-  │ +new
-  │ +another
+    1  old
+    1  new
+    2  another
+
   A astral-tui/src/new.rs  +1/-0
-  │ +new module
+    1  new module
+
   D astral-tui/src/obsolete.rs  +0/-1
-  │ -old module
-  R astral-tui/src/old_name.rs → astral-tui/src/new_name.rs  +0/-0
+    1  old module
+
+  R astral-tui/src/old_name.rs → astral-tui/src/new_name.rs
