@@ -24,6 +24,10 @@ pub(crate) use self::state::has_options;
 pub(crate) use self::state::option_count;
 pub(crate) use self::state::option_label;
 
+#[cfg(test)]
+#[path = "request_user_input_tests.rs"]
+mod tests;
+
 pub(crate) const OTHER_OPTION_LABEL: &str = "None of the above";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
