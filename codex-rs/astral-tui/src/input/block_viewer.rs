@@ -54,6 +54,12 @@ pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction
             }
             return InputAction::Redraw;
         }
+        (KeyCode::Char('w'), KeyModifiers::NONE) => {
+            if let Some(viewer) = state.block_viewer_mut() {
+                viewer.toggle_wrap_mode();
+            }
+            return InputAction::Redraw;
+        }
         (KeyCode::Char('v' | 'V'), modifiers)
             if modifiers == KeyModifiers::NONE || modifiers == KeyModifiers::SHIFT =>
         {

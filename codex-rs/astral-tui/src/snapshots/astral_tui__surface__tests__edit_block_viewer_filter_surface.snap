@@ -23,5 +23,5 @@ expression: buffer_text(&buffer)
   │                                                                          │
   │                                              [filter: draw · 3 matches]  │
   │                                                                          │
-  │    Esc close · / search · f filter · v select · y copy · Y copy path     │
+  │    Esc close · / search · f filter · v select · w wrap · Y copy path     │
   └──────────────────────────────────────────────────────────────────────────┘

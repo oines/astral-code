@@ -3,20 +3,25 @@
 // Modified to render Astral's provider-neutral PresentationBlock with the same
 // renderer and theme roles used by the surrounding transcript.
 
+use std::borrow::Cow;
+
 use astral_tui_scrollback::BlockTextMode;
 use astral_tui_scrollback::DisplayMode;
 use astral_tui_scrollback::PresentationBlock;
 use astral_tui_scrollback::render_block;
+use astral_tui_scrollback::wrap_styled_line_with_metadata;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
+use ratatui::text::Line;
 use ratatui::widgets::Clear;
 use ratatui::widgets::Widget;
 use unicode_width::UnicodeWidthStr;
 
 use crate::block_viewer::BlockViewerState;
+use crate::block_viewer::ViewerWrapMode;
 
 use super::AstralTheme;
 use super::ModalHeight;
@@ -26,6 +31,21 @@ use super::markdown_content::render_markdown_content;
 use super::render_modal_close_button;
 use super::render_modal_frame_with_geometry;
 use super::transcript::render_options;
+
+const LOGICAL_LINE_WIDTH: u16 = 500;
+
+struct ViewerItem {
+    line: Line<'static>,
+    plain: String,
+    background: Option<Color>,
+}
+
+struct ViewerRow {
+    line: Line<'static>,
+    item: usize,
+    plain: String,
+    background: Option<Color>,
+}
 
 pub(crate) struct BlockViewerPane<'a> {
     pub(crate) state: &'a mut BlockViewerState,
@@ -69,54 +89,42 @@ impl BlockViewerPane<'_> {
             1,
             body_height,
         );
-        let lines = match self.block {
-            PresentationBlock::Assistant { text } | PresentationBlock::Thinking { text, .. } => {
-                render_markdown_content(text, body_width, theme, self.text_mode, "")
-                    .into_iter()
-                    .map(|line| line.line)
-                    .collect()
-            }
-            _ => {
-                render_block(
-                    self.block,
-                    render_options(body_width, DisplayMode::Expanded, theme)
-                        .with_max_output_lines(usize::MAX),
-                )
-                .lines
-            }
-        };
-        let plain_lines = lines
-            .iter()
-            .map(|line| {
-                line.spans
-                    .iter()
-                    .map(|span| span.content.as_ref())
-                    .collect()
-            })
-            .collect();
-        self.state
-            .observe_frame(frame.popup, body_area, frame.close_button, plain_lines);
-        let lines = self
+        let items = render_viewer_items(self.block, theme, self.text_mode);
+        let rows = render_viewer_rows(&items, body_width, self.state.wrap_mode());
+        let logical_lines = items.iter().map(|item| item.plain.clone()).collect();
+        let row_items = rows.iter().map(|row| row.item).collect();
+        let rendered_rows = rows.iter().map(|row| row.plain.clone()).collect();
+        self.state.observe_frame(
+            frame.popup,
+            body_area,
+            frame.close_button,
+            logical_lines,
+            row_items,
+            rendered_rows,
+        );
+        let rows = self
             .state
-            .visible_line_indices()
+            .visible_row_indices()
             .iter()
-            .filter_map(|index| lines.get(*index).cloned())
+            .filter_map(|index| rows.get(*index))
             .collect::<Vec<_>>();
+        let lines = rows.iter().map(|row| row.line.clone()).collect::<Vec<_>>();
         let viewport = ScrollbackViewport::from_first(
             lines.len(),
             usize::from(body_area.height),
             self.state.scroll_offset(),
         );
+        render_row_backgrounds(&rows, body_area, viewport, buffer);
         ScrollbackPane {
             lines: &lines,
             viewport,
         }
         .render(body_area, scrollbar_area, buffer, theme);
         render_visual_selection(self.state, body_area, viewport, buffer, theme);
-        if let Some(selected) = self.state.selected_line()
-            && viewport.first_visible_line <= selected
-            && selected < viewport.end_visible_line
-        {
+        for selected in viewport.first_visible_line..viewport.end_visible_line {
+            if !self.state.row_is_selected(selected) {
+                continue;
+            }
             let row = body_area.y.saturating_add(
                 u16::try_from(selected.saturating_sub(viewport.first_visible_line))
                     .unwrap_or(u16::MAX),
@@ -143,18 +151,118 @@ impl BlockViewerPane<'_> {
     }
 }
 
+fn render_viewer_items(
+    block: &PresentationBlock,
+    theme: AstralTheme,
+    text_mode: BlockTextMode,
+) -> Vec<ViewerItem> {
+    let lines = match block {
+        PresentationBlock::Assistant { text } | PresentationBlock::Thinking { text, .. } => {
+            render_markdown_content(text, LOGICAL_LINE_WIDTH, theme, text_mode, "")
+                .into_iter()
+                .map(|line| line.line)
+                .collect()
+        }
+        _ => {
+            render_block(
+                block,
+                render_options(LOGICAL_LINE_WIDTH, DisplayMode::Expanded, theme)
+                    .with_max_output_lines(usize::MAX),
+            )
+            .lines
+        }
+    };
+    lines.into_iter().map(viewer_item).collect()
+}
+
+fn viewer_item(mut line: Line<'static>) -> ViewerItem {
+    let background = line
+        .style
+        .bg
+        .or_else(|| line.spans.iter().find_map(|span| span.style.bg));
+    while let Some(last) = line.spans.last_mut() {
+        let trimmed = last.content.trim_end_matches(char::is_whitespace);
+        if trimmed.is_empty() {
+            line.spans.pop();
+        } else {
+            if trimmed.len() != last.content.len() {
+                last.content = Cow::Owned(trimmed.to_string());
+            }
+            break;
+        }
+    }
+    let plain = line
+        .spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect();
+    ViewerItem {
+        line,
+        plain,
+        background,
+    }
+}
+
+fn render_viewer_rows(
+    items: &[ViewerItem],
+    width: u16,
+    wrap_mode: ViewerWrapMode,
+) -> Vec<ViewerRow> {
+    items
+        .iter()
+        .enumerate()
+        .flat_map(|(item, logical)| {
+            let lines = match wrap_mode {
+                ViewerWrapMode::Wrap => wrap_styled_line_with_metadata(&logical.line, width)
+                    .into_iter()
+                    .map(|line| line.line)
+                    .collect(),
+                ViewerWrapMode::NoWrap => vec![logical.line.clone()],
+            };
+            lines.into_iter().map(move |line| ViewerRow {
+                plain: line
+                    .spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect(),
+                line,
+                item,
+                background: logical.background,
+            })
+        })
+        .collect()
+}
+
+fn render_row_backgrounds(
+    rows: &[&ViewerRow],
+    area: Rect,
+    viewport: ScrollbackViewport,
+    buffer: &mut Buffer,
+) {
+    for row in viewport.first_visible_line..viewport.end_visible_line {
+        let Some(background) = rows.get(row).and_then(|row| row.background) else {
+            continue;
+        };
+        let y = area.y.saturating_add(
+            u16::try_from(row.saturating_sub(viewport.first_visible_line)).unwrap_or(u16::MAX),
+        );
+        buffer.set_style(
+            Rect::new(area.x, y, area.width, 1),
+            Style::default().bg(background),
+        );
+    }
+}
+
 fn block_viewer_footer(block: &PresentationBlock) -> String {
     let mut hints = vec![
         "Esc close".to_string(),
         "/ search".to_string(),
         "f filter".to_string(),
         "v select".to_string(),
+        "w wrap".to_string(),
     ];
     if block.supports_raw() {
         hints.push("r raw".to_string());
-    }
-    if block.supports_copy() {
-        hints.push("y copy".to_string());
     }
     if let Some(label) = block.copy_meta_label() {
         hints.push(format!("Y {label}"));
@@ -169,12 +277,10 @@ fn render_visual_selection(
     buffer: &mut Buffer,
     theme: AstralTheme,
 ) {
-    let Some(range) = state.visual_selection_range() else {
-        return;
-    };
-    let first = (*range.start()).max(viewport.first_visible_line);
-    let end = range.end().saturating_add(1).min(viewport.end_visible_line);
-    for line in first..end {
+    for line in viewport.first_visible_line..viewport.end_visible_line {
+        if !state.row_is_in_visual_selection(line) {
+            continue;
+        }
         let row = area.y.saturating_add(
             u16::try_from(line.saturating_sub(viewport.first_visible_line)).unwrap_or(u16::MAX),
         );
@@ -207,7 +313,7 @@ fn render_matches(
         let row = area.y.saturating_add(
             u16::try_from(line.saturating_sub(viewport.first_visible_line)).unwrap_or(u16::MAX),
         );
-        let Some(text) = state.rendered_line(line) else {
+        let Some(text) = state.rendered_row(line) else {
             continue;
         };
         for range in state.match_ranges(line) {

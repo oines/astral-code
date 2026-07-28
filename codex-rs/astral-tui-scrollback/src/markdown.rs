@@ -94,6 +94,29 @@ pub fn render_literal_with_metadata(text: &str, width: u16, style: Style) -> Vec
     .collect()
 }
 
+/// Wraps one already-styled logical line while retaining its span styles.
+///
+/// Fullscreen viewers use this after rendering content at its natural width,
+/// so selection, filtering, and wrap toggles continue to address stable
+/// logical lines instead of transient screen rows.
+pub fn wrap_styled_line_with_metadata(line: &Line<'_>, width: u16) -> Vec<MarkdownLine> {
+    let segments = line
+        .spans
+        .iter()
+        .map(|span| Segment {
+            text: span.content.to_string(),
+            style: line.style.patch(span.style),
+        })
+        .collect::<Vec<_>>();
+    wrap_segments_with_joiners(&segments, usize::from(width).max(1))
+        .into_iter()
+        .map(|wrapped| MarkdownLine {
+            line: Line::from(wrapped.spans),
+            joiner_to_previous: wrapped.joiner_to_previous,
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone)]
 struct Segment {
     text: String,

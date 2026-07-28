@@ -23,7 +23,7 @@ expression: "format!(\"{}\\n\\nvisual selection mask:\\n{}\", buffer_text(&buffe
   │                                                                          │
   │                                                                          │
   │                                                                          │
-  │    Esc close · / search · f filter · v select · y copy · Y copy path     │
+  │    Esc close · / search · f filter · v select · w wrap · Y copy path     │
   └──────────────────────────────────────────────────────────────────────────┘
 
 visual selection mask:

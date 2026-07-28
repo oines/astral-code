@@ -21,35 +21,56 @@ fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
     }
 }
 
+fn observe_frame(
+    state: &mut BlockViewerState,
+    popup: Rect,
+    content: Rect,
+    close: Rect,
+    logical_lines: Vec<String>,
+) {
+    let row_items = (0..logical_lines.len()).collect();
+    let rendered_rows = logical_lines.clone();
+    state.observe_frame(
+        popup,
+        content,
+        close,
+        logical_lines,
+        row_items,
+        rendered_rows,
+    );
+}
+
 #[test]
 fn viewer_scroll_is_clamped_to_the_observed_content() {
     let mut state = BlockViewerState::new("turn\0entry-1".to_string());
-    state.observe_frame(
+    observe_frame(
+        &mut state,
         Rect::new(1, 1, 20, 10),
         Rect::new(3, 3, 16, 4),
         Rect::new(17, 1, 3, 1),
         lines(12),
     );
 
-    assert_eq!(state.selected_line(), Some(0));
+    assert_eq!(state.selected_item(), Some(0));
     assert!(state.scroll_by(50));
     assert_eq!(state.scroll_offset(), 8);
-    assert_eq!(state.selected_line(), Some(8));
+    assert_eq!(state.selected_item(), Some(8));
     assert!(state.scroll_page(-1));
     assert_eq!(state.scroll_offset(), 4);
-    assert_eq!(state.selected_line(), Some(4));
+    assert_eq!(state.selected_item(), Some(4));
     assert!(state.scroll_to_start());
     assert_eq!(state.scroll_offset(), 0);
-    assert_eq!(state.selected_line(), Some(0));
+    assert_eq!(state.selected_item(), Some(0));
     assert!(state.scroll_to_end());
     assert_eq!(state.scroll_offset(), 8);
-    assert_eq!(state.selected_line(), Some(11));
+    assert_eq!(state.selected_item(), Some(11));
 }
 
 #[test]
 fn viewer_pointer_uses_the_rendered_modal_geometry() {
     let mut state = BlockViewerState::new("turn\0entry-1".to_string());
-    state.observe_frame(
+    observe_frame(
+        &mut state,
         Rect::new(2, 2, 30, 12),
         Rect::new(5, 4, 24, 7),
         Rect::new(27, 2, 3, 1),
@@ -73,13 +94,14 @@ fn viewer_pointer_uses_the_rendered_modal_geometry() {
         state.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 8, 6)),
         BlockViewerMouseAction::Redraw
     );
-    assert_eq!(state.selected_line(), Some(2));
+    assert_eq!(state.selected_item(), Some(2));
 }
 
 #[test]
 fn viewer_search_uses_rendered_line_order_and_wraps_matches() {
     let mut state = BlockViewerState::new("turn\0entry-1".to_string());
-    state.observe_frame(
+    observe_frame(
+        &mut state,
         Rect::new(1, 1, 30, 12),
         Rect::new(3, 3, 24, 5),
         Rect::new(27, 1, 3, 1),
@@ -98,11 +120,11 @@ fn viewer_search_uses_rendered_line_order_and_wraps_matches() {
             KeyModifiers::NONE,
         ));
     }
-    assert_eq!(state.selected_line(), Some(1));
+    assert_eq!(state.selected_item(), Some(1));
     assert!(state.select_next_match());
-    assert_eq!(state.selected_line(), Some(3));
+    assert_eq!(state.selected_item(), Some(3));
     assert!(state.select_next_match());
-    assert_eq!(state.selected_line(), Some(1));
+    assert_eq!(state.selected_item(), Some(1));
 }
 
 #[test]
@@ -112,11 +134,12 @@ fn viewer_filter_keeps_only_matching_rendered_lines() {
         Rect::new(1, 1, 30, 12),
         Rect::new(3, 3, 24, 5),
         Rect::new(27, 1, 3, 1),
+        vec!["alpha continued".to_string(), "beta".to_string()],
+        vec![0, 0, 1],
         vec![
             "alpha".to_string(),
+            "continued".to_string(),
             "beta".to_string(),
-            "alphabet".to_string(),
-            "gamma".to_string(),
         ],
     );
 
@@ -130,16 +153,17 @@ fn viewer_filter_keeps_only_matching_rendered_lines() {
 
     assert_eq!(
         (0..3)
-            .map(|line| state.rendered_line(line))
+            .map(|line| state.rendered_row(line))
             .collect::<Vec<_>>(),
-        vec![Some("alpha"), Some("alphabet"), None]
+        vec![Some("alpha"), Some("continued"), None]
     );
 }
 
 #[test]
 fn viewer_visual_selection_copies_the_rendered_line_range() {
     let mut state = BlockViewerState::new("turn\0entry-1".to_string());
-    state.observe_frame(
+    observe_frame(
+        &mut state,
         Rect::new(1, 1, 30, 12),
         Rect::new(3, 3, 24, 5),
         Rect::new(27, 1, 3, 1),
