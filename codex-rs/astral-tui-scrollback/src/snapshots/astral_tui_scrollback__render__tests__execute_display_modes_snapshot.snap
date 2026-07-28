@@ -1,0 +1,25 @@
+---
+source: astral-tui-scrollback/src/render_tests.rs
+expression: rendered
+---
+COLLAPSED
+◆ Run just test -p astral-tui  2.4s
+
+TRUNCATED
+◆ Run just test -p astral-tui  2.4s
+  cwd /workspace
+  exit 0
+  │ Compiling projection
+  │ Testing reducer
+  … 2 hidden lines
+  │ All tests passed
+
+EXPANDED
+◆ Run just test -p astral-tui  2.4s
+  cwd /workspace
+  exit 0
+  │ Compiling projection
+  │ Testing reducer
+  │ Testing renderer
+  │ Testing runtime
+  │ All tests passed

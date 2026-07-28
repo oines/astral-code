@@ -289,6 +289,44 @@ fn background_command_lifecycle_snapshot() {
 }
 
 #[test]
+fn execute_display_modes_snapshot() {
+    let item = ThreadItem::CommandExecution {
+        id: "command-run".to_string(),
+        command: "just test\n-p astral-tui".to_string(),
+        cwd: AbsolutePathBuf::try_from("/workspace".to_string()).expect("absolute path"),
+        process_id: None,
+        source: Default::default(),
+        status: CommandExecutionStatus::Completed,
+        command_actions: vec![CommandAction::Unknown {
+            command: "just test -p astral-tui".to_string(),
+        }],
+        aggregated_output: Some(
+            [
+                "Compiling projection",
+                "Testing reducer",
+                "Testing renderer",
+                "Testing runtime",
+                "All tests passed",
+            ]
+            .join("\n"),
+        ),
+        exit_code: Some(0),
+        duration_ms: Some(2_440),
+    };
+    let rendered = [
+        ("COLLAPSED", DisplayMode::Collapsed),
+        ("TRUNCATED", DisplayMode::Truncated),
+        ("EXPANDED", DisplayMode::Expanded),
+    ]
+    .into_iter()
+    .map(|(label, mode)| format!("{label}\n{}", render(item.clone(), mode)))
+    .collect::<Vec<_>>()
+    .join("\n\n");
+
+    assert_snapshot!(rendered);
+}
+
+#[test]
 fn web_and_image_tool_blocks_snapshot() {
     let items = [
         ThreadItem::WebSearch {

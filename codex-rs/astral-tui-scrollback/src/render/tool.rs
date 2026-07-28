@@ -13,12 +13,30 @@ use crate::ToolKind;
 use crate::ToolPresentation;
 
 mod edit;
+mod execute;
 
 pub(super) fn render_tool(tool: &ToolPresentation, options: RenderOptions) -> Text<'static> {
-    if tool.kind == ToolKind::Edit && !tool.changes.is_empty() {
-        return edit::render_edit(tool, options);
+    match tool.kind {
+        ToolKind::Edit if !tool.changes.is_empty() => edit::render_edit(tool, options),
+        ToolKind::Execute | ToolKind::Background => execute::render_execute(tool, options),
+        ToolKind::BackgroundPoll
+        | ToolKind::BackgroundInput
+        | ToolKind::BackgroundList
+        | ToolKind::BackgroundStop
+        | ToolKind::Read
+        | ToolKind::Edit
+        | ToolKind::List
+        | ToolKind::Search
+        | ToolKind::WebFetch
+        | ToolKind::WebSearch
+        | ToolKind::Mcp
+        | ToolKind::Skill
+        | ToolKind::Collab
+        | ToolKind::ImageView
+        | ToolKind::ImageGeneration
+        | ToolKind::Todo
+        | ToolKind::Other => render_generic_tool(tool, options),
     }
-    render_generic_tool(tool, options)
 }
 
 fn render_generic_tool(tool: &ToolPresentation, options: RenderOptions) -> Text<'static> {
