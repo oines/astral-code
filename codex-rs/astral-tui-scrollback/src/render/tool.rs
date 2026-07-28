@@ -17,6 +17,13 @@ mod edit;
 mod execute;
 mod inspect;
 
+pub(super) fn render_edit_viewer_lines(
+    tool: &ToolPresentation,
+    options: RenderOptions,
+) -> Vec<super::EditViewerLine> {
+    edit::render_edit_viewer_lines(tool, options)
+}
+
 pub(super) fn render_tool(tool: &ToolPresentation, options: RenderOptions) -> Text<'static> {
     match tool.kind {
         ToolKind::Edit if !tool.changes.is_empty() => edit::render_edit(tool, options),

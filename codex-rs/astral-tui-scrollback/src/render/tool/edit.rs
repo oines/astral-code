@@ -16,10 +16,23 @@ use super::RenderOptions;
 use super::tool_header_with_title_style;
 use crate::DisplayMode;
 use crate::ToolPresentation;
+use crate::render::EditViewerLine;
 
 mod diff;
 
 pub(super) fn render_edit(tool: &ToolPresentation, options: RenderOptions) -> Text<'static> {
+    Text::from(
+        render_edit_viewer_lines(tool, options)
+            .into_iter()
+            .map(|line| line.line)
+            .collect::<Vec<_>>(),
+    )
+}
+
+pub(super) fn render_edit_viewer_lines(
+    tool: &ToolPresentation,
+    options: RenderOptions,
+) -> Vec<EditViewerLine> {
     let (added, removed) = diff::change_counts(&tool.changes);
     let suffix = if options.mode == DisplayMode::Collapsed && (added > 0 || removed > 0) {
         vec![
@@ -30,43 +43,59 @@ pub(super) fn render_edit(tool: &ToolPresentation, options: RenderOptions) -> Te
     } else {
         Vec::new()
     };
-    let mut lines = vec![tool_header_with_title_style(
-        tool,
-        edit_label(&tool.changes),
-        &edit_title(tool),
-        Style::default().fg(options.diff_style.path),
-        suffix,
-    )];
+    let mut lines = vec![EditViewerLine {
+        line: tool_header_with_title_style(
+            tool,
+            edit_label(&tool.changes),
+            &edit_title(tool),
+            Style::default().fg(options.diff_style.path),
+            suffix,
+        ),
+        copy: None,
+    }];
     if options.mode == DisplayMode::Collapsed {
-        return Text::from(lines);
+        return lines;
     }
 
     let mut body = render_changes(&tool.changes, options);
     if options.mode == DisplayMode::Truncated && body.len() > options.max_output_lines {
         let hidden = body.len() - options.max_output_lines;
         body.truncate(options.max_output_lines);
-        body.push(vec!["  └ ".dim(), format!("{hidden} more lines").dim()].into());
+        body.push(EditViewerLine {
+            line: vec!["  └ ".dim(), format!("{hidden} more lines").dim()].into(),
+            copy: None,
+        });
     }
     if !body.is_empty() {
-        lines.push(Line::default());
+        lines.push(EditViewerLine {
+            line: Line::default(),
+            copy: None,
+        });
         lines.extend(body);
     }
-    Text::from(lines)
+    lines
 }
 
-fn render_changes(changes: &[FileUpdateChange], options: RenderOptions) -> Vec<Line<'static>> {
+fn render_changes(changes: &[FileUpdateChange], options: RenderOptions) -> Vec<EditViewerLine> {
     match changes {
         [] => Vec::new(),
-        [change] => diff::render_file_change(change, options.width, options.diff_style, "  "),
+        [change] => diff::render_file_change(change, 0, options.width, options.diff_style, "  "),
         changes => {
             let mut lines = Vec::new();
             for (index, change) in changes.iter().enumerate() {
                 if index > 0 {
-                    lines.push(Line::default());
+                    lines.push(EditViewerLine {
+                        line: Line::default(),
+                        copy: None,
+                    });
                 }
-                lines.push(render_change_header(change, options));
+                lines.push(EditViewerLine {
+                    line: render_change_header(change, options),
+                    copy: None,
+                });
                 lines.extend(diff::render_file_change(
                     change,
+                    index,
                     options.width,
                     options.diff_style,
                     "    ",

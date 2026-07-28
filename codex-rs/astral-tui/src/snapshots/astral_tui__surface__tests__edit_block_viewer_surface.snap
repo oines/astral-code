@@ -7,14 +7,14 @@ expression: "format!(\"{}\\n\\nvisual selection mask:\\n{}\\n\\nmouse drag selec
   │                                                                          │
   │  ◆ Edit lib.rs                                                           │
   │                                                                          │
-  │    │ @@ -1,4 +1,6 @@                                                     │
-  │    │  pub fn render() {                                                  │
-  │    │ -    draw_old();                                                    │
-  │    │ +    draw_header();                                                 │
-  │    │ +    draw_body();                                                   │
-  │    │  }                                                                  │
-  │    │ +                                                                   │
-  │    │ +pub fn close() {}                                                  │
+  │    1  pub fn render() {                                                  │
+  │    2      draw_old();                                                    │
+  │    2      draw_header();                                                 │
+  │    3      draw_body();                                                   │
+  │    4  }                                                                  │
+  │    5                                                                     │
+  │    6  pub fn close() {}                                                  │
+  │                                                                          │
   │                                                                          │
   │                                                                          │
   │                                                                          │

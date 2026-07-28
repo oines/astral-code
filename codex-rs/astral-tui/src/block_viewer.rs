@@ -3,8 +3,11 @@
 // Modified to retain Astral's stable transcript entry id and render the current
 // provider-neutral PresentationBlock instead of copying runtime payloads.
 
+use astral_tui_scrollback::EditCopyLine;
 use ratatui::layout::Rect;
 
+#[path = "block_viewer/edit_copy.rs"]
+mod edit_copy;
 #[path = "block_viewer/matcher.rs"]
 mod matcher;
 #[path = "block_viewer/navigation.rs"]
@@ -55,6 +58,16 @@ impl ViewerRowGeometry {
     }
 }
 
+pub(crate) struct BlockViewerFrame {
+    pub(crate) popup_area: Rect,
+    pub(crate) content_area: Rect,
+    pub(crate) close_button: Rect,
+    pub(crate) logical_lines: Vec<String>,
+    pub(crate) edit_copy_lines: Vec<Option<EditCopyLine>>,
+    pub(crate) row_geometry: Vec<ViewerRowGeometry>,
+    pub(crate) rendered_rows: Vec<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct TextEndpoint {
     item: usize,
@@ -101,6 +114,7 @@ pub(crate) struct BlockViewerState {
     close_button: Option<Rect>,
     close_hovered: bool,
     logical_lines: Vec<String>,
+    edit_copy_lines: Vec<Option<EditCopyLine>>,
     rendered_rows: Vec<String>,
     row_geometry: Vec<ViewerRowGeometry>,
     visible_item_indices: Vec<usize>,
@@ -125,6 +139,7 @@ impl BlockViewerState {
             close_button: None,
             close_hovered: false,
             logical_lines: Vec::new(),
+            edit_copy_lines: Vec::new(),
             rendered_rows: Vec::new(),
             row_geometry: Vec::new(),
             visible_item_indices: Vec::new(),
@@ -231,15 +246,16 @@ impl BlockViewerState {
         range.contains(&item)
     }
 
-    pub(crate) fn observe_frame(
-        &mut self,
-        popup_area: Rect,
-        content_area: Rect,
-        close_button: Rect,
-        logical_lines: Vec<String>,
-        row_geometry: Vec<ViewerRowGeometry>,
-        rendered_rows: Vec<String>,
-    ) {
+    pub(crate) fn observe_frame(&mut self, frame: BlockViewerFrame) {
+        let BlockViewerFrame {
+            popup_area,
+            content_area,
+            close_button,
+            logical_lines,
+            edit_copy_lines,
+            row_geometry,
+            rendered_rows,
+        } = frame;
         self.popup_area = Some(popup_area);
         self.content_area = Some(content_area);
         self.close_button = Some(close_button);
@@ -253,6 +269,7 @@ impl BlockViewerState {
             .then(|| self.selected_item_screen_row())
             .flatten();
         self.logical_lines = logical_lines;
+        self.edit_copy_lines = edit_copy_lines;
         self.row_geometry = row_geometry;
         self.rendered_rows = rendered_rows;
         self.matcher.rebuild(&self.logical_lines);
@@ -329,19 +346,6 @@ impl BlockViewerState {
 
     pub(crate) fn clear_visual_selection(&mut self) -> bool {
         self.visual_anchor.take().is_some()
-    }
-
-    pub(crate) fn take_visual_selection_text(&mut self) -> Option<String> {
-        let range = self.visual_selection_range()?;
-        let text = range
-            .filter_map(|item| {
-                let physical = *self.visible_item_indices.get(item)?;
-                self.logical_lines.get(physical).map(String::as_str)
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        self.clear_visual_selection();
-        Some(text)
     }
 }
 

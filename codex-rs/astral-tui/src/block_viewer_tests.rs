@@ -5,6 +5,7 @@ use crossterm::event::MouseEventKind;
 use pretty_assertions::assert_eq;
 use ratatui::layout::Rect;
 
+use super::BlockViewerFrame;
 use super::BlockViewerMouseAction;
 use super::BlockViewerState;
 use super::ViewerRowGeometry;
@@ -29,6 +30,7 @@ fn observe_frame(
     close: Rect,
     logical_lines: Vec<String>,
 ) {
+    let edit_copy_lines = vec![None; logical_lines.len()];
     let row_geometry = logical_lines
         .iter()
         .enumerate()
@@ -37,14 +39,15 @@ fn observe_frame(
         })
         .collect();
     let rendered_rows = logical_lines.clone();
-    state.observe_frame(
-        popup,
-        content,
-        close,
+    state.observe_frame(BlockViewerFrame {
+        popup_area: popup,
+        content_area: content,
+        close_button: close,
         logical_lines,
+        edit_copy_lines,
         row_geometry,
         rendered_rows,
-    );
+    });
 }
 
 #[test]
@@ -145,22 +148,23 @@ fn viewer_search_uses_rendered_line_order_and_wraps_matches() {
 #[test]
 fn viewer_filter_keeps_only_matching_rendered_lines() {
     let mut state = BlockViewerState::new("turn\0entry-1".to_string());
-    state.observe_frame(
-        Rect::new(1, 1, 30, 12),
-        Rect::new(3, 3, 24, 5),
-        Rect::new(27, 1, 3, 1),
-        vec!["alpha continued".to_string(), "beta".to_string()],
-        vec![
+    state.observe_frame(BlockViewerFrame {
+        popup_area: Rect::new(1, 1, 30, 12),
+        content_area: Rect::new(3, 3, 24, 5),
+        close_button: Rect::new(27, 1, 3, 1),
+        logical_lines: vec!["alpha continued".to_string(), "beta".to_string()],
+        edit_copy_lines: vec![None, None],
+        row_geometry: vec![
             ViewerRowGeometry::new(0, 0, 5),
             ViewerRowGeometry::new(0, 6, 15),
             ViewerRowGeometry::new(1, 0, 4),
         ],
-        vec![
+        rendered_rows: vec![
             "alpha".to_string(),
             "continued".to_string(),
             "beta".to_string(),
         ],
-    );
+    });
 
     state.open_filter();
     for character in "alpha".chars() {
@@ -194,7 +198,9 @@ fn viewer_visual_selection_copies_the_rendered_line_range() {
     state.select_by(2);
 
     assert_eq!(
-        state.take_visual_selection_text(),
+        state.take_visual_selection_text(&astral_tui_scrollback::PresentationBlock::Assistant {
+            text: String::new(),
+        }),
         Some("line 1\nline 2\nline 3".to_string())
     );
     assert!(!state.visual_selection_active());

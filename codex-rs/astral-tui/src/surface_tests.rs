@@ -1550,7 +1550,7 @@ fn enter_opens_the_selected_edit_in_a_scrollable_viewer_snapshot() {
             path: "src/lib.rs".to_string(),
             kind: PatchChangeKind::Update { move_path: None },
             diff: [
-                "@@ -1,4 +1,6 @@",
+                "@@ -1,3 +1,6 @@",
                 " pub fn render() {",
                 "-    draw_old();",
                 "+    draw_header();",
@@ -1616,8 +1616,21 @@ fn enter_opens_the_selected_edit_in_a_scrollable_viewer_snapshot() {
     );
     let visual_selection_mask = selection_mask(&buffer, state.theme().panel_selected);
     assert_eq!(
-        handle_key(&mut state, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
-        InputAction::Redraw
+        handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE)
+        ),
+        InputAction::CopyText {
+            text: [
+                "--- a/src/lib.rs",
+                "+++ b/src/lib.rs",
+                "@@ -1,1 +1,1 @@",
+                " pub fn render() {",
+                "",
+            ]
+            .join("\n"),
+            notice: "Copied block content".to_string(),
+        }
     );
     assert_eq!(
         handle_input_mouse(

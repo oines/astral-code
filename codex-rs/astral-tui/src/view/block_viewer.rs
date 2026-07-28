@@ -7,10 +7,12 @@ use std::borrow::Cow;
 
 use astral_tui_scrollback::BlockTextMode;
 use astral_tui_scrollback::DisplayMode;
+use astral_tui_scrollback::EditCopyLine;
 use astral_tui_scrollback::LineJoiner;
 use astral_tui_scrollback::MarkdownLine;
 use astral_tui_scrollback::PresentationBlock;
 use astral_tui_scrollback::render_block;
+use astral_tui_scrollback::render_edit_viewer_lines;
 use astral_tui_scrollback::wrap_styled_line_with_metadata;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -22,6 +24,7 @@ use ratatui::widgets::Clear;
 use ratatui::widgets::Widget;
 use unicode_width::UnicodeWidthStr;
 
+use crate::block_viewer::BlockViewerFrame;
 use crate::block_viewer::BlockViewerState;
 use crate::block_viewer::ViewerRowGeometry;
 use crate::block_viewer::ViewerWrapMode;
@@ -42,6 +45,7 @@ struct ViewerItem {
     line: Line<'static>,
     plain: String,
     background: Option<Color>,
+    edit_copy: Option<EditCopyLine>,
 }
 
 struct ViewerRow {
@@ -96,16 +100,18 @@ impl BlockViewerPane<'_> {
         let items = render_viewer_items(self.block, theme, self.text_mode);
         let rows = render_viewer_rows(&items, body_width, self.state.wrap_mode());
         let logical_lines = items.iter().map(|item| item.plain.clone()).collect();
+        let edit_copy_lines = items.iter().map(|item| item.edit_copy.clone()).collect();
         let row_geometry = rows.iter().map(|row| row.geometry).collect();
         let rendered_rows = rows.iter().map(|row| row.plain.clone()).collect();
-        self.state.observe_frame(
-            frame.popup,
-            body_area,
-            frame.close_button,
+        self.state.observe_frame(BlockViewerFrame {
+            popup_area: frame.popup,
+            content_area: body_area,
+            close_button: frame.close_button,
             logical_lines,
+            edit_copy_lines,
             row_geometry,
             rendered_rows,
-        );
+        });
         let rows = self
             .state
             .visible_row_indices()
@@ -161,6 +167,14 @@ fn render_viewer_items(
     theme: AstralTheme,
     text_mode: BlockTextMode,
 ) -> Vec<ViewerItem> {
+    let options = render_options(LOGICAL_LINE_WIDTH, DisplayMode::Expanded, theme)
+        .with_max_output_lines(usize::MAX);
+    if let Some(lines) = render_edit_viewer_lines(block, options) {
+        return lines
+            .into_iter()
+            .map(|line| viewer_item(line.line, line.copy))
+            .collect();
+    }
     let lines = match block {
         PresentationBlock::Assistant { text } | PresentationBlock::Thinking { text, .. } => {
             render_markdown_content(text, LOGICAL_LINE_WIDTH, theme, text_mode, "")
@@ -168,19 +182,15 @@ fn render_viewer_items(
                 .map(|line| line.line)
                 .collect()
         }
-        _ => {
-            render_block(
-                block,
-                render_options(LOGICAL_LINE_WIDTH, DisplayMode::Expanded, theme)
-                    .with_max_output_lines(usize::MAX),
-            )
-            .lines
-        }
+        _ => render_block(block, options).lines,
     };
-    lines.into_iter().map(viewer_item).collect()
+    lines
+        .into_iter()
+        .map(|line| viewer_item(line, None))
+        .collect()
 }
 
-fn viewer_item(mut line: Line<'static>) -> ViewerItem {
+fn viewer_item(mut line: Line<'static>, edit_copy: Option<EditCopyLine>) -> ViewerItem {
     let background = line
         .style
         .bg
@@ -205,6 +215,7 @@ fn viewer_item(mut line: Line<'static>) -> ViewerItem {
         line,
         plain,
         background,
+        edit_copy,
     }
 }
 

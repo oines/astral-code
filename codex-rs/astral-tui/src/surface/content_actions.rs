@@ -42,19 +42,20 @@ impl SurfaceState {
     }
 
     pub(crate) fn block_viewer_copy_text(&mut self) -> Option<String> {
+        let entry_id = self.block_viewer()?.entry_id().to_string();
+        let block = self.presentation_block(&entry_id)?;
         if self
             .block_viewer()
             .is_some_and(BlockViewerState::visual_selection_active)
         {
-            return non_empty(self.block_viewer_mut()?.take_visual_selection_text());
+            return non_empty(self.block_viewer_mut()?.take_visual_selection_text(&block));
         }
-        let entry_id = self.block_viewer()?.entry_id();
-        let mode = if self.scrollback.is_raw_entry(entry_id) {
+        let mode = if self.scrollback.is_raw_entry(&entry_id) {
             BlockTextMode::Raw
         } else {
             BlockTextMode::Rendered
         };
-        non_empty(self.presentation_block(entry_id)?.copy_text(mode))
+        non_empty(block.copy_text(mode))
     }
 
     pub(crate) fn block_viewer_copy_meta(&self) -> Option<String> {

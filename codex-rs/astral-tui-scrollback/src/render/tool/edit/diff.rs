@@ -21,16 +21,20 @@ use textwrap::core::display_width;
 
 use crate::markdown::CodeLineHighlighter;
 use crate::render::DiffStyle;
+use crate::render::EditCopyKind;
+use crate::render::EditCopyLine;
+use crate::render::EditViewerLine;
 
 const CONTENT_GAP: &str = "  ";
 const TAB_WIDTH: usize = 4;
 
 pub(super) fn render_file_change(
     change: &FileUpdateChange,
+    change_index: usize,
     width: u16,
     style: DiffStyle,
     indent: &'static str,
-) -> Vec<Line<'static>> {
+) -> Vec<EditViewerLine> {
     let path = match &change.kind {
         PatchChangeKind::Update {
             move_path: Some(destination),
@@ -43,6 +47,7 @@ pub(super) fn render_file_change(
         PatchChangeKind::Add => render_whole_file(
             &change.diff,
             DiffLineKind::Added,
+            change_index,
             path,
             width,
             style,
@@ -51,12 +56,15 @@ pub(super) fn render_file_change(
         PatchChangeKind::Delete => render_whole_file(
             &change.diff,
             DiffLineKind::Removed,
+            change_index,
             path,
             width,
             style,
             indent,
         ),
-        PatchChangeKind::Update { .. } => render_update(&change.diff, path, width, style, indent),
+        PatchChangeKind::Update { .. } => {
+            render_update(&change.diff, change_index, path, width, style, indent)
+        }
     }
 }
 
@@ -86,24 +94,26 @@ pub(super) fn change_counts(changes: &[FileUpdateChange]) -> (usize, usize) {
 fn render_whole_file(
     source: &str,
     kind: DiffLineKind,
+    change_index: usize,
     path: &Path,
     width: u16,
     style: DiffStyle,
     indent: &'static str,
-) -> Vec<Line<'static>> {
+) -> Vec<EditViewerLine> {
     let line_count = source.lines().count();
     let number_width = line_number_width(line_count);
     let mut highlighter = CodeLineHighlighter::for_path(path, source, style.syntax_theme);
     source
         .lines()
         .enumerate()
-        .flat_map(|(index, text)| {
-            let text = expand_tabs(text);
+        .flat_map(|(index, raw)| {
+            let text = expand_tabs(raw);
             let highlighted = highlighter
                 .as_mut()
                 .and_then(|highlighter| highlighter.highlight_line(&text));
+            let line_number = index + 1;
             render_diff_line(
-                index + 1,
+                line_number,
                 kind,
                 &text,
                 highlighted,
@@ -111,6 +121,13 @@ fn render_whole_file(
                 width,
                 style,
                 indent,
+                EditCopyLine {
+                    change_index,
+                    kind: kind.copy_kind(),
+                    text: raw.to_string(),
+                    old_line: (kind == DiffLineKind::Removed).then_some(line_number),
+                    new_line: (kind == DiffLineKind::Added).then_some(line_number),
+                },
             )
         })
         .collect()
@@ -118,13 +135,28 @@ fn render_whole_file(
 
 fn render_update(
     source: &str,
+    change_index: usize,
     path: &Path,
     width: u16,
     style: DiffStyle,
     indent: &'static str,
-) -> Vec<Line<'static>> {
-    let Ok(patch) = Patch::from_str(source) else {
-        return render_unparsed(source, width, indent);
+) -> Vec<EditViewerLine> {
+    let normalized;
+    let patch = match Patch::from_str(source) {
+        Ok(patch) => patch,
+        Err(_) => {
+            // App-server updates may contain a bare hunk without file headers
+            // or a trailing newline. Add display-only headers for parsing;
+            // the original path and text remain authoritative for rendering.
+            normalized = format!(
+                "--- a/source\n+++ b/source\n{}\n",
+                source.trim_end_matches(['\n', '\r'])
+            );
+            let Ok(patch) = Patch::from_str(&normalized) else {
+                return render_unparsed(source, width, indent);
+            };
+            patch
+        }
     };
     let number_width = patch
         .hunks()
@@ -154,7 +186,8 @@ fn render_update(
         for line in hunk.lines() {
             match line {
                 DiffyLine::Insert(text) => {
-                    let text = expand_tabs(text.trim_end_matches(['\n', '\r']));
+                    let raw = text.trim_end_matches(['\n', '\r']);
+                    let text = expand_tabs(raw);
                     let highlighted = new_highlighter
                         .as_mut()
                         .and_then(|highlighter| highlighter.highlight_line(&text));
@@ -167,11 +200,19 @@ fn render_update(
                         width,
                         style,
                         indent,
+                        EditCopyLine {
+                            change_index,
+                            kind: EditCopyKind::Insert,
+                            text: raw.to_string(),
+                            old_line: None,
+                            new_line: Some(new_line),
+                        },
                     ));
                     new_line += 1;
                 }
                 DiffyLine::Delete(text) => {
-                    let text = expand_tabs(text.trim_end_matches(['\n', '\r']));
+                    let raw = text.trim_end_matches(['\n', '\r']);
+                    let text = expand_tabs(raw);
                     let highlighted = old_highlighter
                         .as_mut()
                         .and_then(|highlighter| highlighter.highlight_line(&text));
@@ -184,11 +225,19 @@ fn render_update(
                         width,
                         style,
                         indent,
+                        EditCopyLine {
+                            change_index,
+                            kind: EditCopyKind::Delete,
+                            text: raw.to_string(),
+                            old_line: Some(old_line),
+                            new_line: None,
+                        },
                     ));
                     old_line += 1;
                 }
                 DiffyLine::Context(text) => {
-                    let text = expand_tabs(text.trim_end_matches(['\n', '\r']));
+                    let raw = text.trim_end_matches(['\n', '\r']);
+                    let text = expand_tabs(raw);
                     if let Some(highlighter) = old_highlighter.as_mut() {
                         let _ = highlighter.highlight_line(&text);
                     }
@@ -204,6 +253,13 @@ fn render_update(
                         width,
                         style,
                         indent,
+                        EditCopyLine {
+                            change_index,
+                            kind: EditCopyKind::Context,
+                            text: raw.to_string(),
+                            old_line: Some(old_line),
+                            new_line: Some(new_line),
+                        },
                     ));
                     old_line += 1;
                     new_line += 1;
@@ -225,7 +281,8 @@ fn render_diff_line(
     width: u16,
     style: DiffStyle,
     indent: &'static str,
-) -> Vec<Line<'static>> {
+    copy: EditCopyLine,
+) -> Vec<EditViewerLine> {
     let prefix_width = display_width(indent) + number_width + display_width(CONTENT_GAP);
     let content_width = usize::from(width).saturating_sub(prefix_width).max(1);
     let spans = content_spans(text, kind, highlighted, style);
@@ -265,7 +322,10 @@ fn render_diff_line(
                 }
                 spans.push(Span::styled(" ".repeat(padding), padding_style));
             }
-            Line::from(spans)
+            EditViewerLine {
+                line: Line::from(spans),
+                copy: Some(copy.clone()),
+            }
         })
         .collect()
 }
@@ -299,7 +359,7 @@ fn styled_content(
     Span::styled(text.to_string(), content_style)
 }
 
-fn render_unparsed(source: &str, width: u16, indent: &'static str) -> Vec<Line<'static>> {
+fn render_unparsed(source: &str, width: u16, indent: &'static str) -> Vec<EditViewerLine> {
     let prefix = format!("{indent}│ ");
     let continuation = format!("{indent}│   ");
     let options = Options::new(usize::from(width).max(1))
@@ -311,21 +371,27 @@ fn render_unparsed(source: &str, width: u16, indent: &'static str) -> Vec<Line<'
     source
         .lines()
         .flat_map(|line| textwrap::wrap(line, &options))
-        .map(|line| Line::from(line.into_owned().dim()))
+        .map(|line| EditViewerLine {
+            line: Line::from(line.into_owned().dim()),
+            copy: None,
+        })
         .collect()
 }
 
-fn hunk_separator(unchanged: usize, indent: &'static str, style: DiffStyle) -> Line<'static> {
+fn hunk_separator(unchanged: usize, indent: &'static str, style: DiffStyle) -> EditViewerLine {
     let label = match unchanged {
         0 => "…".to_string(),
         1 => "… 1 unchanged line".to_string(),
         unchanged => format!("… {unchanged} unchanged lines"),
     };
-    vec![
-        indent.into(),
-        Span::styled(label, Style::default().fg(style.gutter)),
-    ]
-    .into()
+    EditViewerLine {
+        line: vec![
+            indent.into(),
+            Span::styled(label, Style::default().fg(style.gutter)),
+        ]
+        .into(),
+        copy: None,
+    }
 }
 
 fn gutter_style(kind: DiffLineKind, style: DiffStyle) -> Style {
@@ -428,4 +494,14 @@ enum DiffLineKind {
     Added,
     Removed,
     Context,
+}
+
+impl DiffLineKind {
+    fn copy_kind(self) -> EditCopyKind {
+        match self {
+            Self::Added => EditCopyKind::Insert,
+            Self::Removed => EditCopyKind::Delete,
+            Self::Context => EditCopyKind::Context,
+        }
+    }
 }

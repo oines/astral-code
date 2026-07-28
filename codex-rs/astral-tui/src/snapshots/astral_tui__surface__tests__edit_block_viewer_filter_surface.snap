@@ -5,9 +5,9 @@ expression: buffer_text(&buffer)
 
   ┌─ lib.rs ─────────────────────────────────────────────────────────────[×]─┐
   │                                                                          │
-  │    │ -    draw_old();                                                    │
-  │    │ +    draw_header();                                                 │
-  │    │ +    draw_body();                                                   │
+  │    2      draw_old();                                                    │
+  │    2      draw_header();                                                 │
+  │    3      draw_body();                                                   │
   │                                                                          │
   │                                                                          │
   │                                                                          │

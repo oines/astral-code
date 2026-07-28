@@ -12,6 +12,7 @@ use crate::SubagentAction;
 use crate::SubagentAgent;
 use crate::SubagentAgentStatus;
 use crate::SubagentPresentation;
+use crate::ToolKind;
 use crate::ToolStatus;
 use crate::markdown::MarkdownStyle;
 use crate::markdown::MarkdownSyntaxTheme;
@@ -44,6 +45,31 @@ pub struct DiffStyle {
     pub delete_background: Option<Color>,
     pub equal_foreground: Color,
     pub syntax_theme: MarkdownSyntaxTheme,
+}
+
+/// Copy semantics attached to one rendered edit line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditCopyKind {
+    Context,
+    Insert,
+    Delete,
+}
+
+/// Raw diff data retained beside an edit viewer line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditCopyLine {
+    pub change_index: usize,
+    pub kind: EditCopyKind,
+    pub text: String,
+    pub old_line: Option<usize>,
+    pub new_line: Option<usize>,
+}
+
+/// One logical edit viewer row and its optional patch-copy metadata.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EditViewerLine {
+    pub line: Line<'static>,
+    pub copy: Option<EditCopyLine>,
 }
 
 impl Default for DiffStyle {
@@ -118,6 +144,17 @@ pub fn render_block(block: &PresentationBlock, options: RenderOptions) -> Text<'
             Text::from(lines)
         }
     }
+}
+
+pub fn render_edit_viewer_lines(
+    block: &PresentationBlock,
+    options: RenderOptions,
+) -> Option<Vec<EditViewerLine>> {
+    let PresentationBlock::Tool(tool) = block else {
+        return None;
+    };
+    (tool.kind == ToolKind::Edit && !tool.changes.is_empty())
+        .then(|| tool::render_edit_viewer_lines(tool, options))
 }
 
 fn render_subagent(subagent: &SubagentPresentation, options: RenderOptions) -> Text<'static> {
