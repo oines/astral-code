@@ -1,0 +1,8 @@
+---
+source: astral-tui/src/theme_picker_tests.rs
+expression: "style_summary(&buffer, selected, row_fill, description, unselected)"
+---
+selected: fg=Rgb(30, 30, 34) bg=Rgb(218, 215, 226) modifiers=BOLD
+row-fill: bg=Rgb(218, 215, 226)
+description: bg=Rgb(244, 244, 244)
+unselected: bg=Rgb(244, 244, 244) modifiers=NONE

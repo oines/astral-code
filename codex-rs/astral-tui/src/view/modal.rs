@@ -132,6 +132,23 @@ pub(crate) fn render_modal_frame(
     ))
 }
 
+/// Shared selected-row treatment for list choices inside Astral modal frames.
+///
+/// Grok's modal picker keeps the selected row on the visual panel color and
+/// emphasizes its primary label. Keeping this in the modal layer prevents the
+/// resume, theme, and permission pickers from drifting onto prompt-border or
+/// menu-specific colors.
+pub(crate) fn modal_choice_style(theme: AstralTheme, selected: bool) -> Style {
+    if selected {
+        Style::default()
+            .fg(theme.text_primary)
+            .bg(theme.panel_selected)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme.text_primary).bg(theme.bg_base)
+    }
+}
+
 fn popup_area(area: Rect, height: ModalHeight) -> Option<Rect> {
     if area.width < 20 || area.height < 8 {
         return None;
