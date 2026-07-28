@@ -244,8 +244,11 @@ fn proposed_plan_uses_the_markdown_renderer_snapshot() {
         )
         .to_string(),
     };
+    let block = PresentationBlock::from_item(&item, &TimelineStream::None)
+        .expect("fixture should produce a presentation block");
 
-    assert_snapshot!(render(item, DisplayMode::Expanded));
+    assert_eq!(block.default_display_mode(), DisplayMode::Expanded);
+    assert_snapshot!(render(item, block.default_display_mode()));
 }
 
 #[test]

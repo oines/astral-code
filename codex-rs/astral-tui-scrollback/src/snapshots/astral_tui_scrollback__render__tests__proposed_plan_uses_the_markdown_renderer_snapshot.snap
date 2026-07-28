@@ -1,8 +1,8 @@
 ---
 source: astral-tui-scrollback/src/render_tests.rs
-expression: "render(item, DisplayMode::Expanded)"
+expression: "render(item, block.default_display_mode())"
 ---
-◆ Plan
+• Proposed Plan
   Renderer plan
 
   1. Preserve event order

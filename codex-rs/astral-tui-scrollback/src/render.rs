@@ -260,9 +260,8 @@ fn render_thinking(text: &str, running: bool, options: RenderOptions) -> Text<'s
     Text::from(lines)
 }
 
-fn render_plan(text: &str, running: bool, options: RenderOptions) -> Text<'static> {
-    let marker = if running { "◇ " } else { "◆ " };
-    let mut lines = vec![vec![marker.cyan(), "Plan".cyan()].into()];
+fn render_plan(text: &str, _running: bool, options: RenderOptions) -> Text<'static> {
+    let mut lines = vec![vec!["• ".dim(), "Proposed Plan".bold()].into()];
     if options.mode != DisplayMode::Collapsed {
         let body = render_markdown(
             text,

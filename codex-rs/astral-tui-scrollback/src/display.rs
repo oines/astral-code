@@ -15,14 +15,16 @@ pub enum DisplayMode {
 impl PresentationBlock {
     pub fn default_display_mode(&self) -> DisplayMode {
         match self {
-            Self::User { .. } | Self::Assistant { .. } | Self::Todo(_) => DisplayMode::Expanded,
+            Self::User { .. }
+            | Self::Assistant { .. }
+            | Self::Plan { running: false, .. }
+            | Self::Todo(_) => DisplayMode::Expanded,
             Self::Thinking { running: true, .. } | Self::Plan { running: true, .. } => {
                 DisplayMode::Truncated
             }
-            Self::Thinking { running: false, .. }
-            | Self::Plan { running: false, .. }
-            | Self::Subagent(_)
-            | Self::System { .. } => DisplayMode::Collapsed,
+            Self::Thinking { running: false, .. } | Self::Subagent(_) | Self::System { .. } => {
+                DisplayMode::Collapsed
+            }
             Self::Tool(tool) if tool.kind == ToolKind::Edit && !tool.changes.is_empty() => {
                 DisplayMode::Expanded
             }
