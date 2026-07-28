@@ -2,6 +2,7 @@ mod appearance;
 mod block_viewer;
 mod mentions;
 mod plan_review;
+mod pointer;
 mod requests;
 
 use astral_tui_scrollback::DisplayMode;
@@ -72,6 +73,8 @@ use crate::view::render_entry_chrome;
 use crate::view::render_follow_indicator;
 use crate::view::render_transcript;
 
+use self::pointer::SurfacePointerState;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SurfaceActivity {
     Ready,
@@ -108,6 +111,7 @@ pub struct SurfaceState {
     completed_plan: Option<CompletedPlan>,
     plan_review: Option<PlanReviewState>,
     plan_review_mouse: PlanReviewMouseState,
+    pointer_areas: SurfacePointerState,
     theme: AstralThemeId,
     color_level: ColorLevel,
     timeline_visible: bool,
@@ -136,6 +140,7 @@ impl SurfaceState {
             completed_plan: None,
             plan_review: None,
             plan_review_mouse: PlanReviewMouseState::default(),
+            pointer_areas: SurfacePointerState::default(),
             theme: AstralThemeId::default(),
             color_level: ColorLevel::default(),
             timeline_visible: false,
@@ -171,6 +176,7 @@ impl SurfaceState {
             completed_plan: None,
             plan_review: None,
             plan_review_mouse: PlanReviewMouseState::default(),
+            pointer_areas: SurfacePointerState::default(),
             theme: AstralThemeId::default(),
             color_level: ColorLevel::default(),
             timeline_visible: false,
@@ -557,6 +563,7 @@ pub(crate) fn render_surface_with_view(
         timeline_width,
         compact: false,
     });
+    state.observe_pointer_areas(layout.scrollback, layout.prompt);
 
     render_status_bar(state, session, layout.status_bar, buffer, theme);
 

@@ -1303,11 +1303,35 @@ fn scrollback_focus_folds_tool_entries_snapshot() {
         "scrollback_focus_fold_surface",
         format!("COLLAPSED\n{collapsed}\n\nEXPANDED\n{expanded}")
     );
+    let area = Rect::new(0, 0, 80, 20);
+    let mut buffer = Buffer::empty(area);
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        area,
+        &mut buffer,
+    );
+    let (column, row) =
+        find_text(&buffer, "❯").unwrap_or_else(|| panic!("prompt is visible:\n{expanded}"));
     assert_eq!(
-        handle_key(&mut state, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)),
+        handle_input_mouse(
+            &mut state,
+            mouse(MouseEventKind::Down(MouseButton::Left), column, row),
+        ),
         crate::InputAction::Redraw
     );
     assert!(!state.scrollback_focused());
+    let (column, row) =
+        find_text(&buffer, "Run").unwrap_or_else(|| panic!("tool entry is visible:\n{expanded}"));
+    assert_eq!(
+        handle_input_mouse(
+            &mut state,
+            mouse(MouseEventKind::Down(MouseButton::Left), column, row),
+        ),
+        crate::InputAction::None
+    );
+    assert!(state.scrollback_focused());
 }
 
 #[test]
@@ -1595,6 +1619,7 @@ fn plan_review_mouse_selects_and_activates_a_decision_row() {
     let (column, first_choice_row) =
         find_text(&buffer, "Yes, implement this plan").expect("plan decision row");
     let second_choice_row = first_choice_row.saturating_add(1);
+    assert!(state.focus_scrollback());
 
     assert_eq!(
         handle_input_mouse(
@@ -1607,6 +1632,7 @@ fn plan_review_mouse_selects_and_activates_a_decision_row() {
         ),
         InputAction::Redraw
     );
+    assert!(!state.scrollback_focused());
     assert_eq!(
         handle_input_mouse(
             &mut state,

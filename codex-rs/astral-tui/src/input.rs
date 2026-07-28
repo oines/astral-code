@@ -4,7 +4,9 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
+use crossterm::event::MouseButton;
 use crossterm::event::MouseEvent;
+use crossterm::event::MouseEventKind;
 
 use crate::PendingRequest;
 use crate::PendingRequestResponse;
@@ -65,7 +67,7 @@ pub fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
     }
     if let Some(request) = state.pending_requests().front().cloned() {
         state.sync_request_states();
-        if is_simple_request(&request) && state.scrollback_focused() {
+        if state.scrollback_focused() {
             return scrollback::handle_key(state, key);
         }
         return handle_request_key(state, request, key);
@@ -117,7 +119,7 @@ pub fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
             _ => InputAction::None,
         };
     }
-    if state.plan_review().is_some() {
+    if state.plan_review().is_some() && !state.scrollback_focused() {
         return plan_review::handle_key(state, key);
     }
     if key.code == KeyCode::Esc && state.clear_scrollback_selection() {
@@ -186,6 +188,9 @@ pub(crate) fn handle_mouse(state: &mut SurfaceState, mouse: MouseEvent) -> Input
     if state.block_viewer().is_some() {
         return block_viewer::handle_mouse(state, mouse);
     }
+    if state.pending_requests().front().is_some() && scrollback_owns_pointer(state, mouse) {
+        return InputAction::None;
+    }
     if let Some(request) = state.pending_requests().front().cloned()
         && is_simple_request(&request)
     {
@@ -227,13 +232,41 @@ pub(crate) fn handle_mouse(state: &mut SurfaceState, mouse: MouseEvent) -> Input
     if state.modal().is_some() {
         return pickers::handle_info_modal_mouse(state, mouse);
     }
+    if scrollback_owns_pointer(state, mouse) {
+        return InputAction::None;
+    }
     if state.plan_review().is_some() {
-        return plan_review::handle_mouse(state, mouse);
+        let action = plan_review::handle_mouse(state, mouse);
+        if action != InputAction::None {
+            return action;
+        }
+        if state.prompt_contains(mouse)
+            && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+        {
+            state.focus_prompt();
+            return InputAction::Redraw;
+        }
+        return InputAction::None;
     }
     if state.slash().open || state.mentions().open {
         return InputAction::Redraw;
     }
+    if state.prompt_contains(mouse) && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+    {
+        state.focus_prompt();
+        return InputAction::Redraw;
+    }
     InputAction::None
+}
+
+fn scrollback_owns_pointer(state: &mut SurfaceState, mouse: MouseEvent) -> bool {
+    if !state.scrollback_contains(mouse) {
+        return false;
+    }
+    if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+        state.focus_scrollback();
+    }
+    true
 }
 
 fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {

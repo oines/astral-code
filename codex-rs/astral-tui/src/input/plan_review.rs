@@ -31,6 +31,7 @@ pub(super) fn handle_paste(state: &mut SurfaceState, text: &str) -> InputAction 
 pub(super) fn handle_mouse(state: &mut SurfaceState, mouse: MouseEvent) -> InputAction {
     match state.handle_plan_review_mouse(mouse) {
         PlanReviewMouseAction::Select(choice) => {
+            state.focus_prompt();
             let Some(review) = state.plan_review_mut() else {
                 return InputAction::None;
             };
@@ -41,6 +42,7 @@ pub(super) fn handle_mouse(state: &mut SurfaceState, mouse: MouseEvent) -> Input
             InputAction::Redraw
         }
         PlanReviewMouseAction::Activate(choice) => {
+            state.focus_prompt();
             if let Some(review) = state.plan_review_mut() {
                 review.select(choice);
             }
