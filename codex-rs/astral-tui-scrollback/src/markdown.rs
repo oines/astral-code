@@ -31,6 +31,7 @@ mod wrapping;
 use code::render_code_line;
 pub use style::MarkdownStyle;
 pub use style::MarkdownSyntaxTheme;
+pub(crate) use syntax::CodeLineHighlighter;
 use syntax::highlight_code;
 use table::TableState;
 use wrapping::wrap_segments_with_joiners;

@@ -19,6 +19,7 @@ pub use markdown::MarkdownStyle;
 pub use markdown::MarkdownSyntaxTheme;
 pub use markdown::render_markdown;
 pub use markdown::render_markdown_with_metadata;
+pub use render::DiffStyle;
 pub use render::RenderOptions;
 pub use render::render_block;
 pub use stream::TimelineStream;

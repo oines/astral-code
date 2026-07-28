@@ -602,6 +602,7 @@ version = "0.0.0"
 dependencies = [
  "codex-app-server-protocol",
  "codex-utils-absolute-path",
+ "diffy",
  "insta",
  "pretty_assertions",
  "pulldown-cmark",

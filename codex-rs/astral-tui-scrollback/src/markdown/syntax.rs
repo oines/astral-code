@@ -6,6 +6,7 @@ use std::sync::OnceLock;
 use ratatui::style::Color;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
+use ratatui::text::Span;
 use syntect::easy::HighlightLines;
 use syntect::highlighting::FontStyle;
 use syntect::highlighting::Theme;
@@ -23,6 +24,46 @@ const MAX_HIGHLIGHT_LINES: usize = 10_000;
 static SYNTAX_SET: OnceLock<SyntaxSet> = OnceLock::new();
 static NIGHT_THEME: OnceLock<Theme> = OnceLock::new();
 static DAY_THEME: OnceLock<Theme> = OnceLock::new();
+
+/// Stateful, file-extension-aware highlighter used by structured diffs.
+///
+/// Grok Build keeps independent old/new highlighters while walking a hunk so
+/// multiline syntax state cannot leak between file versions. The diff
+/// renderer owns those two instances; this type only centralizes Astral's
+/// grammar, theme, guardrail, and style conversion.
+pub(crate) struct CodeLineHighlighter {
+    inner: HighlightLines<'static>,
+    theme: MarkdownSyntaxTheme,
+}
+
+impl CodeLineHighlighter {
+    pub(crate) fn for_path(path: &Path, source: &str, theme: MarkdownSyntaxTheme) -> Option<Self> {
+        if source.len() > MAX_HIGHLIGHT_BYTES || source.lines().count() > MAX_HIGHLIGHT_LINES {
+            return None;
+        }
+        let extension = path.extension()?.to_str()?;
+        let syntax = syntax_set().find_syntax_by_extension(extension)?;
+        Some(Self {
+            inner: HighlightLines::new(syntax, syntax_theme(theme)),
+            theme,
+        })
+    }
+
+    pub(crate) fn highlight_line(&mut self, source: &str) -> Option<Vec<Span<'static>>> {
+        let source = format!("{source}\n");
+        let highlighted = self.inner.highlight_line(&source, syntax_set()).ok()?;
+        Some(
+            highlighted
+                .into_iter()
+                .filter_map(|(style, text)| {
+                    let text = text.trim_end_matches(['\n', '\r']);
+                    (!text.is_empty())
+                        .then(|| Span::styled(text.to_string(), convert_style(style, self.theme)))
+                })
+                .collect(),
+        )
+    }
+}
 
 pub(super) fn highlight_code(
     source: &str,

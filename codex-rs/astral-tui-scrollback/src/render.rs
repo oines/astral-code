@@ -14,6 +14,7 @@ use crate::SubagentAgentStatus;
 use crate::SubagentPresentation;
 use crate::ToolStatus;
 use crate::markdown::MarkdownStyle;
+use crate::markdown::MarkdownSyntaxTheme;
 use crate::markdown::render_markdown;
 use crate::todo::render_todo;
 
@@ -26,6 +27,41 @@ pub struct RenderOptions {
     pub width: u16,
     pub mode: DisplayMode,
     pub max_output_lines: usize,
+    pub diff_style: DiffStyle,
+}
+
+/// Theme roles needed by the structured file-change renderer.
+///
+/// The surrounding TUI owns the active palette; keeping the roles in this
+/// value lets the scrollback renderer stay independent from Astral's shell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DiffStyle {
+    pub path: Color,
+    pub gutter: Color,
+    pub insert_foreground: Color,
+    pub delete_foreground: Color,
+    pub insert_background: Option<Color>,
+    pub delete_background: Option<Color>,
+    pub equal_foreground: Color,
+    pub syntax_theme: MarkdownSyntaxTheme,
+}
+
+impl Default for DiffStyle {
+    // Grok Build GrokNight diff roles at commit
+    // 47348d13ec4508dcfe440e34c6d511bb02998fb2 (Apache-2.0).
+    #[allow(clippy::disallowed_methods)]
+    fn default() -> Self {
+        Self {
+            path: Color::Rgb(255, 158, 100),
+            gutter: Color::Rgb(108, 108, 108),
+            insert_foreground: Color::Rgb(158, 206, 106),
+            delete_foreground: Color::Rgb(247, 118, 142),
+            insert_background: Some(Color::Rgb(6, 56, 6)),
+            delete_background: Some(Color::Rgb(66, 14, 20)),
+            equal_foreground: Color::Rgb(108, 108, 108),
+            syntax_theme: MarkdownSyntaxTheme::Night,
+        }
+    }
 }
 
 impl RenderOptions {
@@ -34,6 +70,7 @@ impl RenderOptions {
             width,
             mode,
             max_output_lines: 3,
+            diff_style: DiffStyle::default(),
         }
     }
 
@@ -51,6 +88,11 @@ impl RenderOptions {
 
     pub fn with_max_output_lines(mut self, max_output_lines: usize) -> Self {
         self.max_output_lines = max_output_lines;
+        self
+    }
+
+    pub fn with_diff_style(mut self, diff_style: DiffStyle) -> Self {
+        self.diff_style = diff_style;
         self
     }
 }
