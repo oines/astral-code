@@ -2,10 +2,10 @@
 // presentation at commit 47348d13ec4508dcfe440e34c6d511bb02998fb2
 // (Apache-2.0). Modified for Astral app-server turn and item metadata.
 
+use astral_tui_scrollback::DiffStyle;
 use astral_tui_scrollback::DisplayMode;
 use astral_tui_scrollback::LineJoiner;
 use astral_tui_scrollback::MarkdownStyle;
-use astral_tui_scrollback::MarkdownSyntaxTheme;
 use astral_tui_scrollback::PresentationBlock;
 use astral_tui_scrollback::RenderOptions;
 use astral_tui_scrollback::render_block;
@@ -22,7 +22,6 @@ use crate::conversation::TranscriptBlock;
 use crate::conversation::TranscriptTurn;
 
 use super::AstralTheme;
-use super::AstralThemeId;
 use super::EntryDisplayState;
 use super::EntryGroupSpan;
 use super::entry_group::scan_turn;
@@ -250,7 +249,7 @@ fn render_turn_block(
 ) {
     match &block.block {
         PresentationBlock::User { .. } => {
-            let rendered = render_block(&block.block, RenderOptions::for_mode(width, mode));
+            let rendered = render_block(&block.block, render_options(width, mode, theme));
             push_transcript_line(
                 lines,
                 selectable_lines,
@@ -303,7 +302,7 @@ fn render_turn_block(
                 LineJoiner::HardBreak,
             );
             if mode != DisplayMode::Collapsed {
-                let rendered = render_block(&block.block, RenderOptions::for_mode(width, mode));
+                let rendered = render_block(&block.block, render_options(width, mode, theme));
                 for line in rendered.lines.into_iter().skip(1) {
                     let columns = selectable_columns(&line, width);
                     push_transcript_line(
@@ -331,7 +330,7 @@ fn render_turn_block(
             }
         }
         _ => {
-            for line in render_block(&block.block, RenderOptions::for_mode(width, mode)).lines {
+            for line in render_block(&block.block, render_options(width, mode, theme)).lines {
                 let columns = selectable_columns(&line, width);
                 push_transcript_line(
                     lines,
@@ -424,16 +423,23 @@ fn markdown_style(theme: AstralTheme) -> MarkdownStyle {
         link_url: gray,
         code: secondary,
         code_background: Style::default().bg(theme.panel_background),
-        syntax_theme: if theme == AstralTheme::for_id(AstralThemeId::Day) {
-            MarkdownSyntaxTheme::Day
-        } else if theme == AstralTheme::for_id(AstralThemeId::Terminal) {
-            MarkdownSyntaxTheme::Terminal
-        } else {
-            MarkdownSyntaxTheme::Night
-        },
+        syntax_theme: theme.syntax_theme,
         table_border: Style::default().fg(theme.gray_dim),
         table_header: primary.add_modifier(Modifier::BOLD),
     }
+}
+
+fn render_options(width: u16, mode: DisplayMode, theme: AstralTheme) -> RenderOptions {
+    RenderOptions::for_mode(width, mode).with_diff_style(DiffStyle {
+        path: theme.path,
+        gutter: theme.diff_gutter,
+        insert_foreground: theme.diff_insert_foreground,
+        delete_foreground: theme.diff_delete_foreground,
+        insert_background: theme.diff_insert_background,
+        delete_background: theme.diff_delete_background,
+        equal_foreground: theme.diff_equal_foreground,
+        syntax_theme: theme.syntax_theme,
+    })
 }
 
 fn band_line(

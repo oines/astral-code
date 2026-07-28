@@ -1388,8 +1388,8 @@ fn edit_diff_expands_by_default_and_double_click_collapses_snapshot() {
         &mut buffer,
     );
     let expanded = buffer_text(&buffer);
-    assert!(expanded.contains("-old value"));
-    assert!(expanded.contains("+new value"));
+    assert!(expanded.contains("old value"));
+    assert!(expanded.contains("new value"));
     let (column, row) = find_text(&buffer, "Edit lib.rs")
         .unwrap_or_else(|| panic!("edit header is visible:\n{expanded}"));
 
@@ -1406,8 +1406,8 @@ fn edit_diff_expands_by_default_and_double_click_collapses_snapshot() {
         &mut buffer,
     );
     let collapsed = buffer_text(&buffer);
-    assert!(!collapsed.contains("-old value"));
-    assert!(!collapsed.contains("+new value"));
+    assert!(!collapsed.contains("old value"));
+    assert!(!collapsed.contains("new value"));
     assert!(collapsed.contains("Edit lib.rs +1/-1"));
     insta::assert_snapshot!(
         "edit_diff_mouse_fold_surface",
