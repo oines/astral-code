@@ -411,7 +411,7 @@ fn selected_columns(
     }
 }
 
-fn apply_selection_highlight(theme: AstralTheme, cell: &mut ratatui::buffer::Cell) {
+pub(super) fn apply_selection_highlight(theme: AstralTheme, cell: &mut ratatui::buffer::Cell) {
     if theme.text_primary == Color::Reset || theme.bg_base == Color::Reset {
         cell.modifier.insert(Modifier::REVERSED);
         return;

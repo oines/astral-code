@@ -7,6 +7,8 @@ use std::borrow::Cow;
 
 use astral_tui_scrollback::BlockTextMode;
 use astral_tui_scrollback::DisplayMode;
+use astral_tui_scrollback::LineJoiner;
+use astral_tui_scrollback::MarkdownLine;
 use astral_tui_scrollback::PresentationBlock;
 use astral_tui_scrollback::render_block;
 use astral_tui_scrollback::wrap_styled_line_with_metadata;
@@ -21,6 +23,7 @@ use ratatui::widgets::Widget;
 use unicode_width::UnicodeWidthStr;
 
 use crate::block_viewer::BlockViewerState;
+use crate::block_viewer::ViewerRowGeometry;
 use crate::block_viewer::ViewerWrapMode;
 
 use super::AstralTheme;
@@ -30,6 +33,7 @@ use super::ScrollbackViewport;
 use super::markdown_content::render_markdown_content;
 use super::render_modal_close_button;
 use super::render_modal_frame_with_geometry;
+use super::selection::apply_selection_highlight;
 use super::transcript::render_options;
 
 const LOGICAL_LINE_WIDTH: u16 = 500;
@@ -42,7 +46,7 @@ struct ViewerItem {
 
 struct ViewerRow {
     line: Line<'static>,
-    item: usize,
+    geometry: ViewerRowGeometry,
     plain: String,
     background: Option<Color>,
 }
@@ -92,14 +96,14 @@ impl BlockViewerPane<'_> {
         let items = render_viewer_items(self.block, theme, self.text_mode);
         let rows = render_viewer_rows(&items, body_width, self.state.wrap_mode());
         let logical_lines = items.iter().map(|item| item.plain.clone()).collect();
-        let row_items = rows.iter().map(|row| row.item).collect();
+        let row_geometry = rows.iter().map(|row| row.geometry).collect();
         let rendered_rows = rows.iter().map(|row| row.plain.clone()).collect();
         self.state.observe_frame(
             frame.popup,
             body_area,
             frame.close_button,
             logical_lines,
-            row_items,
+            row_geometry,
             rendered_rows,
         );
         let rows = self
@@ -135,6 +139,7 @@ impl BlockViewerPane<'_> {
             );
         }
         render_matches(self.state, body_area, viewport, buffer, theme);
+        render_text_drag(self.state, body_area, viewport, buffer, theme);
         if query_bar_visible {
             render_query_bar(
                 self.state,
@@ -208,29 +213,42 @@ fn render_viewer_rows(
     width: u16,
     wrap_mode: ViewerWrapMode,
 ) -> Vec<ViewerRow> {
-    items
-        .iter()
-        .enumerate()
-        .flat_map(|(item, logical)| {
-            let lines = match wrap_mode {
-                ViewerWrapMode::Wrap => wrap_styled_line_with_metadata(&logical.line, width)
-                    .into_iter()
-                    .map(|line| line.line)
-                    .collect(),
-                ViewerWrapMode::NoWrap => vec![logical.line.clone()],
-            };
-            lines.into_iter().map(move |line| ViewerRow {
-                plain: line
-                    .spans
-                    .iter()
-                    .map(|span| span.content.as_ref())
-                    .collect(),
-                line,
-                item,
+    let mut rows = Vec::new();
+    for (item, logical) in items.iter().enumerate() {
+        let wrapped = match wrap_mode {
+            ViewerWrapMode::Wrap => wrap_styled_line_with_metadata(&logical.line, width),
+            ViewerWrapMode::NoWrap => vec![MarkdownLine {
+                line: logical.line.clone(),
+                joiner_to_previous: LineJoiner::HardBreak,
+            }],
+        };
+        let mut logical_column = 0u16;
+        for (index, wrapped) in wrapped.into_iter().enumerate() {
+            if index > 0 {
+                logical_column = logical_column.saturating_add(
+                    u16::try_from(UnicodeWidthStr::width(wrapped.joiner_to_previous.as_str()))
+                        .unwrap_or(u16::MAX),
+                );
+            }
+            let plain = wrapped
+                .line
+                .spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>();
+            let end = logical_column.saturating_add(
+                u16::try_from(UnicodeWidthStr::width(plain.as_str())).unwrap_or(u16::MAX),
+            );
+            rows.push(ViewerRow {
+                line: wrapped.line,
+                geometry: ViewerRowGeometry::new(item, logical_column, end),
+                plain,
                 background: logical.background,
-            })
-        })
-        .collect()
+            });
+            logical_column = end;
+        }
+    }
+    rows
 }
 
 fn render_row_backgrounds(
@@ -335,6 +353,28 @@ fn render_matches(
                 ),
                 style,
             );
+        }
+    }
+}
+
+fn render_text_drag(
+    state: &BlockViewerState,
+    area: Rect,
+    viewport: ScrollbackViewport,
+    buffer: &mut Buffer,
+    theme: AstralTheme,
+) {
+    for row in viewport.first_visible_line..viewport.end_visible_line {
+        let Some(columns) = state.text_drag_columns(row) else {
+            continue;
+        };
+        let y = area.y.saturating_add(
+            u16::try_from(row.saturating_sub(viewport.first_visible_line)).unwrap_or(u16::MAX),
+        );
+        for column in columns.start.min(area.width)..columns.end.min(area.width) {
+            if let Some(cell) = buffer.cell_mut((area.x.saturating_add(column), y)) {
+                apply_selection_highlight(theme, cell);
+            }
         }
     }
 }

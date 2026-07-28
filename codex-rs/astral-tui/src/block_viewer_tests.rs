@@ -7,6 +7,7 @@ use ratatui::layout::Rect;
 
 use super::BlockViewerMouseAction;
 use super::BlockViewerState;
+use super::ViewerRowGeometry;
 
 fn lines(count: usize) -> Vec<String> {
     (0..count).map(|line| format!("line {line}")).collect()
@@ -28,14 +29,20 @@ fn observe_frame(
     close: Rect,
     logical_lines: Vec<String>,
 ) {
-    let row_items = (0..logical_lines.len()).collect();
+    let row_geometry = logical_lines
+        .iter()
+        .enumerate()
+        .map(|(item, line)| {
+            ViewerRowGeometry::new(item, 0, u16::try_from(line.len()).unwrap_or(u16::MAX))
+        })
+        .collect();
     let rendered_rows = logical_lines.clone();
     state.observe_frame(
         popup,
         content,
         close,
         logical_lines,
-        row_items,
+        row_geometry,
         rendered_rows,
     );
 }
@@ -91,10 +98,18 @@ fn viewer_pointer_uses_the_rendered_modal_geometry() {
         BlockViewerMouseAction::Close
     );
     assert_eq!(
-        state.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 8, 6)),
+        state.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 5, 6)),
         BlockViewerMouseAction::Redraw
     );
-    assert_eq!(state.selected_item(), Some(2));
+    assert_eq!(
+        state.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), 9, 6)),
+        BlockViewerMouseAction::Redraw
+    );
+    assert_eq!(
+        state.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), 9, 6)),
+        BlockViewerMouseAction::Copy("line ".to_string())
+    );
+    assert_eq!(state.selected_item(), Some(0));
 }
 
 #[test]
@@ -135,7 +150,11 @@ fn viewer_filter_keeps_only_matching_rendered_lines() {
         Rect::new(3, 3, 24, 5),
         Rect::new(27, 1, 3, 1),
         vec!["alpha continued".to_string(), "beta".to_string()],
-        vec![0, 0, 1],
+        vec![
+            ViewerRowGeometry::new(0, 0, 5),
+            ViewerRowGeometry::new(0, 6, 15),
+            ViewerRowGeometry::new(1, 0, 4),
+        ],
         vec![
             "alpha".to_string(),
             "continued".to_string(),

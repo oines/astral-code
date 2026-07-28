@@ -13,6 +13,9 @@ pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction
         state.close_block_viewer();
         return InputAction::Redraw;
     }
+    if let Some(viewer) = state.block_viewer_mut() {
+        viewer.clear_text_drag();
+    }
     if state
         .block_viewer()
         .is_some_and(BlockViewerState::query_input_active)
@@ -202,6 +205,7 @@ pub(super) fn handle_paste(state: &mut SurfaceState, text: &str) -> InputAction 
         return InputAction::None;
     };
     if viewer.query_input_active() {
+        viewer.clear_text_drag();
         viewer.handle_query_paste(text);
         InputAction::Redraw
     } else {
@@ -219,5 +223,9 @@ pub(super) fn handle_mouse(state: &mut SurfaceState, mouse: MouseEvent) -> Input
             state.close_block_viewer();
             InputAction::Redraw
         }
+        BlockViewerMouseAction::Copy(text) => InputAction::CopyText {
+            text,
+            notice: "Copied selection".to_string(),
+        },
     }
 }

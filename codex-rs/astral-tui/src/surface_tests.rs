@@ -1614,12 +1614,39 @@ fn enter_opens_the_selected_edit_in_a_scrollable_viewer_snapshot() {
         area,
         &mut buffer,
     );
+    let visual_selection_mask = selection_mask(&buffer, state.theme().panel_selected);
+    assert_eq!(
+        handle_key(&mut state, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        InputAction::Redraw
+    );
+    assert_eq!(
+        handle_input_mouse(
+            &mut state,
+            mouse(MouseEventKind::Down(MouseButton::Left), 8, 5),
+        ),
+        InputAction::Redraw
+    );
+    assert_eq!(
+        handle_input_mouse(
+            &mut state,
+            mouse(MouseEventKind::Drag(MouseButton::Left), 15, 5),
+        ),
+        InputAction::Redraw
+    );
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        area,
+        &mut buffer,
+    );
     insta::assert_snapshot!(
         "edit_block_viewer_surface",
         format!(
-            "{}\n\nvisual selection mask:\n{}",
+            "{}\n\nvisual selection mask:\n{}\n\nmouse drag selection mask:\n{}",
             buffer_text(&buffer),
-            selection_mask(&buffer, state.theme().panel_selected)
+            visual_selection_mask,
+            selection_mask(&buffer, state.theme().text_primary)
         )
     );
 

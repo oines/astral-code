@@ -296,21 +296,40 @@ async fn run_loop(
                     Event::Mouse(mouse) => {
                         if options.viewport == RunViewport::Fullscreen {
                             let action = handle_mouse(surface, mouse);
-                            if matches!(action, InputAction::None) {
-                                if let Some(selection) = surface.handle_scrollback_mouse(mouse) {
-                                    match copy_to_clipboard(&selection) {
+                            match action {
+                                InputAction::None => {
+                                    if let Some(selection) = surface.handle_scrollback_mouse(mouse) {
+                                        match copy_to_clipboard(&selection) {
+                                            Ok(lease) => {
+                                                _clipboard_lease = Some(lease);
+                                                surface.set_notice("Copied selection");
+                                            }
+                                            Err(error) => surface.set_notice(error),
+                                        }
+                                    }
+                                }
+                                InputAction::CopyText { text, notice } => {
+                                    match copy_to_clipboard(&text) {
                                         Ok(lease) => {
                                             _clipboard_lease = Some(lease);
-                                            surface.set_notice("Copied selection");
+                                            surface.set_notice(notice);
                                         }
                                         Err(error) => surface.set_notice(error),
                                     }
                                 }
-                            } else if let Some(reason) =
-                                apply_input_action(session, surface, theme_selection, action).await?
-                            {
-                                reject_pending(session, surface).await;
-                                return Ok(reason);
+                                action => {
+                                    if let Some(reason) = apply_input_action(
+                                        session,
+                                        surface,
+                                        theme_selection,
+                                        action,
+                                    )
+                                    .await?
+                                    {
+                                        reject_pending(session, surface).await;
+                                        return Ok(reason);
+                                    }
+                                }
                             }
                         }
                     }

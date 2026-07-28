@@ -1,6 +1,6 @@
 ---
 source: astral-tui/src/surface_tests.rs
-expression: "format!(\"{}\\n\\nvisual selection mask:\\n{}\", buffer_text(&buffer),\nselection_mask(&buffer, state.theme().panel_selected))"
+expression: "format!(\"{}\\n\\nvisual selection mask:\\n{}\\n\\nmouse drag selection mask:\\n{}\",\nbuffer_text(&buffer), visual_selection_mask,\nselection_mask(&buffer, state.theme().text_primary))"
 ---
 
   ┌─ lib.rs ─────────────────────────────────────────────────────────────[×]─┐
@@ -33,3 +33,11 @@ visual selection mask:
      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+mouse drag selection mask:
+
+
+
+
+
+        ^^^^^^^^

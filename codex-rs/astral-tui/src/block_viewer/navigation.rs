@@ -87,20 +87,31 @@ impl BlockViewerState {
                     .is_some_and(|area| area.contains(position))
                     || self.popup_area.is_some_and(|area| !area.contains(position))
                 {
+                    self.clear_text_drag();
                     BlockViewerMouseAction::Close
                 } else if let Some(area) = self.content_area
                     && area.contains(position)
                 {
-                    self.clear_visual_selection();
-                    let row = self
-                        .scroll_offset
-                        .saturating_add(usize::from(mouse.row.saturating_sub(area.y)));
-                    self.select_item_at_row(row);
+                    if self.start_text_drag(mouse.column, mouse.row) {
+                        BlockViewerMouseAction::Redraw
+                    } else {
+                        BlockViewerMouseAction::Ignored
+                    }
+                } else {
+                    self.clear_text_drag();
+                    BlockViewerMouseAction::Ignored
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                if self.update_text_drag(mouse.column, mouse.row) {
                     BlockViewerMouseAction::Redraw
                 } else {
                     BlockViewerMouseAction::Ignored
                 }
             }
+            MouseEventKind::Up(MouseButton::Left) => self
+                .finish_text_drag(mouse.column, mouse.row)
+                .map_or(BlockViewerMouseAction::Redraw, BlockViewerMouseAction::Copy),
             MouseEventKind::Moved => {
                 let hovered = self
                     .close_button
@@ -124,9 +135,10 @@ impl BlockViewerState {
             }
             MouseEventKind::ScrollLeft
             | MouseEventKind::ScrollRight
-            | MouseEventKind::Up(_)
-            | MouseEventKind::Drag(_)
+            | MouseEventKind::Up(MouseButton::Right | MouseButton::Middle)
+            | MouseEventKind::Drag(MouseButton::Right | MouseButton::Middle)
             | MouseEventKind::Down(MouseButton::Right | MouseButton::Middle) => {
+                self.clear_text_drag();
                 BlockViewerMouseAction::Ignored
             }
         }
@@ -200,18 +212,25 @@ impl BlockViewerState {
 
     pub(super) fn visible_row_physical_item(&self, row: usize) -> Option<usize> {
         let physical_row = *self.visible_row_indices.get(row)?;
-        self.row_items.get(physical_row).copied()
+        self.row_geometry
+            .get(physical_row)
+            .map(|geometry| geometry.item)
     }
 
     fn visible_item_row_range(&self, item: usize) -> Option<std::ops::Range<usize>> {
         let physical = *self.visible_item_indices.get(item)?;
-        let start = self
-            .visible_row_indices
-            .iter()
-            .position(|row| self.row_items.get(*row) == Some(&physical))?;
+        let start = self.visible_row_indices.iter().position(|row| {
+            self.row_geometry
+                .get(*row)
+                .is_some_and(|geometry| geometry.item == physical)
+        })?;
         let length = self.visible_row_indices[start..]
             .iter()
-            .take_while(|row| self.row_items.get(**row) == Some(&physical))
+            .take_while(|row| {
+                self.row_geometry
+                    .get(**row)
+                    .is_some_and(|geometry| geometry.item == physical)
+            })
             .count();
         Some(start..start.saturating_add(length))
     }
@@ -236,12 +255,12 @@ impl BlockViewerState {
             (0..self.logical_lines.len()).collect()
         };
         self.visible_row_indices = self
-            .row_items
+            .row_geometry
             .iter()
             .enumerate()
-            .filter_map(|(row, item)| {
+            .filter_map(|(row, geometry)| {
                 self.visible_item_indices
-                    .binary_search(item)
+                    .binary_search(&geometry.item)
                     .is_ok()
                     .then_some(row)
             })

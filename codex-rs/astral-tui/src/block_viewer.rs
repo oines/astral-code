@@ -9,15 +9,18 @@ use ratatui::layout::Rect;
 mod matcher;
 #[path = "block_viewer/navigation.rs"]
 mod navigation;
+#[path = "block_viewer/text_selection.rs"]
+mod text_selection;
 
 use self::matcher::ViewerMatchMode;
 use self::matcher::ViewerMatcher;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum BlockViewerMouseAction {
     Ignored,
     Redraw,
     Close,
+    Copy(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,6 +35,49 @@ impl ViewerWrapMode {
             Self::Wrap => Self::NoWrap,
             Self::NoWrap => Self::Wrap,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ViewerRowGeometry {
+    item: usize,
+    logical_start: u16,
+    logical_end: u16,
+}
+
+impl ViewerRowGeometry {
+    pub(crate) fn new(item: usize, logical_start: u16, logical_end: u16) -> Self {
+        Self {
+            item,
+            logical_start,
+            logical_end,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct TextEndpoint {
+    item: usize,
+    column: u16,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TextDrag {
+    anchor: TextEndpoint,
+    head: TextEndpoint,
+}
+
+impl TextDrag {
+    fn ordered(self) -> (TextEndpoint, TextEndpoint) {
+        if self.anchor <= self.head {
+            (self.anchor, self.head)
+        } else {
+            (self.head, self.anchor)
+        }
+    }
+
+    fn is_non_empty(self) -> bool {
+        self.anchor != self.head
     }
 }
 
@@ -56,9 +102,10 @@ pub(crate) struct BlockViewerState {
     close_hovered: bool,
     logical_lines: Vec<String>,
     rendered_rows: Vec<String>,
-    row_items: Vec<usize>,
+    row_geometry: Vec<ViewerRowGeometry>,
     visible_item_indices: Vec<usize>,
     visible_row_indices: Vec<usize>,
+    text_drag: Option<TextDrag>,
     matcher: ViewerMatcher,
 }
 
@@ -79,9 +126,10 @@ impl BlockViewerState {
             close_hovered: false,
             logical_lines: Vec::new(),
             rendered_rows: Vec::new(),
-            row_items: Vec::new(),
+            row_geometry: Vec::new(),
             visible_item_indices: Vec::new(),
             visible_row_indices: Vec::new(),
+            text_drag: None,
             matcher: ViewerMatcher::default(),
         }
     }
@@ -189,7 +237,7 @@ impl BlockViewerState {
         content_area: Rect,
         close_button: Rect,
         logical_lines: Vec<String>,
-        row_items: Vec<usize>,
+        row_geometry: Vec<ViewerRowGeometry>,
         rendered_rows: Vec<String>,
     ) {
         self.popup_area = Some(popup_area);
@@ -199,13 +247,13 @@ impl BlockViewerState {
         let selected_physical = self.selected_physical_item();
         let anchor_physical = self.visual_anchor_physical_item();
         let layout_changed = self.logical_lines != logical_lines
-            || self.row_items != row_items
+            || self.row_geometry != row_geometry
             || self.rendered_rows != rendered_rows;
         let selected_screen_row = layout_changed
             .then(|| self.selected_item_screen_row())
             .flatten();
         self.logical_lines = logical_lines;
-        self.row_items = row_items;
+        self.row_geometry = row_geometry;
         self.rendered_rows = rendered_rows;
         self.matcher.rebuild(&self.logical_lines);
         self.rebuild_visible_rows(selected_physical, anchor_physical, selected_screen_row);
