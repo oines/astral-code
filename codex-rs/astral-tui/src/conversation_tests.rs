@@ -118,6 +118,15 @@ fn completed_item_without_start_is_inserted() {
 }
 
 #[test]
+fn empty_started_assistant_stays_out_of_the_visible_transcript() {
+    let mut state = ConversationState::new("thread-1");
+
+    state.apply(&started("turn-1", agent_message("message-1", "")));
+
+    assert!(state.all_turns().is_empty());
+}
+
+#[test]
 fn delta_survives_missing_start_until_authoritative_completion() {
     let mut state = ConversationState::new("thread-1");
     state.apply(&ServerNotification::AgentMessageDelta(

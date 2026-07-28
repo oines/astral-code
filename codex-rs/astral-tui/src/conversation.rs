@@ -228,6 +228,12 @@ fn project_entry(entry: &ConversationEntry) -> Option<PresentationBlock> {
             _ => {}
         }
     }
+    if matches!(
+        &block,
+        PresentationBlock::Assistant { text } if text.trim().is_empty()
+    ) {
+        return None;
+    }
     Some(block)
 }
 
