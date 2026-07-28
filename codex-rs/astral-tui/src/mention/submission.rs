@@ -63,6 +63,30 @@ impl PromptSubmission {
         }
         input
     }
+
+    pub(crate) fn into_slash_args(mut self, command: &str, args: String) -> Self {
+        let command_end = 1usize.saturating_add(command.len()).min(self.text.len());
+        let args_start = self
+            .text
+            .get(command_end..)
+            .unwrap_or_default()
+            .char_indices()
+            .find_map(|(offset, character)| {
+                (!character.is_whitespace()).then_some(command_end + offset)
+            })
+            .unwrap_or(self.text.len());
+        let args_end = args_start.saturating_add(args.len()).min(self.text.len());
+        self.mentions.retain_mut(|binding| {
+            if binding.range.start < args_start || binding.range.end > args_end {
+                return false;
+            }
+            binding.range.start -= args_start;
+            binding.range.end -= args_start;
+            true
+        });
+        self.text = args;
+        self
+    }
 }
 
 #[cfg(test)]

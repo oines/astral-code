@@ -1,6 +1,7 @@
 use codex_app_server_protocol::ApprovalsReviewer;
 use codex_app_server_protocol::AskForApproval;
 use codex_app_server_protocol::ClientRequest;
+use codex_app_server_protocol::CollaborationModeMask;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::SandboxPolicy;
 use codex_app_server_protocol::ServerNotification;
@@ -17,6 +18,7 @@ use pretty_assertions::assert_eq;
 use serde_json::json;
 
 use super::SessionState;
+use super::collaboration_mode_from_mask;
 use super::default_collaboration_mode;
 use super::turn_start_request;
 
@@ -70,6 +72,52 @@ fn default_turn_request_inherits_thread_settings() {
                 }
             }
         })
+    );
+}
+
+#[test]
+fn collaboration_presets_override_plan_effort_and_restore_the_default() {
+    let plan = collaboration_mode_from_mask(
+        "deepseek-v4-pro",
+        Some(ReasoningEffort::High),
+        CollaborationModeMask {
+            name: "Plan".to_string(),
+            mode: Some(ModeKind::Plan),
+            model: None,
+            reasoning_effort: Some(Some(ReasoningEffort::Medium)),
+        },
+    );
+    let default = collaboration_mode_from_mask(
+        "deepseek-v4-pro",
+        Some(ReasoningEffort::High),
+        CollaborationModeMask {
+            name: "Default".to_string(),
+            mode: Some(ModeKind::Default),
+            model: None,
+            reasoning_effort: None,
+        },
+    );
+
+    assert_eq!(
+        (plan, default),
+        (
+            Some(CollaborationMode {
+                mode: ModeKind::Plan,
+                settings: Settings {
+                    model: "deepseek-v4-pro".to_string(),
+                    reasoning_effort: Some(ReasoningEffort::Medium),
+                    developer_instructions: None,
+                },
+            }),
+            Some(CollaborationMode {
+                mode: ModeKind::Default,
+                settings: Settings {
+                    model: "deepseek-v4-pro".to_string(),
+                    reasoning_effort: Some(ReasoningEffort::High),
+                    developer_instructions: None,
+                },
+            }),
+        )
     );
 }
 

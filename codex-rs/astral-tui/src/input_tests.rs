@@ -159,11 +159,39 @@ fn slash_completion_and_dispatch_stay_local_to_the_tui() {
     assert_eq!(state.composer(), "/compact");
     assert_eq!(
         handle_key(&mut state, key(KeyCode::Enter)),
-        InputAction::Slash(SlashInvocation {
-            command: SlashCommandId::Compact,
-            name: "compact",
-            args: String::new(),
-        })
+        InputAction::Slash {
+            invocation: SlashInvocation {
+                command: SlashCommandId::Compact,
+                name: "compact",
+                args: String::new(),
+            },
+            submission: crate::PromptSubmission {
+                text: "/compact".to_string(),
+                mentions: Vec::new(),
+            },
+        }
+    );
+    assert!(state.composer().is_empty());
+}
+
+#[test]
+fn plan_command_keeps_the_inline_prompt_for_typed_dispatch() {
+    let mut state = SurfaceState::new("thread-1");
+    state.set_composer("/plan inspect the renderer");
+
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Enter)),
+        InputAction::Slash {
+            invocation: SlashInvocation {
+                command: SlashCommandId::Plan,
+                name: "plan",
+                args: "inspect the renderer".to_string(),
+            },
+            submission: crate::PromptSubmission {
+                text: "/plan inspect the renderer".to_string(),
+                mentions: Vec::new(),
+            },
+        }
     );
     assert!(state.composer().is_empty());
 }

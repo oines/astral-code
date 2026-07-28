@@ -25,6 +25,7 @@ use crate::ClientToolError;
 use crate::ClientToolRegistry;
 use crate::InputAction;
 use crate::PendingRequestResponse;
+use crate::PromptSubmission;
 use crate::SessionError;
 use crate::SlashCommandId;
 use crate::SurfaceActivity;
@@ -397,14 +398,7 @@ async fn apply_input_action(
     match action {
         InputAction::None | InputAction::Redraw => {}
         InputAction::Submit(submission) => {
-            // Follow mode already tracks the new turn. Keep a manual reading
-            // anchor in place while the submitted turn appends below it.
-            surface.set_activity(SurfaceActivity::Working);
-            if let Err(error) = session.start_turn(submission.user_input()).await {
-                surface.restore_submission(submission);
-                surface.set_activity(SurfaceActivity::Ready);
-                surface.set_notice(error.to_string());
-            }
+            start_submission(session, surface, submission).await;
         }
         InputAction::Interrupt => match session.interrupt().await {
             Ok(()) => surface.set_activity(SurfaceActivity::Interrupted),
@@ -475,7 +469,10 @@ async fn apply_input_action(
             set_collaboration_mode(session, surface, mode).await;
         }
         InputAction::OpenShortcuts => surface.open_modal(shortcuts_modal()),
-        InputAction::Slash(invocation) => match invocation.command {
+        InputAction::Slash {
+            invocation,
+            submission,
+        } => match invocation.command {
             SlashCommandId::Exit | SlashCommandId::Quit => {
                 return Ok(Some(RunExitReason::UserRequested));
             }
@@ -525,7 +522,14 @@ async fn apply_input_action(
                 }
             }
             SlashCommandId::Plan => {
-                set_collaboration_mode(session, surface, ModeKind::Plan).await;
+                let switched = set_collaboration_mode(session, surface, ModeKind::Plan).await;
+                if switched && !invocation.args.is_empty() {
+                    let submission =
+                        submission.into_slash_args(invocation.name, invocation.args.clone());
+                    start_submission(session, surface, submission).await;
+                } else if !switched && !invocation.args.is_empty() {
+                    surface.restore_submission(submission);
+                }
             }
             SlashCommandId::Permissions => {
                 let current_profile = session
@@ -650,13 +654,32 @@ async fn set_collaboration_mode(
     session: &mut AstralSession,
     surface: &mut SurfaceState,
     mode: ModeKind,
-) {
+) -> bool {
     match session.update_collaboration_mode(mode).await {
         Ok(()) => {
             let mode = format!("{mode:?}").to_lowercase();
             surface.set_notice(format!("Switched to {mode} mode"));
+            true
         }
-        Err(error) => surface.set_notice(error.to_string()),
+        Err(error) => {
+            surface.set_notice(error.to_string());
+            false
+        }
+    }
+}
+
+async fn start_submission(
+    session: &mut AstralSession,
+    surface: &mut SurfaceState,
+    submission: PromptSubmission,
+) {
+    // Follow mode already tracks the new turn. Keep a manual reading anchor
+    // in place while the submitted turn appends below it.
+    surface.set_activity(SurfaceActivity::Working);
+    if let Err(error) = session.start_turn(submission.user_input()).await {
+        surface.restore_submission(submission);
+        surface.set_activity(SurfaceActivity::Ready);
+        surface.set_notice(error.to_string());
     }
 }
 

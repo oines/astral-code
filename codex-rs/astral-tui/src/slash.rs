@@ -118,7 +118,13 @@ const COMMANDS: &[CommandSpec] = &[
         Args::None,
         Idle
     ),
-    command!(Plan, "plan", "Switch collaboration mode", Args::None, Idle),
+    command!(
+        Plan,
+        "plan",
+        "Switch mode and optionally start a planning task",
+        Args::Optional("prompt"),
+        Idle
+    ),
     command!(New, "new", "Start a new conversation", Args::None, Idle),
     command!(
         Resume,
