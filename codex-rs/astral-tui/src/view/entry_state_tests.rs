@@ -119,6 +119,30 @@ fn defaults_follow_entry_lifecycle_until_the_user_pins_a_fold() {
         state.mode_for("turn-1", "thinking", &finished.blocks[0].block),
         DisplayMode::Expanded
     );
+
+    state.toggle_all_thinking();
+    assert_eq!(
+        state.mode_for("turn-1", "thinking", &finished.blocks[0].block),
+        DisplayMode::Collapsed
+    );
+    state.toggle_all_thinking();
+    assert_eq!(
+        state.mode_for("turn-1", "thinking", &finished.blocks[0].block),
+        DisplayMode::Expanded
+    );
+
+    let next = turn(vec![block("thinking-next", thinking(false))]);
+    state.observe(std::slice::from_ref(&next));
+    assert_eq!(
+        state.mode_for("turn-1", "thinking-next", &next.blocks[0].block),
+        DisplayMode::Expanded
+    );
+
+    state.toggle_all();
+    assert_eq!(
+        state.mode_for("turn-1", "thinking-next", &next.blocks[0].block),
+        DisplayMode::Collapsed
+    );
 }
 
 #[test]

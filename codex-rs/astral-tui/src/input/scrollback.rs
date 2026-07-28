@@ -12,6 +12,10 @@ pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction
             state.focus_prompt();
             InputAction::Redraw
         }
+        (KeyCode::Char(' '), KeyModifiers::NONE) => {
+            state.focus_prompt();
+            InputAction::Redraw
+        }
         (KeyCode::Down, _) | (KeyCode::Char('j'), KeyModifiers::NONE) => {
             state.move_entry_selection(1);
             InputAction::Redraw
@@ -30,6 +34,14 @@ pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction
         }
         (KeyCode::Char('e'), KeyModifiers::NONE) => {
             state.toggle_selected_entry();
+            InputAction::Redraw
+        }
+        (KeyCode::Char('E'), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
+            state.toggle_all_entries();
+            InputAction::Redraw
+        }
+        (KeyCode::Char('e'), modifiers) if modifiers == KeyModifiers::CONTROL => {
+            state.toggle_all_thinking();
             InputAction::Redraw
         }
         (KeyCode::Enter, KeyModifiers::NONE) => {

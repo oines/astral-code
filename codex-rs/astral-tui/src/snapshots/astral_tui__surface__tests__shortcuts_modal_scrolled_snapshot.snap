@@ -14,11 +14,11 @@ expression: "render_at_size(&mut state, &session, 80, 24)"
                 │  j/k        Select foldable entry            │
                 │  e / Enter  Toggle selected entry            │
                 │  h/l        Collapse / expand entry          │
+                │  E          Expand all / collapse all entri  │
+                │  Ctrl+E     Expand / collapse all thinking   │
                 │  Esc        Close the focused menu or modal  │
                 │  Y          Approve a pending request        │
-                │  A          Approve for the session when av  │
-                │  N          Decline a pending request        │
-  ◇ Working     │                                              │
+  ◇ Working     │  A          Approve for the session when av  │
                 │                                              │
   ╭─────────────│            ↑/↓ scroll · Esc close            │─────────────╮
   │ ❯           └──────────────────────────────────────────────┘             │

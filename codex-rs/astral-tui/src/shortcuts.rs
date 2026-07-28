@@ -21,6 +21,8 @@ pub(crate) fn shortcuts_modal() -> ModalState {
             ModalRow::new("j/k", "Select foldable entry"),
             ModalRow::new("e / Enter", "Toggle selected entry"),
             ModalRow::new("h/l", "Collapse / expand entry"),
+            ModalRow::new("E", "Expand all / collapse all entries"),
+            ModalRow::new("Ctrl+E", "Expand / collapse all thinking"),
             ModalRow::new("Esc", "Close the focused menu or modal"),
             ModalRow::new("Y", "Approve a pending request"),
             ModalRow::new("A", "Approve for the session when available"),

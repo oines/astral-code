@@ -17,6 +17,7 @@ struct EntryDescriptor {
     parent_group: Option<String>,
     group_header: bool,
     foldable: bool,
+    thinking: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,6 +39,7 @@ pub(crate) struct EntryDisplayState {
     manual_modes: HashMap<String, DisplayMode>,
     groups: HashMap<String, GroupDescriptor>,
     expanded_groups: HashSet<String>,
+    thinking_mode: Option<DisplayMode>,
     preserve_empty_selection: bool,
     pending_verb_rekey: Option<String>,
 }
@@ -83,6 +85,7 @@ impl EntryDisplayState {
                         parent_group: None,
                         group_header: true,
                         foldable: true,
+                        thinking: false,
                     });
                 }
                 let parent_group = groups
@@ -92,12 +95,19 @@ impl EntryDisplayState {
                 if groups.iter().any(|group| group.hides(index)) || !block.block.is_selectable() {
                     continue;
                 }
+                let thinking = matches!(&block.block, PresentationBlock::Thinking { .. });
                 entries.push(EntryDescriptor {
                     id: entry_id(&turn.id, &block.item_id),
-                    default_mode: block.block.default_display_mode(),
+                    default_mode: if thinking {
+                        self.thinking_mode
+                            .unwrap_or_else(|| block.block.default_display_mode())
+                    } else {
+                        block.block.default_display_mode()
+                    },
                     parent_group,
                     group_header: false,
                     foldable: block.block.is_foldable(),
+                    thinking,
                 });
             }
         }
@@ -195,7 +205,12 @@ impl EntryDisplayState {
         self.manual_modes
             .get(&entry_id(turn_id, item_id))
             .copied()
-            .unwrap_or_else(|| block.default_display_mode())
+            .unwrap_or_else(|| match block {
+                PresentationBlock::Thinking { .. } => self
+                    .thinking_mode
+                    .unwrap_or_else(|| block.default_display_mode()),
+                _ => block.default_display_mode(),
+            })
     }
 
     pub(crate) fn focus_scrollback(&mut self) -> bool {
@@ -365,6 +380,59 @@ impl EntryDisplayState {
         self.preserve_empty_selection = false;
         self.selected = Some(parent.clone());
         Some(parent)
+    }
+
+    pub(crate) fn toggle_all(&mut self) {
+        let any_collapsed = self.entries.iter().any(|entry| {
+            !entry.group_header
+                && entry.foldable
+                && self.mode(&entry.id) == Some(DisplayMode::Collapsed)
+        });
+        let target = if any_collapsed {
+            DisplayMode::Expanded
+        } else {
+            DisplayMode::Collapsed
+        };
+        for entry in &self.entries {
+            if !entry.group_header && entry.foldable {
+                self.manual_modes.insert(entry.id.clone(), target);
+            }
+        }
+        self.expanded_groups.clear();
+        self.pending_verb_rekey = None;
+    }
+
+    pub(crate) fn toggle_all_thinking(&mut self) {
+        let any_collapsed = self.entries.iter().any(|entry| {
+            entry.thinking && entry.foldable && self.mode(&entry.id) == Some(DisplayMode::Collapsed)
+        });
+        let target = if any_collapsed {
+            DisplayMode::Expanded
+        } else {
+            DisplayMode::Collapsed
+        };
+        self.thinking_mode = Some(target);
+        for entry in &self.entries {
+            if entry.thinking && entry.foldable {
+                self.manual_modes.insert(entry.id.clone(), target);
+            }
+        }
+        if target == DisplayMode::Expanded {
+            self.expanded_groups.extend(self.groups.keys().cloned());
+        } else {
+            self.expanded_groups.clear();
+        }
+        self.pending_verb_rekey = None;
+    }
+
+    pub(crate) fn thinking_fold_label(&self) -> &'static str {
+        if self.entries.iter().any(|entry| {
+            entry.thinking && entry.foldable && self.mode(&entry.id) == Some(DisplayMode::Collapsed)
+        }) {
+            "expand thinking"
+        } else {
+            "collapse thinking"
+        }
     }
 
     pub(crate) fn toggle_group(&mut self, group_id: &str) -> Option<String> {

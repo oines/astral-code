@@ -299,6 +299,14 @@ impl SurfaceState {
         self.scrollback.collapse_selected();
     }
 
+    pub(crate) fn toggle_all_entries(&mut self) {
+        self.scrollback.toggle_all_entries();
+    }
+
+    pub(crate) fn toggle_all_thinking(&mut self) {
+        self.scrollback.toggle_all_thinking();
+    }
+
     pub(crate) fn handle_scrollback_mouse(
         &mut self,
         mouse: crossterm::event::MouseEvent,
@@ -720,9 +728,23 @@ pub(crate) fn render_surface_with_view(
     } else {
         "expand"
     };
-    let group_hints = [("Enter", fold_action), ("Tab", "prompt")];
-    let entry_hints = [("e", fold_action), ("Enter", "open"), ("Tab", "prompt")];
-    let plain_entry_hints = [("Enter", "open"), ("Tab", "prompt")];
+    let thinking_action = state.scrollback.thinking_fold_label();
+    let group_hints = [
+        ("Enter", fold_action),
+        ("Ctrl+e", thinking_action),
+        ("Tab", "prompt"),
+    ];
+    let entry_hints = [
+        ("e", fold_action),
+        ("Enter", "open"),
+        ("Ctrl+e", thinking_action),
+        ("Tab", "prompt"),
+    ];
+    let plain_entry_hints = [
+        ("Enter", "open"),
+        ("Ctrl+e", thinking_action),
+        ("Tab", "prompt"),
+    ];
     let scrollback_hints = if state.scrollback.selected_is_group_header() {
         &group_hints[..]
     } else if !state.scrollback.selected_is_foldable() {

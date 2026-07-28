@@ -189,6 +189,20 @@ impl ScrollbackState {
         self.reveal_selected();
     }
 
+    pub(crate) fn toggle_all_entries(&mut self) {
+        self.display.toggle_all();
+        self.reveal_selected();
+    }
+
+    pub(crate) fn toggle_all_thinking(&mut self) {
+        self.display.toggle_all_thinking();
+        self.reveal_selected();
+    }
+
+    pub(crate) fn thinking_fold_label(&self) -> &'static str {
+        self.display.thinking_fold_label()
+    }
+
     pub(crate) fn handle_mouse(&mut self, mouse: MouseEvent) -> Option<String> {
         match mouse.kind {
             MouseEventKind::Down(crossterm::event::MouseButton::Left)
