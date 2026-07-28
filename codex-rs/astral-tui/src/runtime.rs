@@ -24,6 +24,7 @@ use crate::AstralSession;
 use crate::ClientToolError;
 use crate::ClientToolRegistry;
 use crate::InputAction;
+use crate::PendingRequest;
 use crate::PendingRequestResponse;
 use crate::PromptSubmission;
 use crate::SessionError;
@@ -637,8 +638,14 @@ async fn apply_input_action(
             },
         },
         InputAction::Resolve(resolution) => {
-            if let Err(error) = session.resolve(resolution).await {
-                surface.set_notice(error.to_string());
+            let request_id = resolution.request_id().clone();
+            match session.resolve(resolution).await {
+                Ok(()) => {
+                    surface.remove_pending_request(&request_id);
+                }
+                Err(error) => surface.set_notice(format!(
+                    "Could not send response; the request remains open: {error}"
+                )),
             }
         }
         InputAction::Notice(message) => surface.set_notice(message),
@@ -737,7 +744,7 @@ async fn handle_app_event(
             | ServerRequest::ExecCommandApproval { .. }) => {
                 let request_id = request.id().clone();
                 surface.pending_requests_mut().note(request);
-                let resolution = surface.pending_requests_mut().resolve(
+                let resolution = surface.pending_requests().prepare_resolution(
                     &request_id,
                     PendingRequestResponse::Reject {
                         code: -32601,
@@ -745,7 +752,14 @@ async fn handle_app_event(
                     },
                 );
                 if let Ok(resolution) = resolution {
-                    session.resolve(resolution).await?;
+                    match session.resolve(resolution).await {
+                        Ok(()) => {
+                            surface.remove_pending_request(&request_id);
+                        }
+                        Err(error) => surface.set_notice(format!(
+                            "Could not reject unsupported request; it remains open: {error}"
+                        )),
+                    }
                 }
             }
             request => surface.pending_requests_mut().note(request),
@@ -776,9 +790,14 @@ fn handle_notification(surface: &mut SurfaceState, notification: &ServerNotifica
             TurnStatus::InProgress => surface.set_activity(SurfaceActivity::Working),
         },
         ServerNotification::ServerRequestResolved(params) => {
-            surface
-                .pending_requests_mut()
-                .remove_resolved(&params.request_id);
+            let belongs_to_thread = surface
+                .pending_requests()
+                .get(&params.request_id)
+                .and_then(PendingRequest::thread_id)
+                == Some(params.thread_id.as_str());
+            if belongs_to_thread {
+                surface.remove_pending_request(&params.request_id);
+            }
         }
         ServerNotification::ThreadTokenUsageUpdated(params)
             if params.thread_id == surface.conversation().timeline().thread_id() =>
@@ -822,10 +841,17 @@ async fn resolve_client_tool(
         }
     };
     let resolution = surface
-        .pending_requests_mut()
-        .resolve(&completion.request_id, response);
+        .pending_requests()
+        .prepare_resolution(&completion.request_id, response);
     if let Ok(resolution) = resolution {
-        session.resolve(resolution).await?;
+        match session.resolve(resolution).await {
+            Ok(()) => {
+                surface.remove_pending_request(&completion.request_id);
+            }
+            Err(error) => surface.set_notice(format!(
+                "Could not send client tool result; the request remains open: {error}"
+            )),
+        }
     }
     Ok(())
 }
@@ -836,7 +862,7 @@ async fn reject_pending(session: &AstralSession, surface: &mut SurfaceState) {
         .front()
         .map(|request| request.request_id().clone())
     {
-        let Ok(resolution) = surface.pending_requests_mut().resolve(
+        let Ok(resolution) = surface.pending_requests().prepare_resolution(
             &request_id,
             PendingRequestResponse::Reject {
                 code: -32000,
@@ -846,6 +872,7 @@ async fn reject_pending(session: &AstralSession, surface: &mut SurfaceState) {
             break;
         };
         let _ = session.resolve(resolution).await;
+        surface.remove_pending_request(&request_id);
     }
 }
 

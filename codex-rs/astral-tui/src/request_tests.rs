@@ -93,7 +93,7 @@ fn preserves_command_and_file_decision_semantics() {
     })));
 
     assert_eq!(
-        requests.resolve(
+        requests.prepare_resolution(
             &RequestId::Integer(1),
             PendingRequestResponse::CommandExecution(
                 CommandExecutionApprovalDecision::AcceptForSession,
@@ -104,8 +104,10 @@ fn preserves_command_and_file_decision_semantics() {
             result: json!({"decision": "acceptForSession"}),
         })
     );
+    assert_eq!(requests.len(), 2);
+    requests.remove_resolved(&RequestId::Integer(1));
     assert_eq!(
-        requests.resolve(
+        requests.prepare_resolution(
             &RequestId::Integer(2),
             PendingRequestResponse::FileChange(FileChangeApprovalDecision::Cancel),
         ),
@@ -114,6 +116,8 @@ fn preserves_command_and_file_decision_semantics() {
             result: json!({"decision": "cancel"}),
         })
     );
+    assert_eq!(requests.len(), 1);
+    requests.remove_resolved(&RequestId::Integer(2));
     assert!(requests.is_empty());
 }
 
@@ -134,7 +138,7 @@ fn dynamic_tool_results_are_first_class_and_not_approvals() {
     })));
 
     assert_eq!(
-        requests.resolve(
+        requests.prepare_resolution(
             &RequestId::String("dynamic-1".to_string()),
             PendingRequestResponse::DynamicTool(DynamicToolCallResponse {
                 content_items: vec![DynamicToolCallOutputContentItem::InputText {
@@ -171,7 +175,7 @@ fn mismatched_response_keeps_request_pending_and_any_request_can_be_rejected() {
     })));
 
     assert_eq!(
-        requests.resolve(
+        requests.prepare_resolution(
             &request_id,
             PendingRequestResponse::CommandExecution(CommandExecutionApprovalDecision::Accept),
         ),
@@ -183,7 +187,7 @@ fn mismatched_response_keeps_request_pending_and_any_request_can_be_rejected() {
     assert_eq!(requests.len(), 1);
 
     assert_eq!(
-        requests.resolve(
+        requests.prepare_resolution(
             &request_id,
             PendingRequestResponse::Reject {
                 code: -32000,
@@ -191,7 +195,7 @@ fn mismatched_response_keeps_request_pending_and_any_request_can_be_rejected() {
             },
         ),
         Ok(RequestResolution::Reject {
-            request_id,
+            request_id: request_id.clone(),
             error: codex_app_server_protocol::JSONRPCErrorError {
                 code: -32000,
                 message: "surface closed".to_string(),
@@ -199,5 +203,7 @@ fn mismatched_response_keeps_request_pending_and_any_request_can_be_rejected() {
             },
         })
     );
+    assert_eq!(requests.len(), 1);
+    requests.remove_resolved(&request_id);
     assert!(requests.is_empty());
 }

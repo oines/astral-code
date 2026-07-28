@@ -376,19 +376,11 @@ fn handle_request_key(
     };
 
     let request_id = request.request_id().clone();
-    match state.pending_requests_mut().resolve(&request_id, response) {
-        Ok(resolution) => {
-            match request {
-                PendingRequest::UserInput { .. } => state.reset_request_user_input(),
-                PendingRequest::McpElicitation { params, .. }
-                    if matches!(params.request, McpServerElicitationRequest::Form { .. }) =>
-                {
-                    state.reset_mcp_form();
-                }
-                _ => {}
-            }
-            InputAction::Resolve(resolution)
-        }
+    match state
+        .pending_requests()
+        .prepare_resolution(&request_id, response)
+    {
+        Ok(resolution) => InputAction::Resolve(resolution),
         Err(error) => InputAction::Notice(error.to_string()),
     }
 }
