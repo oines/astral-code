@@ -23,6 +23,8 @@ use crate::protocol::v2::UserInput;
 use crate::protocol::v2::WebSearchAction;
 use codex_protocol::items::parse_hook_prompt_message;
 use codex_protocol::models::MessagePhase;
+use codex_protocol::models::ReasoningItemContent;
+use codex_protocol::models::ReasoningItemReasoningSummary;
 use codex_protocol::protocol::AgentReasoningEvent;
 use codex_protocol::protocol::AgentReasoningRawContentEvent;
 use codex_protocol::protocol::AgentStatus;
@@ -91,6 +93,29 @@ pub struct ThreadHistoryBuilder {
     next_item_index: i64,
     current_rollout_index: usize,
     next_rollout_index: usize,
+    last_reasoning_source: Option<ReasoningRecordSource>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ReasoningInputSource {
+    Event,
+    Transcript,
+}
+
+// Reasoning can be persisted twice: first as streamed event fragments and then
+// as the authoritative completed transcript item.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ReasoningRecordSource {
+    Event,
+    Transcript,
+    Both,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ReasoningMergeMode {
+    AppendEventFragments,
+    TranscriptAuthoritative,
+    AppendNovelEventFragments,
 }
 
 impl Default for ThreadHistoryBuilder {
@@ -107,6 +132,7 @@ impl ThreadHistoryBuilder {
             next_item_index: 1,
             current_rollout_index: 0,
             next_rollout_index: 0,
+            last_reasoning_source: None,
         }
     }
 
@@ -273,6 +299,33 @@ impl ThreadHistoryBuilder {
             codex_protocol::models::TranscriptItem::FunctionCallOutput { call_id, output } => {
                 self.handle_core_tool_call_output(call_id, output);
             }
+            codex_protocol::models::TranscriptItem::Reasoning {
+                id,
+                summary,
+                content,
+                ..
+            } => {
+                let summary = summary
+                    .iter()
+                    .map(|entry| match entry {
+                        ReasoningItemReasoningSummary::SummaryText { text } => text.clone(),
+                    })
+                    .collect();
+                let content = content
+                    .iter()
+                    .flatten()
+                    .map(|entry| match entry {
+                        ReasoningItemContent::ReasoningText { text }
+                        | ReasoningItemContent::Text { text } => text.clone(),
+                    })
+                    .collect();
+                self.handle_reasoning_item(
+                    ReasoningInputSource::Transcript,
+                    (!id.is_empty()).then_some(id.as_str()),
+                    summary,
+                    content,
+                );
+            }
             _ => {}
         }
     }
@@ -343,42 +396,99 @@ impl ThreadHistoryBuilder {
     }
 
     fn handle_agent_reasoning(&mut self, payload: &AgentReasoningEvent) {
-        if payload.text.is_empty() {
-            return;
-        }
-
-        // If the last item is a reasoning item, add the new text to the summary.
-        if let Some(ThreadItem::Reasoning { summary, .. }) = self.ensure_turn().items.last_mut() {
-            summary.push(payload.text.clone());
-            return;
-        }
-
-        // Otherwise, create a new reasoning item.
-        let id = self.next_item_id();
-        self.ensure_turn().items.push(ThreadItem::Reasoning {
-            id,
-            summary: vec![payload.text.clone()],
-            content: Vec::new(),
-        });
+        self.handle_reasoning_item(
+            ReasoningInputSource::Event,
+            /*id*/ None,
+            vec![payload.text.clone()],
+            Vec::new(),
+        );
     }
 
     fn handle_agent_reasoning_raw_content(&mut self, payload: &AgentReasoningRawContentEvent) {
-        if payload.text.is_empty() {
+        self.handle_reasoning_item(
+            ReasoningInputSource::Event,
+            /*id*/ None,
+            Vec::new(),
+            vec![payload.text.clone()],
+        );
+    }
+
+    fn handle_reasoning_item(
+        &mut self,
+        source: ReasoningInputSource,
+        id: Option<&str>,
+        mut summary: Vec<String>,
+        mut content: Vec<String>,
+    ) {
+        summary.retain(|text| !text.is_empty());
+        content.retain(|text| !text.is_empty());
+        if summary.is_empty() && content.is_empty() {
             return;
         }
 
-        // If the last item is a reasoning item, add the new text to the content.
-        if let Some(ThreadItem::Reasoning { content, .. }) = self.ensure_turn().items.last_mut() {
-            content.push(payload.text.clone());
+        let merge = match (self.last_reasoning_source, source) {
+            (Some(record_source @ ReasoningRecordSource::Event), ReasoningInputSource::Event)
+            | (Some(record_source @ ReasoningRecordSource::Both), ReasoningInputSource::Event) => {
+                Some((ReasoningMergeMode::AppendEventFragments, record_source))
+            }
+            (Some(ReasoningRecordSource::Event), ReasoningInputSource::Transcript) => Some((
+                ReasoningMergeMode::TranscriptAuthoritative,
+                ReasoningRecordSource::Both,
+            )),
+            (Some(ReasoningRecordSource::Transcript), ReasoningInputSource::Event) => Some((
+                ReasoningMergeMode::AppendNovelEventFragments,
+                ReasoningRecordSource::Both,
+            )),
+            (None, _)
+            | (Some(ReasoningRecordSource::Transcript), ReasoningInputSource::Transcript)
+            | (Some(ReasoningRecordSource::Both), ReasoningInputSource::Transcript) => None,
+        };
+        if let Some((merge_mode, merged_source)) = merge
+            && let Some(ThreadItem::Reasoning {
+                summary: existing_summary,
+                content: existing_content,
+                ..
+            }) = self.ensure_turn().items.last_mut()
+        {
+            match merge_mode {
+                ReasoningMergeMode::AppendEventFragments => {
+                    existing_summary.extend(summary);
+                    existing_content.extend(content);
+                }
+                ReasoningMergeMode::TranscriptAuthoritative => {
+                    if !summary.is_empty() {
+                        *existing_summary = summary;
+                    }
+                    if !content.is_empty() {
+                        *existing_content = content;
+                    }
+                }
+                ReasoningMergeMode::AppendNovelEventFragments => {
+                    for text in summary {
+                        if !existing_summary.contains(&text) {
+                            existing_summary.push(text);
+                        }
+                    }
+                    for text in content {
+                        if !existing_content.contains(&text) {
+                            existing_content.push(text);
+                        }
+                    }
+                }
+            }
+            self.last_reasoning_source = Some(merged_source);
             return;
         }
 
-        // Otherwise, create a new reasoning item.
-        let id = self.next_item_id();
+        let id = id.map(str::to_owned).unwrap_or_else(|| self.next_item_id());
         self.ensure_turn().items.push(ThreadItem::Reasoning {
             id,
-            summary: Vec::new(),
-            content: vec![payload.text.clone()],
+            summary,
+            content,
+        });
+        self.last_reasoning_source = Some(match source {
+            ReasoningInputSource::Event => ReasoningRecordSource::Event,
+            ReasoningInputSource::Transcript => ReasoningRecordSource::Transcript,
         });
     }
 
@@ -1744,6 +1854,253 @@ mod tests {
                 summary: vec!["second summary".into()],
                 content: Vec::new(),
             }
+        );
+    }
+
+    #[test]
+    fn rebuilds_persisted_reasoning_in_rollout_order() {
+        let items = vec![
+            RolloutItem::EventMsg(EventMsg::TurnStarted(TurnStartedEvent {
+                turn_id: "turn-reasoning".into(),
+                trace_id: None,
+                started_at: None,
+                model_context_window: None,
+                collaboration_mode_kind: Default::default(),
+            })),
+            RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+                message: "make a plan".into(),
+                ..Default::default()
+            })),
+            RolloutItem::TranscriptItem(codex_protocol::models::TranscriptItem::Reasoning {
+                id: String::new(),
+                summary: Vec::new(),
+                content: Some(vec![ReasoningItemContent::ReasoningText {
+                    text: "first thought".into(),
+                }]),
+                encrypted_content: None,
+                provider_metadata: None,
+            }),
+            RolloutItem::EventMsg(EventMsg::AgentMessage(AgentMessageEvent {
+                message: "I will draft the plan.".into(),
+                phase: Some(MessagePhase::Commentary),
+                memory_citation: None,
+            })),
+            RolloutItem::TranscriptItem(codex_protocol::models::TranscriptItem::FunctionCall {
+                id: None,
+                name: "update_plan".into(),
+                namespace: None,
+                arguments: r#"{"plan":[{"step":"Trace order","status":"in_progress"}]}"#.into(),
+                call_id: "plan-1".into(),
+            }),
+            RolloutItem::TranscriptItem(
+                codex_protocol::models::TranscriptItem::FunctionCallOutput {
+                    call_id: "plan-1".into(),
+                    output: codex_protocol::models::FunctionCallOutputPayload {
+                        body: codex_protocol::models::FunctionCallOutputBody::Text(
+                            "Plan updated".into(),
+                        ),
+                        success: Some(true),
+                    },
+                },
+            ),
+            RolloutItem::TranscriptItem(codex_protocol::models::TranscriptItem::Reasoning {
+                id: String::new(),
+                summary: Vec::new(),
+                content: Some(vec![ReasoningItemContent::Text {
+                    text: "second thought".into(),
+                }]),
+                encrypted_content: None,
+                provider_metadata: None,
+            }),
+            RolloutItem::EventMsg(EventMsg::AgentMessage(AgentMessageEvent {
+                message: "The plan is ready.".into(),
+                phase: Some(MessagePhase::FinalAnswer),
+                memory_citation: None,
+            })),
+            RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
+                turn_id: "turn-reasoning".into(),
+                last_agent_message: None,
+                completed_at: None,
+                duration_ms: None,
+                time_to_first_token_ms: None,
+            })),
+        ];
+
+        let turns = build_turns_from_rollout_items(&items);
+
+        assert_eq!(
+            turns[0].items,
+            vec![
+                ThreadItem::UserMessage {
+                    id: "item-1".into(),
+                    client_id: None,
+                    content: vec![UserInput::Text {
+                        text: "make a plan".into(),
+                        text_elements: Vec::new(),
+                    }],
+                },
+                ThreadItem::Reasoning {
+                    id: "item-2".into(),
+                    summary: Vec::new(),
+                    content: vec!["first thought".into()],
+                },
+                ThreadItem::AgentMessage {
+                    id: "item-3".into(),
+                    text: "I will draft the plan.".into(),
+                    phase: Some(MessagePhase::Commentary),
+                    memory_citation: None,
+                },
+                ThreadItem::CoreToolCall {
+                    id: "plan-1".into(),
+                    tool: "update_plan".into(),
+                    arguments: serde_json::json!({
+                        "plan": [{"step": "Trace order", "status": "in_progress"}]
+                    }),
+                    status: CoreToolCallStatus::Completed,
+                    result: Some("Plan updated".into()),
+                    error: None,
+                    duration_ms: None,
+                },
+                ThreadItem::Reasoning {
+                    id: "item-4".into(),
+                    summary: Vec::new(),
+                    content: vec!["second thought".into()],
+                },
+                ThreadItem::AgentMessage {
+                    id: "item-5".into(),
+                    text: "The plan is ready.".into(),
+                    phase: Some(MessagePhase::FinalAnswer),
+                    memory_citation: None,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn persisted_reasoning_enriches_adjacent_event_without_duplication() {
+        let items = vec![
+            RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+                message: "inspect this".into(),
+                ..Default::default()
+            })),
+            RolloutItem::EventMsg(EventMsg::AgentReasoning(AgentReasoningEvent {
+                text: "partial summary".into(),
+            })),
+            RolloutItem::EventMsg(EventMsg::AgentReasoning(AgentReasoningEvent {
+                text: "stale tail".into(),
+            })),
+            RolloutItem::TranscriptItem(codex_protocol::models::TranscriptItem::Reasoning {
+                id: "provider-reasoning-1".into(),
+                summary: vec![ReasoningItemReasoningSummary::SummaryText {
+                    text: "visible summary".into(),
+                }],
+                content: Some(vec![ReasoningItemContent::ReasoningText {
+                    text: "raw reasoning".into(),
+                }]),
+                encrypted_content: Some("encrypted".into()),
+                provider_metadata: None,
+            }),
+        ];
+
+        let turns = build_turns_from_rollout_items(&items);
+
+        assert_eq!(
+            turns[0].items,
+            vec![
+                ThreadItem::UserMessage {
+                    id: "item-1".into(),
+                    client_id: None,
+                    content: vec![UserInput::Text {
+                        text: "inspect this".into(),
+                        text_elements: Vec::new(),
+                    }],
+                },
+                ThreadItem::Reasoning {
+                    id: "item-2".into(),
+                    summary: vec!["visible summary".into()],
+                    content: vec!["raw reasoning".into()],
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn adjacent_persisted_reasoning_items_remain_distinct() {
+        let reasoning_item = |id: &str| {
+            RolloutItem::TranscriptItem(codex_protocol::models::TranscriptItem::Reasoning {
+                id: id.into(),
+                summary: Vec::new(),
+                content: Some(vec![ReasoningItemContent::ReasoningText {
+                    text: "same visible content".into(),
+                }]),
+                encrypted_content: None,
+                provider_metadata: None,
+            })
+        };
+        let items = vec![
+            RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+                message: "inspect this".into(),
+                ..Default::default()
+            })),
+            reasoning_item("provider-reasoning-1"),
+            reasoning_item("provider-reasoning-2"),
+        ];
+
+        let turns = build_turns_from_rollout_items(&items);
+
+        assert_eq!(
+            turns[0].items,
+            vec![
+                ThreadItem::UserMessage {
+                    id: "item-1".into(),
+                    client_id: None,
+                    content: vec![UserInput::Text {
+                        text: "inspect this".into(),
+                        text_elements: Vec::new(),
+                    }],
+                },
+                ThreadItem::Reasoning {
+                    id: "provider-reasoning-1".into(),
+                    summary: Vec::new(),
+                    content: vec!["same visible content".into()],
+                },
+                ThreadItem::Reasoning {
+                    id: "provider-reasoning-2".into(),
+                    summary: Vec::new(),
+                    content: vec!["same visible content".into()],
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn encrypted_only_reasoning_does_not_create_blank_history_item() {
+        let items = vec![
+            RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+                message: "inspect this".into(),
+                ..Default::default()
+            })),
+            RolloutItem::TranscriptItem(codex_protocol::models::TranscriptItem::Reasoning {
+                id: "provider-reasoning-1".into(),
+                summary: Vec::new(),
+                content: None,
+                encrypted_content: Some("encrypted".into()),
+                provider_metadata: None,
+            }),
+        ];
+
+        let turns = build_turns_from_rollout_items(&items);
+
+        assert_eq!(
+            turns[0].items,
+            vec![ThreadItem::UserMessage {
+                id: "item-1".into(),
+                client_id: None,
+                content: vec![UserInput::Text {
+                    text: "inspect this".into(),
+                    text_elements: Vec::new(),
+                }],
+            }]
         );
     }
 
