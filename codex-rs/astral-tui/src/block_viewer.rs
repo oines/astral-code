@@ -111,6 +111,8 @@ pub(crate) struct BlockViewerState {
     wrap_mode: ViewerWrapMode,
     popup_area: Option<Rect>,
     content_area: Option<Rect>,
+    scrollbar_area: Option<Rect>,
+    scrollbar_dragging: bool,
     close_button: Option<Rect>,
     close_hovered: bool,
     logical_lines: Vec<String>,
@@ -136,6 +138,8 @@ impl BlockViewerState {
             wrap_mode: ViewerWrapMode::Wrap,
             popup_area: None,
             content_area: None,
+            scrollbar_area: None,
+            scrollbar_dragging: false,
             close_button: None,
             close_hovered: false,
             logical_lines: Vec::new(),
@@ -182,6 +186,13 @@ impl BlockViewerState {
 
     pub(crate) fn close_hovered(&self) -> bool {
         self.close_hovered
+    }
+
+    pub(crate) fn observe_scrollbar_area(&mut self, area: Option<Rect>) {
+        self.scrollbar_area = area;
+        if area.is_none() {
+            self.scrollbar_dragging = false;
+        }
     }
 
     pub(crate) fn query_input_active(&self) -> bool {

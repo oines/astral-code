@@ -86,6 +86,7 @@ fn viewer_pointer_uses_the_rendered_modal_geometry() {
         Rect::new(27, 2, 3, 1),
         lines(20),
     );
+    state.observe_scrollbar_area(Some(Rect::new(30, 4, 1, 7)));
 
     assert_eq!(
         state.handle_mouse(mouse(MouseEventKind::Moved, 28, 2)),
@@ -99,6 +100,22 @@ fn viewer_pointer_uses_the_rendered_modal_geometry() {
     assert_eq!(
         state.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 0, 0)),
         BlockViewerMouseAction::Close
+    );
+    assert_eq!(
+        state.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 30, 10)),
+        BlockViewerMouseAction::Redraw
+    );
+    assert_eq!(state.scroll_offset(), 13);
+    assert_eq!(state.selected_item(), Some(19));
+    assert_eq!(
+        state.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), 30, 4)),
+        BlockViewerMouseAction::Redraw
+    );
+    assert_eq!(state.scroll_offset(), 0);
+    assert_eq!(state.selected_item(), Some(0));
+    assert_eq!(
+        state.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), 30, 4)),
+        BlockViewerMouseAction::Redraw
     );
     assert_eq!(
         state.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 5, 6)),

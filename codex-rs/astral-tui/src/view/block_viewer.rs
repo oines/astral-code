@@ -124,6 +124,8 @@ impl BlockViewerPane<'_> {
             usize::from(body_area.height),
             self.state.scroll_offset(),
         );
+        self.state
+            .observe_scrollbar_area(viewport.needs_scrollbar().then_some(scrollbar_area));
         render_row_backgrounds(&rows, body_area, viewport, buffer);
         ScrollbackPane {
             lines: &lines,

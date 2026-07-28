@@ -81,6 +81,7 @@ impl BlockViewerState {
     pub(crate) fn handle_mouse(&mut self, mouse: MouseEvent) -> BlockViewerMouseAction {
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
+                self.scrollbar_dragging = false;
                 let position = (mouse.column, mouse.row).into();
                 if self
                     .close_button
@@ -89,6 +90,11 @@ impl BlockViewerState {
                 {
                     self.clear_text_drag();
                     BlockViewerMouseAction::Close
+                } else if self.scrollbar_contains(mouse.column, mouse.row) {
+                    self.clear_text_drag();
+                    self.scrollbar_dragging = true;
+                    self.apply_scrollbar_click(mouse.row);
+                    BlockViewerMouseAction::Redraw
                 } else if let Some(area) = self.content_area
                     && area.contains(position)
                 {
@@ -103,15 +109,24 @@ impl BlockViewerState {
                 }
             }
             MouseEventKind::Drag(MouseButton::Left) => {
-                if self.update_text_drag(mouse.column, mouse.row) {
+                if self.scrollbar_dragging {
+                    self.apply_scrollbar_click(mouse.row);
+                    BlockViewerMouseAction::Redraw
+                } else if self.update_text_drag(mouse.column, mouse.row) {
                     BlockViewerMouseAction::Redraw
                 } else {
                     BlockViewerMouseAction::Ignored
                 }
             }
-            MouseEventKind::Up(MouseButton::Left) => self
-                .finish_text_drag(mouse.column, mouse.row)
-                .map_or(BlockViewerMouseAction::Redraw, BlockViewerMouseAction::Copy),
+            MouseEventKind::Up(MouseButton::Left) => {
+                if self.scrollbar_dragging {
+                    self.scrollbar_dragging = false;
+                    BlockViewerMouseAction::Redraw
+                } else {
+                    self.finish_text_drag(mouse.column, mouse.row)
+                        .map_or(BlockViewerMouseAction::Redraw, BlockViewerMouseAction::Copy)
+                }
+            }
             MouseEventKind::Moved => {
                 let hovered = self
                     .close_button
@@ -125,12 +140,12 @@ impl BlockViewerState {
             }
             MouseEventKind::ScrollUp => {
                 self.clear_visual_selection();
-                self.scroll_by(-3);
+                self.scroll_from_pointer(-3, mouse.column, mouse.row);
                 BlockViewerMouseAction::Redraw
             }
             MouseEventKind::ScrollDown => {
                 self.clear_visual_selection();
-                self.scroll_by(3);
+                self.scroll_from_pointer(3, mouse.column, mouse.row);
                 BlockViewerMouseAction::Redraw
             }
             MouseEventKind::ScrollLeft
@@ -138,10 +153,73 @@ impl BlockViewerState {
             | MouseEventKind::Up(MouseButton::Right | MouseButton::Middle)
             | MouseEventKind::Drag(MouseButton::Right | MouseButton::Middle)
             | MouseEventKind::Down(MouseButton::Right | MouseButton::Middle) => {
+                self.scrollbar_dragging = false;
                 self.clear_text_drag();
                 BlockViewerMouseAction::Ignored
             }
         }
+    }
+
+    fn scrollbar_contains(&self, column: u16, row: u16) -> bool {
+        self.scrollbar_area
+            .is_some_and(|area| area.contains((column, row).into()))
+    }
+
+    fn apply_scrollbar_click(&mut self, row: u16) -> bool {
+        let Some(area) = self.scrollbar_area else {
+            return false;
+        };
+        let track_height = usize::from(area.height);
+        if track_height == 0 || self.total_rows <= self.page_size {
+            return false;
+        }
+        let cell = usize::from(row.saturating_sub(area.y));
+        if cell == 0 {
+            return self.scroll_to_start();
+        }
+        if cell >= track_height.saturating_sub(1) {
+            return self.scroll_to_end();
+        }
+
+        let thumb_height = self
+            .page_size
+            .saturating_mul(track_height)
+            .div_ceil(self.total_rows)
+            .clamp(1, track_height);
+        let thumb_travel = track_height.saturating_sub(thumb_height);
+        let thumb_top = cell.saturating_sub(thumb_height / 2).min(thumb_travel);
+        let offset = thumb_top
+            .saturating_mul(self.max_scroll_offset)
+            .saturating_add(thumb_travel / 2)
+            .checked_div(thumb_travel)
+            .unwrap_or(0);
+        self.set_scroll_offset_and_center(offset)
+    }
+
+    fn scroll_from_pointer(&mut self, lines: isize, column: u16, row: u16) -> bool {
+        if !self.scrollbar_contains(column, row) {
+            return self.scroll_by(lines);
+        }
+        let proportional = self.total_rows.saturating_add(200) / 400;
+        let magnitude = proportional.max(lines.unsigned_abs());
+        let magnitude = isize::try_from(magnitude).unwrap_or(isize::MAX);
+        let delta = magnitude.saturating_mul(lines.signum());
+        let offset = self
+            .scroll_offset
+            .saturating_add_signed(delta)
+            .min(self.max_scroll_offset);
+        self.set_scroll_offset_and_center(offset)
+    }
+
+    fn set_scroll_offset_and_center(&mut self, offset: usize) -> bool {
+        let previous = (self.scroll_offset, self.selected_item);
+        self.scroll_offset = offset.min(self.max_scroll_offset);
+        self.select_item_at_row(
+            self.scroll_offset
+                .saturating_add(self.page_size / 2)
+                .min(self.total_rows.saturating_sub(1)),
+        );
+        previous != (self.scroll_offset, self.selected_item)
     }
 
     pub(super) fn reveal_selected_item(&mut self) {
