@@ -10,6 +10,7 @@ use crate::conversation::TranscriptTurn;
 use super::AstralTheme;
 use super::EntryDisplayState;
 use super::TranscriptSection;
+use super::TranscriptSectionKind;
 use super::format_duration;
 use super::item_duration_ms;
 use super::render_committed_block;
@@ -100,10 +101,12 @@ fn transcript_layout_assigns_stable_item_sections() {
             TranscriptSection {
                 item_id: "turn-1\0agent-1".to_string(),
                 lines: 0..1,
+                kind: TranscriptSectionKind::Entry,
             },
             TranscriptSection {
                 item_id: "turn-1\0agent-2".to_string(),
                 lines: 1..3,
+                kind: TranscriptSectionKind::Entry,
             },
         ]
     );

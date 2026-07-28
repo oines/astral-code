@@ -1,0 +1,61 @@
+---
+source: astral-tui/src/surface_tests.rs
+expression: "format!(\"COLLAPSED\\n{collapsed}\\n\\nEXPANDED\\n{expanded}\")"
+---
+COLLAPSED
+
+  ⎇ main  /workspace
+
+
+  › inspect these files
+
+  ◈ Read 2 files, Searched 1 pattern
+  The relevant files are loaded.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ╭──────────────────────────────────────────────────────────────────────────────────╮
+  │ ❯                                                                                │
+  ╰──────────────────────────────────────────────────── claude-sonnet-4 · workspace ─╯
+
+  Shift+Tab:mode  │  Ctrl+.:shortcuts
+
+EXPANDED
+
+  ⎇ main  /workspace
+
+
+  › inspect these files
+
+  ◈ Read 2 files, Searched 1 pattern
+  › Thought
+  ◆ Read a.rs (1 line)  20ms
+  ◆ Search src (1 result)  30ms
+  ◆ Read b.rs (1 line)  20ms
+  The relevant files are loaded.
+
+
+
+
+
+
+
+
+
+
+  ╭──────────────────────────────────────────────────────────────────────────────────╮
+  │ ❯                                                                                │
+  ╰──────────────────────────────────────────────────── claude-sonnet-4 · workspace ─╯
+
+  ←:collapse  │  Enter:open  │  Tab:prompt

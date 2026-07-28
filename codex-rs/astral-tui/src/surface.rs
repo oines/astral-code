@@ -324,6 +324,12 @@ impl SurfaceState {
                     self.scrollback.reveal_entry(&item_id);
                 }
             }
+            EntryMouseAction::ToggleGroup(item_id) => {
+                if self.entry_display.select(&item_id) {
+                    self.entry_display.toggle_group(&item_id);
+                    self.scrollback.reveal_entry(&item_id);
+                }
+            }
             EntryMouseAction::Ignored => {}
         }
         None

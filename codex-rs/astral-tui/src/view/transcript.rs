@@ -24,12 +24,21 @@ use crate::conversation::TranscriptTurn;
 use super::AstralTheme;
 use super::AstralThemeId;
 use super::EntryDisplayState;
+use super::EntryGroupSpan;
+use super::entry_group::scan_turn;
 use super::entry_state::entry_id;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TranscriptSection {
     pub(crate) item_id: String,
     pub(crate) lines: Range<usize>,
+    pub(crate) kind: TranscriptSectionKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TranscriptSectionKind {
+    Entry,
+    GroupHeader,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,7 +96,14 @@ impl TranscriptLayout {
     pub(crate) fn section(&self, item_id: &str) -> Option<&TranscriptSection> {
         self.sections
             .iter()
-            .find(|section| section.item_id == item_id)
+            .find(|section| {
+                section.item_id == item_id && section.kind == TranscriptSectionKind::Entry
+            })
+            .or_else(|| {
+                self.sections
+                    .iter()
+                    .find(|section| section.item_id == item_id)
+            })
     }
 }
 
@@ -101,7 +117,22 @@ pub(crate) fn render_transcript(
     let mut sections = Vec::new();
     let mut selectable_ranges = Vec::new();
     for turn in turns {
-        for block in &turn.blocks {
+        let groups = scan_turn(turn, display);
+        for (index, block) in turn.blocks.iter().enumerate() {
+            if let Some(group) = groups.iter().find(|group| group.range.start == index) {
+                render_group_section(
+                    &mut lines,
+                    &mut sections,
+                    &mut selectable_ranges,
+                    group,
+                    width,
+                    theme,
+                    display,
+                );
+            }
+            if groups.iter().any(|group| group.hides(index)) {
+                continue;
+            }
             let start = lines.len();
             let mut selectable_lines = Vec::new();
             let item_id = entry_id(&turn.id, &block.item_id);
@@ -113,6 +144,7 @@ pub(crate) fn render_transcript(
             sections.push(TranscriptSection {
                 item_id,
                 lines: start..lines.len(),
+                kind: TranscriptSectionKind::Entry,
             });
             selectable_ranges.push(TranscriptSelectableRange {
                 lines: selectable_lines,
@@ -140,6 +172,48 @@ pub(crate) fn render_transcript(
         sections,
         selectable_ranges,
     }
+}
+
+fn render_group_section(
+    lines: &mut Vec<Line<'static>>,
+    sections: &mut Vec<TranscriptSection>,
+    selectable_ranges: &mut Vec<TranscriptSelectableRange>,
+    group: &EntryGroupSpan,
+    width: u16,
+    theme: AstralTheme,
+    display: &EntryDisplayState,
+) {
+    let start = lines.len();
+    let color = if group.failed {
+        theme.accent_error
+    } else if group.running {
+        theme.accent_running
+    } else {
+        theme.gray
+    };
+    let line: Line<'static> = vec!["◈ ".fg(color), group.label.clone().bold().fg(color)].into();
+    let columns = selectable_columns(&line, width);
+    lines.push(line);
+    if group.header_owns_selection() && display.selected_id() == Some(group.id.as_str()) {
+        let mode = if group.expanded {
+            DisplayMode::Expanded
+        } else {
+            DisplayMode::Collapsed
+        };
+        highlight_selected_header(lines, start, width, theme, mode);
+    }
+    sections.push(TranscriptSection {
+        item_id: group.id.clone(),
+        lines: start..lines.len(),
+        kind: TranscriptSectionKind::GroupHeader,
+    });
+    selectable_ranges.push(TranscriptSelectableRange {
+        lines: vec![TranscriptSelectableLine {
+            line: start,
+            columns,
+            joiner_to_previous: LineJoiner::HardBreak,
+        }],
+    });
 }
 
 pub(crate) fn render_committed_block(

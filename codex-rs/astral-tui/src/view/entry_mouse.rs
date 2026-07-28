@@ -13,6 +13,7 @@ use ratatui::layout::Rect;
 use super::ScrollbackViewport;
 use super::transcript::TranscriptLayout;
 use super::transcript::TranscriptSection;
+use super::transcript::TranscriptSectionKind;
 
 const MULTI_CLICK_TIMEOUT: Duration = Duration::from_millis(300);
 
@@ -21,6 +22,7 @@ pub(crate) enum EntryMouseAction {
     Ignored,
     Select(String),
     Toggle(String),
+    ToggleGroup(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,12 +34,14 @@ struct EntryMouseFrame {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PendingClick {
     item_id: String,
+    kind: TranscriptSectionKind,
 }
 
 #[derive(Debug, Clone)]
 struct CompletedClick {
     at: Instant,
     item_id: String,
+    kind: TranscriptSectionKind,
 }
 
 /// Mouse hit-testing for foldable transcript entries.
@@ -79,7 +83,7 @@ impl EntryMouseState {
             MouseEventKind::Down(MouseButton::Left) => {
                 self.pending = self
                     .hit_test(mouse.column, mouse.row)
-                    .map(|item_id| PendingClick { item_id });
+                    .map(|(item_id, kind)| PendingClick { item_id, kind });
                 if self.pending.is_none() {
                     self.last_click = None;
                 }
@@ -93,24 +97,30 @@ impl EntryMouseState {
                 let Some(pending) = self.pending.take() else {
                     return EntryMouseAction::Ignored;
                 };
-                let Some(item_id) = self.hit_test(mouse.column, mouse.row) else {
+                let Some((item_id, kind)) = self.hit_test(mouse.column, mouse.row) else {
                     self.last_click = None;
                     return EntryMouseAction::Ignored;
                 };
-                if item_id != pending.item_id {
+                if item_id != pending.item_id || kind != pending.kind {
                     self.last_click = None;
                     return EntryMouseAction::Ignored;
                 }
                 if self.last_click.as_ref().is_some_and(|last| {
                     last.item_id == item_id
+                        && last.kind == kind
                         && now.saturating_duration_since(last.at) < MULTI_CLICK_TIMEOUT
                 }) {
                     self.last_click = None;
-                    EntryMouseAction::Toggle(item_id)
+                    if kind == TranscriptSectionKind::GroupHeader {
+                        EntryMouseAction::ToggleGroup(item_id)
+                    } else {
+                        EntryMouseAction::Toggle(item_id)
+                    }
                 } else {
                     self.last_click = Some(CompletedClick {
                         at: now,
                         item_id: item_id.clone(),
+                        kind,
                     });
                     EntryMouseAction::Select(item_id)
                 }
@@ -132,7 +142,7 @@ impl EntryMouseState {
         }
     }
 
-    fn hit_test(&self, column: u16, row: u16) -> Option<String> {
+    fn hit_test(&self, column: u16, row: u16) -> Option<(String, TranscriptSectionKind)> {
         let frame = self.frame?;
         if !frame.area.contains((column, row).into()) {
             return None;
@@ -144,7 +154,7 @@ impl EntryMouseState {
         self.sections
             .iter()
             .find(|section| section.lines.contains(&line))
-            .map(|section| section.item_id.clone())
+            .map(|section| (section.item_id.clone(), section.kind))
     }
 }
 

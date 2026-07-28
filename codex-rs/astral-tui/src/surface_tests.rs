@@ -1274,6 +1274,98 @@ fn scrollback_focus_folds_tool_entries_snapshot() {
 }
 
 #[test]
+fn verb_group_double_click_reveals_members_below_the_header_snapshot() {
+    let mut session = session_state();
+    session.thread.turns[0].items = vec![
+        ThreadItem::UserMessage {
+            id: "user-group".to_string(),
+            client_id: None,
+            content: vec![UserInput::Text {
+                text: "inspect these files".to_string(),
+                text_elements: Vec::new(),
+            }],
+        },
+        ThreadItem::Reasoning {
+            id: "thought-group".to_string(),
+            summary: vec!["Locate the relevant files first.".to_string()],
+            content: Vec::new(),
+        },
+        ThreadItem::CoreToolCall {
+            id: "read-a".to_string(),
+            tool: "Read".to_string(),
+            arguments: json!({"path": "src/a.rs"}),
+            status: CoreToolCallStatus::Completed,
+            result: Some("fn a() {}".to_string()),
+            error: None,
+            duration_ms: Some(20),
+        },
+        ThreadItem::CoreToolCall {
+            id: "search".to_string(),
+            tool: "grep".to_string(),
+            arguments: json!({"pattern": "render", "path": "src"}),
+            status: CoreToolCallStatus::Completed,
+            result: Some("src/a.rs:1:fn render()".to_string()),
+            error: None,
+            duration_ms: Some(30),
+        },
+        ThreadItem::CoreToolCall {
+            id: "read-b".to_string(),
+            tool: "Read".to_string(),
+            arguments: json!({"path": "src/b.rs"}),
+            status: CoreToolCallStatus::Completed,
+            result: Some("fn b() {}".to_string()),
+            error: None,
+            duration_ms: Some(20),
+        },
+        ThreadItem::AgentMessage {
+            id: "agent-group".to_string(),
+            text: "The relevant files are loaded.".to_string(),
+            phase: None,
+            memory_citation: None,
+        },
+    ];
+    session.thread.turns[0].status = TurnStatus::Completed;
+    session.active_turn_id = None;
+    let mut state = SurfaceState::from_session(&session);
+    let area = Rect::new(0, 0, 88, 28);
+    let mut buffer = Buffer::empty(area);
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        area,
+        &mut buffer,
+    );
+    let collapsed = buffer_text(&buffer);
+    assert!(collapsed.contains("Read 2 files, Searched 1 pattern"));
+    assert!(!collapsed.contains("Read a.rs"));
+    let (column, row) = find_text(&buffer, "Read 2 files")
+        .unwrap_or_else(|| panic!("group header is visible:\n{collapsed}"));
+
+    for _ in 0..2 {
+        state.handle_scrollback_mouse(mouse(MouseEventKind::Down(MouseButton::Left), column, row));
+        state.handle_scrollback_mouse(mouse(MouseEventKind::Up(MouseButton::Left), column, row));
+    }
+
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        area,
+        &mut buffer,
+    );
+    let expanded = buffer_text(&buffer);
+    assert!(expanded.contains("◈ Read 2 files, Searched 1 pattern"));
+    assert!(expanded.contains("Read a.rs"));
+    assert!(expanded.contains("Search src"));
+    assert!(expanded.contains("Read b.rs"));
+    insta::assert_snapshot!(
+        "verb_group_mouse_expand_surface",
+        format!("COLLAPSED\n{collapsed}\n\nEXPANDED\n{expanded}")
+    );
+}
+
+#[test]
 fn edit_diff_expands_by_default_and_double_click_collapses_snapshot() {
     let mut session = session_state();
     session.thread.turns[0].items.push(ThreadItem::FileChange {

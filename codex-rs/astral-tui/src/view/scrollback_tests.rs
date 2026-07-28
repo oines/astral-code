@@ -11,6 +11,7 @@ use super::ScrollbackViewport;
 use crate::view::AstralTheme;
 use crate::view::transcript::TranscriptLayout;
 use crate::view::transcript::TranscriptSection;
+use crate::view::transcript::TranscriptSectionKind;
 use crate::view::transcript::TranscriptSelectableLine;
 use crate::view::transcript::TranscriptSelectableRange;
 
@@ -24,6 +25,7 @@ fn transcript_layout(sections: &[(&str, usize)]) -> TranscriptLayout {
         ranges.push(TranscriptSection {
             item_id: (*item_id).to_string(),
             lines: start..lines.len(),
+            kind: TranscriptSectionKind::Entry,
         });
         selectable_ranges.push(TranscriptSelectableRange {
             lines: (start..lines.len())

@@ -15,6 +15,7 @@ use super::MULTI_CLICK_TIMEOUT;
 use crate::view::ScrollbackViewport;
 use crate::view::transcript::TranscriptLayout;
 use crate::view::transcript::TranscriptSection;
+use crate::view::transcript::TranscriptSectionKind;
 
 fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
     MouseEvent {
@@ -26,11 +27,16 @@ fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
 }
 
 fn state(section_lines: Range<usize>) -> EntryMouseState {
+    state_with_kind(section_lines, TranscriptSectionKind::Entry)
+}
+
+fn state_with_kind(section_lines: Range<usize>, kind: TranscriptSectionKind) -> EntryMouseState {
     let layout = TranscriptLayout {
         lines: Vec::new(),
         sections: vec![TranscriptSection {
             item_id: "turn-1\0tool-1".to_string(),
             lines: section_lines,
+            kind,
         }],
         selectable_ranges: Vec::new(),
     };
@@ -86,5 +92,22 @@ fn second_click_toggles_but_a_drag_does_not() {
     assert_eq!(
         state.handle_mouse_at(up, now + Duration::from_secs(1) + Duration::from_millis(2)),
         EntryMouseAction::Ignored
+    );
+}
+
+#[test]
+fn second_click_on_group_header_toggles_the_group_not_its_anchor_entry() {
+    let mut state = state_with_kind(7..8, TranscriptSectionKind::GroupHeader);
+    let now = Instant::now();
+    let down = mouse(MouseEventKind::Down(MouseButton::Left), 4, 5);
+    let up = mouse(MouseEventKind::Up(MouseButton::Left), 4, 5);
+
+    state.handle_mouse_at(down, now);
+    state.handle_mouse_at(up, now + Duration::from_millis(1));
+    state.handle_mouse_at(down, now + Duration::from_millis(2));
+
+    assert_eq!(
+        state.handle_mouse_at(up, now + Duration::from_millis(3)),
+        EntryMouseAction::ToggleGroup("turn-1\0tool-1".to_string())
     );
 }

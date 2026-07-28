@@ -21,6 +21,7 @@ use super::slice_display_columns;
 use crate::view::AstralTheme;
 use crate::view::transcript::TranscriptLayout;
 use crate::view::transcript::TranscriptSection;
+use crate::view::transcript::TranscriptSectionKind;
 use crate::view::transcript::TranscriptSelectableLine;
 use crate::view::transcript::TranscriptSelectableRange;
 
@@ -40,10 +41,12 @@ fn layout() -> TranscriptLayout {
             TranscriptSection {
                 item_id: "first".to_string(),
                 lines: 0..2,
+                kind: TranscriptSectionKind::Entry,
             },
             TranscriptSection {
                 item_id: "second".to_string(),
                 lines: 2..3,
+                kind: TranscriptSectionKind::Entry,
             },
         ],
         selectable_ranges: vec![
@@ -142,6 +145,7 @@ fn copied_selection_uses_renderer_owned_soft_wrap_joiners() {
         sections: vec![TranscriptSection {
             item_id: "assistant".to_string(),
             lines: 0..2,
+            kind: TranscriptSectionKind::Entry,
         }],
         selectable_ranges: vec![TranscriptSelectableRange {
             lines: vec![
@@ -201,6 +205,7 @@ fn semantic_geometry_excludes_timestamp_padding_and_preserves_blank_lines() {
         sections: vec![TranscriptSection {
             item_id: "assistant".to_string(),
             lines: 0..3,
+            kind: TranscriptSectionKind::Entry,
         }],
         selectable_ranges: vec![TranscriptSelectableRange {
             lines: vec![

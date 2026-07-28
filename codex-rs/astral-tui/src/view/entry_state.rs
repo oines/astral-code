@@ -6,10 +6,14 @@ use astral_tui_scrollback::PresentationBlock;
 
 use crate::conversation::TranscriptTurn;
 
+use super::entry_group::scan_turn;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct EntryDescriptor {
     id: String,
     default_mode: DisplayMode,
+    parent_group: Option<String>,
+    group_header: bool,
 }
 
 /// Fold and focus state owned by the TUI presentation layer.
@@ -22,30 +26,62 @@ pub(crate) struct EntryDisplayState {
     selected: Option<String>,
     entries: Vec<EntryDescriptor>,
     manual_modes: HashMap<String, DisplayMode>,
+    groups: HashSet<String>,
+    expanded_groups: HashSet<String>,
 }
 
 impl EntryDisplayState {
     pub(crate) fn observe(&mut self, turns: &[TranscriptTurn]) {
-        self.entries = turns
-            .iter()
-            .flat_map(|turn| {
-                turn.blocks
+        let mut entries = Vec::new();
+        let mut known_ids = HashSet::new();
+        let mut groups_seen = HashSet::new();
+        for turn in turns {
+            for block in &turn.blocks {
+                if block.block.is_foldable() {
+                    known_ids.insert(entry_id(&turn.id, &block.item_id));
+                }
+            }
+            let groups = scan_turn(turn, self);
+            groups_seen.extend(groups.iter().map(|group| group.id.clone()));
+            for (index, block) in turn.blocks.iter().enumerate() {
+                if let Some(group) = groups
                     .iter()
-                    .filter(|&block| block.block.is_foldable())
-                    .map(|block| EntryDescriptor {
-                        id: entry_id(&turn.id, &block.item_id),
-                        default_mode: block.block.default_display_mode(),
-                    })
-            })
-            .collect();
+                    .find(|group| group.range.start == index && group.header_owns_selection())
+                {
+                    entries.push(EntryDescriptor {
+                        id: group.id.clone(),
+                        default_mode: DisplayMode::Collapsed,
+                        parent_group: None,
+                        group_header: true,
+                    });
+                }
+                let parent_group = groups
+                    .iter()
+                    .find(|group| group.expanded && group.contains_member(index))
+                    .map(|group| group.id.clone());
+                if groups.iter().any(|group| group.hides(index)) || !block.block.is_foldable() {
+                    continue;
+                }
+                entries.push(EntryDescriptor {
+                    id: entry_id(&turn.id, &block.item_id),
+                    default_mode: block.block.default_display_mode(),
+                    parent_group,
+                    group_header: false,
+                });
+            }
+        }
+        self.entries = entries;
+        self.groups = groups_seen;
 
+        self.manual_modes
+            .retain(|entry_id, _| known_ids.contains(entry_id.as_str()));
+        self.expanded_groups
+            .retain(|entry_id| known_ids.contains(entry_id.as_str()));
         let visible_ids = self
             .entries
             .iter()
             .map(|entry| entry.id.as_str())
             .collect::<HashSet<_>>();
-        self.manual_modes
-            .retain(|entry_id, _| visible_ids.contains(entry_id.as_str()));
         if self
             .selected
             .as_ref()
@@ -111,12 +147,23 @@ impl EntryDisplayState {
 
     pub(crate) fn selected_mode(&self) -> Option<DisplayMode> {
         let entry = self.selected_entry()?;
+        if entry.group_header {
+            return Some(if self.expanded_groups.contains(&entry.id) {
+                DisplayMode::Expanded
+            } else {
+                DisplayMode::Collapsed
+            });
+        }
         Some(
             self.manual_modes
                 .get(&entry.id)
                 .copied()
                 .unwrap_or(entry.default_mode),
         )
+    }
+
+    pub(crate) fn group_is_expanded(&self, group_id: &str) -> bool {
+        self.expanded_groups.contains(group_id)
     }
 
     pub(crate) fn move_selection(&mut self, delta: isize) -> Option<String> {
@@ -134,6 +181,9 @@ impl EntryDisplayState {
 
     pub(crate) fn toggle_selected(&mut self) -> Option<String> {
         let entry = self.selected_entry()?.clone();
+        if entry.group_header {
+            return self.toggle_group(&entry.id);
+        }
         let current = self
             .manual_modes
             .get(&entry.id)
@@ -148,17 +198,45 @@ impl EntryDisplayState {
     }
 
     pub(crate) fn expand_selected(&mut self) -> Option<String> {
-        self.set_selected_mode(DisplayMode::Expanded)
+        let entry = self.selected_entry()?.clone();
+        if entry.group_header {
+            self.expanded_groups.insert(entry.id.clone());
+            return Some(entry.id);
+        }
+        self.manual_modes
+            .insert(entry.id.clone(), DisplayMode::Expanded);
+        Some(entry.id)
     }
 
     pub(crate) fn collapse_selected(&mut self) -> Option<String> {
-        self.set_selected_mode(DisplayMode::Collapsed)
+        let entry = self.selected_entry()?.clone();
+        if entry.group_header {
+            return self.expanded_groups.remove(&entry.id).then_some(entry.id);
+        }
+        let current = self
+            .manual_modes
+            .get(&entry.id)
+            .copied()
+            .unwrap_or(entry.default_mode);
+        if current != DisplayMode::Collapsed {
+            self.manual_modes
+                .insert(entry.id.clone(), DisplayMode::Collapsed);
+            return Some(entry.id);
+        }
+        let parent = entry.parent_group?;
+        self.expanded_groups.remove(&parent);
+        self.selected = Some(parent.clone());
+        Some(parent)
     }
 
-    fn set_selected_mode(&mut self, mode: DisplayMode) -> Option<String> {
-        let entry = self.selected_entry()?.clone();
-        self.manual_modes.insert(entry.id.clone(), mode);
-        Some(entry.id)
+    pub(crate) fn toggle_group(&mut self, group_id: &str) -> Option<String> {
+        if !self.groups.contains(group_id) {
+            return None;
+        }
+        if !self.expanded_groups.remove(group_id) {
+            self.expanded_groups.insert(group_id.to_string());
+        }
+        Some(group_id.to_string())
     }
 
     fn selected_entry(&self) -> Option<&EntryDescriptor> {

@@ -31,8 +31,12 @@ fn turn(blocks: Vec<TranscriptBlock>) -> TranscriptTurn {
 }
 
 fn tool(status: ToolStatus) -> PresentationBlock {
+    tool_with_kind(ToolKind::Execute, status)
+}
+
+fn tool_with_kind(kind: ToolKind, status: ToolStatus) -> PresentationBlock {
     PresentationBlock::Tool(ToolPresentation {
-        kind: ToolKind::Execute,
+        kind,
         status,
         name: "exec".to_string(),
         title: "cargo test".to_string(),
@@ -129,4 +133,50 @@ fn truncated_entry_expands_on_the_first_toggle() {
         state.mode_for("turn-1", "thinking", &turns[0].blocks[0].block),
         DisplayMode::Expanded
     );
+}
+
+#[test]
+fn verb_group_and_first_member_keep_independent_fold_state() {
+    let turns = [turn(vec![
+        block(
+            "read-1",
+            tool_with_kind(ToolKind::Read, ToolStatus::Success),
+        ),
+        block(
+            "search-1",
+            tool_with_kind(ToolKind::Search, ToolStatus::Success),
+        ),
+        block(
+            "read-2",
+            tool_with_kind(ToolKind::Read, ToolStatus::Success),
+        ),
+    ])];
+    let mut state = EntryDisplayState::default();
+    let group_id = entry_id("turn-1", "read-1");
+    state.observe(&turns);
+    assert!(state.focus_scrollback());
+    assert_eq!(state.selected_id(), Some(group_id.as_str()));
+    assert_eq!(state.selected_mode(), Some(DisplayMode::Collapsed));
+
+    state.toggle_selected();
+    state.observe(&turns);
+    assert!(state.group_is_expanded(&group_id));
+    assert_eq!(state.selected_mode(), Some(DisplayMode::Collapsed));
+
+    state.expand_selected();
+    state.observe(&turns);
+    assert_eq!(
+        state.mode_for("turn-1", "read-1", &turns[0].blocks[0].block),
+        DisplayMode::Expanded
+    );
+
+    state.collapse_selected();
+    state.observe(&turns);
+    assert!(state.group_is_expanded(&group_id));
+    assert_eq!(state.selected_mode(), Some(DisplayMode::Collapsed));
+
+    state.collapse_selected();
+    state.observe(&turns);
+    assert!(!state.group_is_expanded(&group_id));
+    assert_eq!(state.selected_mode(), Some(DisplayMode::Collapsed));
 }
