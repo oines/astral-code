@@ -9,6 +9,8 @@ use astral_tui_scrollback::PresentationBlock;
 use astral_tui_scrollback::render_block;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use ratatui::style::Color;
+use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::widgets::Clear;
 use ratatui::widgets::Widget;
@@ -83,7 +85,7 @@ impl BlockViewerPane<'_> {
             }
         };
         self.state
-            .observe_frame(frame.popup, frame.content, frame.close_button, lines.len());
+            .observe_frame(frame.popup, body_area, frame.close_button, lines.len());
         let viewport = ScrollbackViewport::from_first(
             lines.len(),
             usize::from(body_area.height),
@@ -94,11 +96,29 @@ impl BlockViewerPane<'_> {
             viewport,
         }
         .render(body_area, scrollbar_area, buffer, theme);
+        if let Some(selected) = self.state.selected_line()
+            && viewport.first_visible_line <= selected
+            && selected < viewport.end_visible_line
+        {
+            let row = body_area.y.saturating_add(
+                u16::try_from(selected.saturating_sub(viewport.first_visible_line))
+                    .unwrap_or(u16::MAX),
+            );
+            let selection_style = if theme.panel_selected == Color::Reset {
+                Style::default().add_modifier(Modifier::REVERSED)
+            } else {
+                Style::default().bg(theme.panel_selected)
+            };
+            buffer.set_style(
+                Rect::new(body_area.x, row, body_area.width, 1),
+                selection_style,
+            );
+        }
     }
 }
 
 fn block_viewer_footer(block: &PresentationBlock) -> String {
-    let mut hints = vec!["↑/↓ scroll".to_string()];
+    let mut hints = vec!["j/k select".to_string(), "Ctrl+d/u page".to_string()];
     if block.supports_raw() {
         hints.push("r raw".to_string());
     }

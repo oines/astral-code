@@ -23,5 +23,5 @@ expression: viewer
   │                                                                          │
   │                                                                          │
   │                                                                          │
-  │          ↑/↓ scroll · y copy · Y copy path · Esc/q/Ctrl+F close          │
+  │  j/k select · Ctrl+d/u page · y copy · Y copy path · Esc/q/Ctrl+F close  │
   └──────────────────────────────────────────────────────────────────────────┘

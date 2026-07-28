@@ -46,11 +46,35 @@ pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction
     };
     match (key.code, key.modifiers) {
         (KeyCode::Up, _) | (KeyCode::Char('k'), KeyModifiers::NONE) => {
-            viewer.scroll_by(-1);
+            viewer.select_by(-1);
             InputAction::Redraw
         }
         (KeyCode::Down, _) | (KeyCode::Char('j'), KeyModifiers::NONE) => {
+            viewer.select_by(1);
+            InputAction::Redraw
+        }
+        (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
+            viewer.select_by(-1);
+            InputAction::Redraw
+        }
+        (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
+            viewer.select_by(1);
+            InputAction::Redraw
+        }
+        (KeyCode::Char('k'), KeyModifiers::CONTROL) => {
+            viewer.scroll_by(-1);
+            InputAction::Redraw
+        }
+        (KeyCode::Char('j'), KeyModifiers::CONTROL) => {
             viewer.scroll_by(1);
+            InputAction::Redraw
+        }
+        (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
+            viewer.scroll_half_page(-1);
+            InputAction::Redraw
+        }
+        (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
+            viewer.scroll_half_page(1);
             InputAction::Redraw
         }
         (KeyCode::PageUp, _) => {

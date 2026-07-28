@@ -27,14 +27,19 @@ fn viewer_scroll_is_clamped_to_the_observed_content() {
         12,
     );
 
+    assert_eq!(state.selected_line(), Some(0));
     assert!(state.scroll_by(50));
     assert_eq!(state.scroll_offset(), 8);
+    assert_eq!(state.selected_line(), Some(8));
     assert!(state.scroll_page(-1));
-    assert_eq!(state.scroll_offset(), 5);
+    assert_eq!(state.scroll_offset(), 4);
+    assert_eq!(state.selected_line(), Some(4));
     assert!(state.scroll_to_start());
     assert_eq!(state.scroll_offset(), 0);
+    assert_eq!(state.selected_line(), Some(0));
     assert!(state.scroll_to_end());
     assert_eq!(state.scroll_offset(), 8);
+    assert_eq!(state.selected_line(), Some(11));
 }
 
 #[test]
@@ -60,4 +65,9 @@ fn viewer_pointer_uses_the_rendered_modal_geometry() {
         state.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 0, 0)),
         BlockViewerMouseAction::Close
     );
+    assert_eq!(
+        state.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 8, 6)),
+        BlockViewerMouseAction::Redraw
+    );
+    assert_eq!(state.selected_line(), Some(2));
 }
