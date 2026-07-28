@@ -12,6 +12,7 @@ use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::UserInput;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use insta::assert_snapshot;
+use pretty_assertions::assert_eq;
 use serde_json::json;
 
 use super::DisplayMode;
@@ -112,6 +113,26 @@ fn edit_display_modes_snapshot() {
     .map(|(label, mode)| format!("{label}\n{}", render(edit_item(), mode)))
     .collect::<Vec<_>>()
     .join("\n\n");
+
+    assert_snapshot!(rendered);
+}
+
+#[test]
+fn edit_defaults_to_an_expanded_diff_snapshot() {
+    let item = edit_item();
+    let block = PresentationBlock::from_item(&item, &TimelineStream::None)
+        .expect("fixture should produce a presentation block");
+
+    assert_eq!(block.default_display_mode(), DisplayMode::Expanded);
+    let rendered = render_block(
+        &block,
+        RenderOptions::for_mode(68, block.default_display_mode()),
+    )
+    .lines
+    .iter()
+    .map(std::string::ToString::to_string)
+    .collect::<Vec<_>>()
+    .join("\n");
 
     assert_snapshot!(rendered);
 }

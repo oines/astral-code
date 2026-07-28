@@ -1,4 +1,5 @@
 use crate::PresentationBlock;
+use crate::ToolKind;
 
 /// Presentation-only visibility for one transcript entry.
 ///
@@ -22,6 +23,9 @@ impl PresentationBlock {
             | Self::Plan { running: false, .. }
             | Self::Subagent(_)
             | Self::System { .. } => DisplayMode::Collapsed,
+            Self::Tool(tool) if tool.kind == ToolKind::Edit && !tool.changes.is_empty() => {
+                DisplayMode::Expanded
+            }
             Self::Tool(_) => DisplayMode::Collapsed,
         }
     }
