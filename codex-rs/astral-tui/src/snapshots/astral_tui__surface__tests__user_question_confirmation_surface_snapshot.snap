@@ -17,6 +17,6 @@ expression: "render_at_size(&mut state, &session, 72, 18)"
  ┃  Submit with unanswered questions?
  ┃  1 question unanswered
  ┃
- ┃  › Go back — Return to the first unanswered question
- ┃  ○ Proceed — Submit empty answers where needed
+ ┃  1 (●) Go back — Return to the first unanswered question
+ ┃  2 (○) Proceed — Submit empty answers where needed
  ↑/↓:navigate  │  Enter:confirm  │  Esc:back

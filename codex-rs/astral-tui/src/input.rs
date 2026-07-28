@@ -22,7 +22,6 @@ use crate::request_choice::RequestChoiceEvent;
 use crate::request_choice::cancel_response;
 use crate::request_choice::is_simple_request;
 use crate::request_choice::response_for;
-use crate::request_user_input::RequestUserInputEvent;
 use crate::theme_picker::ThemePickerInput;
 use crate::theme_picker::handle_key as handle_theme_picker_key;
 use crate::thread_picker::PickerInput;
@@ -31,6 +30,7 @@ use crate::thread_picker::handle_key as handle_thread_picker_key;
 mod mention_popup;
 mod plan_review;
 mod scrollback;
+mod user_input;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum InputAction {
@@ -196,6 +196,12 @@ pub(crate) fn handle_mouse(state: &mut SurfaceState, mouse: MouseEvent) -> Input
             state.focus_prompt();
         }
         return handle_request_choice_event(state, request, event);
+    }
+    if let Some(request) = state.pending_requests().front().cloned()
+        && let PendingRequest::UserInput { params, .. } = &request
+    {
+        let params = params.clone();
+        return user_input::handle_mouse(state, request, &params, mouse);
     }
     if state.plan_review().is_some() {
         return plan_review::handle_mouse(state, mouse);
@@ -379,17 +385,7 @@ fn handle_request_key(
             return handle_request_choice_event(state, request, event);
         }
         PendingRequest::UserInput { params, .. } => {
-            match state.request_user_input_mut().handle_key(&params, key) {
-                RequestUserInputEvent::None => return InputAction::None,
-                RequestUserInputEvent::Redraw => return InputAction::Redraw,
-                RequestUserInputEvent::Submit(response) => {
-                    Some(PendingRequestResponse::UserInput(response))
-                }
-                RequestUserInputEvent::Cancel => Some(PendingRequestResponse::Reject {
-                    code: -32000,
-                    message: "user input cancelled".to_string(),
-                }),
-            }
+            return user_input::handle_key(state, request, &params, key);
         }
         PendingRequest::McpElicitation { params, .. } => match &params.request {
             McpServerElicitationRequest::Form {

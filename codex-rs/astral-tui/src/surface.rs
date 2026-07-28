@@ -536,12 +536,9 @@ pub(crate) fn render_surface_with_view(
     state.sync_request_states();
 
     let has_request = state.pending_requests.front().is_some();
-    let request_focused = state
-        .pending_requests
-        .front()
-        .is_some_and(|request| {
-            !crate::request_choice::is_simple_request(request) || !state.scrollback_focused()
-        });
+    let request_focused = state.pending_requests.front().is_some_and(|request| {
+        !crate::request_choice::is_simple_request(request) || !state.scrollback_focused()
+    });
     let plan_review = state.plan_review().cloned();
     let prompt_height = state.pending_requests.front().map_or_else(
         || {
@@ -794,11 +791,14 @@ pub(crate) fn render_surface_with_view(
         right: None,
     }
     .render(layout.shortcuts, buffer, theme);
-    state.request_choice.observe_rows(
-        request_pane
-            .map(|pane| pane.choice_hit_rows(layout.prompt))
-            .unwrap_or_default(),
-    );
+    let choice_hit_rows = request_pane
+        .map(|pane| pane.choice_hit_rows(layout.prompt))
+        .unwrap_or_default();
+    let user_input_hit_rows = request_pane
+        .map(|pane| pane.user_input_hit_rows(layout.prompt))
+        .unwrap_or_default();
+    state.request_choice.observe_rows(choice_hit_rows);
+    state.request_user_input.observe_rows(user_input_hit_rows);
     if appearance::render_overlay(state, area, buffer, theme) {
         None
     } else if prompt_focused {

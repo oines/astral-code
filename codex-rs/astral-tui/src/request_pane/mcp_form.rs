@@ -78,6 +78,7 @@ pub(super) fn push_content(
     match &field.control {
         McpFormControl::Text { .. } => {
             rows.push(PaneRow::Input {
+                hit: None,
                 text: state.editor().to_string(),
                 cursor_column: input_cursor_width(
                     state.editor(),
@@ -97,6 +98,7 @@ pub(super) fn push_content(
                 .iter()
                 .enumerate()
                 .map(|(index, choice)| PaneRow::Option {
+                    hit: None,
                     label: choice.label.clone(),
                     detail: None,
                     selected: *cursor == index,

@@ -1,10 +1,12 @@
 use codex_app_server_protocol::ToolRequestUserInputParams;
 
 use crate::request_user_input::OTHER_OPTION_LABEL;
+use crate::request_user_input::RequestUserInputHit;
 use crate::request_user_input::RequestUserInputState;
 use crate::request_user_input::has_options;
 use crate::request_user_input::option_count;
 
+use super::PaneHit;
 use super::PaneRow;
 use super::input_cursor_width;
 use super::push_visible_options;
@@ -59,12 +61,14 @@ pub(super) fn push_content(
         rows.push(PaneRow::Blank);
         rows.extend([
             PaneRow::Option {
+                hit: Some(PaneHit::UserInput(RequestUserInputHit::Confirmation(0))),
                 label: "Go back".to_string(),
                 detail: Some("Return to the first unanswered question".to_string()),
                 selected: choice == 0,
                 committed: false,
             },
             PaneRow::Option {
+                hit: Some(PaneHit::UserInput(RequestUserInputHit::Confirmation(1))),
                 label: "Proceed".to_string(),
                 detail: Some("Submit empty answers where needed".to_string()),
                 selected: choice == 1,
@@ -92,7 +96,8 @@ pub(super) fn push_content(
             .iter()
             .enumerate()
             .map(|(index, option)| PaneRow::Option {
-                label: format!("{}. {}", index + 1, option.label),
+                hit: Some(PaneHit::UserInput(RequestUserInputHit::Option(index))),
+                label: option.label.clone(),
                 detail: (!option.description.is_empty()).then(|| option.description.clone()),
                 selected: selected == Some(index),
                 committed: committed && selected == Some(index),
@@ -101,7 +106,8 @@ pub(super) fn push_content(
         if option_count(question) > options.len() {
             let index = options.len();
             option_rows.push(PaneRow::Option {
-                label: format!("{}. {OTHER_OPTION_LABEL}", index + 1),
+                hit: Some(PaneHit::UserInput(RequestUserInputHit::Option(index))),
+                label: OTHER_OPTION_LABEL.to_string(),
                 detail: Some("Add details in notes if needed".to_string()),
                 selected: selected == Some(index),
                 committed: committed && selected == Some(index),
@@ -121,6 +127,7 @@ pub(super) fn push_content(
     let secret = question.is_secret;
     let editor = state.editor();
     rows.push(PaneRow::Input {
+        hit: Some(PaneHit::UserInput(RequestUserInputHit::Editor)),
         text: if secret {
             "•".repeat(editor.chars().count())
         } else {

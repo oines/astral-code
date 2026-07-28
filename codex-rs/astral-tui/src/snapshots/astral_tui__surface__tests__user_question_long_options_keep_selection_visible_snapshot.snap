@@ -13,10 +13,10 @@ expression: "render_at_size(&mut state, &session, 72, 18)"
  ┃  Choose one
  ┃  The selected option must stay visible.
  ┃  … 8 options above
- ┃  ○ 9. Option 9 — Description 9
- ┃  ○ 10. Option 10 — Description 10
- ┃  ○ 11. Option 11 — Description 11
- ┃  › 12. Option 12 — Description 12
- ┃  ○ 13. Option 13 — Description 13
- ┃  ○ 14. Option 14 — Description 14
+ ┃  9 (○) Option 9 — Description 9
+ ┃  10 (○) Option 10 — Description 10
+ ┃  11 (○) Option 11 — Description 11
+ ┃  12 (○) Option 12 — Description 12
+ ┃  13 (○) Option 13 — Description 13
+ ┃  14 (○) Option 14 — Description 14
  ↑/↓:navigate  │  Enter:select  │  Tab:notes  │  Esc:cancel

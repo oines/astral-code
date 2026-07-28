@@ -4,6 +4,9 @@
 //! composer. Approvals and questions can therefore arrive while the user has a
 //! draft without overwriting that draft.
 
+mod pointer;
+mod state;
+
 use std::collections::HashMap;
 
 use codex_app_server_protocol::ToolRequestUserInputAnswer;
@@ -15,6 +18,11 @@ use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
 
 use crate::composer::ComposerState;
+
+use self::pointer::RequestUserInputPointerState;
+pub(crate) use self::state::has_options;
+pub(crate) use self::state::option_count;
+pub(crate) use self::state::option_label;
 
 pub(crate) const OTHER_OPTION_LABEL: &str = "None of the above";
 
@@ -46,6 +54,13 @@ pub(crate) enum RequestUserInputEvent {
     Cancel,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RequestUserInputHit {
+    Option(usize),
+    Editor,
+    Confirmation(usize),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct RequestUserInputState {
     request: Option<ToolRequestUserInputParams>,
@@ -54,6 +69,7 @@ pub(crate) struct RequestUserInputState {
     focus: Focus,
     editor: ComposerState,
     confirmation: Option<ConfirmationChoice>,
+    pointer: RequestUserInputPointerState,
 }
 
 impl Default for RequestUserInputState {
@@ -65,6 +81,7 @@ impl Default for RequestUserInputState {
             focus: Focus::Options,
             editor: ComposerState::default(),
             confirmation: None,
+            pointer: RequestUserInputPointerState::default(),
         }
     }
 }
@@ -96,6 +113,7 @@ impl RequestUserInputState {
         };
         self.editor.clear();
         self.confirmation = None;
+        self.pointer.reset();
     }
 
     pub(crate) fn reset(&mut self) {
@@ -153,7 +171,19 @@ impl RequestUserInputState {
         if self.confirmation.is_some() {
             return self.handle_confirmation(params, key);
         }
+        if key.code == KeyCode::Char('X') && key.modifiers == KeyModifiers::SHIFT {
+            return RequestUserInputEvent::Cancel;
+        }
         if key.code == KeyCode::Esc {
+            if self.focus == Focus::Notes
+                && params
+                    .questions
+                    .get(self.current_question)
+                    .is_some_and(has_options)
+            {
+                self.clear_notes();
+                return RequestUserInputEvent::Redraw;
+            }
             return RequestUserInputEvent::Cancel;
         }
         if self.question_count() == 0 {
@@ -402,6 +432,7 @@ impl RequestUserInputState {
         } else {
             Focus::Notes
         };
+        self.pointer.clear_click();
     }
 
     fn save_editor(&mut self) {
@@ -454,39 +485,4 @@ impl RequestUserInputState {
             answer.committed && !answer.draft.trim().is_empty()
         }
     }
-
-    fn question_count(&self) -> usize {
-        self.answers.len()
-    }
-
-    fn current_answer(&self) -> Option<&AnswerState> {
-        self.answers.get(self.current_question)
-    }
-
-    fn current_answer_mut(&mut self) -> Option<&mut AnswerState> {
-        self.answers.get_mut(self.current_question)
-    }
-}
-
-pub(crate) fn has_options(question: &ToolRequestUserInputQuestion) -> bool {
-    question
-        .options
-        .as_ref()
-        .is_some_and(|options| !options.is_empty())
-}
-
-pub(crate) fn option_count(question: &ToolRequestUserInputQuestion) -> usize {
-    question.options.as_ref().map(Vec::len).unwrap_or_default()
-        + usize::from(question.is_other && has_options(question))
-}
-
-pub(crate) fn option_label(
-    question: &ToolRequestUserInputQuestion,
-    index: usize,
-) -> Option<String> {
-    let options = question.options.as_ref()?;
-    if let Some(option) = options.get(index) {
-        return Some(option.label.clone());
-    }
-    (question.is_other && index == options.len()).then(|| OTHER_OPTION_LABEL.to_string())
 }
