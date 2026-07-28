@@ -208,6 +208,16 @@ fn slash_command_menu_snapshot() {
 }
 
 #[test]
+fn plan_command_menu_snapshot() {
+    let session = session_state();
+    let mut state = SurfaceState::from_session(&session);
+    state.set_activity(SurfaceActivity::Ready);
+    state.set_composer("/pl");
+
+    insta::assert_snapshot!(render_at_size(&mut state, &session, 80, 24));
+}
+
+#[test]
 fn skill_and_plugin_mention_menu_snapshot() {
     let session = session_state();
     let mut state = SurfaceState::from_session(&session);

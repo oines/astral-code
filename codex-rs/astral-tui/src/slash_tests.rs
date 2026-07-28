@@ -56,6 +56,13 @@ fn invocation_keeps_typed_arguments_and_validation() {
         controller.invocation("/model", SlashCommandState::Working),
         Err(SlashError::UnavailableWhileWorking("model".to_string()))
     );
+    assert_eq!(
+        controller
+            .invocation("/plan inspect ordering", SlashCommandState::Idle)
+            .expect("plan command")
+            .map(|invocation| (invocation.command, invocation.args)),
+        Some((SlashCommandId::Plan, "inspect ordering".to_string()))
+    );
 }
 
 #[test]

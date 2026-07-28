@@ -42,7 +42,10 @@ pub enum InputAction {
     ScrollUp,
     ScrollDown,
     CopyLastResponse,
-    Slash(SlashInvocation),
+    Slash {
+        invocation: SlashInvocation,
+        submission: PromptSubmission,
+    },
     ThreadPickerLoadNext,
     ThreadPickerSelect {
         action: ThreadPickerAction,
@@ -294,9 +297,12 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
             if state.slash().active {
                 return match state.slash_invocation() {
                     Ok(Some(invocation)) => {
-                        state.take_composer();
+                        let submission = state.take_submission();
                         state.record_slash(invocation.command);
-                        InputAction::Slash(invocation)
+                        InputAction::Slash {
+                            invocation,
+                            submission,
+                        }
                     }
                     Ok(None) => InputAction::Notice("Choose a slash command".to_string()),
                     Err(error) => InputAction::Notice(error.to_string()),

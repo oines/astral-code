@@ -9,6 +9,9 @@ use codex_app_server_protocol::ActivePermissionProfile;
 use codex_app_server_protocol::ApprovalsReviewer;
 use codex_app_server_protocol::AskForApproval;
 use codex_app_server_protocol::ClientRequest;
+use codex_app_server_protocol::CollaborationModeListParams;
+use codex_app_server_protocol::CollaborationModeListResponse;
+use codex_app_server_protocol::CollaborationModeMask;
 use codex_app_server_protocol::Model;
 use codex_app_server_protocol::ModelListParams;
 use codex_app_server_protocol::ModelListResponse;
@@ -50,6 +53,7 @@ use crate::permission_picker::PermissionSelection;
 pub enum SessionError {
     NoThread,
     NoActiveTurn,
+    CollaborationModeUnavailable(ModeKind),
     Request(TypedRequestError),
     Transport(io::Error),
 }
@@ -59,6 +63,9 @@ impl std::fmt::Display for SessionError {
         match self {
             Self::NoThread => f.write_str("no Astral thread is active"),
             Self::NoActiveTurn => f.write_str("no Astral turn is active"),
+            Self::CollaborationModeUnavailable(mode) => {
+                write!(f, "{} mode is unavailable", mode.display_name())
+            }
             Self::Request(error) => write!(f, "{error}"),
             Self::Transport(error) => write!(f, "{error}"),
         }
@@ -70,7 +77,7 @@ impl std::error::Error for SessionError {
         match self {
             Self::Request(error) => Some(error),
             Self::Transport(error) => Some(error),
-            Self::NoThread | Self::NoActiveTurn => None,
+            Self::NoThread | Self::NoActiveTurn | Self::CollaborationModeUnavailable(_) => None,
         }
     }
 }
@@ -203,6 +210,7 @@ pub struct AstralSession {
     client: AppServerClient,
     next_request_id: i64,
     state: Option<SessionState>,
+    default_reasoning_effort: Option<ReasoningEffort>,
 }
 
 impl AstralSession {
@@ -211,6 +219,7 @@ impl AstralSession {
             client,
             next_request_id: 1,
             state: None,
+            default_reasoning_effort: None,
         }
     }
 
@@ -227,7 +236,9 @@ impl AstralSession {
             .client
             .request_typed(ClientRequest::ThreadStart { request_id, params })
             .await?;
-        self.state = Some(SessionState::from_start(response));
+        let state = SessionState::from_start(response);
+        self.default_reasoning_effort = state.collaboration_mode.settings.reasoning_effort.clone();
+        self.state = Some(state);
         self.state.as_ref().ok_or(SessionError::NoThread)
     }
 
@@ -240,7 +251,9 @@ impl AstralSession {
             .client
             .request_typed(ClientRequest::ThreadResume { request_id, params })
             .await?;
-        self.state = Some(SessionState::from_resume(response));
+        let state = SessionState::from_resume(response);
+        self.default_reasoning_effort = state.collaboration_mode.settings.reasoning_effort.clone();
+        self.state = Some(state);
         self.state.as_ref().ok_or(SessionError::NoThread)
     }
 
@@ -250,7 +263,9 @@ impl AstralSession {
             .client
             .request_typed(ClientRequest::ThreadFork { request_id, params })
             .await?;
-        self.state = Some(SessionState::from_fork(response));
+        let state = SessionState::from_fork(response);
+        self.default_reasoning_effort = state.collaboration_mode.settings.reasoning_effort.clone();
+        self.state = Some(state);
         self.state.as_ref().ok_or(SessionError::NoThread)
     }
 
@@ -439,11 +454,24 @@ impl AstralSession {
         &mut self,
         selection: &ModelSelection,
     ) -> Result<(), SessionError> {
-        let thread_id = self
+        let (thread_id, mode) = self
             .state
             .as_ref()
-            .map(|state| state.thread.id.clone())
+            .map(|state| (state.thread.id.clone(), state.collaboration_mode.mode))
             .ok_or(SessionError::NoThread)?;
+        let collaboration_mode = if mode == ModeKind::Plan {
+            let mask = self.collaboration_mode_mask(mode).await?;
+            Some(
+                collaboration_mode_from_mask(
+                    &selection.model,
+                    Some(selection.effort.clone()),
+                    mask,
+                )
+                .ok_or(SessionError::CollaborationModeUnavailable(mode))?,
+            )
+        } else {
+            None
+        };
         let request_id = self.next_request_id();
         let _: ThreadSettingsUpdateResponse = self
             .client
@@ -454,10 +482,23 @@ impl AstralSession {
                     model: Some(selection.model.clone()),
                     model_provider: Some(selection.model_provider.clone()),
                     effort: Some(selection.effort.clone()),
+                    collaboration_mode: collaboration_mode.clone(),
                     ..ThreadSettingsUpdateParams::default()
                 },
             })
             .await?;
+        self.default_reasoning_effort = Some(selection.effort.clone());
+        if let Some(state) = self.state.as_mut() {
+            state.model.clone_from(&selection.model);
+            state.model_provider.clone_from(&selection.model_provider);
+            state.collaboration_mode = collaboration_mode.unwrap_or_else(|| {
+                state.collaboration_mode.with_updates(
+                    Some(selection.model.clone()),
+                    Some(Some(selection.effort.clone())),
+                    None,
+                )
+            });
+        }
         Ok(())
     }
 
@@ -465,25 +506,15 @@ impl AstralSession {
         &mut self,
         mode: ModeKind,
     ) -> Result<(), SessionError> {
-        let (thread_id, model, reasoning_effort) = self
+        let mask = self.collaboration_mode_mask(mode).await?;
+        let (thread_id, model) = self
             .state
             .as_ref()
-            .map(|state| {
-                (
-                    state.thread.id.clone(),
-                    state.model.clone(),
-                    state.collaboration_mode.settings.reasoning_effort.clone(),
-                )
-            })
+            .map(|state| (state.thread.id.clone(), state.model.clone()))
             .ok_or(SessionError::NoThread)?;
-        let collaboration_mode = CollaborationMode {
-            mode,
-            settings: Settings {
-                model,
-                reasoning_effort,
-                developer_instructions: None,
-            },
-        };
+        let collaboration_mode =
+            collaboration_mode_from_mask(&model, self.default_reasoning_effort.clone(), mask)
+                .ok_or(SessionError::CollaborationModeUnavailable(mode))?;
         let request_id = self.next_request_id();
         let _: ThreadSettingsUpdateResponse = self
             .client
@@ -500,6 +531,25 @@ impl AstralSession {
             state.collaboration_mode = collaboration_mode;
         }
         Ok(())
+    }
+
+    async fn collaboration_mode_mask(
+        &mut self,
+        mode: ModeKind,
+    ) -> Result<CollaborationModeMask, SessionError> {
+        let request_id = self.next_request_id();
+        let response: CollaborationModeListResponse = self
+            .client
+            .request_typed(ClientRequest::CollaborationModeList {
+                request_id,
+                params: CollaborationModeListParams::default(),
+            })
+            .await?;
+        response
+            .data
+            .into_iter()
+            .find(|mask| mask.mode == Some(mode))
+            .ok_or(SessionError::CollaborationModeUnavailable(mode))
     }
 
     pub(crate) async fn update_permissions(
@@ -548,10 +598,18 @@ impl AstralSession {
 
     pub async fn next_event(&mut self) -> Option<AppServerEvent> {
         let event = self.client.next_event().await?;
-        if let AppServerEvent::ServerNotification(notification) = &event
-            && let Some(state) = self.state.as_mut()
-        {
-            state.observe_notification(notification);
+        if let AppServerEvent::ServerNotification(notification) = &event {
+            if let ServerNotification::ThreadSettingsUpdated(params) = notification
+                && self
+                    .state
+                    .as_ref()
+                    .is_some_and(|state| state.thread.id == params.thread_id)
+            {
+                self.default_reasoning_effort = params.thread_settings.effort.clone();
+            }
+            if let Some(state) = self.state.as_mut() {
+                state.observe_notification(notification);
+            }
         }
         Some(event)
     }
@@ -613,6 +671,21 @@ fn default_collaboration_mode(
             developer_instructions: None,
         },
     }
+}
+
+fn collaboration_mode_from_mask(
+    default_model: &str,
+    default_reasoning_effort: Option<ReasoningEffort>,
+    mask: CollaborationModeMask,
+) -> Option<CollaborationMode> {
+    Some(CollaborationMode {
+        mode: mask.mode?,
+        settings: Settings {
+            model: mask.model.unwrap_or_else(|| default_model.to_string()),
+            reasoning_effort: mask.reasoning_effort.unwrap_or(default_reasoning_effort),
+            developer_instructions: None,
+        },
+    })
 }
 
 #[cfg(test)]
