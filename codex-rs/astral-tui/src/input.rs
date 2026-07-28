@@ -31,6 +31,7 @@ use crate::thread_picker::PickerInput;
 use crate::thread_picker::handle_key as handle_thread_picker_key;
 
 mod mention_popup;
+mod plan_review;
 mod scrollback;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -54,6 +55,7 @@ pub enum InputAction {
     },
     SelectTheme(String),
     SelectPermission(PermissionSelection),
+    Plan(crate::plan_review::PlanReviewAction),
     CycleMode,
     OpenShortcuts,
     Resolve(RequestResolution),
@@ -114,6 +116,9 @@ pub fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
             _ => InputAction::None,
         };
     }
+    if state.plan_review().is_some() {
+        return plan_review::handle_key(state, key);
+    }
     if key.code == KeyCode::Esc && state.clear_scrollback_selection() {
         return InputAction::Redraw;
     }
@@ -166,6 +171,9 @@ pub fn handle_paste(state: &mut SurfaceState, text: &str) -> InputAction {
         } else {
             InputAction::None
         };
+    }
+    if state.plan_review().is_some() {
+        return plan_review::handle_paste(state, text);
     }
     state.composer_state_mut().insert_text(text);
     state.refresh_composer_completions();

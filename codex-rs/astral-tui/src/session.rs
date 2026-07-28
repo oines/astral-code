@@ -418,15 +418,46 @@ impl AstralSession {
         &mut self,
         input: Vec<UserInput>,
     ) -> Result<TurnStartResponse, SessionError> {
-        let thread_id = self
-            .state
-            .as_ref()
-            .map(|state| state.thread.id.clone())
-            .ok_or(SessionError::NoThread)?;
         let collaboration_mode = self
             .state
             .as_ref()
             .map(|state| state.collaboration_mode.clone())
+            .ok_or(SessionError::NoThread)?;
+        self.send_turn_start(input, collaboration_mode).await
+    }
+
+    pub(crate) async fn start_turn_in_mode(
+        &mut self,
+        input: Vec<UserInput>,
+        mode: ModeKind,
+    ) -> Result<TurnStartResponse, SessionError> {
+        let mask = self.collaboration_mode_mask(mode).await?;
+        let model = self
+            .state
+            .as_ref()
+            .map(|state| state.model.clone())
+            .ok_or(SessionError::NoThread)?;
+        let collaboration_mode =
+            collaboration_mode_from_mask(&model, self.default_reasoning_effort.clone(), mask)
+                .ok_or(SessionError::CollaborationModeUnavailable(mode))?;
+        let response = self
+            .send_turn_start(input, collaboration_mode.clone())
+            .await?;
+        if let Some(state) = self.state.as_mut() {
+            state.collaboration_mode = collaboration_mode;
+        }
+        Ok(response)
+    }
+
+    async fn send_turn_start(
+        &mut self,
+        input: Vec<UserInput>,
+        collaboration_mode: CollaborationMode,
+    ) -> Result<TurnStartResponse, SessionError> {
+        let thread_id = self
+            .state
+            .as_ref()
+            .map(|state| state.thread.id.clone())
             .ok_or(SessionError::NoThread)?;
         let request_id = self.next_request_id();
         let response: TurnStartResponse = self

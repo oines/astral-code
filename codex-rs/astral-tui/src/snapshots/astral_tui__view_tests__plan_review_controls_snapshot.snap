@@ -1,0 +1,6 @@
+---
+source: astral-tui/src/view_tests.rs
+expression: buffer_text(&buffer)
+---
+Plan ready for review
+enter implement · c fresh context · s revise · q keep planning

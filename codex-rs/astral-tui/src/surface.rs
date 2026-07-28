@@ -1,5 +1,6 @@
 mod appearance;
 mod mentions;
+mod plan_review;
 mod requests;
 
 use codex_app_server_protocol::Model;
@@ -27,6 +28,9 @@ use crate::model_command::ModelResolveError;
 use crate::model_command::ModelSelection;
 use crate::permission_picker::PermissionPickerState;
 use crate::permission_picker::display_permission_mode;
+use crate::plan_review::CompletedPlan;
+use crate::plan_review::PlanReviewFocus;
+use crate::plan_review::PlanReviewState;
 use crate::request_pane::RequestPane;
 use crate::request_user_input::RequestUserInputState;
 use crate::slash::SlashCommandId;
@@ -46,6 +50,7 @@ use crate::view::EntryDisplayState;
 use crate::view::LayoutConfig;
 use crate::view::MentionMenu;
 use crate::view::PaneHeights;
+use crate::view::PlanReviewPane;
 use crate::view::PromptChrome;
 use crate::view::ScrollbackNavigation;
 use crate::view::ScrollbackPane;
@@ -95,6 +100,8 @@ pub struct SurfaceState {
     thread_picker: Option<PickerState>,
     permission_picker: Option<PermissionPickerState>,
     theme_picker: Option<ThemePickerState>,
+    completed_plan: Option<CompletedPlan>,
+    plan_review: Option<PlanReviewState>,
     theme: AstralThemeId,
     color_level: ColorLevel,
     timeline_visible: bool,
@@ -120,6 +127,8 @@ impl SurfaceState {
             thread_picker: None,
             permission_picker: None,
             theme_picker: None,
+            completed_plan: None,
+            plan_review: None,
             theme: AstralThemeId::default(),
             color_level: ColorLevel::default(),
             timeline_visible: false,
@@ -152,6 +161,8 @@ impl SurfaceState {
             thread_picker: None,
             permission_picker: None,
             theme_picker: None,
+            completed_plan: None,
+            plan_review: None,
             theme: AstralThemeId::default(),
             color_level: ColorLevel::default(),
             timeline_visible: false,
@@ -481,8 +492,18 @@ pub(crate) fn render_surface_with_view(
     state.sync_request_states();
 
     let has_request = state.pending_requests.front().is_some();
+    let plan_review = state.plan_review().cloned();
     let prompt_height = state.pending_requests.front().map_or_else(
-        || prompt_height(state.composer(), state.composer_cursor(), area.width),
+        || {
+            if plan_review
+                .as_ref()
+                .is_some_and(|review| review.focus() == PlanReviewFocus::Decision)
+            {
+                0
+            } else {
+                prompt_height(state.composer(), state.composer_cursor(), area.width)
+            }
+        },
         |request| {
             RequestPane::new(request, state.request_user_input(), state.mcp_form())
                 .height(area.height)
@@ -498,14 +519,19 @@ pub(crate) fn render_surface_with_view(
     } else {
         0
     };
-    let completion_height = if !has_request && completion_rows > 0 {
+    let completion_height = if !has_request && plan_review.is_none() && completion_rows > 0 {
         u16::try_from(completion_rows.min(max_suggestions))
             .unwrap_or(u16::MAX)
             .saturating_add(2)
     } else {
         0
     };
-    let turn_status = (!has_request && completion_height == 0)
+    let banner_height = if plan_review.is_some() {
+        PlanReviewPane::HEIGHT
+    } else {
+        completion_height
+    };
+    let turn_status = (!has_request && banner_height == 0)
         .then(|| turn_status_line(state, theme))
         .flatten();
     let turn_count = session.thread.turns.len();
@@ -517,8 +543,8 @@ pub(crate) fn render_surface_with_view(
         panes: PaneHeights {
             prompt: prompt_height,
             turn_status: u16::from(turn_status.is_some()),
-            banner: completion_height,
-            prompt_gap: u16::from(area.height > 16),
+            banner: banner_height,
+            prompt_gap: u16::from(area.height > 16 && prompt_height > 0),
             shortcuts: 1,
             ..PaneHeights::default()
         },
@@ -594,7 +620,9 @@ pub(crate) fn render_surface_with_view(
             layout.turn_status.width,
         );
     }
-    if completion_height > 0 {
+    if let Some(review) = plan_review.as_ref() {
+        PlanReviewPane { state: review }.render(layout.banner, buffer, theme);
+    } else if completion_height > 0 {
         if mentions.open {
             MentionMenu {
                 snapshot: &mentions,
@@ -619,18 +647,30 @@ pub(crate) fn render_surface_with_view(
         .pending_requests
         .front()
         .map(|request| RequestPane::new(request, state.request_user_input(), state.mcp_form()));
-    let prompt_focused = request_pane.is_some() || !state.scrollback_focused();
+    let revising_plan = plan_review
+        .as_ref()
+        .is_some_and(|review| review.focus() == PlanReviewFocus::Revision);
+    let prompt_focused = request_pane.is_some() || revising_plan || !state.scrollback_focused();
     let cursor = if let Some(pane) = request_pane {
         pane.render(layout.prompt, buffer, theme)
+    } else if plan_review
+        .as_ref()
+        .is_some_and(|review| review.focus() == PlanReviewFocus::Decision)
+    {
+        None
     } else {
         let flags = [mode];
         PromptChrome {
             text: state.composer(),
             cursor_byte: state.composer_cursor(),
-            title: session.thread.name.as_deref(),
+            title: if revising_plan {
+                Some("Plan feedback")
+            } else {
+                session.thread.name.as_deref()
+            },
             model: &session.model,
             flags: &flags,
-            ghost: slash.ghost.as_deref(),
+            ghost: (!revising_plan).then_some(slash.ghost.as_deref()).flatten(),
             focused: prompt_focused,
         }
         .render(layout.prompt, buffer, theme)
@@ -640,9 +680,20 @@ pub(crate) fn render_surface_with_view(
     let scrollback_hints = [("j/k", "navigate"), ("e", "fold"), ("Tab", "prompt")];
     let mention_hints = [("↑/↓", "navigate"), ("Tab", "select"), ("Esc", "close")];
     let slash_hints = [("↑/↓", "navigate"), ("Tab", "complete"), ("Esc", "close")];
+    let plan_hints = [
+        ("Enter", "implement"),
+        ("c", "fresh"),
+        ("s", "revise"),
+        ("q", "keep planning"),
+    ];
+    let revision_hints = [("Enter", "request changes"), ("Esc", "back")];
     ShortcutsBar {
         hints: if let Some(pane) = request_pane {
             pane.shortcuts()
+        } else if revising_plan {
+            &revision_hints
+        } else if plan_review.is_some() {
+            &plan_hints
         } else if state.scrollback_focused() {
             &scrollback_hints
         } else if mentions.open {

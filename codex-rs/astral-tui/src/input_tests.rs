@@ -1,6 +1,7 @@
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerRequest;
 use codex_app_server_protocol::ThreadListResponse;
+use codex_protocol::config_types::ModeKind;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
@@ -21,6 +22,8 @@ use crate::mention::MentionKind;
 use crate::mention::MentionTarget;
 use crate::modal::ModalRow;
 use crate::modal::ModalState;
+use crate::plan_review::PlanReviewAction;
+use crate::plan_review::PlanReviewFocus;
 use crate::thread_picker::PickerState;
 use crate::thread_picker::ThreadPickerAction;
 use crate::view::AstralThemeId;
@@ -194,6 +197,78 @@ fn plan_command_keeps_the_inline_prompt_for_typed_dispatch() {
         }
     );
     assert!(state.composer().is_empty());
+}
+
+#[test]
+fn completed_plan_opens_review_and_enter_implements_without_losing_the_draft() {
+    let mut state = SurfaceState::new("thread-1");
+    state.set_composer("keep this draft");
+    state.note_completed_plan("turn-1", "# Plan\n- implement");
+
+    assert!(state.maybe_open_plan_review("turn-1", ModeKind::Plan));
+    assert!(state.composer().is_empty());
+    assert_eq!(state.plan_review_focus(), Some(PlanReviewFocus::Decision));
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Enter)),
+        InputAction::Plan(PlanReviewAction::Implement)
+    );
+    assert!(state.plan_review().is_none());
+    assert_eq!(state.composer(), "keep this draft");
+}
+
+#[test]
+fn plan_review_fresh_context_carries_only_the_approved_plan() {
+    let mut state = SurfaceState::new("thread-1");
+    state.set_composer("old thread draft");
+    state.note_completed_plan("turn-1", "# Plan\n- implement");
+    assert!(state.maybe_open_plan_review("turn-1", ModeKind::Plan));
+
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Char('c'))),
+        InputAction::Plan(PlanReviewAction::ImplementFresh {
+            plan: "# Plan\n- implement".to_string(),
+        })
+    );
+    assert!(state.plan_review().is_none());
+    assert!(state.composer().is_empty());
+}
+
+#[test]
+fn plan_review_revision_submits_feedback_and_stays_separate_from_the_draft() {
+    let mut state = SurfaceState::new("thread-1");
+    state.set_composer("keep this draft");
+    state.note_completed_plan("turn-1", "# Plan");
+    assert!(state.maybe_open_plan_review("turn-1", ModeKind::Plan));
+
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Char('s'))),
+        InputAction::Redraw
+    );
+    assert_eq!(state.plan_review_focus(), Some(PlanReviewFocus::Revision));
+    for character in "add tests".chars() {
+        assert_eq!(
+            handle_key(&mut state, key(KeyCode::Char(character))),
+            InputAction::Redraw
+        );
+    }
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Enter)),
+        InputAction::Plan(PlanReviewAction::Revise {
+            feedback: crate::PromptSubmission::text_only("add tests"),
+        })
+    );
+    assert!(state.plan_review().is_none());
+    assert_eq!(state.composer(), "keep this draft");
+}
+
+#[test]
+fn plan_review_only_opens_for_a_real_plan_in_plan_mode() {
+    let mut state = SurfaceState::new("thread-1");
+    assert!(!state.maybe_open_plan_review("turn-1", ModeKind::Plan));
+
+    state.note_completed_plan("turn-1", "# Plan");
+    assert!(!state.maybe_open_plan_review("turn-1", ModeKind::Default));
+    assert!(state.plan_review().is_none());
 }
 
 #[test]

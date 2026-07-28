@@ -56,6 +56,7 @@ use crate::view::AstralThemeId;
 use crate::view::ColorLevel;
 
 mod mentions;
+mod plan;
 
 type AstralTerminal = Terminal<CrosstermBackend<Stdout>>;
 
@@ -449,6 +450,7 @@ async fn apply_input_action(
                 Err(error) => surface.set_notice(error.to_string()),
             }
         }
+        InputAction::Plan(action) => plan::apply_action(session, surface, action).await,
         InputAction::CycleMode => {
             let mode = session
                 .state()
@@ -730,6 +732,11 @@ async fn handle_app_event(
         AppServerEvent::Lagged { skipped } => surface.conversation_mut().record_lag(skipped),
         AppServerEvent::ServerNotification(notification) => {
             handle_notification(surface, &notification);
+            let mode = session
+                .state()
+                .map(|state| state.collaboration_mode.mode)
+                .unwrap_or(ModeKind::Default);
+            plan::handle_notification(surface, &notification, mode);
         }
         AppServerEvent::ServerRequest(request)
             if PendingRequest::from(request.clone())

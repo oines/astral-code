@@ -46,6 +46,13 @@ pub struct PromptSubmission {
 }
 
 impl PromptSubmission {
+    pub(crate) fn text_only(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            mentions: Vec::new(),
+        }
+    }
+
     pub fn text(&self) -> &str {
         &self.text
     }

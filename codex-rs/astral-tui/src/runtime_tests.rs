@@ -1,7 +1,9 @@
+use codex_app_server_protocol::ItemCompletedNotification;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ServerRequest;
 use codex_app_server_protocol::ServerRequestResolvedNotification;
+use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::ThreadTokenUsage;
 use codex_app_server_protocol::ThreadTokenUsageUpdatedNotification;
 use codex_app_server_protocol::TokenUsageBreakdown;
@@ -10,6 +12,7 @@ use codex_app_server_protocol::TurnCompletedNotification;
 use codex_app_server_protocol::TurnError;
 use codex_app_server_protocol::TurnStartedNotification;
 use codex_app_server_protocol::TurnStatus;
+use codex_protocol::config_types::ModeKind;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 
@@ -17,6 +20,7 @@ use super::RunOptions;
 use super::RunViewport;
 use super::configured_theme;
 use super::handle_notification;
+use super::plan::handle_notification as handle_plan_review_notification;
 use super::viewport_rows;
 use crate::SurfaceActivity;
 use crate::SurfaceState;
@@ -91,6 +95,53 @@ fn turn_completion_preserves_terminal_activity_states() {
 
     handle_notification(&mut surface, &turn_completed(TurnStatus::Completed, None));
     assert_eq!(surface.activity(), &SurfaceActivity::Ready);
+}
+
+#[test]
+fn real_plan_item_opens_review_only_after_its_live_plan_turn_completes() {
+    let mut surface = SurfaceState::new("thread-1");
+    let item = ServerNotification::ItemCompleted(ItemCompletedNotification {
+        thread_id: "thread-1".to_string(),
+        turn_id: "turn-1".to_string(),
+        item: ThreadItem::Plan {
+            id: "plan-1".to_string(),
+            text: "# Plan\n- implement".to_string(),
+        },
+        completed_at_ms: 20,
+    });
+
+    handle_notification(&mut surface, &item);
+    handle_plan_review_notification(&mut surface, &item, ModeKind::Plan);
+    assert!(surface.plan_review().is_none());
+
+    let completed = turn_completed(TurnStatus::Completed, None);
+    handle_notification(&mut surface, &completed);
+    handle_plan_review_notification(&mut surface, &completed, ModeKind::Plan);
+    assert!(surface.plan_review().is_some());
+}
+
+#[test]
+fn ordinary_assistant_markdown_never_opens_plan_review() {
+    let mut surface = SurfaceState::new("thread-1");
+    let item = ServerNotification::ItemCompleted(ItemCompletedNotification {
+        thread_id: "thread-1".to_string(),
+        turn_id: "turn-1".to_string(),
+        item: ThreadItem::AgentMessage {
+            id: "message-1".to_string(),
+            text: "# Plan\n- this is still an assistant message".to_string(),
+            phase: None,
+            memory_citation: None,
+        },
+        completed_at_ms: 20,
+    });
+
+    handle_notification(&mut surface, &item);
+    handle_plan_review_notification(&mut surface, &item, ModeKind::Plan);
+    let completed = turn_completed(TurnStatus::Completed, None);
+    handle_notification(&mut surface, &completed);
+    handle_plan_review_notification(&mut surface, &completed, ModeKind::Plan);
+
+    assert!(surface.plan_review().is_none());
 }
 
 #[test]

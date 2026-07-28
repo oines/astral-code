@@ -9,10 +9,13 @@ use super::view::AgentViewLayoutInput;
 use super::view::AstralTheme;
 use super::view::LayoutConfig;
 use super::view::PaneHeights;
+use super::view::PlanReviewPane;
 use super::view::PromptChrome;
 use super::view::ScrollbarConfig;
 use super::view::ShortcutsBar;
 use super::view::StatusBar;
+use crate::PromptSubmission;
+use crate::plan_review::PlanReviewState;
 
 #[test]
 fn standard_agent_view_geometry_matches_the_ported_layout() {
@@ -117,6 +120,37 @@ fn prompt_wrap_and_mid_buffer_cursor_snapshot() {
     .render(area, &mut buffer, theme);
 
     assert_eq!(cursor, Some(Position::new(12, 3)));
+    insta::assert_snapshot!(buffer_text(&buffer));
+}
+
+#[test]
+fn plan_review_controls_snapshot() {
+    let theme = AstralTheme::default();
+    let area = Rect::new(0, 0, 72, PlanReviewPane::HEIGHT);
+    let mut buffer = Buffer::empty(area);
+    let state = PlanReviewState::new(
+        "# Plan\n- trace\n- implement".to_string(),
+        PromptSubmission::text_only(""),
+    );
+
+    PlanReviewPane { state: &state }.render(area, &mut buffer, theme);
+
+    insta::assert_snapshot!(buffer_text(&buffer));
+}
+
+#[test]
+fn plan_revision_controls_snapshot() {
+    let theme = AstralTheme::default();
+    let area = Rect::new(0, 0, 72, PlanReviewPane::HEIGHT);
+    let mut buffer = Buffer::empty(area);
+    let mut state = PlanReviewState::new(
+        "# Plan\n- trace\n- implement".to_string(),
+        PromptSubmission::text_only(""),
+    );
+    state.begin_revision();
+
+    PlanReviewPane { state: &state }.render(area, &mut buffer, theme);
+
     insta::assert_snapshot!(buffer_text(&buffer));
 }
 
