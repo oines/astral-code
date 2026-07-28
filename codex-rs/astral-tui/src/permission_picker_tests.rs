@@ -16,21 +16,23 @@ use crate::view::AstralTheme;
 
 #[test]
 fn permission_picker_snapshot() {
-    let state = PermissionPickerState::new(Some(BUILT_IN_PERMISSION_PROFILE_WORKSPACE.to_string()));
+    let mut state =
+        PermissionPickerState::new(Some(BUILT_IN_PERMISSION_PROFILE_WORKSPACE.to_string()));
     let area = Rect::new(0, 0, 80, 18);
     let mut buffer = Buffer::empty(area);
-    render_picker(&state, area, &mut buffer, AstralTheme::default());
+    render_picker(&mut state, area, &mut buffer, AstralTheme::default());
 
     insta::assert_snapshot!(buffer_text(&buffer));
 }
 
 #[test]
 fn permission_picker_selected_row_uses_shared_modal_style() {
-    let state = PermissionPickerState::new(Some(BUILT_IN_PERMISSION_PROFILE_WORKSPACE.to_string()));
+    let mut state =
+        PermissionPickerState::new(Some(BUILT_IN_PERMISSION_PROFILE_WORKSPACE.to_string()));
     let area = Rect::new(0, 0, 80, 18);
     let mut buffer = Buffer::empty(area);
     let theme = AstralTheme::default();
-    render_picker(&state, area, &mut buffer, theme);
+    render_picker(&mut state, area, &mut buffer, theme);
 
     let selected = text_position(&buffer, "Workspace").expect("selected permission");
     let selected_cell = &buffer[selected];

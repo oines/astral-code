@@ -8,7 +8,6 @@ use astral_tui_scrollback::PresentationBlock;
 use astral_tui_scrollback::render_block;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::widgets::Clear;
 use ratatui::widgets::Widget;
@@ -19,6 +18,7 @@ use super::AstralTheme;
 use super::ModalHeight;
 use super::ScrollbackPane;
 use super::ScrollbackViewport;
+use super::render_modal_close_button;
 use super::render_modal_frame_with_geometry;
 use super::transcript::render_options;
 
@@ -42,17 +42,12 @@ impl BlockViewerPane<'_> {
         ) else {
             return;
         };
-        if self.state.close_hovered() {
-            buffer.set_string(
-                frame.close_button.x,
-                frame.close_button.y,
-                "[×]",
-                Style::default()
-                    .fg(theme.text_primary)
-                    .bg(theme.bg_base)
-                    .add_modifier(Modifier::BOLD),
-            );
-        }
+        render_modal_close_button(
+            buffer,
+            frame.close_button,
+            theme,
+            self.state.close_hovered(),
+        );
 
         let body_width = frame.content.width.saturating_sub(2).max(1);
         let body_area = Rect::new(

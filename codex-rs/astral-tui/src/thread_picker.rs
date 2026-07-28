@@ -23,11 +23,19 @@ use ratatui::style::Style;
 use ratatui::style::Stylize;
 use tokio_stream::StreamExt;
 
+use crate::modal::ModalPointerState;
+use crate::modal::ModalRowHit;
 use crate::terminal_guard::TerminalGuard;
 use crate::view::AstralTheme;
 use crate::view::ModalHeight;
 use crate::view::modal_choice_style;
-use crate::view::render_modal_frame;
+use crate::view::render_modal_close_button;
+use crate::view::render_modal_frame_with_geometry;
+
+#[path = "thread_picker/pointer.rs"]
+mod pointer;
+
+pub(crate) use pointer::handle_mouse;
 
 type PickerTerminal = Terminal<CrosstermBackend<Stdout>>;
 
@@ -70,6 +78,7 @@ pub(crate) struct PickerState {
     query: String,
     selected: usize,
     notice: Option<String>,
+    pointer: ModalPointerState,
 }
 
 impl PickerState {
@@ -83,6 +92,7 @@ impl PickerState {
             query: String::new(),
             selected: 0,
             notice: None,
+            pointer: ModalPointerState::default(),
         }
     }
 
@@ -191,7 +201,7 @@ pub async fn run_thread_picker(
     let mut request_id = 1;
 
     let result = loop {
-        terminal.draw(|frame| draw_picker(frame, &state))?;
+        terminal.draw(|frame| draw_picker(frame, &mut state))?;
         let Some(event) = input.next().await else {
             break Ok(None);
         };
@@ -201,9 +211,8 @@ pub async fn run_thread_picker(
                 state.paste(&text);
                 PickerInput::Redraw
             }
-            Event::Resize(_, _) | Event::FocusGained | Event::FocusLost | Event::Mouse(_) => {
-                PickerInput::Redraw
-            }
+            Event::Mouse(mouse) => handle_mouse(&mut state, mouse),
+            Event::Resize(_, _) | Event::FocusGained | Event::FocusLost => PickerInput::Redraw,
         };
         match action {
             PickerInput::None | PickerInput::Redraw => {}
@@ -305,7 +314,7 @@ pub(crate) fn handle_key(
     }
 }
 
-fn draw_picker(frame: &mut Frame<'_>, state: &PickerState) {
+fn draw_picker(frame: &mut Frame<'_>, state: &mut PickerState) {
     render_picker(
         state,
         frame.area(),
@@ -315,13 +324,13 @@ fn draw_picker(frame: &mut Frame<'_>, state: &PickerState) {
 }
 
 pub(crate) fn render_picker(
-    state: &PickerState,
+    state: &mut PickerState,
     area: Rect,
     buffer: &mut Buffer,
     theme: AstralTheme,
 ) {
     let title = format!("{} Astral session", state.action.verb());
-    let Some(content) = render_modal_frame(
+    let Some(frame) = render_modal_frame_with_geometry(
         area,
         buffer,
         theme,
@@ -331,6 +340,13 @@ pub(crate) fn render_picker(
     ) else {
         return;
     };
+    render_modal_close_button(
+        buffer,
+        frame.close_button,
+        theme,
+        state.pointer.close_hovered(),
+    );
+    let content = frame.content;
 
     buffer.set_line(
         content.x,
@@ -356,6 +372,7 @@ pub(crate) fn render_picker(
         Style::default().fg(theme.text_primary).bg(theme.bg_base),
     );
     let mut rendered_rows = 0;
+    let mut row_hits = Vec::new();
     for (row, (visible_index, thread_index)) in indices
         .iter()
         .enumerate()
@@ -369,6 +386,15 @@ pub(crate) fn render_picker(
         if y >= list.bottom() {
             break;
         }
+        row_hits.push(ModalRowHit {
+            id: visible_index,
+            area: Rect::new(
+                list.x,
+                y,
+                list.width,
+                list.bottom().saturating_sub(y).min(2),
+            ),
+        });
         let thread = &state.threads[*thread_index];
         let selected = visible_index == state.selected;
         let row_style = modal_choice_style(theme, selected);
@@ -435,6 +461,9 @@ pub(crate) fn render_picker(
         &footer_line.into(),
         content.width,
     );
+    state
+        .pointer
+        .observe_frame(frame.popup, frame.close_button, row_hits);
 }
 
 fn thread_title(thread: &Thread) -> String {

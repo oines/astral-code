@@ -33,7 +33,7 @@ pub(crate) struct ModalFrame {
 }
 
 pub(crate) struct InfoModal<'a> {
-    pub(crate) state: &'a ModalState,
+    pub(crate) state: &'a mut ModalState,
 }
 
 impl InfoModal<'_> {
@@ -43,7 +43,7 @@ impl InfoModal<'_> {
         } else {
             "Esc close"
         };
-        let Some(content) = render_modal_frame(
+        let Some(frame) = render_modal_frame_with_geometry(
             area,
             buffer,
             theme,
@@ -53,6 +53,16 @@ impl InfoModal<'_> {
         ) else {
             return;
         };
+        render_modal_close_button(
+            buffer,
+            frame.close_button,
+            theme,
+            self.state.pointer.close_hovered(),
+        );
+        self.state
+            .pointer
+            .observe_frame(frame.popup, frame.close_button, Vec::new());
+        let content = frame.content;
         let label_width = self
             .state
             .rows
@@ -90,18 +100,6 @@ impl InfoModal<'_> {
     }
 }
 
-pub(crate) fn render_modal_frame(
-    area: Rect,
-    buffer: &mut Buffer,
-    theme: AstralTheme,
-    title: &str,
-    footer: &str,
-    height: ModalHeight,
-) -> Option<Rect> {
-    render_modal_frame_with_geometry(area, buffer, theme, title, footer, height)
-        .map(|frame| frame.content)
-}
-
 pub(crate) fn render_modal_frame_with_geometry(
     area: Rect,
     buffer: &mut Buffer,
@@ -128,15 +126,7 @@ pub(crate) fn render_modal_frame_with_geometry(
     block.render(popup, buffer);
 
     let close_button = Rect::new(popup.right().saturating_sub(5), popup.y, 3, 1);
-    buffer.set_string(
-        close_button.x,
-        close_button.y,
-        "[×]",
-        Style::default()
-            .fg(theme.text_secondary)
-            .bg(theme.bg_base)
-            .add_modifier(Modifier::BOLD),
-    );
+    render_modal_close_button(buffer, close_button, theme, /*hovered*/ false);
     let footer_width = u16::try_from(Line::from(footer).width()).unwrap_or(u16::MAX);
     if footer_width < inner.width {
         buffer.set_string(
@@ -156,6 +146,27 @@ pub(crate) fn render_modal_frame_with_geometry(
         ),
         close_button,
     })
+}
+
+pub(crate) fn render_modal_close_button(
+    buffer: &mut Buffer,
+    area: Rect,
+    theme: AstralTheme,
+    hovered: bool,
+) {
+    buffer.set_string(
+        area.x,
+        area.y,
+        "[×]",
+        Style::default()
+            .fg(if hovered {
+                theme.text_primary
+            } else {
+                theme.text_secondary
+            })
+            .bg(theme.bg_base)
+            .add_modifier(Modifier::BOLD),
+    );
 }
 
 /// Shared selected-row treatment for list choices inside Astral modal frames.

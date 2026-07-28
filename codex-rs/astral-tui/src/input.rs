@@ -14,21 +14,16 @@ use crate::SlashInvocation;
 use crate::SurfaceActivity;
 use crate::SurfaceState;
 use crate::ThreadPickerAction;
-use crate::permission_picker::PermissionPickerInput;
 use crate::permission_picker::PermissionSelection;
-use crate::permission_picker::handle_key as handle_permission_picker_key;
 use crate::request_choice::RequestChoiceEvent;
 use crate::request_choice::cancel_response;
 use crate::request_choice::is_simple_request;
 use crate::request_choice::response_for;
-use crate::theme_picker::ThemePickerInput;
-use crate::theme_picker::handle_key as handle_theme_picker_key;
-use crate::thread_picker::PickerInput;
-use crate::thread_picker::handle_key as handle_thread_picker_key;
 
 mod block_viewer;
 mod mcp_form;
 mod mention_popup;
+mod pickers;
 mod plan_review;
 mod scrollback;
 mod user_input;
@@ -76,13 +71,13 @@ pub fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
         return handle_request_key(state, request, key);
     }
     if state.thread_picker().is_some() {
-        return handle_thread_picker_input(state, key);
+        return pickers::handle_thread_picker_key(state, key);
     }
     if state.permission_picker().is_some() {
-        return handle_permission_picker_input(state, key);
+        return pickers::handle_permission_picker_key(state, key);
     }
     if state.theme_picker().is_some() {
-        return handle_theme_picker_input(state, key);
+        return pickers::handle_theme_picker_key(state, key);
     }
     if state.modal().is_some() {
         if key.code == KeyCode::Esc
@@ -220,19 +215,17 @@ pub(crate) fn handle_mouse(state: &mut SurfaceState, mouse: MouseEvent) -> Input
         let schema = requested_schema.clone();
         return mcp_form::handle_mouse(state, request, &schema, mouse);
     }
-    if state.thread_picker().is_some()
-        || state.permission_picker().is_some()
-        || state.theme_picker().is_some()
-    {
-        return InputAction::Redraw;
+    if state.thread_picker().is_some() {
+        return pickers::handle_thread_picker_mouse(state, mouse);
     }
-    if let Some(modal) = state.modal_mut() {
-        match mouse.kind {
-            crossterm::event::MouseEventKind::ScrollUp => modal.scroll_by(-3),
-            crossterm::event::MouseEventKind::ScrollDown => modal.scroll_by(3),
-            _ => {}
-        }
-        return InputAction::Redraw;
+    if state.permission_picker().is_some() {
+        return pickers::handle_permission_picker_mouse(state, mouse);
+    }
+    if state.theme_picker().is_some() {
+        return pickers::handle_theme_picker_mouse(state, mouse);
+    }
+    if state.modal().is_some() {
+        return pickers::handle_info_modal_mouse(state, mouse);
     }
     if state.plan_review().is_some() {
         return plan_review::handle_mouse(state, mouse);
@@ -241,72 +234,6 @@ pub(crate) fn handle_mouse(state: &mut SurfaceState, mouse: MouseEvent) -> Input
         return InputAction::Redraw;
     }
     InputAction::None
-}
-
-fn handle_theme_picker_input(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
-    let original = state
-        .theme_picker()
-        .map(crate::theme_picker::ThemePickerState::original);
-    let Some(picker) = state.theme_picker_mut() else {
-        return InputAction::None;
-    };
-    match handle_theme_picker_key(picker, key) {
-        ThemePickerInput::None => InputAction::None,
-        ThemePickerInput::Preview(theme) => {
-            state.set_theme(theme);
-            InputAction::Redraw
-        }
-        ThemePickerInput::Select(theme) => {
-            state.set_theme(theme);
-            state.close_theme_picker();
-            InputAction::SelectTheme(theme.config_name().to_string())
-        }
-        ThemePickerInput::Cancel => {
-            if let Some(original) = original {
-                state.set_theme(original);
-            }
-            state.close_theme_picker();
-            InputAction::Redraw
-        }
-    }
-}
-
-fn handle_permission_picker_input(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
-    let Some(picker) = state.permission_picker_mut() else {
-        return InputAction::None;
-    };
-    match handle_permission_picker_key(picker, key) {
-        PermissionPickerInput::None => InputAction::None,
-        PermissionPickerInput::Redraw => InputAction::Redraw,
-        PermissionPickerInput::Select(selection) => {
-            state.close_permission_picker();
-            InputAction::SelectPermission(selection)
-        }
-        PermissionPickerInput::Cancel => {
-            state.close_permission_picker();
-            InputAction::Redraw
-        }
-    }
-}
-
-fn handle_thread_picker_input(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
-    let Some(picker) = state.thread_picker_mut() else {
-        return InputAction::None;
-    };
-    match handle_thread_picker_key(picker, key, /*terminal_height*/ 24) {
-        PickerInput::None => InputAction::None,
-        PickerInput::Redraw => InputAction::Redraw,
-        PickerInput::LoadNext => InputAction::ThreadPickerLoadNext,
-        PickerInput::Select(thread) => {
-            let action = picker.action();
-            state.close_thread_picker();
-            InputAction::ThreadPickerSelect { action, thread }
-        }
-        PickerInput::Cancel => {
-            state.close_thread_picker();
-            InputAction::Redraw
-        }
-    }
 }
 
 fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {

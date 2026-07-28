@@ -71,11 +71,11 @@ fn state() -> PickerState {
 
 #[test]
 fn picker_snapshot() {
-    let state = state();
+    let mut state = state();
     let area = Rect::new(0, 0, 72, 13);
     let mut buffer = Buffer::empty(area);
     let theme = AstralTheme::default();
-    render_picker(&state, area, &mut buffer, theme);
+    render_picker(&mut state, area, &mut buffer, theme);
 
     insta::assert_snapshot!(buffer_text(&buffer));
 }
@@ -88,7 +88,7 @@ fn picker_owns_row_colors_and_omits_raw_timestamps() {
     let area = Rect::new(0, 0, 72, 13);
     let mut buffer = Buffer::empty(area);
     let theme = AstralTheme::for_id(AstralThemeId::Day);
-    render_picker(&state, area, &mut buffer, theme);
+    render_picker(&mut state, area, &mut buffer, theme);
 
     let rendered = buffer_text(&buffer);
     assert!(!rendered.contains("updated"));

@@ -31,11 +31,11 @@ fn theme_picker_previews_and_selects_explicit_variants() {
 
 #[test]
 fn theme_picker_snapshot() {
-    let state = ThemePickerState::new(AstralThemeId::Night);
+    let mut state = ThemePickerState::new(AstralThemeId::Night);
     let area = Rect::new(0, 0, 80, 18);
     let mut buffer = Buffer::empty(area);
     render_picker(
-        &state,
+        &mut state,
         area,
         &mut buffer,
         AstralTheme::for_id(AstralThemeId::Night),
@@ -46,11 +46,11 @@ fn theme_picker_snapshot() {
 
 #[test]
 fn theme_picker_selected_row_uses_shared_modal_style() {
-    let state = ThemePickerState::new(AstralThemeId::Night);
+    let mut state = ThemePickerState::new(AstralThemeId::Night);
     let area = Rect::new(0, 0, 80, 18);
     let mut buffer = Buffer::empty(area);
     let theme = AstralTheme::for_id(AstralThemeId::Day);
-    render_picker(&state, area, &mut buffer, theme);
+    render_picker(&mut state, area, &mut buffer, theme);
 
     let selected = text_position(&buffer, "Night").expect("selected theme");
     let selected_cell = &buffer[selected];

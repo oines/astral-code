@@ -44,7 +44,7 @@ pub(crate) use mention_menu::MentionMenu;
 pub(crate) use modal::InfoModal;
 pub(crate) use modal::ModalHeight;
 pub(crate) use modal::modal_choice_style;
-pub(crate) use modal::render_modal_frame;
+pub(crate) use modal::render_modal_close_button;
 pub(crate) use modal::render_modal_frame_with_geometry;
 pub(crate) use plan_review::PlanReviewMouseAction;
 pub(crate) use plan_review::PlanReviewMouseState;

@@ -130,13 +130,13 @@ pub(super) fn render_overlay(
             block: &block,
         }
         .render(area, buffer, theme);
-    } else if let Some(picker) = &state.theme_picker {
+    } else if let Some(picker) = &mut state.theme_picker {
         render_theme_picker(picker, area, buffer, theme);
-    } else if let Some(picker) = &state.permission_picker {
+    } else if let Some(picker) = &mut state.permission_picker {
         render_permission_picker(picker, area, buffer, theme);
-    } else if let Some(picker) = &state.thread_picker {
+    } else if let Some(picker) = &mut state.thread_picker {
         render_thread_picker(picker, area, buffer, theme);
-    } else if let Some(modal) = &state.modal {
+    } else if let Some(modal) = &mut state.modal {
         InfoModal { state: modal }.render(area, buffer, theme);
     } else {
         return false;

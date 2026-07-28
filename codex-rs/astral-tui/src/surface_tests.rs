@@ -1377,6 +1377,7 @@ fn verb_group_double_click_reveals_members_below_the_header_snapshot() {
     assert!(collapsed.contains("Read 2 files, Searched 1 pattern"));
     assert!(!collapsed.contains("Read a.rs"));
     assert!(state.focus_scrollback());
+    state.move_entry_selection(-1);
     assert_eq!(
         handle_key(
             &mut state,
