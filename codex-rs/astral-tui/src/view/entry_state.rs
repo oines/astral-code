@@ -313,6 +313,16 @@ impl EntryDisplayState {
         Some(entry.id.clone())
     }
 
+    pub(crate) fn select_first(&mut self) -> Option<String> {
+        let entry_id = self.entries.first()?.id.clone();
+        self.select(&entry_id).then_some(entry_id)
+    }
+
+    pub(crate) fn select_last(&mut self) -> Option<String> {
+        let entry_id = self.entries.last()?.id.clone();
+        self.select(&entry_id).then_some(entry_id)
+    }
+
     pub(crate) fn toggle_selected(&mut self) -> Option<String> {
         let entry = self.selected_entry()?.clone();
         if entry.group_header {

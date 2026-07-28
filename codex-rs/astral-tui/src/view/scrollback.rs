@@ -200,6 +200,14 @@ impl ScrollbackNavigation {
         self.viewport()
     }
 
+    pub(crate) fn half_page_up(&mut self) {
+        self.scroll_up(self.half_page_scroll_lines());
+    }
+
+    pub(crate) fn half_page_down(&mut self) {
+        self.scroll_down(self.half_page_scroll_lines());
+    }
+
     pub(crate) fn reveal_entry(&mut self, item_id: &str) {
         let Some(section) = self
             .sections
@@ -218,6 +226,20 @@ impl ScrollbackNavigation {
         }
         self.follow_mode = false;
         self.refresh_anchor();
+    }
+
+    pub(crate) fn entry_top(&self, item_id: &str) -> Option<usize> {
+        self.sections
+            .iter()
+            .find(|section| section.item_id == item_id)
+            .map(|section| section.lines.start)
+    }
+
+    pub(crate) fn scroll_entry_to_top(&mut self, item_id: &str) {
+        let Some(top) = self.entry_top(item_id) else {
+            return;
+        };
+        self.set_scroll_offset(top);
     }
 
     pub(crate) fn distance_from_bottom(&self) -> usize {
@@ -246,6 +268,10 @@ impl ScrollbackNavigation {
 
     fn page_scroll_lines(&self) -> usize {
         self.viewport_lines.saturating_sub(2).max(1)
+    }
+
+    fn half_page_scroll_lines(&self) -> usize {
+        (self.viewport_lines / 2).max(1)
     }
 
     fn refresh_anchor(&mut self) {

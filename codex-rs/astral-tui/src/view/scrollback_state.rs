@@ -36,6 +36,8 @@ pub(crate) struct ScrollbackState {
     display: EntryDisplayState,
     selection: ScrollbackSelection,
     pointer: EntryMouseState,
+    turn_prompts: Vec<String>,
+    response_anchors: Vec<String>,
     scrollbar: Option<Rect>,
     scrollbar_dragging: bool,
     hovered: Option<String>,
@@ -44,6 +46,11 @@ pub(crate) struct ScrollbackState {
 impl ScrollbackState {
     pub(crate) fn observe_entries(&mut self, turns: &[TranscriptTurn]) {
         self.display.observe(turns);
+        self.turn_prompts = turns.iter().filter_map(turn_prompt_id).collect::<Vec<_>>();
+        self.response_anchors = turns
+            .iter()
+            .filter_map(response_anchor_id)
+            .collect::<Vec<_>>();
         if self
             .hovered
             .as_deref()
@@ -113,6 +120,28 @@ impl ScrollbackState {
         }
     }
 
+    pub(crate) fn half_page_up(&mut self) {
+        self.selection.clear_persistent();
+        self.navigation.half_page_up();
+    }
+
+    pub(crate) fn half_page_down(&mut self) {
+        self.selection.clear_persistent();
+        self.navigation.half_page_down();
+    }
+
+    pub(crate) fn goto_top(&mut self) {
+        self.selection.clear_persistent();
+        self.navigation.scroll_to_top();
+        self.display.select_first();
+    }
+
+    pub(crate) fn goto_bottom(&mut self) {
+        self.selection.clear_persistent();
+        self.navigation.scroll_to_bottom();
+        self.display.select_last();
+    }
+
     pub(crate) fn scroll_to_bottom(&mut self) {
         self.selection.clear_persistent();
         self.navigation.scroll_to_bottom();
@@ -172,6 +201,69 @@ impl ScrollbackState {
         } else if delta > 0 {
             self.navigation.scroll_to_bottom();
         }
+    }
+
+    pub(crate) fn next_turn(&mut self) {
+        let selected = self.display.selected_id();
+        let current = selected.and_then(turn_id_from_entry).and_then(|turn_id| {
+            self.turn_prompts
+                .iter()
+                .position(|prompt| turn_id_from_entry(prompt) == Some(turn_id))
+        });
+        let target = current
+            .map(|index| (index + 1).min(self.turn_prompts.len().saturating_sub(1)))
+            .unwrap_or_default();
+        self.select_and_snap(self.turn_prompts.get(target).cloned());
+    }
+
+    pub(crate) fn previous_turn(&mut self) {
+        let selected = self.display.selected_id();
+        let current = selected.and_then(turn_id_from_entry).and_then(|turn_id| {
+            self.turn_prompts
+                .iter()
+                .position(|prompt| turn_id_from_entry(prompt) == Some(turn_id))
+        });
+        let target = current.and_then(|index| {
+            let prompt = self.turn_prompts.get(index)?;
+            if selected == Some(prompt.as_str()) {
+                index.checked_sub(1)
+            } else {
+                Some(index)
+            }
+        });
+        self.select_and_snap(target.and_then(|index| self.turn_prompts.get(index).cloned()));
+    }
+
+    pub(crate) fn next_response(&mut self) {
+        let viewport_top = self.navigation.viewport().first_visible_line;
+        let target = self
+            .response_anchors
+            .iter()
+            .filter_map(|entry_id| {
+                self.navigation
+                    .entry_top(entry_id)
+                    .filter(|top| *top > viewport_top)
+                    .map(|top| (top, entry_id))
+            })
+            .min_by_key(|(top, _)| *top)
+            .map(|(_, entry_id)| entry_id.clone());
+        self.select_and_snap(target);
+    }
+
+    pub(crate) fn previous_response(&mut self) {
+        let viewport_top = self.navigation.viewport().first_visible_line;
+        let target = self
+            .response_anchors
+            .iter()
+            .filter_map(|entry_id| {
+                self.navigation
+                    .entry_top(entry_id)
+                    .filter(|top| *top < viewport_top)
+                    .map(|top| (top, entry_id))
+            })
+            .max_by_key(|(top, _)| *top)
+            .map(|(_, entry_id)| entry_id.clone());
+        self.select_and_snap(target);
     }
 
     pub(crate) fn toggle_selected(&mut self) {
@@ -297,6 +389,16 @@ impl ScrollbackState {
         }
     }
 
+    fn select_and_snap(&mut self, item_id: Option<String>) {
+        let Some(item_id) = item_id else {
+            return;
+        };
+        if self.display.select(&item_id) {
+            self.selection.clear_persistent();
+            self.navigation.scroll_entry_to_top(&item_id);
+        }
+    }
+
     fn select_viewport_edge(&mut self, viewport: ScrollbackViewport, prefer_top: bool) {
         let sections = self
             .navigation
@@ -353,4 +455,38 @@ impl ScrollbackState {
 fn section_overlaps_viewport(section: &TranscriptSection, viewport: ScrollbackViewport) -> bool {
     section.lines.start < viewport.end_visible_line
         && section.lines.end > viewport.first_visible_line
+}
+
+fn turn_prompt_id(turn: &TranscriptTurn) -> Option<String> {
+    turn.blocks
+        .iter()
+        .find(|block| matches!(&block.block, crate::PresentationBlock::User { .. }))
+        .map(|block| super::entry_state::entry_id(&turn.id, &block.item_id))
+}
+
+fn turn_id_from_entry(entry_id: &str) -> Option<&str> {
+    entry_id.split_once('\0').map(|(turn_id, _)| turn_id)
+}
+
+fn response_anchor_id(turn: &TranscriptTurn) -> Option<String> {
+    let mut anchor = None;
+    for block in turn.blocks.iter().rev() {
+        match &block.block {
+            crate::PresentationBlock::Assistant { text }
+            | crate::PresentationBlock::Plan { text, .. }
+                if !text.trim().is_empty() =>
+            {
+                anchor = Some(super::entry_state::entry_id(&turn.id, &block.item_id));
+            }
+            crate::PresentationBlock::Thinking { .. }
+            | crate::PresentationBlock::Tool(_)
+            | crate::PresentationBlock::Subagent(_) => break,
+            crate::PresentationBlock::User { .. }
+            | crate::PresentationBlock::Assistant { .. }
+            | crate::PresentationBlock::Plan { .. }
+            | crate::PresentationBlock::Todo(_)
+            | crate::PresentationBlock::System { .. } => {}
+        }
+    }
+    anchor
 }

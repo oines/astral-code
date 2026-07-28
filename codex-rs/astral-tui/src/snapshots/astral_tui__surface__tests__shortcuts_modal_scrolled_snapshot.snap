@@ -12,13 +12,13 @@ expression: "render_at_size(&mut state, &session, 80, 24)"
   I’m tracing th│  ↑/↓        Navigate menus / scroll lists    │
                 │  Tab        Complete item / switch focus     │
                 │  j/k        Select foldable entry            │
+                │  Shift+L/H  Next / previous turn             │
+                │  J/K        Next / previous final response   │
+                │  g/G        Go to transcript top / bottom    │
+                │  Ctrl+J/K   Scroll transcript one line       │
+                │  Ctrl+U/D   Scroll transcript half a page    │
                 │  e / Enter  Toggle selected entry            │
-                │  h/l        Collapse / expand entry          │
-                │  E          Expand all / collapse all entri  │
-                │  Ctrl+E     Expand / collapse all thinking   │
-                │  Esc        Close the focused menu or modal  │
-                │  Y          Approve a pending request        │
-  ◇ Working     │  A          Approve for the session when av  │
+  ◇ Working     │  h/l        Collapse / expand entry          │
                 │                                              │
   ╭─────────────│            ↑/↓ scroll · Esc close            │─────────────╮
   │ ❯           └──────────────────────────────────────────────┘             │

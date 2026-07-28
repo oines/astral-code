@@ -287,6 +287,38 @@ impl SurfaceState {
         self.scrollback.move_selection(delta);
     }
 
+    pub(crate) fn half_page_up(&mut self) {
+        self.scrollback.half_page_up();
+    }
+
+    pub(crate) fn half_page_down(&mut self) {
+        self.scrollback.half_page_down();
+    }
+
+    pub(crate) fn goto_scrollback_top(&mut self) {
+        self.scrollback.goto_top();
+    }
+
+    pub(crate) fn goto_scrollback_bottom(&mut self) {
+        self.scrollback.goto_bottom();
+    }
+
+    pub(crate) fn next_turn(&mut self) {
+        self.scrollback.next_turn();
+    }
+
+    pub(crate) fn previous_turn(&mut self) {
+        self.scrollback.previous_turn();
+    }
+
+    pub(crate) fn next_response(&mut self) {
+        self.scrollback.next_response();
+    }
+
+    pub(crate) fn previous_response(&mut self) {
+        self.scrollback.previous_response();
+    }
+
     pub(crate) fn toggle_selected_entry(&mut self) {
         self.scrollback.toggle_selected();
     }
