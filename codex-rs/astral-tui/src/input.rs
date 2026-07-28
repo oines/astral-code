@@ -11,6 +11,7 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
+use crossterm::event::MouseEvent;
 
 use crate::PendingRequest;
 use crate::PendingRequestResponse;
@@ -178,6 +179,13 @@ pub fn handle_paste(state: &mut SurfaceState, text: &str) -> InputAction {
     state.composer_state_mut().insert_text(text);
     state.refresh_composer_completions();
     InputAction::Redraw
+}
+
+pub(crate) fn handle_mouse(state: &mut SurfaceState, mouse: MouseEvent) -> InputAction {
+    if state.plan_review().is_some() {
+        return plan_review::handle_mouse(state, mouse);
+    }
+    InputAction::None
 }
 
 fn handle_theme_picker_input(state: &mut SurfaceState, key: KeyEvent) -> InputAction {

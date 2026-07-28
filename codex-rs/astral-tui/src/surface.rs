@@ -53,6 +53,8 @@ use crate::view::EntryMouseState;
 use crate::view::LayoutConfig;
 use crate::view::MentionMenu;
 use crate::view::PaneHeights;
+use crate::view::PlanReviewMouseAction;
+use crate::view::PlanReviewMouseState;
 use crate::view::PlanReviewPane;
 use crate::view::PromptChrome;
 use crate::view::ScrollbackNavigation;
@@ -107,6 +109,7 @@ pub struct SurfaceState {
     theme_picker: Option<ThemePickerState>,
     completed_plan: Option<CompletedPlan>,
     plan_review: Option<PlanReviewState>,
+    plan_review_mouse: PlanReviewMouseState,
     theme: AstralThemeId,
     color_level: ColorLevel,
     timeline_visible: bool,
@@ -135,6 +138,7 @@ impl SurfaceState {
             theme_picker: None,
             completed_plan: None,
             plan_review: None,
+            plan_review_mouse: PlanReviewMouseState::default(),
             theme: AstralThemeId::default(),
             color_level: ColorLevel::default(),
             timeline_visible: false,
@@ -170,6 +174,7 @@ impl SurfaceState {
             theme_picker: None,
             completed_plan: None,
             plan_review: None,
+            plan_review_mouse: PlanReviewMouseState::default(),
             theme: AstralThemeId::default(),
             color_level: ColorLevel::default(),
             timeline_visible: false,
@@ -334,6 +339,13 @@ impl SurfaceState {
             EntryMouseAction::Ignored => {}
         }
         None
+    }
+
+    pub(crate) fn handle_plan_review_mouse(
+        &mut self,
+        mouse: crossterm::event::MouseEvent,
+    ) -> PlanReviewMouseAction {
+        self.plan_review_mouse.handle_mouse(mouse)
     }
 
     pub(crate) fn clear_scrollback_selection(&mut self) -> bool {
@@ -662,8 +674,12 @@ pub(crate) fn render_surface_with_view(
         );
     }
     if let Some(review) = plan_review.as_ref() {
+        state
+            .plan_review_mouse
+            .observe(layout.banner, review.focus());
         PlanReviewPane { state: review }.render(layout.banner, buffer, theme);
     } else if completion_height > 0 {
+        state.plan_review_mouse.clear();
         if mentions.open {
             MentionMenu {
                 snapshot: &mentions,
@@ -672,6 +688,8 @@ pub(crate) fn render_surface_with_view(
         } else {
             SlashMenu { snapshot: &slash }.render(layout.banner, buffer, theme);
         }
+    } else {
+        state.plan_review_mouse.clear();
     }
 
     let mode = if session.collaboration_mode.mode == ModeKind::Plan {

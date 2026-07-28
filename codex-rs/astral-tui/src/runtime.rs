@@ -42,6 +42,7 @@ use crate::ecosystem::plugins_panel;
 use crate::ecosystem::skills_panel;
 use crate::handle_key;
 use crate::handle_paste;
+use crate::input::handle_mouse;
 use crate::modal::ModalRow;
 use crate::modal::ModalState;
 use crate::permission_picker::PermissionPickerState;
@@ -289,22 +290,30 @@ async fn run_loop(
                     Event::Resize(_, _) => {}
                     Event::Mouse(mouse) => {
                         if options.viewport == RunViewport::Fullscreen {
-                            match mouse.kind {
-                                MouseEventKind::ScrollUp => surface.scroll_up(/*lines*/ 3),
-                                MouseEventKind::ScrollDown => surface.scroll_down(/*lines*/ 3),
-                                _ => {
-                                    if let Some(selection) =
-                                        surface.handle_scrollback_mouse(mouse)
-                                    {
-                                        match copy_to_clipboard(&selection) {
-                                            Ok(lease) => {
-                                                _clipboard_lease = Some(lease);
-                                                surface.set_notice("Copied selection");
+                            let action = handle_mouse(surface, mouse);
+                            if matches!(action, InputAction::None) {
+                                match mouse.kind {
+                                    MouseEventKind::ScrollUp => surface.scroll_up(/*lines*/ 3),
+                                    MouseEventKind::ScrollDown => surface.scroll_down(/*lines*/ 3),
+                                    _ => {
+                                        if let Some(selection) =
+                                            surface.handle_scrollback_mouse(mouse)
+                                        {
+                                            match copy_to_clipboard(&selection) {
+                                                Ok(lease) => {
+                                                    _clipboard_lease = Some(lease);
+                                                    surface.set_notice("Copied selection");
+                                                }
+                                                Err(error) => surface.set_notice(error),
                                             }
-                                            Err(error) => surface.set_notice(error),
                                         }
                                     }
                                 }
+                            } else if let Some(reason) =
+                                apply_input_action(session, surface, theme_selection, action).await?
+                            {
+                                reject_pending(session, surface).await;
+                                return Ok(reason);
                             }
                         }
                     }

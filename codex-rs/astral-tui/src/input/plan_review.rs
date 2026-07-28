@@ -1,6 +1,7 @@
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
+use crossterm::event::MouseEvent;
 
 use super::InputAction;
 use crate::SurfaceState;
@@ -8,6 +9,7 @@ use crate::plan_review::PlanReviewAction;
 use crate::plan_review::PlanReviewChoice;
 use crate::plan_review::PlanReviewFocus;
 use crate::plan_review::PlanReviewState;
+use crate::view::PlanReviewMouseAction;
 
 pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
     match state.plan_review_focus() {
@@ -24,6 +26,28 @@ pub(super) fn handle_paste(state: &mut SurfaceState, text: &str) -> InputAction 
     state.composer_state_mut().insert_text(text);
     state.refresh_composer_completions();
     InputAction::Redraw
+}
+
+pub(super) fn handle_mouse(state: &mut SurfaceState, mouse: MouseEvent) -> InputAction {
+    match state.handle_plan_review_mouse(mouse) {
+        PlanReviewMouseAction::Select(choice) => {
+            let Some(review) = state.plan_review_mut() else {
+                return InputAction::None;
+            };
+            if review.selection() == choice {
+                return InputAction::None;
+            }
+            review.select(choice);
+            InputAction::Redraw
+        }
+        PlanReviewMouseAction::Activate(choice) => {
+            if let Some(review) = state.plan_review_mut() {
+                review.select(choice);
+            }
+            activate_selection(state)
+        }
+        PlanReviewMouseAction::Ignored => InputAction::None,
+    }
 }
 
 fn handle_decision_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {

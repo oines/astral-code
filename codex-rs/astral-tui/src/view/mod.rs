@@ -41,6 +41,8 @@ pub(crate) use modal::InfoModal;
 pub(crate) use modal::ModalHeight;
 pub(crate) use modal::modal_choice_style;
 pub(crate) use modal::render_modal_frame;
+pub(crate) use plan_review::PlanReviewMouseAction;
+pub(crate) use plan_review::PlanReviewMouseState;
 pub(crate) use plan_review::PlanReviewPane;
 pub(crate) use scrollback::ScrollbackNavigation;
 pub(crate) use scrollback::ScrollbackPane;

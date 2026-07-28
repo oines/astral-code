@@ -43,15 +43,18 @@ use super::SurfaceState;
 use super::TranscriptView;
 use super::render_surface;
 use super::render_surface_with_view;
+use crate::InputAction;
 use crate::SessionState;
 use crate::handle_key;
 use crate::handle_paste;
+use crate::input::handle_mouse as handle_input_mouse;
 use crate::mention::MentionCandidate;
 use crate::mention::MentionCatalog;
 use crate::mention::MentionKind;
 use crate::mention::MentionTarget;
 use crate::modal::ModalRow;
 use crate::modal::ModalState;
+use crate::plan_review::PlanReviewAction;
 use crate::shortcuts::shortcuts_modal;
 use crate::view::AstralThemeId;
 use crate::view::ColorLevel;
@@ -1413,6 +1416,47 @@ fn edit_diff_expands_by_default_and_double_click_collapses_snapshot() {
         "edit_diff_mouse_fold_surface",
         format!("EXPANDED\n{expanded}\n\nCOLLAPSED\n{collapsed}")
     );
+}
+
+#[test]
+fn plan_review_mouse_selects_and_activates_a_decision_row() {
+    let session = session_state();
+    let mut state = SurfaceState::from_session(&session);
+    state.note_completed_plan("turn-1", "# Plan\n- implement");
+    assert!(state.maybe_open_plan_review("turn-1", ModeKind::Plan));
+
+    let area = Rect::new(0, 0, 96, 24);
+    let mut buffer = Buffer::empty(area);
+    render_surface(&mut state, &session, area, &mut buffer);
+    let (column, first_choice_row) =
+        find_text(&buffer, "Yes, implement this plan").expect("plan decision row");
+    let second_choice_row = first_choice_row.saturating_add(1);
+
+    assert_eq!(
+        handle_input_mouse(
+            &mut state,
+            mouse(
+                MouseEventKind::Down(MouseButton::Left),
+                column,
+                second_choice_row,
+            ),
+        ),
+        InputAction::Redraw
+    );
+    assert_eq!(
+        handle_input_mouse(
+            &mut state,
+            mouse(
+                MouseEventKind::Up(MouseButton::Left),
+                column,
+                second_choice_row,
+            ),
+        ),
+        InputAction::Plan(PlanReviewAction::ImplementFresh {
+            plan: "# Plan\n- implement".to_string(),
+        })
+    );
+    assert!(state.plan_review().is_none());
 }
 
 #[test]
