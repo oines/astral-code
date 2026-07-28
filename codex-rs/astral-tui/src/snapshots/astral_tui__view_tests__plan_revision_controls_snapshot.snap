@@ -2,5 +2,5 @@
 source: astral-tui/src/view_tests.rs
 expression: buffer_text(&buffer)
 ---
-Plan ready for review
+Implement this plan?
 enter request changes · tab plan · esc back

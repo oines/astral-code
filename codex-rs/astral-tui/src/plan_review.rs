@@ -37,6 +37,33 @@ pub(crate) enum PlanReviewFocus {
     Revision,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PlanReviewChoice {
+    Implement,
+    ImplementFresh,
+    KeepPlanning,
+}
+
+impl PlanReviewChoice {
+    pub(crate) const ALL: [Self; 3] = [Self::Implement, Self::ImplementFresh, Self::KeepPlanning];
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Implement => "Yes, implement this plan",
+            Self::ImplementFresh => "Yes, clear context and implement",
+            Self::KeepPlanning => "No, stay in Plan mode",
+        }
+    }
+
+    pub(crate) fn description(self) -> &'static str {
+        match self {
+            Self::Implement => "Switch to Default and start coding.",
+            Self::ImplementFresh => "Fresh thread with this plan.",
+            Self::KeepPlanning => "Continue planning with the model.",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlanReviewAction {
     Implement,
@@ -48,6 +75,7 @@ pub enum PlanReviewAction {
 pub(crate) struct PlanReviewState {
     plan: String,
     focus: PlanReviewFocus,
+    selected: usize,
     stashed_submission: PromptSubmission,
 }
 
@@ -56,6 +84,7 @@ impl PlanReviewState {
         Self {
             plan,
             focus: PlanReviewFocus::Decision,
+            selected: 0,
             stashed_submission,
         }
     }
@@ -70,6 +99,25 @@ impl PlanReviewState {
 
     pub(crate) fn focus(&self) -> PlanReviewFocus {
         self.focus
+    }
+
+    pub(crate) fn selection(&self) -> PlanReviewChoice {
+        PlanReviewChoice::ALL[self.selected.min(PlanReviewChoice::ALL.len() - 1)]
+    }
+
+    pub(crate) fn select(&mut self, choice: PlanReviewChoice) {
+        self.selected = PlanReviewChoice::ALL
+            .iter()
+            .position(|candidate| *candidate == choice)
+            .unwrap_or_default();
+    }
+
+    pub(crate) fn move_up(&mut self) {
+        self.selected = self.selected.saturating_sub(1);
+    }
+
+    pub(crate) fn move_down(&mut self) {
+        self.selected = (self.selected + 1).min(PlanReviewChoice::ALL.len() - 1);
     }
 
     pub(crate) fn begin_revision(&mut self) {

@@ -5,7 +5,9 @@ use crossterm::event::KeyModifiers;
 use super::InputAction;
 use crate::SurfaceState;
 use crate::plan_review::PlanReviewAction;
+use crate::plan_review::PlanReviewChoice;
 use crate::plan_review::PlanReviewFocus;
+use crate::plan_review::PlanReviewState;
 
 pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
     match state.plan_review_focus() {
@@ -26,11 +28,68 @@ pub(super) fn handle_paste(state: &mut SurfaceState, text: &str) -> InputAction 
 
 fn handle_decision_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
     match (key.code, key.modifiers) {
-        (KeyCode::Enter | KeyCode::Char('a'), KeyModifiers::NONE) => {
+        (KeyCode::Up | KeyCode::Char('k'), KeyModifiers::NONE) => {
+            if let Some(review) = state.plan_review_mut() {
+                review.move_up();
+            }
+            InputAction::Redraw
+        }
+        (KeyCode::Down | KeyCode::Char('j'), KeyModifiers::NONE) => {
+            if let Some(review) = state.plan_review_mut() {
+                review.move_down();
+            }
+            InputAction::Redraw
+        }
+        (KeyCode::Char('1' | '2' | '3'), KeyModifiers::NONE) => {
+            let choice = match key.code {
+                KeyCode::Char('1') => PlanReviewChoice::Implement,
+                KeyCode::Char('2') => PlanReviewChoice::ImplementFresh,
+                KeyCode::Char('3') => PlanReviewChoice::KeepPlanning,
+                _ => unreachable!("matched plan choice shortcut"),
+            };
+            if let Some(review) = state.plan_review_mut() {
+                review.select(choice);
+            }
+            activate_selection(state)
+        }
+        (KeyCode::Char('s') | KeyCode::Tab, KeyModifiers::NONE) => {
+            if let Some(review) = state.plan_review_mut() {
+                review.begin_revision();
+            }
+            InputAction::Redraw
+        }
+        (KeyCode::Enter, KeyModifiers::NONE) => activate_selection(state),
+        (KeyCode::Char('a'), KeyModifiers::NONE) => {
+            if let Some(review) = state.plan_review_mut() {
+                review.select(PlanReviewChoice::Implement);
+            }
+            activate_selection(state)
+        }
+        (KeyCode::Char('c'), KeyModifiers::NONE) => {
+            if let Some(review) = state.plan_review_mut() {
+                review.select(PlanReviewChoice::ImplementFresh);
+            }
+            activate_selection(state)
+        }
+        (KeyCode::Char('q') | KeyCode::Esc, KeyModifiers::NONE) => {
+            if let Some(review) = state.plan_review_mut() {
+                review.select(PlanReviewChoice::KeepPlanning);
+            }
+            activate_selection(state)
+        }
+        (KeyCode::PageUp, _) => InputAction::ScrollUp,
+        (KeyCode::PageDown, _) => InputAction::ScrollDown,
+        _ => InputAction::None,
+    }
+}
+
+fn activate_selection(state: &mut SurfaceState) -> InputAction {
+    match state.plan_review().map(PlanReviewState::selection) {
+        Some(PlanReviewChoice::Implement) => {
             state.close_plan_review(/*restore_draft*/ true);
             InputAction::Plan(PlanReviewAction::Implement)
         }
-        (KeyCode::Char('c'), KeyModifiers::NONE) => {
+        Some(PlanReviewChoice::ImplementFresh) => {
             let Some(plan) = state.plan_review().map(|review| review.plan().to_string()) else {
                 return InputAction::None;
             };
@@ -40,19 +99,11 @@ fn handle_decision_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
             state.close_plan_review(/*restore_draft*/ false);
             InputAction::Plan(PlanReviewAction::ImplementFresh { plan })
         }
-        (KeyCode::Char('s') | KeyCode::Tab, KeyModifiers::NONE) => {
-            if let Some(review) = state.plan_review_mut() {
-                review.begin_revision();
-            }
-            InputAction::Redraw
-        }
-        (KeyCode::Char('q') | KeyCode::Esc, KeyModifiers::NONE) => {
+        Some(PlanReviewChoice::KeepPlanning) => {
             state.close_plan_review(/*restore_draft*/ true);
             InputAction::Redraw
         }
-        (KeyCode::PageUp, _) => InputAction::ScrollUp,
-        (KeyCode::PageDown, _) => InputAction::ScrollDown,
-        _ => InputAction::None,
+        None => InputAction::None,
     }
 }
 

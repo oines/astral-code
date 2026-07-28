@@ -2,5 +2,7 @@
 source: astral-tui/src/view_tests.rs
 expression: buffer_text(&buffer)
 ---
-Plan ready for review
-enter implement · c fresh context · s revise · q keep planning
+Implement this plan?
+› 1. Yes, implement this plan          Switch to Default and start coding.
+  2. Yes, clear context and implement  Fresh thread with this plan.
+  3. No, stay in Plan mode             Continue planning with the model.

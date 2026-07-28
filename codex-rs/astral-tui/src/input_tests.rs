@@ -23,7 +23,9 @@ use crate::mention::MentionTarget;
 use crate::modal::ModalRow;
 use crate::modal::ModalState;
 use crate::plan_review::PlanReviewAction;
+use crate::plan_review::PlanReviewChoice;
 use crate::plan_review::PlanReviewFocus;
+use crate::plan_review::PlanReviewState;
 use crate::thread_picker::PickerState;
 use crate::thread_picker::ThreadPickerAction;
 use crate::view::AstralThemeId;
@@ -211,6 +213,33 @@ fn completed_plan_opens_review_and_enter_implements_without_losing_the_draft() {
     assert_eq!(
         handle_key(&mut state, key(KeyCode::Enter)),
         InputAction::Plan(PlanReviewAction::Implement)
+    );
+    assert!(state.plan_review().is_none());
+    assert_eq!(state.composer(), "keep this draft");
+}
+
+#[test]
+fn plan_review_navigation_selects_keep_planning_without_submitting() {
+    let mut state = SurfaceState::new("thread-1");
+    state.set_composer("keep this draft");
+    state.note_completed_plan("turn-1", "# Plan\n- implement");
+    assert!(state.maybe_open_plan_review("turn-1", ModeKind::Plan));
+
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Down)),
+        InputAction::Redraw
+    );
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Char('j'))),
+        InputAction::Redraw
+    );
+    assert_eq!(
+        state.plan_review().map(PlanReviewState::selection),
+        Some(PlanReviewChoice::KeepPlanning)
+    );
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Enter)),
+        InputAction::Redraw
     );
     assert!(state.plan_review().is_none());
     assert_eq!(state.composer(), "keep this draft");

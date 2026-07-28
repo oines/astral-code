@@ -126,14 +126,15 @@ fn prompt_wrap_and_mid_buffer_cursor_snapshot() {
 #[test]
 fn plan_review_controls_snapshot() {
     let theme = AstralTheme::default();
-    let area = Rect::new(0, 0, 72, PlanReviewPane::HEIGHT);
-    let mut buffer = Buffer::empty(area);
     let state = PlanReviewState::new(
         "# Plan\n- trace\n- implement".to_string(),
         PromptSubmission::text_only(""),
     );
+    let pane = PlanReviewPane { state: &state };
+    let area = Rect::new(0, 0, 96, pane.height());
+    let mut buffer = Buffer::empty(area);
 
-    PlanReviewPane { state: &state }.render(area, &mut buffer, theme);
+    pane.render(area, &mut buffer, theme);
 
     insta::assert_snapshot!(buffer_text(&buffer));
 }
@@ -141,15 +142,16 @@ fn plan_review_controls_snapshot() {
 #[test]
 fn plan_revision_controls_snapshot() {
     let theme = AstralTheme::default();
-    let area = Rect::new(0, 0, 72, PlanReviewPane::HEIGHT);
-    let mut buffer = Buffer::empty(area);
     let mut state = PlanReviewState::new(
         "# Plan\n- trace\n- implement".to_string(),
         PromptSubmission::text_only(""),
     );
     state.begin_revision();
+    let pane = PlanReviewPane { state: &state };
+    let area = Rect::new(0, 0, 72, pane.height());
+    let mut buffer = Buffer::empty(area);
 
-    PlanReviewPane { state: &state }.render(area, &mut buffer, theme);
+    pane.render(area, &mut buffer, theme);
 
     insta::assert_snapshot!(buffer_text(&buffer));
 }

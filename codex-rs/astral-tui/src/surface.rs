@@ -554,11 +554,9 @@ pub(crate) fn render_surface_with_view(
     } else {
         0
     };
-    let banner_height = if plan_review.is_some() {
-        PlanReviewPane::HEIGHT
-    } else {
-        completion_height
-    };
+    let banner_height = plan_review.as_ref().map_or(completion_height, |review| {
+        PlanReviewPane { state: review }.height()
+    });
     let turn_status = (!has_request && banner_height == 0)
         .then(|| turn_status_line(state, theme))
         .flatten();
@@ -729,10 +727,10 @@ pub(crate) fn render_surface_with_view(
     let mention_hints = [("↑/↓", "navigate"), ("Tab", "select"), ("Esc", "close")];
     let slash_hints = [("↑/↓", "navigate"), ("Tab", "complete"), ("Esc", "close")];
     let plan_hints = [
-        ("Enter", "implement"),
-        ("c", "fresh"),
+        ("↑/↓", "navigate"),
+        ("Enter", "select"),
         ("s", "revise"),
-        ("q", "keep planning"),
+        ("Esc", "keep planning"),
     ];
     let revision_hints = [("Enter", "request changes"), ("Esc", "back")];
     ShortcutsBar {
