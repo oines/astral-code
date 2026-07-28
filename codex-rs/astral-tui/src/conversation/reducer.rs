@@ -6,15 +6,12 @@ use codex_app_server_protocol::TurnStatus;
 
 use super::ConversationState;
 use super::ReduceOutcome;
-use super::model::ConversationEntry;
-use super::model::ConversationTurn;
 use super::model::EntryLocation;
 use super::model::EntryPhase;
 use super::model::MutationSource;
 use super::model::TextStreamKind;
 use super::model::TranscriptMutation;
 use super::model::TurnTiming;
-use super::state::text_kind;
 
 impl ConversationState {
     pub fn from_turns(thread_id: impl Into<String>, turns: &[Turn]) -> Self {
@@ -179,7 +176,7 @@ impl ConversationState {
             return ReduceOutcome::DifferentThread;
         }
         let turn_index = self.ensure_turn(turn_id);
-        self.apply_mutation(turn_index, mutation, MutationSource::Live, true);
+        self.apply_mutation(turn_index, mutation, MutationSource::Live);
         ReduceOutcome::Applied
     }
 
@@ -188,20 +185,13 @@ impl ConversationState {
         turn_index: usize,
         mutation: TranscriptMutation,
         source: MutationSource,
-        allow_defer: bool,
     ) {
-        if allow_defer && should_defer(&self.turns[turn_index], &mutation) {
-            self.turns[turn_index].deferred.push_back(mutation);
-            return;
-        }
-
-        let completed_active_text = active_text_completed(&self.turns[turn_index], &mutation);
         match mutation {
             TranscriptMutation::ItemStarted {
                 item,
                 started_at_ms,
             } => {
-                let entry_index = self.prepare_item(turn_index, &item, source);
+                let entry_index = self.prepare_started_item(turn_index, &item, source);
                 let entry = &mut self.turns[turn_index].entries[entry_index];
                 entry.item = Some(item.clone());
                 entry.started_at_ms = Some(started_at_ms);
@@ -300,6 +290,10 @@ impl ConversationState {
                     .replace_file_changes(changes);
             }
             TranscriptMutation::TurnPlanUpdated(event) => {
+                if self.turns[turn_index].todo_entry.is_none() {
+                    self.close_reasoning(turn_index);
+                    self.close_text(turn_index);
+                }
                 let entry_index = self.todo_entry(turn_index, None);
                 self.turn_plan = Some(event.clone());
                 let entry = &mut self.turns[turn_index].entries[entry_index];
@@ -307,64 +301,11 @@ impl ConversationState {
                 entry.phase = EntryPhase::Settling;
             }
         }
-
-        if completed_active_text {
-            self.turns[turn_index].active_text = None;
-            self.drain_deferred(turn_index);
-        }
-    }
-
-    pub(super) fn drain_deferred(&mut self, turn_index: usize) {
-        while let Some(mutation) = self.turns[turn_index].deferred.pop_front() {
-            self.apply_mutation(turn_index, mutation, MutationSource::Live, false);
-        }
     }
 
     fn is_active_thread(&self, thread_id: &str) -> bool {
         self.thread_id == thread_id
     }
-}
-
-fn should_defer(turn: &ConversationTurn, mutation: &TranscriptMutation) -> bool {
-    let Some((entry_index, kind)) = turn.active_text else {
-        return false;
-    };
-    let entry = &turn.entries[entry_index];
-    match mutation {
-        TranscriptMutation::AgentMessageDelta { item_id, .. } => {
-            kind != TextStreamKind::Agent || !entry_matches_id(entry, item_id)
-        }
-        TranscriptMutation::PlanDelta { item_id, .. } => {
-            kind != TextStreamKind::Plan || !entry_matches_id(entry, item_id)
-        }
-        TranscriptMutation::ItemStarted { item, .. }
-        | TranscriptMutation::ItemCompleted { item, .. } => {
-            text_kind(item) != Some(kind) || !entry_matches_id(entry, item.id())
-        }
-        _ => true,
-    }
-}
-
-fn active_text_completed(turn: &ConversationTurn, mutation: &TranscriptMutation) -> bool {
-    let Some((entry_index, kind)) = turn.active_text else {
-        return false;
-    };
-    let TranscriptMutation::ItemCompleted { item, .. } = mutation else {
-        return false;
-    };
-    text_kind(item) == Some(kind) && entry_matches_id(&turn.entries[entry_index], item.id())
-}
-
-fn entry_matches_id(entry: &ConversationEntry, item_id: &str) -> bool {
-    match (entry.provider_id.as_deref(), non_empty(item_id)) {
-        (Some(provider_id), Some(item_id)) => provider_id == item_id,
-        (None, None) => true,
-        _ => false,
-    }
-}
-
-fn non_empty(value: &str) -> Option<&str> {
-    (!value.is_empty()).then_some(value)
 }
 
 fn turn_timing(turn: &Turn) -> TurnTiming {

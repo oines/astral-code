@@ -15,6 +15,8 @@ use super::model::EntryLocation;
 use super::model::EntryPhase;
 use super::model::MutationSource;
 use super::model::TextStreamKind;
+use super::streams::ItemLifecycle;
+use super::streams::text_kind;
 
 impl ConversationState {
     pub(super) fn apply_item(
@@ -24,7 +26,16 @@ impl ConversationState {
         completed_at_ms: Option<i64>,
         source: MutationSource,
     ) {
-        let entry_index = self.prepare_item(turn_index, &item, source);
+        if let ThreadItem::AgentMessage { text, .. } = &item {
+            self.last_agent_response = Some(text.clone());
+        }
+        if source == MutationSource::Live
+            && text_kind(&item).is_some()
+            && self.finalize_segmented_text(turn_index, &item, completed_at_ms)
+        {
+            return;
+        }
+        let entry_index = self.prepare_completed_item(turn_index, &item, source);
         let phase = if item_is_running(&item) {
             EntryPhase::Running
         } else if item_can_be_superseded(&item) && !self.turns[turn_index].sealed {
@@ -54,7 +65,6 @@ impl ConversationState {
     pub(super) fn finish_turn(&mut self, turn_index: usize) {
         self.close_reasoning(turn_index);
         self.close_text(turn_index);
-        self.drain_deferred(turn_index);
         let turn = &mut self.turns[turn_index];
         turn.active_reasoning = None;
         turn.active_text = None;
@@ -90,6 +100,8 @@ impl ConversationState {
         {
             return entry_index;
         }
+        self.close_reasoning(turn_index);
+        self.close_text(turn_index);
         self.allocate_entry(turn_index, non_empty(provider_id).map(str::to_owned))
     }
 
@@ -111,24 +123,22 @@ impl ConversationState {
         entry_index
     }
 
-    pub(super) fn prepare_item(
+    pub(super) fn prepare_started_item(
         &mut self,
         turn_index: usize,
         item: &ThreadItem,
         source: MutationSource,
     ) -> usize {
-        match item {
-            ThreadItem::UserMessage { .. } | ThreadItem::HookPrompt { .. } => {
-                self.close_reasoning(turn_index);
-                self.close_text(turn_index);
-            }
-            ThreadItem::AgentMessage { .. } | ThreadItem::Plan { .. } => {
-                self.close_reasoning(turn_index);
-            }
-            ThreadItem::Reasoning { .. } => {}
-            _ => self.close_reasoning(turn_index),
-        }
-        self.item_entry(turn_index, item, source)
+        self.item_entry(turn_index, item, source, ItemLifecycle::Started)
+    }
+
+    fn prepare_completed_item(
+        &mut self,
+        turn_index: usize,
+        item: &ThreadItem,
+        source: MutationSource,
+    ) -> usize {
+        self.item_entry(turn_index, item, source, ItemLifecycle::Completed)
     }
 
     pub(super) fn note_item_role(
@@ -140,16 +150,31 @@ impl ConversationState {
         let turn = &mut self.turns[turn_index];
         match item {
             ThreadItem::AgentMessage { .. } => {
-                turn.active_text = (turn.entries[entry_index].phase == EntryPhase::Running)
-                    .then_some((entry_index, TextStreamKind::Agent));
+                if turn.entries[entry_index].phase == EntryPhase::Running {
+                    turn.active_text = Some((entry_index, TextStreamKind::Agent));
+                } else if turn
+                    .active_text
+                    .is_some_and(|(active_entry, _)| active_entry == entry_index)
+                {
+                    turn.active_text = None;
+                }
             }
             ThreadItem::Plan { .. } => {
-                turn.active_text = (turn.entries[entry_index].phase == EntryPhase::Running)
-                    .then_some((entry_index, TextStreamKind::Plan));
+                if turn.entries[entry_index].phase == EntryPhase::Running {
+                    turn.active_text = Some((entry_index, TextStreamKind::Plan));
+                } else if turn
+                    .active_text
+                    .is_some_and(|(active_entry, _)| active_entry == entry_index)
+                {
+                    turn.active_text = None;
+                }
             }
             ThreadItem::Reasoning { .. } => {
-                turn.active_reasoning =
-                    (turn.entries[entry_index].phase == EntryPhase::Running).then_some(entry_index);
+                if turn.entries[entry_index].phase == EntryPhase::Running {
+                    turn.active_reasoning = Some(entry_index);
+                } else if turn.active_reasoning == Some(entry_index) {
+                    turn.active_reasoning = None;
+                }
             }
             _ => {}
         }
@@ -160,49 +185,42 @@ impl ConversationState {
         turn_index: usize,
         item: &ThreadItem,
         source: MutationSource,
+        lifecycle: ItemLifecycle,
     ) -> usize {
         if is_todo_item(item) {
+            if self.turns[turn_index].todo_entry.is_none() {
+                self.close_reasoning(turn_index);
+                self.close_text(turn_index);
+            }
             let provider_id = non_empty(item.id()).map(str::to_owned);
             return self.todo_entry(turn_index, provider_id);
         }
-        if let Some(provider_id) = non_empty(item.id()) {
-            return self.provider_entry(turn_index, provider_id);
+        if let Some(kind) = text_kind(item) {
+            self.close_reasoning(turn_index);
+            return self.text_item_entry(turn_index, item.id(), kind, source, lifecycle);
         }
-        if source == MutationSource::Live
-            && let Some(entry_index) = matching_active_entry(&self.turns[turn_index], item)
+        if matches!(item, ThreadItem::Reasoning { .. }) {
+            return self.reasoning_item_entry(turn_index, item.id(), source, lifecycle);
+        }
+        let provider_id = non_empty(item.id()).map(str::to_owned);
+        if let Some(provider_id) = provider_id.as_deref()
+            && let Some(entry_index) = self.turns[turn_index]
+                .provider_indices
+                .get(provider_id)
+                .copied()
         {
             return entry_index;
         }
-        self.allocate_entry(turn_index, None)
+        self.close_reasoning(turn_index);
+        self.close_text(turn_index);
+        self.allocate_entry(turn_index, provider_id)
     }
 
-    pub(super) fn stream_entry(
+    pub(super) fn allocate_entry(
         &mut self,
         turn_index: usize,
-        item_id: &str,
-        kind: TextStreamKind,
+        provider_id: Option<String>,
     ) -> usize {
-        if let Some(provider_id) = non_empty(item_id) {
-            return self.provider_entry(turn_index, provider_id);
-        }
-        if let Some((entry_index, active_kind)) = self.turns[turn_index].active_text
-            && active_kind == kind
-        {
-            return entry_index;
-        }
-        self.allocate_entry(turn_index, None)
-    }
-
-    pub(super) fn reasoning_entry(&mut self, turn_index: usize, item_id: &str) -> usize {
-        if let Some(provider_id) = non_empty(item_id) {
-            return self.provider_entry(turn_index, provider_id);
-        }
-        self.turns[turn_index]
-            .active_reasoning
-            .unwrap_or_else(|| self.allocate_entry(turn_index, None))
-    }
-
-    fn allocate_entry(&mut self, turn_index: usize, provider_id: Option<String>) -> usize {
         let local_id = self.next_entry_id;
         self.next_entry_id = self.next_entry_id.saturating_add(1);
         let turn = &mut self.turns[turn_index];
@@ -233,29 +251,6 @@ impl ConversationState {
         if let Some(process_id) = process_id {
             self.process_entries.insert(process_id.clone(), location);
         }
-    }
-}
-
-pub(super) fn text_kind(item: &ThreadItem) -> Option<TextStreamKind> {
-    match item {
-        ThreadItem::AgentMessage { .. } => Some(TextStreamKind::Agent),
-        ThreadItem::Plan { .. } => Some(TextStreamKind::Plan),
-        _ => None,
-    }
-}
-
-fn matching_active_entry(turn: &ConversationTurn, item: &ThreadItem) -> Option<usize> {
-    match item {
-        ThreadItem::AgentMessage { .. } => turn
-            .active_text
-            .filter(|(_, kind)| *kind == TextStreamKind::Agent)
-            .map(|(index, _)| index),
-        ThreadItem::Plan { .. } => turn
-            .active_text
-            .filter(|(_, kind)| *kind == TextStreamKind::Plan)
-            .map(|(index, _)| index),
-        ThreadItem::Reasoning { .. } => turn.active_reasoning,
-        _ => None,
     }
 }
 

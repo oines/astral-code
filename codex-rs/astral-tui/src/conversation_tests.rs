@@ -6,6 +6,8 @@ use codex_app_server_protocol::ItemCompletedNotification;
 use codex_app_server_protocol::ItemStartedNotification;
 use codex_app_server_protocol::PatchApplyStatus;
 use codex_app_server_protocol::PatchChangeKind;
+use codex_app_server_protocol::PlanDeltaNotification;
+use codex_app_server_protocol::ReasoningSummaryTextDeltaNotification;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::TerminalInteractionNotification;
 use codex_app_server_protocol::ThreadItem;
@@ -149,7 +151,7 @@ fn delta_survives_missing_start_until_authoritative_completion() {
 }
 
 #[test]
-fn assistant_stream_defers_tool_events_in_fifo_order() {
+fn semantic_boundaries_split_assistant_text_even_when_provider_id_is_reused() {
     let mut state = ConversationState::new("thread-1");
     state.apply(&ServerNotification::AgentMessageDelta(
         AgentMessageDeltaNotification {
@@ -159,6 +161,7 @@ fn assistant_stream_defers_tool_events_in_fifo_order() {
             delta: "answer".to_string(),
         },
     ));
+    state.apply(&completed("turn-1", agent_message("message-1", "answer")));
     state.apply(&started(
         "turn-1",
         core_tool("read-1", "Read", CoreToolCallStatus::InProgress),
@@ -167,18 +170,178 @@ fn assistant_stream_defers_tool_events_in_fifo_order() {
         "turn-1",
         core_tool("read-1", "Read", CoreToolCallStatus::Completed),
     ));
-
-    assert_eq!(state.all_turns()[0].blocks.len(), 1);
-
-    state.apply(&completed("turn-1", agent_message("message-1", "answer")));
+    state.apply(&ServerNotification::AgentMessageDelta(
+        AgentMessageDeltaNotification {
+            thread_id: "thread-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            item_id: "message-1".to_string(),
+            delta: "after tool".to_string(),
+        },
+    ));
+    state.apply(&completed(
+        "turn-1",
+        agent_message("message-1", "after tool"),
+    ));
 
     let blocks = &state.all_turns()[0].blocks;
-    assert_eq!(blocks.len(), 2);
-    assert!(matches!(
+    assert_eq!(blocks.len(), 3);
+    assert_eq!(
         blocks[0].block,
-        PresentationBlock::Assistant { .. }
-    ));
+        PresentationBlock::Assistant {
+            text: "answer".to_string()
+        }
+    );
     assert!(matches!(blocks[1].block, PresentationBlock::Tool(_)));
+    assert_eq!(
+        blocks[2].block,
+        PresentationBlock::Assistant {
+            text: "after tool".to_string()
+        }
+    );
+}
+
+#[test]
+fn replay_preserves_reused_text_ids_across_semantic_boundaries() {
+    let replay = ConversationState::from_turns(
+        "thread-1",
+        &[turn(
+            "turn-1",
+            vec![
+                agent_message("message-1", "before"),
+                core_tool("read-1", "Read", CoreToolCallStatus::Completed),
+                agent_message("message-1", "after"),
+            ],
+            TurnStatus::Completed,
+        )],
+    );
+
+    let blocks = &replay.all_turns()[0].blocks;
+    assert_eq!(blocks.len(), 3);
+    assert_eq!(
+        blocks[0].block,
+        PresentationBlock::Assistant {
+            text: "before".to_string()
+        }
+    );
+    assert!(matches!(blocks[1].block, PresentationBlock::Tool(_)));
+    assert_eq!(
+        blocks[2].block,
+        PresentationBlock::Assistant {
+            text: "after".to_string()
+        }
+    );
+}
+
+#[test]
+fn reasoning_boundary_prevents_later_text_from_rewriting_earlier_assistant_block() {
+    let mut state = ConversationState::new("thread-1");
+    state.apply(&ServerNotification::AgentMessageDelta(
+        AgentMessageDeltaNotification {
+            thread_id: "thread-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            item_id: "message-1".to_string(),
+            delta: "before thought".to_string(),
+        },
+    ));
+    state.apply(&ServerNotification::ReasoningSummaryTextDelta(
+        ReasoningSummaryTextDeltaNotification {
+            thread_id: "thread-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            item_id: "reasoning-1".to_string(),
+            summary_index: 0,
+            delta: "checking".to_string(),
+        },
+    ));
+    state.apply(&ServerNotification::AgentMessageDelta(
+        AgentMessageDeltaNotification {
+            thread_id: "thread-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            item_id: "message-1".to_string(),
+            delta: "after thought".to_string(),
+        },
+    ));
+
+    let blocks = &state.all_turns()[0].blocks;
+    assert_eq!(blocks.len(), 3);
+    assert_eq!(
+        blocks[0].block,
+        PresentationBlock::Assistant {
+            text: "before thought".to_string()
+        }
+    );
+    assert!(matches!(
+        blocks[1].block,
+        PresentationBlock::Thinking { .. }
+    ));
+    assert_eq!(
+        blocks[2].block,
+        PresentationBlock::Assistant {
+            text: "after thought".to_string()
+        }
+    );
+}
+
+#[test]
+fn completed_plan_mode_message_preserves_text_on_both_sides_of_the_plan() {
+    let mut state = ConversationState::new("thread-1");
+    state.apply(&ServerNotification::AgentMessageDelta(
+        AgentMessageDeltaNotification {
+            thread_id: "thread-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            item_id: "message-1".to_string(),
+            delta: "Preface\n".to_string(),
+        },
+    ));
+    state.apply(&ServerNotification::PlanDelta(PlanDeltaNotification {
+        thread_id: "thread-1".to_string(),
+        turn_id: "turn-1".to_string(),
+        item_id: "plan-1".to_string(),
+        delta: "# Plan\n- implement".to_string(),
+    }));
+    state.apply(&ServerNotification::AgentMessageDelta(
+        AgentMessageDeltaNotification {
+            thread_id: "thread-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            item_id: "message-1".to_string(),
+            delta: "Post".to_string(),
+        },
+    ));
+    state.apply(&completed(
+        "turn-1",
+        ThreadItem::Plan {
+            id: "plan-1".to_string(),
+            text: "# Plan\n- implement".to_string(),
+        },
+    ));
+    state.apply(&ServerNotification::AgentMessageDelta(
+        AgentMessageDeltaNotification {
+            thread_id: "thread-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            item_id: "message-1".to_string(),
+            delta: "script".to_string(),
+        },
+    ));
+    state.apply(&completed(
+        "turn-1",
+        agent_message("message-1", "Preface\nPostscript"),
+    ));
+
+    let blocks = &state.all_turns()[0].blocks;
+    assert_eq!(blocks.len(), 3);
+    assert_eq!(
+        blocks[0].block,
+        PresentationBlock::Assistant {
+            text: "Preface\n".to_string()
+        }
+    );
+    assert!(matches!(blocks[1].block, PresentationBlock::Plan { .. }));
+    assert_eq!(
+        blocks[2].block,
+        PresentationBlock::Assistant {
+            text: "Postscript".to_string()
+        }
+    );
+    assert_eq!(state.last_agent_response(), Some("Preface\nPostscript"));
 }
 
 #[test]

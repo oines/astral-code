@@ -1,10 +1,10 @@
 mod model;
 mod reducer;
 mod state;
+mod streams;
 
 use std::collections::HashMap;
 
-use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::TurnPlanUpdatedNotification;
 
 use crate::PresentationBlock;
@@ -55,9 +55,10 @@ pub(crate) struct TranscriptTurn {
 /// Canonical transcript state for one app-server thread.
 ///
 /// The app-server remains authoritative for runtime semantics. This state only
-/// preserves Codex's presentation lifecycle: turns own their entries, streamed
-/// assistant text delays interrupting tool rows, and mutable tool projections
-/// settle before they are printed into terminal-native scrollback.
+/// preserves Codex's presentation lifecycle: turns own their entries, semantic
+/// boundaries close streamed text before later blocks are appended, and mutable
+/// tool projections settle before they are printed into terminal-native
+/// scrollback.
 #[derive(Debug, Clone)]
 pub struct ConversationState {
     thread_id: String,
@@ -68,6 +69,7 @@ pub struct ConversationState {
     commit_turn: usize,
     turn_plan: Option<TurnPlanUpdatedNotification>,
     turn_diff: Option<String>,
+    last_agent_response: Option<String>,
     skipped_events: usize,
 }
 
@@ -82,6 +84,7 @@ impl ConversationState {
             commit_turn: 0,
             turn_plan: None,
             turn_diff: None,
+            last_agent_response: None,
             skipped_events: 0,
         }
     }
@@ -167,15 +170,7 @@ impl ConversationState {
     }
 
     pub fn last_agent_response(&self) -> Option<&str> {
-        self.turns
-            .iter()
-            .rev()
-            .flat_map(|turn| turn.entries.iter().rev())
-            .filter_map(|entry| entry.item.as_ref())
-            .find_map(|item| match item {
-                ThreadItem::AgentMessage { text, .. } => Some(text.as_str()),
-                _ => None,
-            })
+        self.last_agent_response.as_deref()
     }
 
     pub fn committed_entries(&self) -> usize {

@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::collections::VecDeque;
 
 use astral_tui_scrollback::PresentationBlock;
 use astral_tui_scrollback::TimelineStream;
@@ -126,7 +125,6 @@ pub(super) struct ConversationTurn {
     pub(super) todo_entry: Option<usize>,
     pub(super) active_text: Option<(usize, TextStreamKind)>,
     pub(super) active_reasoning: Option<usize>,
-    pub(super) deferred: VecDeque<TranscriptMutation>,
     pub(super) committed_entries: usize,
     pub(super) timing: TurnTiming,
     pub(super) sealed: bool,
@@ -141,7 +139,6 @@ impl ConversationTurn {
             todo_entry: None,
             active_text: None,
             active_reasoning: None,
-            deferred: VecDeque::new(),
             committed_entries: 0,
             timing: TurnTiming::default(),
             sealed: false,

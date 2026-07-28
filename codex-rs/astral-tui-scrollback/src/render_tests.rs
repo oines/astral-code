@@ -210,6 +210,24 @@ fn todo_tool_surfaces_snapshot() {
 }
 
 #[test]
+fn proposed_plan_uses_the_markdown_renderer_snapshot() {
+    let item = ThreadItem::Plan {
+        id: "plan-1".to_string(),
+        text: concat!(
+            "# Renderer plan\n\n",
+            "1. Preserve **event order**\n",
+            "2. Render `ThreadItem::Plan` separately\n\n",
+            "| Stage | State |\n",
+            "| --- | --- |\n",
+            "| reducer | done |"
+        )
+        .to_string(),
+    };
+
+    assert_snapshot!(render(item, DisplayMode::Expanded));
+}
+
+#[test]
 fn background_task_action_tool_surfaces_snapshot() {
     let items = [
         ThreadItem::CoreToolCall {

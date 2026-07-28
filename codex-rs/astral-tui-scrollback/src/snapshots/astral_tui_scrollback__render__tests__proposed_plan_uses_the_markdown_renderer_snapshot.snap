@@ -1,0 +1,15 @@
+---
+source: astral-tui-scrollback/src/render_tests.rs
+expression: "render(item, DisplayMode::Expanded)"
+---
+◆ Plan
+  Renderer plan
+
+  1. Preserve event order
+  2. Render ThreadItem::Plan separately
+
+  ┌─────────┬───────┐
+  │ Stage   │ State │
+  ├─────────┼───────┤
+  │ reducer │ done  │
+  └─────────┴───────┘

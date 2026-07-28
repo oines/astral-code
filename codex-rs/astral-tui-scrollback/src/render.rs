@@ -222,7 +222,19 @@ fn render_plan(text: &str, running: bool, options: RenderOptions) -> Text<'stati
     let marker = if running { "◇ " } else { "◆ " };
     let mut lines = vec![vec![marker.cyan(), "Plan".cyan()].into()];
     if options.mode != DisplayMode::Collapsed {
-        let body = indented_lines(text, options.width, "  ", false);
+        let body = render_markdown(
+            text,
+            options.width.saturating_sub(2),
+            MarkdownStyle::default(),
+        )
+        .into_iter()
+        .map(|mut line| {
+            if line.width() > 0 {
+                line.spans.insert(0, "  ".into());
+            }
+            line
+        })
+        .collect();
         lines.extend(limit_lines(body, options));
     }
     Text::from(lines)
