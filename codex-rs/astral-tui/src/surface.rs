@@ -50,9 +50,6 @@ use crate::view::AgentViewLayoutInput;
 use crate::view::AstralTheme;
 use crate::view::AstralThemeId;
 use crate::view::ColorLevel;
-use crate::view::EntryDisplayState;
-use crate::view::EntryMouseAction;
-use crate::view::EntryMouseState;
 use crate::view::LayoutConfig;
 use crate::view::MentionMenu;
 use crate::view::PaneHeights;
@@ -60,10 +57,8 @@ use crate::view::PlanReviewMouseAction;
 use crate::view::PlanReviewMouseState;
 use crate::view::PlanReviewPane;
 use crate::view::PromptChrome;
-use crate::view::ScrollbackNavigation;
 use crate::view::ScrollbackPane;
-use crate::view::ScrollbackSelection;
-use crate::view::ScrollbackSelectionAction;
+use crate::view::ScrollbackState;
 use crate::view::ScrollbackViewport;
 use crate::view::ScrollbarConfig;
 use crate::view::ShortcutsBar;
@@ -101,10 +96,7 @@ pub struct SurfaceState {
     activity: SurfaceActivity,
     token_usage: Option<ThreadTokenUsage>,
     notice: Option<String>,
-    scrollback: ScrollbackNavigation,
-    selection: ScrollbackSelection,
-    entry_display: EntryDisplayState,
-    entry_mouse: EntryMouseState,
+    scrollback: ScrollbackState,
     slash: SlashController,
     mentions: MentionController,
     block_viewer: Option<BlockViewerState>,
@@ -132,10 +124,7 @@ impl SurfaceState {
             activity: SurfaceActivity::Ready,
             token_usage: None,
             notice: None,
-            scrollback: ScrollbackNavigation::default(),
-            selection: ScrollbackSelection::default(),
-            entry_display: EntryDisplayState::default(),
-            entry_mouse: EntryMouseState::default(),
+            scrollback: ScrollbackState::default(),
             slash: SlashController::default(),
             mentions: MentionController::default(),
             block_viewer: None,
@@ -170,10 +159,7 @@ impl SurfaceState {
             },
             token_usage: None,
             notice: None,
-            scrollback: ScrollbackNavigation::default(),
-            selection: ScrollbackSelection::default(),
-            entry_display: EntryDisplayState::default(),
-            entry_mouse: EntryMouseState::default(),
+            scrollback: ScrollbackState::default(),
             slash: SlashController::default(),
             mentions: MentionController::default(),
             block_viewer: None,
@@ -255,17 +241,22 @@ impl SurfaceState {
     }
 
     pub fn scroll_up(&mut self, lines: usize) {
-        self.selection.clear_persistent();
         self.scrollback.scroll_up(lines);
     }
 
     pub fn scroll_down(&mut self, lines: usize) {
-        self.selection.clear_persistent();
         self.scrollback.scroll_down(lines);
     }
 
+    pub fn page_up(&mut self) {
+        self.scrollback.page_up();
+    }
+
+    pub fn page_down(&mut self) {
+        self.scrollback.page_down();
+    }
+
     pub fn scroll_to_bottom(&mut self) {
-        self.selection.clear_persistent();
         self.scrollback.scroll_to_bottom();
     }
 
@@ -274,80 +265,38 @@ impl SurfaceState {
     }
 
     pub(crate) fn focus_scrollback(&mut self) -> bool {
-        if !self.entry_display.focus_scrollback() {
-            return false;
-        }
-        self.reveal_selected_entry();
-        true
+        self.scrollback.focus_scrollback()
     }
 
     pub(crate) fn focus_prompt(&mut self) {
-        self.entry_display.focus_prompt();
+        self.scrollback.focus_prompt();
     }
 
     pub(crate) fn scrollback_focused(&self) -> bool {
-        self.entry_display.is_focused()
+        self.scrollback.is_focused()
     }
 
     pub(crate) fn move_entry_selection(&mut self, delta: isize) {
-        if let Some(item_id) = self.entry_display.move_selection(delta) {
-            self.scrollback.reveal_entry(&item_id);
-        }
+        self.scrollback.move_selection(delta);
     }
 
     pub(crate) fn toggle_selected_entry(&mut self) {
-        self.entry_display.toggle_selected();
-        self.reveal_selected_entry();
+        self.scrollback.toggle_selected();
     }
 
     pub(crate) fn expand_selected_entry(&mut self) {
-        self.entry_display.expand_selected();
-        self.reveal_selected_entry();
+        self.scrollback.expand_selected();
     }
 
     pub(crate) fn collapse_selected_entry(&mut self) {
-        self.entry_display.collapse_selected();
-        self.reveal_selected_entry();
-    }
-
-    fn reveal_selected_entry(&mut self) {
-        if let Some(item_id) = self.entry_display.selected_id().map(str::to_string) {
-            self.scrollback.reveal_entry(&item_id);
-        }
+        self.scrollback.collapse_selected();
     }
 
     pub(crate) fn handle_scrollback_mouse(
         &mut self,
         mouse: crossterm::event::MouseEvent,
     ) -> Option<String> {
-        let entry_action = self.entry_mouse.handle_mouse(mouse);
-        match self.selection.handle_mouse(mouse) {
-            ScrollbackSelectionAction::ScrollUp => self.scroll_up(/*lines*/ 1),
-            ScrollbackSelectionAction::ScrollDown => self.scroll_down(/*lines*/ 1),
-            ScrollbackSelectionAction::Copy(text) => return Some(text),
-            ScrollbackSelectionAction::Ignored | ScrollbackSelectionAction::Redraw => {}
-        }
-        match entry_action {
-            EntryMouseAction::Select(item_id) => {
-                if self.entry_display.select(&item_id) {
-                    self.scrollback.reveal_entry(&item_id);
-                }
-            }
-            EntryMouseAction::Toggle(item_id) => {
-                if self.entry_display.select(&item_id) {
-                    self.entry_display.toggle_selected();
-                    self.scrollback.reveal_entry(&item_id);
-                }
-            }
-            EntryMouseAction::ToggleGroup(item_id) => {
-                if self.entry_display.select(&item_id) {
-                    self.entry_display.toggle_group(&item_id);
-                    self.scrollback.reveal_entry(&item_id);
-                }
-            }
-            EntryMouseAction::Ignored => {}
-        }
-        None
+        self.scrollback.handle_mouse(mouse)
     }
 
     pub(crate) fn handle_plan_review_mouse(
@@ -358,15 +307,15 @@ impl SurfaceState {
     }
 
     pub(crate) fn clear_scrollback_selection(&mut self) -> bool {
-        self.selection.clear()
+        self.scrollback.clear_selection()
     }
 
     pub(crate) fn scrollback_selection_expiry(&self) -> Option<std::time::Instant> {
-        self.selection.expiry()
+        self.scrollback.selection_expiry()
     }
 
     pub(crate) fn expire_scrollback_selection(&mut self) -> bool {
-        self.selection.expire_if_due(std::time::Instant::now())
+        self.scrollback.expire_selection(std::time::Instant::now())
     }
 
     pub fn last_agent_response(&self) -> Option<&str> {
@@ -643,16 +592,13 @@ pub(crate) fn render_surface_with_view(
         viewport,
         layout.scrollback_content,
         (transcript_view == TranscriptView::Full)
-            .then(|| state.entry_display.selected_id())
+            .then(|| state.scrollback.selected_id())
             .flatten(),
         buffer,
         theme,
     );
     if transcript_view == TranscriptView::Full {
-        state
-            .entry_mouse
-            .observe(&transcript, viewport, layout.scrollback_content);
-        state.selection.render(
+        state.scrollback.observe_frame(
             &transcript,
             viewport,
             layout.scrollback_content,
@@ -660,7 +606,7 @@ pub(crate) fn render_surface_with_view(
             theme,
         );
     } else {
-        state.entry_mouse.clear_frame();
+        state.scrollback.clear_frame();
     }
     render_follow_indicator(
         viewport,
@@ -760,15 +706,18 @@ pub(crate) fn render_surface_with_view(
     };
 
     let default_hints = [("Shift+Tab", "mode"), ("Ctrl+.", "shortcuts")];
-    let fold_action = if state.entry_display.selected_mode() == Some(DisplayMode::Expanded) {
+    let fold_action = if state.scrollback.selected_mode() == Some(DisplayMode::Expanded) {
         "collapse"
     } else {
         "expand"
     };
     let group_hints = [("Enter", fold_action), ("Tab", "prompt")];
     let entry_hints = [("e", fold_action), ("Enter", "open"), ("Tab", "prompt")];
-    let scrollback_hints = if state.entry_display.selected_is_group_header() {
+    let plain_entry_hints = [("Enter", "open"), ("Tab", "prompt")];
+    let scrollback_hints = if state.scrollback.selected_is_group_header() {
         &group_hints[..]
+    } else if !state.scrollback.selected_is_foldable() {
+        &plain_entry_hints[..]
     } else {
         &entry_hints[..]
     };
@@ -832,8 +781,8 @@ fn conversation_layout(
         TranscriptView::Live => state.conversation.live_turns(),
         TranscriptView::Full => state.conversation.all_turns(),
     };
-    state.entry_display.observe(&turns);
-    render_transcript(&turns, width, state.theme(), &state.entry_display)
+    state.scrollback.observe_entries(&turns);
+    render_transcript(&turns, width, state.theme(), state.scrollback.display())
 }
 
 fn turn_status_line(state: &SurfaceState, theme: AstralTheme) -> Option<Line<'static>> {

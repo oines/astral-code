@@ -54,4 +54,15 @@ impl PresentationBlock {
             Self::User { .. } | Self::Assistant { .. } | Self::Todo(_) => false,
         }
     }
+
+    /// Whether the block participates in transcript navigation.
+    ///
+    /// Grok treats navigation and folding as separate capabilities: user and
+    /// assistant messages are selectable even though they have nothing to
+    /// collapse. Keeping those concepts separate prevents focus from jumping
+    /// backwards to the last foldable tool when the visible tail is plain
+    /// conversation text.
+    pub fn is_selectable(&self) -> bool {
+        !matches!(self, Self::Todo(_) | Self::System { .. })
+    }
 }

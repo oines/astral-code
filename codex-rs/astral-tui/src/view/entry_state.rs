@@ -16,6 +16,7 @@ struct EntryDescriptor {
     default_mode: DisplayMode,
     parent_group: Option<String>,
     group_header: bool,
+    foldable: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,13 +82,14 @@ impl EntryDisplayState {
                         default_mode: DisplayMode::Collapsed,
                         parent_group: None,
                         group_header: true,
+                        foldable: true,
                     });
                 }
                 let parent_group = groups
                     .iter()
                     .find(|group| group.expanded && group.contains_member(index))
                     .map(|group| group.id.clone());
-                if groups.iter().any(|group| group.hides(index)) || !block.block.is_foldable() {
+                if groups.iter().any(|group| group.hides(index)) || !block.block.is_selectable() {
                     continue;
                 }
                 entries.push(EntryDescriptor {
@@ -95,6 +97,7 @@ impl EntryDisplayState {
                     default_mode: block.block.default_display_mode(),
                     parent_group,
                     group_header: false,
+                    foldable: block.block.is_foldable(),
                 });
             }
         }
@@ -234,6 +237,10 @@ impl EntryDisplayState {
         true
     }
 
+    pub(crate) fn contains(&self, entry_id: &str) -> bool {
+        self.entries.iter().any(|entry| entry.id == entry_id)
+    }
+
     pub(crate) fn selected_mode(&self) -> Option<DisplayMode> {
         let entry = self.selected_entry()?;
         if entry.group_header {
@@ -254,6 +261,10 @@ impl EntryDisplayState {
     pub(crate) fn selected_is_group_header(&self) -> bool {
         self.selected_entry()
             .is_some_and(|entry| entry.group_header)
+    }
+
+    pub(crate) fn selected_is_foldable(&self) -> bool {
+        self.selected_entry().is_some_and(|entry| entry.foldable)
     }
 
     pub(crate) fn group_is_expanded(&self, group_id: &str) -> bool {
@@ -281,6 +292,9 @@ impl EntryDisplayState {
         if entry.group_header {
             return self.toggle_group(&entry.id);
         }
+        if !entry.foldable {
+            return None;
+        }
         let current = self
             .manual_modes
             .get(&entry.id)
@@ -303,6 +317,9 @@ impl EntryDisplayState {
             }
             return self.toggle_group(&entry.id);
         }
+        if !entry.foldable {
+            return None;
+        }
         self.manual_modes
             .insert(entry.id.clone(), DisplayMode::Expanded);
         self.pending_verb_rekey = Some(entry.id.clone());
@@ -316,6 +333,9 @@ impl EntryDisplayState {
                 self.preserve_empty_selection = false;
                 return Some(entry.id);
             }
+            return None;
+        }
+        if !entry.foldable {
             return None;
         }
         let current = self

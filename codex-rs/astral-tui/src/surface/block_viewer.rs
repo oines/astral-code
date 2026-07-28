@@ -17,13 +17,13 @@ impl SurfaceState {
     /// Apply Grok's Enter behavior to the selected transcript row.
     ///
     /// A group header owns Enter as its expand/collapse action. A normal
-    /// foldable row opens a viewer that follows the current canonical block.
+    /// selected row opens a viewer that follows the current canonical block.
     pub(crate) fn open_selected_entry(&mut self) -> bool {
-        if self.entry_display.selected_is_group_header() {
+        if self.scrollback.selected_is_group_header() {
             self.toggle_selected_entry();
             return true;
         }
-        let Some(entry_id) = self.entry_display.selected_id().map(str::to_string) else {
+        let Some(entry_id) = self.scrollback.selected_id().map(str::to_string) else {
             return false;
         };
         if self.presentation_block(&entry_id).is_none() {

@@ -13,7 +13,6 @@ use codex_app_server_protocol::TurnStatus;
 use codex_protocol::config_types::ModeKind;
 use crossterm::event::Event;
 use crossterm::event::EventStream;
-use crossterm::event::MouseEventKind;
 use ratatui::TerminalOptions;
 use ratatui::Viewport;
 use ratatui::backend::CrosstermBackend;
@@ -243,9 +242,7 @@ async fn run_loop(
                         let action = match handle_key(surface, key) {
                             InputAction::ScrollUp => {
                                 if options.viewport == RunViewport::Fullscreen {
-                                    let page_rows =
-                                        usize::from(terminal.viewport_area().height.max(1));
-                                    surface.scroll_up(page_rows);
+                                    surface.page_up();
                                 } else {
                                     surface.set_notice(
                                         "Use the terminal's native scrollback in inline mode",
@@ -255,9 +252,7 @@ async fn run_loop(
                             }
                             InputAction::ScrollDown => {
                                 if options.viewport == RunViewport::Fullscreen {
-                                    let page_rows =
-                                        usize::from(terminal.viewport_area().height.max(1));
-                                    surface.scroll_down(page_rows);
+                                    surface.page_down();
                                 }
                                 InputAction::None
                             }
@@ -292,21 +287,13 @@ async fn run_loop(
                         if options.viewport == RunViewport::Fullscreen {
                             let action = handle_mouse(surface, mouse);
                             if matches!(action, InputAction::None) {
-                                match mouse.kind {
-                                    MouseEventKind::ScrollUp => surface.scroll_up(/*lines*/ 3),
-                                    MouseEventKind::ScrollDown => surface.scroll_down(/*lines*/ 3),
-                                    _ => {
-                                        if let Some(selection) =
-                                            surface.handle_scrollback_mouse(mouse)
-                                        {
-                                            match copy_to_clipboard(&selection) {
-                                                Ok(lease) => {
-                                                    _clipboard_lease = Some(lease);
-                                                    surface.set_notice("Copied selection");
-                                                }
-                                                Err(error) => surface.set_notice(error),
-                                            }
+                                if let Some(selection) = surface.handle_scrollback_mouse(mouse) {
+                                    match copy_to_clipboard(&selection) {
+                                        Ok(lease) => {
+                                            _clipboard_lease = Some(lease);
+                                            surface.set_notice("Copied selection");
                                         }
+                                        Err(error) => surface.set_notice(error),
                                     }
                                 }
                             } else if let Some(reason) =

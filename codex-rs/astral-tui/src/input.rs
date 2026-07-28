@@ -220,8 +220,25 @@ pub(crate) fn handle_mouse(state: &mut SurfaceState, mouse: MouseEvent) -> Input
         let schema = requested_schema.clone();
         return mcp_form::handle_mouse(state, request, &schema, mouse);
     }
+    if state.thread_picker().is_some()
+        || state.permission_picker().is_some()
+        || state.theme_picker().is_some()
+    {
+        return InputAction::Redraw;
+    }
+    if let Some(modal) = state.modal_mut() {
+        match mouse.kind {
+            crossterm::event::MouseEventKind::ScrollUp => modal.scroll_by(-3),
+            crossterm::event::MouseEventKind::ScrollDown => modal.scroll_by(3),
+            _ => {}
+        }
+        return InputAction::Redraw;
+    }
     if state.plan_review().is_some() {
         return plan_review::handle_mouse(state, mouse);
+    }
+    if state.slash().open || state.mentions().open {
+        return InputAction::Redraw;
     }
     InputAction::None
 }

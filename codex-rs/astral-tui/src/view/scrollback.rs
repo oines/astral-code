@@ -178,6 +178,16 @@ impl ScrollbackNavigation {
         self.anchor = None;
     }
 
+    pub(crate) fn page_up(&mut self) -> ScrollbackViewport {
+        self.scroll_up(self.page_scroll_lines());
+        self.viewport()
+    }
+
+    pub(crate) fn page_down(&mut self) -> ScrollbackViewport {
+        self.scroll_down(self.page_scroll_lines());
+        self.viewport()
+    }
+
     pub(crate) fn reveal_entry(&mut self, item_id: &str) {
         let Some(section) = self
             .sections
@@ -208,6 +218,22 @@ impl ScrollbackNavigation {
                 .saturating_sub(self.viewport_lines)
                 .saturating_sub(self.first_visible_line)
         }
+    }
+
+    pub(crate) fn sections(&self) -> &[TranscriptSection] {
+        &self.sections
+    }
+
+    fn viewport(&self) -> ScrollbackViewport {
+        ScrollbackViewport::from_first(
+            self.total_lines,
+            self.viewport_lines,
+            self.first_visible_line,
+        )
+    }
+
+    fn page_scroll_lines(&self) -> usize {
+        self.viewport_lines.saturating_sub(2).max(1)
     }
 
     fn refresh_anchor(&mut self) {
