@@ -8,6 +8,8 @@ use ratatui::layout::Rect;
 
 #[path = "block_viewer/edit_copy.rs"]
 mod edit_copy;
+#[path = "block_viewer/follow.rs"]
+mod follow;
 #[path = "block_viewer/matcher.rs"]
 mod matcher;
 #[path = "block_viewer/navigation.rs"]
@@ -66,6 +68,7 @@ pub(crate) struct BlockViewerFrame {
     pub(crate) edit_copy_lines: Vec<Option<EditCopyLine>>,
     pub(crate) row_geometry: Vec<ViewerRowGeometry>,
     pub(crate) rendered_rows: Vec<String>,
+    pub(crate) is_running: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -123,10 +126,14 @@ pub(crate) struct BlockViewerState {
     visible_row_indices: Vec<usize>,
     text_drag: Option<TextDrag>,
     matcher: ViewerMatcher,
+    follow_enabled: bool,
+    follow_mode: bool,
+    at_content_edge: bool,
+    mouse_overscroll: usize,
 }
 
 impl BlockViewerState {
-    pub(crate) fn new(entry_id: String) -> Self {
+    pub(crate) fn new(entry_id: String, is_running: bool) -> Self {
         Self {
             entry_id,
             scroll_offset: 0,
@@ -150,6 +157,10 @@ impl BlockViewerState {
             visible_row_indices: Vec::new(),
             text_drag: None,
             matcher: ViewerMatcher::default(),
+            follow_enabled: is_running,
+            follow_mode: is_running,
+            at_content_edge: false,
+            mouse_overscroll: 0,
         }
     }
 
@@ -266,6 +277,7 @@ impl BlockViewerState {
             edit_copy_lines,
             row_geometry,
             rendered_rows,
+            is_running,
         } = frame;
         self.popup_area = Some(popup_area);
         self.content_area = Some(content_area);
@@ -285,15 +297,23 @@ impl BlockViewerState {
         self.rendered_rows = rendered_rows;
         self.matcher.rebuild(&self.logical_lines);
         self.rebuild_visible_rows(selected_physical, anchor_physical, selected_screen_row);
+        if self.follow_enabled && !is_running {
+            self.follow_enabled = false;
+            self.follow_mode = false;
+            self.selected_item = self.visible_item_indices.len().checked_sub(1);
+            self.scroll_offset = self.max_scroll_offset;
+        }
     }
 
     pub(crate) fn open_search(&mut self) {
+        self.pause_follow();
         self.clear_visual_selection();
         self.matcher.open(ViewerMatchMode::Search);
         self.refresh_visible_rows();
     }
 
     pub(crate) fn open_filter(&mut self) {
+        self.pause_follow();
         self.clear_visual_selection();
         self.matcher.open(ViewerMatchMode::Filter);
         self.refresh_visible_rows();
@@ -350,6 +370,7 @@ impl BlockViewerState {
     }
 
     pub(crate) fn begin_visual_selection(&mut self) {
+        self.pause_follow();
         if self.visual_anchor.is_none() {
             self.visual_anchor = self.selected_item;
         }

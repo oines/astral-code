@@ -29,6 +29,7 @@ fn observe_frame(
     content: Rect,
     close: Rect,
     logical_lines: Vec<String>,
+    is_running: bool,
 ) {
     let edit_copy_lines = vec![None; logical_lines.len()];
     let row_geometry = logical_lines
@@ -47,18 +48,20 @@ fn observe_frame(
         edit_copy_lines,
         row_geometry,
         rendered_rows,
+        is_running,
     });
 }
 
 #[test]
 fn viewer_scroll_is_clamped_to_the_observed_content() {
-    let mut state = BlockViewerState::new("turn\0entry-1".to_string());
+    let mut state = BlockViewerState::new("turn\0entry-1".to_string(), false);
     observe_frame(
         &mut state,
         Rect::new(1, 1, 20, 10),
         Rect::new(3, 3, 16, 4),
         Rect::new(17, 1, 3, 1),
         lines(12),
+        false,
     );
 
     assert_eq!(state.selected_item(), Some(0));
@@ -78,13 +81,14 @@ fn viewer_scroll_is_clamped_to_the_observed_content() {
 
 #[test]
 fn viewer_pointer_uses_the_rendered_modal_geometry() {
-    let mut state = BlockViewerState::new("turn\0entry-1".to_string());
+    let mut state = BlockViewerState::new("turn\0entry-1".to_string(), false);
     observe_frame(
         &mut state,
         Rect::new(2, 2, 30, 12),
         Rect::new(5, 4, 24, 7),
         Rect::new(27, 2, 3, 1),
         lines(20),
+        false,
     );
     state.observe_scrollbar_area(Some(Rect::new(30, 4, 1, 7)));
 
@@ -134,7 +138,7 @@ fn viewer_pointer_uses_the_rendered_modal_geometry() {
 
 #[test]
 fn viewer_search_uses_rendered_line_order_and_wraps_matches() {
-    let mut state = BlockViewerState::new("turn\0entry-1".to_string());
+    let mut state = BlockViewerState::new("turn\0entry-1".to_string(), false);
     observe_frame(
         &mut state,
         Rect::new(1, 1, 30, 12),
@@ -146,6 +150,7 @@ fn viewer_search_uses_rendered_line_order_and_wraps_matches() {
             "middle".to_string(),
             "second beta".to_string(),
         ],
+        false,
     );
 
     state.open_search();
@@ -164,7 +169,7 @@ fn viewer_search_uses_rendered_line_order_and_wraps_matches() {
 
 #[test]
 fn viewer_filter_keeps_only_matching_rendered_lines() {
-    let mut state = BlockViewerState::new("turn\0entry-1".to_string());
+    let mut state = BlockViewerState::new("turn\0entry-1".to_string(), false);
     state.observe_frame(BlockViewerFrame {
         popup_area: Rect::new(1, 1, 30, 12),
         content_area: Rect::new(3, 3, 24, 5),
@@ -181,6 +186,7 @@ fn viewer_filter_keeps_only_matching_rendered_lines() {
             "continued".to_string(),
             "beta".to_string(),
         ],
+        is_running: false,
     });
 
     state.open_filter();
@@ -201,13 +207,14 @@ fn viewer_filter_keeps_only_matching_rendered_lines() {
 
 #[test]
 fn viewer_visual_selection_copies_the_rendered_line_range() {
-    let mut state = BlockViewerState::new("turn\0entry-1".to_string());
+    let mut state = BlockViewerState::new("turn\0entry-1".to_string(), false);
     observe_frame(
         &mut state,
         Rect::new(1, 1, 30, 12),
         Rect::new(3, 3, 24, 5),
         Rect::new(27, 1, 3, 1),
         lines(5),
+        false,
     );
 
     state.select_by(1);
@@ -221,4 +228,34 @@ fn viewer_visual_selection_copies_the_rendered_line_range() {
         Some("line 1\nline 2\nline 3".to_string())
     );
     assert!(!state.visual_selection_active());
+}
+
+#[test]
+fn running_viewer_follows_live_content_until_navigation_pauses_it() {
+    let mut state = BlockViewerState::new("turn\0entry-1".to_string(), true);
+    let popup = Rect::new(1, 1, 20, 10);
+    let content = Rect::new(3, 3, 16, 4);
+    let close = Rect::new(17, 1, 3, 1);
+
+    observe_frame(&mut state, popup, content, close, lines(12), true);
+    assert_eq!((state.scroll_offset(), state.selected_item()), (8, None));
+
+    observe_frame(&mut state, popup, content, close, lines(14), true);
+    assert_eq!((state.scroll_offset(), state.selected_item()), (10, None));
+
+    assert!(state.select_by(-1));
+    assert_eq!(state.selected_item(), Some(12));
+    observe_frame(&mut state, popup, content, close, lines(16), true);
+    assert_eq!(state.selected_item(), Some(12));
+    assert!(state.scroll_offset() < 12);
+
+    assert!(state.toggle_follow());
+    observe_frame(&mut state, popup, content, close, lines(18), true);
+    assert_eq!((state.scroll_offset(), state.selected_item()), (14, None));
+
+    observe_frame(&mut state, popup, content, close, lines(18), false);
+    assert_eq!(
+        (state.scroll_offset(), state.selected_item()),
+        (14, Some(17))
+    );
 }

@@ -118,7 +118,7 @@ pub(super) fn render_overlay(
     theme: AstralTheme,
 ) -> bool {
     if state.block_viewer().is_some() {
-        let Some(block) = state.current_block_viewer_block() else {
+        let Some((block, is_running)) = state.current_block_viewer_entry() else {
             state.close_block_viewer();
             return false;
         };
@@ -130,6 +130,7 @@ pub(super) fn render_overlay(
             state: viewer,
             block: &block,
             text_mode,
+            is_running,
         }
         .render(area, buffer, theme);
     } else if let Some(picker) = &mut state.theme_picker {

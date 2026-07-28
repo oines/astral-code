@@ -59,6 +59,7 @@ pub(crate) struct BlockViewerPane<'a> {
     pub(crate) state: &'a mut BlockViewerState,
     pub(crate) block: &'a PresentationBlock,
     pub(crate) text_mode: BlockTextMode,
+    pub(crate) is_running: bool,
 }
 
 impl BlockViewerPane<'_> {
@@ -111,6 +112,7 @@ impl BlockViewerPane<'_> {
             edit_copy_lines,
             row_geometry,
             rendered_rows,
+            is_running: self.is_running,
         });
         let rows = self
             .state

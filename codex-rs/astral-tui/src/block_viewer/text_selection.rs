@@ -19,6 +19,7 @@ impl BlockViewerState {
         let Some(endpoint) = self.screen_to_endpoint(column, row) else {
             return false;
         };
+        self.pause_follow();
         self.clear_visual_selection();
         self.text_drag = Some(TextDrag {
             anchor: endpoint,

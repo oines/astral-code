@@ -8,8 +8,42 @@ use crossterm::event::MouseEventKind;
 use super::BlockViewerMouseAction;
 use super::BlockViewerState;
 
+const MOUSE_OVERSCROLL_THRESHOLD: usize = 9;
+
 impl BlockViewerState {
+    pub(crate) fn center_selected(&mut self) -> bool {
+        if self.follow_mode {
+            return false;
+        }
+        let Some(selected) = self.selected_item else {
+            return false;
+        };
+        let Some(rows) = self.visible_item_row_range(selected) else {
+            return false;
+        };
+        let next = rows
+            .start
+            .saturating_add(rows.len() / 2)
+            .saturating_sub(self.page_size / 2)
+            .min(self.max_scroll_offset);
+        if next == self.scroll_offset {
+            return false;
+        }
+        self.scroll_offset = next;
+        self.reset_edge_state();
+        true
+    }
+
     pub(crate) fn scroll_by(&mut self, lines: isize) -> bool {
+        if self.follow_mode {
+            if lines >= 0 {
+                return false;
+            }
+            self.pause_follow();
+        }
+        if lines < 0 {
+            self.reset_edge_state();
+        }
         let old_offset = self.scroll_offset;
         let selected_screen_row = self.selected_item_screen_row().unwrap_or(0);
         let next = self
@@ -17,13 +51,18 @@ impl BlockViewerState {
             .saturating_add_signed(lines)
             .min(self.max_scroll_offset);
         if next == old_offset {
-            return false;
+            return lines > 0 && self.push_past_content_edge();
         }
         self.scroll_offset = next;
         self.select_item_at_row(
             next.saturating_add(selected_screen_row)
                 .min(self.total_rows.saturating_sub(1)),
         );
+        if lines > 0 && next == self.max_scroll_offset && self.follow_engagement_allowed() {
+            self.at_content_edge = true;
+        } else if lines > 0 {
+            self.reset_edge_state();
+        }
         true
     }
 
@@ -42,6 +81,15 @@ impl BlockViewerState {
     }
 
     pub(crate) fn select_by(&mut self, items: isize) -> bool {
+        if self.follow_mode {
+            if items >= 0 {
+                return false;
+            }
+            self.pause_follow();
+        }
+        if items < 0 {
+            self.reset_edge_state();
+        }
         let Some(selected) = self.selected_item else {
             return false;
         };
@@ -49,14 +97,17 @@ impl BlockViewerState {
             .saturating_add_signed(items)
             .min(self.visible_item_indices.len().saturating_sub(1));
         if next == selected {
-            return false;
+            return items > 0 && self.push_past_content_edge();
         }
         self.selected_item = Some(next);
         self.reveal_selected_item();
+        self.reset_edge_state();
         true
     }
 
     pub(crate) fn scroll_to_start(&mut self) -> bool {
+        self.follow_mode = false;
+        self.reset_edge_state();
         let changed = self.scroll_offset != 0 || self.selected_item != Some(0);
         if !changed {
             return false;
@@ -67,6 +118,10 @@ impl BlockViewerState {
     }
 
     pub(crate) fn scroll_to_end(&mut self) -> bool {
+        if self.follow_engagement_allowed() {
+            return self.engage_follow();
+        }
+        self.reset_edge_state();
         let last_item = self.visible_item_indices.len().checked_sub(1);
         let changed =
             self.scroll_offset != self.max_scroll_offset || self.selected_item != last_item;
@@ -197,22 +252,54 @@ impl BlockViewerState {
     }
 
     fn scroll_from_pointer(&mut self, lines: isize, column: u16, row: u16) -> bool {
-        if !self.scrollbar_contains(column, row) {
-            return self.scroll_by(lines);
-        }
-        let proportional = self.total_rows.saturating_add(200) / 400;
-        let magnitude = proportional.max(lines.unsigned_abs());
+        let magnitude = if self.scrollbar_contains(column, row) {
+            let proportional = self.total_rows.saturating_add(200) / 400;
+            proportional.max(lines.unsigned_abs())
+        } else {
+            lines.unsigned_abs()
+        };
         let magnitude = isize::try_from(magnitude).unwrap_or(isize::MAX);
         let delta = magnitude.saturating_mul(lines.signum());
+        self.scroll_pointer_by(delta)
+    }
+
+    fn scroll_pointer_by(&mut self, lines: isize) -> bool {
+        if self.follow_mode {
+            if lines >= 0 {
+                return false;
+            }
+            self.pause_follow();
+        }
+        if lines < 0 {
+            self.reset_edge_state();
+        }
         let offset = self
             .scroll_offset
-            .saturating_add_signed(delta)
+            .saturating_add_signed(lines)
             .min(self.max_scroll_offset);
+        if offset == self.scroll_offset {
+            if lines <= 0 || !self.follow_engagement_allowed() {
+                return false;
+            }
+            self.mouse_overscroll = self.mouse_overscroll.saturating_add(lines.unsigned_abs());
+            if self.mouse_overscroll >= MOUSE_OVERSCROLL_THRESHOLD {
+                return self.engage_follow();
+            }
+            self.at_content_edge = true;
+            return false;
+        }
+        if lines > 0 && offset == self.max_scroll_offset {
+            self.at_content_edge = true;
+            self.mouse_overscroll = 0;
+        } else if lines > 0 {
+            self.reset_edge_state();
+        }
         self.set_scroll_offset_and_center(offset)
     }
 
     fn set_scroll_offset_and_center(&mut self, offset: usize) -> bool {
         let previous = (self.scroll_offset, self.selected_item);
+        self.follow_mode = false;
         self.scroll_offset = offset.min(self.max_scroll_offset);
         self.select_item_at_row(
             self.scroll_offset
@@ -255,7 +342,7 @@ impl BlockViewerState {
         self.reveal_selected_item();
     }
 
-    fn select_item_at_row(&mut self, row: usize) {
+    pub(super) fn select_item_at_row(&mut self, row: usize) {
         let Some(physical) = self.visible_row_physical_item(row) else {
             return;
         };
@@ -345,6 +432,12 @@ impl BlockViewerState {
             .collect();
         self.total_rows = self.visible_row_indices.len();
         self.max_scroll_offset = self.total_rows.saturating_sub(self.page_size);
+        if self.follow_mode {
+            self.selected_item = None;
+            self.visual_anchor = None;
+            self.scroll_offset = self.max_scroll_offset;
+            return;
+        }
         self.selected_item = match self.visible_item_indices.len() {
             0 => None,
             item_count => selected_physical

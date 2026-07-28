@@ -169,17 +169,18 @@ impl ConversationState {
             .collect()
     }
 
-    pub(crate) fn presentation_block(
+    pub(crate) fn presentation_block_state(
         &self,
         turn_id: &str,
         render_id: &str,
-    ) -> Option<PresentationBlock> {
+    ) -> Option<(PresentationBlock, bool)> {
         let local_id = render_id.strip_prefix("entry-")?.parse::<u64>().ok()?;
         let turn = self.turns.get(*self.turn_indices.get(turn_id)?)?;
-        turn.entries
+        let entry = turn
+            .entries
             .iter()
-            .find(|entry| entry.local_id == local_id)
-            .and_then(project_entry)
+            .find(|entry| entry.local_id == local_id)?;
+        project_entry(entry).map(|block| (block, entry.phase == EntryPhase::Running))
     }
 
     pub fn last_agent_response(&self) -> Option<&str> {

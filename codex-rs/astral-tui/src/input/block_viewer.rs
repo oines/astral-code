@@ -63,6 +63,12 @@ pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction
             }
             return InputAction::Redraw;
         }
+        (KeyCode::Char('F'), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
+            if let Some(viewer) = state.block_viewer_mut() {
+                viewer.toggle_follow();
+            }
+            return InputAction::Redraw;
+        }
         (KeyCode::Char('v' | 'V'), modifiers)
             if modifiers == KeyModifiers::NONE || modifiers == KeyModifiers::SHIFT =>
         {
@@ -194,6 +200,10 @@ pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction
         }
         (KeyCode::End, _) | (KeyCode::Char('G'), KeyModifiers::SHIFT) => {
             viewer.scroll_to_end();
+            InputAction::Redraw
+        }
+        (KeyCode::Char('z'), KeyModifiers::NONE) => {
+            viewer.center_selected();
             InputAction::Redraw
         }
         _ => InputAction::None,

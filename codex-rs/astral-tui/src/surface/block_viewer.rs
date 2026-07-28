@@ -26,10 +26,10 @@ impl SurfaceState {
         let Some(entry_id) = self.scrollback.selected_id().map(str::to_string) else {
             return false;
         };
-        if self.presentation_block(&entry_id).is_none() {
+        let Some((_, running)) = self.presentation_block_state(&entry_id) else {
             return false;
-        }
-        self.block_viewer = Some(BlockViewerState::new(entry_id));
+        };
+        self.block_viewer = Some(BlockViewerState::new(entry_id, running));
         true
     }
 
@@ -37,13 +37,19 @@ impl SurfaceState {
         self.block_viewer = None;
     }
 
-    pub(super) fn current_block_viewer_block(&self) -> Option<PresentationBlock> {
+    pub(super) fn current_block_viewer_entry(&self) -> Option<(PresentationBlock, bool)> {
         let entry_id = self.block_viewer.as_ref()?.entry_id();
-        self.presentation_block(entry_id)
+        self.presentation_block_state(entry_id)
     }
 
     pub(super) fn presentation_block(&self, entry_id: &str) -> Option<PresentationBlock> {
+        self.presentation_block_state(entry_id)
+            .map(|(block, _)| block)
+    }
+
+    fn presentation_block_state(&self, entry_id: &str) -> Option<(PresentationBlock, bool)> {
         let (turn_id, render_id) = entry_id.split_once('\0')?;
-        self.conversation.presentation_block(turn_id, render_id)
+        self.conversation
+            .presentation_block_state(turn_id, render_id)
     }
 }
