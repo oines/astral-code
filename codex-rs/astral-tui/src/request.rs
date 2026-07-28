@@ -182,6 +182,14 @@ pub enum RequestResolution {
     },
 }
 
+impl RequestResolution {
+    pub fn request_id(&self) -> &RequestId {
+        match self {
+            Self::Success { request_id, .. } | Self::Reject { request_id, .. } => request_id,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PendingRequestError {
     NotFound(RequestId),
@@ -247,8 +255,13 @@ impl PendingRequests {
         Some(request)
     }
 
-    pub fn resolve(
-        &mut self,
+    /// Builds the typed response without removing the pending request.
+    ///
+    /// The caller must keep the request until the response reaches app-server,
+    /// otherwise a transport failure would make the interaction impossible to
+    /// retry.
+    pub fn prepare_resolution(
+        &self,
         request_id: &RequestId,
         response: PendingRequestResponse,
     ) -> Result<RequestResolution, PendingRequestError> {
@@ -259,10 +272,8 @@ impl PendingRequests {
 
         let result = match (request, response) {
             (_, PendingRequestResponse::Reject { code, message }) => {
-                let request_id = request_id.clone();
-                self.remove_resolved(&request_id);
                 return Ok(RequestResolution::Reject {
-                    request_id,
+                    request_id: request_id.clone(),
                     error: JSONRPCErrorError {
                         code,
                         message,
@@ -302,9 +313,10 @@ impl PendingRequests {
         }
         .map_err(|error| PendingRequestError::Serialize(error.to_string()))?;
 
-        let request_id = request_id.clone();
-        self.remove_resolved(&request_id);
-        Ok(RequestResolution::Success { request_id, result })
+        Ok(RequestResolution::Success {
+            request_id: request_id.clone(),
+            result,
+        })
     }
 }
 

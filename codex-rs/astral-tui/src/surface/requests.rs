@@ -1,4 +1,5 @@
 use codex_app_server_protocol::McpServerElicitationRequest;
+use codex_app_server_protocol::RequestId;
 
 use super::SurfaceState;
 use crate::PendingRequest;
@@ -31,10 +32,6 @@ impl SurfaceState {
         &mut self.request_user_input
     }
 
-    pub(crate) fn reset_request_user_input(&mut self) {
-        self.request_user_input.reset();
-    }
-
     pub(crate) fn mcp_form(&self) -> &McpFormState {
         &self.mcp_form
     }
@@ -43,7 +40,20 @@ impl SurfaceState {
         &mut self.mcp_form
     }
 
-    pub(crate) fn reset_mcp_form(&mut self) {
-        self.mcp_form.reset();
+    pub(crate) fn remove_pending_request(
+        &mut self,
+        request_id: &RequestId,
+    ) -> Option<PendingRequest> {
+        let request = self.pending_requests.remove_resolved(request_id)?;
+        match &request {
+            PendingRequest::UserInput { .. } => self.request_user_input.reset(),
+            PendingRequest::McpElicitation { params, .. }
+                if matches!(params.request, McpServerElicitationRequest::Form { .. }) =>
+            {
+                self.mcp_form.reset();
+            }
+            _ => {}
+        }
+        Some(request)
     }
 }

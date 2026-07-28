@@ -359,6 +359,7 @@ fn command_session_approval_preserves_typed_decision() {
         })
     );
     assert_eq!(state.composer(), "draft survives approval");
+    assert_eq!(state.pending_requests().len(), 1);
 }
 
 #[test]
@@ -406,6 +407,7 @@ fn file_change_and_permission_approvals_preserve_scope() {
             result: json!({"decision": "acceptForSession"}),
         })
     );
+    state.remove_pending_request(&RequestId::String("edit-1".to_string()));
 
     state.pending_requests_mut().note(request(json!({
         "method": "item/permissions/requestApproval",
@@ -575,6 +577,7 @@ fn mcp_form_and_url_elicitations_keep_typed_actions() {
         })
     );
     assert_eq!(state.composer(), "keep this prompt draft");
+    state.remove_pending_request(&RequestId::String("mcp-form".to_string()));
 
     state.pending_requests_mut().note(request(json!({
         "method": "mcpServer/elicitation/request",

@@ -1,4 +1,7 @@
+use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerNotification;
+use codex_app_server_protocol::ServerRequest;
+use codex_app_server_protocol::ServerRequestResolvedNotification;
 use codex_app_server_protocol::ThreadTokenUsage;
 use codex_app_server_protocol::ThreadTokenUsageUpdatedNotification;
 use codex_app_server_protocol::TokenUsageBreakdown;
@@ -7,6 +10,7 @@ use codex_app_server_protocol::TurnCompletedNotification;
 use codex_app_server_protocol::TurnError;
 use codex_app_server_protocol::TurnStatus;
 use pretty_assertions::assert_eq;
+use serde_json::json;
 
 use super::RunOptions;
 use super::RunViewport;
@@ -86,6 +90,58 @@ fn turn_completion_preserves_terminal_activity_states() {
 
     handle_notification(&mut surface, &turn_completed(TurnStatus::Completed, None));
     assert_eq!(surface.activity(), &SurfaceActivity::Ready);
+}
+
+#[test]
+fn resolved_notifications_only_clear_the_matching_thread_request() {
+    let mut surface = SurfaceState::new("thread-1");
+    let request: ServerRequest = serde_json::from_value(json!({
+        "method": "item/tool/requestUserInput",
+        "id": "question-1",
+        "params": {
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "itemId": "call-1",
+            "questions": [{
+                "id": "answer",
+                "header": "Answer",
+                "question": "Continue?",
+                "options": null
+            }]
+        }
+    }))
+    .expect("valid user input request");
+    let ServerRequest::ToolRequestUserInput { params, .. } = &request else {
+        panic!("expected user input request");
+    };
+    let params = params.clone();
+    surface.pending_requests_mut().note(request);
+    surface.sync_request_states();
+    assert!(
+        surface
+            .request_user_input_mut()
+            .handle_paste(&params, "draft")
+    );
+
+    handle_notification(
+        &mut surface,
+        &ServerNotification::ServerRequestResolved(ServerRequestResolvedNotification {
+            thread_id: "thread-2".to_string(),
+            request_id: RequestId::String("question-1".to_string()),
+        }),
+    );
+    assert_eq!(surface.pending_requests().len(), 1);
+    assert_eq!(surface.request_user_input().editor(), "draft");
+
+    handle_notification(
+        &mut surface,
+        &ServerNotification::ServerRequestResolved(ServerRequestResolvedNotification {
+            thread_id: "thread-1".to_string(),
+            request_id: RequestId::String("question-1".to_string()),
+        }),
+    );
+    assert!(surface.pending_requests().is_empty());
+    assert!(surface.request_user_input().editor().is_empty());
 }
 
 fn turn_completed(status: TurnStatus, error: Option<TurnError>) -> ServerNotification {
