@@ -36,10 +36,6 @@ impl RenderOptions {
         }
     }
 
-    pub fn compact(width: u16) -> Self {
-        Self::truncated(width)
-    }
-
     pub fn collapsed(width: u16) -> Self {
         Self::for_mode(width, DisplayMode::Collapsed)
     }

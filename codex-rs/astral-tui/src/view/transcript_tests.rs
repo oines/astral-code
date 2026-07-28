@@ -8,11 +8,21 @@ use crate::conversation::TranscriptBlock;
 use crate::conversation::TranscriptTurn;
 
 use super::AstralTheme;
+use super::EntryDisplayState;
 use super::TranscriptSection;
 use super::format_duration;
 use super::item_duration_ms;
 use super::render_committed_block;
 use super::render_transcript;
+
+fn render(turns: &[TranscriptTurn], width: u16) -> super::TranscriptLayout {
+    render_transcript(
+        turns,
+        width,
+        AstralTheme::default(),
+        &EntryDisplayState::default(),
+    )
+}
 
 #[test]
 fn duration_format_matches_grok_turn_markers() {
@@ -82,7 +92,7 @@ fn transcript_layout_assigns_stable_item_sections() {
         duration_ms: Some(2_400),
     };
 
-    let layout = render_transcript(&[turn], 80, AstralTheme::default());
+    let layout = render(&[turn], 80);
 
     assert_eq!(
         layout.sections,
@@ -117,7 +127,7 @@ fn transcript_omits_timestamp_chrome_and_tracks_soft_wraps() {
         duration_ms: None,
     };
 
-    let layout = render_transcript(&[turn], 10, AstralTheme::default());
+    let layout = render(&[turn], 10);
     let selectable = &layout.selectable_ranges[0].lines;
 
     assert_eq!(
@@ -148,7 +158,7 @@ fn transcript_sections_scope_empty_item_ids_to_their_turn() {
         duration_ms: None,
     });
 
-    let layout = render_transcript(&turns, 80, AstralTheme::default());
+    let layout = render(&turns, 80);
 
     assert_eq!(
         layout
@@ -197,7 +207,7 @@ fn full_and_committed_paths_render_identical_entry_boundaries() {
         completed_at_ms: Some(3_400),
         duration_ms: Some(2_400),
     };
-    let full = render_transcript(&[turn], 80, AstralTheme::default()).lines;
+    let full = render(&[turn], 80).lines;
     let committed = blocks
         .into_iter()
         .enumerate()

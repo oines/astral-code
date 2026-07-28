@@ -8,17 +8,17 @@ expression: "render_at_size(&mut state, &session, 80, 24)"
 
   › inspect this┌─ Keyboard shortcuts ─────────────────────[×]─┐
                 │                                              │
-  I’m tracing th│  Enter      Send / submit focused input      │
-                │  Shift+Tab  Cycle collaboration mode         │
-                │  Ctrl+.     Toggle shortcuts window          │
-                │  Ctrl+C     Interrupt / clear / idle exit    │
-                │  Ctrl+D     Exit when the composer is empty  │
-                │  Ctrl+O     Copy the last agent response     │
-                │  PageUp     Scroll history up                │
-                │  PageDown   Scroll history down              │
-                │  /          Open slash-command discovery     │
+  I’m tracing th│  /          Open slash-command discovery     │
                 │  ↑/↓        Navigate menus / scroll lists    │
-  ◇ Working     │  Tab        Complete item / switch focus     │
+                │  Tab        Complete item / switch focus     │
+                │  j/k        Select foldable entry            │
+                │  e / Enter  Toggle selected entry            │
+                │  h/l        Collapse / expand entry          │
+                │  Esc        Close the focused menu or modal  │
+                │  Y          Approve a pending request        │
+                │  A          Approve for the session when av  │
+                │  N          Decline a pending request        │
+  ◇ Working     │                                              │
                 │                                              │
   ╭─────────────│            ↑/↓ scroll · Esc close            │─────────────╮
   │ ❯           └──────────────────────────────────────────────┘             │

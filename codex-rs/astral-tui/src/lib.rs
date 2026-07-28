@@ -36,6 +36,7 @@ mod view;
 #[path = "view_tests.rs"]
 mod view_tests;
 
+pub use astral_tui_scrollback::DisplayMode;
 pub use astral_tui_scrollback::PresentationBlock;
 pub use astral_tui_scrollback::RenderOptions;
 pub use astral_tui_scrollback::TimelineStream;

@@ -1,0 +1,47 @@
+---
+source: astral-tui/src/surface_tests.rs
+expression: "format!(\"COLLAPSED\\n{collapsed}\\n\\nEXPANDED\\n{expanded}\")"
+---
+COLLAPSED
+ ⎇ main  /workspace
+
+ › inspect this repo
+
+ I’m tracing the relevant data flow.
+ › Run cargo test -p astral-tui  2.4s
+
+
+
+
+
+
+
+
+ ◇ Working
+
+ ╭────────────────────────────────────────────────────────────────────────────╮
+ │ ❯                                                                          │
+ ╰────────────────────────────────────────────── claude-sonnet-4 · workspace ─╯
+ j/k:navigate  │  e:fold  │  Tab:prompt
+
+EXPANDED
+ ⎇ main  /workspace
+
+ › inspect this repo
+
+ I’m tracing the relevant data flow.
+ ⌄ Run cargo test -p astral-tui  2.4s
+   │ 150 passed
+   │ 0 failed
+
+
+
+
+
+
+ ◇ Working
+
+ ╭────────────────────────────────────────────────────────────────────────────╮
+ │ ❯                                                                          │
+ ╰────────────────────────────────────────────── claude-sonnet-4 · workspace ─╯
+ j/k:navigate  │  e:fold  │  Tab:prompt

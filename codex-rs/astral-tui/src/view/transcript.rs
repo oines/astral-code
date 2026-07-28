@@ -2,6 +2,7 @@
 // presentation at commit 47348d13ec4508dcfe440e34c6d511bb02998fb2
 // (Apache-2.0). Modified for Astral app-server turn and item metadata.
 
+use astral_tui_scrollback::DisplayMode;
 use astral_tui_scrollback::LineJoiner;
 use astral_tui_scrollback::MarkdownStyle;
 use astral_tui_scrollback::MarkdownSyntaxTheme;
@@ -22,6 +23,8 @@ use crate::conversation::TranscriptTurn;
 
 use super::AstralTheme;
 use super::AstralThemeId;
+use super::EntryDisplayState;
+use super::entry_state::entry_id;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TranscriptSection {
@@ -92,6 +95,7 @@ pub(crate) fn render_transcript(
     turns: &[TranscriptTurn],
     width: u16,
     theme: AstralTheme,
+    display: &EntryDisplayState,
 ) -> TranscriptLayout {
     let mut lines = Vec::new();
     let mut sections = Vec::new();
@@ -100,9 +104,14 @@ pub(crate) fn render_transcript(
         for block in &turn.blocks {
             let start = lines.len();
             let mut selectable_lines = Vec::new();
-            render_turn_block(&mut lines, &mut selectable_lines, block, width, theme);
+            let item_id = entry_id(&turn.id, &block.item_id);
+            let mode = display.mode_for(&turn.id, &block.item_id, &block.block);
+            render_turn_block(&mut lines, &mut selectable_lines, block, width, theme, mode);
+            if display.selected_id() == Some(item_id.as_str()) {
+                highlight_selected_header(&mut lines, start, width, theme, mode);
+            }
             sections.push(TranscriptSection {
-                item_id: section_id(&turn.id, &block.item_id),
+                item_id,
                 lines: start..lines.len(),
             });
             selectable_ranges.push(TranscriptSelectableRange {
@@ -133,10 +142,6 @@ pub(crate) fn render_transcript(
     }
 }
 
-fn section_id(turn_id: &str, item_id: &str) -> String {
-    format!("{turn_id}\0{item_id}")
-}
-
 pub(crate) fn render_committed_block(
     committed: &CommittedBlock,
     width: u16,
@@ -156,12 +161,14 @@ pub(crate) fn render_committed_block(
     };
     let mut lines = Vec::new();
     let mut selectable_lines = Vec::new();
+    let mode = turn.blocks[0].block.default_display_mode();
     render_turn_block(
         &mut lines,
         &mut selectable_lines,
         &turn.blocks[0],
         width,
         theme,
+        mode,
     );
     if committed.ends_turn
         && let Some(duration_ms) = turn_duration_ms(&turn)
@@ -181,10 +188,11 @@ fn render_turn_block(
     block: &TranscriptBlock,
     width: u16,
     theme: AstralTheme,
+    mode: DisplayMode,
 ) {
     match &block.block {
         PresentationBlock::User { .. } => {
-            let rendered = render_block(&block.block, RenderOptions::compact(width));
+            let rendered = render_block(&block.block, RenderOptions::for_mode(width, mode));
             push_transcript_line(
                 lines,
                 selectable_lines,
@@ -221,7 +229,13 @@ fn render_turn_block(
                     |duration_ms| format!("Thought for {}", format_duration(duration_ms)),
                 )
             };
-            let line = vec!["◆ ".fg(theme.gray), label.bold().fg(theme.gray)].into();
+            let marker = if *running { "◇ " } else { "◆ " };
+            let color = if *running {
+                theme.accent_running
+            } else {
+                theme.gray
+            };
+            let line = vec![marker.fg(color), label.bold().fg(color)].into();
             let columns = selectable_columns(&line, width);
             push_transcript_line(
                 lines,
@@ -230,8 +244,8 @@ fn render_turn_block(
                 columns,
                 LineJoiner::HardBreak,
             );
-            if *running {
-                let rendered = render_block(&block.block, RenderOptions::compact(width));
+            if mode != DisplayMode::Collapsed {
+                let rendered = render_block(&block.block, RenderOptions::for_mode(width, mode));
                 for line in rendered.lines.into_iter().skip(1) {
                     let columns = selectable_columns(&line, width);
                     push_transcript_line(
@@ -259,7 +273,7 @@ fn render_turn_block(
             }
         }
         _ => {
-            for line in render_block(&block.block, RenderOptions::compact(width)).lines {
+            for line in render_block(&block.block, RenderOptions::for_mode(width, mode)).lines {
                 let columns = selectable_columns(&line, width);
                 push_transcript_line(
                     lines,
@@ -271,6 +285,32 @@ fn render_turn_block(
             }
         }
     }
+}
+
+fn highlight_selected_header(
+    lines: &mut [Line<'static>],
+    start: usize,
+    width: u16,
+    theme: AstralTheme,
+    mode: DisplayMode,
+) {
+    let Some(line) = lines.get_mut(start) else {
+        return;
+    };
+    if let Some(marker) = line.spans.first_mut() {
+        let content = marker.content.to_string();
+        let mut chars = content.chars();
+        if chars.next().is_some() {
+            let indicator = if mode == DisplayMode::Collapsed {
+                "›"
+            } else {
+                "⌄"
+            };
+            marker.content = format!("{indicator}{}", chars.as_str()).into();
+        }
+    }
+    let line = std::mem::take(line);
+    lines[start] = band_line(line, width, theme.panel_selected);
 }
 
 fn selectable_columns(line: &Line<'_>, width: u16) -> Range<u16> {

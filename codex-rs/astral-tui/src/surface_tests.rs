@@ -3,6 +3,7 @@ use chrono::TimeZone;
 use codex_app_server_protocol::ActivePermissionProfile;
 use codex_app_server_protocol::ApprovalsReviewer;
 use codex_app_server_protocol::AskForApproval;
+use codex_app_server_protocol::CoreToolCallStatus;
 use codex_app_server_protocol::ItemCompletedNotification;
 use codex_app_server_protocol::ItemStartedNotification;
 use codex_app_server_protocol::RequestId;
@@ -340,6 +341,17 @@ fn shortcuts_modal_snapshot() {
     let session = session_state();
     let mut state = SurfaceState::from_session(&session);
     state.open_modal(shortcuts_modal());
+
+    insta::assert_snapshot!(render_at_size(&mut state, &session, 80, 24));
+}
+
+#[test]
+fn shortcuts_modal_scrolled_snapshot() {
+    let session = session_state();
+    let mut state = SurfaceState::from_session(&session);
+    let mut modal = shortcuts_modal();
+    modal.scroll_by(8);
+    state.open_modal(modal);
 
     insta::assert_snapshot!(render_at_size(&mut state, &session, 80, 24));
 }
@@ -1210,6 +1222,52 @@ fn todo_notification_surface_snapshot() {
     assert!(rendered.contains("▶ Render Grok-style todo rows"));
     assert!(rendered.contains("□ Verify Claude and Codex surfaces"));
     insta::assert_snapshot!("todo_notification_surface", rendered);
+}
+
+#[test]
+fn scrollback_focus_folds_tool_entries_snapshot() {
+    let mut session = session_state();
+    session.thread.turns[0]
+        .items
+        .push(ThreadItem::CoreToolCall {
+            id: "tool-1".to_string(),
+            tool: "Bash".to_string(),
+            arguments: json!({"command": "cargo test -p astral-tui"}),
+            status: CoreToolCallStatus::Completed,
+            result: Some("150 passed\n0 failed".to_string()),
+            error: None,
+            duration_ms: Some(2_400),
+        });
+    let mut state = SurfaceState::from_session(&session);
+    render_at_size(&mut state, &session, 80, 20);
+
+    assert_eq!(
+        handle_key(&mut state, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)),
+        crate::InputAction::Redraw
+    );
+    assert!(state.scrollback_focused());
+    let collapsed = render_at_size(&mut state, &session, 80, 20);
+    assert!(!collapsed.contains("150 passed"));
+
+    assert_eq!(
+        handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE)
+        ),
+        crate::InputAction::Redraw
+    );
+    let expanded = render_at_size(&mut state, &session, 80, 20);
+    assert!(expanded.contains("150 passed"));
+
+    insta::assert_snapshot!(
+        "scrollback_focus_fold_surface",
+        format!("COLLAPSED\n{collapsed}\n\nEXPANDED\n{expanded}")
+    );
+    assert_eq!(
+        handle_key(&mut state, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)),
+        crate::InputAction::Redraw
+    );
+    assert!(!state.scrollback_focused());
 }
 
 #[test]

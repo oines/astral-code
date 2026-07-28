@@ -178,6 +178,26 @@ impl ScrollbackNavigation {
         self.anchor = None;
     }
 
+    pub(crate) fn reveal_entry(&mut self, item_id: &str) {
+        let Some(section) = self
+            .sections
+            .iter()
+            .find(|section| section.item_id == item_id)
+        else {
+            return;
+        };
+        let viewport_end = self.first_visible_line.saturating_add(self.viewport_lines);
+        if section.lines.start < self.first_visible_line {
+            self.first_visible_line = section.lines.start;
+        } else if section.lines.end > viewport_end {
+            self.first_visible_line = section.lines.end.saturating_sub(self.viewport_lines);
+        } else {
+            return;
+        }
+        self.follow_mode = false;
+        self.refresh_anchor();
+    }
+
     pub(crate) fn distance_from_bottom(&self) -> usize {
         if self.viewport_lines == 0 {
             self.pending_distance_from_bottom

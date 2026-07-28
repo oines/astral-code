@@ -31,6 +31,7 @@ use crate::thread_picker::PickerInput;
 use crate::thread_picker::handle_key as handle_thread_picker_key;
 
 mod mention_popup;
+mod scrollback;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum InputAction {
@@ -115,6 +116,9 @@ pub fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
     }
     if key.code == KeyCode::Esc && state.clear_scrollback_selection() {
         return InputAction::Redraw;
+    }
+    if state.scrollback_focused() {
+        return scrollback::handle_key(state, key);
     }
     handle_composer_key(state, key)
 }
@@ -272,6 +276,9 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
             }
             _ => {}
         }
+    }
+    if key.code == KeyCode::Tab && key.modifiers == KeyModifiers::NONE && state.focus_scrollback() {
+        return InputAction::Redraw;
     }
     match (key.code, key.modifiers) {
         (KeyCode::Char('c'), KeyModifiers::CONTROL) => {

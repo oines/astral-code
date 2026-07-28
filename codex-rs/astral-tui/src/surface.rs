@@ -42,6 +42,7 @@ use crate::view::AgentViewLayoutInput;
 use crate::view::AstralTheme;
 use crate::view::AstralThemeId;
 use crate::view::ColorLevel;
+use crate::view::EntryDisplayState;
 use crate::view::LayoutConfig;
 use crate::view::MentionMenu;
 use crate::view::PaneHeights;
@@ -87,6 +88,7 @@ pub struct SurfaceState {
     notice: Option<String>,
     scrollback: ScrollbackNavigation,
     selection: ScrollbackSelection,
+    entry_display: EntryDisplayState,
     slash: SlashController,
     mentions: MentionController,
     modal: Option<ModalState>,
@@ -111,6 +113,7 @@ impl SurfaceState {
             notice: None,
             scrollback: ScrollbackNavigation::default(),
             selection: ScrollbackSelection::default(),
+            entry_display: EntryDisplayState::default(),
             slash: SlashController::default(),
             mentions: MentionController::default(),
             modal: None,
@@ -142,6 +145,7 @@ impl SurfaceState {
             notice: None,
             scrollback: ScrollbackNavigation::default(),
             selection: ScrollbackSelection::default(),
+            entry_display: EntryDisplayState::default(),
             slash: SlashController::default(),
             mentions: MentionController::default(),
             modal: None,
@@ -235,6 +239,49 @@ impl SurfaceState {
 
     pub fn scroll_offset(&self) -> usize {
         self.scrollback.distance_from_bottom()
+    }
+
+    pub(crate) fn focus_scrollback(&mut self) -> bool {
+        if !self.entry_display.focus_scrollback() {
+            return false;
+        }
+        self.reveal_selected_entry();
+        true
+    }
+
+    pub(crate) fn focus_prompt(&mut self) {
+        self.entry_display.focus_prompt();
+    }
+
+    pub(crate) fn scrollback_focused(&self) -> bool {
+        self.entry_display.is_focused()
+    }
+
+    pub(crate) fn move_entry_selection(&mut self, delta: isize) {
+        if let Some(item_id) = self.entry_display.move_selection(delta) {
+            self.scrollback.reveal_entry(&item_id);
+        }
+    }
+
+    pub(crate) fn toggle_selected_entry(&mut self) {
+        self.entry_display.toggle_selected();
+        self.reveal_selected_entry();
+    }
+
+    pub(crate) fn expand_selected_entry(&mut self) {
+        self.entry_display.expand_selected();
+        self.reveal_selected_entry();
+    }
+
+    pub(crate) fn collapse_selected_entry(&mut self) {
+        self.entry_display.collapse_selected();
+        self.reveal_selected_entry();
+    }
+
+    fn reveal_selected_entry(&mut self) {
+        if let Some(item_id) = self.entry_display.selected_id().map(str::to_string) {
+            self.scrollback.reveal_entry(&item_id);
+        }
     }
 
     pub(crate) fn handle_scrollback_mouse(
@@ -572,6 +619,7 @@ pub(crate) fn render_surface_with_view(
         .pending_requests
         .front()
         .map(|request| RequestPane::new(request, state.request_user_input(), state.mcp_form()));
+    let prompt_focused = request_pane.is_some() || !state.scrollback_focused();
     let cursor = if let Some(pane) = request_pane {
         pane.render(layout.prompt, buffer, theme)
     } else {
@@ -583,17 +631,20 @@ pub(crate) fn render_surface_with_view(
             model: &session.model,
             flags: &flags,
             ghost: slash.ghost.as_deref(),
-            focused: true,
+            focused: prompt_focused,
         }
         .render(layout.prompt, buffer, theme)
     };
 
     let default_hints = [("Shift+Tab", "mode"), ("Ctrl+.", "shortcuts")];
+    let scrollback_hints = [("j/k", "navigate"), ("e", "fold"), ("Tab", "prompt")];
     let mention_hints = [("↑/↓", "navigate"), ("Tab", "select"), ("Esc", "close")];
     let slash_hints = [("↑/↓", "navigate"), ("Tab", "complete"), ("Esc", "close")];
     ShortcutsBar {
         hints: if let Some(pane) = request_pane {
             pane.shortcuts()
+        } else if state.scrollback_focused() {
+            &scrollback_hints
         } else if mentions.open {
             &mention_hints
         } else if slash.open {
@@ -606,13 +657,15 @@ pub(crate) fn render_surface_with_view(
     .render(layout.shortcuts, buffer, theme);
     if appearance::render_overlay(state, area, buffer, theme) {
         None
-    } else {
+    } else if prompt_focused {
         cursor
+    } else {
+        None
     }
 }
 
 fn conversation_layout(
-    state: &SurfaceState,
+    state: &mut SurfaceState,
     transcript_view: TranscriptView,
     width: u16,
 ) -> TranscriptLayout {
@@ -620,7 +673,8 @@ fn conversation_layout(
         TranscriptView::Live => state.conversation.live_turns(),
         TranscriptView::Full => state.conversation.all_turns(),
     };
-    render_transcript(&turns, width, state.theme())
+    state.entry_display.observe(&turns);
+    render_transcript(&turns, width, state.theme(), &state.entry_display)
 }
 
 fn turn_status_line(state: &SurfaceState, theme: AstralTheme) -> Option<Line<'static>> {
