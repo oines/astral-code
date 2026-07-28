@@ -1,15 +1,26 @@
-use std::collections::HashMap;
-use std::collections::HashSet;
+mod model;
+mod reducer;
+mod state;
 
-use codex_app_server_protocol::ServerNotification;
+use std::collections::HashMap;
+
 use codex_app_server_protocol::ThreadItem;
-use codex_app_server_protocol::Turn;
-use codex_app_server_protocol::TurnStatus;
+use codex_app_server_protocol::TurnPlanUpdatedNotification;
 
 use crate::PresentationBlock;
-use crate::ReduceOutcome;
-use crate::TimelineEntry;
-use crate::TimelineState;
+
+use self::model::ConversationEntry;
+use self::model::ConversationTurn;
+use self::model::EntryLocation;
+use self::model::EntryPhase;
+
+/// Whether an app-server notification changed the active conversation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReduceOutcome {
+    Applied,
+    Ignored,
+    DifferentThread,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CommittedBlock {
@@ -41,110 +52,87 @@ pub(crate) struct TranscriptTurn {
     pub(crate) duration_ms: Option<i64>,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct TurnTiming {
-    started_at_ms: Option<i64>,
-    completed_at_ms: Option<i64>,
-    duration_ms: Option<i64>,
-}
-
-/// Scrollback commit state for one app-server thread.
+/// Canonical transcript state for one app-server thread.
 ///
-/// Items remain mutable while their turn is running. This lets a structured
-/// file-change item replace the same-id generic tool call before anything is
-/// printed into native terminal history.
-#[derive(Debug, Clone, PartialEq)]
+/// The app-server remains authoritative for runtime semantics. This state only
+/// preserves Codex's presentation lifecycle: turns own their entries, streamed
+/// assistant text delays interrupting tool rows, and mutable tool projections
+/// settle before they are printed into terminal-native scrollback.
+#[derive(Debug, Clone)]
 pub struct ConversationState {
-    timeline: TimelineState,
-    committed_entries: usize,
-    completed_turns: HashSet<String>,
-    turn_timings: HashMap<String, TurnTiming>,
+    thread_id: String,
+    turns: Vec<ConversationTurn>,
+    turn_indices: HashMap<String, usize>,
+    process_entries: HashMap<String, EntryLocation>,
+    next_entry_id: u64,
+    commit_turn: usize,
+    turn_plan: Option<TurnPlanUpdatedNotification>,
+    turn_diff: Option<String>,
+    skipped_events: usize,
 }
 
 impl ConversationState {
     pub fn new(thread_id: impl Into<String>) -> Self {
         Self {
-            timeline: TimelineState::new(thread_id),
-            committed_entries: 0,
-            completed_turns: HashSet::new(),
-            turn_timings: HashMap::new(),
+            thread_id: thread_id.into(),
+            turns: Vec::new(),
+            turn_indices: HashMap::new(),
+            process_entries: HashMap::new(),
+            next_entry_id: 0,
+            commit_turn: 0,
+            turn_plan: None,
+            turn_diff: None,
+            skipped_events: 0,
         }
     }
 
-    pub fn from_turns(thread_id: impl Into<String>, turns: &[Turn]) -> Self {
-        let mut state = Self::new(thread_id);
-        state.timeline.replace_from_turns(
-            turns
-                .iter()
-                .map(|turn| (turn.id.as_str(), turn.items.as_slice())),
-        );
-        state.completed_turns.extend(
-            turns
-                .iter()
-                .filter(|turn| turn.status != TurnStatus::InProgress)
-                .map(|turn| turn.id.clone()),
-        );
-        state.turn_timings.extend(turns.iter().map(|turn| {
-            (
-                turn.id.clone(),
-                TurnTiming {
-                    started_at_ms: turn.started_at.map(seconds_to_millis),
-                    completed_at_ms: turn.completed_at.map(seconds_to_millis),
-                    duration_ms: turn.duration_ms,
-                },
-            )
-        }));
-        state
+    pub fn thread_id(&self) -> &str {
+        &self.thread_id
     }
 
-    pub fn timeline(&self) -> &TimelineState {
-        &self.timeline
+    pub fn turn_plan(&self) -> Option<&TurnPlanUpdatedNotification> {
+        self.turn_plan.as_ref()
     }
 
-    pub fn apply(&mut self, notification: &ServerNotification) -> ReduceOutcome {
-        let outcome = self.timeline.apply(notification);
-        match notification {
-            ServerNotification::TurnStarted(params)
-                if params.thread_id == self.timeline.thread_id() =>
-            {
-                self.completed_turns.remove(&params.turn.id);
-                self.record_turn_timing(&params.turn);
-            }
-            ServerNotification::TurnCompleted(params)
-                if params.thread_id == self.timeline.thread_id() =>
-            {
-                self.completed_turns.insert(params.turn.id.clone());
-                self.record_turn_timing(&params.turn);
-            }
-            _ => {}
-        }
-        outcome
+    pub fn turn_diff(&self) -> Option<&str> {
+        self.turn_diff.as_deref()
+    }
+
+    pub fn skipped_events(&self) -> usize {
+        self.skipped_events
     }
 
     pub fn record_lag(&mut self, skipped: usize) {
-        self.timeline.record_lag(skipped);
+        self.skipped_events = self.skipped_events.saturating_add(skipped);
     }
 
     pub fn drain_committable(&mut self) -> Vec<CommittedBlock> {
         let mut blocks = Vec::new();
-        while let Some(entry) = self.timeline.entries().get(self.committed_entries) {
-            if !entry.is_finalized() || !self.completed_turns.contains(entry.turn_id()) {
+        while let Some(turn) = self.turns.get(self.commit_turn) {
+            let Some(entry) = turn.entries.get(turn.committed_entries) else {
+                if turn.sealed {
+                    self.commit_turn += 1;
+                    continue;
+                }
+                break;
+            };
+            let is_tail = turn.committed_entries + 1 == turn.entries.len();
+            if entry.phase != EntryPhase::Stable || is_tail && !turn.sealed {
                 break;
             }
-            self.committed_entries += 1;
-            if let Some(block) = project_entry(entry) {
-                let timing = self.turn_timing(entry.turn_id());
-                let ends_turn = self
-                    .timeline
-                    .entries()
-                    .get(self.committed_entries)
-                    .is_none_or(|next| next.turn_id() != entry.turn_id());
+
+            let entry = entry.clone();
+            let turn_id = turn.id.clone();
+            let timing = turn.timing;
+            let ends_turn = turn.sealed && is_tail;
+            self.turns[self.commit_turn].committed_entries += 1;
+            if let Some(block) = project_entry(&entry) {
                 blocks.push(CommittedBlock {
-                    item_id: entry.id().to_string(),
-                    turn_id: entry.turn_id().to_string(),
+                    item_id: entry.render_id(),
+                    turn_id,
                     block,
-                    started_at_ms: entry.started_at_ms(),
-                    completed_at_ms: entry.completed_at_ms(),
+                    started_at_ms: entry.started_at_ms,
+                    completed_at_ms: entry.completed_at_ms,
                     turn_started_at_ms: timing.started_at_ms,
                     turn_completed_at_ms: timing.completed_at_ms,
                     turn_duration_ms: timing.duration_ms,
@@ -156,19 +144,34 @@ impl ConversationState {
     }
 
     pub(crate) fn live_turns(&self) -> Vec<TranscriptTurn> {
-        self.project_turns(&self.timeline.entries()[self.committed_entries..])
+        self.turns
+            .iter()
+            .enumerate()
+            .skip(self.commit_turn)
+            .filter_map(|(turn_index, turn)| {
+                let start = if turn_index == self.commit_turn {
+                    turn.committed_entries
+                } else {
+                    0
+                };
+                project_turn(turn, &turn.entries[start..])
+            })
+            .collect()
     }
 
     pub(crate) fn all_turns(&self) -> Vec<TranscriptTurn> {
-        self.project_turns(self.timeline.entries())
+        self.turns
+            .iter()
+            .filter_map(|turn| project_turn(turn, &turn.entries))
+            .collect()
     }
 
     pub fn last_agent_response(&self) -> Option<&str> {
-        self.timeline
-            .entries()
+        self.turns
             .iter()
             .rev()
-            .filter_map(TimelineEntry::item)
+            .flat_map(|turn| turn.entries.iter().rev())
+            .filter_map(|entry| entry.item.as_ref())
             .find_map(|item| match item {
                 ThreadItem::AgentMessage { text, .. } => Some(text.as_str()),
                 _ => None,
@@ -176,65 +179,48 @@ impl ConversationState {
     }
 
     pub fn committed_entries(&self) -> usize {
-        self.committed_entries
+        self.turns.iter().map(|turn| turn.committed_entries).sum()
     }
+}
 
-    fn record_turn_timing(&mut self, turn: &Turn) {
-        self.turn_timings.insert(
-            turn.id.clone(),
-            TurnTiming {
-                started_at_ms: turn.started_at.map(seconds_to_millis),
-                completed_at_ms: turn.completed_at.map(seconds_to_millis),
-                duration_ms: turn.duration_ms,
-            },
-        );
-    }
+fn project_turn(turn: &ConversationTurn, entries: &[ConversationEntry]) -> Option<TranscriptTurn> {
+    let blocks = entries
+        .iter()
+        .filter_map(|entry| {
+            project_entry(entry).map(|block| TranscriptBlock {
+                item_id: entry.render_id(),
+                block,
+                started_at_ms: entry.started_at_ms,
+                completed_at_ms: entry.completed_at_ms,
+            })
+        })
+        .collect::<Vec<_>>();
+    (!blocks.is_empty()).then_some(TranscriptTurn {
+        id: turn.id.clone(),
+        blocks,
+        started_at_ms: turn.timing.started_at_ms,
+        completed_at_ms: turn.timing.completed_at_ms,
+        duration_ms: turn.timing.duration_ms,
+    })
+}
 
-    fn turn_timing(&self, turn_id: &str) -> TurnTiming {
-        self.turn_timings.get(turn_id).copied().unwrap_or_default()
-    }
-
-    fn project_turns(&self, entries: &[TimelineEntry]) -> Vec<TranscriptTurn> {
-        let mut turns = Vec::<TranscriptTurn>::new();
-        for entry in entries {
-            let Some(block) = project_entry(entry) else {
-                continue;
-            };
-            if turns.last().is_none_or(|turn| turn.id != entry.turn_id()) {
-                let timing = self.turn_timing(entry.turn_id());
-                turns.push(TranscriptTurn {
-                    id: entry.turn_id().to_string(),
-                    blocks: Vec::new(),
-                    started_at_ms: timing.started_at_ms,
-                    completed_at_ms: timing.completed_at_ms,
-                    duration_ms: timing.duration_ms,
-                });
-            }
-            if let Some(turn) = turns.last_mut() {
-                turn.blocks.push(TranscriptBlock {
-                    item_id: entry.id().to_string(),
-                    block,
-                    started_at_ms: entry.started_at_ms(),
-                    completed_at_ms: entry.completed_at_ms(),
-                });
-            }
+fn project_entry(entry: &ConversationEntry) -> Option<PresentationBlock> {
+    let mut block = if let Some(presentation) = &entry.presentation {
+        Some(presentation.clone())
+    } else {
+        match &entry.item {
+            Some(item) => PresentationBlock::from_item(item, &entry.stream),
+            None => PresentationBlock::from_stream(&entry.stream),
         }
-        turns
+    }?;
+    if entry.phase == EntryPhase::Running {
+        match &mut block {
+            PresentationBlock::Plan { running, .. }
+            | PresentationBlock::Thinking { running, .. } => *running = true,
+            _ => {}
+        }
     }
-}
-
-fn seconds_to_millis(seconds: i64) -> i64 {
-    seconds.saturating_mul(1_000)
-}
-
-fn project_entry(entry: &TimelineEntry) -> Option<PresentationBlock> {
-    if let Some(presentation) = entry.presentation() {
-        return Some(presentation.clone());
-    }
-    match entry.item() {
-        Some(item) => PresentationBlock::from_item(item, entry.stream()),
-        None => PresentationBlock::from_stream(entry.stream()),
-    }
+    Some(block)
 }
 
 #[cfg(test)]

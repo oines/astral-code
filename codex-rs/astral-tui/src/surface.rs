@@ -645,17 +645,11 @@ fn turn_status_line(state: &SurfaceState, theme: AstralTheme) -> Option<Line<'st
         }
         spans.push(notice.to_string().cyan());
     }
-    if state.conversation.timeline().skipped_events() > 0 {
+    if state.conversation.skipped_events() > 0 {
         if !spans.is_empty() {
             spans.push(" · ".dim());
         }
-        spans.push(
-            format!(
-                "{} events skipped",
-                state.conversation.timeline().skipped_events()
-            )
-            .cyan(),
-        );
+        spans.push(format!("{} events skipped", state.conversation.skipped_events()).cyan());
     }
     if state.scroll_offset() > 0 {
         if !spans.is_empty() {

@@ -1,0 +1,24 @@
+---
+source: astral-tui/src/surface_tests.rs
+expression: rendered
+---
+ ⎇ main  /workspace
+
+ › first question
+
+
+ first response                                                         7:30 AM
+
+
+
+ › second question
+
+
+
+
+
+
+ ╭────────────────────────────────────────────────────────────────────────────╮
+ │ ❯                                                                          │
+ ╰────────────────────────────────────────────── claude-sonnet-4 · workspace ─╯
+ Shift+Tab:mode  │  Ctrl+.:shortcuts

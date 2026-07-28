@@ -789,7 +789,7 @@ async fn handle_app_event(
 }
 
 fn handle_notification(surface: &mut SurfaceState, notification: &ServerNotification) {
-    let active_thread_id = surface.conversation().timeline().thread_id().to_string();
+    let active_thread_id = surface.conversation().thread_id().to_string();
     surface.conversation_mut().apply(notification);
     match notification {
         ServerNotification::TurnStarted(params) if params.thread_id == active_thread_id => {

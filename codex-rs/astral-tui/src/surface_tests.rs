@@ -1103,6 +1103,72 @@ fn reused_provider_item_ids_preserve_turn_order_snapshot() {
 }
 
 #[test]
+fn interleaved_live_events_render_each_turn_once_snapshot() {
+    let session = session_state();
+    let mut state = SurfaceState::new("thread-1");
+    for (turn_id, item) in [
+        (
+            "turn-first",
+            ThreadItem::UserMessage {
+                id: "user-first".to_string(),
+                client_id: None,
+                content: vec![UserInput::Text {
+                    text: "first question".to_string(),
+                    text_elements: Vec::new(),
+                }],
+            },
+        ),
+        (
+            "turn-second",
+            ThreadItem::UserMessage {
+                id: "user-second".to_string(),
+                client_id: None,
+                content: vec![UserInput::Text {
+                    text: "second question".to_string(),
+                    text_elements: Vec::new(),
+                }],
+            },
+        ),
+        (
+            "turn-first",
+            ThreadItem::AgentMessage {
+                id: "agent-first".to_string(),
+                text: "first response".to_string(),
+                phase: None,
+                memory_citation: None,
+            },
+        ),
+    ] {
+        state
+            .conversation_mut()
+            .apply(&ServerNotification::ItemCompleted(
+                ItemCompletedNotification {
+                    thread_id: "thread-1".to_string(),
+                    turn_id: turn_id.to_string(),
+                    item,
+                    completed_at_ms: 20,
+                },
+            ));
+    }
+    let area = Rect::new(0, 0, 80, 20);
+    let mut buffer = Buffer::empty(area);
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        area,
+        &mut buffer,
+    );
+
+    let rendered = buffer_text(&buffer);
+    let first_question = rendered.find("first question").expect("first question");
+    let first_response = rendered.find("first response").expect("first response");
+    let second_question = rendered.find("second question").expect("second question");
+    assert!(first_question < first_response && first_response < second_question);
+    insta::assert_snapshot!("interleaved_live_events_render_each_turn_once", rendered);
+}
+
+#[test]
 fn todo_notification_surface_snapshot() {
     let session = session_state();
     let mut state = SurfaceState::from_session(&session);
