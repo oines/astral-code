@@ -47,6 +47,7 @@ use crate::modal::ModalState;
 use crate::permission_picker::PermissionPickerState;
 use crate::render_surface;
 use crate::render_surface_with_view;
+use crate::session::ThreadSwitchOutcome;
 use crate::shortcuts::shortcuts_modal;
 use crate::surface::paint_committed_with_theme;
 use crate::terminal_guard::TerminalGuard;
@@ -435,17 +436,10 @@ async fn apply_input_action(
         InputAction::ThreadPickerSelect { action, thread } => {
             let result = match action {
                 ThreadPickerAction::Resume => session.resume_thread(thread.id).await,
-                ThreadPickerAction::Fork => {
-                    session
-                        .fork(codex_app_server_protocol::ThreadForkParams {
-                            thread_id: thread.id,
-                            ..codex_app_server_protocol::ThreadForkParams::default()
-                        })
-                        .await
-                }
+                ThreadPickerAction::Fork => session.fork_thread(thread.id).await,
             };
             match result {
-                Ok(_) => reset_surface(session, surface).await,
+                Ok(outcome) => reset_surface_after_switch(session, surface, outcome).await,
                 Err(error) => surface.set_notice(error.to_string()),
             }
         }
@@ -502,7 +496,7 @@ async fn apply_input_action(
                 Err(error) => surface.set_notice(error.to_string()),
             },
             SlashCommandId::New => match session.start_new().await {
-                Ok(_) => reset_surface(session, surface).await,
+                Ok(outcome) => reset_surface_after_switch(session, surface, outcome).await,
                 Err(error) => surface.set_notice(error.to_string()),
             },
             SlashCommandId::Resume => match session.list_threads(None).await {
@@ -512,7 +506,7 @@ async fn apply_input_action(
                 Err(error) => surface.set_notice(error.to_string()),
             },
             SlashCommandId::Fork => match session.fork_current().await {
-                Ok(_) => reset_surface(session, surface).await,
+                Ok(outcome) => reset_surface_after_switch(session, surface, outcome).await,
                 Err(error) => surface.set_notice(error.to_string()),
             },
             SlashCommandId::Rename => {
@@ -711,6 +705,17 @@ async fn reset_surface(session: &mut AstralSession, surface: &mut SurfaceState) 
     mentions::refresh_catalog(session, surface).await;
 }
 
+async fn reset_surface_after_switch(
+    session: &mut AstralSession,
+    surface: &mut SurfaceState,
+    outcome: ThreadSwitchOutcome,
+) {
+    reset_surface(session, surface).await;
+    if let Some(warning) = outcome.unsubscribe_warning {
+        surface.set_notice(warning);
+    }
+}
+
 async fn handle_app_event(
     session: &AstralSession,
     surface: &mut SurfaceState,
@@ -718,52 +723,64 @@ async fn handle_app_event(
     client_tool_tasks: &mut JoinSet<ClientToolCompletion>,
     event: AppServerEvent,
 ) -> Result<(), RunError> {
+    let active_thread_id = session
+        .state()
+        .map(|state| state.thread.id.as_str())
+        .ok_or(RunError::NoThread)?;
     match event {
         AppServerEvent::Lagged { skipped } => surface.conversation_mut().record_lag(skipped),
         AppServerEvent::ServerNotification(notification) => {
             handle_notification(surface, &notification);
         }
-        AppServerEvent::ServerRequest(request) => match request {
-            ServerRequest::DynamicToolCall { request_id, params } => {
-                surface
-                    .pending_requests_mut()
-                    .note(ServerRequest::DynamicToolCall {
-                        request_id: request_id.clone(),
-                        params: params.clone(),
-                    });
-                let client_tools = client_tools.clone();
-                client_tool_tasks.spawn(async move {
-                    ClientToolCompletion {
-                        request_id,
-                        result: client_tools.call(params).await,
-                    }
-                });
-            }
-            request @ (ServerRequest::AttestationGenerate { .. }
-            | ServerRequest::ApplyPatchApproval { .. }
-            | ServerRequest::ExecCommandApproval { .. }) => {
-                let request_id = request.id().clone();
-                surface.pending_requests_mut().note(request);
-                let resolution = surface.pending_requests().prepare_resolution(
-                    &request_id,
-                    PendingRequestResponse::Reject {
-                        code: -32601,
-                        message: "request is not supported by the Astral v2 surface".to_string(),
-                    },
-                );
-                if let Ok(resolution) = resolution {
-                    match session.resolve(resolution).await {
-                        Ok(()) => {
-                            surface.remove_pending_request(&request_id);
+        AppServerEvent::ServerRequest(request)
+            if PendingRequest::from(request.clone())
+                .thread_id()
+                .is_none_or(|thread_id| thread_id == active_thread_id) =>
+        {
+            match request {
+                ServerRequest::DynamicToolCall { request_id, params } => {
+                    surface
+                        .pending_requests_mut()
+                        .note(ServerRequest::DynamicToolCall {
+                            request_id: request_id.clone(),
+                            params: params.clone(),
+                        });
+                    let client_tools = client_tools.clone();
+                    client_tool_tasks.spawn(async move {
+                        ClientToolCompletion {
+                            request_id,
+                            result: client_tools.call(params).await,
                         }
-                        Err(error) => surface.set_notice(format!(
-                            "Could not reject unsupported request; it remains open: {error}"
-                        )),
+                    });
+                }
+                request @ (ServerRequest::AttestationGenerate { .. }
+                | ServerRequest::ApplyPatchApproval { .. }
+                | ServerRequest::ExecCommandApproval { .. }) => {
+                    let request_id = request.id().clone();
+                    surface.pending_requests_mut().note(request);
+                    let resolution = surface.pending_requests().prepare_resolution(
+                        &request_id,
+                        PendingRequestResponse::Reject {
+                            code: -32601,
+                            message: "request is not supported by the Astral v2 surface"
+                                .to_string(),
+                        },
+                    );
+                    if let Ok(resolution) = resolution {
+                        match session.resolve(resolution).await {
+                            Ok(()) => {
+                                surface.remove_pending_request(&request_id);
+                            }
+                            Err(error) => surface.set_notice(format!(
+                                "Could not reject unsupported request; it remains open: {error}"
+                            )),
+                        }
                     }
                 }
+                request => surface.pending_requests_mut().note(request),
             }
-            request => surface.pending_requests_mut().note(request),
-        },
+        }
+        AppServerEvent::ServerRequest(_) => {}
         AppServerEvent::Disconnected { message } => {
             surface.set_activity(SurfaceActivity::Disconnected(message));
         }
@@ -772,24 +789,29 @@ async fn handle_app_event(
 }
 
 fn handle_notification(surface: &mut SurfaceState, notification: &ServerNotification) {
+    let active_thread_id = surface.conversation().timeline().thread_id().to_string();
     surface.conversation_mut().apply(notification);
     match notification {
-        ServerNotification::TurnStarted(_) => {
+        ServerNotification::TurnStarted(params) if params.thread_id == active_thread_id => {
             surface.clear_notice();
             surface.set_activity(SurfaceActivity::Working);
         }
-        ServerNotification::TurnCompleted(params) => match &params.turn.status {
-            TurnStatus::Completed => surface.set_activity(SurfaceActivity::Ready),
-            TurnStatus::Interrupted => surface.set_activity(SurfaceActivity::Interrupted),
-            TurnStatus::Failed => {
-                surface.set_activity(SurfaceActivity::Ready);
-                if let Some(error) = &params.turn.error {
-                    surface.set_notice(error.message.clone());
+        ServerNotification::TurnCompleted(params) if params.thread_id == active_thread_id => {
+            match &params.turn.status {
+                TurnStatus::Completed => surface.set_activity(SurfaceActivity::Ready),
+                TurnStatus::Interrupted => surface.set_activity(SurfaceActivity::Interrupted),
+                TurnStatus::Failed => {
+                    surface.set_activity(SurfaceActivity::Ready);
+                    if let Some(error) = &params.turn.error {
+                        surface.set_notice(error.message.clone());
+                    }
                 }
+                TurnStatus::InProgress => surface.set_activity(SurfaceActivity::Working),
             }
-            TurnStatus::InProgress => surface.set_activity(SurfaceActivity::Working),
-        },
-        ServerNotification::ServerRequestResolved(params) => {
+        }
+        ServerNotification::ServerRequestResolved(params)
+            if params.thread_id == active_thread_id =>
+        {
             let belongs_to_thread = surface
                 .pending_requests()
                 .get(&params.request_id)
@@ -800,22 +822,33 @@ fn handle_notification(surface: &mut SurfaceState, notification: &ServerNotifica
             }
         }
         ServerNotification::ThreadTokenUsageUpdated(params)
-            if params.thread_id == surface.conversation().timeline().thread_id() =>
+            if params.thread_id == active_thread_id =>
         {
             surface.set_token_usage(params.token_usage.clone());
         }
-        ServerNotification::ThreadSettingsUpdated(params) => {
+        ServerNotification::ThreadSettingsUpdated(params)
+            if params.thread_id == active_thread_id =>
+        {
             surface.update_current_model(
                 params.thread_settings.model.clone(),
                 params.thread_settings.model_provider.clone(),
             );
             surface.set_notice(format!("Model changed to {}", params.thread_settings.model));
         }
-        ServerNotification::ContextCompacted(_) => {
+        ServerNotification::ContextCompacted(params) if params.thread_id == active_thread_id => {
             surface.set_notice("Conversation compacted");
         }
-        ServerNotification::Error(params) => surface.set_notice(params.error.message.clone()),
-        ServerNotification::Warning(params) => surface.set_notice(params.message.clone()),
+        ServerNotification::Error(params) if params.thread_id == active_thread_id => {
+            surface.set_notice(params.error.message.clone());
+        }
+        ServerNotification::Warning(params)
+            if params
+                .thread_id
+                .as_deref()
+                .is_none_or(|thread_id| thread_id == active_thread_id) =>
+        {
+            surface.set_notice(params.message.clone());
+        }
         _ => {}
     }
 }

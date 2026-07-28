@@ -35,6 +35,8 @@ use codex_app_server_protocol::ThreadSource;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
 use codex_app_server_protocol::ThreadStartSource;
+use codex_app_server_protocol::ThreadUnsubscribeParams;
+use codex_app_server_protocol::ThreadUnsubscribeResponse;
 use codex_app_server_protocol::TurnInterruptParams;
 use codex_app_server_protocol::TurnInterruptResponse;
 use codex_app_server_protocol::TurnStartParams;
@@ -109,6 +111,11 @@ pub struct SessionState {
     pub approval_policy: AskForApproval,
     pub approvals_reviewer: ApprovalsReviewer,
     pub active_permission_profile: Option<ActivePermissionProfile>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct ThreadSwitchOutcome {
+    pub(crate) unsubscribe_warning: Option<String>,
 }
 
 impl SessionState {
@@ -269,8 +276,9 @@ impl AstralSession {
         self.state.as_ref().ok_or(SessionError::NoThread)
     }
 
-    pub(crate) async fn start_new(&mut self) -> Result<&SessionState, SessionError> {
+    pub(crate) async fn start_new(&mut self) -> Result<ThreadSwitchOutcome, SessionError> {
         let state = self.state.as_ref().ok_or(SessionError::NoThread)?;
+        let previous_thread_id = state.thread.id.clone();
         let params = ThreadStartParams {
             model: Some(state.model.clone()),
             model_provider: Some(state.model_provider.clone()),
@@ -286,22 +294,41 @@ impl AstralSession {
             thread_source: Some(ThreadSource::User),
             ..ThreadStartParams::default()
         };
-        self.start(params).await
+        self.start(params).await?;
+        self.finish_thread_switch(previous_thread_id).await
     }
 
     pub(crate) async fn resume_thread(
         &mut self,
         thread_id: String,
-    ) -> Result<&SessionState, SessionError> {
+    ) -> Result<ThreadSwitchOutcome, SessionError> {
+        let previous_thread_id = self
+            .state
+            .as_ref()
+            .map(|state| state.thread.id.clone())
+            .ok_or(SessionError::NoThread)?;
         self.resume(ThreadResumeParams {
             thread_id,
             ..ThreadResumeParams::default()
         })
-        .await
+        .await?;
+        self.finish_thread_switch(previous_thread_id).await
     }
 
-    pub(crate) async fn fork_current(&mut self) -> Result<&SessionState, SessionError> {
+    pub(crate) async fn fork_current(&mut self) -> Result<ThreadSwitchOutcome, SessionError> {
         let thread_id = self
+            .state
+            .as_ref()
+            .map(|state| state.thread.id.clone())
+            .ok_or(SessionError::NoThread)?;
+        self.fork_thread(thread_id).await
+    }
+
+    pub(crate) async fn fork_thread(
+        &mut self,
+        thread_id: String,
+    ) -> Result<ThreadSwitchOutcome, SessionError> {
+        let previous_thread_id = self
             .state
             .as_ref()
             .map(|state| state.thread.id.clone())
@@ -310,7 +337,8 @@ impl AstralSession {
             thread_id,
             ..ThreadForkParams::default()
         })
-        .await
+        .await?;
+        self.finish_thread_switch(previous_thread_id).await
     }
 
     pub(crate) async fn list_threads(
@@ -354,6 +382,36 @@ impl AstralSession {
             })
             .await?;
         Ok(())
+    }
+
+    async fn finish_thread_switch(
+        &mut self,
+        previous_thread_id: String,
+    ) -> Result<ThreadSwitchOutcome, SessionError> {
+        let current_thread_id = self
+            .state
+            .as_ref()
+            .map(|state| state.thread.id.clone())
+            .ok_or(SessionError::NoThread)?;
+        if previous_thread_id == current_thread_id {
+            return Ok(ThreadSwitchOutcome::default());
+        }
+
+        let request_id = self.next_request_id();
+        let response: Result<ThreadUnsubscribeResponse, TypedRequestError> = self
+            .client
+            .request_typed(ClientRequest::ThreadUnsubscribe {
+                request_id,
+                params: ThreadUnsubscribeParams {
+                    thread_id: previous_thread_id.clone(),
+                },
+            })
+            .await;
+        Ok(ThreadSwitchOutcome {
+            unsubscribe_warning: response.err().map(|error| {
+                format!("Switched threads, but could not unsubscribe {previous_thread_id}: {error}")
+            }),
+        })
     }
 
     pub async fn start_turn(

@@ -8,6 +8,7 @@ use codex_app_server_protocol::TokenUsageBreakdown;
 use codex_app_server_protocol::Turn;
 use codex_app_server_protocol::TurnCompletedNotification;
 use codex_app_server_protocol::TurnError;
+use codex_app_server_protocol::TurnStartedNotification;
 use codex_app_server_protocol::TurnStatus;
 use pretty_assertions::assert_eq;
 use serde_json::json;
@@ -142,6 +143,48 @@ fn resolved_notifications_only_clear_the_matching_thread_request() {
     );
     assert!(surface.pending_requests().is_empty());
     assert!(surface.request_user_input().editor().is_empty());
+}
+
+#[test]
+fn foreign_thread_turn_notifications_do_not_change_surface_activity() {
+    let mut surface = SurfaceState::new("thread-1");
+    surface.set_activity(SurfaceActivity::Ready);
+    handle_notification(
+        &mut surface,
+        &ServerNotification::TurnStarted(TurnStartedNotification {
+            thread_id: "thread-2".to_string(),
+            turn: Turn {
+                id: "turn-2".to_string(),
+                items: Vec::new(),
+                items_view: Default::default(),
+                status: TurnStatus::InProgress,
+                error: None,
+                started_at: Some(1),
+                completed_at: None,
+                duration_ms: None,
+            },
+        }),
+    );
+    assert_eq!(surface.activity(), &SurfaceActivity::Ready);
+
+    surface.set_activity(SurfaceActivity::Working);
+    handle_notification(
+        &mut surface,
+        &ServerNotification::TurnCompleted(TurnCompletedNotification {
+            thread_id: "thread-2".to_string(),
+            turn: Turn {
+                id: "turn-2".to_string(),
+                items: Vec::new(),
+                items_view: Default::default(),
+                status: TurnStatus::Completed,
+                error: None,
+                started_at: Some(1),
+                completed_at: Some(2),
+                duration_ms: Some(1_000),
+            },
+        }),
+    );
+    assert_eq!(surface.activity(), &SurfaceActivity::Working);
 }
 
 fn turn_completed(status: TurnStatus, error: Option<TurnError>) -> ServerNotification {
