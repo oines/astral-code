@@ -1,5 +1,4 @@
 use crate::PresentationBlock;
-use crate::ToolStatus;
 
 /// Presentation-only visibility for one transcript entry.
 ///
@@ -23,13 +22,7 @@ impl PresentationBlock {
             | Self::Plan { running: false, .. }
             | Self::Subagent(_)
             | Self::System { .. } => DisplayMode::Collapsed,
-            Self::Tool(tool) => match tool.status {
-                ToolStatus::Running
-                | ToolStatus::Failed
-                | ToolStatus::Declined
-                | ToolStatus::Interrupted => DisplayMode::Truncated,
-                ToolStatus::Success => DisplayMode::Collapsed,
-            },
+            Self::Tool(_) => DisplayMode::Collapsed,
         }
     }
 

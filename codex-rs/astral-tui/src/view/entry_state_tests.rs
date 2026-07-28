@@ -43,6 +43,13 @@ fn tool(status: ToolStatus) -> PresentationBlock {
     })
 }
 
+fn thinking(running: bool) -> PresentationBlock {
+    PresentationBlock::Thinking {
+        text: "Inspect the renderer".to_string(),
+        running,
+    }
+}
+
 #[test]
 fn focus_navigates_only_foldable_entries_and_preserves_manual_modes() {
     let turns = [turn(vec![
@@ -86,17 +93,17 @@ fn focus_navigates_only_foldable_entries_and_preserves_manual_modes() {
 #[test]
 fn defaults_follow_entry_lifecycle_until_the_user_pins_a_fold() {
     let mut state = EntryDisplayState::default();
-    let running = turn(vec![block("tool", tool(ToolStatus::Running))]);
+    let running = turn(vec![block("thinking", thinking(true))]);
     state.observe(std::slice::from_ref(&running));
     assert_eq!(
-        state.mode_for("turn-1", "tool", &running.blocks[0].block),
+        state.mode_for("turn-1", "thinking", &running.blocks[0].block),
         DisplayMode::Truncated
     );
 
-    let finished = turn(vec![block("tool", tool(ToolStatus::Success))]);
+    let finished = turn(vec![block("thinking", thinking(false))]);
     state.observe(std::slice::from_ref(&finished));
     assert_eq!(
-        state.mode_for("turn-1", "tool", &finished.blocks[0].block),
+        state.mode_for("turn-1", "thinking", &finished.blocks[0].block),
         DisplayMode::Collapsed
     );
 
@@ -104,14 +111,14 @@ fn defaults_follow_entry_lifecycle_until_the_user_pins_a_fold() {
     state.expand_selected();
     state.observe(std::slice::from_ref(&finished));
     assert_eq!(
-        state.mode_for("turn-1", "tool", &finished.blocks[0].block),
+        state.mode_for("turn-1", "thinking", &finished.blocks[0].block),
         DisplayMode::Expanded
     );
 }
 
 #[test]
 fn truncated_entry_expands_on_the_first_toggle() {
-    let turns = [turn(vec![block("tool", tool(ToolStatus::Running))])];
+    let turns = [turn(vec![block("thinking", thinking(true))])];
     let mut state = EntryDisplayState::default();
     state.observe(&turns);
     assert!(state.focus_scrollback());
@@ -119,7 +126,7 @@ fn truncated_entry_expands_on_the_first_toggle() {
     state.toggle_selected();
 
     assert_eq!(
-        state.mode_for("turn-1", "tool", &turns[0].blocks[0].block),
+        state.mode_for("turn-1", "thinking", &turns[0].blocks[0].block),
         DisplayMode::Expanded
     );
 }

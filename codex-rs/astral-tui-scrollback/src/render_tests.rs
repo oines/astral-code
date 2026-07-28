@@ -33,6 +33,37 @@ fn render(item: ThreadItem, mode: DisplayMode) -> String {
         .join("\n")
 }
 
+fn edit_item() -> ThreadItem {
+    ThreadItem::FileChange {
+        id: "patch-1".to_string(),
+        changes: vec![
+            FileUpdateChange {
+                path: "astral-tui/src/render.rs".to_string(),
+                kind: PatchChangeKind::Update { move_path: None },
+                diff: "@@ -1 +1,2 @@\n-old\n+new\n+another".to_string(),
+            },
+            FileUpdateChange {
+                path: "astral-tui/src/new.rs".to_string(),
+                kind: PatchChangeKind::Add,
+                diff: "new module\n".to_string(),
+            },
+            FileUpdateChange {
+                path: "astral-tui/src/obsolete.rs".to_string(),
+                kind: PatchChangeKind::Delete,
+                diff: "old module\n".to_string(),
+            },
+            FileUpdateChange {
+                path: "astral-tui/src/old_name.rs".to_string(),
+                kind: PatchChangeKind::Update {
+                    move_path: Some(std::path::PathBuf::from("astral-tui/src/new_name.rs")),
+                },
+                diff: String::new(),
+            },
+        ],
+        status: PatchApplyStatus::Completed,
+    }
+}
+
 #[test]
 fn codex_surface_tool_blocks_snapshot() {
     let items = [
@@ -53,34 +84,7 @@ fn codex_surface_tool_blocks_snapshot() {
             exit_code: Some(0),
             duration_ms: Some(2_440),
         },
-        ThreadItem::FileChange {
-            id: "patch-1".to_string(),
-            changes: vec![
-                FileUpdateChange {
-                    path: "astral-tui/src/render.rs".to_string(),
-                    kind: PatchChangeKind::Update { move_path: None },
-                    diff: "@@\n-old\n+new\n+another".to_string(),
-                },
-                FileUpdateChange {
-                    path: "astral-tui/src/new.rs".to_string(),
-                    kind: PatchChangeKind::Add,
-                    diff: "@@\n+new module".to_string(),
-                },
-                FileUpdateChange {
-                    path: "astral-tui/src/obsolete.rs".to_string(),
-                    kind: PatchChangeKind::Delete,
-                    diff: "@@\n-old module".to_string(),
-                },
-                FileUpdateChange {
-                    path: "astral-tui/src/old_name.rs".to_string(),
-                    kind: PatchChangeKind::Update {
-                        move_path: Some(std::path::PathBuf::from("astral-tui/src/new_name.rs")),
-                    },
-                    diff: String::new(),
-                },
-            ],
-            status: PatchApplyStatus::Completed,
-        },
+        edit_item(),
         ThreadItem::WebSearch {
             id: "search-1".to_string(),
             query: "Ratatui inline viewport".to_string(),
@@ -93,6 +97,21 @@ fn codex_surface_tool_blocks_snapshot() {
         .map(|item| render(item, DisplayMode::Expanded))
         .collect::<Vec<_>>()
         .join("\n");
+    assert_snapshot!(rendered);
+}
+
+#[test]
+fn edit_display_modes_snapshot() {
+    let rendered = [
+        ("COLLAPSED", DisplayMode::Collapsed),
+        ("TRUNCATED", DisplayMode::Truncated),
+        ("EXPANDED", DisplayMode::Expanded),
+    ]
+    .into_iter()
+    .map(|(label, mode)| format!("{label}\n{}", render(edit_item(), mode)))
+    .collect::<Vec<_>>()
+    .join("\n\n");
+
     assert_snapshot!(rendered);
 }
 

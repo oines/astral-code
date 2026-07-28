@@ -1,4 +1,3 @@
-use codex_app_server_protocol::PatchChangeKind;
 use ratatui::style::Styled;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
@@ -13,7 +12,16 @@ use crate::DisplayMode;
 use crate::ToolKind;
 use crate::ToolPresentation;
 
+mod edit;
+
 pub(super) fn render_tool(tool: &ToolPresentation, options: RenderOptions) -> Text<'static> {
+    if tool.kind == ToolKind::Edit && !tool.changes.is_empty() {
+        return edit::render_edit(tool, options);
+    }
+    render_generic_tool(tool, options)
+}
+
+fn render_generic_tool(tool: &ToolPresentation, options: RenderOptions) -> Text<'static> {
     let marker = status_marker(tool.status);
     let mut header = vec![marker.set_style(status_style(tool.status))];
     if tool.kind == ToolKind::Mcp {
@@ -35,31 +43,6 @@ pub(super) fn render_tool(tool: &ToolPresentation, options: RenderOptions) -> Te
                 .iter()
                 .flat_map(|detail| indented_lines(detail, options.width, "  ", true)),
         );
-        for change in &tool.changes {
-            let (added, removed) = diff_counts(&change.diff);
-            let (operation, path) = match &change.kind {
-                PatchChangeKind::Add => ("A".green(), change.path.clone()),
-                PatchChangeKind::Delete => ("D".red(), change.path.clone()),
-                PatchChangeKind::Update {
-                    move_path: Some(move_path),
-                } => (
-                    "R".magenta(),
-                    format!("{} → {}", change.path, move_path.display()),
-                ),
-                PatchChangeKind::Update { move_path: None } => ("M".cyan(), change.path.clone()),
-            };
-            lines.push(
-                vec![
-                    "  ".into(),
-                    operation,
-                    " ".dim(),
-                    path.dim(),
-                    format!("  +{added}").green(),
-                    format!(" -{removed}").red(),
-                ]
-                .into(),
-            );
-        }
     }
 
     if options.mode != DisplayMode::Collapsed
@@ -80,6 +63,24 @@ pub(super) fn render_tool(tool: &ToolPresentation, options: RenderOptions) -> Te
         lines.extend(output_lines);
     }
     Text::from(lines)
+}
+
+fn tool_header(
+    tool: &ToolPresentation,
+    label: &str,
+    title: &str,
+    suffix: Vec<Span<'static>>,
+) -> Line<'static> {
+    let mut spans = vec![
+        status_marker(tool.status).set_style(status_style(tool.status)),
+        format!("{label} ").bold().dim(),
+        title.to_string().dim(),
+    ];
+    spans.extend(suffix);
+    if let Some(duration_ms) = tool.duration_ms {
+        spans.push(format!("  {}", duration_label(duration_ms)).dim());
+    }
+    spans.into()
 }
 
 fn mcp_header(tool: &ToolPresentation) -> Vec<Span<'static>> {
@@ -127,15 +128,4 @@ fn duration_label(duration_ms: i64) -> String {
     } else {
         format!("{:.1}s", duration_ms as f64 / 1_000.0)
     }
-}
-
-fn diff_counts(diff: &str) -> (usize, usize) {
-    diff.lines()
-        .filter(|line| !line.starts_with("+++") && !line.starts_with("---"))
-        .fold((0, 0), |(added, removed), line| {
-            (
-                added + usize::from(line.starts_with('+')),
-                removed + usize::from(line.starts_with('-')),
-            )
-        })
 }
