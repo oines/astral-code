@@ -136,8 +136,10 @@ pub fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
 }
 
 pub fn handle_paste(state: &mut SurfaceState, text: &str) -> InputAction {
-    if state.block_viewer().is_some()
-        || state.permission_picker().is_some()
+    if state.block_viewer().is_some() {
+        return block_viewer::handle_paste(state, text);
+    }
+    if state.permission_picker().is_some()
         || state.theme_picker().is_some()
         || state.modal().is_some()
     {

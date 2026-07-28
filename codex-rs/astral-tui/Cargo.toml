@@ -14,6 +14,7 @@ codex-protocol = { workspace = true }
 codex-terminal-detection = { workspace = true }
 crossterm = { workspace = true, features = ["bracketed-paste", "event-stream"] }
 ratatui = { workspace = true }
+regex = { workspace = true }
 serde_json = { workspace = true }
 supports-color = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "sync"] }

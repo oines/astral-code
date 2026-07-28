@@ -8,6 +8,11 @@ use crossterm::event::MouseEvent;
 use crossterm::event::MouseEventKind;
 use ratatui::layout::Rect;
 
+#[path = "block_viewer/search.rs"]
+mod search;
+
+use self::search::ViewerSearch;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BlockViewerMouseAction {
     Ignored,
@@ -32,6 +37,8 @@ pub(crate) struct BlockViewerState {
     content_area: Option<Rect>,
     close_button: Option<Rect>,
     close_hovered: bool,
+    rendered_lines: Vec<String>,
+    search: ViewerSearch,
 }
 
 impl BlockViewerState {
@@ -47,6 +54,8 @@ impl BlockViewerState {
             content_area: None,
             close_button: None,
             close_hovered: false,
+            rendered_lines: Vec::new(),
+            search: ViewerSearch::default(),
         }
     }
 
@@ -66,25 +75,99 @@ impl BlockViewerState {
         self.close_hovered
     }
 
+    pub(crate) fn search_input_active(&self) -> bool {
+        self.search.input_active()
+    }
+
+    pub(crate) fn search_bar_visible(&self) -> bool {
+        self.search.is_visible()
+    }
+
+    pub(crate) fn search_query(&self) -> &str {
+        self.search.query()
+    }
+
+    pub(crate) fn search_cursor(&self) -> usize {
+        self.search.cursor()
+    }
+
+    pub(crate) fn search_is_error(&self) -> bool {
+        self.search.is_error()
+    }
+
+    pub(crate) fn search_match_count(&self) -> usize {
+        self.search.match_count()
+    }
+
+    pub(crate) fn search_match_ranges(&self, line: usize) -> Vec<std::ops::Range<usize>> {
+        self.rendered_lines
+            .get(line)
+            .map_or_else(Vec::new, |text| self.search.match_ranges(text))
+    }
+
+    pub(crate) fn rendered_line(&self, line: usize) -> Option<&str> {
+        self.rendered_lines.get(line).map(String::as_str)
+    }
+
     pub(crate) fn observe_frame(
         &mut self,
         popup_area: Rect,
         content_area: Rect,
         close_button: Rect,
-        total_lines: usize,
+        rendered_lines: Vec<String>,
     ) {
         self.popup_area = Some(popup_area);
         self.content_area = Some(content_area);
         self.close_button = Some(close_button);
         self.page_size = usize::from(content_area.height).max(1);
-        self.total_lines = total_lines;
-        self.max_scroll_offset = total_lines.saturating_sub(self.page_size);
+        self.total_lines = rendered_lines.len();
+        self.max_scroll_offset = self.total_lines.saturating_sub(self.page_size);
         self.scroll_offset = self.scroll_offset.min(self.max_scroll_offset);
-        self.selected_line = match total_lines {
+        self.selected_line = match self.total_lines {
             0 => None,
-            _ => Some(self.selected_line.unwrap_or(0).min(total_lines - 1)),
+            _ => Some(self.selected_line.unwrap_or(0).min(self.total_lines - 1)),
         };
+        self.rendered_lines = rendered_lines;
+        self.search.rebuild(&self.rendered_lines);
         self.reveal_selected_line();
+    }
+
+    pub(crate) fn open_search(&mut self) {
+        self.search.open();
+    }
+
+    pub(crate) fn handle_search_key(&mut self, key: crossterm::event::KeyEvent) {
+        if let Some(target) = self
+            .search
+            .handle_key(key, &self.rendered_lines, self.selected_line)
+        {
+            self.select_line(target);
+        }
+    }
+
+    pub(crate) fn handle_search_paste(&mut self, text: &str) {
+        let target = self
+            .search
+            .paste(text, &self.rendered_lines, self.selected_line);
+        if let Some(target) = target {
+            self.select_line(target);
+        }
+    }
+
+    pub(crate) fn select_next_match(&mut self) -> bool {
+        let Some(target) = self.search.next_match(self.selected_line.unwrap_or(0)) else {
+            return false;
+        };
+        self.select_line(target);
+        true
+    }
+
+    pub(crate) fn select_previous_match(&mut self) -> bool {
+        let Some(target) = self.search.previous_match(self.selected_line.unwrap_or(0)) else {
+            return false;
+        };
+        self.select_line(target);
+        true
     }
 
     pub(crate) fn scroll_by(&mut self, lines: isize) -> bool {
@@ -223,6 +306,14 @@ impl BlockViewerState {
                 .saturating_sub(self.page_size)
                 .min(self.max_scroll_offset);
         }
+    }
+
+    fn select_line(&mut self, line: usize) {
+        if line >= self.total_lines {
+            return;
+        }
+        self.selected_line = Some(line);
+        self.reveal_selected_line();
     }
 }
 

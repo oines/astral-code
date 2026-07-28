@@ -1593,8 +1593,33 @@ fn enter_opens_the_selected_edit_in_a_scrollable_viewer_snapshot() {
     let viewer = buffer_text(&buffer);
     assert!(viewer.contains("Edit lib.rs"));
     assert!(viewer.contains("draw_header"));
-    assert!(viewer.contains("Esc/q/Ctrl+F close"));
+    assert!(viewer.contains("Esc close"));
     insta::assert_snapshot!("edit_block_viewer_surface", viewer);
+
+    assert_eq!(
+        handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE),
+        ),
+        InputAction::Redraw
+    );
+    for character in "draw".chars() {
+        assert_eq!(
+            handle_key(
+                &mut state,
+                KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE),
+            ),
+            InputAction::Redraw
+        );
+    }
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        area,
+        &mut buffer,
+    );
+    insta::assert_snapshot!("edit_block_viewer_search_surface", buffer_text(&buffer));
 
     assert_eq!(
         handle_key(

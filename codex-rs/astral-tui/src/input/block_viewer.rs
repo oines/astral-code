@@ -6,16 +6,35 @@ use crossterm::event::MouseEvent;
 use crate::InputAction;
 use crate::SurfaceState;
 use crate::block_viewer::BlockViewerMouseAction;
+use crate::block_viewer::BlockViewerState;
 
 pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
-    if key.code == KeyCode::Esc
-        || key.code == KeyCode::Char('q') && key.modifiers == KeyModifiers::NONE
-        || key.code == KeyCode::Char('f') && key.modifiers.contains(KeyModifiers::CONTROL)
+    if key.code == KeyCode::Char('f') && key.modifiers.contains(KeyModifiers::CONTROL)
+        || !state
+            .block_viewer()
+            .is_some_and(BlockViewerState::search_input_active)
+            && (key.code == KeyCode::Esc
+                || key.code == KeyCode::Char('q') && key.modifiers == KeyModifiers::NONE)
     {
         state.close_block_viewer();
         return InputAction::Redraw;
     }
+    if state
+        .block_viewer()
+        .is_some_and(BlockViewerState::search_input_active)
+    {
+        if let Some(viewer) = state.block_viewer_mut() {
+            viewer.handle_search_key(key);
+        }
+        return InputAction::Redraw;
+    }
     match (key.code, key.modifiers) {
+        (KeyCode::Char('/'), KeyModifiers::NONE) => {
+            if let Some(viewer) = state.block_viewer_mut() {
+                viewer.open_search();
+            }
+            return InputAction::Redraw;
+        }
         (KeyCode::Char('r'), KeyModifiers::NONE) => {
             return if state.toggle_block_viewer_raw() {
                 InputAction::Redraw
@@ -61,6 +80,14 @@ pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction
             viewer.select_by(1);
             InputAction::Redraw
         }
+        (KeyCode::Char('n'), KeyModifiers::NONE) => {
+            viewer.select_next_match();
+            InputAction::Redraw
+        }
+        (KeyCode::Char('N'), KeyModifiers::SHIFT) => {
+            viewer.select_previous_match();
+            InputAction::Redraw
+        }
         (KeyCode::Char('k'), KeyModifiers::CONTROL) => {
             viewer.scroll_by(-1);
             InputAction::Redraw
@@ -94,6 +121,18 @@ pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction
             InputAction::Redraw
         }
         _ => InputAction::None,
+    }
+}
+
+pub(super) fn handle_paste(state: &mut SurfaceState, text: &str) -> InputAction {
+    let Some(viewer) = state.block_viewer_mut() else {
+        return InputAction::None;
+    };
+    if viewer.search_input_active() {
+        viewer.handle_search_paste(text);
+        InputAction::Redraw
+    } else {
+        InputAction::None
     }
 }
 

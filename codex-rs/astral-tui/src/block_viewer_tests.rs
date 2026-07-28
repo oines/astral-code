@@ -8,6 +8,10 @@ use ratatui::layout::Rect;
 use super::BlockViewerMouseAction;
 use super::BlockViewerState;
 
+fn lines(count: usize) -> Vec<String> {
+    (0..count).map(|line| format!("line {line}")).collect()
+}
+
 fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
     MouseEvent {
         kind,
@@ -24,7 +28,7 @@ fn viewer_scroll_is_clamped_to_the_observed_content() {
         Rect::new(1, 1, 20, 10),
         Rect::new(3, 3, 16, 4),
         Rect::new(17, 1, 3, 1),
-        12,
+        lines(12),
     );
 
     assert_eq!(state.selected_line(), Some(0));
@@ -49,7 +53,7 @@ fn viewer_pointer_uses_the_rendered_modal_geometry() {
         Rect::new(2, 2, 30, 12),
         Rect::new(5, 4, 24, 7),
         Rect::new(27, 2, 3, 1),
-        20,
+        lines(20),
     );
 
     assert_eq!(
@@ -70,4 +74,33 @@ fn viewer_pointer_uses_the_rendered_modal_geometry() {
         BlockViewerMouseAction::Redraw
     );
     assert_eq!(state.selected_line(), Some(2));
+}
+
+#[test]
+fn viewer_search_uses_rendered_line_order_and_wraps_matches() {
+    let mut state = BlockViewerState::new("turn\0entry-1".to_string());
+    state.observe_frame(
+        Rect::new(1, 1, 30, 12),
+        Rect::new(3, 3, 24, 5),
+        Rect::new(27, 1, 3, 1),
+        vec![
+            "alpha".to_string(),
+            "first beta".to_string(),
+            "middle".to_string(),
+            "second beta".to_string(),
+        ],
+    );
+
+    state.open_search();
+    for character in "beta".chars() {
+        state.handle_search_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char(character),
+            KeyModifiers::NONE,
+        ));
+    }
+    assert_eq!(state.selected_line(), Some(1));
+    assert!(state.select_next_match());
+    assert_eq!(state.selected_line(), Some(3));
+    assert!(state.select_next_match());
+    assert_eq!(state.selected_line(), Some(1));
 }

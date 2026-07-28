@@ -14,6 +14,7 @@ use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::widgets::Clear;
 use ratatui::widgets::Widget;
+use unicode_width::UnicodeWidthStr;
 
 use crate::block_viewer::BlockViewerState;
 
@@ -55,18 +56,18 @@ impl BlockViewerPane<'_> {
             self.state.close_hovered(),
         );
 
+        let search_bar_visible = self.state.search_bar_visible();
         let body_width = frame.content.width.saturating_sub(2).max(1);
-        let body_area = Rect::new(
-            frame.content.x,
-            frame.content.y,
-            body_width,
-            frame.content.height,
-        );
+        let body_height = frame
+            .content
+            .height
+            .saturating_sub(u16::from(search_bar_visible));
+        let body_area = Rect::new(frame.content.x, frame.content.y, body_width, body_height);
         let scrollbar_area = Rect::new(
             frame.content.right().saturating_sub(1),
             frame.content.y,
             1,
-            frame.content.height,
+            body_height,
         );
         let lines = match self.block {
             PresentationBlock::Assistant { text } | PresentationBlock::Thinking { text, .. } => {
@@ -84,8 +85,17 @@ impl BlockViewerPane<'_> {
                 .lines
             }
         };
+        let plain_lines = lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect()
+            })
+            .collect();
         self.state
-            .observe_frame(frame.popup, body_area, frame.close_button, lines.len());
+            .observe_frame(frame.popup, body_area, frame.close_button, plain_lines);
         let viewport = ScrollbackViewport::from_first(
             lines.len(),
             usize::from(body_area.height),
@@ -114,11 +124,30 @@ impl BlockViewerPane<'_> {
                 selection_style,
             );
         }
+        render_search_matches(self.state, body_area, viewport, buffer, theme);
+        if search_bar_visible {
+            render_search_bar(
+                self.state,
+                Rect::new(
+                    frame.content.x,
+                    frame.content.bottom().saturating_sub(1),
+                    frame.content.width,
+                    1,
+                ),
+                buffer,
+                theme,
+            );
+        }
     }
 }
 
 fn block_viewer_footer(block: &PresentationBlock) -> String {
-    let mut hints = vec!["j/k select".to_string(), "Ctrl+d/u page".to_string()];
+    let mut hints = vec![
+        "Esc close".to_string(),
+        "/ search".to_string(),
+        "n/N match".to_string(),
+        "j/k navigate".to_string(),
+    ];
     if block.supports_raw() {
         hints.push("r raw".to_string());
     }
@@ -128,8 +157,151 @@ fn block_viewer_footer(block: &PresentationBlock) -> String {
     if let Some(label) = block.copy_meta_label() {
         hints.push(format!("Y {label}"));
     }
-    hints.push("Esc/q/Ctrl+F close".to_string());
     hints.join(" · ")
+}
+
+fn render_search_matches(
+    state: &BlockViewerState,
+    area: Rect,
+    viewport: ScrollbackViewport,
+    buffer: &mut Buffer,
+    theme: AstralTheme,
+) {
+    let style = Style::default()
+        .fg(theme.accent_running)
+        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
+    for line in viewport.first_visible_line..viewport.end_visible_line {
+        let row = area.y.saturating_add(
+            u16::try_from(line.saturating_sub(viewport.first_visible_line)).unwrap_or(u16::MAX),
+        );
+        let Some(text) = state.rendered_line(line) else {
+            continue;
+        };
+        for range in state.search_match_ranges(line) {
+            let start = UnicodeWidthStr::width(&text[..range.start]);
+            let width = UnicodeWidthStr::width(&text[range.clone()]);
+            if width == 0 || start >= usize::from(area.width) {
+                continue;
+            }
+            buffer.set_style(
+                Rect::new(
+                    area.x
+                        .saturating_add(u16::try_from(start).unwrap_or(u16::MAX)),
+                    row,
+                    u16::try_from(width).unwrap_or(u16::MAX).min(
+                        area.width
+                            .saturating_sub(u16::try_from(start).unwrap_or(u16::MAX)),
+                    ),
+                    1,
+                ),
+                style,
+            );
+        }
+    }
+}
+
+fn render_search_bar(
+    state: &BlockViewerState,
+    area: Rect,
+    buffer: &mut Buffer,
+    theme: AstralTheme,
+) {
+    if area.width == 0 {
+        return;
+    }
+    buffer.set_style(area, Style::default().bg(theme.panel_background));
+    if state.search_input_active() {
+        let label = if state.search_is_error() {
+            "search! "
+        } else {
+            "search: "
+        };
+        buffer.set_string(
+            area.x,
+            area.y,
+            label,
+            Style::default()
+                .fg(if state.search_is_error() {
+                    theme.accent_error
+                } else {
+                    theme.prompt_border_active
+                })
+                .bg(theme.panel_background)
+                .add_modifier(Modifier::BOLD),
+        );
+        let label_width = UnicodeWidthStr::width(label);
+        let available = usize::from(area.width).saturating_sub(label_width);
+        let query = state.search_query();
+        let (visible, cursor_width) = search_input_window(query, state.search_cursor(), available);
+        buffer.set_stringn(
+            area.x
+                .saturating_add(u16::try_from(label_width).unwrap_or(u16::MAX)),
+            area.y,
+            &visible,
+            available,
+            Style::default()
+                .fg(theme.text_primary)
+                .bg(theme.panel_background),
+        );
+        if available > 0 {
+            buffer[(
+                area.x
+                    .saturating_add(u16::try_from(label_width).unwrap_or(u16::MAX))
+                    .saturating_add(u16::try_from(cursor_width).unwrap_or(u16::MAX)),
+                area.y,
+            )]
+                .modifier
+                .insert(Modifier::REVERSED);
+        }
+    } else {
+        let status = format!(
+            "[search: {} · {} matches]",
+            state.search_query(),
+            state.search_match_count()
+        );
+        let width = UnicodeWidthStr::width(status.as_str());
+        let x = area
+            .right()
+            .saturating_sub(u16::try_from(width).unwrap_or(u16::MAX));
+        buffer.set_stringn(
+            x.max(area.x),
+            area.y,
+            status,
+            usize::from(area.width),
+            Style::default()
+                .fg(theme.gray)
+                .bg(theme.panel_background)
+                .add_modifier(Modifier::DIM),
+        );
+    }
+}
+
+fn search_input_window(query: &str, cursor: usize, width: usize) -> (String, usize) {
+    if width == 0 {
+        return (String::new(), 0);
+    }
+    let mut start = cursor;
+    let cursor_limit = width.saturating_sub(1);
+    while start > 0 {
+        let previous = query[..start]
+            .char_indices()
+            .next_back()
+            .map_or(0, |(index, _)| index);
+        if UnicodeWidthStr::width(&query[previous..cursor]) > cursor_limit {
+            break;
+        }
+        start = previous;
+    }
+    let cursor_column = UnicodeWidthStr::width(&query[start..cursor]).min(cursor_limit);
+    let mut end = start;
+    for (offset, character) in query[start..].char_indices() {
+        let candidate = start + offset + character.len_utf8();
+        if UnicodeWidthStr::width(&query[start..candidate]) > width {
+            break;
+        }
+        end = candidate;
+    }
+    (query[start..end].to_string(), cursor_column)
 }
 
 fn block_title(block: &PresentationBlock) -> String {

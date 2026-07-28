@@ -1,6 +1,6 @@
 ---
 source: astral-tui/src/surface_tests.rs
-expression: viewer
+expression: buffer_text(&buffer)
 ---
 
   ┌─ lib.rs ─────────────────────────────────────────────────────────────[×]─┐
@@ -21,7 +21,7 @@ expression: viewer
   │                                                                          │
   │                                                                          │
   │                                                                          │
-  │                                                                          │
+  │  search: draw                                                            │
   │                                                                          │
   │  Esc close · / search · n/N match · j/k navigate · y copy · Y copy path  │
   └──────────────────────────────────────────────────────────────────────────┘
