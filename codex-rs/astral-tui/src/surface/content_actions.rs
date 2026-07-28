@@ -1,6 +1,8 @@
 use astral_tui_scrollback::BlockTextMode;
 use astral_tui_scrollback::PresentationBlock;
 
+use crate::block_viewer::BlockViewerState;
+
 use super::SurfaceState;
 
 impl SurfaceState {
@@ -39,7 +41,13 @@ impl SurfaceState {
         self.scrollback.toggle_raw(&entry_id)
     }
 
-    pub(crate) fn block_viewer_copy_text(&self) -> Option<String> {
+    pub(crate) fn block_viewer_copy_text(&mut self) -> Option<String> {
+        if self
+            .block_viewer()
+            .is_some_and(BlockViewerState::visual_selection_active)
+        {
+            return non_empty(self.block_viewer_mut()?.take_visual_selection_text());
+        }
         let entry_id = self.block_viewer()?.entry_id();
         let mode = if self.scrollback.is_raw_entry(entry_id) {
             BlockTextMode::Raw

@@ -33,6 +33,7 @@ pub(crate) struct BlockViewerState {
     page_size: usize,
     total_lines: usize,
     selected_line: Option<usize>,
+    visual_anchor: Option<usize>,
     popup_area: Option<Rect>,
     content_area: Option<Rect>,
     close_button: Option<Rect>,
@@ -50,6 +51,7 @@ impl BlockViewerState {
             page_size: 1,
             total_lines: 0,
             selected_line: None,
+            visual_anchor: None,
             popup_area: None,
             content_area: None,
             close_button: None,
@@ -69,6 +71,16 @@ impl BlockViewerState {
 
     pub(crate) fn selected_line(&self) -> Option<usize> {
         self.selected_line
+    }
+
+    pub(crate) fn visual_selection_active(&self) -> bool {
+        self.visual_anchor.is_some()
+    }
+
+    pub(crate) fn visual_selection_range(&self) -> Option<std::ops::RangeInclusive<usize>> {
+        let anchor = self.visual_anchor?;
+        let selected = self.selected_line?;
+        Some(anchor.min(selected)..=anchor.max(selected))
     }
 
     pub(crate) fn close_hovered(&self) -> bool {
@@ -127,13 +139,28 @@ impl BlockViewerState {
             0 => None,
             _ => Some(self.selected_line.unwrap_or(0).min(self.total_lines - 1)),
         };
+        self.visual_anchor = match self.total_lines {
+            0 => None,
+            _ => self
+                .visual_anchor
+                .map(|anchor| anchor.min(self.total_lines - 1)),
+        };
         self.rendered_lines = rendered_lines;
         self.search.rebuild(&self.rendered_lines);
         self.reveal_selected_line();
     }
 
     pub(crate) fn open_search(&mut self) {
+        self.clear_visual_selection();
         self.search.open();
+    }
+
+    pub(crate) fn clear_search(&mut self) -> bool {
+        if !self.search.is_visible() {
+            return false;
+        }
+        self.search.clear();
+        true
     }
 
     pub(crate) fn handle_search_key(&mut self, key: crossterm::event::KeyEvent) {
@@ -168,6 +195,31 @@ impl BlockViewerState {
         };
         self.select_line(target);
         true
+    }
+
+    pub(crate) fn toggle_visual_selection(&mut self) {
+        if self.visual_anchor.is_some() {
+            self.clear_visual_selection();
+        } else {
+            self.begin_visual_selection();
+        }
+    }
+
+    pub(crate) fn begin_visual_selection(&mut self) {
+        if self.visual_anchor.is_none() {
+            self.visual_anchor = self.selected_line;
+        }
+    }
+
+    pub(crate) fn clear_visual_selection(&mut self) -> bool {
+        self.visual_anchor.take().is_some()
+    }
+
+    pub(crate) fn take_visual_selection_text(&mut self) -> Option<String> {
+        let range = self.visual_selection_range()?;
+        let text = self.rendered_lines[range].join("\n");
+        self.clear_visual_selection();
+        Some(text)
     }
 
     pub(crate) fn scroll_by(&mut self, lines: isize) -> bool {
@@ -254,6 +306,7 @@ impl BlockViewerState {
                 } else if let Some(area) = self.content_area
                     && area.contains(position)
                 {
+                    self.clear_visual_selection();
                     let line = self
                         .scroll_offset
                         .saturating_add(usize::from(mouse.row.saturating_sub(area.y)));
@@ -277,10 +330,12 @@ impl BlockViewerState {
                 }
             }
             MouseEventKind::ScrollUp => {
+                self.clear_visual_selection();
                 self.scroll_by(-3);
                 BlockViewerMouseAction::Redraw
             }
             MouseEventKind::ScrollDown => {
+                self.clear_visual_selection();
                 self.scroll_by(3);
                 BlockViewerMouseAction::Redraw
             }

@@ -1,6 +1,6 @@
 ---
 source: astral-tui/src/surface_tests.rs
-expression: viewer
+expression: "format!(\"{}\\n\\nvisual selection mask:\\n{}\", buffer_text(&buffer),\nselection_mask(&buffer, state.theme().panel_selected))"
 ---
 
   ┌─ lib.rs ─────────────────────────────────────────────────────────────[×]─┐
@@ -23,5 +23,13 @@ expression: viewer
   │                                                                          │
   │                                                                          │
   │                                                                          │
-  │  Esc close · / search · n/N match · j/k navigate · y copy · Y copy path  │
+  │    Esc close · / search · v select · n/N match · y copy · Y copy path    │
   └──────────────────────────────────────────────────────────────────────────┘
+
+visual selection mask:
+
+
+
+     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

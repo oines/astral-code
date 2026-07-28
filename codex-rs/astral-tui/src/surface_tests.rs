@@ -1594,7 +1594,34 @@ fn enter_opens_the_selected_edit_in_a_scrollable_viewer_snapshot() {
     assert!(viewer.contains("Edit lib.rs"));
     assert!(viewer.contains("draw_header"));
     assert!(viewer.contains("Esc close"));
-    insta::assert_snapshot!("edit_block_viewer_surface", viewer);
+    assert_eq!(
+        handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE),
+        ),
+        InputAction::Redraw
+    );
+    for _ in 0..2 {
+        assert_eq!(
+            handle_key(&mut state, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
+            InputAction::Redraw
+        );
+    }
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        area,
+        &mut buffer,
+    );
+    insta::assert_snapshot!(
+        "edit_block_viewer_surface",
+        format!(
+            "{}\n\nvisual selection mask:\n{}",
+            buffer_text(&buffer),
+            selection_mask(&buffer, state.theme().panel_selected)
+        )
+    );
 
     assert_eq!(
         handle_key(

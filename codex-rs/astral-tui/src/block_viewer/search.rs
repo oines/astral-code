@@ -199,7 +199,7 @@ impl ViewerSearch {
             .copied()
     }
 
-    fn clear(&mut self) {
+    pub(super) fn clear(&mut self) {
         self.editor.clear();
         self.input_active = false;
         self.matcher = None;

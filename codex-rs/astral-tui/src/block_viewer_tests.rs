@@ -104,3 +104,24 @@ fn viewer_search_uses_rendered_line_order_and_wraps_matches() {
     assert!(state.select_next_match());
     assert_eq!(state.selected_line(), Some(1));
 }
+
+#[test]
+fn viewer_visual_selection_copies_the_rendered_line_range() {
+    let mut state = BlockViewerState::new("turn\0entry-1".to_string());
+    state.observe_frame(
+        Rect::new(1, 1, 30, 12),
+        Rect::new(3, 3, 24, 5),
+        Rect::new(27, 1, 3, 1),
+        lines(5),
+    );
+
+    state.select_by(1);
+    state.begin_visual_selection();
+    state.select_by(2);
+
+    assert_eq!(
+        state.take_visual_selection_text(),
+        Some("line 1\nline 2\nline 3".to_string())
+    );
+    assert!(!state.visual_selection_active());
+}

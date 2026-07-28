@@ -23,5 +23,5 @@ expression: buffer_text(&buffer)
   │                                                                          │
   │  search: draw                                                            │
   │                                                                          │
-  │  Esc close · / search · n/N match · j/k navigate · y copy · Y copy path  │
+  │    Esc close · / search · v select · n/N match · y copy · Y copy path    │
   └──────────────────────────────────────────────────────────────────────────┘

@@ -106,6 +106,7 @@ impl BlockViewerPane<'_> {
             viewport,
         }
         .render(body_area, scrollbar_area, buffer, theme);
+        render_visual_selection(self.state, body_area, viewport, buffer, theme);
         if let Some(selected) = self.state.selected_line()
             && viewport.first_visible_line <= selected
             && selected < viewport.end_visible_line
@@ -114,14 +115,9 @@ impl BlockViewerPane<'_> {
                 u16::try_from(selected.saturating_sub(viewport.first_visible_line))
                     .unwrap_or(u16::MAX),
             );
-            let selection_style = if theme.panel_selected == Color::Reset {
-                Style::default().add_modifier(Modifier::REVERSED)
-            } else {
-                Style::default().bg(theme.panel_selected)
-            };
             buffer.set_style(
                 Rect::new(body_area.x, row, body_area.width, 1),
-                selection_style,
+                selection_style(theme).add_modifier(Modifier::BOLD),
             );
         }
         render_search_matches(self.state, body_area, viewport, buffer, theme);
@@ -145,8 +141,8 @@ fn block_viewer_footer(block: &PresentationBlock) -> String {
     let mut hints = vec![
         "Esc close".to_string(),
         "/ search".to_string(),
+        "v select".to_string(),
         "n/N match".to_string(),
-        "j/k navigate".to_string(),
     ];
     if block.supports_raw() {
         hints.push("r raw".to_string());
@@ -158,6 +154,37 @@ fn block_viewer_footer(block: &PresentationBlock) -> String {
         hints.push(format!("Y {label}"));
     }
     hints.join(" · ")
+}
+
+fn render_visual_selection(
+    state: &BlockViewerState,
+    area: Rect,
+    viewport: ScrollbackViewport,
+    buffer: &mut Buffer,
+    theme: AstralTheme,
+) {
+    let Some(range) = state.visual_selection_range() else {
+        return;
+    };
+    let first = (*range.start()).max(viewport.first_visible_line);
+    let end = range.end().saturating_add(1).min(viewport.end_visible_line);
+    for line in first..end {
+        let row = area.y.saturating_add(
+            u16::try_from(line.saturating_sub(viewport.first_visible_line)).unwrap_or(u16::MAX),
+        );
+        buffer.set_style(
+            Rect::new(area.x, row, area.width, 1),
+            selection_style(theme),
+        );
+    }
+}
+
+fn selection_style(theme: AstralTheme) -> Style {
+    if theme.panel_selected == Color::Reset {
+        Style::default().add_modifier(Modifier::REVERSED)
+    } else {
+        Style::default().bg(theme.panel_selected)
+    }
 }
 
 fn render_search_matches(
