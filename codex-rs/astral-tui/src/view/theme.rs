@@ -74,6 +74,8 @@ pub(crate) struct AstralTheme {
     pub(crate) panel_selected: Color,
     pub(crate) prompt_border: Color,
     pub(crate) prompt_border_active: Color,
+    pub(crate) prompt_selection_background: Color,
+    pub(crate) prompt_selection_foreground: Color,
     pub(crate) selection_border: Color,
 }
 
@@ -112,6 +114,8 @@ impl AstralTheme {
             panel_selected: quantize(self.panel_selected),
             prompt_border: quantize(self.prompt_border),
             prompt_border_active: quantize(self.prompt_border_active),
+            prompt_selection_background: quantize(self.prompt_selection_background),
+            prompt_selection_foreground: quantize(self.prompt_selection_foreground),
             selection_border: quantize(self.selection_border),
         }
     }
@@ -140,6 +144,8 @@ impl AstralTheme {
             panel_selected: Color::Rgb(45, 43, 50),
             prompt_border: Color::Rgb(50, 50, 55),
             prompt_border_active: Color::Rgb(80, 80, 88),
+            prompt_selection_background: Color::Rgb(49, 62, 115),
+            prompt_selection_foreground: Color::Rgb(192, 202, 245),
             selection_border: Color::Rgb(80, 80, 88),
         }
     }
@@ -166,10 +172,13 @@ impl AstralTheme {
             panel_selected: Color::Rgb(218, 215, 226),
             prompt_border: Color::Rgb(208, 208, 214),
             prompt_border_active: Color::Rgb(142, 142, 152),
+            prompt_selection_background: Color::Rgb(49, 62, 115),
+            prompt_selection_foreground: Color::Rgb(192, 202, 245),
             selection_border: Color::Rgb(142, 142, 152),
         }
     }
 
+    #[allow(clippy::disallowed_methods)]
     const fn terminal() -> Self {
         Self {
             bg_base: Color::Reset,
@@ -191,6 +200,8 @@ impl AstralTheme {
             panel_selected: Color::DarkGray,
             prompt_border: Color::DarkGray,
             prompt_border_active: Color::Gray,
+            prompt_selection_background: Color::Rgb(49, 62, 115),
+            prompt_selection_foreground: Color::Rgb(192, 202, 245),
             selection_border: Color::Gray,
         }
     }

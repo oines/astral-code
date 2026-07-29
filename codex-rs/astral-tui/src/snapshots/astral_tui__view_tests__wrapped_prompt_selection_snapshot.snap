@@ -1,0 +1,14 @@
+---
+source: astral-tui/src/view_tests.rs
+expression: "format!(\"{}\\n\\nselection mask:\\n{}\", buffer_text(&buffer),\nselection_mask(&buffer, theme.prompt_selection_background))"
+---
+╭──────────────────────╮
+│ ❯ alpha beta gamma   │
+│ delta                │
+│                      │
+│                      │
+╰────────────── gpt-5 ─╯
+
+selection mask:
+
+          ^^^^^^^^^^

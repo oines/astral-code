@@ -2,6 +2,7 @@ use pretty_assertions::assert_eq;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Position;
 use ratatui::layout::Rect;
+use ratatui::style::Color;
 use ratatui::style::Stylize;
 
 use super::view::AgentViewLayout;
@@ -88,6 +89,7 @@ fn view_chrome_snapshot() {
         flags: &["anthropic"],
         ghost: None,
         focused: true,
+        selection: None,
     }
     .render(Rect::new(0, 1, 80, 3), &mut buffer, theme);
     ShortcutsBar {
@@ -116,11 +118,37 @@ fn prompt_wrap_and_mid_buffer_cursor_snapshot() {
         flags: &["default"],
         ghost: None,
         focused: true,
+        selection: None,
     }
     .render(area, &mut buffer, theme);
 
     assert_eq!(cursor, Some(Position::new(12, 3)));
     insta::assert_snapshot!(buffer_text(&buffer));
+}
+
+#[test]
+fn wrapped_prompt_selection_snapshot() {
+    let theme = AstralTheme::default();
+    let area = Rect::new(0, 0, 24, 6);
+    let mut buffer = Buffer::empty(area);
+    let text = "alpha beta gamma delta";
+    PromptChrome {
+        text,
+        cursor_byte: text.len(),
+        title: None,
+        model: "gpt-5",
+        flags: &[],
+        ghost: None,
+        focused: true,
+        selection: Some(6..16),
+    }
+    .render(area, &mut buffer, theme);
+
+    insta::assert_snapshot!(format!(
+        "{}\n\nselection mask:\n{}",
+        buffer_text(&buffer),
+        selection_mask(&buffer, theme.prompt_selection_background)
+    ));
 }
 
 #[test]
@@ -162,6 +190,28 @@ fn buffer_text(buffer: &Buffer) -> String {
         .map(|y| {
             (area.x..area.right())
                 .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+                .trim_end()
+                .to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim_end()
+        .to_string()
+}
+
+fn selection_mask(buffer: &Buffer, selection_background: Color) -> String {
+    let area = buffer.area;
+    (area.y..area.bottom())
+        .map(|y| {
+            (area.x..area.right())
+                .map(|x| {
+                    if buffer[(x, y)].bg == selection_background {
+                        '^'
+                    } else {
+                        ' '
+                    }
+                })
                 .collect::<String>()
                 .trim_end()
                 .to_string()

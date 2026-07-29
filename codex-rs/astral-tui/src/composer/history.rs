@@ -137,6 +137,7 @@ impl ComposerState {
         self.cursor = range.start.saturating_add(inserted_len);
         self.preferred_column = None;
         self.finish_mutation();
+        self.clear_selection_state();
     }
 
     pub(super) fn undo(&mut self) -> bool {
@@ -179,6 +180,7 @@ impl ComposerState {
         self.cursor = snapshot.cursor.min(self.text.len());
         self.mention_bindings = snapshot.mention_bindings;
         self.preferred_column = None;
+        self.clear_selection_state();
     }
 }
 

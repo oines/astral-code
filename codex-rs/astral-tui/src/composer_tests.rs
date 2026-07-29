@@ -1,9 +1,16 @@
+use std::time::Duration;
+use std::time::Instant;
+
 use codex_app_server_protocol::UserInput;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
+use crossterm::event::MouseButton;
+use crossterm::event::MouseEvent;
+use crossterm::event::MouseEventKind;
 use pretty_assertions::assert_eq;
 
+use super::ComposerMouseAction;
 use super::ComposerState;
 use crate::mention::MentionTarget;
 
@@ -174,6 +181,82 @@ fn editing_inside_a_selected_mention_drops_its_structured_binding() {
     );
 }
 
+#[test]
+fn mouse_selection_copies_and_replaces_the_selected_buffer_range() {
+    let mut composer = ComposerState::default();
+    composer.replace("hello world");
+    let now = Instant::now();
+
+    assert_eq!(
+        composer.handle_mouse(
+            mouse(MouseEventKind::Down(MouseButton::Left), 4, 2),
+            Some(6),
+            now,
+        ),
+        ComposerMouseAction::Redraw
+    );
+    assert_eq!(
+        composer.handle_mouse(
+            mouse(MouseEventKind::Drag(MouseButton::Left), 9, 2),
+            Some(11),
+            now + Duration::from_millis(20),
+        ),
+        ComposerMouseAction::Redraw
+    );
+    assert_eq!(
+        composer.handle_mouse(
+            mouse(MouseEventKind::Up(MouseButton::Left), 9, 2),
+            None,
+            now + Duration::from_millis(40),
+        ),
+        ComposerMouseAction::Copy("world".to_string())
+    );
+    assert_eq!(composer.selection_range(), Some(6..11));
+
+    composer.insert_text("Astral");
+    assert_eq!(composer.text(), "hello Astral");
+    assert_eq!(composer.selection_range(), None);
+    assert!(composer.edit_key(modified_char('z', KeyModifiers::CONTROL)));
+    assert_eq!(composer.text(), "hello world");
+
+    assert_eq!(
+        composer.handle_mouse(
+            mouse(MouseEventKind::Down(MouseButton::Left), 3, 3),
+            Some(1),
+            now + Duration::from_millis(100),
+        ),
+        ComposerMouseAction::Redraw
+    );
+    let _ = composer.handle_mouse(
+        mouse(MouseEventKind::Up(MouseButton::Left), 3, 3),
+        None,
+        now + Duration::from_millis(120),
+    );
+    assert_eq!(
+        composer.handle_mouse(
+            mouse(MouseEventKind::Down(MouseButton::Left), 3, 3),
+            Some(1),
+            now + Duration::from_millis(200),
+        ),
+        ComposerMouseAction::Copy("hello".to_string())
+    );
+    let _ = composer.handle_mouse(
+        mouse(MouseEventKind::Up(MouseButton::Left), 3, 3),
+        None,
+        now + Duration::from_millis(220),
+    );
+    assert_eq!(
+        composer.handle_mouse(
+            mouse(MouseEventKind::Down(MouseButton::Left), 3, 3),
+            Some(1),
+            now + Duration::from_millis(300),
+        ),
+        ComposerMouseAction::Copy("hello world".to_string())
+    );
+    assert!(composer.edit_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE,)));
+    assert_eq!(composer.text(), "");
+}
+
 fn skill_mention() -> (String, MentionTarget) {
     (
         "$review".to_string(),
@@ -186,4 +269,13 @@ fn skill_mention() -> (String, MentionTarget) {
 
 fn modified_char(character: char, modifiers: KeyModifiers) -> KeyEvent {
     KeyEvent::new(KeyCode::Char(character), modifiers)
+}
+
+fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+    MouseEvent {
+        kind,
+        column,
+        row,
+        modifiers: KeyModifiers::NONE,
+    }
 }

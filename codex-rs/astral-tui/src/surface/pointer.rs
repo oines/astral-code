@@ -1,7 +1,12 @@
+use std::time::Instant;
+
+use crossterm::event::MouseButton;
 use crossterm::event::MouseEvent;
+use crossterm::event::MouseEventKind;
 use ratatui::layout::Position;
 use ratatui::layout::Rect;
 
+use crate::composer::ComposerMouseAction;
 use crate::view::CompletionMenuFrame;
 use crate::view::prompt_cursor_at;
 
@@ -101,18 +106,48 @@ impl SurfaceState {
         self.pointer_areas.prompt_contains(mouse)
     }
 
-    pub(crate) fn place_composer_cursor(&mut self, mouse: MouseEvent) -> bool {
-        let Some(cursor) = prompt_cursor_at(
-            self.composer.text(),
-            self.composer.cursor(),
-            self.pointer_areas.prompt,
-            Position::new(mouse.column, mouse.row),
-        ) else {
-            return false;
+    pub(crate) fn composer_mouse_active(&self) -> bool {
+        self.composer.mouse_selection_active()
+    }
+
+    pub(crate) fn composer_mouse_drag_active(&self) -> bool {
+        self.composer.mouse_drag_active()
+    }
+
+    pub(crate) fn handle_composer_mouse(
+        &mut self,
+        mut mouse: MouseEvent,
+        now: Instant,
+    ) -> ComposerMouseAction {
+        if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+            && self.composer.mouse_drag_active()
+        {
+            mouse.kind = MouseEventKind::Drag(MouseButton::Left);
+        }
+        let position = match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Drag(MouseButton::Left) => {
+                prompt_cursor_at(
+                    self.composer.text(),
+                    self.composer.cursor(),
+                    self.pointer_areas.prompt,
+                    Position::new(mouse.column, mouse.row),
+                )
+            }
+            MouseEventKind::Up(MouseButton::Left)
+            | MouseEventKind::Down(MouseButton::Right | MouseButton::Middle)
+            | MouseEventKind::Up(MouseButton::Right | MouseButton::Middle)
+            | MouseEventKind::Drag(MouseButton::Right | MouseButton::Middle)
+            | MouseEventKind::Moved
+            | MouseEventKind::ScrollDown
+            | MouseEventKind::ScrollUp
+            | MouseEventKind::ScrollLeft
+            | MouseEventKind::ScrollRight => None,
         };
-        let changed = self.composer.set_cursor(cursor);
-        self.refresh_composer_completions();
-        changed
+        let action = self.composer.handle_mouse(mouse, position, now);
+        if action != ComposerMouseAction::Nothing {
+            self.refresh_composer_completions();
+        }
+        action
     }
 
     pub(crate) fn observe_completion_menu(&mut self, frame: CompletionMenuFrame) {

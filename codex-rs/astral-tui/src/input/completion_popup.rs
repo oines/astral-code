@@ -48,9 +48,7 @@ pub(super) fn handle_mouse(state: &mut SurfaceState, mouse: MouseEvent) -> Input
                 if kind == CompletionKind::History && state.history().browse {
                     state.detach_history();
                 }
-                state.focus_prompt();
-                state.place_composer_cursor(mouse);
-                return InputAction::Redraw;
+                return super::prompt_mouse::handle(state, mouse);
             }
             InputAction::None
         }

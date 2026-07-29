@@ -13,6 +13,7 @@ use crate::mention::PromptSubmission;
 
 mod edit;
 mod history;
+mod selection;
 
 use edit::byte_at_column;
 use edit::line_end;
@@ -24,6 +25,9 @@ use edit::small_word_start_left;
 use edit::whitespace_word_start_left;
 use history::EditHistory;
 use history::MutationKind;
+use selection::ClickTracker;
+pub(crate) use selection::ComposerMouseAction;
+use selection::Selection;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ComposerState {
@@ -33,6 +37,10 @@ pub(crate) struct ComposerState {
     kill_buffer: String,
     history: EditHistory,
     mention_bindings: Vec<MentionBinding>,
+    selection: Option<Selection>,
+    drag_anchor: Option<usize>,
+    drag_active: bool,
+    click_tracker: ClickTracker,
 }
 
 impl ComposerState {
@@ -44,22 +52,10 @@ impl ComposerState {
         self.cursor
     }
 
-    pub(crate) fn set_cursor(&mut self, cursor: usize) -> bool {
-        let mut cursor = cursor.min(self.text.len());
-        while !self.text.is_char_boundary(cursor) {
-            cursor = cursor.saturating_sub(1);
-        }
-        if cursor == self.cursor {
-            return false;
-        }
-        self.cursor = cursor;
-        self.preferred_column = None;
-        true
-    }
-
     pub(crate) fn replace(&mut self, text: impl Into<String>) {
         let text = text.into();
         if self.text == text && self.cursor == text.len() && self.mention_bindings.is_empty() {
+            self.clear_selection_state();
             return;
         }
         self.begin_mutation(MutationKind::Replace);
@@ -68,10 +64,12 @@ impl ComposerState {
         self.preferred_column = None;
         self.mention_bindings.clear();
         self.finish_mutation();
+        self.clear_selection_state();
     }
 
     pub(crate) fn take(&mut self) -> String {
         if self.text.is_empty() && self.cursor == 0 && self.mention_bindings.is_empty() {
+            self.clear_selection_state();
             return String::new();
         }
         self.begin_mutation(MutationKind::Replace);
@@ -80,11 +78,13 @@ impl ComposerState {
         self.mention_bindings.clear();
         let text = std::mem::take(&mut self.text);
         self.finish_mutation();
+        self.clear_selection_state();
         text
     }
 
     pub(crate) fn take_submission(&mut self) -> PromptSubmission {
         if self.text.is_empty() && self.cursor == 0 && self.mention_bindings.is_empty() {
+            self.clear_selection_state();
             return PromptSubmission::text_only(String::new());
         }
         self.begin_mutation(MutationKind::Replace);
@@ -100,6 +100,7 @@ impl ComposerState {
             mentions,
         };
         self.finish_mutation();
+        self.clear_selection_state();
         submission
     }
 
@@ -108,6 +109,7 @@ impl ComposerState {
             && self.cursor == submission.text.len()
             && self.mention_bindings == submission.mentions
         {
+            self.clear_selection_state();
             return;
         }
         self.begin_mutation(MutationKind::Replace);
@@ -116,10 +118,12 @@ impl ComposerState {
         self.cursor = self.text.len();
         self.preferred_column = None;
         self.finish_mutation();
+        self.clear_selection_state();
     }
 
     pub(crate) fn clear(&mut self) {
         if self.text.is_empty() && self.cursor == 0 && self.mention_bindings.is_empty() {
+            self.clear_selection_state();
             return;
         }
         self.begin_mutation(MutationKind::Replace);
@@ -128,6 +132,7 @@ impl ComposerState {
         self.preferred_column = None;
         self.mention_bindings.clear();
         self.finish_mutation();
+        self.clear_selection_state();
     }
 
     pub(crate) fn insert_char(&mut self, character: char) {
@@ -139,6 +144,11 @@ impl ComposerState {
         if normalized.is_empty() {
             return;
         }
+        if let Some(range) = self.selection_range() {
+            self.replace_range(range, &normalized, MutationKind::Replace);
+            return;
+        }
+        self.clear_selection_state();
         self.history.break_insert_batch_at(&normalized);
         self.replace_range(self.cursor..self.cursor, &normalized, MutationKind::Insert);
         self.history.record_inserted_text(&normalized);
@@ -161,10 +171,33 @@ impl ComposerState {
     }
 
     pub(crate) fn edit_key(&mut self, key: KeyEvent) -> bool {
+        if self.selection_range().is_some() {
+            match (key.code, key.modifiers) {
+                (KeyCode::Char('j' | 'm'), KeyModifiers::CONTROL) => {
+                    self.insert_char('\n');
+                    return true;
+                }
+                (
+                    KeyCode::Backspace | KeyCode::Delete | KeyCode::Char('\u{0008}' | '\u{007f}'),
+                    _,
+                )
+                | (KeyCode::Char('h' | 'd'), KeyModifiers::CONTROL) => {
+                    return self.delete_selection();
+                }
+                (KeyCode::Char(character), modifiers)
+                    if !modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::SUPER) =>
+                {
+                    self.insert_char(character);
+                    return true;
+                }
+                _ => {}
+            }
+        }
+        let selection_cleared = self.clear_selection_state();
         let word_modifier = key
             .modifiers
             .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
-        match (key.code, key.modifiers) {
+        let changed = match (key.code, key.modifiers) {
             (KeyCode::Char('Z'), modifiers)
                 if modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::SUPER) =>
             {
@@ -235,7 +268,8 @@ impl ComposerState {
                 true
             }
             _ => false,
-        }
+        };
+        changed || selection_cleared
     }
 
     pub(crate) fn backspace(&mut self) -> bool {

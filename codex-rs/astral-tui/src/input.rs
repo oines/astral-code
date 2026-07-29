@@ -34,6 +34,7 @@ mod mention_popup;
 mod mouse_scroll;
 mod pickers;
 mod plan_review;
+mod prompt_mouse;
 mod scrollback;
 mod shortcut_help;
 mod subagent;
@@ -170,6 +171,16 @@ pub(crate) fn handle_mouse(state: &mut SurfaceState, mouse: MouseEvent) -> Input
     if let Some(overlay) = state.active_overlay() {
         return handle_overlay_mouse(state, overlay, mouse);
     }
+    if (state.composer_mouse_drag_active()
+        && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)))
+        || (state.composer_mouse_active()
+            && matches!(
+                mouse.kind,
+                MouseEventKind::Drag(MouseButton::Left) | MouseEventKind::Up(MouseButton::Left)
+            ))
+    {
+        return prompt_mouse::handle(state, mouse);
+    }
     if state.pending_requests().front().is_some() && scrollback_owns_pointer(state, mouse) {
         return InputAction::None;
     }
@@ -213,9 +224,7 @@ pub(crate) fn handle_mouse(state: &mut SurfaceState, mouse: MouseEvent) -> Input
         if state.prompt_contains(mouse)
             && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
         {
-            state.focus_prompt();
-            state.place_composer_cursor(mouse);
-            return InputAction::Redraw;
+            return prompt_mouse::handle(state, mouse);
         }
         return InputAction::None;
     }
@@ -224,9 +233,7 @@ pub(crate) fn handle_mouse(state: &mut SurfaceState, mouse: MouseEvent) -> Input
     }
     if state.prompt_contains(mouse) && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
     {
-        state.focus_prompt();
-        state.place_composer_cursor(mouse);
-        return InputAction::Redraw;
+        return prompt_mouse::handle(state, mouse);
     }
     InputAction::None
 }

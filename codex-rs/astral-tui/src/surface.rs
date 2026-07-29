@@ -238,6 +238,10 @@ impl SurfaceState {
         self.composer.cursor()
     }
 
+    pub(crate) fn composer_selection(&self) -> Option<std::ops::Range<usize>> {
+        self.composer.selection_range()
+    }
+
     pub fn set_composer(&mut self, text: impl Into<String>) {
         self.composer.replace(text);
         self.refresh_composer_completions();
@@ -938,6 +942,7 @@ pub(crate) fn render_surface_with_view(
                 .then_some(slash.ghost.as_deref())
                 .flatten(),
             focused: prompt_focused,
+            selection: state.composer_selection(),
         }
         .render(layout.prompt, buffer, theme)
     };
