@@ -18,6 +18,7 @@ use crate::view::AstralTheme;
 use crate::view::AstralThemeId;
 use crate::view::BlockViewerPane;
 use crate::view::ColorLevel;
+use crate::view::FileViewerPane;
 use crate::view::InfoModal;
 use crate::view::ShortcutHelp;
 
@@ -127,6 +128,12 @@ pub(super) fn render_overlay(
             if !state.render_subagent_overlay(area, buffer, theme) {
                 return false;
             }
+        }
+        ActiveOverlay::FileViewer => {
+            let Some(viewer) = state.file_viewer_mut() else {
+                return false;
+            };
+            FileViewerPane { state: viewer }.render(area, buffer, theme);
         }
         ActiveOverlay::BlockViewer => {
             let Some((block, is_running)) = state.current_block_viewer_entry() else {

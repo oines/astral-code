@@ -16,6 +16,13 @@ use crate::mention::PromptSubmission;
 const PASTE_CHIP_DISPLAY_BYTES: usize = 10_000;
 const PASTE_CHIP_MIN_LINES: usize = 4;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FileReferenceAtCursor {
+    pub(crate) range: Range<usize>,
+    pub(crate) path: String,
+    pub(crate) line_range: Option<Range<usize>>,
+}
+
 impl ComposerState {
     pub(crate) fn elements(&self) -> &[ComposerElement] {
         &self.elements
@@ -86,6 +93,34 @@ impl ComposerState {
         self.replace_range(path_start..token_range.end, path, MutationKind::Replace);
     }
 
+    pub(crate) fn replace_file_reference(&mut self, range: Range<usize>, path: &str) {
+        let start = range.start;
+        let end = if self.text.as_bytes().get(range.end) == Some(&b' ') {
+            range.end.saturating_add(1)
+        } else {
+            range.end
+        };
+        let insert_text = format!("@{path}");
+        self.replace_range(
+            range.start..end,
+            &format!("{insert_text} "),
+            MutationKind::Replace,
+        );
+        self.elements.push(ComposerElement::file_reference(
+            start..start + insert_text.len(),
+            insert_text,
+        ));
+        self.elements.sort_by_key(|element| element.range.start);
+    }
+
+    pub(crate) fn file_reference_at_cursor(&self) -> Option<FileReferenceAtCursor> {
+        self.file_reference_near_cursor(false)
+    }
+
+    pub(crate) fn file_reference_at_boundary(&self) -> Option<FileReferenceAtCursor> {
+        self.file_reference_near_cursor(true)
+    }
+
     pub(crate) fn expand_paste_at_cursor(&mut self) -> bool {
         let Some(index) = self.element_index_at(self.cursor) else {
             return false;
@@ -106,6 +141,25 @@ impl ComposerState {
         }
         self.expand_element(index);
         true
+    }
+
+    fn file_reference_near_cursor(&self, boundary_only: bool) -> Option<FileReferenceAtCursor> {
+        let element = self.elements.iter().find(|element| {
+            element.is_file_reference()
+                && if boundary_only {
+                    self.cursor == element.range.start || self.cursor == element.range.end
+                } else {
+                    self.cursor >= element.range.start
+                        && self.cursor <= element.range.end.saturating_add(1)
+                }
+        })?;
+        let text = self.text.get(element.range.clone())?;
+        let (path, line_range) = parse_file_reference(text);
+        Some(FileReferenceAtCursor {
+            range: element.range.clone(),
+            path,
+            line_range,
+        })
     }
 
     pub(super) fn element_start_at(&self, position: usize) -> Option<usize> {
@@ -221,6 +275,30 @@ impl ComposerState {
         let replacement = element.submission_text().to_string();
         self.replace_range(element.range, &replacement, MutationKind::Replace);
     }
+}
+
+fn parse_file_reference(text: &str) -> (String, Option<Range<usize>>) {
+    let text = text.strip_prefix('@').unwrap_or(text);
+    let Some((path, suffix)) = text.rsplit_once(':') else {
+        return (text.to_string(), None);
+    };
+    let parsed = if let Some((start, end)) = suffix.split_once('-') {
+        let start = start.parse::<usize>().ok();
+        let end = end.parse::<usize>().ok();
+        start.zip(end).and_then(|(start, end)| {
+            (start > 0 && end >= start).then(|| start..end.saturating_add(1))
+        })
+    } else {
+        suffix
+            .parse::<usize>()
+            .ok()
+            .filter(|line| *line > 0)
+            .map(|line| line..line.saturating_add(1))
+    };
+    parsed.map_or_else(
+        || (text.to_string(), None),
+        |range| (path.to_string(), Some(range)),
+    )
 }
 
 fn paste_chip_lines(line_count: usize) -> String {

@@ -43,7 +43,7 @@ const LOGICAL_LINE_WIDTH: u16 = 500;
 
 pub(crate) struct ViewerItem {
     line: Line<'static>,
-    plain: String,
+    logical: String,
     background: Option<Color>,
     edit_copy: Option<EditCopyLine>,
 }
@@ -70,6 +70,7 @@ impl BlockViewerPane<'_> {
             footer: block_viewer_footer(self.block),
             items: render_viewer_items(self.block, theme, self.text_mode),
             is_running: self.is_running,
+            initial_selection: None,
         }
         .render(area, buffer, theme);
     }
@@ -81,6 +82,7 @@ pub(crate) struct ContentViewerPane<'a> {
     pub(crate) footer: String,
     pub(crate) items: Vec<ViewerItem>,
     pub(crate) is_running: bool,
+    pub(crate) initial_selection: Option<std::ops::Range<usize>>,
 }
 
 impl ContentViewerPane<'_> {
@@ -118,7 +120,7 @@ impl ContentViewerPane<'_> {
             body_height,
         );
         let rows = render_viewer_rows(&self.items, body_width, self.state.wrap_mode());
-        let logical_lines = self.items.iter().map(|item| item.plain.clone()).collect();
+        let logical_lines = self.items.iter().map(|item| item.logical.clone()).collect();
         let edit_copy_lines = self
             .items
             .iter()
@@ -136,6 +138,9 @@ impl ContentViewerPane<'_> {
             rendered_rows,
             is_running: self.is_running,
         });
+        if let Some(range) = self.initial_selection {
+            self.state.select_physical_range(range);
+        }
         let rows = self
             .state
             .visible_row_indices()
@@ -232,17 +237,26 @@ pub(crate) fn viewer_item(mut line: Line<'static>, edit_copy: Option<EditCopyLin
             break;
         }
     }
-    let plain = line
+    let plain: String = line
         .spans
         .iter()
         .map(|span| span.content.as_ref())
         .collect();
     ViewerItem {
         line,
-        plain,
+        logical: plain,
         background,
         edit_copy,
     }
+}
+
+pub(crate) fn viewer_item_with_logical_text(
+    line: Line<'static>,
+    logical_text: String,
+) -> ViewerItem {
+    let mut item = viewer_item(line, None);
+    item.logical = logical_text;
+    item
 }
 
 fn render_viewer_rows(

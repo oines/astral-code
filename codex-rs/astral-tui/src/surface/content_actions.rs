@@ -43,7 +43,7 @@ impl SurfaceState {
         let block = self.presentation_block(&entry_id)?;
         if self
             .block_viewer()
-            .is_some_and(|viewer| ViewerState::visual_selection_active(viewer))
+            .is_some_and(ViewerState::visual_selection_active)
         {
             return non_empty(self.block_viewer_mut()?.take_visual_selection_text(&block));
         }

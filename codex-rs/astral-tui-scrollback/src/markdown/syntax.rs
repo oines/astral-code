@@ -31,13 +31,13 @@ static DAY_THEME: OnceLock<Theme> = OnceLock::new();
 /// multiline syntax state cannot leak between file versions. The diff
 /// renderer owns those two instances; this type only centralizes Astral's
 /// grammar, theme, guardrail, and style conversion.
-pub(crate) struct CodeLineHighlighter {
+pub struct CodeLineHighlighter {
     inner: HighlightLines<'static>,
     theme: MarkdownSyntaxTheme,
 }
 
 impl CodeLineHighlighter {
-    pub(crate) fn for_path(path: &Path, source: &str, theme: MarkdownSyntaxTheme) -> Option<Self> {
+    pub fn for_path(path: &Path, source: &str, theme: MarkdownSyntaxTheme) -> Option<Self> {
         if source.len() > MAX_HIGHLIGHT_BYTES || source.lines().count() > MAX_HIGHLIGHT_LINES {
             return None;
         }
@@ -49,7 +49,7 @@ impl CodeLineHighlighter {
         })
     }
 
-    pub(crate) fn highlight_line(&mut self, source: &str) -> Option<Vec<Span<'static>>> {
+    pub fn highlight_line(&mut self, source: &str) -> Option<Vec<Span<'static>>> {
         let source = format!("{source}\n");
         let highlighted = self.inner.highlight_line(&source, syntax_set()).ok()?;
         Some(

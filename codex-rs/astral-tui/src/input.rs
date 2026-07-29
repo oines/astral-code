@@ -30,6 +30,7 @@ mod block_viewer;
 mod completion_popup;
 mod content_viewer;
 mod file_search_popup;
+mod file_viewer;
 mod history_popup;
 mod mcp_form;
 mod mention_popup;
@@ -252,6 +253,7 @@ fn handle_overlay_key(
 ) -> InputAction {
     match overlay {
         ActiveOverlay::Subagent => subagent::handle_key(state, key),
+        ActiveOverlay::FileViewer => file_viewer::handle_key(state, key),
         ActiveOverlay::BlockViewer => block_viewer::handle_key(state, key),
         ActiveOverlay::ThemePicker => pickers::handle_theme_picker_key(state, key),
         ActiveOverlay::PermissionPicker => pickers::handle_permission_picker_key(state, key),
@@ -268,6 +270,7 @@ fn handle_overlay_paste(
 ) -> InputAction {
     match overlay {
         ActiveOverlay::Subagent => subagent::handle_paste(state, text),
+        ActiveOverlay::FileViewer => file_viewer::handle_paste(state, text),
         ActiveOverlay::BlockViewer => block_viewer::handle_paste(state, text),
         ActiveOverlay::ThreadPicker => {
             let Some(picker) = state.thread_picker_mut() else {
@@ -290,6 +293,7 @@ fn handle_overlay_mouse(
 ) -> InputAction {
     match overlay {
         ActiveOverlay::Subagent => subagent::handle_mouse(state, mouse),
+        ActiveOverlay::FileViewer => file_viewer::handle_mouse(state, mouse),
         ActiveOverlay::BlockViewer => block_viewer::handle_mouse(state, mouse),
         ActiveOverlay::ThemePicker => pickers::handle_theme_picker_mouse(state, mouse),
         ActiveOverlay::PermissionPicker => pickers::handle_permission_picker_mouse(state, mouse),
@@ -322,6 +326,18 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
         && let Some(action) = mention_popup::handle_key(state, key)
     {
         return action;
+    }
+    if key.code == KeyCode::Char('l')
+        && key.modifiers == KeyModifiers::CONTROL
+        && state.open_file_reference_viewer(false)
+    {
+        return InputAction::Redraw;
+    }
+    if key.code == KeyCode::Char(':')
+        && key.modifiers == KeyModifiers::NONE
+        && state.open_file_reference_viewer(true)
+    {
+        return InputAction::Redraw;
     }
     let prompt_action = actions::lookup(&key, When::PromptFocused);
     if prompt_action == Some(ActionId::CycleMode) {

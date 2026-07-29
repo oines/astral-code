@@ -394,6 +394,70 @@ fn file_search_menu_and_atomic_reference_snapshot() {
 }
 
 #[test]
+fn file_search_colon_opens_line_viewer_and_inserts_selected_range_snapshot() {
+    let session = session_state();
+    let mut state = SurfaceState::from_session(&session);
+    state.set_activity(SurfaceActivity::Ready);
+    state.set_composer("@src");
+    let search = state
+        .take_file_search_request()
+        .expect("file query should schedule a search");
+    assert!(state.apply_file_search_results(
+        search.generation,
+        &search.query,
+        vec![FuzzyFileSearchResult {
+            root: "/workspace".to_string(),
+            path: "src/lib.rs".to_string(),
+            match_type: FuzzyFileSearchMatchType::File,
+            file_name: "lib.rs".to_string(),
+            score: 100,
+            indices: Some(vec![0, 1, 2]),
+        }],
+    ));
+    assert_eq!(
+        handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Char(':'), KeyModifiers::NONE),
+        ),
+        InputAction::Redraw
+    );
+    let request = state
+        .take_file_viewer_request()
+        .expect("colon should request the selected file");
+    assert_eq!(request.path, "src/lib.rs");
+    assert!(state.apply_file_viewer_result(
+        request.generation,
+        Ok(["fn first() {}", "fn second() {}", "fn third() {}"].join("\n")),
+    ));
+    let _ = render_at_size(&mut state, &session, 80, 20);
+    assert_eq!(
+        handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE),
+        ),
+        InputAction::Redraw
+    );
+    for _ in 0..2 {
+        assert_eq!(
+            handle_key(&mut state, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
+            InputAction::Redraw
+        );
+    }
+    let viewer = render_at_size(&mut state, &session, 80, 20);
+    insta::assert_snapshot!("file_line_viewer_selection", viewer);
+
+    assert_eq!(
+        handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        ),
+        InputAction::Redraw
+    );
+    assert_eq!(state.composer(), "@src/lib.rs:1-3 ");
+    assert_eq!(state.composer_elements().len(), 1);
+}
+
+#[test]
 fn disconnected_slash_command_menu_snapshot() {
     let session = session_state();
     let mut state = SurfaceState::from_session(&session);

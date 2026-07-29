@@ -27,6 +27,11 @@ pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> Option<Inpu
             state.dismiss_file_search();
             Some(InputAction::Redraw)
         }
+        (KeyCode::Char(':'), KeyModifiers::NONE) | (KeyCode::Char('l'), KeyModifiers::CONTROL) => {
+            state
+                .open_file_search_viewer()
+                .then_some(InputAction::Redraw)
+        }
         (KeyCode::Tab | KeyCode::Enter, KeyModifiers::NONE) => state
             .accept_file_search_selection()
             .then_some(InputAction::Redraw),

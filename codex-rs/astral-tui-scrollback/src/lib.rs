@@ -15,6 +15,7 @@ pub use block::ToolPresentation;
 pub use block::ToolStatus;
 pub use content_actions::BlockTextMode;
 pub use display::DisplayMode;
+pub use markdown::CodeLineHighlighter;
 pub use markdown::LineJoiner;
 pub use markdown::MarkdownLine;
 pub use markdown::MarkdownLink;
