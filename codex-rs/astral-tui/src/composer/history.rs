@@ -2,7 +2,7 @@
 //!
 //! The batching rules follow Grok Build's `xai-ratatui-textarea` at commit
 //! 47348d13ec4508dcfe440e34c6d511bb02998fb2 (Apache-2.0). Astral snapshots its
-//! structured mention bindings alongside text so undo never silently changes
+//! structured prompt elements alongside text so undo never silently changes
 //! the next app-server submission.
 
 use std::ops::Range;
@@ -108,7 +108,8 @@ impl EditHistory {
 
 impl ComposerState {
     pub(super) fn kill_range(&mut self, range: Range<usize>) {
-        self.kill_buffer = self.text[range.clone()].to_string();
+        let range = self.expand_range_to_element_boundaries(range);
+        self.kill_buffer = self.expanded_text_for_range(range.clone());
         self.replace_range(range, "", MutationKind::Kill);
     }
 
@@ -118,6 +119,11 @@ impl ComposerState {
         replacement: &str,
         kind: MutationKind,
     ) {
+        let range = if range.is_empty() {
+            range
+        } else {
+            self.expand_range_to_element_boundaries(range)
+        };
         self.begin_mutation(kind);
         let removed_len = range.end.saturating_sub(range.start);
         let inserted_len = replacement.len();
@@ -194,11 +200,7 @@ fn adjust_element_for_insertion(
         return true;
     }
     if position == element.range.start {
-        if !inserted
-            .chars()
-            .next_back()
-            .is_some_and(char::is_whitespace)
-        {
+        if !element.keep_after_boundary_insertion(/*at_start*/ true, inserted) {
             return false;
         }
         element.range.start = element.range.start.saturating_add(inserted.len());
@@ -208,7 +210,8 @@ fn adjust_element_for_insertion(
     if position < element.range.end {
         return false;
     }
-    position != element.range.end || inserted.chars().next().is_some_and(char::is_whitespace)
+    position != element.range.end
+        || element.keep_after_boundary_insertion(/*at_start*/ false, inserted)
 }
 
 fn shifted_index(index: usize, removed_len: usize, inserted_len: usize) -> usize {

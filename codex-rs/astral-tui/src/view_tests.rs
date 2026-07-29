@@ -16,6 +16,7 @@ use super::view::ScrollbarConfig;
 use super::view::ShortcutsBar;
 use super::view::StatusBar;
 use crate::PromptSubmission;
+use crate::composer::ComposerElement;
 use crate::plan_review::PlanReviewState;
 
 #[test]
@@ -90,6 +91,7 @@ fn view_chrome_snapshot() {
         ghost: None,
         focused: true,
         selection: None,
+        elements: &[],
     }
     .render(Rect::new(0, 1, 80, 3), &mut buffer, theme);
     ShortcutsBar {
@@ -119,6 +121,7 @@ fn prompt_wrap_and_mid_buffer_cursor_snapshot() {
         ghost: None,
         focused: true,
         selection: None,
+        elements: &[],
     }
     .render(area, &mut buffer, theme);
 
@@ -141,6 +144,7 @@ fn wrapped_prompt_selection_snapshot() {
         ghost: None,
         focused: true,
         selection: Some(6..16),
+        elements: &[],
     }
     .render(area, &mut buffer, theme);
 
@@ -148,6 +152,40 @@ fn wrapped_prompt_selection_snapshot() {
         "{}\n\nselection mask:\n{}",
         buffer_text(&buffer),
         selection_mask(&buffer, theme.prompt_selection_background)
+    ));
+}
+
+#[test]
+fn paste_chip_prompt_snapshot() {
+    let theme = AstralTheme::default();
+    let area = Rect::new(0, 0, 52, 4);
+    let mut buffer = Buffer::empty(area);
+    let placeholder = "[Pasted: 4 lines]";
+    let text = format!("inspect {placeholder} before submitting");
+    let start = "inspect ".len();
+    let elements = vec![ComposerElement::paste(
+        start..start + placeholder.len(),
+        placeholder.to_string(),
+        "one\ntwo\nthree\nfour".to_string(),
+    )];
+
+    PromptChrome {
+        text: &text,
+        cursor_byte: start + placeholder.len(),
+        title: None,
+        model: "gpt-5",
+        flags: &[],
+        ghost: None,
+        focused: true,
+        selection: None,
+        elements: &elements,
+    }
+    .render(area, &mut buffer, theme);
+
+    insta::assert_snapshot!(format!(
+        "{}\n\nchip mask:\n{}",
+        buffer_text(&buffer),
+        selection_mask(&buffer, theme.panel_selected)
     ));
 }
 

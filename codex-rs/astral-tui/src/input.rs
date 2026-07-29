@@ -163,7 +163,7 @@ pub fn handle_paste(state: &mut SurfaceState, text: &str) -> InputAction {
     if state.plan_review().is_some() {
         return plan_review::handle_paste(state, text);
     }
-    state.composer_state_mut().insert_text(text);
+    state.composer_state_mut().insert_paste(text);
     state.refresh_composer_completions();
     InputAction::Redraw
 }
@@ -352,6 +352,13 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
         state.open_history_browse();
         return InputAction::Redraw;
     }
+    if prompt_action == Some(ActionId::SendPrompt)
+        && !state.slash().active
+        && state.composer_state_mut().expand_paste_at_cursor()
+    {
+        state.refresh_composer_completions();
+        return InputAction::Redraw;
+    }
     match prompt_action {
         Some(ActionId::PromptCancel) => {
             if matches!(state.activity(), SurfaceActivity::Working) {
@@ -369,9 +376,9 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
         Some(ActionId::OpenExternalEditor) => {
             if state.slash().open || state.mentions().open {
                 InputAction::None
-            } else if state.composer_has_structured_mentions() {
+            } else if state.composer_has_structured_elements() {
                 InputAction::Notice(
-                    "External editing is unavailable while the draft has skill or plugin mentions"
+                    "External editing is unavailable while the draft has structured prompt items"
                         .to_string(),
                 )
             } else {

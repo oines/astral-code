@@ -122,6 +122,55 @@ fn prompt_history_browses_live_and_detaches_for_editing() {
 }
 
 #[test]
+fn large_paste_chip_expands_on_enter_and_keeps_payload_through_history() {
+    let mut state = SurfaceState::new("thread-1");
+    let pasted = "one\ntwo\nthree\nfour";
+
+    assert_eq!(handle_paste(&mut state, pasted), InputAction::Redraw);
+    assert_eq!(state.composer(), "[Pasted: 4 lines]");
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Left)),
+        InputAction::Redraw
+    );
+    assert_eq!(state.composer_cursor(), 0);
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Enter)),
+        InputAction::Redraw
+    );
+    assert_eq!(state.composer(), pasted);
+
+    assert_eq!(
+        handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('z'), KeyModifiers::CONTROL),
+        ),
+        InputAction::Redraw
+    );
+    assert_eq!(state.composer(), "[Pasted: 4 lines]");
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Right)),
+        InputAction::Redraw
+    );
+    let InputAction::Submit(submission) = handle_key(&mut state, key(KeyCode::Enter)) else {
+        panic!("enter after the chip should submit");
+    };
+    assert_eq!(
+        submission.user_input(),
+        vec![codex_app_server_protocol::UserInput::Text {
+            text: pasted.to_string(),
+            text_elements: Vec::new(),
+        }]
+    );
+
+    state.record_submission(&submission);
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Up)),
+        InputAction::Redraw
+    );
+    assert_eq!(state.composer(), "[Pasted: 4 lines]");
+}
+
+#[test]
 fn dollar_completion_selects_a_skill_and_submits_structured_input() {
     let mut state = SurfaceState::new("thread-1");
     state.set_mention_catalog(MentionCatalog {

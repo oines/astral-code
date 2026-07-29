@@ -66,10 +66,11 @@ pub(super) fn handle_paste(state: &mut SurfaceState, text: &str) -> InputAction 
     if browse {
         state.detach_history();
     }
-    state.composer_state_mut().insert_text(text);
     if browse {
+        state.composer_state_mut().insert_paste(text);
         state.refresh_composer_completions();
     } else {
+        state.composer_state_mut().insert_text(text);
         state.update_history_query();
     }
     InputAction::Redraw

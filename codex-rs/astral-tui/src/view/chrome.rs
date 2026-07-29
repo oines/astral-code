@@ -8,7 +8,9 @@ use ratatui::text::Span;
 use std::ops::Range;
 
 use super::AstralTheme;
+use super::prompt_elements::PromptElementOverlay;
 use super::prompt_selection::PromptSelectionOverlay;
+use crate::composer::ComposerElement;
 
 pub(crate) struct StatusBar<'a> {
     pub(crate) left: Line<'a>,
@@ -40,6 +42,7 @@ pub(crate) struct PromptChrome<'a> {
     pub(crate) ghost: Option<&'a str>,
     pub(crate) focused: bool,
     pub(crate) selection: Option<Range<usize>>,
+    pub(crate) elements: &'a [ComposerElement],
 }
 
 impl PromptChrome<'_> {
@@ -114,6 +117,14 @@ impl PromptChrome<'_> {
                 Style::default().fg(theme.text_primary).bg(bg),
             );
         }
+        PromptElementOverlay {
+            text: self.text,
+            elements: self.elements,
+            rows: &layout.ranges,
+            first_visible,
+            visible_rows,
+        }
+        .render(area, buffer, theme);
         PromptSelectionOverlay {
             text: self.text,
             selection: self.selection,

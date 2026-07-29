@@ -20,6 +20,7 @@ mod markdown_content;
 mod mention_menu;
 mod modal;
 mod plan_review;
+mod prompt_elements;
 mod prompt_pointer;
 mod prompt_selection;
 mod scrollback;

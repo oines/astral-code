@@ -23,7 +23,7 @@ pub(super) fn handle_paste(state: &mut SurfaceState, text: &str) -> InputAction 
     if state.plan_review_focus() != Some(PlanReviewFocus::Revision) {
         return InputAction::None;
     }
-    state.composer_state_mut().insert_text(text);
+    state.composer_state_mut().insert_paste(text);
     state.refresh_composer_completions();
     InputAction::Redraw
 }

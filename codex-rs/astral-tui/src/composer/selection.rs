@@ -64,7 +64,7 @@ impl ComposerState {
         let selection = self.selection?;
         let start = selection.anchor.min(selection.head).min(self.text.len());
         let end = selection.anchor.max(selection.head).min(self.text.len());
-        (start < end).then_some(start..end)
+        (start < end).then(|| self.expand_range_to_element_boundaries(start..end))
     }
 
     pub(crate) fn mouse_selection_active(&self) -> bool {
@@ -96,9 +96,19 @@ impl ComposerState {
                     };
                 };
                 match click_count {
-                    2 => self.select_word(position),
+                    2 if self.expand_paste_at_position(position) => ComposerMouseAction::Redraw,
+                    2 => {
+                        if let Some(start) = self.element_start_at(position) {
+                            self.drag_anchor = Some(start);
+                            self.set_cursor_from_mouse(start);
+                            ComposerMouseAction::Redraw
+                        } else {
+                            self.select_word(position)
+                        }
+                    }
                     3 => self.select_line(position),
                     _ => {
+                        let position = self.element_start_at(position).unwrap_or(position);
                         self.drag_anchor = Some(position);
                         self.set_cursor_from_mouse(position);
                         ComposerMouseAction::Redraw
@@ -109,7 +119,9 @@ impl ComposerState {
                 let Some(anchor) = self.drag_anchor else {
                     return ComposerMouseAction::Nothing;
                 };
-                let Some(head) = position.map(|position| position.min(self.text.len())) else {
+                let Some(head) = position.map(|position| {
+                    self.snap_position_to_element_boundary(position.min(self.text.len()))
+                }) else {
                     return ComposerMouseAction::Nothing;
                 };
                 if head == anchor {
@@ -130,9 +142,7 @@ impl ComposerState {
                     return ComposerMouseAction::Nothing;
                 }
                 self.selected_text()
-                    .map_or(ComposerMouseAction::Redraw, |text| {
-                        ComposerMouseAction::Copy(text.to_string())
-                    })
+                    .map_or(ComposerMouseAction::Redraw, ComposerMouseAction::Copy)
             }
             MouseEventKind::Down(MouseButton::Right | MouseButton::Middle)
             | MouseEventKind::Up(MouseButton::Right | MouseButton::Middle)
@@ -162,8 +172,8 @@ impl ComposerState {
         true
     }
 
-    fn selected_text(&self) -> Option<&str> {
-        self.text.get(self.selection_range()?)
+    fn selected_text(&self) -> Option<String> {
+        Some(self.expanded_text_for_range(self.selection_range()?))
     }
 
     fn select_word(&mut self, position: usize) -> ComposerMouseAction {
@@ -187,7 +197,7 @@ impl ComposerState {
             head: end,
         });
         self.set_cursor_from_mouse(previous_boundary(&self.text, end).unwrap_or(start));
-        ComposerMouseAction::Copy(self.text[start..end].to_string())
+        ComposerMouseAction::Copy(self.expanded_text_for_range(start..end))
     }
 
     fn select_line(&mut self, position: usize) -> ComposerMouseAction {
@@ -204,13 +214,11 @@ impl ComposerState {
         });
         self.set_cursor_from_mouse(position);
         self.selected_text()
-            .map_or(ComposerMouseAction::Redraw, |text| {
-                ComposerMouseAction::Copy(text.to_string())
-            })
+            .map_or(ComposerMouseAction::Redraw, ComposerMouseAction::Copy)
     }
 
     fn set_cursor_from_mouse(&mut self, position: usize) {
-        self.cursor = position.min(self.text.len());
+        self.cursor = self.snap_position_to_element_boundary(position);
         self.preferred_column = None;
     }
 }

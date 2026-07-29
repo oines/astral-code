@@ -33,7 +33,7 @@ impl MentionTarget {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PromptSubmission {
     pub(crate) text: String,
     pub(crate) elements: Vec<ComposerElement>,
@@ -52,13 +52,36 @@ impl PromptSubmission {
     }
 
     pub fn user_input(&self) -> Vec<UserInput> {
+        let mut paste_elements = self
+            .elements
+            .iter()
+            .filter(|element| element.is_paste() && element.matches_text(&self.text))
+            .collect::<Vec<_>>();
+        paste_elements.sort_by_key(|element| element.range.start);
+        let mut text = String::new();
+        let mut cursor = 0;
+        for element in paste_elements {
+            if element.range.start < cursor {
+                continue;
+            }
+            text.push_str(&self.text[cursor..element.range.start]);
+            text.push_str(element.submission_text());
+            cursor = element.range.end;
+        }
+        text.push_str(&self.text[cursor..]);
+
         let mut input = vec![UserInput::Text {
-            text: self.text.clone(),
+            text,
             text_elements: Vec::new(),
         }];
         let mut seen = HashSet::new();
         for element in &self.elements {
-            let target = element.mention_target();
+            if !element.matches_text(&self.text) {
+                continue;
+            }
+            let Some(target) = element.mention_target() else {
+                continue;
+            };
             if seen.insert(target.key().to_string()) {
                 input.push(target.to_user_input());
             }

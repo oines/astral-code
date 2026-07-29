@@ -9,17 +9,17 @@ impl SurfaceState {
     }
 
     pub(crate) fn open_history_browse(&mut self) -> bool {
-        let saved = self.composer.text().to_string();
-        let Some(text) = self.history.activate_browse(&saved) else {
+        let saved = self.composer.submission();
+        let Some(submission) = self.history.activate_browse(saved) else {
             return false;
         };
-        self.replace_composer_for_history(text);
+        self.replace_composer_for_history(submission);
         true
     }
 
     pub(crate) fn open_history_search(&mut self) {
-        let saved = self.composer.text().to_string();
-        self.history.activate_search(&saved);
+        let saved = self.composer.submission();
+        self.history.activate_search(saved);
         self.slash.close();
         self.mentions.dismiss(self.composer.text());
     }
@@ -55,8 +55,8 @@ impl SurfaceState {
     }
 
     pub(crate) fn accept_history_selection(&mut self) {
-        let text = self.history.accept();
-        self.set_composer(text);
+        let submission = self.history.accept();
+        self.restore_submission(submission);
     }
 
     pub(crate) fn cancel_history(&mut self) -> bool {
@@ -64,7 +64,7 @@ impl SurfaceState {
             return false;
         }
         let saved = self.history.cancel();
-        self.set_composer(saved);
+        self.restore_submission(saved);
         true
     }
 
@@ -73,17 +73,17 @@ impl SurfaceState {
     }
 
     pub(crate) fn record_submission(&mut self, submission: &PromptSubmission) {
-        self.history.record(submission.text());
+        self.history.record(submission);
     }
 
     fn populate_selected_history(&mut self) {
-        if let Some(text) = self.history.selected_text().map(str::to_string) {
-            self.replace_composer_for_history(text);
+        if let Some(submission) = self.history.selected_submission().cloned() {
+            self.replace_composer_for_history(submission);
         }
     }
 
-    fn replace_composer_for_history(&mut self, text: String) {
-        self.composer.replace(text);
+    fn replace_composer_for_history(&mut self, submission: PromptSubmission) {
+        self.composer.restore_submission(submission);
         self.slash.close();
         self.mentions.dismiss(self.composer.text());
     }

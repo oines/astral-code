@@ -12,6 +12,7 @@ use crate::mention::PromptSubmission;
 
 mod edit;
 mod element;
+mod element_edit;
 mod history;
 mod selection;
 
@@ -53,7 +54,7 @@ impl ComposerState {
         self.cursor
     }
 
-    pub(crate) fn has_structured_mentions(&self) -> bool {
+    pub(crate) fn has_structured_elements(&self) -> bool {
         !self.elements.is_empty()
     }
 
@@ -120,6 +121,7 @@ impl ComposerState {
         self.begin_mutation(MutationKind::Replace);
         self.text = submission.text;
         self.elements = submission.elements;
+        self.elements.sort_by_key(|element| element.range.start);
         self.cursor = self.text.len();
         self.preferred_column = None;
         self.finish_mutation();
@@ -173,6 +175,7 @@ impl ComposerState {
             insert_text,
             target,
         ));
+        self.elements.sort_by_key(|element| element.range.start);
     }
 
     pub(crate) fn edit_key(&mut self, key: KeyEvent) -> bool {
@@ -321,7 +324,7 @@ impl ComposerState {
     }
 
     pub(crate) fn move_left(&mut self) -> bool {
-        let Some(previous) = previous_boundary(&self.text, self.cursor) else {
+        let Some(previous) = self.atomic_left_target() else {
             return false;
         };
         self.cursor = previous;
@@ -330,7 +333,7 @@ impl ComposerState {
     }
 
     pub(crate) fn move_right(&mut self) -> bool {
-        let Some(next) = next_boundary(&self.text, self.cursor) else {
+        let Some(next) = self.atomic_right_target() else {
             return false;
         };
         self.cursor = next;
@@ -339,7 +342,8 @@ impl ComposerState {
     }
 
     pub(crate) fn move_word_left(&mut self) -> bool {
-        let target = small_word_start_left(&self.text, self.cursor);
+        let target =
+            self.snap_position_to_element_boundary(small_word_start_left(&self.text, self.cursor));
         if target == self.cursor {
             return false;
         }
@@ -349,7 +353,8 @@ impl ComposerState {
     }
 
     pub(crate) fn move_word_right(&mut self) -> bool {
-        let target = small_word_end_right(&self.text, self.cursor);
+        let target =
+            self.snap_position_to_element_boundary(small_word_end_right(&self.text, self.cursor));
         if target == self.cursor {
             return false;
         }
@@ -455,7 +460,12 @@ impl ComposerState {
             .unwrap_or_else(|| self.text[current_start..self.cursor].chars().count());
         let target_end = current_start - 1;
         let target_start = line_start(&self.text, target_end);
-        self.cursor = byte_at_column(&self.text, target_start, target_end, column);
+        self.cursor = self.snap_position_to_element_boundary(byte_at_column(
+            &self.text,
+            target_start,
+            target_end,
+            column,
+        ));
         self.preferred_column = Some(column);
         true
     }
@@ -471,7 +481,12 @@ impl ComposerState {
             .unwrap_or_else(|| self.text[current_start..self.cursor].chars().count());
         let target_start = current_end + 1;
         let target_end = line_end(&self.text, target_start);
-        self.cursor = byte_at_column(&self.text, target_start, target_end, column);
+        self.cursor = self.snap_position_to_element_boundary(byte_at_column(
+            &self.text,
+            target_start,
+            target_end,
+            column,
+        ));
         self.preferred_column = Some(column);
         true
     }

@@ -1,0 +1,12 @@
+---
+source: astral-tui/src/view_tests.rs
+expression: "format!(\"{}\\n\\nchip mask:\\n{}\", buffer_text(&buffer),\nselection_mask(&buffer, theme.panel_selected))"
+---
+╭──────────────────────────────────────────────────╮
+│ ❯ inspect [Pasted: 4 lines] before submitting    │
+│                                                  │
+╰────────────────────────────────────────── gpt-5 ─╯
+
+chip mask:
+
+            ^^^^^^^^^^^^^^^^^

@@ -162,20 +162,21 @@ fn selected_mentions_survive_edits_before_them_and_project_structured_input() {
 }
 
 #[test]
-fn editing_inside_a_selected_mention_drops_its_structured_binding() {
+fn selected_mentions_are_atomic_during_cursor_navigation() {
     let mut composer = ComposerState::default();
     composer.replace("$rev");
     let (insert_text, target) = skill_mention();
     composer.insert_mention(0..4, insert_text, target);
     assert!(composer.move_left());
     assert!(composer.move_left());
+    assert_eq!(composer.cursor(), 0);
     composer.insert_char('x');
 
     let submission = composer.take_submission();
     assert_eq!(
         submission.user_input(),
         vec![UserInput::Text {
-            text: "$reviexw ".to_string(),
+            text: "x$review ".to_string(),
             text_elements: Vec::new(),
         }]
     );

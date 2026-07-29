@@ -242,8 +242,12 @@ impl SurfaceState {
         self.composer.selection_range()
     }
 
-    pub(crate) fn composer_has_structured_mentions(&self) -> bool {
-        self.composer.has_structured_mentions()
+    pub(crate) fn composer_elements(&self) -> &[crate::composer::ComposerElement] {
+        self.composer.elements()
+    }
+
+    pub(crate) fn composer_has_structured_elements(&self) -> bool {
+        self.composer.has_structured_elements()
     }
 
     pub fn set_composer(&mut self, text: impl Into<String>) {
@@ -680,7 +684,8 @@ pub(crate) fn render_surface_with_view(
                     0
                 } else {
                     let (text, cursor) = if history.open && history.browse {
-                        (history.saved_text.as_str(), history.saved_text.len())
+                        let text = history.saved_submission.text();
+                        (text, text.len())
                     } else {
                         (state.composer(), state.composer_cursor())
                     };
@@ -947,6 +952,7 @@ pub(crate) fn render_surface_with_view(
                 .flatten(),
             focused: prompt_focused,
             selection: state.composer_selection(),
+            elements: state.composer_elements(),
         }
         .render(layout.prompt, buffer, theme)
     };

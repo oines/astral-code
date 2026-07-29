@@ -9,6 +9,7 @@ use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::Turn;
 use codex_app_server_protocol::UserInput;
 
+use crate::PromptSubmission;
 use crate::slash::fuzzy_match;
 
 const MAX_HISTORY_ENTRIES: usize = 1_000;
@@ -16,7 +17,7 @@ const MAX_MATCHES: usize = 100;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct HistoryMatch {
-    pub(crate) text: String,
+    pub(crate) submission: PromptSubmission,
     pub(crate) display: String,
     pub(crate) indices: Vec<usize>,
 }
@@ -25,7 +26,7 @@ pub(crate) struct HistoryMatch {
 pub(crate) struct HistorySnapshot {
     pub(crate) open: bool,
     pub(crate) browse: bool,
-    pub(crate) saved_text: String,
+    pub(crate) saved_submission: PromptSubmission,
     pub(crate) query: String,
     pub(crate) matches: Vec<HistoryMatch>,
     pub(crate) selected: usize,
@@ -41,7 +42,7 @@ impl HistorySnapshot {
 pub(crate) struct PromptHistory {
     /// Most recent first. Empty-query results reverse this so the newest
     /// prompt sits at the bottom of the panel, nearest the composer.
-    entries: Vec<String>,
+    entries: Vec<PromptSubmission>,
     snapshot: HistorySnapshot,
 }
 
@@ -64,7 +65,7 @@ impl PromptHistory {
                     })
                     .collect::<Vec<_>>()
                     .join("\n");
-                history.record(&text);
+                history.record(&PromptSubmission::text_only(text));
             }
         }
         history
@@ -74,31 +75,39 @@ impl PromptHistory {
         &self.snapshot
     }
 
-    pub(crate) fn record(&mut self, text: &str) {
-        if text.trim().is_empty() || self.entries.first().is_some_and(|entry| entry == text) {
+    pub(crate) fn record(&mut self, submission: &PromptSubmission) {
+        if submission.text().trim().is_empty()
+            || self
+                .entries
+                .first()
+                .is_some_and(|entry| entry == submission)
+        {
             return;
         }
-        self.entries.insert(0, text.to_string());
+        self.entries.insert(0, submission.clone());
         self.entries.truncate(MAX_HISTORY_ENTRIES);
         self.deactivate();
     }
 
-    pub(crate) fn activate_browse(&mut self, saved_text: &str) -> Option<String> {
+    pub(crate) fn activate_browse(
+        &mut self,
+        saved_submission: PromptSubmission,
+    ) -> Option<PromptSubmission> {
         if self.entries.is_empty() {
             return None;
         }
-        self.activate(saved_text, /*browse*/ true);
-        self.selected_text().map(str::to_string)
+        self.activate(saved_submission, /*browse*/ true);
+        self.selected_submission().cloned()
     }
 
-    pub(crate) fn activate_search(&mut self, saved_text: &str) {
-        self.activate(saved_text, /*browse*/ false);
+    pub(crate) fn activate_search(&mut self, saved_submission: PromptSubmission) {
+        self.activate(saved_submission, /*browse*/ false);
     }
 
-    fn activate(&mut self, saved_text: &str, browse: bool) {
+    fn activate(&mut self, saved_submission: PromptSubmission, browse: bool) {
         self.snapshot.open = true;
         self.snapshot.browse = browse;
-        self.snapshot.saved_text = saved_text.to_string();
+        self.snapshot.saved_submission = saved_submission;
         self.snapshot.query.clear();
         self.refresh_matches();
     }
@@ -118,9 +127,9 @@ impl PromptHistory {
                 .iter()
                 .take(MAX_MATCHES)
                 .rev()
-                .map(|text| HistoryMatch {
-                    text: text.clone(),
-                    display: single_line(text),
+                .map(|submission| HistoryMatch {
+                    submission: submission.clone(),
+                    display: single_line(submission.text()),
                     indices: Vec::new(),
                 })
                 .collect()
@@ -129,10 +138,10 @@ impl PromptHistory {
                 .entries
                 .iter()
                 .enumerate()
-                .filter_map(|(recency, text)| {
-                    let display = single_line(text);
+                .filter_map(|(recency, submission)| {
+                    let display = single_line(submission.text());
                     fuzzy_match(&display, query)
-                        .map(|(score, indices)| (recency, score, text, display, indices))
+                        .map(|(score, indices)| (recency, score, submission, display, indices))
                 })
                 .collect::<Vec<_>>();
             // Weakest/oldest first, strongest/newest last. The best result is
@@ -143,8 +152,8 @@ impl PromptHistory {
                 .rev()
                 .take(MAX_MATCHES)
                 .rev()
-                .map(|(_, _, text, display, indices)| HistoryMatch {
-                    text: text.clone(),
+                .map(|(_, _, submission, display, indices)| HistoryMatch {
+                    submission: submission.clone(),
                     display,
                     indices,
                 })
@@ -183,21 +192,21 @@ impl PromptHistory {
         self.snapshot.selected = index.min(self.snapshot.matches.len() - 1);
     }
 
-    pub(crate) fn selected_text(&self) -> Option<&str> {
-        self.snapshot.selection().map(|entry| entry.text.as_str())
+    pub(crate) fn selected_submission(&self) -> Option<&PromptSubmission> {
+        self.snapshot.selection().map(|entry| &entry.submission)
     }
 
-    pub(crate) fn accept(&mut self) -> String {
-        let text = self
-            .selected_text()
-            .map(str::to_string)
-            .unwrap_or_else(|| self.snapshot.saved_text.clone());
+    pub(crate) fn accept(&mut self) -> PromptSubmission {
+        let submission = self
+            .selected_submission()
+            .cloned()
+            .unwrap_or_else(|| self.snapshot.saved_submission.clone());
         self.deactivate();
-        text
+        submission
     }
 
-    pub(crate) fn cancel(&mut self) -> String {
-        let saved = self.snapshot.saved_text.clone();
+    pub(crate) fn cancel(&mut self) -> PromptSubmission {
+        let saved = self.snapshot.saved_submission.clone();
         self.deactivate();
         saved
     }
