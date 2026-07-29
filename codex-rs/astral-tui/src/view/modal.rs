@@ -32,6 +32,34 @@ pub(crate) struct ModalFrame {
     pub(crate) close_button: Rect,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ModalSizing {
+    width_percent: u16,
+    min_width: u16,
+    max_width: u16,
+    height: ModalHeight,
+}
+
+impl ModalSizing {
+    pub(crate) const fn shortcuts() -> Self {
+        Self {
+            width_percent: 70,
+            min_width: 44,
+            max_width: 80,
+            height: ModalHeight::Adaptive,
+        }
+    }
+
+    const fn standard(height: ModalHeight) -> Self {
+        Self {
+            width_percent: 60,
+            min_width: 44,
+            max_width: 120,
+            height,
+        }
+    }
+}
+
 pub(crate) struct InfoModal<'a> {
     pub(crate) state: &'a mut ModalState,
 }
@@ -108,7 +136,25 @@ pub(crate) fn render_modal_frame_with_geometry(
     footer: &str,
     height: ModalHeight,
 ) -> Option<ModalFrame> {
-    let popup = popup_area(area, height)?;
+    render_modal_frame_with_sizing(
+        area,
+        buffer,
+        theme,
+        title,
+        footer,
+        ModalSizing::standard(height),
+    )
+}
+
+pub(crate) fn render_modal_frame_with_sizing(
+    area: Rect,
+    buffer: &mut Buffer,
+    theme: AstralTheme,
+    title: &str,
+    footer: &str,
+    sizing: ModalSizing,
+) -> Option<ModalFrame> {
+    let popup = popup_area(area, sizing)?;
     Clear.render(popup, buffer);
     buffer.set_style(popup, Style::default().bg(theme.bg_base));
     let border = Style::default().fg(theme.gray_dim).bg(theme.bg_base);
@@ -186,11 +232,11 @@ pub(crate) fn modal_choice_style(theme: AstralTheme, selected: bool) -> Style {
     }
 }
 
-fn popup_area(area: Rect, height: ModalHeight) -> Option<Rect> {
+fn popup_area(area: Rect, sizing: ModalSizing) -> Option<Rect> {
     if area.width < 20 || area.height < 8 {
         return None;
     }
-    if height == ModalHeight::FullViewport {
+    if sizing.height == ModalHeight::FullViewport {
         let width = (area.width.saturating_mul(95) / 100)
             .max(60.min(area.width))
             .min(area.width);
@@ -204,8 +250,11 @@ fn popup_area(area: Rect, height: ModalHeight) -> Option<Rect> {
             height,
         ));
     }
-    let width = (area.width.saturating_mul(3) / 5).clamp(44.min(area.width), 120.min(area.width));
-    let minimum = match height {
+    let width = (area.width.saturating_mul(sizing.width_percent) / 100).clamp(
+        sizing.min_width.min(area.width),
+        sizing.max_width.min(area.width),
+    );
+    let minimum = match sizing.height {
         ModalHeight::Adaptive => 8,
         ModalHeight::MinimumContent(content_height) => content_height.saturating_add(5),
         ModalHeight::FullViewport => unreachable!("handled above"),
