@@ -21,6 +21,10 @@ impl SurfacePointerState {
         self.scrollback.contains((mouse.column, mouse.row).into())
     }
 
+    fn scrollback_rows(&self) -> u16 {
+        self.scrollback.height
+    }
+
     fn prompt_contains(&self, mouse: MouseEvent) -> bool {
         self.prompt.contains((mouse.column, mouse.row).into())
     }
@@ -33,6 +37,10 @@ impl SurfaceState {
 
     pub(crate) fn scrollback_contains(&self, mouse: MouseEvent) -> bool {
         self.pointer_areas.scrollback_contains(mouse)
+    }
+
+    pub(crate) fn scrollback_rows(&self) -> u16 {
+        self.pointer_areas.scrollback_rows()
     }
 
     pub(crate) fn prompt_contains(&self, mouse: MouseEvent) -> bool {

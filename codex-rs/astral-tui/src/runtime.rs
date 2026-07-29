@@ -1,6 +1,7 @@
 use std::io;
 use std::io::Stdout;
 use std::time::Duration;
+use std::time::Instant;
 
 use astral_terminal_inline::Terminal;
 use codex_app_server_client::AppServerEvent;
@@ -40,6 +41,9 @@ use crate::ecosystem::plugins_panel;
 use crate::ecosystem::skills_panel;
 use crate::handle_key;
 use crate::handle_paste;
+use crate::input::MouseScrollState;
+use crate::input::ScrollConfig;
+use crate::input::ScrollDirection;
 use crate::input::handle_mouse;
 use crate::modal::ModalRow;
 use crate::modal::ModalState;
@@ -215,25 +219,38 @@ async fn run_loop(
     let mut input = TerminalEventReader::start()?;
     let mut client_tool_tasks = JoinSet::new();
     let mut _clipboard_lease = None;
+    let mut mouse_scroll = MouseScrollState::default();
+    let mut needs_draw = true;
 
     loop {
-        let _ = surface.poll_scrollback_search();
-        draw(terminal, session, surface, &options)?;
+        needs_draw |= surface.poll_scrollback_search();
+        if needs_draw {
+            draw(terminal, session, surface, &options)?;
+            needs_draw = false;
+        }
         let selection_expiry = surface
             .scrollback_selection_expiry()
             .map(tokio::time::Instant::from_std);
         let search_pending = surface.scrollback_search_pending();
+        let scroll_deadline = mouse_scroll.clock_deadline(Instant::now());
 
         tokio::select! {
             _ = tokio::time::sleep(Duration::from_millis(16)), if search_pending => {
-                let _ = surface.poll_scrollback_search();
+                needs_draw |= surface.poll_scrollback_search();
+            }
+            _ = async {
+                if let Some(delay) = scroll_deadline {
+                    tokio::time::sleep(delay).await;
+                }
+            }, if scroll_deadline.is_some() => {
+                needs_draw |= apply_scroll_lines(surface, mouse_scroll.on_tick());
             }
             _ = async {
                 if let Some(expiry) = selection_expiry {
                     tokio::time::sleep_until(expiry).await;
                 }
             }, if selection_expiry.is_some() => {
-                surface.expire_scrollback_selection();
+                needs_draw |= surface.expire_scrollback_selection();
             }
             terminal_event = input.recv() => {
                 let Some(terminal_event) = terminal_event else {
@@ -246,6 +263,7 @@ async fn run_loop(
                 };
                 match terminal_event? {
                     Event::Key(key) => {
+                        mouse_scroll.cancel();
                         let action = match handle_key(surface, key) {
                             InputAction::ScrollUp => {
                                 if options.viewport == RunViewport::Fullscreen {
@@ -295,27 +313,53 @@ async fn run_loop(
                             reject_pending(session, surface).await;
                             return Ok(reason);
                         }
+                        needs_draw = true;
                     }
                     Event::Paste(text) => {
+                        mouse_scroll.cancel();
                         let _ = handle_paste(surface, &text);
+                        needs_draw = true;
                     }
-                    Event::Resize(_, _) => {}
+                    Event::Resize(_, _) => {
+                        mouse_scroll.cancel();
+                        needs_draw = true;
+                    }
                     Event::Mouse(mouse) => {
                         if options.viewport == RunViewport::Fullscreen {
+                            let direction = ScrollDirection::from_mouse_event(mouse);
                             let action = handle_mouse(surface, mouse);
                             match action {
+                                InputAction::None
+                                    if direction.is_some()
+                                        && surface.scrollback_contains(mouse) =>
+                                {
+                                    let config =
+                                        ScrollConfig::detected(surface.scrollback_rows());
+                                    let lines = mouse_scroll.on_scroll_event(
+                                        direction.expect("checked above"),
+                                        config,
+                                    );
+                                    needs_draw |= apply_scroll_lines(surface, lines);
+                                }
                                 InputAction::None => {
-                                    if let Some(selection) = surface.handle_scrollback_mouse(mouse) {
-                                        match copy_to_clipboard(&selection) {
-                                            Ok(lease) => {
-                                                _clipboard_lease = Some(lease);
-                                                surface.set_notice("Copied selection");
+                                    mouse_scroll.cancel();
+                                    if surface.scrollback_contains(mouse) {
+                                        if let Some(selection) =
+                                            surface.handle_scrollback_mouse(mouse)
+                                        {
+                                            match copy_to_clipboard(&selection) {
+                                                Ok(lease) => {
+                                                    _clipboard_lease = Some(lease);
+                                                    surface.set_notice("Copied selection");
+                                                }
+                                                Err(error) => surface.set_notice(error),
                                             }
-                                            Err(error) => surface.set_notice(error),
                                         }
+                                        needs_draw = true;
                                     }
                                 }
                                 InputAction::CopyText { text, notice } => {
+                                    mouse_scroll.cancel();
                                     match copy_to_clipboard(&text) {
                                         Ok(lease) => {
                                             _clipboard_lease = Some(lease);
@@ -323,8 +367,10 @@ async fn run_loop(
                                         }
                                         Err(error) => surface.set_notice(error),
                                     }
+                                    needs_draw = true;
                                 }
                                 action => {
+                                    mouse_scroll.cancel();
                                     if let Some(reason) = apply_input_action(
                                         session,
                                         surface,
@@ -336,11 +382,14 @@ async fn run_loop(
                                         reject_pending(session, surface).await;
                                         return Ok(reason);
                                     }
+                                    needs_draw = true;
                                 }
                             }
                         }
                     }
-                    Event::FocusGained | Event::FocusLost => {}
+                    Event::FocusGained | Event::FocusLost => {
+                        mouse_scroll.cancel();
+                    }
                 }
             }
             app_event = session.next_event() => {
@@ -360,6 +409,7 @@ async fn run_loop(
                     app_event,
                 )
                 .await?;
+                needs_draw = true;
             }
             completion = client_tool_tasks.join_next(), if !client_tool_tasks.is_empty() => {
                 if let Some(completion) = completion {
@@ -369,9 +419,22 @@ async fn run_loop(
                         )))
                     })?;
                     resolve_client_tool(session, surface, completion).await?;
+                    needs_draw = true;
                 }
             }
         }
+    }
+}
+
+fn apply_scroll_lines(surface: &mut SurfaceState, lines: i32) -> bool {
+    if lines < 0 {
+        surface.scroll_up(lines.unsigned_abs() as usize);
+        true
+    } else if lines > 0 {
+        surface.scroll_down(lines.unsigned_abs() as usize);
+        true
+    } else {
+        false
     }
 }
 
