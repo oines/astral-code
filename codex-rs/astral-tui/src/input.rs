@@ -28,6 +28,7 @@ use crate::surface::ActiveOverlay;
 
 mod block_viewer;
 mod completion_popup;
+mod file_search_popup;
 mod history_popup;
 mod mcp_form;
 mod mention_popup;
@@ -229,7 +230,11 @@ pub(crate) fn handle_mouse(state: &mut SurfaceState, mouse: MouseEvent) -> Input
         }
         return InputAction::None;
     }
-    if state.history().open || state.slash().open || state.mentions().open {
+    if state.history().open
+        || state.file_search().open
+        || state.slash().open
+        || state.mentions().open
+    {
         return completion_popup::handle_mouse(state, mouse);
     }
     if state.prompt_contains(mouse) && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
@@ -307,6 +312,11 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
     if state.history().open {
         return history_popup::handle_key(state, key);
     }
+    if state.file_search().open
+        && let Some(action) = file_search_popup::handle_key(state, key)
+    {
+        return action;
+    }
     if state.mentions().open
         && let Some(action) = mention_popup::handle_key(state, key)
     {
@@ -380,7 +390,7 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
         Some(ActionId::ExitEmptyPrompt) if state.composer().is_empty() => InputAction::Exit,
         Some(ActionId::CopyLastResponse) => InputAction::CopyLastResponse,
         Some(ActionId::OpenExternalEditor) => {
-            if state.slash().open || state.mentions().open {
+            if state.slash().open || state.mentions().open || state.file_search().open {
                 InputAction::None
             } else if state.composer_has_structured_elements() {
                 InputAction::Notice(

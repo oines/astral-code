@@ -17,6 +17,7 @@ impl SurfaceState {
     pub(crate) fn refresh_composer_completions(&mut self) {
         self.refresh_slash();
         self.refresh_mentions();
+        self.refresh_file_search();
     }
 
     pub(crate) fn refresh_mentions(&mut self) {

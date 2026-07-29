@@ -27,6 +27,8 @@ impl PromptElementOverlay<'_> {
         {
             let foreground = if element.is_paste() {
                 theme.text_secondary
+            } else if element.is_file_reference() {
+                theme.path
             } else {
                 theme.accent_running
             };

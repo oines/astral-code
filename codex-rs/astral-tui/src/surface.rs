@@ -2,6 +2,7 @@ mod appearance;
 mod attachments;
 mod block_viewer;
 mod content_actions;
+mod file_search;
 mod history;
 mod mentions;
 mod overlay;
@@ -34,6 +35,7 @@ use crate::PendingRequests;
 use crate::SessionState;
 use crate::block_viewer::BlockViewerState;
 use crate::composer::ComposerState;
+use crate::file_search::FileSearchController;
 use crate::history::PromptHistory;
 use crate::mcp_form::McpFormState;
 use crate::mention::MentionController;
@@ -63,6 +65,7 @@ use crate::view::AstralTheme;
 use crate::view::AstralThemeId;
 use crate::view::ColorLevel;
 use crate::view::EntryChromeState;
+use crate::view::FileSearchMenu;
 use crate::view::HistoryMenu;
 use crate::view::ImagePreviewOverlay;
 use crate::view::LayoutConfig;
@@ -125,6 +128,7 @@ pub struct SurfaceState {
     history: PromptHistory,
     slash: SlashController,
     mentions: MentionController,
+    file_search: FileSearchController,
     block_viewer: Option<BlockViewerState>,
     subagent_view: Option<Box<SubagentViewState>>,
     modal: Option<ModalState>,
@@ -158,6 +162,7 @@ impl SurfaceState {
             history: PromptHistory::default(),
             slash: SlashController::default(),
             mentions: MentionController::default(),
+            file_search: FileSearchController::default(),
             block_viewer: None,
             subagent_view: None,
             modal: None,
@@ -198,6 +203,7 @@ impl SurfaceState {
             history: PromptHistory::from_turns(&session.thread.turns),
             slash: SlashController::default(),
             mentions: MentionController::default(),
+            file_search: FileSearchController::default(),
             block_viewer: None,
             subagent_view: None,
             modal: None,
@@ -708,9 +714,12 @@ pub(crate) fn render_surface_with_view(
     };
     let slash = state.slash().clone();
     let mentions = state.mentions().clone();
-    let max_suggestions = if area.height <= 16 { 2 } else { 6 };
+    let file_search = state.file_search().clone();
+    let max_suggestions = if area.height <= 16 { 2 } else { 8 };
     let completion_rows = if history.open {
         history.matches.len().max(1)
+    } else if file_search.open {
+        file_search.matches.len().max(1)
     } else if mentions.open {
         mentions.matches.len()
     } else if slash.open {
@@ -876,6 +885,12 @@ pub(crate) fn render_surface_with_view(
         let completion_frame = if history.open {
             HistoryMenu {
                 snapshot: &history,
+                hovered,
+            }
+            .render(layout.banner, buffer, theme)
+        } else if file_search.open {
+            FileSearchMenu {
+                snapshot: &file_search,
                 hovered,
             }
             .render(layout.banner, buffer, theme)
@@ -1054,6 +1069,13 @@ pub(crate) fn render_surface_with_view(
         }
     }
     let mention_hints = [("↑/↓", "navigate"), ("Tab", "select"), ("Esc", "close")];
+    let file_search_hints = [
+        ("↑/↓", "navigate"),
+        ("PgUp/PgDn", "page"),
+        ("Tab/Enter", "select"),
+        ("→", "drill"),
+        ("Esc", "close"),
+    ];
     let slash_hints = [("↑/↓", "navigate"), ("Tab", "complete"), ("Esc", "close")];
     let history_hints = [
         ("↑/↓", "navigate"),
@@ -1095,6 +1117,8 @@ pub(crate) fn render_surface_with_view(
             &scrollback_hints
         } else if history.open {
             &history_hints
+        } else if file_search.open {
+            &file_search_hints
         } else if mentions.open {
             &mention_hints
         } else if slash.open {

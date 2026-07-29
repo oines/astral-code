@@ -69,6 +69,23 @@ impl ComposerState {
         self.elements.sort_by_key(|element| element.range.start);
     }
 
+    pub(crate) fn insert_file_reference(&mut self, range: Range<usize>, path: String) {
+        let start = range.start;
+        let insert_text = format!("@{path}");
+        let replacement = format!("{insert_text} ");
+        self.replace_range(range, &replacement, MutationKind::Replace);
+        self.elements.push(ComposerElement::file_reference(
+            start..start + insert_text.len(),
+            insert_text,
+        ));
+        self.elements.sort_by_key(|element| element.range.start);
+    }
+
+    pub(crate) fn replace_file_reference_path(&mut self, token_range: Range<usize>, path: &str) {
+        let path_start = token_range.start.saturating_add(1).min(token_range.end);
+        self.replace_range(path_start..token_range.end, path, MutationKind::Replace);
+    }
+
     pub(crate) fn expand_paste_at_cursor(&mut self) -> bool {
         let Some(index) = self.element_index_at(self.cursor) else {
             return false;

@@ -1,0 +1,43 @@
+---
+source: astral-tui/src/surface_tests.rs
+expression: "format!(\"MENU\\n{menu}\\n\\nREFERENCE\\n{chip}\")"
+---
+MENU
+ ⎇ main  /workspace
+
+ › inspect this repo
+
+
+ I’m tracing the relevant data flow.
+
+
+
+ ╭ files ───────────────────────────────────────────────────────────────────2─╮
+ │› src/lib.rs                                                                │
+ │  src/view                                                                  │
+ ╰────────────────────────────────────────────────────────────────────────────╯
+
+ ╭────────────────────────────────────────────────────────────────────────────╮
+ │ ❯ @src                                                                     │
+ ╰────────────────────────────────────────────── claude-sonnet-4 · workspace ─╯
+ ↑/↓:navigate  │  PgUp/PgDn:page  │  Tab/Enter:select  │  →:drill
+
+REFERENCE
+ ⎇ main  /workspace
+
+ › inspect this repo
+
+
+ I’m tracing the relevant data flow.
+
+
+
+
+
+
+
+
+ ╭────────────────────────────────────────────────────────────────────────────╮
+ │ ❯ @src/lib.rs                                                              │
+ ╰────────────────────────────────────────────── claude-sonnet-4 · workspace ─╯
+ Shift+Tab:mode  │  Ctrl+.:shortcuts

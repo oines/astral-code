@@ -8,6 +8,7 @@ use crate::SurfaceState;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CompletionKind {
     History,
+    File,
     Slash,
     Mention,
 }
@@ -75,6 +76,11 @@ pub(super) fn handle_mouse(state: &mut SurfaceState, mouse: MouseEvent) -> Input
 fn active_completion(state: &SurfaceState) -> Option<(CompletionKind, usize)> {
     if state.history().open {
         Some((CompletionKind::History, state.history().matches.len()))
+    } else if state.file_search().open {
+        Some((
+            CompletionKind::File,
+            state.file_search().matches.len().max(1),
+        ))
     } else if state.mentions().open {
         Some((CompletionKind::Mention, state.mentions().matches.len()))
     } else if state.slash().open {
@@ -89,6 +95,7 @@ fn move_selection(state: &mut SurfaceState, kind: CompletionKind, delta: isize) 
         CompletionKind::History => {
             state.move_history_selection(delta);
         }
+        CompletionKind::File => state.move_file_search_selection(delta),
         CompletionKind::Slash => state.move_slash_selection(delta),
         CompletionKind::Mention => state.move_mention_selection(delta),
     }
@@ -97,6 +104,7 @@ fn move_selection(state: &mut SurfaceState, kind: CompletionKind, delta: isize) 
 fn select(state: &mut SurfaceState, kind: CompletionKind, index: usize) {
     match kind {
         CompletionKind::History => state.select_history(index),
+        CompletionKind::File => state.select_file_search(index),
         CompletionKind::Slash => state.select_slash(index),
         CompletionKind::Mention => state.select_mention(index),
     }
@@ -105,6 +113,9 @@ fn select(state: &mut SurfaceState, kind: CompletionKind, index: usize) {
 fn accept(state: &mut SurfaceState, kind: CompletionKind) {
     match kind {
         CompletionKind::History => state.accept_history_selection(),
+        CompletionKind::File => {
+            state.accept_file_search_selection();
+        }
         CompletionKind::Slash => {
             state.accept_slash_selection();
         }

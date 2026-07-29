@@ -6,6 +6,7 @@ use std::time::Instant;
 use astral_terminal_inline::Terminal;
 use codex_app_server_client::AppServerEvent;
 use codex_app_server_protocol::DynamicToolCallResponse;
+use codex_app_server_protocol::FuzzyFileSearchResponse;
 use codex_app_server_protocol::McpServerStatusDetail;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerNotification;
@@ -40,6 +41,7 @@ use crate::ecosystem::mcp_panel;
 use crate::ecosystem::plugins_panel;
 use crate::ecosystem::skills_panel;
 use crate::external_editor;
+use crate::file_search::FileSearchRequest;
 use crate::handle_key;
 use crate::handle_paste;
 use crate::input::MouseScrollState;
@@ -222,12 +224,18 @@ async fn run_loop(
 ) -> Result<RunExitReason, RunError> {
     let mut input = TerminalEventReader::start()?;
     let mut client_tool_tasks = JoinSet::new();
+    let mut file_search_tasks = JoinSet::new();
     let mut _clipboard_lease = None;
     let mut mouse_scroll = MouseScrollState::default();
     let mut needs_draw = true;
 
     loop {
         needs_draw |= surface.poll_scrollback_search();
+        if let Some(request) = surface.take_file_search_request() {
+            file_search_tasks.abort_all();
+            spawn_file_search(session, &mut file_search_tasks, request);
+            needs_draw = true;
+        }
         if needs_draw {
             draw(terminal, session, surface, &options)?;
             needs_draw = false;
@@ -480,6 +488,23 @@ async fn run_loop(
                     })?;
                     resolve_client_tool(session, surface, completion).await?;
                     needs_draw = true;
+                }
+            }
+            completion = file_search_tasks.join_next(), if !file_search_tasks.is_empty() => {
+                match completion {
+                    Some(Ok(completion)) => {
+                        needs_draw |= apply_file_search_completion(
+                            session,
+                            surface,
+                            completion,
+                        );
+                    }
+                    Some(Err(error)) if error.is_cancelled() => {}
+                    Some(Err(error)) => {
+                        surface.set_notice(format!("File search task failed: {error}"));
+                        needs_draw = true;
+                    }
+                    None => {}
                 }
             }
         }
@@ -1072,6 +1097,71 @@ fn handle_notification(surface: &mut SurfaceState, notification: &ServerNotifica
 struct ClientToolCompletion {
     request_id: RequestId,
     result: Result<DynamicToolCallResponse, ClientToolError>,
+}
+
+struct FileSearchCompletion {
+    thread_id: String,
+    generation: u64,
+    query: String,
+    result: Result<FuzzyFileSearchResponse, SessionError>,
+}
+
+fn spawn_file_search(
+    session: &mut AstralSession,
+    tasks: &mut JoinSet<FileSearchCompletion>,
+    request: FileSearchRequest,
+) {
+    let Some(thread_id) = session.state().map(|state| state.thread.id.clone()) else {
+        return;
+    };
+    let cancellation_token = format!("astral-tui:{thread_id}:file-search");
+    let future = match session.search_files(request.query.clone(), cancellation_token) {
+        Ok(future) => future,
+        Err(error) => {
+            tasks.spawn(async move {
+                FileSearchCompletion {
+                    thread_id,
+                    generation: request.generation,
+                    query: request.query,
+                    result: Err(error),
+                }
+            });
+            return;
+        }
+    };
+    tasks.spawn(async move {
+        FileSearchCompletion {
+            thread_id,
+            generation: request.generation,
+            query: request.query,
+            result: future.await,
+        }
+    });
+}
+
+fn apply_file_search_completion(
+    session: &AstralSession,
+    surface: &mut SurfaceState,
+    completion: FileSearchCompletion,
+) -> bool {
+    if session
+        .state()
+        .is_none_or(|state| state.thread.id != completion.thread_id)
+    {
+        return false;
+    }
+    match completion.result {
+        Ok(response) => surface.apply_file_search_results(
+            completion.generation,
+            &completion.query,
+            response.files,
+        ),
+        Err(error) => surface.apply_file_search_error(
+            completion.generation,
+            &completion.query,
+            error.to_string(),
+        ),
+    }
 }
 
 async fn resolve_client_tool(

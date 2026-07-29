@@ -5,6 +5,8 @@ use codex_app_server_protocol::ApprovalsReviewer;
 use codex_app_server_protocol::AskForApproval;
 use codex_app_server_protocol::CoreToolCallStatus;
 use codex_app_server_protocol::FileUpdateChange;
+use codex_app_server_protocol::FuzzyFileSearchMatchType;
+use codex_app_server_protocol::FuzzyFileSearchResult;
 use codex_app_server_protocol::ItemCompletedNotification;
 use codex_app_server_protocol::ItemStartedNotification;
 use codex_app_server_protocol::PatchApplyStatus;
@@ -339,6 +341,56 @@ fn skill_and_plugin_mention_menu_snapshot() {
     state.set_composer("$");
 
     insta::assert_snapshot!(render_at_size(&mut state, &session, 80, 24));
+}
+
+#[test]
+fn file_search_menu_and_atomic_reference_snapshot() {
+    let session = session_state();
+    let mut state = SurfaceState::from_session(&session);
+    state.set_activity(SurfaceActivity::Ready);
+    state.set_composer("@src");
+    let request = state
+        .take_file_search_request()
+        .expect("file query should schedule a search");
+    assert!(state.apply_file_search_results(
+        request.generation,
+        &request.query,
+        vec![
+            FuzzyFileSearchResult {
+                root: "/workspace".to_string(),
+                path: "src/lib.rs".to_string(),
+                match_type: FuzzyFileSearchMatchType::File,
+                file_name: "lib.rs".to_string(),
+                score: 100,
+                indices: Some(vec![0, 1, 2]),
+            },
+            FuzzyFileSearchResult {
+                root: "/workspace".to_string(),
+                path: "src/view".to_string(),
+                match_type: FuzzyFileSearchMatchType::Directory,
+                file_name: "view".to_string(),
+                score: 90,
+                indices: Some(vec![0, 1, 2]),
+            },
+        ],
+    ));
+    let menu = render_at_size(&mut state, &session, 80, 18);
+
+    assert_eq!(
+        handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)
+        ),
+        InputAction::Redraw
+    );
+    assert_eq!(state.composer(), "@src/lib.rs ");
+    assert_eq!(state.composer_elements().len(), 1);
+    let chip = render_at_size(&mut state, &session, 80, 18);
+
+    insta::assert_snapshot!(
+        "file_search_menu_and_atomic_reference",
+        format!("MENU\n{menu}\n\nREFERENCE\n{chip}")
+    );
 }
 
 #[test]

@@ -12,6 +12,7 @@ use crate::mention::MentionTarget;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ComposerElementKind {
+    FileReference,
     Mention(MentionTarget),
     Paste { content: Arc<str> },
     LocalImage(LocalImage),
@@ -41,6 +42,14 @@ impl ComposerElement {
         }
     }
 
+    pub(crate) fn file_reference(range: Range<usize>, insert_text: String) -> Self {
+        Self {
+            range,
+            insert_text,
+            kind: ComposerElementKind::FileReference,
+        }
+    }
+
     pub(crate) fn paste(range: Range<usize>, placeholder: String, content: String) -> Self {
         Self {
             range,
@@ -65,6 +74,7 @@ impl ComposerElement {
             return false;
         }
         match &self.kind {
+            ComposerElementKind::FileReference => true,
             ComposerElementKind::Mention(_) => {
                 (self.range.start == 0
                     || text[..self.range.start]
@@ -84,21 +94,27 @@ impl ComposerElement {
     pub(crate) fn mention_target(&self) -> Option<&MentionTarget> {
         match &self.kind {
             ComposerElementKind::Mention(target) => Some(target),
-            ComposerElementKind::Paste { .. } | ComposerElementKind::LocalImage(_) => None,
+            ComposerElementKind::FileReference
+            | ComposerElementKind::Paste { .. }
+            | ComposerElementKind::LocalImage(_) => None,
         }
     }
 
     pub(crate) fn paste_content(&self) -> Option<&str> {
         match &self.kind {
             ComposerElementKind::Paste { content } => Some(content),
-            ComposerElementKind::Mention(_) | ComposerElementKind::LocalImage(_) => None,
+            ComposerElementKind::FileReference
+            | ComposerElementKind::Mention(_)
+            | ComposerElementKind::LocalImage(_) => None,
         }
     }
 
     pub(crate) fn local_image_data(&self) -> Option<&LocalImage> {
         match &self.kind {
             ComposerElementKind::LocalImage(image) => Some(image),
-            ComposerElementKind::Mention(_) | ComposerElementKind::Paste { .. } => None,
+            ComposerElementKind::FileReference
+            | ComposerElementKind::Mention(_)
+            | ComposerElementKind::Paste { .. } => None,
         }
     }
 
@@ -108,6 +124,10 @@ impl ComposerElement {
 
     pub(crate) fn is_paste(&self) -> bool {
         matches!(&self.kind, ComposerElementKind::Paste { .. })
+    }
+
+    pub(crate) fn is_file_reference(&self) -> bool {
+        matches!(&self.kind, ComposerElementKind::FileReference)
     }
 
     pub(crate) fn is_bracketed_chip(&self) -> bool {
@@ -120,6 +140,13 @@ impl ComposerElement {
     pub(super) fn keep_after_boundary_insertion(&self, at_start: bool, inserted: &str) -> bool {
         match &self.kind {
             ComposerElementKind::Paste { .. } | ComposerElementKind::LocalImage(_) => true,
+            ComposerElementKind::FileReference if at_start => inserted
+                .chars()
+                .next_back()
+                .is_some_and(char::is_whitespace),
+            ComposerElementKind::FileReference => {
+                inserted.chars().next().is_some_and(char::is_whitespace)
+            }
             ComposerElementKind::Mention(_) if at_start => inserted
                 .chars()
                 .next_back()

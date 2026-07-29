@@ -12,6 +12,8 @@ use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::CollaborationModeListParams;
 use codex_app_server_protocol::CollaborationModeListResponse;
 use codex_app_server_protocol::CollaborationModeMask;
+use codex_app_server_protocol::FuzzyFileSearchParams;
+use codex_app_server_protocol::FuzzyFileSearchResponse;
 use codex_app_server_protocol::Model;
 use codex_app_server_protocol::ModelListParams;
 use codex_app_server_protocol::ModelListResponse;
@@ -382,6 +384,41 @@ impl AstralSession {
             })
             .await?;
         Ok(response.thread)
+    }
+
+    pub(crate) fn search_files(
+        &mut self,
+        query: String,
+        cancellation_token: String,
+    ) -> Result<
+        impl std::future::Future<Output = Result<FuzzyFileSearchResponse, SessionError>>
+        + Send
+        + 'static,
+        SessionError,
+    > {
+        let root = self
+            .state
+            .as_ref()
+            .ok_or(SessionError::NoThread)?
+            .thread
+            .cwd
+            .to_string_lossy()
+            .to_string();
+        let request_id = self.next_request_id();
+        let client = self.client.request_handle();
+        Ok(async move {
+            client
+                .request_typed(ClientRequest::FuzzyFileSearch {
+                    request_id,
+                    params: FuzzyFileSearchParams {
+                        query,
+                        roots: vec![root],
+                        cancellation_token: Some(cancellation_token),
+                    },
+                })
+                .await
+                .map_err(SessionError::from)
+        })
     }
 
     pub(crate) async fn rename(&mut self, name: String) -> Result<(), SessionError> {
