@@ -5,6 +5,9 @@ mod mentions;
 mod plan_review;
 mod pointer;
 mod requests;
+mod transcript_cache;
+
+use std::sync::Arc;
 
 use astral_tui_scrollback::DisplayMode;
 use codex_app_server_protocol::Model;
@@ -75,6 +78,8 @@ use crate::view::render_follow_indicator;
 use crate::view::render_transcript;
 
 use self::pointer::SurfacePointerState;
+use self::transcript_cache::TranscriptCache;
+use self::transcript_cache::TranscriptCacheKey;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SurfaceActivity {
@@ -116,6 +121,7 @@ pub struct SurfaceState {
     theme: AstralThemeId,
     color_level: ColorLevel,
     timeline_visible: bool,
+    transcript_cache: TranscriptCache,
 }
 
 impl SurfaceState {
@@ -145,6 +151,7 @@ impl SurfaceState {
             theme: AstralThemeId::default(),
             color_level: ColorLevel::default(),
             timeline_visible: false,
+            transcript_cache: TranscriptCache::default(),
         }
     }
 
@@ -181,6 +188,7 @@ impl SurfaceState {
             theme: AstralThemeId::default(),
             color_level: ColorLevel::default(),
             timeline_visible: false,
+            transcript_cache: TranscriptCache::default(),
         }
     }
 
@@ -932,13 +940,26 @@ fn conversation_layout(
     state: &mut SurfaceState,
     transcript_view: TranscriptView,
     width: u16,
-) -> TranscriptLayout {
+) -> Arc<TranscriptLayout> {
+    let theme = state.theme();
+    let mut key = TranscriptCacheKey {
+        view: transcript_view,
+        content_generation: state.conversation.content_generation(),
+        display_revision: state.scrollback.display().render_revision(),
+        width,
+        theme,
+    };
+    if let Some(layout) = state.transcript_cache.get(key) {
+        return layout;
+    }
     let turns = match transcript_view {
         TranscriptView::Live => state.conversation.live_turns(),
         TranscriptView::Full => state.conversation.all_turns(),
     };
     state.scrollback.observe_entries(&turns);
-    render_transcript(&turns, width, state.theme(), state.scrollback.display())
+    key.display_revision = state.scrollback.display().render_revision();
+    let layout = render_transcript(&turns, width, theme, state.scrollback.display());
+    state.transcript_cache.store(key, layout)
 }
 
 fn turn_status_line(state: &SurfaceState, theme: AstralTheme) -> Option<Line<'static>> {

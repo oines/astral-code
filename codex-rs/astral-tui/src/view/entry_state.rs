@@ -33,6 +33,7 @@ struct GroupDescriptor {
 pub(crate) struct EntryDisplayState {
     focused: bool,
     selected: Option<String>,
+    render_revision: u64,
     entries: Vec<EntryDescriptor>,
     manual_modes: HashMap<String, DisplayMode>,
     groups: HashMap<String, GroupDescriptor>,
@@ -45,6 +46,10 @@ pub(crate) struct EntryDisplayState {
 }
 
 impl EntryDisplayState {
+    pub(crate) fn render_revision(&self) -> u64 {
+        self.render_revision
+    }
+
     pub(crate) fn observe(&mut self, turns: &[TranscriptTurn]) {
         let mut groups_by_turn = turns
             .iter()
@@ -236,12 +241,17 @@ impl EntryDisplayState {
         if self.selected.is_none() {
             self.selected = Some(last.id.clone());
         }
+        self.bump_render_revision();
         true
     }
 
     pub(crate) fn focus_prompt(&mut self) {
+        let changed = self.focused;
         self.focused = false;
         self.preserve_empty_selection = false;
+        if changed {
+            self.bump_render_revision();
+        }
     }
 
     pub(crate) fn is_focused(&self) -> bool {
@@ -260,9 +270,13 @@ impl EntryDisplayState {
         if !self.entries.iter().any(|entry| entry.id == entry_id) {
             return false;
         }
+        let changed = !self.focused || self.selected.as_deref() != Some(entry_id);
         self.focused = true;
         self.preserve_empty_selection = false;
         self.selected = Some(entry_id.to_string());
+        if changed {
+            self.bump_render_revision();
+        }
         true
     }
 
@@ -280,6 +294,7 @@ impl EntryDisplayState {
         self.focused = true;
         self.preserve_empty_selection = false;
         self.selected = Some(entry_id.to_string());
+        self.bump_render_revision();
         true
     }
 
@@ -348,6 +363,7 @@ impl EntryDisplayState {
 
     pub(crate) fn move_selection(&mut self, delta: isize) -> Option<String> {
         let last = self.entries.len().checked_sub(1)?;
+        let previous = self.selected.clone();
         let next = self
             .selected
             .as_deref()
@@ -356,10 +372,13 @@ impl EntryDisplayState {
                 || if delta < 0 { last } else { 0 },
                 |current| current.saturating_add_signed(delta).min(last),
             );
-        let entry = self.entries.get(next)?;
+        let entry_id = self.entries.get(next)?.id.clone();
         self.preserve_empty_selection = false;
-        self.selected = Some(entry.id.clone());
-        Some(entry.id.clone())
+        self.selected = Some(entry_id.clone());
+        if self.selected != previous {
+            self.bump_render_revision();
+        }
+        Some(entry_id)
     }
 
     pub(crate) fn select_first(&mut self) -> Option<String> {
@@ -391,6 +410,7 @@ impl EntryDisplayState {
         };
         self.manual_modes.insert(entry.id.clone(), target);
         self.pending_verb_rekey = Some(entry.id.clone());
+        self.bump_render_revision();
         Some(entry.id)
     }
 
@@ -401,7 +421,11 @@ impl EntryDisplayState {
     }
 
     pub(crate) fn toggle_raw(&mut self, entry_id: &str) -> bool {
-        self.content_state.toggle_raw(entry_id)
+        let toggled = self.content_state.toggle_raw(entry_id);
+        if toggled {
+            self.bump_render_revision();
+        }
+        toggled
     }
 
     pub(crate) fn expand_selected(&mut self) -> Option<String> {
@@ -418,6 +442,7 @@ impl EntryDisplayState {
         self.manual_modes
             .insert(entry.id.clone(), DisplayMode::Expanded);
         self.pending_verb_rekey = Some(entry.id.clone());
+        self.bump_render_revision();
         Some(entry.id)
     }
 
@@ -426,6 +451,7 @@ impl EntryDisplayState {
         if entry.group_header {
             if self.expanded_groups.remove(&entry.id) {
                 self.preserve_empty_selection = false;
+                self.bump_render_revision();
                 return Some(entry.id);
             }
             return None;
@@ -442,12 +468,14 @@ impl EntryDisplayState {
             self.manual_modes
                 .insert(entry.id.clone(), DisplayMode::Collapsed);
             self.pending_verb_rekey = Some(entry.id.clone());
+            self.bump_render_revision();
             return Some(entry.id);
         }
         let parent = entry.parent_group?;
         self.expanded_groups.remove(&parent);
         self.preserve_empty_selection = false;
         self.selected = Some(parent.clone());
+        self.bump_render_revision();
         Some(parent)
     }
 
@@ -469,6 +497,7 @@ impl EntryDisplayState {
         }
         self.expanded_groups.clear();
         self.pending_verb_rekey = None;
+        self.bump_render_revision();
     }
 
     pub(crate) fn toggle_all_thinking(&mut self) {
@@ -492,6 +521,7 @@ impl EntryDisplayState {
             self.expanded_groups.clear();
         }
         self.pending_verb_rekey = None;
+        self.bump_render_revision();
     }
 
     pub(crate) fn thinking_fold_label(&self) -> &'static str {
@@ -516,7 +546,12 @@ impl EntryDisplayState {
         } else {
             self.preserve_empty_selection = false;
         }
+        self.bump_render_revision();
         Some(group_id.to_string())
+    }
+
+    fn bump_render_revision(&mut self) {
+        self.render_revision = self.render_revision.wrapping_add(1);
     }
 
     fn selected_entry(&self) -> Option<&EntryDescriptor> {
