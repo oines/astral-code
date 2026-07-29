@@ -12,7 +12,7 @@ expression: buffer_text(&buffer)
   › question 6: inspect the layered transcript
 
 
-  Response 6 keeps enough content to make the transcript overflow.
+  Response 6 keeps enough content to make the transcript overflow. Astral
 
   Worked for 1.0s                                                              █
                                                                                █

@@ -117,8 +117,24 @@ pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction
                 text,
                 notice: "Copied block metadata".to_string(),
             }),
+        (KeyCode::Char('o'), KeyModifiers::NONE) => {
+            if state.cycle_scrollback_link(true) {
+                InputAction::Redraw
+            } else {
+                InputAction::None
+            }
+        }
+        (KeyCode::Char('O'), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
+            if state.cycle_scrollback_link(false) {
+                InputAction::Redraw
+            } else {
+                InputAction::None
+            }
+        }
         (KeyCode::Enter, KeyModifiers::NONE) => {
-            if state.open_selected_entry() {
+            if let Some(target) = state.highlighted_scrollback_link() {
+                InputAction::OpenLink(target)
+            } else if state.open_selected_entry() {
                 InputAction::Redraw
             } else {
                 InputAction::None

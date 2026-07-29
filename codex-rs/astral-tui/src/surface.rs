@@ -9,6 +9,7 @@ mod transcript_cache;
 
 use std::sync::Arc;
 
+use astral_terminal_inline::LinkSpan;
 use astral_tui_scrollback::DisplayMode;
 use codex_app_server_protocol::Model;
 use codex_app_server_protocol::ThreadTokenUsage;
@@ -63,6 +64,8 @@ use crate::view::PlanReviewMouseAction;
 use crate::view::PlanReviewMouseState;
 use crate::view::PlanReviewPane;
 use crate::view::PromptChrome;
+use crate::view::ScrollbackFrame;
+use crate::view::ScrollbackMouseAction;
 use crate::view::ScrollbackPane;
 use crate::view::ScrollbackState;
 use crate::view::ScrollbackViewport;
@@ -351,8 +354,20 @@ impl SurfaceState {
     pub(crate) fn handle_scrollback_mouse(
         &mut self,
         mouse: crossterm::event::MouseEvent,
-    ) -> Option<String> {
+    ) -> ScrollbackMouseAction {
         self.scrollback.handle_mouse(mouse)
+    }
+
+    pub(crate) fn cycle_scrollback_link(&mut self, forward: bool) -> bool {
+        self.scrollback.cycle_link(forward)
+    }
+
+    pub(crate) fn highlighted_scrollback_link(&self) -> Option<crate::LinkTarget> {
+        self.scrollback.highlighted_link_target()
+    }
+
+    pub(crate) fn frame_link_spans(&self) -> Vec<LinkSpan> {
+        self.scrollback.frame_link_spans()
     }
 
     pub(crate) fn handle_plan_review_mouse(
@@ -718,10 +733,13 @@ pub(crate) fn render_surface_with_view(
     );
     if transcript_view == TranscriptView::Full {
         state.scrollback.observe_frame(
-            &transcript,
-            viewport,
-            scrollback_content,
-            scrollbar_area,
+            ScrollbackFrame {
+                layout: &transcript,
+                viewport,
+                area: scrollback_content,
+                scrollbar_area,
+                cwd: &session.thread.cwd,
+            },
             buffer,
             theme,
         );
@@ -858,6 +876,9 @@ pub(crate) fn render_surface_with_view(
     } else {
         entry_hints.to_vec()
     };
+    if state.scrollback.has_visible_links() {
+        scrollback_hints.insert(0, ("o/O", "links"));
+    }
     if !state.scrollback.selected_is_group_header() {
         let insert_at = scrollback_hints
             .iter()

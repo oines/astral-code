@@ -4,6 +4,7 @@
 // transcript state so navigation, folding, selection, and pointer input cannot
 // disagree about the active viewport.
 
+use std::path::Path;
 use std::time::Instant;
 
 use astral_tui_scrollback::DisplayMode;
@@ -23,11 +24,24 @@ use super::ScrollbackSelection;
 use super::ScrollbackSelectionAction;
 use super::ScrollbackViewport;
 use super::TranscriptLayout;
+use super::VisibleLinks;
 use super::scrollback_search::ScrollbackSearch;
 use super::transcript::TranscriptSection;
 
+#[path = "scrollback_state_links.rs"]
+mod links;
 #[path = "scrollback_state_search.rs"]
 mod search;
+
+pub(crate) use links::ScrollbackMouseAction;
+
+pub(crate) struct ScrollbackFrame<'a> {
+    pub(crate) layout: &'a TranscriptLayout,
+    pub(crate) viewport: ScrollbackViewport,
+    pub(crate) area: Rect,
+    pub(crate) scrollbar_area: Rect,
+    pub(crate) cwd: &'a Path,
+}
 
 /// Unified owner for Astral's interactive transcript.
 ///
@@ -47,6 +61,7 @@ pub(crate) struct ScrollbackState {
     hovered: Option<String>,
     search: Option<ScrollbackSearch>,
     pending_search_target: Option<(String, usize)>,
+    links: VisibleLinks,
 }
 
 impl ScrollbackState {
@@ -92,16 +107,21 @@ impl ScrollbackState {
 
     pub(crate) fn observe_frame(
         &mut self,
-        layout: &TranscriptLayout,
-        viewport: ScrollbackViewport,
-        area: Rect,
-        scrollbar_area: Rect,
+        frame: ScrollbackFrame<'_>,
         buffer: &mut Buffer,
         theme: AstralTheme,
     ) {
-        self.pointer.observe(layout, viewport, area);
-        self.scrollbar = viewport.needs_scrollbar().then_some(scrollbar_area);
-        self.selection.render(layout, viewport, area, buffer, theme);
+        self.pointer
+            .observe(frame.layout, frame.viewport, frame.area);
+        self.scrollbar = frame
+            .viewport
+            .needs_scrollbar()
+            .then_some(frame.scrollbar_area);
+        self.selection
+            .render(frame.layout, frame.viewport, frame.area, buffer, theme);
+        self.links
+            .rebuild(frame.layout, frame.viewport, frame.area, frame.cwd);
+        self.links.paint(buffer, theme);
     }
 
     pub(crate) fn clear_frame(&mut self) {
@@ -109,14 +129,21 @@ impl ScrollbackState {
         self.scrollbar = None;
         self.scrollbar_dragging = false;
         self.hovered = None;
+        self.links.clear_frame();
     }
 
     pub(crate) fn scroll_up(&mut self, lines: usize) {
+        self.pointer.cancel_gesture();
+        self.scrollbar_dragging = false;
+        self.hovered = None;
         self.selection.clear_persistent();
         self.navigation.scroll_up(lines);
     }
 
     pub(crate) fn scroll_down(&mut self, lines: usize) {
+        self.pointer.cancel_gesture();
+        self.scrollbar_dragging = false;
+        self.hovered = None;
         self.selection.clear_persistent();
         self.navigation.scroll_down(lines);
     }
@@ -174,6 +201,7 @@ impl ScrollbackState {
 
     pub(crate) fn focus_prompt(&mut self) {
         self.search = None;
+        self.links.clear_highlight();
         self.display.focus_prompt();
     }
 
@@ -341,7 +369,10 @@ impl ScrollbackState {
         self.display.thinking_fold_label()
     }
 
-    pub(crate) fn handle_mouse(&mut self, mouse: MouseEvent) -> Option<String> {
+    pub(crate) fn handle_mouse(&mut self, mouse: MouseEvent) -> ScrollbackMouseAction {
+        if let Some(action) = self.handle_link_mouse(mouse) {
+            return action;
+        }
         match mouse.kind {
             MouseEventKind::Down(crossterm::event::MouseButton::Left)
                 if self
@@ -353,17 +384,17 @@ impl ScrollbackState {
                 self.hovered = None;
                 self.scrollbar_dragging = true;
                 self.apply_scrollbar_position(mouse.row);
-                return None;
+                return ScrollbackMouseAction::Ignored;
             }
             MouseEventKind::Drag(crossterm::event::MouseButton::Left)
                 if self.scrollbar_dragging =>
             {
                 self.apply_scrollbar_position(mouse.row);
-                return None;
+                return ScrollbackMouseAction::Ignored;
             }
             MouseEventKind::Up(crossterm::event::MouseButton::Left) if self.scrollbar_dragging => {
                 self.scrollbar_dragging = false;
-                return None;
+                return ScrollbackMouseAction::Ignored;
             }
             MouseEventKind::Moved => {
                 self.hovered = self
@@ -377,14 +408,14 @@ impl ScrollbackState {
                 self.scrollbar_dragging = false;
                 self.hovered = None;
                 self.scroll_up(/* lines */ 3);
-                return None;
+                return ScrollbackMouseAction::Ignored;
             }
             MouseEventKind::ScrollDown => {
                 self.pointer.cancel_gesture();
                 self.scrollbar_dragging = false;
                 self.hovered = None;
                 self.scroll_down(/* lines */ 3);
-                return None;
+                return ScrollbackMouseAction::Ignored;
             }
             _ => {}
         }
@@ -393,7 +424,9 @@ impl ScrollbackState {
         match self.selection.handle_mouse(mouse) {
             ScrollbackSelectionAction::ScrollUp => self.scroll_up(/* lines */ 1),
             ScrollbackSelectionAction::ScrollDown => self.scroll_down(/* lines */ 1),
-            ScrollbackSelectionAction::Copy(text) => return Some(text),
+            ScrollbackSelectionAction::Copy(text) => {
+                return ScrollbackMouseAction::Copy(text);
+            }
             ScrollbackSelectionAction::Ignored | ScrollbackSelectionAction::Redraw => {}
         }
         match entry_action {
@@ -414,11 +447,11 @@ impl ScrollbackState {
             }
             EntryMouseAction::Ignored => {}
         }
-        None
+        ScrollbackMouseAction::Ignored
     }
 
     pub(crate) fn clear_selection(&mut self) -> bool {
-        self.selection.clear()
+        self.selection.clear() | self.links.clear_highlight()
     }
 
     pub(crate) fn selection_expiry(&self) -> Option<Instant> {

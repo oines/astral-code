@@ -827,15 +827,14 @@ fn copied_selection_clears_on_scroll_and_reflow() {
         area,
         &mut buffer,
     );
-    assert!(
-        state
-            .handle_scrollback_mouse(mouse(
-                MouseEventKind::Up(MouseButton::Left),
-                end_column,
-                start.1,
-            ))
-            .is_some()
-    );
+    assert!(matches!(
+        state.handle_scrollback_mouse(mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            end_column,
+            start.1,
+        )),
+        crate::view::ScrollbackMouseAction::Copy(_)
+    ));
     render_surface_with_view(
         &mut state,
         &session,
@@ -879,15 +878,14 @@ fn copied_selection_clears_on_scroll_and_reflow() {
         area,
         &mut buffer,
     );
-    assert!(
-        state
-            .handle_scrollback_mouse(mouse(
-                MouseEventKind::Up(MouseButton::Left),
-                end_column,
-                start.1,
-            ))
-            .is_some()
-    );
+    assert!(matches!(
+        state.handle_scrollback_mouse(mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            end_column,
+            start.1,
+        )),
+        crate::view::ScrollbackMouseAction::Copy(_)
+    ));
 
     let narrower = Rect::new(0, 0, 71, 16);
     let mut narrower_buffer = Buffer::empty(narrower);
@@ -923,7 +921,8 @@ fn fullscreen_scrollback_viewport_snapshot() {
                 ThreadItem::AgentMessage {
                     id: format!("agent-{index}"),
                     text: format!(
-                        "Response {index} keeps enough content to make the transcript overflow."
+                        "Response {index} keeps enough content to make the transcript overflow. \
+                         [Astral](https://example.com/docs)"
                     ),
                     phase: None,
                     memory_citation: None,
@@ -941,6 +940,14 @@ fn fullscreen_scrollback_viewport_snapshot() {
     state.scroll_up(/*lines*/ 5);
     let area = Rect::new(0, 0, 80, 24);
     let mut buffer = Buffer::empty(area);
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        area,
+        &mut buffer,
+    );
+    assert!(state.cycle_scrollback_link(true));
     render_surface_with_view(
         &mut state,
         &session,

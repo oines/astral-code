@@ -45,6 +45,7 @@ use crate::input::MouseScrollState;
 use crate::input::ScrollConfig;
 use crate::input::ScrollDirection;
 use crate::input::handle_mouse;
+use crate::link_opener;
 use crate::modal::ModalRow;
 use crate::modal::ModalState;
 use crate::permission_picker::PermissionPickerState;
@@ -57,6 +58,7 @@ use crate::terminal_guard::TerminalGuard;
 use crate::thread_picker::PickerState;
 use crate::view::AstralThemeId;
 use crate::view::ColorLevel;
+use crate::view::ScrollbackMouseAction;
 
 mod input_reader;
 mod mentions;
@@ -344,15 +346,25 @@ async fn run_loop(
                                 InputAction::None => {
                                     mouse_scroll.cancel();
                                     if surface.scrollback_contains(mouse) {
-                                        if let Some(selection) =
-                                            surface.handle_scrollback_mouse(mouse)
-                                        {
-                                            match copy_to_clipboard(&selection) {
-                                                Ok(lease) => {
-                                                    _clipboard_lease = Some(lease);
-                                                    surface.set_notice("Copied selection");
+                                        match surface.handle_scrollback_mouse(mouse) {
+                                            ScrollbackMouseAction::Ignored => {}
+                                            ScrollbackMouseAction::Copy(selection) => {
+                                                match copy_to_clipboard(&selection) {
+                                                    Ok(lease) => {
+                                                        _clipboard_lease = Some(lease);
+                                                        surface.set_notice("Copied selection");
+                                                    }
+                                                    Err(error) => surface.set_notice(error),
                                                 }
-                                                Err(error) => surface.set_notice(error),
+                                            }
+                                            ScrollbackMouseAction::Open(target) => {
+                                                let _ = apply_input_action(
+                                                    session,
+                                                    surface,
+                                                    theme_selection,
+                                                    InputAction::OpenLink(target),
+                                                )
+                                                .await?;
                                             }
                                         }
                                         needs_draw = true;
@@ -465,7 +477,7 @@ fn draw(
     }
 
     let session_state = session.state().ok_or(RunError::NoThread)?;
-    terminal.draw(|frame| {
+    terminal.draw_with_links(|frame, links| {
         let position = match options.viewport {
             RunViewport::Fullscreen => render_surface_with_view(
                 surface,
@@ -478,6 +490,7 @@ fn draw(
                 render_surface(surface, session_state, frame.area(), frame.buffer_mut())
             }
         };
+        links.extend(surface.frame_link_spans());
         if let Some(position) = position {
             frame.set_cursor_position(position);
         }
@@ -506,6 +519,10 @@ async fn apply_input_action(
         | InputAction::ScrollDown
         | InputAction::CopyLastResponse
         | InputAction::CopyText { .. } => {}
+        InputAction::OpenLink(target) => match link_opener::open_link(&target) {
+            Ok(()) => surface.set_notice("Opening in default app…"),
+            Err(error) => surface.set_notice(error),
+        },
         InputAction::SelectTheme(name) => {
             *theme_selection = Some(name.clone());
             surface.set_notice(format!("Switched to {name}"));

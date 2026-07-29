@@ -49,6 +49,7 @@ pub enum InputAction {
         text: String,
         notice: String,
     },
+    OpenLink(crate::LinkTarget),
     Slash {
         invocation: SlashInvocation,
         submission: PromptSubmission,

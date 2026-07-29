@@ -62,6 +62,8 @@ pub(crate) use scrollback::ScrollbackNavigation;
 pub(crate) use scrollback::ScrollbackPane;
 pub(crate) use scrollback::ScrollbackViewport;
 pub(crate) use scrollback::render_follow_indicator;
+pub(crate) use scrollback_state::ScrollbackFrame;
+pub(crate) use scrollback_state::ScrollbackMouseAction;
 pub(crate) use scrollback_state::ScrollbackState;
 pub(crate) use selection::ScrollbackSelection;
 pub(crate) use selection::ScrollbackSelectionAction;
