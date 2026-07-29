@@ -28,6 +28,7 @@ use crate::surface::ActiveOverlay;
 
 mod block_viewer;
 mod completion_popup;
+mod content_viewer;
 mod file_search_popup;
 mod history_popup;
 mod mcp_form;
