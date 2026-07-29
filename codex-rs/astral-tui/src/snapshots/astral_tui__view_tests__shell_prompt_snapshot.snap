@@ -1,0 +1,7 @@
+---
+source: astral-tui/src/view_tests.rs
+expression: buffer_text(&buffer)
+---
+╭──────────────────────────────────────────────────╮
+│ ! printf 'ASTRAL_SHELL_OK\n'                     │
+╰────────────────────────────── Run shell command ─╯

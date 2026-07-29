@@ -36,6 +36,8 @@ use codex_app_server_protocol::ThreadSetNameParams;
 use codex_app_server_protocol::ThreadSetNameResponse;
 use codex_app_server_protocol::ThreadSettingsUpdateParams;
 use codex_app_server_protocol::ThreadSettingsUpdateResponse;
+use codex_app_server_protocol::ThreadShellCommandParams;
+use codex_app_server_protocol::ThreadShellCommandResponse;
 use codex_app_server_protocol::ThreadSortKey;
 use codex_app_server_protocol::ThreadSource;
 use codex_app_server_protocol::ThreadStartParams;
@@ -646,6 +648,23 @@ impl AstralSession {
             .request_typed(ClientRequest::ThreadCompactStart {
                 request_id,
                 params: ThreadCompactStartParams { thread_id },
+            })
+            .await?;
+        Ok(())
+    }
+
+    pub(crate) async fn run_shell_command(&mut self, command: String) -> Result<(), SessionError> {
+        let thread_id = self
+            .state
+            .as_ref()
+            .map(|state| state.thread.id.clone())
+            .ok_or(SessionError::NoThread)?;
+        let request_id = self.next_request_id();
+        let _: ThreadShellCommandResponse = self
+            .client
+            .request_typed(ClientRequest::ThreadShellCommand {
+                request_id,
+                params: ThreadShellCommandParams { thread_id, command },
             })
             .await?;
         Ok(())

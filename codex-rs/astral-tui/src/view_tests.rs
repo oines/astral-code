@@ -17,6 +17,7 @@ use super::view::PromptChrome;
 use super::view::ScrollbarConfig;
 use super::view::ShortcutsBar;
 use super::view::StatusBar;
+use crate::PromptInputMode;
 use crate::PromptSubmission;
 use crate::composer::ComposerElement;
 use crate::composer::LocalImage;
@@ -93,6 +94,7 @@ fn view_chrome_snapshot() {
         flags: &["anthropic"],
         ghost: None,
         focused: true,
+        input_mode: PromptInputMode::Normal,
         selection: None,
         elements: &[],
     }
@@ -123,12 +125,38 @@ fn prompt_wrap_and_mid_buffer_cursor_snapshot() {
         flags: &["default"],
         ghost: None,
         focused: true,
+        input_mode: PromptInputMode::Normal,
         selection: None,
         elements: &[],
     }
     .render(area, &mut buffer, theme);
 
     assert_eq!(cursor, Some(Position::new(12, 3)));
+    insta::assert_snapshot!(buffer_text(&buffer));
+}
+
+#[test]
+fn shell_prompt_snapshot() {
+    let theme = AstralTheme::default();
+    let area = Rect::new(0, 0, 52, 3);
+    let mut buffer = Buffer::empty(area);
+    let text = "printf 'ASTRAL_SHELL_OK\\n'";
+
+    let cursor = PromptChrome {
+        text,
+        cursor_byte: text.len(),
+        title: None,
+        model: "Run shell command",
+        flags: &[],
+        ghost: None,
+        focused: true,
+        input_mode: PromptInputMode::Shell,
+        selection: None,
+        elements: &[],
+    }
+    .render(area, &mut buffer, theme);
+
+    assert_eq!(cursor, Some(Position::new(30, 1)));
     insta::assert_snapshot!(buffer_text(&buffer));
 }
 
@@ -146,6 +174,7 @@ fn wrapped_prompt_selection_snapshot() {
         flags: &[],
         ghost: None,
         focused: true,
+        input_mode: PromptInputMode::Normal,
         selection: Some(6..16),
         elements: &[],
     }
@@ -180,6 +209,7 @@ fn paste_chip_prompt_snapshot() {
         flags: &[],
         ghost: None,
         focused: true,
+        input_mode: PromptInputMode::Normal,
         selection: None,
         elements: &elements,
     }
@@ -218,6 +248,7 @@ fn local_image_chip_prompt_snapshot() {
         flags: &[],
         ghost: None,
         focused: true,
+        input_mode: PromptInputMode::Normal,
         selection: None,
         elements: &elements,
     }

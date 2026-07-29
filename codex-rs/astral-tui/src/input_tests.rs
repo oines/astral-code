@@ -551,6 +551,46 @@ fn multiline_mode_swaps_enter_and_modified_enter() {
 }
 
 #[test]
+fn shell_mode_runs_directly_and_restores_from_history() {
+    let mut state = SurfaceState::new("thread-1");
+    assert_eq!(
+        handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('!'), KeyModifiers::SHIFT),
+        ),
+        InputAction::Redraw
+    );
+    assert!(state.shell_input_mode());
+    assert_eq!(state.composer(), "");
+    assert_eq!(handle_key(&mut state, key(KeyCode::Up)), InputAction::None);
+
+    state.toggle_multiline_mode();
+    state.set_composer("printf shell-ok");
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Enter)),
+        InputAction::RunShellCommand {
+            command: "printf shell-ok".to_string(),
+        }
+    );
+    assert!(!state.shell_input_mode());
+
+    state.record_submission(&crate::PromptSubmission::text_only("! printf shell-ok"));
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Up)),
+        InputAction::Redraw
+    );
+    assert!(state.shell_input_mode());
+    assert_eq!(state.composer(), "printf shell-ok");
+
+    state.composer_state_mut().clear();
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Esc)),
+        InputAction::Redraw
+    );
+    assert!(!state.shell_input_mode());
+}
+
+#[test]
 fn theme_cancel_restores_the_original_preview() {
     let mut state = SurfaceState::new("thread-1");
     state.open_theme_picker();

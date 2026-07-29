@@ -6,6 +6,7 @@ use ratatui::layout::Position;
 use ratatui::layout::Rect;
 use ratatui::text::Line;
 
+use super::chrome::PROMPT_PREFIX_WIDTH;
 use super::chrome::prompt_layout;
 
 pub(crate) fn prompt_cursor_at(
@@ -83,7 +84,7 @@ fn prompt_cursor_for_row(
     };
     let range = layout.ranges.get(row)?;
     let content_x = area.x.saturating_add(2);
-    let text_x = content_x.saturating_add(u16::from(row == 0) * 2);
+    let text_x = content_x.saturating_add(u16::from(row == 0) * PROMPT_PREFIX_WIDTH);
     let column = usize::from(position.x.saturating_sub(text_x));
     Some(byte_at_display_column(text, range.clone(), column))
 }

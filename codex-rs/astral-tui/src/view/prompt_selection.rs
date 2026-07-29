@@ -15,6 +15,7 @@ pub(super) struct PromptSelectionOverlay<'a> {
     pub(super) rows: &'a [Range<usize>],
     pub(super) first_visible: usize,
     pub(super) visible_rows: usize,
+    pub(super) prefix_width: u16,
 }
 
 impl PromptSelectionOverlay<'_> {
@@ -39,7 +40,7 @@ impl PromptSelectionOverlay<'_> {
             if start >= end {
                 continue;
             }
-            let prefix = u16::from(row == 0) * 2;
+            let prefix = u16::from(row == 0) * self.prefix_width;
             let selection_x = u16::try_from(Line::from(&self.text[range.start..start]).width())
                 .unwrap_or(u16::MAX);
             let selection_width =

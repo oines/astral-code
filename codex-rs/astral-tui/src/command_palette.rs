@@ -11,6 +11,7 @@ use crate::slash::SlashPaletteEntry;
 pub(crate) enum CommandPaletteCommand {
     CycleMode,
     ToggleMultiline,
+    ShellMode,
     OpenShortcuts,
     ToggleQueue,
     EditPrompt,
@@ -51,6 +52,7 @@ impl CommandPaletteState {
                 ActionId::ToggleMultiline,
                 CommandPaletteCommand::ToggleMultiline,
             ),
+            action_entry(ActionId::ShellMode, CommandPaletteCommand::ShellMode),
             action_entry(
                 ActionId::ShortcutsHelp,
                 CommandPaletteCommand::OpenShortcuts,

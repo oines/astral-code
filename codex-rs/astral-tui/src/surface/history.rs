@@ -56,7 +56,7 @@ impl SurfaceState {
 
     pub(crate) fn accept_history_selection(&mut self) {
         let submission = self.history.accept();
-        self.restore_submission(submission);
+        self.restore_history_submission(submission);
     }
 
     pub(crate) fn cancel_history(&mut self) -> bool {
@@ -64,6 +64,7 @@ impl SurfaceState {
             return false;
         }
         let saved = self.history.cancel();
+        self.prompt_input_mode = crate::PromptInputMode::Normal;
         self.restore_submission(saved);
         true
     }
@@ -83,8 +84,22 @@ impl SurfaceState {
     }
 
     fn replace_composer_for_history(&mut self, submission: PromptSubmission) {
-        self.composer.restore_submission(submission);
+        self.restore_history_submission(submission);
         self.slash.close();
         self.mentions.dismiss(self.composer.text());
+    }
+
+    fn restore_history_submission(&mut self, submission: PromptSubmission) {
+        if submission.elements.is_empty()
+            && let Some(command) = submission.text.strip_prefix("! ")
+        {
+            self.prompt_input_mode = crate::PromptInputMode::Shell;
+            self.composer
+                .restore_submission(PromptSubmission::text_only(command));
+        } else {
+            self.prompt_input_mode = crate::PromptInputMode::Normal;
+            self.composer.restore_submission(submission);
+        }
+        self.refresh_composer_completions();
     }
 }

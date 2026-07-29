@@ -55,6 +55,21 @@ pub(super) fn default_actions() -> Vec<ActionDef> {
              Enter inserts a newline and Shift+Enter or Alt+Enter sends the prompt.",
         ),
         ActionDef::new(
+            ActionId::ShellMode,
+            "shell",
+            "Shell mode",
+            KeyShortcut::character('!'),
+            Vec::new(),
+            Category::Input,
+            When::PromptFocused,
+        )
+        .with_key_display("!")
+        .with_help(
+            "Type ! on an empty prompt to run a local shell command without leaving Astral. \
+             Enter runs the command through Astral's existing thread shell request; \
+             Backspace or Esc leaves an empty shell prompt.",
+        ),
+        ActionDef::new(
             ActionId::ShortcutsHelp,
             "shortcuts",
             "Keyboard shortcuts",

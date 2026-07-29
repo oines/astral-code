@@ -86,6 +86,9 @@ pub enum InputAction {
     Plan(crate::plan_review::PlanReviewAction),
     CycleMode,
     ToggleMultiline,
+    RunShellCommand {
+        command: String,
+    },
     OpenShortcuts,
     DrainQueue,
     Resolve(RequestResolution),
@@ -198,6 +201,17 @@ pub fn handle_paste(state: &mut SurfaceState, text: &str) -> InputAction {
     }
     if state.plan_review().is_some() {
         return plan_review::handle_paste(state, text);
+    }
+    if state.shell_input_mode() {
+        state.composer_state_mut().insert_text(text);
+        return InputAction::Redraw;
+    }
+    if state.composer().is_empty()
+        && let Some(command) = text.strip_prefix("! ")
+        && state.enter_shell_input_mode()
+    {
+        state.composer_state_mut().insert_text(command);
+        return InputAction::Redraw;
     }
     let notice = state.composer_state_mut().insert_paste_payload(text);
     state.refresh_composer_completions();
@@ -411,6 +425,10 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
     {
         return action;
     }
+    if state.shell_input_mode() && state.composer().is_empty() && is_shell_mode_exit_key(key) {
+        state.exit_shell_input_mode();
+        return InputAction::Redraw;
+    }
     if key.code == KeyCode::Char('l')
         && key.modifiers == KeyModifiers::CONTROL
         && state.open_file_reference_viewer(false)
@@ -427,15 +445,34 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
         && key
             .modifiers
             .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT);
-    let prompt_action = if state.multiline_mode() && modified_enter {
+    let shell_mode_key = key.code == KeyCode::Char('!')
+        && !key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER);
+    let mut prompt_action = if state.multiline_mode() && modified_enter {
         Some(ActionId::SendPrompt)
+    } else if shell_mode_key {
+        Some(ActionId::ShellMode)
     } else {
         actions::lookup(&key, When::PromptFocused)
     };
+    if prompt_action == Some(ActionId::ShellMode) {
+        if state.enter_shell_input_mode() {
+            return InputAction::Redraw;
+        }
+        prompt_action = None;
+    }
     if key.code == KeyCode::Esc && state.restore_palette_draft() {
         return InputAction::Redraw;
     }
     if prompt_action == Some(ActionId::InterjectPrompt) {
+        if state.shell_input_mode() {
+            return state
+                .take_shell_command()
+                .map_or(InputAction::None, |command| InputAction::RunShellCommand {
+                    command,
+                });
+        }
         if state.slash().active {
             return InputAction::Notice("Run slash commands with Enter".to_string());
         }
@@ -486,7 +523,10 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
     if prompt_action == Some(ActionId::FocusScrollback) && state.focus_scrollback() {
         return InputAction::Redraw;
     }
-    if key.code == KeyCode::Up && key.modifiers == KeyModifiers::NONE && state.composer().is_empty()
+    if key.code == KeyCode::Up
+        && key.modifiers == KeyModifiers::NONE
+        && !state.shell_input_mode()
+        && state.composer().is_empty()
     {
         state.open_history_browse();
         return InputAction::Redraw;
@@ -535,6 +575,13 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
         Some(ActionId::PageUp) => InputAction::ScrollUp,
         Some(ActionId::PageDown) => InputAction::ScrollDown,
         Some(ActionId::SendPrompt) => {
+            if state.shell_input_mode() {
+                return state
+                    .take_shell_command()
+                    .map_or(InputAction::None, |command| InputAction::RunShellCommand {
+                        command,
+                    });
+            }
             if state.slash().active {
                 return match state.slash_invocation() {
                     Ok(Some(invocation)) => {
@@ -597,6 +644,7 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
         Some(
             ActionId::CycleMode
             | ActionId::ToggleMultiline
+            | ActionId::ShellMode
             | ActionId::CommandPalette
             | ActionId::ShortcutsHelp
             | ActionId::ToggleQueue
@@ -632,6 +680,15 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
         | Some(ActionId::ExitEmptyPrompt)
         | None => InputAction::None,
     }
+}
+
+fn is_shell_mode_exit_key(key: KeyEvent) -> bool {
+    key.code == KeyCode::Esc
+        || key.code == KeyCode::Backspace
+        || matches!(
+            (key.code, key.modifiers),
+            (KeyCode::Char('c' | 'u' | 'w'), KeyModifiers::CONTROL)
+        )
 }
 
 fn handle_request_key(

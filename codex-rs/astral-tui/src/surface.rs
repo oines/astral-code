@@ -10,6 +10,7 @@ mod mentions;
 mod overlay;
 mod plan_review;
 mod pointer;
+mod prompt_input;
 mod requests;
 mod subagent;
 mod transcript_cache;
@@ -34,6 +35,7 @@ use ratatui::widgets::Widget;
 use crate::CommittedBlock;
 use crate::ConversationState;
 use crate::PendingRequests;
+use crate::PromptInputMode;
 use crate::PromptSubmission;
 use crate::SessionState;
 use crate::block_viewer::BlockViewerState;
@@ -161,6 +163,7 @@ pub struct SurfaceState {
     color_level: ColorLevel,
     timeline_visible: bool,
     multiline_mode: bool,
+    prompt_input_mode: PromptInputMode,
     transcript_cache: TranscriptCache,
 }
 
@@ -203,6 +206,7 @@ impl SurfaceState {
             color_level: ColorLevel::default(),
             timeline_visible: false,
             multiline_mode: false,
+            prompt_input_mode: PromptInputMode::default(),
             transcript_cache: TranscriptCache::default(),
         }
     }
@@ -252,6 +256,7 @@ impl SurfaceState {
             color_level: ColorLevel::default(),
             timeline_visible: false,
             multiline_mode: false,
+            prompt_input_mode: PromptInputMode::default(),
             transcript_cache: TranscriptCache::default(),
         }
     }
@@ -1150,6 +1155,13 @@ pub(crate) fn render_surface_with_view(
             Default::default()
         };
         let flags = [mode, multiline];
+        let prompt_input_mode = state.prompt_input_mode();
+        let prompt_info = prompt_input_mode.info().unwrap_or(&session.model);
+        let prompt_flags: &[&str] = if prompt_input_mode.is_shell() {
+            &[]
+        } else {
+            &flags
+        };
         PromptChrome {
             text: state.composer(),
             cursor_byte: state.composer_cursor(),
@@ -1158,12 +1170,13 @@ pub(crate) fn render_surface_with_view(
             } else {
                 session.thread.name.as_deref()
             },
-            model: &session.model,
-            flags: &flags,
-            ghost: (!revising_plan && !history.open)
+            model: prompt_info,
+            flags: prompt_flags,
+            ghost: (!revising_plan && !history.open && !prompt_input_mode.is_shell())
                 .then_some(slash.ghost.as_deref())
                 .flatten(),
             focused: prompt_focused,
+            input_mode: prompt_input_mode,
             selection: state.composer_selection(),
             elements: state.composer_elements(),
         }
@@ -1220,7 +1233,14 @@ pub(crate) fn render_surface_with_view(
         (cycle_mode.hint_key(), cycle_mode.label),
         (shortcuts_help.hint_key(), shortcuts_help.label),
     ];
-    let default_hints: &[(&str, &str)] = if matches!(state.activity(), SurfaceActivity::Working) {
+    let shell_hints = [
+        ("Enter", "run shell"),
+        ("Esc", "cancel"),
+        (shortcuts_help.hint_key(), shortcuts_help.label),
+    ];
+    let default_hints: &[(&str, &str)] = if state.shell_input_mode() {
+        &shell_hints
+    } else if matches!(state.activity(), SurfaceActivity::Working) {
         &working_hints
     } else {
         &idle_hints

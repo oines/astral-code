@@ -657,6 +657,17 @@ async fn apply_input_action(
                 start_submission(session, surface, submission).await;
             }
         }
+        InputAction::RunShellCommand { command } => {
+            match session.run_shell_command(command.clone()).await {
+                Ok(()) => {
+                    surface.record_submission(&PromptSubmission::text_only(format!("! {command}")))
+                }
+                Err(error) => {
+                    surface.restore_shell_command(command);
+                    surface.set_notice(error.to_string());
+                }
+            }
+        }
         InputAction::Interrupt => match session.interrupt().await {
             Ok(()) => surface.set_activity(SurfaceActivity::Interrupted),
             Err(error) => surface.set_notice(error.to_string()),

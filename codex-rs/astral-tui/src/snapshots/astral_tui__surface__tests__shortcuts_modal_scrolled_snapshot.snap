@@ -10,11 +10,11 @@ expression: "render_at_size(&mut state, &session, 80, 24)"
             │                                                      │
             │  Search: / to filter                                 │
   I’m tracin│  ──────────────────────────────────────────────────  │
+            │    Ctrl+m               Toggle multiline prompt mod  │
+            │    !                    Shell mode                   │
+            │    Enter / Cmd+Enter    Send prompt                  │
+            │      Send prompt                                     │
             │    Ctrl+Enter / Ctrl+i  Send now to the active turn  │
-            │      Uses Astral's existing turn/steer request       │
-            │      to add the draft to the active turn. With an    │
-            │      empty draft, sends the next queued follow-up;   │
-            │      from the queue pane it sends the selected row.  │
             │    Ctrl+g               Edit the current draft in a  │
             │  ▸ Conversation navigation                           │
             │  ▸ Conversation actions                              │

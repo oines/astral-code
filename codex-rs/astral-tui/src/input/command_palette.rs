@@ -120,6 +120,14 @@ fn activate_selected(state: &mut SurfaceState) -> InputAction {
             state.close_command_palette();
             InputAction::ToggleMultiline
         }
+        CommandPaletteCommand::ShellMode => {
+            state.close_command_palette();
+            if state.enter_shell_input_mode() {
+                InputAction::Redraw
+            } else {
+                InputAction::Notice("Shell mode requires an empty prompt".to_string())
+            }
+        }
         CommandPaletteCommand::OpenShortcuts => {
             state.close_command_palette();
             InputAction::OpenShortcuts

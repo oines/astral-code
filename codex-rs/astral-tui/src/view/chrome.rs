@@ -10,7 +10,10 @@ use std::ops::Range;
 use super::AstralTheme;
 use super::prompt_elements::PromptElementOverlay;
 use super::prompt_selection::PromptSelectionOverlay;
+use crate::PromptInputMode;
 use crate::composer::ComposerElement;
+
+pub(super) const PROMPT_PREFIX_WIDTH: u16 = 2;
 
 pub(crate) struct StatusBar<'a> {
     pub(crate) left: Line<'a>,
@@ -41,6 +44,7 @@ pub(crate) struct PromptChrome<'a> {
     pub(crate) flags: &'a [&'a str],
     pub(crate) ghost: Option<&'a str>,
     pub(crate) focused: bool,
+    pub(crate) input_mode: PromptInputMode,
     pub(crate) selection: Option<Range<usize>>,
     pub(crate) elements: &'a [ComposerElement],
 }
@@ -56,11 +60,18 @@ impl PromptChrome<'_> {
             return None;
         }
         let bg = theme.bg_base;
-        let border = if self.focused {
+        let accent = match self.input_mode {
+            PromptInputMode::Normal => None,
+            PromptInputMode::Shell => Some(theme.command),
+        };
+        let border = accent.unwrap_or(if self.focused {
             theme.prompt_border_active
         } else {
             theme.prompt_border
-        };
+        });
+        let prefix_style = Style::default()
+            .fg(accent.unwrap_or(theme.text_secondary))
+            .bg(bg);
         buffer.set_style(area, Style::default().fg(theme.text_primary).bg(bg));
         render_border_row(area, area.y, '╭', '╮', border, bg, buffer);
         render_border_row(area, area.bottom() - 1, '╰', '╯', border, bg, buffer);
@@ -101,14 +112,13 @@ impl PromptChrome<'_> {
         {
             let y = area.y + 1 + u16::try_from(visible_row).unwrap_or(u16::MAX);
             if row == 0 {
-                buffer.set_string(
-                    content_x,
-                    y,
-                    "❯ ",
-                    Style::default().fg(theme.text_secondary).bg(bg),
-                );
+                buffer.set_string(content_x, y, self.input_mode.prefix(), prefix_style);
             }
-            let x = if row == 0 { content_x + 2 } else { content_x };
+            let x = if row == 0 {
+                content_x + PROMPT_PREFIX_WIDTH
+            } else {
+                content_x
+            };
             let available = usize::from(area.right().saturating_sub(2).saturating_sub(x));
             buffer.set_string(
                 x,
@@ -123,6 +133,7 @@ impl PromptChrome<'_> {
             rows: &layout.ranges,
             first_visible,
             visible_rows,
+            prefix_width: PROMPT_PREFIX_WIDTH,
         }
         .render(area, buffer, theme);
         PromptSelectionOverlay {
@@ -131,6 +142,7 @@ impl PromptChrome<'_> {
             rows: &layout.ranges,
             first_visible,
             visible_rows,
+            prefix_width: PROMPT_PREFIX_WIDTH,
         }
         .render(area, buffer, theme);
         if layout.rows.len() == 1
@@ -138,7 +150,7 @@ impl PromptChrome<'_> {
             && let Some(ghost) = self.ghost
         {
             let text_width = u16::try_from(Line::from(self.text).width()).unwrap_or(u16::MAX);
-            let x = content_x + 2 + text_width;
+            let x = content_x + PROMPT_PREFIX_WIDTH + text_width;
             let available = usize::from(area.right().saturating_sub(2).saturating_sub(x));
             buffer.set_string(
                 x,
@@ -147,10 +159,18 @@ impl PromptChrome<'_> {
                 Style::default().fg(theme.gray_dim).bg(bg),
             );
         }
-        render_prompt_info(area, buffer, theme, self.model, self.flags, self.focused);
+        render_prompt_info(
+            area,
+            buffer,
+            theme,
+            self.model,
+            self.flags,
+            self.focused,
+            accent,
+        );
 
         let cursor_visible_row = layout.cursor_row.saturating_sub(first_visible);
-        let prefix = u16::from(layout.cursor_row == 0) * 2;
+        let prefix = u16::from(layout.cursor_row == 0) * PROMPT_PREFIX_WIDTH;
         let cursor_width = u16::try_from(layout.cursor_column).unwrap_or(u16::MAX);
         Some(Position::new(
             (content_x + prefix + cursor_width).min(area.right().saturating_sub(2)),
@@ -235,7 +255,9 @@ fn wrap_logical_line(
     let mut row_start = start;
     while row_start < end {
         let capacity = if ranges.is_empty() {
-            width.saturating_sub(2).max(1)
+            width
+                .saturating_sub(usize::from(PROMPT_PREFIX_WIDTH))
+                .max(1)
         } else {
             width
         };
@@ -376,6 +398,7 @@ fn render_prompt_info(
     model: &str,
     flags: &[&str],
     focused: bool,
+    accent: Option<ratatui::style::Color>,
 ) {
     let mut parts = vec![model];
     parts.extend(flags.iter().copied().filter(|flag| !flag.is_empty()));
@@ -386,7 +409,7 @@ fn render_prompt_info(
     if width + 2 >= area.width {
         return;
     }
-    let color = if focused { theme.gray } else { theme.gray_dim };
+    let color = accent.unwrap_or(if focused { theme.gray } else { theme.gray_dim });
     buffer.set_string(
         area.right().saturating_sub(width + 2),
         area.bottom() - 1,
