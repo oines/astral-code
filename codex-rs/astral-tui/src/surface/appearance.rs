@@ -75,6 +75,15 @@ impl SurfaceState {
         self.timeline_visible = !self.timeline_visible;
         self.timeline_visible
     }
+
+    pub(crate) fn multiline_mode(&self) -> bool {
+        self.multiline_mode
+    }
+
+    pub(crate) fn toggle_multiline_mode(&mut self) -> bool {
+        self.multiline_mode = !self.multiline_mode;
+        self.multiline_mode
+    }
 }
 
 pub(super) fn timeline_width(state: &SurfaceState, area_width: u16, turn_count: usize) -> u16 {

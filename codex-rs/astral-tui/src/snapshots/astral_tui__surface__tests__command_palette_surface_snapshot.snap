@@ -12,13 +12,13 @@ expression: "render_at_size(&mut state, &session, 80, 24)"
   I’m tracin│  ──────────────────────────────────────────────────  │
             │  ─ Actions                                           │
             │   Cycle collaboration mode               Shift+Tab   │
+            │   Toggle multiline prompt mode              Ctrl+m   │
             │   Keyboard shortcuts               Ctrl+. / Ctrl+x   │
             │   Toggle prompt queue     Ctrl+; / Ctrl+' / Ctrl+4   │
             │   Edit the current draft in an external ed  Ctrl+g   │
             │   Copy the last agent response              Ctrl+o   │
             │  ─ Slash commands                                    │
-            │   Rename this conversation                 /rename   │
-  ◇ Working │   Show session and context status          /status   │
+  ◇ Working │   Rename this conversation                 /rename   │
             │                                                      │
   ╭─────────│type to search · ↑/↓ navigate · Enter run · Esc close │─────────╮
   │ ❯ keep t└──────────────────────────────────────────────────────┘         │

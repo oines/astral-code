@@ -12,7 +12,7 @@ use crate::model_command::ModelCatalog;
 use crate::model_command::ModelResolveError;
 use crate::model_command::ModelSelection;
 
-const MAX_MATCHES: usize = 20;
+const MAX_MODEL_MATCHES: usize = 20;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SlashCommandId {
@@ -30,6 +30,7 @@ pub enum SlashCommandId {
     Permissions,
     Plan,
     Theme,
+    Multiline,
     Timeline,
     Mcp,
     Skills,
@@ -170,6 +171,13 @@ const COMMANDS: &[CommandSpec] = &[
         "theme",
         "Choose the Astral theme",
         Args::Optional("theme"),
+        Always
+    ),
+    command!(
+        Multiline,
+        "multiline",
+        "Toggle multiline prompt mode",
+        Args::None,
         Always
     ),
     command!(
@@ -329,7 +337,7 @@ impl SlashController {
                 .models
                 .suggestions(args)
                 .into_iter()
-                .take(MAX_MATCHES)
+                .take(MAX_MODEL_MATCHES)
                 .map(|suggestion| SlashSuggestion {
                     command: SlashCommandId::Model,
                     display: suggestion.display,
@@ -375,7 +383,6 @@ impl SlashController {
         });
         let matches = ranked
             .into_iter()
-            .take(MAX_MATCHES)
             .map(|(spec, _, _, _, indices)| SlashSuggestion {
                 command: spec.id,
                 display: format!("/{}", spec.name),

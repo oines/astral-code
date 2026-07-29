@@ -85,6 +85,7 @@ pub enum InputAction {
     SelectPermission(PermissionSelection),
     Plan(crate::plan_review::PlanReviewAction),
     CycleMode,
+    ToggleMultiline,
     OpenShortcuts,
     DrainQueue,
     Resolve(RequestResolution),
@@ -422,7 +423,15 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
     {
         return InputAction::Redraw;
     }
-    let prompt_action = actions::lookup(&key, When::PromptFocused);
+    let modified_enter = key.code == KeyCode::Enter
+        && key
+            .modifiers
+            .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT);
+    let prompt_action = if state.multiline_mode() && modified_enter {
+        Some(ActionId::SendPrompt)
+    } else {
+        actions::lookup(&key, When::PromptFocused)
+    };
     if key.code == KeyCode::Esc && state.restore_palette_draft() {
         return InputAction::Redraw;
     }
@@ -442,6 +451,9 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
     }
     if prompt_action == Some(ActionId::CycleMode) {
         return InputAction::CycleMode;
+    }
+    if prompt_action == Some(ActionId::ToggleMultiline) {
+        return InputAction::ToggleMultiline;
     }
     if prompt_action == Some(ActionId::ShortcutsHelp) {
         return InputAction::OpenShortcuts;
@@ -538,6 +550,20 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
                     Err(error) => InputAction::Notice(error.to_string()),
                 };
             }
+            if state.multiline_mode()
+                && key.code == KeyCode::Enter
+                && key.modifiers == KeyModifiers::NONE
+            {
+                if state.composer().trim().is_empty()
+                    && matches!(state.activity(), SurfaceActivity::Working)
+                    && let Some(id) = state.next_follow_up_id()
+                {
+                    return InputAction::SteerQueuedPrompt { id };
+                }
+                state.composer_state_mut().insert_char('\n');
+                state.refresh_composer_completions();
+                return InputAction::Redraw;
+            }
             if state.palette_draft_pending() {
                 state.discard_palette_draft();
             }
@@ -570,6 +596,7 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
         }
         Some(
             ActionId::CycleMode
+            | ActionId::ToggleMultiline
             | ActionId::CommandPalette
             | ActionId::ShortcutsHelp
             | ActionId::ToggleQueue

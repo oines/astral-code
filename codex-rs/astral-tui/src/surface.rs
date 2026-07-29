@@ -160,6 +160,7 @@ pub struct SurfaceState {
     theme: AstralThemeId,
     color_level: ColorLevel,
     timeline_visible: bool,
+    multiline_mode: bool,
     transcript_cache: TranscriptCache,
 }
 
@@ -201,6 +202,7 @@ impl SurfaceState {
             theme: AstralThemeId::default(),
             color_level: ColorLevel::default(),
             timeline_visible: false,
+            multiline_mode: false,
             transcript_cache: TranscriptCache::default(),
         }
     }
@@ -249,6 +251,7 @@ impl SurfaceState {
             theme: AstralThemeId::default(),
             color_level: ColorLevel::default(),
             timeline_visible: false,
+            multiline_mode: false,
             transcript_cache: TranscriptCache::default(),
         }
     }
@@ -1141,7 +1144,12 @@ pub(crate) fn render_surface_with_view(
     {
         None
     } else {
-        let flags = [mode];
+        let multiline = if state.multiline_mode() {
+            "multiline"
+        } else {
+            Default::default()
+        };
+        let flags = [mode, multiline];
         PromptChrome {
             text: state.composer(),
             cursor_byte: state.composer_cursor(),
@@ -1202,8 +1210,13 @@ pub(crate) fn render_surface_with_view(
         (cycle_mode.hint_key(), cycle_mode.label),
         (shortcuts_help.hint_key(), shortcuts_help.label),
     ];
+    let submit_key = if state.multiline_mode() {
+        "Shift+Enter"
+    } else {
+        "Enter"
+    };
     let working_hints = [
-        ("Enter", "queue"),
+        (submit_key, "queue"),
         (cycle_mode.hint_key(), cycle_mode.label),
         (shortcuts_help.hint_key(), shortcuts_help.label),
     ];

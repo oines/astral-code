@@ -17,6 +17,7 @@ use key::KeyShortcut;
 pub(crate) enum ActionId {
     CommandPalette,
     CycleMode,
+    ToggleMultiline,
     ShortcutsHelp,
     ToggleQueue,
     PageUp,

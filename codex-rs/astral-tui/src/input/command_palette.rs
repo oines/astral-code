@@ -116,6 +116,10 @@ fn activate_selected(state: &mut SurfaceState) -> InputAction {
             state.close_command_palette();
             InputAction::CycleMode
         }
+        CommandPaletteCommand::ToggleMultiline => {
+            state.close_command_palette();
+            InputAction::ToggleMultiline
+        }
         CommandPaletteCommand::OpenShortcuts => {
             state.close_command_palette();
             InputAction::OpenShortcuts

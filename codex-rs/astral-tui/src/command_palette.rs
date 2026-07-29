@@ -10,6 +10,7 @@ use crate::slash::SlashPaletteEntry;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CommandPaletteCommand {
     CycleMode,
+    ToggleMultiline,
     OpenShortcuts,
     ToggleQueue,
     EditPrompt,
@@ -46,6 +47,10 @@ impl CommandPaletteState {
         let mut entries = vec![CommandPaletteEntry::Section("Actions")];
         entries.extend([
             action_entry(ActionId::CycleMode, CommandPaletteCommand::CycleMode),
+            action_entry(
+                ActionId::ToggleMultiline,
+                CommandPaletteCommand::ToggleMultiline,
+            ),
             action_entry(
                 ActionId::ShortcutsHelp,
                 CommandPaletteCommand::OpenShortcuts,

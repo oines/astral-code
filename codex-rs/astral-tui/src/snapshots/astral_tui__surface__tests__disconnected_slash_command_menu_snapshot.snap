@@ -15,9 +15,9 @@ expression: "render_at_size(&mut state, &session, 80, 24)"
   │› /status         Show session and context status                        █│
   │  /copy           Copy the last response                                 █│
   │  /theme          Choose the Astral theme                                █│
-  │  /timeline       Toggle the timeline rail                               █│
-  │  /history        Search previous prompts                                █│
-  │  /exit           Exit Astral                                            ││
+  │  /multiline      Toggle multiline prompt mode                           █│
+  │  /timeline       Toggle the timeline rail                               ││
+  │  /history        Search previous prompts                                ││
   ╰──────────────────────────────────────────────────────────────────────────╯
 
   ╭──────────────────────────────────────────────────────────────────────────╮

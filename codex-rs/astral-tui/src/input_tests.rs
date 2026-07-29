@@ -520,6 +520,37 @@ fn command_palette_preserves_the_draft_while_collecting_required_arguments() {
 }
 
 #[test]
+fn multiline_mode_swaps_enter_and_modified_enter() {
+    let mut state = SurfaceState::new("thread-1");
+    assert_eq!(
+        handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('m'), KeyModifiers::CONTROL),
+        ),
+        InputAction::ToggleMultiline
+    );
+
+    state.toggle_multiline_mode();
+    state.set_composer("first line");
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Enter)),
+        InputAction::Redraw
+    );
+    assert_eq!(state.composer(), "first line\n");
+
+    state.set_composer("first line\nsecond line");
+    assert_eq!(
+        handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT),
+        ),
+        InputAction::Submit(crate::PromptSubmission::text_only(
+            "first line\nsecond line"
+        ))
+    );
+}
+
+#[test]
 fn theme_cancel_restores_the_original_preview() {
     let mut state = SurfaceState::new("thread-1");
     state.open_theme_picker();

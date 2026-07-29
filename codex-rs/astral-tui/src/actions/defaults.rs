@@ -41,6 +41,20 @@ pub(super) fn default_actions() -> Vec<ActionDef> {
              The selected mode is sent through Astral's existing thread settings.",
         ),
         ActionDef::new(
+            ActionId::ToggleMultiline,
+            "multiline",
+            "Toggle multiline prompt mode",
+            KeyShortcut::control('m'),
+            Vec::new(),
+            Category::Input,
+            When::PromptFocused,
+        )
+        .with_key_display("Ctrl+M")
+        .with_help(
+            "Swaps the prompt's Enter behavior for this session. While multiline mode is on, \
+             Enter inserts a newline and Shift+Enter or Alt+Enter sends the prompt.",
+        ),
+        ActionDef::new(
             ActionId::ShortcutsHelp,
             "shortcuts",
             "Keyboard shortcuts",

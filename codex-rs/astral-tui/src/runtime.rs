@@ -737,6 +737,9 @@ async fn apply_input_action(
                 .unwrap_or(ModeKind::Default);
             set_collaboration_mode(session, surface, mode).await;
         }
+        InputAction::ToggleMultiline => {
+            toggle_multiline(surface);
+        }
         InputAction::OpenShortcuts => surface.open_shortcut_help(),
         InputAction::Slash {
             invocation,
@@ -820,6 +823,9 @@ async fn apply_input_action(
                     surface
                         .set_notice("Unknown theme. Available: astral-night, astral-day, terminal");
                 }
+            }
+            SlashCommandId::Multiline => {
+                toggle_multiline(surface);
             }
             SlashCommandId::Timeline => {
                 let visible = surface.toggle_timeline();
@@ -920,6 +926,15 @@ async fn apply_input_action(
         InputAction::Notice(message) => surface.set_notice(message),
     }
     Ok(None)
+}
+
+fn toggle_multiline(surface: &mut SurfaceState) {
+    let enabled = surface.toggle_multiline_mode();
+    surface.set_notice(if enabled {
+        "Multiline mode enabled"
+    } else {
+        "Multiline mode disabled"
+    });
 }
 
 fn configured_theme(name: Option<&str>) -> Option<AstralThemeId> {

@@ -128,6 +128,7 @@ fn normalize_child_action(child: &mut SurfaceState, action: InputAction) -> Inpu
         | InputAction::SelectPermission(_)
         | InputAction::Plan(_)
         | InputAction::CycleMode
+        | InputAction::ToggleMultiline
         | InputAction::Resolve(_) => {
             child.set_notice("Subagent view is read-only");
             InputAction::Redraw

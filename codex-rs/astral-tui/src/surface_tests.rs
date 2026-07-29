@@ -586,7 +586,7 @@ fn shortcuts_modal_scrolled_snapshot() {
         .expect("shortcut help should be open");
     shortcuts.select(5);
     shortcuts.expand_selected();
-    shortcuts.select(7);
+    shortcuts.select(8);
     shortcuts.expand_selected();
     shortcuts.select_end();
 
@@ -599,6 +599,16 @@ fn command_palette_surface_snapshot() {
     let mut state = SurfaceState::from_session(&session);
     state.set_composer("keep this draft");
     state.open_command_palette();
+
+    insta::assert_snapshot!(render_at_size(&mut state, &session, 80, 24));
+}
+
+#[test]
+fn multiline_prompt_surface_snapshot() {
+    let session = session_state();
+    let mut state = SurfaceState::from_session(&session);
+    state.toggle_multiline_mode();
+    state.set_composer("first line\nsecond line");
 
     insta::assert_snapshot!(render_at_size(&mut state, &session, 80, 24));
 }
