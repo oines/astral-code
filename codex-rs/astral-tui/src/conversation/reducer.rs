@@ -31,11 +31,12 @@ impl ConversationState {
                 state.finish_turn(turn_index);
             }
         }
+        state.content_generation = u64::from(!turns.is_empty());
         state
     }
 
     pub fn apply(&mut self, notification: &ServerNotification) -> ReduceOutcome {
-        match notification {
+        let outcome = match notification {
             ServerNotification::TurnStarted(event) => {
                 if !self.is_active_thread(&event.thread_id) {
                     return ReduceOutcome::DifferentThread;
@@ -163,7 +164,11 @@ impl ConversationState {
                 ReduceOutcome::Applied
             }
             _ => ReduceOutcome::Ignored,
+        };
+        if outcome == ReduceOutcome::Applied {
+            self.content_generation = self.content_generation.wrapping_add(1);
         }
+        outcome
     }
 
     fn apply_thread_mutation(

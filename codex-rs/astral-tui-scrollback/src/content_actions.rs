@@ -126,6 +126,51 @@ impl PresentationBlock {
             | ToolKind::Other => None,
         }
     }
+
+    /// Plain text indexed by transcript search.
+    ///
+    /// Markdown-backed blocks use their rendered text so matching follows what
+    /// the user sees. Structured blocks retain their meaningful labels,
+    /// details, output, paths, and agent messages without involving the
+    /// app-server projection.
+    pub fn searchable_text(&self) -> Option<String> {
+        let parts = match self {
+            Self::User { text, attachments } => std::iter::once(Some(text.clone()))
+                .chain(attachments.iter().cloned().map(Some))
+                .collect(),
+            Self::Assistant { text } | Self::Thinking { text, .. } | Self::Plan { text, .. } => {
+                vec![Some(rendered_markdown_text(text))]
+            }
+            Self::Todo(todo) => std::iter::once(todo.explanation.clone())
+                .chain(todo.items.iter().map(|item| Some(item.text.clone())))
+                .collect(),
+            Self::Tool(tool) => {
+                let mut parts = vec![Some(tool.name.clone()), Some(tool.title.clone())];
+                parts.extend(tool.details.iter().cloned().map(Some));
+                parts.push(tool.output.clone());
+                for change in &tool.changes {
+                    parts.push(Some(change.path.to_string()));
+                    parts.push(Some(change.diff.clone()));
+                }
+                parts
+            }
+            Self::Subagent(subagent) => {
+                let mut parts = vec![
+                    subagent.prompt.clone(),
+                    subagent.model.clone(),
+                    subagent.reasoning_effort.clone(),
+                ];
+                parts.extend(subagent.thread_ids.iter().cloned().map(Some));
+                for agent in &subagent.agents {
+                    parts.push(Some(agent.thread_id.clone()));
+                    parts.push(agent.message.clone());
+                }
+                parts
+            }
+            Self::System { title, detail } => vec![Some(title.clone()), detail.clone()],
+        };
+        join_searchable(parts)
+    }
 }
 
 fn rendered_markdown_text(source: &str) -> String {
@@ -134,6 +179,17 @@ fn rendered_markdown_text(source: &str) -> String {
         .map(|line| line.to_string().trim_end().to_string())
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn join_searchable(parts: Vec<Option<String>>) -> Option<String> {
+    let text = parts
+        .into_iter()
+        .flatten()
+        .map(|part| part.trim().to_string())
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    (!text.is_empty()).then_some(text)
 }
 
 fn file_changes_patch(changes: &[FileUpdateChange]) -> String {

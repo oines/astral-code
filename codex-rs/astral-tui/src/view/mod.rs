@@ -18,6 +18,7 @@ mod mention_menu;
 mod modal;
 mod plan_review;
 mod scrollback;
+mod scrollback_search;
 mod scrollback_state;
 mod selection;
 mod slash_menu;
