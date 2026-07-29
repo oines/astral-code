@@ -100,7 +100,17 @@ pub fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
         return InputAction::Redraw;
     }
     if state.scrollback_focused() {
-        return scrollback::handle_key(state, key);
+        let registered = actions::lookup(&key, When::ScrollbackFocused).is_some();
+        let action = scrollback::handle_key(state, key);
+        if action == InputAction::None
+            && !registered
+            && matches!(key.code, KeyCode::Char(_))
+            && (key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT)
+        {
+            state.focus_prompt();
+            return handle_composer_key(state, key);
+        }
+        return action;
     }
     handle_composer_key(state, key)
 }

@@ -229,6 +229,26 @@ fn completion_pointer_accepts_the_rendered_row() {
 }
 
 #[test]
+fn unclaimed_scrollback_text_returns_to_the_prompt() {
+    let session = session_state();
+    let mut state = SurfaceState::from_session(&session);
+    let area = Rect::new(0, 0, 80, 24);
+    let mut buffer = Buffer::empty(area);
+    render_surface(&mut state, &session, area, &mut buffer);
+    assert!(state.focus_scrollback());
+
+    assert_eq!(
+        handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE),
+        ),
+        InputAction::Redraw
+    );
+    assert_eq!(state.composer(), "a");
+    assert!(!state.scrollback_focused());
+}
+
+#[test]
 fn prompt_pointer_places_the_edit_cursor() {
     let session = session_state();
     let mut state = SurfaceState::from_session(&session);
