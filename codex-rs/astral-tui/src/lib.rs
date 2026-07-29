@@ -11,6 +11,7 @@ mod clipboard;
 mod composer;
 mod conversation;
 mod ecosystem;
+mod history;
 mod input;
 mod launch;
 mod link_opener;

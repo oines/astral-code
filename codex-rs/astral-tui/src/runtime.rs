@@ -621,6 +621,7 @@ async fn apply_input_action(
                 }
                 Err(error) => surface.set_notice(error.to_string()),
             },
+            SlashCommandId::History => surface.open_history_search(),
             SlashCommandId::Fork => match session.fork_current().await {
                 Ok(outcome) => reset_surface_after_switch(session, surface, outcome).await,
                 Err(error) => surface.set_notice(error.to_string()),
@@ -793,10 +794,13 @@ async fn start_submission(
     // Follow mode already tracks the new turn. Keep a manual reading anchor
     // in place while the submitted turn appends below it.
     surface.set_activity(SurfaceActivity::Working);
-    if let Err(error) = session.start_turn(submission.user_input()).await {
-        surface.restore_submission(submission);
-        surface.set_activity(SurfaceActivity::Ready);
-        surface.set_notice(error.to_string());
+    match session.start_turn(submission.user_input()).await {
+        Ok(_) => surface.record_submission(&submission),
+        Err(error) => {
+            surface.restore_submission(submission);
+            surface.set_activity(SurfaceActivity::Ready);
+            surface.set_notice(error.to_string());
+        }
     }
 }
 

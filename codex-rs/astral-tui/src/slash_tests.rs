@@ -96,6 +96,7 @@ fn command_availability_tracks_working_and_disconnected_states() {
             SlashCommandId::Copy,
             SlashCommandId::Theme,
             SlashCommandId::Timeline,
+            SlashCommandId::History,
             SlashCommandId::Exit,
             SlashCommandId::Quit,
         ]

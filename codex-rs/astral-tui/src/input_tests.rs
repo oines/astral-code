@@ -80,6 +80,48 @@ fn composer_submit_and_interrupt_are_distinct_actions() {
 }
 
 #[test]
+fn prompt_history_browses_live_and_detaches_for_editing() {
+    let mut state = SurfaceState::new("thread-1");
+    state.record_submission(&crate::PromptSubmission::text_only("older prompt"));
+    state.record_submission(&crate::PromptSubmission::text_only("newest prompt"));
+
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Up)),
+        InputAction::Redraw
+    );
+    assert_eq!(state.composer(), "newest prompt");
+    assert!(state.history().open);
+
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Up)),
+        InputAction::Redraw
+    );
+    assert_eq!(state.composer(), "older prompt");
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Down)),
+        InputAction::Redraw
+    );
+    assert_eq!(state.composer(), "newest prompt");
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Down)),
+        InputAction::Redraw
+    );
+    assert_eq!(state.composer(), "");
+    assert!(!state.history().open);
+
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Up)),
+        InputAction::Redraw
+    );
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Char('!'))),
+        InputAction::Redraw
+    );
+    assert_eq!(state.composer(), "newest prompt!");
+    assert!(!state.history().open);
+}
+
+#[test]
 fn dollar_completion_selects_a_skill_and_submits_structured_input() {
     let mut state = SurfaceState::new("thread-1");
     state.set_mention_catalog(MentionCatalog {

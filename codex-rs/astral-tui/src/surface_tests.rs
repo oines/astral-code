@@ -272,6 +272,21 @@ fn plan_command_menu_snapshot() {
 }
 
 #[test]
+fn prompt_history_browse_surface_snapshot() {
+    let session = session_state();
+    let mut state = SurfaceState::from_session(&session);
+
+    assert_eq!(
+        handle_key(&mut state, KeyEvent::new(KeyCode::Up, KeyModifiers::NONE)),
+        InputAction::Redraw
+    );
+    assert_eq!(state.composer(), "inspect this repo");
+    assert!(state.history().open);
+
+    insta::assert_snapshot!(render_at_size(&mut state, &session, 80, 24));
+}
+
+#[test]
 fn skill_and_plugin_mention_menu_snapshot() {
     let session = session_state();
     let mut state = SurfaceState::from_session(&session);

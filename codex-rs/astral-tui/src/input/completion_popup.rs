@@ -7,6 +7,7 @@ use crate::SurfaceState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CompletionKind {
+    History,
     Slash,
     Mention,
 }
@@ -44,6 +45,9 @@ pub(super) fn handle_mouse(state: &mut SurfaceState, mouse: MouseEvent) -> Input
                 return InputAction::Redraw;
             }
             if state.prompt_contains(mouse) {
+                if kind == CompletionKind::History && state.history().browse {
+                    state.detach_history();
+                }
                 state.focus_prompt();
                 state.place_composer_cursor(mouse);
                 return InputAction::Redraw;
@@ -71,7 +75,9 @@ pub(super) fn handle_mouse(state: &mut SurfaceState, mouse: MouseEvent) -> Input
 }
 
 fn active_completion(state: &SurfaceState) -> Option<(CompletionKind, usize)> {
-    if state.mentions().open {
+    if state.history().open {
+        Some((CompletionKind::History, state.history().matches.len()))
+    } else if state.mentions().open {
         Some((CompletionKind::Mention, state.mentions().matches.len()))
     } else if state.slash().open {
         Some((CompletionKind::Slash, state.slash().matches.len()))
@@ -82,6 +88,9 @@ fn active_completion(state: &SurfaceState) -> Option<(CompletionKind, usize)> {
 
 fn move_selection(state: &mut SurfaceState, kind: CompletionKind, delta: isize) {
     match kind {
+        CompletionKind::History => {
+            state.move_history_selection(delta);
+        }
         CompletionKind::Slash => state.move_slash_selection(delta),
         CompletionKind::Mention => state.move_mention_selection(delta),
     }
@@ -89,6 +98,7 @@ fn move_selection(state: &mut SurfaceState, kind: CompletionKind, delta: isize) 
 
 fn select(state: &mut SurfaceState, kind: CompletionKind, index: usize) {
     match kind {
+        CompletionKind::History => state.select_history(index),
         CompletionKind::Slash => state.select_slash(index),
         CompletionKind::Mention => state.select_mention(index),
     }
@@ -96,6 +106,7 @@ fn select(state: &mut SurfaceState, kind: CompletionKind, index: usize) {
 
 fn accept(state: &mut SurfaceState, kind: CompletionKind) {
     match kind {
+        CompletionKind::History => state.accept_history_selection(),
         CompletionKind::Slash => {
             state.accept_slash_selection();
         }

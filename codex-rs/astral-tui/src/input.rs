@@ -24,6 +24,7 @@ use crate::request_choice::response_for;
 
 mod block_viewer;
 mod completion_popup;
+mod history_popup;
 mod mcp_form;
 mod mention_popup;
 mod mouse_scroll;
@@ -149,6 +150,9 @@ pub fn handle_paste(state: &mut SurfaceState, text: &str) -> InputAction {
     if state.paste_scrollback_search(text).is_some() {
         return InputAction::Redraw;
     }
+    if state.history().open {
+        return history_popup::handle_paste(state, text);
+    }
     if state.permission_picker().is_some()
         || state.theme_picker().is_some()
         || state.modal().is_some()
@@ -265,7 +269,7 @@ pub(crate) fn handle_mouse(state: &mut SurfaceState, mouse: MouseEvent) -> Input
         }
         return InputAction::None;
     }
-    if state.slash().open || state.mentions().open {
+    if state.history().open || state.slash().open || state.mentions().open {
         return completion_popup::handle_mouse(state, mouse);
     }
     if state.prompt_contains(mouse) && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
@@ -288,6 +292,9 @@ fn scrollback_owns_pointer(state: &mut SurfaceState, mouse: MouseEvent) -> bool 
 }
 
 fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
+    if state.history().open {
+        return history_popup::handle_key(state, key);
+    }
     if state.mentions().open
         && let Some(action) = mention_popup::handle_key(state, key)
     {
@@ -327,6 +334,11 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
         }
     }
     if key.code == KeyCode::Tab && key.modifiers == KeyModifiers::NONE && state.focus_scrollback() {
+        return InputAction::Redraw;
+    }
+    if key.code == KeyCode::Up && key.modifiers == KeyModifiers::NONE && state.composer().is_empty()
+    {
+        state.open_history_browse();
         return InputAction::Redraw;
     }
     match (key.code, key.modifiers) {

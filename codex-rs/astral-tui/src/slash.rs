@@ -20,6 +20,7 @@ pub enum SlashCommandId {
     Compact,
     New,
     Resume,
+    History,
     Fork,
     Rename,
     Status,
@@ -166,6 +167,13 @@ const COMMANDS: &[CommandSpec] = &[
         Timeline,
         "timeline",
         "Toggle the timeline rail",
+        Args::None,
+        Always
+    ),
+    command!(
+        History,
+        "history",
+        "Search previous prompts",
         Args::None,
         Always
     ),

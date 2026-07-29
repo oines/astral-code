@@ -12,12 +12,12 @@ expression: "render_at_size(&mut state, &session, 80, 24)"
                                                                                █
 
   ╭─ commands ───────────────────────────────────────────────────────────────╮
-  │› /status         Show session and context status                         │
-  │  /copy           Copy the last response                                  │
-  │  /theme          Choose the Astral theme                                 │
-  │  /timeline       Toggle the timeline rail                                │
-  │  /exit           Exit Astral                                             │
-  │  /quit           Exit Astral                                             │
+  │› /status         Show session and context status                        █│
+  │  /copy           Copy the last response                                 █│
+  │  /theme          Choose the Astral theme                                █│
+  │  /timeline       Toggle the timeline rail                               █│
+  │  /history        Search previous prompts                                █│
+  │  /exit           Exit Astral                                            ││
   ╰──────────────────────────────────────────────────────────────────────────╯
 
   ╭──────────────────────────────────────────────────────────────────────────╮

@@ -1,6 +1,7 @@
 mod appearance;
 mod block_viewer;
 mod content_actions;
+mod history;
 mod mentions;
 mod plan_review;
 mod pointer;
@@ -30,6 +31,7 @@ use crate::PendingRequests;
 use crate::SessionState;
 use crate::block_viewer::BlockViewerState;
 use crate::composer::ComposerState;
+use crate::history::PromptHistory;
 use crate::mcp_form::McpFormState;
 use crate::mention::MentionController;
 use crate::modal::ModalState;
@@ -57,6 +59,7 @@ use crate::view::AstralTheme;
 use crate::view::AstralThemeId;
 use crate::view::ColorLevel;
 use crate::view::EntryChromeState;
+use crate::view::HistoryMenu;
 use crate::view::LayoutConfig;
 use crate::view::MentionMenu;
 use crate::view::PaneHeights;
@@ -110,6 +113,7 @@ pub struct SurfaceState {
     token_usage: Option<ThreadTokenUsage>,
     notice: Option<String>,
     scrollback: ScrollbackState,
+    history: PromptHistory,
     slash: SlashController,
     mentions: MentionController,
     block_viewer: Option<BlockViewerState>,
@@ -140,6 +144,7 @@ impl SurfaceState {
             token_usage: None,
             notice: None,
             scrollback: ScrollbackState::default(),
+            history: PromptHistory::default(),
             slash: SlashController::default(),
             mentions: MentionController::default(),
             block_viewer: None,
@@ -177,6 +182,7 @@ impl SurfaceState {
             token_usage: None,
             notice: None,
             scrollback: ScrollbackState::default(),
+            history: PromptHistory::from_turns(&session.thread.turns),
             slash: SlashController::default(),
             mentions: MentionController::default(),
             block_viewer: None,
@@ -284,6 +290,7 @@ impl SurfaceState {
     }
 
     pub(crate) fn focus_scrollback(&mut self) -> bool {
+        self.cancel_history();
         self.slash.close();
         self.mentions.dismiss(self.composer.text());
         self.clear_completion_menu();
@@ -614,6 +621,7 @@ pub(crate) fn render_surface_with_view(
         !crate::request_choice::is_simple_request(request) || !state.scrollback_focused()
     });
     let plan_review = state.plan_review().cloned();
+    let history = state.history().clone();
     let prompt_height = state.pending_requests.front().map_or_else(
         || {
             if plan_review
@@ -622,7 +630,12 @@ pub(crate) fn render_surface_with_view(
             {
                 0
             } else {
-                prompt_height(state.composer(), state.composer_cursor(), area.width)
+                let (text, cursor) = if history.open && history.browse {
+                    (history.saved_text.as_str(), history.saved_text.len())
+                } else {
+                    (state.composer(), state.composer_cursor())
+                };
+                prompt_height(text, cursor, area.width)
             }
         },
         |request| {
@@ -639,7 +652,9 @@ pub(crate) fn render_surface_with_view(
     let slash = state.slash().clone();
     let mentions = state.mentions().clone();
     let max_suggestions = if area.height <= 16 { 2 } else { 6 };
-    let completion_rows = if mentions.open {
+    let completion_rows = if history.open {
+        history.matches.len().max(1)
+    } else if mentions.open {
         mentions.matches.len()
     } else if slash.open {
         slash.matches.len()
@@ -796,7 +811,13 @@ pub(crate) fn render_surface_with_view(
     } else if completion_height > 0 {
         state.plan_review_mouse.clear();
         let hovered = state.completion_hovered();
-        let completion_frame = if mentions.open {
+        let completion_frame = if history.open {
+            HistoryMenu {
+                snapshot: &history,
+                hovered,
+            }
+            .render(layout.banner, buffer, theme)
+        } else if mentions.open {
             MentionMenu {
                 snapshot: &mentions,
                 hovered,
@@ -858,7 +879,9 @@ pub(crate) fn render_surface_with_view(
             },
             model: &session.model,
             flags: &flags,
-            ghost: (!revising_plan).then_some(slash.ghost.as_deref()).flatten(),
+            ghost: (!revising_plan && !history.open)
+                .then_some(slash.ghost.as_deref())
+                .flatten(),
             focused: prompt_focused,
         }
         .render(layout.prompt, buffer, theme)
@@ -915,6 +938,12 @@ pub(crate) fn render_surface_with_view(
     }
     let mention_hints = [("↑/↓", "navigate"), ("Tab", "select"), ("Esc", "close")];
     let slash_hints = [("↑/↓", "navigate"), ("Tab", "complete"), ("Esc", "close")];
+    let history_hints = [
+        ("↑/↓", "navigate"),
+        ("PgUp/PgDn", "page"),
+        ("Enter", "select"),
+        ("Esc", "cancel"),
+    ];
     let plan_hints = [
         ("↑/↓", "navigate"),
         ("Enter", "select"),
@@ -942,6 +971,8 @@ pub(crate) fn render_surface_with_view(
             search_hints
         } else if state.scrollback_focused() {
             &scrollback_hints
+        } else if history.open {
+            &history_hints
         } else if mentions.open {
             &mention_hints
         } else if slash.open {

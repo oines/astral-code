@@ -1,0 +1,224 @@
+//! Prompt history shared by arrow-key browsing and `/history` search.
+//!
+//! The interaction follows Grok Build's history panel while keeping Astral's
+//! app-server transcript authoritative. Resumed user messages seed the local
+//! history and successful submissions extend it; no separate persistence or
+//! protocol surface is introduced here.
+
+use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::Turn;
+use codex_app_server_protocol::UserInput;
+
+use crate::slash::fuzzy_match;
+
+const MAX_HISTORY_ENTRIES: usize = 1_000;
+const MAX_MATCHES: usize = 100;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct HistoryMatch {
+    pub(crate) text: String,
+    pub(crate) display: String,
+    pub(crate) indices: Vec<usize>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct HistorySnapshot {
+    pub(crate) open: bool,
+    pub(crate) browse: bool,
+    pub(crate) saved_text: String,
+    pub(crate) query: String,
+    pub(crate) matches: Vec<HistoryMatch>,
+    pub(crate) selected: usize,
+}
+
+impl HistorySnapshot {
+    pub(crate) fn selection(&self) -> Option<&HistoryMatch> {
+        self.matches.get(self.selected)
+    }
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct PromptHistory {
+    /// Most recent first. Empty-query results reverse this so the newest
+    /// prompt sits at the bottom of the panel, nearest the composer.
+    entries: Vec<String>,
+    snapshot: HistorySnapshot,
+}
+
+impl PromptHistory {
+    pub(crate) fn from_turns(turns: &[Turn]) -> Self {
+        let mut history = Self::default();
+        for turn in turns {
+            for item in &turn.items {
+                let ThreadItem::UserMessage { content, .. } = item else {
+                    continue;
+                };
+                let text = content
+                    .iter()
+                    .filter_map(|input| match input {
+                        UserInput::Text { text, .. } => Some(text.as_str()),
+                        UserInput::Image { .. }
+                        | UserInput::LocalImage { .. }
+                        | UserInput::Skill { .. }
+                        | UserInput::Mention { .. } => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                history.record(&text);
+            }
+        }
+        history
+    }
+
+    pub(crate) fn snapshot(&self) -> &HistorySnapshot {
+        &self.snapshot
+    }
+
+    pub(crate) fn record(&mut self, text: &str) {
+        if text.trim().is_empty() || self.entries.first().is_some_and(|entry| entry == text) {
+            return;
+        }
+        self.entries.insert(0, text.to_string());
+        self.entries.truncate(MAX_HISTORY_ENTRIES);
+        self.deactivate();
+    }
+
+    pub(crate) fn activate_browse(&mut self, saved_text: &str) -> Option<String> {
+        if self.entries.is_empty() {
+            return None;
+        }
+        self.activate(saved_text, /*browse*/ true);
+        self.selected_text().map(str::to_string)
+    }
+
+    pub(crate) fn activate_search(&mut self, saved_text: &str) {
+        self.activate(saved_text, /*browse*/ false);
+    }
+
+    fn activate(&mut self, saved_text: &str, browse: bool) {
+        self.snapshot.open = true;
+        self.snapshot.browse = browse;
+        self.snapshot.saved_text = saved_text.to_string();
+        self.snapshot.query.clear();
+        self.refresh_matches();
+    }
+
+    pub(crate) fn update_query(&mut self, query: &str) {
+        if !self.snapshot.open || self.snapshot.browse || self.snapshot.query == query {
+            return;
+        }
+        self.snapshot.query = query.to_string();
+        self.refresh_matches();
+    }
+
+    fn refresh_matches(&mut self) {
+        let query = self.snapshot.query.trim();
+        let mut matches: Vec<HistoryMatch> = if query.is_empty() {
+            self.entries
+                .iter()
+                .take(MAX_MATCHES)
+                .rev()
+                .map(|text| HistoryMatch {
+                    text: text.clone(),
+                    display: single_line(text),
+                    indices: Vec::new(),
+                })
+                .collect()
+        } else {
+            let mut ranked = self
+                .entries
+                .iter()
+                .enumerate()
+                .filter_map(|(recency, text)| {
+                    let display = single_line(text);
+                    fuzzy_match(&display, query)
+                        .map(|(score, indices)| (recency, score, text, display, indices))
+                })
+                .collect::<Vec<_>>();
+            // Weakest/oldest first, strongest/newest last. The best result is
+            // therefore selected at the panel edge nearest the composer.
+            ranked.sort_by(|left, right| left.1.cmp(&right.1).then_with(|| right.0.cmp(&left.0)));
+            ranked
+                .into_iter()
+                .rev()
+                .take(MAX_MATCHES)
+                .rev()
+                .map(|(_, _, text, display, indices)| HistoryMatch {
+                    text: text.clone(),
+                    display,
+                    indices,
+                })
+                .collect()
+        };
+        if matches.len() > MAX_MATCHES {
+            matches.drain(..matches.len() - MAX_MATCHES);
+        }
+        self.snapshot.matches = matches;
+        self.snapshot.selected = self.snapshot.matches.len().saturating_sub(1);
+    }
+
+    pub(crate) fn move_selection(&mut self, delta: isize) -> bool {
+        let len = self.snapshot.matches.len();
+        if len == 0 {
+            return false;
+        }
+        let selected = (self.snapshot.selected as isize + delta).clamp(0, len as isize - 1);
+        let selected = selected as usize;
+        if selected == self.snapshot.selected {
+            return false;
+        }
+        self.snapshot.selected = selected;
+        true
+    }
+
+    pub(crate) fn page_selection(&mut self, delta: isize, visible_rows: usize) -> bool {
+        let page = (visible_rows / 2).max(1) as isize;
+        self.move_selection(delta.saturating_mul(page))
+    }
+
+    pub(crate) fn select(&mut self, index: usize) {
+        if self.snapshot.matches.is_empty() {
+            return;
+        }
+        self.snapshot.selected = index.min(self.snapshot.matches.len() - 1);
+    }
+
+    pub(crate) fn selected_text(&self) -> Option<&str> {
+        self.snapshot.selection().map(|entry| entry.text.as_str())
+    }
+
+    pub(crate) fn accept(&mut self) -> String {
+        let text = self
+            .selected_text()
+            .map(str::to_string)
+            .unwrap_or_else(|| self.snapshot.saved_text.clone());
+        self.deactivate();
+        text
+    }
+
+    pub(crate) fn cancel(&mut self) -> String {
+        let saved = self.snapshot.saved_text.clone();
+        self.deactivate();
+        saved
+    }
+
+    pub(crate) fn detach(&mut self) {
+        self.deactivate();
+    }
+
+    fn deactivate(&mut self) {
+        self.snapshot = HistorySnapshot::default();
+    }
+}
+
+fn single_line(text: &str) -> String {
+    text.chars()
+        .map(|character| {
+            if character.is_whitespace() {
+                ' '
+            } else {
+                character
+            }
+        })
+        .collect()
+}

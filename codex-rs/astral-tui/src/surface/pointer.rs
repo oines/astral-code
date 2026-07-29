@@ -68,6 +68,12 @@ impl SurfacePointerState {
             .scrollbar_target(mouse.column, mouse.row, total_items)
     }
 
+    fn completion_visible_rows(&self) -> Option<usize> {
+        self.completion
+            .as_ref()
+            .map(CompletionMenuFrame::visible_rows)
+    }
+
     fn update_completion_hover(&mut self, mouse: MouseEvent) -> bool {
         let hovered = self.completion_row_at(mouse);
         if hovered == self.completion_hovered {
@@ -136,6 +142,10 @@ impl SurfaceState {
     ) -> Option<usize> {
         self.pointer_areas
             .completion_scrollbar_target(mouse, total_items)
+    }
+
+    pub(crate) fn completion_visible_rows(&self) -> Option<usize> {
+        self.pointer_areas.completion_visible_rows()
     }
 
     pub(crate) fn update_completion_hover(&mut self, mouse: MouseEvent) -> bool {
