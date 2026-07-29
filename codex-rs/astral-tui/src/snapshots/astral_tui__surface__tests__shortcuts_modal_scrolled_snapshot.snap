@@ -6,20 +6,20 @@ expression: "render_at_size(&mut state, &session, 80, 24)"
   ⎇ main  /workspace
 
 
-  › inspect this┌─ Keyboard shortcuts ─────────────────────[×]─┐
-                │                                              │
-                │  /          Open slash-command discovery     │
-  I’m tracing th│  ↑/↓        Navigate menus / scroll lists    │
-                │  Tab        Complete item / switch focus     │
-                │  j/k        Select foldable entry            │
-                │  Shift+L/H  Next / previous turn             │
-                │  J/K        Next / previous final response   │
-                │  g/G        Go to transcript top / bottom    │
-                │  Ctrl+J/K   Scroll transcript one line       │
-                │  Ctrl+U/D   Scroll transcript half a page    │
-                │  e / Enter  Toggle selected entry            │
-  ◇ Working     │  h/l        Collapse / expand entry          │
-                │                                              │
-  ╭─────────────│            ↑/↓ scroll · Esc close            │─────────────╮
-  │ ❯           └──────────────────────────────────────────────┘             │
+  › inspect ┌─ Keyboard Shortcuts ─────────────────────────────[×]─┐
+            │                                                      │
+            │  Search: / to filter                                 │
+  I’m tracin│  ──────────────────────────────────────────────────  │
+            │    Ctrl+j                  Scroll transcript down o  │
+            │    Ctrl+u                  Scroll transcript up hal  │
+            │    Ctrl+d                  Scroll transcript down h  │
+            │    j / ↓                   Select next transcript e  │
+            │    k / ↑                   Select previous transcri  │
+            │    o                       Select next visible link  │
+            │    Shift+o                 Select previous visible   │
+            │  ▸ Conversation actions                              │
+  ◇ Working │  ▸ Session                                           │
+            │                                                      │
+  ╭─────────│    ↑/↓ nav · e expand · Enter details · Esc close    │─────────╮
+  │ ❯       └──────────────────────────────────────────────────────┘         │
   ╰──────────────────────────────────────────── claude-sonnet-4 · workspace ─╯

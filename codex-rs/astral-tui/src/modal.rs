@@ -57,6 +57,10 @@ impl ModalPointerState {
         self.close_hovered
     }
 
+    pub(crate) fn hovered_row(&self) -> Option<usize> {
+        self.hovered_row
+    }
+
     pub(crate) fn handle_mouse(&mut self, mouse: MouseEvent) -> ModalPointerAction {
         let position = (mouse.column, mouse.row).into();
         let on_close = self

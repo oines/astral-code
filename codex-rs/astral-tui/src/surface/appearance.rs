@@ -19,6 +19,7 @@ use crate::view::AstralThemeId;
 use crate::view::BlockViewerPane;
 use crate::view::ColorLevel;
 use crate::view::InfoModal;
+use crate::view::ShortcutHelp;
 
 impl SurfaceState {
     pub(crate) fn theme_picker(&self) -> Option<&ThemePickerState> {
@@ -161,6 +162,12 @@ pub(super) fn render_overlay(
                 return false;
             };
             render_thread_picker(picker, area, buffer, theme);
+        }
+        ActiveOverlay::ShortcutHelp => {
+            let Some(shortcuts) = &mut state.shortcut_help else {
+                return false;
+            };
+            ShortcutHelp { state: shortcuts }.render(area, buffer, theme);
         }
         ActiveOverlay::InfoModal => {
             let Some(modal) = &mut state.modal else {

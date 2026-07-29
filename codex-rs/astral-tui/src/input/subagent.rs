@@ -8,7 +8,6 @@ use crossterm::event::MouseEvent;
 use crate::InputAction;
 use crate::SurfaceState;
 use crate::modal::ModalPointerAction;
-use crate::shortcuts::shortcuts_modal;
 use crate::view::ScrollbackMouseAction;
 
 pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
@@ -100,7 +99,7 @@ fn normalize_child_action(child: &mut SurfaceState, action: InputAction) -> Inpu
             InputAction::Redraw
         }
         InputAction::OpenShortcuts => {
-            child.open_modal(shortcuts_modal());
+            child.open_shortcut_help();
             InputAction::Redraw
         }
         InputAction::Notice(message) => {

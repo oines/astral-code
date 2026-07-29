@@ -52,7 +52,6 @@ use crate::permission_picker::PermissionPickerState;
 use crate::render_surface;
 use crate::render_surface_with_view;
 use crate::session::ThreadSwitchOutcome;
-use crate::shortcuts::shortcuts_modal;
 use crate::surface::paint_committed_with_theme;
 use crate::terminal_guard::TerminalGuard;
 use crate::thread_picker::PickerState;
@@ -613,7 +612,7 @@ async fn apply_input_action(
                 .unwrap_or(ModeKind::Default);
             set_collaboration_mode(session, surface, mode).await;
         }
-        InputAction::OpenShortcuts => surface.open_modal(shortcuts_modal()),
+        InputAction::OpenShortcuts => surface.open_shortcut_help(),
         InputAction::Slash {
             invocation,
             submission,

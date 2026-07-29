@@ -47,6 +47,7 @@ use crate::plan_review::PlanReviewState;
 use crate::request_choice::RequestChoiceState;
 use crate::request_pane::RequestPane;
 use crate::request_user_input::RequestUserInputState;
+use crate::shortcuts::ShortcutHelpState;
 use crate::slash::SlashCommandId;
 use crate::slash::SlashCommandState;
 use crate::slash::SlashController;
@@ -125,6 +126,7 @@ pub struct SurfaceState {
     block_viewer: Option<BlockViewerState>,
     subagent_view: Option<Box<SubagentViewState>>,
     modal: Option<ModalState>,
+    shortcut_help: Option<ShortcutHelpState>,
     thread_picker: Option<PickerState>,
     permission_picker: Option<PermissionPickerState>,
     theme_picker: Option<ThemePickerState>,
@@ -157,6 +159,7 @@ impl SurfaceState {
             block_viewer: None,
             subagent_view: None,
             modal: None,
+            shortcut_help: None,
             thread_picker: None,
             permission_picker: None,
             theme_picker: None,
@@ -196,6 +199,7 @@ impl SurfaceState {
             block_viewer: None,
             subagent_view: None,
             modal: None,
+            shortcut_help: None,
             thread_picker: None,
             permission_picker: None,
             theme_picker: None,
@@ -522,6 +526,27 @@ impl SurfaceState {
 
     pub(crate) fn close_modal(&mut self) {
         self.modal = None;
+    }
+
+    pub(crate) fn shortcut_help(&self) -> Option<&ShortcutHelpState> {
+        self.shortcut_help.as_ref()
+    }
+
+    pub(crate) fn shortcut_help_mut(&mut self) -> Option<&mut ShortcutHelpState> {
+        self.shortcut_help.as_mut()
+    }
+
+    pub(crate) fn open_shortcut_help(&mut self) {
+        let context = if self.scrollback_focused() {
+            crate::actions::When::ScrollbackFocused
+        } else {
+            crate::actions::When::PromptFocused
+        };
+        self.shortcut_help = Some(ShortcutHelpState::new(context));
+    }
+
+    pub(crate) fn close_shortcut_help(&mut self) {
+        self.shortcut_help = None;
     }
 
     pub(crate) fn thread_picker(&self) -> Option<&PickerState> {

@@ -55,7 +55,6 @@ use crate::mention::MentionTarget;
 use crate::modal::ModalRow;
 use crate::modal::ModalState;
 use crate::plan_review::PlanReviewAction;
-use crate::shortcuts::shortcuts_modal;
 use crate::view::AstralThemeId;
 use crate::view::ColorLevel;
 
@@ -420,7 +419,7 @@ fn ecosystem_modal_scroll_snapshot() {
 fn shortcuts_modal_snapshot() {
     let session = session_state();
     let mut state = SurfaceState::from_session(&session);
-    state.open_modal(shortcuts_modal());
+    state.open_shortcut_help();
 
     insta::assert_snapshot!(render_at_size(&mut state, &session, 80, 24));
 }
@@ -429,9 +428,15 @@ fn shortcuts_modal_snapshot() {
 fn shortcuts_modal_scrolled_snapshot() {
     let session = session_state();
     let mut state = SurfaceState::from_session(&session);
-    let mut modal = shortcuts_modal();
-    modal.scroll_by(8);
-    state.open_modal(modal);
+    state.open_shortcut_help();
+    let shortcuts = state
+        .shortcut_help_mut()
+        .expect("shortcut help should be open");
+    shortcuts.select(4);
+    shortcuts.expand_selected();
+    shortcuts.select(6);
+    shortcuts.expand_selected();
+    shortcuts.select_end();
 
     insta::assert_snapshot!(render_at_size(&mut state, &session, 80, 24));
 }

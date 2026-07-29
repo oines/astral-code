@@ -6,20 +6,20 @@ expression: "render_at_size(&mut state, &session, 80, 24)"
   ⎇ main  /workspace
 
 
-  › inspect this┌─ Keyboard shortcuts ─────────────────────[×]─┐
-                │                                              │
-                │  Enter      Send / submit focused input      │
-  I’m tracing th│  Shift+Tab  Cycle collaboration mode         │
-                │  Ctrl+.     Toggle shortcuts window          │
-                │  Ctrl+C     Interrupt / clear / idle exit    │
-                │  Ctrl+D     Exit when the composer is empty  │
-                │  Ctrl+O     Copy the last agent response     │
-                │  PageUp     Scroll history up                │
-                │  PageDown   Scroll history down              │
-                │  /          Open slash-command discovery     │
-                │  ↑/↓        Navigate menus / scroll lists    │
-  ◇ Working     │  Tab        Complete item / switch focus     │
-                │                                              │
-  ╭─────────────│            ↑/↓ scroll · Esc close            │─────────────╮
-  │ ❯           └──────────────────────────────────────────────┘             │
+  › inspect ┌─ Keyboard Shortcuts ─────────────────────────────[×]─┐
+            │                                                      │
+            │  Search: / to filter                                 │
+  I’m tracin│  ──────────────────────────────────────────────────  │
+            │  ▾ Getting started                                   │
+            │    Ctrl+. / Ctrl+x  Keyboard shortcuts               │
+            │    Tab              Focus transcript                 │
+            │    Tab / i / Space  Focus prompt                     │
+            │  ▸ Input                                             │
+            │  ▸ Conversation navigation                           │
+            │  ▸ Conversation actions                              │
+            │  ▸ Session                                           │
+  ◇ Working │                                                      │
+            │                                                      │
+  ╭─────────│    ↑/↓ nav · e expand · Enter details · Esc close    │─────────╮
+  │ ❯       └──────────────────────────────────────────────────────┘         │
   ╰──────────────────────────────────────────── claude-sonnet-4 · workspace ─╯
