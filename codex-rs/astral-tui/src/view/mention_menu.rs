@@ -8,15 +8,24 @@ use crate::mention::MentionKind;
 use crate::mention::MentionSnapshot;
 
 use super::AstralTheme;
+use super::CompletionMenuFrame;
 
 pub(crate) struct MentionMenu<'a> {
     pub(crate) snapshot: &'a MentionSnapshot,
+    pub(crate) hovered: Option<usize>,
 }
 
 impl MentionMenu<'_> {
-    pub(crate) fn render(self, area: Rect, buffer: &mut Buffer, theme: AstralTheme) {
+    pub(crate) fn render(
+        self,
+        area: Rect,
+        buffer: &mut Buffer,
+        theme: AstralTheme,
+    ) -> CompletionMenuFrame {
+        let mut frame =
+            CompletionMenuFrame::new(area, self.snapshot.matches.len(), self.snapshot.selected);
         if area.width < 20 || area.height < 3 {
-            return;
+            return frame;
         }
         let border = theme.prompt_border_active;
         buffer.set_style(
@@ -31,12 +40,8 @@ impl MentionMenu<'_> {
             Style::default().fg(theme.gray).bg(theme.bg_base),
         );
 
-        let rows = usize::from(area.height.saturating_sub(2));
-        let start = self
-            .snapshot
-            .selected
-            .saturating_add(1)
-            .saturating_sub(rows);
+        let rows = frame.visible_rows();
+        let start = frame.window_start();
         for (visible, (index, suggestion)) in self
             .snapshot
             .matches
@@ -56,12 +61,21 @@ impl MentionMenu<'_> {
                 Style::default().fg(border),
             );
             let selected = index == self.snapshot.selected;
-            let row_style = if selected {
-                Style::default().fg(theme.bg_base).bg(theme.text_secondary)
+            let hovered = self.hovered == Some(index);
+            let row_background = if selected {
+                theme.text_secondary
+            } else if hovered {
+                theme.panel_selected
             } else {
-                Style::default().fg(theme.text_primary).bg(theme.bg_base)
+                theme.bg_base
             };
-            let row = Rect::new(area.x + 1, y, area.width.saturating_sub(2), 1);
+            let row_style = if selected {
+                Style::default().fg(theme.bg_base).bg(row_background)
+            } else {
+                Style::default().fg(theme.text_primary).bg(row_background)
+            };
+            let row = frame.row_rect(visible);
+            frame.observe_row(index, row);
             buffer.set_style(row, row_style);
             buffer.set_string(row.x, y, if selected { "› " } else { "  " }, row_style);
 
@@ -70,9 +84,9 @@ impl MentionMenu<'_> {
             } else {
                 match suggestion.kind {
                     MentionKind::Plugin => {
-                        Style::default().fg(theme.accent_running).bg(theme.bg_base)
+                        Style::default().fg(theme.accent_running).bg(row_background)
                     }
-                    MentionKind::Skill => Style::default().fg(theme.gray).bg(theme.bg_base),
+                    MentionKind::Skill => Style::default().fg(theme.gray).bg(row_background),
                 }
             };
             let tag = format!("{:<7}", suggestion.kind.label());
@@ -88,7 +102,7 @@ impl MentionMenu<'_> {
                         cell.set_style(
                             Style::default()
                                 .fg(theme.accent_running)
-                                .bg(theme.bg_base)
+                                .bg(row_background)
                                 .add_modifier(Modifier::BOLD),
                         );
                     }
@@ -106,11 +120,18 @@ impl MentionMenu<'_> {
                     if selected {
                         row_style
                     } else {
-                        Style::default().fg(theme.gray).bg(theme.bg_base)
+                        Style::default().fg(theme.gray).bg(row_background)
                     },
                 );
             }
         }
+        frame.render_scrollbar(
+            buffer,
+            theme,
+            self.snapshot.matches.len(),
+            self.snapshot.selected,
+        );
+        frame
     }
 }
 

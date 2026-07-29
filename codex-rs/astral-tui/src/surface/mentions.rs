@@ -28,6 +28,10 @@ impl SurfaceState {
         self.mentions.move_selection(delta);
     }
 
+    pub(crate) fn select_mention(&mut self, index: usize) {
+        self.mentions.select(index);
+    }
+
     pub(crate) fn dismiss_mentions(&mut self) {
         self.mentions.dismiss(self.composer.text());
     }

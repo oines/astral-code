@@ -28,6 +28,19 @@ impl ComposerState {
         self.cursor
     }
 
+    pub(crate) fn set_cursor(&mut self, cursor: usize) -> bool {
+        let mut cursor = cursor.min(self.text.len());
+        while !self.text.is_char_boundary(cursor) {
+            cursor = cursor.saturating_sub(1);
+        }
+        if cursor == self.cursor {
+            return false;
+        }
+        self.cursor = cursor;
+        self.preferred_column = None;
+        true
+    }
+
     pub(crate) fn replace(&mut self, text: impl Into<String>) {
         self.text = text.into();
         self.cursor = self.text.len();

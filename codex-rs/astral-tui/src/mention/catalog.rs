@@ -136,6 +136,12 @@ impl MentionController {
         }
     }
 
+    pub(crate) fn select(&mut self, index: usize) {
+        if !self.snapshot.matches.is_empty() {
+            self.snapshot.selected = index.min(self.snapshot.matches.len().saturating_sub(1));
+        }
+    }
+
     pub(crate) fn dismiss(&mut self, text: &str) {
         if let Some(range) = self.snapshot.token_range.clone() {
             self.dismissed_token = Some(text[range].to_string());

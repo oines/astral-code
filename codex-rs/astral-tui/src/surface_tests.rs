@@ -203,6 +203,65 @@ fn slash_command_menu_snapshot() {
 }
 
 #[test]
+fn completion_pointer_accepts_the_rendered_row() {
+    let session = session_state();
+    let mut state = SurfaceState::from_session(&session);
+    state.set_activity(SurfaceActivity::Ready);
+    state.set_composer("/co");
+    let area = Rect::new(0, 0, 80, 24);
+    let mut buffer = Buffer::empty(area);
+    render_surface(&mut state, &session, area, &mut buffer);
+    let (column, row) =
+        find_text(&buffer, "/compact").expect("compact completion should be visible");
+
+    assert_eq!(
+        handle_input_mouse(&mut state, mouse(MouseEventKind::Moved, column, row),),
+        InputAction::Redraw
+    );
+    assert_eq!(
+        handle_input_mouse(
+            &mut state,
+            mouse(MouseEventKind::Down(MouseButton::Left), column, row),
+        ),
+        InputAction::Redraw
+    );
+    assert_eq!(state.composer(), "/compact");
+    assert!(!state.slash().open);
+}
+
+#[test]
+fn prompt_pointer_places_the_edit_cursor() {
+    let session = session_state();
+    let mut state = SurfaceState::from_session(&session);
+    state.set_activity(SurfaceActivity::Ready);
+    state.set_composer("alpha beta");
+    let area = Rect::new(0, 0, 80, 24);
+    let mut buffer = Buffer::empty(area);
+    render_surface(&mut state, &session, area, &mut buffer);
+    let (column, row) = find_text(&buffer, "alpha beta").expect("prompt should be visible");
+
+    assert_eq!(
+        handle_input_mouse(
+            &mut state,
+            mouse(
+                MouseEventKind::Down(MouseButton::Left),
+                column.saturating_add(6),
+                row,
+            ),
+        ),
+        InputAction::Redraw
+    );
+    assert_eq!(
+        handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('X'), KeyModifiers::NONE),
+        ),
+        InputAction::Redraw
+    );
+    assert_eq!(state.composer(), "alpha Xbeta");
+}
+
+#[test]
 fn plan_command_menu_snapshot() {
     let session = session_state();
     let mut state = SurfaceState::from_session(&session);

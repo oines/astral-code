@@ -386,6 +386,18 @@ impl SlashController {
         }
         self.snapshot.selected =
             (self.snapshot.selected as isize + delta).rem_euclid(len as isize) as usize;
+        self.refresh_ghost();
+    }
+
+    pub(crate) fn select(&mut self, index: usize) {
+        if self.snapshot.matches.is_empty() {
+            return;
+        }
+        self.snapshot.selected = index.min(self.snapshot.matches.len().saturating_sub(1));
+        self.refresh_ghost();
+    }
+
+    fn refresh_ghost(&mut self) {
         self.snapshot.ghost = self
             .snapshot
             .selection()

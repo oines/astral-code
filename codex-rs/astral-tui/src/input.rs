@@ -23,6 +23,7 @@ use crate::request_choice::is_simple_request;
 use crate::request_choice::response_for;
 
 mod block_viewer;
+mod completion_popup;
 mod mcp_form;
 mod mention_popup;
 mod mouse_scroll;
@@ -259,16 +260,18 @@ pub(crate) fn handle_mouse(state: &mut SurfaceState, mouse: MouseEvent) -> Input
             && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
         {
             state.focus_prompt();
+            state.place_composer_cursor(mouse);
             return InputAction::Redraw;
         }
         return InputAction::None;
     }
     if state.slash().open || state.mentions().open {
-        return InputAction::Redraw;
+        return completion_popup::handle_mouse(state, mouse);
     }
     if state.prompt_contains(mouse) && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
     {
         state.focus_prompt();
+        state.place_composer_cursor(mouse);
         return InputAction::Redraw;
     }
     InputAction::None

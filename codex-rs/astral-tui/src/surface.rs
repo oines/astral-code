@@ -284,6 +284,9 @@ impl SurfaceState {
     }
 
     pub(crate) fn focus_scrollback(&mut self) -> bool {
+        self.slash.close();
+        self.mentions.dismiss(self.composer.text());
+        self.clear_completion_menu();
         self.scrollback.focus_scrollback()
     }
 
@@ -454,6 +457,10 @@ impl SurfaceState {
         self.slash.move_selection(delta);
     }
 
+    pub(crate) fn select_slash(&mut self, index: usize) {
+        self.slash.select(index);
+    }
+
     pub fn close_slash(&mut self) {
         self.slash.close();
     }
@@ -463,6 +470,8 @@ impl SurfaceState {
             return false;
         };
         self.composer.replace(completion);
+        self.slash.close();
+        self.refresh_mentions();
         true
     }
 
@@ -782,19 +791,28 @@ pub(crate) fn render_surface_with_view(
         state
             .plan_review_mouse
             .observe(layout.banner, review.focus());
+        state.clear_completion_menu();
         PlanReviewPane { state: review }.render(layout.banner, buffer, theme);
     } else if completion_height > 0 {
         state.plan_review_mouse.clear();
-        if mentions.open {
+        let hovered = state.completion_hovered();
+        let completion_frame = if mentions.open {
             MentionMenu {
                 snapshot: &mentions,
+                hovered,
             }
-            .render(layout.banner, buffer, theme);
+            .render(layout.banner, buffer, theme)
         } else {
-            SlashMenu { snapshot: &slash }.render(layout.banner, buffer, theme);
-        }
+            SlashMenu {
+                snapshot: &slash,
+                hovered,
+            }
+            .render(layout.banner, buffer, theme)
+        };
+        state.observe_completion_menu(completion_frame);
     } else {
         state.plan_review_mouse.clear();
+        state.clear_completion_menu();
     }
 
     let mode = if session.collaboration_mode.mode == ModeKind::Plan {

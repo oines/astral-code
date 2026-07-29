@@ -1,5 +1,9 @@
 use crossterm::event::MouseEvent;
+use ratatui::layout::Position;
 use ratatui::layout::Rect;
+
+use crate::view::CompletionMenuFrame;
+use crate::view::prompt_cursor_at;
 
 use super::SurfaceState;
 
@@ -9,6 +13,9 @@ use super::SurfaceState;
 pub(super) struct SurfacePointerState {
     scrollback: Rect,
     prompt: Rect,
+    completion: Option<CompletionMenuFrame>,
+    completion_hovered: Option<usize>,
+    completion_scrollbar_dragging: bool,
 }
 
 impl SurfacePointerState {
@@ -28,6 +35,47 @@ impl SurfacePointerState {
     fn prompt_contains(&self, mouse: MouseEvent) -> bool {
         self.prompt.contains((mouse.column, mouse.row).into())
     }
+
+    fn observe_completion(&mut self, frame: CompletionMenuFrame) {
+        if self
+            .completion_hovered
+            .is_some_and(|item| !frame.contains_item(item))
+        {
+            self.completion_hovered = None;
+        }
+        self.completion = Some(frame);
+    }
+
+    fn clear_completion(&mut self) {
+        self.completion = None;
+        self.completion_hovered = None;
+        self.completion_scrollbar_dragging = false;
+    }
+
+    fn completion_contains(&self, mouse: MouseEvent) -> bool {
+        self.completion
+            .as_ref()
+            .is_some_and(|frame| frame.contains(mouse.column, mouse.row))
+    }
+
+    fn completion_row_at(&self, mouse: MouseEvent) -> Option<usize> {
+        self.completion.as_ref()?.row_at(mouse.column, mouse.row)
+    }
+
+    fn completion_scrollbar_target(&self, mouse: MouseEvent, total_items: usize) -> Option<usize> {
+        self.completion
+            .as_ref()?
+            .scrollbar_target(mouse.column, mouse.row, total_items)
+    }
+
+    fn update_completion_hover(&mut self, mouse: MouseEvent) -> bool {
+        let hovered = self.completion_row_at(mouse);
+        if hovered == self.completion_hovered {
+            return false;
+        }
+        self.completion_hovered = hovered;
+        true
+    }
 }
 
 impl SurfaceState {
@@ -45,5 +93,60 @@ impl SurfaceState {
 
     pub(crate) fn prompt_contains(&self, mouse: MouseEvent) -> bool {
         self.pointer_areas.prompt_contains(mouse)
+    }
+
+    pub(crate) fn place_composer_cursor(&mut self, mouse: MouseEvent) -> bool {
+        let Some(cursor) = prompt_cursor_at(
+            self.composer.text(),
+            self.composer.cursor(),
+            self.pointer_areas.prompt,
+            Position::new(mouse.column, mouse.row),
+        ) else {
+            return false;
+        };
+        let changed = self.composer.set_cursor(cursor);
+        self.refresh_composer_completions();
+        changed
+    }
+
+    pub(crate) fn observe_completion_menu(&mut self, frame: CompletionMenuFrame) {
+        self.pointer_areas.observe_completion(frame);
+    }
+
+    pub(crate) fn clear_completion_menu(&mut self) {
+        self.pointer_areas.clear_completion();
+    }
+
+    pub(crate) fn completion_hovered(&self) -> Option<usize> {
+        self.pointer_areas.completion_hovered
+    }
+
+    pub(crate) fn completion_contains(&self, mouse: MouseEvent) -> bool {
+        self.pointer_areas.completion_contains(mouse)
+    }
+
+    pub(crate) fn completion_row_at(&self, mouse: MouseEvent) -> Option<usize> {
+        self.pointer_areas.completion_row_at(mouse)
+    }
+
+    pub(crate) fn completion_scrollbar_target(
+        &self,
+        mouse: MouseEvent,
+        total_items: usize,
+    ) -> Option<usize> {
+        self.pointer_areas
+            .completion_scrollbar_target(mouse, total_items)
+    }
+
+    pub(crate) fn update_completion_hover(&mut self, mouse: MouseEvent) -> bool {
+        self.pointer_areas.update_completion_hover(mouse)
+    }
+
+    pub(crate) fn set_completion_scrollbar_dragging(&mut self, dragging: bool) {
+        self.pointer_areas.completion_scrollbar_dragging = dragging;
+    }
+
+    pub(crate) fn completion_scrollbar_dragging(&self) -> bool {
+        self.pointer_areas.completion_scrollbar_dragging
     }
 }
