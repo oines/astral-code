@@ -37,10 +37,15 @@ impl FileViewerPane<'_> {
             )],
         };
         let initial_selection = self.state.take_initial_selection();
+        let footer = if area.width >= 110 {
+            "Esc close · / find · f filter · v select · Enter insert · x file only · y copy · Y path · w wrap"
+        } else {
+            "Esc · / find · v select · Enter range · x file · w wrap"
+        };
         ContentViewerPane {
             state: self.state.viewer_mut(),
             title,
-            footer: "Esc close · / search · f filter · v select · Enter insert · x file only · y copy · Y path · w wrap".to_string(),
+            footer: footer.to_string(),
             items,
             is_running: false,
             initial_selection,
