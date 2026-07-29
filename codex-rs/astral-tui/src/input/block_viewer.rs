@@ -6,7 +6,7 @@ use crossterm::event::MouseEvent;
 use crate::InputAction;
 use crate::SurfaceState;
 use crate::block_viewer::BlockViewerMouseAction;
-use crate::block_viewer::BlockViewerState;
+use crate::block_viewer::ViewerState;
 
 pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
     if key.code == KeyCode::Char('f') && key.modifiers.contains(KeyModifiers::CONTROL) {
@@ -18,7 +18,7 @@ pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction
     }
     if state
         .block_viewer()
-        .is_some_and(BlockViewerState::query_input_active)
+        .is_some_and(|viewer| ViewerState::query_input_active(viewer))
     {
         if let Some(viewer) = state.block_viewer_mut() {
             viewer.handle_query_key(key);
@@ -39,7 +39,7 @@ pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction
         && key.modifiers == KeyModifiers::NONE
         && !state
             .block_viewer()
-            .is_some_and(BlockViewerState::visual_selection_active)
+            .is_some_and(|viewer| ViewerState::visual_selection_active(viewer))
     {
         state.close_block_viewer();
         return InputAction::Redraw;

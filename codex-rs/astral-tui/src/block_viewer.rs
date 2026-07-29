@@ -105,6 +105,36 @@ impl TextDrag {
 #[derive(Debug)]
 pub(crate) struct BlockViewerState {
     entry_id: String,
+    viewer: ViewerState,
+}
+
+impl BlockViewerState {
+    pub(crate) fn new(entry_id: String, is_running: bool) -> Self {
+        Self {
+            entry_id,
+            viewer: ViewerState::new(is_running),
+        }
+    }
+
+    pub(crate) fn entry_id(&self) -> &str {
+        &self.entry_id
+    }
+
+    pub(crate) fn viewer(&self) -> &ViewerState {
+        &self.viewer
+    }
+
+    pub(crate) fn viewer_mut(&mut self) -> &mut ViewerState {
+        &mut self.viewer
+    }
+}
+
+/// Shared selection, search, wrapping, and viewport state for modal content.
+///
+/// Transcript and file viewers deliberately share this state machine so their
+/// keyboard, mouse, and scrolling behavior cannot drift apart.
+#[derive(Debug)]
+pub(crate) struct ViewerState {
     scroll_offset: usize,
     max_scroll_offset: usize,
     page_size: usize,
@@ -132,10 +162,9 @@ pub(crate) struct BlockViewerState {
     mouse_overscroll: usize,
 }
 
-impl BlockViewerState {
-    pub(crate) fn new(entry_id: String, is_running: bool) -> Self {
+impl ViewerState {
+    pub(crate) fn new(is_running: bool) -> Self {
         Self {
-            entry_id,
             scroll_offset: 0,
             max_scroll_offset: 0,
             page_size: 1,
@@ -162,10 +191,6 @@ impl BlockViewerState {
             at_content_edge: false,
             mouse_overscroll: 0,
         }
-    }
-
-    pub(crate) fn entry_id(&self) -> &str {
-        &self.entry_id
     }
 
     pub(crate) fn scroll_offset(&self) -> usize {

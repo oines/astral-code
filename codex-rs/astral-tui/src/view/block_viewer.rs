@@ -25,8 +25,8 @@ use ratatui::widgets::Widget;
 use unicode_width::UnicodeWidthStr;
 
 use crate::block_viewer::BlockViewerFrame;
-use crate::block_viewer::BlockViewerState;
 use crate::block_viewer::ViewerRowGeometry;
+use crate::block_viewer::ViewerState;
 use crate::block_viewer::ViewerWrapMode;
 
 use super::AstralTheme;
@@ -56,7 +56,7 @@ struct ViewerRow {
 }
 
 pub(crate) struct BlockViewerPane<'a> {
-    pub(crate) state: &'a mut BlockViewerState,
+    pub(crate) state: &'a mut ViewerState,
     pub(crate) block: &'a PresentationBlock,
     pub(crate) text_mode: BlockTextMode,
     pub(crate) is_running: bool,
@@ -305,7 +305,7 @@ fn block_viewer_footer(block: &PresentationBlock) -> String {
 }
 
 fn render_visual_selection(
-    state: &BlockViewerState,
+    state: &ViewerState,
     area: Rect,
     viewport: ScrollbackViewport,
     buffer: &mut Buffer,
@@ -334,7 +334,7 @@ fn selection_style(theme: AstralTheme) -> Style {
 }
 
 fn render_matches(
-    state: &BlockViewerState,
+    state: &ViewerState,
     area: Rect,
     viewport: ScrollbackViewport,
     buffer: &mut Buffer,
@@ -374,7 +374,7 @@ fn render_matches(
 }
 
 fn render_text_drag(
-    state: &BlockViewerState,
+    state: &ViewerState,
     area: Rect,
     viewport: ScrollbackViewport,
     buffer: &mut Buffer,
@@ -395,7 +395,7 @@ fn render_text_drag(
     }
 }
 
-fn render_query_bar(state: &BlockViewerState, area: Rect, buffer: &mut Buffer, theme: AstralTheme) {
+fn render_query_bar(state: &ViewerState, area: Rect, buffer: &mut Buffer, theme: AstralTheme) {
     if area.width == 0 {
         return;
     }

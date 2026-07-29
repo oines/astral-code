@@ -9,9 +9,9 @@ use astral_tui_scrollback::ToolKind;
 use codex_app_server_protocol::FileUpdateChange;
 use codex_app_server_protocol::PatchChangeKind;
 
-use super::BlockViewerState;
+use super::ViewerState;
 
-impl BlockViewerState {
+impl ViewerState {
     pub(crate) fn take_visual_selection_text(
         &mut self,
         block: &PresentationBlock,

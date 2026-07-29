@@ -36,10 +36,7 @@ impl SurfaceState {
             .path
             .extension()
             .and_then(|extension| extension.to_str())
-            .map_or_else(
-                || "unknown".to_string(),
-                str::to_uppercase,
-            );
+            .map_or_else(|| "unknown".to_string(), str::to_uppercase);
         let target = LinkTarget::File(image.path.clone());
         self.open_modal(ModalState::openable_info(
             format!("Image #{}", image.display_number),

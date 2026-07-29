@@ -6,11 +6,11 @@ use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-use super::BlockViewerState;
 use super::TextDrag;
 use super::TextEndpoint;
+use super::ViewerState;
 
-impl BlockViewerState {
+impl ViewerState {
     pub(crate) fn clear_text_drag(&mut self) -> bool {
         self.text_drag.take().is_some()
     }

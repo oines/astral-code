@@ -106,10 +106,7 @@ fn image_format(image: &LocalImage) -> String {
         .path
         .extension()
         .and_then(|extension| extension.to_str())
-        .map_or_else(
-            || "unknown".to_string(),
-            str::to_uppercase,
-        )
+        .map_or_else(|| "unknown".to_string(), str::to_uppercase)
 }
 
 fn format_bytes(byte_len: u64) -> String {

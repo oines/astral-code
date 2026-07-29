@@ -6,11 +6,11 @@ use crossterm::event::MouseEvent;
 use crossterm::event::MouseEventKind;
 
 use super::BlockViewerMouseAction;
-use super::BlockViewerState;
+use super::ViewerState;
 
 const MOUSE_OVERSCROLL_THRESHOLD: usize = 9;
 
-impl BlockViewerState {
+impl ViewerState {
     pub(crate) fn center_selected(&mut self) -> bool {
         if self.follow_mode {
             return false;

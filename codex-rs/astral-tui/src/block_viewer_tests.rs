@@ -7,8 +7,8 @@ use ratatui::layout::Rect;
 
 use super::BlockViewerFrame;
 use super::BlockViewerMouseAction;
-use super::BlockViewerState;
 use super::ViewerRowGeometry;
+use super::ViewerState;
 
 fn lines(count: usize) -> Vec<String> {
     (0..count).map(|line| format!("line {line}")).collect()
@@ -24,7 +24,7 @@ fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
 }
 
 fn observe_frame(
-    state: &mut BlockViewerState,
+    state: &mut ViewerState,
     popup: Rect,
     content: Rect,
     close: Rect,
@@ -54,7 +54,7 @@ fn observe_frame(
 
 #[test]
 fn viewer_scroll_is_clamped_to_the_observed_content() {
-    let mut state = BlockViewerState::new("turn\0entry-1".to_string(), false);
+    let mut state = ViewerState::new(false);
     observe_frame(
         &mut state,
         Rect::new(1, 1, 20, 10),
@@ -81,7 +81,7 @@ fn viewer_scroll_is_clamped_to_the_observed_content() {
 
 #[test]
 fn viewer_pointer_uses_the_rendered_modal_geometry() {
-    let mut state = BlockViewerState::new("turn\0entry-1".to_string(), false);
+    let mut state = ViewerState::new(false);
     observe_frame(
         &mut state,
         Rect::new(2, 2, 30, 12),
@@ -138,7 +138,7 @@ fn viewer_pointer_uses_the_rendered_modal_geometry() {
 
 #[test]
 fn viewer_search_uses_rendered_line_order_and_wraps_matches() {
-    let mut state = BlockViewerState::new("turn\0entry-1".to_string(), false);
+    let mut state = ViewerState::new(false);
     observe_frame(
         &mut state,
         Rect::new(1, 1, 30, 12),
@@ -169,7 +169,7 @@ fn viewer_search_uses_rendered_line_order_and_wraps_matches() {
 
 #[test]
 fn viewer_filter_keeps_only_matching_rendered_lines() {
-    let mut state = BlockViewerState::new("turn\0entry-1".to_string(), false);
+    let mut state = ViewerState::new(false);
     state.observe_frame(BlockViewerFrame {
         popup_area: Rect::new(1, 1, 30, 12),
         content_area: Rect::new(3, 3, 24, 5),
@@ -207,7 +207,7 @@ fn viewer_filter_keeps_only_matching_rendered_lines() {
 
 #[test]
 fn viewer_visual_selection_copies_the_rendered_line_range() {
-    let mut state = BlockViewerState::new("turn\0entry-1".to_string(), false);
+    let mut state = ViewerState::new(false);
     observe_frame(
         &mut state,
         Rect::new(1, 1, 30, 12),
@@ -232,7 +232,7 @@ fn viewer_visual_selection_copies_the_rendered_line_range() {
 
 #[test]
 fn running_viewer_follows_live_content_until_navigation_pauses_it() {
-    let mut state = BlockViewerState::new("turn\0entry-1".to_string(), true);
+    let mut state = ViewerState::new(true);
     let popup = Rect::new(1, 1, 20, 10);
     let content = Rect::new(3, 3, 16, 4);
     let close = Rect::new(17, 1, 3, 1);

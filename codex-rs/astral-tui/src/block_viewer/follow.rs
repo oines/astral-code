@@ -1,9 +1,9 @@
 // Derived from Grok Build's ListPane follow/navigation transitions at
 // commit 47348d13ec4508dcfe440e34c6d511bb02998fb2 (Apache-2.0).
 
-use super::BlockViewerState;
+use super::ViewerState;
 
-impl BlockViewerState {
+impl ViewerState {
     pub(crate) fn toggle_follow(&mut self) -> bool {
         if !self.follow_enabled {
             return false;
