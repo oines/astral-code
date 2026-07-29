@@ -13,12 +13,10 @@ use codex_app_server_protocol::ThreadTokenUsage;
 use codex_app_server_protocol::TurnStatus;
 use codex_protocol::config_types::ModeKind;
 use crossterm::event::Event;
-use crossterm::event::EventStream;
 use ratatui::TerminalOptions;
 use ratatui::Viewport;
 use ratatui::backend::CrosstermBackend;
 use tokio::task::JoinSet;
-use tokio_stream::StreamExt;
 
 use crate::AstralSession;
 use crate::ClientToolError;
@@ -56,8 +54,11 @@ use crate::thread_picker::PickerState;
 use crate::view::AstralThemeId;
 use crate::view::ColorLevel;
 
+mod input_reader;
 mod mentions;
 mod plan;
+
+use self::input_reader::TerminalEventReader;
 
 type AstralTerminal = Terminal<CrosstermBackend<Stdout>>;
 
@@ -211,7 +212,7 @@ async fn run_loop(
     theme_selection: &mut Option<String>,
     options: RunOptions,
 ) -> Result<RunExitReason, RunError> {
-    let mut input = EventStream::new();
+    let mut input = TerminalEventReader::start()?;
     let mut client_tool_tasks = JoinSet::new();
     let mut _clipboard_lease = None;
 
@@ -234,7 +235,7 @@ async fn run_loop(
             }, if selection_expiry.is_some() => {
                 surface.expire_scrollback_selection();
             }
-            terminal_event = input.next() => {
+            terminal_event = input.recv() => {
                 let Some(terminal_event) = terminal_event else {
                     surface.set_activity(SurfaceActivity::Disconnected(
                         "terminal input closed".to_string(),
