@@ -568,11 +568,11 @@ fn conversation_blocks_snapshot() {
 }
 
 #[test]
-fn raw_reasoning_stays_out_of_the_transcript_snapshot() {
+fn raw_reasoning_is_used_when_summary_is_absent_snapshot() {
     let item = ThreadItem::Reasoning {
         id: "reasoning-raw-only".to_string(),
         summary: Vec::new(),
-        content: vec!["private chain of thought".to_string()],
+        content: vec!["Inspect the renderer before changing its state.".to_string()],
     };
 
     assert_snapshot!(render(item, DisplayMode::Expanded));

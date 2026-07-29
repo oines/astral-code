@@ -34,7 +34,11 @@ impl PresentationBlock {
 
     pub fn is_foldable(&self) -> bool {
         match self {
-            Self::Thinking { text, .. } | Self::Plan { text, .. } => !text.trim().is_empty(),
+            // Grok's ThinkingBlock is always foldable, including the empty
+            // streaming state. This keeps a Thought row on the inline fold
+            // path instead of treating it as a generic viewer target.
+            Self::Thinking { .. } => true,
+            Self::Plan { text, .. } => !text.trim().is_empty(),
             Self::Tool(tool) => {
                 !tool.details.is_empty()
                     || tool
