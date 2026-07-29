@@ -13,6 +13,7 @@ use ratatui::style::Color;
 use ratatui::text::Line;
 
 use super::AstralTheme;
+use super::TranscriptLink;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TranscriptSection {
@@ -91,6 +92,7 @@ pub(crate) struct TranscriptLayout {
     pub(crate) sections: Vec<TranscriptSection>,
     pub(crate) groups: Vec<TranscriptGroup>,
     pub(crate) selectable_ranges: Vec<TranscriptSelectableRange>,
+    pub(crate) links: Vec<TranscriptLink>,
 }
 
 impl TranscriptLayout {

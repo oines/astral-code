@@ -6,6 +6,7 @@ use astral_tui_scrollback::BlockTextMode;
 use astral_tui_scrollback::DiffStyle;
 use astral_tui_scrollback::DisplayMode;
 use astral_tui_scrollback::LineJoiner;
+use astral_tui_scrollback::MarkdownLine;
 use astral_tui_scrollback::PresentationBlock;
 use astral_tui_scrollback::RenderOptions;
 use astral_tui_scrollback::render_block;
@@ -22,6 +23,8 @@ use crate::conversation::TranscriptTurn;
 use super::AstralTheme;
 use super::EntryDisplayState;
 use super::EntryGroupSpan;
+use super::TranscriptLink;
+use super::append_detected_links;
 use super::entry_group::scan_turn;
 use super::entry_state::entry_id;
 use super::markdown_content::render_markdown_content;
@@ -48,6 +51,7 @@ pub(crate) fn render_transcript(
     let mut sections = Vec::new();
     let mut rendered_groups = Vec::new();
     let mut selectable_ranges = Vec::new();
+    let mut links = Vec::new();
     let mut previous_spacing = None;
     for turn in turns {
         let groups = scan_turn(turn, display);
@@ -89,10 +93,14 @@ pub(crate) fn render_transcript(
                 &mut lines,
                 &mut selectable_lines,
                 block,
-                width,
-                theme,
-                mode,
-                text_mode,
+                TurnBlockRenderContext {
+                    links: &mut links,
+                    entry_id: &item_id,
+                    width,
+                    theme,
+                    mode,
+                    text_mode,
+                },
             );
             if display.selected_id() == Some(item_id.as_str()) {
                 let indicator =
@@ -154,11 +162,13 @@ pub(crate) fn render_transcript(
     if previous_spacing.is_some() {
         lines.push(Line::default());
     }
+    append_detected_links(&lines, &mut links);
     TranscriptLayout {
         lines,
         sections,
         groups: rendered_groups,
         selectable_ranges,
+        links,
     }
 }
 
@@ -235,15 +245,20 @@ pub(crate) fn render_committed_block(
     };
     let mut lines = Vec::new();
     let mut selectable_lines = Vec::new();
+    let mut links = Vec::new();
     let mode = turn.blocks[0].block.default_display_mode();
     render_turn_block(
         &mut lines,
         &mut selectable_lines,
         &turn.blocks[0],
-        width,
-        theme,
-        mode,
-        BlockTextMode::Rendered,
+        TurnBlockRenderContext {
+            links: &mut links,
+            entry_id: &committed.item_id,
+            width,
+            theme,
+            mode,
+            text_mode: BlockTextMode::Rendered,
+        },
     );
     if committed.ends_turn
         && let Some(duration_ms) = turn_duration_ms(&turn)
@@ -259,15 +274,29 @@ pub(crate) fn render_committed_block(
     lines
 }
 
-fn render_turn_block(
-    lines: &mut Vec<Line<'static>>,
-    selectable_lines: &mut Vec<TranscriptSelectableLine>,
-    block: &TranscriptBlock,
+struct TurnBlockRenderContext<'a> {
+    links: &'a mut Vec<TranscriptLink>,
+    entry_id: &'a str,
     width: u16,
     theme: AstralTheme,
     mode: DisplayMode,
     text_mode: BlockTextMode,
+}
+
+fn render_turn_block(
+    lines: &mut Vec<Line<'static>>,
+    selectable_lines: &mut Vec<TranscriptSelectableLine>,
+    block: &TranscriptBlock,
+    context: TurnBlockRenderContext<'_>,
 ) {
+    let TurnBlockRenderContext {
+        links,
+        entry_id,
+        width,
+        theme,
+        mode,
+        text_mode,
+    } = context;
     match &block.block {
         PresentationBlock::User { .. } => {
             let rendered = render_block(&block.block, render_options(width, mode, theme));
@@ -324,29 +353,50 @@ fn render_turn_block(
             );
             if mode != DisplayMode::Collapsed {
                 for rendered_line in render_markdown_content(text, width, theme, text_mode, "  ") {
-                    let line = rendered_line.line;
-                    let columns = selectable_columns(&line, width);
-                    push_transcript_line(
+                    push_markdown_line(
                         lines,
                         selectable_lines,
-                        line,
-                        columns,
-                        rendered_line.joiner_to_previous,
+                        links,
+                        entry_id,
+                        rendered_line,
+                        width,
                     );
                 }
             }
         }
         PresentationBlock::Assistant { text } => {
             for rendered_line in render_markdown_content(text, width, theme, text_mode, "") {
-                let line = rendered_line.line;
-                let columns = selectable_columns(&line, width);
-                push_transcript_line(
+                push_markdown_line(
                     lines,
                     selectable_lines,
-                    line,
-                    columns,
-                    rendered_line.joiner_to_previous,
+                    links,
+                    entry_id,
+                    rendered_line,
+                    width,
                 );
+            }
+        }
+        PresentationBlock::Plan { text, .. } => {
+            let line: Line<'static> = vec!["• ".dim(), "Proposed Plan".bold()].into();
+            let columns = selectable_columns(&line, width);
+            push_transcript_line(
+                lines,
+                selectable_lines,
+                line,
+                columns,
+                LineJoiner::HardBreak,
+            );
+            if mode != DisplayMode::Collapsed {
+                for rendered_line in render_markdown_content(text, width, theme, text_mode, "  ") {
+                    push_markdown_line(
+                        lines,
+                        selectable_lines,
+                        links,
+                        entry_id,
+                        rendered_line,
+                        width,
+                    );
+                }
             }
         }
         _ => {
@@ -362,6 +412,37 @@ fn render_turn_block(
             }
         }
     }
+}
+
+fn push_markdown_line(
+    lines: &mut Vec<Line<'static>>,
+    selectable_lines: &mut Vec<TranscriptSelectableLine>,
+    transcript_links: &mut Vec<TranscriptLink>,
+    entry_id: &str,
+    rendered_line: MarkdownLine,
+    width: u16,
+) {
+    let line_index = lines.len();
+    transcript_links.extend(
+        rendered_line
+            .links
+            .iter()
+            .filter(|link| link.columns.start < link.columns.end)
+            .map(|link| TranscriptLink {
+                line: line_index,
+                columns: link.columns.clone(),
+                target: link.target.clone(),
+                id: Some(format!("{entry_id}:markdown:{}", link.id)),
+            }),
+    );
+    let columns = selectable_columns(&rendered_line.line, width);
+    push_transcript_line(
+        lines,
+        selectable_lines,
+        rendered_line.line,
+        columns,
+        rendered_line.joiner_to_previous,
+    );
 }
 
 fn highlight_selected_entry(

@@ -75,6 +75,7 @@ fn layout() -> TranscriptLayout {
                 }],
             },
         ],
+        links: Vec::new(),
     }
 }
 
@@ -166,6 +167,7 @@ fn copied_selection_uses_renderer_owned_soft_wrap_joiners() {
                 },
             ],
         }],
+        links: Vec::new(),
     };
     let area = Rect::new(0, 0, 12, 2);
     let viewport = ScrollbackViewport::from_first(2, 2, 0);
@@ -233,6 +235,7 @@ fn semantic_geometry_excludes_timestamp_padding_and_preserves_blank_lines() {
                 },
             ],
         }],
+        links: Vec::new(),
     };
     let area = Rect::new(0, 0, 24, 3);
     let viewport = ScrollbackViewport::from_first(3, 3, 0);

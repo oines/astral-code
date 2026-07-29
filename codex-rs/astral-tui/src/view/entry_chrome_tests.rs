@@ -36,6 +36,7 @@ fn accent_and_selection_box_use_separate_gutter_columns() {
                 })
                 .collect(),
         }],
+        links: Vec::new(),
     };
     let viewport = ScrollbackViewport::from_first(3, 3, 0);
     let mut buffer = Buffer::empty(Rect::new(0, 0, 14, 6));
@@ -101,6 +102,7 @@ fn expanded_verb_group_selection_wraps_the_whole_group() {
             expanded: true,
         }],
         selectable_ranges: Vec::new(),
+        links: Vec::new(),
     };
     let viewport = ScrollbackViewport::from_first(4, 4, 0);
     let mut buffer = Buffer::empty(Rect::new(0, 0, 14, 7));

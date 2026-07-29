@@ -41,6 +41,7 @@ fn state_with_kind(section_lines: Range<usize>, kind: TranscriptSectionKind) -> 
         }],
         groups: Vec::new(),
         selectable_ranges: Vec::new(),
+        links: Vec::new(),
     };
     let mut state = EntryMouseState::default();
     state.observe(

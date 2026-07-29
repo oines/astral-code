@@ -43,6 +43,7 @@ fn transcript_layout(sections: &[(&str, usize)]) -> TranscriptLayout {
         sections: ranges,
         groups: Vec::new(),
         selectable_ranges,
+        links: Vec::new(),
     }
 }
 

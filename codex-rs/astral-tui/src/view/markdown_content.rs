@@ -23,8 +23,13 @@ pub(super) fn render_markdown_content(
         BlockTextMode::Raw => render_literal_with_metadata(text, body_width, style.text),
     };
     if !indent.is_empty() {
+        let indent_width = u16::try_from(Span::raw(indent).width()).unwrap_or(u16::MAX);
         for line in &mut lines {
             line.line.spans.insert(0, Span::styled(indent, style.text));
+            for link in &mut line.links {
+                link.columns = link.columns.start.saturating_add(indent_width)
+                    ..link.columns.end.saturating_add(indent_width);
+            }
         }
     }
     lines
