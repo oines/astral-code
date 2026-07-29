@@ -36,6 +36,7 @@ pub(crate) struct EntryDisplayState {
     entries: Vec<EntryDescriptor>,
     manual_modes: HashMap<String, DisplayMode>,
     groups: HashMap<String, GroupDescriptor>,
+    entry_groups: HashMap<String, Vec<String>>,
     expanded_groups: HashSet<String>,
     content_state: EntryContentState,
     thinking_mode: Option<DisplayMode>,
@@ -56,10 +57,20 @@ impl EntryDisplayState {
         let mut entries = Vec::new();
         let mut known_ids = HashSet::new();
         let mut groups_seen = HashMap::new();
+        let mut entry_groups_seen = HashMap::new();
         for (turn, groups) in turns.iter().zip(groups_by_turn) {
-            for block in &turn.blocks {
+            for (index, block) in turn.blocks.iter().enumerate() {
                 if block.block.is_selectable() {
-                    known_ids.insert(entry_id(&turn.id, &block.item_id));
+                    let id = entry_id(&turn.id, &block.item_id);
+                    known_ids.insert(id.clone());
+                    entry_groups_seen.insert(
+                        id,
+                        groups
+                            .iter()
+                            .filter(|group| group.range.contains(&index))
+                            .map(|group| group.id.clone())
+                            .collect(),
+                    );
                 }
             }
             for group in &groups {
@@ -114,6 +125,7 @@ impl EntryDisplayState {
         }
         self.entries = entries;
         self.groups = groups_seen;
+        self.entry_groups = entry_groups_seen;
 
         self.manual_modes
             .retain(|entry_id, _| known_ids.contains(entry_id.as_str()));
@@ -256,6 +268,19 @@ impl EntryDisplayState {
 
     pub(crate) fn contains(&self, entry_id: &str) -> bool {
         self.entries.iter().any(|entry| entry.id == entry_id)
+    }
+
+    pub(crate) fn reveal(&mut self, entry_id: &str) -> bool {
+        let Some(groups) = self.entry_groups.get(entry_id) else {
+            return false;
+        };
+        self.expanded_groups.extend(groups.iter().cloned());
+        self.manual_modes
+            .insert(entry_id.to_string(), DisplayMode::Expanded);
+        self.focused = true;
+        self.preserve_empty_selection = false;
+        self.selected = Some(entry_id.to_string());
+        true
     }
 
     pub(crate) fn selected_mode(&self) -> Option<DisplayMode> {

@@ -1,0 +1,24 @@
+---
+source: astral-tui/src/surface_tests.rs
+expression: buffer_text(&buffer)
+---
+ ⎇ main  /workspace
+
+ › inspect this repo
+
+┌                                                                              ┐
+│I’m tracing the relevant data flow.                                           │
+└                                                                              ┘
+
+
+
+
+ ──────────────────────────────────────────────────────────────────────────────
+  search: relevant                                                          1/1
+
+ ◇ Working
+
+ ╭────────────────────────────────────────────────────────────────────────────╮
+ │ ❯                                                                          │
+ ╰────────────────────────────────────────────── claude-sonnet-4 · workspace ─╯
+ ↑/↓:matches  │  Enter:accept  │  Esc:close

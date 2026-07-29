@@ -358,6 +358,46 @@ impl SurfaceState {
         self.scrollback.clear_selection()
     }
 
+    pub(crate) fn open_scrollback_search(&mut self) -> bool {
+        self.scrollback.open_search()
+    }
+
+    pub(crate) fn handle_scrollback_search_key(
+        &mut self,
+        key: crossterm::event::KeyEvent,
+    ) -> Option<()> {
+        let query_changed = self.scrollback.handle_search_key(key)?;
+        if query_changed {
+            self.submit_scrollback_search();
+        }
+        Some(())
+    }
+
+    pub(crate) fn paste_scrollback_search(&mut self, text: &str) -> Option<()> {
+        let query_changed = self.scrollback.paste_search(text)?;
+        if query_changed {
+            self.submit_scrollback_search();
+        }
+        Some(())
+    }
+
+    pub(crate) fn poll_scrollback_search(&mut self) -> bool {
+        self.scrollback.poll_search()
+    }
+
+    pub(crate) fn scrollback_search_pending(&self) -> bool {
+        self.scrollback.search_pending()
+    }
+
+    fn submit_scrollback_search(&mut self) {
+        let generation = self.conversation.content_generation();
+        let turns = self
+            .scrollback
+            .search_needs_corpus(generation)
+            .then(|| self.conversation.all_turns());
+        self.scrollback.submit_search(generation, turns.as_deref());
+    }
+
     pub(crate) fn scrollback_selection_expiry(&self) -> Option<std::time::Instant> {
         self.scrollback.selection_expiry()
     }
@@ -604,38 +644,60 @@ pub(crate) fn render_surface_with_view(
         timeline_width,
         compact: false,
     });
-    state.observe_pointer_areas(layout.scrollback, layout.prompt);
+    let search_rows = state
+        .scrollback
+        .search_reserved_rows(layout.scrollback.height);
+    let scrollback_area = Rect {
+        height: layout.scrollback.height.saturating_sub(search_rows),
+        ..layout.scrollback
+    };
+    let scrollback_content = Rect {
+        height: layout.scrollback_content.height.saturating_sub(search_rows),
+        ..layout.scrollback_content
+    };
+    let search_area = Rect::new(
+        layout.scrollback.x,
+        scrollback_area.bottom(),
+        layout.scrollback.width,
+        search_rows,
+    );
+    state.observe_pointer_areas(scrollback_area, layout.prompt);
 
     render_status_bar(state, session, layout.status_bar, buffer, theme);
 
-    let transcript = conversation_layout(state, transcript_view, layout.scrollback_content.width);
+    let transcript = conversation_layout(state, transcript_view, scrollback_content.width);
     let viewport = match transcript_view {
         TranscriptView::Live => ScrollbackViewport::measure(
             transcript.lines.len(),
-            usize::from(layout.scrollback_content.height),
+            usize::from(scrollback_content.height),
             /*distance_from_bottom*/ 0,
         ),
         TranscriptView::Full => state.scrollback.prepare(
             &transcript,
-            layout.scrollback_content.width,
-            usize::from(layout.scrollback_content.height),
+            scrollback_content.width,
+            usize::from(scrollback_content.height),
         ),
     };
     let scrollbar_area = Rect::new(
         layout.scrollbar_x,
-        layout.scrollback.y,
+        scrollback_area.y,
         1,
-        layout.scrollback.height,
+        scrollback_area.height,
     );
     let viewport = ScrollbackPane {
         lines: &transcript.lines,
         viewport,
     }
-    .render(layout.scrollback_content, scrollbar_area, buffer, theme);
+    .render(scrollback_content, scrollbar_area, buffer, theme);
+    state.scrollback.render_search_highlights(
+        &transcript.lines[viewport.first_visible_line..viewport.end_visible_line],
+        scrollback_content,
+        buffer,
+    );
     render_entry_chrome(
         &transcript,
         viewport,
-        layout.scrollback_content,
+        scrollback_content,
         EntryChromeState {
             selected_id: (transcript_view == TranscriptView::Full)
                 .then(|| state.scrollback.selected_id())
@@ -650,7 +712,7 @@ pub(crate) fn render_surface_with_view(
         state.scrollback.observe_frame(
             &transcript,
             viewport,
-            layout.scrollback_content,
+            scrollback_content,
             scrollbar_area,
             buffer,
             theme,
@@ -658,19 +720,22 @@ pub(crate) fn render_surface_with_view(
     } else {
         state.scrollback.clear_frame();
     }
-    render_follow_indicator(
-        viewport,
-        layout.scrollback,
-        layout.scrollback.bottom(),
-        buffer,
-        theme,
-    );
+    if search_rows == 0 {
+        render_follow_indicator(
+            viewport,
+            scrollback_area,
+            scrollback_area.bottom(),
+            buffer,
+            theme,
+        );
+    }
+    let search_cursor = state.scrollback.render_search(search_area, buffer, theme);
     if layout.timeline_width > 0 {
         appearance::render_timeline(
             buffer,
             theme,
             appearance::TimelineFrame {
-                scrollback: layout.scrollback,
+                scrollback: scrollback_area,
                 rail_x: layout.timeline_x,
                 turn_count,
                 scroll_offset: viewport.first_visible_line,
@@ -810,6 +875,13 @@ pub(crate) fn render_surface_with_view(
         ("Esc", "keep planning"),
     ];
     let revision_hints = [("Enter", "request changes"), ("Esc", "back")];
+    let search_composing_hints = [("↑/↓", "matches"), ("Enter", "accept"), ("Esc", "close")];
+    let search_browsing_hints = [("n/N", "matches"), ("/", "new search"), ("Esc", "close")];
+    let search_hints = if state.scrollback.search_composing() {
+        &search_composing_hints
+    } else {
+        &search_browsing_hints
+    };
     ShortcutsBar {
         hints: if request_pane.is_some() && !request_focused {
             &scrollback_hints
@@ -819,6 +891,8 @@ pub(crate) fn render_surface_with_view(
             &revision_hints
         } else if plan_review.is_some() {
             &plan_hints
+        } else if state.scrollback.search_active() {
+            search_hints
         } else if state.scrollback_focused() {
             &scrollback_hints
         } else if mentions.open {
@@ -845,6 +919,8 @@ pub(crate) fn render_surface_with_view(
     state.mcp_form.observe_rows(mcp_form_hit_rows);
     if appearance::render_overlay(state, area, buffer, theme) {
         None
+    } else if search_cursor.is_some() {
+        search_cursor
     } else if prompt_focused {
         cursor
     } else {

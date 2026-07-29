@@ -228,6 +228,28 @@ impl ScrollbackNavigation {
         self.refresh_anchor();
     }
 
+    pub(crate) fn reveal_entry_line(
+        &mut self,
+        layout: &TranscriptLayout,
+        item_id: &str,
+        line_in_entry: usize,
+    ) -> bool {
+        let Some(section) = layout.section(item_id) else {
+            return false;
+        };
+        let line = section
+            .lines
+            .start
+            .saturating_add(line_in_entry.min(section.lines.len().saturating_sub(1)));
+        let max_top = layout.lines.len().saturating_sub(self.viewport_lines);
+        self.first_visible_line = line.saturating_sub(self.viewport_lines / 2).min(max_top);
+        self.follow_mode = false;
+        self.total_lines = layout.lines.len();
+        self.sections.clone_from(&layout.sections);
+        self.refresh_anchor();
+        true
+    }
+
     pub(crate) fn entry_top(&self, item_id: &str) -> Option<usize> {
         self.sections
             .iter()

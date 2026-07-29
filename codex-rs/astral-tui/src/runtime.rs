@@ -1,5 +1,6 @@
 use std::io;
 use std::io::Stdout;
+use std::time::Duration;
 
 use astral_terminal_inline::Terminal;
 use codex_app_server_client::AppServerEvent;
@@ -215,12 +216,17 @@ async fn run_loop(
     let mut _clipboard_lease = None;
 
     loop {
+        let _ = surface.poll_scrollback_search();
         draw(terminal, session, surface, &options)?;
         let selection_expiry = surface
             .scrollback_selection_expiry()
             .map(tokio::time::Instant::from_std);
+        let search_pending = surface.scrollback_search_pending();
 
         tokio::select! {
+            _ = tokio::time::sleep(Duration::from_millis(16)), if search_pending => {
+                let _ = surface.poll_scrollback_search();
+            }
             _ = async {
                 if let Some(expiry) = selection_expiry {
                     tokio::time::sleep_until(expiry).await;

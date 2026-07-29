@@ -23,7 +23,11 @@ use super::ScrollbackSelection;
 use super::ScrollbackSelectionAction;
 use super::ScrollbackViewport;
 use super::TranscriptLayout;
+use super::scrollback_search::ScrollbackSearch;
 use super::transcript::TranscriptSection;
+
+#[path = "scrollback_state_search.rs"]
+mod search;
 
 /// Unified owner for Astral's interactive transcript.
 ///
@@ -41,6 +45,8 @@ pub(crate) struct ScrollbackState {
     scrollbar: Option<Rect>,
     scrollbar_dragging: bool,
     hovered: Option<String>,
+    search: Option<ScrollbackSearch>,
+    pending_search_target: Option<(String, usize)>,
 }
 
 impl ScrollbackState {
@@ -70,7 +76,18 @@ impl ScrollbackState {
         width: u16,
         viewport_lines: usize,
     ) -> ScrollbackViewport {
-        self.navigation.prepare(layout, width, viewport_lines)
+        let mut viewport = self.navigation.prepare(layout, width, viewport_lines);
+        if let Some((entry_id, line_in_entry)) = self.pending_search_target.take() {
+            if self
+                .navigation
+                .reveal_entry_line(layout, &entry_id, line_in_entry)
+            {
+                viewport = self.navigation.viewport();
+            } else {
+                self.pending_search_target = Some((entry_id, line_in_entry));
+            }
+        }
+        viewport
     }
 
     pub(crate) fn observe_frame(
@@ -156,6 +173,7 @@ impl ScrollbackState {
     }
 
     pub(crate) fn focus_prompt(&mut self) {
+        self.search = None;
         self.display.focus_prompt();
     }
 

@@ -953,6 +953,62 @@ fn fullscreen_scrollback_viewport_snapshot() {
 }
 
 #[test]
+fn transcript_search_surface_snapshot() {
+    let session = session_state();
+    let mut state = SurfaceState::from_session(&session);
+    let area = Rect::new(0, 0, 80, 20);
+    let mut buffer = Buffer::empty(area);
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        area,
+        &mut buffer,
+    );
+    assert!(state.focus_scrollback());
+    assert_eq!(
+        handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE),
+        ),
+        InputAction::Redraw
+    );
+    for character in "relevant".chars() {
+        assert_eq!(
+            handle_key(
+                &mut state,
+                KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE),
+            ),
+            InputAction::Redraw
+        );
+    }
+    let mut settled = false;
+    for _ in 0..1_000 {
+        let _ = state.poll_scrollback_search();
+        if !state.scrollback_search_pending() {
+            settled = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert!(settled, "transcript search daemon should settle");
+
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        area,
+        &mut buffer,
+    );
+    let (x, y) = find_text(&buffer, "relevant").expect("visible search match");
+    assert!(
+        buffer[(x, y)].modifier.contains(Modifier::REVERSED),
+        "search match should be highlighted"
+    );
+    insta::assert_snapshot!(buffer_text(&buffer));
+}
+
+#[test]
 fn grok_layered_turn_139x35_snapshot() {
     let mut session = session_state();
     let base_timestamp =

@@ -7,7 +7,17 @@ use crate::SurfaceActivity;
 use crate::SurfaceState;
 
 pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
+    if state.handle_scrollback_search_key(key).is_some() {
+        return InputAction::Redraw;
+    }
     match (key.code, key.modifiers) {
+        (KeyCode::Char('/'), KeyModifiers::NONE) => {
+            if state.open_scrollback_search() {
+                InputAction::Redraw
+            } else {
+                InputAction::None
+            }
+        }
         (KeyCode::Tab, KeyModifiers::NONE) | (KeyCode::Char('i'), KeyModifiers::NONE) => {
             state.focus_prompt();
             InputAction::Redraw
