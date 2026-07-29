@@ -6,6 +6,7 @@ use ratatui::style::Style;
 use ratatui::text::Line;
 
 use super::LineJoiner;
+use super::MarkdownLink;
 use super::MarkdownStyle;
 use super::render_markdown;
 use super::render_markdown_with_metadata;
@@ -117,6 +118,40 @@ fn metadata_distinguishes_word_and_midword_wraps() {
             ("alpha".to_string(), LineJoiner::HardBreak),
             (String::new(), LineJoiner::HardBreak),
             ("omega".to_string(), LineJoiner::HardBreak),
+        ]
+    );
+}
+
+#[test]
+fn hyperlink_metadata_follows_wrapped_label_segments() {
+    let rendered = render_markdown_with_metadata(
+        "[alpha beta](https://example.com)",
+        5,
+        MarkdownStyle::default(),
+    );
+
+    assert_eq!(
+        rendered
+            .iter()
+            .map(|line| (line.line.to_string(), line.links.clone()))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                "alpha".to_string(),
+                vec![MarkdownLink {
+                    id: 0,
+                    columns: 0..5,
+                    target: "https://example.com".to_string(),
+                }],
+            ),
+            (
+                "beta".to_string(),
+                vec![MarkdownLink {
+                    id: 0,
+                    columns: 0..4,
+                    target: "https://example.com".to_string(),
+                }],
+            ),
         ]
     );
 }

@@ -5,7 +5,7 @@ expression: plain(&rendered)
 Astral Markdown
 
 Paragraph with bold, italic, removed, inline code,
-and an Astral link (https://example.com).
+and an Astral link.
 
 │ A quoted line with structure.
 

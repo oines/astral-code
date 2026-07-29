@@ -7,11 +7,13 @@ use textwrap::WordSeparator;
 use textwrap::WordSplitter;
 
 use super::LineJoiner;
+use super::MarkdownLink;
 use super::Segment;
 
 pub(super) struct WrappedSegments {
     pub(super) spans: Vec<Span<'static>>,
     pub(super) joiner_to_previous: LineJoiner,
+    pub(super) links: Vec<MarkdownLink>,
 }
 
 pub(super) fn wrap_segments(segments: &[Segment], width: usize) -> Vec<Vec<Span<'static>>> {
@@ -36,6 +38,7 @@ pub(super) fn wrap_segments_with_joiners(
             output.push(WrappedSegments {
                 spans: Vec::new(),
                 joiner_to_previous: LineJoiner::HardBreak,
+                links: Vec::new(),
             });
             continue;
         }
@@ -57,9 +60,11 @@ pub(super) fn wrap_segments_with_joiners(
             } else {
                 LineJoiner::None
             };
+            let (spans, links) = styled_range(&logical, start, end);
             output.push(WrappedSegments {
-                spans: styled_range(&logical, start, end),
+                spans,
                 joiner_to_previous,
+                links,
             });
             cursor = end;
         }
@@ -80,6 +85,7 @@ fn split_logical_lines(segments: &[Segment]) -> Vec<Vec<Segment>> {
                 line.push(Segment {
                     text: part.to_string(),
                     style: segment.style,
+                    link: segment.link.clone(),
                 });
             }
         }
@@ -87,22 +93,48 @@ fn split_logical_lines(segments: &[Segment]) -> Vec<Vec<Segment>> {
     lines
 }
 
-fn styled_range(segments: &[Segment], start: usize, end: usize) -> Vec<Span<'static>> {
+fn styled_range(
+    segments: &[Segment],
+    start: usize,
+    end: usize,
+) -> (Vec<Span<'static>>, Vec<MarkdownLink>) {
     let mut spans = Vec::new();
+    let mut links: Vec<MarkdownLink> = Vec::new();
     let mut offset = 0;
+    let mut output_width = 0usize;
     for segment in segments {
         let segment_end = offset + segment.text.len();
         let overlap_start = start.max(offset);
         let overlap_end = end.min(segment_end);
         if overlap_start < overlap_end {
-            spans.push(Span::styled(
-                segment.text[overlap_start - offset..overlap_end - offset].to_string(),
-                segment.style,
-            ));
+            let text = &segment.text[overlap_start - offset..overlap_end - offset];
+            let segment_width = Line::from(text).width();
+            if let Some(link) = segment.link.as_ref()
+                && let (Ok(column_start), Ok(column_end)) = (
+                    u16::try_from(output_width),
+                    u16::try_from(output_width.saturating_add(segment_width)),
+                )
+            {
+                if let Some(previous) = links.last_mut()
+                    && previous.id == link.id
+                    && previous.target == link.target
+                    && previous.columns.end == column_start
+                {
+                    previous.columns.end = column_end;
+                } else {
+                    links.push(MarkdownLink {
+                        id: link.id,
+                        columns: column_start..column_end,
+                        target: link.target.clone(),
+                    });
+                }
+            }
+            spans.push(Span::styled(text.to_string(), segment.style));
+            output_width = output_width.saturating_add(segment_width);
         }
         offset = segment_end;
     }
-    spans
+    (spans, links)
 }
 
 pub(super) fn padded_background_line(

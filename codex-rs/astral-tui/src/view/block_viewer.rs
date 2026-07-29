@@ -235,6 +235,7 @@ fn render_viewer_rows(
             ViewerWrapMode::NoWrap => vec![MarkdownLine {
                 line: logical.line.clone(),
                 joiner_to_previous: LineJoiner::HardBreak,
+                links: Vec::new(),
             }],
         };
         let mut logical_column = 0u16;

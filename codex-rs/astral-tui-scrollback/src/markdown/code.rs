@@ -30,6 +30,7 @@ pub(super) fn render_code_line(
         vec![Segment {
             text: body.to_string(),
             style: style.code,
+            link: None,
         }]
     };
     let wrapped = if body.is_empty() {
@@ -73,6 +74,7 @@ fn trim_segment_prefix(segments: &[Segment], prefix_bytes: usize) -> Vec<Segment
             Some(Segment {
                 text,
                 style: segment.style,
+                link: None,
             })
         })
         .collect()

@@ -89,6 +89,7 @@ pub(super) fn highlight_code(
                     (!text.is_empty()).then(|| Segment {
                         text: text.to_string(),
                         style: convert_style(style, theme),
+                        link: None,
                     })
                 })
                 .collect(),

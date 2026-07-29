@@ -150,10 +150,12 @@ impl TableState {
                     Segment {
                         text: label,
                         style: style.table_header,
+                        link: None,
                     },
                     Segment {
                         text: ": ".to_string(),
                         style: style.table_border,
+                        link: None,
                     },
                 ];
                 segments.extend(cell.iter().cloned());

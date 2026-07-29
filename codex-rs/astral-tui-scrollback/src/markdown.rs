@@ -16,6 +16,7 @@ use pulldown_cmark::TagEnd;
 use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::text::Span;
+use std::ops::Range;
 
 #[path = "markdown/code.rs"]
 mod code;
@@ -66,6 +67,18 @@ impl LineJoiner {
 pub struct MarkdownLine {
     pub line: Line<'static>,
     pub joiner_to_previous: LineJoiner,
+    pub links: Vec<MarkdownLink>,
+}
+
+/// One Markdown hyperlink segment on a rendered line.
+///
+/// A single logical link can produce one segment per visual line after
+/// wrapping. `id` ties those segments back together.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MarkdownLink {
+    pub id: u32,
+    pub columns: Range<u16>,
+    pub target: String,
 }
 
 /// Renders Markdown while retaining hard-break and soft-wrap metadata.
@@ -83,6 +96,7 @@ pub fn render_literal_with_metadata(text: &str, width: u16, style: Style) -> Vec
         &[Segment {
             text: text.to_string(),
             style,
+            link: None,
         }],
         usize::from(width).max(1),
     )
@@ -90,6 +104,7 @@ pub fn render_literal_with_metadata(text: &str, width: u16, style: Style) -> Vec
     .map(|wrapped| MarkdownLine {
         line: Line::from(wrapped.spans),
         joiner_to_previous: wrapped.joiner_to_previous,
+        links: wrapped.links,
     })
     .collect()
 }
@@ -106,6 +121,7 @@ pub fn wrap_styled_line_with_metadata(line: &Line<'_>, width: u16) -> Vec<Markdo
         .map(|span| Segment {
             text: span.content.to_string(),
             style: line.style.patch(span.style),
+            link: None,
         })
         .collect::<Vec<_>>();
     wrap_segments_with_joiners(&segments, usize::from(width).max(1))
@@ -113,6 +129,7 @@ pub fn wrap_styled_line_with_metadata(line: &Line<'_>, width: u16) -> Vec<Markdo
         .map(|wrapped| MarkdownLine {
             line: Line::from(wrapped.spans),
             joiner_to_previous: wrapped.joiner_to_previous,
+            links: wrapped.links,
         })
         .collect()
 }
@@ -121,6 +138,13 @@ pub fn wrap_styled_line_with_metadata(line: &Line<'_>, width: u16) -> Vec<Markdo
 struct Segment {
     text: String,
     style: Style,
+    link: Option<SegmentLink>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SegmentLink {
+    id: u32,
+    target: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -148,8 +172,8 @@ struct ItemContext {
 
 #[derive(Debug)]
 struct LinkContext {
+    id: u32,
     destination: String,
-    label: String,
 }
 
 #[derive(Debug)]
@@ -163,6 +187,7 @@ struct MarkdownWriter {
     style: MarkdownStyle,
     lines: Vec<Line<'static>>,
     joiners: Vec<LineJoiner>,
+    line_links: Vec<Vec<MarkdownLink>>,
     segments: Vec<Segment>,
     inline_styles: Vec<Style>,
     lists: Vec<ListContext>,
@@ -173,6 +198,7 @@ struct MarkdownWriter {
     code: Option<CodeContext>,
     table: Option<TableState>,
     last_kind: Option<BlockKind>,
+    next_link_id: u32,
 }
 
 impl MarkdownWriter {
@@ -182,6 +208,7 @@ impl MarkdownWriter {
             style,
             lines: Vec::new(),
             joiners: Vec::new(),
+            line_links: Vec::new(),
             segments: Vec::new(),
             inline_styles: vec![style.text],
             lists: Vec::new(),
@@ -192,6 +219,7 @@ impl MarkdownWriter {
             code: None,
             table: None,
             last_kind: None,
+            next_link_id: 0,
         }
     }
 
@@ -205,13 +233,16 @@ impl MarkdownWriter {
         while self.lines.last().is_some_and(|line| line.spans.is_empty()) {
             self.lines.pop();
             self.joiners.pop();
+            self.line_links.pop();
         }
         self.lines
             .into_iter()
             .zip(self.joiners)
-            .map(|(line, joiner_to_previous)| MarkdownLine {
+            .zip(self.line_links)
+            .map(|((line, joiner_to_previous), links)| MarkdownLine {
                 line,
                 joiner_to_previous,
+                links,
             })
             .collect()
     }
@@ -269,9 +300,11 @@ impl MarkdownWriter {
             Tag::Strong => self.push_inline_style(self.style.strong),
             Tag::Strikethrough => self.push_inline_style(self.style.strikethrough),
             Tag::Link { dest_url, .. } | Tag::Image { dest_url, .. } => {
+                let id = self.next_link_id;
+                self.next_link_id = self.next_link_id.wrapping_add(1);
                 self.links.push(LinkContext {
+                    id,
                     destination: dest_url.into_string(),
-                    label: String::new(),
                 });
                 self.push_inline_style(self.style.link_text);
             }
@@ -385,15 +418,16 @@ impl MarkdownWriter {
     }
 
     fn push_styled(&mut self, text: &str, style: Style) {
-        if let Some(link) = self.links.last_mut() {
-            link.label.push_str(text);
-        }
         if text.is_empty() {
             return;
         }
         let segment = Segment {
             text: text.to_string(),
             style,
+            link: self.links.last().map(|link| SegmentLink {
+                id: link.id,
+                target: link.destination.clone(),
+            }),
         };
         if self
             .table
@@ -407,12 +441,7 @@ impl MarkdownWriter {
 
     fn finish_link(&mut self) {
         self.pop_inline_style();
-        let Some(link) = self.links.pop() else {
-            return;
-        };
-        if !link.destination.is_empty() && link.destination != link.label.trim() {
-            self.push_styled(&format!(" ({})", link.destination), self.style.link_url);
-        }
+        self.links.pop();
     }
 
     fn finish_code_block(&mut self) {
@@ -469,8 +498,14 @@ impl MarkdownWriter {
                 } else {
                     subsequent_prefix.clone()
                 };
+                let prefix_width =
+                    u16::try_from(Line::from(spans.clone()).width()).unwrap_or(u16::MAX);
+                for link in &mut wrapped.links {
+                    link.columns = link.columns.start.saturating_add(prefix_width)
+                        ..link.columns.end.saturating_add(prefix_width);
+                }
                 spans.append(&mut wrapped.spans);
-                (Line::from(spans), wrapped.joiner_to_previous)
+                (Line::from(spans), wrapped.joiner_to_previous, wrapped.links)
             })
             .collect();
         self.push_wrapped_output(lines, kind);
@@ -511,18 +546,25 @@ impl MarkdownWriter {
         self.insert_block_gap(kind);
         self.joiners
             .extend(std::iter::repeat_n(LineJoiner::HardBreak, lines.len()));
+        self.line_links
+            .extend(std::iter::repeat_n(Vec::new(), lines.len()));
         self.lines.extend(lines);
         self.last_kind = Some(kind);
     }
 
-    fn push_wrapped_output(&mut self, lines: Vec<(Line<'static>, LineJoiner)>, kind: BlockKind) {
+    fn push_wrapped_output(
+        &mut self,
+        lines: Vec<(Line<'static>, LineJoiner, Vec<MarkdownLink>)>,
+        kind: BlockKind,
+    ) {
         if lines.is_empty() {
             return;
         }
         self.insert_block_gap(kind);
-        for (line, joiner) in lines {
+        for (line, joiner, links) in lines {
             self.lines.push(line);
             self.joiners.push(joiner);
+            self.line_links.push(links);
         }
         self.last_kind = Some(kind);
     }
@@ -536,6 +578,7 @@ impl MarkdownWriter {
         if needs_blank && self.lines.last().is_some_and(|line| !line.spans.is_empty()) {
             self.lines.push(Line::default());
             self.joiners.push(LineJoiner::HardBreak);
+            self.line_links.push(Vec::new());
         }
     }
 

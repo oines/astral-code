@@ -4,10 +4,9 @@ expression: plain(&narrow)
 ---
 Astral Markdown
 
-Paragraph with bold,
-italic, removed, inline
-code, and an Astral link
-(https://example.com).
+Paragraph with bold, italic,
+removed, inline code, and an
+Astral link.
 
 │ A quoted line with structure.
 

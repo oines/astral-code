@@ -17,6 +17,7 @@ pub use content_actions::BlockTextMode;
 pub use display::DisplayMode;
 pub use markdown::LineJoiner;
 pub use markdown::MarkdownLine;
+pub use markdown::MarkdownLink;
 pub use markdown::MarkdownStyle;
 pub use markdown::MarkdownSyntaxTheme;
 pub use markdown::render_literal_with_metadata;
