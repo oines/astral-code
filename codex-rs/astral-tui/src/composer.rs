@@ -11,11 +11,23 @@ use crate::mention::MentionBinding;
 use crate::mention::MentionTarget;
 use crate::mention::PromptSubmission;
 
+mod edit;
+
+use edit::byte_at_column;
+use edit::line_end;
+use edit::line_start;
+use edit::next_boundary;
+use edit::previous_boundary;
+use edit::small_word_end_right;
+use edit::small_word_start_left;
+use edit::whitespace_word_start_left;
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ComposerState {
     text: String,
     cursor: usize,
     preferred_column: Option<usize>,
+    kill_buffer: String,
     mention_bindings: Vec<MentionBinding>,
 }
 
@@ -112,22 +124,61 @@ impl ComposerState {
         let word_modifier = key
             .modifiers
             .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
-        match key.code {
-            KeyCode::Backspace if word_modifier => self.delete_word_left(),
-            KeyCode::Backspace => self.backspace(),
-            KeyCode::Left if word_modifier => self.move_word_left(),
-            KeyCode::Right if word_modifier => self.move_word_right(),
-            KeyCode::Left => self.move_left(),
-            KeyCode::Right => self.move_right(),
-            KeyCode::Up => self.move_up(),
-            KeyCode::Down => self.move_down(),
-            KeyCode::Home => self.move_home(),
-            KeyCode::End => self.move_end(),
-            KeyCode::Delete => self.delete(),
-            KeyCode::Char(character)
-                if !key
-                    .modifiers
-                    .intersects(KeyModifiers::CONTROL | KeyModifiers::SUPER) =>
+        match (key.code, key.modifiers) {
+            (KeyCode::Char('a'), KeyModifiers::CONTROL) => self.move_readline_line_start(),
+            (KeyCode::Char('e'), KeyModifiers::CONTROL) => self.move_readline_line_end(),
+            (KeyCode::Char('b'), KeyModifiers::CONTROL)
+            | (KeyCode::Char('\u{0002}'), KeyModifiers::NONE) => self.move_left(),
+            (KeyCode::Char('f'), KeyModifiers::CONTROL)
+            | (KeyCode::Char('\u{0006}'), KeyModifiers::NONE) => self.move_right(),
+            (KeyCode::Char('p'), KeyModifiers::CONTROL) => self.move_up(),
+            (KeyCode::Char('n'), KeyModifiers::CONTROL) => self.move_down(),
+            (KeyCode::Char('b'), KeyModifiers::ALT) => self.move_word_left(),
+            (KeyCode::Char('f'), KeyModifiers::ALT) => self.move_word_right(),
+            (KeyCode::Char('w'), KeyModifiers::CONTROL) => self.delete_word_left(),
+            (KeyCode::Char('u'), KeyModifiers::CONTROL) => self.kill_to_line_start(),
+            (KeyCode::Char('k'), KeyModifiers::CONTROL) => self.kill_to_line_end(),
+            (KeyCode::Char('y'), KeyModifiers::CONTROL) => self.yank(),
+            (KeyCode::Char('h'), modifiers)
+                if modifiers == KeyModifiers::CONTROL | KeyModifiers::ALT =>
+            {
+                self.delete_small_word_left()
+            }
+            (KeyCode::Char('h'), KeyModifiers::CONTROL)
+            | (KeyCode::Char('\u{0008}' | '\u{007f}'), _) => self.backspace(),
+            (KeyCode::Char('d'), KeyModifiers::CONTROL) => self.delete(),
+            (KeyCode::Char('d'), modifiers)
+                if modifiers.intersects(KeyModifiers::ALT | KeyModifiers::SUPER) =>
+            {
+                self.delete_word_right()
+            }
+            (KeyCode::Char('j' | 'm'), KeyModifiers::CONTROL) => {
+                self.insert_char('\n');
+                true
+            }
+            (KeyCode::Backspace, KeyModifiers::SUPER) => self.kill_to_line_start(),
+            (KeyCode::Backspace, _) if word_modifier => self.delete_small_word_left(),
+            (KeyCode::Backspace, _) => self.backspace(),
+            (KeyCode::Delete, modifiers)
+                if modifiers.intersects(
+                    KeyModifiers::ALT | KeyModifiers::CONTROL | KeyModifiers::SUPER,
+                ) =>
+            {
+                self.delete_word_right()
+            }
+            (KeyCode::Delete, _) => self.delete(),
+            (KeyCode::Left, KeyModifiers::SUPER) => self.move_home(),
+            (KeyCode::Right, KeyModifiers::SUPER) => self.move_end(),
+            (KeyCode::Left, _) if word_modifier => self.move_word_left(),
+            (KeyCode::Right, _) if word_modifier => self.move_word_right(),
+            (KeyCode::Left, _) => self.move_left(),
+            (KeyCode::Right, _) => self.move_right(),
+            (KeyCode::Up, _) => self.move_up(),
+            (KeyCode::Down, _) => self.move_down(),
+            (KeyCode::Home, _) => self.move_home(),
+            (KeyCode::End, _) => self.move_end(),
+            (KeyCode::Char(character), modifiers)
+                if !modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::SUPER) =>
             {
                 self.insert_char(character);
                 true
@@ -153,23 +204,29 @@ impl ComposerState {
     }
 
     pub(crate) fn delete_word_left(&mut self) -> bool {
-        let mut start = self.cursor;
-        while let Some(previous) = previous_boundary(&self.text, start) {
-            if !self.text[previous..start].chars().all(char::is_whitespace) {
-                break;
-            }
-            start = previous;
-        }
-        while let Some(previous) = previous_boundary(&self.text, start) {
-            if self.text[previous..start].chars().all(char::is_whitespace) {
-                break;
-            }
-            start = previous;
-        }
+        let start = whitespace_word_start_left(&self.text, self.cursor);
         if start == self.cursor {
             return false;
         }
-        self.replace_range(start..self.cursor, "");
+        self.kill_range(start..self.cursor);
+        true
+    }
+
+    fn delete_small_word_left(&mut self) -> bool {
+        let start = small_word_start_left(&self.text, self.cursor);
+        if start == self.cursor {
+            return false;
+        }
+        self.kill_range(start..self.cursor);
+        true
+    }
+
+    fn delete_word_right(&mut self) -> bool {
+        let end = small_word_end_right(&self.text, self.cursor);
+        if end == self.cursor {
+            return false;
+        }
+        self.kill_range(self.cursor..end);
         true
     }
 
@@ -192,7 +249,7 @@ impl ComposerState {
     }
 
     pub(crate) fn move_word_left(&mut self) -> bool {
-        let target = word_start_left(&self.text, self.cursor);
+        let target = small_word_start_left(&self.text, self.cursor);
         if target == self.cursor {
             return false;
         }
@@ -202,24 +259,79 @@ impl ComposerState {
     }
 
     pub(crate) fn move_word_right(&mut self) -> bool {
-        let mut target = self.cursor;
-        while let Some(next) = next_boundary(&self.text, target) {
-            if !self.text[target..next].chars().all(char::is_whitespace) {
-                break;
-            }
-            target = next;
-        }
-        while let Some(next) = next_boundary(&self.text, target) {
-            if self.text[target..next].chars().all(char::is_whitespace) {
-                break;
-            }
-            target = next;
-        }
+        let target = small_word_end_right(&self.text, self.cursor);
         if target == self.cursor {
             return false;
         }
         self.cursor = target;
         self.preferred_column = None;
+        true
+    }
+
+    fn move_readline_line_start(&mut self) -> bool {
+        let start = line_start(&self.text, self.cursor);
+        let target = if self.cursor == start && start > 0 {
+            line_start(&self.text, start - 1)
+        } else {
+            start
+        };
+        if target == self.cursor {
+            return false;
+        }
+        self.cursor = target;
+        self.preferred_column = None;
+        true
+    }
+
+    fn move_readline_line_end(&mut self) -> bool {
+        let end = line_end(&self.text, self.cursor);
+        let target = if self.cursor == end && end < self.text.len() {
+            line_end(&self.text, end + 1)
+        } else {
+            end
+        };
+        if target == self.cursor {
+            return false;
+        }
+        self.cursor = target;
+        self.preferred_column = None;
+        true
+    }
+
+    fn kill_to_line_start(&mut self) -> bool {
+        let line_start = line_start(&self.text, self.cursor);
+        let start = if self.cursor == line_start {
+            previous_boundary(&self.text, line_start).unwrap_or(line_start)
+        } else {
+            line_start
+        };
+        if start == self.cursor {
+            return false;
+        }
+        self.kill_range(start..self.cursor);
+        true
+    }
+
+    fn kill_to_line_end(&mut self) -> bool {
+        let line_end = line_end(&self.text, self.cursor);
+        let end = if self.cursor == line_end {
+            next_boundary(&self.text, line_end).unwrap_or(line_end)
+        } else {
+            line_end
+        };
+        if end == self.cursor {
+            return false;
+        }
+        self.kill_range(self.cursor..end);
+        true
+    }
+
+    fn yank(&mut self) -> bool {
+        if self.kill_buffer.is_empty() {
+            return false;
+        }
+        let killed = self.kill_buffer.clone();
+        self.insert_text(&killed);
         true
     }
 
@@ -272,6 +384,11 @@ impl ComposerState {
         self.cursor = byte_at_column(&self.text, target_start, target_end, column);
         self.preferred_column = Some(column);
         true
+    }
+
+    fn kill_range(&mut self, range: std::ops::Range<usize>) {
+        self.kill_buffer = self.text[range.clone()].to_string();
+        self.replace_range(range, "");
     }
 
     fn replace_range(&mut self, range: std::ops::Range<usize>, replacement: &str) {
@@ -340,54 +457,6 @@ fn binding_matches_text(text: &str, binding: &MentionBinding) -> bool {
                 .chars()
                 .next()
                 .is_some_and(char::is_whitespace))
-}
-
-fn previous_boundary(text: &str, cursor: usize) -> Option<usize> {
-    text[..cursor]
-        .char_indices()
-        .next_back()
-        .map(|(index, _)| index)
-}
-
-fn word_start_left(text: &str, cursor: usize) -> usize {
-    let mut start = cursor;
-    while let Some(previous) = previous_boundary(text, start) {
-        if !text[previous..start].chars().all(char::is_whitespace) {
-            break;
-        }
-        start = previous;
-    }
-    while let Some(previous) = previous_boundary(text, start) {
-        if text[previous..start].chars().all(char::is_whitespace) {
-            break;
-        }
-        start = previous;
-    }
-    start
-}
-
-fn next_boundary(text: &str, cursor: usize) -> Option<usize> {
-    text[cursor..]
-        .chars()
-        .next()
-        .map(|character| cursor + character.len_utf8())
-}
-
-fn line_start(text: &str, cursor: usize) -> usize {
-    text[..cursor].rfind('\n').map_or(0, |newline| newline + 1)
-}
-
-fn line_end(text: &str, cursor: usize) -> usize {
-    text[cursor..]
-        .find('\n')
-        .map_or(text.len(), |newline| cursor + newline)
-}
-
-fn byte_at_column(text: &str, start: usize, end: usize, column: usize) -> usize {
-    text[start..end]
-        .char_indices()
-        .nth(column)
-        .map_or(end, |(offset, _)| start + offset)
 }
 
 #[cfg(test)]

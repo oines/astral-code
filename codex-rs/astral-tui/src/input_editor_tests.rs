@@ -37,6 +37,20 @@ fn event_mapping_edits_inside_utf8_text() {
         InputAction::Redraw
     );
     assert_eq!(state.composer(), "中文c");
+
+    state.set_composer("ab");
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Home)),
+        InputAction::Redraw
+    );
+    assert_eq!(
+        handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL)
+        ),
+        InputAction::Redraw
+    );
+    assert_eq!(state.composer(), "b");
 }
 
 #[test]

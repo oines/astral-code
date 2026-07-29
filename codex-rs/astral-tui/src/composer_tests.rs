@@ -1,4 +1,7 @@
 use codex_app_server_protocol::UserInput;
+use crossterm::event::KeyCode;
+use crossterm::event::KeyEvent;
+use crossterm::event::KeyModifiers;
 use pretty_assertions::assert_eq;
 
 use super::ComposerState;
@@ -51,6 +54,37 @@ fn vertical_navigation_preserves_the_preferred_column() {
     assert_eq!(composer.cursor(), 3);
     assert!(composer.move_down());
     assert_eq!(composer.cursor(), "abcd\n中".len());
+}
+
+#[test]
+fn readline_navigation_kill_and_yank_match_the_reference_tuis() {
+    let mut composer = ComposerState::default();
+    composer.replace("first\nsecond");
+
+    assert!(composer.edit_key(modified_char('a', KeyModifiers::CONTROL)));
+    assert_eq!(composer.cursor(), "first\n".len());
+    assert!(composer.edit_key(modified_char('a', KeyModifiers::CONTROL)));
+    assert_eq!(composer.cursor(), 0);
+    assert!(composer.edit_key(modified_char('e', KeyModifiers::CONTROL)));
+    assert_eq!(composer.cursor(), "first".len());
+    assert!(composer.edit_key(modified_char('e', KeyModifiers::CONTROL)));
+    assert_eq!(composer.cursor(), "first\nsecond".len());
+
+    assert!(composer.edit_key(modified_char('u', KeyModifiers::CONTROL)));
+    assert_eq!(composer.text(), "first\n");
+    assert!(composer.edit_key(modified_char('y', KeyModifiers::CONTROL)));
+    assert_eq!(composer.text(), "first\nsecond");
+
+    composer.replace("one.two");
+    assert!(composer.edit_key(modified_char('b', KeyModifiers::ALT)));
+    assert_eq!(composer.cursor(), "one.".len());
+    assert!(composer.edit_key(modified_char('b', KeyModifiers::ALT)));
+    assert_eq!(composer.cursor(), "one".len());
+    composer.move_end();
+    assert!(composer.edit_key(modified_char('w', KeyModifiers::CONTROL)));
+    assert_eq!(composer.text(), "");
+    assert!(composer.edit_key(modified_char('y', KeyModifiers::CONTROL)));
+    assert_eq!(composer.text(), "one.two");
 }
 
 #[test]
@@ -108,4 +142,8 @@ fn skill_mention() -> (String, MentionTarget) {
             path: "/skills/review/SKILL.md".into(),
         },
     )
+}
+
+fn modified_char(character: char, modifiers: KeyModifiers) -> KeyEvent {
+    KeyEvent::new(KeyCode::Char(character), modifiers)
 }
