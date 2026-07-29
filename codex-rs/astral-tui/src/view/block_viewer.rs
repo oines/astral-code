@@ -41,7 +41,7 @@ use super::transcript::render_options;
 
 const LOGICAL_LINE_WIDTH: u16 = 500;
 
-struct ViewerItem {
+pub(crate) struct ViewerItem {
     line: Line<'static>,
     plain: String,
     background: Option<Color>,
@@ -64,16 +64,35 @@ pub(crate) struct BlockViewerPane<'a> {
 
 impl BlockViewerPane<'_> {
     pub(crate) fn render(self, area: Rect, buffer: &mut Buffer, theme: AstralTheme) {
+        ContentViewerPane {
+            state: self.state,
+            title: block_title(self.block),
+            footer: block_viewer_footer(self.block),
+            items: render_viewer_items(self.block, theme, self.text_mode),
+            is_running: self.is_running,
+        }
+        .render(area, buffer, theme);
+    }
+}
+
+pub(crate) struct ContentViewerPane<'a> {
+    pub(crate) state: &'a mut ViewerState,
+    pub(crate) title: String,
+    pub(crate) footer: String,
+    pub(crate) items: Vec<ViewerItem>,
+    pub(crate) is_running: bool,
+}
+
+impl ContentViewerPane<'_> {
+    pub(crate) fn render(self, area: Rect, buffer: &mut Buffer, theme: AstralTheme) {
         Clear.render(area, buffer);
         buffer.set_style(area, Style::default().bg(theme.bg_base));
-        let title = block_title(self.block);
-        let footer = block_viewer_footer(self.block);
         let Some(frame) = render_modal_frame_with_geometry(
             area,
             buffer,
             theme,
-            &title,
-            &footer,
+            &self.title,
+            &self.footer,
             ModalHeight::FullViewport,
         ) else {
             return;
@@ -98,10 +117,13 @@ impl BlockViewerPane<'_> {
             1,
             body_height,
         );
-        let items = render_viewer_items(self.block, theme, self.text_mode);
-        let rows = render_viewer_rows(&items, body_width, self.state.wrap_mode());
-        let logical_lines = items.iter().map(|item| item.plain.clone()).collect();
-        let edit_copy_lines = items.iter().map(|item| item.edit_copy.clone()).collect();
+        let rows = render_viewer_rows(&self.items, body_width, self.state.wrap_mode());
+        let logical_lines = self.items.iter().map(|item| item.plain.clone()).collect();
+        let edit_copy_lines = self
+            .items
+            .iter()
+            .map(|item| item.edit_copy.clone())
+            .collect();
         let row_geometry = rows.iter().map(|row| row.geometry).collect();
         let rendered_rows = rows.iter().map(|row| row.plain.clone()).collect();
         self.state.observe_frame(BlockViewerFrame {
@@ -194,7 +216,7 @@ fn render_viewer_items(
         .collect()
 }
 
-fn viewer_item(mut line: Line<'static>, edit_copy: Option<EditCopyLine>) -> ViewerItem {
+pub(crate) fn viewer_item(mut line: Line<'static>, edit_copy: Option<EditCopyLine>) -> ViewerItem {
     let background = line
         .style
         .bg
