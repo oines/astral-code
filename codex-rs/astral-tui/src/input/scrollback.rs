@@ -154,6 +154,7 @@ pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction
             ActionId::ToggleQueue
             | ActionId::FocusScrollback
             | ActionId::SendPrompt
+            | ActionId::InterjectPrompt
             | ActionId::OpenExternalEditor
             | ActionId::PromptCancel
             | ActionId::ExitEmptyPrompt

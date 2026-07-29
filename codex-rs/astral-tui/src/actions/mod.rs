@@ -22,6 +22,7 @@ pub(crate) enum ActionId {
     PageDown,
     FocusScrollback,
     SendPrompt,
+    InterjectPrompt,
     OpenExternalEditor,
     PromptCancel,
     ExitEmptyPrompt,
@@ -188,12 +189,22 @@ impl ActionRegistry {
                     .map(|definition| definition.id)
             })
     }
+
+    fn matches(&self, id: ActionId, key: &KeyEvent) -> bool {
+        self.actions
+            .iter()
+            .any(|definition| definition.id == id && definition.matches(key))
+    }
 }
 
 static ACTIONS: LazyLock<ActionRegistry> = LazyLock::new(ActionRegistry::defaults);
 
 pub(crate) fn lookup(key: &KeyEvent, context: When) -> Option<ActionId> {
     ACTIONS.lookup(key, context)
+}
+
+pub(crate) fn matches(id: ActionId, key: &KeyEvent) -> bool {
+    ACTIONS.matches(id, key)
 }
 
 pub(crate) fn definitions() -> &'static [ActionDef] {

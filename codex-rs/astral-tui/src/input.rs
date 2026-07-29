@@ -53,6 +53,10 @@ pub enum InputAction {
     None,
     Redraw,
     Submit(PromptSubmission),
+    SteerPrompt(PromptSubmission),
+    SteerQueuedPrompt {
+        id: u64,
+    },
     Interrupt,
     Exit,
     ScrollUp,
@@ -234,6 +238,12 @@ pub(crate) fn handle_mouse(state: &mut SurfaceState, mouse: MouseEvent) -> Input
         let schema = requested_schema.clone();
         return mcp_form::handle_mouse(state, request, &schema, mouse);
     }
+    if state.plan_review().is_none()
+        && (state.queue_contains(mouse)
+            || (matches!(mouse.kind, MouseEventKind::Moved) && state.queue_hovered().is_some()))
+    {
+        return queue::handle_mouse(state, mouse);
+    }
     if scrollback_owns_pointer(state, mouse) {
         return InputAction::None;
     }
@@ -379,6 +389,20 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
         return InputAction::Redraw;
     }
     let prompt_action = actions::lookup(&key, When::PromptFocused);
+    if prompt_action == Some(ActionId::InterjectPrompt) {
+        if state.slash().active {
+            return InputAction::Notice("Run slash commands with Enter".to_string());
+        }
+        if !matches!(state.activity(), SurfaceActivity::Working) {
+            return InputAction::Notice("No active turn to steer".to_string());
+        }
+        if state.composer().trim().is_empty() {
+            return state.next_follow_up_id().map_or(InputAction::None, |id| {
+                InputAction::SteerQueuedPrompt { id }
+            });
+        }
+        return InputAction::SteerPrompt(state.take_submission());
+    }
     if prompt_action == Some(ActionId::CycleMode) {
         return InputAction::CycleMode;
     }
@@ -474,6 +498,12 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
                     Err(error) => InputAction::Notice(error.to_string()),
                 };
             }
+            if state.composer().trim().is_empty()
+                && matches!(state.activity(), SurfaceActivity::Working)
+                && let Some(id) = state.next_follow_up_id()
+            {
+                return InputAction::SteerQueuedPrompt { id };
+            }
             let submission = state.take_submission();
             if submission.text().trim().is_empty() {
                 InputAction::None
@@ -499,6 +529,7 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
             ActionId::CycleMode
             | ActionId::ShortcutsHelp
             | ActionId::ToggleQueue
+            | ActionId::InterjectPrompt
             | ActionId::FocusScrollback
             | ActionId::OpenTranscriptSearch
             | ActionId::FocusPrompt

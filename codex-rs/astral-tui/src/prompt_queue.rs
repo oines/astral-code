@@ -100,7 +100,24 @@ impl PromptQueue {
 
     pub(crate) fn selected(&self) -> Option<&QueuedPrompt> {
         let id = self.selected_id?;
+        self.get(id)
+    }
+
+    pub(crate) fn front_id(&self) -> Option<u64> {
+        self.entries.front().map(|entry| entry.id)
+    }
+
+    pub(crate) fn get(&self, id: u64) -> Option<&QueuedPrompt> {
         self.entries.iter().find(|entry| entry.id == id)
+    }
+
+    pub(crate) fn select(&mut self, id: u64) -> bool {
+        if self.get(id).is_none() {
+            return false;
+        }
+        self.selected_id = Some(id);
+        self.focused = true;
+        true
     }
 
     pub(crate) fn move_selection(&mut self, delta: isize) {
@@ -118,7 +135,11 @@ impl PromptQueue {
 
     pub(crate) fn remove_selected(&mut self) -> Option<QueuedPrompt> {
         let selected = self.selected_id?;
-        let index = self.entries.iter().position(|entry| entry.id == selected)?;
+        self.remove(selected)
+    }
+
+    pub(crate) fn remove(&mut self, id: u64) -> Option<QueuedPrompt> {
+        let index = self.entries.iter().position(|entry| entry.id == id)?;
         let removed = self.entries.remove(index)?;
         let next = index.min(self.entries.len().saturating_sub(1));
         self.selected_id = self.entries.get(next).map(|entry| entry.id);

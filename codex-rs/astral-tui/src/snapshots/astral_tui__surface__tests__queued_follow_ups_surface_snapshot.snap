@@ -15,7 +15,7 @@ expression: "render_at_size(&mut state, &session, 80, 24)"
 
 
 
-  #1 Run the focused tests after this finishes
+  #1 Run the focused tests after this finishes        [Send now][edit][cancel]
   #2 Summarize the result (+1 line)
 
   ◇ Working · 2 queued
@@ -24,4 +24,4 @@ expression: "render_at_size(&mut state, &session, 80, 24)"
   │ ❯                                                                        │
   ╰──────────────────────────────────────────── claude-sonnet-4 · workspace ─╯
 
-  ↑/↓:navigate  │  Enter/e:edit  │  x:delete  │  J/K:reorder  │  Esc/Tab:back
+  ↑/↓:move  │  Enter:edit  │  Ctrl+Enter:send now  │  Esc:back

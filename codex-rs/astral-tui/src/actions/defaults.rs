@@ -91,14 +91,26 @@ pub(super) fn default_actions() -> Vec<ActionDef> {
             "send",
             "Send prompt",
             KeyShortcut::plain(KeyCode::Enter),
-            vec![
-                KeyShortcut::new(KeyCode::Enter, KeyModifiers::CONTROL),
-                KeyShortcut::new(KeyCode::Enter, KeyModifiers::SUPER),
-            ],
+            vec![KeyShortcut::new(KeyCode::Enter, KeyModifiers::SUPER)],
             Category::Input,
             When::PromptFocused,
         )
         .with_key_display("Enter"),
+        ActionDef::new(
+            ActionId::InterjectPrompt,
+            "send now",
+            "Send now to the active turn",
+            KeyShortcut::new(KeyCode::Enter, KeyModifiers::CONTROL),
+            vec![KeyShortcut::control('i')],
+            Category::Input,
+            When::PromptFocused,
+        )
+        .with_key_display("Ctrl+Enter")
+        .with_help(
+            "Uses Astral's existing turn/steer request to add the draft to the \
+             active turn. With an empty draft, sends the next queued follow-up; \
+             from the queue pane it sends the selected row.",
+        ),
         ActionDef::new(
             ActionId::OpenExternalEditor,
             "edit prompt",

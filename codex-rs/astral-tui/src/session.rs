@@ -47,6 +47,8 @@ use codex_app_server_protocol::TurnInterruptParams;
 use codex_app_server_protocol::TurnInterruptResponse;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::TurnStartResponse;
+use codex_app_server_protocol::TurnSteerParams;
+use codex_app_server_protocol::TurnSteerResponse;
 use codex_app_server_protocol::UserInput;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
@@ -556,6 +558,33 @@ impl AstralSession {
             state.active_turn_id = Some(response.turn.id.clone());
         }
         Ok(response)
+    }
+
+    pub(crate) async fn steer_turn(
+        &mut self,
+        input: Vec<UserInput>,
+    ) -> Result<TurnSteerResponse, SessionError> {
+        let state = self.state.as_ref().ok_or(SessionError::NoThread)?;
+        let thread_id = state.thread.id.clone();
+        let expected_turn_id = state
+            .active_turn_id
+            .clone()
+            .ok_or(SessionError::NoActiveTurn)?;
+        let request_id = self.next_request_id();
+        self.client
+            .request_typed(ClientRequest::TurnSteer {
+                request_id,
+                params: TurnSteerParams {
+                    thread_id,
+                    client_user_message_id: None,
+                    input,
+                    model_client_metadata: None,
+                    additional_context: None,
+                    expected_turn_id,
+                },
+            })
+            .await
+            .map_err(SessionError::from)
     }
 
     pub async fn interrupt(&mut self) -> Result<(), SessionError> {

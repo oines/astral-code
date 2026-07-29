@@ -9,6 +9,8 @@ use ratatui::layout::Rect;
 
 use crate::composer::ComposerMouseAction;
 use crate::view::CompletionMenuFrame;
+use crate::view::QueuePaneFrame;
+use crate::view::QueuePaneHover;
 use crate::view::prompt_cursor_at;
 use crate::view::prompt_drag_cursor_at;
 
@@ -20,6 +22,8 @@ use super::SurfaceState;
 pub(super) struct SurfacePointerState {
     scrollback: Rect,
     prompt: Rect,
+    queue: QueuePaneFrame,
+    queue_hovered: Option<QueuePaneHover>,
     completion: Option<CompletionMenuFrame>,
     completion_hovered: Option<usize>,
     completion_scrollbar_dragging: bool,
@@ -44,6 +48,33 @@ impl SurfacePointerState {
 
     fn prompt_contains(&self, mouse: MouseEvent) -> bool {
         self.prompt.contains((mouse.column, mouse.row).into())
+    }
+
+    fn observe_queue(&mut self, frame: QueuePaneFrame) {
+        if self
+            .queue_hovered
+            .is_some_and(|hover| !frame.contains_id(hover.id))
+        {
+            self.queue_hovered = None;
+        }
+        self.queue = frame;
+    }
+
+    fn queue_contains(&self, mouse: MouseEvent) -> bool {
+        self.queue.contains(mouse.column, mouse.row)
+    }
+
+    fn queue_hit(&self, mouse: MouseEvent) -> Option<QueuePaneHover> {
+        self.queue.hit(mouse.column, mouse.row)
+    }
+
+    fn update_queue_hover(&mut self, mouse: MouseEvent) -> bool {
+        let hovered = self.queue.hit(mouse.column, mouse.row);
+        if hovered == self.queue_hovered {
+            return false;
+        }
+        self.queue_hovered = hovered;
+        true
     }
 
     fn observe_completion(&mut self, frame: CompletionMenuFrame) {
@@ -109,6 +140,26 @@ impl SurfaceState {
 
     pub(crate) fn prompt_contains(&self, mouse: MouseEvent) -> bool {
         self.pointer_areas.prompt_contains(mouse)
+    }
+
+    pub(crate) fn observe_queue_frame(&mut self, frame: QueuePaneFrame) {
+        self.pointer_areas.observe_queue(frame);
+    }
+
+    pub(crate) fn queue_contains(&self, mouse: MouseEvent) -> bool {
+        self.pointer_areas.queue_contains(mouse)
+    }
+
+    pub(crate) fn queue_hit(&self, mouse: MouseEvent) -> Option<QueuePaneHover> {
+        self.pointer_areas.queue_hit(mouse)
+    }
+
+    pub(crate) fn queue_hovered(&self) -> Option<QueuePaneHover> {
+        self.pointer_areas.queue_hovered
+    }
+
+    pub(crate) fn update_queue_hover(&mut self, mouse: MouseEvent) -> bool {
+        self.pointer_areas.update_queue_hover(mouse)
     }
 
     pub(crate) fn composer_mouse_active(&self) -> bool {

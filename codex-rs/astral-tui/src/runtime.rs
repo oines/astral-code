@@ -639,6 +639,12 @@ async fn apply_input_action(
     match action {
         InputAction::None | InputAction::Redraw | InputAction::OpenExternalEditor => {}
         InputAction::DrainQueue => start_next_follow_up(session, surface).await,
+        InputAction::SteerPrompt(submission) => {
+            steer_submission(session, surface, submission).await;
+        }
+        InputAction::SteerQueuedPrompt { id } => {
+            steer_queued_follow_up(session, surface, id).await;
+        }
         InputAction::Submit(submission) => {
             let turn_active = session
                 .state()
@@ -952,6 +958,51 @@ async fn start_submission(
             surface.restore_submission(submission);
             surface.set_activity(SurfaceActivity::Ready);
             surface.set_notice(error.to_string());
+        }
+    }
+}
+
+async fn steer_submission(
+    session: &mut AstralSession,
+    surface: &mut SurfaceState,
+    submission: PromptSubmission,
+) {
+    match session.steer_turn(submission.user_input()).await {
+        Ok(_) => {
+            surface.record_submission(&submission);
+            surface.set_notice("Sent to active turn");
+        }
+        Err(error) => {
+            let queued = surface.enqueue_follow_up(submission);
+            surface.set_notice(format!(
+                "Could not steer; {queued} follow-up queued: {error}"
+            ));
+            start_next_follow_up(session, surface).await;
+        }
+    }
+}
+
+async fn steer_queued_follow_up(session: &mut AstralSession, surface: &mut SurfaceState, id: u64) {
+    let Some(submission) = surface
+        .follow_up(id)
+        .map(|prompt| prompt.submission().clone())
+    else {
+        return;
+    };
+    match session.steer_turn(submission.user_input()).await {
+        Ok(_) => {
+            surface.remove_follow_up(id);
+            surface.record_submission(&submission);
+            let remaining = surface.queued_follow_ups();
+            if remaining == 0 {
+                surface.clear_notice();
+            } else {
+                surface.set_notice(format!("{remaining} follow-up queued"));
+            }
+        }
+        Err(error) => {
+            surface.set_notice(format!("Could not send queued follow-up now: {error}"));
+            start_next_follow_up(session, surface).await;
         }
     }
 }

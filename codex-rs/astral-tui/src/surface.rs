@@ -326,6 +326,22 @@ impl SurfaceState {
         !self.prompt_queue.is_empty()
     }
 
+    pub(crate) fn next_follow_up_id(&self) -> Option<u64> {
+        self.prompt_queue.front_id()
+    }
+
+    pub(crate) fn follow_up(&self, id: u64) -> Option<&QueuedPrompt> {
+        self.prompt_queue.get(id)
+    }
+
+    pub(crate) fn select_follow_up(&mut self, id: u64) -> bool {
+        self.prompt_queue.select(id)
+    }
+
+    pub(crate) fn remove_follow_up(&mut self, id: u64) -> Option<QueuedPrompt> {
+        self.prompt_queue.remove(id)
+    }
+
     pub(crate) fn queue_focused(&self) -> bool {
         self.prompt_queue.focused()
     }
@@ -360,6 +376,10 @@ impl SurfaceState {
 
     pub(crate) fn selected_follow_up_text(&self) -> Option<&str> {
         self.prompt_queue.selected().map(QueuedPrompt::text)
+    }
+
+    pub(crate) fn selected_follow_up_id(&self) -> Option<u64> {
+        self.prompt_queue.selected_id()
     }
 
     pub(crate) fn begin_queue_edit(&mut self) -> bool {
@@ -869,6 +889,8 @@ pub(crate) fn render_surface_with_view(
         entries: state.prompt_queue.entries(),
         selected_id: state.prompt_queue.selected_id(),
         focused: state.prompt_queue.focused(),
+        hovered: state.queue_hovered(),
+        turn_running: matches!(state.activity(), SurfaceActivity::Working),
     }
     .height();
     let turn_status = (!has_request && banner_height == 0)
@@ -1007,12 +1029,15 @@ pub(crate) fn render_surface_with_view(
             layout.turn_status.width,
         );
     }
-    QueuePane {
+    let queue_frame = QueuePane {
         entries: state.prompt_queue.entries(),
         selected_id: state.prompt_queue.selected_id(),
         focused: state.prompt_queue.focused(),
+        hovered: state.queue_hovered(),
+        turn_running: matches!(state.activity(), SurfaceActivity::Working),
     }
     .render(layout.queue, buffer, theme);
+    state.observe_queue_frame(queue_frame);
     if let Some(review) = plan_review.as_ref() {
         state
             .plan_review_mouse
@@ -1241,11 +1266,10 @@ pub(crate) fn render_surface_with_view(
     ];
     let revision_hints = [("Enter", "request changes"), ("Esc", "back")];
     let queue_hints = [
-        ("↑/↓", "navigate"),
-        ("Enter/e", "edit"),
-        ("x", "delete"),
-        ("J/K", "reorder"),
-        ("Esc/Tab", "back"),
+        ("↑/↓", "move"),
+        ("Enter", "edit"),
+        ("Ctrl+Enter", "send now"),
+        ("Esc", "back"),
     ];
     let queue_edit_hints = [
         ("Enter", "save"),
