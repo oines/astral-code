@@ -25,10 +25,15 @@ use crate::request_choice::response_for;
 mod block_viewer;
 mod mcp_form;
 mod mention_popup;
+mod mouse_scroll;
 mod pickers;
 mod plan_review;
 mod scrollback;
 mod user_input;
+
+pub(crate) use mouse_scroll::MouseScrollState;
+pub(crate) use mouse_scroll::ScrollConfig;
+pub(crate) use mouse_scroll::ScrollDirection;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum InputAction {
