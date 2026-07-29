@@ -88,6 +88,46 @@ fn readline_navigation_kill_and_yank_match_the_reference_tuis() {
 }
 
 #[test]
+fn undo_redo_groups_typing_and_restores_structured_mentions() {
+    let mut composer = ComposerState::default();
+    composer.insert_text("hello");
+    composer.insert_char(' ');
+    composer.insert_text("world");
+
+    assert!(composer.edit_key(modified_char('z', KeyModifiers::CONTROL)));
+    assert_eq!(composer.text(), "hello ");
+    assert!(composer.edit_key(modified_char('z', KeyModifiers::CONTROL)));
+    assert_eq!(composer.text(), "hello");
+    assert!(composer.edit_key(modified_char('r', KeyModifiers::CONTROL)));
+    assert_eq!(composer.text(), "hello ");
+    assert!(composer.edit_key(modified_char(
+        'Z',
+        KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+    )));
+    assert_eq!(composer.text(), "hello world");
+
+    composer.replace("$rev");
+    let (insert_text, target) = skill_mention();
+    composer.insert_mention(0..4, insert_text, target);
+    assert!(composer.edit_key(modified_char('z', KeyModifiers::CONTROL)));
+    assert_eq!(composer.text(), "$rev");
+    assert!(composer.edit_key(modified_char('r', KeyModifiers::CONTROL)));
+    assert_eq!(
+        composer.take_submission().user_input(),
+        vec![
+            UserInput::Text {
+                text: "$review ".to_string(),
+                text_elements: Vec::new(),
+            },
+            UserInput::Skill {
+                name: "review".to_string(),
+                path: "/skills/review/SKILL.md".into(),
+            },
+        ]
+    );
+}
+
+#[test]
 fn selected_mentions_survive_edits_before_them_and_project_structured_input() {
     let mut composer = ComposerState::default();
     composer.replace("use $rev");
