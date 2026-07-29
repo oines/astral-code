@@ -66,6 +66,7 @@ pub(crate) use plan_review::PlanReviewMouseAction;
 pub(crate) use plan_review::PlanReviewMouseState;
 pub(crate) use plan_review::PlanReviewPane;
 pub(crate) use prompt_pointer::prompt_cursor_at;
+pub(crate) use prompt_pointer::prompt_drag_cursor_at;
 pub(crate) use scrollback::ScrollbackNavigation;
 pub(crate) use scrollback::ScrollbackPane;
 pub(crate) use scrollback::ScrollbackViewport;

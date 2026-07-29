@@ -24,14 +24,63 @@ pub(crate) fn prompt_cursor_at(
     {
         return None;
     }
+    prompt_cursor_for_row(text, cursor_byte, area, position, None)
+}
+
+/// Map a drag position to the prompt buffer, including positions beyond the
+/// top or bottom edge. Each repeated outside-edge event advances the cursor
+/// into another wrapped row so the cursor-following viewport scrolls with it.
+pub(crate) fn prompt_drag_cursor_at(
+    text: &str,
+    cursor_byte: usize,
+    area: Rect,
+    position: Position,
+) -> Option<usize> {
+    if area.width < 4 || area.height < 3 {
+        return None;
+    }
+    let content_top = area.y.saturating_add(1);
+    let content_bottom = area.bottom().saturating_sub(1);
+    let outside_rows = if position.y < content_top {
+        Some((
+            true,
+            drag_scroll_lines_for_distance(content_top.saturating_sub(position.y)),
+        ))
+    } else if position.y >= content_bottom {
+        Some((
+            false,
+            drag_scroll_lines_for_distance(
+                position.y.saturating_sub(content_bottom).saturating_add(1),
+            ),
+        ))
+    } else {
+        None
+    };
+    prompt_cursor_for_row(text, cursor_byte, area, position, outside_rows)
+}
+
+fn prompt_cursor_for_row(
+    text: &str,
+    cursor_byte: usize,
+    area: Rect,
+    position: Position,
+    outside_rows: Option<(bool, usize)>,
+) -> Option<usize> {
     let layout = prompt_layout(text, cursor_byte, area.width.saturating_sub(4));
     let visible_rows = usize::from(area.height.saturating_sub(2));
     let first_visible = layout
         .cursor_row
         .saturating_sub(visible_rows.saturating_sub(1));
-    let row = first_visible.saturating_add(usize::from(
-        position.y.saturating_sub(area.y.saturating_add(1)),
-    ));
+    let row = match outside_rows {
+        Some((true, rows)) => first_visible.saturating_sub(rows),
+        Some((false, rows)) => first_visible
+            .saturating_add(visible_rows.saturating_sub(1))
+            .saturating_add(rows)
+            .min(layout.ranges.len().saturating_sub(1)),
+        None => first_visible.saturating_add(usize::from(
+            position.y.saturating_sub(area.y.saturating_add(1)),
+        )),
+    };
     let range = layout.ranges.get(row)?;
     let content_x = area.x.saturating_add(2);
     let text_x = content_x.saturating_add(u16::from(row == 0) * 2);
@@ -53,4 +102,13 @@ fn byte_at_display_column(text: &str, range: Range<usize>, column: usize) -> usi
         width = width.saturating_add(character_width);
     }
     range.end
+}
+
+fn drag_scroll_lines_for_distance(distance: u16) -> usize {
+    match distance {
+        0..=2 => 1,
+        3..=5 => 2,
+        6..=10 => 3,
+        _ => 5,
+    }
 }
