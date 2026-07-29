@@ -638,6 +638,7 @@ async fn apply_input_action(
 ) -> Result<Option<RunExitReason>, RunError> {
     match action {
         InputAction::None | InputAction::Redraw | InputAction::OpenExternalEditor => {}
+        InputAction::DrainQueue => start_next_follow_up(session, surface).await,
         InputAction::Submit(submission) => {
             let turn_active = session
                 .state()
@@ -959,7 +960,11 @@ async fn start_next_follow_up(session: &mut AstralSession, surface: &mut Surface
     let turn_active = session
         .state()
         .is_some_and(|state| state.active_turn_id.is_some());
-    if turn_active || surface.plan_review().is_some() || !surface.pending_requests().is_empty() {
+    if turn_active
+        || surface.queue_editing()
+        || surface.plan_review().is_some()
+        || !surface.pending_requests().is_empty()
+    {
         return;
     }
     let Some(prompt) = surface.pop_follow_up() else {

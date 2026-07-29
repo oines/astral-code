@@ -14,6 +14,8 @@ const MAX_QUEUE_HEIGHT: u16 = 3;
 
 pub(crate) struct QueuePane<'a> {
     pub(crate) entries: &'a VecDeque<QueuedPrompt>,
+    pub(crate) selected_id: Option<u64>,
+    pub(crate) focused: bool,
 }
 
 impl QueuePane<'_> {
@@ -28,7 +30,14 @@ impl QueuePane<'_> {
             return;
         }
         buffer.set_style(area, Style::default().bg(theme.bg_base));
-        let first = self.entries.len().saturating_sub(usize::from(area.height));
+        let visible_rows = usize::from(area.height);
+        let selected = self
+            .selected_id
+            .and_then(|id| self.entries.iter().position(|entry| entry.id() == id))
+            .unwrap_or_default();
+        let first = selected
+            .saturating_sub(visible_rows.saturating_sub(1))
+            .min(self.entries.len().saturating_sub(visible_rows));
         for (row, (position, entry)) in self.entries.iter().enumerate().skip(first).enumerate() {
             let prefix = format!("#{} ", position + 1);
             let suffix = multiline_suffix(entry.text());
@@ -43,12 +52,15 @@ impl QueuePane<'_> {
                     .unwrap_or(""),
                 available,
             );
-            let line: Line<'static> = vec![
+            let mut line: Line<'static> = vec![
                 prefix.fg(theme.gray),
                 text.fg(theme.text_secondary),
                 suffix.fg(theme.gray_dim),
             ]
             .into();
+            if self.focused && self.selected_id == Some(entry.id()) {
+                line = line.patch_style(Style::default().bg(theme.panel_selected));
+            }
             buffer.set_line(
                 area.x,
                 area.y + u16::try_from(row).unwrap_or(u16::MAX),

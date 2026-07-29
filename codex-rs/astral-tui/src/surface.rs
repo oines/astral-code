@@ -52,6 +52,7 @@ use crate::plan_review::CompletedPlan;
 use crate::plan_review::PlanReviewFocus;
 use crate::plan_review::PlanReviewState;
 use crate::prompt_queue::PromptQueue;
+use crate::prompt_queue::PromptQueueEdit;
 use crate::prompt_queue::QueuedPrompt;
 use crate::request_choice::RequestChoiceState;
 use crate::request_pane::RequestPane;
@@ -150,6 +151,7 @@ pub struct SurfaceState {
     plan_review: Option<PlanReviewState>,
     plan_review_mouse: PlanReviewMouseState,
     prompt_queue: PromptQueue,
+    prompt_queue_edit: Option<PromptQueueEdit>,
     pointer_areas: SurfacePointerState,
     theme: AstralThemeId,
     color_level: ColorLevel,
@@ -188,6 +190,7 @@ impl SurfaceState {
             plan_review: None,
             plan_review_mouse: PlanReviewMouseState::default(),
             prompt_queue: PromptQueue::default(),
+            prompt_queue_edit: None,
             pointer_areas: SurfacePointerState::default(),
             theme: AstralThemeId::default(),
             color_level: ColorLevel::default(),
@@ -233,6 +236,7 @@ impl SurfaceState {
             plan_review: None,
             plan_review_mouse: PlanReviewMouseState::default(),
             prompt_queue: PromptQueue::default(),
+            prompt_queue_edit: None,
             pointer_areas: SurfacePointerState::default(),
             theme: AstralThemeId::default(),
             color_level: ColorLevel::default(),
@@ -320,6 +324,87 @@ impl SurfaceState {
 
     pub(crate) fn has_queued_follow_ups(&self) -> bool {
         !self.prompt_queue.is_empty()
+    }
+
+    pub(crate) fn queue_focused(&self) -> bool {
+        self.prompt_queue.focused()
+    }
+
+    pub(crate) fn toggle_queue_focus(&mut self) -> bool {
+        if !self.prompt_queue.toggle_focus() {
+            return false;
+        }
+        if self.prompt_queue.focused() {
+            self.focus_prompt();
+            self.cancel_history();
+            self.clear_completion_menu();
+        }
+        true
+    }
+
+    pub(crate) fn blur_queue(&mut self) {
+        self.prompt_queue.blur();
+    }
+
+    pub(crate) fn move_queue_selection(&mut self, delta: isize) {
+        self.prompt_queue.move_selection(delta);
+    }
+
+    pub(crate) fn remove_selected_follow_up(&mut self) -> bool {
+        self.prompt_queue.remove_selected().is_some()
+    }
+
+    pub(crate) fn reorder_selected_follow_up(&mut self, delta: isize) {
+        self.prompt_queue.swap_selected(delta);
+    }
+
+    pub(crate) fn selected_follow_up_text(&self) -> Option<&str> {
+        self.prompt_queue.selected().map(QueuedPrompt::text)
+    }
+
+    pub(crate) fn begin_queue_edit(&mut self) -> bool {
+        if self.prompt_queue_edit.is_some() {
+            return false;
+        }
+        let Some(prompt) = self.prompt_queue.selected() else {
+            return false;
+        };
+        let id = prompt.id();
+        let submission = prompt.submission().clone();
+        let stashed_submission = self.take_submission();
+        self.prompt_queue_edit = Some(PromptQueueEdit {
+            id,
+            stashed_submission,
+        });
+        self.prompt_queue.blur();
+        self.restore_submission(submission);
+        self.close_slash();
+        self.dismiss_mentions();
+        true
+    }
+
+    pub(crate) fn queue_editing(&self) -> bool {
+        self.prompt_queue_edit.is_some()
+    }
+
+    pub(crate) fn save_queue_edit(&mut self) -> bool {
+        let Some(edit) = self.prompt_queue_edit.take() else {
+            return false;
+        };
+        let submission = self.take_submission();
+        let updated = self.prompt_queue.replace(edit.id, submission);
+        self.restore_submission(edit.stashed_submission);
+        self.prompt_queue.focus();
+        updated
+    }
+
+    pub(crate) fn cancel_queue_edit(&mut self) -> bool {
+        let Some(edit) = self.prompt_queue_edit.take() else {
+            return false;
+        };
+        self.restore_submission(edit.stashed_submission);
+        self.prompt_queue.focus();
+        true
     }
 
     pub fn token_usage(&self) -> Option<&ThreadTokenUsage> {
@@ -718,7 +803,9 @@ pub(crate) fn render_surface_with_view(
         && state.pending_requests.front().is_some_and(|request| {
             !crate::request_choice::is_simple_request(request) || !state.scrollback_focused()
         });
-    let plan_review = (!read_only).then(|| state.plan_review().cloned()).flatten();
+    let plan_review = (!read_only && !state.queue_editing())
+        .then(|| state.plan_review().cloned())
+        .flatten();
     let history = state.history().clone();
     let prompt_height = if read_only {
         0
@@ -780,6 +867,8 @@ pub(crate) fn render_surface_with_view(
     });
     let queue_height = QueuePane {
         entries: state.prompt_queue.entries(),
+        selected_id: state.prompt_queue.selected_id(),
+        focused: state.prompt_queue.focused(),
     }
     .height();
     let turn_status = (!has_request && banner_height == 0)
@@ -920,6 +1009,8 @@ pub(crate) fn render_surface_with_view(
     }
     QueuePane {
         entries: state.prompt_queue.entries(),
+        selected_id: state.prompt_queue.selected_id(),
+        focused: state.prompt_queue.focused(),
     }
     .render(layout.queue, buffer, theme);
     if let Some(review) = plan_review.as_ref() {
@@ -991,7 +1082,7 @@ pub(crate) fn render_surface_with_view(
     let prompt_focused = !read_only
         && ((request_pane.is_some() && request_focused)
             || revising_plan
-            || !state.scrollback_focused());
+            || (!state.scrollback_focused() && !state.queue_focused()));
     let cursor = if read_only {
         None
     } else if let Some(pane) = request_pane {
@@ -1149,6 +1240,18 @@ pub(crate) fn render_surface_with_view(
         ("Esc", "keep planning"),
     ];
     let revision_hints = [("Enter", "request changes"), ("Esc", "back")];
+    let queue_hints = [
+        ("↑/↓", "navigate"),
+        ("Enter/e", "edit"),
+        ("x", "delete"),
+        ("J/K", "reorder"),
+        ("Esc/Tab", "back"),
+    ];
+    let queue_edit_hints = [
+        ("Enter", "save"),
+        ("Esc", "discard"),
+        ("Shift+Enter", "newline"),
+    ];
     let search_composing_hints = [("↑/↓", "matches"), ("Enter", "accept"), ("Esc", "close")];
     let search_browsing_hints = [("n/N", "matches"), ("/", "new search"), ("Esc", "close")];
     let search_hints = if state.scrollback.search_composing() {
@@ -1170,6 +1273,10 @@ pub(crate) fn render_surface_with_view(
             &revision_hints
         } else if plan_review.is_some() {
             &plan_hints
+        } else if state.queue_editing() {
+            &queue_edit_hints
+        } else if state.queue_focused() {
+            &queue_hints
         } else if state.scrollback.search_active() {
             search_hints
         } else if state.scrollback_focused() {

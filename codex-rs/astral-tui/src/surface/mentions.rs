@@ -15,6 +15,12 @@ impl SurfaceState {
     }
 
     pub(crate) fn refresh_composer_completions(&mut self) {
+        if self.queue_editing() {
+            self.close_slash();
+            self.dismiss_mentions();
+            self.dismiss_file_search();
+            return;
+        }
         self.refresh_slash();
         self.refresh_mentions();
         self.refresh_file_search();

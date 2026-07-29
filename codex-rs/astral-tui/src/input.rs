@@ -38,6 +38,7 @@ mod mouse_scroll;
 mod pickers;
 mod plan_review;
 mod prompt_mouse;
+mod queue;
 mod scrollback;
 mod shortcut_help;
 mod subagent;
@@ -80,6 +81,7 @@ pub enum InputAction {
     Plan(crate::plan_review::PlanReviewAction),
     CycleMode,
     OpenShortcuts,
+    DrainQueue,
     Resolve(RequestResolution),
     Notice(String),
 }
@@ -98,8 +100,23 @@ pub fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
         }
         return handle_request_key(state, request, key);
     }
+    if state.queue_editing() {
+        return handle_composer_key(state, key);
+    }
     if state.plan_review().is_some() && !state.scrollback_focused() {
         return plan_review::handle_key(state, key);
+    }
+    if state.plan_review().is_none()
+        && actions::lookup(&key, When::PromptFocused) == Some(ActionId::ToggleQueue)
+    {
+        return if state.toggle_queue_focus() {
+            InputAction::Redraw
+        } else {
+            InputAction::Notice("No follow-ups queued".to_string())
+        };
+    }
+    if state.queue_focused() {
+        return queue::handle_key(state, key);
     }
     if key.code == KeyCode::Esc && state.clear_scrollback_selection() {
         return InputAction::Redraw;
@@ -314,6 +331,28 @@ fn scrollback_owns_pointer(state: &mut SurfaceState, mouse: MouseEvent) -> bool 
 }
 
 fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
+    if state.queue_editing() {
+        if key.code == KeyCode::Esc
+            || (key.code == KeyCode::Char('c')
+                && key.modifiers == KeyModifiers::CONTROL
+                && state.composer().is_empty())
+        {
+            state.cancel_queue_edit();
+            return InputAction::DrainQueue;
+        }
+        if key.code == KeyCode::Enter && key.modifiers == KeyModifiers::NONE {
+            if state.composer().trim().is_empty() {
+                return InputAction::Notice("Queued follow-up cannot be empty".to_string());
+            }
+            state.save_queue_edit();
+            return InputAction::DrainQueue;
+        }
+        if key.code == KeyCode::Enter && !key.modifiers.is_empty() {
+            state.composer_state_mut().insert_char('\n');
+            state.refresh_composer_completions();
+            return InputAction::Redraw;
+        }
+    }
     if state.history().open {
         return history_popup::handle_key(state, key);
     }
@@ -459,6 +498,7 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
         Some(
             ActionId::CycleMode
             | ActionId::ShortcutsHelp
+            | ActionId::ToggleQueue
             | ActionId::FocusScrollback
             | ActionId::OpenTranscriptSearch
             | ActionId::FocusPrompt

@@ -17,6 +17,7 @@ use key::KeyShortcut;
 pub(crate) enum ActionId {
     CycleMode,
     ShortcutsHelp,
+    ToggleQueue,
     PageUp,
     PageDown,
     FocusScrollback,

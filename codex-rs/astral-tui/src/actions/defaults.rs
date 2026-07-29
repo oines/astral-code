@@ -43,6 +43,20 @@ pub(super) fn default_actions() -> Vec<ActionDef> {
              are the same definitions used to dispatch keys.",
         ),
         ActionDef::new(
+            ActionId::ToggleQueue,
+            "queue",
+            "Toggle prompt queue",
+            KeyShortcut::control(';'),
+            vec![KeyShortcut::control('\''), KeyShortcut::control('4')],
+            Category::ConversationActions,
+            When::Always,
+        )
+        .with_key_display("Ctrl+;")
+        .with_help(
+            "Shows or hides the queued follow-up pane. Enter queues while a turn \
+             is running; queued prompts run in order after the active turn.",
+        ),
+        ActionDef::new(
             ActionId::PageUp,
             "page up",
             "Scroll transcript up one page",

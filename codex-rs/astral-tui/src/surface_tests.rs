@@ -186,6 +186,7 @@ fn queued_follow_ups_surface_snapshot() {
     state.enqueue_follow_up(crate::PromptSubmission::text_only(
         "Summarize the result\nand mention any remaining failures",
     ));
+    state.toggle_queue_focus();
 
     insta::assert_snapshot!(render_at_size(&mut state, &session, 80, 24));
 }
