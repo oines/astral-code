@@ -1,0 +1,5 @@
+---
+source: astral-tui-scrollback/src/render_tests.rs
+expression: "render(item, DisplayMode::Expanded)"
+---
+◆ Thinking

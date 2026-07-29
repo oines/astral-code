@@ -58,22 +58,14 @@ impl PresentationBlock {
                     running: !matches!(stream, TimelineStream::None),
                 })
             }
-            ThreadItem::Reasoning {
-                summary, content, ..
-            } => {
+            ThreadItem::Reasoning { summary, .. } => {
                 let mut parts = summary.clone();
-                if parts.is_empty() {
-                    parts.clone_from(content);
-                }
                 if let TimelineStream::Reasoning {
                     summary: streamed_summary,
-                    content: streamed_content,
+                    ..
                 } = stream
                 {
                     append_stream_parts(&mut parts, streamed_summary);
-                    if parts.is_empty() {
-                        append_stream_parts(&mut parts, streamed_content);
-                    }
                 }
                 Some(Self::Thinking {
                     text: parts.join("\n"),
@@ -315,12 +307,8 @@ impl PresentationBlock {
                 text: text.clone(),
                 running: true,
             }),
-            TimelineStream::Reasoning { summary, content } => Some(Self::Thinking {
-                text: if summary.is_empty() {
-                    content.join("\n")
-                } else {
-                    summary.join("\n")
-                },
+            TimelineStream::Reasoning { summary, .. } => Some(Self::Thinking {
+                text: summary.join("\n"),
                 running: true,
             }),
             TimelineStream::Command {

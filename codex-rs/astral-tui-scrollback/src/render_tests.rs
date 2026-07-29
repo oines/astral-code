@@ -568,6 +568,17 @@ fn conversation_blocks_snapshot() {
 }
 
 #[test]
+fn raw_reasoning_stays_out_of_the_transcript_snapshot() {
+    let item = ThreadItem::Reasoning {
+        id: "reasoning-raw-only".to_string(),
+        summary: Vec::new(),
+        content: vec!["private chain of thought".to_string()],
+    };
+
+    assert_snapshot!(render(item, DisplayMode::Expanded));
+}
+
+#[test]
 fn wrapping_preserves_cjk_without_inserting_spaces() {
     let block = PresentationBlock::Assistant {
         text: "你好，我是 Astral，可以帮你读写代码。".to_string(),
