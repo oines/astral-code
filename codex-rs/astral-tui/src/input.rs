@@ -16,6 +16,9 @@ use crate::SlashInvocation;
 use crate::SurfaceActivity;
 use crate::SurfaceState;
 use crate::ThreadPickerAction;
+use crate::actions;
+use crate::actions::ActionId;
+use crate::actions::When;
 use crate::permission_picker::PermissionSelection;
 use crate::request_choice::RequestChoiceEvent;
 use crate::request_choice::cancel_response;
@@ -287,12 +290,11 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
     {
         return action;
     }
-    if key.code == KeyCode::BackTab
-        || (key.code == KeyCode::Tab && key.modifiers.contains(KeyModifiers::SHIFT))
-    {
+    let prompt_action = actions::lookup(&key, When::PromptFocused);
+    if prompt_action == Some(ActionId::CycleMode) {
         return InputAction::CycleMode;
     }
-    if key.code == KeyCode::Char('.') && key.modifiers.contains(KeyModifiers::CONTROL) {
+    if prompt_action == Some(ActionId::ShortcutsHelp) {
         return InputAction::OpenShortcuts;
     }
     if state.slash().open {
@@ -320,7 +322,7 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
             _ => {}
         }
     }
-    if key.code == KeyCode::Tab && key.modifiers == KeyModifiers::NONE && state.focus_scrollback() {
+    if prompt_action == Some(ActionId::FocusScrollback) && state.focus_scrollback() {
         return InputAction::Redraw;
     }
     if key.code == KeyCode::Up && key.modifiers == KeyModifiers::NONE && state.composer().is_empty()
@@ -328,8 +330,8 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
         state.open_history_browse();
         return InputAction::Redraw;
     }
-    match (key.code, key.modifiers) {
-        (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
+    match prompt_action {
+        Some(ActionId::PromptCancel) => {
             if matches!(state.activity(), SurfaceActivity::Working) {
                 InputAction::Interrupt
             } else if state.composer().is_empty() {
@@ -340,15 +342,11 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
                 InputAction::Redraw
             }
         }
-        (KeyCode::Char('d'), KeyModifiers::CONTROL) if state.composer().is_empty() => {
-            InputAction::Exit
-        }
-        (KeyCode::Char('o'), KeyModifiers::CONTROL) => InputAction::CopyLastResponse,
-        (KeyCode::PageUp, _) => InputAction::ScrollUp,
-        (KeyCode::PageDown, _) => InputAction::ScrollDown,
-        (KeyCode::Enter, modifiers)
-            if !modifiers.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) =>
-        {
+        Some(ActionId::ExitEmptyPrompt) if state.composer().is_empty() => InputAction::Exit,
+        Some(ActionId::CopyLastResponse) => InputAction::CopyLastResponse,
+        Some(ActionId::PageUp) => InputAction::ScrollUp,
+        Some(ActionId::PageDown) => InputAction::ScrollDown,
+        Some(ActionId::SendPrompt) => {
             if state.slash().active {
                 return match state.slash_invocation() {
                     Ok(Some(invocation)) => {
@@ -370,16 +368,53 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
                 InputAction::Submit(submission)
             }
         }
-        (KeyCode::Enter, _) => {
+        Some(ActionId::ExitEmptyPrompt) | None
+            if key.code == KeyCode::Enter
+                && key
+                    .modifiers
+                    .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) =>
+        {
             state.composer_state_mut().insert_char('\n');
             state.refresh_composer_completions();
             InputAction::Redraw
         }
-        _ if state.composer_state_mut().edit_key(key) => {
+        Some(ActionId::ExitEmptyPrompt) | None if state.composer_state_mut().edit_key(key) => {
             state.refresh_composer_completions();
             InputAction::Redraw
         }
-        _ => InputAction::None,
+        Some(
+            ActionId::CycleMode
+            | ActionId::ShortcutsHelp
+            | ActionId::FocusScrollback
+            | ActionId::OpenTranscriptSearch
+            | ActionId::FocusPrompt
+            | ActionId::PreviousTurn
+            | ActionId::NextTurn
+            | ActionId::NextResponse
+            | ActionId::PreviousResponse
+            | ActionId::GoToTop
+            | ActionId::GoToBottom
+            | ActionId::ScrollLineUp
+            | ActionId::ScrollLineDown
+            | ActionId::HalfPageUp
+            | ActionId::HalfPageDown
+            | ActionId::SelectNext
+            | ActionId::SelectPrevious
+            | ActionId::CollapseEntry
+            | ActionId::ExpandEntry
+            | ActionId::ToggleEntry
+            | ActionId::ToggleAllEntries
+            | ActionId::ToggleAllReasoning
+            | ActionId::ToggleRawMarkdown
+            | ActionId::CopyBlockContent
+            | ActionId::CopyBlockMetadata
+            | ActionId::NextLink
+            | ActionId::PreviousLink
+            | ActionId::OpenEntry
+            | ActionId::ScrollbackCancel,
+        )
+        | Some(ActionId::ExitEmptyPrompt)
+        | None => InputAction::None,
     }
 }
 

@@ -1,109 +1,104 @@
-use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
-use crossterm::event::KeyModifiers;
 
 use crate::InputAction;
 use crate::SurfaceActivity;
 use crate::SurfaceState;
+use crate::actions;
+use crate::actions::ActionId;
+use crate::actions::When;
 
 pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
     if state.handle_scrollback_search_key(key).is_some() {
         return InputAction::Redraw;
     }
-    match (key.code, key.modifiers) {
-        (KeyCode::Char('/'), KeyModifiers::NONE) => {
+    match actions::lookup(&key, When::ScrollbackFocused) {
+        Some(ActionId::OpenTranscriptSearch) => {
             if state.open_scrollback_search() {
                 InputAction::Redraw
             } else {
                 InputAction::None
             }
         }
-        (KeyCode::Tab, KeyModifiers::NONE) | (KeyCode::Char('i'), KeyModifiers::NONE) => {
+        Some(ActionId::FocusPrompt) => {
             state.focus_prompt();
             InputAction::Redraw
         }
-        (KeyCode::Char(' '), KeyModifiers::NONE) => {
-            state.focus_prompt();
-            InputAction::Redraw
-        }
-        (KeyCode::Char('H'), KeyModifiers::NONE | KeyModifiers::SHIFT)
-        | (KeyCode::Left, KeyModifiers::SHIFT) => {
+        Some(ActionId::PreviousTurn) => {
             state.previous_turn();
             InputAction::Redraw
         }
-        (KeyCode::Char('L'), KeyModifiers::NONE | KeyModifiers::SHIFT)
-        | (KeyCode::Right, KeyModifiers::SHIFT) => {
+        Some(ActionId::NextTurn) => {
             state.next_turn();
             InputAction::Redraw
         }
-        (KeyCode::Char('J'), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
+        Some(ActionId::NextResponse) => {
             state.next_response();
             InputAction::Redraw
         }
-        (KeyCode::Char('K'), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
+        Some(ActionId::PreviousResponse) => {
             state.previous_response();
             InputAction::Redraw
         }
-        (KeyCode::Char('g'), KeyModifiers::NONE) => {
+        Some(ActionId::GoToTop) => {
             state.goto_scrollback_top();
             InputAction::Redraw
         }
-        (KeyCode::Char('G'), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
+        Some(ActionId::GoToBottom) => {
             state.goto_scrollback_bottom();
             InputAction::Redraw
         }
-        (KeyCode::Char('k'), KeyModifiers::CONTROL) => {
+        Some(ActionId::ScrollLineUp) => {
             state.scroll_up(/* lines */ 1);
             InputAction::Redraw
         }
-        (KeyCode::Char('j'), KeyModifiers::CONTROL) => {
+        Some(ActionId::ScrollLineDown) => {
             state.scroll_down(/* lines */ 1);
             InputAction::Redraw
         }
-        (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
+        Some(ActionId::HalfPageUp) => {
             state.half_page_up();
             InputAction::Redraw
         }
-        (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
+        Some(ActionId::HalfPageDown) => {
             state.half_page_down();
             InputAction::Redraw
         }
-        (KeyCode::Down, _) | (KeyCode::Char('j'), KeyModifiers::NONE) => {
+        Some(ActionId::SelectNext) => {
             state.move_entry_selection(1);
             InputAction::Redraw
         }
-        (KeyCode::Up, _) | (KeyCode::Char('k'), KeyModifiers::NONE) => {
+        Some(ActionId::SelectPrevious) => {
             state.move_entry_selection(-1);
             InputAction::Redraw
         }
-        (KeyCode::Left, _) | (KeyCode::Char('h'), KeyModifiers::NONE) => {
+        Some(ActionId::CollapseEntry) => {
             state.collapse_selected_entry();
             InputAction::Redraw
         }
-        (KeyCode::Right, _) | (KeyCode::Char('l'), KeyModifiers::NONE) => {
+        Some(ActionId::ExpandEntry) => {
             state.expand_selected_entry();
             InputAction::Redraw
         }
-        (KeyCode::Char('e'), KeyModifiers::NONE) => {
+        Some(ActionId::ToggleEntry) => {
             state.toggle_selected_entry();
             InputAction::Redraw
         }
-        (KeyCode::Char('E'), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
+        Some(ActionId::ToggleAllEntries) => {
             state.toggle_all_entries();
             InputAction::Redraw
         }
-        (KeyCode::Char('e'), modifiers) if modifiers == KeyModifiers::CONTROL => {
+        Some(ActionId::ToggleAllReasoning) => {
             state.toggle_all_thinking();
             InputAction::Redraw
         }
-        (KeyCode::Char('r'), KeyModifiers::NONE) => {
+        Some(ActionId::ToggleRawMarkdown) => {
             if state.toggle_selected_raw() {
                 InputAction::Redraw
             } else {
                 InputAction::None
             }
         }
-        (KeyCode::Char('y'), KeyModifiers::NONE) => {
+        Some(ActionId::CopyBlockContent) => {
             state
                 .selected_copy_text()
                 .map_or(InputAction::None, |text| InputAction::CopyText {
@@ -111,27 +106,29 @@ pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction
                     notice: "Copied block content".to_string(),
                 })
         }
-        (KeyCode::Char('Y'), KeyModifiers::NONE | KeyModifiers::SHIFT) => state
-            .selected_copy_meta()
-            .map_or(InputAction::None, |text| InputAction::CopyText {
-                text,
-                notice: "Copied block metadata".to_string(),
-            }),
-        (KeyCode::Char('o'), KeyModifiers::NONE) => {
+        Some(ActionId::CopyBlockMetadata) => {
+            state
+                .selected_copy_meta()
+                .map_or(InputAction::None, |text| InputAction::CopyText {
+                    text,
+                    notice: "Copied block metadata".to_string(),
+                })
+        }
+        Some(ActionId::NextLink) => {
             if state.cycle_scrollback_link(true) {
                 InputAction::Redraw
             } else {
                 InputAction::None
             }
         }
-        (KeyCode::Char('O'), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
+        Some(ActionId::PreviousLink) => {
             if state.cycle_scrollback_link(false) {
                 InputAction::Redraw
             } else {
                 InputAction::None
             }
         }
-        (KeyCode::Enter, KeyModifiers::NONE) => {
+        Some(ActionId::OpenEntry) => {
             if let Some(target) = state.highlighted_scrollback_link() {
                 InputAction::OpenLink(target)
             } else if let Some(thread_id) = state.selected_subagent_thread_id() {
@@ -142,31 +139,24 @@ pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction
                 InputAction::None
             }
         }
-        (KeyCode::Char('f'), modifiers) if modifiers.contains(KeyModifiers::CONTROL) => {
-            if let Some(thread_id) = state.selected_subagent_thread_id() {
-                InputAction::OpenSubagent { thread_id }
-            } else if state.open_selected_entry() {
-                InputAction::Redraw
-            } else {
-                InputAction::None
-            }
-        }
-        (KeyCode::PageUp, _) => InputAction::ScrollUp,
-        (KeyCode::PageDown, _) => InputAction::ScrollDown,
-        (KeyCode::BackTab, _) => InputAction::CycleMode,
-        (KeyCode::Tab, modifiers) if modifiers.contains(KeyModifiers::SHIFT) => {
-            InputAction::CycleMode
-        }
-        (KeyCode::Char('.'), modifiers) if modifiers.contains(KeyModifiers::CONTROL) => {
-            InputAction::OpenShortcuts
-        }
-        (KeyCode::Char('c'), modifiers) if modifiers.contains(KeyModifiers::CONTROL) => {
+        Some(ActionId::PageUp) => InputAction::ScrollUp,
+        Some(ActionId::PageDown) => InputAction::ScrollDown,
+        Some(ActionId::CycleMode) => InputAction::CycleMode,
+        Some(ActionId::ShortcutsHelp) => InputAction::OpenShortcuts,
+        Some(ActionId::ScrollbackCancel) => {
             if matches!(state.activity(), SurfaceActivity::Working) {
                 InputAction::Interrupt
             } else {
                 InputAction::Exit
             }
         }
-        _ => InputAction::None,
+        Some(
+            ActionId::FocusScrollback
+            | ActionId::SendPrompt
+            | ActionId::PromptCancel
+            | ActionId::ExitEmptyPrompt
+            | ActionId::CopyLastResponse,
+        )
+        | None => InputAction::None,
     }
 }

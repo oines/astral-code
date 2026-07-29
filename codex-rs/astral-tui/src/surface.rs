@@ -917,7 +917,46 @@ pub(crate) fn render_surface_with_view(
         .render(layout.prompt, buffer, theme)
     };
 
-    let default_hints = [("Shift+Tab", "mode"), ("Ctrl+.", "shortcuts")];
+    let cycle_mode = crate::actions::definition(
+        crate::actions::ActionId::CycleMode,
+        crate::actions::When::PromptFocused,
+    );
+    let shortcuts_help = crate::actions::definition(
+        crate::actions::ActionId::ShortcutsHelp,
+        crate::actions::When::PromptFocused,
+    );
+    let focus_prompt = crate::actions::definition(
+        crate::actions::ActionId::FocusPrompt,
+        crate::actions::When::ScrollbackFocused,
+    );
+    let open_entry = crate::actions::definition(
+        crate::actions::ActionId::OpenEntry,
+        crate::actions::When::ScrollbackFocused,
+    );
+    let toggle_entry = crate::actions::definition(
+        crate::actions::ActionId::ToggleEntry,
+        crate::actions::When::ScrollbackFocused,
+    );
+    let toggle_reasoning = crate::actions::definition(
+        crate::actions::ActionId::ToggleAllReasoning,
+        crate::actions::When::ScrollbackFocused,
+    );
+    let copy_content = crate::actions::definition(
+        crate::actions::ActionId::CopyBlockContent,
+        crate::actions::When::ScrollbackFocused,
+    );
+    let copy_metadata = crate::actions::definition(
+        crate::actions::ActionId::CopyBlockMetadata,
+        crate::actions::When::ScrollbackFocused,
+    );
+    let next_link = crate::actions::definition(
+        crate::actions::ActionId::NextLink,
+        crate::actions::When::ScrollbackFocused,
+    );
+    let default_hints = [
+        (cycle_mode.hint_key(), cycle_mode.label),
+        (shortcuts_help.hint_key(), shortcuts_help.label),
+    ];
     let read_only_hints = [
         ("Esc/q", "back"),
         ("↑/↓", "navigate"),
@@ -931,20 +970,20 @@ pub(crate) fn render_surface_with_view(
     };
     let thinking_action = state.scrollback.thinking_fold_label();
     let group_hints = [
-        ("Enter", fold_action),
-        ("Ctrl+e", thinking_action),
-        ("Tab", "prompt"),
+        (open_entry.hint_key(), fold_action),
+        (toggle_reasoning.hint_key(), thinking_action),
+        (focus_prompt.hint_key(), focus_prompt.label),
     ];
     let entry_hints = [
-        ("e", fold_action),
-        ("Enter", "open"),
-        ("Ctrl+e", thinking_action),
-        ("Tab", "prompt"),
+        (toggle_entry.hint_key(), fold_action),
+        (open_entry.hint_key(), open_entry.label),
+        (toggle_reasoning.hint_key(), thinking_action),
+        (focus_prompt.hint_key(), focus_prompt.label),
     ];
     let plain_entry_hints = [
-        ("Enter", "open"),
-        ("Ctrl+e", thinking_action),
-        ("Tab", "prompt"),
+        (open_entry.hint_key(), open_entry.label),
+        (toggle_reasoning.hint_key(), thinking_action),
+        (focus_prompt.hint_key(), focus_prompt.label),
     ];
     let mut scrollback_hints = if state.scrollback.selected_is_group_header() {
         group_hints.to_vec()
@@ -954,7 +993,7 @@ pub(crate) fn render_surface_with_view(
         entry_hints.to_vec()
     };
     if state.scrollback.has_visible_links() {
-        scrollback_hints.insert(0, ("o/O", "links"));
+        scrollback_hints.insert(0, (next_link.hint_key(), "links"));
     }
     if !state.scrollback.selected_is_group_header() {
         let insert_at = scrollback_hints
@@ -962,14 +1001,14 @@ pub(crate) fn render_surface_with_view(
             .position(|(key, _)| *key == "Ctrl+e")
             .unwrap_or(scrollback_hints.len());
         if state.selected_supports_copy() {
-            scrollback_hints.insert(insert_at, ("y", "copy"));
+            scrollback_hints.insert(insert_at, (copy_content.hint_key(), copy_content.label));
         }
         if let Some(label) = state.selected_copy_meta_label() {
             let insert_at = scrollback_hints
                 .iter()
                 .position(|(key, _)| *key == "Ctrl+e")
                 .unwrap_or(scrollback_hints.len());
-            scrollback_hints.insert(insert_at, ("Y", label));
+            scrollback_hints.insert(insert_at, (copy_metadata.hint_key(), label));
         }
     }
     let mention_hints = [("↑/↓", "navigate"), ("Tab", "select"), ("Esc", "close")];
