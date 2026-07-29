@@ -3,6 +3,7 @@ mod block_viewer;
 mod content_actions;
 mod history;
 mod mentions;
+mod overlay;
 mod plan_review;
 mod pointer;
 mod requests;
@@ -86,6 +87,8 @@ use crate::view::render_transcript;
 use self::pointer::SurfacePointerState;
 use self::transcript_cache::TranscriptCache;
 use self::transcript_cache::TranscriptCacheKey;
+
+pub(crate) use self::overlay::ActiveOverlay;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SurfaceActivity {
@@ -958,8 +961,11 @@ pub(crate) fn render_surface_with_view(
     } else {
         &search_browsing_hints
     };
+    let overlay_hints: &[(&str, &str)] = &[];
     ShortcutsBar {
-        hints: if request_pane.is_some() && !request_focused {
+        hints: if state.active_overlay().is_some() {
+            overlay_hints
+        } else if request_pane.is_some() && !request_focused {
             &scrollback_hints
         } else if let Some(pane) = request_pane {
             pane.shortcuts()

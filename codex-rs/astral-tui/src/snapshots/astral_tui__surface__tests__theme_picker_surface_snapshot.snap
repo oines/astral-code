@@ -23,5 +23,3 @@ expression: "render_at_size(&mut state, &session, 80, 24)"
   ╭─────────────│   ↑/↓ preview · Enter select · Esc cancel    │─────────────╮
   │ ❯           └──────────────────────────────────────────────┘             │
   ╰──────────────────────────────────────────── claude-sonnet-4 · workspace ─╯
-
-  Shift+Tab:mode  │  Ctrl+.:shortcuts

@@ -21,6 +21,7 @@ use crate::request_choice::RequestChoiceEvent;
 use crate::request_choice::cancel_response;
 use crate::request_choice::is_simple_request;
 use crate::request_choice::response_for;
+use crate::surface::ActiveOverlay;
 
 mod block_viewer;
 mod completion_popup;
@@ -74,8 +75,8 @@ pub fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
     if key.kind == KeyEventKind::Release {
         return InputAction::None;
     }
-    if state.block_viewer().is_some() {
-        return block_viewer::handle_key(state, key);
+    if let Some(overlay) = state.active_overlay() {
+        return handle_overlay_key(state, overlay, key);
     }
     if let Some(request) = state.pending_requests().front().cloned() {
         state.sync_request_states();
@@ -83,53 +84,6 @@ pub fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
             return scrollback::handle_key(state, key);
         }
         return handle_request_key(state, request, key);
-    }
-    if state.thread_picker().is_some() {
-        return pickers::handle_thread_picker_key(state, key);
-    }
-    if state.permission_picker().is_some() {
-        return pickers::handle_permission_picker_key(state, key);
-    }
-    if state.theme_picker().is_some() {
-        return pickers::handle_theme_picker_key(state, key);
-    }
-    if state.modal().is_some() {
-        if key.code == KeyCode::Esc
-            || (key.code == KeyCode::Char('.') && key.modifiers.contains(KeyModifiers::CONTROL))
-        {
-            state.close_modal();
-            return InputAction::Redraw;
-        }
-        let Some(modal) = state.modal_mut() else {
-            return InputAction::None;
-        };
-        return match key.code {
-            KeyCode::Up => {
-                modal.scroll_by(-1);
-                InputAction::Redraw
-            }
-            KeyCode::Down => {
-                modal.scroll_by(1);
-                InputAction::Redraw
-            }
-            KeyCode::PageUp => {
-                modal.scroll_by(-10);
-                InputAction::Redraw
-            }
-            KeyCode::PageDown => {
-                modal.scroll_by(10);
-                InputAction::Redraw
-            }
-            KeyCode::Home => {
-                modal.scroll_to_start();
-                InputAction::Redraw
-            }
-            KeyCode::End => {
-                modal.scroll_to_end();
-                InputAction::Redraw
-            }
-            _ => InputAction::None,
-        };
     }
     if state.plan_review().is_some() && !state.scrollback_focused() {
         return plan_review::handle_key(state, key);
@@ -144,24 +98,14 @@ pub fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
 }
 
 pub fn handle_paste(state: &mut SurfaceState, text: &str) -> InputAction {
-    if state.block_viewer().is_some() {
-        return block_viewer::handle_paste(state, text);
+    if let Some(overlay) = state.active_overlay() {
+        return handle_overlay_paste(state, overlay, text);
     }
     if state.paste_scrollback_search(text).is_some() {
         return InputAction::Redraw;
     }
     if state.history().open {
         return history_popup::handle_paste(state, text);
-    }
-    if state.permission_picker().is_some()
-        || state.theme_picker().is_some()
-        || state.modal().is_some()
-    {
-        return InputAction::None;
-    }
-    if let Some(picker) = state.thread_picker_mut() {
-        picker.paste(text);
-        return InputAction::Redraw;
     }
     let user_input = state
         .pending_requests()
@@ -205,8 +149,8 @@ pub fn handle_paste(state: &mut SurfaceState, text: &str) -> InputAction {
 }
 
 pub(crate) fn handle_mouse(state: &mut SurfaceState, mouse: MouseEvent) -> InputAction {
-    if state.block_viewer().is_some() {
-        return block_viewer::handle_mouse(state, mouse);
+    if let Some(overlay) = state.active_overlay() {
+        return handle_overlay_mouse(state, overlay, mouse);
     }
     if state.pending_requests().front().is_some() && scrollback_owns_pointer(state, mouse) {
         return InputAction::None;
@@ -240,18 +184,6 @@ pub(crate) fn handle_mouse(state: &mut SurfaceState, mouse: MouseEvent) -> Input
         let schema = requested_schema.clone();
         return mcp_form::handle_mouse(state, request, &schema, mouse);
     }
-    if state.thread_picker().is_some() {
-        return pickers::handle_thread_picker_mouse(state, mouse);
-    }
-    if state.permission_picker().is_some() {
-        return pickers::handle_permission_picker_mouse(state, mouse);
-    }
-    if state.theme_picker().is_some() {
-        return pickers::handle_theme_picker_mouse(state, mouse);
-    }
-    if state.modal().is_some() {
-        return pickers::handle_info_modal_mouse(state, mouse);
-    }
     if scrollback_owns_pointer(state, mouse) {
         return InputAction::None;
     }
@@ -279,6 +211,54 @@ pub(crate) fn handle_mouse(state: &mut SurfaceState, mouse: MouseEvent) -> Input
         return InputAction::Redraw;
     }
     InputAction::None
+}
+
+fn handle_overlay_key(
+    state: &mut SurfaceState,
+    overlay: ActiveOverlay,
+    key: KeyEvent,
+) -> InputAction {
+    match overlay {
+        ActiveOverlay::BlockViewer => block_viewer::handle_key(state, key),
+        ActiveOverlay::ThemePicker => pickers::handle_theme_picker_key(state, key),
+        ActiveOverlay::PermissionPicker => pickers::handle_permission_picker_key(state, key),
+        ActiveOverlay::ThreadPicker => pickers::handle_thread_picker_key(state, key),
+        ActiveOverlay::InfoModal => pickers::handle_info_modal_key(state, key),
+    }
+}
+
+fn handle_overlay_paste(
+    state: &mut SurfaceState,
+    overlay: ActiveOverlay,
+    text: &str,
+) -> InputAction {
+    match overlay {
+        ActiveOverlay::BlockViewer => block_viewer::handle_paste(state, text),
+        ActiveOverlay::ThreadPicker => {
+            let Some(picker) = state.thread_picker_mut() else {
+                return InputAction::None;
+            };
+            picker.paste(text);
+            InputAction::Redraw
+        }
+        ActiveOverlay::ThemePicker | ActiveOverlay::PermissionPicker | ActiveOverlay::InfoModal => {
+            InputAction::None
+        }
+    }
+}
+
+fn handle_overlay_mouse(
+    state: &mut SurfaceState,
+    overlay: ActiveOverlay,
+    mouse: MouseEvent,
+) -> InputAction {
+    match overlay {
+        ActiveOverlay::BlockViewer => block_viewer::handle_mouse(state, mouse),
+        ActiveOverlay::ThemePicker => pickers::handle_theme_picker_mouse(state, mouse),
+        ActiveOverlay::PermissionPicker => pickers::handle_permission_picker_mouse(state, mouse),
+        ActiveOverlay::ThreadPicker => pickers::handle_thread_picker_mouse(state, mouse),
+        ActiveOverlay::InfoModal => pickers::handle_info_modal_mouse(state, mouse),
+    }
 }
 
 fn scrollback_owns_pointer(state: &mut SurfaceState, mouse: MouseEvent) -> bool {

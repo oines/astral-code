@@ -446,6 +446,34 @@ fn theme_picker_surface_snapshot() {
 }
 
 #[test]
+fn visible_overlay_owns_keyboard_input_snapshot() {
+    let session = session_state();
+    let mut state = SurfaceState::from_session(&session);
+    state.pending_requests_mut().note(request(json!({
+        "method": "item/commandExecution/requestApproval",
+        "id": "request-behind-overlay",
+        "params": {
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "itemId": "call-behind-overlay",
+            "startedAtMs": 100,
+            "reason": "request arrived while the theme picker was open",
+            "command": "just test",
+            "cwd": "/workspace"
+        }
+    })));
+    state.open_theme_picker();
+
+    assert_eq!(
+        handle_key(&mut state, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),),
+        InputAction::Redraw
+    );
+    assert_eq!(state.theme_id(), AstralThemeId::Day);
+    assert_eq!(state.pending_requests().len(), 1);
+    insta::assert_snapshot!(render_at_size(&mut state, &session, 80, 24));
+}
+
+#[test]
 fn timeline_rail_surface_snapshot() {
     let mut session = session_state();
     let second_started_at =

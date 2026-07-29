@@ -1,0 +1,25 @@
+---
+source: astral-tui/src/surface_tests.rs
+expression: "render_at_size(&mut state, &session, 80, 24)"
+---
+
+  ⎇ main  /workspace
+
+
+  › inspect this┌─ Choose Astral theme ────────────────────[×]─┐
+                │                                              │
+                │    Astral Night (current)                    │
+  I’m tracing th│      Dark palette with violet accents        │
+                │  ❯ Astral Day                                │
+                │      Light palette for bright environments   │
+                │    Terminal                                  │
+                │      Use terminal foreground and background  │
+                │                                              │
+  ┃             │                                              │
+  ┃  Allow comma│                                              │
+  ┃  $ just test│                                              │
+  ┃  Reason · re│                                              │
+  ┃             │                                              │
+  ┃  1 (●) Allow│   ↑/↓ preview · Enter select · Esc cancel    │
+  ┃  2 (○) Allow└──────────────────────────────────────────────┘
+  ┃  3 (○) Deny

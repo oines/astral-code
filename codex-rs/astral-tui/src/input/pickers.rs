@@ -1,4 +1,6 @@
+use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
+use crossterm::event::KeyModifiers;
 use crossterm::event::MouseEvent;
 
 use super::InputAction;
@@ -15,6 +17,45 @@ use crate::thread_picker::PickerInput;
 use crate::thread_picker::PickerState;
 use crate::thread_picker::handle_key as handle_thread_key;
 use crate::thread_picker::handle_mouse as handle_thread_mouse_event;
+
+pub(super) fn handle_info_modal_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
+    if key.code == KeyCode::Esc
+        || (key.code == KeyCode::Char('.') && key.modifiers.contains(KeyModifiers::CONTROL))
+    {
+        state.close_modal();
+        return InputAction::Redraw;
+    }
+    let Some(modal) = state.modal_mut() else {
+        return InputAction::None;
+    };
+    match key.code {
+        KeyCode::Up => {
+            modal.scroll_by(-1);
+            InputAction::Redraw
+        }
+        KeyCode::Down => {
+            modal.scroll_by(1);
+            InputAction::Redraw
+        }
+        KeyCode::PageUp => {
+            modal.scroll_by(-10);
+            InputAction::Redraw
+        }
+        KeyCode::PageDown => {
+            modal.scroll_by(10);
+            InputAction::Redraw
+        }
+        KeyCode::Home => {
+            modal.scroll_to_start();
+            InputAction::Redraw
+        }
+        KeyCode::End => {
+            modal.scroll_to_end();
+            InputAction::Redraw
+        }
+        _ => InputAction::None,
+    }
+}
 
 pub(super) fn handle_theme_picker_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
     let original = state.theme_picker().map(ThemePickerState::original);

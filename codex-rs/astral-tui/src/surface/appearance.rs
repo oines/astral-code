@@ -3,6 +3,7 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 
+use super::ActiveOverlay;
 use super::SurfaceState;
 use crate::permission_picker::render_picker as render_permission_picker;
 use crate::theme_picker::ThemePickerState;
@@ -117,32 +118,51 @@ pub(super) fn render_overlay(
     buffer: &mut Buffer,
     theme: AstralTheme,
 ) -> bool {
-    if state.block_viewer().is_some() {
-        let Some((block, is_running)) = state.current_block_viewer_entry() else {
-            state.close_block_viewer();
-            return false;
-        };
-        let text_mode = state.block_viewer_text_mode();
-        let Some(viewer) = state.block_viewer_mut() else {
-            return false;
-        };
-        BlockViewerPane {
-            state: viewer,
-            block: &block,
-            text_mode,
-            is_running,
-        }
-        .render(area, buffer, theme);
-    } else if let Some(picker) = &mut state.theme_picker {
-        render_theme_picker(picker, area, buffer, theme);
-    } else if let Some(picker) = &mut state.permission_picker {
-        render_permission_picker(picker, area, buffer, theme);
-    } else if let Some(picker) = &mut state.thread_picker {
-        render_thread_picker(picker, area, buffer, theme);
-    } else if let Some(modal) = &mut state.modal {
-        InfoModal { state: modal }.render(area, buffer, theme);
-    } else {
+    let Some(overlay) = state.active_overlay() else {
         return false;
+    };
+    match overlay {
+        ActiveOverlay::BlockViewer => {
+            let Some((block, is_running)) = state.current_block_viewer_entry() else {
+                state.close_block_viewer();
+                return render_overlay(state, area, buffer, theme);
+            };
+            let text_mode = state.block_viewer_text_mode();
+            let Some(viewer) = state.block_viewer_mut() else {
+                return false;
+            };
+            BlockViewerPane {
+                state: viewer,
+                block: &block,
+                text_mode,
+                is_running,
+            }
+            .render(area, buffer, theme);
+        }
+        ActiveOverlay::ThemePicker => {
+            let Some(picker) = &mut state.theme_picker else {
+                return false;
+            };
+            render_theme_picker(picker, area, buffer, theme);
+        }
+        ActiveOverlay::PermissionPicker => {
+            let Some(picker) = &mut state.permission_picker else {
+                return false;
+            };
+            render_permission_picker(picker, area, buffer, theme);
+        }
+        ActiveOverlay::ThreadPicker => {
+            let Some(picker) = &mut state.thread_picker else {
+                return false;
+            };
+            render_thread_picker(picker, area, buffer, theme);
+        }
+        ActiveOverlay::InfoModal => {
+            let Some(modal) = &mut state.modal else {
+                return false;
+            };
+            InfoModal { state: modal }.render(area, buffer, theme);
+        }
     }
     true
 }
