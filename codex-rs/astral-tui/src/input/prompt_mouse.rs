@@ -19,5 +19,9 @@ pub(super) fn handle(state: &mut SurfaceState, mouse: MouseEvent) -> InputAction
             text,
             notice: "Copied prompt selection".to_string(),
         },
+        ComposerMouseAction::OpenImage(image) => {
+            state.open_local_image(image);
+            InputAction::Redraw
+        }
     }
 }

@@ -132,6 +132,17 @@ impl ComposerElement {
 }
 
 impl LocalImage {
+    pub(crate) fn from_path(path: PathBuf, display_number: usize) -> Self {
+        let dimensions = image::image_dimensions(&path).ok();
+        let byte_len = std::fs::metadata(&path).ok().map(|metadata| metadata.len());
+        Self {
+            path,
+            display_number,
+            dimensions,
+            byte_len,
+        }
+    }
+
     pub(crate) fn placeholder(&self) -> String {
         format!("[Image #{}]", self.display_number)
     }

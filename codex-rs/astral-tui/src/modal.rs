@@ -125,6 +125,7 @@ pub(crate) struct ModalState {
     pub(crate) rows: Vec<ModalRow>,
     pub(crate) scroll_offset: usize,
     pub(crate) pointer: ModalPointerState,
+    pub(crate) open_target: Option<crate::LinkTarget>,
 }
 
 impl ModalState {
@@ -134,6 +135,21 @@ impl ModalState {
             rows,
             scroll_offset: 0,
             pointer: ModalPointerState::default(),
+            open_target: None,
+        }
+    }
+
+    pub(crate) fn openable_info(
+        title: impl Into<String>,
+        rows: Vec<ModalRow>,
+        target: crate::LinkTarget,
+    ) -> Self {
+        Self {
+            title: title.into(),
+            rows,
+            scroll_offset: 0,
+            pointer: ModalPointerState::default(),
+            open_target: Some(target),
         }
     }
 

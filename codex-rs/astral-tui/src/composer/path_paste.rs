@@ -42,6 +42,21 @@ impl ComposerState {
         self.local_image_at_position(self.cursor)
     }
 
+    pub(crate) fn local_image_for_preview(&self) -> Option<LocalImage> {
+        self.local_image_at_position(self.cursor).or_else(|| {
+            self.elements.iter().find_map(|element| {
+                let image = element.local_image_data()?;
+                if !element.matches_text(&self.text) {
+                    return None;
+                }
+                let immediately_after = element.range.end == self.cursor
+                    || (element.range.end.saturating_add(1) == self.cursor
+                        && self.text.get(element.range.end..self.cursor) == Some(" "));
+                immediately_after.then(|| image.clone())
+            })
+        })
+    }
+
     pub(super) fn local_image_at_position(&self, position: usize) -> Option<LocalImage> {
         self.elements.iter().find_map(|element| {
             (position >= element.range.start
@@ -202,14 +217,12 @@ fn read_image(path: &Path) -> Option<LocalImage> {
     if !IMAGE_EXTENSIONS.contains(&extension.as_str()) || !path.is_file() {
         return None;
     }
-    let dimensions = image::image_dimensions(path).ok()?;
-    let byte_len = std::fs::metadata(path).ok().map(|metadata| metadata.len());
-    Some(LocalImage {
-        path: std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()),
-        display_number: 0,
-        dimensions: Some(dimensions),
-        byte_len,
-    })
+    let image = LocalImage::from_path(
+        std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()),
+        0,
+    );
+    image.dimensions?;
+    Some(image)
 }
 
 fn token_to_path(token: &str) -> Option<PathBuf> {

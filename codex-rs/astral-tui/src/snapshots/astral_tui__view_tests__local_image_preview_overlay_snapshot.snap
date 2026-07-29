@@ -1,0 +1,16 @@
+---
+source: astral-tui/src/view_tests.rs
+expression: buffer_text(&buffer)
+---
+
+ Earlier transcript content
+ stays visible behind the preview
+
+
+
+        ╭────────────────── Image #2 ──────────────────╮
+        │Format: PNG                                   │
+        │Dimensions: 1440 × 900                        │
+        │Size: 1.2 MB                                  │
+        │Path: …roject/screenshots/design-reference.png│
+        ╰──────────────────────────────────────────────╯

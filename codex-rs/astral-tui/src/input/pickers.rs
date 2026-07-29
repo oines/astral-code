@@ -25,6 +25,13 @@ pub(super) fn handle_info_modal_key(state: &mut SurfaceState, key: KeyEvent) -> 
         state.close_modal();
         return InputAction::Redraw;
     }
+    if key.code == KeyCode::Enter {
+        let target = state.modal().and_then(|modal| modal.open_target.clone());
+        if let Some(target) = target {
+            state.close_modal();
+            return InputAction::OpenLink(target);
+        }
+    }
     let Some(modal) = state.modal_mut() else {
         return InputAction::None;
     };

@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use super::view::AgentViewLayout;
 use super::view::AgentViewLayoutInput;
 use super::view::AstralTheme;
+use super::view::ImagePreviewOverlay;
 use super::view::LayoutConfig;
 use super::view::PaneHeights;
 use super::view::PlanReviewPane;
@@ -227,6 +228,25 @@ fn local_image_chip_prompt_snapshot() {
         buffer_text(&buffer),
         selection_mask(&buffer, theme.panel_selected)
     ));
+}
+
+#[test]
+fn local_image_preview_overlay_snapshot() {
+    let theme = AstralTheme::default();
+    let area = Rect::new(0, 0, 64, 12);
+    let mut buffer = Buffer::empty(area);
+    buffer.set_string(1, 1, "Earlier transcript content", Color::Reset);
+    buffer.set_string(1, 2, "stays visible behind the preview", Color::Reset);
+    let image = LocalImage {
+        path: PathBuf::from("/Users/astral/project/screenshots/design-reference.png"),
+        display_number: 2,
+        dimensions: Some((1440, 900)),
+        byte_len: Some(1_245_000),
+    };
+
+    ImagePreviewOverlay { image: &image }.render(area, &mut buffer, theme);
+
+    insta::assert_snapshot!(buffer_text(&buffer));
 }
 
 #[test]

@@ -13,6 +13,7 @@ use crossterm::event::MouseEvent;
 use crossterm::event::MouseEventKind;
 
 use super::ComposerState;
+use super::LocalImage;
 use super::line_end;
 use super::line_start;
 use super::previous_boundary;
@@ -57,6 +58,7 @@ pub(crate) enum ComposerMouseAction {
     Nothing,
     Redraw,
     Copy(String),
+    OpenImage(LocalImage),
 }
 
 impl ComposerState {
@@ -96,6 +98,9 @@ impl ComposerState {
                     };
                 };
                 match click_count {
+                    2 if let Some(image) = self.local_image_at_position(position) => {
+                        ComposerMouseAction::OpenImage(image)
+                    }
                     2 if self.expand_paste_at_position(position) => ComposerMouseAction::Redraw,
                     2 => {
                         if let Some(start) = self.element_start_at(position) {

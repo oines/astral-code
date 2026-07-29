@@ -354,6 +354,12 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
     }
     if prompt_action == Some(ActionId::SendPrompt)
         && !state.slash().active
+        && state.open_composer_image_at_cursor()
+    {
+        return InputAction::Redraw;
+    }
+    if prompt_action == Some(ActionId::SendPrompt)
+        && !state.slash().active
         && state.composer_state_mut().expand_paste_at_cursor()
     {
         state.refresh_composer_completions();

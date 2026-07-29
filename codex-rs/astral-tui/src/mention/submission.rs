@@ -153,12 +153,7 @@ impl PromptSubmission {
                 };
                 image_elements.push(ComposerElement::local_image(
                     range,
-                    LocalImage {
-                        path,
-                        display_number,
-                        dimensions: None,
-                        byte_len: None,
-                    },
+                    LocalImage::from_path(path, display_number),
                 ));
             }
         }

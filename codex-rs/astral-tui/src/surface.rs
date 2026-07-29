@@ -1,4 +1,5 @@
 mod appearance;
+mod attachments;
 mod block_viewer;
 mod content_actions;
 mod history;
@@ -63,6 +64,7 @@ use crate::view::AstralThemeId;
 use crate::view::ColorLevel;
 use crate::view::EntryChromeState;
 use crate::view::HistoryMenu;
+use crate::view::ImagePreviewOverlay;
 use crate::view::LayoutConfig;
 use crate::view::MentionMenu;
 use crate::view::PaneHeights;
@@ -1115,6 +1117,15 @@ pub(crate) fn render_surface_with_view(
     state.request_choice.observe_rows(choice_hit_rows);
     state.request_user_input.observe_rows(user_input_hit_rows);
     state.mcp_form.observe_rows(mcp_form_hit_rows);
+    if prompt_focused
+        && !has_request
+        && plan_review.is_none()
+        && completion_height == 0
+        && state.active_overlay().is_none()
+        && let Some(image) = state.composer_image_for_preview()
+    {
+        ImagePreviewOverlay { image: &image }.render(scrollback_area, buffer, theme);
+    }
     if appearance::render_overlay(state, area, buffer, theme) {
         None
     } else if search_cursor.is_some() {

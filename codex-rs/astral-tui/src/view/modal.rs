@@ -66,7 +66,11 @@ pub(crate) struct InfoModal<'a> {
 
 impl InfoModal<'_> {
     pub(crate) fn render(self, area: Rect, buffer: &mut Buffer, theme: AstralTheme) {
-        let footer = if self.state.rows.len() > 10 {
+        let footer = if self.state.open_target.is_some() && self.state.rows.len() > 10 {
+            "Enter open · ↑/↓ scroll · Esc close"
+        } else if self.state.open_target.is_some() {
+            "Enter open · Esc close"
+        } else if self.state.rows.len() > 10 {
             "↑/↓ scroll · Esc close"
         } else {
             "Esc close"
