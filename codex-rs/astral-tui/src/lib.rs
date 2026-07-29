@@ -9,6 +9,7 @@ mod actions;
 mod block_viewer;
 mod client_tools;
 mod clipboard;
+mod command_palette;
 mod composer;
 mod conversation;
 mod ecosystem;

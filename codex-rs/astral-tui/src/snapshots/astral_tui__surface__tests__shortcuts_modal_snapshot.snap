@@ -11,14 +11,14 @@ expression: "render_at_size(&mut state, &session, 80, 24)"
             │  Search: / to filter                                 │
   I’m tracin│  ──────────────────────────────────────────────────  │
             │  ▾ Getting started                                   │
+            │    Ctrl+p           Search commands and actions      │
             │    Ctrl+. / Ctrl+x  Keyboard shortcuts               │
             │    Tab              Focus transcript                 │
             │    Tab / i / Space  Focus prompt                     │
             │  ▸ Input                                             │
             │  ▸ Conversation navigation                           │
             │  ▸ Conversation actions                              │
-            │  ▸ Session                                           │
-  ◇ Working │                                                      │
+  ◇ Working │  ▸ Session                                           │
             │                                                      │
   ╭─────────│    ↑/↓ nav · e expand · Enter details · Esc close    │─────────╮
   │ ❯       └──────────────────────────────────────────────────────┘         │

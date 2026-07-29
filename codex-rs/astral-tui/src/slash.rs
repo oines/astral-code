@@ -45,6 +45,15 @@ enum Args {
     Required(&'static str),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SlashPaletteEntry {
+    pub(crate) command: SlashCommandId,
+    pub(crate) name: &'static str,
+    pub(crate) description: &'static str,
+    pub(crate) insert_text: String,
+    pub(crate) requires_input: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SlashCommandState {
     Idle,
@@ -282,6 +291,23 @@ pub struct SlashController {
 impl SlashController {
     pub fn snapshot(&self) -> &SlashSnapshot {
         &self.snapshot
+    }
+
+    pub(crate) fn palette_entries(&self, state: SlashCommandState) -> Vec<SlashPaletteEntry> {
+        COMMANDS
+            .iter()
+            .filter(|spec| spec.availability.allows(state))
+            .map(|spec| SlashPaletteEntry {
+                command: spec.id,
+                name: spec.name,
+                description: spec.description,
+                insert_text: match spec.args {
+                    Args::None => format!("/{}", spec.name),
+                    Args::Optional(_) | Args::Required(_) => format!("/{} ", spec.name),
+                },
+                requires_input: matches!(spec.args, Args::Required(_)),
+            })
+            .collect()
     }
 
     pub fn refresh(&mut self, text: &str, state: SlashCommandState) {

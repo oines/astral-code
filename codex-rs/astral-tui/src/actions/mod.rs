@@ -15,6 +15,7 @@ use key::KeyShortcut;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum ActionId {
+    CommandPalette,
     CycleMode,
     ShortcutsHelp,
     ToggleQueue,

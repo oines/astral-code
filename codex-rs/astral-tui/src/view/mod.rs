@@ -7,6 +7,7 @@
 mod block_viewer;
 mod chrome;
 mod color_support;
+mod command_palette;
 mod completion_menu;
 mod entry_chrome;
 mod entry_content;
@@ -43,6 +44,7 @@ pub(crate) use chrome::ShortcutsBar;
 pub(crate) use chrome::StatusBar;
 pub(crate) use chrome::prompt_height;
 pub(crate) use color_support::ColorLevel;
+pub(crate) use command_palette::CommandPalette;
 pub(crate) use completion_menu::CompletionMenuFrame;
 pub(crate) use entry_chrome::EntryChromeState;
 pub(crate) use entry_chrome::render_entry_chrome;

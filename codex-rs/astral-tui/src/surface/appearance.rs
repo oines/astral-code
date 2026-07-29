@@ -21,6 +21,7 @@ use crate::view::AstralTheme;
 use crate::view::AstralThemeId;
 use crate::view::BlockViewerPane;
 use crate::view::ColorLevel;
+use crate::view::CommandPalette;
 use crate::view::FileViewerPane;
 use crate::view::InfoModal;
 use crate::view::ShortcutHelp;
@@ -169,6 +170,12 @@ pub(super) fn render_overlay(
                 return false;
             };
             render_thread_picker(picker, area, buffer, theme);
+        }
+        ActiveOverlay::CommandPalette => {
+            let Some(palette) = &mut state.command_palette else {
+                return false;
+            };
+            CommandPalette { state: palette }.render(area, buffer, theme);
         }
         ActiveOverlay::ShortcutHelp => {
             let Some(shortcuts) = &mut state.shortcut_help else {

@@ -12,6 +12,21 @@ pub(super) fn default_actions() -> Vec<ActionDef> {
     let shift_tab = shift_tab_keys();
     vec![
         ActionDef::new(
+            ActionId::CommandPalette,
+            "commands",
+            "Search commands and actions",
+            KeyShortcut::control('p'),
+            Vec::new(),
+            Category::GettingStarted,
+            When::Always,
+        )
+        .with_key_display("Ctrl+P")
+        .with_help(
+            "Opens Astral's searchable command palette without changing the current draft. \
+             Ctrl+P works from the prompt or transcript; ? also opens it while the transcript \
+             is focused.",
+        ),
+        ActionDef::new(
             ActionId::CycleMode,
             "mode",
             "Cycle collaboration mode",

@@ -486,6 +486,40 @@ fn shortcuts_toggle_is_global() {
 }
 
 #[test]
+fn command_palette_preserves_the_draft_while_collecting_required_arguments() {
+    let mut state = SurfaceState::new("thread-1");
+    state.set_composer("keep this draft");
+
+    assert_eq!(
+        handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL),
+        ),
+        InputAction::Redraw
+    );
+    assert_eq!(handle_paste(&mut state, "rename"), InputAction::Redraw);
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Enter)),
+        InputAction::Redraw
+    );
+    assert_eq!(state.composer(), "/rename ");
+
+    assert_eq!(handle_paste(&mut state, "new name"), InputAction::Redraw);
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Enter)),
+        InputAction::Slash {
+            invocation: SlashInvocation {
+                command: SlashCommandId::Rename,
+                name: "rename",
+                args: "new name".to_string(),
+            },
+            submission: crate::PromptSubmission::text_only("/rename new name"),
+        }
+    );
+    assert_eq!(state.composer(), "keep this draft");
+}
+
+#[test]
 fn theme_cancel_restores_the_original_preview() {
     let mut state = SurfaceState::new("thread-1");
     state.open_theme_picker();

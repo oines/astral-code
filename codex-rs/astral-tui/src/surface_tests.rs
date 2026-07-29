@@ -584,11 +584,21 @@ fn shortcuts_modal_scrolled_snapshot() {
     let shortcuts = state
         .shortcut_help_mut()
         .expect("shortcut help should be open");
-    shortcuts.select(4);
+    shortcuts.select(5);
     shortcuts.expand_selected();
-    shortcuts.select(6);
+    shortcuts.select(7);
     shortcuts.expand_selected();
     shortcuts.select_end();
+
+    insta::assert_snapshot!(render_at_size(&mut state, &session, 80, 24));
+}
+
+#[test]
+fn command_palette_surface_snapshot() {
+    let session = session_state();
+    let mut state = SurfaceState::from_session(&session);
+    state.set_composer("keep this draft");
+    state.open_command_palette();
 
     insta::assert_snapshot!(render_at_size(&mut state, &session, 80, 24));
 }

@@ -1,6 +1,7 @@
 mod appearance;
 mod attachments;
 mod block_viewer;
+mod command_palette;
 mod content_actions;
 mod file_search;
 mod file_viewer;
@@ -36,6 +37,7 @@ use crate::PendingRequests;
 use crate::PromptSubmission;
 use crate::SessionState;
 use crate::block_viewer::BlockViewerState;
+use crate::command_palette::CommandPaletteState;
 use crate::composer::ComposerState;
 use crate::file_search::FileSearchController;
 use crate::file_viewer::FileViewerRequest;
@@ -144,6 +146,8 @@ pub struct SurfaceState {
     subagent_view: Option<Box<SubagentViewState>>,
     modal: Option<ModalState>,
     shortcut_help: Option<ShortcutHelpState>,
+    command_palette: Option<CommandPaletteState>,
+    palette_stashed_submission: Option<PromptSubmission>,
     thread_picker: Option<PickerState>,
     permission_picker: Option<PermissionPickerState>,
     theme_picker: Option<ThemePickerState>,
@@ -183,6 +187,8 @@ impl SurfaceState {
             subagent_view: None,
             modal: None,
             shortcut_help: None,
+            command_palette: None,
+            palette_stashed_submission: None,
             thread_picker: None,
             permission_picker: None,
             theme_picker: None,
@@ -229,6 +235,8 @@ impl SurfaceState {
             subagent_view: None,
             modal: None,
             shortcut_help: None,
+            command_palette: None,
+            palette_stashed_submission: None,
             thread_picker: None,
             permission_picker: None,
             theme_picker: None,

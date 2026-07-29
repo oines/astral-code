@@ -27,6 +27,7 @@ use crate::request_choice::response_for;
 use crate::surface::ActiveOverlay;
 
 mod block_viewer;
+mod command_palette;
 mod completion_popup;
 mod content_viewer;
 mod file_search_popup;
@@ -96,6 +97,16 @@ pub fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
     }
     if let Some(overlay) = state.active_overlay() {
         return handle_overlay_key(state, overlay, key);
+    }
+    if actions::matches(ActionId::CommandPalette, &key)
+        || (state.scrollback_focused()
+            && key.code == KeyCode::Char('?')
+            && !key
+                .modifiers
+                .contains(KeyModifiers::CONTROL | KeyModifiers::ALT))
+    {
+        state.open_command_palette();
+        return InputAction::Redraw;
     }
     if let Some(request) = state.pending_requests().front().cloned() {
         state.sync_request_states();
@@ -305,6 +316,7 @@ fn handle_overlay_key(
         ActiveOverlay::ThemePicker => pickers::handle_theme_picker_key(state, key),
         ActiveOverlay::PermissionPicker => pickers::handle_permission_picker_key(state, key),
         ActiveOverlay::ThreadPicker => pickers::handle_thread_picker_key(state, key),
+        ActiveOverlay::CommandPalette => command_palette::handle_key(state, key),
         ActiveOverlay::ShortcutHelp => shortcut_help::handle_key(state, key),
         ActiveOverlay::InfoModal => pickers::handle_info_modal_key(state, key),
     }
@@ -326,6 +338,7 @@ fn handle_overlay_paste(
             picker.paste(text);
             InputAction::Redraw
         }
+        ActiveOverlay::CommandPalette => command_palette::handle_paste(state, text),
         ActiveOverlay::ShortcutHelp => shortcut_help::handle_paste(state, text),
         ActiveOverlay::ThemePicker | ActiveOverlay::PermissionPicker | ActiveOverlay::InfoModal => {
             InputAction::None
@@ -345,6 +358,7 @@ fn handle_overlay_mouse(
         ActiveOverlay::ThemePicker => pickers::handle_theme_picker_mouse(state, mouse),
         ActiveOverlay::PermissionPicker => pickers::handle_permission_picker_mouse(state, mouse),
         ActiveOverlay::ThreadPicker => pickers::handle_thread_picker_mouse(state, mouse),
+        ActiveOverlay::CommandPalette => command_palette::handle_mouse(state, mouse),
         ActiveOverlay::ShortcutHelp => shortcut_help::handle_mouse(state, mouse),
         ActiveOverlay::InfoModal => pickers::handle_info_modal_mouse(state, mouse),
     }
@@ -409,6 +423,9 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
         return InputAction::Redraw;
     }
     let prompt_action = actions::lookup(&key, When::PromptFocused);
+    if key.code == KeyCode::Esc && state.restore_palette_draft() {
+        return InputAction::Redraw;
+    }
     if prompt_action == Some(ActionId::InterjectPrompt) {
         if state.slash().active {
             return InputAction::Notice("Run slash commands with Enter".to_string());
@@ -477,7 +494,9 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
     }
     match prompt_action {
         Some(ActionId::PromptCancel) => {
-            if matches!(state.activity(), SurfaceActivity::Working) {
+            if state.restore_palette_draft() {
+                InputAction::Redraw
+            } else if matches!(state.activity(), SurfaceActivity::Working) {
                 InputAction::Interrupt
             } else if state.composer().is_empty() {
                 InputAction::Exit
@@ -508,6 +527,7 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
                 return match state.slash_invocation() {
                     Ok(Some(invocation)) => {
                         let submission = state.take_submission();
+                        state.restore_palette_draft();
                         state.record_slash(invocation.command);
                         InputAction::Slash {
                             invocation,
@@ -517,6 +537,9 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
                     Ok(None) => InputAction::Notice("Choose a slash command".to_string()),
                     Err(error) => InputAction::Notice(error.to_string()),
                 };
+            }
+            if state.palette_draft_pending() {
+                state.discard_palette_draft();
             }
             if state.composer().trim().is_empty()
                 && matches!(state.activity(), SurfaceActivity::Working)
@@ -547,6 +570,7 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
         }
         Some(
             ActionId::CycleMode
+            | ActionId::CommandPalette
             | ActionId::ShortcutsHelp
             | ActionId::ToggleQueue
             | ActionId::InterjectPrompt

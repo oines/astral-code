@@ -1,0 +1,25 @@
+---
+source: astral-tui/src/surface_tests.rs
+expression: "render_at_size(&mut state, &session, 80, 24)"
+---
+
+  ⎇ main  /workspace
+
+
+  › inspect ┌─ Commands ───────────────────────────────────────[×]─┐
+            │                                                      │
+            │  › Search commands                                   │
+  I’m tracin│  ──────────────────────────────────────────────────  │
+            │  ─ Actions                                           │
+            │   Cycle collaboration mode               Shift+Tab   │
+            │   Keyboard shortcuts               Ctrl+. / Ctrl+x   │
+            │   Toggle prompt queue     Ctrl+; / Ctrl+' / Ctrl+4   │
+            │   Edit the current draft in an external ed  Ctrl+g   │
+            │   Copy the last agent response              Ctrl+o   │
+            │  ─ Slash commands                                    │
+            │   Rename this conversation                 /rename   │
+  ◇ Working │   Show session and context status          /status   │
+            │                                                      │
+  ╭─────────│type to search · ↑/↓ navigate · Enter run · Esc close │─────────╮
+  │ ❯ keep t└──────────────────────────────────────────────────────┘         │
+  ╰──────────────────────────────────────────── claude-sonnet-4 · workspace ─╯

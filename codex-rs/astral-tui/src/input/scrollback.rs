@@ -151,7 +151,8 @@ pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction
             }
         }
         Some(
-            ActionId::ToggleQueue
+            ActionId::CommandPalette
+            | ActionId::ToggleQueue
             | ActionId::FocusScrollback
             | ActionId::SendPrompt
             | ActionId::InterjectPrompt
