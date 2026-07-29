@@ -9,9 +9,9 @@ expression: "render_at_size(&mut state, &session, 80, 24)"
                                                                                █
   I’m tracing the relevant data flow.                                          █
                                                                                █
-                                                                               ▲
-  › continue with the implementation                                          ━━
-                                                                               ─
+                                                        ╭───────────────────╮  ▲
+  › continue with the implementation                    │ inspect this repo │ ━━
+                                                        ╰───────────────────╯  ─
                                                                                ▼
   I’m validating the next layer.                                               █
                                                                                █

@@ -30,6 +30,13 @@ pub(crate) struct ScrollbackViewport {
     pub(crate) has_content_below: bool,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum ViewportTail {
+    #[default]
+    Clamp,
+    AllowTrailingBlank,
+}
+
 impl ScrollbackViewport {
     pub(crate) fn measure(
         total_lines: usize,
@@ -48,8 +55,25 @@ impl ScrollbackViewport {
         viewport_lines: usize,
         first_visible_line: usize,
     ) -> Self {
+        Self::from_first_with_tail(
+            total_lines,
+            viewport_lines,
+            first_visible_line,
+            ViewportTail::Clamp,
+        )
+    }
+
+    fn from_first_with_tail(
+        total_lines: usize,
+        viewport_lines: usize,
+        first_visible_line: usize,
+        tail: ViewportTail,
+    ) -> Self {
         let viewport_lines = viewport_lines.max(1);
-        let max_top = total_lines.saturating_sub(viewport_lines);
+        let max_top = match tail {
+            ViewportTail::Clamp => total_lines.saturating_sub(viewport_lines),
+            ViewportTail::AllowTrailingBlank => total_lines.saturating_sub(1),
+        };
         let first_visible_line = first_visible_line.min(max_top);
         let end_visible_line = first_visible_line
             .saturating_add(viewport_lines)
@@ -84,6 +108,7 @@ pub(crate) struct ScrollbackNavigation {
     pending_distance_from_bottom: usize,
     anchor: Option<TranscriptAnchor>,
     sections: Vec<TranscriptSection>,
+    tail: ViewportTail,
 }
 
 impl Default for ScrollbackNavigation {
@@ -97,6 +122,7 @@ impl Default for ScrollbackNavigation {
             pending_distance_from_bottom: 0,
             anchor: None,
             sections: Vec::new(),
+            tail: ViewportTail::Clamp,
         }
     }
 }
@@ -109,14 +135,19 @@ impl ScrollbackNavigation {
         viewport_lines: usize,
     ) -> ScrollbackViewport {
         let viewport_lines = viewport_lines.max(1);
-        let max_top = layout.lines.len().saturating_sub(viewport_lines);
+        let clamped_top = layout.lines.len().saturating_sub(viewport_lines);
+        let max_top = match self.tail {
+            ViewportTail::Clamp => clamped_top,
+            ViewportTail::AllowTrailingBlank => layout.lines.len().saturating_sub(1),
+        };
         let layout_changed = self.viewport_lines == 0
             || width != self.width
             || layout.lines.len() != self.total_lines;
         if self.follow_mode {
-            self.first_visible_line = max_top;
+            self.tail = ViewportTail::Clamp;
+            self.first_visible_line = clamped_top;
         } else if self.viewport_lines == 0 {
-            self.first_visible_line = max_top.saturating_sub(self.pending_distance_from_bottom);
+            self.first_visible_line = clamped_top.saturating_sub(self.pending_distance_from_bottom);
         } else if layout_changed
             && let Some(anchor) = self.anchor.as_ref()
             && let Some(section) = layout.section(&anchor.item_id)
@@ -143,10 +174,11 @@ impl ScrollbackNavigation {
         self.sections.clone_from(&layout.sections);
         self.pending_distance_from_bottom = 0;
         self.refresh_anchor();
-        ScrollbackViewport::from_first(
+        ScrollbackViewport::from_first_with_tail(
             self.total_lines,
             self.viewport_lines,
             self.first_visible_line,
+            self.tail,
         )
     }
 
@@ -158,6 +190,9 @@ impl ScrollbackNavigation {
             return;
         }
         self.first_visible_line = self.first_visible_line.saturating_sub(lines);
+        if self.first_visible_line <= self.total_lines.saturating_sub(self.viewport_lines) {
+            self.tail = ViewportTail::Clamp;
+        }
         self.refresh_anchor();
     }
 
@@ -168,6 +203,7 @@ impl ScrollbackNavigation {
             self.follow_mode = self.pending_distance_from_bottom == 0;
             return;
         }
+        self.tail = ViewportTail::Clamp;
         let max_top = self.total_lines.saturating_sub(self.viewport_lines);
         let was_at_bottom = self.first_visible_line == max_top;
         self.first_visible_line = self.first_visible_line.saturating_add(lines).min(max_top);
@@ -177,6 +213,7 @@ impl ScrollbackNavigation {
 
     pub(crate) fn scroll_to_bottom(&mut self) {
         self.follow_mode = true;
+        self.tail = ViewportTail::Clamp;
         self.pending_distance_from_bottom = 0;
         self.first_visible_line = self.total_lines.saturating_sub(self.viewport_lines);
         self.anchor = None;
@@ -189,6 +226,7 @@ impl ScrollbackNavigation {
     pub(crate) fn set_scroll_offset(&mut self, offset: usize) {
         let max_top = self.total_lines.saturating_sub(self.viewport_lines);
         self.follow_mode = false;
+        self.tail = ViewportTail::Clamp;
         self.pending_distance_from_bottom = 0;
         self.first_visible_line = offset.min(max_top);
         self.refresh_anchor();
@@ -229,6 +267,7 @@ impl ScrollbackNavigation {
             return;
         }
         self.follow_mode = false;
+        self.tail = ViewportTail::Clamp;
         self.refresh_anchor();
     }
 
@@ -248,6 +287,7 @@ impl ScrollbackNavigation {
         let max_top = layout.lines.len().saturating_sub(self.viewport_lines);
         self.first_visible_line = line.saturating_sub(self.viewport_lines / 2).min(max_top);
         self.follow_mode = false;
+        self.tail = ViewportTail::Clamp;
         self.total_lines = layout.lines.len();
         self.sections.clone_from(&layout.sections);
         self.refresh_anchor();
@@ -265,7 +305,11 @@ impl ScrollbackNavigation {
         let Some(top) = self.entry_top(item_id) else {
             return;
         };
-        self.set_scroll_offset(top);
+        self.follow_mode = false;
+        self.tail = ViewportTail::AllowTrailingBlank;
+        self.pending_distance_from_bottom = 0;
+        self.first_visible_line = top.min(self.total_lines.saturating_sub(1));
+        self.refresh_anchor();
     }
 
     pub(crate) fn distance_from_bottom(&self) -> usize {
@@ -285,10 +329,11 @@ impl ScrollbackNavigation {
     }
 
     pub(crate) fn viewport(&self) -> ScrollbackViewport {
-        ScrollbackViewport::from_first(
+        ScrollbackViewport::from_first_with_tail(
             self.total_lines,
             self.viewport_lines,
             self.first_visible_line,
+            self.tail,
         )
     }
 
@@ -337,17 +382,23 @@ pub(crate) fn render_follow_indicator(
     viewport: ScrollbackViewport,
     transcript_area: Rect,
     y: u16,
+    hovered: bool,
     buffer: &mut Buffer,
     theme: AstralTheme,
-) {
+) -> Option<Rect> {
     if !viewport.has_content_below || y >= buffer.area.bottom() || transcript_area.width == 0 {
-        return;
+        return None;
     }
     let x = transcript_area.x + transcript_area.width / 2;
     if let Some(cell) = buffer.cell_mut((x, y)) {
         cell.set_symbol("▼")
-            .set_style(Style::default().fg(theme.gray));
+            .set_style(Style::default().fg(if hovered {
+                theme.text_primary
+            } else {
+                theme.gray
+            }));
     }
+    Some(Rect::new(x.saturating_sub(1), y, 3, 1))
 }
 
 fn render_scrollbar(
@@ -369,6 +420,7 @@ fn render_scrollbar(
     let thumb_travel = track_height.saturating_sub(thumb_height);
     let thumb_top = viewport
         .first_visible_line
+        .min(max_top)
         .saturating_mul(thumb_travel)
         .saturating_add(max_top / 2)
         .checked_div(max_top)

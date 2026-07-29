@@ -196,6 +196,17 @@ pub(crate) fn handle_mouse(state: &mut SurfaceState, mouse: MouseEvent) -> Input
     if let Some(overlay) = state.active_overlay() {
         return handle_overlay_mouse(state, overlay, mouse);
     }
+    let navigation_hover_changed = matches!(mouse.kind, MouseEventKind::Moved)
+        && state.update_transcript_navigation_hover(mouse);
+    let action = handle_main_mouse(state, mouse);
+    if action == InputAction::None && navigation_hover_changed {
+        InputAction::Redraw
+    } else {
+        action
+    }
+}
+
+fn handle_main_mouse(state: &mut SurfaceState, mouse: MouseEvent) -> InputAction {
     if (state.composer_mouse_drag_active()
         && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)))
         || (state.composer_mouse_active()
@@ -205,6 +216,15 @@ pub(crate) fn handle_mouse(state: &mut SurfaceState, mouse: MouseEvent) -> Input
             ))
     {
         return prompt_mouse::handle(state, mouse);
+    }
+    if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+        && let Some(changed) = state.handle_transcript_navigation_click(mouse)
+    {
+        return if changed {
+            InputAction::Redraw
+        } else {
+            InputAction::None
+        };
     }
     if state.pending_requests().front().is_some() && scrollback_owns_pointer(state, mouse) {
         return InputAction::None;

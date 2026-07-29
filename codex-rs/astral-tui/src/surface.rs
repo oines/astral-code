@@ -896,11 +896,11 @@ pub(crate) fn render_surface_with_view(
     let turn_status = (!has_request && banner_height == 0)
         .then(|| turn_status_line(state, theme))
         .flatten();
-    let turn_count = session.thread.turns.len();
-    let timeline_width = if read_only {
-        0
-    } else {
+    let turn_count = state.conversation.turn_count();
+    let timeline_width = if transcript_view == TranscriptView::Full {
         appearance::timeline_width(state, area.width, turn_count)
+    } else {
+        0
     };
     let layout = AgentViewLayout::compute(AgentViewLayoutInput {
         area,
@@ -997,17 +997,29 @@ pub(crate) fn render_surface_with_view(
     } else {
         state.scrollback.clear_frame();
     }
-    if search_rows == 0 {
+    let follow_indicator = if search_rows == 0 {
         render_follow_indicator(
             viewport,
             scrollback_area,
             scrollback_area.bottom(),
+            state.follow_indicator_hovered(),
             buffer,
             theme,
-        );
-    }
+        )
+    } else {
+        None
+    };
     let search_cursor = state.scrollback.render_search(search_area, buffer, theme);
-    if layout.timeline_width > 0 {
+    let timeline_hovered = state.timeline_hovered();
+    let timeline_preview = timeline_hovered
+        .and_then(|hit| match hit {
+            crate::timeline_rail::TimelineHit::Tick(turn_index) => {
+                state.scrollback.timeline_preview(turn_index)
+            }
+            crate::timeline_rail::TimelineHit::Up | crate::timeline_rail::TimelineHit::Down => None,
+        })
+        .map(str::to_owned);
+    let timeline = if layout.timeline_width > 0 {
         appearance::render_timeline(
             buffer,
             theme,
@@ -1015,12 +1027,15 @@ pub(crate) fn render_surface_with_view(
                 scrollback: scrollback_area,
                 rail_x: layout.timeline_x,
                 turn_count,
-                scroll_offset: viewport.first_visible_line,
-                first_visible_line: viewport.first_visible_line,
-                total_lines: transcript.lines.len(),
+                viewport: state.scrollback.timeline_viewport(),
             },
-        );
-    }
+            timeline_hovered,
+            timeline_preview.as_deref(),
+        )
+    } else {
+        None
+    };
+    state.observe_transcript_navigation(follow_indicator, timeline);
     if let Some(turn_status) = turn_status {
         buffer.set_line(
             layout.turn_status.x,

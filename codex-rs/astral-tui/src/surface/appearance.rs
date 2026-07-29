@@ -11,9 +11,12 @@ use crate::theme_picker::render_picker as render_theme_picker;
 use crate::thread_picker::render_picker as render_thread_picker;
 use crate::timeline_rail::RailEligibility;
 use crate::timeline_rail::RailViewport;
+use crate::timeline_rail::TimelineHit;
+use crate::timeline_rail::TimelineRail;
 use crate::timeline_rail::compute_rail;
 use crate::timeline_rail::rail_width;
 use crate::timeline_rail::render_rail;
+use crate::timeline_rail::render_tick_hover_popup;
 use crate::view::AstralTheme;
 use crate::view::AstralThemeId;
 use crate::view::BlockViewerPane;
@@ -86,32 +89,29 @@ pub(super) struct TimelineFrame {
     pub(super) scrollback: Rect,
     pub(super) rail_x: u16,
     pub(super) turn_count: usize,
-    pub(super) scroll_offset: usize,
-    pub(super) first_visible_line: usize,
-    pub(super) total_lines: usize,
+    pub(super) viewport: RailViewport,
 }
 
-pub(super) fn render_timeline(buffer: &mut Buffer, theme: AstralTheme, frame: TimelineFrame) {
-    if frame.turn_count == 0 {
-        return;
-    }
-    let at_bottom = frame.scroll_offset == 0;
-    let active = if at_bottom || frame.total_lines == 0 {
-        Some(frame.turn_count - 1)
-    } else {
-        Some(
-            (frame.first_visible_line * frame.turn_count / frame.total_lines)
-                .min(frame.turn_count - 1),
-        )
-    };
-    if let Some(rail) = compute_rail(
+pub(super) fn render_timeline(
+    buffer: &mut Buffer,
+    theme: AstralTheme,
+    frame: TimelineFrame,
+    hovered: Option<TimelineHit>,
+    preview: Option<&str>,
+) -> Option<TimelineRail> {
+    let rail = compute_rail(
         frame.scrollback,
         frame.rail_x,
         frame.turn_count,
-        RailViewport { active, at_bottom },
-    ) {
-        render_rail(buffer, &rail, frame.turn_count, theme);
+        frame.viewport,
+    )?;
+    render_rail(buffer, &rail, hovered, theme);
+    if let Some(TimelineHit::Tick(turn_index)) = hovered
+        && let Some(preview) = preview
+    {
+        render_tick_hover_popup(buffer, &rail, frame.scrollback, turn_index, preview, theme);
     }
+    Some(rail)
 }
 
 pub(super) fn render_overlay(

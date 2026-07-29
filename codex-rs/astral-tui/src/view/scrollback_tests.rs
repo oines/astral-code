@@ -195,3 +195,24 @@ fn scrolling_past_the_bottom_reenables_follow_mode() {
     assert_eq!(viewport.first_visible_line, 20);
     assert!(!viewport.has_content_below);
 }
+
+#[test]
+fn entry_top_jump_can_anchor_a_trailing_turn_above_blank_rows() {
+    let layout = transcript_layout(&[("history", 10), ("last-prompt", 1), ("last-answer", 1)]);
+    let mut navigation = ScrollbackNavigation::default();
+    navigation.prepare(&layout, 40, 5);
+
+    navigation.scroll_entry_to_top("last-prompt");
+
+    assert_eq!(
+        navigation.viewport(),
+        ScrollbackViewport {
+            first_visible_line: 10,
+            end_visible_line: 12,
+            total_lines: 12,
+            viewport_lines: 5,
+            has_content_above: true,
+            has_content_below: false,
+        }
+    );
+}

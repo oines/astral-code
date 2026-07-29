@@ -8,6 +8,8 @@ use ratatui::layout::Position;
 use ratatui::layout::Rect;
 
 use crate::composer::ComposerMouseAction;
+use crate::timeline_rail::TimelineHit;
+use crate::timeline_rail::TimelineRail;
 use crate::view::CompletionMenuFrame;
 use crate::view::QueuePaneFrame;
 use crate::view::QueuePaneHover;
@@ -27,6 +29,10 @@ pub(super) struct SurfacePointerState {
     completion: Option<CompletionMenuFrame>,
     completion_hovered: Option<usize>,
     completion_scrollbar_dragging: bool,
+    follow_indicator: Option<Rect>,
+    follow_indicator_hovered: bool,
+    timeline: Option<TimelineRail>,
+    timeline_hovered: Option<TimelineHit>,
     pending_prompt_drag: Option<MouseEvent>,
     last_prompt_drag_scroll: Option<Instant>,
     prompt_drag_scroll_steps: u32,
@@ -122,6 +128,39 @@ impl SurfacePointerState {
         }
         self.completion_hovered = hovered;
         true
+    }
+
+    fn observe_transcript_navigation(
+        &mut self,
+        follow_indicator: Option<Rect>,
+        timeline: Option<TimelineRail>,
+    ) {
+        if follow_indicator.is_none() {
+            self.follow_indicator_hovered = false;
+        }
+        if self
+            .timeline_hovered
+            .is_some_and(|hit| !timeline.as_ref().is_some_and(|rail| rail.contains_hit(hit)))
+        {
+            self.timeline_hovered = None;
+        }
+        self.follow_indicator = follow_indicator;
+        self.timeline = timeline;
+    }
+
+    fn update_transcript_navigation_hover(&mut self, mouse: MouseEvent) -> bool {
+        let follow_indicator_hovered = self
+            .follow_indicator
+            .is_some_and(|area| area.contains((mouse.column, mouse.row).into()));
+        let timeline_hovered = self
+            .timeline
+            .as_ref()
+            .and_then(|rail| rail.hit(mouse.column, mouse.row));
+        let changed = follow_indicator_hovered != self.follow_indicator_hovered
+            || timeline_hovered != self.timeline_hovered;
+        self.follow_indicator_hovered = follow_indicator_hovered;
+        self.timeline_hovered = timeline_hovered;
+        changed
     }
 }
 
@@ -326,6 +365,50 @@ impl SurfaceState {
 
     pub(crate) fn completion_scrollbar_dragging(&self) -> bool {
         self.pointer_areas.completion_scrollbar_dragging
+    }
+
+    pub(crate) fn observe_transcript_navigation(
+        &mut self,
+        follow_indicator: Option<Rect>,
+        timeline: Option<TimelineRail>,
+    ) {
+        self.pointer_areas
+            .observe_transcript_navigation(follow_indicator, timeline);
+    }
+
+    pub(crate) fn follow_indicator_hovered(&self) -> bool {
+        self.pointer_areas.follow_indicator_hovered
+    }
+
+    pub(crate) fn timeline_hovered(&self) -> Option<TimelineHit> {
+        self.pointer_areas.timeline_hovered
+    }
+
+    pub(crate) fn update_transcript_navigation_hover(&mut self, mouse: MouseEvent) -> bool {
+        self.pointer_areas.update_transcript_navigation_hover(mouse)
+    }
+
+    pub(crate) fn handle_transcript_navigation_click(&mut self, mouse: MouseEvent) -> Option<bool> {
+        if self
+            .pointer_areas
+            .follow_indicator
+            .is_some_and(|area| area.contains((mouse.column, mouse.row).into()))
+        {
+            self.scrollback.goto_bottom();
+            return Some(true);
+        }
+        let rail = self.pointer_areas.timeline.as_ref()?;
+        if !rail.contains(mouse.column, mouse.row) {
+            return None;
+        }
+        let target = rail
+            .hit(mouse.column, mouse.row)
+            .and_then(|hit| rail.target(hit));
+        let Some(turn_index) = target else {
+            return Some(false);
+        };
+        self.focus_scrollback();
+        Some(self.scrollback.jump_to_turn(turn_index))
     }
 }
 

@@ -32,6 +32,8 @@ use super::transcript::TranscriptSection;
 mod links;
 #[path = "scrollback_state_search.rs"]
 mod search;
+#[path = "scrollback_state_timeline.rs"]
+mod timeline;
 
 pub(crate) use links::ScrollbackMouseAction;
 
@@ -54,7 +56,7 @@ pub(crate) struct ScrollbackState {
     display: EntryDisplayState,
     selection: ScrollbackSelection,
     pointer: EntryMouseState,
-    turn_prompts: Vec<String>,
+    timeline: timeline::TimelineState,
     response_anchors: Vec<String>,
     scrollbar: Option<Rect>,
     scrollbar_dragging: bool,
@@ -67,7 +69,7 @@ pub(crate) struct ScrollbackState {
 impl ScrollbackState {
     pub(crate) fn observe_entries(&mut self, turns: &[TranscriptTurn]) {
         self.display.observe(turns);
-        self.turn_prompts = turns.iter().filter_map(turn_prompt_id).collect::<Vec<_>>();
+        self.timeline.observe(turns);
         self.response_anchors = turns
             .iter()
             .filter_map(response_anchor_id)
@@ -263,37 +265,6 @@ impl ScrollbackState {
         } else if delta > 0 {
             self.navigation.scroll_to_bottom();
         }
-    }
-
-    pub(crate) fn next_turn(&mut self) {
-        let selected = self.display.selected_id();
-        let current = selected.and_then(turn_id_from_entry).and_then(|turn_id| {
-            self.turn_prompts
-                .iter()
-                .position(|prompt| turn_id_from_entry(prompt) == Some(turn_id))
-        });
-        let target = current
-            .map(|index| (index + 1).min(self.turn_prompts.len().saturating_sub(1)))
-            .unwrap_or_default();
-        self.select_and_snap(self.turn_prompts.get(target).cloned());
-    }
-
-    pub(crate) fn previous_turn(&mut self) {
-        let selected = self.display.selected_id();
-        let current = selected.and_then(turn_id_from_entry).and_then(|turn_id| {
-            self.turn_prompts
-                .iter()
-                .position(|prompt| turn_id_from_entry(prompt) == Some(turn_id))
-        });
-        let target = current.and_then(|index| {
-            let prompt = self.turn_prompts.get(index)?;
-            if selected == Some(prompt.as_str()) {
-                index.checked_sub(1)
-            } else {
-                Some(index)
-            }
-        });
-        self.select_and_snap(target.and_then(|index| self.turn_prompts.get(index).cloned()));
     }
 
     pub(crate) fn next_response(&mut self) {
@@ -538,17 +509,6 @@ impl ScrollbackState {
 fn section_overlaps_viewport(section: &TranscriptSection, viewport: ScrollbackViewport) -> bool {
     section.lines.start < viewport.end_visible_line
         && section.lines.end > viewport.first_visible_line
-}
-
-fn turn_prompt_id(turn: &TranscriptTurn) -> Option<String> {
-    turn.blocks
-        .iter()
-        .find(|block| matches!(&block.block, crate::PresentationBlock::User { .. }))
-        .map(|block| super::entry_state::entry_id(&turn.id, &block.item_id))
-}
-
-fn turn_id_from_entry(entry_id: &str) -> Option<&str> {
-    entry_id.split_once('\0').map(|(turn_id, _)| turn_id)
 }
 
 fn response_anchor_id(turn: &TranscriptTurn) -> Option<String> {

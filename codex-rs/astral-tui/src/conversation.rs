@@ -196,6 +196,10 @@ impl ConversationState {
     pub fn committed_entries(&self) -> usize {
         self.turns.iter().map(|turn| turn.committed_entries).sum()
     }
+
+    pub(crate) fn turn_count(&self) -> usize {
+        self.turns.len()
+    }
 }
 
 fn project_turn(turn: &ConversationTurn, entries: &[ConversationEntry]) -> Option<TranscriptTurn> {

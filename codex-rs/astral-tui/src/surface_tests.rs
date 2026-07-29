@@ -759,8 +759,68 @@ fn timeline_rail_surface_snapshot() {
     );
     let mut state = SurfaceState::from_session(&session);
     state.set_timeline_visible(true);
+    let area = Rect::new(0, 0, 80, 24);
+    let mut buffer = Buffer::empty(area);
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        area,
+        &mut buffer,
+    );
+    let (column, row) = find_symbol(&buffer, "━").expect("active timeline tick");
+    assert_eq!(
+        handle_input_mouse(&mut state, mouse(MouseEventKind::Moved, column, row),),
+        InputAction::Redraw
+    );
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        area,
+        &mut buffer,
+    );
+    insta::assert_snapshot!(buffer_text(&buffer));
 
-    insta::assert_snapshot!(render_at_size(&mut state, &session, 80, 24));
+    let (_, prompt_row_before) =
+        find_text(&buffer, "continue with the implementation").expect("second prompt");
+    let rail_column = area.right().saturating_sub(1);
+    let second_tick_row = (area.y..area.bottom())
+        .find(|row| buffer[(rail_column, *row)].symbol() == "─")
+        .expect("second timeline tick");
+    assert_eq!(
+        handle_input_mouse(
+            &mut state,
+            mouse(MouseEventKind::Moved, rail_column, second_tick_row),
+        ),
+        InputAction::Redraw
+    );
+    assert_eq!(
+        handle_input_mouse(
+            &mut state,
+            mouse(
+                MouseEventKind::Down(MouseButton::Left),
+                rail_column,
+                second_tick_row,
+            ),
+        ),
+        InputAction::Redraw
+    );
+    render_surface_with_view(
+        &mut state,
+        &session,
+        TranscriptView::Full,
+        area,
+        &mut buffer,
+    );
+    let (_, prompt_row_after) =
+        find_text(&buffer, "continue with the implementation").expect("jumped prompt");
+    assert!(
+        prompt_row_after < prompt_row_before,
+        "timeline jump should move prompt toward the viewport top: {prompt_row_before} -> \
+         {prompt_row_after}\n{}",
+        buffer_text(&buffer)
+    );
 }
 
 #[test]
@@ -1308,6 +1368,16 @@ fn fullscreen_scrollback_viewport_snapshot() {
     );
 
     insta::assert_snapshot!(buffer_text(&buffer));
+
+    let (column, row) = find_symbol(&buffer, "▼").expect("follow indicator");
+    assert_eq!(
+        handle_input_mouse(
+            &mut state,
+            mouse(MouseEventKind::Down(MouseButton::Left), column, row,),
+        ),
+        InputAction::Redraw
+    );
+    assert_eq!(state.scroll_offset(), 0);
 }
 
 #[test]
