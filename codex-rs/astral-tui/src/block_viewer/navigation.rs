@@ -5,7 +5,7 @@ use crossterm::event::MouseButton;
 use crossterm::event::MouseEvent;
 use crossterm::event::MouseEventKind;
 
-use super::BlockViewerMouseAction;
+use super::ViewerMouseAction;
 use super::ViewerState;
 
 const MOUSE_OVERSCROLL_THRESHOLD: usize = 9;
@@ -133,7 +133,7 @@ impl ViewerState {
         changed
     }
 
-    pub(crate) fn handle_mouse(&mut self, mouse: MouseEvent) -> BlockViewerMouseAction {
+    pub(crate) fn handle_mouse(&mut self, mouse: MouseEvent) -> ViewerMouseAction {
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 self.scrollbar_dragging = false;
@@ -144,42 +144,42 @@ impl ViewerState {
                     || self.popup_area.is_some_and(|area| !area.contains(position))
                 {
                     self.clear_text_drag();
-                    BlockViewerMouseAction::Close
+                    ViewerMouseAction::Close
                 } else if self.scrollbar_contains(mouse.column, mouse.row) {
                     self.clear_text_drag();
                     self.scrollbar_dragging = true;
                     self.apply_scrollbar_click(mouse.row);
-                    BlockViewerMouseAction::Redraw
+                    ViewerMouseAction::Redraw
                 } else if let Some(area) = self.content_area
                     && area.contains(position)
                 {
                     if self.start_text_drag(mouse.column, mouse.row) {
-                        BlockViewerMouseAction::Redraw
+                        ViewerMouseAction::Redraw
                     } else {
-                        BlockViewerMouseAction::Ignored
+                        ViewerMouseAction::Ignored
                     }
                 } else {
                     self.clear_text_drag();
-                    BlockViewerMouseAction::Ignored
+                    ViewerMouseAction::Ignored
                 }
             }
             MouseEventKind::Drag(MouseButton::Left) => {
                 if self.scrollbar_dragging {
                     self.apply_scrollbar_click(mouse.row);
-                    BlockViewerMouseAction::Redraw
+                    ViewerMouseAction::Redraw
                 } else if self.update_text_drag(mouse.column, mouse.row) {
-                    BlockViewerMouseAction::Redraw
+                    ViewerMouseAction::Redraw
                 } else {
-                    BlockViewerMouseAction::Ignored
+                    ViewerMouseAction::Ignored
                 }
             }
             MouseEventKind::Up(MouseButton::Left) => {
                 if self.scrollbar_dragging {
                     self.scrollbar_dragging = false;
-                    BlockViewerMouseAction::Redraw
+                    ViewerMouseAction::Redraw
                 } else {
                     self.finish_text_drag(mouse.column, mouse.row)
-                        .map_or(BlockViewerMouseAction::Redraw, BlockViewerMouseAction::Copy)
+                        .map_or(ViewerMouseAction::Redraw, ViewerMouseAction::Copy)
                 }
             }
             MouseEventKind::Moved => {
@@ -187,21 +187,21 @@ impl ViewerState {
                     .close_button
                     .is_some_and(|area| area.contains((mouse.column, mouse.row).into()));
                 if hovered == self.close_hovered {
-                    BlockViewerMouseAction::Ignored
+                    ViewerMouseAction::Ignored
                 } else {
                     self.close_hovered = hovered;
-                    BlockViewerMouseAction::Redraw
+                    ViewerMouseAction::Redraw
                 }
             }
             MouseEventKind::ScrollUp => {
                 self.clear_visual_selection();
                 self.scroll_from_pointer(-3, mouse.column, mouse.row);
-                BlockViewerMouseAction::Redraw
+                ViewerMouseAction::Redraw
             }
             MouseEventKind::ScrollDown => {
                 self.clear_visual_selection();
                 self.scroll_from_pointer(3, mouse.column, mouse.row);
-                BlockViewerMouseAction::Redraw
+                ViewerMouseAction::Redraw
             }
             MouseEventKind::ScrollLeft
             | MouseEventKind::ScrollRight
@@ -210,7 +210,7 @@ impl ViewerState {
             | MouseEventKind::Down(MouseButton::Right | MouseButton::Middle) => {
                 self.scrollbar_dragging = false;
                 self.clear_text_drag();
-                BlockViewerMouseAction::Ignored
+                ViewerMouseAction::Ignored
             }
         }
     }

@@ -4,8 +4,11 @@ use std::time::Duration;
 use std::time::Instant;
 
 use astral_terminal_inline::Terminal;
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
 use codex_app_server_client::AppServerEvent;
 use codex_app_server_protocol::DynamicToolCallResponse;
+use codex_app_server_protocol::FsReadFileResponse;
 use codex_app_server_protocol::FuzzyFileSearchResponse;
 use codex_app_server_protocol::McpServerStatusDetail;
 use codex_app_server_protocol::RequestId;
@@ -42,6 +45,7 @@ use crate::ecosystem::plugins_panel;
 use crate::ecosystem::skills_panel;
 use crate::external_editor;
 use crate::file_search::FileSearchRequest;
+use crate::file_viewer::FileViewerRequest;
 use crate::handle_key;
 use crate::handle_paste;
 use crate::input::MouseScrollState;
@@ -225,6 +229,7 @@ async fn run_loop(
     let mut input = TerminalEventReader::start()?;
     let mut client_tool_tasks = JoinSet::new();
     let mut file_search_tasks = JoinSet::new();
+    let mut file_viewer_tasks = JoinSet::new();
     let mut _clipboard_lease = None;
     let mut mouse_scroll = MouseScrollState::default();
     let mut needs_draw = true;
@@ -234,6 +239,11 @@ async fn run_loop(
         if let Some(request) = surface.take_file_search_request() {
             file_search_tasks.abort_all();
             spawn_file_search(session, &mut file_search_tasks, request);
+            needs_draw = true;
+        }
+        if let Some(request) = surface.take_file_viewer_request() {
+            file_viewer_tasks.abort_all();
+            spawn_file_viewer(session, &mut file_viewer_tasks, request);
             needs_draw = true;
         }
         if needs_draw {
@@ -502,6 +512,23 @@ async fn run_loop(
                     Some(Err(error)) if error.is_cancelled() => {}
                     Some(Err(error)) => {
                         surface.set_notice(format!("File search task failed: {error}"));
+                        needs_draw = true;
+                    }
+                    None => {}
+                }
+            }
+            completion = file_viewer_tasks.join_next(), if !file_viewer_tasks.is_empty() => {
+                match completion {
+                    Some(Ok(completion)) => {
+                        needs_draw |= apply_file_viewer_completion(
+                            session,
+                            surface,
+                            completion,
+                        );
+                    }
+                    Some(Err(error)) if error.is_cancelled() => {}
+                    Some(Err(error)) => {
+                        surface.set_notice(format!("File viewer task failed: {error}"));
                         needs_draw = true;
                     }
                     None => {}
@@ -1106,6 +1133,12 @@ struct FileSearchCompletion {
     result: Result<FuzzyFileSearchResponse, SessionError>,
 }
 
+struct FileViewerCompletion {
+    thread_id: String,
+    generation: u64,
+    result: Result<FsReadFileResponse, SessionError>,
+}
+
 fn spawn_file_search(
     session: &mut AstralSession,
     tasks: &mut JoinSet<FileSearchCompletion>,
@@ -1162,6 +1195,66 @@ fn apply_file_search_completion(
             error.to_string(),
         ),
     }
+}
+
+fn spawn_file_viewer(
+    session: &mut AstralSession,
+    tasks: &mut JoinSet<FileViewerCompletion>,
+    request: FileViewerRequest,
+) {
+    let Some(thread_id) = session.state().map(|state| state.thread.id.clone()) else {
+        return;
+    };
+    let future = match session.read_file(request.path) {
+        Ok(future) => future,
+        Err(error) => {
+            tasks.spawn(async move {
+                FileViewerCompletion {
+                    thread_id,
+                    generation: request.generation,
+                    result: Err(error),
+                }
+            });
+            return;
+        }
+    };
+    tasks.spawn(async move {
+        FileViewerCompletion {
+            thread_id,
+            generation: request.generation,
+            result: future.await,
+        }
+    });
+}
+
+fn apply_file_viewer_completion(
+    session: &AstralSession,
+    surface: &mut SurfaceState,
+    completion: FileViewerCompletion,
+) -> bool {
+    if session
+        .state()
+        .is_none_or(|state| state.thread.id != completion.thread_id)
+    {
+        return false;
+    }
+    let result = completion
+        .result
+        .map_err(|error| error.to_string())
+        .and_then(decode_file_viewer_source);
+    surface.apply_file_viewer_result(completion.generation, result)
+}
+
+fn decode_file_viewer_source(response: FsReadFileResponse) -> Result<String, String> {
+    const MAX_PREVIEW_BYTES: usize = 8 * 1024 * 1024;
+
+    let bytes = STANDARD
+        .decode(response.data_base64)
+        .map_err(|error| format!("Could not decode file contents: {error}"))?;
+    if bytes.len() > MAX_PREVIEW_BYTES {
+        return Err("File is larger than the 8 MiB preview limit".to_string());
+    }
+    String::from_utf8(bytes).map_err(|_| "File is not valid UTF-8 text".to_string())
 }
 
 async fn resolve_client_tool(

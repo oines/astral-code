@@ -21,7 +21,7 @@ use self::matcher::ViewerMatchMode;
 use self::matcher::ViewerMatcher;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum BlockViewerMouseAction {
+pub(crate) enum ViewerMouseAction {
     Ignored,
     Redraw,
     Close,
@@ -218,6 +218,53 @@ impl ViewerState {
         let anchor = self.visual_anchor?;
         let selected = self.selected_item?;
         Some(anchor.min(selected)..=anchor.max(selected))
+    }
+
+    pub(crate) fn selected_physical_range(&self) -> Option<std::ops::Range<usize>> {
+        if let Some(range) = self.visual_selection_range() {
+            let start = *self.visible_item_indices.get(*range.start())?;
+            let end = self
+                .visible_item_indices
+                .get(*range.end())?
+                .saturating_add(1);
+            Some(start..end)
+        } else {
+            let selected = self.selected_physical_item()?;
+            Some(selected..selected.saturating_add(1))
+        }
+    }
+
+    pub(crate) fn selected_text(&self) -> Option<String> {
+        let indices = if let Some(range) = self.visual_selection_range() {
+            range
+                .filter_map(|item| self.visible_item_indices.get(item).copied())
+                .collect::<Vec<_>>()
+        } else {
+            vec![self.selected_physical_item()?]
+        };
+        Some(
+            indices
+                .into_iter()
+                .filter_map(|item| self.logical_lines.get(item))
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+    }
+
+    pub(crate) fn select_physical_range(&mut self, range: std::ops::Range<usize>) {
+        let mut positions = self
+            .visible_item_indices
+            .iter()
+            .enumerate()
+            .filter_map(|(position, physical)| range.contains(physical).then_some(position));
+        let Some(anchor) = positions.next() else {
+            return;
+        };
+        let selected = positions.next_back().unwrap_or(anchor);
+        self.visual_anchor = Some(anchor);
+        self.selected_item = Some(selected);
+        self.reveal_selected_item();
     }
 
     pub(crate) fn close_hovered(&self) -> bool {

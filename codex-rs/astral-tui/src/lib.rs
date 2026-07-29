@@ -14,6 +14,7 @@ mod conversation;
 mod ecosystem;
 mod external_editor;
 mod file_search;
+mod file_viewer;
 mod history;
 mod input;
 mod launch;

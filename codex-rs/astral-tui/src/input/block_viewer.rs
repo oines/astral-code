@@ -5,7 +5,7 @@ use crossterm::event::MouseEvent;
 
 use crate::InputAction;
 use crate::SurfaceState;
-use crate::block_viewer::BlockViewerMouseAction;
+use crate::block_viewer::ViewerMouseAction;
 
 use super::content_viewer;
 use super::content_viewer::ViewerKeyResult;
@@ -17,7 +17,7 @@ pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction
     }
     let query_input_active = state
         .block_viewer()
-        .is_some_and(|viewer| viewer.query_input_active());
+        .is_some_and(super::super::block_viewer::ViewerState::query_input_active);
     if query_input_active {
         let Some(viewer) = state.block_viewer_mut() else {
             return InputAction::None;
@@ -85,12 +85,12 @@ pub(super) fn handle_mouse(state: &mut SurfaceState, mouse: MouseEvent) -> Input
         return InputAction::None;
     };
     match viewer.handle_mouse(mouse) {
-        BlockViewerMouseAction::Ignored | BlockViewerMouseAction::Redraw => InputAction::Redraw,
-        BlockViewerMouseAction::Close => {
+        ViewerMouseAction::Ignored | ViewerMouseAction::Redraw => InputAction::Redraw,
+        ViewerMouseAction::Close => {
             state.close_block_viewer();
             InputAction::Redraw
         }
-        BlockViewerMouseAction::Copy(text) => InputAction::CopyText {
+        ViewerMouseAction::Copy(text) => InputAction::CopyText {
             text,
             notice: "Copied selection".to_string(),
         },

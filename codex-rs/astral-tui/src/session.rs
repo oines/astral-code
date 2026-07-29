@@ -12,6 +12,8 @@ use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::CollaborationModeListParams;
 use codex_app_server_protocol::CollaborationModeListResponse;
 use codex_app_server_protocol::CollaborationModeMask;
+use codex_app_server_protocol::FsReadFileParams;
+use codex_app_server_protocol::FsReadFileResponse;
 use codex_app_server_protocol::FuzzyFileSearchParams;
 use codex_app_server_protocol::FuzzyFileSearchResponse;
 use codex_app_server_protocol::Model;
@@ -415,6 +417,33 @@ impl AstralSession {
                         roots: vec![root],
                         cancellation_token: Some(cancellation_token),
                     },
+                })
+                .await
+                .map_err(SessionError::from)
+        })
+    }
+
+    pub(crate) fn read_file(
+        &mut self,
+        path: String,
+    ) -> Result<
+        impl std::future::Future<Output = Result<FsReadFileResponse, SessionError>> + Send + 'static,
+        SessionError,
+    > {
+        let path = self
+            .state
+            .as_ref()
+            .ok_or(SessionError::NoThread)?
+            .thread
+            .cwd
+            .join(path);
+        let request_id = self.next_request_id();
+        let client = self.client.request_handle();
+        Ok(async move {
+            client
+                .request_typed(ClientRequest::FsReadFile {
+                    request_id,
+                    params: FsReadFileParams { path },
                 })
                 .await
                 .map_err(SessionError::from)

@@ -3,6 +3,7 @@ mod attachments;
 mod block_viewer;
 mod content_actions;
 mod file_search;
+mod file_viewer;
 mod history;
 mod mentions;
 mod overlay;
@@ -36,6 +37,8 @@ use crate::SessionState;
 use crate::block_viewer::BlockViewerState;
 use crate::composer::ComposerState;
 use crate::file_search::FileSearchController;
+use crate::file_viewer::FileViewerRequest;
+use crate::file_viewer::FileViewerState;
 use crate::history::PromptHistory;
 use crate::mcp_form::McpFormState;
 use crate::mention::MentionController;
@@ -129,6 +132,9 @@ pub struct SurfaceState {
     slash: SlashController,
     mentions: MentionController,
     file_search: FileSearchController,
+    file_viewer: Option<FileViewerState>,
+    pending_file_viewer_request: Option<FileViewerRequest>,
+    file_viewer_generation: u64,
     block_viewer: Option<BlockViewerState>,
     subagent_view: Option<Box<SubagentViewState>>,
     modal: Option<ModalState>,
@@ -163,6 +169,9 @@ impl SurfaceState {
             slash: SlashController::default(),
             mentions: MentionController::default(),
             file_search: FileSearchController::default(),
+            file_viewer: None,
+            pending_file_viewer_request: None,
+            file_viewer_generation: 0,
             block_viewer: None,
             subagent_view: None,
             modal: None,
@@ -204,6 +213,9 @@ impl SurfaceState {
             slash: SlashController::default(),
             mentions: MentionController::default(),
             file_search: FileSearchController::default(),
+            file_viewer: None,
+            pending_file_viewer_request: None,
+            file_viewer_generation: 0,
             block_viewer: None,
             subagent_view: None,
             modal: None,

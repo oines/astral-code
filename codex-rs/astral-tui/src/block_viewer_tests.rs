@@ -6,7 +6,7 @@ use pretty_assertions::assert_eq;
 use ratatui::layout::Rect;
 
 use super::BlockViewerFrame;
-use super::BlockViewerMouseAction;
+use super::ViewerMouseAction;
 use super::ViewerRowGeometry;
 use super::ViewerState;
 
@@ -94,44 +94,44 @@ fn viewer_pointer_uses_the_rendered_modal_geometry() {
 
     assert_eq!(
         state.handle_mouse(mouse(MouseEventKind::Moved, 28, 2)),
-        BlockViewerMouseAction::Redraw
+        ViewerMouseAction::Redraw
     );
     assert!(state.close_hovered());
     assert_eq!(
         state.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 28, 2)),
-        BlockViewerMouseAction::Close
+        ViewerMouseAction::Close
     );
     assert_eq!(
         state.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 0, 0)),
-        BlockViewerMouseAction::Close
+        ViewerMouseAction::Close
     );
     assert_eq!(
         state.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 30, 10)),
-        BlockViewerMouseAction::Redraw
+        ViewerMouseAction::Redraw
     );
     assert_eq!(state.scroll_offset(), 13);
     assert_eq!(state.selected_item(), Some(19));
     assert_eq!(
         state.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), 30, 4)),
-        BlockViewerMouseAction::Redraw
+        ViewerMouseAction::Redraw
     );
     assert_eq!(state.scroll_offset(), 0);
     assert_eq!(state.selected_item(), Some(0));
     assert_eq!(
         state.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), 30, 4)),
-        BlockViewerMouseAction::Redraw
+        ViewerMouseAction::Redraw
     );
     assert_eq!(
         state.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), 5, 6)),
-        BlockViewerMouseAction::Redraw
+        ViewerMouseAction::Redraw
     );
     assert_eq!(
         state.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), 9, 6)),
-        BlockViewerMouseAction::Redraw
+        ViewerMouseAction::Redraw
     );
     assert_eq!(
         state.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), 9, 6)),
-        BlockViewerMouseAction::Copy("line ".to_string())
+        ViewerMouseAction::Copy("line ".to_string())
     );
     assert_eq!(state.selected_item(), Some(0));
 }

@@ -142,6 +142,8 @@ impl SubagentViewState {
 impl SurfaceState {
     pub(crate) fn open_subagent_view(&mut self, thread: Thread, session: &SessionState) {
         self.block_viewer = None;
+        self.file_viewer = None;
+        self.pending_file_viewer_request = None;
         self.subagent_view = Some(Box::new(SubagentViewState::new(thread, session, self)));
     }
 
