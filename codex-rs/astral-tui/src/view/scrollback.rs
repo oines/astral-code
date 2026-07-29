@@ -110,14 +110,23 @@ impl ScrollbackNavigation {
     ) -> ScrollbackViewport {
         let viewport_lines = viewport_lines.max(1);
         let max_top = layout.lines.len().saturating_sub(viewport_lines);
+        let layout_changed = self.viewport_lines == 0
+            || width != self.width
+            || layout.lines.len() != self.total_lines;
         if self.follow_mode {
             self.first_visible_line = max_top;
-        } else if let Some(anchor) = self.anchor.as_ref()
+        } else if self.viewport_lines == 0 {
+            self.first_visible_line = max_top.saturating_sub(self.pending_distance_from_bottom);
+        } else if layout_changed
+            && let Some(anchor) = self.anchor.as_ref()
             && let Some(section) = layout.section(&anchor.item_id)
         {
             let section_height = section.lines.len().max(1);
             let line_offset = if width == self.width {
                 anchor.line_offset
+            } else if anchor.line_offset >= anchor.section_height {
+                section_height
+                    .saturating_add(anchor.line_offset.saturating_sub(anchor.section_height))
             } else {
                 anchor
                     .line_offset
@@ -125,12 +134,7 @@ impl ScrollbackNavigation {
                     .checked_div(anchor.section_height)
                     .unwrap_or(0)
             };
-            self.first_visible_line = section
-                .lines
-                .start
-                .saturating_add(line_offset.min(section_height - 1));
-        } else if self.viewport_lines == 0 {
-            self.first_visible_line = max_top.saturating_sub(self.pending_distance_from_bottom);
+            self.first_visible_line = section.lines.start.saturating_add(line_offset);
         }
         self.first_visible_line = self.first_visible_line.min(max_top);
         self.total_lines = layout.lines.len();

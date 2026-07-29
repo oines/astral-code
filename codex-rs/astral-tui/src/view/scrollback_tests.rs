@@ -150,6 +150,19 @@ fn manual_anchor_does_not_move_when_a_new_turn_appends() {
 }
 
 #[test]
+fn manual_scroll_keeps_exact_offset_between_entries() {
+    let mut layout = transcript_layout(&[("first", 5), ("second", 5)]);
+    layout.lines.splice(5..5, (0..4).map(|_| Line::from("")));
+    layout.sections[1].lines = 9..14;
+
+    let mut navigation = ScrollbackNavigation::default();
+    navigation.prepare(&layout, 40, 5);
+    navigation.scroll_up(/*lines*/ 3);
+
+    assert_eq!(navigation.prepare(&layout, 40, 5).first_visible_line, 6);
+}
+
+#[test]
 fn item_anchor_survives_reflow_before_and_inside_the_item() {
     let initial = transcript_layout(&[("before", 10), ("anchor", 10)]);
     let mut navigation = ScrollbackNavigation::default();
