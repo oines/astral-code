@@ -1,0 +1,30 @@
+---
+source: astral-tui/src/surface_tests.rs
+expression: "render_at_size(&mut state, &session, 100, 28)"
+---
+
+  ┌─ Subagent · Feynman ────────────────────────────────────────────────────────────────────[×]─┐
+  │                                                                                             │
+  │   /workspace                                                                                │
+  │                                                                                             │
+  │   › Inspect the retry policy.                                                               │
+  │                                                                                             │
+  │                                                                                             │
+  │  ❙◈ Searched 1 pattern                                                                      │
+  │ ┌                                                                                         ┐ │
+  │ │ The retry policy is configured in src/retry.rs.                                         │ │
+  │ └                                                                                         ┘ │
+  │   Worked for 1.0s                                                                           │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │   Esc/q:back  │  ↑/↓:navigate  │  Enter:open  │  /:search                                   │
+  │                                                                                             │
+  │                                                                                             │
+  └─────────────────────────────────────────────────────────────────────────────────────────────┘

@@ -134,6 +134,8 @@ pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction
         (KeyCode::Enter, KeyModifiers::NONE) => {
             if let Some(target) = state.highlighted_scrollback_link() {
                 InputAction::OpenLink(target)
+            } else if let Some(thread_id) = state.selected_subagent_thread_id() {
+                InputAction::OpenSubagent { thread_id }
             } else if state.open_selected_entry() {
                 InputAction::Redraw
             } else {
@@ -141,7 +143,9 @@ pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction
             }
         }
         (KeyCode::Char('f'), modifiers) if modifiers.contains(KeyModifiers::CONTROL) => {
-            if state.open_selected_entry() {
+            if let Some(thread_id) = state.selected_subagent_thread_id() {
+                InputAction::OpenSubagent { thread_id }
+            } else if state.open_selected_entry() {
                 InputAction::Redraw
             } else {
                 InputAction::None

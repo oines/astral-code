@@ -8,6 +8,7 @@ use super::ScrollbackState;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ScrollbackMouseAction {
     Ignored,
+    ActivateEntry(String),
     Copy(String),
     Open(LinkTarget),
 }

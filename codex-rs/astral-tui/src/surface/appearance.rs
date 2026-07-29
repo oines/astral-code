@@ -122,6 +122,11 @@ pub(super) fn render_overlay(
         return false;
     };
     match overlay {
+        ActiveOverlay::Subagent => {
+            if !state.render_subagent_overlay(area, buffer, theme) {
+                return false;
+            }
+        }
         ActiveOverlay::BlockViewer => {
             let Some((block, is_running)) = state.current_block_viewer_entry() else {
                 state.close_block_viewer();

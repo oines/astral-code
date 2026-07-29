@@ -32,6 +32,7 @@ mod mouse_scroll;
 mod pickers;
 mod plan_review;
 mod scrollback;
+mod subagent;
 mod user_input;
 
 pub(crate) use mouse_scroll::MouseScrollState;
@@ -53,6 +54,9 @@ pub enum InputAction {
         notice: String,
     },
     OpenLink(crate::LinkTarget),
+    OpenSubagent {
+        thread_id: String,
+    },
     Slash {
         invocation: SlashInvocation,
         submission: PromptSubmission,
@@ -219,6 +223,7 @@ fn handle_overlay_key(
     key: KeyEvent,
 ) -> InputAction {
     match overlay {
+        ActiveOverlay::Subagent => subagent::handle_key(state, key),
         ActiveOverlay::BlockViewer => block_viewer::handle_key(state, key),
         ActiveOverlay::ThemePicker => pickers::handle_theme_picker_key(state, key),
         ActiveOverlay::PermissionPicker => pickers::handle_permission_picker_key(state, key),
@@ -233,6 +238,7 @@ fn handle_overlay_paste(
     text: &str,
 ) -> InputAction {
     match overlay {
+        ActiveOverlay::Subagent => subagent::handle_paste(state, text),
         ActiveOverlay::BlockViewer => block_viewer::handle_paste(state, text),
         ActiveOverlay::ThreadPicker => {
             let Some(picker) = state.thread_picker_mut() else {
@@ -253,6 +259,7 @@ fn handle_overlay_mouse(
     mouse: MouseEvent,
 ) -> InputAction {
     match overlay {
+        ActiveOverlay::Subagent => subagent::handle_mouse(state, mouse),
         ActiveOverlay::BlockViewer => block_viewer::handle_mouse(state, mouse),
         ActiveOverlay::ThemePicker => pickers::handle_theme_picker_mouse(state, mouse),
         ActiveOverlay::PermissionPicker => pickers::handle_permission_picker_mouse(state, mouse),

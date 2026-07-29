@@ -24,6 +24,8 @@ use codex_app_server_protocol::ThreadForkParams;
 use codex_app_server_protocol::ThreadForkResponse;
 use codex_app_server_protocol::ThreadListParams;
 use codex_app_server_protocol::ThreadListResponse;
+use codex_app_server_protocol::ThreadReadParams;
+use codex_app_server_protocol::ThreadReadResponse;
 use codex_app_server_protocol::ThreadResumeParams;
 use codex_app_server_protocol::ThreadResumeResponse;
 use codex_app_server_protocol::ThreadSetNameParams;
@@ -365,6 +367,21 @@ impl AstralSession {
             })
             .await?;
         Ok(response)
+    }
+
+    pub(crate) async fn read_thread(&mut self, thread_id: String) -> Result<Thread, SessionError> {
+        let request_id = self.next_request_id();
+        let response: ThreadReadResponse = self
+            .client
+            .request_typed(ClientRequest::ThreadRead {
+                request_id,
+                params: ThreadReadParams {
+                    thread_id,
+                    include_turns: true,
+                },
+            })
+            .await?;
+        Ok(response.thread)
     }
 
     pub(crate) async fn rename(&mut self, name: String) -> Result<(), SessionError> {

@@ -435,8 +435,12 @@ impl ScrollbackState {
             }
             EntryMouseAction::Toggle(item_id) => {
                 if self.display.select(&item_id) {
-                    self.display.toggle_selected();
-                    self.navigation.reveal_entry(&item_id);
+                    if self.display.is_foldable(&item_id) {
+                        self.display.toggle_selected();
+                        self.navigation.reveal_entry(&item_id);
+                    } else {
+                        return ScrollbackMouseAction::ActivateEntry(item_id);
+                    }
                 }
             }
             EntryMouseAction::ToggleGroup(item_id) => {

@@ -474,6 +474,98 @@ fn visible_overlay_owns_keyboard_input_snapshot() {
 }
 
 #[test]
+fn subagent_view_is_read_only_and_owns_input_snapshot() {
+    let session = session_state();
+    let child: Thread = serde_json::from_value(json!({
+        "id": "thread-child",
+        "sessionId": "session-1",
+        "forkedFromId": null,
+        "parentThreadId": "thread-1",
+        "preview": "inspect retry behavior",
+        "ephemeral": false,
+        "modelProvider": "anthropic",
+        "createdAt": 2,
+        "updatedAt": 3,
+        "status": {"type": "idle"},
+        "path": null,
+        "cwd": "/workspace",
+        "cliVersion": "0.0.0",
+        "source": "cli",
+        "threadSource": "subagent",
+        "agentNickname": "Feynman",
+        "agentRole": "explorer",
+        "gitInfo": null,
+        "name": null,
+        "turns": [{
+            "id": "turn-child",
+            "items": [
+                {
+                    "type": "userMessage",
+                    "id": "child-user",
+                    "content": [{
+                        "type": "text",
+                        "text": "Inspect the retry policy.",
+                        "text_elements": []
+                    }]
+                },
+                {
+                    "type": "reasoning",
+                    "id": "child-reasoning",
+                    "summary": ["Trace the retry configuration and call sites."],
+                    "content": []
+                },
+                {
+                    "type": "commandExecution",
+                    "id": "child-command",
+                    "command": "rg max_retry",
+                    "cwd": "/workspace",
+                    "processId": null,
+                    "source": "agent",
+                    "status": "completed",
+                    "commandActions": [{
+                        "type": "search",
+                        "command": "rg max_retry",
+                        "query": "max_retry",
+                        "path": null
+                    }],
+                    "aggregatedOutput": "src/retry.rs:42: max_retry = 3",
+                    "exitCode": 0,
+                    "durationMs": 18
+                },
+                {
+                    "type": "agentMessage",
+                    "id": "child-agent",
+                    "text": "The retry policy is configured in `src/retry.rs`.",
+                    "phase": null,
+                    "memoryCitation": null
+                }
+            ],
+            "itemsView": "full",
+            "status": "completed",
+            "error": null,
+            "startedAt": 2,
+            "completedAt": 3,
+            "durationMs": 1000
+        }]
+    }))
+    .expect("valid child thread");
+    let mut state = SurfaceState::from_session(&session);
+    state.open_subagent_view(child, &session);
+
+    assert_eq!(
+        handle_key(&mut state, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
+        InputAction::Redraw
+    );
+    insta::assert_snapshot!(render_at_size(&mut state, &session, 100, 28));
+
+    assert_eq!(
+        handle_key(&mut state, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        InputAction::Redraw
+    );
+    assert!(!state.subagent_view_open());
+}
+
+#[test]
 fn timeline_rail_surface_snapshot() {
     let mut session = session_state();
     let second_started_at =

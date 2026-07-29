@@ -8,6 +8,7 @@ use super::SurfaceState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ActiveOverlay {
+    Subagent,
     BlockViewer,
     ThemePicker,
     PermissionPicker,
@@ -17,7 +18,9 @@ pub(crate) enum ActiveOverlay {
 
 impl SurfaceState {
     pub(crate) fn active_overlay(&self) -> Option<ActiveOverlay> {
-        if self.block_viewer().is_some() {
+        if self.subagent_view_open() {
+            Some(ActiveOverlay::Subagent)
+        } else if self.block_viewer().is_some() {
             Some(ActiveOverlay::BlockViewer)
         } else if self.theme_picker().is_some() {
             Some(ActiveOverlay::ThemePicker)

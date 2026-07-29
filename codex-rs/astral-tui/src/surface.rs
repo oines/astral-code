@@ -7,6 +7,7 @@ mod overlay;
 mod plan_review;
 mod pointer;
 mod requests;
+mod subagent;
 mod transcript_cache;
 
 use std::sync::Arc;
@@ -85,6 +86,7 @@ use crate::view::render_follow_indicator;
 use crate::view::render_transcript;
 
 use self::pointer::SurfacePointerState;
+use self::subagent::SubagentViewState;
 use self::transcript_cache::TranscriptCache;
 use self::transcript_cache::TranscriptCacheKey;
 
@@ -102,6 +104,7 @@ pub enum SurfaceActivity {
 pub(crate) enum TranscriptView {
     Live,
     Full,
+    ReadOnly,
 }
 
 #[derive(Debug)]
@@ -120,6 +123,7 @@ pub struct SurfaceState {
     slash: SlashController,
     mentions: MentionController,
     block_viewer: Option<BlockViewerState>,
+    subagent_view: Option<Box<SubagentViewState>>,
     modal: Option<ModalState>,
     thread_picker: Option<PickerState>,
     permission_picker: Option<PermissionPickerState>,
@@ -151,6 +155,7 @@ impl SurfaceState {
             slash: SlashController::default(),
             mentions: MentionController::default(),
             block_viewer: None,
+            subagent_view: None,
             modal: None,
             thread_picker: None,
             permission_picker: None,
@@ -189,6 +194,7 @@ impl SurfaceState {
             slash: SlashController::default(),
             mentions: MentionController::default(),
             block_viewer: None,
+            subagent_view: None,
             modal: None,
             thread_picker: None,
             permission_picker: None,
@@ -617,41 +623,49 @@ pub(crate) fn render_surface_with_view(
     }
     let theme = state.theme();
     buffer.set_style(area, Style::default().bg(theme.bg_base));
-    state.sync_request_states();
+    let read_only = transcript_view == TranscriptView::ReadOnly;
+    if !read_only {
+        state.sync_request_states();
+    }
 
-    let has_request = state.pending_requests.front().is_some();
-    let request_focused = state.pending_requests.front().is_some_and(|request| {
-        !crate::request_choice::is_simple_request(request) || !state.scrollback_focused()
-    });
-    let plan_review = state.plan_review().cloned();
+    let has_request = !read_only && state.pending_requests.front().is_some();
+    let request_focused = !read_only
+        && state.pending_requests.front().is_some_and(|request| {
+            !crate::request_choice::is_simple_request(request) || !state.scrollback_focused()
+        });
+    let plan_review = (!read_only).then(|| state.plan_review().cloned()).flatten();
     let history = state.history().clone();
-    let prompt_height = state.pending_requests.front().map_or_else(
-        || {
-            if plan_review
-                .as_ref()
-                .is_some_and(|review| review.focus() == PlanReviewFocus::Decision)
-            {
-                0
-            } else {
-                let (text, cursor) = if history.open && history.browse {
-                    (history.saved_text.as_str(), history.saved_text.len())
+    let prompt_height = if read_only {
+        0
+    } else {
+        state.pending_requests.front().map_or_else(
+            || {
+                if plan_review
+                    .as_ref()
+                    .is_some_and(|review| review.focus() == PlanReviewFocus::Decision)
+                {
+                    0
                 } else {
-                    (state.composer(), state.composer_cursor())
-                };
-                prompt_height(text, cursor, area.width)
-            }
-        },
-        |request| {
-            RequestPane::new(
-                request,
-                state.request_choice(),
-                state.request_user_input(),
-                state.mcp_form(),
-                request_focused,
-            )
-            .height(area.height)
-        },
-    );
+                    let (text, cursor) = if history.open && history.browse {
+                        (history.saved_text.as_str(), history.saved_text.len())
+                    } else {
+                        (state.composer(), state.composer_cursor())
+                    };
+                    prompt_height(text, cursor, area.width)
+                }
+            },
+            |request| {
+                RequestPane::new(
+                    request,
+                    state.request_choice(),
+                    state.request_user_input(),
+                    state.mcp_form(),
+                    request_focused,
+                )
+                .height(area.height)
+            },
+        )
+    };
     let slash = state.slash().clone();
     let mentions = state.mentions().clone();
     let max_suggestions = if area.height <= 16 { 2 } else { 6 };
@@ -664,13 +678,14 @@ pub(crate) fn render_surface_with_view(
     } else {
         0
     };
-    let completion_height = if !has_request && plan_review.is_none() && completion_rows > 0 {
-        u16::try_from(completion_rows.min(max_suggestions))
-            .unwrap_or(u16::MAX)
-            .saturating_add(2)
-    } else {
-        0
-    };
+    let completion_height =
+        if !read_only && !has_request && plan_review.is_none() && completion_rows > 0 {
+            u16::try_from(completion_rows.min(max_suggestions))
+                .unwrap_or(u16::MAX)
+                .saturating_add(2)
+        } else {
+            0
+        };
     let banner_height = plan_review.as_ref().map_or(completion_height, |review| {
         PlanReviewPane { state: review }.height()
     });
@@ -678,7 +693,11 @@ pub(crate) fn render_surface_with_view(
         .then(|| turn_status_line(state, theme))
         .flatten();
     let turn_count = session.thread.turns.len();
-    let timeline_width = appearance::timeline_width(state, area.width, turn_count);
+    let timeline_width = if read_only {
+        0
+    } else {
+        appearance::timeline_width(state, area.width, turn_count)
+    };
     let layout = AgentViewLayout::compute(AgentViewLayoutInput {
         area,
         layout: LayoutConfig::default(),
@@ -722,7 +741,7 @@ pub(crate) fn render_surface_with_view(
             usize::from(scrollback_content.height),
             /*distance_from_bottom*/ 0,
         ),
-        TranscriptView::Full => state.scrollback.prepare(
+        TranscriptView::Full | TranscriptView::ReadOnly => state.scrollback.prepare(
             &transcript,
             scrollback_content.width,
             usize::from(scrollback_content.height),
@@ -749,7 +768,7 @@ pub(crate) fn render_surface_with_view(
         viewport,
         scrollback_content,
         EntryChromeState {
-            selected_id: (transcript_view == TranscriptView::Full)
+            selected_id: (transcript_view != TranscriptView::Live)
                 .then(|| state.scrollback.selected_id())
                 .flatten(),
             hovered_id: state.scrollback.hovered_id(),
@@ -758,7 +777,7 @@ pub(crate) fn render_surface_with_view(
         buffer,
         theme,
     );
-    if transcript_view == TranscriptView::Full {
+    if transcript_view != TranscriptView::Live {
         state.scrollback.observe_frame(
             ScrollbackFrame {
                 layout: &transcript,
@@ -849,21 +868,29 @@ pub(crate) fn render_surface_with_view(
                 .map(|profile| profile.id.as_str()),
         )
     };
-    let request_pane = state.pending_requests.front().map(|request| {
-        RequestPane::new(
-            request,
-            state.request_choice(),
-            state.request_user_input(),
-            state.mcp_form(),
-            request_focused,
-        )
-    });
+    let request_pane = if read_only {
+        None
+    } else {
+        state.pending_requests.front().map(|request| {
+            RequestPane::new(
+                request,
+                state.request_choice(),
+                state.request_user_input(),
+                state.mcp_form(),
+                request_focused,
+            )
+        })
+    };
     let revising_plan = plan_review
         .as_ref()
         .is_some_and(|review| review.focus() == PlanReviewFocus::Revision);
-    let prompt_focused =
-        (request_pane.is_some() && request_focused) || revising_plan || !state.scrollback_focused();
-    let cursor = if let Some(pane) = request_pane {
+    let prompt_focused = !read_only
+        && ((request_pane.is_some() && request_focused)
+            || revising_plan
+            || !state.scrollback_focused());
+    let cursor = if read_only {
+        None
+    } else if let Some(pane) = request_pane {
         pane.render(layout.prompt, buffer, theme)
     } else if plan_review
         .as_ref()
@@ -891,6 +918,12 @@ pub(crate) fn render_surface_with_view(
     };
 
     let default_hints = [("Shift+Tab", "mode"), ("Ctrl+.", "shortcuts")];
+    let read_only_hints = [
+        ("Esc/q", "back"),
+        ("↑/↓", "navigate"),
+        ("Enter", "open"),
+        ("/", "search"),
+    ];
     let fold_action = if state.scrollback.selected_mode() == Some(DisplayMode::Expanded) {
         "collapse"
     } else {
@@ -965,6 +998,8 @@ pub(crate) fn render_surface_with_view(
     ShortcutsBar {
         hints: if state.active_overlay().is_some() {
             overlay_hints
+        } else if read_only {
+            &read_only_hints
         } else if request_pane.is_some() && !request_focused {
             &scrollback_hints
         } else if let Some(pane) = request_pane {
@@ -1030,7 +1065,7 @@ fn conversation_layout(
     }
     let turns = match transcript_view {
         TranscriptView::Live => state.conversation.live_turns(),
-        TranscriptView::Full => state.conversation.all_turns(),
+        TranscriptView::Full | TranscriptView::ReadOnly => state.conversation.all_turns(),
     };
     state.scrollback.observe_entries(&turns);
     key.display_revision = state.scrollback.display().render_revision();

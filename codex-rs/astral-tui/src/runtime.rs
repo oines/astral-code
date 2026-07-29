@@ -348,6 +348,29 @@ async fn run_loop(
                                     if surface.scrollback_contains(mouse) {
                                         match surface.handle_scrollback_mouse(mouse) {
                                             ScrollbackMouseAction::Ignored => {}
+                                            ScrollbackMouseAction::ActivateEntry(entry_id) => {
+                                                let action = surface
+                                                    .subagent_thread_id_for_entry(&entry_id)
+                                                    .map_or_else(
+                                                        || {
+                                                            if surface.open_entry(entry_id) {
+                                                                InputAction::Redraw
+                                                            } else {
+                                                                InputAction::None
+                                                            }
+                                                        },
+                                                        |thread_id| {
+                                                            InputAction::OpenSubagent { thread_id }
+                                                        },
+                                                    );
+                                                let _ = apply_input_action(
+                                                    session,
+                                                    surface,
+                                                    theme_selection,
+                                                    action,
+                                                )
+                                                .await?;
+                                            }
                                             ScrollbackMouseAction::Copy(selection) => {
                                                 match copy_to_clipboard(&selection) {
                                                     Ok(lease) => {
@@ -523,6 +546,17 @@ async fn apply_input_action(
             Ok(()) => surface.set_notice("Opening in default app…"),
             Err(error) => surface.set_notice(error),
         },
+        InputAction::OpenSubagent { thread_id } => {
+            let Some(parent_session) = session.state().cloned() else {
+                surface.set_notice_on_active_surface("No Astral thread is active");
+                return Ok(None);
+            };
+            match session.read_thread(thread_id).await {
+                Ok(thread) => surface.open_subagent_view_on_active(thread, &parent_session),
+                Err(error) => surface
+                    .set_notice_on_active_surface(format!("Could not open subagent: {error}")),
+            }
+        }
         InputAction::SelectTheme(name) => {
             *theme_selection = Some(name.clone());
             surface.set_notice(format!("Switched to {name}"));
@@ -914,6 +948,7 @@ async fn handle_app_event(
 }
 
 fn handle_notification(surface: &mut SurfaceState, notification: &ServerNotification) {
+    surface.observe_subagent_notification(notification);
     let active_thread_id = surface.conversation().thread_id().to_string();
     surface.conversation_mut().apply(notification);
     match notification {

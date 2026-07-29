@@ -26,6 +26,10 @@ impl SurfaceState {
         let Some(entry_id) = self.scrollback.selected_id().map(str::to_string) else {
             return false;
         };
+        self.open_entry(entry_id)
+    }
+
+    pub(crate) fn open_entry(&mut self, entry_id: String) -> bool {
         let Some((_, running)) = self.presentation_block_state(&entry_id) else {
             return false;
         };
