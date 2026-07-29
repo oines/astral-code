@@ -65,7 +65,7 @@ fn composer_submit_and_interrupt_are_distinct_actions() {
         handle_key(&mut state, key(KeyCode::Enter)),
         InputAction::Submit(crate::PromptSubmission {
             text: "hello".to_string(),
-            mentions: Vec::new(),
+            elements: Vec::new(),
         })
     );
 
@@ -228,7 +228,7 @@ fn slash_completion_and_dispatch_stay_local_to_the_tui() {
             },
             submission: crate::PromptSubmission {
                 text: "/compact".to_string(),
-                mentions: Vec::new(),
+                elements: Vec::new(),
             },
         }
     );
@@ -250,7 +250,7 @@ fn plan_command_keeps_the_inline_prompt_for_typed_dispatch() {
             },
             submission: crate::PromptSubmission {
                 text: "/plan inspect the renderer".to_string(),
-                mentions: Vec::new(),
+                elements: Vec::new(),
             },
         }
     );

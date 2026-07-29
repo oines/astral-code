@@ -7,8 +7,7 @@
 
 use std::ops::Range;
 
-use crate::mention::MentionBinding;
-
+use super::ComposerElement;
 use super::ComposerState;
 
 const MAX_DEPTH: usize = 100;
@@ -17,7 +16,7 @@ const MAX_DEPTH: usize = 100;
 pub(super) struct EditSnapshot {
     pub(super) text: String,
     pub(super) cursor: usize,
-    pub(super) mention_bindings: Vec<MentionBinding>,
+    pub(super) elements: Vec<ComposerElement>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -122,16 +121,16 @@ impl ComposerState {
         self.begin_mutation(kind);
         let removed_len = range.end.saturating_sub(range.start);
         let inserted_len = replacement.len();
-        self.mention_bindings.retain_mut(|binding| {
+        self.elements.retain_mut(|element| {
             if range.is_empty() {
-                return adjust_binding_for_insertion(binding, range.start, replacement);
+                return adjust_element_for_insertion(element, range.start, replacement);
             }
-            if range.end <= binding.range.start {
-                binding.range.start = shifted_index(binding.range.start, removed_len, inserted_len);
-                binding.range.end = shifted_index(binding.range.end, removed_len, inserted_len);
+            if range.end <= element.range.start {
+                element.range.start = shifted_index(element.range.start, removed_len, inserted_len);
+                element.range.end = shifted_index(element.range.end, removed_len, inserted_len);
                 return true;
             }
-            range.start >= binding.range.end
+            range.start >= element.range.end
         });
         self.text.replace_range(range.clone(), replacement);
         self.cursor = range.start.saturating_add(inserted_len);
@@ -171,30 +170,30 @@ impl ComposerState {
         EditSnapshot {
             text: self.text.clone(),
             cursor: self.cursor,
-            mention_bindings: self.mention_bindings.clone(),
+            elements: self.elements.clone(),
         }
     }
 
     fn restore_snapshot(&mut self, snapshot: EditSnapshot) {
         self.text = snapshot.text;
         self.cursor = snapshot.cursor.min(self.text.len());
-        self.mention_bindings = snapshot.mention_bindings;
+        self.elements = snapshot.elements;
         self.preferred_column = None;
         self.clear_selection_state();
     }
 }
 
-fn adjust_binding_for_insertion(
-    binding: &mut MentionBinding,
+fn adjust_element_for_insertion(
+    element: &mut ComposerElement,
     position: usize,
     inserted: &str,
 ) -> bool {
-    if position < binding.range.start {
-        binding.range.start = binding.range.start.saturating_add(inserted.len());
-        binding.range.end = binding.range.end.saturating_add(inserted.len());
+    if position < element.range.start {
+        element.range.start = element.range.start.saturating_add(inserted.len());
+        element.range.end = element.range.end.saturating_add(inserted.len());
         return true;
     }
-    if position == binding.range.start {
+    if position == element.range.start {
         if !inserted
             .chars()
             .next_back()
@@ -202,14 +201,14 @@ fn adjust_binding_for_insertion(
         {
             return false;
         }
-        binding.range.start = binding.range.start.saturating_add(inserted.len());
-        binding.range.end = binding.range.end.saturating_add(inserted.len());
+        element.range.start = element.range.start.saturating_add(inserted.len());
+        element.range.end = element.range.end.saturating_add(inserted.len());
         return true;
     }
-    if position < binding.range.end {
+    if position < element.range.end {
         return false;
     }
-    position != binding.range.end || inserted.chars().next().is_some_and(char::is_whitespace)
+    position != element.range.end || inserted.chars().next().is_some_and(char::is_whitespace)
 }
 
 fn shifted_index(index: usize, removed_len: usize, inserted_len: usize) -> usize {

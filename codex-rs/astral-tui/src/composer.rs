@@ -7,11 +7,11 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
 
-use crate::mention::MentionBinding;
 use crate::mention::MentionTarget;
 use crate::mention::PromptSubmission;
 
 mod edit;
+mod element;
 mod history;
 mod selection;
 
@@ -23,6 +23,7 @@ use edit::previous_boundary;
 use edit::small_word_end_right;
 use edit::small_word_start_left;
 use edit::whitespace_word_start_left;
+pub(crate) use element::ComposerElement;
 use history::EditHistory;
 use history::MutationKind;
 use selection::ClickTracker;
@@ -36,7 +37,7 @@ pub(crate) struct ComposerState {
     preferred_column: Option<usize>,
     kill_buffer: String,
     history: EditHistory,
-    mention_bindings: Vec<MentionBinding>,
+    elements: Vec<ComposerElement>,
     selection: Option<Selection>,
     drag_anchor: Option<usize>,
     drag_active: bool,
@@ -53,12 +54,12 @@ impl ComposerState {
     }
 
     pub(crate) fn has_structured_mentions(&self) -> bool {
-        !self.mention_bindings.is_empty()
+        !self.elements.is_empty()
     }
 
     pub(crate) fn replace(&mut self, text: impl Into<String>) {
         let text = text.into();
-        if self.text == text && self.cursor == text.len() && self.mention_bindings.is_empty() {
+        if self.text == text && self.cursor == text.len() && self.elements.is_empty() {
             self.clear_selection_state();
             return;
         }
@@ -66,20 +67,20 @@ impl ComposerState {
         self.text = text;
         self.cursor = self.text.len();
         self.preferred_column = None;
-        self.mention_bindings.clear();
+        self.elements.clear();
         self.finish_mutation();
         self.clear_selection_state();
     }
 
     pub(crate) fn take(&mut self) -> String {
-        if self.text.is_empty() && self.cursor == 0 && self.mention_bindings.is_empty() {
+        if self.text.is_empty() && self.cursor == 0 && self.elements.is_empty() {
             self.clear_selection_state();
             return String::new();
         }
         self.begin_mutation(MutationKind::Replace);
         self.cursor = 0;
         self.preferred_column = None;
-        self.mention_bindings.clear();
+        self.elements.clear();
         let text = std::mem::take(&mut self.text);
         self.finish_mutation();
         self.clear_selection_state();
@@ -87,21 +88,21 @@ impl ComposerState {
     }
 
     pub(crate) fn take_submission(&mut self) -> PromptSubmission {
-        if self.text.is_empty() && self.cursor == 0 && self.mention_bindings.is_empty() {
+        if self.text.is_empty() && self.cursor == 0 && self.elements.is_empty() {
             self.clear_selection_state();
             return PromptSubmission::text_only(String::new());
         }
         self.begin_mutation(MutationKind::Replace);
-        let mentions = self
-            .mention_bindings
+        let elements = self
+            .elements
             .drain(..)
-            .filter(|binding| binding_matches_text(&self.text, binding))
+            .filter(|element| element.matches_text(&self.text))
             .collect();
         self.cursor = 0;
         self.preferred_column = None;
         let submission = PromptSubmission {
             text: std::mem::take(&mut self.text),
-            mentions,
+            elements,
         };
         self.finish_mutation();
         self.clear_selection_state();
@@ -111,14 +112,14 @@ impl ComposerState {
     pub(crate) fn restore_submission(&mut self, submission: PromptSubmission) {
         if self.text == submission.text
             && self.cursor == submission.text.len()
-            && self.mention_bindings == submission.mentions
+            && self.elements == submission.elements
         {
             self.clear_selection_state();
             return;
         }
         self.begin_mutation(MutationKind::Replace);
         self.text = submission.text;
-        self.mention_bindings = submission.mentions;
+        self.elements = submission.elements;
         self.cursor = self.text.len();
         self.preferred_column = None;
         self.finish_mutation();
@@ -126,7 +127,7 @@ impl ComposerState {
     }
 
     pub(crate) fn clear(&mut self) {
-        if self.text.is_empty() && self.cursor == 0 && self.mention_bindings.is_empty() {
+        if self.text.is_empty() && self.cursor == 0 && self.elements.is_empty() {
             self.clear_selection_state();
             return;
         }
@@ -134,7 +135,7 @@ impl ComposerState {
         self.text.clear();
         self.cursor = 0;
         self.preferred_column = None;
-        self.mention_bindings.clear();
+        self.elements.clear();
         self.finish_mutation();
         self.clear_selection_state();
     }
@@ -167,11 +168,11 @@ impl ComposerState {
         let start = range.start;
         let inserted = format!("{insert_text} ");
         self.replace_range(range, &inserted, MutationKind::Replace);
-        self.mention_bindings.push(MentionBinding {
-            range: start..start + insert_text.len(),
+        self.elements.push(ComposerElement::mention(
+            start..start + insert_text.len(),
             insert_text,
             target,
-        });
+        ));
     }
 
     pub(crate) fn edit_key(&mut self, key: KeyEvent) -> bool {
@@ -474,20 +475,6 @@ impl ComposerState {
         self.preferred_column = Some(column);
         true
     }
-}
-
-fn binding_matches_text(text: &str, binding: &MentionBinding) -> bool {
-    text.get(binding.range.clone()) == Some(binding.insert_text.as_str())
-        && (binding.range.start == 0
-            || text[..binding.range.start]
-                .chars()
-                .next_back()
-                .is_some_and(char::is_whitespace))
-        && (binding.range.end == text.len()
-            || text[binding.range.end..]
-                .chars()
-                .next()
-                .is_some_and(char::is_whitespace))
 }
 
 #[cfg(test)]

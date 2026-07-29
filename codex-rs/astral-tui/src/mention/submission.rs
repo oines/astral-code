@@ -1,8 +1,9 @@
 use std::collections::HashSet;
-use std::ops::Range;
 use std::path::PathBuf;
 
 use codex_app_server_protocol::UserInput;
+
+use crate::composer::ComposerElement;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum MentionTarget {
@@ -33,23 +34,16 @@ impl MentionTarget {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct MentionBinding {
-    pub(crate) range: Range<usize>,
-    pub(crate) insert_text: String,
-    pub(crate) target: MentionTarget,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PromptSubmission {
     pub(crate) text: String,
-    pub(crate) mentions: Vec<MentionBinding>,
+    pub(crate) elements: Vec<ComposerElement>,
 }
 
 impl PromptSubmission {
     pub(crate) fn text_only(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
-            mentions: Vec::new(),
+            elements: Vec::new(),
         }
     }
 
@@ -63,9 +57,10 @@ impl PromptSubmission {
             text_elements: Vec::new(),
         }];
         let mut seen = HashSet::new();
-        for binding in &self.mentions {
-            if seen.insert(binding.target.key().to_string()) {
-                input.push(binding.target.to_user_input());
+        for element in &self.elements {
+            let target = element.mention_target();
+            if seen.insert(target.key().to_string()) {
+                input.push(target.to_user_input());
             }
         }
         input
@@ -83,12 +78,12 @@ impl PromptSubmission {
             })
             .unwrap_or(self.text.len());
         let args_end = args_start.saturating_add(args.len()).min(self.text.len());
-        self.mentions.retain_mut(|binding| {
-            if binding.range.start < args_start || binding.range.end > args_end {
+        self.elements.retain_mut(|element| {
+            if element.range.start < args_start || element.range.end > args_end {
                 return false;
             }
-            binding.range.start -= args_start;
-            binding.range.end -= args_start;
+            element.range.start -= args_start;
+            element.range.end -= args_start;
             true
         });
         self.text = args;

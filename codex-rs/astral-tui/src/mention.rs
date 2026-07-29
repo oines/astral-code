@@ -12,6 +12,5 @@ pub(crate) use catalog::MentionCatalog;
 pub(crate) use catalog::MentionController;
 pub(crate) use catalog::MentionKind;
 pub(crate) use catalog::MentionSnapshot;
-pub(crate) use submission::MentionBinding;
 pub(crate) use submission::MentionTarget;
 pub use submission::PromptSubmission;
