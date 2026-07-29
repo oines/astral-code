@@ -184,6 +184,7 @@ impl ComposerState {
         self.text = snapshot.text;
         self.cursor = snapshot.cursor.min(self.text.len());
         self.elements = snapshot.elements;
+        self.restore_image_counter_high_water();
         self.preferred_column = None;
         self.clear_selection_state();
     }

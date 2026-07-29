@@ -163,9 +163,9 @@ pub fn handle_paste(state: &mut SurfaceState, text: &str) -> InputAction {
     if state.plan_review().is_some() {
         return plan_review::handle_paste(state, text);
     }
-    state.composer_state_mut().insert_paste(text);
+    let notice = state.composer_state_mut().insert_paste_payload(text);
     state.refresh_composer_completions();
-    InputAction::Redraw
+    notice.map_or(InputAction::Redraw, InputAction::Notice)
 }
 
 pub(crate) fn handle_mouse(state: &mut SurfaceState, mouse: MouseEvent) -> InputAction {

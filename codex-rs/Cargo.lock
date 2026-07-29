@@ -585,6 +585,7 @@ dependencies = [
  "codex-protocol",
  "codex-terminal-detection",
  "crossterm",
+ "image",
  "insta",
  "pretty_assertions",
  "ratatui",
@@ -597,6 +598,7 @@ dependencies = [
  "tokio-stream",
  "unicode-segmentation",
  "unicode-width 0.2.1",
+ "url",
  "which 8.0.0",
  "winsplit",
 ]

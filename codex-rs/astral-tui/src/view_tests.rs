@@ -4,6 +4,7 @@ use ratatui::layout::Position;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
 use ratatui::style::Stylize;
+use std::path::PathBuf;
 
 use super::view::AgentViewLayout;
 use super::view::AgentViewLayoutInput;
@@ -17,6 +18,7 @@ use super::view::ShortcutsBar;
 use super::view::StatusBar;
 use crate::PromptSubmission;
 use crate::composer::ComposerElement;
+use crate::composer::LocalImage;
 use crate::plan_review::PlanReviewState;
 
 #[test]
@@ -172,6 +174,44 @@ fn paste_chip_prompt_snapshot() {
     PromptChrome {
         text: &text,
         cursor_byte: start + placeholder.len(),
+        title: None,
+        model: "gpt-5",
+        flags: &[],
+        ghost: None,
+        focused: true,
+        selection: None,
+        elements: &elements,
+    }
+    .render(area, &mut buffer, theme);
+
+    insta::assert_snapshot!(format!(
+        "{}\n\nchip mask:\n{}",
+        buffer_text(&buffer),
+        selection_mask(&buffer, theme.panel_selected)
+    ));
+}
+
+#[test]
+fn local_image_chip_prompt_snapshot() {
+    let theme = AstralTheme::default();
+    let area = Rect::new(0, 0, 52, 4);
+    let mut buffer = Buffer::empty(area);
+    let placeholder = "[Image #1]";
+    let text = format!("inspect {placeholder} before submitting");
+    let start = "inspect ".len();
+    let elements = vec![ComposerElement::local_image(
+        start..start + placeholder.len(),
+        LocalImage {
+            path: PathBuf::from("/tmp/screenshot.png"),
+            display_number: 1,
+            dimensions: Some((640, 480)),
+            byte_len: Some(12_345),
+        },
+    )];
+
+    PromptChrome {
+        text: &text,
+        cursor_byte: start,
         title: None,
         model: "gpt-5",
         flags: &[],

@@ -7,7 +7,6 @@
 
 use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::Turn;
-use codex_app_server_protocol::UserInput;
 
 use crate::PromptSubmission;
 use crate::slash::fuzzy_match;
@@ -54,18 +53,7 @@ impl PromptHistory {
                 let ThreadItem::UserMessage { content, .. } = item else {
                     continue;
                 };
-                let text = content
-                    .iter()
-                    .filter_map(|input| match input {
-                        UserInput::Text { text, .. } => Some(text.as_str()),
-                        UserInput::Image { .. }
-                        | UserInput::LocalImage { .. }
-                        | UserInput::Skill { .. }
-                        | UserInput::Mention { .. } => None,
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                history.record(&PromptSubmission::text_only(text));
+                history.record(&PromptSubmission::from_user_input(content));
             }
         }
         history

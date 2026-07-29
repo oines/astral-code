@@ -63,7 +63,7 @@ impl PromptElementOverlay<'_> {
                         cell.set_style(style);
                     }
                 }
-                if element.is_paste() {
+                if element.is_bracketed_chip() {
                     if start == element.range.start {
                         dim_bracket(buffer, x, y, theme);
                     }

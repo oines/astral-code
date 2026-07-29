@@ -14,6 +14,7 @@ mod edit;
 mod element;
 mod element_edit;
 mod history;
+mod path_paste;
 mod selection;
 
 use edit::byte_at_column;
@@ -25,6 +26,7 @@ use edit::small_word_end_right;
 use edit::small_word_start_left;
 use edit::whitespace_word_start_left;
 pub(crate) use element::ComposerElement;
+pub(crate) use element::LocalImage;
 use history::EditHistory;
 use history::MutationKind;
 use selection::ClickTracker;
@@ -39,6 +41,7 @@ pub(crate) struct ComposerState {
     kill_buffer: String,
     history: EditHistory,
     elements: Vec<ComposerElement>,
+    image_counter: usize,
     selection: Option<Selection>,
     drag_anchor: Option<usize>,
     drag_active: bool,
@@ -82,6 +85,7 @@ impl ComposerState {
         self.cursor = 0;
         self.preferred_column = None;
         self.elements.clear();
+        self.image_counter = 0;
         let text = std::mem::take(&mut self.text);
         self.finish_mutation();
         self.clear_selection_state();
@@ -101,6 +105,7 @@ impl ComposerState {
             .collect();
         self.cursor = 0;
         self.preferred_column = None;
+        self.image_counter = 0;
         let submission = PromptSubmission {
             text: std::mem::take(&mut self.text),
             elements,
@@ -122,6 +127,7 @@ impl ComposerState {
         self.text = submission.text;
         self.elements = submission.elements;
         self.elements.sort_by_key(|element| element.range.start);
+        self.restore_image_counter_high_water();
         self.cursor = self.text.len();
         self.preferred_column = None;
         self.finish_mutation();
@@ -138,6 +144,7 @@ impl ComposerState {
         self.cursor = 0;
         self.preferred_column = None;
         self.elements.clear();
+        self.image_counter = 0;
         self.finish_mutation();
         self.clear_selection_state();
     }
