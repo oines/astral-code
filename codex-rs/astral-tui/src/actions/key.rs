@@ -130,15 +130,32 @@ impl KeyShortcut {
     }
 
     fn normalize_case(mut self) -> Self {
-        let KeyCode::Char(character) = self.code else {
+        let KeyCode::Char(mut character) = self.code else {
             return self;
         };
+        if self.modifiers.is_empty()
+            && let Some(control) = c0_control_char_to_ctrl_char(character)
+        {
+            character = control;
+            self.code = KeyCode::Char(character);
+            self.modifiers = KeyModifiers::CONTROL;
+        }
         if character.is_ascii_uppercase() {
             self.modifiers.insert(KeyModifiers::SHIFT);
         } else if self.modifiers.contains(KeyModifiers::SHIFT) {
             self.code = KeyCode::Char(character.to_ascii_uppercase());
         }
         self
+    }
+}
+
+fn c0_control_char_to_ctrl_char(character: char) -> Option<char> {
+    let code = u32::from(character);
+    match code {
+        0x00 => Some(' '),
+        0x01..=0x1a => char::from_u32(code - 0x01 + u32::from('a')),
+        0x1c..=0x1f => char::from_u32(code - 0x1c + u32::from('4')),
+        _ => None,
     }
 }
 

@@ -54,6 +54,7 @@ pub enum InputAction {
     ScrollUp,
     ScrollDown,
     CopyLastResponse,
+    OpenExternalEditor,
     CopyText {
         text: String,
         notice: String,
@@ -365,6 +366,18 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
         }
         Some(ActionId::ExitEmptyPrompt) if state.composer().is_empty() => InputAction::Exit,
         Some(ActionId::CopyLastResponse) => InputAction::CopyLastResponse,
+        Some(ActionId::OpenExternalEditor) => {
+            if state.slash().open || state.mentions().open {
+                InputAction::None
+            } else if state.composer_has_structured_mentions() {
+                InputAction::Notice(
+                    "External editing is unavailable while the draft has skill or plugin mentions"
+                        .to_string(),
+                )
+            } else {
+                InputAction::OpenExternalEditor
+            }
+        }
         Some(ActionId::PageUp) => InputAction::ScrollUp,
         Some(ActionId::PageDown) => InputAction::ScrollDown,
         Some(ActionId::SendPrompt) => {

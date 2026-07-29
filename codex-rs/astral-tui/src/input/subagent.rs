@@ -115,6 +115,7 @@ fn normalize_child_action(child: &mut SurfaceState, action: InputAction) -> Inpu
                 })
         }
         InputAction::Submit(_)
+        | InputAction::OpenExternalEditor
         | InputAction::Interrupt
         | InputAction::Exit
         | InputAction::Slash { .. }

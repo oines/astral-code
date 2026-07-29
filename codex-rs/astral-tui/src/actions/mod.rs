@@ -21,6 +21,7 @@ pub(crate) enum ActionId {
     PageDown,
     FocusScrollback,
     SendPrompt,
+    OpenExternalEditor,
     PromptCancel,
     ExitEmptyPrompt,
     CopyLastResponse,

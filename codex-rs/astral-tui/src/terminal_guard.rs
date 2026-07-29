@@ -31,6 +31,14 @@ impl TerminalGuard {
     }
 
     fn enter(screen: Screen) -> io::Result<Self> {
+        Self::activate(screen)?;
+        Ok(Self {
+            screen,
+            active: true,
+        })
+    }
+
+    fn activate(screen: Screen) -> io::Result<()> {
         match screen {
             Screen::Inline => execute!(std::io::stdout(), EnableBracketedPaste)?,
             Screen::Alternate => execute!(
@@ -56,10 +64,16 @@ impl TerminalGuard {
             }
             return Err(error);
         }
-        Ok(Self {
-            screen,
-            active: true,
-        })
+        Ok(())
+    }
+
+    pub(crate) fn reenter(&mut self) -> io::Result<()> {
+        if self.active {
+            return Ok(());
+        }
+        Self::activate(self.screen)?;
+        self.active = true;
+        Ok(())
     }
 
     pub(crate) fn restore(&mut self) {

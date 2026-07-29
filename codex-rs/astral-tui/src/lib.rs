@@ -12,6 +12,7 @@ mod clipboard;
 mod composer;
 mod conversation;
 mod ecosystem;
+mod external_editor;
 mod history;
 mod input;
 mod launch;

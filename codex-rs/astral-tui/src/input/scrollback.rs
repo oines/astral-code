@@ -153,6 +153,7 @@ pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction
         Some(
             ActionId::FocusScrollback
             | ActionId::SendPrompt
+            | ActionId::OpenExternalEditor
             | ActionId::PromptCancel
             | ActionId::ExitEmptyPrompt
             | ActionId::CopyLastResponse,

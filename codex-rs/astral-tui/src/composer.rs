@@ -52,6 +52,10 @@ impl ComposerState {
         self.cursor
     }
 
+    pub(crate) fn has_structured_mentions(&self) -> bool {
+        !self.mention_bindings.is_empty()
+    }
+
     pub(crate) fn replace(&mut self, text: impl Into<String>) {
         let text = text.into();
         if self.text == text && self.cursor == text.len() && self.mention_bindings.is_empty() {

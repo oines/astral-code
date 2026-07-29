@@ -10,13 +10,13 @@ expression: "render_at_size(&mut state, &session, 80, 24)"
             │                                                      │
             │  Search: / to filter                                 │
   I’m tracin│  ──────────────────────────────────────────────────  │
-            │    Ctrl+j                  Scroll transcript down o  │
-            │    Ctrl+u                  Scroll transcript up hal  │
-            │    Ctrl+d                  Scroll transcript down h  │
-            │    j / ↓                   Select next transcript e  │
-            │    k / ↑                   Select previous transcri  │
-            │    o                       Select next visible link  │
-            │    Shift+o                 Select previous visible   │
+            │    Enter / Ctrl+Enter / Cmd+Enter  Send prompt       │
+            │    Ctrl+g                  Edit the current draft i  │
+            │      Opens the current plain-text draft in $VISUAL   │
+            │      or $EDITOR, falling back to vi. Saving and      │
+            │      closing the editor returns the updated text to  │
+            │      the prompt without sending it.                  │
+            │  ▸ Conversation navigation                           │
             │  ▸ Conversation actions                              │
   ◇ Working │  ▸ Session                                           │
             │                                                      │

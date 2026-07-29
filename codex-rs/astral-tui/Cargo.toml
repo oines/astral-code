@@ -16,7 +16,9 @@ crossterm = { workspace = true, features = ["bracketed-paste", "event-stream"] }
 ratatui = { workspace = true }
 regex = { workspace = true }
 serde_json = { workspace = true }
+shlex = { workspace = true }
 supports-color = { workspace = true }
+tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "sync"] }
 tokio-stream = { workspace = true }
 unicode-segmentation = { workspace = true }
@@ -24,6 +26,10 @@ unicode-width = { workspace = true }
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 arboard = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+which = { workspace = true }
+winsplit = "0.1"
 
 [dev-dependencies]
 insta = { workspace = true }

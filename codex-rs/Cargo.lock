@@ -590,11 +590,15 @@ dependencies = [
  "ratatui",
  "regex",
  "serde_json",
+ "shlex",
  "supports-color 3.0.2",
+ "tempfile",
  "tokio",
  "tokio-stream",
  "unicode-segmentation",
  "unicode-width 0.2.1",
+ "which 8.0.0",
+ "winsplit",
 ]
 
 [[package]]

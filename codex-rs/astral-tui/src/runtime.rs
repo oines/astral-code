@@ -39,6 +39,7 @@ use crate::ecosystem::hooks_panel;
 use crate::ecosystem::mcp_panel;
 use crate::ecosystem::plugins_panel;
 use crate::ecosystem::skills_panel;
+use crate::external_editor;
 use crate::handle_key;
 use crate::handle_paste;
 use crate::input::MouseScrollState;
@@ -177,6 +178,7 @@ pub async fn run(mut session: AstralSession, options: RunOptions) -> Result<RunE
     let mut theme_selection = None;
     let result = run_loop(
         &mut terminal,
+        &mut guard,
         &mut session,
         &mut surface,
         &mut theme_selection,
@@ -212,6 +214,7 @@ pub async fn run(mut session: AstralSession, options: RunOptions) -> Result<RunE
 
 async fn run_loop(
     terminal: &mut AstralTerminal,
+    guard: &mut TerminalGuard,
     session: &mut AstralSession,
     surface: &mut SurfaceState,
     theme_selection: &mut Option<String>,
@@ -318,6 +321,19 @@ async fn run_loop(
                             }
                             action => action,
                         };
+                        if matches!(&action, InputAction::OpenExternalEditor) {
+                            launch_external_editor(
+                                terminal,
+                                guard,
+                                &mut input,
+                                session,
+                                surface,
+                                &options,
+                            )
+                            .await?;
+                            needs_draw = true;
+                            continue;
+                        }
                         if let Some(reason) =
                             apply_input_action(session, surface, theme_selection, action).await?
                         {
@@ -531,6 +547,37 @@ fn draw(
     Ok(())
 }
 
+async fn launch_external_editor(
+    terminal: &mut AstralTerminal,
+    guard: &mut TerminalGuard,
+    input: &mut TerminalEventReader,
+    session: &AstralSession,
+    surface: &mut SurfaceState,
+    options: &RunOptions,
+) -> Result<(), RunError> {
+    surface.set_notice("Save and close the external editor to return to Astral");
+    draw(terminal, session, surface, options)?;
+    input.stop();
+    let _ = terminal.show_cursor();
+    guard.restore();
+
+    let result = external_editor::edit(surface.composer().to_string()).await;
+
+    guard.reenter()?;
+    if options.viewport == RunViewport::Fullscreen {
+        terminal.clear()?;
+    }
+    *input = TerminalEventReader::start()?;
+    match result {
+        Ok(text) => {
+            surface.set_composer(text);
+            surface.set_notice("Updated draft from external editor");
+        }
+        Err(error) => surface.set_notice(format!("External editor failed: {error}")),
+    }
+    Ok(())
+}
+
 async fn apply_input_action(
     session: &mut AstralSession,
     surface: &mut SurfaceState,
@@ -538,7 +585,7 @@ async fn apply_input_action(
     action: InputAction,
 ) -> Result<Option<RunExitReason>, RunError> {
     match action {
-        InputAction::None | InputAction::Redraw => {}
+        InputAction::None | InputAction::Redraw | InputAction::OpenExternalEditor => {}
         InputAction::Submit(submission) => {
             start_submission(session, surface, submission).await;
         }

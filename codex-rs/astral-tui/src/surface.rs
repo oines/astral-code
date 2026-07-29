@@ -242,6 +242,10 @@ impl SurfaceState {
         self.composer.selection_range()
     }
 
+    pub(crate) fn composer_has_structured_mentions(&self) -> bool {
+        self.composer.has_structured_mentions()
+    }
+
     pub fn set_composer(&mut self, text: impl Into<String>) {
         self.composer.replace(text);
         self.refresh_composer_completions();

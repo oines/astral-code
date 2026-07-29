@@ -86,6 +86,21 @@ pub(super) fn default_actions() -> Vec<ActionDef> {
         )
         .with_key_display("Enter"),
         ActionDef::new(
+            ActionId::OpenExternalEditor,
+            "edit prompt",
+            "Edit the current draft in an external editor",
+            KeyShortcut::control('g'),
+            Vec::new(),
+            Category::Input,
+            When::PromptFocused,
+        )
+        .with_key_display("Ctrl+G")
+        .with_help(
+            "Opens the current plain-text draft in $VISUAL or $EDITOR, falling back to vi. \
+             Saving and closing the editor returns the updated text to the prompt without \
+             sending it.",
+        ),
+        ActionDef::new(
             ActionId::PromptCancel,
             "interrupt",
             "Interrupt, clear draft, or exit while idle",
