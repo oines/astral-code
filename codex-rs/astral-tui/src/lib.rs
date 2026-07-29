@@ -5,6 +5,7 @@
 //! state; it does not emulate Grok's ACP payloads or duplicate Astral runtime
 //! semantics.
 
+mod actions;
 mod block_viewer;
 mod client_tools;
 mod clipboard;
