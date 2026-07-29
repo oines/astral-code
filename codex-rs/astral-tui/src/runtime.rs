@@ -639,7 +639,16 @@ async fn apply_input_action(
     match action {
         InputAction::None | InputAction::Redraw | InputAction::OpenExternalEditor => {}
         InputAction::Submit(submission) => {
-            start_submission(session, surface, submission).await;
+            let turn_active = session
+                .state()
+                .is_some_and(|state| state.active_turn_id.is_some());
+            if turn_active || surface.has_queued_follow_ups() {
+                let queued = surface.enqueue_follow_up(submission);
+                surface.set_notice(format!("{queued} follow-up queued"));
+                start_next_follow_up(session, surface).await;
+            } else {
+                start_submission(session, surface, submission).await;
+            }
         }
         InputAction::Interrupt => match session.interrupt().await {
             Ok(()) => surface.set_activity(SurfaceActivity::Interrupted),
@@ -946,6 +955,35 @@ async fn start_submission(
     }
 }
 
+async fn start_next_follow_up(session: &mut AstralSession, surface: &mut SurfaceState) {
+    let turn_active = session
+        .state()
+        .is_some_and(|state| state.active_turn_id.is_some());
+    if turn_active || surface.plan_review().is_some() || !surface.pending_requests().is_empty() {
+        return;
+    }
+    let Some(prompt) = surface.pop_follow_up() else {
+        return;
+    };
+    surface.set_activity(SurfaceActivity::Working);
+    match session.start_turn(prompt.submission().user_input()).await {
+        Ok(_) => {
+            surface.record_submission(prompt.submission());
+            let remaining = surface.queued_follow_ups();
+            if remaining == 0 {
+                surface.clear_notice();
+            } else {
+                surface.set_notice(format!("{remaining} follow-up queued"));
+            }
+        }
+        Err(error) => {
+            surface.restore_follow_up(prompt);
+            surface.set_activity(SurfaceActivity::Ready);
+            surface.set_notice(format!("Could not start queued follow-up: {error}"));
+        }
+    }
+}
+
 async fn reset_surface(session: &mut AstralSession, surface: &mut SurfaceState) {
     let Some(state) = session.state().cloned() else {
         surface.set_notice("No Astral thread is active");
@@ -979,7 +1017,7 @@ async fn reset_surface_after_switch(
 }
 
 async fn handle_app_event(
-    session: &AstralSession,
+    session: &mut AstralSession,
     surface: &mut SurfaceState,
     client_tools: &ClientToolRegistry,
     client_tool_tasks: &mut JoinSet<ClientToolCompletion>,
@@ -987,17 +1025,26 @@ async fn handle_app_event(
 ) -> Result<(), RunError> {
     let active_thread_id = session
         .state()
-        .map(|state| state.thread.id.as_str())
+        .map(|state| state.thread.id.clone())
         .ok_or(RunError::NoThread)?;
     match event {
         AppServerEvent::Lagged { skipped } => surface.conversation_mut().record_lag(skipped),
         AppServerEvent::ServerNotification(notification) => {
+            let should_drain_follow_up = matches!(
+                &notification,
+                ServerNotification::TurnCompleted(params)
+                    if params.thread_id == active_thread_id
+                        && params.turn.status == TurnStatus::Completed
+            );
             handle_notification(surface, &notification);
             let mode = session
                 .state()
                 .map(|state| state.collaboration_mode.mode)
                 .unwrap_or(ModeKind::Default);
             plan::handle_notification(surface, &notification, mode);
+            if should_drain_follow_up {
+                start_next_follow_up(session, surface).await;
+            }
         }
         AppServerEvent::ServerRequest(request)
             if PendingRequest::from(request.clone())

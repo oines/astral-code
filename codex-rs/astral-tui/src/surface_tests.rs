@@ -176,6 +176,21 @@ fn working_surface_snapshot() {
 }
 
 #[test]
+fn queued_follow_ups_surface_snapshot() {
+    let session = session_state();
+    let mut state = SurfaceState::from_session(&session);
+    state.set_activity(SurfaceActivity::Working);
+    state.enqueue_follow_up(crate::PromptSubmission::text_only(
+        "Run the focused tests after this finishes",
+    ));
+    state.enqueue_follow_up(crate::PromptSubmission::text_only(
+        "Summarize the result\nand mention any remaining failures",
+    ));
+
+    insta::assert_snapshot!(render_at_size(&mut state, &session, 80, 24));
+}
+
+#[test]
 fn grok_view_80x24_snapshot() {
     let (mut state, session) = named_working_surface();
     insta::assert_snapshot!(render_at_size(&mut state, &session, 80, 24));

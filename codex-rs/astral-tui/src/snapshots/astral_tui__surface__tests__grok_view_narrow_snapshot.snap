@@ -17,4 +17,4 @@ expression: "render_at_size(&mut state, &session, 48, 16)"
  ╭────────────────────────── Astral session ──╮
  │ ❯ trace the projection                     │
  ╰────────────── claude-sonnet-4 · workspace ─╯
- Shift+Tab:mode  │  Ctrl+.:shortcuts
+ Enter:queue  │  Shift+Tab:mode

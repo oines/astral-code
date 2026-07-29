@@ -32,4 +32,4 @@ expression: "render_at_size(&mut state, &session, 120, 32)"
   │ ❯ trace the projection                                                                                           │
   ╰──────────────────────────────────────────────────────────────────────────────────── claude-sonnet-4 · workspace ─╯
 
-  Shift+Tab:mode  │  Ctrl+.:shortcuts
+  Enter:queue  │  Shift+Tab:mode  │  Ctrl+.:shortcuts

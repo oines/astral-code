@@ -24,4 +24,4 @@ expression: "render_at_size(&mut state, &session, 80, 24)"
   │ ❯                                                                        │
   ╰──────────────────────────────────────────── claude-sonnet-4 · workspace ─╯
 
-  Shift+Tab:mode  │  Ctrl+.:shortcuts
+  Enter:queue  │  Shift+Tab:mode  │  Ctrl+.:shortcuts

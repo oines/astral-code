@@ -33,6 +33,7 @@ use ratatui::widgets::Widget;
 use crate::CommittedBlock;
 use crate::ConversationState;
 use crate::PendingRequests;
+use crate::PromptSubmission;
 use crate::SessionState;
 use crate::block_viewer::BlockViewerState;
 use crate::composer::ComposerState;
@@ -50,6 +51,8 @@ use crate::permission_picker::display_permission_mode;
 use crate::plan_review::CompletedPlan;
 use crate::plan_review::PlanReviewFocus;
 use crate::plan_review::PlanReviewState;
+use crate::prompt_queue::PromptQueue;
+use crate::prompt_queue::QueuedPrompt;
 use crate::request_choice::RequestChoiceState;
 use crate::request_pane::RequestPane;
 use crate::request_user_input::RequestUserInputState;
@@ -78,6 +81,7 @@ use crate::view::PlanReviewMouseAction;
 use crate::view::PlanReviewMouseState;
 use crate::view::PlanReviewPane;
 use crate::view::PromptChrome;
+use crate::view::QueuePane;
 use crate::view::ScrollbackFrame;
 use crate::view::ScrollbackMouseAction;
 use crate::view::ScrollbackPane;
@@ -145,6 +149,7 @@ pub struct SurfaceState {
     completed_plan: Option<CompletedPlan>,
     plan_review: Option<PlanReviewState>,
     plan_review_mouse: PlanReviewMouseState,
+    prompt_queue: PromptQueue,
     pointer_areas: SurfacePointerState,
     theme: AstralThemeId,
     color_level: ColorLevel,
@@ -182,6 +187,7 @@ impl SurfaceState {
             completed_plan: None,
             plan_review: None,
             plan_review_mouse: PlanReviewMouseState::default(),
+            prompt_queue: PromptQueue::default(),
             pointer_areas: SurfacePointerState::default(),
             theme: AstralThemeId::default(),
             color_level: ColorLevel::default(),
@@ -226,6 +232,7 @@ impl SurfaceState {
             completed_plan: None,
             plan_review: None,
             plan_review_mouse: PlanReviewMouseState::default(),
+            prompt_queue: PromptQueue::default(),
             pointer_areas: SurfacePointerState::default(),
             theme: AstralThemeId::default(),
             color_level: ColorLevel::default(),
@@ -292,6 +299,27 @@ impl SurfaceState {
     pub fn set_activity(&mut self, activity: SurfaceActivity) {
         self.activity = activity;
         self.refresh_slash();
+    }
+
+    pub(crate) fn enqueue_follow_up(&mut self, submission: PromptSubmission) -> usize {
+        self.prompt_queue.push_back(submission);
+        self.prompt_queue.len()
+    }
+
+    pub(crate) fn pop_follow_up(&mut self) -> Option<QueuedPrompt> {
+        self.prompt_queue.pop_front()
+    }
+
+    pub(crate) fn restore_follow_up(&mut self, prompt: QueuedPrompt) {
+        self.prompt_queue.push_front(prompt);
+    }
+
+    pub(crate) fn queued_follow_ups(&self) -> usize {
+        self.prompt_queue.len()
+    }
+
+    pub(crate) fn has_queued_follow_ups(&self) -> bool {
+        !self.prompt_queue.is_empty()
     }
 
     pub fn token_usage(&self) -> Option<&ThreadTokenUsage> {
@@ -750,6 +778,10 @@ pub(crate) fn render_surface_with_view(
     let banner_height = plan_review.as_ref().map_or(completion_height, |review| {
         PlanReviewPane { state: review }.height()
     });
+    let queue_height = QueuePane {
+        entries: state.prompt_queue.entries(),
+    }
+    .height();
     let turn_status = (!has_request && banner_height == 0)
         .then(|| turn_status_line(state, theme))
         .flatten();
@@ -765,6 +797,7 @@ pub(crate) fn render_surface_with_view(
         scrollbar: ScrollbarConfig::default(),
         panes: PaneHeights {
             prompt: prompt_height,
+            queue: queue_height,
             turn_status: u16::from(turn_status.is_some()),
             banner: banner_height,
             prompt_gap: u16::from(area.height > 16 && prompt_height > 0),
@@ -885,6 +918,10 @@ pub(crate) fn render_surface_with_view(
             layout.turn_status.width,
         );
     }
+    QueuePane {
+        entries: state.prompt_queue.entries(),
+    }
+    .render(layout.queue, buffer, theme);
     if let Some(review) = plan_review.as_ref() {
         state
             .plan_review_mouse
@@ -1022,10 +1059,20 @@ pub(crate) fn render_surface_with_view(
         crate::actions::ActionId::NextLink,
         crate::actions::When::ScrollbackFocused,
     );
-    let default_hints = [
+    let idle_hints = [
         (cycle_mode.hint_key(), cycle_mode.label),
         (shortcuts_help.hint_key(), shortcuts_help.label),
     ];
+    let working_hints = [
+        ("Enter", "queue"),
+        (cycle_mode.hint_key(), cycle_mode.label),
+        (shortcuts_help.hint_key(), shortcuts_help.label),
+    ];
+    let default_hints: &[(&str, &str)] = if matches!(state.activity(), SurfaceActivity::Working) {
+        &working_hints
+    } else {
+        &idle_hints
+    };
     let read_only_hints = [
         ("Esc/q", "back"),
         ("↑/↓", "navigate"),
@@ -1136,7 +1183,7 @@ pub(crate) fn render_surface_with_view(
         } else if slash.open {
             &slash_hints
         } else {
-            &default_hints
+            default_hints
         },
         right: None,
     }
@@ -1220,6 +1267,12 @@ fn turn_status_line(state: &SurfaceState, theme: AstralTheme) -> Option<Line<'st
             spans.push(" · ".dim());
         }
         spans.push(notice.to_string().cyan());
+    }
+    if state.queued_follow_ups() > 0 {
+        if !spans.is_empty() {
+            spans.push(" · ".dim());
+        }
+        spans.push(format!("{} queued", state.queued_follow_ups()).fg(theme.gray));
     }
     if state.conversation.skipped_events() > 0 {
         if !spans.is_empty() {

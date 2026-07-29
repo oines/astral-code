@@ -15,13 +15,13 @@ expression: "render_at_size(&mut state, &session, 80, 24)"
 
 
 
+  #1 Run the focused tests after this finishes
+  #2 Summarize the result (+1 line)
 
+  ◇ Working · 2 queued
 
-
-  ◇ Working
-
-  ╭──────────────────────────────────────────────────────── Astral session ──╮
-  │ ❯ trace the projection                                                   │
+  ╭──────────────────────────────────────────────────────────────────────────╮
+  │ ❯                                                                        │
   ╰──────────────────────────────────────────── claude-sonnet-4 · workspace ─╯
 
   Enter:queue  │  Shift+Tab:mode  │  Ctrl+.:shortcuts
