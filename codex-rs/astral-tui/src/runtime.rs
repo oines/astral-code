@@ -1022,6 +1022,11 @@ async fn reload_models_manager(
         .ok_or(SessionError::NoThread)?;
     let config = session.read_config().await?;
     let models = session.list_models().await?;
+    surface.set_model_catalog(
+        models.clone(),
+        current_model.clone(),
+        current_provider.clone(),
+    );
     surface.open_models_manager(config, models, current_provider, current_model);
     if let Some(provider_id) = focus_provider {
         surface.focus_models_provider(provider_id);
