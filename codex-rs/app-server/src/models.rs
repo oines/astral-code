@@ -4,16 +4,18 @@ use codex_app_server_protocol::Model;
 use codex_app_server_protocol::ModelServiceTier;
 use codex_app_server_protocol::ModelUpgradeInfo;
 use codex_app_server_protocol::ReasoningEffortOption;
-use codex_core::ThreadManager;
 use codex_core::config::Config;
+use codex_login::AuthManager;
+use codex_model_provider::create_model_provider;
+use codex_models_manager::manager::RefreshStrategy;
 use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::openai_models::ReasoningEffortPreset;
 use std::collections::BTreeSet;
 use toml::Value as TomlValue;
 
 pub async fn configured_models(
-    thread_manager: Arc<ThreadManager>,
     config: &Config,
+    auth_manager: Arc<AuthManager>,
     model_provider_filter: Option<&str>,
 ) -> Vec<Model> {
     let mut specs = configured_model_specs(config);
@@ -21,31 +23,57 @@ pub async fn configured_models(
         specs.retain(|(provider_id, _)| provider_id == model_provider_filter);
     }
 
-    let manager_config = config.to_models_manager_config();
     let mut models = Vec::new();
-    for (provider_id, model_name) in specs {
+    let provider_ids = specs
+        .iter()
+        .map(|(provider_id, _)| provider_id.clone())
+        .chain(model_provider_filter.map(str::to_owned))
+        .collect::<BTreeSet<_>>();
+    for provider_id in provider_ids {
         let Some(provider) = config.model_providers.get(&provider_id) else {
             continue;
         };
-        let model_info_key = format!("{provider_id}/{model_name}");
-        let model_info = thread_manager
-            .get_models_manager()
-            .get_model_info(&model_info_key, &manager_config)
-            .await;
         let provider_name = provider_name(&provider_id, provider.name.as_str());
-        let mut preset = ModelPreset::from(model_info);
-        preset.id.clone_from(&model_name);
-        preset.model.clone_from(&model_name);
-        preset.model_provider = Some(provider_id.clone());
-        preset.model_provider_name = Some(provider_name.clone());
-        preset.is_default = config.model.as_deref() == Some(model_name.as_str())
-            && provider_id == config.model_provider_id;
-        preset.show_in_picker = true;
-        models.push(model_from_preset(
-            preset,
-            provider_id.as_str(),
-            provider_name.as_str(),
-        ));
+        let runtime_provider = create_model_provider(provider.clone(), Some(auth_manager.clone()));
+        let configured_catalog = (provider_id == config.model_provider_id)
+            .then(|| config.model_catalog.clone())
+            .flatten();
+        let manager =
+            runtime_provider.models_manager(config.codex_home.to_path_buf(), configured_catalog);
+        let refresh_strategy = if model_provider_filter.is_some() {
+            RefreshStrategy::OnlineIfUncached
+        } else {
+            RefreshStrategy::Offline
+        };
+        let discovered = manager.raw_model_catalog(refresh_strategy).await;
+        let mut provider_models = specs
+            .iter()
+            .filter_map(|(configured_provider, model)| {
+                (configured_provider == &provider_id).then_some(model.clone())
+            })
+            .collect::<BTreeSet<_>>();
+        if model_provider_filter.is_some() {
+            provider_models.extend(discovered.models.into_iter().map(|model| model.slug));
+        }
+
+        let mut manager_config = config.to_models_manager_config();
+        manager_config.model_provider_id = Some(provider_id.clone());
+        for model_name in provider_models {
+            let model_info = manager.get_model_info(&model_name, &manager_config).await;
+            let mut preset = ModelPreset::from(model_info);
+            preset.id.clone_from(&model_name);
+            preset.model.clone_from(&model_name);
+            preset.model_provider = Some(provider_id.clone());
+            preset.model_provider_name = Some(provider_name.clone());
+            preset.is_default = config.model.as_deref() == Some(model_name.as_str())
+                && provider_id == config.model_provider_id;
+            preset.show_in_picker = true;
+            models.push(model_from_preset(
+                preset,
+                provider_id.as_str(),
+                provider_name.as_str(),
+            ));
+        }
     }
 
     models.sort_by(|left, right| {

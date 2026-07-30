@@ -158,14 +158,10 @@ impl CatalogRequestProcessor {
         &self,
         params: ModelListParams,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
-        Self::list_models(
-            self.thread_manager.clone(),
-            self.config.clone(),
-            self.auth_manager.clone(),
-            params,
-        )
-        .await
-        .map(|response| Some(response.into()))
+        let config = Arc::new(self.load_latest_config(/*fallback_cwd*/ None).await?);
+        Self::list_models(config, self.auth_manager.clone(), params)
+            .await
+            .map(|response| Some(response.into()))
     }
 
     pub(crate) async fn experimental_feature_list(
@@ -252,9 +248,8 @@ impl CatalogRequestProcessor {
     }
 
     async fn list_models(
-        thread_manager: Arc<ThreadManager>,
         config: Arc<Config>,
-        _auth_manager: Arc<AuthManager>,
+        auth_manager: Arc<AuthManager>,
         params: ModelListParams,
     ) -> Result<ModelListResponse, JSONRPCErrorError> {
         let ModelListParams {
@@ -272,7 +267,7 @@ impl CatalogRequestProcessor {
         }
 
         let models =
-            configured_models(thread_manager, config.as_ref(), model_provider.as_deref()).await;
+            configured_models(config.as_ref(), auth_manager, model_provider.as_deref()).await;
         let total = models.len();
 
         if total == 0 {

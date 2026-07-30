@@ -17,6 +17,7 @@ use codex_app_server_protocol::ModelUpgradeInfo;
 use codex_app_server_protocol::ReasoningEffortOption;
 use codex_app_server_protocol::RequestId;
 use codex_config::types::AuthCredentialsStoreMode;
+use codex_models_manager::model_info::model_info_from_slug;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::openai_models::ModelsResponse;
@@ -240,6 +241,69 @@ async fn list_models_can_target_configured_model_provider() -> Result<()> {
     assert_eq!(items[1].model_provider_name, "DeepSeek");
     assert_eq!(items[1].model, "deepseek-v4-flash");
     assert!(next_cursor.is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn list_models_discovers_models_for_targeted_provider() -> Result<()> {
+    let server = MockServer::start().await;
+    let models_mock = mount_models_once(
+        &server,
+        ModelsResponse {
+            models: vec![model_info_from_slug("provider-remote-model")],
+        },
+    )
+    .await;
+    let codex_home = TempDir::new()?;
+    std::fs::write(
+        codex_home.path().join("config.toml"),
+        format!(
+            r#"
+[model_providers.custom]
+name = "Custom"
+base_url = "{}"
+env_key = "CUSTOM_API_KEY"
+wire_api = "chat_completions"
+"#,
+            server.uri()
+        ),
+    )?;
+    let mut mcp =
+        TestAppServer::new_with_env(codex_home.path(), &[("CUSTOM_API_KEY", Some("test-key"))])
+            .await?;
+    timeout(DEFAULT_TIMEOUT, mcp.initialize()).await??;
+
+    let request_id = mcp
+        .send_list_models_request(ModelListParams {
+            limit: Some(100),
+            cursor: None,
+            model_provider: Some("custom".to_string()),
+            include_hidden: Some(true),
+        })
+        .await?;
+    let response: JSONRPCResponse = timeout(
+        DEFAULT_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+    )
+    .await??;
+    let ModelListResponse {
+        data: items,
+        next_cursor,
+    } = to_response::<ModelListResponse>(response)?;
+
+    assert_eq!(
+        items
+            .iter()
+            .map(|model| (
+                model.model_provider.as_str(),
+                model.model_provider_name.as_str(),
+                model.model.as_str(),
+            ))
+            .collect::<Vec<_>>(),
+        vec![("custom", "Custom", "provider-remote-model")]
+    );
+    assert!(next_cursor.is_none());
+    assert_eq!(models_mock.requests().len(), 1);
     Ok(())
 }
 
