@@ -176,6 +176,15 @@ fn working_surface_snapshot() {
 }
 
 #[test]
+fn compacting_surface_snapshot() {
+    let session = session_state();
+    let mut state = SurfaceState::from_session(&session);
+    state.set_activity(SurfaceActivity::Compacting);
+
+    insta::assert_snapshot!(render_at_size(&mut state, &session, 72, 12));
+}
+
+#[test]
 fn queued_follow_ups_surface_snapshot() {
     let session = session_state();
     let mut state = SurfaceState::from_session(&session);

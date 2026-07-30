@@ -1,0 +1,16 @@
+---
+source: astral-tui/src/surface_tests.rs
+expression: "render_at_size(&mut state, &session, 72, 12)"
+---
+ ⎇ main  /workspace
+ › inspect this repo                                                   █
+                                                                       █
+                                                                       █
+ I’m tracing the relevant data flow.                                   █
+                                                                       █
+
+ ◇ Compacting…
+ ╭────────────────────────────────────────────────────────────────────╮
+ │ ❯                                                                  │
+ ╰────────────────────────────────────── claude-sonnet-4 · workspace ─╯
+ Enter:queue  │  Shift+Tab:mode  │  Ctrl+.:shortcuts

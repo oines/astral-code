@@ -224,6 +224,14 @@ fn project_turn(turn: &ConversationTurn, entries: &[ConversationEntry]) -> Optio
 }
 
 fn project_entry(entry: &ConversationEntry) -> Option<PresentationBlock> {
+    if !entry.completion_observed
+        && matches!(
+            entry.item.as_ref(),
+            Some(codex_app_server_protocol::ThreadItem::ContextCompaction { .. })
+        )
+    {
+        return None;
+    }
     let mut block = if let Some(presentation) = &entry.presentation {
         Some(presentation.clone())
     } else {

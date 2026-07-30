@@ -1,4 +1,5 @@
 use codex_app_server_protocol::ItemCompletedNotification;
+use codex_app_server_protocol::ItemStartedNotification;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ServerRequest;
@@ -22,6 +23,7 @@ use super::configured_theme;
 use super::handle_notification;
 use super::plan::handle_notification as handle_plan_review_notification;
 use super::viewport_rows;
+use crate::PresentationBlock;
 use crate::SurfaceActivity;
 use crate::SurfaceState;
 use crate::view::AstralThemeId;
@@ -92,6 +94,66 @@ fn turn_completion_preserves_terminal_activity_states() {
         ),
     );
     assert_eq!(surface.activity(), &SurfaceActivity::Ready);
+
+    handle_notification(&mut surface, &turn_completed(TurnStatus::Completed, None));
+    assert_eq!(surface.activity(), &SurfaceActivity::Ready);
+}
+
+#[test]
+fn compaction_uses_started_and_completed_item_lifecycle() {
+    let mut surface = SurfaceState::new("thread-1");
+    let item = ThreadItem::ContextCompaction {
+        id: "compact-1".to_string(),
+    };
+
+    surface.set_activity(SurfaceActivity::Compacting);
+    handle_notification(
+        &mut surface,
+        &ServerNotification::TurnStarted(TurnStartedNotification {
+            thread_id: "thread-1".to_string(),
+            turn: Turn {
+                id: "turn-1".to_string(),
+                items: Vec::new(),
+                items_view: Default::default(),
+                status: TurnStatus::InProgress,
+                error: None,
+                started_at: Some(1),
+                completed_at: None,
+                duration_ms: None,
+            },
+        }),
+    );
+    assert_eq!(surface.activity(), &SurfaceActivity::Compacting);
+
+    handle_notification(
+        &mut surface,
+        &ServerNotification::ItemStarted(ItemStartedNotification {
+            thread_id: "thread-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            item: item.clone(),
+            started_at_ms: 10,
+        }),
+    );
+    assert_eq!(surface.activity(), &SurfaceActivity::Compacting);
+    assert!(surface.conversation().all_turns().is_empty());
+
+    handle_notification(
+        &mut surface,
+        &ServerNotification::ItemCompleted(ItemCompletedNotification {
+            thread_id: "thread-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            item,
+            completed_at_ms: 20,
+        }),
+    );
+    assert_eq!(surface.activity(), &SurfaceActivity::Working);
+    assert_eq!(
+        surface.conversation().all_turns()[0].blocks[0].block,
+        PresentationBlock::System {
+            title: "Context compacted".to_string(),
+            detail: None,
+        }
+    );
 
     handle_notification(&mut surface, &turn_completed(TurnStatus::Completed, None));
     assert_eq!(surface.activity(), &SurfaceActivity::Ready);

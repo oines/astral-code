@@ -1,7 +1,6 @@
 use crossterm::event::KeyEvent;
 
 use crate::InputAction;
-use crate::SurfaceActivity;
 use crate::SurfaceState;
 use crate::actions;
 use crate::actions::ActionId;
@@ -153,7 +152,7 @@ pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction
         Some(ActionId::CycleMode) => InputAction::CycleMode,
         Some(ActionId::ShortcutsHelp) => InputAction::OpenShortcuts,
         Some(ActionId::ScrollbackCancel) => {
-            if matches!(state.activity(), SurfaceActivity::Working) {
+            if state.activity().is_running() {
                 InputAction::Interrupt
             } else {
                 InputAction::Exit

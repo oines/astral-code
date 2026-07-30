@@ -540,7 +540,7 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
         if state.slash().active {
             return InputAction::Notice("Run slash commands with Enter".to_string());
         }
-        if !matches!(state.activity(), SurfaceActivity::Working) {
+        if !state.activity().is_running() {
             return InputAction::Notice("No active turn to steer".to_string());
         }
         if state.composer().trim().is_empty() {
@@ -612,7 +612,7 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
         Some(ActionId::PromptCancel) => {
             if state.restore_palette_draft() {
                 InputAction::Redraw
-            } else if matches!(state.activity(), SurfaceActivity::Working) {
+            } else if state.activity().is_running() {
                 InputAction::Interrupt
             } else if state.composer().is_empty() {
                 InputAction::Exit
@@ -666,7 +666,7 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
                 && key.modifiers == KeyModifiers::NONE
             {
                 if state.composer().trim().is_empty()
-                    && matches!(state.activity(), SurfaceActivity::Working)
+                    && state.activity().is_running()
                     && let Some(id) = state.next_follow_up_id()
                 {
                     return InputAction::SteerQueuedPrompt { id };
@@ -679,7 +679,7 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
                 state.discard_palette_draft();
             }
             if state.composer().trim().is_empty()
-                && matches!(state.activity(), SurfaceActivity::Working)
+                && state.activity().is_running()
                 && let Some(id) = state.next_follow_up_id()
             {
                 return InputAction::SteerQueuedPrompt { id };

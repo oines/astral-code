@@ -14,6 +14,7 @@ use codex_app_server_protocol::McpServerStatusDetail;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ServerRequest;
+use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::ThreadTokenUsage;
 use codex_app_server_protocol::TurnStatus;
 use codex_app_server_protocol::WriteStatus;
@@ -851,10 +852,14 @@ async fn apply_input_action(
                     surface.set_notice(error.to_string());
                 }
             }
-            SlashCommandId::Compact => match session.compact().await {
-                Ok(()) => surface.set_notice("Compacting conversation…"),
-                Err(error) => surface.set_notice(error.to_string()),
-            },
+            SlashCommandId::Compact => {
+                surface.clear_notice();
+                surface.set_activity(SurfaceActivity::Compacting);
+                if let Err(error) = session.compact().await {
+                    surface.set_activity(SurfaceActivity::Ready);
+                    surface.set_notice(error.to_string());
+                }
+            }
             SlashCommandId::New => match session.start_new().await {
                 Ok(outcome) => reset_surface_after_switch(session, surface, outcome).await,
                 Err(error) => surface.set_notice(error.to_string()),
@@ -1286,7 +1291,9 @@ fn handle_notification(surface: &mut SurfaceState, notification: &ServerNotifica
     match notification {
         ServerNotification::TurnStarted(params) if params.thread_id == active_thread_id => {
             surface.clear_notice();
-            surface.set_activity(SurfaceActivity::Working);
+            if surface.activity() != &SurfaceActivity::Compacting {
+                surface.set_activity(SurfaceActivity::Working);
+            }
         }
         ServerNotification::TurnCompleted(params) if params.thread_id == active_thread_id => {
             match &params.turn.status {
@@ -1300,6 +1307,18 @@ fn handle_notification(surface: &mut SurfaceState, notification: &ServerNotifica
                 }
                 TurnStatus::InProgress => surface.set_activity(SurfaceActivity::Working),
             }
+        }
+        ServerNotification::ItemStarted(params)
+            if params.thread_id == active_thread_id
+                && matches!(&params.item, ThreadItem::ContextCompaction { .. }) =>
+        {
+            surface.set_activity(SurfaceActivity::Compacting);
+        }
+        ServerNotification::ItemCompleted(params)
+            if params.thread_id == active_thread_id
+                && matches!(&params.item, ThreadItem::ContextCompaction { .. }) =>
+        {
+            surface.set_activity(SurfaceActivity::Working);
         }
         ServerNotification::ServerRequestResolved(params)
             if params.thread_id == active_thread_id =>
@@ -1327,9 +1346,9 @@ fn handle_notification(surface: &mut SurfaceState, notification: &ServerNotifica
             );
             surface.set_notice(format!("Model changed to {}", params.thread_settings.model));
         }
-        ServerNotification::ContextCompacted(params) if params.thread_id == active_thread_id => {
-            surface.set_notice("Conversation compacted");
-        }
+        // The canonical v2 lifecycle is the ContextCompaction thread item.
+        // Ignore the deprecated notification so completion is rendered once.
+        ServerNotification::ContextCompacted(_) => {}
         ServerNotification::Error(params) if params.thread_id == active_thread_id => {
             surface.set_notice(params.error.message.clone());
         }

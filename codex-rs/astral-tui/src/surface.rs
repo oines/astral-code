@@ -122,8 +122,15 @@ pub(crate) use self::overlay::ActiveOverlay;
 pub enum SurfaceActivity {
     Ready,
     Working,
+    Compacting,
     Interrupted,
     Disconnected(String),
+}
+
+impl SurfaceActivity {
+    pub(crate) fn is_running(&self) -> bool {
+        matches!(self, Self::Working | Self::Compacting)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -708,7 +715,7 @@ impl SurfaceState {
     fn slash_command_state(&self) -> SlashCommandState {
         match self.activity {
             SurfaceActivity::Ready | SurfaceActivity::Interrupted => SlashCommandState::Idle,
-            SurfaceActivity::Working => SlashCommandState::Working,
+            SurfaceActivity::Working | SurfaceActivity::Compacting => SlashCommandState::Working,
             SurfaceActivity::Disconnected(_) => SlashCommandState::Disconnected,
         }
     }
@@ -926,7 +933,7 @@ pub(crate) fn render_surface_with_view(
         selected_id: state.prompt_queue.selected_id(),
         focused: state.prompt_queue.focused(),
         hovered: state.queue_hovered(),
-        turn_running: matches!(state.activity(), SurfaceActivity::Working),
+        turn_running: state.activity().is_running(),
     }
     .height();
     let turn_status = (!has_request && banner_height == 0)
@@ -1085,7 +1092,7 @@ pub(crate) fn render_surface_with_view(
         selected_id: state.prompt_queue.selected_id(),
         focused: state.prompt_queue.focused(),
         hovered: state.queue_hovered(),
-        turn_running: matches!(state.activity(), SurfaceActivity::Working),
+        turn_running: state.activity().is_running(),
     }
     .render(layout.queue, buffer, theme);
     state.observe_queue_frame(queue_frame);
@@ -1260,7 +1267,7 @@ pub(crate) fn render_surface_with_view(
     ];
     let default_hints: &[(&str, &str)] = if state.shell_input_mode() {
         &shell_hints
-    } else if matches!(state.activity(), SurfaceActivity::Working) {
+    } else if state.activity().is_running() {
         &working_hints
     } else {
         &idle_hints
@@ -1510,6 +1517,9 @@ fn turn_status_line(state: &SurfaceState, theme: AstralTheme) -> Option<Line<'st
     let (marker, status, color) = match &state.activity {
         SurfaceActivity::Ready => ("◆ ", None, theme.gray),
         SurfaceActivity::Working => ("◇ ", Some("Working".to_string()), theme.accent_running),
+        SurfaceActivity::Compacting => {
+            ("◇ ", Some("Compacting…".to_string()), theme.accent_running)
+        }
         SurfaceActivity::Interrupted => {
             ("◆ ", Some("Interrupted".to_string()), theme.accent_running)
         }

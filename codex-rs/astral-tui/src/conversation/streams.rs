@@ -51,6 +51,7 @@ impl ConversationState {
             let entry = &mut self.turns[turn_index].entries[entry_index];
             entry.item = Some(text_item_with_text(item, text));
             entry.stream = TimelineStream::None;
+            entry.completion_observed = true;
             entry.completed_at_ms = completed_at_ms;
             entry.phase = EntryPhase::Stable;
         }

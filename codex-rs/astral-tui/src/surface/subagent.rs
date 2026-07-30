@@ -3,6 +3,7 @@
 use astral_tui_scrollback::PresentationBlock;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::Thread;
+use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::TurnStatus;
 use crossterm::event::MouseEvent;
 use ratatui::buffer::Buffer;
@@ -122,6 +123,18 @@ impl SubagentViewState {
                     TurnStatus::InProgress => super::SurfaceActivity::Working,
                     TurnStatus::Completed | TurnStatus::Failed => super::SurfaceActivity::Ready,
                 });
+            }
+            ServerNotification::ItemStarted(params)
+                if params.thread_id == thread_id
+                    && matches!(&params.item, ThreadItem::ContextCompaction { .. }) =>
+            {
+                self.child.set_activity(super::SurfaceActivity::Compacting);
+            }
+            ServerNotification::ItemCompleted(params)
+                if params.thread_id == thread_id
+                    && matches!(&params.item, ThreadItem::ContextCompaction { .. }) =>
+            {
+                self.child.set_activity(super::SurfaceActivity::Working);
             }
             ServerNotification::ThreadTokenUsageUpdated(params)
                 if params.thread_id == thread_id =>

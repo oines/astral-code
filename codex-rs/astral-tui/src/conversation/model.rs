@@ -94,6 +94,7 @@ pub(super) struct ConversationEntry {
     pub(super) presentation: Option<PresentationBlock>,
     pub(super) stream: TimelineStream,
     pub(super) phase: EntryPhase,
+    pub(super) completion_observed: bool,
     pub(super) started_at_ms: Option<i64>,
     pub(super) completed_at_ms: Option<i64>,
 }
@@ -107,6 +108,7 @@ impl ConversationEntry {
             presentation: None,
             stream: TimelineStream::None,
             phase: EntryPhase::Running,
+            completion_observed: false,
             started_at_ms: None,
             completed_at_ms: None,
         }

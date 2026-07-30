@@ -46,6 +46,7 @@ impl ConversationState {
         let entry = &mut self.turns[turn_index].entries[entry_index];
         entry.item = Some(item.clone());
         entry.stream = Default::default();
+        entry.completion_observed = true;
         entry.completed_at_ms = completed_at_ms;
         entry.phase = phase;
         self.note_item_role(turn_index, entry_index, &item);
