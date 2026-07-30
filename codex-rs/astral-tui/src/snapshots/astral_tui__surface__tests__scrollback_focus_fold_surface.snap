@@ -1,6 +1,6 @@
 ---
 source: astral-tui/src/surface_tests.rs
-expression: "format!(\"COLLAPSED\\n{collapsed}\\n\\nEXPANDED\\n{expanded}\")"
+expression: "format!(\"COLLAPSED\\n{collapsed}\\n\\nPREVIEW\\n{preview}\\n\\nEXPANDED\\n{expanded}\")"
 ---
 COLLAPSED
  ⎇ main  /workspace
@@ -24,7 +24,7 @@ COLLAPSED
  ╰────────────────────────────────────────────── claude-sonnet-4 · workspace ─╯
  e:expand  │  Enter:open  │  y:copy  │  Y:copy cmd
 
-EXPANDED
+PREVIEW
  ⎇ main  /workspace
 
  › inspect this repo
@@ -33,11 +33,33 @@ EXPANDED
  I’m tracing the relevant data flow.
 
 ┃◆ Run cargo test -p astral-tui  2.4s
-┃  │ 150 passed
-┃  │ 0 failed
+┃  │ running unit tests
+┃  │ running snapshot tests
+┃  … 3 hidden lines
+┃  │ finished
 
 
+ ◇ Working
 
+ ╭────────────────────────────────────────────────────────────────────────────╮
+ │ ❯                                                                          │
+ ╰────────────────────────────────────────────── claude-sonnet-4 · workspace ─╯
+ e:expand  │  Enter:open  │  y:copy  │  Y:copy cmd
+
+EXPANDED
+ ⎇ main  /workspace
+
+                                                                               █
+ I’m tracing the relevant data flow.                                           █
+                                                                               █
+┃◆ Run cargo test -p astral-tui  2.4s                                          █
+┃  │ running unit tests                                                        █
+┃  │ running snapshot tests                                                    █
+┃  │ running integration tests                                                 █
+┃  │ 150 passed                                                                █
+┃  │ 0 failed                                                                  █
+┃  │ finished                                                                  █
+                                                                               █
 
  ◇ Working
 

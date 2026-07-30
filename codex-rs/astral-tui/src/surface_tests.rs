@@ -1778,7 +1778,17 @@ fn scrollback_focus_folds_tool_entries_snapshot() {
             tool: "Bash".to_string(),
             arguments: json!({"command": "cargo test -p astral-tui"}),
             status: CoreToolCallStatus::Completed,
-            result: Some("150 passed\n0 failed".to_string()),
+            result: Some(
+                [
+                    "running unit tests",
+                    "running snapshot tests",
+                    "running integration tests",
+                    "150 passed",
+                    "0 failed",
+                    "finished",
+                ]
+                .join("\n"),
+            ),
             error: None,
             duration_ms: Some(2_400),
         });
@@ -1791,7 +1801,7 @@ fn scrollback_focus_folds_tool_entries_snapshot() {
     );
     assert!(state.scrollback_focused());
     let collapsed = render_at_size(&mut state, &session, 80, 20);
-    assert!(!collapsed.contains("150 passed"));
+    assert!(!collapsed.contains("running unit tests"));
 
     assert_eq!(
         handle_key(
@@ -1800,12 +1810,24 @@ fn scrollback_focus_folds_tool_entries_snapshot() {
         ),
         crate::InputAction::Redraw
     );
+    let preview = render_at_size(&mut state, &session, 80, 20);
+    assert!(preview.contains("running unit tests"));
+    assert!(!preview.contains("running integration tests"));
+    assert!(preview.contains("finished"));
+
+    assert_eq!(
+        handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE)
+        ),
+        crate::InputAction::Redraw
+    );
     let expanded = render_at_size(&mut state, &session, 80, 20);
-    assert!(expanded.contains("150 passed"));
+    assert!(expanded.contains("running integration tests"));
 
     insta::assert_snapshot!(
         "scrollback_focus_fold_surface",
-        format!("COLLAPSED\n{collapsed}\n\nEXPANDED\n{expanded}")
+        format!("COLLAPSED\n{collapsed}\n\nPREVIEW\n{preview}\n\nEXPANDED\n{expanded}")
     );
     let area = Rect::new(0, 0, 80, 20);
     let mut buffer = Buffer::empty(area);

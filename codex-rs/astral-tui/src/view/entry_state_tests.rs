@@ -87,13 +87,13 @@ fn focus_navigates_only_foldable_entries_and_preserves_manual_modes() {
     assert_eq!(state.toggle_selected(), Some(entry_id("turn-1", "tool")));
     assert_eq!(
         state.mode_for("turn-1", "tool", &turns[0].blocks[1].block),
-        DisplayMode::Expanded
+        DisplayMode::Truncated
     );
 
     state.observe(&turns);
     assert_eq!(
         state.mode_for("turn-1", "tool", &turns[0].blocks[1].block),
-        DisplayMode::Expanded
+        DisplayMode::Truncated
     );
 }
 
@@ -160,6 +160,39 @@ fn truncated_entry_expands_on_the_first_toggle() {
         state.mode_for("turn-1", "thinking", &turns[0].blocks[0].block),
         DisplayMode::Expanded
     );
+}
+
+#[test]
+fn selected_entries_use_their_block_specific_fold_cycle() {
+    let turns = [turn(vec![
+        block("execute", tool(ToolStatus::Success)),
+        block("read", tool_with_kind(ToolKind::Read, ToolStatus::Success)),
+        block("thinking", thinking(true)),
+    ])];
+    let mut state = EntryDisplayState::default();
+    state.observe(&turns);
+
+    assert!(state.select(&entry_id("turn-1", "execute")));
+    state.toggle_selected();
+    assert_eq!(state.selected_mode(), Some(DisplayMode::Truncated));
+    state.toggle_selected();
+    assert_eq!(state.selected_mode(), Some(DisplayMode::Collapsed));
+
+    assert!(state.select(&entry_id("turn-1", "read")));
+    state.toggle_selected();
+    state.observe(&turns);
+    assert!(!state.selected_is_group_header());
+    state.toggle_selected();
+    assert_eq!(state.selected_mode(), Some(DisplayMode::Truncated));
+
+    assert!(state.select(&entry_id("turn-1", "thinking")));
+    state.toggle_selected();
+    assert_eq!(state.selected_mode(), Some(DisplayMode::Expanded));
+    state.toggle_selected();
+    assert_eq!(state.selected_mode(), Some(DisplayMode::Truncated));
+    state.expand_selected();
+    state.collapse_selected();
+    assert_eq!(state.selected_mode(), Some(DisplayMode::Truncated));
 }
 
 #[test]

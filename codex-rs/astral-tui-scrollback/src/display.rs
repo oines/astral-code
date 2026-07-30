@@ -68,6 +68,85 @@ impl PresentationBlock {
         }
     }
 
+    /// Return the block-specific display mode used by a fold toggle.
+    ///
+    /// Grok's transcript does not give every block the same two-state fold:
+    /// command and read entries open to a compact preview, while streaming
+    /// thoughts and generic tools never toggle directly from fully expanded
+    /// to fully hidden. Keep that presentation policy beside the block rather
+    /// than teaching mouse and keyboard handlers about individual tool kinds.
+    pub fn next_fold_mode(&self, current: DisplayMode) -> DisplayMode {
+        match self {
+            Self::Thinking { running, .. } | Self::Plan { running, .. } if *running => {
+                match current {
+                    DisplayMode::Collapsed | DisplayMode::Truncated => DisplayMode::Expanded,
+                    DisplayMode::Expanded => DisplayMode::Truncated,
+                }
+            }
+            Self::Tool(tool) if tool.is_user_shell() => match current {
+                DisplayMode::Collapsed => DisplayMode::Expanded,
+                DisplayMode::Truncated | DisplayMode::Expanded => DisplayMode::Collapsed,
+            },
+            Self::Tool(tool)
+                if matches!(
+                    tool.kind,
+                    ToolKind::Execute | ToolKind::Background | ToolKind::Read
+                ) =>
+            {
+                match current {
+                    DisplayMode::Collapsed => DisplayMode::Truncated,
+                    DisplayMode::Truncated | DisplayMode::Expanded => DisplayMode::Collapsed,
+                }
+            }
+            Self::Tool(tool)
+                if tool.kind == ToolKind::Other && tool.status == crate::ToolStatus::Running =>
+            {
+                match current {
+                    DisplayMode::Collapsed => DisplayMode::Truncated,
+                    DisplayMode::Truncated => DisplayMode::Expanded,
+                    DisplayMode::Expanded => DisplayMode::Truncated,
+                }
+            }
+            Self::User { .. }
+            | Self::Assistant { .. }
+            | Self::Thinking { .. }
+            | Self::Plan { .. }
+            | Self::Todo(_)
+            | Self::Tool(_)
+            | Self::Subagent(_)
+            | Self::System { .. } => match current {
+                DisplayMode::Collapsed => DisplayMode::Expanded,
+                DisplayMode::Truncated | DisplayMode::Expanded => DisplayMode::Collapsed,
+            },
+        }
+    }
+
+    /// Return the minimum display mode used by an explicit collapse action.
+    ///
+    /// Running thoughts and streaming terminal-like entries retain a compact
+    /// live preview, matching Grok's left-arrow behavior.
+    pub fn collapse_mode(&self) -> DisplayMode {
+        match self {
+            Self::Thinking { running: true, .. } | Self::Plan { running: true, .. } => {
+                DisplayMode::Truncated
+            }
+            Self::Tool(tool)
+                if tool.status == crate::ToolStatus::Running
+                    && (tool.is_user_shell() || tool.kind == ToolKind::Other) =>
+            {
+                DisplayMode::Truncated
+            }
+            Self::User { .. }
+            | Self::Assistant { .. }
+            | Self::Thinking { running: false, .. }
+            | Self::Plan { running: false, .. }
+            | Self::Todo(_)
+            | Self::Tool(_)
+            | Self::Subagent(_)
+            | Self::System { .. } => DisplayMode::Collapsed,
+        }
+    }
+
     /// Whether the block participates in transcript navigation.
     ///
     /// Grok treats navigation and folding as separate capabilities: user and

@@ -15,10 +15,29 @@ use super::entry_group::scan_turn;
 struct EntryDescriptor {
     id: String,
     default_mode: DisplayMode,
+    fold_transitions: FoldTransitions,
     parent_group: Option<String>,
     group_header: bool,
     foldable: bool,
     thinking: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FoldTransitions {
+    from_collapsed: DisplayMode,
+    from_truncated: DisplayMode,
+    from_expanded: DisplayMode,
+    collapse: DisplayMode,
+}
+
+impl FoldTransitions {
+    fn next(self, current: DisplayMode) -> DisplayMode {
+        match current {
+            DisplayMode::Collapsed => self.from_collapsed,
+            DisplayMode::Truncated => self.from_truncated,
+            DisplayMode::Expanded => self.from_expanded,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,6 +116,12 @@ impl EntryDisplayState {
                     entries.push(EntryDescriptor {
                         id: group.id.clone(),
                         default_mode: DisplayMode::Collapsed,
+                        fold_transitions: FoldTransitions {
+                            from_collapsed: DisplayMode::Expanded,
+                            from_truncated: DisplayMode::Collapsed,
+                            from_expanded: DisplayMode::Collapsed,
+                            collapse: DisplayMode::Collapsed,
+                        },
                         parent_group: None,
                         group_header: true,
                         foldable: true,
@@ -120,6 +145,12 @@ impl EntryDisplayState {
                             .unwrap_or_else(|| block.block.default_display_mode())
                     } else {
                         block.block.default_display_mode()
+                    },
+                    fold_transitions: FoldTransitions {
+                        from_collapsed: block.block.next_fold_mode(DisplayMode::Collapsed),
+                        from_truncated: block.block.next_fold_mode(DisplayMode::Truncated),
+                        from_expanded: block.block.next_fold_mode(DisplayMode::Expanded),
+                        collapse: block.block.collapse_mode(),
                     },
                     parent_group,
                     group_header: false,
@@ -404,10 +435,7 @@ impl EntryDisplayState {
             .get(&entry.id)
             .copied()
             .unwrap_or(entry.default_mode);
-        let target = match current {
-            DisplayMode::Collapsed | DisplayMode::Truncated => DisplayMode::Expanded,
-            DisplayMode::Expanded => DisplayMode::Collapsed,
-        };
+        let target = entry.fold_transitions.next(current);
         self.manual_modes.insert(entry.id.clone(), target);
         self.pending_verb_rekey = Some(entry.id.clone());
         self.bump_render_revision();
@@ -464,9 +492,9 @@ impl EntryDisplayState {
             .get(&entry.id)
             .copied()
             .unwrap_or(entry.default_mode);
-        if current != DisplayMode::Collapsed {
+        if current != entry.fold_transitions.collapse {
             self.manual_modes
-                .insert(entry.id.clone(), DisplayMode::Collapsed);
+                .insert(entry.id.clone(), entry.fold_transitions.collapse);
             self.pending_verb_rekey = Some(entry.id.clone());
             self.bump_render_revision();
             return Some(entry.id);
