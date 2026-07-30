@@ -20,6 +20,7 @@ struct EntryDescriptor {
     group_header: bool,
     foldable: bool,
     thinking: bool,
+    user_prompt: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -126,6 +127,7 @@ impl EntryDisplayState {
                         group_header: true,
                         foldable: true,
                         thinking: false,
+                        user_prompt: false,
                     });
                 }
                 let parent_group = groups
@@ -136,6 +138,7 @@ impl EntryDisplayState {
                     continue;
                 }
                 let thinking = matches!(&block.block, PresentationBlock::Thinking { .. });
+                let user_prompt = matches!(&block.block, PresentationBlock::User { .. });
                 let id = entry_id(&turn.id, &block.item_id);
                 self.content_state.observe(id.clone(), &block.block);
                 entries.push(EntryDescriptor {
@@ -156,6 +159,7 @@ impl EntryDisplayState {
                     group_header: false,
                     foldable: block.block.is_foldable(),
                     thinking,
+                    user_prompt,
                 });
             }
         }
@@ -355,6 +359,13 @@ impl EntryDisplayState {
             .iter()
             .find(|entry| entry.id == entry_id)
             .is_some_and(|entry| entry.foldable)
+    }
+
+    pub(crate) fn is_user_prompt(&self, entry_id: &str) -> bool {
+        self.entries
+            .iter()
+            .find(|entry| entry.id == entry_id)
+            .is_some_and(|entry| entry.user_prompt)
     }
 
     pub(crate) fn supports_viewer(&self, entry_id: &str) -> bool {

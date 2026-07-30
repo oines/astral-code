@@ -417,8 +417,22 @@ impl ScrollbackState {
                     }
                     if self.display.is_foldable(&item_id) {
                         self.display.toggle_selected();
+                    }
+                    if self.display.is_user_prompt(&item_id) {
+                        self.navigation.scroll_entry_to_top(&item_id);
+                    } else if self.display.is_foldable(&item_id) {
                         self.navigation.reveal_entry(&item_id);
                     }
+                }
+            }
+            EntryMouseAction::ToggleAndSnap(item_id) => {
+                // Grok reserves prompt triple-click as a no-op because its
+                // double-click already snaps that block to the viewport top.
+                if self.display.select(&item_id) && !self.display.is_user_prompt(&item_id) {
+                    if self.display.is_foldable(&item_id) {
+                        self.display.toggle_selected();
+                    }
+                    self.navigation.scroll_entry_to_top(&item_id);
                 }
             }
             EntryMouseAction::ToggleGroup(item_id) => {

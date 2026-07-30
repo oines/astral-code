@@ -73,7 +73,7 @@ fn click_uses_the_visible_viewport_offset() {
 }
 
 #[test]
-fn second_click_toggles_but_a_drag_does_not() {
+fn second_click_toggles_third_click_snaps_but_a_drag_does_not() {
     let mut state = state(7..10);
     let now = Instant::now();
     let down = mouse(MouseEventKind::Down(MouseButton::Left), 4, 5);
@@ -85,6 +85,11 @@ fn second_click_toggles_but_a_drag_does_not() {
     assert_eq!(
         state.handle_mouse_at(up, now + MULTI_CLICK_TIMEOUT - Duration::from_millis(1)),
         EntryMouseAction::Toggle("turn-1\0tool-1".to_string())
+    );
+    state.handle_mouse_at(down, now + MULTI_CLICK_TIMEOUT);
+    assert_eq!(
+        state.handle_mouse_at(up, now + MULTI_CLICK_TIMEOUT + Duration::from_millis(1)),
+        EntryMouseAction::ToggleAndSnap("turn-1\0tool-1".to_string())
     );
 
     state.handle_mouse_at(down, now + Duration::from_secs(1));

@@ -22,6 +22,7 @@ pub(crate) enum EntryMouseAction {
     Ignored,
     Select(String),
     Toggle(String),
+    ToggleAndSnap(String),
     ToggleGroup(String),
 }
 
@@ -42,13 +43,15 @@ struct CompletedClick {
     at: Instant,
     item_id: String,
     kind: TranscriptSectionKind,
+    click_count: u8,
 }
 
 /// Mouse hit-testing for foldable transcript entries.
 ///
 /// Text selection and entry folding deliberately remain separate state
-/// machines. A drag cancels the pending entry click, while a click selects the
-/// entry and a second click on the same entry within the timeout toggles it.
+/// machines. A drag cancels the pending entry click. A click selects the entry,
+/// a second click toggles it, and a third click requests Grok's toggle-and-snap
+/// behavior for non-prompt entries.
 #[derive(Debug, Default)]
 pub(crate) struct EntryMouseState {
     frame: Option<EntryMouseFrame>,
@@ -115,24 +118,46 @@ impl EntryMouseState {
                     self.last_click = None;
                     return EntryMouseAction::Ignored;
                 }
-                if self.last_click.as_ref().is_some_and(|last| {
-                    last.item_id == item_id
-                        && last.kind == kind
-                        && now.saturating_duration_since(last.at) < MULTI_CLICK_TIMEOUT
-                }) {
-                    self.last_click = None;
-                    if kind == TranscriptSectionKind::GroupHeader {
+                let click_count = self
+                    .last_click
+                    .as_ref()
+                    .filter(|last| {
+                        last.item_id == item_id
+                            && last.kind == kind
+                            && now.saturating_duration_since(last.at) < MULTI_CLICK_TIMEOUT
+                    })
+                    .map_or(1, |last| last.click_count.saturating_add(1));
+                match (kind, click_count) {
+                    (TranscriptSectionKind::GroupHeader, 2) => {
+                        self.last_click = None;
                         EntryMouseAction::ToggleGroup(item_id)
-                    } else {
+                    }
+                    (TranscriptSectionKind::GroupHeader, 3..) => {
+                        self.last_click = None;
+                        EntryMouseAction::Ignored
+                    }
+                    (_, 2) => {
+                        self.last_click = Some(CompletedClick {
+                            at: now,
+                            item_id: item_id.clone(),
+                            kind,
+                            click_count,
+                        });
                         EntryMouseAction::Toggle(item_id)
                     }
-                } else {
-                    self.last_click = Some(CompletedClick {
-                        at: now,
-                        item_id: item_id.clone(),
-                        kind,
-                    });
-                    EntryMouseAction::Select(item_id)
+                    (_, 3..) => {
+                        self.last_click = None;
+                        EntryMouseAction::ToggleAndSnap(item_id)
+                    }
+                    _ => {
+                        self.last_click = Some(CompletedClick {
+                            at: now,
+                            item_id: item_id.clone(),
+                            kind,
+                            click_count,
+                        });
+                        EntryMouseAction::Select(item_id)
+                    }
                 }
             }
             MouseEventKind::ScrollDown
