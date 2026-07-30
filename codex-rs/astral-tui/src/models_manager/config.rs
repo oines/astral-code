@@ -68,6 +68,25 @@ pub(super) fn configured_providers(
         .unwrap_or_default()
 }
 
+pub(super) fn configured_capabilities(
+    response: &ConfigReadResponse,
+) -> std::collections::BTreeMap<String, Map<String, Value>> {
+    response
+        .config
+        .additional
+        .get("model_capabilities")
+        .and_then(Value::as_object)
+        .map(|models| {
+            models
+                .iter()
+                .filter_map(|(id, value)| {
+                    value.as_object().cloned().map(|value| (id.clone(), value))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 pub(super) fn provider_write(
     target: ConfigWriteTarget,
     provider_id: String,
@@ -77,6 +96,24 @@ pub(super) fn provider_write(
         focus_provider: provider_id.clone(),
         edits: vec![ConfigEdit {
             key_path: quoted_key("model_providers", &provider_id),
+            value: Value::Object(value),
+            merge_strategy: MergeStrategy::Replace,
+        }],
+        target,
+    }
+}
+
+pub(super) fn capability_write(
+    target: ConfigWriteTarget,
+    provider_id: String,
+    model_id: String,
+    value: Map<String, Value>,
+) -> ModelsConfigWrite {
+    let model_key = format!("{provider_id}/{model_id}");
+    ModelsConfigWrite {
+        focus_provider: provider_id,
+        edits: vec![ConfigEdit {
+            key_path: quoted_key("model_capabilities", &model_key),
             value: Value::Object(value),
             merge_strategy: MergeStrategy::Replace,
         }],

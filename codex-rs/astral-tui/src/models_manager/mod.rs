@@ -3,6 +3,7 @@
 //! The app-server remains authoritative for configuration and discovery. This
 //! module only owns modal navigation, expansion, and presentation state.
 
+mod capability_form;
 mod config;
 mod input;
 mod provider;
