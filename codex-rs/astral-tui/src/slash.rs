@@ -17,6 +17,7 @@ const MAX_MODEL_MATCHES: usize = 20;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SlashCommandId {
     Model,
+    Models,
     Compact,
     New,
     Resume,
@@ -113,6 +114,13 @@ const COMMANDS: &[CommandSpec] = &[
         "model",
         "Choose model and reasoning effort",
         Args::Required("model"),
+        Idle
+    ),
+    command!(
+        Models,
+        "models",
+        "Manage providers and model capabilities",
+        Args::None,
         Idle
     ),
     command!(

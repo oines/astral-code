@@ -27,6 +27,7 @@ mod mention;
 mod modal;
 mod model_command;
 mod model_picker;
+mod models_manager;
 mod pending_action;
 mod permission_picker;
 mod plan_review;

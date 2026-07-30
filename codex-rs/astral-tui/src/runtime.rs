@@ -55,6 +55,7 @@ use crate::input::handle_mouse;
 use crate::link_opener;
 use crate::modal::ModalRow;
 use crate::modal::ModalState;
+use crate::models_manager::ProviderModelsRequest;
 use crate::permission_picker::PermissionPickerState;
 use crate::render_surface;
 use crate::render_surface_with_view;
@@ -230,6 +231,7 @@ async fn run_loop(
     let mut client_tool_tasks = JoinSet::new();
     let mut file_search_tasks = JoinSet::new();
     let mut file_viewer_tasks = JoinSet::new();
+    let mut provider_model_tasks = JoinSet::new();
     let mut _clipboard_lease = None;
     let mut mouse_scroll = MouseScrollState::default();
     let mut needs_draw = true;
@@ -244,6 +246,10 @@ async fn run_loop(
         if let Some(request) = surface.take_file_viewer_request() {
             file_viewer_tasks.abort_all();
             spawn_file_viewer(session, &mut file_viewer_tasks, request);
+            needs_draw = true;
+        }
+        if let Some(request) = surface.take_provider_models_request() {
+            spawn_provider_models(session, &mut provider_model_tasks, request);
             needs_draw = true;
         }
         if needs_draw {
@@ -545,6 +551,23 @@ async fn run_loop(
                     None => {}
                 }
             }
+            completion = provider_model_tasks.join_next(), if !provider_model_tasks.is_empty() => {
+                match completion {
+                    Some(Ok(completion)) => {
+                        needs_draw |= surface.apply_provider_models(
+                            completion.generation,
+                            &completion.provider_id,
+                            completion.result.map_err(|error| error.to_string()),
+                        );
+                    }
+                    Some(Err(error)) if error.is_cancelled() => {}
+                    Some(Err(error)) => {
+                        surface.set_notice(format!("Model discovery task failed: {error}"));
+                        needs_draw = true;
+                    }
+                    None => {}
+                }
+            }
         }
     }
 }
@@ -790,6 +813,26 @@ async fn apply_input_action(
                 },
                 Err(error) => surface.set_notice(error.to_string()),
             },
+            SlashCommandId::Models => {
+                let current = session
+                    .state()
+                    .map(|state| (state.model_provider.clone(), state.model.clone()));
+                match (session.read_config().await, current) {
+                    (Ok(config), Some((current_provider, current_model))) => {
+                        match session.list_models().await {
+                            Ok(models) => surface.open_models_manager(
+                                config,
+                                models,
+                                current_provider,
+                                current_model,
+                            ),
+                            Err(error) => surface.set_notice(error.to_string()),
+                        }
+                    }
+                    (Err(error), _) => surface.set_notice(error.to_string()),
+                    (Ok(_), None) => surface.set_notice("No Astral thread is active"),
+                }
+            }
             SlashCommandId::Compact => match session.compact().await {
                 Ok(()) => surface.set_notice("Compacting conversation…"),
                 Err(error) => surface.set_notice(error.to_string()),
@@ -1279,6 +1322,12 @@ struct FileViewerCompletion {
     result: Result<FsReadFileResponse, SessionError>,
 }
 
+struct ProviderModelsCompletion {
+    generation: u64,
+    provider_id: String,
+    result: Result<Vec<codex_app_server_protocol::Model>, SessionError>,
+}
+
 fn spawn_file_search(
     session: &mut AstralSession,
     tasks: &mut JoinSet<FileSearchCompletion>,
@@ -1383,6 +1432,22 @@ fn apply_file_viewer_completion(
         .map_err(|error| error.to_string())
         .and_then(decode_file_viewer_source);
     surface.apply_file_viewer_result(completion.generation, result)
+}
+
+fn spawn_provider_models(
+    session: &mut AstralSession,
+    tasks: &mut JoinSet<ProviderModelsCompletion>,
+    request: ProviderModelsRequest,
+) {
+    let provider_id = request.provider_id.clone();
+    let future = session.list_models_for_provider(request.provider_id);
+    tasks.spawn(async move {
+        ProviderModelsCompletion {
+            generation: request.generation,
+            provider_id,
+            result: future.await,
+        }
+    });
 }
 
 fn decode_file_viewer_source(response: FsReadFileResponse) -> Result<String, String> {

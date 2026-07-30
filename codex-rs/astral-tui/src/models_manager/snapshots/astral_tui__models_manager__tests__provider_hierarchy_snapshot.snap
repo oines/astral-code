@@ -1,0 +1,59 @@
+---
+source: astral-tui/src/models_manager/models_manager_tests.rs
+expression: "format!(\"COLLAPSED\\n{collapsed}\\n\\nEXPANDED\\n{expanded}\")"
+---
+COLLAPSED
+
+  ┌─ Models ────────────────────────────────────────────────────────────────────────────────[×]─┐
+  │                                                                                             │
+  │  Search providers and loaded models…                                                        │
+  │                                                                                             │
+  │  ❯ ▸ DeepSeek  [deepseek]        current · chat_completions · https://api.deepseek.com/v1   │
+  │    ▸ Anthropic  [anthropic]                anthropic_messages · https://api.anthropic.com   │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                   Type to search · ↑/↓ navigate · Enter open · Esc close                    │
+  └─────────────────────────────────────────────────────────────────────────────────────────────┘
+
+EXPANDED
+
+  ┌─ Models ────────────────────────────────────────────────────────────────────────────────[×]─┐
+  │                                                                                             │
+  │  Search providers and loaded models…                                                        │
+  │                                                                                             │
+  │  ❯ ▾ DeepSeek  [deepseek]        current · chat_completions · https://api.deepseek.com/v1   │
+  │        ◇ Models                                                       Discovering models…   │
+  │        ● DeepSeek Chat                                                    tools · context   │
+  │    ▸ Anthropic  [anthropic]                anthropic_messages · https://api.anthropic.com   │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                   Type to search · ↑/↓ navigate · Enter open · Esc close                    │
+  └─────────────────────────────────────────────────────────────────────────────────────────────┘

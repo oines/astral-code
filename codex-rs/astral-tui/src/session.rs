@@ -12,6 +12,8 @@ use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::CollaborationModeListParams;
 use codex_app_server_protocol::CollaborationModeListResponse;
 use codex_app_server_protocol::CollaborationModeMask;
+use codex_app_server_protocol::ConfigReadParams;
+use codex_app_server_protocol::ConfigReadResponse;
 use codex_app_server_protocol::FsReadFileParams;
 use codex_app_server_protocol::FsReadFileResponse;
 use codex_app_server_protocol::FuzzyFileSearchParams;
@@ -634,6 +636,50 @@ impl AstralSession {
             cursor = Some(next_cursor);
         }
         Ok(models)
+    }
+
+    pub(crate) fn list_models_for_provider(
+        &mut self,
+        model_provider: String,
+    ) -> impl std::future::Future<Output = Result<Vec<Model>, SessionError>> + Send + 'static {
+        let request_id = self.next_request_id();
+        let client = self.client.request_handle();
+        async move {
+            let response: ModelListResponse = client
+                .request_typed(ClientRequest::ModelList {
+                    request_id,
+                    params: ModelListParams {
+                        cursor: None,
+                        model_provider: Some(model_provider),
+                        limit: Some(500),
+                        include_hidden: Some(true),
+                    },
+                })
+                .await?;
+            Ok(response.data)
+        }
+    }
+
+    pub(crate) async fn read_config(&mut self) -> Result<ConfigReadResponse, SessionError> {
+        let cwd = self
+            .state
+            .as_ref()
+            .ok_or(SessionError::NoThread)?
+            .thread
+            .cwd
+            .to_string_lossy()
+            .to_string();
+        let request_id = self.next_request_id();
+        self.client
+            .request_typed(ClientRequest::ConfigRead {
+                request_id,
+                params: ConfigReadParams {
+                    include_layers: true,
+                    cwd: Some(cwd),
+                },
+            })
+            .await
+            .map_err(SessionError::from)
     }
 
     pub(crate) async fn compact(&mut self) -> Result<(), SessionError> {
