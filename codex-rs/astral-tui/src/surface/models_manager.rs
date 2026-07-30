@@ -36,6 +36,12 @@ impl SurfaceState {
         self.models_manager = None;
     }
 
+    pub(crate) fn focus_models_provider(&mut self, provider_id: &str) {
+        if let Some(manager) = self.models_manager.as_mut() {
+            manager.focus_provider(provider_id);
+        }
+    }
+
     pub(crate) fn take_provider_models_request(&mut self) -> Option<ProviderModelsRequest> {
         self.models_manager.as_mut()?.take_request()
     }

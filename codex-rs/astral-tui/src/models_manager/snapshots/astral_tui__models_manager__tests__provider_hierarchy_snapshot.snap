@@ -1,6 +1,6 @@
 ---
 source: astral-tui/src/models_manager/models_manager_tests.rs
-expression: "format!(\"COLLAPSED\\n{collapsed}\\n\\nEXPANDED\\n{expanded}\")"
+expression: "format!(\"COLLAPSED\\n{collapsed}\\n\\nEXPANDED\\n{expanded}\\n\\nADD PROVIDER\\n{form}\")"
 ---
 COLLAPSED
 
@@ -10,7 +10,7 @@ COLLAPSED
   │                                                                                             │
   │  ❯ ▸ DeepSeek  [deepseek]        current · chat_completions · https://api.deepseek.com/v1   │
   │    ▸ Anthropic  [anthropic]                anthropic_messages · https://api.anthropic.com   │
-  │                                                                                             │
+  │    ＋  Add provider                                            Configure a custom endpoint   │
   │                                                                                             │
   │                                                                                             │
   │                                                                                             │
@@ -37,11 +37,11 @@ EXPANDED
   │  Search providers and loaded models…                                                        │
   │                                                                                             │
   │  ❯ ▾ DeepSeek  [deepseek]        current · chat_completions · https://api.deepseek.com/v1   │
+  │        ◇ Settings                                                           Edit DeepSeek   │
   │        ◇ Models                                                       Discovering models…   │
   │        ● DeepSeek Chat                                                    tools · context   │
   │    ▸ Anthropic  [anthropic]                anthropic_messages · https://api.anthropic.com   │
-  │                                                                                             │
-  │                                                                                             │
+  │    ＋  Add provider                                            Configure a custom endpoint   │
   │                                                                                             │
   │                                                                                             │
   │                                                                                             │
@@ -56,4 +56,32 @@ EXPANDED
   │                                                                                             │
   │                                                                                             │
   │                   Type to search · ↑/↓ navigate · Enter open · Esc close                    │
+  └─────────────────────────────────────────────────────────────────────────────────────────────┘
+
+ADD PROVIDER
+
+  ┌─ Add provider ──────────────────────────────────────────────────────────────────────────[×]─┐
+  │                                                                                             │
+  │  ❯ Name              ▏                                                                      │
+  │                                                                                             │
+  │    Provider ID       —                                                                      │
+  │                                                                                             │
+  │    Base URL          —                                                                      │
+  │                                                                                             │
+  │    API wire          Chat Completions  ←/→                                                  │
+  │                                                                                             │
+  │    API key env var   —                                                                      │
+  │                                                                                             │
+  │    Save provider     Write to user config                                                   │
+  │                                                                                             │
+  │                                                                                             │
+  │  Provider flavor is inferred automatically. Hidden advanced keys are preserved.             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                                                                                             │
+  │                  ↑/↓ fields · Enter next/save · Paste supported · Esc back                  │
   └─────────────────────────────────────────────────────────────────────────────────────────────┘

@@ -3,7 +3,10 @@
 //! The app-server remains authoritative for configuration and discovery. This
 //! module only owns modal navigation, expansion, and presentation state.
 
+mod config;
 mod input;
+mod provider;
+mod provider_form;
 mod render;
 
 #[cfg(test)]
@@ -20,11 +23,15 @@ use serde_json::Value;
 
 use crate::modal::ModalPointerState;
 
+pub(crate) use config::ModelsConfigWrite;
 pub(crate) use input::ModelsManagerInput;
 pub(crate) use input::handle_key;
 pub(crate) use input::handle_mouse;
 pub(crate) use input::handle_paste;
 pub(crate) use render::render;
+
+use self::config::ConfigWriteTarget;
+use self::provider_form::ProviderFormState;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProviderModelsRequest {
@@ -42,6 +49,8 @@ pub(crate) struct ModelsManagerState {
     selected: usize,
     scroll_offset: usize,
     detail: Option<Model>,
+    provider_form: Option<ProviderFormState>,
+    write_target: Option<ConfigWriteTarget>,
     pending_request: Option<ProviderModelsRequest>,
     pointer: ModalPointerState,
 }
@@ -52,6 +61,8 @@ struct ProviderState {
     name: String,
     base_url: Option<String>,
     wire_api: Option<String>,
+    raw: serde_json::Map<String, Value>,
+    editable: bool,
     expanded: bool,
     load: ProviderLoad,
     models: Vec<Model>,
@@ -67,7 +78,11 @@ enum ProviderLoad {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum BrowserRow {
+    AddProvider,
     Provider {
+        provider_index: usize,
+    },
+    EditProvider {
         provider_index: usize,
     },
     Status {
@@ -87,7 +102,8 @@ impl ModelsManagerState {
         current_provider: String,
         current_model: String,
     ) -> Self {
-        let configured = configured_providers(&response);
+        let write_target = config::write_target(&response);
+        let configured = config::configured_providers(&response);
         let mut providers = configured
             .into_iter()
             .map(|(id, provider)| {
@@ -109,6 +125,8 @@ impl ModelsManagerState {
                             .get("wire_api")
                             .and_then(Value::as_str)
                             .map(str::to_string),
+                        editable: !is_reserved_provider(&id),
+                        raw: provider,
                         id,
                         expanded: false,
                         load: ProviderLoad::NotLoaded,
@@ -126,6 +144,8 @@ impl ModelsManagerState {
                     name: model.model_provider_name.clone(),
                     base_url: None,
                     wire_api: None,
+                    raw: serde_json::Map::new(),
+                    editable: false,
                     expanded: false,
                     load: ProviderLoad::NotLoaded,
                     models: Vec::new(),
@@ -139,6 +159,8 @@ impl ModelsManagerState {
                 name: current_provider.clone(),
                 base_url: None,
                 wire_api: None,
+                raw: serde_json::Map::new(),
+                editable: false,
                 expanded: false,
                 load: ProviderLoad::NotLoaded,
                 models: Vec::new(),
@@ -164,6 +186,8 @@ impl ModelsManagerState {
             selected: 0,
             scroll_offset: 0,
             detail: None,
+            provider_form: None,
+            write_target,
             pending_request: None,
             pointer: ModalPointerState::default(),
         }
@@ -228,6 +252,9 @@ impl ModelsManagerState {
             }
             rows.push(BrowserRow::Provider { provider_index });
             if provider.expanded || !query.is_empty() {
+                if provider.editable && query.is_empty() {
+                    rows.push(BrowserRow::EditProvider { provider_index });
+                }
                 if matches!(
                     provider.load,
                     ProviderLoad::Loading | ProviderLoad::Failed(_)
@@ -245,6 +272,9 @@ impl ModelsManagerState {
                 );
             }
         }
+        if query.is_empty() {
+            rows.push(BrowserRow::AddProvider);
+        }
         rows
     }
 
@@ -253,6 +283,10 @@ impl ModelsManagerState {
             return ModelsManagerInput::None;
         };
         match row {
+            BrowserRow::AddProvider => {
+                self.provider_form = Some(ProviderFormState::add());
+                ModelsManagerInput::Redraw
+            }
             BrowserRow::Provider { provider_index } => {
                 let provider = &mut self.providers[provider_index];
                 provider.expanded = !provider.expanded;
@@ -268,6 +302,14 @@ impl ModelsManagerState {
                         provider_id: provider.id.clone(),
                     });
                 }
+                ModelsManagerInput::Redraw
+            }
+            BrowserRow::EditProvider { provider_index } => {
+                let provider = &self.providers[provider_index];
+                self.provider_form = Some(ProviderFormState::edit(
+                    provider.id.clone(),
+                    provider.raw.clone(),
+                ));
                 ModelsManagerInput::Redraw
             }
             BrowserRow::Status { provider_index } => {
@@ -310,29 +352,10 @@ impl ModelsManagerState {
     pub(super) fn clamp_selection(&mut self) {
         self.selected = self.selected.min(self.rows().len().saturating_sub(1));
     }
-
-    pub(super) fn close_detail(&mut self) -> bool {
-        self.detail.take().is_some()
-    }
 }
 
-fn configured_providers(
-    response: &ConfigReadResponse,
-) -> BTreeMap<String, serde_json::Map<String, Value>> {
-    response
-        .config
-        .additional
-        .get("model_providers")
-        .and_then(Value::as_object)
-        .map(|providers| {
-            providers
-                .iter()
-                .filter_map(|(id, value)| {
-                    value.as_object().cloned().map(|value| (id.clone(), value))
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+fn is_reserved_provider(id: &str) -> bool {
+    matches!(id, "astral" | "ollama" | "lmstudio")
 }
 
 fn model_order(left: &Model, right: &Model) -> std::cmp::Ordering {

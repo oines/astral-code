@@ -16,6 +16,7 @@ use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ServerRequest;
 use codex_app_server_protocol::ThreadTokenUsage;
 use codex_app_server_protocol::TurnStatus;
+use codex_app_server_protocol::WriteStatus;
 use codex_protocol::config_types::ModeKind;
 use crossterm::event::Event;
 use ratatui::TerminalOptions;
@@ -730,6 +731,36 @@ async fn apply_input_action(
             *theme_selection = Some(name.clone());
             surface.set_notice(format!("Switched to {name}"));
         }
+        InputAction::ModelsConfigWrite {
+            focus_provider,
+            params,
+        } => {
+            let write_result = session.write_config(params).await;
+            match write_result {
+                Ok(response) => {
+                    let message = match response.status {
+                        WriteStatus::Ok => format!("Saved provider {focus_provider}"),
+                        WriteStatus::OkOverridden => response
+                            .overridden_metadata
+                            .map(|metadata| metadata.message)
+                            .unwrap_or_else(|| {
+                                format!(
+                                    "Saved provider {focus_provider}, but another config layer overrides it"
+                                )
+                            }),
+                    };
+                    match reload_models_manager(session, surface, Some(&focus_provider)).await {
+                        Ok(()) => surface.set_notice(message),
+                        Err(error) => surface.set_notice(error.to_string()),
+                    }
+                }
+                Err(error) => {
+                    if let Some(manager) = surface.models_manager_mut() {
+                        manager.set_form_error(error.to_string());
+                    }
+                }
+            }
+        }
         InputAction::ThreadPickerLoadNext => {
             let cursor = surface
                 .thread_picker()
@@ -814,23 +845,8 @@ async fn apply_input_action(
                 Err(error) => surface.set_notice(error.to_string()),
             },
             SlashCommandId::Models => {
-                let current = session
-                    .state()
-                    .map(|state| (state.model_provider.clone(), state.model.clone()));
-                match (session.read_config().await, current) {
-                    (Ok(config), Some((current_provider, current_model))) => {
-                        match session.list_models().await {
-                            Ok(models) => surface.open_models_manager(
-                                config,
-                                models,
-                                current_provider,
-                                current_model,
-                            ),
-                            Err(error) => surface.set_notice(error.to_string()),
-                        }
-                    }
-                    (Err(error), _) => surface.set_notice(error.to_string()),
-                    (Ok(_), None) => surface.set_notice("No Astral thread is active"),
+                if let Err(error) = reload_models_manager(session, surface, None).await {
+                    surface.set_notice(error.to_string());
                 }
             }
             SlashCommandId::Compact => match session.compact().await {
@@ -991,6 +1007,24 @@ async fn apply_input_action(
         InputAction::Notice(message) => surface.set_notice(message),
     }
     Ok(None)
+}
+
+async fn reload_models_manager(
+    session: &mut AstralSession,
+    surface: &mut SurfaceState,
+    focus_provider: Option<&str>,
+) -> Result<(), SessionError> {
+    let (current_provider, current_model) = session
+        .state()
+        .map(|state| (state.model_provider.clone(), state.model.clone()))
+        .ok_or(SessionError::NoThread)?;
+    let config = session.read_config().await?;
+    let models = session.list_models().await?;
+    surface.open_models_manager(config, models, current_provider, current_model);
+    if let Some(provider_id) = focus_provider {
+        surface.focus_models_provider(provider_id);
+    }
+    Ok(())
 }
 
 fn toggle_multiline(surface: &mut SurfaceState) {

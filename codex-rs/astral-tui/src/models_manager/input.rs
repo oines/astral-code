@@ -6,13 +6,15 @@ use crossterm::event::MouseEvent;
 
 use crate::modal::ModalPointerAction;
 
+use super::ModelsConfigWrite;
 use super::ModelsManagerState;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum ModelsManagerInput {
     None,
     Redraw,
     Cancel,
+    WriteConfig(ModelsConfigWrite),
 }
 
 pub(crate) fn handle_key(state: &mut ModelsManagerState, key: KeyEvent) -> ModelsManagerInput {
@@ -20,11 +22,14 @@ pub(crate) fn handle_key(state: &mut ModelsManagerState, key: KeyEvent) -> Model
         return ModelsManagerInput::None;
     }
     if key.code == KeyCode::Esc {
-        return if state.close_detail() {
+        return if state.close_panel() {
             ModelsManagerInput::Redraw
         } else {
             ModelsManagerInput::Cancel
         };
+    }
+    if state.provider_form_active() {
+        return state.handle_provider_key(key);
     }
     if state.detail.is_some() {
         return ModelsManagerInput::None;
@@ -72,6 +77,9 @@ pub(crate) fn handle_key(state: &mut ModelsManagerState, key: KeyEvent) -> Model
 }
 
 pub(crate) fn handle_paste(state: &mut ModelsManagerState, text: &str) -> ModelsManagerInput {
+    if state.provider_form_active() {
+        return state.handle_provider_paste(text);
+    }
     if state.detail.is_some() {
         return ModelsManagerInput::None;
     }
@@ -89,7 +97,7 @@ pub(crate) fn handle_mouse(
     match state.pointer.handle_mouse(mouse) {
         ModalPointerAction::Ignored => ModelsManagerInput::None,
         ModalPointerAction::Close => {
-            if state.close_detail() {
+            if state.close_panel() {
                 ModelsManagerInput::Redraw
             } else {
                 ModelsManagerInput::Cancel
@@ -97,15 +105,27 @@ pub(crate) fn handle_mouse(
         }
         ModalPointerAction::Redraw | ModalPointerAction::Hover(None) => ModelsManagerInput::Redraw,
         ModalPointerAction::Hover(Some(index)) => {
-            state.set_selected(index);
+            if state.provider_form_active() {
+                state.select_provider_field(index);
+            } else {
+                state.set_selected(index);
+            }
             ModelsManagerInput::Redraw
         }
         ModalPointerAction::Activate(index) => {
-            state.set_selected(index);
-            state.activate(index)
+            if state.provider_form_active() {
+                state.activate_provider_field(index)
+            } else {
+                state.set_selected(index);
+                state.activate(index)
+            }
         }
         ModalPointerAction::Scroll(delta) => {
-            state.move_selection(delta);
+            if state.provider_form_active() {
+                state.move_provider_field(delta);
+            } else {
+                state.move_selection(delta);
+            }
             ModelsManagerInput::Redraw
         }
     }

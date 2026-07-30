@@ -125,6 +125,7 @@ fn normalize_child_action(child: &mut SurfaceState, action: InputAction) -> Inpu
         | InputAction::ThreadPickerLoadNext
         | InputAction::ThreadPickerSelect { .. }
         | InputAction::SelectTheme(_)
+        | InputAction::ModelsConfigWrite { .. }
         | InputAction::SelectPermission(_)
         | InputAction::Plan(_)
         | InputAction::CycleMode

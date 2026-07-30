@@ -33,6 +33,13 @@ fn apply_input(state: &mut SurfaceState, input: ModelsManagerInput) -> InputActi
     match input {
         ModelsManagerInput::None => InputAction::None,
         ModelsManagerInput::Redraw => InputAction::Redraw,
+        ModelsManagerInput::WriteConfig(write) => {
+            let (focus_provider, params) = write.into_parts();
+            InputAction::ModelsConfigWrite {
+                focus_provider,
+                params,
+            }
+        }
         ModelsManagerInput::Cancel => {
             state.close_models_manager();
             InputAction::Redraw

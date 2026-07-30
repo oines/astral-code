@@ -86,6 +86,10 @@ pub enum InputAction {
         thread: Box<Thread>,
     },
     SelectTheme(String),
+    ModelsConfigWrite {
+        focus_provider: String,
+        params: codex_app_server_protocol::ConfigBatchWriteParams,
+    },
     SelectPermission(PermissionSelection),
     Plan(crate::plan_review::PlanReviewAction),
     CycleMode,

@@ -12,8 +12,10 @@ use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::CollaborationModeListParams;
 use codex_app_server_protocol::CollaborationModeListResponse;
 use codex_app_server_protocol::CollaborationModeMask;
+use codex_app_server_protocol::ConfigBatchWriteParams;
 use codex_app_server_protocol::ConfigReadParams;
 use codex_app_server_protocol::ConfigReadResponse;
+use codex_app_server_protocol::ConfigWriteResponse;
 use codex_app_server_protocol::FsReadFileParams;
 use codex_app_server_protocol::FsReadFileResponse;
 use codex_app_server_protocol::FuzzyFileSearchParams;
@@ -678,6 +680,17 @@ impl AstralSession {
                     cwd: Some(cwd),
                 },
             })
+            .await
+            .map_err(SessionError::from)
+    }
+
+    pub(crate) async fn write_config(
+        &mut self,
+        params: ConfigBatchWriteParams,
+    ) -> Result<ConfigWriteResponse, SessionError> {
+        let request_id = self.next_request_id();
+        self.client
+            .request_typed(ClientRequest::ConfigBatchWrite { request_id, params })
             .await
             .map_err(SessionError::from)
     }

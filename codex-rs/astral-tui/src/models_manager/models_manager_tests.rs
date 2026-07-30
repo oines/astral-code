@@ -81,8 +81,13 @@ fn provider_hierarchy_snapshot() {
     let collapsed = render_state(&mut state);
     let _ = state.activate(0);
     let expanded = render_state(&mut state);
+    let add_provider = state.rows().len().saturating_sub(1);
+    let _ = state.activate(add_provider);
+    let form = render_state(&mut state);
 
-    insta::assert_snapshot!(format!("COLLAPSED\n{collapsed}\n\nEXPANDED\n{expanded}"));
+    insta::assert_snapshot!(format!(
+        "COLLAPSED\n{collapsed}\n\nEXPANDED\n{expanded}\n\nADD PROVIDER\n{form}"
+    ));
 }
 
 fn render_state(state: &mut ModelsManagerState) -> String {

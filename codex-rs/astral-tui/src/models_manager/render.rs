@@ -15,6 +15,7 @@ use super::BrowserRow;
 use super::ModelsManagerState;
 use super::ProviderLoad;
 use super::capability_sources;
+use super::provider_form;
 
 pub(crate) fn render(
     state: &mut ModelsManagerState,
@@ -22,7 +23,9 @@ pub(crate) fn render(
     buffer: &mut Buffer,
     theme: AstralTheme,
 ) {
-    if let Some(model) = state.detail.clone() {
+    if let Some(form) = state.provider_form.clone() {
+        provider_form::render(&form, &mut state.pointer, area, buffer, theme);
+    } else if let Some(model) = state.detail.clone() {
         render_detail(state, &model, area, buffer, theme);
     } else {
         render_browser(state, area, buffer, theme);
@@ -127,6 +130,10 @@ fn render_browser_row(
     let style = modal_choice_style(theme, selected);
     buffer.set_style(area, style);
     let (label, description) = match row {
+        BrowserRow::AddProvider => (
+            "＋ Add provider".to_string(),
+            "Configure a custom endpoint".to_string(),
+        ),
         BrowserRow::Provider { provider_index } => {
             let provider = &state.providers[*provider_index];
             let marker = if provider.expanded { "▾" } else { "▸" };
@@ -145,6 +152,10 @@ fn render_browser_row(
                 detail,
             )
         }
+        BrowserRow::EditProvider { provider_index } => (
+            "    ◇ Settings".to_string(),
+            format!("Edit {}", state.providers[*provider_index].name),
+        ),
         BrowserRow::Status { provider_index } => {
             let provider = &state.providers[*provider_index];
             let status = match &provider.load {
