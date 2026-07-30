@@ -322,11 +322,17 @@ pub(super) fn render(
     render_modal_close_button(buffer, frame.close_button, theme, pointer.close_hovered());
     let mut hits = Vec::new();
     let label_width = 20;
+    let visible_slots = usize::from(frame.content.height.saturating_sub(2).saturating_add(1) / 2);
+    let start = form
+        .selected
+        .saturating_add(1)
+        .saturating_sub(visible_slots);
     for (index, field) in FIELDS.into_iter().enumerate() {
-        let y = frame.content.y + u16::try_from(index.saturating_mul(2)).unwrap_or(u16::MAX);
-        if y >= frame.content.bottom() {
-            break;
+        if index < start || index >= start.saturating_add(visible_slots) {
+            continue;
         }
+        let y = frame.content.y
+            + u16::try_from(index.saturating_sub(start).saturating_mul(2)).unwrap_or(u16::MAX);
         let row = Rect::new(frame.content.x, y, frame.content.width, 1);
         let selected = form.selected == index || pointer.hovered_row() == Some(index);
         let style = modal_choice_style(theme, selected);
@@ -354,21 +360,18 @@ pub(super) fn render(
             area: row,
         });
     }
-    let note_y = frame.content.y.saturating_add(13);
-    if note_y < frame.content.bottom() {
+    let note_y = frame.content.bottom().saturating_sub(1);
+    buffer.set_stringn(
+        frame.content.x,
+        note_y,
+        "Provider flavor is inferred automatically. Hidden advanced keys are preserved.",
+        usize::from(frame.content.width),
+        Style::default().fg(theme.gray).bg(theme.bg_base),
+    );
+    if let Some(error) = form.error.as_deref() {
         buffer.set_stringn(
             frame.content.x,
             note_y,
-            "Provider flavor is inferred automatically. Hidden advanced keys are preserved.",
-            usize::from(frame.content.width),
-            Style::default().fg(theme.gray).bg(theme.bg_base),
-        );
-    }
-    if let Some(error) = form.error.as_deref() {
-        let error_y = frame.content.bottom().saturating_sub(1);
-        buffer.set_stringn(
-            frame.content.x,
-            error_y,
             error,
             usize::from(frame.content.width),
             Style::default().fg(theme.accent_error).bg(theme.bg_base),

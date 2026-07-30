@@ -28,6 +28,9 @@ pub(super) fn set_optional_number(
     let value = value
         .parse::<u64>()
         .map_err(|_| format!("{key} must be a positive integer"))?;
+    if value == 0 {
+        return Err(format!("{key} must be a positive integer"));
+    }
     raw.insert(key.to_string(), Value::Number(Number::from(value)));
     Ok(())
 }

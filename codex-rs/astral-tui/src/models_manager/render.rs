@@ -14,6 +14,7 @@ use crate::view::render_modal_frame_with_geometry;
 use super::BrowserRow;
 use super::ModelsManagerState;
 use super::ProviderLoad;
+use super::capability_form;
 use super::capability_sources;
 use super::provider_form;
 
@@ -23,7 +24,9 @@ pub(crate) fn render(
     buffer: &mut Buffer,
     theme: AstralTheme,
 ) {
-    if let Some(form) = state.provider_form.clone() {
+    if let Some(form) = state.capability_form.clone() {
+        capability_form::render(&form, &mut state.pointer, area, buffer, theme);
+    } else if let Some(form) = state.provider_form.clone() {
         provider_form::render(&form, &mut state.pointer, area, buffer, theme);
     } else if let Some(model) = state.detail.clone() {
         render_detail(state, &model, area, buffer, theme);
@@ -134,6 +137,10 @@ fn render_browser_row(
             "＋ Add provider".to_string(),
             "Configure a custom endpoint".to_string(),
         ),
+        BrowserRow::AddModel { provider_index } => (
+            "    ＋ Add model".to_string(),
+            format!("Add to {}", state.providers[*provider_index].name),
+        ),
         BrowserRow::Provider { provider_index } => {
             let provider = &state.providers[*provider_index];
             let marker = if provider.expanded { "▾" } else { "▸" };
@@ -201,12 +208,17 @@ fn render_detail(
     buffer: &mut Buffer,
     theme: AstralTheme,
 ) {
+    let editable = state.detail_can_edit();
     let Some(frame) = render_modal_frame_with_geometry(
         area,
         buffer,
         theme,
         &model.display_name,
-        "Esc back",
+        if editable {
+            "Enter edit manual overrides · Esc back"
+        } else {
+            "Esc back"
+        },
         ModalHeight::FullViewport,
     ) else {
         return;
@@ -271,6 +283,7 @@ fn render_detail(
         ),
         ("Sources", capability_sources(capabilities)),
     ];
+    let row_count = rows.len();
     let label_width = rows
         .iter()
         .map(|(label, _)| Line::from(*label).width())
@@ -300,9 +313,31 @@ fn render_detail(
             );
         }
     }
+    let mut hits = Vec::new();
+    if editable {
+        let action_y = frame
+            .content
+            .y
+            .saturating_add(u16::try_from(row_count).unwrap_or(u16::MAX))
+            .saturating_add(1);
+        if action_y < frame.content.bottom() {
+            let area = Rect::new(frame.content.x, action_y, frame.content.width, 1);
+            let hovered = state.pointer.hovered_row() == Some(0);
+            let style = modal_choice_style(theme, hovered);
+            buffer.set_style(area, style);
+            buffer.set_stringn(
+                area.x,
+                area.y,
+                "❯ Edit manual overrides",
+                usize::from(area.width),
+                style,
+            );
+            hits.push(ModalRowHit { id: 0, area });
+        }
+    }
     state
         .pointer
-        .observe_frame(frame.popup, frame.close_button, Vec::new());
+        .observe_frame(frame.popup, frame.close_button, hits);
 }
 
 fn render_label_and_description(

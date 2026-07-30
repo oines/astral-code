@@ -9,6 +9,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use serde_json::json;
 
+use super::BrowserRow;
 use super::ModelsManagerState;
 use super::render;
 use crate::view::AstralTheme;
@@ -29,6 +30,12 @@ fn provider_hierarchy_snapshot() {
                     "base_url": "https://api.anthropic.com",
                     "env_key": "ANTHROPIC_API_KEY",
                     "wire_api": "anthropic_messages"
+                }
+            },
+            "model_capabilities": {
+                "deepseek/deepseek-chat": {
+                    "context_window": 128000,
+                    "supports_tools": true
                 }
             }
         },
@@ -83,10 +90,30 @@ fn provider_hierarchy_snapshot() {
     let expanded = render_state(&mut state);
     let add_provider = state.rows().len().saturating_sub(1);
     let _ = state.activate(add_provider);
-    let form = render_state(&mut state);
+    let provider_form = render_state(&mut state);
+    let _ = state.close_panel();
+
+    let add_model = state
+        .rows()
+        .iter()
+        .position(|row| matches!(row, BrowserRow::AddModel { .. }))
+        .expect("expanded provider has add model row");
+    let _ = state.activate(add_model);
+    let model_form = render_state(&mut state);
+    let _ = state.close_panel();
+
+    let model = state
+        .rows()
+        .iter()
+        .position(|row| matches!(row, BrowserRow::Model { .. }))
+        .expect("expanded provider has a model");
+    let _ = state.activate(model);
+    let detail = render_state(&mut state);
+    let _ = state.activate_detail();
+    let overrides = render_state(&mut state);
 
     insta::assert_snapshot!(format!(
-        "COLLAPSED\n{collapsed}\n\nEXPANDED\n{expanded}\n\nADD PROVIDER\n{form}"
+        "COLLAPSED\n{collapsed}\n\nEXPANDED\n{expanded}\n\nADD PROVIDER\n{provider_form}\n\nADD MODEL\n{model_form}\n\nMODEL DETAIL\n{detail}\n\nMODEL OVERRIDES\n{overrides}"
     ));
 }
 

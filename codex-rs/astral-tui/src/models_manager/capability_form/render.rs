@@ -42,12 +42,7 @@ pub(in crate::models_manager) fn render(
     let visible_rows = usize::from(frame.content.height.saturating_sub(2));
     let start = form.selected.saturating_add(1).saturating_sub(visible_rows);
     let mut hits = Vec::new();
-    for (index, field) in fields
-        .into_iter()
-        .enumerate()
-        .skip(start)
-        .take(visible_rows)
-    {
+    for (index, field) in fields.iter().enumerate().skip(start).take(visible_rows) {
         let y = frame.content.y + u16::try_from(index.saturating_sub(start)).unwrap_or(u16::MAX);
         let row = Rect::new(frame.content.x, y, frame.content.width, 1);
         let selected = form.selected == index || pointer.hovered_row() == Some(index);

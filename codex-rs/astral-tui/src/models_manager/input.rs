@@ -28,11 +28,18 @@ pub(crate) fn handle_key(state: &mut ModelsManagerState, key: KeyEvent) -> Model
             ModelsManagerInput::Cancel
         };
     }
+    if state.capability_form_active() {
+        return state.handle_capability_key(key);
+    }
     if state.provider_form_active() {
         return state.handle_provider_key(key);
     }
     if state.detail.is_some() {
-        return ModelsManagerInput::None;
+        return if key.code == KeyCode::Enter && key.modifiers == KeyModifiers::NONE {
+            state.activate_detail()
+        } else {
+            ModelsManagerInput::None
+        };
     }
     match (key.code, key.modifiers) {
         (KeyCode::Up, _) => {
@@ -77,6 +84,9 @@ pub(crate) fn handle_key(state: &mut ModelsManagerState, key: KeyEvent) -> Model
 }
 
 pub(crate) fn handle_paste(state: &mut ModelsManagerState, text: &str) -> ModelsManagerInput {
+    if state.capability_form_active() {
+        return state.handle_capability_paste(text);
+    }
     if state.provider_form_active() {
         return state.handle_provider_paste(text);
     }
@@ -105,25 +115,33 @@ pub(crate) fn handle_mouse(
         }
         ModalPointerAction::Redraw | ModalPointerAction::Hover(None) => ModelsManagerInput::Redraw,
         ModalPointerAction::Hover(Some(index)) => {
-            if state.provider_form_active() {
+            if state.capability_form_active() {
+                state.select_capability_field(index);
+            } else if state.provider_form_active() {
                 state.select_provider_field(index);
-            } else {
+            } else if state.detail.is_none() {
                 state.set_selected(index);
             }
             ModelsManagerInput::Redraw
         }
         ModalPointerAction::Activate(index) => {
-            if state.provider_form_active() {
+            if state.capability_form_active() {
+                state.activate_capability_field(index)
+            } else if state.provider_form_active() {
                 state.activate_provider_field(index)
+            } else if state.detail.is_some() {
+                state.activate_detail()
             } else {
                 state.set_selected(index);
                 state.activate(index)
             }
         }
         ModalPointerAction::Scroll(delta) => {
-            if state.provider_form_active() {
+            if state.capability_form_active() {
+                state.move_capability_field(delta);
+            } else if state.provider_form_active() {
                 state.move_provider_field(delta);
-            } else {
+            } else if state.detail.is_none() {
                 state.move_selection(delta);
             }
             ModelsManagerInput::Redraw

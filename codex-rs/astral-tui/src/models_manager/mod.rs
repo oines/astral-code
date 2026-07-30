@@ -3,6 +3,7 @@
 //! The app-server remains authoritative for configuration and discovery. This
 //! module only owns modal navigation, expansion, and presentation state.
 
+mod capability;
 mod capability_form;
 mod config;
 mod input;
@@ -31,6 +32,7 @@ pub(crate) use input::handle_mouse;
 pub(crate) use input::handle_paste;
 pub(crate) use render::render;
 
+use self::capability_form::CapabilityFormState;
 use self::config::ConfigWriteTarget;
 use self::provider_form::ProviderFormState;
 
@@ -50,7 +52,9 @@ pub(crate) struct ModelsManagerState {
     selected: usize,
     scroll_offset: usize,
     detail: Option<Model>,
+    capability_form: Option<CapabilityFormState>,
     provider_form: Option<ProviderFormState>,
+    manual_capabilities: BTreeMap<String, serde_json::Map<String, Value>>,
     write_target: Option<ConfigWriteTarget>,
     pending_request: Option<ProviderModelsRequest>,
     pointer: ModalPointerState,
@@ -80,6 +84,9 @@ enum ProviderLoad {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum BrowserRow {
     AddProvider,
+    AddModel {
+        provider_index: usize,
+    },
     Provider {
         provider_index: usize,
     },
@@ -104,6 +111,7 @@ impl ModelsManagerState {
         current_model: String,
     ) -> Self {
         let write_target = config::write_target(&response);
+        let manual_capabilities = config::configured_capabilities(&response);
         let configured = config::configured_providers(&response);
         let mut providers = configured
             .into_iter()
@@ -187,7 +195,9 @@ impl ModelsManagerState {
             selected: 0,
             scroll_offset: 0,
             detail: None,
+            capability_form: None,
             provider_form: None,
+            manual_capabilities,
             write_target,
             pending_request: None,
             pointer: ModalPointerState::default(),
@@ -255,6 +265,7 @@ impl ModelsManagerState {
             if provider.expanded || !query.is_empty() {
                 if provider.editable && query.is_empty() {
                     rows.push(BrowserRow::EditProvider { provider_index });
+                    rows.push(BrowserRow::AddModel { provider_index });
                 }
                 if matches!(
                     provider.load,
@@ -286,6 +297,14 @@ impl ModelsManagerState {
         match row {
             BrowserRow::AddProvider => {
                 self.provider_form = Some(ProviderFormState::add());
+                ModelsManagerInput::Redraw
+            }
+            BrowserRow::AddModel { provider_index } => {
+                let provider = &self.providers[provider_index];
+                self.capability_form = Some(CapabilityFormState::add(
+                    provider.id.clone(),
+                    provider.name.clone(),
+                ));
                 ModelsManagerInput::Redraw
             }
             BrowserRow::Provider { provider_index } => {

@@ -14,7 +14,9 @@ impl ModelsManagerState {
     }
 
     pub(super) fn close_panel(&mut self) -> bool {
-        self.provider_form.take().is_some() || self.detail.take().is_some()
+        self.capability_form.take().is_some()
+            || self.provider_form.take().is_some()
+            || self.detail.take().is_some()
     }
 
     pub(super) fn handle_provider_key(&mut self, key: KeyEvent) -> ModelsManagerInput {
@@ -61,7 +63,9 @@ impl ModelsManagerState {
     }
 
     pub(crate) fn set_form_error(&mut self, error: String) {
-        if let Some(form) = self.provider_form.as_mut() {
+        if let Some(form) = self.capability_form.as_mut() {
+            form.set_error(error);
+        } else if let Some(form) = self.provider_form.as_mut() {
             form.set_error(error);
         }
     }

@@ -739,7 +739,9 @@ async fn apply_input_action(
             match write_result {
                 Ok(response) => {
                     let message = match response.status {
-                        WriteStatus::Ok => format!("Saved provider {focus_provider}"),
+                        WriteStatus::Ok => {
+                            format!("Saved model configuration for {focus_provider}")
+                        }
                         WriteStatus::OkOverridden => response
                             .overridden_metadata
                             .map(|metadata| metadata.message)
