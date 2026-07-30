@@ -5,6 +5,7 @@ use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::text::Text;
 use textwrap::Options;
+use textwrap::core::display_width;
 
 use crate::DisplayMode;
 use crate::PresentationBlock;
@@ -14,6 +15,7 @@ use crate::SubagentAgentStatus;
 use crate::SubagentPresentation;
 use crate::ToolKind;
 use crate::ToolStatus;
+use crate::display::USER_COLLAPSED_MAX_LINES;
 use crate::markdown::MarkdownStyle;
 use crate::markdown::MarkdownSyntaxTheme;
 use crate::markdown::render_markdown;
@@ -125,9 +127,7 @@ impl RenderOptions {
 
 pub fn render_block(block: &PresentationBlock, options: RenderOptions) -> Text<'static> {
     match block {
-        PresentationBlock::User { text, attachments } => {
-            render_user(text, attachments, options.width)
-        }
+        PresentationBlock::User { text, attachments } => render_user(text, attachments, options),
         PresentationBlock::Assistant { text } => render_assistant(text, options.width),
         PresentationBlock::Thinking { text, running } => render_thinking(text, *running, options),
         PresentationBlock::Plan { text, running } => render_plan(text, *running, options),
@@ -273,12 +273,24 @@ fn quoted_preview(value: &str, max_chars: usize) -> String {
     }
 }
 
-fn render_user(text: &str, attachments: &[String], width: u16) -> Text<'static> {
-    let mut lines = prefixed_lines(text, width, "› ", "  ", false);
+fn render_user(text: &str, attachments: &[String], options: RenderOptions) -> Text<'static> {
+    let mut lines = prefixed_lines(text, options.width, "› ", "  ", false);
+    if options.mode != DisplayMode::Expanded && lines.len() > USER_COLLAPSED_MAX_LINES {
+        lines.truncate(USER_COLLAPSED_MAX_LINES);
+        if let Some(last) = lines.last_mut() {
+            const ELLIPSIS: &str = " …";
+            let content_width = usize::from(options.width).saturating_sub(display_width(ELLIPSIS));
+            let mut content = last.to_string();
+            while display_width(&content) > content_width {
+                content.pop();
+            }
+            *last = format!("{}{ELLIPSIS}", content.trim_end()).into();
+        }
+    }
     lines.extend(
         attachments
             .iter()
-            .flat_map(|attachment| prefixed_lines(attachment, width, "  ↳ ", "    ", true)),
+            .flat_map(|attachment| prefixed_lines(attachment, options.width, "  ↳ ", "    ", true)),
     );
     Text::from(lines)
 }
@@ -364,7 +376,22 @@ fn prefixed_lines(
     subsequent_indent: &str,
     dim: bool,
 ) -> Vec<Line<'static>> {
-    wrapped_lines(value, width, initial_indent, subsequent_indent, dim)
+    value
+        .split('\n')
+        .enumerate()
+        .flat_map(|(index, line)| {
+            let line_indent = if index == 0 {
+                initial_indent
+            } else {
+                subsequent_indent
+            };
+            if line.is_empty() {
+                vec![styled_line(line_indent.to_string(), dim)]
+            } else {
+                wrapped_lines(line, width, line_indent, subsequent_indent, dim)
+            }
+        })
+        .collect()
 }
 
 fn indented_lines(value: &str, width: u16, indent: &str, dim: bool) -> Vec<Line<'static>> {

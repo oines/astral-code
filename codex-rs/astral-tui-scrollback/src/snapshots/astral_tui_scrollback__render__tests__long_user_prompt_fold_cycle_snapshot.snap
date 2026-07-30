@@ -1,0 +1,16 @@
+---
+source: astral-tui-scrollback/src/render_tests.rs
+expression: "format!(\"COLLAPSED\\n{collapsed}\\n\\nEXPANDED\\n{expanded}\")"
+---
+COLLAPSED
+› first line
+  second line
+  third line …
+  ↳ src/main.rs
+
+EXPANDED
+› first line
+  second line
+  third line
+  fourth line
+  ↳ src/main.rs

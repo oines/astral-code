@@ -1,5 +1,9 @@
 use crate::PresentationBlock;
 use crate::ToolKind;
+use textwrap::core::display_width;
+
+pub(crate) const USER_COLLAPSED_MAX_LINES: usize = 3;
+const USER_FOLD_ESTIMATE_WIDTH: usize = 60;
 
 /// Presentation-only visibility for one transcript entry.
 ///
@@ -15,6 +19,7 @@ pub enum DisplayMode {
 impl PresentationBlock {
     pub fn default_display_mode(&self) -> DisplayMode {
         match self {
+            Self::User { text, .. } if user_is_foldable(text) => DisplayMode::Collapsed,
             Self::User { .. }
             | Self::Assistant { .. }
             | Self::Plan { running: false, .. }
@@ -64,7 +69,8 @@ impl PresentationBlock {
             Self::System { detail, .. } => detail
                 .as_deref()
                 .is_some_and(|detail| !detail.trim().is_empty()),
-            Self::User { .. } | Self::Assistant { .. } | Self::Todo(_) => false,
+            Self::User { text, .. } => user_is_foldable(text),
+            Self::Assistant { .. } | Self::Todo(_) => false,
         }
     }
 
@@ -157,4 +163,20 @@ impl PresentationBlock {
     pub fn is_selectable(&self) -> bool {
         !matches!(self, Self::Todo(_) | Self::System { .. })
     }
+}
+
+fn user_is_foldable(text: &str) -> bool {
+    let mut visual_lines = 0;
+    for line in text.lines() {
+        let width = display_width(line);
+        visual_lines += if width == 0 {
+            1
+        } else {
+            width.div_ceil(USER_FOLD_ESTIMATE_WIDTH)
+        };
+        if visual_lines > USER_COLLAPSED_MAX_LINES {
+            return true;
+        }
+    }
+    false
 }

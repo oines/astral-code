@@ -633,6 +633,31 @@ fn conversation_blocks_snapshot() {
 }
 
 #[test]
+fn long_user_prompt_fold_cycle_snapshot() {
+    let block = PresentationBlock::User {
+        text: "first line\nsecond line\nthird line\nfourth line".to_string(),
+        attachments: vec!["src/main.rs".to_string()],
+    };
+    assert!(block.is_foldable());
+    assert_eq!(block.default_display_mode(), DisplayMode::Collapsed);
+
+    let collapsed = render_block(&block, RenderOptions::collapsed(24))
+        .lines
+        .iter()
+        .map(|line| line.to_string().trim_end().to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let expanded = render_block(&block, RenderOptions::expanded(24))
+        .lines
+        .iter()
+        .map(|line| line.to_string().trim_end().to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert_snapshot!(format!("COLLAPSED\n{collapsed}\n\nEXPANDED\n{expanded}"));
+}
+
+#[test]
 fn raw_reasoning_is_used_when_summary_is_absent_snapshot() {
     let item = ThreadItem::Reasoning {
         id: "reasoning-raw-only".to_string(),
