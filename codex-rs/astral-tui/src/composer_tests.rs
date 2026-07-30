@@ -258,6 +258,38 @@ fn mouse_selection_copies_and_replaces_the_selected_buffer_range() {
     assert_eq!(composer.text(), "");
 }
 
+#[test]
+fn double_clicking_a_file_reference_opens_it() {
+    let mut composer = ComposerState::default();
+    composer.insert_file_reference(0..0, "src/main.rs:4-7".to_string());
+    let now = Instant::now();
+
+    assert_eq!(
+        composer.handle_mouse(
+            mouse(MouseEventKind::Down(MouseButton::Left), 3, 2),
+            Some(3),
+            now,
+        ),
+        ComposerMouseAction::Redraw
+    );
+    assert_eq!(
+        composer.handle_mouse(
+            mouse(MouseEventKind::Down(MouseButton::Left), 3, 2),
+            Some(3),
+            now + Duration::from_millis(100),
+        ),
+        ComposerMouseAction::OpenFileReference
+    );
+    assert_eq!(
+        composer.file_reference_at_cursor(),
+        Some(super::element_edit::FileReferenceAtCursor {
+            range: 0.."@src/main.rs:4-7".len(),
+            path: "src/main.rs".to_string(),
+            line_range: Some(4..8),
+        })
+    );
+}
+
 fn skill_mention() -> (String, MentionTarget) {
     (
         "$review".to_string(),

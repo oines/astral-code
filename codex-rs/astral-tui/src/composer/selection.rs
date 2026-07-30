@@ -58,6 +58,7 @@ pub(crate) enum ComposerMouseAction {
     Nothing,
     Redraw,
     Copy(String),
+    OpenFileReference,
     OpenImage(LocalImage),
 }
 
@@ -102,6 +103,17 @@ impl ComposerState {
                         ComposerMouseAction::OpenImage(image)
                     }
                     2 if self.expand_paste_at_position(position) => ComposerMouseAction::Redraw,
+                    2 if self.elements.iter().any(|element| {
+                        element.is_file_reference()
+                            && position >= element.range.start
+                            && position < element.range.end
+                    }) =>
+                    {
+                        let start = self.element_start_at(position).unwrap_or(position);
+                        self.drag_anchor = Some(start);
+                        self.set_cursor_from_mouse(start);
+                        ComposerMouseAction::OpenFileReference
+                    }
                     2 => {
                         if let Some(start) = self.element_start_at(position) {
                             self.drag_anchor = Some(start);
