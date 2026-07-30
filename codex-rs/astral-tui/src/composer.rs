@@ -168,6 +168,23 @@ impl ComposerState {
         self.history.record_inserted_text(&normalized);
     }
 
+    pub(crate) fn apply_backslash_continuation(&mut self) -> bool {
+        let Some(previous) = previous_boundary(&self.text, self.cursor) else {
+            return false;
+        };
+        if self.text.get(previous..self.cursor) != Some("\\")
+            || self.elements.iter().any(|element| {
+                previous >= element.range.start
+                    && self.cursor <= element.range.end
+                    && element.matches_text(&self.text)
+            })
+        {
+            return false;
+        }
+        self.replace_range(previous..self.cursor, "\n", MutationKind::Replace);
+        true
+    }
+
     pub(crate) fn insert_mention(
         &mut self,
         range: std::ops::Range<usize>,

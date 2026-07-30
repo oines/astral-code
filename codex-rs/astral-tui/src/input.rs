@@ -674,6 +674,10 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
             {
                 return InputAction::SteerQueuedPrompt { id };
             }
+            if state.composer_state_mut().apply_backslash_continuation() {
+                state.refresh_composer_completions();
+                return InputAction::Redraw;
+            }
             let submission = state.take_submission();
             if submission.text().trim().is_empty() {
                 InputAction::None

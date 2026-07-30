@@ -619,6 +619,24 @@ fn multiline_mode_swaps_enter_and_modified_enter() {
 }
 
 #[test]
+fn trailing_backslash_continues_the_prompt_instead_of_submitting() {
+    let mut state = SurfaceState::new("thread-1");
+    state.set_composer("first line\\");
+
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Enter)),
+        InputAction::Redraw
+    );
+    assert_eq!(state.composer(), "first line\n");
+
+    state.composer_state_mut().insert_text("second line");
+    let InputAction::Submit(submission) = handle_key(&mut state, key(KeyCode::Enter)) else {
+        panic!("the continued prompt should submit after more text");
+    };
+    assert_eq!(submission.text(), "first line\nsecond line");
+}
+
+#[test]
 fn shell_mode_runs_directly_and_restores_from_history() {
     let mut state = SurfaceState::new("thread-1");
     assert_eq!(
