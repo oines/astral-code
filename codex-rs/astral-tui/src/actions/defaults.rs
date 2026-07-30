@@ -70,6 +70,20 @@ pub(super) fn default_actions() -> Vec<ActionDef> {
              this picker while the transcript is focused.",
         ),
         ActionDef::new(
+            ActionId::OpenSessions,
+            "sessions",
+            "Open saved sessions",
+            KeyShortcut::control('s'),
+            Vec::new(),
+            Category::Session,
+            When::Always,
+        )
+        .with_key_display("Ctrl+S")
+        .with_help(
+            "Opens Astral's existing resume picker without changing the current draft. \
+             Select a saved conversation to switch to its full history.",
+        ),
+        ActionDef::new(
             ActionId::ShellMode,
             "shell",
             "Shell mode",

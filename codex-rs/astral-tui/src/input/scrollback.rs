@@ -162,6 +162,7 @@ pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction
         Some(
             ActionId::CommandPalette
             | ActionId::ToggleMultiline
+            | ActionId::OpenSessions
             | ActionId::ShellMode
             | ActionId::ToggleQueue
             | ActionId::FocusScrollback

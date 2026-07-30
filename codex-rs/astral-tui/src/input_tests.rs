@@ -486,6 +486,33 @@ fn shortcuts_toggle_is_global() {
 }
 
 #[test]
+fn sessions_shortcut_preserves_the_draft_and_uses_resume() {
+    let mut state = SurfaceState::new("thread-1");
+    state.set_activity(SurfaceActivity::Ready);
+    state.set_composer("keep this draft");
+    let shortcut = KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL);
+
+    assert_eq!(
+        handle_key(&mut state, shortcut),
+        InputAction::Slash {
+            invocation: SlashInvocation {
+                command: SlashCommandId::Resume,
+                name: "resume",
+                args: String::new(),
+            },
+            submission: crate::PromptSubmission::text_only(String::new()),
+        }
+    );
+    assert_eq!(state.composer(), "keep this draft");
+
+    state.set_activity(SurfaceActivity::Working);
+    assert_eq!(
+        handle_key(&mut state, shortcut),
+        InputAction::Notice("Session selection is unavailable while Astral is working".to_string())
+    );
+}
+
+#[test]
 fn command_palette_preserves_the_draft_while_collecting_required_arguments() {
     let mut state = SurfaceState::new("thread-1");
     state.set_composer("keep this draft");

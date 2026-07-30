@@ -620,6 +620,24 @@ fn shortcuts_modal_snapshot() {
 }
 
 #[test]
+fn shortcuts_sessions_action_snapshot() {
+    let session = session_state();
+    let mut state = SurfaceState::from_session(&session);
+    state.open_shortcut_help();
+    let shortcuts = state
+        .shortcut_help_mut()
+        .expect("shortcut help should be open");
+    shortcuts.begin_search();
+    for character in "sessions".chars() {
+        shortcuts.insert_query(character);
+    }
+    shortcuts.select(1);
+    assert!(shortcuts.open_selected_detail());
+
+    insta::assert_snapshot!(render_at_size(&mut state, &session, 80, 24));
+}
+
+#[test]
 fn shortcuts_modal_scrolled_snapshot() {
     let session = session_state();
     let mut state = SurfaceState::from_session(&session);

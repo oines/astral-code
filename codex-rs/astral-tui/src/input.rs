@@ -12,6 +12,7 @@ use crate::PendingRequest;
 use crate::PendingRequestResponse;
 use crate::PromptSubmission;
 use crate::RequestResolution;
+use crate::SlashCommandId;
 use crate::SlashInvocation;
 use crate::SurfaceActivity;
 use crate::SurfaceState;
@@ -136,6 +137,25 @@ pub fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
     }
     if state.queue_focused() {
         return queue::handle_key(state, key);
+    }
+    if actions::matches(ActionId::OpenSessions, &key) {
+        if !matches!(
+            state.activity(),
+            SurfaceActivity::Ready | SurfaceActivity::Interrupted
+        ) {
+            return InputAction::Notice(
+                "Session selection is unavailable while Astral is working".to_string(),
+            );
+        }
+        state.record_slash(SlashCommandId::Resume);
+        return InputAction::Slash {
+            invocation: SlashInvocation {
+                command: SlashCommandId::Resume,
+                name: "resume",
+                args: String::new(),
+            },
+            submission: PromptSubmission::text_only(String::new()),
+        };
     }
     if key.code == KeyCode::Esc && state.clear_scrollback_selection() {
         return InputAction::Redraw;
@@ -648,6 +668,7 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
             ActionId::CycleMode
             | ActionId::ToggleMultiline
             | ActionId::ModelPicker
+            | ActionId::OpenSessions
             | ActionId::ShellMode
             | ActionId::CommandPalette
             | ActionId::ShortcutsHelp

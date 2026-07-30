@@ -1,0 +1,25 @@
+---
+source: astral-tui/src/surface_tests.rs
+expression: "render_at_size(&mut state, &session, 80, 24)"
+---
+
+  ⎇ main  /workspace
+
+
+  › inspect ┌─ Keyboard Shortcuts ─────────────────────────────[×]─┐
+            │                                                      │
+            │  Open saved sessions                                 │
+  I’m tracin│  Key: Ctrl+s                                         │
+            │  Available in: prompt and transcript                 │
+            │                                                      │
+            │  Opens Astral's existing resume picker without       │
+            │  changing the current draft. Select a saved          │
+            │  conversation to switch to its full history.         │
+            │                                                      │
+            │                                                      │
+            │                                                      │
+  ◇ Working │                                                      │
+            │                                                      │
+  ╭─────────│                ↑/↓ scroll · Esc back                 │─────────╮
+  │ ❯       └──────────────────────────────────────────────────────┘         │
+  ╰──────────────────────────────────────────── claude-sonnet-4 · workspace ─╯
