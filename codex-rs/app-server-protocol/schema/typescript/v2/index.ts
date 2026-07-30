@@ -222,6 +222,8 @@ export type { MergeStrategy } from "./MergeStrategy";
 export type { MigrationDetails } from "./MigrationDetails";
 export type { Model } from "./Model";
 export type { ModelAvailabilityNux } from "./ModelAvailabilityNux";
+export type { ModelCapabilities } from "./ModelCapabilities";
+export type { ModelCapabilitySource } from "./ModelCapabilitySource";
 export type { ModelListParams } from "./ModelListParams";
 export type { ModelListResponse } from "./ModelListResponse";
 export type { ModelProviderCapabilitiesReadParams } from "./ModelProviderCapabilitiesReadParams";

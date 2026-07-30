@@ -10,6 +10,8 @@ use app_test_support::write_models_cache;
 use codex_app_server_protocol::JSONRPCError;
 use codex_app_server_protocol::JSONRPCResponse;
 use codex_app_server_protocol::Model;
+use codex_app_server_protocol::ModelCapabilities;
+use codex_app_server_protocol::ModelCapabilitySource;
 use codex_app_server_protocol::ModelListParams;
 use codex_app_server_protocol::ModelListResponse;
 use codex_app_server_protocol::ModelServiceTier;
@@ -74,6 +76,7 @@ fn model_from_preset(preset: &ModelPreset) -> Model {
             })
             .collect(),
         default_service_tier: preset.default_service_tier.clone(),
+        capabilities: ModelCapabilities::default(),
         is_default: preset.is_default,
     }
 }
@@ -164,6 +167,21 @@ async fn list_models_returns_configured_models_with_large_limit() -> Result<()> 
         ]
     );
     assert!(items[0].is_default);
+    assert_eq!(
+        items[0].capabilities,
+        ModelCapabilities {
+            context_window: Some(272_000),
+            max_context_window: Some(272_000),
+            max_output_tokens: Some(32_000),
+            supports_tools: Some(true),
+            supports_vision: Some(false),
+            sources: vec![
+                ModelCapabilitySource::Manual,
+                ModelCapabilitySource::Fallback,
+            ],
+            ..ModelCapabilities::default()
+        }
+    );
     assert!(items.iter().all(|model| !model.hidden));
     assert!(next_cursor.is_none());
     Ok(())
@@ -301,6 +319,16 @@ wire_api = "chat_completions"
             ))
             .collect::<Vec<_>>(),
         vec![("custom", "Custom", "provider-remote-model")]
+    );
+    assert_eq!(
+        items[0].capabilities,
+        ModelCapabilities {
+            supports_parallel_tools: Some(false),
+            supports_vision: Some(false),
+            supports_reasoning: Some(false),
+            sources: vec![ModelCapabilitySource::Provider],
+            ..ModelCapabilities::default()
+        }
     );
     assert!(next_cursor.is_none());
     assert_eq!(models_mock.requests().len(), 1);

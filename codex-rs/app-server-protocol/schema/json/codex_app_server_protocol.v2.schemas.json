@@ -7609,6 +7609,27 @@
             }
           ]
         },
+        "capabilities": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ModelCapabilities"
+            }
+          ],
+          "default": {
+            "contextWindow": null,
+            "maxContextWindow": null,
+            "maxOutputTokens": null,
+            "sources": [],
+            "supportedEndpoints": [],
+            "supportsNativeStreaming": null,
+            "supportsParallelTools": null,
+            "supportsPromptCache": null,
+            "supportsReasoning": null,
+            "supportsTools": null,
+            "supportsVision": null,
+            "toolMode": null
+          }
+        },
         "defaultReasoningEffort": {
           "$ref": "#/definitions/ReasoningEffort"
         },
@@ -7712,6 +7733,103 @@
         "message"
       ],
       "type": "object"
+    },
+    "ModelCapabilities": {
+      "properties": {
+        "contextWindow": {
+          "description": "Effective context window used for this model.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "maxContextWindow": {
+          "description": "Maximum context window accepted by model-level overrides, when known.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "maxOutputTokens": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "sources": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/ModelCapabilitySource"
+          },
+          "type": "array"
+        },
+        "supportedEndpoints": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "supportsNativeStreaming": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "supportsParallelTools": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "supportsPromptCache": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "supportsReasoning": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "supportsTools": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "supportsVision": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "toolMode": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ToolMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ModelCapabilitySource": {
+      "enum": [
+        "provider",
+        "liteLlm",
+        "manual",
+        "fallback"
+      ],
+      "type": "string"
     },
     "ModelListParams": {
       "$schema": "http://json-schema.org/draft-07/schema#",
@@ -15064,6 +15182,14 @@
         "name"
       ],
       "type": "object"
+    },
+    "ToolMode": {
+      "enum": [
+        "direct",
+        "code_mode",
+        "code_mode_only"
+      ],
+      "type": "string"
     },
     "ToolsV2": {
       "properties": {

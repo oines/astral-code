@@ -1,4 +1,5 @@
 use codex_app_server_protocol::Model;
+use codex_app_server_protocol::ModelCapabilities;
 use codex_app_server_protocol::ReasoningEffortOption;
 use codex_protocol::openai_models::ReasoningEffort;
 use pretty_assertions::assert_eq;
@@ -89,6 +90,7 @@ fn model(model: &str, display_name: &str, efforts: Vec<ReasoningEffort>) -> Mode
         additional_speed_tiers: Vec::new(),
         service_tiers: Vec::new(),
         default_service_tier: None,
+        capabilities: ModelCapabilities::default(),
         is_default: true,
     }
 }

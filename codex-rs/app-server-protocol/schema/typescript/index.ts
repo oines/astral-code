@@ -72,6 +72,7 @@ export type { SubAgentSource } from "./SubAgentSource";
 export type { ThreadId } from "./ThreadId";
 export type { ThreadMemoryMode } from "./ThreadMemoryMode";
 export type { Tool } from "./Tool";
+export type { ToolMode } from "./ToolMode";
 export type { TranscriptItem } from "./TranscriptItem";
 export type { Verbosity } from "./Verbosity";
 export type { WebSearchAction } from "./WebSearchAction";

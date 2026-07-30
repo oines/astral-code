@@ -1,13 +1,18 @@
 use std::sync::Arc;
 
 use codex_app_server_protocol::Model;
+use codex_app_server_protocol::ModelCapabilities;
+use codex_app_server_protocol::ModelCapabilitySource;
 use codex_app_server_protocol::ModelServiceTier;
 use codex_app_server_protocol::ModelUpgradeInfo;
 use codex_app_server_protocol::ReasoningEffortOption;
 use codex_core::config::Config;
 use codex_login::AuthManager;
 use codex_model_provider::create_model_provider;
+use codex_models_manager::capabilities::ModelCapability;
 use codex_models_manager::manager::RefreshStrategy;
+use codex_protocol::openai_models::InputModality;
+use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::openai_models::ReasoningEffortPreset;
 use std::collections::BTreeSet;
@@ -46,6 +51,11 @@ pub async fn configured_models(
             RefreshStrategy::Offline
         };
         let discovered = manager.raw_model_catalog(refresh_strategy).await;
+        let discovered_metadata = discovered
+            .models
+            .iter()
+            .map(|model| (model.slug.clone(), !model.used_fallback_model_metadata))
+            .collect::<std::collections::HashMap<_, _>>();
         let mut provider_models = specs
             .iter()
             .filter_map(|(configured_provider, model)| {
@@ -60,6 +70,15 @@ pub async fn configured_models(
         manager_config.model_provider_id = Some(provider_id.clone());
         for model_name in provider_models {
             let model_info = manager.get_model_info(&model_name, &manager_config).await;
+            let capabilities = effective_capabilities(
+                &model_info,
+                model_capability(config, &provider_id, &model_name),
+                discovered_metadata
+                    .get(&model_name)
+                    .copied()
+                    .unwrap_or(false),
+                has_manual_capability(config, &provider_id, &model_name),
+            );
             let mut preset = ModelPreset::from(model_info);
             preset.id.clone_from(&model_name);
             preset.model.clone_from(&model_name);
@@ -72,6 +91,7 @@ pub async fn configured_models(
                 preset,
                 provider_id.as_str(),
                 provider_name.as_str(),
+                capabilities,
             ));
         }
     }
@@ -134,10 +154,92 @@ fn provider_name(provider_id: &str, configured_name: &str) -> String {
     }
 }
 
+fn model_capability<'a>(
+    config: &'a Config,
+    provider_id: &str,
+    model_name: &str,
+) -> Option<&'a ModelCapability> {
+    let cache = config.model_capabilities.as_ref()?;
+    let provider_model = format!("{provider_id}/{model_name}");
+    cache
+        .models
+        .get(&provider_model)
+        .or_else(|| cache.lookup(model_name))
+}
+
+fn has_manual_capability(config: &Config, provider_id: &str, model_name: &str) -> bool {
+    let effective_config = config.config_layer_stack.effective_config();
+    let Some(TomlValue::Table(model_capabilities)) = effective_config.get("model_capabilities")
+    else {
+        return false;
+    };
+    model_capabilities.keys().any(|model_key| {
+        configured_model_spec_from_key(model_key, config.model_provider_id.as_str()).is_some_and(
+            |(configured_provider, configured_model)| {
+                configured_provider == provider_id && configured_model == model_name
+            },
+        )
+    })
+}
+
+fn effective_capabilities(
+    model: &ModelInfo,
+    configured: Option<&ModelCapability>,
+    has_provider_metadata: bool,
+    has_manual_capability: bool,
+) -> ModelCapabilities {
+    let mut sources = Vec::new();
+    if has_provider_metadata {
+        sources.push(ModelCapabilitySource::Provider);
+    }
+    if configured.is_some() {
+        sources.push(if has_manual_capability {
+            ModelCapabilitySource::Manual
+        } else {
+            ModelCapabilitySource::LiteLlm
+        });
+    }
+    if !has_provider_metadata {
+        sources.push(ModelCapabilitySource::Fallback);
+    }
+
+    ModelCapabilities {
+        context_window: model.resolved_context_window(),
+        max_context_window: model.max_context_window,
+        max_output_tokens: model.max_output_tokens,
+        tool_mode: model.tool_mode,
+        supports_tools: configured
+            .and_then(|capability| capability.supports_tools)
+            .or_else(|| model.tool_mode.map(|_| true)),
+        supports_parallel_tools: configured
+            .and_then(|capability| capability.supports_parallel_tools)
+            .or_else(|| has_provider_metadata.then_some(model.supports_parallel_tool_calls)),
+        supports_vision: configured
+            .and_then(|capability| capability.supports_vision)
+            .or_else(|| {
+                has_provider_metadata
+                    .then(|| model.input_modalities.contains(&InputModality::Image))
+            }),
+        supports_prompt_cache: configured.and_then(|capability| capability.supports_prompt_cache),
+        supports_reasoning: configured
+            .and_then(|capability| capability.supports_reasoning)
+            .or_else(|| {
+                has_provider_metadata.then_some(!model.supported_reasoning_levels.is_empty())
+            }),
+        supports_native_streaming: configured
+            .and_then(|capability| capability.supports_native_streaming),
+        supported_endpoints: configured
+            .map(|capability| capability.supported_endpoints.clone())
+            .unwrap_or_default(),
+        sources,
+    }
+}
+
 fn model_from_preset(
     preset: ModelPreset,
     model_provider: &str,
     model_provider_name: &str,
+    capabilities: ModelCapabilities,
 ) -> Model {
     Model {
         model_provider: preset
@@ -176,6 +278,7 @@ fn model_from_preset(
             })
             .collect(),
         default_service_tier: preset.default_service_tier,
+        capabilities,
         is_default: preset.is_default,
     }
 }
