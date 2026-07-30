@@ -12,6 +12,7 @@ use super::model::MutationSource;
 use super::model::TextStreamKind;
 use super::model::TranscriptMutation;
 use super::model::TurnTiming;
+use super::state::structured_file_change_takes_precedence;
 
 impl ConversationState {
     pub fn from_turns(thread_id: impl Into<String>, turns: &[Turn]) -> Self {
@@ -198,6 +199,9 @@ impl ConversationState {
             } => {
                 let entry_index = self.prepare_started_item(turn_index, &item, source);
                 let entry = &mut self.turns[turn_index].entries[entry_index];
+                if structured_file_change_takes_precedence(entry.item.as_ref(), &item) {
+                    return;
+                }
                 entry.item = Some(item.clone());
                 entry.started_at_ms = Some(started_at_ms);
                 entry.phase = EntryPhase::Running;

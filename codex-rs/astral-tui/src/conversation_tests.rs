@@ -25,7 +25,6 @@ use super::ConversationState;
 use super::ReduceOutcome;
 use crate::PresentationBlock;
 use crate::TimelineStream;
-use crate::ToolKind;
 
 fn started(turn_id: &str, item: ThreadItem) -> ServerNotification {
     ServerNotification::ItemStarted(ItemStartedNotification {
@@ -86,15 +85,21 @@ fn core_tool(id: &str, tool: &str, status: CoreToolCallStatus) -> ThreadItem {
     }
 }
 
-fn file_change(id: &str) -> ThreadItem {
+fn file_change(
+    id: &str,
+    path: &str,
+    kind: PatchChangeKind,
+    diff: &str,
+    status: PatchApplyStatus,
+) -> ThreadItem {
     ThreadItem::FileChange {
         id: id.to_string(),
         changes: vec![FileUpdateChange {
-            path: "src/lib.rs".to_string(),
-            kind: PatchChangeKind::Update { move_path: None },
-            diff: "@@ -1 +1 @@\n-old\n+new".to_string(),
+            path: path.to_string(),
+            kind,
+            diff: diff.to_string(),
         }],
-        status: PatchApplyStatus::Completed,
+        status,
     }
 }
 
@@ -381,26 +386,51 @@ fn stable_blocks_commit_before_the_turn_finishes() {
 }
 
 #[test]
-fn edit_waits_for_structured_replacement_before_commit() {
+fn structured_file_changes_survive_claude_edit_and_write_completion() {
     let mut state = ConversationState::new("thread-1");
-    state.apply(&completed(
-        "turn-1",
-        core_tool("edit-1", "Edit", CoreToolCallStatus::Completed),
-    ));
-    assert!(state.drain_committable().is_empty());
+    let cases = [
+        (
+            "edit-1",
+            "Edit",
+            "src/lib.rs",
+            PatchChangeKind::Update { move_path: None },
+            "@@ -1 +1 @@\n-old\n+new",
+        ),
+        (
+            "write-1",
+            "Write",
+            "src/new.rs",
+            PatchChangeKind::Add,
+            "fn main() {}\n",
+        ),
+    ];
+    let mut expected = Vec::new();
+    for (id, tool, path, kind, diff) in cases {
+        state.apply(&started(
+            "turn-1",
+            core_tool(id, tool, CoreToolCallStatus::InProgress),
+        ));
+        state.apply(&started(
+            "turn-1",
+            file_change(id, path, kind.clone(), diff, PatchApplyStatus::InProgress),
+        ));
+        let completed_change = file_change(id, path, kind, diff, PatchApplyStatus::Completed);
+        state.apply(&completed("turn-1", completed_change.clone()));
+        state.apply(&completed(
+            "turn-1",
+            core_tool(id, tool, CoreToolCallStatus::Completed),
+        ));
+        expected.push(Some(completed_change));
+    }
 
-    state.apply(&completed("turn-1", file_change("edit-1")));
-    assert!(state.drain_committable().is_empty());
-
-    state.apply(&completed_turn("turn-1"));
-    let committed = state.drain_committable();
-    assert_eq!(committed.len(), 1);
-    let PresentationBlock::Tool(tool) = &committed[0].block else {
-        panic!("expected tool block");
-    };
-    assert_eq!(tool.kind, ToolKind::Edit);
-    assert_eq!(tool.name, "edit");
-    assert!(committed[0].ends_turn);
+    assert_eq!(
+        state.turns[0]
+            .entries
+            .iter()
+            .map(|entry| entry.item.clone())
+            .collect::<Vec<_>>(),
+        expected
+    );
 }
 
 #[test]

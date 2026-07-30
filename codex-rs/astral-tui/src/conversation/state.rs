@@ -44,6 +44,9 @@ impl ConversationState {
             EntryPhase::Stable
         };
         let entry = &mut self.turns[turn_index].entries[entry_index];
+        if structured_file_change_takes_precedence(entry.item.as_ref(), &item) {
+            return;
+        }
         entry.item = Some(item.clone());
         entry.stream = Default::default();
         entry.completion_observed = true;
@@ -271,6 +274,21 @@ fn item_can_be_superseded(item: &ThreadItem) -> bool {
         }
         _ => false,
     }
+}
+
+pub(super) fn structured_file_change_takes_precedence(
+    existing: Option<&ThreadItem>,
+    incoming: &ThreadItem,
+) -> bool {
+    // Claude Edit/Write calls emit a FileChange before their generic tool
+    // completion. Keep the authoritative diff instead of replacing it with
+    // the later success text; Codex apply_patch already arrives as FileChange.
+    matches!(existing, Some(ThreadItem::FileChange { .. }))
+        && matches!(
+            incoming,
+            ThreadItem::CoreToolCall { tool, .. } | ThreadItem::DynamicToolCall { tool, .. }
+                if classify_tool_name(tool) == ToolKind::Edit
+        )
 }
 
 fn item_is_running(item: &ThreadItem) -> bool {
