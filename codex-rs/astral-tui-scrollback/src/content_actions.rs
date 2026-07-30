@@ -20,6 +20,62 @@ pub enum BlockTextMode {
 }
 
 impl PresentationBlock {
+    /// Whether Enter may open this block in Astral's fullscreen block viewer.
+    ///
+    /// This mirrors Grok's `has_normal_fullscreen_viewer`: selection and folding
+    /// remain available to more block types than the dedicated viewer.
+    pub fn supports_viewer(&self) -> bool {
+        match self {
+            Self::Assistant { .. } | Self::Thinking { .. } => true,
+            Self::Tool(tool) => match tool.kind {
+                ToolKind::Execute
+                | ToolKind::Background
+                | ToolKind::Edit
+                | ToolKind::WebFetch
+                | ToolKind::WebSearch
+                | ToolKind::Mcp => true,
+                ToolKind::Read | ToolKind::List => {
+                    tool.status == crate::ToolStatus::Success
+                        && tool
+                            .output
+                            .as_deref()
+                            .is_some_and(|output| !output.trim().is_empty())
+                }
+                ToolKind::Search => !matches!(
+                    tool.status,
+                    crate::ToolStatus::Failed
+                        | crate::ToolStatus::Declined
+                        | crate::ToolStatus::Interrupted
+                ),
+                ToolKind::BackgroundPoll
+                | ToolKind::BackgroundInput
+                | ToolKind::BackgroundList
+                | ToolKind::BackgroundStop
+                | ToolKind::Skill
+                | ToolKind::Collab
+                | ToolKind::ImageView
+                | ToolKind::ImageGeneration
+                | ToolKind::Todo
+                | ToolKind::Other => false,
+            },
+            Self::User { .. }
+            | Self::Plan { .. }
+            | Self::Todo(_)
+            | Self::Subagent(_)
+            | Self::System { .. } => false,
+        }
+    }
+
+    /// Whether Grok assigns double-click to the block's dedicated detail view
+    /// instead of its inline fold state.
+    pub fn double_click_opens(&self) -> bool {
+        match self {
+            Self::Subagent(_) => true,
+            Self::Tool(tool) => tool.kind == ToolKind::Background,
+            _ => false,
+        }
+    }
+
     pub fn supports_raw(&self) -> bool {
         matches!(self, Self::Assistant { .. } | Self::Thinking { .. })
     }

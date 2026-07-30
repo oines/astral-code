@@ -227,6 +227,12 @@ impl ScrollbackState {
         self.display.selected_is_foldable()
     }
 
+    pub(crate) fn selected_supports_viewer(&self) -> bool {
+        self.display
+            .selected_id()
+            .is_some_and(|entry_id| self.display.supports_viewer(entry_id))
+    }
+
     pub(crate) fn selected_is_raw(&self) -> bool {
         self.display.selected_is_raw()
     }
@@ -406,11 +412,12 @@ impl ScrollbackState {
             }
             EntryMouseAction::Toggle(item_id) => {
                 if self.display.select(&item_id) {
+                    if self.display.double_click_opens(&item_id) {
+                        return ScrollbackMouseAction::ActivateEntry(item_id);
+                    }
                     if self.display.is_foldable(&item_id) {
                         self.display.toggle_selected();
                         self.navigation.reveal_entry(&item_id);
-                    } else {
-                        return ScrollbackMouseAction::ActivateEntry(item_id);
                     }
                 }
             }

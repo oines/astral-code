@@ -7,6 +7,8 @@ use astral_tui_scrollback::PresentationBlock;
 pub(super) struct EntryContentCapabilities {
     supports_raw: bool,
     supports_copy: bool,
+    supports_viewer: bool,
+    double_click_opens: bool,
     copy_meta_label: Option<&'static str>,
 }
 
@@ -15,6 +17,8 @@ impl EntryContentCapabilities {
         Self {
             supports_raw: block.supports_raw(),
             supports_copy: block.supports_copy(),
+            supports_viewer: block.supports_viewer(),
+            double_click_opens: block.double_click_opens(),
             copy_meta_label: block.copy_meta_label(),
         }
     }
@@ -25,6 +29,14 @@ impl EntryContentCapabilities {
 
     pub(super) fn supports_copy(self) -> bool {
         self.supports_copy
+    }
+
+    pub(super) fn supports_viewer(self) -> bool {
+        self.supports_viewer
+    }
+
+    pub(super) fn double_click_opens(self) -> bool {
+        self.double_click_opens
     }
 
     pub(super) fn copy_meta_label(self) -> Option<&'static str> {
@@ -59,6 +71,18 @@ impl EntryContentState {
         self.capabilities
             .get(entry_id)
             .is_some_and(|capabilities| capabilities.supports_copy())
+    }
+
+    pub(super) fn supports_viewer(&self, entry_id: &str) -> bool {
+        self.capabilities
+            .get(entry_id)
+            .is_some_and(|capabilities| capabilities.supports_viewer())
+    }
+
+    pub(super) fn double_click_opens(&self, entry_id: &str) -> bool {
+        self.capabilities
+            .get(entry_id)
+            .is_some_and(|capabilities| capabilities.double_click_opens())
     }
 
     pub(super) fn copy_meta_label(&self, entry_id: &str) -> Option<&'static str> {

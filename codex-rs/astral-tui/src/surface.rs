@@ -1279,17 +1279,32 @@ pub(crate) fn render_surface_with_view(
         (toggle_reasoning.hint_key(), thinking_action),
         (focus_prompt.hint_key(), focus_prompt.label),
     ];
+    let fold_only_hints = [
+        (toggle_entry.hint_key(), fold_action),
+        (toggle_reasoning.hint_key(), thinking_action),
+        (focus_prompt.hint_key(), focus_prompt.label),
+    ];
     let plain_entry_hints = [
         (open_entry.hint_key(), open_entry.label),
         (toggle_reasoning.hint_key(), thinking_action),
         (focus_prompt.hint_key(), focus_prompt.label),
     ];
+    let passive_entry_hints = [
+        (toggle_reasoning.hint_key(), thinking_action),
+        (focus_prompt.hint_key(), focus_prompt.label),
+    ];
+    let foldable = state.scrollback.selected_is_foldable();
+    let supports_viewer = state.scrollback.selected_supports_viewer()
+        || state.selected_subagent_thread_id().is_some();
     let mut scrollback_hints = if state.scrollback.selected_is_group_header() {
         group_hints.to_vec()
-    } else if !state.scrollback.selected_is_foldable() {
-        plain_entry_hints.to_vec()
     } else {
-        entry_hints.to_vec()
+        match (foldable, supports_viewer) {
+            (true, true) => entry_hints.to_vec(),
+            (true, false) => fold_only_hints.to_vec(),
+            (false, true) => plain_entry_hints.to_vec(),
+            (false, false) => passive_entry_hints.to_vec(),
+        }
     };
     if state.scrollback.has_visible_links() {
         scrollback_hints.insert(0, (next_link.hint_key(), "links"));

@@ -2339,6 +2339,44 @@ fn enter_opens_the_selected_edit_in_a_scrollable_viewer_snapshot() {
 }
 
 #[test]
+fn user_prompt_does_not_advertise_or_open_a_block_viewer_snapshot() {
+    let session = session_state();
+    let mut state = SurfaceState::from_session(&session);
+    render_at_size(&mut state, &session, 80, 18);
+    assert!(state.focus_scrollback());
+    state.move_entry_selection(-1);
+
+    let rendered = render_at_size(&mut state, &session, 80, 18);
+    assert!(!rendered.contains("Enter:open"));
+    assert_eq!(
+        handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)
+        ),
+        InputAction::None
+    );
+    assert!(state.block_viewer().is_none());
+
+    let area = Rect::new(0, 0, 80, 18);
+    let mut buffer = Buffer::empty(area);
+    render_surface(&mut state, &session, area, &mut buffer);
+    let (column, row) =
+        find_text(&buffer, "inspect this repo").expect("selected user prompt is visible");
+    let mut second_release = crate::view::ScrollbackMouseAction::Ignored;
+    for _ in 0..2 {
+        state.handle_scrollback_mouse(mouse(MouseEventKind::Down(MouseButton::Left), column, row));
+        second_release = state.handle_scrollback_mouse(mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            column,
+            row,
+        ));
+    }
+    assert_eq!(second_release, crate::view::ScrollbackMouseAction::Ignored);
+    assert!(state.block_viewer().is_none());
+    insta::assert_snapshot!("user_prompt_selection_without_viewer_surface", rendered);
+}
+
+#[test]
 fn plan_review_mouse_selects_and_activates_a_decision_row() {
     let session = session_state();
     let mut state = SurfaceState::from_session(&session);

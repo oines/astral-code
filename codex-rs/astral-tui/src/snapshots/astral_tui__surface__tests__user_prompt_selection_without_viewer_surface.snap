@@ -1,0 +1,22 @@
+---
+source: astral-tui/src/surface_tests.rs
+expression: rendered
+---
+ ⎇ main  /workspace
+
+ › inspect this repo
+
+
+ I’m tracing the relevant data flow.
+
+
+
+
+
+
+ ◇ Working
+
+ ╭────────────────────────────────────────────────────────────────────────────╮
+ │ ❯                                                                          │
+ ╰────────────────────────────────────────────── claude-sonnet-4 · workspace ─╯
+ y:copy  │  Ctrl+e:collapse thinking  │  Tab:prompt

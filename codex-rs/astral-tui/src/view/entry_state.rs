@@ -357,6 +357,14 @@ impl EntryDisplayState {
             .is_some_and(|entry| entry.foldable)
     }
 
+    pub(crate) fn supports_viewer(&self, entry_id: &str) -> bool {
+        self.content_state.supports_viewer(entry_id)
+    }
+
+    pub(crate) fn double_click_opens(&self, entry_id: &str) -> bool {
+        self.content_state.double_click_opens(entry_id)
+    }
+
     pub(crate) fn selected_is_group_header(&self) -> bool {
         self.selected_entry()
             .is_some_and(|entry| entry.group_header)

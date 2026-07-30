@@ -35,9 +35,12 @@ impl SurfaceState {
     }
 
     pub(crate) fn open_entry(&mut self, entry_id: String) -> bool {
-        let Some((_, running)) = self.presentation_block_state(&entry_id) else {
+        let Some((block, running)) = self.presentation_block_state(&entry_id) else {
             return false;
         };
+        if !block.supports_viewer() {
+            return false;
+        }
         self.block_viewer = Some(BlockViewerState::new(entry_id, running));
         true
     }
