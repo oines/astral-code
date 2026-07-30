@@ -641,6 +641,26 @@ fn apple_terminal_recovers_enter_modifiers_dropped_by_the_pty() {
 }
 
 #[test]
+fn deletion_modifier_rescue_follows_terminal_capabilities() {
+    let key = key(KeyCode::Backspace);
+    let held = ModifierState {
+        option: true,
+        ..ModifierState::default()
+    };
+    let mut rescued = key;
+    rescued.modifiers = KeyModifiers::ALT;
+
+    assert_eq!(
+        super::terminal_support::normalize_key_for(key, TerminalName::AppleTerminal, held),
+        rescued
+    );
+    assert_eq!(
+        super::terminal_support::normalize_key_for(key, TerminalName::Ghostty, held),
+        key
+    );
+}
+
+#[test]
 fn trailing_backslash_continues_the_prompt_instead_of_submitting() {
     let mut state = SurfaceState::new("thread-1");
     state.set_composer("first line\\");

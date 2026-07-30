@@ -50,6 +50,7 @@ mod user_input;
 pub(crate) use mouse_scroll::MouseScrollState;
 pub(crate) use mouse_scroll::ScrollConfig;
 pub(crate) use mouse_scroll::ScrollDirection;
+pub(crate) use terminal_support::normalize_key;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum InputAction {

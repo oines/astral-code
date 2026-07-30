@@ -306,6 +306,7 @@ async fn run_loop(
                 match terminal_event? {
                     Event::Key(key) => {
                         mouse_scroll.cancel();
+                        let key = crate::input::normalize_key(key);
                         let action = match handle_key(surface, key) {
                             InputAction::ScrollUp => {
                                 if options.viewport == RunViewport::Fullscreen {
