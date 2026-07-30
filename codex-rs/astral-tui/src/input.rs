@@ -44,6 +44,7 @@ mod queue;
 mod scrollback;
 mod shortcut_help;
 mod subagent;
+mod terminal_support;
 mod user_input;
 
 pub(crate) use mouse_scroll::MouseScrollState;
@@ -453,17 +454,17 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
             state.cancel_queue_edit();
             return InputAction::DrainQueue;
         }
+        if terminal_support::is_modified_enter(&key) {
+            state.composer_state_mut().insert_char('\n');
+            state.refresh_composer_completions();
+            return InputAction::Redraw;
+        }
         if key.code == KeyCode::Enter && key.modifiers == KeyModifiers::NONE {
             if state.composer().trim().is_empty() {
                 return InputAction::Notice("Queued follow-up cannot be empty".to_string());
             }
             state.save_queue_edit();
             return InputAction::DrainQueue;
-        }
-        if key.code == KeyCode::Enter && !key.modifiers.is_empty() {
-            state.composer_state_mut().insert_char('\n');
-            state.refresh_composer_completions();
-            return InputAction::Redraw;
         }
     }
     if state.history().open {
@@ -495,10 +496,7 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
     {
         return InputAction::Redraw;
     }
-    let modified_enter = key.code == KeyCode::Enter
-        && key
-            .modifiers
-            .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT);
+    let modified_enter = terminal_support::is_modified_enter(&key);
     let shell_mode_key = key.code == KeyCode::Char('!')
         && !key
             .modifiers
@@ -510,6 +508,9 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
     } else {
         actions::lookup(&key, When::PromptFocused)
     };
+    if !state.multiline_mode() && modified_enter && prompt_action == Some(ActionId::SendPrompt) {
+        prompt_action = None;
+    }
     if prompt_action == Some(ActionId::ShellMode) {
         if state.enter_shell_input_mode() {
             return InputAction::Redraw;
@@ -685,12 +686,7 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
                 InputAction::Submit(submission)
             }
         }
-        Some(ActionId::ExitEmptyPrompt) | None
-            if key.code == KeyCode::Enter
-                && key
-                    .modifiers
-                    .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) =>
-        {
+        Some(ActionId::ExitEmptyPrompt) | None if modified_enter => {
             state.composer_state_mut().insert_char('\n');
             state.refresh_composer_completions();
             InputAction::Redraw

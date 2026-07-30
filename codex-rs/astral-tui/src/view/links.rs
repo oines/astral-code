@@ -333,27 +333,12 @@ fn supports_osc8(terminal: TerminalName) -> bool {
 
 #[cfg(target_os = "macos")]
 fn link_modifier_held(_modifiers: KeyModifiers) -> bool {
-    macos_command_held()
+    crate::macos_modifiers::snapshot().command
 }
 
 #[cfg(not(target_os = "macos"))]
 fn link_modifier_held(modifiers: KeyModifiers) -> bool {
     modifiers.contains(KeyModifiers::CONTROL)
-}
-
-#[cfg(target_os = "macos")]
-fn macos_command_held() -> bool {
-    #[link(name = "CoreGraphics", kind = "framework")]
-    unsafe extern "C" {
-        fn CGEventSourceFlagsState(state_id: i32) -> u64;
-    }
-
-    const HID_SYSTEM_STATE: i32 = 1;
-    const COMMAND_MASK: u64 = 0x0010_0000;
-
-    // SAFETY: this stable CoreGraphics function takes and returns integers and
-    // does not transfer pointers or ownership across the FFI boundary.
-    unsafe { CGEventSourceFlagsState(HID_SYSTEM_STATE) & COMMAND_MASK != 0 }
 }
 
 pub(crate) fn append_detected_links(lines: &[Line<'static>], links: &mut Vec<TranscriptLink>) {

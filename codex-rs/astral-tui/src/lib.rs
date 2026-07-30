@@ -20,6 +20,7 @@ mod history;
 mod input;
 mod launch;
 mod link_opener;
+mod macos_modifiers;
 mod mcp_form;
 mod mcp_form_schema;
 mod mention;

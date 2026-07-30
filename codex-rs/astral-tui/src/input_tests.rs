@@ -2,6 +2,7 @@ use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerRequest;
 use codex_app_server_protocol::ThreadListResponse;
 use codex_protocol::config_types::ModeKind;
+use codex_terminal_detection::TerminalName;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
@@ -21,6 +22,7 @@ use crate::SlashCommandId;
 use crate::SlashInvocation;
 use crate::SurfaceActivity;
 use crate::SurfaceState;
+use crate::macos_modifiers::ModifierState;
 use crate::mention::MentionCandidate;
 use crate::mention::MentionCatalog;
 use crate::mention::MentionKind;
@@ -616,6 +618,26 @@ fn multiline_mode_swaps_enter_and_modified_enter() {
             "first line\nsecond line"
         ))
     );
+}
+
+#[test]
+fn apple_terminal_recovers_enter_modifiers_dropped_by_the_pty() {
+    let key = key(KeyCode::Enter);
+    let held = ModifierState {
+        shift: true,
+        ..ModifierState::default()
+    };
+
+    assert!(super::terminal_support::is_modified_enter_for(
+        &key,
+        TerminalName::AppleTerminal,
+        held,
+    ));
+    assert!(!super::terminal_support::is_modified_enter_for(
+        &key,
+        TerminalName::Ghostty,
+        held,
+    ));
 }
 
 #[test]
