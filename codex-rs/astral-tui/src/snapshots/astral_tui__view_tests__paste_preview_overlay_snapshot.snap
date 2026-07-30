@@ -1,0 +1,16 @@
+---
+source: astral-tui/src/view_tests.rs
+expression: buffer_text(&buffer)
+---
+
+
+
+        ╭──────────────────────────────────────────────╮
+        │pasted line 1: 一 段 很 长 的 内 容                  │
+        │pasted line 2: 一 段 很 长 的 内 容                  │
+        │pasted line 3: 一 段 很 长 的 内 容                  │
+        │⋮ (4 more lines)                              │
+        │pasted line 8: 一 段 很 长 的 内 容                  │
+        │pasted line 9: 一 段 很 长 的 内 容                  │
+        │pasted line 10: 一 段 很 长 的 内 容                 │
+        ╰─ enter or double-click to expand ────────────╯

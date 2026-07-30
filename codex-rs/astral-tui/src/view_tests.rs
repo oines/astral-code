@@ -13,6 +13,7 @@ use super::view::ImagePreviewOverlay;
 use super::view::LayoutConfig;
 use super::view::PaneHeights;
 use super::view::PlanReviewPane;
+use super::view::PreviewOverlay;
 use super::view::PromptChrome;
 use super::view::ScrollbarConfig;
 use super::view::ShortcutsBar;
@@ -277,6 +278,33 @@ fn local_image_preview_overlay_snapshot() {
     };
 
     ImagePreviewOverlay { image: &image }.render(area, &mut buffer, theme);
+
+    insta::assert_snapshot!(buffer_text(&buffer));
+}
+
+#[test]
+fn paste_preview_overlay_snapshot() {
+    let theme = AstralTheme::default();
+    let area = Rect::new(0, 0, 64, 12);
+    let mut buffer = Buffer::empty(area);
+    let content = (1..=10)
+        .map(|line| format!("pasted line {line}: 一段很长的内容"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    PreviewOverlay {
+        content: &content,
+        hint: Some(
+            vec![
+                "enter".fg(theme.accent_running).bold(),
+                " or ".dim(),
+                "double-click".fg(theme.accent_running).bold(),
+                " to expand".dim(),
+            ]
+            .into(),
+        ),
+    }
+    .render(area, &mut buffer, theme);
 
     insta::assert_snapshot!(buffer_text(&buffer));
 }

@@ -54,7 +54,11 @@ impl PromptSubmission {
         &self.text
     }
 
-    pub fn user_input(&self) -> Vec<UserInput> {
+    pub(crate) fn expanded_text(&self) -> String {
+        self.projected_text().0
+    }
+
+    fn projected_text(&self) -> (String, Vec<(&ComposerElement, std::ops::Range<usize>)>) {
         let mut elements = self
             .elements
             .iter()
@@ -76,7 +80,11 @@ impl PromptSubmission {
             cursor = element.range.end;
         }
         text.push_str(&self.text[cursor..]);
+        (text, projected)
+    }
 
+    pub fn user_input(&self) -> Vec<UserInput> {
+        let (text, projected) = self.projected_text();
         let text_elements = projected
             .iter()
             .filter_map(|(element, range)| {

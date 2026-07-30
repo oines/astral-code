@@ -6,6 +6,7 @@ use crate::PromptSubmission;
 pub(crate) struct QueuedPrompt {
     id: u64,
     submission: PromptSubmission,
+    expanded_text: String,
 }
 
 impl QueuedPrompt {
@@ -14,7 +15,7 @@ impl QueuedPrompt {
     }
 
     pub(crate) fn text(&self) -> &str {
-        self.submission.text()
+        &self.expanded_text
     }
 
     pub(crate) fn submission(&self) -> &PromptSubmission {
@@ -34,7 +35,12 @@ impl PromptQueue {
     pub(crate) fn push_back(&mut self, submission: PromptSubmission) {
         let id = self.next_id;
         self.next_id = self.next_id.wrapping_add(1);
-        self.entries.push_back(QueuedPrompt { id, submission });
+        let expanded_text = submission.expanded_text();
+        self.entries.push_back(QueuedPrompt {
+            id,
+            submission,
+            expanded_text,
+        });
         self.selected_id.get_or_insert(id);
     }
 
@@ -167,6 +173,7 @@ impl PromptQueue {
         let Some(entry) = self.entries.iter_mut().find(|entry| entry.id == id) else {
             return false;
         };
+        entry.expanded_text = submission.expanded_text();
         entry.submission = submission;
         true
     }

@@ -183,10 +183,18 @@ fn queued_follow_ups_surface_snapshot() {
     state.enqueue_follow_up(crate::PromptSubmission::text_only(
         "Run the focused tests after this finishes",
     ));
-    state.enqueue_follow_up(crate::PromptSubmission::text_only(
-        "Summarize the result\nand mention any remaining failures",
-    ));
+    let paste = "Summarize the result\nand mention any remaining failures";
+    let placeholder = "[Pasted: 2 lines]";
+    state.enqueue_follow_up(crate::PromptSubmission {
+        text: placeholder.to_string(),
+        elements: vec![crate::composer::ComposerElement::paste(
+            0..placeholder.len(),
+            placeholder.to_string(),
+            paste.to_string(),
+        )],
+    });
     state.toggle_queue_focus();
+    state.move_queue_selection(1);
 
     insta::assert_snapshot!(render_at_size(&mut state, &session, 80, 24));
 }

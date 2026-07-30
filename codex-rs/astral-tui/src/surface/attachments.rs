@@ -1,5 +1,6 @@
 use crate::LinkTarget;
 use crate::composer::LocalImage;
+use crate::composer::PastePreview;
 use crate::modal::ModalRow;
 use crate::modal::ModalState;
 
@@ -8,6 +9,10 @@ use super::SurfaceState;
 impl SurfaceState {
     pub(crate) fn composer_image_for_preview(&self) -> Option<LocalImage> {
         self.composer.local_image_for_preview()
+    }
+
+    pub(crate) fn composer_paste_for_preview(&self) -> Option<PastePreview<'_>> {
+        self.composer.paste_for_preview()
     }
 
     pub(crate) fn open_composer_image_at_cursor(&mut self) -> bool {

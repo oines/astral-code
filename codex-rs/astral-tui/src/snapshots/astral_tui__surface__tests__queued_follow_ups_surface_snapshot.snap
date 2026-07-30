@@ -10,13 +10,13 @@ expression: "render_at_size(&mut state, &session, 80, 24)"
 
 
   I’m tracing the relevant data flow.
+           ╭───────────────────────────────────────────────────────╮
+           │Summarize the result                                   │
+           │and mention any remaining failures                     │
+           ╰───────────────────────────────────────────────────────╯
 
-
-
-
-
-  #1 Run the focused tests after this finishes        [Send now][edit][cancel]
-  #2 Summarize the result (+1 line)
+  #1 Run the focused tests after this finishes
+  #2 Summarize the result (+1 line)                   [Send now][edit][cancel]
 
   ◇ Working · 2 queued
 

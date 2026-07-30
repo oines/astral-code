@@ -27,6 +27,7 @@ use edit::small_word_start_left;
 use edit::whitespace_word_start_left;
 pub(crate) use element::ComposerElement;
 pub(crate) use element::LocalImage;
+pub(crate) use element_edit::PastePreview;
 use history::EditHistory;
 use history::MutationKind;
 use selection::ClickTracker;

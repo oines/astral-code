@@ -23,6 +23,12 @@ pub(crate) struct FileReferenceAtCursor {
     pub(crate) line_range: Option<Range<usize>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PastePreview<'a> {
+    pub(crate) content: &'a str,
+    pub(crate) expansion_label: &'static str,
+}
+
 impl ComposerState {
     pub(crate) fn elements(&self) -> &[ComposerElement] {
         &self.elements
@@ -130,6 +136,32 @@ impl ComposerState {
         }
         self.expand_element(index);
         true
+    }
+
+    pub(crate) fn paste_for_preview(&self) -> Option<PastePreview<'_>> {
+        if let Some(element) = self.elements.iter().find(|element| {
+            self.cursor >= element.range.start
+                && self.cursor < element.range.end
+                && element.matches_text(&self.text)
+        }) {
+            return element.paste_content().map(|content| PastePreview {
+                content,
+                expansion_label: "enter",
+            });
+        }
+        self.elements.iter().find_map(|element| {
+            let content = element.paste_content()?;
+            if !element.matches_text(&self.text) {
+                return None;
+            }
+            let immediately_after = element.range.end == self.cursor
+                || (element.range.end.saturating_add(1) == self.cursor
+                    && self.text.get(element.range.end..self.cursor) == Some(" "));
+            immediately_after.then_some(PastePreview {
+                content,
+                expansion_label: "paste again",
+            })
+        })
     }
 
     pub(super) fn expand_paste_at_position(&mut self, position: usize) -> bool {

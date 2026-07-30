@@ -89,6 +89,7 @@ use crate::view::PaneHeights;
 use crate::view::PlanReviewMouseAction;
 use crate::view::PlanReviewMouseState;
 use crate::view::PlanReviewPane;
+use crate::view::PreviewOverlay;
 use crate::view::PromptChrome;
 use crate::view::QueuePane;
 use crate::view::ScrollbackFrame;
@@ -1427,14 +1428,38 @@ pub(crate) fn render_surface_with_view(
     state.request_choice.observe_rows(choice_hit_rows);
     state.request_user_input.observe_rows(user_input_hit_rows);
     state.mcp_form.observe_rows(mcp_form_hit_rows);
-    if prompt_focused
-        && !has_request
+    let preview_available = !has_request
         && plan_review.is_none()
         && completion_height == 0
-        && state.active_overlay().is_none()
-        && let Some(image) = state.composer_image_for_preview()
+        && state.active_overlay().is_none();
+    if preview_available
+        && state.queue_focused()
+        && let Some(text) = state.selected_follow_up_text()
+        && text.lines().count() > 1
     {
-        ImagePreviewOverlay { image: &image }.render(scrollback_area, buffer, theme);
+        PreviewOverlay {
+            content: text,
+            hint: None,
+        }
+        .render(scrollback_area, buffer, theme);
+    } else if preview_available && prompt_focused {
+        if let Some(preview) = state.composer_paste_for_preview() {
+            PreviewOverlay {
+                content: preview.content,
+                hint: Some(
+                    vec![
+                        preview.expansion_label.fg(theme.accent_running).bold(),
+                        " or ".dim(),
+                        "double-click".fg(theme.accent_running).bold(),
+                        " to expand".dim(),
+                    ]
+                    .into(),
+                ),
+            }
+            .render(scrollback_area, buffer, theme);
+        } else if let Some(image) = state.composer_image_for_preview() {
+            ImagePreviewOverlay { image: &image }.render(scrollback_area, buffer, theme);
+        }
     }
     if appearance::render_overlay(state, area, buffer, theme) {
         None
