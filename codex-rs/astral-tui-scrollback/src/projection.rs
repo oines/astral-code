@@ -78,8 +78,9 @@ impl PresentationBlock {
                     parts.clone_from(content);
                     append_stream_parts(&mut parts, streamed_content);
                 }
-                Some(Self::Thinking {
-                    text: parts.join("\n"),
+                let text = parts.join("\n");
+                (!text.trim().is_empty()).then_some(Self::Thinking {
+                    text,
                     running: !matches!(stream, TimelineStream::None),
                 })
             }
@@ -352,8 +353,9 @@ impl PresentationBlock {
                 } else {
                     content
                 };
-                Some(Self::Thinking {
-                    text: parts.join("\n"),
+                let text = parts.join("\n");
+                (!text.trim().is_empty()).then_some(Self::Thinking {
+                    text,
                     running: true,
                 })
             }

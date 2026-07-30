@@ -1233,6 +1233,14 @@ fn user_question_long_options_keep_selection_visible_snapshot() {
 #[test]
 fn fullscreen_surface_keeps_committed_history_snapshot() {
     let mut session = session_state();
+    session.thread.turns[0].items.insert(
+        1,
+        ThreadItem::Reasoning {
+            id: "opaque-reasoning".to_string(),
+            summary: Vec::new(),
+            content: Vec::new(),
+        },
+    );
     session.thread.turns[0].status = codex_app_server_protocol::TurnStatus::Completed;
     session.thread.turns[0].completed_at = Some(local_timestamp_seconds(
         /*hour*/ 0, /*minute*/ 0, /*second*/ 2,
