@@ -1165,6 +1165,38 @@ fn user_question_confirmation_surface_snapshot() {
 }
 
 #[test]
+fn mcp_url_elicitation_waits_for_browser_completion_snapshot() {
+    let session = session_state();
+    let mut state = SurfaceState::from_session(&session);
+    state.pending_requests_mut().note(request(json!({
+        "method": "mcpServer/elicitation/request",
+        "id": "mcp-url",
+        "params": {
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "serverName": "linear",
+            "mode": "url",
+            "_meta": null,
+            "message": "Connect Linear to continue",
+            "url": "https://linear.app/oauth/authorize",
+            "elicitationId": "auth-1"
+        }
+    })));
+
+    assert_eq!(
+        handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)
+        ),
+        InputAction::OpenLink(crate::LinkTarget::Url(
+            "https://linear.app/oauth/authorize".to_string()
+        ))
+    );
+
+    insta::assert_snapshot!(render_at_size(&mut state, &session, 72, 18));
+}
+
+#[test]
 fn user_question_long_options_keep_selection_visible_snapshot() {
     let session = session_state();
     let mut state = SurfaceState::from_session(&session);

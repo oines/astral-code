@@ -1096,6 +1096,12 @@ fn mcp_form_and_url_elicitations_keep_typed_actions() {
 
     assert_eq!(
         handle_key(&mut state, key(KeyCode::Char('y'))),
+        InputAction::OpenLink(crate::LinkTarget::Url(
+            "https://example.com/auth".to_string()
+        ))
+    );
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Char('y'))),
         InputAction::Resolve(RequestResolution::Success {
             request_id: RequestId::String("mcp-url".to_string()),
             result: json!({

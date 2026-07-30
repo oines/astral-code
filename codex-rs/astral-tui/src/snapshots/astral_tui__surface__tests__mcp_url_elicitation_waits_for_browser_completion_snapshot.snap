@@ -1,0 +1,22 @@
+---
+source: astral-tui/src/surface_tests.rs
+expression: "render_at_size(&mut state, &session, 72, 18)"
+---
+ ⎇ main  /workspace
+
+ › inspect this repo
+
+
+ I’m tracing the relevant data flow.
+
+
+
+
+ ┃
+ ┃  Authorize linear in the browser?
+ ┃  Connect Linear to continue
+ ┃  https://linear.app/oauth/authorize
+ ┃
+ ┃  1 (●) I finished
+ ┃  2 (○) Decline
+ ↑/↓:navigate  │  Enter:select  │  Tab:transcript  │  Esc:cancel

@@ -23,6 +23,7 @@ use crossterm::event::MouseButton;
 use crossterm::event::MouseEvent;
 use crossterm::event::MouseEventKind;
 use ratatui::layout::Rect;
+use url::Url;
 
 use crate::PendingRequest;
 use crate::PendingRequestResponse;
@@ -53,11 +54,13 @@ pub(crate) struct RequestChoice {
     pub(crate) label: &'static str,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum RequestChoiceEvent {
     None,
     Redraw,
     FocusScrollback,
+    OpenUrl(String),
+    Notice(String),
     Activate(RequestChoiceId),
     Cancel,
 }
@@ -70,6 +73,7 @@ pub(crate) struct RequestChoiceState {
     hovered: Option<usize>,
     hit_rows: Vec<(usize, Rect)>,
     last_click: Option<(Instant, usize)>,
+    mcp_url_opened: bool,
 }
 
 impl RequestChoiceState {
@@ -87,6 +91,7 @@ impl RequestChoiceState {
         self.hovered = None;
         self.hit_rows.clear();
         self.last_click = None;
+        self.mcp_url_opened = false;
     }
 
     pub(crate) fn reset(&mut self) {
@@ -96,6 +101,7 @@ impl RequestChoiceState {
         self.hovered = None;
         self.hit_rows.clear();
         self.last_click = None;
+        self.mcp_url_opened = false;
     }
 
     pub(crate) fn choices(&self) -> &[RequestChoice] {
@@ -132,9 +138,7 @@ impl RequestChoiceState {
             }
             (KeyCode::Enter, KeyModifiers::NONE) => self
                 .selected_choice()
-                .map_or(RequestChoiceEvent::None, |choice| {
-                    RequestChoiceEvent::Activate(choice.id)
-                }),
+                .map_or(RequestChoiceEvent::None, |choice| self.activate(choice)),
             (KeyCode::Tab, KeyModifiers::NONE) => RequestChoiceEvent::FocusScrollback,
             (KeyCode::Esc, KeyModifiers::NONE) => RequestChoiceEvent::Cancel,
             (KeyCode::Char(character), KeyModifiers::NONE) => {
@@ -157,7 +161,7 @@ impl RequestChoiceState {
                     return RequestChoiceEvent::None;
                 };
                 self.selected = index;
-                RequestChoiceEvent::Activate(choice.id)
+                self.activate(choice)
             }
             _ => RequestChoiceEvent::None,
         }
@@ -193,9 +197,7 @@ impl RequestChoiceState {
                     self.choices
                         .get(index)
                         .copied()
-                        .map_or(RequestChoiceEvent::Redraw, |choice| {
-                            RequestChoiceEvent::Activate(choice.id)
-                        })
+                        .map_or(RequestChoiceEvent::Redraw, |choice| self.activate(choice))
                 } else {
                     self.last_click = Some((now, index));
                     RequestChoiceEvent::Redraw
@@ -223,12 +225,59 @@ impl RequestChoiceState {
             .copied()
     }
 
+    fn activate(&mut self, selected: RequestChoice) -> RequestChoiceEvent {
+        if selected.id != RequestChoiceId::McpUrlAccept || self.mcp_url_opened {
+            return RequestChoiceEvent::Activate(selected.id);
+        }
+        let Some(url) = self.source.as_ref().and_then(mcp_url).map(str::to_string) else {
+            return RequestChoiceEvent::Activate(selected.id);
+        };
+        let Some(url) = validate_external_url(&url) else {
+            return RequestChoiceEvent::Notice(
+                "Refused to open an invalid or insecure MCP URL".to_string(),
+            );
+        };
+
+        self.mcp_url_opened = true;
+        self.choices = vec![
+            choice(RequestChoiceId::McpUrlAccept, 'y', "I finished"),
+            choice(RequestChoiceId::McpUrlDecline, 'n', "Decline"),
+        ];
+        self.selected = 0;
+        self.hovered = None;
+        self.hit_rows.clear();
+        self.last_click = None;
+        RequestChoiceEvent::OpenUrl(url)
+    }
+
     fn hit_test(&self, column: u16, row: u16) -> Option<usize> {
         self.hit_rows
             .iter()
             .find(|(_, area)| area.contains((column, row).into()))
             .map(|(index, _)| *index)
     }
+}
+
+fn mcp_url(request: &PendingRequest) -> Option<&str> {
+    let PendingRequest::McpElicitation { params, .. } = request else {
+        return None;
+    };
+    let McpServerElicitationRequest::Url { url, .. } = &params.request else {
+        return None;
+    };
+    Some(url)
+}
+
+fn validate_external_url(url: &str) -> Option<String> {
+    let parsed = Url::parse(url).ok()?;
+    if parsed.scheme() != "https"
+        || parsed.host_str().is_none()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+    {
+        return None;
+    }
+    Some(parsed.into())
 }
 
 pub(crate) fn is_simple_request(request: &PendingRequest) -> bool {

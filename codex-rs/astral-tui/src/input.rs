@@ -802,6 +802,8 @@ fn handle_request_choice_event(
                 InputAction::None
             }
         }
+        RequestChoiceEvent::OpenUrl(url) => InputAction::OpenLink(crate::LinkTarget::Url(url)),
+        RequestChoiceEvent::Notice(message) => InputAction::Notice(message),
         RequestChoiceEvent::Activate(choice) => response_for(&request, choice)
             .map_or(InputAction::None, |response| {
                 resolve_request(state, &request, response)
