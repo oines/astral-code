@@ -20,6 +20,7 @@ pub(crate) enum ActionId {
     ToggleMultiline,
     ModelPicker,
     OpenSessions,
+    NewSession,
     ShellMode,
     ShortcutsHelp,
     ToggleQueue,

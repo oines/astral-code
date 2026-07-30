@@ -309,6 +309,12 @@ fn wrap_logical_line(
 pub(crate) struct ShortcutsBar<'a> {
     pub(crate) hints: &'a [(&'a str, &'a str)],
     pub(crate) right: Option<&'a str>,
+    pub(crate) pending_confirmation: Option<ShortcutConfirmation<'a>>,
+}
+
+pub(crate) struct ShortcutConfirmation<'a> {
+    pub(crate) shortcut: &'a str,
+    pub(crate) label: &'a str,
 }
 
 impl ShortcutsBar<'_> {
@@ -323,6 +329,27 @@ impl ShortcutsBar<'_> {
             .add_modifier(Modifier::BOLD);
         let label_style = Style::default().fg(theme.gray).bg(theme.bg_base);
         let separator_style = label_style.add_modifier(Modifier::DIM);
+        if let Some(pending) = self.pending_confirmation {
+            let key_width = u16::try_from(Line::from(pending.shortcut).width()).unwrap_or(u16::MAX);
+            buffer.set_stringn(
+                area.x,
+                area.y,
+                pending.shortcut,
+                usize::from(area.width),
+                key_style,
+            );
+            let label_x = area.x.saturating_add(key_width);
+            if label_x < area.right() {
+                buffer.set_stringn(
+                    label_x,
+                    area.y,
+                    format!(":{}", pending.label),
+                    usize::from(area.right().saturating_sub(label_x)),
+                    label_style,
+                );
+            }
+            return;
+        }
         let mut x = area.x;
         for (index, (key, label)) in self.hints.iter().enumerate() {
             let separator_width = if index > 0 { 5 } else { 0 };

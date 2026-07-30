@@ -102,6 +102,7 @@ fn view_chrome_snapshot() {
     ShortcutsBar {
         hints: &[("Enter", "send"), ("Ctrl+.", "shortcuts")],
         right: Some("claude-sonnet-4 · anthropic"),
+        pending_confirmation: None,
     }
     .render(Rect::new(0, 5, 80, 1), &mut buffer, theme);
 

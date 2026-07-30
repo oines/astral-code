@@ -163,6 +163,7 @@ pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction
             ActionId::CommandPalette
             | ActionId::ToggleMultiline
             | ActionId::OpenSessions
+            | ActionId::NewSession
             | ActionId::ShellMode
             | ActionId::ToggleQueue
             | ActionId::FocusScrollback

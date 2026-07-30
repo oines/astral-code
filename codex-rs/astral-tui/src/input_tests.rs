@@ -513,6 +513,47 @@ fn sessions_shortcut_preserves_the_draft_and_uses_resume() {
 }
 
 #[test]
+fn new_session_shortcut_requires_a_second_press() {
+    let mut state = SurfaceState::new("thread-1");
+    state.set_activity(SurfaceActivity::Ready);
+    state.set_composer("keep this draft");
+    let shortcut = KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL);
+
+    assert_eq!(handle_key(&mut state, shortcut), InputAction::Redraw);
+    assert_eq!(
+        state.pending_action(),
+        Some(crate::actions::ActionId::NewSession)
+    );
+    assert_eq!(state.composer(), "keep this draft");
+
+    assert_eq!(
+        handle_key(&mut state, key(KeyCode::Char('x'))),
+        InputAction::Redraw
+    );
+    assert_eq!(state.pending_action(), None);
+    assert_eq!(handle_key(&mut state, shortcut), InputAction::Redraw);
+    assert_eq!(
+        handle_key(&mut state, shortcut),
+        InputAction::Slash {
+            invocation: SlashInvocation {
+                command: SlashCommandId::New,
+                name: "new",
+                args: String::new(),
+            },
+            submission: crate::PromptSubmission::text_only(String::new()),
+        }
+    );
+
+    state.set_activity(SurfaceActivity::Working);
+    assert_eq!(
+        handle_key(&mut state, shortcut),
+        InputAction::Notice(
+            "Starting a new session is unavailable while Astral is working".to_string()
+        )
+    );
+}
+
+#[test]
 fn command_palette_preserves_the_draft_while_collecting_required_arguments() {
     let mut state = SurfaceState::new("thread-1");
     state.set_composer("keep this draft");

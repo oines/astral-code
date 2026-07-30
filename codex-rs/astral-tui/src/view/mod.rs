@@ -40,6 +40,7 @@ mod transcript_layout;
 
 pub(crate) use block_viewer::BlockViewerPane;
 pub(crate) use chrome::PromptChrome;
+pub(crate) use chrome::ShortcutConfirmation;
 pub(crate) use chrome::ShortcutsBar;
 pub(crate) use chrome::StatusBar;
 pub(crate) use chrome::prompt_height;

@@ -253,6 +253,9 @@ async fn run_loop(
         let selection_expiry = surface
             .scrollback_selection_expiry()
             .map(tokio::time::Instant::from_std);
+        let pending_action_deadline = surface
+            .pending_action_deadline()
+            .map(tokio::time::Instant::from_std);
         let search_pending = surface.scrollback_search_pending();
         let scroll_deadline = mouse_scroll.clock_deadline(Instant::now());
         let prompt_drag_deadline = surface
@@ -276,6 +279,13 @@ async fn run_loop(
                 }
             }, if selection_expiry.is_some() => {
                 needs_draw |= surface.expire_scrollback_selection();
+            }
+            _ = async {
+                if let Some(deadline) = pending_action_deadline {
+                    tokio::time::sleep_until(deadline).await;
+                }
+            }, if pending_action_deadline.is_some() => {
+                needs_draw |= surface.expire_pending_action(Instant::now());
             }
             _ = async {
                 if let Some(deadline) = prompt_drag_deadline {

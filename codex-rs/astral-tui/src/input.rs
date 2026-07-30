@@ -100,6 +100,25 @@ pub fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
     if key.kind == KeyEventKind::Release {
         return InputAction::None;
     }
+    if state.consume_pending_action(&key) == Some(ActionId::NewSession) {
+        if !matches!(
+            state.activity(),
+            SurfaceActivity::Ready | SurfaceActivity::Interrupted
+        ) {
+            return InputAction::Notice(
+                "Starting a new session is unavailable while Astral is working".to_string(),
+            );
+        }
+        state.record_slash(SlashCommandId::New);
+        return InputAction::Slash {
+            invocation: SlashInvocation {
+                command: SlashCommandId::New,
+                name: "new",
+                args: String::new(),
+            },
+            submission: PromptSubmission::text_only(String::new()),
+        };
+    }
     if let Some(overlay) = state.active_overlay() {
         return handle_overlay_key(state, overlay, key);
     }
@@ -156,6 +175,18 @@ pub fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
             },
             submission: PromptSubmission::text_only(String::new()),
         };
+    }
+    if actions::matches(ActionId::NewSession, &key) {
+        if !matches!(
+            state.activity(),
+            SurfaceActivity::Ready | SurfaceActivity::Interrupted
+        ) {
+            return InputAction::Notice(
+                "Starting a new session is unavailable while Astral is working".to_string(),
+            );
+        }
+        state.arm_pending_action(ActionId::NewSession);
+        return InputAction::Redraw;
     }
     if key.code == KeyCode::Esc && state.clear_scrollback_selection() {
         return InputAction::Redraw;
@@ -669,6 +700,7 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
             | ActionId::ToggleMultiline
             | ActionId::ModelPicker
             | ActionId::OpenSessions
+            | ActionId::NewSession
             | ActionId::ShellMode
             | ActionId::CommandPalette
             | ActionId::ShortcutsHelp

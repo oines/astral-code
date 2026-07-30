@@ -9,6 +9,7 @@ mod history;
 mod mentions;
 mod model_picker;
 mod overlay;
+mod pending_action;
 mod plan_review;
 mod pointer;
 mod prompt_input;
@@ -52,6 +53,7 @@ use crate::modal::ModalState;
 use crate::model_command::ModelResolveError;
 use crate::model_command::ModelSelection;
 use crate::model_picker::ModelPickerState;
+use crate::pending_action::PendingActionState;
 use crate::permission_picker::PermissionPickerState;
 use crate::permission_picker::display_permission_mode;
 use crate::plan_review::CompletedPlan;
@@ -95,6 +97,7 @@ use crate::view::ScrollbackPane;
 use crate::view::ScrollbackState;
 use crate::view::ScrollbackViewport;
 use crate::view::ScrollbarConfig;
+use crate::view::ShortcutConfirmation;
 use crate::view::ShortcutsBar;
 use crate::view::SlashMenu;
 use crate::view::StatusBar;
@@ -138,6 +141,7 @@ pub struct SurfaceState {
     activity: SurfaceActivity,
     token_usage: Option<ThreadTokenUsage>,
     notice: Option<String>,
+    pending_action: Option<PendingActionState>,
     scrollback: ScrollbackState,
     history: PromptHistory,
     slash: SlashController,
@@ -182,6 +186,7 @@ impl SurfaceState {
             activity: SurfaceActivity::Ready,
             token_usage: None,
             notice: None,
+            pending_action: None,
             scrollback: ScrollbackState::default(),
             history: PromptHistory::default(),
             slash: SlashController::default(),
@@ -233,6 +238,7 @@ impl SurfaceState {
             },
             token_usage: None,
             notice: None,
+            pending_action: None,
             scrollback: ScrollbackState::default(),
             history: PromptHistory::from_turns(&session.thread.turns),
             slash: SlashController::default(),
@@ -1345,6 +1351,19 @@ pub(crate) fn render_surface_with_view(
         &search_browsing_hints
     };
     let overlay_hints: &[(&str, &str)] = &[];
+    let pending_action = state
+        .pending_action()
+        .map(|action| crate::actions::definition(action, crate::actions::When::PromptFocused));
+    let pending_confirmation_label =
+        pending_action.map(|definition| format!("press again to {}", definition.label));
+    let pending_confirmation = pending_action.and_then(|definition| {
+        pending_confirmation_label
+            .as_deref()
+            .map(|label| ShortcutConfirmation {
+                shortcut: definition.hint_key(),
+                label,
+            })
+    });
     ShortcutsBar {
         hints: if state.active_overlay().is_some() {
             overlay_hints
@@ -1378,6 +1397,7 @@ pub(crate) fn render_surface_with_view(
             default_hints
         },
         right: None,
+        pending_confirmation,
     }
     .render(layout.shortcuts, buffer, theme);
     let choice_hit_rows = request_pane

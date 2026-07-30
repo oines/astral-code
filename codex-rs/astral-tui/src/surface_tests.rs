@@ -675,6 +675,23 @@ fn multiline_prompt_surface_snapshot() {
 }
 
 #[test]
+fn new_session_confirmation_surface_snapshot() {
+    let session = session_state();
+    let mut state = SurfaceState::from_session(&session);
+    state.set_activity(SurfaceActivity::Ready);
+    state.set_composer("keep this draft");
+    assert_eq!(
+        handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL),
+        ),
+        InputAction::Redraw
+    );
+
+    insta::assert_snapshot!(render_at_size(&mut state, &session, 80, 24));
+}
+
+#[test]
 fn theme_picker_surface_snapshot() {
     let session = session_state();
     let mut state = SurfaceState::from_session(&session);

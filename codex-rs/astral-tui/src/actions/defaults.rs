@@ -84,6 +84,21 @@ pub(super) fn default_actions() -> Vec<ActionDef> {
              Select a saved conversation to switch to its full history.",
         ),
         ActionDef::new(
+            ActionId::NewSession,
+            "new",
+            "Start a new session",
+            KeyShortcut::control('n'),
+            Vec::new(),
+            Category::Session,
+            When::Always,
+        )
+        .with_key_display("Ctrl+N")
+        .with_help(
+            "Starts a fresh Astral session with empty scrollback and context. \
+             Press Ctrl+N twice within one second so an accidental keypress \
+             cannot discard the current conversation.",
+        ),
+        ActionDef::new(
             ActionId::ShellMode,
             "shell",
             "Shell mode",
