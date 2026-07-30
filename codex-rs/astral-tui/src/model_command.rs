@@ -45,6 +45,7 @@ pub(crate) struct ModelCatalog {
     models: Vec<Model>,
     current_model: String,
     current_provider: String,
+    current_effort: Option<ReasoningEffort>,
 }
 
 impl ModelCatalog {
@@ -53,38 +54,30 @@ impl ModelCatalog {
         models: Vec<Model>,
         current_model: impl Into<String>,
         current_provider: impl Into<String>,
+        current_effort: Option<ReasoningEffort>,
     ) {
         self.models = models;
         self.current_model = current_model.into();
         self.current_provider = current_provider.into();
+        self.current_effort = current_effort;
     }
 
     pub(crate) fn update_current(
         &mut self,
         model: impl Into<String>,
         model_provider: impl Into<String>,
+        effort: Option<ReasoningEffort>,
     ) {
         self.current_model = model.into();
         self.current_provider = model_provider.into();
+        self.current_effort = effort;
     }
 
     pub(crate) fn suggestions(&self, args_query: &str) -> Vec<ModelSuggestion> {
         if let Some((model, effort_query)) = self.effort_phase(args_query) {
-            return model
-                .supported_reasoning_efforts
-                .iter()
-                .filter(|option| {
-                    fuzzy_match(option.reasoning_effort.as_str(), effort_query).is_some()
-                })
-                .map(|option| ModelSuggestion {
-                    display: option.reasoning_effort.to_string(),
-                    description: option.description.clone(),
-                    insert_text: format!(
-                        "/model {} {}",
-                        model.display_name, option.reasoning_effort
-                    ),
-                })
-                .collect();
+            return self.effort_suggestions_for(model, effort_query, |effort| {
+                format!("/model {} {effort}", model.display_name)
+            });
         }
 
         let query = args_query.trim();
@@ -125,6 +118,28 @@ impl ModelCatalog {
             .collect()
     }
 
+    pub(crate) fn effort_suggestions(&self, query: &str) -> Vec<ModelSuggestion> {
+        self.current_model()
+            .map(|model| {
+                self.effort_suggestions_for(model, query, |effort| format!("/effort {effort}"))
+            })
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn is_effort_phase(&self, args_query: &str) -> bool {
+        self.effort_phase(args_query).is_some()
+    }
+
+    pub(crate) fn is_complete_selection(&self, args: &str) -> bool {
+        if let Some((_, effort)) = self.effort_phase(args) {
+            return !effort.is_empty() && self.resolve(args).is_ok();
+        }
+        self.models
+            .iter()
+            .find(|model| model_name_matches(model, args.trim()))
+            .is_some_and(|model| model.supported_reasoning_efforts.is_empty())
+    }
+
     pub(crate) fn resolve(&self, args: &str) -> Result<ModelSelection, ModelResolveError> {
         let args = args.trim();
         if let Some(model) = self
@@ -163,6 +178,51 @@ impl ModelCatalog {
         Err(ModelResolveError::UnknownModel(args.to_string()))
     }
 
+    pub(crate) fn resolve_effort(&self, effort: &str) -> Result<ModelSelection, ModelResolveError> {
+        let model = self
+            .current_model()
+            .ok_or_else(|| ModelResolveError::UnknownModel(self.current_model.clone()))?;
+        let effort = effort.trim();
+        let Some(option) = model.supported_reasoning_efforts.iter().find(|option| {
+            option
+                .reasoning_effort
+                .as_str()
+                .eq_ignore_ascii_case(effort)
+        }) else {
+            return Err(ModelResolveError::UnsupportedEffort {
+                model: model.display_name.clone(),
+                effort: effort.to_string(),
+            });
+        };
+        Ok(selection(model, option.reasoning_effort.clone()))
+    }
+
+    fn effort_suggestions_for(
+        &self,
+        model: &Model,
+        query: &str,
+        insert_text: impl Fn(&ReasoningEffort) -> String,
+    ) -> Vec<ModelSuggestion> {
+        let mark_active = self.is_current(model);
+        model
+            .supported_reasoning_efforts
+            .iter()
+            .filter(|option| fuzzy_match(option.reasoning_effort.as_str(), query).is_some())
+            .map(|option| {
+                let effort = &option.reasoning_effort;
+                ModelSuggestion {
+                    display: if mark_active && self.current_effort.as_ref() == Some(effort) {
+                        format!("{effort} (active)")
+                    } else {
+                        effort.to_string()
+                    },
+                    description: option.description.clone(),
+                    insert_text: insert_text(effort),
+                }
+            })
+            .collect()
+    }
+
     fn effort_phase<'a>(&'a self, args_query: &'a str) -> Option<(&'a Model, &'a str)> {
         let mut matches = self
             .models
@@ -185,6 +245,10 @@ impl ModelCatalog {
 
     fn is_current(&self, model: &Model) -> bool {
         model.model == self.current_model && model.model_provider == self.current_provider
+    }
+
+    fn current_model(&self) -> Option<&Model> {
+        self.models.iter().find(|model| self.is_current(model))
     }
 }
 

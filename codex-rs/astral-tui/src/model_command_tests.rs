@@ -18,8 +18,20 @@ fn model_phase_filters_and_marks_the_current_model() {
 
 #[test]
 fn effort_phase_chains_from_the_selected_model() {
-    let suggestions = catalog().suggestions("Codex 5.2 xh");
+    let catalog = catalog();
+    let suggestions = catalog.suggestions("Codex 5.2 xh");
     assert_eq!(suggestions[0].insert_text, "/model Codex 5.2 xhigh");
+    assert!(!catalog.is_complete_selection("Codex 5.2"));
+    assert!(!catalog.is_complete_selection("Codex 5.2 "));
+    assert!(catalog.is_complete_selection("Codex 5.2 xhigh"));
+
+    let suggestions = catalog.effort_suggestions("hi");
+    assert_eq!(suggestions[0].display, "high (active)");
+    assert_eq!(suggestions[0].insert_text, "/effort high");
+    assert_eq!(
+        catalog.resolve_effort("xhigh"),
+        Ok(selection(ReasoningEffort::XHigh))
+    );
 }
 
 #[test]
@@ -61,6 +73,7 @@ fn catalog() -> ModelCatalog {
         )],
         "gpt-5.2",
         "openai",
+        Some(ReasoningEffort::High),
     );
     catalog
 }

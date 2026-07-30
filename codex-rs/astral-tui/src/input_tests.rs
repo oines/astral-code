@@ -266,11 +266,6 @@ fn slash_completion_and_dispatch_stay_local_to_the_tui() {
     }
     assert_eq!(
         handle_key(&mut state, key(KeyCode::Enter)),
-        InputAction::Redraw
-    );
-    assert_eq!(state.composer(), "/compact");
-    assert_eq!(
-        handle_key(&mut state, key(KeyCode::Enter)),
         InputAction::Slash {
             invocation: SlashInvocation {
                 command: SlashCommandId::Compact,

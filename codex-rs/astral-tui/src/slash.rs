@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 
 use codex_app_server_protocol::Model;
+use codex_protocol::openai_models::ReasoningEffort;
 
 use crate::model_command::ModelCatalog;
 use crate::model_command::ModelResolveError;
@@ -17,6 +18,7 @@ const MAX_MODEL_MATCHES: usize = 20;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SlashCommandId {
     Model,
+    Effort,
     Models,
     Compact,
     New,
@@ -114,6 +116,13 @@ const COMMANDS: &[CommandSpec] = &[
         "model",
         "Choose model and reasoning effort",
         Args::Required("model"),
+        Idle
+    ),
+    command!(
+        Effort,
+        "effort",
+        "Set reasoning effort for the current model",
+        Args::Required("level"),
         Idle
     ),
     command!(
@@ -334,20 +343,27 @@ impl SlashController {
         };
         let exact = find_spec(query);
         if has_args
-            && exact.is_some_and(|spec| {
-                spec.id == SlashCommandId::Model && spec.availability.allows(state)
-            })
+            && let Some(spec) = exact
+            && matches!(spec.id, SlashCommandId::Model | SlashCommandId::Effort)
+            && spec.availability.allows(state)
         {
-            let args = parse_invocation(text)
-                .map(|(_, args)| args)
-                .unwrap_or_default();
-            let matches = self
-                .models
-                .suggestions(args)
+            let command = spec.id;
+            let args = parse_args_query(text).unwrap_or_default();
+            let suggestions = match command {
+                SlashCommandId::Model => self.models.suggestions(args),
+                SlashCommandId::Effort => self.models.effort_suggestions(args),
+                _ => unreachable!("only model commands enter argument completion"),
+            };
+            let title = if command == SlashCommandId::Effort || self.models.is_effort_phase(args) {
+                "reasoning effort"
+            } else {
+                "models"
+            };
+            let matches = suggestions
                 .into_iter()
                 .take(MAX_MODEL_MATCHES)
                 .map(|suggestion| SlashSuggestion {
-                    command: SlashCommandId::Model,
+                    command,
                     display: suggestion.display,
                     description: suggestion.description,
                     insert_text: suggestion.insert_text,
@@ -364,12 +380,16 @@ impl SlashController {
             self.snapshot = SlashSnapshot {
                 active: true,
                 open: !matches.is_empty(),
-                title: "models",
+                title,
                 query: args.to_string(),
                 matches,
                 selected,
                 ghost: None,
-                recognized: self.models.resolve(args).is_ok(),
+                recognized: match command {
+                    SlashCommandId::Model => self.models.is_complete_selection(args),
+                    SlashCommandId::Effort => self.models.resolve_effort(args).is_ok(),
+                    _ => unreachable!("only model commands enter argument completion"),
+                },
             };
             return;
         }
@@ -509,16 +529,19 @@ impl SlashController {
         models: Vec<Model>,
         current_model: impl Into<String>,
         current_provider: impl Into<String>,
+        current_effort: Option<ReasoningEffort>,
     ) {
-        self.models.replace(models, current_model, current_provider);
+        self.models
+            .replace(models, current_model, current_provider, current_effort);
     }
 
     pub fn update_current_model(
         &mut self,
         model: impl Into<String>,
         model_provider: impl Into<String>,
+        effort: Option<ReasoningEffort>,
     ) {
-        self.models.update_current(model, model_provider);
+        self.models.update_current(model, model_provider, effort);
     }
 
     pub(crate) fn model_catalog(&self) -> &ModelCatalog {
@@ -527,6 +550,10 @@ impl SlashController {
 
     pub fn resolve_model(&self, args: &str) -> Result<ModelSelection, ModelResolveError> {
         self.models.resolve(args)
+    }
+
+    pub fn resolve_effort(&self, args: &str) -> Result<ModelSelection, ModelResolveError> {
+        self.models.resolve_effort(args)
     }
 }
 
@@ -541,6 +568,12 @@ fn parse_invocation(text: &str) -> Option<(&str, &str)> {
     let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
     let name = &rest[..end];
     (!name.is_empty()).then(|| (name, rest[end..].trim()))
+}
+
+fn parse_args_query(text: &str) -> Option<&str> {
+    let rest = text.strip_prefix('/')?;
+    let end = rest.find(char::is_whitespace)?;
+    Some(rest[end..].trim_start())
 }
 
 fn find_spec(name: &str) -> Option<&'static CommandSpec> {

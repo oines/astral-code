@@ -1,0 +1,27 @@
+---
+source: astral-tui/src/surface_tests.rs
+expression: "render_at_size(&mut state, &session, 80, 24)"
+---
+
+  ⎇ main  /workspace
+
+
+  › inspect this repo
+
+
+  I’m tracing the relevant data flow.
+
+
+
+
+
+  ╭─ reasoning effort ───────────────────────────────────────────────────────╮
+  │› high (active)   Deep reasoning                                          │
+  │  xhigh           Maximum reasoning                                       │
+  ╰──────────────────────────────────────────────────────────────────────────╯
+
+  ╭──────────────────────────────────────────────────────────────────────────╮
+  │ ❯ /model Claude Sonnet 4                                                 │
+  ╰──────────────────────────────────────────── claude-sonnet-4 · workspace ─╯
+
+  ↑/↓:navigate  │  Tab:complete  │  Esc:close

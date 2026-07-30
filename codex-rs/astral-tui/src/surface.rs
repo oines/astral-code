@@ -25,6 +25,7 @@ use astral_tui_scrollback::DisplayMode;
 use codex_app_server_protocol::Model;
 use codex_app_server_protocol::ThreadTokenUsage;
 use codex_protocol::config_types::ModeKind;
+use codex_protocol::openai_models::ReasoningEffort;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Position;
 use ratatui::layout::Rect;
@@ -697,8 +698,11 @@ impl SurfaceState {
         let Some(completion) = self.slash.accept_selection(self.slash_command_state()) else {
             return false;
         };
+        let chains = completion.ends_with(char::is_whitespace);
         self.composer.replace(completion);
-        self.slash.close();
+        if !chains {
+            self.slash.close();
+        }
         self.refresh_mentions();
         true
     }
@@ -794,9 +798,10 @@ impl SurfaceState {
         models: Vec<Model>,
         current_model: impl Into<String>,
         current_provider: impl Into<String>,
+        current_effort: Option<ReasoningEffort>,
     ) {
         self.slash
-            .set_models(models, current_model, current_provider);
+            .set_models(models, current_model, current_provider, current_effort);
         self.refresh_slash();
     }
 
@@ -804,13 +809,19 @@ impl SurfaceState {
         &mut self,
         model: impl Into<String>,
         model_provider: impl Into<String>,
+        effort: Option<ReasoningEffort>,
     ) {
-        self.slash.update_current_model(model, model_provider);
+        self.slash
+            .update_current_model(model, model_provider, effort);
         self.refresh_slash();
     }
 
     pub(crate) fn resolve_model(&self, args: &str) -> Result<ModelSelection, ModelResolveError> {
         self.slash.resolve_model(args)
+    }
+
+    pub(crate) fn resolve_effort(&self, args: &str) -> Result<ModelSelection, ModelResolveError> {
+        self.slash.resolve_effort(args)
     }
 }
 

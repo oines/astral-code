@@ -168,6 +168,7 @@ pub async fn run(mut session: AstralSession, options: RunOptions) -> Result<RunE
             models,
             initial_state.model.clone(),
             initial_state.model_provider.clone(),
+            initial_state.collaboration_mode.reasoning_effort(),
         ),
         Err(error) => surface.set_notice(format!("Could not load model catalog: {error}")),
     }
@@ -837,16 +838,30 @@ async fn apply_input_action(
                     surface.set_notice("No agent response to copy");
                 }
             }
-            SlashCommandId::Model => match surface.resolve_model(&invocation.args) {
-                Ok(selection) => match session.update_model(&selection).await {
-                    Ok(()) => surface.set_notice(format!(
-                        "Switching to {} ({})",
-                        selection.display_name, selection.effort
-                    )),
+            SlashCommandId::Model | SlashCommandId::Effort => {
+                let selection = match invocation.command {
+                    SlashCommandId::Model => surface.resolve_model(&invocation.args),
+                    SlashCommandId::Effort => surface.resolve_effort(&invocation.args),
+                    _ => unreachable!("only model commands enter this arm"),
+                };
+                match selection {
+                    Ok(selection) => match session.update_model(&selection).await {
+                        Ok(()) => {
+                            surface.update_current_model(
+                                selection.model.clone(),
+                                selection.model_provider.clone(),
+                                Some(selection.effort.clone()),
+                            );
+                            surface.set_notice(format!(
+                                "Switching to {} ({})",
+                                selection.display_name, selection.effort
+                            ));
+                        }
+                        Err(error) => surface.set_notice(error.to_string()),
+                    },
                     Err(error) => surface.set_notice(error.to_string()),
-                },
-                Err(error) => surface.set_notice(error.to_string()),
-            },
+                }
+            }
             SlashCommandId::Models => {
                 if let Err(error) = reload_models_manager(session, surface, None).await {
                     surface.set_notice(error.to_string());
@@ -1021,9 +1036,15 @@ async fn reload_models_manager(
     surface: &mut SurfaceState,
     focus_provider: Option<&str>,
 ) -> Result<(), SessionError> {
-    let (current_provider, current_model) = session
+    let (current_provider, current_model, current_effort) = session
         .state()
-        .map(|state| (state.model_provider.clone(), state.model.clone()))
+        .map(|state| {
+            (
+                state.model_provider.clone(),
+                state.model.clone(),
+                state.collaboration_mode.reasoning_effort(),
+            )
+        })
         .ok_or(SessionError::NoThread)?;
     let config = session.read_config().await?;
     let models = session.list_models().await?;
@@ -1031,6 +1052,7 @@ async fn reload_models_manager(
         models.clone(),
         current_model.clone(),
         current_provider.clone(),
+        current_effort,
     );
     surface.open_models_manager(config, models, current_provider, current_model);
     if let Some(provider_id) = focus_provider {
@@ -1179,9 +1201,12 @@ async fn reset_surface(session: &mut AstralSession, surface: &mut SurfaceState) 
     surface.set_color_level(color_level);
     surface.set_timeline_visible(timeline_visible);
     match session.list_models().await {
-        Ok(models) => {
-            surface.set_model_catalog(models, state.model.clone(), state.model_provider.clone())
-        }
+        Ok(models) => surface.set_model_catalog(
+            models,
+            state.model.clone(),
+            state.model_provider.clone(),
+            state.collaboration_mode.reasoning_effort(),
+        ),
         Err(error) => surface.set_notice(format!("Could not load model catalog: {error}")),
     }
     mentions::refresh_catalog(session, surface).await;
@@ -1343,6 +1368,7 @@ fn handle_notification(surface: &mut SurfaceState, notification: &ServerNotifica
             surface.update_current_model(
                 params.thread_settings.model.clone(),
                 params.thread_settings.model_provider.clone(),
+                params.thread_settings.collaboration_mode.reasoning_effort(),
             );
             surface.set_notice(format!("Model changed to {}", params.thread_settings.model));
         }

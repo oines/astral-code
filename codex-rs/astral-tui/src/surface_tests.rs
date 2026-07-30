@@ -511,6 +511,28 @@ fn model_argument_menu_snapshot() {
     state.set_composer("/model ");
 
     insta::assert_snapshot!(render_at_size(&mut state, &session, 80, 24));
+
+    assert_eq!(
+        handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        ),
+        InputAction::Redraw
+    );
+    assert_eq!(state.composer(), "/model Claude Sonnet 4 ");
+    insta::assert_snapshot!(
+        "model_effort_argument_menu_snapshot",
+        render_at_size(&mut state, &session, 80, 24)
+    );
+
+    let InputAction::Slash { invocation, .. } = handle_key(
+        &mut state,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+    ) else {
+        panic!("terminal effort selection should execute with the same Enter");
+    };
+    assert_eq!(invocation.command, crate::SlashCommandId::Model);
+    assert_eq!(invocation.args, "Claude Sonnet 4 high");
 }
 
 #[test]
@@ -582,6 +604,7 @@ fn set_test_model_catalog(state: &mut SurfaceState, session: &SessionState) {
         ],
         session.model.clone(),
         session.model_provider.clone(),
+        Some(codex_protocol::openai_models::ReasoningEffort::High),
     );
 }
 

@@ -578,8 +578,14 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
                 return InputAction::Redraw;
             }
             KeyCode::Enter if !state.slash().recognized => {
+                let chains = state
+                    .slash()
+                    .selection()
+                    .is_some_and(|selection| selection.insert_text.ends_with(char::is_whitespace));
                 state.accept_slash_selection();
-                return InputAction::Redraw;
+                if chains {
+                    return InputAction::Redraw;
+                }
             }
             _ => {}
         }
