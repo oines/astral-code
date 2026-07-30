@@ -8,6 +8,7 @@ use crate::modal::ModalPointerAction;
 
 use super::ModelsConfigWrite;
 use super::ModelsManagerState;
+use super::SEARCH_ROW_ID;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum ModelsManagerInput {
@@ -21,8 +22,12 @@ pub(crate) fn handle_key(state: &mut ModelsManagerState, key: KeyEvent) -> Model
     if key.kind == KeyEventKind::Release {
         return ModelsManagerInput::None;
     }
+    state.pointer.clear_hover();
     if key.code == KeyCode::Esc {
-        return if state.close_panel() {
+        return if state.close_panel() || state.search_focused() {
+            state.focus_list();
+            ModelsManagerInput::Redraw
+        } else if state.clear_query() {
             ModelsManagerInput::Redraw
         } else {
             ModelsManagerInput::Cancel
@@ -39,6 +44,24 @@ pub(crate) fn handle_key(state: &mut ModelsManagerState, key: KeyEvent) -> Model
             state.activate_detail()
         } else {
             ModelsManagerInput::None
+        };
+    }
+    if state.search_focused() {
+        return match (key.code, key.modifiers) {
+            (KeyCode::Up, _) => {
+                state.select_end();
+                ModelsManagerInput::Redraw
+            }
+            (KeyCode::Down, _) => {
+                state.select_start();
+                ModelsManagerInput::Redraw
+            }
+            (KeyCode::Enter, KeyModifiers::NONE) => {
+                state.focus_list();
+                state.activate(state.selected)
+            }
+            _ if state.edit_query(key) => ModelsManagerInput::Redraw,
+            _ => ModelsManagerInput::None,
         };
     }
     match (key.code, key.modifiers) {
@@ -59,24 +82,36 @@ pub(crate) fn handle_key(state: &mut ModelsManagerState, key: KeyEvent) -> Model
             ModelsManagerInput::Redraw
         }
         (KeyCode::Home, _) => {
-            state.set_selected(0);
+            state.select_start();
             ModelsManagerInput::Redraw
         }
         (KeyCode::End, _) => {
-            state.set_selected(state.rows().len().saturating_sub(1));
+            state.select_end();
+            ModelsManagerInput::Redraw
+        }
+        (KeyCode::Right, _) => {
+            state.expand_selected();
+            ModelsManagerInput::Redraw
+        }
+        (KeyCode::Left, _) => {
+            state.collapse_selected();
             ModelsManagerInput::Redraw
         }
         (KeyCode::Enter, KeyModifiers::NONE) => state.activate(state.selected),
-        (KeyCode::Backspace, _) => {
-            state.query.pop();
-            state.clamp_selection();
+        (KeyCode::Char('/'), KeyModifiers::NONE) => {
+            state.focus_search();
+            ModelsManagerInput::Redraw
+        }
+        (KeyCode::Backspace, _) if !state.query_is_empty() => {
+            state.focus_search();
+            state.edit_query(key);
             ModelsManagerInput::Redraw
         }
         (KeyCode::Char(character), modifiers)
             if modifiers.is_empty() || modifiers == KeyModifiers::SHIFT =>
         {
-            state.query.push(character);
-            state.clamp_selection();
+            state.focus_search();
+            state.edit_query(KeyEvent::new(KeyCode::Char(character), modifiers));
             ModelsManagerInput::Redraw
         }
         _ => ModelsManagerInput::None,
@@ -93,10 +128,8 @@ pub(crate) fn handle_paste(state: &mut ModelsManagerState, text: &str) -> Models
     if state.detail.is_some() {
         return ModelsManagerInput::None;
     }
-    state
-        .query
-        .extend(text.chars().filter(|character| !character.is_control()));
-    state.clamp_selection();
+    state.focus_search();
+    state.paste_query(text);
     ModelsManagerInput::Redraw
 }
 
@@ -115,17 +148,24 @@ pub(crate) fn handle_mouse(
         }
         ModalPointerAction::Redraw | ModalPointerAction::Hover(None) => ModelsManagerInput::Redraw,
         ModalPointerAction::Hover(Some(index)) => {
-            if state.capability_form_active() {
-                state.select_capability_field(index);
-            } else if state.provider_form_active() {
-                state.select_provider_field(index);
-            } else if state.detail.is_none() {
+            if index != SEARCH_ROW_ID
+                && !state.capability_form_active()
+                && !state.provider_form_active()
+                && state.detail.is_none()
+            {
                 state.set_selected(index);
             }
             ModelsManagerInput::Redraw
         }
         ModalPointerAction::Activate(index) => {
-            if state.capability_form_active() {
+            if index == SEARCH_ROW_ID
+                && !state.capability_form_active()
+                && !state.provider_form_active()
+                && state.detail.is_none()
+            {
+                state.focus_search();
+                ModelsManagerInput::Redraw
+            } else if state.capability_form_active() {
                 state.activate_capability_field(index)
             } else if state.provider_form_active() {
                 state.activate_provider_field(index)
@@ -137,12 +177,13 @@ pub(crate) fn handle_mouse(
             }
         }
         ModalPointerAction::Scroll(delta) => {
+            state.pointer.clear_hover();
             if state.capability_form_active() {
                 state.move_capability_field(delta);
             } else if state.provider_form_active() {
                 state.move_provider_field(delta);
             } else if state.detail.is_none() {
-                state.move_selection(delta);
+                state.scroll_browser(delta);
             }
             ModelsManagerInput::Redraw
         }

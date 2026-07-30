@@ -32,20 +32,13 @@ impl ModelsManagerState {
         }
     }
 
-    pub(super) fn select_capability_field(&mut self, index: usize) {
-        if let Some(form) = self.capability_form.as_mut() {
-            form.select(index);
-        }
-    }
-
     pub(super) fn activate_capability_field(&mut self, index: usize) -> ModelsManagerInput {
         let target = self.write_target.clone();
         let existing_ids = self.model_ids_for_capability_form();
         let Some(form) = self.capability_form.as_mut() else {
             return ModelsManagerInput::None;
         };
-        form.select(index);
-        form.activate(target, &existing_ids)
+        form.activate_pointer(index, target, &existing_ids)
     }
 
     pub(super) fn move_capability_field(&mut self, delta: isize) {
@@ -87,6 +80,7 @@ impl ModelsManagerState {
             raw,
             model.capabilities,
         ));
+        self.pointer.clear_hover();
         ModelsManagerInput::Redraw
     }
 

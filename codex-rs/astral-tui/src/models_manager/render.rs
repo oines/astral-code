@@ -12,8 +12,10 @@ use crate::view::render_modal_close_button;
 use crate::view::render_modal_frame_with_geometry;
 
 use super::BrowserRow;
+use super::BrowserScroll;
 use super::ModelsManagerState;
 use super::ProviderLoad;
+use super::SEARCH_ROW_ID;
 use super::capability_form;
 use super::capability_sources;
 use super::provider_form;
@@ -41,12 +43,17 @@ fn render_browser(
     buffer: &mut Buffer,
     theme: AstralTheme,
 ) {
+    let footer = if state.search_focused() {
+        "Edit search · ↑/↓ results · Enter open · Esc navigation"
+    } else {
+        "Type or / search · ↑/↓ navigate · ←/→ fold · Enter open · Esc back"
+    };
     let Some(frame) = render_modal_frame_with_geometry(
         area,
         buffer,
         theme,
         "Models",
-        "Type to search · ↑/↓ navigate · Enter open · Esc close",
+        footer,
         ModalHeight::FullViewport,
     ) else {
         return;
@@ -64,23 +71,22 @@ fn render_browser(
             .observe_frame(frame.popup, frame.close_button, Vec::new());
         return;
     }
-    let search = if state.query.is_empty() {
-        "Search providers and loaded models…".to_string()
-    } else {
-        format!("Search: {}", state.query)
-    };
+    let search_area = Rect::new(content.x, content.y, content.width, 1);
+    let search_selected =
+        state.search_focused() || state.pointer.hovered_row() == Some(SEARCH_ROW_ID);
+    let search_style = modal_choice_style(theme, search_selected);
+    buffer.set_style(search_area, search_style);
+    let search = render_search(state, search_selected);
     buffer.set_stringn(
-        content.x,
-        content.y,
+        search_area.x,
+        search_area.y,
         search,
-        usize::from(content.width),
-        Style::default()
-            .fg(if state.query.is_empty() {
-                theme.gray
-            } else {
-                theme.text_primary
-            })
-            .bg(theme.bg_base),
+        usize::from(search_area.width),
+        if search_selected {
+            search_style
+        } else {
+            Style::default().fg(theme.gray).bg(theme.bg_base)
+        },
     );
     let list = Rect::new(
         content.x,
@@ -90,7 +96,10 @@ fn render_browser(
     );
     let rows = state.rows();
     ensure_selection_visible(state, rows.len(), usize::from(list.height));
-    let mut hits = Vec::new();
+    let mut hits = vec![ModalRowHit {
+        id: SEARCH_ROW_ID,
+        area: search_area,
+    }];
     for (row_index, row) in rows
         .iter()
         .enumerate()
@@ -100,8 +109,8 @@ fn render_browser(
         let y = list.y
             + u16::try_from(row_index.saturating_sub(state.scroll_offset)).unwrap_or(u16::MAX);
         let area = Rect::new(list.x, y, list.width, 1);
-        let selected =
-            state.selected == row_index || state.pointer.hovered_row() == Some(row_index);
+        let selected = (!state.search_focused() && state.selected == row_index)
+            || state.pointer.hovered_row() == Some(row_index);
         render_browser_row(state, row, area, buffer, theme, selected);
         hits.push(ModalRowHit {
             id: row_index,
@@ -120,6 +129,23 @@ fn render_browser(
     state
         .pointer
         .observe_frame(frame.popup, frame.close_button, hits);
+}
+
+fn render_search(state: &ModelsManagerState, selected: bool) -> String {
+    let marker = if selected { "❯ " } else { "  " };
+    if state.query.text().is_empty() {
+        return if state.search_focused() {
+            format!("{marker}Search  ▏")
+        } else {
+            format!("{marker}Search providers and loaded models…")
+        };
+    }
+    if !state.search_focused() {
+        return format!("{marker}Search  {}", state.query.text());
+    }
+    let query = state.query.text();
+    let cursor = state.query.cursor().min(query.len());
+    format!("{marker}Search  {}▏{}", &query[..cursor], &query[cursor..])
 }
 
 fn render_browser_row(
@@ -396,10 +422,12 @@ fn ensure_selection_visible(state: &mut ModelsManagerState, len: usize, height: 
         state.scroll_offset = state.selected;
         return;
     }
-    if state.selected < state.scroll_offset {
-        state.scroll_offset = state.selected;
-    } else if state.selected >= state.scroll_offset.saturating_add(height) {
-        state.scroll_offset = state.selected.saturating_add(1).saturating_sub(height);
+    if state.browser_scroll == BrowserScroll::FollowSelection {
+        if state.selected < state.scroll_offset {
+            state.scroll_offset = state.selected;
+        } else if state.selected >= state.scroll_offset.saturating_add(height) {
+            state.scroll_offset = state.selected.saturating_add(1).saturating_sub(height);
+        }
     }
     state.scroll_offset = state.scroll_offset.min(len.saturating_sub(height));
 }

@@ -14,9 +14,13 @@ impl ModelsManagerState {
     }
 
     pub(super) fn close_panel(&mut self) -> bool {
-        self.capability_form.take().is_some()
+        let closed = self.capability_form.take().is_some()
             || self.provider_form.take().is_some()
-            || self.detail.take().is_some()
+            || self.detail.take().is_some();
+        if closed {
+            self.pointer.clear_hover();
+        }
+        closed
     }
 
     pub(super) fn handle_provider_key(&mut self, key: KeyEvent) -> ModelsManagerInput {
@@ -40,20 +44,13 @@ impl ModelsManagerState {
         }
     }
 
-    pub(super) fn select_provider_field(&mut self, index: usize) {
-        if let Some(form) = self.provider_form.as_mut() {
-            form.select(index);
-        }
-    }
-
     pub(super) fn activate_provider_field(&mut self, index: usize) -> ModelsManagerInput {
         let target = self.write_target.clone();
         let existing_ids = self.provider_ids();
         let Some(form) = self.provider_form.as_mut() else {
             return ModelsManagerInput::None;
         };
-        form.select(index);
-        form.activate(target, &existing_ids)
+        form.activate_pointer(index, target, &existing_ids)
     }
 
     pub(super) fn move_provider_field(&mut self, delta: isize) {
@@ -99,6 +96,8 @@ impl ModelsManagerState {
             )
         }) {
             self.selected = row_index;
+            self.browser_scroll = super::BrowserScroll::FollowSelection;
+            self.pointer.clear_hover();
         }
     }
 

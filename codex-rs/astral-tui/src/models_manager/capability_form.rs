@@ -153,6 +153,16 @@ impl CapabilityFormState {
 
     pub(super) fn move_selection(&mut self, delta: isize) {
         self.save_editor();
+        self.selected = self
+            .selected
+            .saturating_add_signed(delta)
+            .min(self.fields().len().saturating_sub(1));
+        self.error = None;
+        self.load_editor();
+    }
+
+    fn cycle_selection(&mut self, delta: isize) {
+        self.save_editor();
         self.selected =
             (self.selected as isize + delta).rem_euclid(self.fields().len() as isize) as usize;
         self.error = None;
@@ -176,12 +186,20 @@ impl CapabilityFormState {
         existing_ids: &BTreeSet<String>,
     ) -> ModelsManagerInput {
         match (key.code, key.modifiers) {
-            (KeyCode::Up | KeyCode::BackTab, _) => {
+            (KeyCode::Up, _) => {
                 self.move_selection(-1);
                 ModelsManagerInput::Redraw
             }
-            (KeyCode::Down | KeyCode::Tab, _) => {
+            (KeyCode::Down, _) => {
                 self.move_selection(1);
+                ModelsManagerInput::Redraw
+            }
+            (KeyCode::BackTab, _) => {
+                self.cycle_selection(-1);
+                ModelsManagerInput::Redraw
+            }
+            (KeyCode::Tab, _) => {
+                self.cycle_selection(1);
                 ModelsManagerInput::Redraw
             }
             (KeyCode::Left, _) if self.field().is_choice() => {
@@ -261,6 +279,21 @@ impl CapabilityFormState {
             | CapabilityField::SupportsParallelTools
             | CapabilityField::SupportsPromptCache
             | CapabilityField::SupportsNativeStreaming => ModelsManagerInput::None,
+        }
+    }
+
+    pub(super) fn activate_pointer(
+        &mut self,
+        index: usize,
+        target: Option<ConfigWriteTarget>,
+        existing_ids: &BTreeSet<String>,
+    ) -> ModelsManagerInput {
+        let was_selected = self.selected == index;
+        self.select(index);
+        if !was_selected || self.field().is_text() {
+            ModelsManagerInput::Redraw
+        } else {
+            self.activate(target, existing_ids)
         }
     }
 

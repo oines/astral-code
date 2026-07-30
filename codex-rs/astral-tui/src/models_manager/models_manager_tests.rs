@@ -5,12 +5,17 @@ use codex_app_server_protocol::ModelCapabilitySource;
 use codex_protocol::openai_models::InputModality;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::openai_models::ToolMode;
+use crossterm::event::KeyCode;
+use crossterm::event::KeyEvent;
+use crossterm::event::KeyModifiers;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use serde_json::json;
 
 use super::BrowserRow;
+use super::ModelsManagerInput;
 use super::ModelsManagerState;
+use super::handle_key;
 use super::render;
 use crate::view::AstralTheme;
 
@@ -115,6 +120,56 @@ fn provider_hierarchy_snapshot() {
     insta::assert_snapshot!(format!(
         "COLLAPSED\n{collapsed}\n\nEXPANDED\n{expanded}\n\nADD PROVIDER\n{provider_form}\n\nADD MODEL\n{model_form}\n\nMODEL DETAIL\n{detail}\n\nMODEL OVERRIDES\n{overrides}"
     ));
+}
+
+#[test]
+fn search_editing_resets_selection_and_esc_unwinds_before_close() {
+    let config: ConfigReadResponse = serde_json::from_value(json!({
+        "config": {
+            "model_providers": {
+                "deepseek": {"name": "DeepSeek"},
+                "mimo": {"name": "MiMo"}
+            }
+        },
+        "origins": {},
+        "layers": null
+    }))
+    .expect("valid config response");
+    let mut state = ModelsManagerState::new(
+        1,
+        config,
+        Vec::new(),
+        "deepseek".to_string(),
+        "deepseek-chat".to_string(),
+    );
+    state.select_end();
+
+    assert_eq!(
+        handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE)
+        ),
+        ModelsManagerInput::Redraw
+    );
+    assert_eq!(state.selected, 0);
+    assert!(state.search_focused());
+    assert_eq!(state.query.text(), "m");
+
+    assert_eq!(
+        handle_key(&mut state, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        ModelsManagerInput::Redraw
+    );
+    assert!(!state.search_focused());
+    assert_eq!(state.query.text(), "m");
+    assert_eq!(
+        handle_key(&mut state, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        ModelsManagerInput::Redraw
+    );
+    assert!(state.query_is_empty());
+    assert_eq!(
+        handle_key(&mut state, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        ModelsManagerInput::Cancel
+    );
 }
 
 fn render_state(state: &mut ModelsManagerState) -> String {

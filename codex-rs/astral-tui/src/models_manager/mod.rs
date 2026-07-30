@@ -3,6 +3,7 @@
 //! The app-server remains authoritative for configuration and discovery. This
 //! module only owns modal navigation, expansion, and presentation state.
 
+mod browser;
 mod capability;
 mod capability_form;
 mod config;
@@ -23,6 +24,7 @@ use codex_app_server_protocol::ModelCapabilities;
 use codex_app_server_protocol::ModelCapabilitySource;
 use serde_json::Value;
 
+use crate::composer::ComposerState;
 use crate::modal::ModalPointerState;
 
 pub(crate) use config::ModelsConfigWrite;
@@ -32,6 +34,9 @@ pub(crate) use input::handle_mouse;
 pub(crate) use input::handle_paste;
 pub(crate) use render::render;
 
+use self::browser::BrowserFocus;
+use self::browser::BrowserScroll;
+use self::browser::SEARCH_ROW_ID;
 use self::capability_form::CapabilityFormState;
 use self::config::ConfigWriteTarget;
 use self::provider_form::ProviderFormState;
@@ -48,7 +53,9 @@ pub(crate) struct ModelsManagerState {
     providers: Vec<ProviderState>,
     current_provider: String,
     current_model: String,
-    query: String,
+    query: ComposerState,
+    browser_focus: BrowserFocus,
+    browser_scroll: BrowserScroll,
     selected: usize,
     scroll_offset: usize,
     detail: Option<Model>,
@@ -191,7 +198,9 @@ impl ModelsManagerState {
             providers,
             current_provider,
             current_model,
-            query: String::new(),
+            query: ComposerState::default(),
+            browser_focus: BrowserFocus::List,
+            browser_scroll: BrowserScroll::FollowSelection,
             selected: 0,
             scroll_offset: 0,
             detail: None,
@@ -237,7 +246,7 @@ impl ModelsManagerState {
     }
 
     pub(super) fn rows(&self) -> Vec<BrowserRow> {
-        let query = self.query.trim().to_lowercase();
+        let query = self.query.text().trim().to_lowercase();
         let mut rows = Vec::new();
         for (provider_index, provider) in self.providers.iter().enumerate() {
             let provider_matches = query.is_empty()
@@ -297,6 +306,7 @@ impl ModelsManagerState {
         match row {
             BrowserRow::AddProvider => {
                 self.provider_form = Some(ProviderFormState::add());
+                self.pointer.clear_hover();
                 ModelsManagerInput::Redraw
             }
             BrowserRow::AddModel { provider_index } => {
@@ -305,23 +315,12 @@ impl ModelsManagerState {
                     provider.id.clone(),
                     provider.name.clone(),
                 ));
+                self.pointer.clear_hover();
                 ModelsManagerInput::Redraw
             }
             BrowserRow::Provider { provider_index } => {
-                let provider = &mut self.providers[provider_index];
-                provider.expanded = !provider.expanded;
-                if provider.expanded
-                    && matches!(
-                        provider.load,
-                        ProviderLoad::NotLoaded | ProviderLoad::Failed(_)
-                    )
-                {
-                    provider.load = ProviderLoad::Loading;
-                    self.pending_request = Some(ProviderModelsRequest {
-                        generation: self.generation,
-                        provider_id: provider.id.clone(),
-                    });
-                }
+                let expanded = !self.providers[provider_index].expanded;
+                self.set_provider_expanded(provider_index, expanded);
                 ModelsManagerInput::Redraw
             }
             BrowserRow::EditProvider { provider_index } => {
@@ -330,6 +329,7 @@ impl ModelsManagerState {
                     provider.id.clone(),
                     provider.raw.clone(),
                 ));
+                self.pointer.clear_hover();
                 ModelsManagerInput::Redraw
             }
             BrowserRow::Status { provider_index } => {
@@ -351,26 +351,10 @@ impl ModelsManagerState {
                     .models
                     .get(model_index)
                     .cloned();
+                self.pointer.clear_hover();
                 ModelsManagerInput::Redraw
             }
         }
-    }
-
-    pub(super) fn move_selection(&mut self, delta: isize) {
-        let len = self.rows().len();
-        if len > 0 {
-            self.selected = (self.selected as isize + delta).rem_euclid(len as isize) as usize;
-        }
-    }
-
-    pub(super) fn set_selected(&mut self, selected: usize) {
-        if selected < self.rows().len() {
-            self.selected = selected;
-        }
-    }
-
-    pub(super) fn clamp_selection(&mut self) {
-        self.selected = self.selected.min(self.rows().len().saturating_sub(1));
     }
 }
 

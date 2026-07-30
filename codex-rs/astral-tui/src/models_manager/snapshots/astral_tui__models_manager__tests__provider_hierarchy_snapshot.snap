@@ -6,7 +6,7 @@ COLLAPSED
 
   ┌─ Models ────────────────────────────────────────────────────────────────────────────────[×]─┐
   │                                                                                             │
-  │  Search providers and loaded models…                                                        │
+  │    Search providers and loaded models…                                                      │
   │                                                                                             │
   │  ❯ ▸ DeepSeek  [deepseek]        current · chat_completions · https://api.deepseek.com/v1   │
   │    ▸ Anthropic  [anthropic]                anthropic_messages · https://api.anthropic.com   │
@@ -27,14 +27,14 @@ COLLAPSED
   │                                                                                             │
   │                                                                                             │
   │                                                                                             │
-  │                   Type to search · ↑/↓ navigate · Enter open · Esc close                    │
+  │             Type or / search · ↑/↓ navigate · ←/→ fold · Enter open · Esc back              │
   └─────────────────────────────────────────────────────────────────────────────────────────────┘
 
 EXPANDED
 
   ┌─ Models ────────────────────────────────────────────────────────────────────────────────[×]─┐
   │                                                                                             │
-  │  Search providers and loaded models…                                                        │
+  │    Search providers and loaded models…                                                      │
   │                                                                                             │
   │  ❯ ▾ DeepSeek  [deepseek]        current · chat_completions · https://api.deepseek.com/v1   │
   │        ◇ Settings                                                           Edit DeepSeek   │
@@ -55,7 +55,7 @@ EXPANDED
   │                                                                                             │
   │                                                                                             │
   │                                                                                             │
-  │                   Type to search · ↑/↓ navigate · Enter open · Esc close                    │
+  │             Type or / search · ↑/↓ navigate · ←/→ fold · Enter open · Esc back              │
   └─────────────────────────────────────────────────────────────────────────────────────────────┘
 
 ADD PROVIDER
