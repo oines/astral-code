@@ -121,6 +121,31 @@ fn real_plan_item_opens_review_only_after_its_live_plan_turn_completes() {
 }
 
 #[test]
+fn queued_follow_up_bypasses_plan_review_after_turn_completion() {
+    let mut surface = SurfaceState::new("thread-1");
+    surface.enqueue_follow_up(crate::PromptSubmission::text_only("refine the plan"));
+    let item = ServerNotification::ItemCompleted(ItemCompletedNotification {
+        thread_id: "thread-1".to_string(),
+        turn_id: "turn-1".to_string(),
+        item: ThreadItem::Plan {
+            id: "plan-1".to_string(),
+            text: "# Plan\n- implement".to_string(),
+        },
+        completed_at_ms: 20,
+    });
+
+    handle_plan_review_notification(&mut surface, &item, ModeKind::Plan);
+    handle_plan_review_notification(
+        &mut surface,
+        &turn_completed(TurnStatus::Completed, None),
+        ModeKind::Plan,
+    );
+
+    assert!(surface.plan_review().is_none());
+    assert_eq!(surface.queued_follow_ups(), 1);
+}
+
+#[test]
 fn ordinary_assistant_markdown_never_opens_plan_review() {
     let mut surface = SurfaceState::new("thread-1");
     let item = ServerNotification::ItemCompleted(ItemCompletedNotification {

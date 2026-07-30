@@ -24,6 +24,7 @@ impl SurfaceState {
         };
         if mode != ModeKind::Plan
             || !self.pending_requests.is_empty()
+            || self.has_queued_follow_ups()
             || self.plan_review.is_some()
             || self.modal.is_some()
             || self.thread_picker.is_some()
