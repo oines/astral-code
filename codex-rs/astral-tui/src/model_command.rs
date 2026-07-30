@@ -40,7 +40,7 @@ impl std::fmt::Display for ModelResolveError {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct ModelCatalog {
     models: Vec<Model>,
     current_model: String,

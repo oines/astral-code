@@ -513,6 +513,10 @@ impl SlashController {
         self.models.update_current(model, model_provider);
     }
 
+    pub(crate) fn model_catalog(&self) -> &ModelCatalog {
+        &self.models
+    }
+
     pub fn resolve_model(&self, args: &str) -> Result<ModelSelection, ModelResolveError> {
         self.models.resolve(args)
     }

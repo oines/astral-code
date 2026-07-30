@@ -7,6 +7,7 @@ mod file_search;
 mod file_viewer;
 mod history;
 mod mentions;
+mod model_picker;
 mod overlay;
 mod plan_review;
 mod pointer;
@@ -50,6 +51,7 @@ use crate::mention::MentionController;
 use crate::modal::ModalState;
 use crate::model_command::ModelResolveError;
 use crate::model_command::ModelSelection;
+use crate::model_picker::ModelPickerState;
 use crate::permission_picker::PermissionPickerState;
 use crate::permission_picker::display_permission_mode;
 use crate::plan_review::CompletedPlan;
@@ -151,6 +153,7 @@ pub struct SurfaceState {
     command_palette: Option<CommandPaletteState>,
     palette_stashed_submission: Option<PromptSubmission>,
     thread_picker: Option<PickerState>,
+    model_picker: Option<ModelPickerState>,
     permission_picker: Option<PermissionPickerState>,
     theme_picker: Option<ThemePickerState>,
     completed_plan: Option<CompletedPlan>,
@@ -194,6 +197,7 @@ impl SurfaceState {
             command_palette: None,
             palette_stashed_submission: None,
             thread_picker: None,
+            model_picker: None,
             permission_picker: None,
             theme_picker: None,
             completed_plan: None,
@@ -244,6 +248,7 @@ impl SurfaceState {
             command_palette: None,
             palette_stashed_submission: None,
             thread_picker: None,
+            model_picker: None,
             permission_picker: None,
             theme_picker: None,
             completed_plan: None,

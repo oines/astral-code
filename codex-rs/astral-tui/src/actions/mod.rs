@@ -18,6 +18,7 @@ pub(crate) enum ActionId {
     CommandPalette,
     CycleMode,
     ToggleMultiline,
+    ModelPicker,
     ShellMode,
     ShortcutsHelp,
     ToggleQueue,

@@ -14,6 +14,7 @@ pub(crate) enum ActiveOverlay {
     ThemePicker,
     PermissionPicker,
     ThreadPicker,
+    ModelPicker,
     CommandPalette,
     ShortcutHelp,
     InfoModal,
@@ -33,6 +34,8 @@ impl SurfaceState {
             Some(ActiveOverlay::PermissionPicker)
         } else if self.thread_picker().is_some() {
             Some(ActiveOverlay::ThreadPicker)
+        } else if self.model_picker().is_some() {
+            Some(ActiveOverlay::ModelPicker)
         } else if self.command_palette().is_some() {
             Some(ActiveOverlay::CommandPalette)
         } else if self.shortcut_help().is_some() {

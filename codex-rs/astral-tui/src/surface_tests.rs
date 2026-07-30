@@ -490,6 +490,52 @@ fn model_argument_menu_snapshot() {
     let session = session_state();
     let mut state = SurfaceState::from_session(&session);
     state.set_activity(SurfaceActivity::Ready);
+    set_test_model_catalog(&mut state, &session);
+    state.set_composer("/model ");
+
+    insta::assert_snapshot!(render_at_size(&mut state, &session, 80, 24));
+}
+
+#[test]
+fn model_picker_snapshot_and_effort_selection() {
+    let session = session_state();
+    let mut state = SurfaceState::from_session(&session);
+    state.set_activity(SurfaceActivity::Ready);
+    set_test_model_catalog(&mut state, &session);
+    let _ = render_at_size(&mut state, &session, 80, 24);
+    assert!(state.focus_scrollback());
+
+    assert_eq!(
+        handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Char('m'), KeyModifiers::CONTROL),
+        ),
+        InputAction::Redraw
+    );
+    insta::assert_snapshot!(render_at_size(&mut state, &session, 80, 24));
+
+    assert_eq!(
+        handle_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        ),
+        InputAction::Redraw
+    );
+    assert_eq!(
+        handle_key(&mut state, KeyEvent::new(KeyCode::End, KeyModifiers::NONE),),
+        InputAction::Redraw
+    );
+    let InputAction::Slash { invocation, .. } = handle_key(
+        &mut state,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+    ) else {
+        panic!("effort selection should dispatch /model");
+    };
+    assert_eq!(invocation.command, crate::SlashCommandId::Model);
+    assert_eq!(invocation.args, "Claude Sonnet 4 xhigh");
+}
+
+fn set_test_model_catalog(state: &mut SurfaceState, session: &SessionState) {
     state.set_model_catalog(
         vec![
             serde_json::from_value(json!({
@@ -520,9 +566,6 @@ fn model_argument_menu_snapshot() {
         session.model.clone(),
         session.model_provider.clone(),
     );
-    state.set_composer("/model ");
-
-    insta::assert_snapshot!(render_at_size(&mut state, &session, 80, 24));
 }
 
 #[test]

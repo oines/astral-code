@@ -25,6 +25,7 @@ mod mcp_form_schema;
 mod mention;
 mod modal;
 mod model_command;
+mod model_picker;
 mod permission_picker;
 mod plan_review;
 mod prompt_input_mode;

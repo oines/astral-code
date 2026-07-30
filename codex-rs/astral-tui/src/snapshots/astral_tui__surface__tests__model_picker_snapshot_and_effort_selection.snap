@@ -1,0 +1,25 @@
+---
+source: astral-tui/src/surface_tests.rs
+expression: "render_at_size(&mut state, &session, 80, 24)"
+---
+
+  ⎇ main  /workspace
+
+
+  › inspect this r┌─ Pick model ─────────────────────────[×]─┐
+                  │                                          │
+                  │  Search:                                 │
+  I’m tracing the │                                          │
+                  │  ❯ Claude Sonnet 4 (current)             │
+                  │                                          │
+                  │                                          │
+                  │                                          │
+                  │                                          │
+                  │                                          │
+                  │                                          │
+                  │                                          │
+                  │                                          │
+                  │                                          │
+  ╭───────────────│  ↑/↓ navigate · Enter select · Esc back  │───────────────╮
+  │ ❯             └──────────────────────────────────────────┘               │
+  ╰──────────────────────────────────────────── claude-sonnet-4 · workspace ─╯

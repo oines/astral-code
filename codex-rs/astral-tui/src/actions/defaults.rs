@@ -55,6 +55,21 @@ pub(super) fn default_actions() -> Vec<ActionDef> {
              Enter inserts a newline and Shift+Enter or Alt+Enter sends the prompt.",
         ),
         ActionDef::new(
+            ActionId::ModelPicker,
+            "model",
+            "Pick model",
+            KeyShortcut::control('m'),
+            Vec::new(),
+            Category::Session,
+            When::ScrollbackFocused,
+        )
+        .with_key_display("Ctrl+M")
+        .with_help(
+            "Opens the model picker without changing the current draft. \
+             Ctrl+M toggles multiline while the prompt is focused and opens \
+             this picker while the transcript is focused.",
+        ),
+        ActionDef::new(
             ActionId::ShellMode,
             "shell",
             "Shell mode",

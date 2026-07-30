@@ -50,6 +50,15 @@ impl ModalSizing {
         }
     }
 
+    pub(crate) const fn picker() -> Self {
+        Self {
+            width_percent: 50,
+            min_width: 44,
+            max_width: 80,
+            height: ModalHeight::Adaptive,
+        }
+    }
+
     const fn standard(height: ModalHeight) -> Self {
         Self {
             width_percent: 60,

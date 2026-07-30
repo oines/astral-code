@@ -23,6 +23,15 @@ pub(super) fn handle_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction
             state.focus_prompt();
             InputAction::Redraw
         }
+        Some(ActionId::ModelPicker) => {
+            if state.open_model_picker() {
+                InputAction::Redraw
+            } else {
+                InputAction::Notice(
+                    "Model selection is unavailable while Astral is working".to_string(),
+                )
+            }
+        }
         Some(ActionId::PreviousTurn) => {
             state.previous_turn();
             InputAction::Redraw

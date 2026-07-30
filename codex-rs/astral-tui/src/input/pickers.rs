@@ -4,8 +4,15 @@ use crossterm::event::KeyModifiers;
 use crossterm::event::MouseEvent;
 
 use super::InputAction;
+use crate::PromptSubmission;
+use crate::SlashCommandId;
+use crate::SlashInvocation;
 use crate::SurfaceState;
 use crate::modal::ModalPointerAction;
+use crate::model_picker::ModelPickerInput;
+use crate::model_picker::handle_key as handle_model_key;
+use crate::model_picker::handle_mouse as handle_model_mouse_event;
+use crate::model_picker::handle_paste as handle_model_paste;
 use crate::permission_picker::PermissionPickerInput;
 use crate::permission_picker::handle_key as handle_permission_key;
 use crate::permission_picker::handle_mouse as handle_permission_mouse_event;
@@ -179,6 +186,56 @@ fn apply_thread_input(state: &mut SurfaceState, input: PickerInput) -> InputActi
         }
         PickerInput::Cancel => {
             state.close_thread_picker();
+            InputAction::Redraw
+        }
+    }
+}
+
+pub(super) fn handle_model_picker_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
+    let input = state
+        .model_picker_mut()
+        .map(|picker| handle_model_key(picker, key))
+        .unwrap_or(ModelPickerInput::None);
+    apply_model_input(state, input)
+}
+
+pub(super) fn handle_model_picker_paste(state: &mut SurfaceState, text: &str) -> InputAction {
+    let input = state
+        .model_picker_mut()
+        .map(|picker| handle_model_paste(picker, text))
+        .unwrap_or(ModelPickerInput::None);
+    apply_model_input(state, input)
+}
+
+pub(super) fn handle_model_picker_mouse(
+    state: &mut SurfaceState,
+    mouse: MouseEvent,
+) -> InputAction {
+    let input = state
+        .model_picker_mut()
+        .map(|picker| handle_model_mouse_event(picker, mouse))
+        .unwrap_or(ModelPickerInput::None);
+    apply_model_input(state, input)
+}
+
+fn apply_model_input(state: &mut SurfaceState, input: ModelPickerInput) -> InputAction {
+    match input {
+        ModelPickerInput::None => InputAction::None,
+        ModelPickerInput::Redraw => InputAction::Redraw,
+        ModelPickerInput::Select(args) => {
+            state.close_model_picker();
+            state.record_slash(SlashCommandId::Model);
+            InputAction::Slash {
+                invocation: SlashInvocation {
+                    command: SlashCommandId::Model,
+                    name: "model",
+                    args,
+                },
+                submission: PromptSubmission::text_only(String::new()),
+            }
+        }
+        ModelPickerInput::Cancel => {
+            state.close_model_picker();
             InputAction::Redraw
         }
     }

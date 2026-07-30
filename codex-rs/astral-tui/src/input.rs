@@ -331,6 +331,7 @@ fn handle_overlay_key(
         ActiveOverlay::ThemePicker => pickers::handle_theme_picker_key(state, key),
         ActiveOverlay::PermissionPicker => pickers::handle_permission_picker_key(state, key),
         ActiveOverlay::ThreadPicker => pickers::handle_thread_picker_key(state, key),
+        ActiveOverlay::ModelPicker => pickers::handle_model_picker_key(state, key),
         ActiveOverlay::CommandPalette => command_palette::handle_key(state, key),
         ActiveOverlay::ShortcutHelp => shortcut_help::handle_key(state, key),
         ActiveOverlay::InfoModal => pickers::handle_info_modal_key(state, key),
@@ -353,6 +354,7 @@ fn handle_overlay_paste(
             picker.paste(text);
             InputAction::Redraw
         }
+        ActiveOverlay::ModelPicker => pickers::handle_model_picker_paste(state, text),
         ActiveOverlay::CommandPalette => command_palette::handle_paste(state, text),
         ActiveOverlay::ShortcutHelp => shortcut_help::handle_paste(state, text),
         ActiveOverlay::ThemePicker | ActiveOverlay::PermissionPicker | ActiveOverlay::InfoModal => {
@@ -373,6 +375,7 @@ fn handle_overlay_mouse(
         ActiveOverlay::ThemePicker => pickers::handle_theme_picker_mouse(state, mouse),
         ActiveOverlay::PermissionPicker => pickers::handle_permission_picker_mouse(state, mouse),
         ActiveOverlay::ThreadPicker => pickers::handle_thread_picker_mouse(state, mouse),
+        ActiveOverlay::ModelPicker => pickers::handle_model_picker_mouse(state, mouse),
         ActiveOverlay::CommandPalette => command_palette::handle_mouse(state, mouse),
         ActiveOverlay::ShortcutHelp => shortcut_help::handle_mouse(state, mouse),
         ActiveOverlay::InfoModal => pickers::handle_info_modal_mouse(state, mouse),
@@ -644,6 +647,7 @@ fn handle_composer_key(state: &mut SurfaceState, key: KeyEvent) -> InputAction {
         Some(
             ActionId::CycleMode
             | ActionId::ToggleMultiline
+            | ActionId::ModelPicker
             | ActionId::ShellMode
             | ActionId::CommandPalette
             | ActionId::ShortcutsHelp
