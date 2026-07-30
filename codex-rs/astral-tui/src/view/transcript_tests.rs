@@ -2,6 +2,7 @@ use astral_tui_scrollback::DisplayMode;
 use astral_tui_scrollback::LineJoiner;
 use astral_tui_scrollback::PresentationBlock;
 use astral_tui_scrollback::ToolKind;
+use astral_tui_scrollback::ToolOrigin;
 use astral_tui_scrollback::ToolPresentation;
 use astral_tui_scrollback::ToolStatus;
 use pretty_assertions::assert_eq;
@@ -37,6 +38,7 @@ fn command_block(index: usize) -> TranscriptBlock {
         item_id: format!("command-{index}"),
         block: PresentationBlock::Tool(ToolPresentation {
             kind: ToolKind::Execute,
+            origin: ToolOrigin::Agent,
             status: ToolStatus::Success,
             name: "exec_command".to_string(),
             title: format!("echo command-{index}"),
@@ -87,6 +89,7 @@ fn entry_accents_follow_grok_block_semantics() {
     let tool = |kind, status| {
         PresentationBlock::Tool(ToolPresentation {
             kind,
+            origin: ToolOrigin::Agent,
             status,
             name: String::new(),
             title: String::new(),

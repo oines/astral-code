@@ -1,4 +1,5 @@
 use codex_app_server_protocol::CommandAction;
+use codex_app_server_protocol::CommandExecutionSource;
 use codex_app_server_protocol::CommandExecutionStatus;
 use codex_app_server_protocol::CoreToolCallStatus;
 use codex_app_server_protocol::DynamicToolCallOutputContentItem;
@@ -365,6 +366,70 @@ fn execute_display_modes_snapshot() {
     .map(|(label, mode)| format!("{label}\n{}", render(item.clone(), mode)))
     .collect::<Vec<_>>()
     .join("\n\n");
+
+    assert_snapshot!(rendered);
+}
+
+#[test]
+fn user_shell_command_opens_when_it_finishes_snapshot() {
+    let running_item = ThreadItem::CommandExecution {
+        id: "user-shell".to_string(),
+        command: "/bin/zsh -lc 'printf shell-output'".to_string(),
+        cwd: AbsolutePathBuf::try_from("/workspace".to_string()).expect("absolute path"),
+        process_id: None,
+        source: CommandExecutionSource::UserShell,
+        status: CommandExecutionStatus::InProgress,
+        command_actions: vec![CommandAction::Unknown {
+            command: "printf shell-output".to_string(),
+        }],
+        aggregated_output: Some(
+            [
+                "line one",
+                "line two",
+                "line three",
+                "line four",
+                "line five",
+            ]
+            .join("\n"),
+        ),
+        exit_code: None,
+        duration_ms: None,
+    };
+    let running = PresentationBlock::from_item(&running_item, &TimelineStream::None)
+        .expect("user shell should produce a presentation block");
+    assert_eq!(running.default_display_mode(), DisplayMode::Truncated);
+
+    let mut finished_item = running_item;
+    let ThreadItem::CommandExecution {
+        status,
+        exit_code,
+        duration_ms,
+        ..
+    } = &mut finished_item
+    else {
+        unreachable!("fixture is a command execution");
+    };
+    *status = CommandExecutionStatus::Completed;
+    *exit_code = Some(0);
+    *duration_ms = Some(125);
+    let finished = PresentationBlock::from_item(&finished_item, &TimelineStream::None)
+        .expect("user shell should produce a presentation block");
+    assert_eq!(finished.default_display_mode(), DisplayMode::Expanded);
+
+    let rendered = [("RUNNING", running), ("FINISHED", finished)]
+        .into_iter()
+        .map(|(label, block)| {
+            let mode = block.default_display_mode();
+            let output = render_block(&block, RenderOptions::for_mode(68, mode))
+                .lines
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n");
+            format!("{label} ({mode:?})\n{output}")
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
 
     assert_snapshot!(rendered);
 }

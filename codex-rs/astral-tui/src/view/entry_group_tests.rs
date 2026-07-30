@@ -1,5 +1,6 @@
 use astral_tui_scrollback::PresentationBlock;
 use astral_tui_scrollback::ToolKind;
+use astral_tui_scrollback::ToolOrigin;
 use astral_tui_scrollback::ToolPresentation;
 use astral_tui_scrollback::ToolStatus;
 use pretty_assertions::assert_eq;
@@ -15,6 +16,7 @@ fn tool(item_id: &str, kind: ToolKind) -> TranscriptBlock {
         item_id: item_id.to_string(),
         block: PresentationBlock::Tool(ToolPresentation {
             kind,
+            origin: ToolOrigin::Agent,
             status: ToolStatus::Success,
             name: item_id.to_string(),
             title: item_id.to_string(),

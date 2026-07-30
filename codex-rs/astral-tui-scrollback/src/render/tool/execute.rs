@@ -8,9 +8,14 @@ use crate::DisplayMode;
 use crate::ToolPresentation;
 
 pub(super) fn render_execute(tool: &ToolPresentation, options: RenderOptions) -> Text<'static> {
+    let label = if tool.is_user_shell() {
+        "Run (user)"
+    } else {
+        "Run"
+    };
     let mut lines = vec![tool_header(
         tool,
-        "Run",
+        label,
         &single_line(&tool.title),
         Vec::new(),
     )];

@@ -1,6 +1,7 @@
 use astral_tui_scrollback::DisplayMode;
 use astral_tui_scrollback::PresentationBlock;
 use astral_tui_scrollback::ToolKind;
+use astral_tui_scrollback::ToolOrigin;
 use astral_tui_scrollback::ToolPresentation;
 use astral_tui_scrollback::ToolStatus;
 use pretty_assertions::assert_eq;
@@ -38,6 +39,7 @@ fn tool(status: ToolStatus) -> PresentationBlock {
 fn tool_with_kind(kind: ToolKind, status: ToolStatus) -> PresentationBlock {
     PresentationBlock::Tool(ToolPresentation {
         kind,
+        origin: ToolOrigin::Agent,
         status,
         name: "exec".to_string(),
         title: "cargo test".to_string(),

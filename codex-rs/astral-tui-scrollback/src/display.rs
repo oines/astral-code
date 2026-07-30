@@ -28,6 +28,13 @@ impl PresentationBlock {
             Self::Tool(tool) if tool.kind == ToolKind::Edit && !tool.changes.is_empty() => {
                 DisplayMode::Expanded
             }
+            Self::Tool(tool) if tool.is_user_shell() => match tool.status {
+                crate::ToolStatus::Running => DisplayMode::Truncated,
+                crate::ToolStatus::Success
+                | crate::ToolStatus::Failed
+                | crate::ToolStatus::Declined
+                | crate::ToolStatus::Interrupted => DisplayMode::Expanded,
+            },
             Self::Tool(_) => DisplayMode::Collapsed,
         }
     }

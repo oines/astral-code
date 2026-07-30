@@ -1,3 +1,5 @@
+use codex_app_server_protocol::CommandAction;
+use codex_app_server_protocol::CommandExecutionSource;
 use codex_app_server_protocol::DynamicToolCallOutputContentItem;
 use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::UserInput;
@@ -8,6 +10,7 @@ use crate::SubagentPresentation;
 use crate::TimelineStream;
 use crate::TodoPresentation;
 use crate::ToolKind;
+use crate::ToolOrigin;
 use crate::ToolPresentation;
 use crate::ToolStatus;
 use crate::tool_semantics::classify_tool_name;
@@ -89,9 +92,29 @@ impl PresentationBlock {
                 aggregated_output,
                 exit_code,
                 duration_ms,
+                source,
                 ..
             } => {
-                let (mut kind, title) = command_presentation(command, command_actions);
+                let origin = match source {
+                    CommandExecutionSource::UserShell => ToolOrigin::UserShell,
+                    CommandExecutionSource::Agent
+                    | CommandExecutionSource::UnifiedExecStartup
+                    | CommandExecutionSource::UnifiedExecInteraction => ToolOrigin::Agent,
+                };
+                let (mut kind, title) = if origin == ToolOrigin::UserShell {
+                    let title = match command_actions.as_slice() {
+                        [
+                            CommandAction::Read { command, .. }
+                            | CommandAction::ListFiles { command, .. }
+                            | CommandAction::Search { command, .. }
+                            | CommandAction::Unknown { command },
+                        ] => command.clone(),
+                        _ => command.clone(),
+                    };
+                    (ToolKind::Execute, title)
+                } else {
+                    command_presentation(command, command_actions)
+                };
                 let (stream_process_id, streamed_output, terminal_input) = match stream {
                     TimelineStream::Command {
                         process_id,
@@ -105,7 +128,7 @@ impl PresentationBlock {
                     _ => (None, "", &[][..]),
                 };
                 let process_id = process_id.as_deref().or(stream_process_id);
-                if process_id.is_some() {
+                if process_id.is_some() && origin == ToolOrigin::Agent {
                     kind = ToolKind::Background;
                 }
                 let output = merge_output(aggregated_output.as_deref(), streamed_output);
@@ -121,6 +144,7 @@ impl PresentationBlock {
                 }
                 Some(Self::Tool(ToolPresentation {
                     kind,
+                    origin,
                     status: command_status(status),
                     name: "command".to_string(),
                     title,
@@ -139,6 +163,7 @@ impl PresentationBlock {
                 };
                 Some(Self::Tool(ToolPresentation {
                     kind: ToolKind::Edit,
+                    origin: ToolOrigin::Agent,
                     status: patch_status(status),
                     name: "edit".to_string(),
                     title: edit_title(streamed_changes),
@@ -165,6 +190,7 @@ impl PresentationBlock {
                     .or_else(|| result.as_deref().and_then(mcp_result_text));
                 Some(Self::Tool(ToolPresentation {
                     kind: ToolKind::Mcp,
+                    origin: ToolOrigin::Agent,
                     status: mcp_status(status),
                     name: format!("{server}/{tool}"),
                     title,
@@ -194,6 +220,7 @@ impl PresentationBlock {
                 }
                 Some(Self::Tool(ToolPresentation {
                     kind,
+                    origin: ToolOrigin::Agent,
                     status,
                     name: namespace
                         .as_ref()
@@ -227,6 +254,7 @@ impl PresentationBlock {
                 }
                 Some(Self::Tool(ToolPresentation {
                     kind,
+                    origin: ToolOrigin::Agent,
                     status,
                     name: tool.clone(),
                     title: tool_call_title(kind, tool, arguments),
@@ -256,6 +284,7 @@ impl PresentationBlock {
             ))),
             ThreadItem::WebSearch { query, .. } => Some(Self::Tool(ToolPresentation {
                 kind: ToolKind::WebSearch,
+                origin: ToolOrigin::Agent,
                 status: ToolStatus::Success,
                 name: "web_search".to_string(),
                 title: query.clone(),
@@ -266,6 +295,7 @@ impl PresentationBlock {
             })),
             ThreadItem::ImageView { path, .. } => Some(Self::Tool(ToolPresentation {
                 kind: ToolKind::ImageView,
+                origin: ToolOrigin::Agent,
                 status: ToolStatus::Success,
                 name: "view_image".to_string(),
                 title: compact_path(path.as_path()),
@@ -281,6 +311,7 @@ impl PresentationBlock {
                 ..
             } => Some(Self::Tool(ToolPresentation {
                 kind: ToolKind::ImageGeneration,
+                origin: ToolOrigin::Agent,
                 status: status_from_text(status),
                 name: "image_generation".to_string(),
                 title: saved_path.as_ref().map_or_else(
@@ -344,6 +375,7 @@ impl PresentationBlock {
                     } else {
                         ToolKind::Execute
                     },
+                    origin: ToolOrigin::Agent,
                     status: ToolStatus::Running,
                     name: "command".to_string(),
                     title: "Running command".to_string(),
@@ -357,6 +389,7 @@ impl PresentationBlock {
                 output, changes, ..
             } => Some(Self::Tool(ToolPresentation {
                 kind: ToolKind::Edit,
+                origin: ToolOrigin::Agent,
                 status: ToolStatus::Running,
                 name: "edit".to_string(),
                 title: edit_title(changes),
