@@ -39,9 +39,12 @@ fn current_reasoning_effort_restores_missing_provider_options() {
     let mut current = model("deepseek-v4-pro", "DeepSeek V4 Pro", Vec::new());
     current.default_reasoning_effort = ReasoningEffort::None;
     current.capabilities.supports_reasoning = Some(false);
+    let mut flash = model("deepseek-v4-flash", "DeepSeek V4 Flash", Vec::new());
+    flash.default_reasoning_effort = ReasoningEffort::None;
+    flash.capabilities.supports_reasoning = Some(false);
     let mut catalog = ModelCatalog::default();
     catalog.replace(
-        vec![current],
+        vec![current, flash],
         "deepseek-v4-pro",
         "openai",
         Some(ReasoningEffort::XHigh),
@@ -49,11 +52,18 @@ fn current_reasoning_effort_restores_missing_provider_options() {
 
     assert_eq!(
         catalog.suggestions(""),
-        vec![super::ModelSuggestion {
-            display: "DeepSeek V4 Pro (current)".to_string(),
-            description: "General coding model".to_string(),
-            insert_text: "/model DeepSeek V4 Pro ".to_string(),
-        }]
+        vec![
+            super::ModelSuggestion {
+                display: "DeepSeek V4 Pro (current)".to_string(),
+                description: "General coding model".to_string(),
+                insert_text: "/model DeepSeek V4 Pro ".to_string(),
+            },
+            super::ModelSuggestion {
+                display: "DeepSeek V4 Flash".to_string(),
+                description: "General coding model".to_string(),
+                insert_text: "/model DeepSeek V4 Flash ".to_string(),
+            },
+        ]
     );
     assert_eq!(
         catalog
@@ -98,6 +108,32 @@ fn current_reasoning_effort_restores_missing_provider_options() {
             display_name: "DeepSeek V4 Pro".to_string(),
             effort: ReasoningEffort::High,
         })
+    );
+
+    catalog.update_current("deepseek-v4-flash", "openai", Some(ReasoningEffort::None));
+    assert_eq!(
+        catalog
+            .suggestions("DeepSeek V4 Flash ")
+            .into_iter()
+            .map(|suggestion| (suggestion.display, suggestion.insert_text))
+            .collect::<Vec<_>>(),
+        vec![(
+            "none (active)".to_string(),
+            "/model DeepSeek V4 Flash none".to_string(),
+        )]
+    );
+    assert_eq!(
+        catalog
+            .suggestions("DeepSeek V4 Pro ")
+            .into_iter()
+            .map(|suggestion| suggestion.insert_text)
+            .collect::<Vec<_>>(),
+        vec![
+            "/model DeepSeek V4 Pro xhigh".to_string(),
+            "/model DeepSeek V4 Pro high".to_string(),
+            "/model DeepSeek V4 Pro medium".to_string(),
+            "/model DeepSeek V4 Pro low".to_string(),
+        ]
     );
 }
 

@@ -504,7 +504,9 @@ fn disconnected_slash_command_menu_snapshot() {
 
 #[test]
 fn model_argument_menu_snapshot() {
-    let session = session_state();
+    let mut session = session_state();
+    session.collaboration_mode.settings.reasoning_effort =
+        Some(codex_protocol::openai_models::ReasoningEffort::High);
     let mut state = SurfaceState::from_session(&session);
     state.set_activity(SurfaceActivity::Ready);
     set_test_model_catalog(&mut state, &session);

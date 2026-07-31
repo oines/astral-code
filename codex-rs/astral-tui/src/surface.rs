@@ -18,6 +18,7 @@ mod requests;
 mod subagent;
 mod transcript_cache;
 
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use astral_terminal_inline::LinkSpan;
@@ -1194,7 +1195,13 @@ pub(crate) fn render_surface_with_view(
         };
         let flags = [mode, multiline];
         let prompt_input_mode = state.prompt_input_mode();
-        let prompt_info = prompt_input_mode.info().unwrap_or(&session.model);
+        let prompt_info = if let Some(info) = prompt_input_mode.info() {
+            Cow::Borrowed(info)
+        } else if let Some(effort) = session.collaboration_mode.reasoning_effort() {
+            Cow::Owned(format!("{} ({effort})", session.model))
+        } else {
+            Cow::Borrowed(session.model.as_str())
+        };
         let prompt_flags: &[&str] = if prompt_input_mode.is_shell() {
             &[]
         } else {
@@ -1208,7 +1215,7 @@ pub(crate) fn render_surface_with_view(
             } else {
                 session.thread.name.as_deref()
             },
-            model: prompt_info,
+            model: prompt_info.as_ref(),
             flags: prompt_flags,
             ghost: (!revising_plan && !history.open && !prompt_input_mode.is_shell())
                 .then_some(slash.ghost.as_deref())

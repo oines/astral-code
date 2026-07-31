@@ -3,6 +3,7 @@
 use codex_app_server_protocol::Model;
 use codex_app_server_protocol::ReasoningEffortOption;
 use codex_protocol::openai_models::ReasoningEffort;
+use std::collections::HashSet;
 
 use crate::slash::fuzzy_match;
 
@@ -54,6 +55,7 @@ pub(crate) struct ModelCatalog {
     current_model: String,
     current_provider: String,
     current_effort: Option<ReasoningEffort>,
+    observed_reasoning_models: HashSet<(String, String)>,
 }
 
 impl ModelCatalog {
@@ -68,6 +70,14 @@ impl ModelCatalog {
         self.current_model = current_model.into();
         self.current_provider = current_provider.into();
         self.current_effort = current_effort;
+        let available_models = self
+            .models
+            .iter()
+            .map(model_identity)
+            .collect::<HashSet<_>>();
+        self.observed_reasoning_models
+            .retain(|identity| available_models.contains(identity));
+        self.remember_current_reasoning_model();
     }
 
     pub(crate) fn update_current(
@@ -79,6 +89,7 @@ impl ModelCatalog {
         self.current_model = model.into();
         self.current_provider = model_provider.into();
         self.current_effort = effort;
+        self.remember_current_reasoning_model();
     }
 
     pub(crate) fn suggestions(&self, args_query: &str) -> Vec<ModelSuggestion> {
@@ -107,21 +118,14 @@ impl ModelCatalog {
         });
         ranked
             .into_iter()
-            .map(|(model, _, current, _)| {
-                let suffix = if self.supports_reasoning_effort(model) {
-                    " "
+            .map(|(model, _, current, _)| ModelSuggestion {
+                display: if current {
+                    format!("{} (current)", model.display_name)
                 } else {
-                    ""
-                };
-                ModelSuggestion {
-                    display: if current {
-                        format!("{} (current)", model.display_name)
-                    } else {
-                        model.display_name.clone()
-                    },
-                    description: model.description.clone(),
-                    insert_text: format!("/model {}{suffix}", model.display_name),
-                }
+                    model.display_name.clone()
+                },
+                description: model.description.clone(),
+                insert_text: format!("/model {} ", model.display_name),
             })
             .collect()
     }
@@ -142,10 +146,7 @@ impl ModelCatalog {
         if let Some((_, effort)) = self.effort_phase(args) {
             return !effort.is_empty() && self.resolve(args).is_ok();
         }
-        self.models
-            .iter()
-            .find(|model| model_name_matches(model, args.trim()))
-            .is_some_and(|model| !self.supports_reasoning_effort(model))
+        false
     }
 
     pub(crate) fn resolve(&self, args: &str) -> Result<ModelSelection, ModelResolveError> {
@@ -243,9 +244,8 @@ impl ModelCatalog {
             .models
             .iter()
             .flat_map(|model| model_names(model).map(move |name| (model, name)))
-            .filter(|(model, name)| {
-                self.supports_reasoning_effort(model)
-                    && args_query.len() > name.len()
+            .filter(|(_, name)| {
+                args_query.len() > name.len()
                     && args_query
                         .get(..name.len())
                         .is_some_and(|prefix| prefix.eq_ignore_ascii_case(name))
@@ -270,11 +270,9 @@ impl ModelCatalog {
         !model.supported_reasoning_efforts.is_empty()
             || model.capabilities.supports_reasoning == Some(true)
             || model.default_reasoning_effort != ReasoningEffort::None
-            || (self.is_current(model)
-                && self
-                    .current_effort
-                    .as_ref()
-                    .is_some_and(|effort| effort != &ReasoningEffort::None))
+            || self
+                .observed_reasoning_models
+                .contains(&model_identity(model))
     }
 
     fn reasoning_effort_options(&self, model: &Model) -> Vec<ReasoningEffortOption> {
@@ -282,7 +280,10 @@ impl ModelCatalog {
             return model.supported_reasoning_efforts.clone();
         }
         if !self.supports_reasoning_effort(model) {
-            return Vec::new();
+            return vec![ReasoningEffortOption {
+                reasoning_effort: ReasoningEffort::None,
+                description: "No reasoning".to_string(),
+            }];
         }
         LEGACY_REASONING_EFFORTS
             .iter()
@@ -291,6 +292,17 @@ impl ModelCatalog {
                 description: (*description).to_string(),
             })
             .collect()
+    }
+
+    fn remember_current_reasoning_model(&mut self) {
+        if self
+            .current_effort
+            .as_ref()
+            .is_some_and(|effort| effort != &ReasoningEffort::None)
+        {
+            self.observed_reasoning_models
+                .insert((self.current_provider.clone(), self.current_model.clone()));
+        }
     }
 }
 
@@ -311,6 +323,10 @@ fn model_names(model: &Model) -> impl Iterator<Item = &str> {
         model.id.as_str(),
     ]
     .into_iter()
+}
+
+fn model_identity(model: &Model) -> (String, String) {
+    (model.model_provider.clone(), model.model.clone())
 }
 
 fn selection(model: &Model, effort: ReasoningEffort) -> ModelSelection {
