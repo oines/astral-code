@@ -73,8 +73,10 @@ use crate::view::ScrollbackMouseAction;
 mod input_reader;
 mod mentions;
 mod plan;
+mod presenter;
 
 use self::input_reader::TerminalEventReader;
+use self::presenter::Presenter;
 
 type AstralTerminal = Terminal<CrosstermBackend<Stdout>>;
 
@@ -238,28 +240,27 @@ async fn run_loop(
     let mut provider_model_tasks = JoinSet::new();
     let mut _clipboard_lease = None;
     let mut mouse_scroll = MouseScrollState::default();
-    let mut needs_draw = true;
+    let mut presenter = Presenter::new(Instant::now());
 
     loop {
-        needs_draw |= surface.poll_scrollback_search();
+        if surface.poll_scrollback_search() {
+            presenter.request(Instant::now());
+        }
         if let Some(request) = surface.take_file_search_request() {
             file_search_tasks.abort_all();
             spawn_file_search(session, &mut file_search_tasks, request);
-            needs_draw = true;
+            presenter.request(Instant::now());
         }
         if let Some(request) = surface.take_file_viewer_request() {
             file_viewer_tasks.abort_all();
             spawn_file_viewer(session, &mut file_viewer_tasks, request);
-            needs_draw = true;
+            presenter.request(Instant::now());
         }
         if let Some(request) = surface.take_provider_models_request() {
             spawn_provider_models(session, &mut provider_model_tasks, request);
-            needs_draw = true;
+            presenter.request(Instant::now());
         }
-        if needs_draw {
-            draw(terminal, session, surface, &options)?;
-            needs_draw = false;
-        }
+        let frame_deadline = presenter.deadline().map(tokio::time::Instant::from_std);
         let selection_expiry = surface
             .scrollback_selection_expiry()
             .map(tokio::time::Instant::from_std);
@@ -273,36 +274,54 @@ async fn run_loop(
             .map(tokio::time::Instant::from_std);
 
         tokio::select! {
+            _ = async {
+                if let Some(deadline) = frame_deadline {
+                    tokio::time::sleep_until(deadline).await;
+                }
+            }, if frame_deadline.is_some() => {
+                draw(terminal, session, surface, &options)?;
+                presenter.mark_presented(Instant::now());
+            }
             _ = tokio::time::sleep(Duration::from_millis(16)), if search_pending => {
-                needs_draw |= surface.poll_scrollback_search();
+                if surface.poll_scrollback_search() {
+                    presenter.request(Instant::now());
+                }
             }
             _ = async {
                 if let Some(delay) = scroll_deadline {
                     tokio::time::sleep(delay).await;
                 }
             }, if scroll_deadline.is_some() => {
-                needs_draw |= apply_scroll_lines(surface, mouse_scroll.on_tick());
+                if apply_scroll_lines(surface, mouse_scroll.on_tick()) {
+                    presenter.request(Instant::now());
+                }
             }
             _ = async {
                 if let Some(expiry) = selection_expiry {
                     tokio::time::sleep_until(expiry).await;
                 }
             }, if selection_expiry.is_some() => {
-                needs_draw |= surface.expire_scrollback_selection();
+                if surface.expire_scrollback_selection() {
+                    presenter.request(Instant::now());
+                }
             }
             _ = async {
                 if let Some(deadline) = pending_action_deadline {
                     tokio::time::sleep_until(deadline).await;
                 }
             }, if pending_action_deadline.is_some() => {
-                needs_draw |= surface.expire_pending_action(Instant::now());
+                if surface.expire_pending_action(Instant::now()) {
+                    presenter.request(Instant::now());
+                }
             }
             _ = async {
                 if let Some(deadline) = prompt_drag_deadline {
                     tokio::time::sleep_until(deadline).await;
                 }
             }, if prompt_drag_deadline.is_some() => {
-                needs_draw |= surface.tick_composer_drag(Instant::now());
+                if surface.tick_composer_drag(Instant::now()) {
+                    presenter.request(Instant::now());
+                }
             }
             terminal_event = input.recv() => {
                 let Some(terminal_event) = terminal_event else {
@@ -370,7 +389,7 @@ async fn run_loop(
                                 &options,
                             )
                             .await?;
-                            needs_draw = true;
+                            presenter.request(Instant::now());
                             continue;
                         }
                         if let Some(reason) =
@@ -379,16 +398,16 @@ async fn run_loop(
                             reject_pending(session, surface).await;
                             return Ok(reason);
                         }
-                        needs_draw = true;
+                        presenter.request(Instant::now());
                     }
                     Event::Paste(text) => {
                         mouse_scroll.cancel();
                         let _ = handle_paste(surface, &text);
-                        needs_draw = true;
+                        presenter.request(Instant::now());
                     }
                     Event::Resize(_, _) => {
                         mouse_scroll.cancel();
-                        needs_draw = true;
+                        presenter.request(Instant::now());
                     }
                     Event::Mouse(mouse) => {
                         if options.viewport == RunViewport::Fullscreen {
@@ -405,7 +424,9 @@ async fn run_loop(
                                         direction.expect("checked above"),
                                         config,
                                     );
-                                    needs_draw |= apply_scroll_lines(surface, lines);
+                                    if apply_scroll_lines(surface, lines) {
+                                        presenter.request(Instant::now());
+                                    }
                                 }
                                 InputAction::None => {
                                     mouse_scroll.cancel();
@@ -454,7 +475,7 @@ async fn run_loop(
                                                 .await?;
                                             }
                                         }
-                                        needs_draw = true;
+                                        presenter.request(Instant::now());
                                     }
                                 }
                                 InputAction::CopyText { text, notice } => {
@@ -466,7 +487,7 @@ async fn run_loop(
                                         }
                                         Err(error) => surface.set_notice(error),
                                     }
-                                    needs_draw = true;
+                                    presenter.request(Instant::now());
                                 }
                                 action => {
                                     mouse_scroll.cancel();
@@ -481,7 +502,7 @@ async fn run_loop(
                                         reject_pending(session, surface).await;
                                         return Ok(reason);
                                     }
-                                    needs_draw = true;
+                                    presenter.request(Instant::now());
                                 }
                             }
                         }
@@ -508,7 +529,7 @@ async fn run_loop(
                     app_event,
                 )
                 .await?;
-                needs_draw = true;
+                presenter.request(Instant::now());
             }
             completion = client_tool_tasks.join_next(), if !client_tool_tasks.is_empty() => {
                 if let Some(completion) = completion {
@@ -518,22 +539,24 @@ async fn run_loop(
                         )))
                     })?;
                     resolve_client_tool(session, surface, completion).await?;
-                    needs_draw = true;
+                    presenter.request(Instant::now());
                 }
             }
             completion = file_search_tasks.join_next(), if !file_search_tasks.is_empty() => {
                 match completion {
                     Some(Ok(completion)) => {
-                        needs_draw |= apply_file_search_completion(
+                        if apply_file_search_completion(
                             session,
                             surface,
                             completion,
-                        );
+                        ) {
+                            presenter.request(Instant::now());
+                        }
                     }
                     Some(Err(error)) if error.is_cancelled() => {}
                     Some(Err(error)) => {
                         surface.set_notice(format!("File search task failed: {error}"));
-                        needs_draw = true;
+                        presenter.request(Instant::now());
                     }
                     None => {}
                 }
@@ -541,16 +564,18 @@ async fn run_loop(
             completion = file_viewer_tasks.join_next(), if !file_viewer_tasks.is_empty() => {
                 match completion {
                     Some(Ok(completion)) => {
-                        needs_draw |= apply_file_viewer_completion(
+                        if apply_file_viewer_completion(
                             session,
                             surface,
                             completion,
-                        );
+                        ) {
+                            presenter.request(Instant::now());
+                        }
                     }
                     Some(Err(error)) if error.is_cancelled() => {}
                     Some(Err(error)) => {
                         surface.set_notice(format!("File viewer task failed: {error}"));
-                        needs_draw = true;
+                        presenter.request(Instant::now());
                     }
                     None => {}
                 }
@@ -558,16 +583,18 @@ async fn run_loop(
             completion = provider_model_tasks.join_next(), if !provider_model_tasks.is_empty() => {
                 match completion {
                     Some(Ok(completion)) => {
-                        needs_draw |= surface.apply_provider_models(
+                        if surface.apply_provider_models(
                             completion.generation,
                             &completion.provider_id,
                             completion.result.map_err(|error| error.to_string()),
-                        );
+                        ) {
+                            presenter.request(Instant::now());
+                        }
                     }
                     Some(Err(error)) if error.is_cancelled() => {}
                     Some(Err(error)) => {
                         surface.set_notice(format!("Model discovery task failed: {error}"));
-                        needs_draw = true;
+                        presenter.request(Instant::now());
                     }
                     None => {}
                 }
@@ -1272,7 +1299,7 @@ async fn handle_app_event(
         .map(|state| state.thread.id.clone())
         .ok_or(RunError::NoThread)?;
     match event {
-        AppServerEvent::Lagged { skipped } => surface.conversation_mut().record_lag(skipped),
+        AppServerEvent::Lagged { .. } => {}
         AppServerEvent::ServerNotification(notification) => {
             let should_drain_follow_up = matches!(
                 &notification,
