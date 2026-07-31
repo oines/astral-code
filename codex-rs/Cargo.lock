@@ -595,6 +595,7 @@ dependencies = [
  "shlex",
  "supports-color 3.0.2",
  "tempfile",
+ "textwrap 0.16.2",
  "tokio",
  "tokio-stream",
  "unicode-segmentation",
