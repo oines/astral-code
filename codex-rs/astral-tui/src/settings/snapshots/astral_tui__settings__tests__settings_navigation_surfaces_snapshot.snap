@@ -1,0 +1,124 @@
+---
+source: astral-tui/src/settings/settings_tests.rs
+expression: "format!(\"ROOT\\n{root}\\n\\nTOOLS\\n{tools}\\n\\nSEARCH\\n{search}\\n\\nMEMORY\\n{memory}\\n\\nNARROW\\n{narrow}\")"
+---
+ROOT
+
+              ┌─ Settings ──────────────────────────────────────────────────[×]─┐
+              │                                                                 │
+              │    Search settings by name, description, or key…                │
+              │                                                                 │
+              │  ❯ › Models & Providers                   deepseek-chat · high  │
+              │      Default models, providers, discovery, and capabilities     │
+              │    › Tools & Search                        Codex · Live search  │
+              │      Tool surface, web search, and provider credentials         │
+              │    › Memory                      Session off · compact enqueue  │
+              │      Session compaction and long-term memories                  │
+              │    › Appearance & Input                             Astral Day  │
+              │      Theme, terminal behavior, input, and notifications         │
+              │    › Permissions & Safety                            workspace  │
+              │      Default permission profile and legacy safety controls      │
+              │    › Features                                      0/0 enabled  │
+              │      Stable and beta capabilities reported by app-server        │
+              │    › Advanced                                                   │
+              │      Prompts, templates, experimental, and legacy settings      │
+              │                                                                 │
+              │                                                                 │
+              │                                                                 │
+              │             j/k · Enter open · / search · Esc close             │
+              └─────────────────────────────────────────────────────────────────┘
+
+TOOLS
+
+              ┌─ Tools & Search ────────────────────────────────────────────[×]─┐
+              │                                                                 │
+              │  ‹ Settings  /  Tools & Search                                  │
+              │                                                                 │
+              │    Search settings by name, description, or key…                │
+              │                                                                 │
+              │  ❯ ▸ Tool surface                                        Codex  │
+              │    ▸ Web search mode                                      Live  │
+              │    › Search provider                                      Open  │
+              │                                                                 │
+              │                                                                 │
+              │                                                                 │
+              │                                                                 │
+              │                                                                 │
+              │                                                                 │
+              │                                                                 │
+              │                                                                 │
+              │                                                                 │
+              │                                                                 │
+              │                                                                 │
+              │                                                                 │
+              │            j/k · Enter · l info · d reset · Esc back            │
+              └─────────────────────────────────────────────────────────────────┘
+
+SEARCH
+
+              ┌─ Search Provider ───────────────────────────────────────────[×]─┐
+              │                                                                 │
+              │  ‹ Settings  /  Tools & Search  /  Search Provider              │
+              │                                                                 │
+              │  Tavily, Exa, Jina, Brave, or SerpAPI                           │
+              │  tools.web_search.provider · User · /Users/test/.astral-code/…  │
+              │  Per-request domains, recency, and limit stay model-controlle…  │
+              │                                                                 │
+              │  ❯ › Provider                                           tavily  │
+              │    › API key                                 Configured · keep  │
+              │    › Context size                                       medium  │
+              │    › Allowed domains                       docs.rs, github.com  │
+              │    › Country                                                SG  │
+              │    › Region                                            Not set  │
+              │    › City                                            Singapore  │
+              │    › Timezone                                   Asia/Singapore  │
+              │                                                                 │
+              │                                                                 │
+              │                                                                 │
+              │    ◆ Save search settings                           No changes  │
+              │                                                                 │
+              │            j/k · Enter edit · Ctrl+S save · Esc back            │
+              └─────────────────────────────────────────────────────────────────┘
+
+MEMORY
+
+              ┌─ Session Memory Templates ──────────────────────────────────[×]─┐
+              │                                                                 │
+              │  ‹ Settings  /  Advanced  /  Session Memory Templates           │
+              │                                                                 │
+              │  Choose the built-in template, inline text, or a file path      │
+              │  session_memory_template · User · /Users/test/.astral-code/co…  │
+              │  Inline clears File, and File clears Inline, on Save.           │
+              │                                                                 │
+              │  ❯ › Summary template source                            Inline  │
+              │    › Summary template           Keep decisions and active wor…  │
+              │    › Update prompt source                             Built-in  │
+              │    › Update prompt                                    Built-in  │
+              │                                                                 │
+              │                                                                 │
+              │                                                                 │
+              │                                                                 │
+              │                                                                 │
+              │                                                                 │
+              │                                                                 │
+              │    ◆ Save template settings                         No changes  │
+              │                                                                 │
+              │            j/k · Enter edit · Ctrl+S save · Esc back            │
+              └─────────────────────────────────────────────────────────────────┘
+
+NARROW
+
+    ┌─ Settings ───────────────────────────[×]─┐
+    │                                          │
+    │    Search settings by name, description  │
+    │                                          │
+    │  ❯ › Models & Providers                  │
+    │      deepseek-chat · hi…                 │
+    │    › Tools & Search                      │
+    │      Codex · Live search                 │
+    │    › Memory                              │
+    │      Session off · comp…                 │
+    │                                          │
+    │                                          │
+    │ j/k · Enter open · / search · Esc close  │
+    └──────────────────────────────────────────┘
