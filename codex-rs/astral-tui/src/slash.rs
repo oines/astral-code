@@ -19,7 +19,7 @@ const MAX_MODEL_MATCHES: usize = 20;
 pub enum SlashCommandId {
     Model,
     Effort,
-    Models,
+    Settings,
     Compact,
     New,
     Resume,
@@ -126,9 +126,9 @@ const COMMANDS: &[CommandSpec] = &[
         Idle
     ),
     command!(
-        Models,
-        "models",
-        "Manage providers and model capabilities",
+        Settings,
+        "settings",
+        "Configure Astral without editing config.toml",
         Args::None,
         Idle
     ),

@@ -45,7 +45,38 @@ fn provider_hierarchy_snapshot() {
             }
         },
         "origins": {},
-        "layers": null
+        "layers": [
+            {
+                "name": {
+                    "type": "user",
+                    "file": "/Users/test/.astral-code/config.toml",
+                    "profile": null
+                },
+                "version": "user-v1",
+                "config": {
+                    "model_providers": {
+                        "deepseek": {
+                            "name": "DeepSeek",
+                            "base_url": "https://api.deepseek.com/v1",
+                            "env_key": "DEEPSEEK_API_KEY",
+                            "wire_api": "chat_completions"
+                        },
+                        "anthropic": {
+                            "name": "Anthropic",
+                            "base_url": "https://api.anthropic.com",
+                            "env_key": "ANTHROPIC_API_KEY",
+                            "wire_api": "anthropic_messages"
+                        }
+                    },
+                    "model_capabilities": {
+                        "deepseek/deepseek-chat": {
+                            "context_window": 128000,
+                            "supports_tools": true
+                        }
+                    }
+                }
+            }
+        ]
     }))
     .expect("valid config response");
     let models = vec![Model {
@@ -91,9 +122,18 @@ fn provider_hierarchy_snapshot() {
     );
 
     let collapsed = render_state(&mut state);
-    let _ = state.activate(0);
+    let active_provider = state
+        .rows()
+        .iter()
+        .position(|row| matches!(row, BrowserRow::Provider { provider_index: 0 }))
+        .expect("active provider row");
+    let _ = state.activate(active_provider);
     let expanded = render_state(&mut state);
-    let add_provider = state.rows().len().saturating_sub(1);
+    let add_provider = state
+        .rows()
+        .iter()
+        .position(|row| matches!(row, BrowserRow::AddProvider))
+        .expect("add provider row");
     let _ = state.activate(add_provider);
     let provider_form = render_state(&mut state);
     let _ = state.close_panel();
@@ -175,7 +215,7 @@ fn search_editing_resets_selection_and_esc_unwinds_before_close() {
 fn render_state(state: &mut ModelsManagerState) -> String {
     let area = Rect::new(0, 0, 100, 28);
     let mut buffer = Buffer::empty(area);
-    render(state, area, &mut buffer, AstralTheme::default());
+    render(state, area, &mut buffer, AstralTheme::default(), None);
     (0..area.height)
         .map(|y| {
             (0..area.width)

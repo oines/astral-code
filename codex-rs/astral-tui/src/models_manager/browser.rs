@@ -35,6 +35,18 @@ impl ModelsManagerState {
         self.pointer.clear_hover();
     }
 
+    pub(super) fn move_search_selection(&mut self, delta: isize) {
+        let len = self.rows().len();
+        if len > 0 {
+            self.selected = self
+                .selected
+                .saturating_add_signed(delta)
+                .min(len.saturating_sub(1));
+        }
+        self.browser_scroll = BrowserScroll::FollowSelection;
+        self.pointer.clear_hover();
+    }
+
     pub(super) fn set_selected(&mut self, selected: usize) {
         if selected < self.rows().len() {
             self.selected = selected;
@@ -63,6 +75,24 @@ impl ModelsManagerState {
         self.scroll_offset = self.scroll_offset.saturating_add_signed(delta);
         self.browser_focus = BrowserFocus::List;
         self.browser_scroll = BrowserScroll::Manual;
+        self.pointer.clear_hover();
+    }
+
+    pub(super) fn scroll_detail(&mut self, delta: isize) {
+        self.detail_scroll_offset = self
+            .detail_scroll_offset
+            .saturating_add_signed(delta)
+            .min(super::DETAIL_ROW_COUNT.saturating_sub(1));
+        self.pointer.clear_hover();
+    }
+
+    pub(super) fn detail_to_start(&mut self) {
+        self.detail_scroll_offset = 0;
+        self.pointer.clear_hover();
+    }
+
+    pub(super) fn detail_to_end(&mut self) {
+        self.detail_scroll_offset = super::DETAIL_ROW_COUNT.saturating_sub(1);
         self.pointer.clear_hover();
     }
 
@@ -135,6 +165,7 @@ impl ModelsManagerState {
             }
             BrowserRow::AddModel { provider_index }
             | BrowserRow::EditProvider { provider_index }
+            | BrowserRow::DeleteProvider { provider_index }
             | BrowserRow::Status { provider_index }
             | BrowserRow::Model { provider_index, .. } => provider_index,
             BrowserRow::AddProvider => return,
@@ -168,6 +199,15 @@ impl ModelsManagerState {
                 provider_id: provider.id.clone(),
             });
         }
+    }
+
+    pub(super) fn provider_toggle_hit(&self, row_index: usize, column: u16, row: u16) -> bool {
+        self.provider_toggle_hits
+            .get(row_index)
+            .and_then(Option::as_ref)
+            .is_some_and(|area| {
+                column >= area.x && column < area.right() && row >= area.y && row < area.bottom()
+            })
     }
 
     fn reset_filtered_navigation(&mut self) {

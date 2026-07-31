@@ -7,10 +7,28 @@ use super::ModelsManagerInput;
 use super::ModelsManagerState;
 use super::ProviderLoad;
 use super::ProviderModelsRequest;
+use super::capability_form::CapabilityFormState;
+use super::provider_form::ProviderFormState;
 
 impl ModelsManagerState {
     pub(super) fn provider_form_active(&self) -> bool {
         self.provider_form.is_some()
+    }
+
+    pub(super) fn has_unsaved_form(&self) -> bool {
+        self.provider_form
+            .as_ref()
+            .is_some_and(ProviderFormState::is_dirty)
+            || self
+                .capability_form
+                .as_ref()
+                .is_some_and(CapabilityFormState::is_dirty)
+    }
+
+    pub(crate) fn discard_active_form(&mut self) {
+        self.capability_form = None;
+        self.provider_form = None;
+        self.pointer.clear_hover();
     }
 
     pub(super) fn close_panel(&mut self) -> bool {
@@ -18,6 +36,7 @@ impl ModelsManagerState {
             || self.provider_form.take().is_some()
             || self.detail.take().is_some();
         if closed {
+            self.detail_scroll_offset = 0;
             self.pointer.clear_hover();
         }
         closed
@@ -56,14 +75,6 @@ impl ModelsManagerState {
     pub(super) fn move_provider_field(&mut self, delta: isize) {
         if let Some(form) = self.provider_form.as_mut() {
             form.move_selection(delta);
-        }
-    }
-
-    pub(crate) fn set_form_error(&mut self, error: String) {
-        if let Some(form) = self.capability_form.as_mut() {
-            form.set_error(error);
-        } else if let Some(form) = self.provider_form.as_mut() {
-            form.set_error(error);
         }
     }
 

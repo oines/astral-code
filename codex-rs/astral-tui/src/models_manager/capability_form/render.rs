@@ -6,10 +6,10 @@ use ratatui::style::Style;
 use crate::modal::ModalPointerState;
 use crate::modal::ModalRowHit;
 use crate::view::AstralTheme;
-use crate::view::ModalHeight;
+use crate::view::ModalSizing;
 use crate::view::modal_choice_style;
 use crate::view::render_modal_close_button;
-use crate::view::render_modal_frame_with_geometry;
+use crate::view::render_modal_frame_with_sizing;
 
 use super::CapabilityField;
 use super::CapabilityFormState;
@@ -21,19 +21,20 @@ pub(in crate::models_manager) fn render(
     area: Rect,
     buffer: &mut Buffer,
     theme: AstralTheme,
+    notice: Option<(&str, bool)>,
 ) {
     let title = if form.editing_id.is_some() {
         format!("Model overrides · {}", form.model_id)
     } else {
         format!("Add model · {}", form.provider_name)
     };
-    let Some(frame) = render_modal_frame_with_geometry(
+    let Some(frame) = render_modal_frame_with_sizing(
         area,
         buffer,
         theme,
         &title,
-        "↑/↓ fields · ←/→ choices · Enter next/save · Esc back",
-        ModalHeight::FullViewport,
+        "j/k · h/l choice · Enter · Ctrl+S save · Esc",
+        ModalSizing::settings(),
     ) else {
         return;
     };
@@ -83,6 +84,20 @@ pub(in crate::models_manager) fn render(
             error,
             usize::from(frame.content.width),
             Style::default().fg(theme.accent_error).bg(theme.bg_base),
+        );
+    } else if let Some((message, is_error)) = notice {
+        buffer.set_stringn(
+            frame.content.x,
+            note_y,
+            message,
+            usize::from(frame.content.width),
+            Style::default()
+                .fg(if is_error {
+                    theme.accent_error
+                } else {
+                    theme.accent_running
+                })
+                .bg(theme.bg_base),
         );
     }
     pointer.observe_frame(frame.popup, frame.close_button, hits);

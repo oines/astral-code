@@ -87,6 +87,7 @@ pub(super) struct CapabilityFormState {
     pub(super) editor: ComposerState,
     pub(super) error: Option<String>,
     draft: BTreeMap<CapabilityField, String>,
+    dirty: bool,
 }
 
 impl CapabilityFormState {
@@ -138,6 +139,7 @@ impl CapabilityFormState {
             editor: ComposerState::default(),
             error: None,
             draft,
+            dirty: false,
         };
         state.load_editor();
         state
@@ -186,6 +188,15 @@ impl CapabilityFormState {
         existing_ids: &BTreeSet<String>,
     ) -> ModelsManagerInput {
         match (key.code, key.modifiers) {
+            (KeyCode::Char('s'), KeyModifiers::CONTROL) => {
+                match self.build_write(target, existing_ids) {
+                    Ok(write) => ModelsManagerInput::WriteConfig(write),
+                    Err(error) => {
+                        self.error = Some(error);
+                        ModelsManagerInput::Redraw
+                    }
+                }
+            }
             (KeyCode::Up, _) => {
                 self.move_selection(-1);
                 ModelsManagerInput::Redraw
@@ -211,9 +222,15 @@ impl CapabilityFormState {
                 ModelsManagerInput::Redraw
             }
             (KeyCode::Enter, KeyModifiers::NONE) => self.activate(target, existing_ids),
-            _ if self.field().is_text() && self.editor.edit_key(key) => {
-                self.error = None;
-                ModelsManagerInput::Redraw
+            _ if self.field().is_text() => {
+                let previous = self.editor.text().to_string();
+                if self.editor.edit_key(key) {
+                    self.dirty |= self.editor.text() != previous;
+                    self.error = None;
+                    ModelsManagerInput::Redraw
+                } else {
+                    ModelsManagerInput::None
+                }
             }
             _ => ModelsManagerInput::None,
         }
@@ -225,7 +242,9 @@ impl CapabilityFormState {
         {
             return false;
         }
+        let previous = self.editor.text().to_string();
         self.editor.insert_text(&text.replace(['\r', '\n'], " "));
+        self.dirty |= self.editor.text() != previous;
         self.error = None;
         true
     }
@@ -297,12 +316,12 @@ impl CapabilityFormState {
         }
     }
 
-    pub(super) fn set_error(&mut self, error: String) {
-        self.error = Some(error);
-    }
-
     pub(super) fn draft(&self, field: CapabilityField) -> &str {
         self.draft.get(&field).map(String::as_str).unwrap_or("")
+    }
+
+    pub(super) fn is_dirty(&self) -> bool {
+        self.dirty
     }
 
     fn build_write(
@@ -319,7 +338,7 @@ impl CapabilityFormState {
             return Err(format!("Model {model_id} already exists for this provider"));
         }
         let target = target.ok_or_else(|| {
-            "The writable user config layer is unavailable; reopen /models and try again"
+            "The writable user config layer is unavailable; reopen Settings and try again"
                 .to_string()
         })?;
         let mut raw = self.raw.clone();
@@ -387,6 +406,7 @@ impl CapabilityFormState {
                 self.raw.remove(key);
             }
         }
+        self.dirty = true;
         self.error = None;
     }
 

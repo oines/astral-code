@@ -62,6 +62,7 @@ use crate::permission_picker::PermissionPickerState;
 use crate::render_surface;
 use crate::render_surface_with_view;
 use crate::session::ThreadSwitchOutcome;
+use crate::settings::SettingsFocus;
 use crate::surface::paint_committed_with_theme;
 use crate::terminal_guard::TerminalGuard;
 use crate::thread_picker::PickerState;
@@ -733,34 +734,53 @@ async fn apply_input_action(
             *theme_selection = Some(name.clone());
             surface.set_notice(format!("Switched to {name}"));
         }
-        InputAction::ModelsConfigWrite {
-            focus_provider,
+        InputAction::SettingsConfigWrite {
+            focus,
             params,
+            selected_theme,
         } => {
             let write_result = session.write_config(params).await;
             match write_result {
                 Ok(response) => {
-                    let message = match response.status {
-                        WriteStatus::Ok => {
-                            format!("Saved model configuration for {focus_provider}")
-                        }
+                    let effective_theme = selected_theme.as_deref().and_then(|selected| {
+                        let name = match &response.status {
+                            WriteStatus::Ok => Some(selected),
+                            WriteStatus::OkOverridden => response
+                                .overridden_metadata
+                                .as_ref()
+                                .and_then(|metadata| metadata.effective_value.as_str()),
+                        };
+                        name.and_then(AstralThemeId::from_name)
+                    });
+                    let message = match &response.status {
+                        WriteStatus::Ok => "Saved settings".to_string(),
                         WriteStatus::OkOverridden => response
                             .overridden_metadata
-                            .map(|metadata| metadata.message)
+                            .as_ref()
+                            .map(|metadata| metadata.message.clone())
                             .unwrap_or_else(|| {
-                                format!(
-                                    "Saved provider {focus_provider}, but another config layer overrides it"
-                                )
+                                "Saved, but another config layer overrides this value".to_string()
                             }),
                     };
-                    match reload_models_manager(session, surface, Some(&focus_provider)).await {
-                        Ok(()) => surface.set_notice(message),
+                    if selected_theme.is_some() {
+                        *theme_selection = None;
+                    }
+                    if let Some(theme) = effective_theme {
+                        surface.set_theme(theme);
+                    }
+                    let focus = SettingsFocus::from_token(&focus);
+                    match reload_settings(session, surface, focus).await {
+                        Ok(()) => {
+                            if let Some(settings) = surface.settings_mut() {
+                                settings.set_notice(message);
+                            }
+                        }
                         Err(error) => surface.set_notice(error.to_string()),
                     }
                 }
                 Err(error) => {
-                    if let Some(manager) = surface.models_manager_mut() {
-                        manager.set_form_error(error.to_string());
+                    if let Some(settings) = surface.settings_mut() {
+                        settings.set_error(config_write_error_message(&error));
                     }
                 }
             }
@@ -862,8 +882,8 @@ async fn apply_input_action(
                     Err(error) => surface.set_notice(error.to_string()),
                 }
             }
-            SlashCommandId::Models => {
-                if let Err(error) = reload_models_manager(session, surface, None).await {
+            SlashCommandId::Settings => {
+                if let Err(error) = reload_settings(session, surface, SettingsFocus::Root).await {
                     surface.set_notice(error.to_string());
                 }
             }
@@ -1031,10 +1051,10 @@ async fn apply_input_action(
     Ok(None)
 }
 
-async fn reload_models_manager(
+async fn reload_settings(
     session: &mut AstralSession,
     surface: &mut SurfaceState,
-    focus_provider: Option<&str>,
+    focus: SettingsFocus,
 ) -> Result<(), SessionError> {
     let (current_provider, current_model, current_effort) = session
         .state()
@@ -1046,19 +1066,36 @@ async fn reload_models_manager(
             )
         })
         .ok_or(SessionError::NoThread)?;
-    let config = session.read_config().await?;
-    let models = session.list_models().await?;
+    let data = session.load_settings().await?;
     surface.set_model_catalog(
-        models.clone(),
+        data.models.clone(),
         current_model.clone(),
         current_provider.clone(),
         current_effort,
     );
-    surface.open_models_manager(config, models, current_provider, current_model);
-    if let Some(provider_id) = focus_provider {
-        surface.focus_models_provider(provider_id);
-    }
+    surface.open_settings(data, current_provider, current_model, focus);
     Ok(())
+}
+
+fn config_write_error_message(error: &SessionError) -> String {
+    let SessionError::Request(codex_app_server_client::TypedRequestError::Server {
+        source, ..
+    }) = error
+    else {
+        return error.to_string();
+    };
+    let is_conflict = source
+        .data
+        .as_ref()
+        .and_then(|data| data.get("config_write_error_code"))
+        .and_then(serde_json::Value::as_str)
+        == Some("configVersionConflict");
+    if is_conflict {
+        "Settings changed on disk. Your draft is preserved; reload Settings before saving again."
+            .to_string()
+    } else {
+        error.to_string()
+    }
 }
 
 fn toggle_multiline(surface: &mut SurfaceState) {

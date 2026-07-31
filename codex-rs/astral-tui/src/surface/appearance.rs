@@ -6,8 +6,8 @@ use ratatui::layout::Rect;
 use super::ActiveOverlay;
 use super::SurfaceState;
 use crate::model_picker::render_picker as render_model_picker;
-use crate::models_manager::render as render_models_manager;
 use crate::permission_picker::render_picker as render_permission_picker;
+use crate::settings::render as render_settings;
 use crate::theme_picker::ThemePickerState;
 use crate::theme_picker::render_picker as render_theme_picker;
 use crate::thread_picker::render_picker as render_thread_picker;
@@ -188,11 +188,11 @@ pub(super) fn render_overlay(
             };
             render_model_picker(picker, area, buffer, theme);
         }
-        ActiveOverlay::ModelsManager => {
-            let Some(manager) = &mut state.models_manager else {
+        ActiveOverlay::Settings => {
+            let Some(settings) = &mut state.settings else {
                 return false;
             };
-            render_models_manager(manager, area, buffer, theme);
+            render_settings(settings, area, buffer, theme);
         }
         ActiveOverlay::CommandPalette => {
             let Some(palette) = &mut state.command_palette else {

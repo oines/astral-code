@@ -59,12 +59,29 @@ impl ModalSizing {
         }
     }
 
-    const fn standard(height: ModalHeight) -> Self {
+    pub(crate) const fn settings() -> Self {
         Self {
-            width_percent: 60,
+            width_percent: 70,
             min_width: 44,
             max_width: 120,
-            height,
+            height: ModalHeight::FullViewport,
+        }
+    }
+
+    const fn standard(height: ModalHeight) -> Self {
+        match height {
+            ModalHeight::FullViewport => Self {
+                width_percent: 95,
+                min_width: 60,
+                max_width: u16::MAX,
+                height,
+            },
+            ModalHeight::Adaptive | ModalHeight::MinimumContent(_) => Self {
+                width_percent: 60,
+                min_width: 44,
+                max_width: 120,
+                height,
+            },
         }
     }
 }
@@ -250,9 +267,10 @@ fn popup_area(area: Rect, sizing: ModalSizing) -> Option<Rect> {
         return None;
     }
     if sizing.height == ModalHeight::FullViewport {
-        let width = (area.width.saturating_mul(95) / 100)
-            .max(60.min(area.width))
-            .min(area.width);
+        let width = (area.width.saturating_mul(sizing.width_percent) / 100).clamp(
+            sizing.min_width.min(area.width),
+            sizing.max_width.min(area.width),
+        );
         let height = (area.height.saturating_mul(92) / 100)
             .max(12.min(area.height))
             .min(area.height);

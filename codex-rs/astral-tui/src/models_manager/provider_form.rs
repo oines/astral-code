@@ -13,10 +13,10 @@ use crate::composer::ComposerState;
 use crate::modal::ModalPointerState;
 use crate::modal::ModalRowHit;
 use crate::view::AstralTheme;
-use crate::view::ModalHeight;
+use crate::view::ModalSizing;
 use crate::view::modal_choice_style;
 use crate::view::render_modal_close_button;
-use crate::view::render_modal_frame_with_geometry;
+use crate::view::render_modal_frame_with_sizing;
 
 use super::ModelsManagerInput;
 use super::config::ConfigWriteTarget;
@@ -91,6 +91,7 @@ pub(super) struct ProviderFormState {
     selected: usize,
     editor: ComposerState,
     error: Option<String>,
+    dirty: bool,
 }
 
 impl ProviderFormState {
@@ -106,6 +107,7 @@ impl ProviderFormState {
             selected: 0,
             editor: ComposerState::default(),
             error: None,
+            dirty: false,
         };
         state.load_editor();
         state
@@ -123,6 +125,7 @@ impl ProviderFormState {
             selected: 0,
             editor: ComposerState::default(),
             error: None,
+            dirty: false,
         };
         state.load_editor();
         state
@@ -162,6 +165,15 @@ impl ProviderFormState {
         existing_ids: &BTreeSet<String>,
     ) -> ModelsManagerInput {
         match (key.code, key.modifiers) {
+            (KeyCode::Char('s'), KeyModifiers::CONTROL) => {
+                match self.build_write(target, existing_ids) {
+                    Ok(write) => ModelsManagerInput::WriteConfig(write),
+                    Err(error) => {
+                        self.error = Some(error);
+                        ModelsManagerInput::Redraw
+                    }
+                }
+            }
             (KeyCode::Up, _) => {
                 self.move_selection(-1);
                 ModelsManagerInput::Redraw
@@ -180,12 +192,19 @@ impl ProviderFormState {
             }
             (KeyCode::Left | KeyCode::Right, _) if self.field() == ProviderField::WireApi => {
                 self.wire.toggle();
+                self.dirty = true;
                 ModelsManagerInput::Redraw
             }
             (KeyCode::Enter, KeyModifiers::NONE) => self.activate(target, existing_ids),
-            _ if self.field_is_text() && self.editor.edit_key(key) => {
-                self.error = None;
-                ModelsManagerInput::Redraw
+            _ if self.field_is_text() => {
+                let previous = self.editor.text().to_string();
+                if self.editor.edit_key(key) {
+                    self.dirty |= self.editor.text() != previous;
+                    self.error = None;
+                    ModelsManagerInput::Redraw
+                } else {
+                    ModelsManagerInput::None
+                }
             }
             _ => ModelsManagerInput::None,
         }
@@ -197,7 +216,9 @@ impl ProviderFormState {
             return false;
         }
         let text = text.replace(['\r', '\n'], " ");
+        let previous = self.editor.text().to_string();
         self.editor.insert_text(&text);
+        self.dirty |= self.editor.text() != previous;
         self.error = None;
         true
     }
@@ -210,6 +231,7 @@ impl ProviderFormState {
         match self.field() {
             ProviderField::WireApi => {
                 self.wire.toggle();
+                self.dirty = true;
                 ModelsManagerInput::Redraw
             }
             ProviderField::Save => match self.build_write(target, existing_ids) {
@@ -248,10 +270,6 @@ impl ProviderFormState {
         }
     }
 
-    pub(super) fn set_error(&mut self, error: String) {
-        self.error = Some(error);
-    }
-
     fn build_write(
         &mut self,
         target: Option<ConfigWriteTarget>,
@@ -274,7 +292,7 @@ impl ProviderFormState {
             return Err(format!("Provider ID {id} already exists"));
         }
         let target = target.ok_or_else(|| {
-            "The writable user config layer is unavailable; reopen /models and try again"
+            "The writable user config layer is unavailable; reopen Settings and try again"
                 .to_string()
         })?;
         let mut raw = self.raw.clone();
@@ -291,6 +309,10 @@ impl ProviderFormState {
             raw.insert("env_key".to_string(), Value::String(env_key.to_string()));
         }
         Ok(provider_write(target, id.to_string(), raw))
+    }
+
+    pub(super) fn is_dirty(&self) -> bool {
+        self.dirty
     }
 
     fn field(&self) -> ProviderField {
@@ -336,19 +358,20 @@ pub(super) fn render(
     area: Rect,
     buffer: &mut Buffer,
     theme: AstralTheme,
+    notice: Option<(&str, bool)>,
 ) {
     let title = if form.editing_id.is_some() {
         "Edit provider"
     } else {
         "Add provider"
     };
-    let Some(frame) = render_modal_frame_with_geometry(
+    let Some(frame) = render_modal_frame_with_sizing(
         area,
         buffer,
         theme,
         title,
-        "↑/↓ fields · Enter next/save · Paste supported · Esc back",
-        ModalHeight::FullViewport,
+        "j/k fields · Enter next · Ctrl+S save · Esc",
+        ModalSizing::settings(),
     ) else {
         return;
     };
@@ -408,6 +431,20 @@ pub(super) fn render(
             error,
             usize::from(frame.content.width),
             Style::default().fg(theme.accent_error).bg(theme.bg_base),
+        );
+    } else if let Some((message, is_error)) = notice {
+        buffer.set_stringn(
+            frame.content.x,
+            note_y,
+            message,
+            usize::from(frame.content.width),
+            Style::default()
+                .fg(if is_error {
+                    theme.accent_error
+                } else {
+                    theme.accent_running
+                })
+                .bg(theme.bg_base),
         );
     }
     pointer.observe_frame(frame.popup, frame.close_button, hits);
