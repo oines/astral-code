@@ -70,7 +70,6 @@ pub struct ConversationState {
     turn_plan: Option<TurnPlanUpdatedNotification>,
     turn_diff: Option<String>,
     last_agent_response: Option<String>,
-    skipped_events: usize,
     content_generation: u64,
 }
 
@@ -86,7 +85,6 @@ impl ConversationState {
             turn_plan: None,
             turn_diff: None,
             last_agent_response: None,
-            skipped_events: 0,
             content_generation: 0,
         }
     }
@@ -103,16 +101,8 @@ impl ConversationState {
         self.turn_diff.as_deref()
     }
 
-    pub fn skipped_events(&self) -> usize {
-        self.skipped_events
-    }
-
     pub(crate) fn content_generation(&self) -> u64 {
         self.content_generation
-    }
-
-    pub fn record_lag(&mut self, skipped: usize) {
-        self.skipped_events = self.skipped_events.saturating_add(skipped);
     }
 
     pub fn drain_committable(&mut self) -> Vec<CommittedBlock> {

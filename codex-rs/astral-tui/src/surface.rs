@@ -1562,12 +1562,6 @@ fn turn_status_line(state: &SurfaceState, theme: AstralTheme) -> Option<Line<'st
         }
         spans.push(format!("{} queued", state.queued_follow_ups()).fg(theme.gray));
     }
-    if state.conversation.skipped_events() > 0 {
-        if !spans.is_empty() {
-            spans.push(" · ".dim());
-        }
-        spans.push(format!("{} events skipped", state.conversation.skipped_events()).cyan());
-    }
     (!spans.is_empty()).then(|| spans.into())
 }
 
