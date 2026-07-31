@@ -2430,9 +2430,6 @@ fn resolve_web_search_config(config_toml: &ConfigToml) -> Option<WebSearchConfig
     })
 }
 
-const DEFAULT_WEB_SEARCH_LIMIT: usize = 5;
-const MAX_WEB_SEARCH_LIMIT: usize = 20;
-
 fn resolve_web_search_runtime_config(config_toml: &ConfigToml) -> Option<WebSearchRuntimeConfig> {
     let tool_config = config_toml
         .tools
@@ -2444,21 +2441,7 @@ fn resolve_web_search_runtime_config(config_toml: &ConfigToml) -> Option<WebSear
         return None;
     }
 
-    let max_limit = tool_config
-        .max_limit
-        .unwrap_or(MAX_WEB_SEARCH_LIMIT)
-        .clamp(1, MAX_WEB_SEARCH_LIMIT);
-    let default_limit = tool_config
-        .default_limit
-        .unwrap_or(DEFAULT_WEB_SEARCH_LIMIT)
-        .clamp(1, max_limit);
-
-    Some(WebSearchRuntimeConfig {
-        provider,
-        api_key,
-        default_limit,
-        max_limit,
-    })
+    Some(WebSearchRuntimeConfig { provider, api_key })
 }
 
 fn resolve_experimental_request_user_input_enabled(config_toml: &ConfigToml) -> bool {

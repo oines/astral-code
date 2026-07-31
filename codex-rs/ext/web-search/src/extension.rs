@@ -134,8 +134,6 @@ mod tests {
             runtime_config: Some(WebSearchRuntimeConfig {
                 provider: WebSearchProvider::Tavily,
                 api_key: SecretString::new("secret".to_string()).expect("secret should be valid"),
-                default_limit: 5,
-                max_limit: 20,
             }),
         });
 
