@@ -4,168 +4,168 @@ expression: "format!(\"COLLAPSED\\n{collapsed}\\n\\nEXPANDED\\n{expanded}\\n\\nA
 ---
 COLLAPSED
 
-  ┌─ Models ────────────────────────────────────────────────────────────────────────────────[×]─┐
-  │                                                                                             │
-  │    Search providers and loaded models…                                                      │
-  │                                                                                             │
-  │  ❯ ▸ DeepSeek  [deepseek]        current · chat_completions · https://api.deepseek.com/v1   │
-  │    ▸ Anthropic  [anthropic]                anthropic_messages · https://api.anthropic.com   │
-  │    ＋  Add provider                                            Configure a custom endpoint   │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │             Type or / search · ↑/↓ navigate · ←/→ fold · Enter open · Esc back              │
-  └─────────────────────────────────────────────────────────────────────────────────────────────┘
+               ┌─ Settings / Models & Providers ────────────────────────────────[×]─┐
+               │                                                                    │
+               │    Search providers and loaded models…                             │
+               │                                                                    │
+               │    ＋  Add provider                   Configure a custom endpoint   │
+               │  ❯ ▸ DeepSeek  [deepseek]                                          │
+               │    ▸ Anthropic  [anthropic]                                        │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │              Type · j/k move · h/l fold · Enter · Esc              │
+               └────────────────────────────────────────────────────────────────────┘
 
 EXPANDED
 
-  ┌─ Models ────────────────────────────────────────────────────────────────────────────────[×]─┐
-  │                                                                                             │
-  │    Search providers and loaded models…                                                      │
-  │                                                                                             │
-  │  ❯ ▾ DeepSeek  [deepseek]        current · chat_completions · https://api.deepseek.com/v1   │
-  │        ◇ Settings                                                           Edit DeepSeek   │
-  │        ＋  Add model                                                       Add to DeepSeek   │
-  │        ◇ Models                                                       Discovering models…   │
-  │        ● DeepSeek Chat                                                    tools · context   │
-  │    ▸ Anthropic  [anthropic]                anthropic_messages · https://api.anthropic.com   │
-  │    ＋  Add provider                                            Configure a custom endpoint   │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │             Type or / search · ↑/↓ navigate · ←/→ fold · Enter open · Esc back              │
-  └─────────────────────────────────────────────────────────────────────────────────────────────┘
+               ┌─ Settings / Models & Providers ────────────────────────────────[×]─┐
+               │                                                                    │
+               │    Search providers and loaded models…                             │
+               │                                                                    │
+               │    ＋  Add provider                   Configure a custom endpoint   │
+               │  ❯ ▾ DeepSeek  [deepseek]                                          │
+               │        ◇ Settings                                  Edit DeepSeek   │
+               │        ＋  Add model                              Add to DeepSeek   │
+               │        − Remove provider                         Delete DeepSeek   │
+               │        ◇ Models                              Discovering models…   │
+               │        ● DeepSeek Chat                           tools · context   │
+               │    ▸ Anthropic  [anthropic]                                        │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │              Type · j/k move · h/l fold · Enter · Esc              │
+               └────────────────────────────────────────────────────────────────────┘
 
 ADD PROVIDER
 
-  ┌─ Add provider ──────────────────────────────────────────────────────────────────────────[×]─┐
-  │                                                                                             │
-  │  ❯ Name              ▏                                                                      │
-  │                                                                                             │
-  │    Provider ID       —                                                                      │
-  │                                                                                             │
-  │    Base URL          —                                                                      │
-  │                                                                                             │
-  │    API wire          Chat Completions  ←/→                                                  │
-  │                                                                                             │
-  │    API key env var   —                                                                      │
-  │                                                                                             │
-  │    Save provider     Write to user config                                                   │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │  Provider flavor is inferred automatically. Hidden advanced keys are preserved.             │
-  │                                                                                             │
-  │                  ↑/↓ fields · Enter next/save · Paste supported · Esc back                  │
-  └─────────────────────────────────────────────────────────────────────────────────────────────┘
+               ┌─ Add provider ─────────────────────────────────────────────────[×]─┐
+               │                                                                    │
+               │  ❯ Name              ▏                                             │
+               │                                                                    │
+               │    Provider ID       —                                             │
+               │                                                                    │
+               │    Base URL          —                                             │
+               │                                                                    │
+               │    API wire          Chat Completions  ←/→                         │
+               │                                                                    │
+               │    API key env var   —                                             │
+               │                                                                    │
+               │    Save provider     Write to user config                          │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │  Provider flavor is inferred automatically. Hidden advanced keys   │
+               │                                                                    │
+               │            j/k fields · Enter next · Ctrl+S save · Esc             │
+               └────────────────────────────────────────────────────────────────────┘
 
 ADD MODEL
 
-  ┌─ Add model · DeepSeek ──────────────────────────────────────────────────────────────────[×]─┐
-  │                                                                                             │
-  │  ❯ Model ID              ▏                                                                  │
-  │    Context window        Inherit                                                            │
-  │    Max output tokens     Inherit                                                            │
-  │    Tool mode             Inherit  ←/→                                                       │
-  │    Tools                 Inherit  ←/→                                                       │
-  │    Vision                Inherit  ←/→                                                       │
-  │    Reasoning             Inherit  ←/→                                                       │
-  │    Advanced              Show advanced fields                                               │
-  │    Save model            Write manual overrides to user config                              │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │  Blank/Inherit keeps discovered metadata; entered values are manual overrides.              │
-  │                                                                                             │
-  │                    ↑/↓ fields · ←/→ choices · Enter next/save · Esc back                    │
-  └─────────────────────────────────────────────────────────────────────────────────────────────┘
+               ┌─ Add model · DeepSeek ─────────────────────────────────────────[×]─┐
+               │                                                                    │
+               │  ❯ Model ID              ▏                                         │
+               │    Context window        Inherit                                   │
+               │    Max output tokens     Inherit                                   │
+               │    Tool mode             Inherit  ←/→                              │
+               │    Tools                 Inherit  ←/→                              │
+               │    Vision                Inherit  ←/→                              │
+               │    Reasoning             Inherit  ←/→                              │
+               │    Advanced              Show advanced fields                      │
+               │    Save model            Write manual overrides to user config     │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │  Blank/Inherit keeps discovered metadata; entered values are manu  │
+               │                                                                    │
+               │            j/k · h/l choice · Enter · Ctrl+S save · Esc            │
+               └────────────────────────────────────────────────────────────────────┘
 
 MODEL DETAIL
 
-  ┌─ DeepSeek Chat ─────────────────────────────────────────────────────────────────────────[×]─┐
-  │                                                                                             │
-  │  Provider          DeepSeek [deepseek]                                                      │
-  │  Model ID          deepseek-chat                                                            │
-  │  Description       General-purpose chat model                                               │
-  │  Context           128000                                                                   │
-  │  Max context       128000                                                                   │
-  │  Max output        8192                                                                     │
-  │  Tool mode         direct                                                                   │
-  │  Tools             yes                                                                      │
-  │  Parallel tools    yes                                                                      │
-  │  Vision            no                                                                       │
-  │  Prompt cache      yes                                                                      │
-  │  Reasoning         no                                                                       │
-  │  Native streaming  yes                                                                      │
-  │  Endpoints         /v1/chat/completions                                                     │
-  │  Sources           provider                                                                 │
-  │                                                                                             │
-  │  ❯ Edit manual overrides                                                                    │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                           Enter edit manual overrides · Esc back                            │
-  └─────────────────────────────────────────────────────────────────────────────────────────────┘
+               ┌─ DeepSeek Chat ────────────────────────────────────────────────[×]─┐
+               │                                                                    │
+               │    ◆ Edit manual overrides                                         │
+               │                                                                    │
+               │  Provider          DeepSeek [deepseek]                             │
+               │  Model ID          deepseek-chat                                   │
+               │  Description       General-purpose chat model                      │
+               │  Context           128000                                          │
+               │  Max context       128000                                          │
+               │  Max output        8192                                            │
+               │  Tool mode         direct                                          │
+               │  Tools             yes                                             │
+               │  Parallel tools    yes                                             │
+               │  Vision            no                                              │
+               │  Prompt cache      yes                                             │
+               │  Reasoning         no                                              │
+               │  Native streaming  yes                                             │
+               │  Endpoints         /v1/chat/completions                            │
+               │  Sources           provider                                        │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                 j/k scroll · Enter edit · Esc back                 │
+               └────────────────────────────────────────────────────────────────────┘
 
 MODEL OVERRIDES
 
-  ┌─ Model overrides · deepseek-chat ───────────────────────────────────────────────────────[×]─┐
-  │                                                                                             │
-  │  ❯ Model ID              deepseek-chat  (read-only)                                         │
-  │    Context window        128000                                                             │
-  │    Max output tokens     Inherit (effective: 8192)                                          │
-  │    Tool mode             Inherit (effective: direct)  ←/→                                   │
-  │    Tools                 Yes  ←/→                                                           │
-  │    Vision                Inherit (effective: no)  ←/→                                       │
-  │    Reasoning             Inherit (effective: no)  ←/→                                       │
-  │    Advanced              Show advanced fields                                               │
-  │    Save model            Write manual overrides to user config                              │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │                                                                                             │
-  │  Blank/Inherit keeps discovered metadata; entered values are manual overrides.              │
-  │                                                                                             │
-  │                    ↑/↓ fields · ←/→ choices · Enter next/save · Esc back                    │
-  └─────────────────────────────────────────────────────────────────────────────────────────────┘
+               ┌─ Model overrides · deepseek-chat ──────────────────────────────[×]─┐
+               │                                                                    │
+               │  ❯ Model ID              deepseek-chat  (read-only)                │
+               │    Context window        128000                                    │
+               │    Max output tokens     Inherit (effective: 8192)                 │
+               │    Tool mode             Inherit (effective: direct)  ←/→          │
+               │    Tools                 Yes  ←/→                                  │
+               │    Vision                Inherit (effective: no)  ←/→              │
+               │    Reasoning             Inherit (effective: no)  ←/→              │
+               │    Advanced              Show advanced fields                      │
+               │    Save model            Write manual overrides to user config     │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │  Blank/Inherit keeps discovered metadata; entered values are manu  │
+               │                                                                    │
+               │            j/k · h/l choice · Enter · Ctrl+S save · Esc            │
+               └────────────────────────────────────────────────────────────────────┘
