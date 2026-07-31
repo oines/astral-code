@@ -39,6 +39,7 @@ mod request_pane;
 mod request_user_input;
 mod runtime;
 mod session;
+mod settings;
 mod shortcuts;
 mod slash;
 mod surface;

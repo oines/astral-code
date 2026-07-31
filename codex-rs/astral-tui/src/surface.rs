@@ -8,13 +8,13 @@ mod file_viewer;
 mod history;
 mod mentions;
 mod model_picker;
-mod models_manager;
 mod overlay;
 mod pending_action;
 mod plan_review;
 mod pointer;
 mod prompt_input;
 mod requests;
+mod settings;
 mod subagent;
 mod transcript_cache;
 
@@ -56,7 +56,6 @@ use crate::modal::ModalState;
 use crate::model_command::ModelResolveError;
 use crate::model_command::ModelSelection;
 use crate::model_picker::ModelPickerState;
-use crate::models_manager::ModelsManagerState;
 use crate::pending_action::PendingActionState;
 use crate::permission_picker::PermissionPickerState;
 use crate::permission_picker::display_permission_mode;
@@ -69,6 +68,7 @@ use crate::prompt_queue::QueuedPrompt;
 use crate::request_choice::RequestChoiceState;
 use crate::request_pane::RequestPane;
 use crate::request_user_input::RequestUserInputState;
+use crate::settings::SettingsState;
 use crate::shortcuts::ShortcutHelpState;
 use crate::slash::SlashCommandId;
 use crate::slash::SlashCommandState;
@@ -170,8 +170,8 @@ pub struct SurfaceState {
     palette_stashed_submission: Option<PromptSubmission>,
     thread_picker: Option<PickerState>,
     model_picker: Option<ModelPickerState>,
-    models_manager: Option<ModelsManagerState>,
-    models_manager_generation: u64,
+    settings: Option<SettingsState>,
+    settings_generation: u64,
     permission_picker: Option<PermissionPickerState>,
     theme_picker: Option<ThemePickerState>,
     completed_plan: Option<CompletedPlan>,
@@ -217,8 +217,8 @@ impl SurfaceState {
             palette_stashed_submission: None,
             thread_picker: None,
             model_picker: None,
-            models_manager: None,
-            models_manager_generation: 0,
+            settings: None,
+            settings_generation: 0,
             permission_picker: None,
             theme_picker: None,
             completed_plan: None,
@@ -271,8 +271,8 @@ impl SurfaceState {
             palette_stashed_submission: None,
             thread_picker: None,
             model_picker: None,
-            models_manager: None,
-            models_manager_generation: 0,
+            settings: None,
+            settings_generation: 0,
             permission_picker: None,
             theme_picker: None,
             completed_plan: None,

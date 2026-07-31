@@ -15,7 +15,10 @@ use codex_app_server_protocol::CollaborationModeMask;
 use codex_app_server_protocol::ConfigBatchWriteParams;
 use codex_app_server_protocol::ConfigReadParams;
 use codex_app_server_protocol::ConfigReadResponse;
+use codex_app_server_protocol::ConfigRequirementsReadResponse;
 use codex_app_server_protocol::ConfigWriteResponse;
+use codex_app_server_protocol::ExperimentalFeatureListParams;
+use codex_app_server_protocol::ExperimentalFeatureListResponse;
 use codex_app_server_protocol::FsReadFileParams;
 use codex_app_server_protocol::FsReadFileResponse;
 use codex_app_server_protocol::FuzzyFileSearchParams;
@@ -23,6 +26,8 @@ use codex_app_server_protocol::FuzzyFileSearchResponse;
 use codex_app_server_protocol::Model;
 use codex_app_server_protocol::ModelListParams;
 use codex_app_server_protocol::ModelListResponse;
+use codex_app_server_protocol::PermissionProfileListParams;
+use codex_app_server_protocol::PermissionProfileListResponse;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::Thread;
@@ -64,6 +69,7 @@ use codex_protocol::openai_models::ReasoningEffort;
 use crate::RequestResolution;
 use crate::model_command::ModelSelection;
 use crate::permission_picker::PermissionSelection;
+use crate::settings::SettingsData;
 
 #[derive(Debug)]
 pub enum SessionError {
@@ -662,26 +668,91 @@ impl AstralSession {
         }
     }
 
-    pub(crate) async fn read_config(&mut self) -> Result<ConfigReadResponse, SessionError> {
-        let cwd = self
-            .state
-            .as_ref()
-            .ok_or(SessionError::NoThread)?
-            .thread
-            .cwd
-            .to_string_lossy()
-            .to_string();
-        let request_id = self.next_request_id();
-        self.client
-            .request_typed(ClientRequest::ConfigRead {
-                request_id,
-                params: ConfigReadParams {
-                    include_layers: true,
-                    cwd: Some(cwd),
-                },
-            })
-            .await
-            .map_err(SessionError::from)
+    pub(crate) async fn load_settings(&mut self) -> Result<SettingsData, SessionError> {
+        let state = self.state.as_ref().ok_or(SessionError::NoThread)?;
+        let cwd = state.thread.cwd.to_string_lossy().to_string();
+        let config_cwd = cwd.clone();
+        let permissions_cwd = cwd;
+        let thread_id = state.thread.id.clone();
+        let config_request_id = self.next_request_id();
+        let models_request_id = self.next_request_id();
+        let features_request_id = self.next_request_id();
+        let permissions_request_id = self.next_request_id();
+        let requirements_request_id = self.next_request_id();
+        let client = self.client.request_handle();
+
+        let (config, models, features, permission_profiles, requirements) = tokio::try_join!(
+            async {
+                client
+                    .request_typed::<ConfigReadResponse>(ClientRequest::ConfigRead {
+                        request_id: config_request_id,
+                        params: ConfigReadParams {
+                            include_layers: true,
+                            cwd: Some(config_cwd),
+                        },
+                    })
+                    .await
+            },
+            async {
+                client
+                    .request_typed::<ModelListResponse>(ClientRequest::ModelList {
+                        request_id: models_request_id,
+                        params: ModelListParams {
+                            cursor: None,
+                            model_provider: None,
+                            limit: Some(500),
+                            include_hidden: Some(false),
+                        },
+                    })
+                    .await
+            },
+            async {
+                client
+                    .request_typed::<ExperimentalFeatureListResponse>(
+                        ClientRequest::ExperimentalFeatureList {
+                            request_id: features_request_id,
+                            params: ExperimentalFeatureListParams {
+                                cursor: None,
+                                limit: Some(500),
+                                thread_id: Some(thread_id),
+                            },
+                        },
+                    )
+                    .await
+            },
+            async {
+                client
+                    .request_typed::<PermissionProfileListResponse>(
+                        ClientRequest::PermissionProfileList {
+                            request_id: permissions_request_id,
+                            params: PermissionProfileListParams {
+                                cursor: None,
+                                limit: Some(500),
+                                cwd: Some(permissions_cwd),
+                            },
+                        },
+                    )
+                    .await
+            },
+            async {
+                client
+                    .request_typed::<ConfigRequirementsReadResponse>(
+                        ClientRequest::ConfigRequirementsRead {
+                            request_id: requirements_request_id,
+                            params: None,
+                        },
+                    )
+                    .await
+            },
+        )?;
+
+        Ok(SettingsData {
+            config,
+            models: models.data,
+            features: features.data,
+            permission_profiles: permission_profiles.data,
+            requirements: requirements.requirements,
+        })
     }
 
     pub(crate) async fn write_config(

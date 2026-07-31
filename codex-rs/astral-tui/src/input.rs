@@ -36,13 +36,13 @@ mod file_viewer;
 mod history_popup;
 mod mcp_form;
 mod mention_popup;
-mod models_manager;
 mod mouse_scroll;
 mod pickers;
 mod plan_review;
 mod prompt_mouse;
 mod queue;
 mod scrollback;
+mod settings;
 mod shortcut_help;
 mod subagent;
 mod terminal_support;
@@ -86,9 +86,10 @@ pub enum InputAction {
         thread: Box<Thread>,
     },
     SelectTheme(String),
-    ModelsConfigWrite {
-        focus_provider: String,
+    SettingsConfigWrite {
+        focus: String,
         params: codex_app_server_protocol::ConfigBatchWriteParams,
+        selected_theme: Option<String>,
     },
     SelectPermission(PermissionSelection),
     Plan(crate::plan_review::PlanReviewAction),
@@ -390,7 +391,7 @@ fn handle_overlay_key(
         ActiveOverlay::PermissionPicker => pickers::handle_permission_picker_key(state, key),
         ActiveOverlay::ThreadPicker => pickers::handle_thread_picker_key(state, key),
         ActiveOverlay::ModelPicker => pickers::handle_model_picker_key(state, key),
-        ActiveOverlay::ModelsManager => models_manager::handle_key(state, key),
+        ActiveOverlay::Settings => settings::handle_key(state, key),
         ActiveOverlay::CommandPalette => command_palette::handle_key(state, key),
         ActiveOverlay::ShortcutHelp => shortcut_help::handle_key(state, key),
         ActiveOverlay::InfoModal => pickers::handle_info_modal_key(state, key),
@@ -414,7 +415,7 @@ fn handle_overlay_paste(
             InputAction::Redraw
         }
         ActiveOverlay::ModelPicker => pickers::handle_model_picker_paste(state, text),
-        ActiveOverlay::ModelsManager => models_manager::handle_paste(state, text),
+        ActiveOverlay::Settings => settings::handle_paste(state, text),
         ActiveOverlay::CommandPalette => command_palette::handle_paste(state, text),
         ActiveOverlay::ShortcutHelp => shortcut_help::handle_paste(state, text),
         ActiveOverlay::ThemePicker | ActiveOverlay::PermissionPicker | ActiveOverlay::InfoModal => {
@@ -436,7 +437,7 @@ fn handle_overlay_mouse(
         ActiveOverlay::PermissionPicker => pickers::handle_permission_picker_mouse(state, mouse),
         ActiveOverlay::ThreadPicker => pickers::handle_thread_picker_mouse(state, mouse),
         ActiveOverlay::ModelPicker => pickers::handle_model_picker_mouse(state, mouse),
-        ActiveOverlay::ModelsManager => models_manager::handle_mouse(state, mouse),
+        ActiveOverlay::Settings => settings::handle_mouse(state, mouse),
         ActiveOverlay::CommandPalette => command_palette::handle_mouse(state, mouse),
         ActiveOverlay::ShortcutHelp => shortcut_help::handle_mouse(state, mouse),
         ActiveOverlay::InfoModal => pickers::handle_info_modal_mouse(state, mouse),

@@ -14,9 +14,9 @@ expression: "render_at_size(&mut state, &session, 80, 24)"
 
 
 
+
   ╭─ commands ───────────────────────────────────────────────────────────────╮
   │› /model          Choose model and reasoning effort                       │
-  │  /models         Manage providers and model capabilities                 │
   │  /permissions    Choose what Astral can do                               │
   ╰──────────────────────────────────────────────────────────────────────────╯
 
