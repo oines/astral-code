@@ -13,11 +13,11 @@ expression: "render_at_size(&mut state, &session, 80, 24)"
 
 
 
-
-
   ╭─ reasoning effort ───────────────────────────────────────────────────────╮
-  │› high (active)   Deep reasoning                                          │
-  │  xhigh           Maximum reasoning                                       │
+  │› xhigh           Extended reasoning                                      │
+  │  high (active)   Heavy reasoning                                         │
+  │  medium          Balanced reasoning                                      │
+  │  low             Faster, lighter reasoning                               │
   ╰──────────────────────────────────────────────────────────────────────────╯
 
   ╭──────────────────────────────────────────────────────────────────────────╮

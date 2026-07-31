@@ -532,7 +532,7 @@ fn model_argument_menu_snapshot() {
         panic!("terminal effort selection should execute with the same Enter");
     };
     assert_eq!(invocation.command, crate::SlashCommandId::Model);
-    assert_eq!(invocation.args, "Claude Sonnet 4 high");
+    assert_eq!(invocation.args, "Claude Sonnet 4 xhigh");
 }
 
 #[test]
@@ -560,10 +560,6 @@ fn model_picker_snapshot_and_effort_selection() {
         ),
         InputAction::Redraw
     );
-    assert_eq!(
-        handle_key(&mut state, KeyEvent::new(KeyCode::End, KeyModifiers::NONE),),
-        InputAction::Redraw
-    );
     let InputAction::Slash { invocation, .. } = handle_key(
         &mut state,
         KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
@@ -588,11 +584,8 @@ fn set_test_model_catalog(state: &mut SurfaceState, session: &SessionState) {
                 "displayName": "Claude Sonnet 4",
                 "description": "Fast coding model",
                 "hidden": false,
-                "supportedReasoningEfforts": [
-                    {"reasoningEffort": "high", "description": "Deep reasoning"},
-                    {"reasoningEffort": "xhigh", "description": "Maximum reasoning"}
-                ],
-                "defaultReasoningEffort": "high",
+                "supportedReasoningEfforts": [],
+                "defaultReasoningEffort": "none",
                 "inputModalities": ["text", "image"],
                 "supportsPersonality": true,
                 "additionalSpeedTiers": [],

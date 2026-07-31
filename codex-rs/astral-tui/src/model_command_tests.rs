@@ -35,6 +35,73 @@ fn effort_phase_chains_from_the_selected_model() {
 }
 
 #[test]
+fn current_reasoning_effort_restores_missing_provider_options() {
+    let mut current = model("deepseek-v4-pro", "DeepSeek V4 Pro", Vec::new());
+    current.default_reasoning_effort = ReasoningEffort::None;
+    current.capabilities.supports_reasoning = Some(false);
+    let mut catalog = ModelCatalog::default();
+    catalog.replace(
+        vec![current],
+        "deepseek-v4-pro",
+        "openai",
+        Some(ReasoningEffort::XHigh),
+    );
+
+    assert_eq!(
+        catalog.suggestions(""),
+        vec![super::ModelSuggestion {
+            display: "DeepSeek V4 Pro (current)".to_string(),
+            description: "General coding model".to_string(),
+            insert_text: "/model DeepSeek V4 Pro ".to_string(),
+        }]
+    );
+    assert_eq!(
+        catalog
+            .suggestions("DeepSeek V4 Pro ")
+            .into_iter()
+            .map(|suggestion| (suggestion.display, suggestion.insert_text))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                "xhigh (active)".to_string(),
+                "/model DeepSeek V4 Pro xhigh".to_string(),
+            ),
+            (
+                "high".to_string(),
+                "/model DeepSeek V4 Pro high".to_string(),
+            ),
+            (
+                "medium".to_string(),
+                "/model DeepSeek V4 Pro medium".to_string(),
+            ),
+            ("low".to_string(), "/model DeepSeek V4 Pro low".to_string(),),
+        ]
+    );
+    assert_eq!(
+        catalog
+            .effort_suggestions("")
+            .into_iter()
+            .map(|suggestion| (suggestion.display, suggestion.insert_text))
+            .collect::<Vec<_>>(),
+        vec![
+            ("xhigh (active)".to_string(), "/effort xhigh".to_string()),
+            ("high".to_string(), "/effort high".to_string()),
+            ("medium".to_string(), "/effort medium".to_string()),
+            ("low".to_string(), "/effort low".to_string()),
+        ]
+    );
+    assert_eq!(
+        catalog.resolve_effort("high"),
+        Ok(ModelSelection {
+            model: "deepseek-v4-pro".to_string(),
+            model_provider: "openai".to_string(),
+            display_name: "DeepSeek V4 Pro".to_string(),
+            effort: ReasoningEffort::High,
+        })
+    );
+}
+
+#[test]
 fn resolver_accepts_display_name_model_id_and_effort() {
     let catalog = catalog();
     assert_eq!(
