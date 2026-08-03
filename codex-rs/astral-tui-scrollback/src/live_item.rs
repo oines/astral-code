@@ -21,6 +21,29 @@ pub enum LiveItem {
 }
 
 impl LiveItem {
+    pub(crate) fn command_output(&self) -> Option<&str> {
+        match self {
+            Self::Command { output, .. } if !output.is_empty() => Some(output),
+            Self::None
+            | Self::AgentMessage(_)
+            | Self::Plan(_)
+            | Self::Reasoning { .. }
+            | Self::Command { .. }
+            | Self::FileChange { .. } => None,
+        }
+    }
+
+    pub(crate) fn terminal_input(&self) -> &[String] {
+        match self {
+            Self::Command { terminal_input, .. } => terminal_input,
+            Self::None
+            | Self::AgentMessage(_)
+            | Self::Plan(_)
+            | Self::Reasoning { .. }
+            | Self::FileChange { .. } => &[],
+        }
+    }
+
     pub(crate) fn append_agent_message(&mut self, delta: &str) {
         match self {
             Self::AgentMessage(text) => text.push_str(delta),

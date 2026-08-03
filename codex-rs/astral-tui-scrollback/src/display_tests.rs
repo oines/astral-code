@@ -1,3 +1,5 @@
+use codex_app_server_protocol::CommandExecutionSource;
+use codex_app_server_protocol::CommandExecutionStatus;
 use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::UserInput;
 use pretty_assertions::assert_eq;
@@ -61,6 +63,65 @@ fn proposed_plan_is_not_an_assistant_fold_or_running_preview() {
     assert!(!state.toggle_fold(&plan));
     assert!(state.toggle_raw(&plan));
     assert!(state.raw());
+}
+
+#[test]
+fn commands_follow_grok_agent_and_user_shell_fold_cycles() {
+    let agent_item = command(
+        CommandExecutionSource::Agent,
+        CommandExecutionStatus::Completed,
+        /*output*/ Some("one\ntwo\nthree\nfour"),
+    );
+    let agent = EntryBlock::from_parts(&agent_item, &LiveItem::None, completed());
+    let mut agent_state = EntryDisplayState::for_block(&agent).expect("agent command state");
+    assert_eq!(agent_state.mode(), DisplayMode::Collapsed);
+    assert!(agent_state.toggle_fold(&agent));
+    assert_eq!(agent_state.mode(), DisplayMode::Truncated);
+
+    let running_item = command(
+        CommandExecutionSource::UserShell,
+        CommandExecutionStatus::InProgress,
+        /*output*/ None,
+    );
+    let live = LiveItem::Command {
+        output: "streaming".to_string(),
+        terminal_input: Vec::new(),
+    };
+    let running = EntryBlock::from_parts(&running_item, &live, running());
+    let mut user_state = EntryDisplayState::for_block(&running).expect("user shell state");
+    assert_eq!(user_state.mode(), DisplayMode::Truncated);
+
+    let completed_item = command(
+        CommandExecutionSource::UserShell,
+        CommandExecutionStatus::Completed,
+        /*output*/ Some("streaming"),
+    );
+    let completed = EntryBlock::from_parts(&completed_item, &LiveItem::None, completed());
+    assert!(user_state.reconcile(&completed));
+    assert_eq!(user_state.mode(), DisplayMode::Expanded);
+    assert!(user_state.toggle_fold(&completed));
+    assert_eq!(user_state.mode(), DisplayMode::Collapsed);
+}
+
+fn command(
+    source: CommandExecutionSource,
+    status: CommandExecutionStatus,
+    output: Option<&str>,
+) -> ThreadItem {
+    ThreadItem::CommandExecution {
+        id: "command".to_string(),
+        command: "printf test".to_string(),
+        cwd: std::path::PathBuf::from("/tmp")
+            .try_into()
+            .expect("absolute cwd"),
+        process_id: None,
+        source,
+        status,
+        command_actions: Vec::new(),
+        aggregated_output: output.map(str::to_string),
+        exit_code: Some(0),
+        duration_ms: Some(250),
+    }
 }
 
 fn running() -> EntryLifecycle {

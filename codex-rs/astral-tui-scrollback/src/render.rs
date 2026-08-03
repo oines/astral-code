@@ -3,7 +3,6 @@
 use codex_app_server_protocol::UserInput;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
-use ratatui::text::Span;
 use unicode_width::UnicodeWidthStr;
 
 use crate::DisplayMode;
@@ -16,6 +15,11 @@ use crate::ReasoningBlock;
 use crate::ReasoningVisibility;
 use crate::render_literal_with_metadata;
 use crate::render_markdown_with_metadata;
+
+#[path = "render/tool.rs"]
+mod tool;
+
+use tool::render_protocol_item;
 
 const USER_COLLAPSED_MAX_LINES: usize = 3;
 
@@ -61,9 +65,9 @@ impl RenderedEntry {
     }
 }
 
-/// Render one typed transcript entry. Protocol items deliberately return
-/// `None` until their exact renderer is implemented; they are never guessed by
-/// tool name here.
+/// Render one typed transcript entry. Unsupported protocol items return
+/// `None`; tool renderers match exact protocol variants and never guess by
+/// tool name.
 pub fn render_entry(
     block: &EntryBlock<'_>,
     state: EntryDisplayState,
@@ -76,7 +80,9 @@ pub fn render_entry(
         }
         EntryBlock::ProposedPlan { markdown, .. } => render_plan(markdown, state.raw(), options),
         EntryBlock::Reasoning(reasoning) => render_reasoning(reasoning, state, options),
-        EntryBlock::ProtocolItem { .. } => return None,
+        EntryBlock::ProtocolItem { item, live } => {
+            render_protocol_item(item, live, state, options)?
+        }
     };
     Some(RenderedEntry { lines })
 }
@@ -96,7 +102,7 @@ fn render_user(content: &[UserInput], mode: DisplayMode, width: u16) -> Vec<Mark
 
     let body_width = width.saturating_sub(2).max(1);
     let mut lines = render_literal_with_metadata(&text, body_width, Default::default());
-    prefix_lines(&mut lines, "› ".bold(), "  ".into());
+    prefix_lines(&mut lines, Line::from("› ".bold()), Line::from("  "));
     if mode != DisplayMode::Expanded && lines.len() > USER_COLLAPSED_MAX_LINES {
         lines.truncate(USER_COLLAPSED_MAX_LINES);
         if let Some(last) = lines.last_mut() {
@@ -146,7 +152,7 @@ fn render_plan(markdown: &str, raw: bool, options: EntryRenderOptions) -> Vec<Ma
             options.markdown_style,
         )
     };
-    prefix_lines(&mut body, "  ".into(), "  ".into());
+    prefix_lines(&mut body, Line::from("  "), Line::from("  "));
     lines.extend(body);
     lines
 }
@@ -193,7 +199,7 @@ fn render_reasoning(
             },
         );
     }
-    prefix_lines(&mut body, "  ".into(), "  ".into());
+    prefix_lines(&mut body, Line::from("  "), Line::from("  "));
     lines.push(blank_line());
     lines.extend(body);
     lines
@@ -230,23 +236,27 @@ fn format_elapsed(elapsed_ms: i64) -> String {
     }
 }
 
-fn prefix_lines(lines: &mut [MarkdownLine], initial: Span<'static>, subsequent: Span<'static>) {
+pub(super) fn prefix_lines(
+    lines: &mut [MarkdownLine],
+    initial: Line<'static>,
+    subsequent: Line<'static>,
+) {
     for (index, line) in lines.iter_mut().enumerate() {
         let prefix = if index == 0 {
             initial.clone()
         } else {
             subsequent.clone()
         };
-        let prefix_width = u16::try_from(Line::from(prefix.clone()).width()).unwrap_or(u16::MAX);
+        let prefix_width = u16::try_from(prefix.width()).unwrap_or(u16::MAX);
         for link in &mut line.links {
             link.columns = link.columns.start.saturating_add(prefix_width)
                 ..link.columns.end.saturating_add(prefix_width);
         }
-        line.line.spans.insert(0, prefix);
+        line.line.spans.splice(0..0, prefix.spans);
     }
 }
 
-fn truncate_with_ellipsis(line: &mut MarkdownLine, width: u16) {
+pub(super) fn truncate_with_ellipsis(line: &mut MarkdownLine, width: u16) {
     const ELLIPSIS: &str = " …";
     let available = usize::from(width).saturating_sub(UnicodeWidthStr::width(ELLIPSIS));
     let mut text = line.line.to_string();
