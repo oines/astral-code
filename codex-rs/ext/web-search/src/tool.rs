@@ -24,8 +24,8 @@ use crate::fetch;
 use crate::fetch::WebFetchInput;
 use crate::output::WebToolOutput;
 use crate::provider;
-use crate::provider::WebSearchRequest;
 use crate::provider::WebSearchResult;
+use crate::request::WebSearchRequest;
 
 pub(crate) const WEB_NAMESPACE: &str = "web";
 pub(crate) const SEARCH_TOOL_NAME: &str = "search";
