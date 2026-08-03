@@ -3,6 +3,7 @@ use std::borrow::Cow;
 use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::UserInput;
 
+use crate::DynamicToolCallBlock;
 use crate::EntryLifecycle;
 use crate::LiveItem;
 use crate::McpToolCallBlock;
@@ -29,6 +30,7 @@ pub enum EntryBlock<'a> {
     },
     Reasoning(ReasoningBlock<'a>),
     ContextCompaction(ContextCompactionBlock),
+    DynamicToolCall(DynamicToolCallBlock<'a>),
     McpToolCall(McpToolCallBlock<'a>),
     WebSearch(WebSearchBlock<'a>),
     ProtocolItem {
@@ -47,6 +49,9 @@ impl<'a> EntryBlock<'a> {
         live: &'a LiveItem,
         lifecycle: EntryLifecycle,
     ) -> Self {
+        if let Some(call) = DynamicToolCallBlock::from_item(item) {
+            return Self::DynamicToolCall(call);
+        }
         if let Some(call) = McpToolCallBlock::from_item(item) {
             return Self::McpToolCall(call);
         }
