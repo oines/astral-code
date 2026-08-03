@@ -577,6 +577,7 @@ version = "0.0.0"
 dependencies = [
  "codex-ansi-escape",
  "codex-app-server-protocol",
+ "diffy",
  "insta",
  "pretty_assertions",
  "pulldown-cmark",

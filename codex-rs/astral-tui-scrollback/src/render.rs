@@ -1,6 +1,7 @@
 //! Shared rendering for source-preserving conversation entries.
 
 use codex_app_server_protocol::UserInput;
+use ratatui::style::Color;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
 use unicode_width::UnicodeWidthStr;
@@ -28,6 +29,37 @@ pub struct EntryRenderOptions {
     pub width: u16,
     pub max_truncated_lines: usize,
     pub markdown_style: MarkdownStyle,
+    pub diff_style: DiffStyle,
+}
+
+/// Palette roles for structured file changes. The active TUI can replace the
+/// terminal-safe default with its day/night theme without changing diff
+/// semantics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DiffStyle {
+    pub path: Color,
+    pub gutter: Color,
+    pub insert_foreground: Color,
+    pub delete_foreground: Color,
+    pub insert_background: Option<Color>,
+    pub delete_background: Option<Color>,
+    pub equal_foreground: Color,
+    pub syntax_theme: crate::MarkdownSyntaxTheme,
+}
+
+impl Default for DiffStyle {
+    fn default() -> Self {
+        Self {
+            path: Color::Cyan,
+            gutter: Color::DarkGray,
+            insert_foreground: Color::Green,
+            delete_foreground: Color::Red,
+            insert_background: None,
+            delete_background: None,
+            equal_foreground: Color::DarkGray,
+            syntax_theme: crate::MarkdownSyntaxTheme::Terminal,
+        }
+    }
 }
 
 impl EntryRenderOptions {
@@ -36,6 +68,7 @@ impl EntryRenderOptions {
             width: width.max(1),
             max_truncated_lines: 3,
             markdown_style: MarkdownStyle::default(),
+            diff_style: DiffStyle::default(),
         }
     }
 
@@ -46,6 +79,11 @@ impl EntryRenderOptions {
 
     pub fn with_markdown_style(mut self, markdown_style: MarkdownStyle) -> Self {
         self.markdown_style = markdown_style;
+        self
+    }
+
+    pub fn with_diff_style(mut self, diff_style: DiffStyle) -> Self {
+        self.diff_style = diff_style;
         self
     }
 }
