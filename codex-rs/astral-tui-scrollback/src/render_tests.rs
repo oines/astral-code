@@ -1,3 +1,7 @@
+use codex_app_server_protocol::CollabAgentState;
+use codex_app_server_protocol::CollabAgentStatus;
+use codex_app_server_protocol::CollabAgentTool;
+use codex_app_server_protocol::CollabAgentToolCallStatus;
 use codex_app_server_protocol::CommandExecutionSource;
 use codex_app_server_protocol::CommandExecutionStatus;
 use codex_app_server_protocol::CoreToolCallStatus;
@@ -484,6 +488,81 @@ fn dynamic_tools_keep_client_hosted_and_web_fetch_semantics() {
       │ # Documentation
       │ Fetched body
     "###);
+}
+
+#[test]
+fn collaboration_operations_keep_protocol_semantics_and_grok_folds() {
+    let spawn = collab_tool(
+        CollabAgentTool::SpawnAgent,
+        CollabAgentToolCallStatus::Completed,
+        &["worker-alpha"],
+        /*prompt*/ Some("Inspect the renderer and report the ordering risk."),
+        /*model*/ Some("gpt-5"),
+        /*reasoning_effort*/ Some("high"),
+        &[("worker-alpha", CollabAgentStatus::Running, None)],
+    );
+    let send = collab_tool(
+        CollabAgentTool::SendInput,
+        CollabAgentToolCallStatus::Failed,
+        &["worker-alpha"],
+        /*prompt*/ Some("Please include the failed boundary."),
+        /*model*/ None,
+        /*reasoning_effort*/ None,
+        &[(
+            "worker-alpha",
+            CollabAgentStatus::Errored,
+            Some("tool timeout"),
+        )],
+    );
+    let wait = collab_tool(
+        CollabAgentTool::Wait,
+        CollabAgentToolCallStatus::InProgress,
+        &["worker-alpha", "reviewer-beta"],
+        /*prompt*/ None,
+        /*model*/ None,
+        /*reasoning_effort*/ None,
+        &[
+            ("worker-alpha", CollabAgentStatus::Completed, Some("done")),
+            ("reviewer-beta", CollabAgentStatus::Running, None),
+        ],
+    );
+    let resume = collab_tool(
+        CollabAgentTool::ResumeAgent,
+        CollabAgentToolCallStatus::Completed,
+        &["worker-alpha"],
+        /*prompt*/ None,
+        /*model*/ None,
+        /*reasoning_effort*/ None,
+        &[("worker-alpha", CollabAgentStatus::Running, None)],
+    );
+    let close = collab_tool(
+        CollabAgentTool::CloseAgent,
+        CollabAgentToolCallStatus::Completed,
+        &["worker-alpha"],
+        /*prompt*/ None,
+        /*model*/ None,
+        /*reasoning_effort*/ None,
+        &[],
+    );
+    let options = EntryRenderOptions::new(/*width*/ 62);
+    let mut output = Vec::new();
+    for (label, item, expand) in [
+        ("SPAWN", spawn, true),
+        ("SEND", send, true),
+        ("WAIT", wait, true),
+        ("RESUME", resume, true),
+        ("CLOSE", close, false),
+    ] {
+        let block = EntryBlock::from_parts(&item, &LiveItem::None, EntryLifecycle::Restored);
+        let mut state = EntryDisplayState::for_block(&block).expect("collaboration display state");
+        if expand {
+            assert!(state.expand(&block));
+        }
+        let rendered = render_entry(&block, state, options).expect("collaboration renderer");
+        output.push(format!("{label}\n{}", plain(&rendered)));
+    }
+
+    assert_snapshot!(output.join("\n\n"));
 }
 
 #[test]
@@ -983,6 +1062,43 @@ fn dynamic_tool(
         content_items,
         success,
         duration_ms,
+    }
+}
+
+fn collab_tool(
+    tool: CollabAgentTool,
+    status: CollabAgentToolCallStatus,
+    receiver_thread_ids: &[&str],
+    prompt: Option<&str>,
+    model: Option<&str>,
+    reasoning_effort: Option<&str>,
+    agents_states: &[(&str, CollabAgentStatus, Option<&str>)],
+) -> ThreadItem {
+    ThreadItem::CollabAgentToolCall {
+        id: "collab".to_string(),
+        tool,
+        status,
+        sender_thread_id: "parent".to_string(),
+        receiver_thread_ids: receiver_thread_ids
+            .iter()
+            .map(ToString::to_string)
+            .collect(),
+        prompt: prompt.map(str::to_string),
+        model: model.map(str::to_string),
+        reasoning_effort: reasoning_effort
+            .map(|effort| serde_json::from_value(json!(effort)).expect("valid reasoning effort")),
+        agents_states: agents_states
+            .iter()
+            .map(|(thread_id, status, message)| {
+                (
+                    (*thread_id).to_string(),
+                    CollabAgentState {
+                        status: status.clone(),
+                        message: message.map(str::to_string),
+                    },
+                )
+            })
+            .collect(),
     }
 }
 

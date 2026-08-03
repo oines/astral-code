@@ -1,0 +1,29 @@
+---
+source: astral-tui-scrollback/src/render_tests.rs
+expression: "output.join(\"\\n\\n\")"
+---
+SPAWN
+◆ Spawned Agent worker-… (gpt-5 high)
+
+  │ prompt: Inspect the renderer and report the ordering risk.
+  │ agent worker-alpha: Running
+
+SEND
+× Failed to send input to Agent worker-…
+
+  │ prompt: Please include the failed boundary.
+  │ agent worker-alpha: Error - tool timeout
+
+WAIT
+◇ Waiting for 2 agents
+
+  │ agent worker-alpha: Completed - done
+  │ agent reviewer-beta: Running
+
+RESUME
+◆ Resumed Agent worker-…
+
+  │ agent worker-alpha: Running
+
+CLOSE
+◆ Closed Agent worker-…
