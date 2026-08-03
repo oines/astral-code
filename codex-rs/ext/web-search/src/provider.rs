@@ -5,14 +5,14 @@ use codex_config::config_toml::WebSearchProvider;
 use codex_config::config_toml::WebSearchRuntimeConfig;
 use reqwest::header::ACCEPT;
 use serde_json::Value;
-use serde_json::json;
 use url::Url;
 
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct WebSearchRequest {
-    pub(crate) query: String,
-    pub(crate) limit: usize,
-}
+use crate::request::WebSearchRequest;
+use crate::request::brave_query;
+use crate::request::exa_body;
+use crate::request::jina_url;
+use crate::request::serpapi_query;
+use crate::request::tavily_body;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WebSearchResult {
@@ -152,43 +152,6 @@ async fn response_json(response: reqwest::Response, provider: &str) -> Result<Va
 
 fn request_error(provider: &str, error: reqwest::Error) -> String {
     format!("{provider} search request failed: {}", error.without_url())
-}
-
-fn tavily_body(request: &WebSearchRequest) -> Value {
-    json!({
-        "query": request.query,
-        "max_results": request.limit,
-    })
-}
-
-fn exa_body(request: &WebSearchRequest) -> Value {
-    json!({
-        "query": request.query,
-        "numResults": request.limit,
-    })
-}
-
-fn jina_url(request: &WebSearchRequest) -> Result<Url, String> {
-    let mut url =
-        Url::parse("https://s.jina.ai/").map_err(|err| format!("invalid Jina URL: {err}"))?;
-    url.query_pairs_mut().append_pair("q", &request.query);
-    Ok(url)
-}
-
-fn brave_query(request: &WebSearchRequest) -> Vec<(&'static str, String)> {
-    vec![
-        ("q", request.query.clone()),
-        ("count", request.limit.to_string()),
-    ]
-}
-
-fn serpapi_query(request: &WebSearchRequest, api_key: &str) -> Vec<(&'static str, String)> {
-    vec![
-        ("engine", "google".to_string()),
-        ("q", request.query.clone()),
-        ("num", request.limit.to_string()),
-        ("api_key", api_key.to_string()),
-    ]
 }
 
 pub(crate) fn parse_tavily_results(value: &Value) -> Vec<WebSearchResult> {
