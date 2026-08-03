@@ -14,12 +14,16 @@ use std::ops::Range;
 mod style;
 #[path = "markdown/syntax.rs"]
 mod syntax;
+#[path = "markdown/table.rs"]
+mod table;
 #[path = "markdown/wrapping.rs"]
 mod wrapping;
 
 pub use style::MarkdownStyle;
 pub use style::MarkdownSyntaxTheme;
 pub use syntax::CodeLineHighlighter;
+pub use table::MarkdownTable;
+pub use table::MarkdownTableAlignment;
 use wrapping::wrap_segments_with_joiners;
 
 /// Separator required before a rendered line when reconstructing selected text.
