@@ -563,6 +563,53 @@ fn collaboration_operations_keep_protocol_semantics_and_grok_folds() {
     }
 
     assert_snapshot!(output.join("\n\n"));
+
+    let boundary_item = collab_tool(
+        CollabAgentTool::Wait,
+        CollabAgentToolCallStatus::Completed,
+        &["worker-alpha", "worker-alpha", "reviewer-beta"],
+        /*prompt*/ None,
+        /*model*/ None,
+        /*reasoning_effort*/ None,
+        &[
+            ("agent-d", CollabAgentStatus::Running, None),
+            ("agent-b", CollabAgentStatus::Running, None),
+            ("agent-f", CollabAgentStatus::Running, None),
+            ("worker-alpha", CollabAgentStatus::Running, None),
+            ("agent-a", CollabAgentStatus::Running, None),
+            ("agent-e", CollabAgentStatus::Running, None),
+            ("reviewer-beta", CollabAgentStatus::Completed, None),
+            ("agent-c", CollabAgentStatus::Running, None),
+            ("agent-h", CollabAgentStatus::Running, None),
+            ("agent-g", CollabAgentStatus::Running, None),
+        ],
+    );
+    let block = EntryBlock::from_parts(&boundary_item, &LiveItem::None, EntryLifecycle::Restored);
+    let mut state = EntryDisplayState::for_block(&block).expect("collaboration display state");
+    assert!(state.expand(&block));
+    let boundary = plain(
+        &render_entry(&block, state, EntryRenderOptions::new(/*width*/ 80))
+            .expect("collaboration renderer"),
+    );
+    let agent_rows = boundary
+        .lines()
+        .filter_map(|line| line.strip_prefix("  │ agent "))
+        .filter_map(|line| line.split(':').next())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        agent_rows,
+        vec![
+            "worker-alpha",
+            "reviewer-beta",
+            "agent-a",
+            "agent-b",
+            "agent-c",
+            "agent-d",
+            "agent-e",
+            "agent-f",
+        ]
+    );
+    assert!(boundary.contains("  │ … 2 more agents"));
 }
 
 #[test]
