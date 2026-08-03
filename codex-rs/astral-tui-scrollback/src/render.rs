@@ -19,8 +19,11 @@ use crate::render_markdown_with_metadata;
 
 #[path = "render/tool.rs"]
 mod tool;
+#[path = "render/verb_group.rs"]
+mod verb_group;
 
 use tool::render_protocol_item;
+use verb_group::render_header as render_verb_group_header_lines;
 
 const USER_COLLAPSED_MAX_LINES: usize = 3;
 
@@ -123,6 +126,16 @@ pub fn render_entry(
         }
     };
     Some(RenderedEntry { lines })
+}
+
+/// Render the synthetic header for one Grok-style verb group.
+pub fn render_verb_group_header(
+    group: &crate::VerbGroupSpan,
+    options: EntryRenderOptions,
+) -> RenderedEntry {
+    RenderedEntry {
+        lines: render_verb_group_header_lines(group, options.width),
+    }
 }
 
 fn render_user(content: &[UserInput], mode: DisplayMode, width: u16) -> Vec<MarkdownLine> {
