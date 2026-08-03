@@ -4,6 +4,7 @@
 mod block;
 mod display;
 mod live_item;
+mod markdown;
 mod transcript;
 
 pub use block::EntryBlock;
@@ -12,6 +13,15 @@ pub use block::ReasoningVisibility;
 pub use display::DisplayMode;
 pub use display::EntryDisplayState;
 pub use live_item::LiveItem;
+pub use markdown::CodeLineHighlighter;
+pub use markdown::LineJoiner;
+pub use markdown::MarkdownLine;
+pub use markdown::MarkdownLink;
+pub use markdown::MarkdownStyle;
+pub use markdown::MarkdownSyntaxTheme;
+pub use markdown::highlight_fenced_code;
+pub use markdown::render_literal_with_metadata;
+pub use markdown::wrap_styled_line_with_metadata;
 pub use transcript::ApplyOutcome;
 pub use transcript::EntryLifecycle;
 pub use transcript::Transcript;

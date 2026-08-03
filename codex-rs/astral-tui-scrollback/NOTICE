@@ -1,0 +1,11 @@
+astral-tui-scrollback includes Markdown rendering code derived from
+xai-grok-markdown and xai-grok-pager.
+
+Upstream: https://github.com/xai-org/grok-build
+Source commit: 47348d13ec4508dcfe440e34c6d511bb02998fb2
+Copyright 2023-2026 xAI
+Licensed under the Apache License, Version 2.0.
+
+Astral Code modifications include a source-preserving app-server item model,
+crate decomposition, and adaptation for shared inline/fullscreen rendering.
+See the repository root LICENSE and NOTICE.
