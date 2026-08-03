@@ -1,5 +1,8 @@
 use codex_app_server_protocol::CommandExecutionSource;
 use codex_app_server_protocol::CommandExecutionStatus;
+use codex_app_server_protocol::FileUpdateChange;
+use codex_app_server_protocol::PatchApplyStatus;
+use codex_app_server_protocol::PatchChangeKind;
 use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::UserInput;
 use insta::assert_snapshot;
@@ -224,6 +227,89 @@ fn running_user_shell_streams_live_output_and_terminal_input() {
       ↳ 1 + 1
       │ >>> 2
     "###);
+}
+
+#[test]
+fn file_change_renders_a_structured_narrow_diff() {
+    let item = file_change(vec![FileUpdateChange {
+        path: "/workspace/src/example.rs".to_string(),
+        kind: PatchChangeKind::Update { move_path: None },
+        diff: "@@ -1,3 +1,4 @@\n fn main() {\n-    println!(\"old\");\n+    println!(\"new\");\n+    let 中文 = \"一段很长的内容\";\n }\n"
+            .to_string(),
+    }]);
+    let block = EntryBlock::from_parts(
+        &item,
+        &LiveItem::None,
+        completed(/*started_at_ms*/ 1_000, /*completed_at_ms*/ 1_200),
+    );
+    let state = EntryDisplayState::for_block(&block).expect("file change state");
+    let rendered =
+        render_entry(&block, state, EntryRenderOptions::new(/*width*/ 32)).expect("rendered diff");
+
+    assert_snapshot!(plain(&rendered), @r###"
+    ◆ Edit example.rs
+
+      1  fn main() {
+      2      println!("old");
+      2      println!("new");
+      3      let 中文 =
+         "一段很长的内容";
+      4  }
+    "###);
+}
+
+#[test]
+fn multi_file_change_keeps_create_delete_and_move_semantics() {
+    let item = file_change(vec![
+        FileUpdateChange {
+            path: "src/new.rs".to_string(),
+            kind: PatchChangeKind::Add,
+            diff: "alpha\nbeta\n".to_string(),
+        },
+        FileUpdateChange {
+            path: "src/old.rs".to_string(),
+            kind: PatchChangeKind::Delete,
+            diff: "obsolete\n".to_string(),
+        },
+        FileUpdateChange {
+            path: "src/name.rs".to_string(),
+            kind: PatchChangeKind::Update {
+                move_path: Some("src/renamed.rs".into()),
+            },
+            diff: "@@ -1 +1 @@\n-old_name\n+new_name\n\nMoved to: src/renamed.rs".to_string(),
+        },
+    ]);
+    let block = EntryBlock::from_parts(
+        &item,
+        &LiveItem::None,
+        completed(/*started_at_ms*/ 1_000, /*completed_at_ms*/ 1_200),
+    );
+    let state = EntryDisplayState::for_block(&block).expect("file change state");
+    let rendered =
+        render_entry(&block, state, EntryRenderOptions::new(/*width*/ 56)).expect("rendered diff");
+
+    assert_snapshot!(plain(&rendered), @r###"
+    ◆ Edit 3 files
+
+      A src/new.rs  +2/-0
+        1  alpha
+        2  beta
+
+      D src/old.rs  +0/-1
+        1  obsolete
+
+      R src/name.rs → src/renamed.rs  +1/-1
+        1  old_name
+        1  new_name
+    "###);
+}
+
+fn file_change(changes: Vec<FileUpdateChange>) -> ThreadItem {
+    ThreadItem::FileChange {
+        id: "edit".to_string(),
+        changes,
+        status: PatchApplyStatus::Completed,
+    }
 }
 
 fn command(

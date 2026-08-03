@@ -196,12 +196,24 @@ impl EntryBlock<'_> {
                         },
                     })
                 }
+                ThreadItem::FileChange { changes, .. } => {
+                    let changes = if changes.is_empty() {
+                        live.file_changes()
+                    } else {
+                        changes
+                    };
+                    Some(DisplayPolicy {
+                        default_mode: DisplayMode::Expanded,
+                        foldable: !changes.is_empty(),
+                        has_raw_mode: false,
+                        fold_cycle: FoldCycle::TwoState,
+                    })
+                }
                 ThreadItem::UserMessage { .. }
                 | ThreadItem::HookPrompt { .. }
                 | ThreadItem::AgentMessage { .. }
                 | ThreadItem::Plan { .. }
                 | ThreadItem::Reasoning { .. }
-                | ThreadItem::FileChange { .. }
                 | ThreadItem::McpToolCall { .. }
                 | ThreadItem::DynamicToolCall { .. }
                 | ThreadItem::CoreToolCall { .. }

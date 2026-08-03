@@ -21,6 +21,17 @@ pub enum LiveItem {
 }
 
 impl LiveItem {
+    pub(crate) fn file_changes(&self) -> &[FileUpdateChange] {
+        match self {
+            Self::FileChange { changes } => changes,
+            Self::None
+            | Self::AgentMessage(_)
+            | Self::Plan(_)
+            | Self::Reasoning { .. }
+            | Self::Command { .. } => &[],
+        }
+    }
+
     pub(crate) fn command_output(&self) -> Option<&str> {
         match self {
             Self::Command { output, .. } if !output.is_empty() => Some(output),

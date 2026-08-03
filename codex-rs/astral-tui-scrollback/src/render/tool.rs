@@ -10,6 +10,8 @@ use super::EntryRenderOptions;
 
 #[path = "tool/command.rs"]
 mod command;
+#[path = "tool/file_change.rs"]
+mod file_change;
 
 pub(super) fn render_protocol_item(
     item: &ThreadItem,
@@ -19,12 +21,12 @@ pub(super) fn render_protocol_item(
 ) -> Option<Vec<MarkdownLine>> {
     match item {
         ThreadItem::CommandExecution { .. } => command::render(item, live, state, options),
+        ThreadItem::FileChange { .. } => file_change::render(item, live, state, options),
         ThreadItem::UserMessage { .. }
         | ThreadItem::HookPrompt { .. }
         | ThreadItem::AgentMessage { .. }
         | ThreadItem::Plan { .. }
         | ThreadItem::Reasoning { .. }
-        | ThreadItem::FileChange { .. }
         | ThreadItem::McpToolCall { .. }
         | ThreadItem::DynamicToolCall { .. }
         | ThreadItem::CoreToolCall { .. }

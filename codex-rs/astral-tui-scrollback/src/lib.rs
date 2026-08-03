@@ -27,6 +27,7 @@ pub use markdown::render_literal_with_metadata;
 pub use markdown::render_markdown;
 pub use markdown::render_markdown_with_metadata;
 pub use markdown::wrap_styled_line_with_metadata;
+pub use render::DiffStyle;
 pub use render::EntryRenderOptions;
 pub use render::RenderedEntry;
 pub use render::render_entry;
