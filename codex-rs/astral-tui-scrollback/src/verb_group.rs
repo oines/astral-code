@@ -16,6 +16,7 @@ use crate::TranscriptEntryId;
 use crate::TranscriptTurn;
 use crate::read_tool::ReadCall;
 use crate::search_tool::SearchCall;
+use crate::web_search::WebSearchKind;
 
 /// One synthetic fold over consecutive, non-destructive transcript entries.
 ///
@@ -261,12 +262,12 @@ fn run_step(
                 RunStep::ThoughtMember
             }
         }
-        EntryBlock::ProtocolItem { item, .. } => {
-            let Some((kind, _)) = member_kind_and_status(item) else {
+        EntryBlock::ProtocolItem { .. } | EntryBlock::WebSearch(_) => {
+            let Some(meta) = member_meta(&block) else {
                 return RunStep::Break;
             };
             if state.mode() == DisplayMode::Collapsed {
-                RunStep::Member(kind)
+                RunStep::Member(meta.kind)
             } else {
                 RunStep::Transparent
             }
@@ -283,6 +284,8 @@ enum GroupBucket {
     File,
     Skill,
     Search,
+    WebFetch,
+    WebSearch,
 }
 
 impl GroupBucket {
@@ -292,6 +295,10 @@ impl GroupBucket {
             (Self::File | Self::Skill, true) => "Reading",
             (Self::Search, false) => "Searched",
             (Self::Search, true) => "Searching",
+            (Self::WebFetch, false) => "Fetched",
+            (Self::WebFetch, true) => "Fetching",
+            (Self::WebSearch, false) => "Searched",
+            (Self::WebSearch, true) => "Searching",
         }
     }
 
@@ -303,20 +310,58 @@ impl GroupBucket {
             (Self::Skill, _) => "skills",
             (Self::Search, 1) => "pattern",
             (Self::Search, _) => "patterns",
+            (Self::WebFetch | Self::WebSearch, 1) => "website",
+            (Self::WebFetch | Self::WebSearch, _) => "websites",
         }
     }
 }
 
-fn member_kind_and_status(item: &ThreadItem) -> Option<(GroupBucket, CoreToolCallStatus)> {
-    if let Some(read) = ReadCall::from_item(item) {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MemberMeta {
+    kind: GroupBucket,
+    running: bool,
+    failed: bool,
+}
+
+fn member_meta(block: &EntryBlock<'_>) -> Option<MemberMeta> {
+    match block {
+        EntryBlock::ProtocolItem { item, .. } => protocol_member_meta(item),
+        EntryBlock::WebSearch(search) => Some(MemberMeta {
+            kind: match search.kind() {
+                WebSearchKind::Search => GroupBucket::WebSearch,
+                WebSearchKind::Fetch => GroupBucket::WebFetch,
+            },
+            running: search.running(),
+            failed: false,
+        }),
+        EntryBlock::User { .. }
+        | EntryBlock::Assistant { .. }
+        | EntryBlock::ProposedPlan { .. }
+        | EntryBlock::Reasoning(_)
+        | EntryBlock::ContextCompaction(_) => None,
+    }
+}
+
+fn protocol_member_meta(item: &ThreadItem) -> Option<MemberMeta> {
+    let (kind, status) = if let Some(read) = ReadCall::from_item(item) {
         let kind = if skill_name_from_path(read.path()).is_some() {
             GroupBucket::Skill
         } else {
             GroupBucket::File
         };
-        return Some((kind, read.status()));
-    }
-    SearchCall::from_item(item).map(|search| (GroupBucket::Search, search.status()))
+        (kind, read.status())
+    } else {
+        let search = SearchCall::from_item(item)?;
+        (GroupBucket::Search, search.status())
+    };
+    Some(MemberMeta {
+        kind,
+        running: status == CoreToolCallStatus::InProgress,
+        failed: matches!(
+            status,
+            CoreToolCallStatus::Failed | CoreToolCallStatus::Interrupted
+        ),
+    })
 }
 
 fn skill_name_from_path(path: &str) -> Option<&str> {
@@ -338,23 +383,20 @@ fn aggregate_label(entries: &[TranscriptEntry], indices: &[usize]) -> GroupLabel
     let mut running = false;
     let mut failed_count = 0;
     for index in indices {
-        let Some((kind, status)) = entries
-            .get(*index)
-            .map(TranscriptEntry::item)
-            .and_then(member_kind_and_status)
-        else {
+        let Some(entry) = entries.get(*index) else {
             continue;
         };
-        if let Some((_, count)) = buckets.iter_mut().find(|(bucket, _)| *bucket == kind) {
+        let block = EntryBlock::from_entry(entry);
+        let Some(meta) = member_meta(&block) else {
+            continue;
+        };
+        if let Some((_, count)) = buckets.iter_mut().find(|(bucket, _)| *bucket == meta.kind) {
             *count += 1;
         } else {
-            buckets.push((kind, 1));
+            buckets.push((meta.kind, 1));
         }
-        running |= status == CoreToolCallStatus::InProgress;
-        failed_count += usize::from(matches!(
-            status,
-            CoreToolCallStatus::Failed | CoreToolCallStatus::Interrupted
-        ));
+        running |= meta.running;
+        failed_count += usize::from(meta.failed);
     }
     let mut text = buckets
         .into_iter()
