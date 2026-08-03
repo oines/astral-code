@@ -1,3 +1,6 @@
+use codex_app_server_protocol::CommandExecutionSource;
+use codex_app_server_protocol::CommandExecutionStatus;
+use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::UserInput;
 use unicode_width::UnicodeWidthStr;
 
@@ -160,7 +163,56 @@ impl EntryBlock<'_> {
                     FoldCycle::TwoState
                 },
             }),
-            Self::ProtocolItem { .. } => None,
+            Self::ProtocolItem { item, live } => match item {
+                ThreadItem::CommandExecution {
+                    source,
+                    status,
+                    aggregated_output,
+                    ..
+                } => {
+                    let running = *status == CommandExecutionStatus::InProgress;
+                    let user_shell = *source == CommandExecutionSource::UserShell;
+                    let foldable = aggregated_output
+                        .as_deref()
+                        .is_some_and(|output| !output.is_empty())
+                        || live.command_output().is_some()
+                        || !live.terminal_input().is_empty();
+                    Some(DisplayPolicy {
+                        default_mode: if user_shell {
+                            if running {
+                                DisplayMode::Truncated
+                            } else {
+                                DisplayMode::Expanded
+                            }
+                        } else {
+                            DisplayMode::Collapsed
+                        },
+                        foldable,
+                        has_raw_mode: false,
+                        fold_cycle: if user_shell {
+                            FoldCycle::UserShell { running }
+                        } else {
+                            FoldCycle::AgentCommand
+                        },
+                    })
+                }
+                ThreadItem::UserMessage { .. }
+                | ThreadItem::HookPrompt { .. }
+                | ThreadItem::AgentMessage { .. }
+                | ThreadItem::Plan { .. }
+                | ThreadItem::Reasoning { .. }
+                | ThreadItem::FileChange { .. }
+                | ThreadItem::McpToolCall { .. }
+                | ThreadItem::DynamicToolCall { .. }
+                | ThreadItem::CoreToolCall { .. }
+                | ThreadItem::CollabAgentToolCall { .. }
+                | ThreadItem::WebSearch { .. }
+                | ThreadItem::ImageView { .. }
+                | ThreadItem::ImageGeneration { .. }
+                | ThreadItem::EnteredReviewMode { .. }
+                | ThreadItem::ExitedReviewMode { .. }
+                | ThreadItem::ContextCompaction { .. } => None,
+            },
         }
     }
 }
@@ -184,6 +236,14 @@ impl DisplayPolicy {
                 DisplayMode::Collapsed | DisplayMode::Truncated => DisplayMode::Expanded,
                 DisplayMode::Expanded => DisplayMode::Truncated,
             },
+            FoldCycle::AgentCommand => match current {
+                DisplayMode::Collapsed => DisplayMode::Truncated,
+                DisplayMode::Truncated | DisplayMode::Expanded => DisplayMode::Collapsed,
+            },
+            FoldCycle::UserShell { .. } => match current {
+                DisplayMode::Collapsed => DisplayMode::Expanded,
+                DisplayMode::Truncated | DisplayMode::Expanded => DisplayMode::Collapsed,
+            },
         }
     }
 
@@ -191,6 +251,9 @@ impl DisplayPolicy {
         match self.fold_cycle {
             FoldCycle::RunningReasoning => DisplayMode::Truncated,
             FoldCycle::TwoState => DisplayMode::Collapsed,
+            FoldCycle::AgentCommand => DisplayMode::Collapsed,
+            FoldCycle::UserShell { running: true } => DisplayMode::Truncated,
+            FoldCycle::UserShell { running: false } => DisplayMode::Collapsed,
         }
     }
 }
@@ -199,6 +262,8 @@ impl DisplayPolicy {
 enum FoldCycle {
     TwoState,
     RunningReasoning,
+    AgentCommand,
+    UserShell { running: bool },
 }
 
 fn user_is_foldable(content: &[UserInput]) -> bool {

@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+codex-ansi-escape = { workspace = true }
 codex-app-server-protocol = { workspace = true }
 pulldown-cmark = { workspace = true }
 ratatui = { workspace = true }
