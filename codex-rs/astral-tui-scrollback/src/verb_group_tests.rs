@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use codex_app_server_protocol::CoreToolCallStatus;
 use codex_app_server_protocol::ItemCompletedNotification;
 use codex_app_server_protocol::ItemStartedNotification;
+use codex_app_server_protocol::McpToolCallStatus;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::Turn;
@@ -50,6 +51,7 @@ fn groups_exact_lookup_entries_without_flattening_source_order() {
         ),
         web_search("web", "rust async runtime"),
         web_fetch("fetch", "https://example.com/docs"),
+        mcp_tool("mcp"),
         agent("boundary"),
         core_tool(
             "glob",
@@ -71,7 +73,7 @@ fn groups_exact_lookup_entries_without_flattening_source_order() {
         "Reading 1 skill, Reading 1 file, Searching 1 pattern, Searching 1 website, Fetching 1 website"
     );
     assert!(groups[0].running());
-    assert_eq!(groups[1].range(), 7..8);
+    assert_eq!(groups[1].range(), 8..9);
     assert_eq!(groups[1].label(), "Searched 1 pattern");
 
     let mut state = VerbGroupDisplayState::default();
@@ -284,6 +286,21 @@ fn web_fetch(id: &str, url: &str) -> ThreadItem {
         action: Some(WebSearchAction::OpenPage {
             url: Some(url.to_string()),
         }),
+    }
+}
+
+fn mcp_tool(id: &str) -> ThreadItem {
+    ThreadItem::McpToolCall {
+        id: id.to_string(),
+        server: "linear".to_string(),
+        tool: "list_issues".to_string(),
+        status: McpToolCallStatus::Completed,
+        arguments: json!({}),
+        mcp_app_resource_uri: None,
+        plugin_id: None,
+        result: None,
+        error: None,
+        duration_ms: None,
     }
 }
 

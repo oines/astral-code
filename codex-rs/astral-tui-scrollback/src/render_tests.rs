@@ -2,6 +2,9 @@ use codex_app_server_protocol::CommandExecutionSource;
 use codex_app_server_protocol::CommandExecutionStatus;
 use codex_app_server_protocol::CoreToolCallStatus;
 use codex_app_server_protocol::FileUpdateChange;
+use codex_app_server_protocol::McpToolCallError;
+use codex_app_server_protocol::McpToolCallResult;
+use codex_app_server_protocol::McpToolCallStatus;
 use codex_app_server_protocol::PatchApplyStatus;
 use codex_app_server_protocol::PatchChangeKind;
 use codex_app_server_protocol::ThreadItem;
@@ -250,6 +253,141 @@ fn web_search_actions_render_from_exact_protocol_data() {
     OTHER
     ◆ Web Search provider-defined …
     "###);
+}
+
+#[test]
+fn mcp_calls_keep_grok_folds_and_protocol_result_shapes() {
+    let running_item = mcp_tool(
+        McpToolCallStatus::InProgress,
+        json!({"query": "ratatui styling", "limit": 3}),
+        /*result*/ None,
+        /*error*/ None,
+        /*duration_ms*/ None,
+    );
+    let completed_item = mcp_tool(
+        McpToolCallStatus::Completed,
+        json!({"query": "ratatui styling", "limit": 3}),
+        /*result*/
+        Some(McpToolCallResult {
+            content: vec![
+                json!({
+                    "type": "text",
+                    "text": "Found styling guidance in styles.md.\nNo anomalies detected."
+                }),
+                json!({
+                    "type": "resource_link",
+                    "uri": "file:///docs/styles.md",
+                    "name": "styles.md"
+                }),
+                json!({"type": "image", "data": "omitted", "mimeType": "image/png"}),
+            ],
+            structured_content: Some(json!({"matches": 1})),
+            meta: None,
+        }),
+        /*error*/ None,
+        /*duration_ms*/ Some(640),
+    );
+    let failed_item = mcp_tool(
+        McpToolCallStatus::Failed,
+        Value::Null,
+        /*result*/
+        Some(McpToolCallResult {
+            content: Vec::new(),
+            structured_content: Some(json!({"retryable": true})),
+            meta: None,
+        }),
+        /*error*/ Some("network timeout"),
+        /*duration_ms*/ Some(2_000),
+    );
+    let options = EntryRenderOptions::new(/*width*/ 52);
+    let mut output = Vec::new();
+    for (label, item, expand) in [
+        ("RUNNING", running_item, false),
+        ("COMPLETED", completed_item, true),
+        ("FAILED", failed_item, true),
+    ] {
+        let block = EntryBlock::from_parts(&item, &LiveItem::None, EntryLifecycle::Restored);
+        let mut state = EntryDisplayState::for_block(&block).expect("MCP display state");
+        if expand {
+            assert!(state.expand(&block));
+        }
+        let rendered = render_entry(&block, state, options).expect("MCP renderer");
+        output.push(format!("{label}\n{}", plain(&rendered)));
+    }
+
+    assert_snapshot!(output.join("\n\n"), @r###"
+    RUNNING
+    ◇ Search Find Docs
+
+    COMPLETED
+    ◆ Search Find Docs  0.6s
+
+      limit: 3
+      query: ratatui styling
+
+      │ Found styling guidance in styles.md.
+      │ No anomalies detected.
+      │ link: file:///docs/styles.md
+      │ <image content>
+
+    FAILED
+    × Search Find Docs  2.0s
+
+      │ structured result: {"retryable":true}
+      │ Error: network timeout
+    "###);
+
+    let bounded_arguments = Value::Object(
+        (0..14)
+            .map(|index| (format!("arg_{index:02}"), json!("界".repeat(600))))
+            .collect(),
+    );
+    let bounded_result = McpToolCallResult {
+        content: (0..12)
+            .map(|index| json!({"type": "text", "text": format!("row {index:02}")}))
+            .collect(),
+        structured_content: None,
+        meta: None,
+    };
+    let bounded_item = mcp_tool(
+        McpToolCallStatus::Completed,
+        bounded_arguments,
+        /*result*/ Some(bounded_result),
+        /*error*/ None,
+        /*duration_ms*/ None,
+    );
+    let block = EntryBlock::from_parts(&bounded_item, &LiveItem::None, EntryLifecycle::Restored);
+    let mut state = EntryDisplayState::for_block(&block).expect("MCP display state");
+    assert!(state.expand(&block));
+    let bounded = plain(
+        &render_entry(&block, state, EntryRenderOptions::new(/*width*/ 2_048))
+            .expect("bounded MCP renderer"),
+    );
+    assert!(bounded.contains("… 2 more arguments"));
+    assert!(bounded.contains("… 2 hidden lines"));
+    assert!(bounded.contains(&format!("{}…", "界".repeat(511))));
+
+    let long_output_item = mcp_tool(
+        McpToolCallStatus::Completed,
+        Value::Null,
+        /*result*/
+        Some(McpToolCallResult {
+            content: vec![json!({"type": "text", "text": "x".repeat(5_000)})],
+            structured_content: None,
+            meta: None,
+        }),
+        /*error*/ None,
+        /*duration_ms*/ None,
+    );
+    let block =
+        EntryBlock::from_parts(&long_output_item, &LiveItem::None, EntryLifecycle::Restored);
+    let mut state = EntryDisplayState::for_block(&block).expect("MCP display state");
+    assert!(state.expand(&block));
+    let bounded = plain(
+        &render_entry(&block, state, EntryRenderOptions::new(/*width*/ 8_192))
+            .expect("bounded MCP renderer"),
+    );
+    assert!(bounded.contains(&format!("{}…", "x".repeat(4_095))));
 }
 
 #[test]
@@ -705,6 +843,29 @@ fn web_search(query: &str, action: Option<WebSearchAction>) -> ThreadItem {
         id: "web-search".to_string(),
         query: query.to_string(),
         action,
+    }
+}
+
+fn mcp_tool(
+    status: McpToolCallStatus,
+    arguments: Value,
+    result: Option<McpToolCallResult>,
+    error: Option<&str>,
+    duration_ms: Option<i64>,
+) -> ThreadItem {
+    ThreadItem::McpToolCall {
+        id: "mcp".to_string(),
+        server: "search".to_string(),
+        tool: "find_docs".to_string(),
+        status,
+        arguments,
+        mcp_app_resource_uri: None,
+        plugin_id: None,
+        result: result.map(Box::new),
+        error: error.map(|message| McpToolCallError {
+            message: message.to_string(),
+        }),
+        duration_ms,
     }
 }
 
