@@ -578,6 +578,7 @@ dependencies = [
  "codex-app-server-protocol",
  "insta",
  "pretty_assertions",
+ "pulldown-cmark",
  "ratatui",
  "syntect",
  "textwrap 0.16.2",

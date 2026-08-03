@@ -23,6 +23,8 @@ pub use markdown::MarkdownTable;
 pub use markdown::MarkdownTableAlignment;
 pub use markdown::highlight_fenced_code;
 pub use markdown::render_literal_with_metadata;
+pub use markdown::render_markdown;
+pub use markdown::render_markdown_with_metadata;
 pub use markdown::wrap_styled_line_with_metadata;
 pub use transcript::ApplyOutcome;
 pub use transcript::EntryLifecycle;

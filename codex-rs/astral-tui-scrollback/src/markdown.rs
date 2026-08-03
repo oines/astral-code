@@ -10,6 +10,10 @@ use ratatui::text::Line;
 use ratatui::text::Span;
 use std::ops::Range;
 
+#[path = "markdown/code.rs"]
+mod code;
+#[path = "markdown/parser.rs"]
+mod parser;
 #[path = "markdown/style.rs"]
 mod style;
 #[path = "markdown/syntax.rs"]
@@ -25,6 +29,22 @@ pub use syntax::CodeLineHighlighter;
 pub use table::MarkdownTable;
 pub use table::MarkdownTableAlignment;
 use wrapping::wrap_segments_with_joiners;
+
+pub fn render_markdown(text: &str, width: u16, style: MarkdownStyle) -> Vec<Line<'static>> {
+    render_markdown_with_metadata(text, width, style)
+        .into_iter()
+        .map(|line| line.line)
+        .collect()
+}
+
+/// Renders Markdown while retaining hard-break, soft-wrap, and link metadata.
+pub fn render_markdown_with_metadata(
+    text: &str,
+    width: u16,
+    style: MarkdownStyle,
+) -> Vec<MarkdownLine> {
+    parser::render(text, width, style)
+}
 
 /// Separator required before a rendered line when reconstructing selected text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

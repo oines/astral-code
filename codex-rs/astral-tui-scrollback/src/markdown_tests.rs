@@ -1,9 +1,116 @@
 use super::LineJoiner;
+use super::MarkdownLink;
+use super::MarkdownStyle;
 use super::MarkdownSyntaxTheme;
 use super::highlight_fenced_code;
 use super::render_literal_with_metadata;
+use super::render_markdown;
+use super::render_markdown_with_metadata;
 use insta::assert_snapshot;
+use pretty_assertions::assert_eq;
 use ratatui::style::Style;
+
+const MARKDOWN_FIXTURE: &str = r#"# Astral Markdown
+
+Paragraph with **bold**, *italic*, ~~removed~~, `inline code`, and an [Astral link](https://example.com).
+
+> A quoted line with **structure**.
+
+1. First ordered item
+2. Second ordered item
+   - Nested bullet
+- [x] Finished task
+- [ ] Pending task
+
+| Feature | State |
+|:--|--:|
+| Markdown | **ready** |
+| Width | `52` |
+
+---
+
+```rust
+fn main() {
+    println!("hello");
+}
+```
+"#;
+
+fn plain(lines: &[ratatui::text::Line<'_>]) -> String {
+    lines
+        .iter()
+        .map(|line| line.to_string().trim_end().to_string())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn parses_grok_markdown_structure_without_rewriting_source_order() {
+    let rendered = render_markdown(MARKDOWN_FIXTURE, 52, MarkdownStyle::default());
+
+    assert_snapshot!(plain(&rendered), @r###"
+    Astral Markdown
+
+    Paragraph with bold, italic, removed, inline code,
+    and an Astral link.
+
+    │ A quoted line with structure.
+
+    1. First ordered item
+    2. Second ordered item
+      • Nested bullet
+    ☑ Finished task
+    ☐ Pending task
+
+    ┌──────────┬───────┐
+    │ Feature  │ State │
+    ├──────────┼───────┤
+    │ Markdown │ ready │
+    ├──────────┼───────┤
+    │ Width    │    52 │
+    └──────────┴───────┘
+
+    ───
+
+    fn main() {
+        println!("hello");
+    }
+    "###);
+}
+
+#[test]
+fn wrapped_links_keep_one_stable_target() {
+    let rendered = render_markdown_with_metadata(
+        "[alpha beta](https://example.com)",
+        5,
+        MarkdownStyle::default(),
+    );
+
+    assert_eq!(
+        rendered
+            .iter()
+            .map(|line| (line.line.to_string(), line.links.clone()))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                "alpha".to_string(),
+                vec![MarkdownLink {
+                    id: 0,
+                    columns: 0..5,
+                    target: "https://example.com".to_string(),
+                }],
+            ),
+            (
+                "beta".to_string(),
+                vec![MarkdownLink {
+                    id: 0,
+                    columns: 0..4,
+                    target: "https://example.com".to_string(),
+                }],
+            ),
+        ]
+    );
+}
 
 #[test]
 fn literal_wrapping_preserves_source_joiners_for_selection() {
