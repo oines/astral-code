@@ -143,13 +143,29 @@ impl Transcript {
         &self.turns
     }
 
-    /// Replace all state from an authoritative app-server thread snapshot.
+    /// Replace authoritative content from an app-server thread snapshot while
+    /// retaining local identities for matching thread/turn/item keys.
     pub fn reset_from_thread(&mut self, thread: &Thread) {
+        let mut previous_turns = if self.thread_id == thread.id {
+            std::mem::take(&mut self.turns)
+                .into_iter()
+                .map(|turn| (turn.id.clone(), turn))
+                .collect::<HashMap<_, _>>()
+        } else {
+            self.turns.clear();
+            HashMap::new()
+        };
         self.thread_id.clone_from(&thread.id);
-        self.turns.clear();
         self.turn_indices.clear();
         for turn in &thread.turns {
-            let transcript_turn = Self::turn_from_snapshot(turn, &mut self.next_entry_id);
+            let transcript_turn = if let Some(mut previous) = previous_turns.remove(&turn.id) {
+                previous.plan = None;
+                previous.diff = None;
+                previous.replace_from_snapshot(turn, &mut self.next_entry_id);
+                previous
+            } else {
+                Self::turn_from_snapshot(turn, &mut self.next_entry_id)
+            };
             self.turn_indices
                 .insert(transcript_turn.id.clone(), self.turns.len());
             self.turns.push(transcript_turn);

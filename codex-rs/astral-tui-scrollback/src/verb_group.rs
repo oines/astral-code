@@ -28,6 +28,7 @@ pub struct VerbGroupSpan {
     anchor: TranscriptEntryId,
     range: Range<usize>,
     claimed: Vec<usize>,
+    claimed_entry_ids: Vec<TranscriptEntryId>,
     members: usize,
     label: String,
     running: bool,
@@ -113,12 +114,12 @@ impl VerbGroupDisplayState {
         self.expanded.retain(|anchor| anchors.contains(anchor));
     }
 
-    /// Preserve expansion when opening a member moves the run's anchor.
+    /// Preserve expansion when opening or reordering members moves the run's
+    /// anchor.
     ///
-    /// Both slices must describe the same turn before and after one entry
-    /// display-state change. The most-overlapping successor inherits the old
-    /// expansion key, matching Grok's rekey invariant without index-keyed UI
-    /// state leaking into the transcript.
+    /// The most-overlapping successor by stable entry identity inherits the
+    /// old expansion key. Index ranges are intentionally ignored because an
+    /// authoritative snapshot can put unrelated entries at the same offsets.
     pub fn reconcile(&mut self, previous: &[VerbGroupSpan], current: &[VerbGroupSpan]) -> bool {
         let current_anchors = current
             .iter()
@@ -132,8 +133,10 @@ impl VerbGroupDisplayState {
             .filter_map(|old| {
                 let next = current
                     .iter()
-                    .filter(|next| ranges_overlap(&old.range, &next.range))
-                    .max_by_key(|next| overlap_len(&old.range, &next.range))?;
+                    .map(|next| (next, shared_entry_count(old, next)))
+                    .filter(|(_, shared)| *shared > 0)
+                    .max_by_key(|(_, shared)| *shared)?
+                    .0;
                 Some((old.anchor, next.anchor))
             })
             .collect::<Vec<_>>();
@@ -148,14 +151,11 @@ impl VerbGroupDisplayState {
     }
 }
 
-fn ranges_overlap(left: &Range<usize>, right: &Range<usize>) -> bool {
-    left.start < right.end && right.start < left.end
-}
-
-fn overlap_len(left: &Range<usize>, right: &Range<usize>) -> usize {
-    left.end
-        .min(right.end)
-        .saturating_sub(left.start.max(right.start))
+fn shared_entry_count(left: &VerbGroupSpan, right: &VerbGroupSpan) -> usize {
+    left.claimed_entry_ids
+        .iter()
+        .filter(|entry_id| right.claimed_entry_ids.contains(entry_id))
+        .count()
 }
 
 /// Find maximal Grok-style verb runs in one authoritative app-server turn.
@@ -183,6 +183,11 @@ pub fn scan_verb_groups(
         spans.push(VerbGroupSpan {
             anchor: entries[index].id(),
             range: index..scan.end,
+            claimed_entry_ids: scan
+                .claimed
+                .iter()
+                .map(|index| entries[*index].id())
+                .collect(),
             claimed: scan.claimed,
             members: scan.members,
             label: label.text,
