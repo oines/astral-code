@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "astral-terminal-inline",
     "aws-auth",
     "analytics",
     "agent-graph-store",
@@ -133,6 +134,7 @@ license = "Apache-2.0"
 [workspace.dependencies]
 # Internal
 app_test_support = { path = "app-server/tests/common" }
+astral-terminal-inline = { path = "astral-terminal-inline" }
 codex-analytics = { path = "analytics" }
 codex-agent-graph-store = { path = "agent-graph-store" }
 codex-agent-protocol = { path = "agent-protocol" }
@@ -253,6 +255,7 @@ age = "0.11.1"
 allocative = "0.3.3"
 ansi-to-tui = "7.0.0"
 anyhow = "1"
+anstyle-parse = "0.2"
 arboard = { version = "3", features = ["wayland-data-control"] }
 arc-swap = "1.9.0"
 assert_cmd = "2"

@@ -553,6 +553,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b34d609dfbaf33d6889b2b7106d3ca345eacad44200913df5ba02bfd31d2ba9"
 
 [[package]]
+name = "astral-terminal-inline"
+version = "0.0.0"
+dependencies = [
+ "anstyle-parse",
+ "crossterm",
+ "ratatui",
+ "unicode-width 0.2.1",
+]
+
+[[package]]
 name = "astral-tl"
 version = "0.7.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"

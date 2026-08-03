@@ -1,0 +1,6 @@
+load("//:defs.bzl", "codex_rust_crate")
+
+codex_rust_crate(
+    name = "astral-terminal-inline",
+    crate_name = "astral_terminal_inline",
+)
