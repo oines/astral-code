@@ -11,23 +11,50 @@ use super::parse_tavily_results;
 #[test]
 fn parses_tavily_results() {
     let value = json!({
-        "results": [{
-            "title": "Tavily Result",
-            "url": "https://example.com/a",
-            "content": " useful snippet ",
-            "score": 0.8
-        }]
+        "results": [
+            {
+                "title": "First",
+                "url": "https://example.com/duplicate",
+                "content": " first snippet ",
+                "score": 0.1
+            },
+            {
+                "title": "Duplicate URL",
+                "url": "https://example.com/duplicate",
+                "content": "second snippet",
+                "score": 0.9
+            },
+            {
+                "title": "Third",
+                "url": "https://example.com/third",
+                "content": "third snippet",
+                "score": 0.5
+            }
+        ]
     });
 
     assert_eq!(
         parse_tavily_results(&value),
-        vec![WebSearchResult {
-            title: "Tavily Result".to_string(),
-            url: "https://example.com/a".to_string(),
-            snippet: Some("useful snippet".to_string()),
-            published_at: None,
-            score: Some(0.8),
-        }]
+        vec![
+            WebSearchResult {
+                title: "First".to_string(),
+                url: "https://example.com/duplicate".to_string(),
+                snippet: Some("first snippet".to_string()),
+                published_at: None,
+            },
+            WebSearchResult {
+                title: "Duplicate URL".to_string(),
+                url: "https://example.com/duplicate".to_string(),
+                snippet: Some("second snippet".to_string()),
+                published_at: None,
+            },
+            WebSearchResult {
+                title: "Third".to_string(),
+                url: "https://example.com/third".to_string(),
+                snippet: Some("third snippet".to_string()),
+                published_at: None,
+            },
+        ]
     );
 }
 
@@ -52,7 +79,6 @@ fn parses_exa_results_preferring_summary() {
             url: "https://example.com/b".to_string(),
             snippet: Some("summary text".to_string()),
             published_at: Some("2026-01-02T00:00:00Z".to_string()),
-            score: Some(0.4),
         }]
     );
 }
@@ -75,7 +101,6 @@ fn parses_jina_data_results() {
             url: "https://example.com/c".to_string(),
             snippet: Some("reader content".to_string()),
             published_at: Some("2026-01-03".to_string()),
-            score: None,
         }]
     );
 }
@@ -100,7 +125,6 @@ fn parses_brave_results() {
             url: "https://example.com/d".to_string(),
             snippet: Some("brave snippet".to_string()),
             published_at: Some("2 days ago".to_string()),
-            score: Some(1.0),
         }]
     );
 }
@@ -124,7 +148,6 @@ fn parses_serpapi_results() {
             url: "https://example.com/e".to_string(),
             snippet: Some("serp snippet".to_string()),
             published_at: Some("Jan 4, 2026".to_string()),
-            score: Some(0.5),
         }]
     );
 }

@@ -15,6 +15,9 @@ use codex_tools::ResponsesApiNamespace;
 use codex_tools::ResponsesApiNamespaceTool;
 use codex_tools::ToolExposure;
 use codex_tools::default_namespace_description;
+use codex_utils_output_truncation::TruncationPolicy;
+use codex_utils_output_truncation::approx_bytes_for_tokens;
+use codex_utils_output_truncation::formatted_truncate_text;
 use schemars::JsonSchema;
 use schemars::schema_for;
 use serde::Deserialize;
@@ -31,15 +34,23 @@ pub(crate) const WEB_NAMESPACE: &str = "web";
 pub(crate) const SEARCH_TOOL_NAME: &str = "search";
 pub(crate) const FETCH_TOOL_NAME: &str = "fetch";
 
-const WEB_SEARCH_DESCRIPTION: &str = "Search the web and return a concise list of relevant results with titles, URLs, snippets, and dates when available.";
+const WEB_SEARCH_DESCRIPTION: &str = "Search the web and return a concise list of relevant results with titles, URLs, snippets, and dates when available. Only query is required; omit domains, recency, and limit to use the configured provider's defaults.";
 const WEB_FETCH_DESCRIPTION: &str =
     "Fetch a web page by URL and return cleaned markdown or text content with noisy data removed.";
+const MAX_WEB_SEARCH_OUTPUT_TOKENS: usize = 8_000;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 struct WebSearchInput {
+    /// Search query.
     query: String,
-    #[schemars(range(min = 1, max = 20))]
+    /// Optional hostnames to restrict the upstream search to.
+    domains: Option<Vec<String>>,
+    /// Optional maximum result age in whole days.
+    #[schemars(range(min = 1))]
+    recency: Option<u32>,
+    /// Optional result count passed directly to the upstream provider.
+    #[schemars(range(min = 1))]
     limit: Option<usize>,
 }
 
@@ -73,47 +84,41 @@ impl ToolExecutor<ToolCall> for WebSearchTool {
 impl WebSearchTool {
     async fn handle_call(&self, call: ToolCall) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
         let input: WebSearchInput = parse_input(&call)?;
-        let query = input.query.trim();
-        if query.is_empty() {
-            return Err(FunctionCallError::RespondToModel(
-                "query must not be empty".to_string(),
-            ));
-        }
-
-        let limit = input
-            .limit
-            .unwrap_or(self.config.default_limit)
-            .clamp(1, self.config.max_limit);
+        let request = WebSearchRequest::from_input(
+            input.query,
+            input.domains,
+            input.recency,
+            input.limit,
+            chrono::Utc::now().date_naive(),
+        )
+        .map_err(FunctionCallError::RespondToModel)?;
+        let query = request.query.clone();
         let action = WebSearchAction::Search {
-            query: Some(query.to_string()),
+            query: Some(query.clone()),
             queries: None,
         };
         call.turn_item_emitter
             .emit_started(web_search_item(&call.call_id, action.clone()))
             .await;
-        let search_result = provider::search(
-            &self.client,
-            &self.config,
-            WebSearchRequest {
-                query: query.to_string(),
-                limit,
-            },
-        )
-        .await;
+        let search_result = provider::search(&self.client, &self.config, request).await;
         call.turn_item_emitter
             .emit_completed(web_search_item(&call.call_id, action))
             .await;
         let results = match search_result {
             Ok(results) => results,
             Err(error) => {
-                return Ok(Box::new(WebToolOutput::failure(format!(
-                    "Web search failed for query \"{query}\": {error}"
-                ))));
+                let output = bound_search_output(
+                    &format!("Web search failed for query \"{query}\": {error}"),
+                    call.truncation_policy,
+                );
+                return Ok(Box::new(WebToolOutput::failure(output)));
             }
         };
 
         Ok(Box::new(WebToolOutput::new(format_search_results(
-            query, &results,
+            &query,
+            &results,
+            call.truncation_policy,
         ))))
     }
 }
@@ -217,27 +222,44 @@ fn web_search_item(call_id: &str, action: WebSearchAction) -> ExtensionTurnItem 
     })
 }
 
-pub(crate) fn format_search_results(query: &str, results: &[WebSearchResult]) -> String {
-    if results.is_empty() {
-        return format!("Search query: \"{query}\"\nNo search results found.");
-    }
+pub(crate) fn format_search_results(
+    query: &str,
+    results: &[WebSearchResult],
+    truncation_policy: TruncationPolicy,
+) -> String {
+    let output = if results.is_empty() {
+        format!("Search query: \"{query}\"\nNo search results found.")
+    } else {
+        let mut output = format!(
+            "Search query: \"{query}\"\nResults returned: {}\n",
+            results.len()
+        );
+        for (index, result) in results.iter().enumerate() {
+            output.push('\n');
+            output.push_str(&format!("{}. Title: {}\n", index + 1, result.title));
+            output.push_str(&format!("   URL: {}\n", result.url));
+            if let Some(published_at) = &result.published_at {
+                output.push_str(&format!("   Published: {published_at}\n"));
+            }
+            if let Some(snippet) = &result.snippet {
+                output.push_str(&format!("   Snippet: {snippet}\n"));
+            }
+        }
+        output
+    };
+    bound_search_output(&output, truncation_policy)
+}
 
-    let mut output = format!(
-        "Search query: \"{query}\"\nResults returned: {}\n",
-        results.len()
-    );
-    for (index, result) in results.iter().enumerate() {
-        output.push('\n');
-        output.push_str(&format!("{}. Title: {}\n", index + 1, result.title));
-        output.push_str(&format!("   URL: {}\n", result.url));
-        if let Some(published_at) = &result.published_at {
-            output.push_str(&format!("   Published: {published_at}\n"));
+fn bound_search_output(output: &str, truncation_policy: TruncationPolicy) -> String {
+    let truncation_policy = match truncation_policy {
+        TruncationPolicy::Bytes(bytes) => TruncationPolicy::Bytes(
+            bytes.min(approx_bytes_for_tokens(MAX_WEB_SEARCH_OUTPUT_TOKENS)),
+        ),
+        TruncationPolicy::Tokens(tokens) => {
+            TruncationPolicy::Tokens(tokens.min(MAX_WEB_SEARCH_OUTPUT_TOKENS))
         }
-        if let Some(snippet) = &result.snippet {
-            output.push_str(&format!("   Snippet: {snippet}\n"));
-        }
-    }
-    output
+    };
+    formatted_truncate_text(output, truncation_policy)
 }
 
 #[cfg(test)]

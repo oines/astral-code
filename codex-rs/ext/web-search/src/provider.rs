@@ -1,11 +1,7 @@
-use std::cmp::Ordering;
-use std::collections::HashSet;
-
 use codex_config::config_toml::WebSearchProvider;
 use codex_config::config_toml::WebSearchRuntimeConfig;
 use reqwest::header::ACCEPT;
 use serde_json::Value;
-use url::Url;
 
 use crate::request::WebSearchRequest;
 use crate::request::brave_query;
@@ -20,7 +16,6 @@ pub(crate) struct WebSearchResult {
     pub(crate) url: String,
     pub(crate) snippet: Option<String>,
     pub(crate) published_at: Option<String>,
-    pub(crate) score: Option<f64>,
 }
 
 pub(crate) async fn search(
@@ -44,7 +39,7 @@ pub(crate) async fn search(
         WebSearchProvider::SerpApi => parse_serpapi_results(&value),
     };
 
-    Ok(normalize_results(results, request.limit))
+    Ok(results)
 }
 
 async fn tavily_search(
@@ -121,7 +116,7 @@ async fn serpapi_search(
 ) -> Result<Value, String> {
     let response = client
         .get("https://serpapi.com/search.json")
-        .query(&serpapi_query(request, config.api_key.expose_secret()))
+        .query(&serpapi_query(request, config.api_key.expose_secret())?)
         .send()
         .await
         .map_err(|err| request_error("SerpAPI", err))?;
@@ -167,7 +162,6 @@ pub(crate) fn parse_tavily_results(value: &Value) -> Vec<WebSearchResult> {
                 &["url"],
                 &["content", "snippet"],
                 &["published_date", "publishedDate", "date"],
-                &["score"],
             )
         })
         .collect()
@@ -187,10 +181,6 @@ pub(crate) fn parse_exa_results(value: &Value) -> Vec<WebSearchResult> {
                 string_field(item, &["url"])?,
                 snippet,
                 string_field(item, &["publishedDate", "published_date", "date"]),
-                item.get("highlightScores")
-                    .and_then(Value::as_array)
-                    .and_then(|scores| scores.first())
-                    .and_then(Value::as_f64),
             )
         })
         .collect()
@@ -212,7 +202,6 @@ pub(crate) fn parse_jina_results(value: &Value) -> Vec<WebSearchResult> {
                 &["url", "source"],
                 &["content", "description", "snippet"],
                 &["timestamp", "published_at", "publishedDate", "date"],
-                &["score"],
             )
         })
         .collect()
@@ -224,14 +213,12 @@ pub(crate) fn parse_brave_results(value: &Value) -> Vec<WebSearchResult> {
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .enumerate()
-        .filter_map(|(index, item)| {
+        .filter_map(|item| {
             result_from_parts(
                 string_field(item, &["title"])?,
                 string_field(item, &["url"])?,
                 string_field(item, &["description", "snippet"]),
                 string_field(item, &["age", "page_age", "published"]),
-                Some(1.0 / (index + 1) as f64),
             )
         })
         .collect()
@@ -243,19 +230,12 @@ pub(crate) fn parse_serpapi_results(value: &Value) -> Vec<WebSearchResult> {
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .enumerate()
-        .filter_map(|(index, item)| {
+        .filter_map(|item| {
             result_from_parts(
                 string_field(item, &["title"])?,
                 string_field(item, &["link", "url"])?,
                 string_field(item, &["snippet"]),
                 string_field(item, &["date"]),
-                Some(
-                    item.get("position")
-                        .and_then(Value::as_u64)
-                        .map(|position| 1.0 / position.max(1) as f64)
-                        .unwrap_or_else(|| 1.0 / (index + 1) as f64),
-                ),
             )
         })
         .collect()
@@ -267,14 +247,12 @@ fn result_from_fields(
     url_fields: &[&str],
     snippet_fields: &[&str],
     published_fields: &[&str],
-    score_fields: &[&str],
 ) -> Option<WebSearchResult> {
     result_from_parts(
         string_field(value, title_fields)?,
         string_field(value, url_fields)?,
         string_field(value, snippet_fields),
         string_field(value, published_fields),
-        number_field(value, score_fields),
     )
 }
 
@@ -283,7 +261,6 @@ fn result_from_parts(
     url: String,
     snippet: Option<String>,
     published_at: Option<String>,
-    score: Option<f64>,
 ) -> Option<WebSearchResult> {
     let title = clean_inline_text(&title);
     let url = clean_inline_text(&url);
@@ -300,44 +277,7 @@ fn result_from_parts(
         published_at: published_at
             .map(|published_at| truncate_chars(&clean_inline_text(&published_at), 120))
             .filter(|published_at| !published_at.is_empty()),
-        score,
     })
-}
-
-fn normalize_results(mut results: Vec<WebSearchResult>, limit: usize) -> Vec<WebSearchResult> {
-    let mut seen = HashSet::new();
-    results.retain(|result| {
-        let Some(key) = normalize_url_key(&result.url) else {
-            return false;
-        };
-        seen.insert(key)
-    });
-
-    if results.iter().any(|result| result.score.is_some()) {
-        let mut indexed = results.into_iter().enumerate().collect::<Vec<_>>();
-        indexed.sort_by(|left, right| {
-            score_order(right.1.score, left.1.score).then_with(|| left.0.cmp(&right.0))
-        });
-        results = indexed.into_iter().map(|(_, result)| result).collect();
-    }
-
-    results.truncate(limit);
-    results
-}
-
-fn score_order(left: Option<f64>, right: Option<f64>) -> Ordering {
-    match (left, right) {
-        (Some(left), Some(right)) => left.partial_cmp(&right).unwrap_or(Ordering::Equal),
-        (Some(_), None) => Ordering::Less,
-        (None, Some(_)) => Ordering::Greater,
-        (None, None) => Ordering::Equal,
-    }
-}
-
-fn normalize_url_key(url: &str) -> Option<String> {
-    let mut parsed = Url::parse(url).ok()?;
-    parsed.set_fragment(None);
-    Some(parsed.to_string())
 }
 
 fn string_field(value: &Value, fields: &[&str]) -> Option<String> {
@@ -349,13 +289,6 @@ fn string_field(value: &Value, fields: &[&str]) -> Option<String> {
             Value::Number(value) => Some(value.to_string()),
             _ => None,
         })
-}
-
-fn number_field(value: &Value, fields: &[&str]) -> Option<f64> {
-    fields
-        .iter()
-        .filter_map(|field| value.get(*field))
-        .find_map(Value::as_f64)
 }
 
 fn first_string_in_array(value: Option<&Value>) -> Option<String> {

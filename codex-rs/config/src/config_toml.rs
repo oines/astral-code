@@ -720,8 +720,6 @@ pub struct WebSearchToolConfig {
     pub provider: Option<WebSearchProvider>,
     #[schemars(skip)]
     pub api_key: Option<SecretString>,
-    pub default_limit: Option<usize>,
-    pub max_limit: Option<usize>,
     pub context_size: Option<WebSearchContextSize>,
     pub allowed_domains: Option<Vec<String>>,
     pub location: Option<WebSearchLocation>,
@@ -731,8 +729,6 @@ pub struct WebSearchToolConfig {
 pub struct WebSearchRuntimeConfig {
     pub provider: WebSearchProvider,
     pub api_key: SecretString,
-    pub default_limit: usize,
-    pub max_limit: usize,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
