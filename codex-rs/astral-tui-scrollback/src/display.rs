@@ -157,6 +157,12 @@ impl EntryBlock<'_> {
                 has_raw_mode: false,
                 fold_cycle: FoldCycle::TwoState,
             }),
+            Self::DynamicToolCall(call) => Some(DisplayPolicy {
+                default_mode: DisplayMode::Collapsed,
+                foldable: call.has_details(),
+                has_raw_mode: false,
+                fold_cycle: FoldCycle::TwoState,
+            }),
             Self::McpToolCall(call) => Some(DisplayPolicy {
                 default_mode: DisplayMode::Collapsed,
                 foldable: call.has_details(),

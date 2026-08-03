@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use codex_app_server_protocol::CoreToolCallStatus;
+use codex_app_server_protocol::DynamicToolCallStatus;
 use codex_app_server_protocol::ItemCompletedNotification;
 use codex_app_server_protocol::ItemStartedNotification;
 use codex_app_server_protocol::McpToolCallStatus;
@@ -51,6 +52,17 @@ fn groups_exact_lookup_entries_without_flattening_source_order() {
         ),
         web_search("web", "rust async runtime"),
         web_fetch("fetch", "https://example.com/docs"),
+        dynamic_fetch(
+            "dynamic-fetch",
+            "https://example.com/reference",
+            DynamicToolCallStatus::Completed,
+        ),
+        generic_dynamic("dynamic-boundary"),
+        dynamic_fetch(
+            "dynamic-fetch-after-boundary",
+            "https://example.com/after-boundary",
+            DynamicToolCallStatus::Completed,
+        ),
         mcp_tool("mcp"),
         agent("boundary"),
         core_tool(
@@ -64,17 +76,20 @@ fn groups_exact_lookup_entries_without_flattening_source_order() {
 
     let groups = scan_verb_groups(turn, default_display_state);
 
-    assert_eq!(groups.len(), 2);
-    assert_eq!(groups[0].range(), 0..6);
-    assert_eq!(groups[0].claimed(), &[0, 1, 2, 3, 4, 5]);
-    assert_eq!(groups[0].members(), 5);
+    assert_eq!(groups.len(), 3);
+    assert_eq!(groups[0].range(), 0..7);
+    assert_eq!(groups[0].claimed(), &[0, 1, 2, 3, 4, 5, 6]);
+    assert_eq!(groups[0].members(), 6);
     assert_eq!(
         groups[0].label(),
-        "Reading 1 skill, Reading 1 file, Searching 1 pattern, Searching 1 website, Fetching 1 website"
+        "Reading 1 skill, Reading 1 file, Searching 1 pattern, Searching 1 website, Fetching 2 websites"
     );
     assert!(groups[0].running());
+    assert!(groups.iter().all(|group| !group.contains_member(7)));
     assert_eq!(groups[1].range(), 8..9);
-    assert_eq!(groups[1].label(), "Searched 1 pattern");
+    assert_eq!(groups[1].label(), "Fetched 1 website");
+    assert_eq!(groups[2].range(), 11..12);
+    assert_eq!(groups[2].label(), "Searched 1 pattern");
 
     let mut state = VerbGroupDisplayState::default();
     assert!(state.hides(&groups[0], 0));
@@ -93,12 +108,16 @@ fn groups_exact_lookup_entries_without_flattening_source_order() {
     assert_snapshot!(text, @r###"
     ◇ Reading 1 skill, Reading 1 file,
       Searching 1 pattern, Searching 1
-      website, Fetching 1 website
+      website, Fetching 2 websites
     "###);
 
     let mut web_lifecycle = transcript(Vec::new());
     let search = web_search("live-search", "rust async runtime");
-    let fetch = web_fetch("live-fetch", "https://example.com/docs");
+    let fetch = dynamic_fetch(
+        "live-fetch",
+        "https://example.com/docs",
+        DynamicToolCallStatus::InProgress,
+    );
     for item in [&search, &fetch] {
         web_lifecycle.apply(&item_started(item.clone()));
     }
@@ -107,13 +126,38 @@ fn groups_exact_lookup_entries_without_flattening_source_order() {
         running[0].label(),
         "Searching 1 website, Fetching 1 website"
     );
-    for item in [search, fetch] {
-        web_lifecycle.apply(&item_completed(item));
-    }
+    web_lifecycle.apply(&item_completed(search));
+    web_lifecycle.apply(&item_completed(dynamic_fetch(
+        "live-fetch",
+        "https://example.com/docs",
+        DynamicToolCallStatus::Completed,
+    )));
     let completed = scan_verb_groups(&web_lifecycle.turns()[0], default_display_state);
     assert_eq!(
         completed[0].label(),
         "Searched 1 website, Fetched 1 website"
+    );
+
+    let mut failed_lifecycle = transcript(Vec::new());
+    failed_lifecycle.apply(&item_started(dynamic_fetch(
+        "failed-fetch",
+        "https://example.com/failure",
+        DynamicToolCallStatus::InProgress,
+    )));
+    failed_lifecycle.apply(&item_completed(dynamic_fetch(
+        "failed-fetch",
+        "https://example.com/failure",
+        DynamicToolCallStatus::Failed,
+    )));
+    let failed = scan_verb_groups(&failed_lifecycle.turns()[0], default_display_state);
+    assert_eq!(failed[0].label(), "Fetched 1 website · 1 failed");
+    assert!(failed[0].failed());
+    assert!(!failed[0].running());
+    assert_eq!(
+        render_verb_group_header(&failed[0], EntryRenderOptions::new(/*width*/ 40)).lines()[0]
+            .line
+            .to_string(),
+        "× Fetched 1 website · 1 failed",
     );
 }
 
@@ -286,6 +330,37 @@ fn web_fetch(id: &str, url: &str) -> ThreadItem {
         action: Some(WebSearchAction::OpenPage {
             url: Some(url.to_string()),
         }),
+    }
+}
+
+fn dynamic_fetch(id: &str, url: &str, status: DynamicToolCallStatus) -> ThreadItem {
+    let success = match status {
+        DynamicToolCallStatus::InProgress => None,
+        DynamicToolCallStatus::Completed => Some(true),
+        DynamicToolCallStatus::Failed => Some(false),
+    };
+    ThreadItem::DynamicToolCall {
+        id: id.to_string(),
+        namespace: Some("web".to_string()),
+        tool: "fetch".to_string(),
+        arguments: json!({"url": url}),
+        status,
+        content_items: success.map(|_| Vec::new()),
+        success,
+        duration_ms: success.map(|_| 20),
+    }
+}
+
+fn generic_dynamic(id: &str) -> ThreadItem {
+    ThreadItem::DynamicToolCall {
+        id: id.to_string(),
+        namespace: Some("codex_app".to_string()),
+        tool: "lookup_ticket".to_string(),
+        arguments: json!({"id": "ABC-123"}),
+        status: DynamicToolCallStatus::Completed,
+        content_items: Some(Vec::new()),
+        success: Some(true),
+        duration_ms: Some(20),
     }
 }
 

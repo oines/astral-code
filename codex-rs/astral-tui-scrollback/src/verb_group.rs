@@ -262,7 +262,9 @@ fn run_step(
                 RunStep::ThoughtMember
             }
         }
-        EntryBlock::ProtocolItem { .. } | EntryBlock::WebSearch(_) => {
+        EntryBlock::ProtocolItem { .. }
+        | EntryBlock::DynamicToolCall(_)
+        | EntryBlock::WebSearch(_) => {
             let Some(meta) = member_meta(&block) else {
                 return RunStep::Break;
             };
@@ -335,10 +337,16 @@ fn member_meta(block: &EntryBlock<'_>) -> Option<MemberMeta> {
             running: search.running(),
             failed: false,
         }),
+        EntryBlock::DynamicToolCall(call) if call.is_web_fetch() => Some(MemberMeta {
+            kind: GroupBucket::WebFetch,
+            running: call.running(),
+            failed: call.failed(),
+        }),
         EntryBlock::User { .. }
         | EntryBlock::Assistant { .. }
         | EntryBlock::ProposedPlan { .. }
         | EntryBlock::Reasoning(_)
+        | EntryBlock::DynamicToolCall(_)
         | EntryBlock::McpToolCall(_)
         | EntryBlock::ContextCompaction(_) => None,
     }

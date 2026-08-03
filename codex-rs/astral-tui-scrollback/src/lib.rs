@@ -3,6 +3,7 @@
 
 mod block;
 mod display;
+mod dynamic_tool;
 mod live_item;
 mod markdown;
 mod mcp_tool;
@@ -19,6 +20,7 @@ pub use block::ReasoningBlock;
 pub use block::ReasoningVisibility;
 pub use display::DisplayMode;
 pub use display::EntryDisplayState;
+pub use dynamic_tool::DynamicToolCallBlock;
 pub use live_item::LiveItem;
 pub use markdown::CodeLineHighlighter;
 pub use markdown::LineJoiner;

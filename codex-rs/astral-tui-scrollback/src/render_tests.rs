@@ -1,6 +1,8 @@
 use codex_app_server_protocol::CommandExecutionSource;
 use codex_app_server_protocol::CommandExecutionStatus;
 use codex_app_server_protocol::CoreToolCallStatus;
+use codex_app_server_protocol::DynamicToolCallOutputContentItem;
+use codex_app_server_protocol::DynamicToolCallStatus;
 use codex_app_server_protocol::FileUpdateChange;
 use codex_app_server_protocol::McpToolCallError;
 use codex_app_server_protocol::McpToolCallResult;
@@ -388,6 +390,100 @@ fn mcp_calls_keep_grok_folds_and_protocol_result_shapes() {
             .expect("bounded MCP renderer"),
     );
     assert!(bounded.contains(&format!("{}…", "x".repeat(4_095))));
+}
+
+#[test]
+fn dynamic_tools_keep_client_hosted_and_web_fetch_semantics() {
+    let running_item = dynamic_tool(
+        Some("codex_app"),
+        "lookup_ticket",
+        json!({"id": "ABC-123"}),
+        DynamicToolCallStatus::InProgress,
+        /*content_items*/ None,
+        /*success*/ None,
+        /*duration_ms*/ None,
+    );
+    let completed_item = dynamic_tool(
+        Some("mcp__codex_apps__calendar"),
+        "create_event",
+        json!({"title": "Standup"}),
+        DynamicToolCallStatus::Completed,
+        /*content_items*/
+        Some(vec![
+            DynamicToolCallOutputContentItem::InputText {
+                text: "Created event evt-42".to_string(),
+            },
+            DynamicToolCallOutputContentItem::InputImage {
+                image_url: "data:image/png;base64,omitted".to_string(),
+            },
+        ]),
+        /*success*/ Some(true),
+        /*duration_ms*/ Some(420),
+    );
+    let failed_item = dynamic_tool(
+        None,
+        "publish",
+        Value::Null,
+        DynamicToolCallStatus::Failed,
+        /*content_items*/
+        Some(vec![DynamicToolCallOutputContentItem::InputText {
+            text: "permission denied".to_string(),
+        }]),
+        /*success*/ Some(false),
+        /*duration_ms*/ Some(900),
+    );
+    let fetch_item = dynamic_tool(
+        Some("web"),
+        "fetch",
+        json!({"url": "https://example.com/docs"}),
+        DynamicToolCallStatus::Completed,
+        /*content_items*/
+        Some(vec![DynamicToolCallOutputContentItem::InputText {
+            text: "# Documentation\nFetched body".to_string(),
+        }]),
+        /*success*/ Some(true),
+        /*duration_ms*/ Some(1_200),
+    );
+    let options = EntryRenderOptions::new(/*width*/ 56);
+    let mut output = Vec::new();
+    for (label, item, expand) in [
+        ("RUNNING", running_item, false),
+        ("COMPLETED", completed_item, true),
+        ("FAILED", failed_item, true),
+        ("FETCH", fetch_item, true),
+    ] {
+        let block = EntryBlock::from_parts(&item, &LiveItem::None, EntryLifecycle::Restored);
+        let mut state = EntryDisplayState::for_block(&block).expect("dynamic-tool display state");
+        if expand {
+            assert!(state.expand(&block));
+        }
+        let rendered = render_entry(&block, state, options).expect("dynamic-tool renderer");
+        output.push(format!("{label}\n{}", plain(&rendered)));
+    }
+
+    assert_snapshot!(output.join("\n\n"), @r###"
+    RUNNING
+    ◇ Codex App Lookup Ticket
+
+    COMPLETED
+    ◆ Calendar Create Event  0.4s
+
+      title: Standup
+
+      │ Created event evt-42
+      │ <image output>
+
+    FAILED
+    × Publish  0.9s
+
+      │ permission denied
+
+    FETCH
+    ◆ Fetch https://example.com/docs  1.2s
+
+      │ # Documentation
+      │ Fetched body
+    "###);
 }
 
 #[test]
@@ -865,6 +961,27 @@ fn mcp_tool(
         error: error.map(|message| McpToolCallError {
             message: message.to_string(),
         }),
+        duration_ms,
+    }
+}
+
+fn dynamic_tool(
+    namespace: Option<&str>,
+    tool: &str,
+    arguments: Value,
+    status: DynamicToolCallStatus,
+    content_items: Option<Vec<DynamicToolCallOutputContentItem>>,
+    success: Option<bool>,
+    duration_ms: Option<i64>,
+) -> ThreadItem {
+    ThreadItem::DynamicToolCall {
+        id: "dynamic".to_string(),
+        namespace: namespace.map(str::to_string),
+        tool: tool.to_string(),
+        arguments,
+        status,
+        content_items,
+        success,
         duration_ms,
     }
 }
