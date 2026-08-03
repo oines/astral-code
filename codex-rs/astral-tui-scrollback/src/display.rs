@@ -6,6 +6,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::EntryBlock;
 use crate::read_tool::ReadCall;
+use crate::search_tool::SearchCall;
 
 const USER_COLLAPSED_MAX_LINES: usize = 3;
 const USER_FOLD_ESTIMATE_WIDTH: usize = 60;
@@ -211,17 +212,24 @@ impl EntryBlock<'_> {
                     })
                 }
                 ThreadItem::CoreToolCall { .. } => {
-                    let read = ReadCall::from_item(item)?;
-                    let failed = read.failed();
+                    let (failed, foldable, fold_cycle) =
+                        if let Some(read) = ReadCall::from_item(item) {
+                            let failed = read.failed();
+                            (failed, read.has_details() && !failed, FoldCycle::LookupRead)
+                        } else {
+                            let search = SearchCall::from_item(item)?;
+                            let failed = search.failed();
+                            (failed, !failed, FoldCycle::TwoState)
+                        };
                     Some(DisplayPolicy {
                         default_mode: if failed {
                             DisplayMode::Truncated
                         } else {
                             DisplayMode::Collapsed
                         },
-                        foldable: read.has_details() && !failed,
+                        foldable,
                         has_raw_mode: false,
-                        fold_cycle: FoldCycle::LookupRead,
+                        fold_cycle,
                     })
                 }
                 ThreadItem::UserMessage { .. }

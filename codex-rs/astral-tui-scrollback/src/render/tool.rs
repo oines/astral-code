@@ -14,6 +14,8 @@ mod command;
 mod file_change;
 #[path = "tool/read.rs"]
 mod read;
+#[path = "tool/search.rs"]
+mod search;
 
 pub(super) fn render_protocol_item(
     item: &ThreadItem,
@@ -24,7 +26,9 @@ pub(super) fn render_protocol_item(
     match item {
         ThreadItem::CommandExecution { .. } => command::render(item, live, state, options),
         ThreadItem::FileChange { .. } => file_change::render(item, live, state, options),
-        ThreadItem::CoreToolCall { .. } => read::render(item, state, options),
+        ThreadItem::CoreToolCall { .. } => {
+            read::render(item, state, options).or_else(|| search::render(item, state, options))
+        }
         ThreadItem::UserMessage { .. }
         | ThreadItem::HookPrompt { .. }
         | ThreadItem::AgentMessage { .. }
