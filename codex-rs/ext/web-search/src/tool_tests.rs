@@ -155,10 +155,10 @@ fn bounds_formatted_search_results_for_model_context() {
         &[WebSearchResult {
             title: "Rust Result".to_string(),
             url: "https://example.com/rust".to_string(),
-            snippet: Some("large result ".repeat(100)),
+            snippet: Some("large result ".repeat(20_000)),
             published_at: None,
         }],
-        TruncationPolicy::Tokens(20),
+        TruncationPolicy::Tokens(500_000),
     );
 
     assert!(output.starts_with("Warning: truncated output"));

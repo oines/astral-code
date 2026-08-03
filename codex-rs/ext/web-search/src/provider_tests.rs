@@ -11,22 +11,50 @@ use super::parse_tavily_results;
 #[test]
 fn parses_tavily_results() {
     let value = json!({
-        "results": [{
-            "title": "Tavily Result",
-            "url": "https://example.com/a",
-            "content": " useful snippet ",
-            "score": 0.8
-        }]
+        "results": [
+            {
+                "title": "First",
+                "url": "https://example.com/duplicate",
+                "content": " first snippet ",
+                "score": 0.1
+            },
+            {
+                "title": "Duplicate URL",
+                "url": "https://example.com/duplicate",
+                "content": "second snippet",
+                "score": 0.9
+            },
+            {
+                "title": "Third",
+                "url": "https://example.com/third",
+                "content": "third snippet",
+                "score": 0.5
+            }
+        ]
     });
 
     assert_eq!(
         parse_tavily_results(&value),
-        vec![WebSearchResult {
-            title: "Tavily Result".to_string(),
-            url: "https://example.com/a".to_string(),
-            snippet: Some("useful snippet".to_string()),
-            published_at: None,
-        }]
+        vec![
+            WebSearchResult {
+                title: "First".to_string(),
+                url: "https://example.com/duplicate".to_string(),
+                snippet: Some("first snippet".to_string()),
+                published_at: None,
+            },
+            WebSearchResult {
+                title: "Duplicate URL".to_string(),
+                url: "https://example.com/duplicate".to_string(),
+                snippet: Some("second snippet".to_string()),
+                published_at: None,
+            },
+            WebSearchResult {
+                title: "Third".to_string(),
+                url: "https://example.com/third".to_string(),
+                snippet: Some("third snippet".to_string()),
+                published_at: None,
+            },
+        ]
     );
 }
 
