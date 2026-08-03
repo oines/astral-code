@@ -6,6 +6,7 @@ use codex_app_server_protocol::UserInput;
 use crate::EntryLifecycle;
 use crate::LiveItem;
 use crate::TranscriptEntry;
+use crate::WebSearchBlock;
 
 /// Lossless renderer-facing view of one transcript entry.
 ///
@@ -27,6 +28,7 @@ pub enum EntryBlock<'a> {
     },
     Reasoning(ReasoningBlock<'a>),
     ContextCompaction(ContextCompactionBlock),
+    WebSearch(WebSearchBlock<'a>),
     ProtocolItem {
         item: &'a ThreadItem,
         live: &'a LiveItem,
@@ -71,6 +73,9 @@ impl<'a> EntryBlock<'a> {
                     elapsed_ms: lifecycle_elapsed_ms(lifecycle),
                 })
             }
+            ThreadItem::WebSearch { query, action, .. } => Self::WebSearch(
+                WebSearchBlock::from_parts(query, action.as_ref(), lifecycle),
+            ),
             ThreadItem::HookPrompt { .. }
             | ThreadItem::CommandExecution { .. }
             | ThreadItem::FileChange { .. }
@@ -78,7 +83,6 @@ impl<'a> EntryBlock<'a> {
             | ThreadItem::DynamicToolCall { .. }
             | ThreadItem::CoreToolCall { .. }
             | ThreadItem::CollabAgentToolCall { .. }
-            | ThreadItem::WebSearch { .. }
             | ThreadItem::ImageView { .. }
             | ThreadItem::ImageGeneration { .. }
             | ThreadItem::EnteredReviewMode { .. }
@@ -217,7 +221,7 @@ fn has_text(parts: &[Cow<'_, str>]) -> bool {
     parts.iter().any(|part| !part.trim().is_empty())
 }
 
-fn lifecycle_elapsed_ms(lifecycle: EntryLifecycle) -> Option<i64> {
+pub(crate) fn lifecycle_elapsed_ms(lifecycle: EntryLifecycle) -> Option<i64> {
     match lifecycle {
         EntryLifecycle::Completed {
             started_at_ms: Some(started_at_ms),

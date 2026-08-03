@@ -1,12 +1,15 @@
 use std::collections::HashMap;
 
 use codex_app_server_protocol::CoreToolCallStatus;
+use codex_app_server_protocol::ItemCompletedNotification;
+use codex_app_server_protocol::ItemStartedNotification;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::Turn;
 use codex_app_server_protocol::TurnItemsView;
 use codex_app_server_protocol::TurnStartedNotification;
 use codex_app_server_protocol::TurnStatus;
+use codex_app_server_protocol::WebSearchAction;
 use insta::assert_snapshot;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
@@ -25,7 +28,7 @@ use crate::render_verb_group_header;
 
 #[test]
 fn groups_exact_lookup_entries_without_flattening_source_order() {
-    let transcript = transcript(vec![
+    let history = transcript(vec![
         reasoning("thought"),
         core_tool(
             "skill",
@@ -45,6 +48,8 @@ fn groups_exact_lookup_entries_without_flattening_source_order() {
             json!({"pattern": "needle"}),
             CoreToolCallStatus::InProgress,
         ),
+        web_search("web", "rust async runtime"),
+        web_fetch("fetch", "https://example.com/docs"),
         agent("boundary"),
         core_tool(
             "glob",
@@ -53,20 +58,20 @@ fn groups_exact_lookup_entries_without_flattening_source_order() {
             CoreToolCallStatus::Completed,
         ),
     ]);
-    let turn = &transcript.turns()[0];
+    let turn = &history.turns()[0];
 
     let groups = scan_verb_groups(turn, default_display_state);
 
     assert_eq!(groups.len(), 2);
-    assert_eq!(groups[0].range(), 0..4);
-    assert_eq!(groups[0].claimed(), &[0, 1, 2, 3]);
-    assert_eq!(groups[0].members(), 3);
+    assert_eq!(groups[0].range(), 0..6);
+    assert_eq!(groups[0].claimed(), &[0, 1, 2, 3, 4, 5]);
+    assert_eq!(groups[0].members(), 5);
     assert_eq!(
         groups[0].label(),
-        "Reading 1 skill, Reading 1 file, Searching 1 pattern"
+        "Reading 1 skill, Reading 1 file, Searching 1 pattern, Searching 1 website, Fetching 1 website"
     );
     assert!(groups[0].running());
-    assert_eq!(groups[1].range(), 5..6);
+    assert_eq!(groups[1].range(), 7..8);
     assert_eq!(groups[1].label(), "Searched 1 pattern");
 
     let mut state = VerbGroupDisplayState::default();
@@ -85,8 +90,29 @@ fn groups_exact_lookup_entries_without_flattening_source_order() {
         .join("\n");
     assert_snapshot!(text, @r###"
     ◇ Reading 1 skill, Reading 1 file,
-      Searching 1 pattern
+      Searching 1 pattern, Searching 1
+      website, Fetching 1 website
     "###);
+
+    let mut web_lifecycle = transcript(Vec::new());
+    let search = web_search("live-search", "rust async runtime");
+    let fetch = web_fetch("live-fetch", "https://example.com/docs");
+    for item in [&search, &fetch] {
+        web_lifecycle.apply(&item_started(item.clone()));
+    }
+    let running = scan_verb_groups(&web_lifecycle.turns()[0], default_display_state);
+    assert_eq!(
+        running[0].label(),
+        "Searching 1 website, Fetching 1 website"
+    );
+    for item in [search, fetch] {
+        web_lifecycle.apply(&item_completed(item));
+    }
+    let completed = scan_verb_groups(&web_lifecycle.turns()[0], default_display_state);
+    assert_eq!(
+        completed[0].label(),
+        "Searched 1 website, Fetched 1 website"
+    );
 }
 
 #[test]
@@ -98,12 +124,7 @@ fn opened_member_stays_visible_inside_the_same_run() {
             json!({"file_path": "a.rs"}),
             CoreToolCallStatus::Completed,
         ),
-        core_tool(
-            "grep",
-            "Grep",
-            json!({"pattern": "needle"}),
-            CoreToolCallStatus::Completed,
-        ),
+        web_fetch("fetch", "https://example.com/docs"),
         core_tool(
             "read-b",
             "Read",
@@ -122,12 +143,12 @@ fn opened_member_stays_visible_inside_the_same_run() {
             )
         })
         .collect::<HashMap<TranscriptEntryId, EntryDisplayState>>();
-    let search = &turn.entries()[1];
+    let fetch = &turn.entries()[1];
     assert!(
         states
-            .get_mut(&search.id())
-            .expect("search state")
-            .expand(&EntryBlock::from_entry(search))
+            .get_mut(&fetch.id())
+            .expect("fetch state")
+            .expand(&EntryBlock::from_entry(fetch))
     );
 
     let groups = scan_verb_groups(turn, |entry| states.get(&entry.id()).copied());
@@ -243,4 +264,43 @@ fn core_tool(id: &str, tool: &str, arguments: Value, status: CoreToolCallStatus)
         error: None,
         duration_ms: None,
     }
+}
+
+fn web_search(id: &str, query: &str) -> ThreadItem {
+    ThreadItem::WebSearch {
+        id: id.to_string(),
+        query: query.to_string(),
+        action: Some(WebSearchAction::Search {
+            query: Some(query.to_string()),
+            queries: None,
+        }),
+    }
+}
+
+fn web_fetch(id: &str, url: &str) -> ThreadItem {
+    ThreadItem::WebSearch {
+        id: id.to_string(),
+        query: url.to_string(),
+        action: Some(WebSearchAction::OpenPage {
+            url: Some(url.to_string()),
+        }),
+    }
+}
+
+fn item_started(item: ThreadItem) -> ServerNotification {
+    ServerNotification::ItemStarted(ItemStartedNotification {
+        item,
+        thread_id: "thread-1".to_string(),
+        turn_id: "turn-1".to_string(),
+        started_at_ms: 1_000,
+    })
+}
+
+fn item_completed(item: ThreadItem) -> ServerNotification {
+    ServerNotification::ItemCompleted(ItemCompletedNotification {
+        item,
+        thread_id: "thread-1".to_string(),
+        turn_id: "turn-1".to_string(),
+        completed_at_ms: 2_000,
+    })
 }

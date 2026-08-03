@@ -21,6 +21,8 @@ use crate::render_markdown_with_metadata;
 mod tool;
 #[path = "render/verb_group.rs"]
 mod verb_group;
+#[path = "render/web_search.rs"]
+mod web_search;
 
 use tool::render_protocol_item;
 use verb_group::render_header as render_verb_group_header_lines;
@@ -122,6 +124,7 @@ pub fn render_entry(
         EntryBlock::ProposedPlan { markdown, .. } => render_plan(markdown, state.raw(), options),
         EntryBlock::Reasoning(reasoning) => render_reasoning(reasoning, state, options),
         EntryBlock::ContextCompaction(compaction) => render_context_compaction(*compaction),
+        EntryBlock::WebSearch(search) => web_search::render(*search, state, options),
         EntryBlock::ProtocolItem { item, live } => {
             render_protocol_item(item, live, state, options)?
         }
@@ -297,7 +300,7 @@ fn reasoning_header(reasoning: &ReasoningBlock<'_>) -> MarkdownLine {
     }
 }
 
-fn format_elapsed(elapsed_ms: i64) -> String {
+pub(super) fn format_elapsed(elapsed_ms: i64) -> String {
     let seconds = elapsed_ms.max(0) as f64 / 1000.0;
     if seconds < 60.0 {
         format!("{seconds:.1}s")

@@ -6,6 +6,7 @@ use codex_app_server_protocol::PatchApplyStatus;
 use codex_app_server_protocol::PatchChangeKind;
 use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::UserInput;
+use codex_app_server_protocol::WebSearchAction;
 use insta::assert_snapshot;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
@@ -166,6 +167,88 @@ fn context_compaction_updates_one_typed_entry_across_its_lifecycle() {
 
     RESTORED
     ◆ Context compacted
+    "###);
+}
+
+#[test]
+fn web_search_actions_render_from_exact_protocol_data() {
+    let starting_item = web_search("fallback query", None);
+    let search_item = web_search(
+        "fallback query",
+        Some(WebSearchAction::Search {
+            query: None,
+            queries: Some(vec![
+                "first complementary query".to_string(),
+                "second query".to_string(),
+            ]),
+        }),
+    );
+    let fetch_item = web_search(
+        "fallback fetch",
+        Some(WebSearchAction::OpenPage {
+            url: Some("https://example.com/a/very/long/page".to_string()),
+        }),
+    );
+    let find_item = web_search(
+        "fallback find",
+        Some(WebSearchAction::FindInPage {
+            url: None,
+            pattern: Some("cached input".to_string()),
+        }),
+    );
+    let other_item = web_search("provider-defined action", Some(WebSearchAction::Other));
+    let starting = EntryBlock::from_parts(
+        &starting_item,
+        &LiveItem::None,
+        EntryLifecycle::Running {
+            started_at_ms: 1_000,
+        },
+    );
+    let search = EntryBlock::from_parts(&search_item, &LiveItem::None, EntryLifecycle::Restored);
+    let fetch = EntryBlock::from_parts(
+        &fetch_item,
+        &LiveItem::None,
+        completed(/*started_at_ms*/ 1_000, /*completed_at_ms*/ 2_250),
+    );
+    let find = EntryBlock::from_parts(&find_item, &LiveItem::None, EntryLifecycle::Restored);
+    let other = EntryBlock::from_parts(&other_item, &LiveItem::None, EntryLifecycle::Restored);
+    let options = EntryRenderOptions::new(/*width*/ 34);
+    let output = [
+        ("STARTING", starting, false),
+        ("SEARCH", search, true),
+        ("FETCH", fetch, true),
+        ("FIND", find, true),
+        ("OTHER", other, false),
+    ]
+    .into_iter()
+    .map(|(label, block, expand)| {
+        let mut state = EntryDisplayState::for_block(&block).expect("web search state");
+        if expand {
+            assert!(state.expand(&block));
+        }
+        let rendered = render_entry(&block, state, options).expect("web search renderer");
+        format!("{label}\n{}", plain(&rendered))
+    })
+    .collect::<Vec<_>>()
+    .join("\n\n");
+
+    assert_snapshot!(output, @r###"
+    STARTING
+    ◇ Web Search fallback query
+
+    SEARCH
+    ◆ Web Search first complementary
+                 query ...
+
+    FETCH
+    ◆ Fetch https://example.com/a/very
+            /long/page  1.2s
+
+    FIND
+    ◆ Find "cached input"
+
+    OTHER
+    ◆ Web Search provider-defined …
     "###);
 }
 
@@ -614,6 +697,14 @@ fn command(
         aggregated_output: output.map(str::to_string),
         exit_code,
         duration_ms,
+    }
+}
+
+fn web_search(query: &str, action: Option<WebSearchAction>) -> ThreadItem {
+    ThreadItem::WebSearch {
+        id: "web-search".to_string(),
+        query: query.to_string(),
+        action,
     }
 }
 
