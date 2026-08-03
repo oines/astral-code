@@ -21,6 +21,8 @@ use crate::render_markdown_with_metadata;
 mod mcp_tool;
 #[path = "render/tool.rs"]
 mod tool;
+#[path = "render/tool_card.rs"]
+mod tool_card;
 #[path = "render/verb_group.rs"]
 mod verb_group;
 #[path = "render/web_search.rs"]
