@@ -181,8 +181,6 @@ fn enable_test_web_search(config: &mut Config) {
         provider: WebSearchProvider::Tavily,
         api_key: SecretString::new("test-web-search-key".to_string())
             .expect("web search key should be valid"),
-        default_limit: 5,
-        max_limit: 20,
     });
 }
 

@@ -5009,7 +5009,7 @@ fn web_search_mode_disabled_overrides_legacy_request() {
 }
 
 #[tokio::test]
-async fn web_search_runtime_config_loads_provider_key_and_limits() -> anyhow::Result<()> {
+async fn web_search_runtime_config_loads_provider_and_key() -> anyhow::Result<()> {
     let codex_home = tempdir()?;
     let cfg = ConfigToml {
         web_search: Some(WebSearchMode::Live),
@@ -5017,8 +5017,6 @@ async fn web_search_runtime_config_loads_provider_key_and_limits() -> anyhow::Re
             web_search: Some(WebSearchToolConfig {
                 provider: Some(WebSearchProvider::Exa),
                 api_key: Some(SecretString::new("exa-key".to_string()).expect("valid secret")),
-                default_limit: Some(50),
-                max_limit: Some(100),
                 ..Default::default()
             }),
             ..Default::default()
@@ -5037,13 +5035,8 @@ async fn web_search_runtime_config_loads_provider_key_and_limits() -> anyhow::Re
         .web_search_runtime_config
         .expect("runtime config should be present");
     assert_eq!(
-        (
-            runtime.provider,
-            runtime.api_key.expose_secret(),
-            runtime.default_limit,
-            runtime.max_limit,
-        ),
-        (WebSearchProvider::Exa, "exa-key", 20, 20)
+        (runtime.provider, runtime.api_key.expose_secret()),
+        (WebSearchProvider::Exa, "exa-key")
     );
 
     Ok(())

@@ -78,7 +78,7 @@ impl TurnItemEmitter for RecordingTurnItemEmitter {
 }
 
 #[test]
-fn web_search_schema_exposes_simple_query_and_limit_shape() {
+fn web_search_schema_exposes_required_query_and_optional_provider_parameters() {
     let ToolSpec::Namespace(namespace) =
         web_tool_spec::<WebSearchInput>(SEARCH_TOOL_NAME, WEB_SEARCH_DESCRIPTION)
     else {
@@ -96,8 +96,14 @@ fn web_search_schema_exposes_simple_query_and_limit_shape() {
         .as_ref()
         .expect("properties should exist");
     assert!(properties.contains_key("query"));
+    assert!(properties.contains_key("domains"));
+    assert!(properties.contains_key("recency"));
     assert!(properties.contains_key("limit"));
-    assert_eq!(properties.len(), 2);
+    assert_eq!(properties.len(), 4);
+    assert_eq!(
+        tool.parameters.required.as_ref(),
+        Some(&vec!["query".to_string()])
+    );
 }
 
 #[test]
@@ -132,14 +138,31 @@ fn formats_search_results_as_plain_text() {
             url: "https://example.com/rust".to_string(),
             snippet: Some("A useful snippet.".to_string()),
             published_at: Some("2026-01-01".to_string()),
-            score: Some(0.9),
         }],
+        TruncationPolicy::Tokens(8_000),
     );
 
     assert_eq!(
         output,
         "Search query: \"rust news\"\nResults returned: 1\n\n1. Title: Rust Result\n   URL: https://example.com/rust\n   Published: 2026-01-01\n   Snippet: A useful snippet.\n"
     );
+}
+
+#[test]
+fn bounds_formatted_search_results_for_model_context() {
+    let output = format_search_results(
+        "rust news",
+        &[WebSearchResult {
+            title: "Rust Result".to_string(),
+            url: "https://example.com/rust".to_string(),
+            snippet: Some("large result ".repeat(100)),
+            published_at: None,
+        }],
+        TruncationPolicy::Tokens(20),
+    );
+
+    assert!(output.starts_with("Warning: truncated output"));
+    assert!(output.contains("tokens truncated"));
 }
 
 #[tokio::test]
@@ -155,8 +178,6 @@ async fn web_search_failure_returns_model_output_and_completes_visible_item() {
         config: WebSearchRuntimeConfig {
             provider: WebSearchProvider::Tavily,
             api_key: SecretString::new("secret".to_string()).expect("secret should be valid"),
-            default_limit: 5,
-            max_limit: 20,
         },
     };
     let call = ToolCall {

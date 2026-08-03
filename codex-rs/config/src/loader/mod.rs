@@ -1483,8 +1483,6 @@ web_search = "live"
 [tools.web_search]
 provider = "tavily"
 api_key = "tvly-dev-secret"
-default_limit = 5
-max_limit = 20
 "#,
         )?;
 

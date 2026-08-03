@@ -14,12 +14,14 @@ workspace = true
 
 [dependencies]
 async-trait = { workspace = true }
+chrono = { workspace = true }
 codex-config = { workspace = true }
 codex-core = { workspace = true }
 codex-extension-api = { workspace = true }
 codex-login = { workspace = true }
 codex-protocol = { workspace = true }
 codex-tools = { workspace = true }
+codex-utils-output-truncation = { workspace = true }
 html-to-markdown-rs = { workspace = true }
 regex = { workspace = true }
 reqwest = { workspace = true, features = ["json", "stream"] }
