@@ -2,12 +2,15 @@
 //! values instead of flattening them into renderer-specific text.
 
 mod block;
+mod display;
 mod live_item;
 mod transcript;
 
 pub use block::EntryBlock;
 pub use block::ReasoningBlock;
 pub use block::ReasoningVisibility;
+pub use display::DisplayMode;
+pub use display::EntryDisplayState;
 pub use live_item::LiveItem;
 pub use transcript::ApplyOutcome;
 pub use transcript::EntryLifecycle;

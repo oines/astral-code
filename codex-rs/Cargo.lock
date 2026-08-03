@@ -577,6 +577,7 @@ version = "0.0.0"
 dependencies = [
  "codex-app-server-protocol",
  "pretty_assertions",
+ "unicode-width 0.2.1",
 ]
 
 [[package]]

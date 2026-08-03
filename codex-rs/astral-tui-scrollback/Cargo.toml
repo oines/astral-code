@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 codex-app-server-protocol = { workspace = true }
+unicode-width = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
