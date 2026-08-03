@@ -121,11 +121,32 @@ pub fn render_entry(
         }
         EntryBlock::ProposedPlan { markdown, .. } => render_plan(markdown, state.raw(), options),
         EntryBlock::Reasoning(reasoning) => render_reasoning(reasoning, state, options),
+        EntryBlock::ContextCompaction(compaction) => render_context_compaction(*compaction),
         EntryBlock::ProtocolItem { item, live } => {
             render_protocol_item(item, live, state, options)?
         }
     };
     Some(RenderedEntry { lines })
+}
+
+fn render_context_compaction(compaction: crate::ContextCompactionBlock) -> Vec<MarkdownLine> {
+    let line = if compaction.running() {
+        vec!["◇ ".magenta(), "Compacting context…".bold()].into()
+    } else if let Some(elapsed_ms) = compaction.elapsed_ms() {
+        vec![
+            "◆ ".dim(),
+            "Context compacted".bold(),
+            format!(" in {}", format_elapsed(elapsed_ms)).dim(),
+        ]
+        .into()
+    } else {
+        vec!["◆ ".dim(), "Context compacted".bold()].into()
+    };
+    vec![MarkdownLine {
+        line,
+        joiner_to_previous: LineJoiner::HardBreak,
+        links: Vec::new(),
+    }]
 }
 
 /// Render the synthetic header for one Grok-style verb group.

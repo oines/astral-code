@@ -125,6 +125,51 @@ fn conversation_entries_keep_distinct_grok_chrome_and_source_order() {
 }
 
 #[test]
+fn context_compaction_updates_one_typed_entry_across_its_lifecycle() {
+    let item = ThreadItem::ContextCompaction {
+        id: "compact".to_string(),
+    };
+    let running = EntryBlock::from_parts(
+        &item,
+        &LiveItem::None,
+        EntryLifecycle::Running {
+            started_at_ms: 1_000,
+        },
+    );
+    let completed = EntryBlock::from_parts(
+        &item,
+        &LiveItem::None,
+        completed(/*started_at_ms*/ 1_000, /*completed_at_ms*/ 3_500),
+    );
+    let restored = EntryBlock::from_parts(&item, &LiveItem::None, EntryLifecycle::Restored);
+    let options = EntryRenderOptions::new(/*width*/ 40);
+    let output = [
+        ("RUNNING", running),
+        ("COMPLETED", completed),
+        ("RESTORED", restored),
+    ]
+    .into_iter()
+    .map(|(label, block)| {
+        let state = EntryDisplayState::for_block(&block).expect("compaction display state");
+        let rendered = render_entry(&block, state, options).expect("compaction renderer");
+        format!("{label}\n{}", plain(&rendered))
+    })
+    .collect::<Vec<_>>()
+    .join("\n\n");
+
+    assert_snapshot!(output, @r###"
+    RUNNING
+    ◇ Compacting context…
+
+    COMPLETED
+    ◆ Context compacted in 2.5s
+
+    RESTORED
+    ◆ Context compacted
+    "###);
+}
+
+#[test]
 fn raw_assistant_shows_source_without_changing_the_entry() {
     let item = ThreadItem::AgentMessage {
         id: "assistant".to_string(),

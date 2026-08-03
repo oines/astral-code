@@ -11,6 +11,7 @@ mod search_tool;
 mod transcript;
 mod verb_group;
 
+pub use block::ContextCompactionBlock;
 pub use block::EntryBlock;
 pub use block::ReasoningBlock;
 pub use block::ReasoningVisibility;

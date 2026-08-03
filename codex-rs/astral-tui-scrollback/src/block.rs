@@ -26,6 +26,7 @@ pub enum EntryBlock<'a> {
         running: bool,
     },
     Reasoning(ReasoningBlock<'a>),
+    ContextCompaction(ContextCompactionBlock),
     ProtocolItem {
         item: &'a ThreadItem,
         live: &'a LiveItem,
@@ -61,7 +62,13 @@ impl<'a> EntryBlock<'a> {
                     summary: merge_parts(summary, live_summary),
                     content: merge_parts(content, live_content),
                     running,
-                    elapsed_ms: reasoning_elapsed_ms(lifecycle),
+                    elapsed_ms: lifecycle_elapsed_ms(lifecycle),
+                })
+            }
+            ThreadItem::ContextCompaction { .. } => {
+                Self::ContextCompaction(ContextCompactionBlock {
+                    running,
+                    elapsed_ms: lifecycle_elapsed_ms(lifecycle),
                 })
             }
             ThreadItem::HookPrompt { .. }
@@ -75,9 +82,29 @@ impl<'a> EntryBlock<'a> {
             | ThreadItem::ImageView { .. }
             | ThreadItem::ImageGeneration { .. }
             | ThreadItem::EnteredReviewMode { .. }
-            | ThreadItem::ExitedReviewMode { .. }
-            | ThreadItem::ContextCompaction { .. } => Self::ProtocolItem { item, live },
+            | ThreadItem::ExitedReviewMode { .. } => Self::ProtocolItem { item, live },
         }
+    }
+}
+
+/// Display data for one canonical app-server context-compaction item.
+///
+/// The protocol intentionally carries no status field: its `item/started` and
+/// `item/completed` lifecycle is the status authority. Restored items represent
+/// completed history and therefore never re-enter the running state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ContextCompactionBlock {
+    running: bool,
+    elapsed_ms: Option<i64>,
+}
+
+impl ContextCompactionBlock {
+    pub fn running(self) -> bool {
+        self.running
+    }
+
+    pub fn elapsed_ms(self) -> Option<i64> {
+        self.elapsed_ms
     }
 }
 
@@ -190,7 +217,7 @@ fn has_text(parts: &[Cow<'_, str>]) -> bool {
     parts.iter().any(|part| !part.trim().is_empty())
 }
 
-fn reasoning_elapsed_ms(lifecycle: EntryLifecycle) -> Option<i64> {
+fn lifecycle_elapsed_ms(lifecycle: EntryLifecycle) -> Option<i64> {
     match lifecycle {
         EntryLifecycle::Completed {
             started_at_ms: Some(started_at_ms),

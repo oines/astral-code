@@ -151,6 +151,12 @@ impl EntryBlock<'_> {
                 has_raw_mode: true,
                 fold_cycle: FoldCycle::TwoState,
             }),
+            Self::ContextCompaction(_) => Some(DisplayPolicy {
+                default_mode: DisplayMode::Expanded,
+                foldable: false,
+                has_raw_mode: false,
+                fold_cycle: FoldCycle::TwoState,
+            }),
             Self::Reasoning(reasoning) => Some(DisplayPolicy {
                 default_mode: if reasoning.running() {
                     DisplayMode::Truncated

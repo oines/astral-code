@@ -273,7 +273,8 @@ fn run_step(
         }
         EntryBlock::User { .. }
         | EntryBlock::Assistant { .. }
-        | EntryBlock::ProposedPlan { .. } => RunStep::Break,
+        | EntryBlock::ProposedPlan { .. }
+        | EntryBlock::ContextCompaction(_) => RunStep::Break,
     }
 }
 
