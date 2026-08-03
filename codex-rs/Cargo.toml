@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "astral-terminal-inline",
+    "astral-tui-scrollback",
     "aws-auth",
     "analytics",
     "agent-graph-store",
@@ -135,6 +136,7 @@ license = "Apache-2.0"
 # Internal
 app_test_support = { path = "app-server/tests/common" }
 astral-terminal-inline = { path = "astral-terminal-inline" }
+astral-tui-scrollback = { path = "astral-tui-scrollback" }
 codex-analytics = { path = "analytics" }
 codex-agent-graph-store = { path = "agent-graph-store" }
 codex-agent-protocol = { path = "agent-protocol" }
