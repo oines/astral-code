@@ -1,3 +1,8 @@
+use super::ApplyOutcome;
+use super::EntryLifecycle;
+use super::Transcript;
+use super::TranscriptGap;
+use crate::LiveItem;
 use codex_app_server_protocol::AgentMessageDeltaNotification;
 use codex_app_server_protocol::ItemCompletedNotification;
 use codex_app_server_protocol::ItemStartedNotification;
@@ -12,15 +17,7 @@ use codex_app_server_protocol::TurnPlanUpdatedNotification;
 use codex_app_server_protocol::TurnStartedNotification;
 use codex_app_server_protocol::TurnStatus;
 use pretty_assertions::assert_eq;
-
-use super::ApplyOutcome;
-use super::EntryLifecycle;
-use super::Transcript;
-use super::TranscriptGap;
-use crate::LiveItem;
-
 const THREAD_ID: &str = "thread-1";
-
 #[test]
 fn lifecycle_events_keep_stable_entries_and_authoritative_order() {
     let mut transcript = Transcript::new(THREAD_ID);
@@ -53,15 +50,19 @@ fn lifecycle_events_keep_stable_entries_and_authoritative_order() {
         transcript.apply(&agent_delta("turn-1", "assistant", "late")),
         ApplyOutcome::NeedsSnapshot(TranscriptGap::ItemNotRunning)
     );
+    let mut completed = turn("turn-1", Vec::new(), TurnStatus::Completed);
+    completed.items_view = TurnItemsView::NotLoaded;
     transcript.apply(&ServerNotification::TurnCompleted(
         TurnCompletedNotification {
             thread_id: THREAD_ID.to_string(),
-            turn: turn(
-                "turn-1",
-                vec![agent("second", "after"), agent("assistant", "hello")],
-                TurnStatus::Completed,
-            ),
+            turn: completed,
         },
+    ));
+    assert_eq!(item_ids(&transcript, 0), vec!["assistant", "second"]);
+    transcript.insert_or_replace_turn(&turn(
+        "turn-1",
+        vec![agent("second", "after"), agent("assistant", "hello")],
+        TurnStatus::Completed,
     ));
     assert_eq!(item_ids(&transcript, 0), vec!["second", "assistant"]);
 }
@@ -79,7 +80,6 @@ fn item_identity_is_scoped_by_turn() {
     }
     transcript.apply(&agent_delta("turn-a", "shared", "alpha"));
     transcript.apply(&agent_delta("turn-b", "shared", "beta"));
-
     assert_eq!(
         transcript.turns()[0].entries()[0].live(),
         &LiveItem::AgentMessage("alpha".to_string())
@@ -107,7 +107,6 @@ fn turn_plan_is_auxiliary_state_not_a_transcript_entry() {
             status: TurnPlanStepStatus::InProgress,
         }],
     };
-
     transcript.apply(&ServerNotification::TurnPlanUpdated(notification.clone()));
     assert!(transcript.turns()[0].entries().is_empty());
     assert_eq!(transcript.turns()[0].plan(), Some(&notification));
@@ -120,7 +119,6 @@ fn item_ids(transcript: &Transcript, turn_index: usize) -> Vec<&str> {
         .map(|entry| entry.item().id())
         .collect()
 }
-
 fn agent(id: &str, text: &str) -> ThreadItem {
     ThreadItem::AgentMessage {
         id: id.to_string(),

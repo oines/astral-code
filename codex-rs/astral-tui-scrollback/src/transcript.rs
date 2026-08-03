@@ -392,40 +392,42 @@ impl TranscriptTurn {
     }
 
     fn replace_from_snapshot(&mut self, snapshot: &Turn, next_entry_id: &mut u64) {
-        let mut previous = std::mem::take(&mut self.entries)
-            .into_iter()
-            .filter(|entry| !entry.item.id().is_empty())
-            .map(|entry| (entry.item.id().to_owned(), entry))
-            .collect::<HashMap<_, _>>();
-        self.entries = snapshot
-            .items
-            .iter()
-            .cloned()
-            .map(|item| {
-                if let Some(mut entry) = previous.remove(item.id()) {
-                    entry.item = item;
-                    entry.live = LiveItem::None;
-                    if matches!(entry.lifecycle, EntryLifecycle::Running { .. }) {
-                        entry.lifecycle = EntryLifecycle::Restored;
+        if matches!(snapshot.items_view, TurnItemsView::Full) {
+            let mut previous = std::mem::take(&mut self.entries)
+                .into_iter()
+                .filter(|entry| !entry.item.id().is_empty())
+                .map(|entry| (entry.item.id().to_owned(), entry))
+                .collect::<HashMap<_, _>>();
+            self.entries = snapshot
+                .items
+                .iter()
+                .cloned()
+                .map(|item| {
+                    if let Some(mut entry) = previous.remove(item.id()) {
+                        entry.item = item;
+                        entry.live = LiveItem::None;
+                        if matches!(entry.lifecycle, EntryLifecycle::Running { .. }) {
+                            entry.lifecycle = EntryLifecycle::Restored;
+                        }
+                        entry
+                    } else {
+                        let id = TranscriptEntryId(*next_entry_id);
+                        *next_entry_id = next_entry_id.saturating_add(1);
+                        TranscriptEntry {
+                            id,
+                            item,
+                            live: LiveItem::None,
+                            lifecycle: EntryLifecycle::Restored,
+                        }
                     }
-                    entry
-                } else {
-                    let id = TranscriptEntryId(*next_entry_id);
-                    *next_entry_id = next_entry_id.saturating_add(1);
-                    TranscriptEntry {
-                        id,
-                        item,
-                        live: LiveItem::None,
-                        lifecycle: EntryLifecycle::Restored,
-                    }
-                }
-            })
-            .collect();
+                })
+                .collect();
+            self.rebuild_entry_indices();
+        }
         self.id.clone_from(&snapshot.id);
         self.status.clone_from(&snapshot.status);
         self.error.clone_from(&snapshot.error);
         self.items_view = snapshot.items_view;
-        self.rebuild_entry_indices();
     }
 
     fn rebuild_entry_indices(&mut self) {
