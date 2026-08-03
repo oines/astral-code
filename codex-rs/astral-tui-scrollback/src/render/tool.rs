@@ -12,6 +12,8 @@ use super::EntryRenderOptions;
 mod command;
 #[path = "tool/file_change.rs"]
 mod file_change;
+#[path = "tool/read.rs"]
+mod read;
 
 pub(super) fn render_protocol_item(
     item: &ThreadItem,
@@ -22,6 +24,7 @@ pub(super) fn render_protocol_item(
     match item {
         ThreadItem::CommandExecution { .. } => command::render(item, live, state, options),
         ThreadItem::FileChange { .. } => file_change::render(item, live, state, options),
+        ThreadItem::CoreToolCall { .. } => read::render(item, state, options),
         ThreadItem::UserMessage { .. }
         | ThreadItem::HookPrompt { .. }
         | ThreadItem::AgentMessage { .. }
@@ -29,7 +32,6 @@ pub(super) fn render_protocol_item(
         | ThreadItem::Reasoning { .. }
         | ThreadItem::McpToolCall { .. }
         | ThreadItem::DynamicToolCall { .. }
-        | ThreadItem::CoreToolCall { .. }
         | ThreadItem::CollabAgentToolCall { .. }
         | ThreadItem::WebSearch { .. }
         | ThreadItem::ImageView { .. }

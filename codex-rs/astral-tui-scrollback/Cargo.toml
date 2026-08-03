@@ -10,6 +10,7 @@ codex-app-server-protocol = { workspace = true }
 diffy = { workspace = true }
 pulldown-cmark = { workspace = true }
 ratatui = { workspace = true }
+serde_json = { workspace = true }
 syntect = { workspace = true }
 textwrap = { workspace = true }
 two-face = { version = "0.5", default-features = false, features = ["syntect-default-onig"] }

@@ -582,6 +582,7 @@ dependencies = [
  "pretty_assertions",
  "pulldown-cmark",
  "ratatui",
+ "serde_json",
  "syntect",
  "textwrap 0.16.2",
  "two-face",
