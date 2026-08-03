@@ -80,6 +80,26 @@ impl TranscriptTurn {
         true
     }
 
+    pub(super) fn complete_or_append_item(
+        &mut self,
+        item: ThreadItem,
+        completed_at_ms: i64,
+        next_entry_id: &mut u64,
+    ) {
+        if self.complete_item(item.clone(), completed_at_ms) {
+            return;
+        }
+        self.close_streams();
+        self.append_entry(
+            item,
+            EntryLifecycle::Completed {
+                started_at_ms: None,
+                completed_at_ms,
+            },
+            next_entry_id,
+        );
+    }
+
     fn complete_text(
         &mut self,
         item: ThreadItem,

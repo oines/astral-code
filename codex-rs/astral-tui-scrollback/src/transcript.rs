@@ -112,7 +112,7 @@ impl TranscriptTurn {
     }
 }
 
-/// A lifecycle gap that should be recovered from an authoritative thread snapshot.
+/// A lifecycle or malformed-delta gap that prevented one notification from applying.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TranscriptGap {
     MissingTurn,
@@ -128,7 +128,7 @@ pub enum ApplyOutcome {
     Applied,
     DifferentThread,
     NotTranscript,
-    NeedsSnapshot(TranscriptGap),
+    Ignored(TranscriptGap),
 }
 
 /// Ordered transcript for exactly one app-server thread.

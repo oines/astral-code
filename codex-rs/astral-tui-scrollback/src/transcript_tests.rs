@@ -70,10 +70,12 @@ fn lifecycle_events_keep_stable_entries_and_authoritative_order() {
         entries[1].live(),
         &LiveItem::AgentMessage("after".to_string())
     );
+    let before_late_delta = transcript.clone();
     assert_eq!(
         transcript.apply(&agent_delta("turn-1", "assistant", "late")),
-        ApplyOutcome::NeedsSnapshot(TranscriptGap::ItemNotRunning)
+        ApplyOutcome::Ignored(TranscriptGap::ItemNotRunning)
     );
+    assert_eq!(transcript, before_late_delta);
     let mut completed = turn("turn-1", Vec::new(), TurnStatus::Completed);
     completed.items_view = TurnItemsView::NotLoaded;
     transcript.apply(&ServerNotification::TurnCompleted(
@@ -89,6 +91,69 @@ fn lifecycle_events_keep_stable_entries_and_authoritative_order() {
         TurnStatus::Completed,
     ));
     assert_eq!(item_ids(&transcript, 0), vec!["second", "assistant"]);
+}
+
+#[test]
+fn lossless_events_recover_missing_starts_and_settle_from_completion() {
+    let mut transcript = Transcript::new(THREAD_ID);
+
+    transcript.apply(&agent_delta("streamed", "assistant", "draft"));
+    transcript.apply(&item_completed(
+        "streamed",
+        agent("assistant", "authoritative"),
+        20,
+    ));
+    let mut streamed = turn("streamed", Vec::new(), TurnStatus::Completed);
+    streamed.items_view = TurnItemsView::NotLoaded;
+    transcript.apply(&ServerNotification::TurnCompleted(
+        TurnCompletedNotification {
+            thread_id: THREAD_ID.to_string(),
+            turn: streamed,
+        },
+    ));
+
+    assert_eq!(
+        transcript.apply(&item_completed(
+            "completion-only",
+            agent("second", "arrived complete"),
+            30,
+        )),
+        ApplyOutcome::Applied
+    );
+    let completion_only = &transcript.turns()[1];
+    assert_eq!(completion_only.status(), &TurnStatus::InProgress);
+    assert_eq!(
+        completion_only.entries()[0].item(),
+        &agent("second", "arrived complete")
+    );
+    let mut completion_only = turn("completion-only", Vec::new(), TurnStatus::Completed);
+    completion_only.items_view = TurnItemsView::NotLoaded;
+    transcript.apply(&ServerNotification::TurnCompleted(
+        TurnCompletedNotification {
+            thread_id: THREAD_ID.to_string(),
+            turn: completion_only,
+        },
+    ));
+
+    assert_snapshot!(
+        transcript
+            .turns()
+            .iter()
+            .map(|turn| format!(
+                "{} {:?}\n{}",
+                turn.id(),
+                turn.status(),
+                presented_items(turn.entries())
+            ))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        @r###"
+    streamed Completed
+    assistant: authoritative
+    completion-only Completed
+    assistant: arrived complete
+    "###
+    );
 }
 
 #[test]
