@@ -5,6 +5,7 @@ use codex_app_server_protocol::UserInput;
 use unicode_width::UnicodeWidthStr;
 
 use crate::EntryBlock;
+use crate::read_tool::ReadCall;
 
 const USER_COLLAPSED_MAX_LINES: usize = 3;
 const USER_FOLD_ESTIMATE_WIDTH: usize = 60;
@@ -209,6 +210,20 @@ impl EntryBlock<'_> {
                         fold_cycle: FoldCycle::TwoState,
                     })
                 }
+                ThreadItem::CoreToolCall { .. } => {
+                    let read = ReadCall::from_item(item)?;
+                    let failed = read.failed();
+                    Some(DisplayPolicy {
+                        default_mode: if failed {
+                            DisplayMode::Truncated
+                        } else {
+                            DisplayMode::Collapsed
+                        },
+                        foldable: read.has_details() && !failed,
+                        has_raw_mode: false,
+                        fold_cycle: FoldCycle::LookupRead,
+                    })
+                }
                 ThreadItem::UserMessage { .. }
                 | ThreadItem::HookPrompt { .. }
                 | ThreadItem::AgentMessage { .. }
@@ -216,7 +231,6 @@ impl EntryBlock<'_> {
                 | ThreadItem::Reasoning { .. }
                 | ThreadItem::McpToolCall { .. }
                 | ThreadItem::DynamicToolCall { .. }
-                | ThreadItem::CoreToolCall { .. }
                 | ThreadItem::CollabAgentToolCall { .. }
                 | ThreadItem::WebSearch { .. }
                 | ThreadItem::ImageView { .. }
@@ -252,6 +266,10 @@ impl DisplayPolicy {
                 DisplayMode::Collapsed => DisplayMode::Truncated,
                 DisplayMode::Truncated | DisplayMode::Expanded => DisplayMode::Collapsed,
             },
+            FoldCycle::LookupRead => match current {
+                DisplayMode::Collapsed => DisplayMode::Truncated,
+                DisplayMode::Truncated | DisplayMode::Expanded => DisplayMode::Collapsed,
+            },
             FoldCycle::UserShell { .. } => match current {
                 DisplayMode::Collapsed => DisplayMode::Expanded,
                 DisplayMode::Truncated | DisplayMode::Expanded => DisplayMode::Collapsed,
@@ -264,6 +282,7 @@ impl DisplayPolicy {
             FoldCycle::RunningReasoning => DisplayMode::Truncated,
             FoldCycle::TwoState => DisplayMode::Collapsed,
             FoldCycle::AgentCommand => DisplayMode::Collapsed,
+            FoldCycle::LookupRead => DisplayMode::Collapsed,
             FoldCycle::UserShell { running: true } => DisplayMode::Truncated,
             FoldCycle::UserShell { running: false } => DisplayMode::Collapsed,
         }
@@ -275,6 +294,7 @@ enum FoldCycle {
     TwoState,
     RunningReasoning,
     AgentCommand,
+    LookupRead,
     UserShell { running: bool },
 }
 

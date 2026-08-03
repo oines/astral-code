@@ -1,5 +1,6 @@
 use codex_app_server_protocol::CommandExecutionSource;
 use codex_app_server_protocol::CommandExecutionStatus;
+use codex_app_server_protocol::CoreToolCallStatus;
 use codex_app_server_protocol::FileUpdateChange;
 use codex_app_server_protocol::PatchApplyStatus;
 use codex_app_server_protocol::PatchChangeKind;
@@ -7,6 +8,8 @@ use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::UserInput;
 use insta::assert_snapshot;
 use pretty_assertions::assert_eq;
+use serde_json::Value;
+use serde_json::json;
 
 use super::EntryRenderOptions;
 use super::RenderedEntry;
@@ -304,11 +307,99 @@ fn multi_file_change_keeps_create_delete_and_move_semantics() {
     "###);
 }
 
+#[test]
+fn read_lookup_uses_grok_collapsed_preview_and_expanded_views() {
+    let item = core_tool(
+        "Read",
+        json!({
+            "file_path": "/workspace/src/lib.rs",
+            "offset": 3,
+            "limit": 10,
+        }),
+        CoreToolCallStatus::Completed,
+        /*result*/
+        Some(
+            "3\tfn demo() {\n4\t    let one = 1;\n5\t    let two = 2;\n6\t    let three = 3;\n7\t    let four = 4;\n8\t    let five = 5;\n9\t    let six = 6;\n10\t    let seven = 7;\n11\t    let eight = 8;\n12\t}",
+        ),
+        /*error*/ None,
+        /*duration_ms*/ Some(1_250),
+    );
+    let block = EntryBlock::from_parts(
+        &item,
+        &LiveItem::None,
+        completed(/*started_at_ms*/ 1_000, /*completed_at_ms*/ 2_250),
+    );
+    let mut state = EntryDisplayState::for_block(&block).expect("read state");
+    let options = EntryRenderOptions::new(/*width*/ 44);
+
+    let collapsed = render_entry(&block, state, options).expect("collapsed read");
+    assert!(state.toggle_fold(&block));
+    let preview = render_entry(&block, state, options).expect("read preview");
+    assert!(state.expand(&block));
+    let expanded = render_entry(&block, state, options).expect("expanded read");
+
+    assert_snapshot!(format!(
+        "COLLAPSED\n{}\n\nPREVIEW\n{}\n\nEXPANDED\n{}",
+        plain(&collapsed),
+        plain(&preview),
+        plain(&expanded),
+    ), @r###"
+    COLLAPSED
+    ◆ Read lib.rs (3–12)  1.2s
+
+    PREVIEW
+    ◆ Read /workspace/src/lib.rs (3–12)  1.2s
+
+       3  fn demo() {
+       4      let one = 1;
+       5      let two = 2;
+       6      let three = 3;
+       7      let four = 4;
+      … 2 hidden lines
+      10      let seven = 7;
+      11      let eight = 8;
+      12  }
+
+    EXPANDED
+    ◆ Read /workspace/src/lib.rs (3–12)  1.2s
+
+       3  fn demo() {
+       4      let one = 1;
+       5      let two = 2;
+       6      let three = 3;
+       7      let four = 4;
+       8      let five = 5;
+       9      let six = 6;
+      10      let seven = 7;
+      11      let eight = 8;
+      12  }
+    "###);
+}
+
 fn file_change(changes: Vec<FileUpdateChange>) -> ThreadItem {
     ThreadItem::FileChange {
         id: "edit".to_string(),
         changes,
         status: PatchApplyStatus::Completed,
+    }
+}
+
+fn core_tool(
+    tool: &str,
+    arguments: Value,
+    status: CoreToolCallStatus,
+    result: Option<&str>,
+    error: Option<&str>,
+    duration_ms: Option<i64>,
+) -> ThreadItem {
+    ThreadItem::CoreToolCall {
+        id: "lookup".to_string(),
+        tool: tool.to_string(),
+        arguments,
+        status,
+        result: result.map(str::to_string),
+        error: error.map(str::to_string),
+        duration_ms,
     }
 }
 

@@ -5,6 +5,7 @@ mod block;
 mod display;
 mod live_item;
 mod markdown;
+mod read_tool;
 mod render;
 mod transcript;
 
