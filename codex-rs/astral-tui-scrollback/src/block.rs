@@ -37,7 +37,11 @@ impl<'a> EntryBlock<'a> {
         Self::from_parts(entry.item(), entry.live(), entry.lifecycle())
     }
 
-    fn from_parts(item: &'a ThreadItem, live: &'a LiveItem, lifecycle: EntryLifecycle) -> Self {
+    pub(crate) fn from_parts(
+        item: &'a ThreadItem,
+        live: &'a LiveItem,
+        lifecycle: EntryLifecycle,
+    ) -> Self {
         let running = matches!(lifecycle, EntryLifecycle::Running { .. });
         match item {
             ThreadItem::UserMessage { content, .. } => Self::User { content },
