@@ -2,6 +2,7 @@
 //! values instead of flattening them into renderer-specific text.
 
 mod block;
+mod collab_tool;
 mod display;
 mod dynamic_tool;
 mod live_item;
@@ -18,6 +19,7 @@ pub use block::ContextCompactionBlock;
 pub use block::EntryBlock;
 pub use block::ReasoningBlock;
 pub use block::ReasoningVisibility;
+pub use collab_tool::CollabAgentToolCallBlock;
 pub use display::DisplayMode;
 pub use display::EntryDisplayState;
 pub use dynamic_tool::DynamicToolCallBlock;

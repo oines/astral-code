@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use codex_app_server_protocol::CollabAgentTool;
+use codex_app_server_protocol::CollabAgentToolCallStatus;
 use codex_app_server_protocol::CoreToolCallStatus;
 use codex_app_server_protocol::DynamicToolCallStatus;
 use codex_app_server_protocol::ItemCompletedNotification;
@@ -63,6 +65,7 @@ fn groups_exact_lookup_entries_without_flattening_source_order() {
             "https://example.com/after-boundary",
             DynamicToolCallStatus::Completed,
         ),
+        collab_tool("collab-boundary"),
         mcp_tool("mcp"),
         agent("boundary"),
         core_tool(
@@ -88,7 +91,8 @@ fn groups_exact_lookup_entries_without_flattening_source_order() {
     assert!(groups.iter().all(|group| !group.contains_member(7)));
     assert_eq!(groups[1].range(), 8..9);
     assert_eq!(groups[1].label(), "Fetched 1 website");
-    assert_eq!(groups[2].range(), 11..12);
+    assert!(groups.iter().all(|group| !group.contains_member(9)));
+    assert_eq!(groups[2].range(), 12..13);
     assert_eq!(groups[2].label(), "Searched 1 pattern");
 
     let mut state = VerbGroupDisplayState::default();
@@ -361,6 +365,20 @@ fn generic_dynamic(id: &str) -> ThreadItem {
         content_items: Some(Vec::new()),
         success: Some(true),
         duration_ms: Some(20),
+    }
+}
+
+fn collab_tool(id: &str) -> ThreadItem {
+    ThreadItem::CollabAgentToolCall {
+        id: id.to_string(),
+        tool: CollabAgentTool::Wait,
+        status: CollabAgentToolCallStatus::InProgress,
+        sender_thread_id: "parent".to_string(),
+        receiver_thread_ids: vec!["worker".to_string()],
+        prompt: None,
+        model: None,
+        reasoning_effort: None,
+        agents_states: HashMap::new(),
     }
 }
 
