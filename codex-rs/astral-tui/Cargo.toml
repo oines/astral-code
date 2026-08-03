@@ -1,0 +1,17 @@
+[package]
+name = "astral-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+codex-app-server-client = { workspace = true }
+codex-app-server-protocol = { workspace = true }
+codex-protocol = { workspace = true }
+
+[dev-dependencies]
+codex-utils-absolute-path = { workspace = true }
+pretty_assertions = { workspace = true }
+
+[lints]
+workspace = true
