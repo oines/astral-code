@@ -8,6 +8,7 @@ mod conversation;
 mod runtime;
 mod session;
 mod surface;
+mod viewport;
 
 pub use conversation::ConversationState;
 pub use conversation::EntryDisplayAction;
@@ -20,6 +21,9 @@ pub use session::AstralSession;
 pub use session::SessionError;
 pub use session::SessionState;
 pub use surface::ConversationSurface;
+pub use surface::SurfaceAnchor;
 pub use surface::SurfaceNode;
 pub use surface::SurfaceNodeId;
 pub use surface::SurfaceNodeKind;
+pub use viewport::ScrollDirection;
+pub use viewport::SurfaceViewport;

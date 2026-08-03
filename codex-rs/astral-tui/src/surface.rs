@@ -11,6 +11,7 @@ use astral_tui_scrollback::DisplayMode;
 use astral_tui_scrollback::EntryBlock;
 use astral_tui_scrollback::EntryLifecycle;
 use astral_tui_scrollback::EntryRenderOptions;
+use astral_tui_scrollback::LineJoiner;
 use astral_tui_scrollback::MarkdownLine;
 use astral_tui_scrollback::RenderedEntry;
 use astral_tui_scrollback::TranscriptEntryId;
@@ -26,6 +27,33 @@ use crate::ConversationState;
 pub enum SurfaceNodeId {
     Entry(TranscriptEntryId),
     VerbGroup(TranscriptEntryId),
+}
+
+/// Reflow-stable position inside one surface node.
+///
+/// A terminal resize changes soft-wrapped row counts, so retaining an absolute
+/// row would jump to unrelated text. Logical line indices survive reflow;
+/// `sub_rows` preserves the position inside that line and is clamped if the
+/// line becomes shorter at the new width.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SurfaceAnchor {
+    node: SurfaceNodeId,
+    logical_line: usize,
+    sub_rows: usize,
+}
+
+impl SurfaceAnchor {
+    pub fn node(self) -> SurfaceNodeId {
+        self.node
+    }
+
+    pub fn logical_line(self) -> usize {
+        self.logical_line
+    }
+
+    pub fn sub_rows(self) -> usize {
+        self.sub_rows
+    }
 }
 
 /// Source metadata for one rendered surface node.
@@ -181,6 +209,53 @@ impl ConversationSurface {
         self.nodes
             .get(index)
             .filter(|node| node.rows.contains(&row))
+    }
+
+    /// Capture a virtual row as a semantic node + logical-line anchor.
+    pub fn anchor_at_row(&self, row: usize) -> Option<SurfaceAnchor> {
+        let node = self.node_at_row(row)?;
+        let local_row = row.saturating_sub(node.rows.start);
+        let (logical_line, line_start) = node
+            .rendered
+            .lines()
+            .iter()
+            .take(local_row.saturating_add(1))
+            .enumerate()
+            .filter(|(index, line)| *index == 0 || line.joiner_to_previous == LineJoiner::HardBreak)
+            .enumerate()
+            .last()
+            .map(|(logical_line, (line_start, _))| (logical_line, line_start))?;
+        Some(SurfaceAnchor {
+            node: node.id,
+            logical_line,
+            sub_rows: local_row.saturating_sub(line_start),
+        })
+    }
+
+    /// Resolve an anchor after content growth or width-dependent reflow.
+    pub fn row_for_anchor(&self, anchor: SurfaceAnchor) -> Option<usize> {
+        let node = self.node(anchor.node)?;
+        let mut logical_starts =
+            node.rendered
+                .lines()
+                .iter()
+                .enumerate()
+                .filter(|(index, line)| {
+                    *index == 0 || line.joiner_to_previous == LineJoiner::HardBreak
+                });
+        let line_start = logical_starts
+            .nth(anchor.logical_line)
+            .map(|(index, _)| index)
+            .or_else(|| node.rendered.lines().len().checked_sub(1))?;
+        let line_last = logical_starts
+            .next()
+            .map_or_else(
+                || node.rendered.lines().len().saturating_sub(1),
+                |(next_start, _)| next_start.saturating_sub(1),
+            )
+            .max(line_start);
+        let local_row = line_start.saturating_add(anchor.sub_rows).min(line_last);
+        Some(node.rows.start.saturating_add(local_row))
     }
 
     fn push(
