@@ -11,6 +11,7 @@ use codex_app_server_protocol::JSONRPCErrorError;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::Result as JsonRpcResult;
 use codex_app_server_protocol::ServerNotification;
+use codex_app_server_protocol::ServerRequest;
 use codex_app_server_protocol::Thread;
 use codex_app_server_protocol::ThreadForkParams;
 use codex_app_server_protocol::ThreadForkResponse;
@@ -177,6 +178,103 @@ impl SessionState {
             }
             _ => {}
         }
+        if let Some((thread_id, turn_id)) = notification_turn_activity(notification) {
+            self.observe_turn_activity(thread_id, turn_id);
+        }
+    }
+
+    fn observe_server_request(&mut self, request: &ServerRequest) {
+        if let Some((thread_id, turn_id)) = server_request_turn_activity(request) {
+            self.observe_turn_activity(thread_id, turn_id);
+        }
+    }
+
+    fn observe_turn_activity(&mut self, thread_id: &str, turn_id: &str) {
+        if thread_id == self.thread.id && self.active_turn_id.is_none() {
+            self.active_turn_id = Some(turn_id.to_owned());
+        }
+    }
+}
+
+fn notification_turn_activity(notification: &ServerNotification) -> Option<(&str, &str)> {
+    match notification {
+        ServerNotification::Error(params) => Some((&params.thread_id, &params.turn_id)),
+        ServerNotification::HookStarted(params) => {
+            Some((&params.thread_id, params.turn_id.as_deref()?))
+        }
+        ServerNotification::HookCompleted(params) => {
+            Some((&params.thread_id, params.turn_id.as_deref()?))
+        }
+        ServerNotification::TurnDiffUpdated(params) => Some((&params.thread_id, &params.turn_id)),
+        ServerNotification::TurnPlanUpdated(params) => Some((&params.thread_id, &params.turn_id)),
+        ServerNotification::ItemStarted(params) => Some((&params.thread_id, &params.turn_id)),
+        ServerNotification::ItemGuardianApprovalReviewStarted(params) => {
+            Some((&params.thread_id, &params.turn_id))
+        }
+        ServerNotification::ItemGuardianApprovalReviewCompleted(params) => {
+            Some((&params.thread_id, &params.turn_id))
+        }
+        ServerNotification::ItemCompleted(params) => Some((&params.thread_id, &params.turn_id)),
+        ServerNotification::RawResponseItemCompleted(params) => {
+            Some((&params.thread_id, &params.turn_id))
+        }
+        ServerNotification::AgentMessageDelta(params) => Some((&params.thread_id, &params.turn_id)),
+        ServerNotification::PlanDelta(params) => Some((&params.thread_id, &params.turn_id)),
+        ServerNotification::CommandExecutionOutputDelta(params) => {
+            Some((&params.thread_id, &params.turn_id))
+        }
+        ServerNotification::TerminalInteraction(params) => {
+            Some((&params.thread_id, &params.turn_id))
+        }
+        ServerNotification::FileChangeOutputDelta(params) => {
+            Some((&params.thread_id, &params.turn_id))
+        }
+        ServerNotification::FileChangePatchUpdated(params) => {
+            Some((&params.thread_id, &params.turn_id))
+        }
+        ServerNotification::McpToolCallProgress(params) => {
+            Some((&params.thread_id, &params.turn_id))
+        }
+        ServerNotification::ReasoningSummaryTextDelta(params) => {
+            Some((&params.thread_id, &params.turn_id))
+        }
+        ServerNotification::ReasoningSummaryPartAdded(params) => {
+            Some((&params.thread_id, &params.turn_id))
+        }
+        ServerNotification::ReasoningTextDelta(params) => {
+            Some((&params.thread_id, &params.turn_id))
+        }
+        ServerNotification::ContextCompacted(params) => Some((&params.thread_id, &params.turn_id)),
+        ServerNotification::ModelRerouted(params) => Some((&params.thread_id, &params.turn_id)),
+        ServerNotification::ModelVerification(params) => Some((&params.thread_id, &params.turn_id)),
+        ServerNotification::TurnModerationMetadata(params) => {
+            Some((&params.thread_id, &params.turn_id))
+        }
+        _ => None,
+    }
+}
+
+fn server_request_turn_activity(request: &ServerRequest) -> Option<(&str, &str)> {
+    match request {
+        ServerRequest::CommandExecutionRequestApproval { params, .. } => {
+            Some((&params.thread_id, &params.turn_id))
+        }
+        ServerRequest::FileChangeRequestApproval { params, .. } => {
+            Some((&params.thread_id, &params.turn_id))
+        }
+        ServerRequest::ToolRequestUserInput { params, .. } => {
+            Some((&params.thread_id, &params.turn_id))
+        }
+        ServerRequest::McpServerElicitationRequest { params, .. } => {
+            Some((&params.thread_id, params.turn_id.as_deref()?))
+        }
+        ServerRequest::PermissionsRequestApproval { params, .. } => {
+            Some((&params.thread_id, &params.turn_id))
+        }
+        ServerRequest::DynamicToolCall { params, .. } => Some((&params.thread_id, &params.turn_id)),
+        ServerRequest::AttestationGenerate { .. }
+        | ServerRequest::ApplyPatchApproval { .. }
+        | ServerRequest::ExecCommandApproval { .. } => None,
     }
 }
 
@@ -299,10 +397,14 @@ impl AstralSession {
 
     pub async fn next_event(&mut self) -> Option<AppServerEvent> {
         let event = self.client.next_event().await?;
-        if let AppServerEvent::ServerNotification(notification) = &event
-            && let Some(state) = self.state.as_mut()
-        {
-            state.observe_notification(notification);
+        if let Some(state) = self.state.as_mut() {
+            match &event {
+                AppServerEvent::ServerNotification(notification) => {
+                    state.observe_notification(notification);
+                }
+                AppServerEvent::ServerRequest(request) => state.observe_server_request(request),
+                AppServerEvent::Lagged { .. } | AppServerEvent::Disconnected { .. } => {}
+            }
         }
         Some(event)
     }

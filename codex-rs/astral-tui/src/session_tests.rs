@@ -1,7 +1,9 @@
 use codex_app_server_protocol::ActivePermissionProfile;
+use codex_app_server_protocol::AgentMessageDeltaNotification;
 use codex_app_server_protocol::ApprovalsReviewer;
 use codex_app_server_protocol::AskForApproval;
 use codex_app_server_protocol::ClientRequest;
+use codex_app_server_protocol::DynamicToolCallParams;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::SandboxPolicy;
 use codex_app_server_protocol::ServerNotification;
@@ -11,6 +13,9 @@ use codex_app_server_protocol::ThreadResumeResponse;
 use codex_app_server_protocol::ThreadSettings;
 use codex_app_server_protocol::ThreadSettingsUpdatedNotification;
 use codex_app_server_protocol::ThreadStatus;
+use codex_app_server_protocol::ThreadTokenUsage;
+use codex_app_server_protocol::ThreadTokenUsageUpdatedNotification;
+use codex_app_server_protocol::TokenUsageBreakdown;
 use codex_app_server_protocol::Turn;
 use codex_app_server_protocol::TurnCompletedNotification;
 use codex_app_server_protocol::TurnItemsView;
@@ -179,6 +184,58 @@ fn session_state_observes_only_matching_lifecycle_and_settings_notifications() {
     ));
     expected_updated.active_turn_id = None;
     assert_eq!(state, expected_updated);
+
+    state.observe_server_request(&codex_app_server_protocol::ServerRequest::DynamicToolCall {
+        request_id: RequestId::Integer(11),
+        params: DynamicToolCallParams {
+            thread_id: "thread-1".to_string(),
+            turn_id: "request-inferred-active".to_string(),
+            call_id: "call-1".to_string(),
+            namespace: None,
+            tool: "client_tool".to_string(),
+            arguments: Default::default(),
+        },
+    });
+    expected_updated.active_turn_id = Some("request-inferred-active".to_string());
+    assert_eq!(state, expected_updated);
+
+    state.observe_notification(&ServerNotification::TurnCompleted(
+        TurnCompletedNotification {
+            thread_id: "thread-1".to_string(),
+            turn: turn("request-inferred-active", TurnStatus::Completed),
+        },
+    ));
+    expected_updated.active_turn_id = None;
+    assert_eq!(state, expected_updated);
+
+    state.observe_notification(&ServerNotification::ThreadTokenUsageUpdated(
+        ThreadTokenUsageUpdatedNotification {
+            thread_id: "thread-1".to_string(),
+            turn_id: "finished".to_string(),
+            token_usage: token_usage(),
+        },
+    ));
+    assert_eq!(state, expected_updated);
+
+    state.observe_notification(&ServerNotification::AgentMessageDelta(
+        AgentMessageDeltaNotification {
+            thread_id: "thread-1".to_string(),
+            turn_id: "inferred-active".to_string(),
+            item_id: "assistant".to_string(),
+            delta: "hello".to_string(),
+        },
+    ));
+    expected_updated.active_turn_id = Some("inferred-active".to_string());
+    assert_eq!(state, expected_updated);
+
+    state.observe_notification(&ServerNotification::TurnCompleted(
+        TurnCompletedNotification {
+            thread_id: "thread-1".to_string(),
+            turn: turn("inferred-active", TurnStatus::Completed),
+        },
+    ));
+    expected_updated.active_turn_id = None;
+    assert_eq!(state, expected_updated);
 }
 
 fn turn(id: &str, status: TurnStatus) -> Turn {
@@ -191,5 +248,20 @@ fn turn(id: &str, status: TurnStatus) -> Turn {
         started_at: None,
         completed_at: None,
         duration_ms: None,
+    }
+}
+
+fn token_usage() -> ThreadTokenUsage {
+    let empty = TokenUsageBreakdown {
+        total_tokens: 0,
+        input_tokens: 0,
+        cached_input_tokens: 0,
+        output_tokens: 0,
+        reasoning_output_tokens: 0,
+    };
+    ThreadTokenUsage {
+        total: empty.clone(),
+        last: empty,
+        model_context_window: None,
     }
 }
