@@ -65,7 +65,7 @@ impl LineJoiner {
 }
 
 /// One rendered Markdown line and its relationship to the preceding line.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MarkdownLine {
     pub line: Line<'static>,
     pub joiner_to_previous: LineJoiner,

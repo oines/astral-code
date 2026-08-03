@@ -5,6 +5,7 @@ mod block;
 mod display;
 mod live_item;
 mod markdown;
+mod render;
 mod transcript;
 
 pub use block::EntryBlock;
@@ -26,6 +27,9 @@ pub use markdown::render_literal_with_metadata;
 pub use markdown::render_markdown;
 pub use markdown::render_markdown_with_metadata;
 pub use markdown::wrap_styled_line_with_metadata;
+pub use render::EntryRenderOptions;
+pub use render::RenderedEntry;
+pub use render::render_entry;
 pub use transcript::ApplyOutcome;
 pub use transcript::EntryLifecycle;
 pub use transcript::Transcript;

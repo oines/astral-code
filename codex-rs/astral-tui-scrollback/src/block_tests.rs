@@ -62,6 +62,7 @@ fn reasoning_visibility_never_creates_an_empty_viewer_body() {
         block.visible_parts(ReasoningVisibility::Raw),
         block.summary()
     );
+    assert_eq!(block.elapsed_ms(), None);
     assert!(block.has_visible_body(ReasoningVisibility::Summary));
 
     let opaque = ThreadItem::Reasoning {
@@ -76,6 +77,7 @@ fn reasoning_visibility_never_creates_an_empty_viewer_body() {
     };
     assert!(!opaque.has_visible_body(ReasoningVisibility::Summary));
     assert!(!opaque.has_visible_body(ReasoningVisibility::Raw));
+    assert_eq!(opaque.elapsed_ms(), Some(1));
 }
 
 fn running() -> EntryLifecycle {

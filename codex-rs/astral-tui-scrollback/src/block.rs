@@ -61,6 +61,7 @@ impl<'a> EntryBlock<'a> {
                     summary: merge_parts(summary, live_summary),
                     content: merge_parts(content, live_content),
                     running,
+                    elapsed_ms: reasoning_elapsed_ms(lifecycle),
                 })
             }
             ThreadItem::HookPrompt { .. }
@@ -94,6 +95,7 @@ pub struct ReasoningBlock<'a> {
     summary: Vec<Cow<'a, str>>,
     content: Vec<Cow<'a, str>>,
     running: bool,
+    elapsed_ms: Option<i64>,
 }
 
 impl<'a> ReasoningBlock<'a> {
@@ -107,6 +109,10 @@ impl<'a> ReasoningBlock<'a> {
 
     pub fn running(&self) -> bool {
         self.running
+    }
+
+    pub fn elapsed_ms(&self) -> Option<i64> {
+        self.elapsed_ms
     }
 
     /// Return only content that is actually available for display.
@@ -182,6 +188,21 @@ fn merge_parts<'a>(persisted: &'a [String], live: &'a [String]) -> Vec<Cow<'a, s
 
 fn has_text(parts: &[Cow<'_, str>]) -> bool {
     parts.iter().any(|part| !part.trim().is_empty())
+}
+
+fn reasoning_elapsed_ms(lifecycle: EntryLifecycle) -> Option<i64> {
+    match lifecycle {
+        EntryLifecycle::Completed {
+            started_at_ms: Some(started_at_ms),
+            completed_at_ms,
+        } => Some(completed_at_ms.saturating_sub(started_at_ms).max(0)),
+        EntryLifecycle::Restored
+        | EntryLifecycle::Running { .. }
+        | EntryLifecycle::Completed {
+            started_at_ms: None,
+            ..
+        } => None,
+    }
 }
 
 #[cfg(test)]
