@@ -7,6 +7,7 @@ use codex_app_server_protocol::AgentMessageDeltaNotification;
 use codex_app_server_protocol::ItemCompletedNotification;
 use codex_app_server_protocol::ItemStartedNotification;
 use codex_app_server_protocol::ServerNotification;
+use codex_app_server_protocol::Thread;
 use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::Turn;
 use codex_app_server_protocol::TurnCompletedNotification;
@@ -112,6 +113,62 @@ fn turn_plan_is_auxiliary_state_not_a_transcript_entry() {
     assert_eq!(transcript.turns()[0].plan(), Some(&notification));
 }
 
+#[test]
+fn authoritative_refresh_preserves_matching_entry_identity_and_reorders_from_source() {
+    let mut transcript = Transcript::from_thread(&thread(vec![
+        turn(
+            "turn-a",
+            vec![agent("one", "old one"), agent("two", "old two")],
+            TurnStatus::Completed,
+        ),
+        turn(
+            "turn-b",
+            vec![agent("three", "old three")],
+            TurnStatus::Completed,
+        ),
+    ]));
+    let one = transcript.turns()[0].entries()[0].id();
+    let two = transcript.turns()[0].entries()[1].id();
+    let three = transcript.turns()[1].entries()[0].id();
+
+    transcript.reset_from_thread(&thread(vec![
+        turn(
+            "turn-b",
+            vec![agent("three", "new three")],
+            TurnStatus::Completed,
+        ),
+        turn(
+            "turn-a",
+            vec![
+                agent("two", "new two"),
+                agent("one", "new one"),
+                agent("four", "new four"),
+            ],
+            TurnStatus::Completed,
+        ),
+    ]));
+    let four = transcript.turns()[1].entries()[2].id();
+    assert!(![one, two, three].contains(&four));
+
+    assert_eq!(
+        transcript
+            .turns()
+            .iter()
+            .map(|turn| (
+                turn.id(),
+                turn.entries()
+                    .iter()
+                    .map(|entry| (entry.item().id(), entry.id()))
+                    .collect::<Vec<_>>()
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            ("turn-b", vec![("three", three)]),
+            ("turn-a", vec![("two", two), ("one", one), ("four", four)]),
+        ]
+    );
+}
+
 fn item_ids(transcript: &Transcript, turn_index: usize) -> Vec<&str> {
     transcript.turns()[turn_index]
         .entries()
@@ -139,6 +196,32 @@ fn turn(id: &str, items: Vec<ThreadItem>, status: TurnStatus) -> Turn {
         completed_at: None,
         duration_ms: None,
     }
+}
+
+fn thread(turns: Vec<Turn>) -> Thread {
+    serde_json::from_value(serde_json::json!({
+        "id": THREAD_ID,
+        "sessionId": THREAD_ID,
+        "forkedFromId": null,
+        "parentThreadId": null,
+        "preview": "",
+        "ephemeral": false,
+        "modelProvider": "astral",
+        "createdAt": 1,
+        "updatedAt": 1,
+        "status": { "type": "idle" },
+        "path": null,
+        "cwd": std::env::current_dir().expect("current directory"),
+        "cliVersion": "0.0.0",
+        "source": "exec",
+        "threadSource": null,
+        "agentNickname": null,
+        "agentRole": null,
+        "gitInfo": null,
+        "name": null,
+        "turns": turns,
+    }))
+    .expect("thread fixture should deserialize")
 }
 
 fn turn_started(turn: Turn) -> ServerNotification {
