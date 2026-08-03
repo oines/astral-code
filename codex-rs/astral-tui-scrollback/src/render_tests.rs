@@ -143,7 +143,7 @@ fn context_compaction_updates_one_typed_entry_across_its_lifecycle() {
         &item,
         &LiveItem::None,
         EntryLifecycle::Running {
-            started_at_ms: 1_000,
+            started_at_ms: Some(1_000),
         },
     );
     let completed = EntryBlock::from_parts(
@@ -210,7 +210,7 @@ fn web_search_actions_render_from_exact_protocol_data() {
         &starting_item,
         &LiveItem::None,
         EntryLifecycle::Running {
-            started_at_ms: 1_000,
+            started_at_ms: Some(1_000),
         },
     );
     let search = EntryBlock::from_parts(&search_item, &LiveItem::None, EntryLifecycle::Restored);
@@ -708,7 +708,13 @@ fn running_user_shell_streams_live_output_and_terminal_input() {
         output: ">>> 2\n".to_string(),
         terminal_input: vec!["1 + 1\n".to_string()],
     };
-    let block = EntryBlock::from_parts(&item, &live, EntryLifecycle::Running { started_at_ms: 1 });
+    let block = EntryBlock::from_parts(
+        &item,
+        &live,
+        EntryLifecycle::Running {
+            started_at_ms: Some(1),
+        },
+    );
     let state = EntryDisplayState::for_block(&block).expect("user command state");
     let rendered =
         render_entry(&block, state, EntryRenderOptions::new(/*width*/ 40)).expect("rendered");

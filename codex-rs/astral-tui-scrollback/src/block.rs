@@ -43,7 +43,21 @@ pub enum EntryBlock<'a> {
 
 impl<'a> EntryBlock<'a> {
     pub fn from_entry(entry: &'a TranscriptEntry) -> Self {
-        Self::from_parts(entry.item(), entry.live(), entry.lifecycle())
+        let block = Self::from_parts(entry.item(), entry.live(), entry.lifecycle());
+        let Some(markdown) = entry.presentation_text() else {
+            return block;
+        };
+        match block {
+            Self::Assistant { running, .. } => Self::Assistant {
+                markdown: Cow::Borrowed(markdown),
+                running,
+            },
+            Self::ProposedPlan { running, .. } => Self::ProposedPlan {
+                markdown: Cow::Borrowed(markdown),
+                running,
+            },
+            block => block,
+        }
     }
 
     pub(crate) fn from_parts(

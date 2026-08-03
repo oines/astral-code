@@ -125,7 +125,9 @@ fn command(
 }
 
 fn running() -> EntryLifecycle {
-    EntryLifecycle::Running { started_at_ms: 1 }
+    EntryLifecycle::Running {
+        started_at_ms: Some(1),
+    }
 }
 
 fn completed() -> EntryLifecycle {

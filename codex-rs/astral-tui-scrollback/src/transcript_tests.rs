@@ -2,10 +2,13 @@ use super::ApplyOutcome;
 use super::EntryLifecycle;
 use super::Transcript;
 use super::TranscriptGap;
+use crate::EntryBlock;
 use crate::LiveItem;
 use codex_app_server_protocol::AgentMessageDeltaNotification;
+use codex_app_server_protocol::CoreToolCallStatus;
 use codex_app_server_protocol::ItemCompletedNotification;
 use codex_app_server_protocol::ItemStartedNotification;
+use codex_app_server_protocol::PlanDeltaNotification;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::Thread;
 use codex_app_server_protocol::ThreadItem;
@@ -17,6 +20,7 @@ use codex_app_server_protocol::TurnPlanStepStatus;
 use codex_app_server_protocol::TurnPlanUpdatedNotification;
 use codex_app_server_protocol::TurnStartedNotification;
 use codex_app_server_protocol::TurnStatus;
+use insta::assert_snapshot;
 use pretty_assertions::assert_eq;
 const THREAD_ID: &str = "thread-1";
 #[test]
@@ -27,15 +31,34 @@ fn lifecycle_events_keep_stable_entries_and_authoritative_order() {
         Vec::new(),
         TurnStatus::InProgress,
     )));
-    transcript.apply(&agent_delta("turn-1", "assistant", "early"));
-    assert!(transcript.turns()[0].entries().is_empty());
+    assert_eq!(
+        transcript.apply(&agent_delta("turn-1", "assistant", "early")),
+        ApplyOutcome::Applied
+    );
+    let inferred_id = transcript.turns()[0].entries()[0].id();
+    assert_eq!(
+        transcript.turns()[0].entries()[0].lifecycle(),
+        EntryLifecycle::Running {
+            started_at_ms: None,
+        }
+    );
     transcript.apply(&item_started("turn-1", agent("assistant", ""), 100));
+    assert_eq!(transcript.turns()[0].entries()[0].id(), inferred_id);
+    assert_eq!(
+        transcript.turns()[0].entries()[0].live(),
+        &LiveItem::AgentMessage("early".to_string())
+    );
     transcript.apply(&agent_delta("turn-1", "assistant", "hello"));
     transcript.apply(&item_started("turn-1", agent("second", ""), 110));
     transcript.apply(&agent_delta("turn-1", "second", "after"));
-    transcript.apply(&item_completed("turn-1", agent("assistant", "hello"), 130));
+    transcript.apply(&item_completed(
+        "turn-1",
+        agent("assistant", "earlyhello"),
+        130,
+    ));
     let entries = transcript.turns()[0].entries();
     assert_eq!(item_ids(&transcript, 0), vec!["assistant", "second"]);
+    assert_eq!(entries[0].item(), &agent("assistant", "earlyhello"));
     assert_eq!(
         entries[0].lifecycle(),
         EntryLifecycle::Completed {
@@ -62,7 +85,7 @@ fn lifecycle_events_keep_stable_entries_and_authoritative_order() {
     assert_eq!(item_ids(&transcript, 0), vec!["assistant", "second"]);
     transcript.insert_or_replace_turn(&turn(
         "turn-1",
-        vec![agent("second", "after"), agent("assistant", "hello")],
+        vec![agent("second", "after"), agent("assistant", "earlyhello")],
         TurnStatus::Completed,
     ));
     assert_eq!(item_ids(&transcript, 0), vec!["second", "assistant"]);
@@ -89,6 +112,138 @@ fn item_identity_is_scoped_by_turn() {
         transcript.turns()[1].entries()[0].live(),
         &LiveItem::AgentMessage("beta".to_string())
     );
+}
+
+#[test]
+fn semantic_boundaries_preserve_reused_agent_ids_in_source_order() {
+    let mut transcript = Transcript::new(THREAD_ID);
+    transcript.apply(&turn_started(turn(
+        "turn-1",
+        Vec::new(),
+        TurnStatus::InProgress,
+    )));
+    transcript.apply(&agent_delta("turn-1", "message-1", "before"));
+    transcript.apply(&item_completed("turn-1", agent("message-1", "before"), 5));
+    transcript.apply(&item_started(
+        "turn-1",
+        core_tool("read-1", CoreToolCallStatus::InProgress),
+        10,
+    ));
+    transcript.apply(&item_completed(
+        "turn-1",
+        core_tool("read-1", CoreToolCallStatus::Completed),
+        20,
+    ));
+    transcript.apply(&item_started("turn-1", agent("message-1", ""), 25));
+    transcript.apply(&agent_delta("turn-1", "message-1", "after"));
+    transcript.apply(&item_completed("turn-1", agent("message-1", "after"), 30));
+
+    let entries = transcript.turns()[0].entries();
+    assert_eq!(
+        item_ids(&transcript, 0),
+        vec!["message-1", "read-1", "message-1"]
+    );
+    assert_ne!(entries[0].id(), entries[2].id());
+    assert_eq!(entries[0].item(), &agent("message-1", "before"));
+    assert_eq!(entries[2].item(), &agent("message-1", "after"));
+    assert_snapshot!(projected_items(entries), @r###"
+    assistant message-1: before
+    tool read-1: Read
+    assistant message-1: after
+    "###);
+}
+
+#[test]
+fn plan_boundary_preserves_agent_text_on_both_sides() {
+    let mut transcript = Transcript::new(THREAD_ID);
+    transcript.apply(&turn_started(turn(
+        "turn-1",
+        Vec::new(),
+        TurnStatus::InProgress,
+    )));
+    transcript.apply(&item_started("turn-1", agent("message-1", ""), 5));
+    transcript.apply(&agent_delta("turn-1", "message-1", "Preface\n"));
+    transcript.apply(&ServerNotification::PlanDelta(PlanDeltaNotification {
+        thread_id: THREAD_ID.to_string(),
+        turn_id: "turn-1".to_string(),
+        item_id: "plan-1".to_string(),
+        delta: "# Draft plan".to_string(),
+    }));
+    transcript.apply(&agent_delta("turn-1", "message-1", "Post"));
+    transcript.apply(&item_completed(
+        "turn-1",
+        ThreadItem::Plan {
+            id: "plan-1".to_string(),
+            text: "# Final plan".to_string(),
+        },
+        20,
+    ));
+    transcript.apply(&agent_delta("turn-1", "message-1", "script"));
+    transcript.apply(&item_completed(
+        "turn-1",
+        agent("message-1", "Preface\nPostscript"),
+        30,
+    ));
+
+    assert_eq!(
+        transcript.turns()[0]
+            .entries()
+            .iter()
+            .map(|entry| entry.item().clone())
+            .collect::<Vec<_>>(),
+        vec![
+            agent("message-1", "Preface\nPostscript"),
+            ThreadItem::Plan {
+                id: "plan-1".to_string(),
+                text: "# Final plan".to_string(),
+            },
+            agent("message-1", "Preface\nPostscript"),
+        ]
+    );
+    assert_snapshot!(presented_items(transcript.turns()[0].entries()), @r###"
+    assistant: Preface
+
+    plan: # Final plan
+    assistant: Postscript
+    "###);
+}
+
+#[test]
+fn segmented_completion_discards_unreconciled_drafts() {
+    let mut transcript = Transcript::new(THREAD_ID);
+    transcript.apply(&turn_started(turn(
+        "turn-1",
+        Vec::new(),
+        TurnStatus::InProgress,
+    )));
+    transcript.apply(&item_started("turn-1", agent("message-1", ""), 5));
+    transcript.apply(&agent_delta("turn-1", "message-1", "draft before"));
+    transcript.apply(&ServerNotification::PlanDelta(PlanDeltaNotification {
+        thread_id: THREAD_ID.to_string(),
+        turn_id: "turn-1".to_string(),
+        item_id: "plan-1".to_string(),
+        delta: "draft plan".to_string(),
+    }));
+    transcript.apply(&agent_delta("turn-1", "message-1", "draft after"));
+    transcript.apply(&item_completed(
+        "turn-1",
+        ThreadItem::Plan {
+            id: "plan-1".to_string(),
+            text: "final plan".to_string(),
+        },
+        20,
+    ));
+    let authoritative = agent("message-1", "rewritten final answer");
+    transcript.apply(&item_completed("turn-1", authoritative.clone(), 30));
+
+    let entries = transcript.turns()[0].entries();
+    assert_eq!(entries[0].item(), &authoritative);
+    assert_eq!(entries[2].item(), &authoritative);
+    assert_snapshot!(presented_items(entries), @r###"
+    assistant: <empty>
+    plan: final plan
+    assistant: rewritten final answer
+    "###);
 }
 
 #[test]
@@ -169,6 +324,39 @@ fn authoritative_refresh_preserves_matching_entry_identity_and_reorders_from_sou
     );
 }
 
+#[test]
+fn authoritative_refresh_matches_reused_ids_by_occurrence() {
+    let snapshot = turn(
+        "turn-1",
+        vec![
+            agent("message-1", "before"),
+            core_tool("read-1", CoreToolCallStatus::Completed),
+            agent("message-1", "after"),
+        ],
+        TurnStatus::Completed,
+    );
+    let mut transcript = Transcript::from_thread(&thread(vec![snapshot]));
+    let first = transcript.turns()[0].entries()[0].id();
+    let second = transcript.turns()[0].entries()[2].id();
+
+    transcript.reset_from_thread(&thread(vec![turn(
+        "turn-1",
+        vec![
+            agent("message-1", "updated before"),
+            core_tool("read-1", CoreToolCallStatus::Completed),
+            agent("message-1", "updated after"),
+        ],
+        TurnStatus::Completed,
+    )]));
+
+    let entries = transcript.turns()[0].entries();
+    assert_eq!(entries[0].id(), first);
+    assert_eq!(entries[2].id(), second);
+    assert_ne!(first, second);
+    assert_eq!(entries[0].item(), &agent("message-1", "updated before"));
+    assert_eq!(entries[2].item(), &agent("message-1", "updated after"));
+}
+
 fn item_ids(transcript: &Transcript, turn_index: usize) -> Vec<&str> {
     transcript.turns()[turn_index]
         .entries()
@@ -176,12 +364,55 @@ fn item_ids(transcript: &Transcript, turn_index: usize) -> Vec<&str> {
         .map(|entry| entry.item().id())
         .collect()
 }
+
+fn projected_items(entries: &[super::TranscriptEntry]) -> String {
+    entries
+        .iter()
+        .map(|entry| match entry.item() {
+            ThreadItem::AgentMessage { id, text, .. } => format!("assistant {id}: {text}"),
+            ThreadItem::CoreToolCall { id, tool, .. } => format!("tool {id}: {tool}"),
+            item => format!("other {}", item.id()),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn presented_items(entries: &[super::TranscriptEntry]) -> String {
+    entries
+        .iter()
+        .map(|entry| match EntryBlock::from_entry(entry) {
+            EntryBlock::Assistant { markdown, .. } => {
+                let markdown = if markdown.is_empty() {
+                    "<empty>"
+                } else {
+                    markdown.as_ref()
+                };
+                format!("assistant: {markdown}")
+            }
+            EntryBlock::ProposedPlan { markdown, .. } => format!("plan: {markdown}"),
+            block => format!("other: {block:?}"),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
 fn agent(id: &str, text: &str) -> ThreadItem {
     ThreadItem::AgentMessage {
         id: id.to_string(),
         text: text.to_string(),
         phase: None,
         memory_citation: None,
+    }
+}
+
+fn core_tool(id: &str, status: CoreToolCallStatus) -> ThreadItem {
+    ThreadItem::CoreToolCall {
+        id: id.to_string(),
+        tool: "Read".to_string(),
+        arguments: serde_json::json!({}),
+        status,
+        result: None,
+        error: None,
+        duration_ms: Some(10),
     }
 }
 
