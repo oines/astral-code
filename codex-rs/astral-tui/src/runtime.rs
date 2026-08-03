@@ -1,4 +1,5 @@
 use astral_tui_scrollback::ApplyOutcome;
+use astral_tui_scrollback::EntryRenderOptions;
 use codex_app_server_client::AppServerEvent;
 use codex_app_server_protocol::JSONRPCErrorError;
 use codex_app_server_protocol::RequestId;
@@ -10,6 +11,7 @@ use codex_app_server_protocol::UserInput;
 
 use crate::AstralSession;
 use crate::ConversationState;
+use crate::ConversationSurface;
 use crate::SessionError;
 use crate::SessionState;
 
@@ -97,6 +99,12 @@ impl AstralRuntime {
 
     pub fn conversation_mut(&mut self) -> &mut ConversationState {
         &mut self.conversation
+    }
+
+    /// Materialize the one canonical rendered tree consumed by both terminal
+    /// viewport modes. Viewport and commit policy remain host concerns.
+    pub fn render_surface(&self, options: EntryRenderOptions) -> ConversationSurface {
+        ConversationSurface::render(&self.conversation, options)
     }
 
     pub async fn start_turn(
