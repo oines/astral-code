@@ -7,6 +7,7 @@ mod live_item;
 mod markdown;
 mod read_tool;
 mod render;
+mod search_tool;
 mod transcript;
 
 pub use block::EntryBlock;

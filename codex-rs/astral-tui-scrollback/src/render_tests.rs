@@ -376,6 +376,151 @@ fn read_lookup_uses_grok_collapsed_preview_and_expanded_views() {
     "###);
 }
 
+#[test]
+fn search_lookup_renders_glob_and_every_grep_result_shape() {
+    let items = [
+        (
+            "GLOB",
+            core_tool(
+                "Glob",
+                json!({"pattern": "**/*.rs", "path": "/workspace"}),
+                CoreToolCallStatus::Completed,
+                /*result*/
+                Some(
+                    "src/lib.rs\nsrc/main.rs\n(Results are truncated. Consider using a more specific path or pattern.)",
+                ),
+                /*error*/ None,
+                /*duration_ms*/ Some(87),
+            ),
+            /*expand*/ true,
+        ),
+        (
+            "GREP CONTENT",
+            core_tool(
+                "Grep",
+                json!({
+                    "pattern": ".",
+                    "path": "/workspace",
+                    "glob": "*.rs",
+                    "output_mode": "content",
+                    "type": "rust",
+                    "-i": true,
+                    "multiline": true,
+                }),
+                CoreToolCallStatus::Completed,
+                /*result*/
+                Some(
+                    "src/lib.rs:12:let needle = true;\nsrc/lib.rs-13-context line\n--\nsrc/main.rs:7:println!(\"needle\");\n\n[Showing results with pagination = limit: 250, offset: 0]",
+                ),
+                /*error*/ None,
+                /*duration_ms*/ Some(1_500),
+            ),
+            /*expand*/ true,
+        ),
+        (
+            "GREP FILES",
+            core_tool(
+                "Grep",
+                json!({"pattern": "needle", "output_mode": "files_with_matches"}),
+                CoreToolCallStatus::Completed,
+                /*result*/
+                Some("Found 2 files limit: 2, offset: 5\nsrc/lib.rs\nsrc/main.rs"),
+                /*error*/ None,
+                /*duration_ms*/ Some(25),
+            ),
+            /*expand*/ true,
+        ),
+        (
+            "GREP COUNT",
+            core_tool(
+                "Grep",
+                json!({"pattern": "needle", "output_mode": "count"}),
+                CoreToolCallStatus::Completed,
+                /*result*/
+                Some("src/lib.rs:3\nsrc/main.rs:1\n\nFound 4 total occurrences across 2 files."),
+                /*error*/ None,
+                /*duration_ms*/ Some(30),
+            ),
+            /*expand*/ true,
+        ),
+        (
+            "FAILED",
+            core_tool(
+                "Grep",
+                json!({"pattern": "[", "output_mode": "content"}),
+                CoreToolCallStatus::Failed,
+                /*result*/ Some("invalid regular expression"),
+                /*error*/ None,
+                /*duration_ms*/ Some(4),
+            ),
+            /*expand*/ false,
+        ),
+    ];
+    let output = items
+        .into_iter()
+        .map(|(label, item, expand)| {
+            let block = EntryBlock::from_parts(
+                &item,
+                &LiveItem::None,
+                completed(/*started_at_ms*/ 1_000, /*completed_at_ms*/ 2_000),
+            );
+            let mut state = EntryDisplayState::for_block(&block).expect("search state");
+            if expand {
+                assert!(state.expand(&block));
+            }
+            let rendered = render_entry(&block, state, EntryRenderOptions::new(/*width*/ 66))
+                .expect("search renderer");
+            format!("{label}\n{}", plain(&rendered))
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+
+    assert_snapshot!(output, @r###"
+    GLOB
+    ◆ Search **/*.rs in /workspace (2+ files)  87ms
+
+      src/lib.rs
+      src/main.rs
+      … results truncated
+
+    GREP CONTENT
+    ◆ Search *.rs in /workspace (2 matches)  1.5s
+
+      mode: pattern, type: rust, case-insensitive: true, multiline: true
+
+      src/lib.rs
+          12  let needle = true;
+          13- context line
+        …
+
+      src/main.rs
+           7  println!("needle");
+      … pagination applied
+
+    GREP FILES
+    ◆ Search "needle" (2 files)  25ms
+
+      mode: files
+
+      src/lib.rs
+      src/main.rs
+      … pagination applied
+
+    GREP COUNT
+    ◆ Search "needle" (4 matches)  30ms
+
+      mode: count
+
+      src/lib.rs:3
+      src/main.rs:1
+
+    FAILED
+    × Search "[" (failed)  4ms
+
+      │ invalid regular expression
+    "###);
+}
+
 fn file_change(changes: Vec<FileUpdateChange>) -> ThreadItem {
     ThreadItem::FileChange {
         id: "edit".to_string(),
