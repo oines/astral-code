@@ -157,6 +157,12 @@ impl EntryBlock<'_> {
                 has_raw_mode: false,
                 fold_cycle: FoldCycle::TwoState,
             }),
+            Self::McpToolCall(call) => Some(DisplayPolicy {
+                default_mode: DisplayMode::Collapsed,
+                foldable: call.has_details(),
+                has_raw_mode: false,
+                fold_cycle: FoldCycle::TwoState,
+            }),
             Self::WebSearch(search) => Some(DisplayPolicy {
                 default_mode: DisplayMode::Collapsed,
                 foldable: !search.detail().is_empty(),

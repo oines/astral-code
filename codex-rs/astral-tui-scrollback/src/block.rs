@@ -5,6 +5,7 @@ use codex_app_server_protocol::UserInput;
 
 use crate::EntryLifecycle;
 use crate::LiveItem;
+use crate::McpToolCallBlock;
 use crate::TranscriptEntry;
 use crate::WebSearchBlock;
 
@@ -28,6 +29,7 @@ pub enum EntryBlock<'a> {
     },
     Reasoning(ReasoningBlock<'a>),
     ContextCompaction(ContextCompactionBlock),
+    McpToolCall(McpToolCallBlock<'a>),
     WebSearch(WebSearchBlock<'a>),
     ProtocolItem {
         item: &'a ThreadItem,
@@ -45,6 +47,9 @@ impl<'a> EntryBlock<'a> {
         live: &'a LiveItem,
         lifecycle: EntryLifecycle,
     ) -> Self {
+        if let Some(call) = McpToolCallBlock::from_item(item) {
+            return Self::McpToolCall(call);
+        }
         let running = matches!(lifecycle, EntryLifecycle::Running { .. });
         match item {
             ThreadItem::UserMessage { content, .. } => Self::User { content },

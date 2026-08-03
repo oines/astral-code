@@ -275,6 +275,7 @@ fn run_step(
         EntryBlock::User { .. }
         | EntryBlock::Assistant { .. }
         | EntryBlock::ProposedPlan { .. }
+        | EntryBlock::McpToolCall(_)
         | EntryBlock::ContextCompaction(_) => RunStep::Break,
     }
 }
@@ -338,6 +339,7 @@ fn member_meta(block: &EntryBlock<'_>) -> Option<MemberMeta> {
         | EntryBlock::Assistant { .. }
         | EntryBlock::ProposedPlan { .. }
         | EntryBlock::Reasoning(_)
+        | EntryBlock::McpToolCall(_)
         | EntryBlock::ContextCompaction(_) => None,
     }
 }

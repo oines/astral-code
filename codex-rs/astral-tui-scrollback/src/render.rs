@@ -17,6 +17,8 @@ use crate::ReasoningVisibility;
 use crate::render_literal_with_metadata;
 use crate::render_markdown_with_metadata;
 
+#[path = "render/mcp_tool.rs"]
+mod mcp_tool;
 #[path = "render/tool.rs"]
 mod tool;
 #[path = "render/verb_group.rs"]
@@ -124,6 +126,7 @@ pub fn render_entry(
         EntryBlock::ProposedPlan { markdown, .. } => render_plan(markdown, state.raw(), options),
         EntryBlock::Reasoning(reasoning) => render_reasoning(reasoning, state, options),
         EntryBlock::ContextCompaction(compaction) => render_context_compaction(*compaction),
+        EntryBlock::McpToolCall(call) => mcp_tool::render(*call, state, options),
         EntryBlock::WebSearch(search) => web_search::render(*search, state, options),
         EntryBlock::ProtocolItem { item, live } => {
             render_protocol_item(item, live, state, options)?
