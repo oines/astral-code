@@ -186,11 +186,9 @@ fn normalize_domains(domains: Option<Vec<String>>) -> Result<Option<Vec<String>>
             return Err("domains must contain non-empty hostnames".to_string());
         }
         let Host::Domain(domain) = Host::parse(domain)
-            .map_err(|_| format!("invalid domain {domain:?}; use a hostname without a scheme"))?
+            .map_err(|_| "invalid domain; use a hostname without a scheme".to_string())?
         else {
-            return Err(format!(
-                "invalid domain {domain:?}; IP addresses are not supported"
-            ));
+            return Err("invalid domain; IP addresses are not supported".to_string());
         };
         if seen.insert(domain.clone()) {
             normalized.push(domain);

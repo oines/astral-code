@@ -107,9 +107,11 @@ impl WebSearchTool {
         let results = match search_result {
             Ok(results) => results,
             Err(error) => {
-                return Ok(Box::new(WebToolOutput::failure(format!(
-                    "Web search failed for query \"{query}\": {error}"
-                ))));
+                let output = bound_search_output(
+                    &format!("Web search failed for query \"{query}\": {error}"),
+                    call.truncation_policy,
+                );
+                return Ok(Box::new(WebToolOutput::failure(output)));
             }
         };
 
@@ -245,6 +247,10 @@ pub(crate) fn format_search_results(
         }
         output
     };
+    bound_search_output(&output, truncation_policy)
+}
+
+fn bound_search_output(output: &str, truncation_policy: TruncationPolicy) -> String {
     let truncation_policy = match truncation_policy {
         TruncationPolicy::Bytes(bytes) => TruncationPolicy::Bytes(
             bytes.min(approx_bytes_for_tokens(MAX_WEB_SEARCH_OUTPUT_TOKENS)),
@@ -253,7 +259,7 @@ pub(crate) fn format_search_results(
             TruncationPolicy::Tokens(tokens.min(MAX_WEB_SEARCH_OUTPUT_TOKENS))
         }
     };
-    formatted_truncate_text(&output, truncation_policy)
+    formatted_truncate_text(output, truncation_policy)
 }
 
 #[cfg(test)]

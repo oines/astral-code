@@ -163,7 +163,18 @@ fn rejects_invalid_values_and_treats_an_empty_domain_list_as_absent() {
             None,
             today(),
         ),
-        Err("invalid domain \"https://example.com\"; use a hostname without a scheme".to_string())
+        Err("invalid domain; use a hostname without a scheme".to_string())
+    );
+    let oversized_domain = format!("https://{}", "a".repeat(50_000));
+    assert_eq!(
+        WebSearchRequest::from_input(
+            "query".to_string(),
+            Some(vec![oversized_domain]),
+            None,
+            None,
+            today(),
+        ),
+        Err("invalid domain; use a hostname without a scheme".to_string())
     );
     assert_eq!(
         WebSearchRequest::from_input("query".to_string(), None, Some(0), None, today()),
