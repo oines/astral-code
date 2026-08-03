@@ -15,6 +15,13 @@ pub(super) struct WrappedSegments {
     pub(super) links: Vec<MarkdownLink>,
 }
 
+pub(super) fn wrap_segments(segments: &[Segment], width: usize) -> Vec<Vec<Span<'static>>> {
+    wrap_segments_with_joiners(segments, width)
+        .into_iter()
+        .map(|wrapped| wrapped.spans)
+        .collect()
+}
+
 pub(super) fn wrap_segments_with_joiners(
     segments: &[Segment],
     width: usize,

@@ -19,6 +19,8 @@ pub use markdown::MarkdownLine;
 pub use markdown::MarkdownLink;
 pub use markdown::MarkdownStyle;
 pub use markdown::MarkdownSyntaxTheme;
+pub use markdown::MarkdownTable;
+pub use markdown::MarkdownTableAlignment;
 pub use markdown::highlight_fenced_code;
 pub use markdown::render_literal_with_metadata;
 pub use markdown::wrap_styled_line_with_metadata;
