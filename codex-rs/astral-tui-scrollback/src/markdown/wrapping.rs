@@ -1,5 +1,6 @@
 //! Styled wrapping adapted from Grok Build's Markdown output pipeline.
 
+use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use textwrap::WordSeparator;
@@ -20,6 +21,17 @@ pub(super) fn wrap_segments(segments: &[Segment], width: usize) -> Vec<Vec<Span<
         .into_iter()
         .map(|wrapped| wrapped.spans)
         .collect()
+}
+
+pub(super) fn padded_background_line(
+    mut spans: Vec<Span<'static>>,
+    width: u16,
+    background: Style,
+) -> Line<'static> {
+    let line = Line::from(spans.clone());
+    let padding = usize::from(width).saturating_sub(line.width());
+    spans.push(Span::styled(" ".repeat(padding), background));
+    Line::from(spans).style(background)
 }
 
 pub(super) fn wrap_segments_with_joiners(

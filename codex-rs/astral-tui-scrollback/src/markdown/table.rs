@@ -1,5 +1,6 @@
 //! Width-constrained box tables derived from Grok Build's Markdown table view.
 
+use pulldown_cmark::Alignment;
 use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::text::Span;
@@ -21,6 +22,17 @@ pub enum MarkdownTableAlignment {
     Right,
 }
 
+impl From<Alignment> for MarkdownTableAlignment {
+    fn from(alignment: Alignment) -> Self {
+        match alignment {
+            Alignment::None => Self::None,
+            Alignment::Left => Self::Left,
+            Alignment::Center => Self::Center,
+            Alignment::Right => Self::Right,
+        }
+    }
+}
+
 /// A source-ordered Markdown table that chooses a grid or record layout from
 /// the available terminal width.
 #[derive(Debug, Default)]
@@ -28,6 +40,9 @@ pub struct MarkdownTable {
     alignments: Vec<MarkdownTableAlignment>,
     header: Vec<Cell>,
     rows: Vec<Vec<Cell>>,
+    current_row: Vec<Cell>,
+    current_cell: Option<Cell>,
+    in_header: bool,
 }
 
 impl MarkdownTable {
@@ -47,7 +62,54 @@ impl MarkdownTable {
             .push(cells.into_iter().map(line_to_cell).collect());
     }
 
+    pub(super) fn start_head(&mut self) {
+        self.in_header = true;
+        self.current_row.clear();
+    }
+
+    pub(super) fn end_head(&mut self) {
+        self.finish_cell();
+        self.header = std::mem::take(&mut self.current_row);
+        self.in_header = false;
+    }
+
+    pub(super) fn start_row(&mut self) {
+        self.current_row.clear();
+    }
+
+    pub(super) fn end_row(&mut self) {
+        self.finish_cell();
+        let row = std::mem::take(&mut self.current_row);
+        if self.in_header {
+            self.header = row;
+        } else {
+            self.rows.push(row);
+        }
+    }
+
+    pub(super) fn start_cell(&mut self) {
+        self.current_cell = Some(Vec::new());
+    }
+
+    pub(super) fn finish_cell(&mut self) {
+        if let Some(cell) = self.current_cell.take() {
+            self.current_row.push(cell);
+        }
+    }
+
+    pub(super) fn push(&mut self, segment: Segment) -> bool {
+        let Some(cell) = self.current_cell.as_mut() else {
+            return false;
+        };
+        cell.push(segment);
+        true
+    }
+
     pub fn render(mut self, width: u16, style: MarkdownStyle) -> Vec<MarkdownLine> {
+        self.finish_cell();
+        if !self.current_row.is_empty() {
+            self.end_row();
+        }
         let column_count = std::iter::once(&self.header)
             .chain(&self.rows)
             .map(Vec::len)

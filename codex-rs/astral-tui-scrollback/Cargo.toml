@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 codex-app-server-protocol = { workspace = true }
+pulldown-cmark = { workspace = true }
 ratatui = { workspace = true }
 syntect = { workspace = true }
 textwrap = { workspace = true }
