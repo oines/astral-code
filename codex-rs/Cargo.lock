@@ -587,6 +587,7 @@ dependencies = [
  "ratatui",
  "serde_json",
  "textwrap 0.16.2",
+ "url",
 ]
 
 [[package]]

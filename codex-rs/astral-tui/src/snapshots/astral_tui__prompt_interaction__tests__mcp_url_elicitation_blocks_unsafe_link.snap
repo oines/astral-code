@@ -1,0 +1,13 @@
+---
+source: astral-tui/src/prompt_interaction_tests.rs
+expression: buffer_text(&buffer)
+---
+Action required · payments
+ Review the payment details to continue.
+
+ URL
+ http://example.com/action
+
+ Blocked: only credential-free HTTPS URLs can be opened.
+ › 1. Decline
+             ↑/↓ navigate  |  Enter confirm  |  Esc decline
