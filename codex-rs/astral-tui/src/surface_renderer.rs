@@ -72,9 +72,14 @@ impl SurfaceRenderer {
         Self { style }
     }
 
+    /// Content rectangle used for entry projection and terminal hyperlinks.
+    pub fn content_area(area: Rect) -> Rect {
+        Columns::for_area(area).content
+    }
+
     /// Width hosts must use when building `EntryRenderOptions` for `area`.
     pub fn content_width(area: Rect) -> u16 {
-        Columns::for_area(area).content.width.max(1)
+        Self::content_area(area).width.max(1)
     }
 
     pub fn render(

@@ -14,6 +14,12 @@ use crate::history_cell::HistoryCell;
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct HistoryEntryId(u64);
 
+impl HistoryEntryId {
+    pub(crate) fn value(self) -> u64 {
+        self.0
+    }
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct HistoryTranscript {
     cells: Vec<Arc<dyn HistoryCell>>,

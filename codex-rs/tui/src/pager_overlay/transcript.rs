@@ -1,56 +1,14 @@
 use super::*;
 
-struct CellRenderable {
-    cell: Arc<dyn HistoryCell>,
-    style: Style,
-}
-
-impl Renderable for CellRenderable {
-    fn render(&self, area: Rect, buf: &mut Buffer) {
-        let hyperlink_lines = self.cell.transcript_hyperlink_lines(area.width);
-        let p = Paragraph::new(Text::from(visible_lines(hyperlink_lines.clone())))
-            .style(self.style)
-            .wrap(Wrap { trim: false });
-        p.render(area, buf);
-        mark_buffer_hyperlinks(buf, area, &hyperlink_lines, /*scroll_rows*/ 0);
-    }
-
-    fn desired_height(&self, width: u16) -> u16 {
-        self.cell.desired_transcript_height(width)
-    }
-}
-
-struct HyperlinkLinesRenderable {
-    lines: Vec<HyperlinkLine>,
-}
-
-impl Renderable for HyperlinkLinesRenderable {
-    fn render(&self, area: Rect, buf: &mut Buffer) {
-        Paragraph::new(Text::from(visible_lines(self.lines.clone())))
-            .wrap(Wrap { trim: false })
-            .render(area, buf);
-        mark_buffer_hyperlinks(buf, area, &self.lines, /*scroll_rows*/ 0);
-    }
-
-    fn desired_height(&self, width: u16) -> u16 {
-        Paragraph::new(Text::from(visible_lines(self.lines.clone())))
-            .wrap(Wrap { trim: false })
-            .line_count(width)
-            .try_into()
-            .unwrap_or(/*default*/ 0)
-    }
-}
-
 pub(crate) struct TranscriptOverlay {
-    /// Pager UI state and the renderables currently displayed.
-    ///
-    /// The invariant is that `view.renderables` is `render_cells(cells)` plus an optional trailing
-    /// live-tail renderable appended after the committed cells.
-    pub(super) view: PagerView,
-    /// Committed transcript cells (does not include the live tail).
+    pub(super) surface: ConversationSurface,
+    pub(super) viewport: SurfaceViewport,
+    renderer: SurfaceRenderer,
     pub(super) cells: TranscriptEntries,
-    /// Cache key for the render-only live tail appended after committed cells.
     live_tail_key: Option<LiveTailKey>,
+    live_tail_lines: Vec<HyperlinkLine>,
+    surface_dirty: bool,
+    keymap: PagerKeymap,
     is_done: bool,
 }
 
@@ -70,101 +28,26 @@ struct LiveTailKey {
 }
 
 impl TranscriptOverlay {
-    /// Creates a transcript overlay for a fixed set of committed cells.
-    ///
-    /// This overlay does not own the "active cell"; callers may optionally append a live tail via
-    /// `sync_live_tail` during draws to reflect in-flight activity.
     pub(crate) fn new(
         transcript_cells: Vec<(HistoryEntryId, Arc<dyn HistoryCell>)>,
         keymap: PagerKeymap,
     ) -> Self {
-        let cells = TranscriptEntries::new(transcript_cells);
         Self {
-            view: PagerView::new(
-                Self::render_cells(&cells),
-                "T R A N S C R I P T".to_string(),
-                usize::MAX,
-                keymap,
-            ),
-            cells,
+            surface: ConversationSurface::from_materialized(1, std::iter::empty()),
+            viewport: SurfaceViewport::default(),
+            renderer: SurfaceRenderer::default(),
+            cells: TranscriptEntries::new(transcript_cells),
             live_tail_key: None,
+            live_tail_lines: Vec::new(),
+            surface_dirty: true,
+            keymap,
             is_done: false,
         }
     }
 
-    fn render_cells(cells: &TranscriptEntries) -> Vec<Box<dyn Renderable>> {
-        cells
-            .iter()
-            .enumerate()
-            .flat_map(|(index, entry)| {
-                let mut v: Vec<Box<dyn Renderable>> = Vec::new();
-                let mut cell_renderable = if entry.cell().as_any().is::<UserHistoryCell>() {
-                    Box::new(CachedRenderable::new(CellRenderable {
-                        cell: entry.cell().clone(),
-                        style: if cells.highlighted() == Some(entry.id()) {
-                            user_message_style().reversed()
-                        } else {
-                            user_message_style()
-                        },
-                    })) as Box<dyn Renderable>
-                } else {
-                    Box::new(CachedRenderable::new(CellRenderable {
-                        cell: entry.cell().clone(),
-                        style: Style::default(),
-                    })) as Box<dyn Renderable>
-                };
-                if !entry.cell().is_stream_continuation() && index > 0 {
-                    cell_renderable = Box::new(InsetRenderable::new(
-                        cell_renderable,
-                        Insets::tlbr(
-                            /*top*/ 1, /*left*/ 0, /*bottom*/ 0, /*right*/ 0,
-                        ),
-                    ));
-                }
-                v.push(cell_renderable);
-                v
-            })
-            .collect()
-    }
-
-    /// Insert a committed history cell while keeping any cached live tail.
-    ///
-    /// The live tail is temporarily removed, the committed cells are rebuilt,
-    /// then the tail is reattached. If the tail previously had no leading
-    /// spacing because it was the only renderable, we add the missing inset
-    /// when the first committed cell arrives.
-    ///
-    /// This expects `cell` to be a committed transcript cell (not the in-flight active cell). If
-    /// the overlay was scrolled to bottom before insertion, it remains pinned to bottom after the
-    /// insertion to preserve the "follow along" behavior.
     pub(crate) fn insert_cell(&mut self, id: HistoryEntryId, cell: Arc<dyn HistoryCell>) {
-        let follow_bottom = self.view.is_scrolled_to_bottom();
-        let had_prior_cells = !self.cells.is_empty();
-        let tail_renderable = self.take_live_tail_renderable();
         self.cells.insert(id, cell);
-        self.view.renderables = Self::render_cells(&self.cells);
-        if let Some(tail) = tail_renderable {
-            let tail = if !had_prior_cells
-                && self
-                    .live_tail_key
-                    .is_some_and(|key| !key.is_stream_continuation)
-            {
-                // The tail was rendered as the only entry, so it lacks a top
-                // inset; add one now that it follows a committed cell.
-                Box::new(InsetRenderable::new(
-                    tail,
-                    Insets::tlbr(
-                        /*top*/ 1, /*left*/ 0, /*bottom*/ 0, /*right*/ 0,
-                    ),
-                )) as Box<dyn Renderable>
-            } else {
-                tail
-            };
-            self.view.renderables.push(tail);
-        }
-        if follow_bottom {
-            self.view.scroll_offset = usize::MAX;
-        }
+        self.surface_dirty = true;
     }
 
     /// Replace committed transcript cells while keeping any cached in-progress output that is
@@ -173,12 +56,8 @@ impl TranscriptOverlay {
     /// This is used when existing history is trimmed (for example after rollback) so the
     /// transcript overlay immediately reflects the same committed cells as the main transcript.
     pub(crate) fn replace_cells(&mut self, cells: Vec<(HistoryEntryId, Arc<dyn HistoryCell>)>) {
-        let follow_bottom = self.view.is_scrolled_to_bottom();
         self.cells.replace(cells);
-        self.rebuild_renderables();
-        if follow_bottom {
-            self.view.scroll_offset = usize::MAX;
-        }
+        self.surface_dirty = true;
     }
 
     /// Replace a range of committed cells with a single consolidated cell.
@@ -193,12 +72,8 @@ impl TranscriptOverlay {
         range: std::ops::Range<usize>,
         consolidated: Arc<dyn HistoryCell>,
     ) {
-        let follow_bottom = self.view.is_scrolled_to_bottom();
         if self.cells.consolidate(range, consolidated) {
-            self.rebuild_renderables();
-        }
-        if follow_bottom {
-            self.view.scroll_offset = usize::MAX;
+            self.surface_dirty = true;
         }
     }
 
@@ -216,10 +91,11 @@ impl TranscriptOverlay {
     /// `Ctrl+T` while the main viewport continues to update.
     pub(crate) fn sync_live_tail(
         &mut self,
-        width: u16,
+        area: Rect,
         active_key: Option<ActiveCellTranscriptKey>,
         compute_lines: impl FnOnce(u16) -> Option<Vec<HyperlinkLine>>,
     ) {
+        let width = SurfaceRenderer::content_width(Self::conversation_area(area));
         let next_key = active_key.map(|key| LiveTailKey {
             width,
             revision: key.revision,
@@ -230,75 +106,98 @@ impl TranscriptOverlay {
         if self.live_tail_key == next_key {
             return;
         }
-        let follow_bottom = self.view.is_scrolled_to_bottom();
-
-        self.take_live_tail_renderable();
         self.live_tail_key = next_key;
-
-        if let Some(key) = next_key {
-            let lines = compute_lines(width).unwrap_or_default();
-            if !lines.is_empty() {
-                self.view.renderables.push(Self::live_tail_renderable(
-                    lines,
-                    !self.cells.is_empty(),
-                    key.is_stream_continuation,
-                ));
-            }
-        }
-        if follow_bottom {
-            self.view.scroll_offset = usize::MAX;
-        }
+        self.live_tail_lines = next_key
+            .and_then(|_| compute_lines(width))
+            .unwrap_or_default();
+        self.surface_dirty = true;
     }
 
     pub(crate) fn set_highlight_cell(&mut self, cell: Option<usize>) {
         self.cells.set_highlight_index(cell);
-        self.rebuild_renderables();
-        if let Some(index) = self.cells.highlighted_index() {
-            self.view.scroll_chunk_into_view(index);
-        }
+        self.sync_highlight();
     }
 
-    /// Returns whether the underlying pager view is currently pinned to the bottom.
+    /// Returns whether the shared surface viewport is currently pinned to the bottom.
     ///
     /// The `App` draw loop uses this to decide whether to schedule animation frames for the live
     /// tail; if the user has scrolled up, we avoid driving animation work that they cannot see.
     pub(crate) fn is_scrolled_to_bottom(&self) -> bool {
-        self.view.is_scrolled_to_bottom()
+        self.viewport.is_following_bottom()
     }
 
-    fn rebuild_renderables(&mut self) {
-        let tail_renderable = self.take_live_tail_renderable();
-        self.view.renderables = Self::render_cells(&self.cells);
-        if let Some(tail) = tail_renderable {
-            self.view.renderables.push(tail);
+    pub(super) fn ensure_surface(&mut self, area: Rect) {
+        let width = SurfaceRenderer::content_width(area);
+        if self.surface_dirty || self.surface.width() != width {
+            let tail = self.live_tail_key.map(|key| HistorySurfaceTail {
+                lines: self.live_tail_lines.as_slice(),
+                is_stream_continuation: key.is_stream_continuation,
+            });
+            self.surface = materialize_history_surface(
+                self.cells.iter().map(|entry| (entry.id(), entry.cell())),
+                tail,
+                width,
+            );
+            self.surface_dirty = false;
+        }
+        self.viewport.prepare(&self.surface, area.height);
+        self.sync_highlight();
+    }
+
+    fn sync_highlight(&mut self) {
+        let selected = self
+            .cells
+            .highlighted()
+            .map(|id| SurfaceNodeId::Entry(astral_tui::TranscriptEntryId::new(id.value())));
+        self.viewport.select_node(&self.surface, selected);
+    }
+
+    pub(super) fn apply_key_event(&mut self, viewport_area: Rect, key_event: KeyEvent) -> bool {
+        self.ensure_surface(Self::conversation_area(viewport_area));
+        let page_rows = usize::from(self.viewport.height().max(1));
+        match key_event {
+            event if self.keymap.scroll_up.is_pressed(event) => {
+                self.viewport
+                    .scroll_rows(&self.surface, ScrollDirection::Up, /*rows*/ 1)
+            }
+            event if self.keymap.scroll_down.is_pressed(event) => {
+                self.viewport
+                    .scroll_rows(&self.surface, ScrollDirection::Down, /*rows*/ 1)
+            }
+            event if self.keymap.page_up.is_pressed(event) => {
+                self.viewport
+                    .scroll_rows(&self.surface, ScrollDirection::Up, page_rows)
+            }
+            event if self.keymap.page_down.is_pressed(event) => {
+                self.viewport
+                    .scroll_rows(&self.surface, ScrollDirection::Down, page_rows)
+            }
+            event if self.keymap.half_page_up.is_pressed(event) => self.viewport.scroll_rows(
+                &self.surface,
+                ScrollDirection::Up,
+                usize::from(self.viewport.height().saturating_add(1) / 2),
+            ),
+            event if self.keymap.half_page_down.is_pressed(event) => self.viewport.scroll_rows(
+                &self.surface,
+                ScrollDirection::Down,
+                usize::from(self.viewport.height().saturating_add(1) / 2),
+            ),
+            event if self.keymap.jump_top.is_pressed(event) => {
+                self.viewport.scroll_to_top(&self.surface)
+            }
+            event if self.keymap.jump_bottom.is_pressed(event) => {
+                self.viewport.scroll_to_bottom(&self.surface)
+            }
+            _ => false,
         }
     }
 
-    /// Removes and returns the cached live-tail renderable, if present.
-    ///
-    /// The live tail is represented as a single optional renderable appended after the committed
-    /// cell renderables, so this relies on the live tail always being the final entry in
-    /// `view.renderables` when present.
-    fn take_live_tail_renderable(&mut self) -> Option<Box<dyn Renderable>> {
-        (self.view.renderables.len() > self.cells.len()).then(|| self.view.renderables.pop())?
-    }
-
-    fn live_tail_renderable(
-        lines: Vec<HyperlinkLine>,
-        has_prior_cells: bool,
-        is_stream_continuation: bool,
-    ) -> Box<dyn Renderable> {
-        let mut renderable: Box<dyn Renderable> =
-            Box::new(CachedRenderable::new(HyperlinkLinesRenderable { lines }));
-        if has_prior_cells && !is_stream_continuation {
-            renderable = Box::new(InsetRenderable::new(
-                renderable,
-                Insets::tlbr(
-                    /*top*/ 1, /*left*/ 0, /*bottom*/ 0, /*right*/ 0,
-                ),
-            ));
+    fn handle_key_event(&mut self, tui: &mut tui::Tui, key_event: KeyEvent) {
+        let changed = self.apply_key_event(tui.terminal.viewport_area, key_event);
+        if changed {
+            tui.frame_requester()
+                .schedule_frame_in(crate::tui::TARGET_FRAME_INTERVAL);
         }
-        renderable
     }
 
     fn render_hints(&self, area: Rect, buf: &mut Buffer) {
@@ -309,23 +208,23 @@ impl TranscriptOverlay {
             buf,
             &[
                 (
-                    first_or_empty(&self.view.keymap.scroll_up)
+                    first_or_empty(&self.keymap.scroll_up)
                         .into_iter()
-                        .chain(first_or_empty(&self.view.keymap.scroll_down))
+                        .chain(first_or_empty(&self.keymap.scroll_down))
                         .collect(),
                     "to scroll",
                 ),
                 (
-                    first_or_empty(&self.view.keymap.page_up)
+                    first_or_empty(&self.keymap.page_up)
                         .into_iter()
-                        .chain(first_or_empty(&self.view.keymap.page_down))
+                        .chain(first_or_empty(&self.keymap.page_down))
                         .collect(),
                     "to page",
                 ),
                 (
-                    first_or_empty(&self.view.keymap.jump_top)
+                    first_or_empty(&self.keymap.jump_top)
                         .into_iter()
-                        .chain(first_or_empty(&self.view.keymap.jump_bottom))
+                        .chain(first_or_empty(&self.keymap.jump_bottom))
                         .collect(),
                     "to jump",
                 ),
@@ -333,7 +232,7 @@ impl TranscriptOverlay {
         );
 
         let mut pairs: Vec<(Vec<KeyBinding>, &str)> =
-            vec![(first_or_empty(&self.view.keymap.close), "to quit")];
+            vec![(first_or_empty(&self.keymap.close), "to quit")];
         if self.cells.highlighted().is_some() {
             pairs.push((
                 vec![
@@ -354,22 +253,51 @@ impl TranscriptOverlay {
         let top_h = area.height.saturating_sub(3);
         let top = Rect::new(area.x, area.y, area.width, top_h);
         let bottom = Rect::new(area.x, area.y + top_h, area.width, 3);
-        self.view.render(top, buf);
+        self.ensure_surface(top);
+        self.renderer
+            .render(top, buf, &self.surface, &self.viewport);
+        self.mark_visible_hyperlinks(top, buf);
         self.render_hints(bottom, buf);
     }
-}
 
-impl TranscriptOverlay {
+    fn mark_visible_hyperlinks(&self, area: Rect, buf: &mut Buffer) {
+        let content_area = SurfaceRenderer::content_area(area);
+        let lines = self
+            .viewport
+            .visible_rows(&self.surface)
+            .filter_map(|row| self.surface.line_at_row(row))
+            .map(|line| HyperlinkLine {
+                line: line.line.clone(),
+                hyperlinks: line
+                    .links
+                    .iter()
+                    .map(|link| TerminalHyperlink {
+                        columns: usize::from(link.columns.start)..usize::from(link.columns.end),
+                        destination: link.target.clone(),
+                    })
+                    .collect(),
+            })
+            .collect::<Vec<_>>();
+        mark_buffer_hyperlinks(buf, content_area, &lines, /*scroll_rows*/ 0);
+    }
+
+    pub(super) fn conversation_area(area: Rect) -> Rect {
+        Rect::new(area.x, area.y, area.width, area.height.saturating_sub(3))
+    }
+
     pub(crate) fn handle_event(&mut self, tui: &mut tui::Tui, event: TuiEvent) -> Result<()> {
         match event {
             TuiEvent::Key(key_event) => match key_event {
-                e if self.view.keymap.close.is_pressed(e)
-                    || self.view.keymap.close_transcript.is_pressed(e) =>
+                e if self.keymap.close.is_pressed(e)
+                    || self.keymap.close_transcript.is_pressed(e) =>
                 {
                     self.is_done = true;
                     Ok(())
                 }
-                other => self.view.handle_key_event(tui, other),
+                other => {
+                    self.handle_key_event(tui, other);
+                    Ok(())
+                }
             },
             TuiEvent::Draw | TuiEvent::Resize => {
                 tui.draw(u16::MAX, |frame| {

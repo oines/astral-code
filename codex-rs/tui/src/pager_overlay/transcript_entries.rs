@@ -40,18 +40,16 @@ impl TranscriptEntries {
         self.entries.iter()
     }
 
+    #[cfg(test)]
     pub(super) fn len(&self) -> usize {
         self.entries.len()
-    }
-
-    pub(super) fn is_empty(&self) -> bool {
-        self.entries.is_empty()
     }
 
     pub(super) fn highlighted(&self) -> Option<HistoryEntryId> {
         self.highlighted
     }
 
+    #[cfg(test)]
     pub(super) fn highlighted_index(&self) -> Option<usize> {
         self.highlighted
             .and_then(|id| self.entries.iter().position(|entry| entry.id == id))
