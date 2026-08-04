@@ -143,3 +143,7 @@ fn live_presentation() -> SurfaceEntryPresentation {
         presentation_stable: false,
     }
 }
+
+#[cfg(test)]
+#[path = "history_surface_tests.rs"]
+mod tests;
