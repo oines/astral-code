@@ -178,22 +178,31 @@ impl InlineHost {
         usize::from(available_rows).min(tail_rows) as u16
     }
 
+    /// First row that remains live after the next successful commit pass.
+    pub fn projected_tail_start(&self) -> usize {
+        self.frontier.projected_tail_start(&self.surface)
+    }
+
     /// Render only the uncommitted tail with the same lines, gaps, and rails
     /// used for committed output. Tall tails are clipped from the top so the
     /// newest activity remains visible above the composer.
-    pub fn render_live_tail(&self, area: Rect, buffer: &mut Buffer) {
+    pub fn render_live_tail(&self, area: Rect, buffer: &mut Buffer) -> Range<usize> {
+        let visible = self.live_tail_rows(area.height);
+        self.renderer
+            .render_rows(area, buffer, &self.surface, visible.clone());
+        visible
+    }
+
+    /// Shared row range painted by [`Self::render_live_tail`]. Hosts use this
+    /// to project semantic hyperlink metadata onto the same clipped rows.
+    pub fn live_tail_rows(&self, available_rows: u16) -> Range<usize> {
         let tail_start = self.frontier.tail_start(&self.surface);
         let visible_start = self
             .surface
             .row_count()
-            .saturating_sub(usize::from(area.height))
+            .saturating_sub(usize::from(available_rows))
             .max(tail_start);
-        self.renderer.render_rows(
-            area,
-            buffer,
-            &self.surface,
-            visible_start..self.surface.row_count(),
-        );
+        visible_start..self.surface.row_count()
     }
 }
 

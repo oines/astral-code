@@ -1926,6 +1926,28 @@ impl ChatWidget {
         (!lines.is_empty()).then_some(lines)
     }
 
+    /// Returns the in-flight cells exactly as the normal chat viewport displays
+    /// them. Unlike the transcript-overlay projection, this respects rich/raw
+    /// mode and cells whose compact main representation differs from Ctrl+T.
+    pub(crate) fn active_cell_display_hyperlink_lines(
+        &self,
+        width: u16,
+    ) -> Option<Vec<HyperlinkLine>> {
+        let mode = self.history_render_mode();
+        let mut lines = Vec::new();
+        if let Some(cell) = self.transcript.active_cell.as_ref() {
+            lines.extend(cell.display_hyperlink_lines_for_mode(width, mode));
+        }
+        if let Some(hook_cell) = self.active_hook_cell.as_ref() {
+            let hook_lines = hook_cell.display_hyperlink_lines_for_mode(width, mode);
+            if !hook_lines.is_empty() && !lines.is_empty() {
+                lines.push(HyperlinkLine::from(""));
+            }
+            lines.extend(hook_lines);
+        }
+        (!lines.is_empty()).then_some(lines)
+    }
+
     #[cfg(test)]
     pub(crate) fn active_cell_transcript_lines(&self, width: u16) -> Option<Vec<Line<'static>>> {
         self.active_cell_transcript_hyperlink_lines(width)

@@ -793,6 +793,17 @@ impl Tui {
         self.pending_history_lines.clear();
     }
 
+    pub(crate) fn history_insert_mode(
+        &self,
+        wrap_policy: HistoryLineWrapPolicy,
+    ) -> InsertHistoryMode {
+        if self.is_zellij && wrap_policy == HistoryLineWrapPolicy::Terminal {
+            InsertHistoryMode::ZellijRaw
+        } else {
+            InsertHistoryMode::Standard
+        }
+    }
+
     /// Resize the inline viewport for the resize-reflow path.
     ///
     /// Unlike the legacy draw path, this path does not scroll rows above the viewport when the
@@ -868,6 +879,17 @@ impl Tui {
         height: u16,
         draw_fn: impl FnOnce(&mut custom_terminal::Frame),
     ) -> Result<()> {
+        self.draw_after_history(height, |_terminal| Ok(()), draw_fn)
+    }
+
+    /// Draw after a caller-owned history commit has run inside the same
+    /// synchronized terminal update and after any legacy queued rows flushed.
+    pub(crate) fn draw_after_history(
+        &mut self,
+        height: u16,
+        prepare_fn: impl FnOnce(&mut Terminal) -> Result<()>,
+        draw_fn: impl FnOnce(&mut custom_terminal::Frame),
+    ) -> Result<()> {
         // If we are resuming from ^Z, we need to prepare the resume action now so we can apply it
         // in the synchronized update.
         #[cfg(unix)]
@@ -917,6 +939,7 @@ impl Tui {
                 &mut self.pending_history_lines,
                 self.is_zellij,
             )?;
+            prepare_fn(terminal)?;
 
             // Update the y position for suspending so Ctrl-Z can place the cursor correctly.
             #[cfg(unix)]
@@ -999,9 +1022,10 @@ impl Tui {
     /// This is the feature-gated counterpart to `draw`. It intentionally skips
     /// `pending_viewport_area`, whose cursor-position heuristic is part of the legacy path, and
     /// instead lets transcript reflow rebuild scrollback before the frame is rendered.
-    pub fn draw_with_resize_reflow(
+    pub(crate) fn draw_with_resize_reflow_after_history(
         &mut self,
         height: u16,
+        prepare_fn: impl FnOnce(&mut Terminal) -> Result<()>,
         draw_fn: impl FnOnce(&mut custom_terminal::Frame),
     ) -> Result<()> {
         // If we are resuming from ^Z, we need to prepare the resume action now so we can apply it
@@ -1027,6 +1051,7 @@ impl Tui {
                 &mut self.pending_history_lines,
                 self.is_zellij,
             )?;
+            prepare_fn(terminal)?;
 
             if needs_full_repaint {
                 terminal.invalidate_viewport();
