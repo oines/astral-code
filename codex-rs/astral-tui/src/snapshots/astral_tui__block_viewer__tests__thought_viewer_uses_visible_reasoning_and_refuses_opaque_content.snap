@@ -1,0 +1,25 @@
+---
+source: astral-tui/src/block_viewer_tests.rs
+expression: "buffer_text(&buffer, area)"
+---
+
+
+
+
+
+
+
+    ┌─ Thought ───────────────────────────────────────────────────────────── [×] ─┐
+    │                                                                             │
+    │                                                                             │
+    │  I inspected the canonical transcript.                                      │
+    │                                                                             │
+    │  • Keep source order                                                        │
+    │  • Do not clone stale text                                                  │
+    │                                                                             │
+    │                                                                             │
+    │                                                                             │
+    │                                                                             │
+    │                                                                             │
+    │                     Esc close  |  y copy  |  j/k scroll                     │
+    └─────────────────────────────────────────────────────────────────────────────┘

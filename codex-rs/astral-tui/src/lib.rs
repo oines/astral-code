@@ -4,6 +4,7 @@
 //! tool, transcript, or rollout semantics; UI state is layered over the typed
 //! app-server session and event stream.
 
+mod block_viewer;
 mod conversation;
 mod fullscreen;
 mod inline;
@@ -17,6 +18,8 @@ mod surface;
 mod surface_renderer;
 mod viewport;
 
+pub use block_viewer::BlockViewerHost;
+pub use block_viewer::BlockViewerOutcome;
 pub use conversation::ConversationState;
 pub use conversation::EntryDisplayAction;
 pub use conversation::VerbGroupDisplayAction;
