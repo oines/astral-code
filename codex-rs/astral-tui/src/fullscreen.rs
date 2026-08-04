@@ -1,8 +1,5 @@
-//! Retained fullscreen host for the shared conversation surface.
-//!
-//! This module owns viewport and interaction policy only. App-server events
-//! stay in [`crate::AstralRuntime`], while transcript projection stays in
-//! [`crate::ConversationState`].
+//! Retained fullscreen viewport and input policy over the shared conversation
+//! surface. Runtime events and transcript projection remain in their owners.
 
 use std::time::Duration;
 use std::time::Instant;
@@ -59,11 +56,8 @@ enum NodeDisplayAction {
     ToggleRaw,
 }
 
-/// Fullscreen conversation controller over one canonical rendered surface.
-///
-/// Call [`Self::refresh_surface`] after a transcript update or resize, then
-/// render and route input against the same cached geometry. Presentation
-/// actions refresh the cache internally before returning.
+/// Fullscreen controller over one canonical rendered conversation surface.
+/// Refresh after transcript updates or resize; display actions refresh in place.
 pub struct FullscreenHost {
     thread_id: String,
     area: Rect,
