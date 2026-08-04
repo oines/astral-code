@@ -65,6 +65,7 @@ enum NodeDisplayAction {
 /// render and route input against the same cached geometry. Presentation
 /// actions refresh the cache internally before returning.
 pub struct FullscreenHost {
+    thread_id: String,
     area: Rect,
     surface: ConversationSurface,
     viewport: SurfaceViewport,
@@ -81,6 +82,7 @@ impl FullscreenHost {
         let mut viewport = SurfaceViewport::default();
         viewport.prepare(&surface, area.height);
         Self {
+            thread_id: conversation.transcript().thread_id().to_string(),
             area,
             surface,
             viewport,
@@ -107,10 +109,14 @@ impl FullscreenHost {
     /// Rebuild after transcript growth or resize, retaining semantic targets.
     pub fn refresh_surface(&mut self, conversation: &ConversationState, area: Rect) {
         let resized = self.area != area;
+        let thread_changed = self.thread_id != conversation.transcript().thread_id();
+        if thread_changed {
+            self.thread_id = conversation.transcript().thread_id().to_string();
+        }
         self.area = area;
         self.surface = render_surface(conversation, area);
         self.viewport.prepare(&self.surface, area.height);
-        if resized {
+        if resized || thread_changed {
             self.cancel_pointer_gesture();
         } else {
             self.pending_click = self
