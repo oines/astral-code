@@ -113,6 +113,21 @@ fn wrapped_links_keep_one_stable_target() {
 }
 
 #[test]
+fn wrapped_bare_web_links_keep_one_stable_target() {
+    let target = "https://example.com/a/very/long/path";
+    let rendered = render_markdown_with_metadata(target, 12, MarkdownStyle::default());
+
+    assert_eq!(
+        rendered
+            .iter()
+            .flat_map(|line| line.links.iter())
+            .map(|link| (link.id, link.target.as_str()))
+            .collect::<Vec<_>>(),
+        vec![(0, target), (0, target), (0, target)]
+    );
+}
+
+#[test]
 fn literal_wrapping_preserves_source_joiners_for_selection() {
     let rendered = render_literal_with_metadata("alpha 中文 beta\nnext", 8, Style::default());
     let output = rendered

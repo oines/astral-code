@@ -5,6 +5,8 @@
 
 use std::ops::Range;
 
+use astral_tui_scrollback::find_web_links;
+use astral_tui_scrollback::normalize_web_destination;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
@@ -17,7 +19,6 @@ use ratatui::widgets::Widget;
 use ratatui::widgets::Wrap;
 use unicode_width::UnicodeWidthChar;
 use unicode_width::UnicodeWidthStr;
-use url::Url;
 
 use crate::render::line_utils::line_to_static;
 use crate::wrapping::RtOptions;
@@ -241,82 +242,22 @@ fn push_link_range(line: &mut HyperlinkLine, range: Range<usize>, destination: &
 }
 
 pub(crate) fn web_links_in_text(text: &str) -> Vec<TerminalHyperlink> {
-    let mut links = Vec::new();
-    let mut search_from = 0usize;
-    for raw_token in text.split_ascii_whitespace() {
-        let Some(relative_start) = text[search_from..].find(raw_token) else {
-            continue;
-        };
-        let raw_start = search_from + relative_start;
-        search_from = raw_start + raw_token.len();
-        let trimmed_start = raw_token
-            .find(|ch: char| !is_leading_punctuation(ch))
-            .unwrap_or(raw_token.len());
-        let trimmed_end = trailing_url_end(&raw_token[trimmed_start..]) + trimmed_start;
-        if trimmed_start >= trimmed_end {
-            continue;
-        }
-        let candidate = &raw_token[trimmed_start..trimmed_end];
-        let Some(destination) = web_destination(candidate) else {
-            continue;
-        };
-        let start = text[..raw_start + trimmed_start].width();
-        let end = start + candidate.width();
-        links.push(TerminalHyperlink {
-            columns: start..end,
-            destination,
-        });
-    }
-    links
-}
-
-fn is_leading_punctuation(ch: char) -> bool {
-    matches!(
-        ch,
-        '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>' | ',' | '.' | ';' | '!' | '\'' | '"'
-    )
-}
-
-fn trailing_url_end(candidate: &str) -> usize {
-    let mut end = candidate.len();
-    while end > 0 {
-        let remaining = &candidate[..end];
-        let Some(ch) = remaining.chars().next_back() else {
-            break;
-        };
-        let trim = matches!(ch, ',' | '.' | ';' | '!' | '\'' | '"')
-            || matches!(ch, ')' | ']' | '}' | '>')
-                && has_unmatched_closing_delimiter(remaining, ch);
-        if !trim {
-            break;
-        }
-        end -= ch.len_utf8();
-    }
-    end
-}
-
-fn has_unmatched_closing_delimiter(candidate: &str, closing: char) -> bool {
-    let opening = match closing {
-        ')' => '(',
-        ']' => '[',
-        '}' => '{',
-        '>' => '<',
-        _ => return false,
-    };
-    candidate.chars().filter(|ch| *ch == closing).count()
-        > candidate.chars().filter(|ch| *ch == opening).count()
+    find_web_links(text)
+        .into_iter()
+        .map(|link| {
+            let range = link.byte_range();
+            let start = text[..range.start].width();
+            let end = start + text[range].width();
+            TerminalHyperlink {
+                columns: start..end,
+                destination: link.destination().to_string(),
+            }
+        })
+        .collect()
 }
 
 pub(crate) fn web_destination(destination: &str) -> Option<String> {
-    let safe_destination = destination
-        .chars()
-        .filter(|ch| !ch.is_control())
-        .collect::<String>();
-    let parsed = Url::parse(&safe_destination).ok()?;
-    matches!(parsed.scheme(), "http" | "https")
-        .then(|| parsed.host_str())
-        .flatten()?;
-    Some(safe_destination)
+    normalize_web_destination(destination)
 }
 
 pub(crate) fn osc8_hyperlink(destination: &str, text: &str) -> String {
