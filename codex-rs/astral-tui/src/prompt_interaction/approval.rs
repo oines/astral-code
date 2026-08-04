@@ -1,4 +1,3 @@
-use std::time::Duration;
 use std::time::Instant;
 
 use codex_app_server_protocol::CommandExecutionApprovalDecision;
@@ -13,9 +12,7 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
-use crossterm::event::MouseButton;
 use crossterm::event::MouseEvent;
-use crossterm::event::MouseEventKind;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
@@ -29,8 +26,8 @@ use crate::ModalWindow;
 use crate::ModalWindowConfig;
 use crate::prompt_interaction::PromptInteractionOutcome;
 use crate::prompt_interaction::PromptInteractionSubmission;
-
-const DOUBLE_CLICK_WINDOW: Duration = Duration::from_millis(500);
+use crate::prompt_interaction::choice_list::ChoiceList;
+use crate::prompt_interaction::choice_list::ChoiceListOutcome;
 
 #[derive(Clone)]
 enum ApprovalChoice {
@@ -49,10 +46,7 @@ pub(super) struct ApprovalPrompt {
     body: Vec<String>,
     options: Vec<ApprovalOption>,
     cancel: ApprovalChoice,
-    selected: usize,
-    hovered: Option<usize>,
-    option_hits: Vec<Rect>,
-    last_click: Option<(usize, Instant)>,
+    choices: ChoiceList,
     window: ModalWindow,
 }
 
@@ -98,10 +92,7 @@ impl ApprovalPrompt {
             body,
             options,
             cancel: ApprovalChoice::Command(CommandExecutionApprovalDecision::Cancel),
-            selected: 0,
-            hovered: None,
-            option_hits: Vec::new(),
-            last_click: None,
+            choices: ChoiceList::default(),
             window: ModalWindow::default(),
         }
     }
@@ -137,20 +128,17 @@ impl ApprovalPrompt {
             body,
             options,
             cancel: ApprovalChoice::FileChange(FileChangeApprovalDecision::Cancel),
-            selected: 0,
-            hovered: None,
-            option_hits: Vec::new(),
-            last_click: None,
+            choices: ChoiceList::default(),
             window: ModalWindow::default(),
         }
     }
 
     pub(super) fn selected_index(&self) -> usize {
-        self.selected
+        self.choices.selected()
     }
 
     pub(super) fn set_selected_index(&mut self, selected: usize) {
-        self.selected = selected.min(self.options.len().saturating_sub(1));
+        self.choices.set_selected(selected, self.options.len());
     }
 
     pub(super) fn desired_height(&self, width: u16, available: u16) -> u16 {
@@ -172,7 +160,7 @@ impl ApprovalPrompt {
         queue_len: usize,
         responding: bool,
     ) {
-        self.option_hits.clear();
+        self.choices.begin_frame();
         let title = if queue_len > 1 {
             format!("{} · {queue_len} requests waiting", self.title)
         } else {
@@ -216,21 +204,15 @@ impl ApprovalPrompt {
                 layout.content.width,
                 1,
             );
-            let prefix = if index == self.selected { "› " } else { "  " };
-            let style = if index == self.selected {
-                Style::default().cyan().bold()
-            } else if self.hovered == Some(index) {
-                Style::default().reversed()
-            } else {
-                Style::default()
-            };
+            let prefix = self.choices.prefix(index);
+            let style = self.choices.style(index);
             buffer.set_line(
                 row.x,
                 row.y,
                 &Line::from(format!("{prefix}{}. {}", index + 1, option.label)).style(style),
                 row.width,
             );
-            self.option_hits.push(row);
+            self.choices.record_hit(row);
         }
         if responding && !layout.footer.is_empty() {
             buffer.set_line(
@@ -246,21 +228,11 @@ impl ApprovalPrompt {
         if key.kind == KeyEventKind::Release {
             return PromptInteractionOutcome::Unchanged;
         }
-        match (key.code, key.modifiers) {
-            (KeyCode::Up | KeyCode::Char('k'), KeyModifiers::NONE) => self.move_up(),
-            (KeyCode::Down | KeyCode::Char('j'), KeyModifiers::NONE) => self.move_down(),
-            (KeyCode::Enter, KeyModifiers::NONE) => return self.submit_selected(),
-            (KeyCode::Esc, KeyModifiers::NONE) => return self.submit(self.cancel.clone()),
-            (KeyCode::Char(ch @ '1'..='9'), KeyModifiers::NONE) => {
-                let index = usize::from(ch as u8 - b'1');
-                if index < self.options.len() {
-                    self.selected = index;
-                    return self.submit_selected();
-                }
-            }
-            _ => return PromptInteractionOutcome::Unchanged,
+        if key.code == KeyCode::Esc && key.modifiers == KeyModifiers::NONE {
+            return self.submit(self.cancel.clone());
         }
-        PromptInteractionOutcome::Changed
+        let outcome = self.choices.handle_key(key, self.options.len());
+        self.handle_choice_outcome(outcome)
     }
 
     pub(super) fn handle_mouse_event_at(
@@ -268,72 +240,21 @@ impl ApprovalPrompt {
         mouse: MouseEvent,
         now: Instant,
     ) -> PromptInteractionOutcome {
-        match mouse.kind {
-            MouseEventKind::ScrollUp => {
-                self.move_up();
-                PromptInteractionOutcome::Changed
-            }
-            MouseEventKind::ScrollDown => {
-                self.move_down();
-                PromptInteractionOutcome::Changed
-            }
-            MouseEventKind::Moved => {
-                let hovered = self.option_at(mouse);
-                if self.hovered == hovered {
-                    PromptInteractionOutcome::Unchanged
-                } else {
-                    self.hovered = hovered;
-                    PromptInteractionOutcome::Changed
-                }
-            }
-            MouseEventKind::Down(MouseButton::Left) => {
-                let Some(index) = self.option_at(mouse) else {
-                    self.last_click = None;
-                    return PromptInteractionOutcome::Unchanged;
-                };
-                self.selected = index;
-                let double_click = self.last_click.is_some_and(|(previous, at)| {
-                    previous == index && now.saturating_duration_since(at) < DOUBLE_CLICK_WINDOW
-                });
-                if double_click {
-                    self.last_click = None;
-                    self.submit_selected()
-                } else {
-                    self.last_click = Some((index, now));
-                    PromptInteractionOutcome::Changed
-                }
-            }
-            _ => PromptInteractionOutcome::Unchanged,
+        let outcome = self.choices.handle_mouse(mouse, now, self.options.len());
+        self.handle_choice_outcome(outcome)
+    }
+
+    fn handle_choice_outcome(&self, outcome: ChoiceListOutcome) -> PromptInteractionOutcome {
+        match outcome {
+            ChoiceListOutcome::Unchanged => PromptInteractionOutcome::Unchanged,
+            ChoiceListOutcome::Changed => PromptInteractionOutcome::Changed,
+            ChoiceListOutcome::Activate(index) => self
+                .options
+                .get(index)
+                .map_or(PromptInteractionOutcome::Unchanged, |option| {
+                    self.submit(option.choice.clone())
+                }),
         }
-    }
-
-    fn move_up(&mut self) {
-        self.selected = self.selected.saturating_sub(1);
-        self.last_click = None;
-    }
-
-    fn move_down(&mut self) {
-        self.selected = self
-            .selected
-            .saturating_add(1)
-            .min(self.options.len().saturating_sub(1));
-        self.last_click = None;
-    }
-
-    fn option_at(&self, mouse: MouseEvent) -> Option<usize> {
-        self.option_hits.iter().position(|area| {
-            mouse.column >= area.x
-                && mouse.column < area.right()
-                && mouse.row >= area.y
-                && mouse.row < area.bottom()
-        })
-    }
-
-    fn submit_selected(&self) -> PromptInteractionOutcome {
-        let Some(option) = self.options.get(self.selected) else {
-            return PromptInteractionOutcome::Unchanged;
-        };
-        self.submit(option.choice.clone())
     }
 
     fn submit(&self, choice: ApprovalChoice) -> PromptInteractionOutcome {

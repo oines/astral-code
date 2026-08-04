@@ -19,6 +19,7 @@ use crate::PendingInteractions;
 
 mod approval;
 mod ask_user;
+mod choice_list;
 
 use approval::ApprovalPrompt;
 use ask_user::AskUserPrompt;
