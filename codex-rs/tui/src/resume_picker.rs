@@ -975,7 +975,7 @@ impl PickerState {
             return;
         };
         self.overlay = Some(Overlay::new_transcript(
-            cells.clone(),
+            cells.clone_entries(),
             self.pager_keymap.clone(),
         ));
         self.pending_transcript_open = None;
@@ -1319,7 +1319,7 @@ impl PickerState {
                 Ok(cells) => {
                     let should_open = self.pending_transcript_open == Some(thread_id);
                     self.transcript_cells
-                        .insert(thread_id, SessionTranscriptState::Loaded(cells.clone()));
+                        .insert(thread_id, SessionTranscriptState::Loaded(cells));
                     if should_open {
                         self.open_pending_transcript_if_ready();
                     }
@@ -4349,7 +4349,9 @@ mod tests {
         );
         state.pending_transcript_open = Some(thread_id);
         let cells: TranscriptCells =
-            vec![Arc::new(PlainHistoryCell::new(vec!["transcript".into()]))];
+            vec![Arc::new(PlainHistoryCell::new(vec!["transcript".into()]))
+                as Arc<dyn crate::history_cell::HistoryCell>]
+            .into();
 
         state
             .handle_background_event(BackgroundEvent::Transcript {
@@ -4399,9 +4401,11 @@ mod tests {
         }];
         state.transcript_cells.insert(
             thread_id,
-            SessionTranscriptState::Loaded(vec![Arc::new(PlainHistoryCell::new(vec![
-                "transcript".into(),
-            ]))]),
+            SessionTranscriptState::Loaded(
+                vec![Arc::new(PlainHistoryCell::new(vec!["transcript".into()]))
+                    as Arc<dyn crate::history_cell::HistoryCell>]
+                .into(),
+            ),
         );
 
         state
@@ -5806,7 +5810,7 @@ session_picker_view = "dense"
         };
 
         let rendered = thread_to_transcript_cells(&thread, RawReasoningVisibility::Visible)
-            .into_iter()
+            .iter()
             .flat_map(|cell| cell.transcript_lines(/*width*/ 80))
             .map(|line| line.to_string())
             .collect::<Vec<_>>()
@@ -5860,13 +5864,13 @@ session_picker_view = "dense"
         };
 
         let hidden = thread_to_transcript_cells(&thread, RawReasoningVisibility::Hidden)
-            .into_iter()
+            .iter()
             .flat_map(|cell| cell.transcript_lines(/*width*/ 80))
             .map(|line| line.to_string())
             .collect::<Vec<_>>()
             .join("\n");
         let visible = thread_to_transcript_cells(&thread, RawReasoningVisibility::Visible)
-            .into_iter()
+            .iter()
             .flat_map(|cell| cell.transcript_lines(/*width*/ 80))
             .map(|line| line.to_string())
             .collect::<Vec<_>>()
@@ -5918,7 +5922,7 @@ session_picker_view = "dense"
         };
 
         let rendered = thread_to_transcript_cells(&thread, RawReasoningVisibility::Visible)
-            .into_iter()
+            .iter()
             .flat_map(|cell| cell.transcript_lines(/*width*/ 80))
             .map(|line| line.to_string())
             .collect::<Vec<_>>()

@@ -21,6 +21,7 @@ use std::sync::Arc;
 use crate::chatwidget::ActiveCellTranscriptKey;
 use crate::history_cell::HistoryCell;
 use crate::history_cell::UserHistoryCell;
+use crate::history_transcript::HistoryEntryId;
 use crate::key_hint;
 use crate::key_hint::KeyBinding;
 use crate::key_hint::KeyBindingListExt;
@@ -50,13 +51,20 @@ use ratatui::widgets::Widget;
 use ratatui::widgets::WidgetRef;
 use ratatui::widgets::Wrap;
 
+mod transcript_entries;
+
+use transcript_entries::TranscriptEntries;
+
 pub(crate) enum Overlay {
     Transcript(TranscriptOverlay),
     Static(StaticOverlay),
 }
 
 impl Overlay {
-    pub(crate) fn new_transcript(cells: Vec<Arc<dyn HistoryCell>>, keymap: PagerKeymap) -> Self {
+    pub(crate) fn new_transcript(
+        cells: Vec<(HistoryEntryId, Arc<dyn HistoryCell>)>,
+        keymap: PagerKeymap,
+    ) -> Self {
         Self::Transcript(TranscriptOverlay::new(cells, keymap))
     }
 
@@ -439,8 +447,7 @@ pub(crate) struct TranscriptOverlay {
     /// live-tail renderable appended after the committed cells.
     view: PagerView,
     /// Committed transcript cells (does not include the live tail).
-    cells: Vec<Arc<dyn HistoryCell>>,
-    highlight_cell: Option<usize>,
+    cells: TranscriptEntries,
     /// Cache key for the render-only live tail appended after committed cells.
     live_tail_key: Option<LiveTailKey>,
     is_done: bool,
@@ -466,34 +473,34 @@ impl TranscriptOverlay {
     ///
     /// This overlay does not own the "active cell"; callers may optionally append a live tail via
     /// `sync_live_tail` during draws to reflect in-flight activity.
-    pub(crate) fn new(transcript_cells: Vec<Arc<dyn HistoryCell>>, keymap: PagerKeymap) -> Self {
+    pub(crate) fn new(
+        transcript_cells: Vec<(HistoryEntryId, Arc<dyn HistoryCell>)>,
+        keymap: PagerKeymap,
+    ) -> Self {
+        let cells = TranscriptEntries::new(transcript_cells);
         Self {
             view: PagerView::new(
-                Self::render_cells(&transcript_cells, /*highlight_cell*/ None),
+                Self::render_cells(&cells),
                 "T R A N S C R I P T".to_string(),
                 usize::MAX,
                 keymap,
             ),
-            cells: transcript_cells,
-            highlight_cell: None,
+            cells,
             live_tail_key: None,
             is_done: false,
         }
     }
 
-    fn render_cells(
-        cells: &[Arc<dyn HistoryCell>],
-        highlight_cell: Option<usize>,
-    ) -> Vec<Box<dyn Renderable>> {
+    fn render_cells(cells: &TranscriptEntries) -> Vec<Box<dyn Renderable>> {
         cells
             .iter()
             .enumerate()
-            .flat_map(|(i, c)| {
+            .flat_map(|(index, entry)| {
                 let mut v: Vec<Box<dyn Renderable>> = Vec::new();
-                let mut cell_renderable = if c.as_any().is::<UserHistoryCell>() {
+                let mut cell_renderable = if entry.cell().as_any().is::<UserHistoryCell>() {
                     Box::new(CachedRenderable::new(CellRenderable {
-                        cell: c.clone(),
-                        style: if highlight_cell == Some(i) {
+                        cell: entry.cell().clone(),
+                        style: if cells.highlighted() == Some(entry.id()) {
                             user_message_style().reversed()
                         } else {
                             user_message_style()
@@ -501,11 +508,11 @@ impl TranscriptOverlay {
                     })) as Box<dyn Renderable>
                 } else {
                     Box::new(CachedRenderable::new(CellRenderable {
-                        cell: c.clone(),
+                        cell: entry.cell().clone(),
                         style: Style::default(),
                     })) as Box<dyn Renderable>
                 };
-                if !c.is_stream_continuation() && i > 0 {
+                if !entry.cell().is_stream_continuation() && index > 0 {
                     cell_renderable = Box::new(InsetRenderable::new(
                         cell_renderable,
                         Insets::tlbr(
@@ -529,12 +536,12 @@ impl TranscriptOverlay {
     /// This expects `cell` to be a committed transcript cell (not the in-flight active cell). If
     /// the overlay was scrolled to bottom before insertion, it remains pinned to bottom after the
     /// insertion to preserve the "follow along" behavior.
-    pub(crate) fn insert_cell(&mut self, cell: Arc<dyn HistoryCell>) {
+    pub(crate) fn insert_cell(&mut self, id: HistoryEntryId, cell: Arc<dyn HistoryCell>) {
         let follow_bottom = self.view.is_scrolled_to_bottom();
         let had_prior_cells = !self.cells.is_empty();
         let tail_renderable = self.take_live_tail_renderable();
-        self.cells.push(cell);
-        self.view.renderables = Self::render_cells(&self.cells, self.highlight_cell);
+        self.cells.insert(id, cell);
+        self.view.renderables = Self::render_cells(&self.cells);
         if let Some(tail) = tail_renderable {
             let tail = if !had_prior_cells
                 && self
@@ -564,15 +571,9 @@ impl TranscriptOverlay {
     ///
     /// This is used when existing history is trimmed (for example after rollback) so the
     /// transcript overlay immediately reflects the same committed cells as the main transcript.
-    pub(crate) fn replace_cells(&mut self, cells: Vec<Arc<dyn HistoryCell>>) {
+    pub(crate) fn replace_cells(&mut self, cells: Vec<(HistoryEntryId, Arc<dyn HistoryCell>)>) {
         let follow_bottom = self.view.is_scrolled_to_bottom();
-        self.cells = cells;
-        if self
-            .highlight_cell
-            .is_some_and(|idx| idx >= self.cells.len())
-        {
-            self.highlight_cell = None;
-        }
+        self.cells.replace(cells);
         self.rebuild_renderables();
         if follow_bottom {
             self.view.scroll_offset = usize::MAX;
@@ -592,29 +593,7 @@ impl TranscriptOverlay {
         consolidated: Arc<dyn HistoryCell>,
     ) {
         let follow_bottom = self.view.is_scrolled_to_bottom();
-        // Clamp the range to the overlay's cell count to avoid panic if the overlay has fewer
-        // cells than the main transcript (e.g. cells were inserted after the overlay has opened).
-        let clamped_end = range.end.min(self.cells.len());
-        let clamped_start = range.start.min(clamped_end);
-        if clamped_start < clamped_end {
-            let removed = clamped_end - clamped_start;
-            if let Some(highlight_cell) = self.highlight_cell.as_mut()
-                && *highlight_cell >= clamped_start
-            {
-                if *highlight_cell < clamped_end {
-                    *highlight_cell = clamped_start;
-                } else {
-                    *highlight_cell = highlight_cell.saturating_sub(removed.saturating_sub(1));
-                }
-            }
-            self.cells
-                .splice(clamped_start..clamped_end, std::iter::once(consolidated));
-            if self
-                .highlight_cell
-                .is_some_and(|highlight_cell| highlight_cell >= self.cells.len())
-            {
-                self.highlight_cell = None;
-            }
+        if self.cells.consolidate(range, consolidated) {
             self.rebuild_renderables();
         }
         if follow_bottom {
@@ -671,10 +650,10 @@ impl TranscriptOverlay {
     }
 
     pub(crate) fn set_highlight_cell(&mut self, cell: Option<usize>) {
-        self.highlight_cell = cell;
+        self.cells.set_highlight_index(cell);
         self.rebuild_renderables();
-        if let Some(idx) = self.highlight_cell {
-            self.view.scroll_chunk_into_view(idx);
+        if let Some(index) = self.cells.highlighted_index() {
+            self.view.scroll_chunk_into_view(index);
         }
     }
 
@@ -688,7 +667,7 @@ impl TranscriptOverlay {
 
     fn rebuild_renderables(&mut self) {
         let tail_renderable = self.take_live_tail_renderable();
-        self.view.renderables = Self::render_cells(&self.cells, self.highlight_cell);
+        self.view.renderables = Self::render_cells(&self.cells);
         if let Some(tail) = tail_renderable {
             self.view.renderables.push(tail);
         }
@@ -754,7 +733,7 @@ impl TranscriptOverlay {
 
         let mut pairs: Vec<(Vec<KeyBinding>, &str)> =
             vec![(first_or_empty(&self.view.keymap.close), "to quit")];
-        if self.highlight_cell.is_some() {
+        if self.cells.highlighted().is_some() {
             pairs.push((
                 vec![
                     key_hint::plain(KeyCode::Esc),
@@ -952,6 +931,7 @@ mod tests {
     use crate::history_cell;
     use crate::history_cell::HistoryCell;
     use crate::history_cell::new_patch_event;
+    use crate::history_transcript::HistoryTranscript;
     use codex_protocol::parse_command::ParsedCommand;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
@@ -990,7 +970,15 @@ mod tests {
     }
 
     fn transcript_overlay(cells: Vec<Arc<dyn HistoryCell>>) -> TranscriptOverlay {
-        TranscriptOverlay::new(cells, default_pager_keymap())
+        transcript_overlay_and_source(cells).0
+    }
+
+    fn transcript_overlay_and_source(
+        cells: Vec<Arc<dyn HistoryCell>>,
+    ) -> (TranscriptOverlay, HistoryTranscript) {
+        let transcript: HistoryTranscript = cells.into();
+        let overlay = TranscriptOverlay::new(transcript.clone_entries(), default_pager_keymap());
+        (overlay, transcript)
     }
 
     fn static_overlay(lines: Vec<Line<'static>>, title: &str) -> StaticOverlay {
@@ -1252,7 +1240,7 @@ mod tests {
 
     #[test]
     fn transcript_overlay_keeps_scroll_pinned_at_bottom() {
-        let mut overlay = transcript_overlay(
+        let (mut overlay, mut transcript) = transcript_overlay_and_source(
             (0..20)
                 .map(|i| {
                     Arc::new(TestCell {
@@ -1270,16 +1258,18 @@ mod tests {
             "expected initial render to leave view at bottom"
         );
 
-        overlay.insert_cell(Arc::new(TestCell {
+        let tail: Arc<dyn HistoryCell> = Arc::new(TestCell {
             lines: vec!["tail".into()],
-        }));
+        });
+        let tail_id = transcript.push(tail.clone());
+        overlay.insert_cell(tail_id, tail);
 
         assert_eq!(overlay.view.scroll_offset, usize::MAX);
     }
 
     #[test]
     fn transcript_overlay_preserves_manual_scroll_position() {
-        let mut overlay = transcript_overlay(
+        let (mut overlay, mut transcript) = transcript_overlay_and_source(
             (0..20)
                 .map(|i| {
                     Arc::new(TestCell {
@@ -1294,16 +1284,18 @@ mod tests {
 
         overlay.view.scroll_offset = 0;
 
-        overlay.insert_cell(Arc::new(TestCell {
+        let tail: Arc<dyn HistoryCell> = Arc::new(TestCell {
             lines: vec!["tail".into()],
-        }));
+        });
+        let tail_id = transcript.push(tail.clone());
+        overlay.insert_cell(tail_id, tail);
 
         assert_eq!(overlay.view.scroll_offset, 0);
     }
 
     #[test]
-    fn transcript_overlay_consolidation_remaps_highlight_inside_range() {
-        let mut overlay = transcript_overlay(
+    fn transcript_overlay_consolidation_clears_removed_highlight_identity() {
+        let (mut overlay, transcript) = transcript_overlay_and_source(
             (0..6)
                 .map(|i| {
                     Arc::new(TestCell {
@@ -1312,6 +1304,7 @@ mod tests {
                 })
                 .collect(),
         );
+        let removed_id = transcript.entries().nth(3).expect("removed entry").0;
         overlay.set_highlight_cell(Some(3));
 
         overlay.consolidate_cells(
@@ -1322,15 +1315,16 @@ mod tests {
         );
 
         assert_eq!(
-            overlay.highlight_cell,
-            Some(2),
-            "highlight inside consolidated range should point to replacement cell",
+            overlay.cells.highlighted(),
+            None,
+            "a removed source entry must not transfer selection to a replacement identity",
         );
+        assert_ne!(overlay.cells.highlighted(), Some(removed_id));
     }
 
     #[test]
-    fn transcript_overlay_consolidation_remaps_highlight_after_range() {
-        let mut overlay = transcript_overlay(
+    fn transcript_overlay_consolidation_preserves_highlight_after_range() {
+        let (mut overlay, transcript) = transcript_overlay_and_source(
             (0..7)
                 .map(|i| {
                     Arc::new(TestCell {
@@ -1339,6 +1333,7 @@ mod tests {
                 })
                 .collect(),
         );
+        let highlighted_id = transcript.entries().nth(6).expect("highlighted entry").0;
         overlay.set_highlight_cell(Some(6));
 
         overlay.consolidate_cells(
@@ -1349,10 +1344,77 @@ mod tests {
         );
 
         assert_eq!(
-            overlay.highlight_cell,
-            Some(4),
-            "highlight after consolidated range should shift left by removed cells",
+            overlay.cells.highlighted(),
+            Some(highlighted_id),
+            "an entry after the consolidated range keeps its original identity",
         );
+    }
+
+    #[test]
+    fn transcript_overlay_consolidation_preserves_range_start_identity() {
+        let (mut overlay, transcript) = transcript_overlay_and_source(
+            (0..6)
+                .map(|i| {
+                    Arc::new(TestCell {
+                        lines: vec![Line::from(format!("line{i}"))],
+                    }) as Arc<dyn HistoryCell>
+                })
+                .collect(),
+        );
+        let retained_id = transcript.entries().nth(2).expect("retained entry").0;
+        overlay.set_highlight_cell(Some(2));
+
+        overlay.consolidate_cells(
+            2..5,
+            Arc::new(TestCell {
+                lines: vec![Line::from("consolidated")],
+            }),
+        );
+
+        assert_eq!(overlay.cells.highlighted(), Some(retained_id));
+        assert_eq!(overlay.cells.highlighted_index(), Some(2));
+    }
+
+    #[test]
+    fn transcript_overlay_consolidation_ignores_empty_clamped_range() {
+        let mut overlay = transcript_overlay(vec![Arc::new(TestCell {
+            lines: vec![Line::from("unchanged")],
+        })]);
+
+        overlay.consolidate_cells(
+            2..3,
+            Arc::new(TestCell {
+                lines: vec![Line::from("must not be inserted")],
+            }),
+        );
+
+        assert_eq!(overlay.cells.len(), 1);
+    }
+
+    #[test]
+    fn transcript_overlay_replacement_tracks_highlight_by_identity() {
+        let (mut overlay, mut transcript) = transcript_overlay_and_source(
+            (0..3)
+                .map(|i| {
+                    Arc::new(TestCell {
+                        lines: vec![Line::from(format!("line{i}"))],
+                    }) as Arc<dyn HistoryCell>
+                })
+                .collect(),
+        );
+        let highlighted_id = transcript.entries().nth(2).expect("highlighted entry").0;
+        overlay.set_highlight_cell(Some(2));
+
+        transcript.remove(0);
+        overlay.replace_cells(transcript.clone_entries());
+
+        assert_eq!(overlay.cells.highlighted(), Some(highlighted_id));
+        assert_eq!(overlay.cells.highlighted_index(), Some(1));
+
+        transcript.remove(1);
+        overlay.replace_cells(transcript.clone_entries());
+
+        assert_eq!(overlay.cells.highlighted(), None);
     }
 
     #[test]

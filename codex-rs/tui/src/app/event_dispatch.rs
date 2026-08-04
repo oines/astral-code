@@ -199,11 +199,11 @@ impl App {
             }
             AppEvent::InsertHistoryCell(cell) => {
                 let cell: Arc<dyn HistoryCell> = cell.into();
+                let id = self.transcript_cells.push(cell.clone());
                 if let Some(Overlay::Transcript(t)) = &mut self.overlay {
-                    t.insert_cell(cell.clone());
+                    t.insert_cell(id, cell.clone());
                     tui.frame_requester().schedule_frame();
                 }
-                self.transcript_cells.push(cell.clone());
                 if self.initial_history_replay_buffer.as_ref().is_some() {
                     self.insert_history_cell_lines_with_initial_replay_buffer(
                         tui,
@@ -260,9 +260,9 @@ impl App {
 
                     self.finish_required_stream_reflow(tui)?;
                 } else {
-                    self.transcript_cells.push(consolidated.clone());
+                    let id = self.transcript_cells.push(consolidated.clone());
                     if let Some(Overlay::Transcript(t)) = &mut self.overlay {
-                        t.insert_cell(consolidated.clone());
+                        t.insert_cell(id, consolidated.clone());
                         tui.frame_requester().schedule_frame();
                     }
                     self.insert_history_cell_lines(

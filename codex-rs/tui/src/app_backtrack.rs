@@ -266,7 +266,7 @@ impl App {
     pub(crate) fn open_transcript_overlay(&mut self, tui: &mut tui::Tui) {
         let _ = tui.enter_alt_screen();
         self.overlay = Some(Overlay::new_transcript(
-            self.transcript_cells.clone_cells(),
+            self.transcript_cells.clone_entries(),
             self.keymap.pager.clone(),
         ));
         tui.frame_requester().schedule_frame();
@@ -598,7 +598,7 @@ impl App {
     ///    for cells that were just removed by the trim.
     fn sync_overlay_after_transcript_trim(&mut self) {
         if let Some(Overlay::Transcript(t)) = &mut self.overlay {
-            t.replace_cells(self.transcript_cells.clone_cells());
+            t.replace_cells(self.transcript_cells.clone_entries());
         }
         if self.backtrack.overlay_preview_active {
             let total_users = user_count(&self.transcript_cells);
