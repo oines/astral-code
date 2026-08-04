@@ -154,6 +154,20 @@ impl SurfaceViewport {
         self.top != before
     }
 
+    /// Move to an explicit virtual row without enabling tail follow.
+    ///
+    /// This is the semantic operation used by a scrollbar drag. Reaching the
+    /// final row through a drag remains a manual reading position; an explicit
+    /// bottom command or downward overscroll is what resumes follow mode.
+    pub fn scroll_to_row(&mut self, surface: &ConversationSurface, row: usize) -> bool {
+        let before_top = self.top;
+        let before_follow = self.follow_bottom;
+        self.top = row.min(max_top(surface, self.height));
+        self.follow_bottom = false;
+        self.capture_anchor(surface);
+        self.top != before_top || self.follow_bottom != before_follow
+    }
+
     /// Map one zero-based screen row inside the transcript viewport back to
     /// the shared surface and update hover state.
     pub fn hover_screen_row(
@@ -179,7 +193,37 @@ impl SurfaceViewport {
             .rev()
             .find(|node| !node.rows().is_empty())
             .map(SurfaceNode::id);
-        self.set_selection(surface, next)
+        self.select_node(surface, next)
+    }
+
+    pub fn select_first(&mut self, surface: &ConversationSurface) -> bool {
+        let next = surface
+            .nodes()
+            .iter()
+            .find(|node| !node.rows().is_empty())
+            .map(SurfaceNode::id);
+        self.select_node(surface, next)
+    }
+
+    /// Select a stable surface node and reveal it when necessary.
+    pub fn select_node(
+        &mut self,
+        surface: &ConversationSurface,
+        selected: Option<SurfaceNodeId>,
+    ) -> bool {
+        let selected = selected.filter(|id| {
+            surface
+                .node(*id)
+                .is_some_and(|node| !node.rows().is_empty())
+        });
+        if selected == self.selected {
+            return false;
+        }
+        self.selected = selected;
+        if let Some(selected) = selected {
+            self.ensure_node_visible(surface, selected);
+        }
+        true
     }
 
     pub fn move_selection(
@@ -211,7 +255,7 @@ impl SurfaceViewport {
         }
         .map(SurfaceNode::id);
         if let Some(next) = next {
-            return self.set_selection(surface, Some(next));
+            return self.select_node(surface, Some(next));
         }
         if direction == ScrollDirection::Down && self.selected.is_some() {
             let was_following = self.follow_bottom;
@@ -222,21 +266,6 @@ impl SurfaceViewport {
 
     pub fn clear_selection(&mut self) -> bool {
         self.selected.take().is_some()
-    }
-
-    fn set_selection(
-        &mut self,
-        surface: &ConversationSurface,
-        selected: Option<SurfaceNodeId>,
-    ) -> bool {
-        if selected == self.selected {
-            return false;
-        }
-        self.selected = selected;
-        if let Some(selected) = selected {
-            self.ensure_node_visible(surface, selected);
-        }
-        true
     }
 
     fn ensure_node_visible(&mut self, surface: &ConversationSurface, id: SurfaceNodeId) {
