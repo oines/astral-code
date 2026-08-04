@@ -1,8 +1,8 @@
 //! Typed ownership for active app-server user interactions.
 //!
-//! The app-server request remains authoritative. This module stores the full
-//! request and derives only queue identity and presentation state, avoiding a
-//! second copy of the protocol response mapping owned by app-server.
+//! The complete app-server request remains the only semantic source. This
+//! module adds ordering and presentation lifecycle, but deliberately does not
+//! translate responses or invent identity beyond the JSON-RPC request id.
 
 use std::collections::VecDeque;
 
@@ -32,26 +32,14 @@ pub enum PendingInteractionStatus {
 pub struct PendingInteraction {
     request: ServerRequest,
     kind: PendingInteractionKind,
-    key: InteractionKey,
-    thread_id: String,
-    turn_id: Option<String>,
     status: PendingInteractionStatus,
 }
 
 impl PendingInteraction {
-    fn new(
-        request: ServerRequest,
-        kind: PendingInteractionKind,
-        key: InteractionKey,
-        thread_id: String,
-        turn_id: Option<String>,
-    ) -> Self {
+    fn new(request: ServerRequest, kind: PendingInteractionKind) -> Self {
         Self {
             request,
             kind,
-            key,
-            thread_id,
-            turn_id,
             status: PendingInteractionStatus::Waiting,
         }
     }
@@ -72,31 +60,21 @@ impl PendingInteraction {
         self.status
     }
 
-    pub fn thread_id(&self) -> &str {
-        &self.thread_id
+    pub fn thread_id(&self) -> Option<&str> {
+        server_request_scope(&self.request).map(|(thread_id, _)| thread_id)
     }
 
     pub fn turn_id(&self) -> Option<&str> {
-        self.turn_id.as_deref()
+        server_request_scope(&self.request).and_then(|(_, turn_id)| turn_id)
     }
 }
 
 /// Observable queue mutation used by the future modal host.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PendingInteractionUpdate {
-    Added {
-        request_id: RequestId,
-    },
-    Replayed {
-        request_id: RequestId,
-    },
-    Replaced {
-        previous_request_id: RequestId,
-        request_id: RequestId,
-    },
-    Resolved {
-        request_id: RequestId,
-    },
+    Added { request_id: RequestId },
+    Refreshed { request_id: RequestId },
+    Resolved { request_id: RequestId },
 }
 
 /// Refuses a second local answer while the first is still in flight.
@@ -122,9 +100,10 @@ impl std::error::Error for PendingInteractionError {}
 
 /// Ordered pending interactions for one active Astral thread.
 ///
-/// Exact request replays are idempotent. A newly issued request for the same
-/// logical approval/input replaces the old request in place so focus and queue
-/// order remain stable while the stale JSON-RPC id can no longer be answered.
+/// A replay with the same request id refreshes the existing queue slot. A new
+/// request id always creates a distinct pending interaction, even when its
+/// tool/item metadata matches another request: app-server still owns both
+/// waiters and both must be resolved independently.
 #[derive(Debug)]
 pub struct PendingInteractions {
     thread_id: String,
@@ -164,17 +143,15 @@ impl PendingInteractions {
     }
 
     pub(crate) fn observe_request(&mut self, request: ServerRequest) -> RequestObservation {
-        let Some((kind, key)) = interaction_descriptor(&request) else {
+        let Some(kind) = interaction_kind(&request) else {
             return RequestObservation::PassThrough(Box::new(request));
         };
-        let Some((thread_id, turn_id)) = server_request_scope(&request) else {
+        let Some((thread_id, _)) = server_request_scope(&request) else {
             return RequestObservation::PassThrough(Box::new(request));
         };
         if thread_id != self.thread_id {
             return RequestObservation::PassThrough(Box::new(request));
         }
-        let thread_id = thread_id.to_string();
-        let turn_id = turn_id.map(str::to_string);
 
         if let Some(existing) = self
             .queue
@@ -182,67 +159,72 @@ impl PendingInteractions {
             .find(|pending| pending.request.id() == request.id())
         {
             let request_id = request.id().clone();
-            if existing.request == request {
-                return RequestObservation::Updated(PendingInteractionUpdate::Replayed {
-                    request_id,
-                });
-            }
-            existing.request = request;
-            existing.kind = kind;
-            existing.key = key;
-            existing.thread_id = thread_id;
-            existing.turn_id = turn_id;
-            return RequestObservation::Updated(PendingInteractionUpdate::Replaced {
-                previous_request_id: request_id.clone(),
-                request_id,
-            });
-        }
-
-        if let Some(existing) = self.queue.iter_mut().find(|pending| pending.key == key) {
-            let previous_request_id = existing.request.id().clone();
-            let request_id = request.id().clone();
-            *existing = PendingInteraction::new(request, kind, key, thread_id, turn_id);
-            return RequestObservation::Updated(PendingInteractionUpdate::Replaced {
-                previous_request_id,
-                request_id,
-            });
+            let status = existing.status;
+            *existing = PendingInteraction {
+                request,
+                kind,
+                status,
+            };
+            return RequestObservation::Updated(PendingInteractionUpdate::Refreshed { request_id });
         }
 
         let request_id = request.id().clone();
-        self.queue.push_back(PendingInteraction::new(
-            request, kind, key, thread_id, turn_id,
-        ));
+        self.queue.push_back(PendingInteraction::new(request, kind));
         RequestObservation::Updated(PendingInteractionUpdate::Added { request_id })
     }
 
-    pub(crate) fn resolve_notification(
+    pub(crate) fn observe_notification(
         &mut self,
-        thread_id: &str,
-        request_id: &RequestId,
+        notification: &codex_app_server_protocol::ServerNotification,
     ) -> Option<PendingInteractionUpdate> {
-        if thread_id != self.thread_id {
-            return None;
+        use codex_app_server_protocol::ServerNotification;
+
+        match notification {
+            ServerNotification::ServerRequestResolved(resolved)
+                if resolved.thread_id == self.thread_id =>
+            {
+                self.remove(&resolved.request_id)
+            }
+            ServerNotification::ItemStarted(started) if started.thread_id == self.thread_id => {
+                if let Some(item_id) = approval_item_id(&started.item) {
+                    self.queue.retain(|pending| {
+                        !pending.is_approval_for_started_item(&started.turn_id, item_id)
+                    });
+                }
+                None
+            }
+            ServerNotification::TurnCompleted(completed)
+                if completed.thread_id == self.thread_id =>
+            {
+                self.queue
+                    .retain(|pending| pending.turn_id() != Some(completed.turn.id.as_str()));
+                None
+            }
+            ServerNotification::ThreadClosed(closed) if closed.thread_id == self.thread_id => {
+                self.clear();
+                None
+            }
+            _ => None,
         }
-        self.remove(request_id)
     }
 
-    /// Mark a response in flight. Returns false for requests this thread does
-    /// not own, allowing non-interactive requests to use the same transport.
+    /// Mark a response in flight while allowing untracked requests to keep
+    /// using the same transport.
     pub(crate) fn begin_response(
         &mut self,
         request_id: &RequestId,
-    ) -> Result<bool, PendingInteractionError> {
+    ) -> Result<ResponseOwnership, PendingInteractionError> {
         let Some(pending) = self
             .queue
             .iter_mut()
             .find(|pending| pending.request.id() == request_id)
         else {
-            return Ok(false);
+            return Ok(ResponseOwnership::Untracked);
         };
         match pending.status {
             PendingInteractionStatus::Waiting => {
                 pending.status = PendingInteractionStatus::Responding;
-                Ok(true)
+                Ok(ResponseOwnership::Tracked)
             }
             PendingInteractionStatus::Responding => Err(
                 PendingInteractionError::AlreadyResponding(request_id.clone()),
@@ -250,23 +232,19 @@ impl PendingInteractions {
         }
     }
 
-    pub(crate) fn response_succeeded(
-        &mut self,
-        request_id: &RequestId,
-    ) -> Option<PendingInteractionUpdate> {
-        self.remove(request_id)
+    pub(crate) fn response_succeeded(&mut self, request_id: &RequestId) {
+        self.remove(request_id);
     }
 
-    pub(crate) fn response_failed(&mut self, request_id: &RequestId) -> bool {
+    pub(crate) fn response_failed(&mut self, request_id: &RequestId) {
         let Some(pending) = self
             .queue
             .iter_mut()
             .find(|pending| pending.request.id() == request_id)
         else {
-            return false;
+            return;
         };
         pending.status = PendingInteractionStatus::Waiting;
-        true
     }
 
     fn remove(&mut self, request_id: &RequestId) -> Option<PendingInteractionUpdate> {
@@ -281,94 +259,60 @@ impl PendingInteractions {
     }
 }
 
+impl PendingInteraction {
+    fn is_approval_for_started_item(&self, turn_id: &str, item_id: &str) -> bool {
+        match &self.request {
+            ServerRequest::CommandExecutionRequestApproval { params, .. } => {
+                params.turn_id == turn_id && params.item_id == item_id
+            }
+            ServerRequest::FileChangeRequestApproval { params, .. } => {
+                params.turn_id == turn_id && params.item_id == item_id
+            }
+            _ => false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum RequestObservation {
     Updated(PendingInteractionUpdate),
     PassThrough(Box<ServerRequest>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum InteractionKey {
-    CommandExecution {
-        turn_id: String,
-        callback_id: String,
-    },
-    FileChange {
-        turn_id: String,
-        item_id: String,
-    },
-    UserInput {
-        turn_id: String,
-        item_id: String,
-    },
-    McpElicitation {
-        server_name: String,
-        request_id: RequestId,
-    },
-    Permissions {
-        turn_id: String,
-        item_id: String,
-    },
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ResponseOwnership {
+    Tracked,
+    Untracked,
 }
 
-fn interaction_descriptor(
-    request: &ServerRequest,
-) -> Option<(PendingInteractionKind, InteractionKey)> {
+fn interaction_kind(request: &ServerRequest) -> Option<PendingInteractionKind> {
     match request {
-        ServerRequest::CommandExecutionRequestApproval {
-            request_id: _,
-            params,
-        } => Some((
-            PendingInteractionKind::CommandExecutionApproval,
-            InteractionKey::CommandExecution {
-                turn_id: params.turn_id.clone(),
-                callback_id: params
-                    .approval_id
-                    .clone()
-                    .unwrap_or_else(|| params.item_id.clone()),
-            },
-        )),
-        ServerRequest::FileChangeRequestApproval {
-            request_id: _,
-            params,
-        } => Some((
-            PendingInteractionKind::FileChangeApproval,
-            InteractionKey::FileChange {
-                turn_id: params.turn_id.clone(),
-                item_id: params.item_id.clone(),
-            },
-        )),
-        ServerRequest::ToolRequestUserInput {
-            request_id: _,
-            params,
-        } => Some((
-            PendingInteractionKind::UserInput,
-            InteractionKey::UserInput {
-                turn_id: params.turn_id.clone(),
-                item_id: params.item_id.clone(),
-            },
-        )),
-        ServerRequest::McpServerElicitationRequest { request_id, params } => Some((
-            PendingInteractionKind::McpElicitation,
-            InteractionKey::McpElicitation {
-                server_name: params.server_name.clone(),
-                request_id: request_id.clone(),
-            },
-        )),
-        ServerRequest::PermissionsRequestApproval {
-            request_id: _,
-            params,
-        } => Some((
-            PendingInteractionKind::PermissionsApproval,
-            InteractionKey::Permissions {
-                turn_id: params.turn_id.clone(),
-                item_id: params.item_id.clone(),
-            },
-        )),
+        ServerRequest::CommandExecutionRequestApproval { .. } => {
+            Some(PendingInteractionKind::CommandExecutionApproval)
+        }
+        ServerRequest::FileChangeRequestApproval { .. } => {
+            Some(PendingInteractionKind::FileChangeApproval)
+        }
+        ServerRequest::ToolRequestUserInput { .. } => Some(PendingInteractionKind::UserInput),
+        ServerRequest::McpServerElicitationRequest { .. } => {
+            Some(PendingInteractionKind::McpElicitation)
+        }
+        ServerRequest::PermissionsRequestApproval { .. } => {
+            Some(PendingInteractionKind::PermissionsApproval)
+        }
         ServerRequest::DynamicToolCall { .. }
         | ServerRequest::AttestationGenerate { .. }
         | ServerRequest::ApplyPatchApproval { .. }
         | ServerRequest::ExecCommandApproval { .. } => None,
+    }
+}
+
+fn approval_item_id(item: &codex_app_server_protocol::ThreadItem) -> Option<&str> {
+    use codex_app_server_protocol::ThreadItem;
+
+    match item {
+        ThreadItem::CommandExecution { id, .. } | ThreadItem::FileChange { id, .. } => Some(id),
+        _ => None,
     }
 }
 

@@ -18,6 +18,7 @@ use crate::PendingInteractions;
 use crate::SessionError;
 use crate::SessionState;
 use crate::interactions::RequestObservation;
+use crate::interactions::ResponseOwnership;
 
 /// Effect that one app-server notification had on the active transcript.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -148,20 +149,20 @@ impl AstralRuntime {
         request_id: RequestId,
         result: JsonRpcResult,
     ) -> Result<(), RuntimeError> {
-        let tracked = self.pending_interactions.begin_response(&request_id)?;
+        let ownership = self.pending_interactions.begin_response(&request_id)?;
         match self
             .session
             .resolve_server_request(request_id.clone(), result)
             .await
         {
             Ok(()) => {
-                if tracked {
+                if ownership == ResponseOwnership::Tracked {
                     self.pending_interactions.response_succeeded(&request_id);
                 }
                 Ok(())
             }
             Err(error) => {
-                if tracked {
+                if ownership == ResponseOwnership::Tracked {
                     self.pending_interactions.response_failed(&request_id);
                 }
                 Err(error.into())
@@ -174,20 +175,20 @@ impl AstralRuntime {
         request_id: RequestId,
         error: JSONRPCErrorError,
     ) -> Result<(), RuntimeError> {
-        let tracked = self.pending_interactions.begin_response(&request_id)?;
+        let ownership = self.pending_interactions.begin_response(&request_id)?;
         match self
             .session
             .reject_server_request(request_id.clone(), error)
             .await
         {
             Ok(()) => {
-                if tracked {
+                if ownership == ResponseOwnership::Tracked {
                     self.pending_interactions.response_succeeded(&request_id);
                 }
                 Ok(())
             }
             Err(error) => {
-                if tracked {
+                if ownership == ResponseOwnership::Tracked {
                     self.pending_interactions.response_failed(&request_id);
                 }
                 Err(error.into())
@@ -226,10 +227,7 @@ fn apply_event(
     match event {
         AppServerEvent::Lagged { .. } => None,
         AppServerEvent::ServerNotification(notification) => {
-            if let ServerNotification::ServerRequestResolved(resolved) = &notification
-                && let Some(update) = pending_interactions
-                    .resolve_notification(&resolved.thread_id, &resolved.request_id)
-            {
+            if let Some(update) = pending_interactions.observe_notification(&notification) {
                 return Some(RuntimeEvent::PendingInteraction(update));
             }
             match conversation.apply(&notification) {
