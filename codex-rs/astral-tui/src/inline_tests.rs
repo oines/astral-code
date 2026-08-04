@@ -1,3 +1,10 @@
+use std::io;
+
+use astral_tui_scrollback::DisplayMode;
+use astral_tui_scrollback::EntryLifecycle;
+use astral_tui_scrollback::LineJoiner;
+use astral_tui_scrollback::MarkdownLine;
+use astral_tui_scrollback::TranscriptEntryId;
 use codex_app_server_protocol::ItemCompletedNotification;
 use codex_app_server_protocol::ItemStartedNotification;
 use codex_app_server_protocol::ServerNotification;
@@ -17,9 +24,14 @@ use ratatui::Viewport;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use ratatui::text::Line;
 
 use super::InlineHost;
 use crate::ConversationState;
+use crate::ConversationSurface;
+use crate::MaterializedSurfaceEntry;
+use crate::SurfaceEntryPresentation;
+use crate::SurfaceEntrySpacing;
 use crate::SurfaceNodeId;
 
 #[test]
@@ -132,6 +144,87 @@ fn inline_frontier_waits_for_group_boundary_and_prints_each_node_once() {
             .committed_nodes,
         0
     );
+}
+
+#[test]
+fn materialized_frontier_retries_failed_writes_and_resets_for_a_new_thread() {
+    let first = SurfaceNodeId::Entry(TranscriptEntryId::new(1));
+    let second = SurfaceNodeId::Entry(TranscriptEntryId::new(2));
+    let third = SurfaceNodeId::Entry(TranscriptEntryId::new(3));
+    let mut host = InlineHost::from_surface("thread-a", materialized_surface());
+    let mut attempted = Vec::new();
+
+    let error = host
+        .commit_with(|surface, rows| {
+            let id = surface.node_at_row(rows.start).expect("commit node").id();
+            attempted.push(id);
+            if id == second {
+                return Err(io::Error::other("simulated terminal failure"));
+            }
+            Ok(())
+        })
+        .expect_err("second node should fail");
+    assert_eq!(error.to_string(), "simulated terminal failure");
+    assert_eq!(attempted, vec![first, second]);
+
+    attempted.clear();
+    let retry = host
+        .commit_with(|surface, rows| {
+            attempted.push(surface.node_at_row(rows.start).expect("commit node").id());
+            Ok(())
+        })
+        .expect("retry remaining nodes");
+    assert_eq!(attempted, vec![second, third]);
+    assert_eq!(
+        retry,
+        super::InlineCommitResult {
+            committed_nodes: 2,
+            tail_start: host.surface().row_count(),
+        }
+    );
+
+    host.refresh_materialized_surface("thread-a", materialized_surface());
+    assert_eq!(
+        host.commit_with(|_, _| Ok(()))
+            .expect("same-thread refresh"),
+        super::InlineCommitResult {
+            committed_nodes: 0,
+            tail_start: host.surface().row_count(),
+        }
+    );
+
+    host.refresh_materialized_surface("thread-b", materialized_surface());
+    assert_eq!(
+        host.commit_with(|_, _| Ok(())).expect("new thread commit"),
+        super::InlineCommitResult {
+            committed_nodes: 3,
+            tail_start: host.surface().row_count(),
+        }
+    );
+}
+
+fn materialized_surface() -> ConversationSurface {
+    let presentation = SurfaceEntryPresentation {
+        lifecycle: EntryLifecycle::Restored,
+        mode: DisplayMode::Expanded,
+        foldable: false,
+        groupable: false,
+        turn_settled: true,
+        presentation_stable: true,
+    };
+    let entries = (1..=3).map(|id| {
+        MaterializedSurfaceEntry::ungrouped(
+            TranscriptEntryId::new(id),
+            SurfaceEntrySpacing::Separate,
+            presentation,
+            vec![MarkdownLine {
+                line: Line::from(format!("entry {id}")),
+                joiner_to_previous: LineJoiner::HardBreak,
+                links: Vec::new(),
+            }],
+        )
+    });
+    ConversationSurface::from_materialized(40, entries)
 }
 
 fn buffer_text(buffer: &Buffer, area: Rect) -> String {
