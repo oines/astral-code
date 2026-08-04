@@ -1,0 +1,12 @@
+---
+source: astral-tui/src/plan_implementation_tests.rs
+expression: buffer_text(&buffer)
+---
+Implement this plan?
+ › 1. Yes, implement this plan
+      Switch to Default and start coding.
+   2. Yes, clear context and implement
+      Fresh thread with this plan.
+   3. No, stay in Plan mode
+      Continue planning with the model.
+            ↑/↓ navigate  |  Enter confirm  |  Esc stay in Plan

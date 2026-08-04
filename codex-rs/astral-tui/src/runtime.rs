@@ -15,10 +15,12 @@ use crate::ConversationSurface;
 use crate::PendingInteractionError;
 use crate::PendingInteractionUpdate;
 use crate::PendingInteractions;
+use crate::PlanImplementationRequest;
 use crate::SessionError;
 use crate::SessionState;
 use crate::interactions::RequestObservation;
 use crate::interactions::ResponseOwnership;
+use crate::plan_implementation::PlanImplementationTracker;
 
 /// Effect that one app-server notification had on the active transcript.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,6 +96,7 @@ pub struct AstralRuntime {
     session: AstralSession,
     conversation: ConversationState,
     pending_interactions: PendingInteractions,
+    plan_implementation: PlanImplementationTracker,
 }
 
 impl AstralRuntime {
@@ -107,6 +110,7 @@ impl AstralRuntime {
             session,
             conversation: ConversationState::from_thread(&thread),
             pending_interactions: PendingInteractions::new(thread_id),
+            plan_implementation: PlanImplementationTracker::default(),
         })
     }
 
@@ -126,6 +130,14 @@ impl AstralRuntime {
         &self.pending_interactions
     }
 
+    pub fn plan_implementation_request(&self) -> Option<&PlanImplementationRequest> {
+        self.plan_implementation.request()
+    }
+
+    pub fn dismiss_plan_implementation(&mut self) {
+        self.plan_implementation.clear();
+    }
+
     /// Materialize the one canonical rendered tree consumed by both terminal
     /// viewport modes. Viewport and commit policy remain host concerns.
     pub fn render_surface(&self, options: EntryRenderOptions) -> ConversationSurface {
@@ -136,7 +148,9 @@ impl AstralRuntime {
         &mut self,
         input: Vec<UserInput>,
     ) -> Result<TurnStartResponse, RuntimeError> {
-        Ok(self.session.start_turn(input).await?)
+        let response = self.session.start_turn(input).await?;
+        self.plan_implementation.clear();
+        Ok(response)
     }
 
     pub async fn interrupt(&mut self) -> Result<(), RuntimeError> {
@@ -203,6 +217,12 @@ impl AstralRuntime {
     pub async fn next_event(&mut self) -> Option<RuntimeEvent> {
         loop {
             let event = self.session.next_event().await?;
+            let thread_id = self
+                .session
+                .state()
+                .map(|state| state.thread.id.as_str())
+                .unwrap_or_default();
+            self.plan_implementation.observe_event(thread_id, &event);
             if let Some(event) = apply_event(
                 &mut self.conversation,
                 &mut self.pending_interactions,
