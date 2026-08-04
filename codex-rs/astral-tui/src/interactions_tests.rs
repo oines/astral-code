@@ -85,6 +85,22 @@ fn request_id_is_the_only_pending_identity() {
         Ok(ResponseOwnership::Tracked)
     );
     assert_eq!(
+        pending.observe_request(command_approval(
+            1,
+            "thread-1",
+            "turn-1",
+            "approval-1",
+            "ls -lah",
+        )),
+        RequestObservation::Updated(PendingInteractionUpdate::Refreshed {
+            request_id: RequestId::Integer(1),
+        })
+    );
+    assert_eq!(
+        pending.active().map(super::PendingInteraction::status),
+        Some(PendingInteractionStatus::Responding)
+    );
+    assert_eq!(
         pending.begin_response(&RequestId::Integer(1)),
         Err(PendingInteractionError::AlreadyResponding(
             RequestId::Integer(1)
