@@ -1,0 +1,14 @@
+---
+source: astral-tui/src/prompt_interaction_tests.rs
+expression: buffer_text(&buffer)
+---
+Install Google Calendar? · codex-apps
+ Plan and reference events from your calendar
+ Install connector: Google Calendar
+
+ Setup URL
+ https://apps.example/calendar
+ › 1. Open Install page
+   2. Not now
+   3. Don't suggest this again
+               ↑/↓ navigate  |  Enter confirm  |  Esc cancel

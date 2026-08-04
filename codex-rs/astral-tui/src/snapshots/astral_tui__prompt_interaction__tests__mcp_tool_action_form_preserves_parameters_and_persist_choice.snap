@@ -1,0 +1,13 @@
+---
+source: astral-tui/src/prompt_interaction_tests.rs
+expression: buffer_text(&buffer)
+---
+Run create_event? · codex-apps
+ Allow Calendar to create an event?
+ Title: Roadmap review
+ Calendar: Astral
+ › 1. Run tool
+   2. Allow for this session
+   3. Always allow
+   4. Cancel
+               ↑/↓ navigate  |  Enter confirm  |  Esc cancel

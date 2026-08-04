@@ -290,7 +290,7 @@ impl McpUrlPrompt {
     }
 }
 
-fn validate_external_url(raw: &str) -> Option<String> {
+pub(super) fn validate_external_url(raw: &str) -> Option<String> {
     let parsed = Url::parse(raw).ok()?;
     (parsed.scheme() == "https"
         && parsed.host_str().is_some()

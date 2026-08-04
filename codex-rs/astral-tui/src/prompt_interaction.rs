@@ -20,11 +20,13 @@ use crate::PendingInteractions;
 mod approval;
 mod ask_user;
 mod choice_list;
+mod mcp_action;
 mod mcp_form;
 mod mcp_url;
 
 use approval::ApprovalPrompt;
 use ask_user::AskUserPrompt;
+use mcp_action::McpActionPrompt;
 use mcp_form::McpFormPrompt;
 use mcp_url::McpUrlPrompt;
 
@@ -49,6 +51,7 @@ pub enum PromptInteractionOutcome {
 enum PromptPresenter {
     Approval(ApprovalPrompt),
     AskUser(AskUserPrompt),
+    McpAction(McpActionPrompt),
     McpForm(McpFormPrompt),
     McpUrl(McpUrlPrompt),
 }
@@ -178,6 +181,7 @@ impl PromptPresenter {
         ApprovalPrompt::from_request(request)
             .map(Self::Approval)
             .or_else(|| AskUserPrompt::from_request(request).map(Self::AskUser))
+            .or_else(|| McpActionPrompt::from_request(request).map(Self::McpAction))
             .or_else(|| McpFormPrompt::from_request(request).map(Self::McpForm))
             .or_else(|| McpUrlPrompt::from_request(request).map(Self::McpUrl))
     }
@@ -186,6 +190,7 @@ impl PromptPresenter {
         match self {
             Self::Approval(prompt) => prompt.selected_index(),
             Self::AskUser(_) => 0,
+            Self::McpAction(prompt) => prompt.selected_index(),
             Self::McpForm(prompt) => prompt.selected_index(),
             Self::McpUrl(prompt) => prompt.selected_index(),
         }
@@ -195,6 +200,7 @@ impl PromptPresenter {
         match self {
             Self::Approval(prompt) => prompt.set_selected_index(selected),
             Self::AskUser(_) => {}
+            Self::McpAction(prompt) => prompt.set_selected_index(selected),
             Self::McpForm(prompt) => prompt.set_selected_index(selected),
             Self::McpUrl(prompt) => prompt.set_selected_index(selected),
         }
@@ -204,6 +210,7 @@ impl PromptPresenter {
         match self {
             Self::Approval(prompt) => prompt.desired_height(width, available),
             Self::AskUser(prompt) => prompt.desired_height(width, available),
+            Self::McpAction(prompt) => prompt.desired_height(width, available),
             Self::McpForm(prompt) => prompt.desired_height(width, available),
             Self::McpUrl(prompt) => prompt.desired_height(width, available),
         }
@@ -213,6 +220,7 @@ impl PromptPresenter {
         match self {
             Self::Approval(prompt) => prompt.render(buffer, area, queue_len, responding),
             Self::AskUser(prompt) => prompt.render(buffer, area, queue_len, responding),
+            Self::McpAction(prompt) => prompt.render(buffer, area, queue_len, responding),
             Self::McpForm(prompt) => prompt.render(buffer, area, queue_len, responding),
             Self::McpUrl(prompt) => prompt.render(buffer, area, queue_len, responding),
         }
@@ -222,6 +230,7 @@ impl PromptPresenter {
         match self {
             Self::Approval(prompt) => prompt.handle_key_event(key),
             Self::AskUser(prompt) => prompt.handle_key_event(key),
+            Self::McpAction(prompt) => prompt.handle_key_event(key),
             Self::McpForm(prompt) => prompt.handle_key_event(key),
             Self::McpUrl(prompt) => prompt.handle_key_event(key),
         }
@@ -235,6 +244,7 @@ impl PromptPresenter {
         match self {
             Self::Approval(prompt) => prompt.handle_mouse_event_at(mouse, now),
             Self::AskUser(prompt) => prompt.handle_mouse_event_at(mouse, now),
+            Self::McpAction(prompt) => prompt.handle_mouse_event_at(mouse, now),
             Self::McpForm(prompt) => prompt.handle_mouse_event_at(mouse, now),
             Self::McpUrl(prompt) => prompt.handle_mouse_event_at(mouse, now),
         }
@@ -244,6 +254,7 @@ impl PromptPresenter {
         match self {
             Self::Approval(_) => PromptInteractionOutcome::Unchanged,
             Self::AskUser(prompt) => prompt.handle_paste(text),
+            Self::McpAction(_) => PromptInteractionOutcome::Unchanged,
             Self::McpForm(prompt) => prompt.handle_paste(text),
             Self::McpUrl(_) => PromptInteractionOutcome::Unchanged,
         }
