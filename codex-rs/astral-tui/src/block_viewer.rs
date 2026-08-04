@@ -1,0 +1,307 @@
+//! Fullscreen content viewer over one canonical transcript entry.
+//!
+//! Grok's viewer reads the selected block again on every frame instead of
+//! copying its text when the modal opens. Astral keeps the same invariant:
+//! app-server transcript state remains authoritative while this host owns only
+//! viewport and raw/summary presentation state.
+
+use astral_tui_scrollback::EntryBlock;
+use astral_tui_scrollback::EntryDisplayState;
+use astral_tui_scrollback::ReasoningVisibility;
+use astral_tui_scrollback::TranscriptEntry;
+use astral_tui_scrollback::TranscriptEntryId;
+use crossterm::event::KeyCode;
+use crossterm::event::KeyEvent;
+use crossterm::event::KeyEventKind;
+use crossterm::event::KeyModifiers;
+
+use crate::ConversationState;
+use crate::ModalOutcome;
+use crate::ModalWindow;
+use crate::SurfaceNodeId;
+
+#[path = "block_viewer/render.rs"]
+mod render;
+
+const COPY_SHORTCUT: usize = 0;
+const RAW_SHORTCUT: usize = 1;
+
+/// Result of routing one viewer input event.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BlockViewerOutcome {
+    Unchanged,
+    Changed,
+    Close,
+    Copy(String),
+}
+
+/// Retained interaction state for one selected transcript entry.
+///
+/// The entry itself is deliberately not cloned. Re-rendering resolves the
+/// stable local id against [`ConversationState`], so streaming updates and
+/// resume replacement cannot leave the viewer on stale content.
+#[derive(Debug)]
+pub struct BlockViewerHost {
+    entry_id: TranscriptEntryId,
+    raw: bool,
+    scroll_offset: usize,
+    row_count: usize,
+    content_height: u16,
+    content_width: u16,
+    follow_bottom: bool,
+    modal: ModalWindow,
+}
+
+impl BlockViewerHost {
+    /// Open a normal content viewer for one source entry.
+    ///
+    /// Synthetic verb-group headers retain Enter as their expand/collapse
+    /// action. Opaque reasoning has no displayable body and is rejected here,
+    /// which prevents the empty Thought modal seen in the prototype.
+    pub fn open(conversation: &ConversationState, node: SurfaceNodeId) -> Option<Self> {
+        let SurfaceNodeId::Entry(entry_id) = node else {
+            return None;
+        };
+        let entry = find_entry(conversation, entry_id)?;
+        let block = EntryBlock::from_entry(entry);
+        let display = conversation.entry_display_state(entry_id)?;
+        let raw = reconciled_raw(&block, display, display.raw())?;
+        Some(Self {
+            entry_id,
+            raw,
+            scroll_offset: 0,
+            row_count: 0,
+            content_height: 0,
+            content_width: 1,
+            follow_bottom: matches!(
+                entry.lifecycle(),
+                astral_tui_scrollback::EntryLifecycle::Running { .. }
+            ),
+            modal: ModalWindow::default(),
+        })
+    }
+
+    pub fn entry_id(&self) -> TranscriptEntryId {
+        self.entry_id
+    }
+
+    pub fn raw(&self) -> bool {
+        self.raw
+    }
+
+    /// Whether the canonical entry still exists and has viewer content.
+    pub fn is_available(&self, conversation: &ConversationState) -> bool {
+        find_entry(conversation, self.entry_id).is_some_and(|entry| {
+            let block = EntryBlock::from_entry(entry);
+            conversation
+                .entry_display_state(self.entry_id)
+                .and_then(|display| reconciled_raw(&block, display, self.raw))
+                .is_some()
+        })
+    }
+
+    pub fn handle_key_event(
+        &mut self,
+        key: KeyEvent,
+        conversation: &ConversationState,
+    ) -> BlockViewerOutcome {
+        if key.kind == KeyEventKind::Release {
+            return BlockViewerOutcome::Unchanged;
+        }
+        if self.modal.handle_key_event(key) == ModalOutcome::CloseRequested {
+            return BlockViewerOutcome::Close;
+        }
+        match (key.code, key.modifiers) {
+            (KeyCode::Char('q'), KeyModifiers::NONE)
+            | (KeyCode::Char('f'), KeyModifiers::CONTROL) => BlockViewerOutcome::Close,
+            (KeyCode::Up, KeyModifiers::NONE) | (KeyCode::Char('k'), KeyModifiers::NONE) => {
+                changed(self.scroll_up(1))
+            }
+            (KeyCode::Down, KeyModifiers::NONE) | (KeyCode::Char('j'), KeyModifiers::NONE) => {
+                changed(self.scroll_down(1))
+            }
+            (KeyCode::PageUp, KeyModifiers::NONE) => changed(self.scroll_up(self.page_rows())),
+            (KeyCode::PageDown, KeyModifiers::NONE) | (KeyCode::Char(' '), KeyModifiers::NONE) => {
+                changed(self.scroll_down(self.page_rows()))
+            }
+            (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
+                changed(self.scroll_up(self.half_page_rows()))
+            }
+            (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
+                changed(self.scroll_down(self.half_page_rows()))
+            }
+            (KeyCode::Home, KeyModifiers::NONE) | (KeyCode::Char('g'), KeyModifiers::NONE) => {
+                changed(self.goto_top())
+            }
+            (KeyCode::End, KeyModifiers::NONE)
+            | (KeyCode::Char('G'), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
+                changed(self.goto_bottom())
+            }
+            (KeyCode::Char('r'), KeyModifiers::NONE) if self.supports_raw(conversation) => {
+                self.raw = !self.raw;
+                self.scroll_offset = 0;
+                self.follow_bottom = false;
+                BlockViewerOutcome::Changed
+            }
+            (KeyCode::Char('y'), KeyModifiers::NONE) => self
+                .copy_text(conversation)
+                .map_or(BlockViewerOutcome::Unchanged, BlockViewerOutcome::Copy),
+            _ => BlockViewerOutcome::Unchanged,
+        }
+    }
+
+    fn scroll_up(&mut self, rows: usize) -> bool {
+        let before = self.scroll_offset;
+        self.scroll_offset = self.scroll_offset.saturating_sub(rows);
+        if self.scroll_offset < self.maximum_scroll() {
+            self.follow_bottom = false;
+        }
+        self.scroll_offset != before
+    }
+
+    fn scroll_down(&mut self, rows: usize) -> bool {
+        let before = self.scroll_offset;
+        self.scroll_offset = self
+            .scroll_offset
+            .saturating_add(rows)
+            .min(self.maximum_scroll());
+        self.follow_bottom = self.scroll_offset == self.maximum_scroll();
+        self.scroll_offset != before
+    }
+
+    fn goto_top(&mut self) -> bool {
+        let changed = self.scroll_offset != 0;
+        self.scroll_offset = 0;
+        self.follow_bottom = false;
+        changed
+    }
+
+    fn goto_bottom(&mut self) -> bool {
+        let maximum = self.maximum_scroll();
+        let changed = self.scroll_offset != maximum || !self.follow_bottom;
+        self.scroll_offset = maximum;
+        self.follow_bottom = true;
+        changed
+    }
+
+    fn maximum_scroll(&self) -> usize {
+        self.row_count
+            .saturating_sub(usize::from(self.content_height))
+    }
+
+    fn page_rows(&self) -> usize {
+        usize::from(self.content_height).saturating_sub(1).max(1)
+    }
+
+    fn half_page_rows(&self) -> usize {
+        (usize::from(self.content_height) / 2).max(1)
+    }
+
+    fn supports_raw(&self, conversation: &ConversationState) -> bool {
+        let Some(entry) = find_entry(conversation, self.entry_id) else {
+            return false;
+        };
+        let block = EntryBlock::from_entry(entry);
+        conversation
+            .entry_display_state(self.entry_id)
+            .is_some_and(|display| supports_raw(&block, display))
+    }
+
+    fn reconcile(&mut self, conversation: &ConversationState) -> bool {
+        let Some(entry) = find_entry(conversation, self.entry_id) else {
+            return false;
+        };
+        let block = EntryBlock::from_entry(entry);
+        let Some(display) = conversation.entry_display_state(self.entry_id) else {
+            return false;
+        };
+        let Some(raw) = reconciled_raw(&block, display, self.raw) else {
+            return false;
+        };
+        self.raw = raw;
+        true
+    }
+}
+
+fn find_entry(
+    conversation: &ConversationState,
+    entry_id: TranscriptEntryId,
+) -> Option<&TranscriptEntry> {
+    conversation
+        .transcript()
+        .turns()
+        .iter()
+        .flat_map(astral_tui_scrollback::TranscriptTurn::entries)
+        .find(|entry| entry.id() == entry_id)
+}
+
+fn supports_raw(block: &EntryBlock<'_>, mut display: EntryDisplayState) -> bool {
+    match block {
+        EntryBlock::Reasoning(reasoning) => {
+            reasoning.has_visible_body(ReasoningVisibility::Summary)
+                && reasoning
+                    .content()
+                    .iter()
+                    .any(|part| !part.trim().is_empty())
+        }
+        EntryBlock::User { .. }
+        | EntryBlock::Assistant { .. }
+        | EntryBlock::ProposedPlan { .. }
+        | EntryBlock::ContextCompaction(_)
+        | EntryBlock::CollabAgentToolCall(_)
+        | EntryBlock::DynamicToolCall(_)
+        | EntryBlock::McpToolCall(_)
+        | EntryBlock::WebSearch(_)
+        | EntryBlock::ProtocolItem { .. } => display.toggle_raw(block),
+    }
+}
+
+fn reconciled_raw(
+    block: &EntryBlock<'_>,
+    display: EntryDisplayState,
+    requested_raw: bool,
+) -> Option<bool> {
+    match block {
+        EntryBlock::Reasoning(reasoning) => {
+            if !reasoning.has_visible_body(ReasoningVisibility::Raw) {
+                return None;
+            }
+            let summary_visible = reasoning.has_visible_body(ReasoningVisibility::Summary);
+            let raw_visible = reasoning
+                .content()
+                .iter()
+                .any(|part| !part.trim().is_empty());
+            Some(match (summary_visible, raw_visible) {
+                (false, true) => true,
+                (true, false) => false,
+                (true, true) => requested_raw,
+                (false, false) => return None,
+            })
+        }
+        EntryBlock::User { .. }
+        | EntryBlock::Assistant { .. }
+        | EntryBlock::ProposedPlan { .. }
+        | EntryBlock::ContextCompaction(_)
+        | EntryBlock::CollabAgentToolCall(_)
+        | EntryBlock::DynamicToolCall(_)
+        | EntryBlock::McpToolCall(_)
+        | EntryBlock::WebSearch(_)
+        | EntryBlock::ProtocolItem { .. } => Some(if supports_raw(block, display) {
+            requested_raw
+        } else {
+            display.raw()
+        }),
+    }
+}
+
+fn changed(changed: bool) -> BlockViewerOutcome {
+    if changed {
+        BlockViewerOutcome::Changed
+    } else {
+        BlockViewerOutcome::Unchanged
+    }
+}
+
+#[cfg(test)]
+#[path = "block_viewer_tests.rs"]
+mod tests;
