@@ -20,6 +20,21 @@ fn id_at(transcript: &HistoryTranscript, index: usize) -> HistoryEntryId {
         .expect("entry id")
 }
 
+fn entry_snapshot(transcript: &HistoryTranscript) -> Vec<(HistoryEntryId, String)> {
+    transcript
+        .entries()
+        .map(|(id, cell)| {
+            let text = cell
+                .display_lines(/*width*/ 80)
+                .into_iter()
+                .map(|line| line.to_string())
+                .collect::<Vec<_>>()
+                .join("\n");
+            (id, text)
+        })
+        .collect()
+}
+
 #[test]
 fn consolidation_retains_first_identity_and_surrounding_ids() {
     let mut transcript: HistoryTranscript = ["before", "part 1", "part 2", "after"]
@@ -34,26 +49,37 @@ fn consolidation_retains_first_identity_and_surrounding_ids() {
 
     assert_eq!(consolidated, first_part);
     assert_eq!(
-        transcript.entries().map(|(id, _)| id).collect::<Vec<_>>(),
-        vec![before, first_part, after]
+        entry_snapshot(&transcript),
+        vec![
+            (before, "before".to_string()),
+            (first_part, "final".to_string()),
+            (after, "after".to_string()),
+        ]
     );
 }
 
 #[test]
 fn structural_mutations_keep_cells_and_ids_aligned() {
     let mut transcript: HistoryTranscript = ["one", "two", "three"].into_iter().map(cell).collect();
+    let original = entry_snapshot(&transcript);
 
-    transcript.remove(1);
+    let removed = transcript.remove(1);
+    assert_eq!(removed.display_lines(/*width*/ 80), vec![Line::from("two")]);
+    assert_eq!(
+        entry_snapshot(&transcript),
+        vec![original[0].clone(), original[2].clone()]
+    );
+
     transcript.truncate(1);
-    let retained = id_at(&transcript, 0);
+    assert_eq!(entry_snapshot(&transcript), vec![original[0].clone()]);
+
     let appended = transcript.push(cell("four"));
 
-    assert_eq!(transcript.len(), 2);
     assert_eq!(
-        transcript.entries().map(|(id, _)| id).collect::<Vec<_>>(),
-        vec![retained, appended]
+        entry_snapshot(&transcript),
+        vec![original[0].clone(), (appended, "four".to_string())]
     );
-    assert!(appended.value() > retained.value());
+    assert!(!original.iter().any(|(id, _)| *id == appended));
 }
 
 #[test]
@@ -64,5 +90,5 @@ fn clear_does_not_reuse_presentation_identity() {
     transcript.clear();
     let new = transcript.push(cell("new"));
 
-    assert!(new.value() > old.value());
+    assert_ne!(new, old);
 }
