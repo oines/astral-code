@@ -18,8 +18,10 @@ use crate::PendingInteractionStatus;
 use crate::PendingInteractions;
 
 mod approval;
+mod ask_user;
 
 use approval::ApprovalPrompt;
+use ask_user::AskUserPrompt;
 
 /// One response ready for [`AstralRuntime::resolve_server_request`].
 #[derive(Debug, Clone, PartialEq)]
@@ -39,6 +41,7 @@ pub enum PromptInteractionOutcome {
 
 enum PromptPresenter {
     Approval(ApprovalPrompt),
+    AskUser(AskUserPrompt),
 }
 
 /// Retained presenter for the front item in [`PendingInteractions`].
@@ -103,10 +106,7 @@ impl PromptInteractionHost {
             let previous_selection = same_request
                 .then(|| self.presenter.as_ref().map(PromptPresenter::selected_index))
                 .flatten();
-            self.presenter = source
-                .as_ref()
-                .and_then(ApprovalPrompt::from_request)
-                .map(PromptPresenter::Approval);
+            self.presenter = source.as_ref().and_then(PromptPresenter::from_request);
             if let Some(selected) = previous_selection
                 && let Some(presenter) = self.presenter.as_mut()
             {
@@ -151,36 +151,58 @@ impl PromptInteractionHost {
                 presenter.handle_mouse_event_at(mouse, now)
             })
     }
+
+    pub fn handle_paste(&mut self, text: &str) -> PromptInteractionOutcome {
+        if self.status == Some(PendingInteractionStatus::Responding) {
+            return PromptInteractionOutcome::Unchanged;
+        }
+        self.presenter
+            .as_mut()
+            .map_or(PromptInteractionOutcome::Unchanged, |presenter| {
+                presenter.handle_paste(text)
+            })
+    }
 }
 
 impl PromptPresenter {
-    fn desired_height(&self, width: u16, available: u16) -> u16 {
-        match self {
-            Self::Approval(prompt) => prompt.desired_height(width, available),
-        }
+    fn from_request(request: &ServerRequest) -> Option<Self> {
+        ApprovalPrompt::from_request(request)
+            .map(Self::Approval)
+            .or_else(|| AskUserPrompt::from_request(request).map(Self::AskUser))
     }
 
     fn selected_index(&self) -> usize {
         match self {
             Self::Approval(prompt) => prompt.selected_index(),
+            Self::AskUser(_) => 0,
         }
     }
 
     fn set_selected_index(&mut self, selected: usize) {
         match self {
             Self::Approval(prompt) => prompt.set_selected_index(selected),
+            Self::AskUser(_) => {}
+        }
+    }
+
+    fn desired_height(&self, width: u16, available: u16) -> u16 {
+        match self {
+            Self::Approval(prompt) => prompt.desired_height(width, available),
+            Self::AskUser(prompt) => prompt.desired_height(width, available),
         }
     }
 
     fn render(&mut self, buffer: &mut Buffer, area: Rect, queue_len: usize, responding: bool) {
         match self {
             Self::Approval(prompt) => prompt.render(buffer, area, queue_len, responding),
+            Self::AskUser(prompt) => prompt.render(buffer, area, queue_len, responding),
         }
     }
 
     fn handle_key_event(&mut self, key: KeyEvent) -> PromptInteractionOutcome {
         match self {
             Self::Approval(prompt) => prompt.handle_key_event(key),
+            Self::AskUser(prompt) => prompt.handle_key_event(key),
         }
     }
 
@@ -191,6 +213,14 @@ impl PromptPresenter {
     ) -> PromptInteractionOutcome {
         match self {
             Self::Approval(prompt) => prompt.handle_mouse_event_at(mouse, now),
+            Self::AskUser(prompt) => prompt.handle_mouse_event_at(mouse, now),
+        }
+    }
+
+    fn handle_paste(&mut self, text: &str) -> PromptInteractionOutcome {
+        match self {
+            Self::Approval(_) => PromptInteractionOutcome::Unchanged,
+            Self::AskUser(prompt) => prompt.handle_paste(text),
         }
     }
 }
