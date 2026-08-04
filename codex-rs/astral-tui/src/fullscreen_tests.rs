@@ -110,11 +110,23 @@ fn grok_key_and_double_click_actions_share_one_retained_surface() {
     host.render(&mut buffer);
     insta::assert_snapshot!(buffer_text(&buffer, area));
 
+    assert_eq!(
+        press(&mut host, &mut conversation, KeyCode::Char('/')),
+        FullscreenOutcome::OpenSearch
+    );
     host.set_key_mode(ScrollbackKeyMode::Simple);
     let key = KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE);
     assert_eq!(
         host.handle_key_event(key, &mut conversation),
         FullscreenOutcome::ForwardToComposer(key)
+    );
+
+    let mut empty = ConversationState::from_thread(&thread(Vec::new()));
+    let mut empty_host = FullscreenHost::new(&empty, area, ScrollbackKeyMode::Vim);
+    let slash = KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE);
+    assert_eq!(
+        empty_host.handle_key_event(slash, &mut empty),
+        FullscreenOutcome::ForwardToComposer(slash)
     );
 
     let short_area = Rect::new(0, 0, 30, 3);
@@ -165,6 +177,7 @@ fn click(
         host.handle_mouse_event_at(down, now, conversation),
         FullscreenOutcome::Unchanged
     );
+    host.refresh_surface(conversation, host.area);
     assert_eq!(host.handle_mouse_event_at(up, now, conversation), changed());
 }
 
