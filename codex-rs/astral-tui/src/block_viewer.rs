@@ -14,10 +14,6 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
-use crossterm::event::MouseButton;
-use crossterm::event::MouseEvent;
-use crossterm::event::MouseEventKind;
-use ratatui::layout::Rect;
 
 use crate::ConversationState;
 use crate::ModalOutcome;
@@ -29,7 +25,6 @@ mod render;
 
 const COPY_SHORTCUT: usize = 0;
 const RAW_SHORTCUT: usize = 1;
-const WHEEL_ROWS: usize = 3;
 
 /// Result of routing one viewer input event.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,15 +44,11 @@ pub enum BlockViewerOutcome {
 pub struct BlockViewerHost {
     entry_id: TranscriptEntryId,
     raw: bool,
-    supports_raw: bool,
     scroll_offset: usize,
     row_count: usize,
     content_height: u16,
     content_width: u16,
     follow_bottom: bool,
-    content_area: Option<Rect>,
-    scrollbar_area: Option<Rect>,
-    scrollbar_dragging: bool,
     modal: ModalWindow,
 }
 
@@ -74,12 +65,10 @@ impl BlockViewerHost {
         let entry = find_entry(conversation, entry_id)?;
         let block = EntryBlock::from_entry(entry);
         let display = conversation.entry_display_state(entry_id)?;
-        let supports_raw = supports_raw(&block, display);
-        let raw = initial_raw(&block, display)?;
+        let raw = reconciled_raw(&block, display, display.raw())?;
         Some(Self {
             entry_id,
             raw,
-            supports_raw,
             scroll_offset: 0,
             row_count: 0,
             content_height: 0,
@@ -88,9 +77,6 @@ impl BlockViewerHost {
                 entry.lifecycle(),
                 astral_tui_scrollback::EntryLifecycle::Running { .. }
             ),
-            content_area: None,
-            scrollbar_area: None,
-            scrollbar_dragging: false,
             modal: ModalWindow::default(),
         })
     }
@@ -109,7 +95,7 @@ impl BlockViewerHost {
             let block = EntryBlock::from_entry(entry);
             conversation
                 .entry_display_state(self.entry_id)
-                .and_then(|display| initial_raw(&block, display))
+                .and_then(|display| reconciled_raw(&block, display, self.raw))
                 .is_some()
         })
     }
@@ -151,7 +137,7 @@ impl BlockViewerHost {
             | (KeyCode::Char('G'), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
                 changed(self.goto_bottom())
             }
-            (KeyCode::Char('r'), KeyModifiers::NONE) if self.supports_raw => {
+            (KeyCode::Char('r'), KeyModifiers::NONE) if self.supports_raw(conversation) => {
                 self.raw = !self.raw;
                 self.scroll_offset = 0;
                 self.follow_bottom = false;
@@ -160,52 +146,6 @@ impl BlockViewerHost {
             (KeyCode::Char('y'), KeyModifiers::NONE) => self
                 .copy_text(conversation)
                 .map_or(BlockViewerOutcome::Unchanged, BlockViewerOutcome::Copy),
-            _ => BlockViewerOutcome::Unchanged,
-        }
-    }
-
-    pub fn handle_mouse_event(
-        &mut self,
-        mouse: MouseEvent,
-        conversation: &ConversationState,
-    ) -> BlockViewerOutcome {
-        match self.modal.handle_mouse_event(mouse) {
-            ModalOutcome::CloseRequested => return BlockViewerOutcome::Close,
-            ModalOutcome::ShortcutActivated(COPY_SHORTCUT) => {
-                return self
-                    .copy_text(conversation)
-                    .map_or(BlockViewerOutcome::Unchanged, BlockViewerOutcome::Copy);
-            }
-            ModalOutcome::ShortcutActivated(RAW_SHORTCUT) if self.supports_raw => {
-                self.raw = !self.raw;
-                self.scroll_offset = 0;
-                self.follow_bottom = false;
-                return BlockViewerOutcome::Changed;
-            }
-            ModalOutcome::Handled | ModalOutcome::TabChanged(_) => {
-                return BlockViewerOutcome::Changed;
-            }
-            ModalOutcome::ShortcutActivated(_) | ModalOutcome::Unhandled => {}
-        }
-
-        match mouse.kind {
-            MouseEventKind::ScrollUp if self.pointer_in_content(mouse) => {
-                changed(self.scroll_up(WHEEL_ROWS))
-            }
-            MouseEventKind::ScrollDown if self.pointer_in_content(mouse) => {
-                changed(self.scroll_down(WHEEL_ROWS))
-            }
-            MouseEventKind::Down(MouseButton::Left) if self.pointer_in_scrollbar(mouse) => {
-                self.scrollbar_dragging = true;
-                changed(self.apply_scrollbar_row(mouse.row))
-            }
-            MouseEventKind::Drag(MouseButton::Left) if self.scrollbar_dragging => {
-                changed(self.apply_scrollbar_row(mouse.row))
-            }
-            MouseEventKind::Up(MouseButton::Left) if self.scrollbar_dragging => {
-                self.scrollbar_dragging = false;
-                changed(self.apply_scrollbar_row(mouse.row))
-            }
             _ => BlockViewerOutcome::Unchanged,
         }
     }
@@ -257,42 +197,29 @@ impl BlockViewerHost {
         (usize::from(self.content_height) / 2).max(1)
     }
 
-    fn pointer_in_content(&self, mouse: MouseEvent) -> bool {
-        self.content_area.is_some_and(|area| contains(area, mouse))
-            || self.pointer_in_scrollbar(mouse)
-    }
-
-    fn pointer_in_scrollbar(&self, mouse: MouseEvent) -> bool {
-        self.scrollbar_area
-            .is_some_and(|area| contains(area, mouse))
-    }
-
-    fn apply_scrollbar_row(&mut self, row: u16) -> bool {
-        let Some(area) = self.scrollbar_area else {
+    fn supports_raw(&self, conversation: &ConversationState) -> bool {
+        let Some(entry) = find_entry(conversation, self.entry_id) else {
             return false;
         };
-        let height = usize::from(area.height);
-        let maximum = self.maximum_scroll();
-        if height == 0 || maximum == 0 {
+        let block = EntryBlock::from_entry(entry);
+        conversation
+            .entry_display_state(self.entry_id)
+            .is_some_and(|display| supports_raw(&block, display))
+    }
+
+    fn reconcile(&mut self, conversation: &ConversationState) -> bool {
+        let Some(entry) = find_entry(conversation, self.entry_id) else {
             return false;
-        }
-        let click = usize::from(
-            row.saturating_sub(area.y)
-                .min(area.height.saturating_sub(1)),
-        );
-        let thumb_height = height
-            .saturating_mul(height)
-            .div_ceil(self.row_count)
-            .clamp(1, height);
-        let travel = height.saturating_sub(thumb_height);
-        let target = maximum
-            .saturating_mul(click.saturating_sub(thumb_height / 2).min(travel))
-            .checked_div(travel)
-            .unwrap_or(0);
-        let changed = self.scroll_offset != target;
-        self.scroll_offset = target;
-        self.follow_bottom = target == maximum;
-        changed
+        };
+        let block = EntryBlock::from_entry(entry);
+        let Some(display) = conversation.entry_display_state(self.entry_id) else {
+            return false;
+        };
+        let Some(raw) = reconciled_raw(&block, display, self.raw) else {
+            return false;
+        };
+        self.raw = raw;
+        true
     }
 }
 
@@ -329,7 +256,11 @@ fn supports_raw(block: &EntryBlock<'_>, mut display: EntryDisplayState) -> bool 
     }
 }
 
-fn initial_raw(block: &EntryBlock<'_>, display: EntryDisplayState) -> Option<bool> {
+fn reconciled_raw(
+    block: &EntryBlock<'_>,
+    display: EntryDisplayState,
+    requested_raw: bool,
+) -> Option<bool> {
     match block {
         EntryBlock::Reasoning(reasoning) => {
             if !reasoning.has_visible_body(ReasoningVisibility::Raw) {
@@ -340,7 +271,12 @@ fn initial_raw(block: &EntryBlock<'_>, display: EntryDisplayState) -> Option<boo
                 .content()
                 .iter()
                 .any(|part| !part.trim().is_empty());
-            Some(display.raw() || (!summary_visible && raw_visible))
+            Some(match (summary_visible, raw_visible) {
+                (false, true) => true,
+                (true, false) => false,
+                (true, true) => requested_raw,
+                (false, false) => return None,
+            })
         }
         EntryBlock::User { .. }
         | EntryBlock::Assistant { .. }
@@ -350,15 +286,12 @@ fn initial_raw(block: &EntryBlock<'_>, display: EntryDisplayState) -> Option<boo
         | EntryBlock::DynamicToolCall(_)
         | EntryBlock::McpToolCall(_)
         | EntryBlock::WebSearch(_)
-        | EntryBlock::ProtocolItem { .. } => Some(display.raw()),
+        | EntryBlock::ProtocolItem { .. } => Some(if supports_raw(block, display) {
+            requested_raw
+        } else {
+            display.raw()
+        }),
     }
-}
-
-fn contains(area: Rect, mouse: MouseEvent) -> bool {
-    mouse.column >= area.x
-        && mouse.column < area.right()
-        && mouse.row >= area.y
-        && mouse.row < area.bottom()
 }
 
 fn changed(changed: bool) -> BlockViewerOutcome {
