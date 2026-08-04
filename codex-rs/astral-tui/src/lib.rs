@@ -5,6 +5,7 @@
 //! app-server session and event stream.
 
 mod conversation;
+mod fullscreen;
 mod runtime;
 mod session;
 mod surface;
@@ -14,6 +15,9 @@ mod viewport;
 pub use conversation::ConversationState;
 pub use conversation::EntryDisplayAction;
 pub use conversation::VerbGroupDisplayAction;
+pub use fullscreen::FullscreenHost;
+pub use fullscreen::FullscreenOutcome;
+pub use fullscreen::ScrollbackKeyMode;
 pub use runtime::AstralRuntime;
 pub use runtime::RuntimeError;
 pub use runtime::RuntimeEvent;
