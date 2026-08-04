@@ -11,14 +11,23 @@ use codex_utils_absolute_path::AbsolutePathBuf;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
+use ratatui::text::Line;
 
 use super::SurfaceRenderer;
 use crate::ConversationState;
 use crate::ConversationSurface;
+use crate::MaterializedSurfaceEntry;
 use crate::ScrollDirection;
+use crate::SurfaceEntryPresentation;
+use crate::SurfaceEntrySpacing;
 use crate::SurfaceNodeId;
 use crate::SurfaceViewport;
+use astral_tui_scrollback::DisplayMode;
+use astral_tui_scrollback::EntryLifecycle;
 use astral_tui_scrollback::EntryRenderOptions;
+use astral_tui_scrollback::LineJoiner;
+use astral_tui_scrollback::MarkdownLine;
+use astral_tui_scrollback::TranscriptEntryId;
 
 #[test]
 fn clipped_surface_chrome_matches_grok_layering() {
@@ -61,6 +70,91 @@ fn clipped_surface_chrome_matches_grok_layering() {
             .iter()
             .all(|cell| { cell.style().bg.is_none() || cell.style().bg == Some(Color::Reset) })
     );
+}
+
+#[test]
+fn ungrouped_entries_do_not_share_selected_chrome() {
+    let presentation = SurfaceEntryPresentation {
+        lifecycle: EntryLifecycle::Restored,
+        mode: DisplayMode::Collapsed,
+        foldable: false,
+        groupable: true,
+        turn_settled: true,
+        presentation_stable: true,
+    };
+    let entries = ["first", "selected", "last"]
+        .into_iter()
+        .enumerate()
+        .map(|(index, text)| {
+            MaterializedSurfaceEntry::ungrouped(
+                TranscriptEntryId::new(index as u64),
+                SurfaceEntrySpacing::Continue,
+                presentation,
+                vec![MarkdownLine {
+                    line: Line::from(text),
+                    joiner_to_previous: LineJoiner::HardBreak,
+                    links: Vec::new(),
+                }],
+            )
+        });
+    let area = Rect::new(0, 0, 24, 5);
+    let surface = ConversationSurface::from_materialized(21, entries);
+    let selected = SurfaceNodeId::Entry(TranscriptEntryId::new(1));
+    let mut viewport = SurfaceViewport::default();
+    viewport.prepare(&surface, area.height);
+    assert!(viewport.select_node(&surface, Some(selected)));
+
+    let mut buffer = Buffer::empty(area);
+    SurfaceRenderer::default().render(area, &mut buffer, &surface, &viewport);
+
+    insta::assert_snapshot!(buffer_text(&buffer, area), @"
+ ❙ first
+│❙ selected           │
+ ❙ last
+");
+}
+
+#[test]
+fn selected_group_chrome_stops_at_adjacent_group_boundary() {
+    let presentation = SurfaceEntryPresentation {
+        lifecycle: EntryLifecycle::Restored,
+        mode: DisplayMode::Collapsed,
+        foldable: false,
+        groupable: true,
+        turn_settled: true,
+        presentation_stable: true,
+    };
+    let entries = [("A", "first"), ("A", "selected"), ("B", "last")]
+        .into_iter()
+        .enumerate()
+        .map(|(index, (group, text))| {
+            MaterializedSurfaceEntry::new(
+                TranscriptEntryId::new(index as u64),
+                group,
+                SurfaceEntrySpacing::Continue,
+                presentation,
+                vec![MarkdownLine {
+                    line: Line::from(text),
+                    joiner_to_previous: LineJoiner::HardBreak,
+                    links: Vec::new(),
+                }],
+            )
+        });
+    let area = Rect::new(0, 0, 24, 5);
+    let surface = ConversationSurface::from_materialized(21, entries);
+    let selected = SurfaceNodeId::Entry(TranscriptEntryId::new(1));
+    let mut viewport = SurfaceViewport::default();
+    viewport.prepare(&surface, area.height);
+    assert!(viewport.select_node(&surface, Some(selected)));
+
+    let mut buffer = Buffer::empty(area);
+    SurfaceRenderer::default().render(area, &mut buffer, &surface, &viewport);
+
+    insta::assert_snapshot!(buffer_text(&buffer, area), @"
+│❙ first              │
+│❙ selected           │
+ ❙ last
+");
 }
 
 fn buffer_text(buffer: &Buffer, area: Rect) -> String {

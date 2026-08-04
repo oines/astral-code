@@ -365,7 +365,7 @@ impl FullscreenHost {
         };
         let previous_row = node.rows().start;
         let before = node.display_mode();
-        let turn_id = node.turn_id().to_string();
+        let presentation_group = node.presentation_group().map(str::to_string);
         let changed = match node_id {
             SurfaceNodeId::Entry(entry_id) => {
                 let action = match action {
@@ -377,6 +377,9 @@ impl FullscreenHost {
                 conversation.apply_entry_display_action(entry_id, action)
             }
             SurfaceNodeId::VerbGroup(anchor) => {
+                let Some(turn_id) = presentation_group.as_deref() else {
+                    return false;
+                };
                 let action = match action {
                     NodeDisplayAction::Toggle => VerbGroupDisplayAction::Toggle,
                     NodeDisplayAction::Collapse => VerbGroupDisplayAction::Collapse,
@@ -384,7 +387,7 @@ impl FullscreenHost {
                     NodeDisplayAction::ToggleRaw => return false,
                 };
                 conversation
-                    .apply_verb_group_display_action(&turn_id, anchor, action)
+                    .apply_verb_group_display_action(turn_id, anchor, action)
                     .is_some_and(|after| after != before)
             }
         };

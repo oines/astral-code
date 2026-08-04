@@ -21,6 +21,12 @@ use codex_app_server_protocol::TurnStatus;
 
 use crate::ConversationState;
 
+#[path = "surface/materialized.rs"]
+mod materialized;
+
+pub use materialized::MaterializedSurfaceEntry;
+pub use materialized::SurfaceEntrySpacing;
+
 /// Stable identity shared by viewport anchors, keyboard selection, and mouse
 /// hit testing. Synthetic group headers have their own namespace, so they do
 /// not collide with the source entry that anchors the group.
@@ -92,37 +98,11 @@ pub struct SurfaceEntryPresentation {
     pub presentation_stable: bool,
 }
 
-/// One stable, ordered entry already rendered by an authoritative transcript
-/// projector.
-#[derive(Debug, Clone, PartialEq)]
-pub struct MaterializedSurfaceEntry {
-    id: TranscriptEntryId,
-    turn_id: String,
-    presentation: SurfaceEntryPresentation,
-    rendered: RenderedEntry,
-}
-
-impl MaterializedSurfaceEntry {
-    pub fn new(
-        id: TranscriptEntryId,
-        turn_id: impl Into<String>,
-        presentation: SurfaceEntryPresentation,
-        lines: Vec<MarkdownLine>,
-    ) -> Self {
-        Self {
-            id,
-            turn_id: turn_id.into(),
-            presentation,
-            rendered: RenderedEntry::from_lines(lines),
-        }
-    }
-}
-
 /// One ordered, width-resolved conversation node.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SurfaceNode {
     id: SurfaceNodeId,
-    turn_id: String,
+    presentation_group: Option<String>,
     kind: SurfaceNodeKind,
     rows: Range<usize>,
     gap_after: usize,
@@ -134,8 +114,9 @@ impl SurfaceNode {
         self.id
     }
 
-    pub fn turn_id(&self) -> &str {
-        &self.turn_id
+    /// Source-backed identity used only for view-time grouping.
+    pub fn presentation_group(&self) -> Option<&str> {
+        self.presentation_group.as_deref()
     }
 
     pub fn kind(&self) -> &SurfaceNodeKind {
@@ -246,7 +227,8 @@ impl ConversationSurface {
                         .collect();
                     surface.push(
                         SurfaceNodeId::VerbGroup(group.anchor()),
-                        turn.id(),
+                        Some(turn.id()),
+                        GapPolicy::Automatic,
                         SurfaceNodeKind::VerbGroup {
                             mode,
                             members,
@@ -274,7 +256,8 @@ impl ConversationSurface {
                 };
                 surface.push(
                     SurfaceNodeId::Entry(entry.id()),
-                    turn.id(),
+                    Some(turn.id()),
+                    GapPolicy::Automatic,
                     SurfaceNodeKind::Entry {
                         lifecycle: entry.lifecycle(),
                         mode: display.mode(),
@@ -306,7 +289,8 @@ impl ConversationSurface {
             let presentation = entry.presentation;
             surface.push(
                 SurfaceNodeId::Entry(entry.id),
-                &entry.turn_id,
+                entry.presentation_group.as_deref(),
+                GapPolicy::Explicit(entry.spacing),
                 SurfaceNodeKind::Entry {
                     lifecycle: presentation.lifecycle,
                     mode: presentation.mode,
@@ -420,7 +404,8 @@ impl ConversationSurface {
     fn push(
         &mut self,
         id: SurfaceNodeId,
-        turn_id: &str,
+        presentation_group: Option<&str>,
+        gap_policy: GapPolicy,
         kind: SurfaceNodeKind,
         rendered: RenderedEntry,
     ) {
@@ -428,24 +413,32 @@ impl ConversationSurface {
             return;
         }
         if let Some(previous) = self.nodes.last_mut() {
-            let both_groupable = previous.is_groupable()
-                && match &kind {
-                    SurfaceNodeKind::Entry { groupable, .. } => *groupable,
-                    SurfaceNodeKind::VerbGroup { .. } => true,
-                };
-            let both_collapsed = previous.display_mode() == DisplayMode::Collapsed
-                && match &kind {
-                    SurfaceNodeKind::Entry { mode, .. }
-                    | SurfaceNodeKind::VerbGroup { mode, .. } => *mode == DisplayMode::Collapsed,
-                };
-            previous.gap_after = usize::from(!(both_groupable && both_collapsed));
+            previous.gap_after = match gap_policy {
+                GapPolicy::Automatic => {
+                    let both_groupable = previous.is_groupable()
+                        && match &kind {
+                            SurfaceNodeKind::Entry { groupable, .. } => *groupable,
+                            SurfaceNodeKind::VerbGroup { .. } => true,
+                        };
+                    let both_collapsed = previous.display_mode() == DisplayMode::Collapsed
+                        && match &kind {
+                            SurfaceNodeKind::Entry { mode, .. }
+                            | SurfaceNodeKind::VerbGroup { mode, .. } => {
+                                *mode == DisplayMode::Collapsed
+                            }
+                        };
+                    usize::from(!(both_groupable && both_collapsed))
+                }
+                GapPolicy::Explicit(SurfaceEntrySpacing::Separate) => 1,
+                GapPolicy::Explicit(SurfaceEntrySpacing::Continue) => 0,
+            };
             self.row_count = self.row_count.saturating_add(previous.gap_after);
         }
         let start = self.row_count;
         self.row_count = self.row_count.saturating_add(rendered.lines().len());
         self.nodes.push(SurfaceNode {
             id,
-            turn_id: turn_id.to_string(),
+            presentation_group: presentation_group.map(str::to_string),
             kind,
             rows: start..self.row_count,
             gap_after: 0,
@@ -480,6 +473,12 @@ impl ConversationSurface {
             (row < node.rows.end.saturating_add(node.gap_after)).then_some(node)
         })
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum GapPolicy {
+    Automatic,
+    Explicit(SurfaceEntrySpacing),
 }
 
 #[cfg(test)]
