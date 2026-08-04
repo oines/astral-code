@@ -77,8 +77,10 @@ impl HistoryTranscript {
         self.ids.iter().copied().zip(&self.cells)
     }
 
-    pub(crate) fn clone_cells(&self) -> Vec<Arc<dyn HistoryCell>> {
-        self.entries().map(|(_, cell)| cell.clone()).collect()
+    pub(crate) fn clone_entries(&self) -> Vec<(HistoryEntryId, Arc<dyn HistoryCell>)> {
+        self.entries()
+            .map(|(id, cell)| (id, cell.clone()))
+            .collect()
     }
 
     fn allocate_id(&mut self) -> HistoryEntryId {

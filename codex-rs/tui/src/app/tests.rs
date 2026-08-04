@@ -5224,7 +5224,7 @@ async fn queued_rollback_syncs_overlay_and_clears_deferred_history() {
     ]
     .into();
     app.overlay = Some(Overlay::new_transcript(
-        app.transcript_cells.clone_cells(),
+        app.transcript_cells.clone_entries(),
         app.keymap.pager.clone(),
     ));
     app.deferred_history_lines = vec![Line::from("stale buffered line").into()];
@@ -5787,7 +5787,7 @@ async fn clear_only_ui_reset_preserves_chat_session_state() {
     }) as Arc<dyn HistoryCell>]
     .into();
     app.overlay = Some(Overlay::new_transcript(
-        app.transcript_cells.clone_cells(),
+        app.transcript_cells.clone_entries(),
         crate::keymap::RuntimeKeymap::defaults().pager,
     ));
     app.deferred_history_lines = vec![Line::from("stale buffered line").into()];

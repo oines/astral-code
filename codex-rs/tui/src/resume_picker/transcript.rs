@@ -3,10 +3,10 @@ use std::sync::Arc;
 use crate::app_server_session::AppServerSession;
 use crate::git_action_directives::parse_assistant_markdown;
 use crate::history_cell::AgentMarkdownCell;
-use crate::history_cell::HistoryCell;
 use crate::history_cell::PlainHistoryCell;
 use crate::history_cell::ReasoningSummaryCell;
 use crate::history_cell::UserHistoryCell;
+use crate::history_transcript::HistoryTranscript;
 use codex_app_server_protocol::Thread;
 use codex_app_server_protocol::ThreadItem;
 use codex_protocol::ThreadId;
@@ -14,7 +14,7 @@ use codex_protocol::items::UserMessageItem;
 use ratatui::style::Stylize as _;
 use ratatui::text::Line;
 
-pub(crate) type TranscriptCells = Vec<Arc<dyn HistoryCell>>;
+pub(crate) type TranscriptCells = HistoryTranscript;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum RawReasoningVisibility {
@@ -42,7 +42,7 @@ pub(crate) fn thread_to_transcript_cells(
     raw_reasoning_visibility: RawReasoningVisibility,
 ) -> TranscriptCells {
     let cwd = thread.cwd.as_path();
-    let mut cells: TranscriptCells = Vec::new();
+    let mut cells = TranscriptCells::default();
     for item in thread.turns.iter().flat_map(|turn| turn.items.iter()) {
         match item {
             ThreadItem::UserMessage {

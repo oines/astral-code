@@ -34,10 +34,10 @@ impl App {
         // source-backed cell during consolidation.
         if let Some(cell) = deferred_history_cell {
             let cell: Arc<dyn HistoryCell> = cell.into();
+            let id = self.transcript_cells.push(cell.clone());
             if let Some(Overlay::Transcript(t)) = &mut self.overlay {
-                t.insert_cell(cell.clone());
+                t.insert_cell(id, cell.clone());
             }
-            self.transcript_cells.push(cell);
         }
 
         // Walk backward to find the contiguous run of streaming AgentMessageCells that
