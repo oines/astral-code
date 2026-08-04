@@ -61,6 +61,9 @@ impl SurfaceAnchor {
 pub enum SurfaceNodeKind {
     Entry {
         lifecycle: EntryLifecycle,
+        mode: DisplayMode,
+        foldable: bool,
+        groupable: bool,
     },
     VerbGroup {
         mode: DisplayMode,
@@ -75,6 +78,7 @@ pub struct SurfaceNode {
     turn_id: String,
     kind: SurfaceNodeKind,
     rows: Range<usize>,
+    gap_after: usize,
     rendered: RenderedEntry,
 }
 
@@ -95,6 +99,31 @@ impl SurfaceNode {
         self.rows.clone()
     }
 
+    /// Number of shared layout rows between this node and the next one.
+    pub fn gap_after(&self) -> usize {
+        self.gap_after
+    }
+
+    pub fn display_mode(&self) -> DisplayMode {
+        match &self.kind {
+            SurfaceNodeKind::Entry { mode, .. } | SurfaceNodeKind::VerbGroup { mode, .. } => *mode,
+        }
+    }
+
+    pub fn is_foldable(&self) -> bool {
+        match &self.kind {
+            SurfaceNodeKind::Entry { foldable, .. } => *foldable,
+            SurfaceNodeKind::VerbGroup { .. } => true,
+        }
+    }
+
+    pub fn is_groupable(&self) -> bool {
+        match &self.kind {
+            SurfaceNodeKind::Entry { groupable, .. } => *groupable,
+            SurfaceNodeKind::VerbGroup { .. } => true,
+        }
+    }
+
     pub fn rendered(&self) -> &RenderedEntry {
         &self.rendered
     }
@@ -106,6 +135,7 @@ pub struct ConversationSurface {
     width: u16,
     row_count: usize,
     nodes: Vec<SurfaceNode>,
+    gap_line: MarkdownLine,
 }
 
 impl ConversationSurface {
@@ -118,6 +148,11 @@ impl ConversationSurface {
             width: options.width,
             row_count: 0,
             nodes: Vec::new(),
+            gap_line: MarkdownLine {
+                line: Default::default(),
+                joiner_to_previous: LineJoiner::HardBreak,
+                links: Vec::new(),
+            },
         };
 
         for turn in conversation.transcript().turns() {
@@ -173,12 +208,16 @@ impl ConversationSurface {
                     turn.id(),
                     SurfaceNodeKind::Entry {
                         lifecycle: entry.lifecycle(),
+                        mode: display.mode(),
+                        foldable: block.is_foldable(),
+                        groupable: block.is_groupable(),
                     },
                     rendered,
                 );
             }
         }
 
+        surface.finish();
         surface
     }
 
@@ -195,7 +234,24 @@ impl ConversationSurface {
     }
 
     pub fn lines(&self) -> impl Iterator<Item = &MarkdownLine> {
-        self.nodes.iter().flat_map(|node| node.rendered.lines())
+        let gap_line = &self.gap_line;
+        self.nodes.iter().flat_map(move |node| {
+            node.rendered
+                .lines()
+                .iter()
+                .chain(std::iter::repeat_n(gap_line, node.gap_after))
+        })
+    }
+
+    /// Resolve one shared layout row without walking all preceding entries.
+    pub fn line_at_row(&self, row: usize) -> Option<&MarkdownLine> {
+        if let Some(node) = self.node_at_row(row) {
+            return node
+                .rendered
+                .lines()
+                .get(row.saturating_sub(node.rows.start));
+        }
+        (row < self.row_count).then_some(&self.gap_line)
     }
 
     pub fn node(&self, id: SurfaceNodeId) -> Option<&SurfaceNode> {
@@ -213,7 +269,9 @@ impl ConversationSurface {
 
     /// Capture a virtual row as a semantic node + logical-line anchor.
     pub fn anchor_at_row(&self, row: usize) -> Option<SurfaceAnchor> {
-        let node = self.node_at_row(row)?;
+        let node = self
+            .node_at_row(row)
+            .or_else(|| self.node_before_gap_row(row))?;
         let local_row = row.saturating_sub(node.rows.start);
         let (logical_line, line_start) = node
             .rendered
@@ -265,6 +323,23 @@ impl ConversationSurface {
         kind: SurfaceNodeKind,
         rendered: RenderedEntry,
     ) {
+        if rendered.lines().is_empty() {
+            return;
+        }
+        if let Some(previous) = self.nodes.last_mut() {
+            let both_groupable = previous.is_groupable()
+                && match &kind {
+                    SurfaceNodeKind::Entry { groupable, .. } => *groupable,
+                    SurfaceNodeKind::VerbGroup { .. } => true,
+                };
+            let both_collapsed = previous.display_mode() == DisplayMode::Collapsed
+                && match &kind {
+                    SurfaceNodeKind::Entry { mode, .. }
+                    | SurfaceNodeKind::VerbGroup { mode, .. } => *mode == DisplayMode::Collapsed,
+                };
+            previous.gap_after = usize::from(!(both_groupable && both_collapsed));
+            self.row_count = self.row_count.saturating_add(previous.gap_after);
+        }
         let start = self.row_count;
         self.row_count = self.row_count.saturating_add(rendered.lines().len());
         self.nodes.push(SurfaceNode {
@@ -272,8 +347,24 @@ impl ConversationSurface {
             turn_id: turn_id.to_string(),
             kind,
             rows: start..self.row_count,
+            gap_after: 0,
             rendered,
         });
+    }
+
+    fn finish(&mut self) {
+        if let Some(last) = self.nodes.last_mut() {
+            last.gap_after = 1;
+            self.row_count = self.row_count.saturating_add(last.gap_after);
+        }
+    }
+
+    fn node_before_gap_row(&self, row: usize) -> Option<&SurfaceNode> {
+        let insertion = self.nodes.partition_point(|node| node.rows.end <= row);
+        insertion.checked_sub(1).and_then(|index| {
+            let node = &self.nodes[index];
+            (row < node.rows.end.saturating_add(node.gap_after)).then_some(node)
+        })
     }
 }
 

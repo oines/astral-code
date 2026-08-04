@@ -9,9 +9,11 @@ astral-tui-scrollback = { workspace = true }
 codex-app-server-client = { workspace = true }
 codex-app-server-protocol = { workspace = true }
 codex-protocol = { workspace = true }
+ratatui = { workspace = true }
 
 [dev-dependencies]
 codex-utils-absolute-path = { workspace = true }
+insta = { workspace = true }
 pretty_assertions = { workspace = true }
 
 [lints]

@@ -124,6 +124,28 @@ impl EntryDisplayState {
 }
 
 impl EntryBlock<'_> {
+    /// Whether this block exposes an interactive collapsed/expanded state.
+    pub fn is_foldable(&self) -> bool {
+        self.display_policy().is_some_and(|policy| policy.foldable)
+    }
+
+    /// Whether this block participates in Grok-style dense presentation.
+    ///
+    /// Adjacent groupable blocks omit their spacer only while both are
+    /// collapsed. User and assistant prose deliberately break dense runs.
+    pub fn is_groupable(&self) -> bool {
+        match self {
+            Self::User { .. } | Self::Assistant { .. } | Self::ProposedPlan { .. } => false,
+            Self::Reasoning(_)
+            | Self::ContextCompaction(_)
+            | Self::CollabAgentToolCall(_)
+            | Self::DynamicToolCall(_)
+            | Self::McpToolCall(_)
+            | Self::WebSearch(_)
+            | Self::ProtocolItem { .. } => true,
+        }
+    }
+
     fn display_policy(&self) -> Option<DisplayPolicy> {
         match self {
             Self::User { content } => {

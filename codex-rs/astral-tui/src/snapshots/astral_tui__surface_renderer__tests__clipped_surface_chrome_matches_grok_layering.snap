@@ -1,0 +1,12 @@
+---
+source: astral-tui/src/surface_renderer_tests.rs
+expression: "buffer_text(&buffer, area)"
+---
+   › Inspect the renderer                                  █
+┌                                                         ┐█
+│❙ › Searched 2 websites                                  │█
+└                                                         ┘█
+│  The surface now keeps one geometry for:                │█
+│                                                         │█
+│  • scrolling                                            ││
+┆  • selection                                            ┆│
