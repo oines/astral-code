@@ -13,6 +13,7 @@ mod render;
 mod search_tool;
 mod transcript;
 mod verb_group;
+mod web_link;
 mod web_search;
 
 pub use block::ContextCompactionBlock;
@@ -55,4 +56,7 @@ pub use verb_group::VerbGroupProjection;
 pub use verb_group::VerbGroupSpan;
 pub use verb_group::project_verb_groups;
 pub use verb_group::scan_verb_groups;
+pub use web_link::WebLinkMatch;
+pub use web_link::find_web_links;
+pub use web_link::normalize_web_destination;
 pub use web_search::WebSearchBlock;

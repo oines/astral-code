@@ -22,6 +22,7 @@ use super::syntax::highlight_code;
 use super::table::MarkdownTable;
 use super::table::MarkdownTableAlignment;
 use super::wrapping::wrap_segments_with_joiners;
+use crate::web_link::find_web_links;
 
 pub(super) fn render(text: &str, width: u16, style: MarkdownStyle) -> Vec<MarkdownLine> {
     MarkdownWriter::new(width, style).render(text)
@@ -299,7 +300,39 @@ impl MarkdownWriter {
             code.source.push_str(text);
             return;
         }
+        if self.links.is_empty() {
+            let links = find_web_links(text);
+            if !links.is_empty() {
+                self.push_text_with_plain_links(text, links);
+                return;
+            }
+        }
         self.push_styled(text, self.current_style());
+    }
+
+    fn push_text_with_plain_links(
+        &mut self,
+        text: &str,
+        links: Vec<crate::web_link::WebLinkMatch>,
+    ) {
+        let mut cursor = 0usize;
+        for link in links {
+            let range = link.byte_range();
+            self.push_styled(&text[cursor..range.start], self.current_style());
+
+            let id = self.next_link_id;
+            self.next_link_id = self.next_link_id.wrapping_add(1);
+            self.links.push(LinkContext {
+                id,
+                destination: link.destination().to_string(),
+            });
+            self.push_inline_style(self.style.link_text);
+            self.push_styled(&text[range.clone()], self.current_style());
+            self.pop_inline_style();
+            self.links.pop();
+            cursor = range.end;
+        }
+        self.push_styled(&text[cursor..], self.current_style());
     }
 
     fn push_styled(&mut self, text: &str, style: Style) {

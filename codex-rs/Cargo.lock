@@ -606,6 +606,7 @@ dependencies = [
  "textwrap 0.16.2",
  "two-face",
  "unicode-width 0.2.1",
+ "url",
 ]
 
 [[package]]
@@ -3947,6 +3948,7 @@ dependencies = [
  "anyhow",
  "arboard",
  "assert_matches",
+ "astral-tui-scrollback",
  "base64 0.22.1",
  "chrono",
  "clap",
