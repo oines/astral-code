@@ -141,7 +141,9 @@ impl TranscriptOverlay {
             self.surface_dirty = false;
         }
         self.viewport.prepare(&self.surface, area.height);
-        self.sync_highlight();
+        if self.cells.highlighted().is_some() {
+            self.sync_highlight();
+        }
     }
 
     fn sync_highlight(&mut self) {
@@ -154,24 +156,19 @@ impl TranscriptOverlay {
 
     pub(super) fn apply_key_event(&mut self, viewport_area: Rect, key_event: KeyEvent) -> bool {
         self.ensure_surface(Self::conversation_area(viewport_area));
-        let page_rows = usize::from(self.viewport.height().max(1));
         match key_event {
-            event if self.keymap.scroll_up.is_pressed(event) => {
-                self.viewport
-                    .scroll_rows(&self.surface, ScrollDirection::Up, /*rows*/ 1)
-            }
-            event if self.keymap.scroll_down.is_pressed(event) => {
-                self.viewport
-                    .scroll_rows(&self.surface, ScrollDirection::Down, /*rows*/ 1)
-            }
-            event if self.keymap.page_up.is_pressed(event) => {
-                self.viewport
-                    .scroll_rows(&self.surface, ScrollDirection::Up, page_rows)
-            }
-            event if self.keymap.page_down.is_pressed(event) => {
-                self.viewport
-                    .scroll_rows(&self.surface, ScrollDirection::Down, page_rows)
-            }
+            event if self.keymap.scroll_up.is_pressed(event) => self
+                .viewport
+                .move_selection(&self.surface, ScrollDirection::Up),
+            event if self.keymap.scroll_down.is_pressed(event) => self
+                .viewport
+                .move_selection(&self.surface, ScrollDirection::Down),
+            event if self.keymap.page_up.is_pressed(event) => self
+                .viewport
+                .scroll_page(&self.surface, ScrollDirection::Up),
+            event if self.keymap.page_down.is_pressed(event) => self
+                .viewport
+                .scroll_page(&self.surface, ScrollDirection::Down),
             event if self.keymap.half_page_up.is_pressed(event) => self.viewport.scroll_rows(
                 &self.surface,
                 ScrollDirection::Up,
@@ -183,10 +180,14 @@ impl TranscriptOverlay {
                 usize::from(self.viewport.height().saturating_add(1) / 2),
             ),
             event if self.keymap.jump_top.is_pressed(event) => {
-                self.viewport.scroll_to_top(&self.surface)
+                let scrolled = self.viewport.scroll_to_top(&self.surface);
+                let selected = self.viewport.select_first(&self.surface);
+                scrolled || selected
             }
             event if self.keymap.jump_bottom.is_pressed(event) => {
-                self.viewport.scroll_to_bottom(&self.surface)
+                let scrolled = self.viewport.scroll_to_bottom(&self.surface);
+                let selected = self.viewport.select_last(&self.surface);
+                scrolled || selected
             }
             _ => false,
         }
@@ -212,7 +213,7 @@ impl TranscriptOverlay {
                         .into_iter()
                         .chain(first_or_empty(&self.keymap.scroll_down))
                         .collect(),
-                    "to scroll",
+                    "to select",
                 ),
                 (
                     first_or_empty(&self.keymap.page_up)
