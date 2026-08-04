@@ -19,14 +19,14 @@ const DOUBLE_CLICK_WINDOW: Duration = Duration::from_millis(500);
 mod tests;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum ChoiceListOutcome {
+pub(crate) enum ChoiceListOutcome {
     Unchanged,
     Changed,
     Activate(usize),
 }
 
 #[derive(Debug, Default)]
-pub(super) struct ChoiceList {
+pub(crate) struct ChoiceList {
     selected: usize,
     hovered: Option<usize>,
     hits: Vec<Rect>,
@@ -34,19 +34,19 @@ pub(super) struct ChoiceList {
 }
 
 impl ChoiceList {
-    pub(super) fn begin_frame(&mut self) {
+    pub(crate) fn begin_frame(&mut self) {
         self.hits.clear();
     }
 
-    pub(super) fn selected(&self) -> usize {
+    pub(crate) fn selected(&self) -> usize {
         self.selected
     }
 
-    pub(super) fn set_selected(&mut self, selected: usize, len: usize) {
+    pub(crate) fn set_selected(&mut self, selected: usize, len: usize) {
         self.selected = selected.min(len.saturating_sub(1));
     }
 
-    pub(super) fn style(&self, index: usize) -> Style {
+    pub(crate) fn style(&self, index: usize) -> Style {
         if index == self.selected {
             Style::default().cyan().bold()
         } else if self.hovered == Some(index) {
@@ -56,15 +56,15 @@ impl ChoiceList {
         }
     }
 
-    pub(super) fn prefix(&self, index: usize) -> &'static str {
+    pub(crate) fn prefix(&self, index: usize) -> &'static str {
         if index == self.selected { "› " } else { "  " }
     }
 
-    pub(super) fn record_hit(&mut self, area: Rect) {
+    pub(crate) fn record_hit(&mut self, area: Rect) {
         self.hits.push(area);
     }
 
-    pub(super) fn handle_key(&mut self, key: KeyEvent, len: usize) -> ChoiceListOutcome {
+    pub(crate) fn handle_key(&mut self, key: KeyEvent, len: usize) -> ChoiceListOutcome {
         if key.kind == KeyEventKind::Release || len == 0 {
             return ChoiceListOutcome::Unchanged;
         }
@@ -91,7 +91,7 @@ impl ChoiceList {
         ChoiceListOutcome::Changed
     }
 
-    pub(super) fn handle_mouse(
+    pub(crate) fn handle_mouse(
         &mut self,
         mouse: MouseEvent,
         now: Instant,
