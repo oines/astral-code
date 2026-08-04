@@ -15,7 +15,6 @@ use pretty_assertions::assert_eq;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 
-use super::FRESH_CONTEXT_PREFIX;
 use super::PlanImplementationHost;
 use super::PlanImplementationOutcome;
 use super::PlanImplementationRequest;
@@ -120,14 +119,12 @@ fn prompt_renders_original_choices_and_returns_exact_actions() {
 
     assert_eq!(
         host.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
-        PlanImplementationOutcome::Selected(PlanImplementationSelection::ImplementCurrentThread {
-            input: "Implement the plan.".to_string(),
-        })
+        PlanImplementationOutcome::Selected(PlanImplementationSelection::ImplementCurrentThread)
     );
     assert_eq!(
         host.handle_key_event(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE)),
         PlanImplementationOutcome::Selected(PlanImplementationSelection::ImplementFreshThread {
-            input: format!("{FRESH_CONTEXT_PREFIX}\n\n# Final plan\n\n- inspect\n- implement"),
+            request: request.clone(),
         })
     );
     assert_eq!(
