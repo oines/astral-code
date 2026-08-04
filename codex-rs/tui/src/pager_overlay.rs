@@ -20,27 +20,29 @@ use std::sync::Arc;
 
 use crate::chatwidget::ActiveCellTranscriptKey;
 use crate::history_cell::HistoryCell;
-use crate::history_cell::UserHistoryCell;
+use crate::history_surface::HistorySurfaceTail;
+use crate::history_surface::materialize_history_surface;
 use crate::history_transcript::HistoryEntryId;
 use crate::key_hint;
 use crate::key_hint::KeyBinding;
 use crate::key_hint::KeyBindingListExt;
 use crate::keymap::PagerKeymap;
-use crate::render::Insets;
-use crate::render::renderable::InsetRenderable;
 use crate::render::renderable::Renderable;
-use crate::style::user_message_style;
 use crate::terminal_hyperlinks::HyperlinkLine;
+use crate::terminal_hyperlinks::TerminalHyperlink;
 use crate::terminal_hyperlinks::mark_buffer_hyperlinks;
-use crate::terminal_hyperlinks::visible_lines;
 use crate::tui;
 use crate::tui::TuiEvent;
+use astral_tui::ConversationSurface;
+use astral_tui::ScrollDirection;
+use astral_tui::SurfaceNodeId;
+use astral_tui::SurfaceRenderer;
+use astral_tui::SurfaceViewport;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use ratatui::buffer::Buffer;
 use ratatui::buffer::Cell;
 use ratatui::layout::Rect;
-use ratatui::style::Style;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::text::Span;
@@ -58,8 +60,8 @@ use transcript::TranscriptOverlay;
 use transcript_entries::TranscriptEntries;
 
 pub(crate) enum Overlay {
-    Transcript(TranscriptOverlay),
-    Static(StaticOverlay),
+    Transcript(Box<TranscriptOverlay>),
+    Static(Box<StaticOverlay>),
 }
 
 impl Overlay {
@@ -67,7 +69,7 @@ impl Overlay {
         cells: Vec<(HistoryEntryId, Arc<dyn HistoryCell>)>,
         keymap: PagerKeymap,
     ) -> Self {
-        Self::Transcript(TranscriptOverlay::new(cells, keymap))
+        Self::Transcript(Box::new(TranscriptOverlay::new(cells, keymap)))
     }
 
     pub(crate) fn new_static_with_lines(
@@ -75,7 +77,7 @@ impl Overlay {
         title: String,
         keymap: PagerKeymap,
     ) -> Self {
-        Self::Static(StaticOverlay::with_title(lines, title, keymap))
+        Self::Static(Box::new(StaticOverlay::with_title(lines, title, keymap)))
     }
 
     pub(crate) fn new_static_with_renderables(
@@ -83,7 +85,11 @@ impl Overlay {
         title: String,
         keymap: PagerKeymap,
     ) -> Self {
-        Self::Static(StaticOverlay::with_renderables(renderables, title, keymap))
+        Self::Static(Box::new(StaticOverlay::with_renderables(
+            renderables,
+            title,
+            keymap,
+        )))
     }
 
     pub(crate) fn handle_event(&mut self, tui: &mut tui::Tui, event: TuiEvent) -> Result<()> {
@@ -133,9 +139,6 @@ struct PagerView {
     title: String,
     keymap: PagerKeymap,
     last_content_height: Option<usize>,
-    last_rendered_height: Option<usize>,
-    /// If set, on next render ensure this chunk is visible.
-    pending_scroll_chunk: Option<usize>,
 }
 
 impl PagerView {
@@ -151,8 +154,6 @@ impl PagerView {
             title,
             keymap,
             last_content_height: None,
-            last_rendered_height: None,
-            pending_scroll_chunk: None,
         }
     }
 
@@ -169,12 +170,6 @@ impl PagerView {
         let content_area = self.content_area(area);
         self.update_last_content_height(content_area.height);
         let content_height = self.content_height(content_area.width);
-        self.last_rendered_height = Some(content_height);
-        // If there is a pending request to scroll a specific chunk into view,
-        // satisfy it now that wrapping is up to date for this width.
-        if let Some(idx) = self.pending_scroll_chunk.take() {
-            self.ensure_chunk_visible(idx, content_area);
-        }
         self.scroll_offset = self
             .scroll_offset
             .min(content_height.saturating_sub(content_area.height as usize));
@@ -320,53 +315,6 @@ impl PagerView {
         area.y = area.y.saturating_add(1);
         area.height = area.height.saturating_sub(2);
         area
-    }
-}
-
-impl PagerView {
-    fn is_scrolled_to_bottom(&self) -> bool {
-        if self.scroll_offset == usize::MAX {
-            return true;
-        }
-        let Some(height) = self.last_content_height else {
-            return false;
-        };
-        if self.renderables.is_empty() {
-            return true;
-        }
-        let Some(total_height) = self.last_rendered_height else {
-            return false;
-        };
-        if total_height <= height {
-            return true;
-        }
-        let max_scroll = total_height.saturating_sub(height);
-        self.scroll_offset >= max_scroll
-    }
-
-    /// Request that the given text chunk index be scrolled into view on next render.
-    fn scroll_chunk_into_view(&mut self, chunk_index: usize) {
-        self.pending_scroll_chunk = Some(chunk_index);
-    }
-
-    fn ensure_chunk_visible(&mut self, idx: usize, area: Rect) {
-        if area.height == 0 || idx >= self.renderables.len() {
-            return;
-        }
-        let first = self
-            .renderables
-            .iter()
-            .take(idx)
-            .map(|r| r.desired_height(area.width) as usize)
-            .sum();
-        let last = first + self.renderables[idx].desired_height(area.width) as usize;
-        let current_top = self.scroll_offset;
-        let current_bottom = current_top.saturating_add(area.height.saturating_sub(1) as usize);
-        if first < current_top {
-            self.scroll_offset = first;
-        } else if last > current_bottom {
-            self.scroll_offset = last.saturating_sub(area.height.saturating_sub(1) as usize);
-        }
     }
 }
 
@@ -649,7 +597,7 @@ mod tests {
 
     #[test]
     fn transcript_overlay_snapshot_basic() {
-        // Prepare a transcript overlay with a few lines
+        // Prepare a transcript overlay with a selected middle entry.
         let mut overlay = transcript_overlay(vec![
             Arc::new(TestCell {
                 lines: vec![Line::from("alpha")],
@@ -661,9 +609,17 @@ mod tests {
                 lines: vec![Line::from("gamma")],
             }),
         ]);
+        overlay.set_highlight_cell(Some(1));
+        let highlighted = overlay.cells.highlighted().expect("highlighted entry");
         let mut term = Terminal::new(TestBackend::new(40, 10)).expect("term");
         term.draw(|f| overlay.render(f.area(), f.buffer_mut()))
             .expect("draw");
+        assert_eq!(
+            overlay.viewport.selected(),
+            Some(SurfaceNodeId::Entry(astral_tui::TranscriptEntryId::new(
+                highlighted.value(),
+            ))),
+        );
         assert_snapshot!(term.backend());
     }
 
@@ -694,7 +650,7 @@ mod tests {
             lines: vec![Line::from("alpha")],
         })]);
         overlay.sync_live_tail(
-            /*width*/ 40,
+            Rect::new(0, 0, 40, 10),
             Some(ActiveCellTranscriptKey {
                 revision: 1,
                 is_stream_continuation: false,
@@ -723,13 +679,20 @@ mod tests {
         let mut buf = Buffer::empty(area);
 
         overlay.sync_live_tail(
-            area.width,
+            area,
             Some(ActiveCellTranscriptKey {
                 revision: 1,
                 is_stream_continuation: false,
                 animation_tick: None,
             }),
             |width| Some(cell.transcript_hyperlink_lines(width)),
+        );
+        overlay.ensure_surface(TranscriptOverlay::conversation_area(area));
+        assert!(
+            overlay
+                .surface
+                .lines()
+                .any(|line| { line.links.iter().any(|link| link.target == destination) })
         );
         overlay.render(area, &mut buf);
 
@@ -753,11 +716,12 @@ mod tests {
             animation_tick: None,
         };
 
-        overlay.sync_live_tail(/*width*/ 40, Some(key), |_| {
+        let area = Rect::new(0, 0, 40, 10);
+        overlay.sync_live_tail(area, Some(key), |_| {
             calls.set(calls.get() + 1);
             Some(vec![HyperlinkLine::from("tail")])
         });
-        overlay.sync_live_tail(/*width*/ 40, Some(key), |_| {
+        overlay.sync_live_tail(area, Some(key), |_| {
             calls.set(calls.get() + 1);
             Some(vec![HyperlinkLine::from("tail2")])
         });
@@ -843,7 +807,7 @@ mod tests {
         let mut buf = Buffer::empty(area);
 
         overlay.render(area, &mut buf);
-        overlay.view.scroll_offset = 0;
+        overlay.viewport.scroll_to_top(&overlay.surface);
         overlay.render(area, &mut buf);
 
         let snapshot = buffer_to_text(&buf, area);
@@ -865,18 +829,25 @@ mod tests {
         term.draw(|f| overlay.render(f.area(), f.buffer_mut()))
             .expect("draw");
 
-        assert!(
-            overlay.view.is_scrolled_to_bottom(),
-            "expected initial render to leave view at bottom"
-        );
+        assert!(overlay.is_scrolled_to_bottom());
+        let previous_rows = overlay.surface.row_count();
 
         let tail: Arc<dyn HistoryCell> = Arc::new(TestCell {
             lines: vec!["tail".into()],
         });
         let tail_id = transcript.push(tail.clone());
         overlay.insert_cell(tail_id, tail);
+        term.draw(|f| overlay.render(f.area(), f.buffer_mut()))
+            .expect("draw after insert");
 
-        assert_eq!(overlay.view.scroll_offset, usize::MAX);
+        assert!(overlay.is_scrolled_to_bottom());
+        assert!(overlay.surface.row_count() > previous_rows);
+        assert!(overlay.surface.lines().any(|line| {
+            line.line
+                .spans
+                .iter()
+                .any(|span| span.content.contains("tail"))
+        }));
     }
 
     #[test]
@@ -894,15 +865,20 @@ mod tests {
         term.draw(|f| overlay.render(f.area(), f.buffer_mut()))
             .expect("draw");
 
-        overlay.view.scroll_offset = 0;
+        overlay.viewport.scroll_to_top(&overlay.surface);
+        let previous_rows = overlay.surface.row_count();
 
         let tail: Arc<dyn HistoryCell> = Arc::new(TestCell {
             lines: vec!["tail".into()],
         });
         let tail_id = transcript.push(tail.clone());
         overlay.insert_cell(tail_id, tail);
+        term.draw(|f| overlay.render(f.area(), f.buffer_mut()))
+            .expect("draw after insert");
 
-        assert_eq!(overlay.view.scroll_offset, 0);
+        assert_eq!(overlay.viewport.top(), 0);
+        assert!(!overlay.is_scrolled_to_bottom());
+        assert!(overlay.surface.row_count() > previous_rows);
     }
 
     #[test]
@@ -1049,7 +1025,7 @@ mod tests {
 
         let top_h = area.height.saturating_sub(3);
         let top = Rect::new(area.x, area.y, area.width, top_h);
-        let content_area = overlay.view.content_area(top);
+        let content_area = SurfaceRenderer::content_area(top);
 
         let mut nums = Vec::new();
         for y in content_area.y..content_area.bottom() {
@@ -1081,14 +1057,13 @@ mod tests {
         );
         let area = Rect::new(0, 0, 40, 15);
 
-        // Prime layout so last_content_height is populated and paging uses the real content height.
+        // Prime retained geometry at the real transcript viewport height.
         let mut buf = Buffer::empty(area);
-        overlay.view.scroll_offset = 0;
         overlay.render(area, &mut buf);
-        let page_height = overlay.view.page_height(area);
+        overlay.viewport.scroll_to_top(&overlay.surface);
 
         // Scenario 1: starting from the top, PageDown should show the next page of content.
-        overlay.view.scroll_offset = 0;
+        overlay.viewport.scroll_to_top(&overlay.surface);
         let page1 = transcript_line_numbers(&mut overlay, area);
         let page1_len = page1.len();
         let expected_page1: Vec<usize> = (0..page1_len).collect();
@@ -1097,7 +1072,7 @@ mod tests {
             "first page should start at line-00 and show a full page of content"
         );
 
-        overlay.view.scroll_offset = overlay.view.scroll_offset.saturating_add(page_height);
+        assert!(overlay.apply_key_event(area, KeyEvent::from(KeyCode::PageDown)));
         let page2 = transcript_line_numbers(&mut overlay, area);
         assert_eq!(
             page2.len(),
@@ -1112,11 +1087,14 @@ mod tests {
 
         // Scenario 2: from an interior offset (start=3), PageDown then PageUp should round-trip.
         let interior_offset = 3usize;
-        overlay.view.scroll_offset = interior_offset;
+        overlay.viewport.scroll_to_top(&overlay.surface);
+        overlay
+            .viewport
+            .scroll_rows(&overlay.surface, ScrollDirection::Down, interior_offset);
         let before = transcript_line_numbers(&mut overlay, area);
-        overlay.view.scroll_offset = overlay.view.scroll_offset.saturating_add(page_height);
+        assert!(overlay.apply_key_event(area, KeyEvent::from(KeyCode::PageDown)));
         let _ = transcript_line_numbers(&mut overlay, area);
-        overlay.view.scroll_offset = overlay.view.scroll_offset.saturating_sub(page_height);
+        assert!(overlay.apply_key_event(area, KeyEvent::from(KeyCode::PageUp)));
         let after = transcript_line_numbers(&mut overlay, area);
         assert_eq!(
             before, after,
@@ -1124,11 +1102,12 @@ mod tests {
         );
 
         // Scenario 3: from the top of the second page, PageUp then PageDown should round-trip.
-        overlay.view.scroll_offset = page_height;
+        overlay.viewport.scroll_to_top(&overlay.surface);
+        assert!(overlay.apply_key_event(area, KeyEvent::from(KeyCode::PageDown)));
         let before2 = transcript_line_numbers(&mut overlay, area);
-        overlay.view.scroll_offset = overlay.view.scroll_offset.saturating_sub(page_height);
+        assert!(overlay.apply_key_event(area, KeyEvent::from(KeyCode::PageUp)));
         let _ = transcript_line_numbers(&mut overlay, area);
-        overlay.view.scroll_offset = overlay.view.scroll_offset.saturating_add(page_height);
+        assert!(overlay.apply_key_event(area, KeyEvent::from(KeyCode::PageDown)));
         let after2 = transcript_line_numbers(&mut overlay, area);
         assert_eq!(
             before2, after2,
@@ -1160,85 +1139,5 @@ mod tests {
         );
 
         assert_eq!(pv.content_height(/*width*/ 80), 5);
-    }
-
-    #[test]
-    fn pager_view_ensure_chunk_visible_scrolls_down_when_needed() {
-        let mut pv = pager_view(
-            vec![
-                paragraph_block("a", /*lines*/ 1),
-                paragraph_block("b", /*lines*/ 3),
-                paragraph_block("c", /*lines*/ 3),
-            ],
-            "T",
-            /*scroll_offset*/ 0,
-        );
-        let area = Rect::new(0, 0, 20, 8);
-
-        pv.scroll_offset = 0;
-        let content_area = pv.content_area(area);
-        pv.ensure_chunk_visible(/*idx*/ 2, content_area);
-
-        let mut buf = Buffer::empty(area);
-        pv.render(area, &mut buf);
-        let rendered = buffer_to_text(&buf, area);
-
-        assert!(
-            rendered.contains("c0"),
-            "expected chunk top in view: {rendered:?}"
-        );
-        assert!(
-            rendered.contains("c1"),
-            "expected chunk middle in view: {rendered:?}"
-        );
-        assert!(
-            rendered.contains("c2"),
-            "expected chunk bottom in view: {rendered:?}"
-        );
-    }
-
-    #[test]
-    fn pager_view_ensure_chunk_visible_scrolls_up_when_needed() {
-        let mut pv = pager_view(
-            vec![
-                paragraph_block("a", /*lines*/ 2),
-                paragraph_block("b", /*lines*/ 3),
-                paragraph_block("c", /*lines*/ 3),
-            ],
-            "T",
-            /*scroll_offset*/ 0,
-        );
-        let area = Rect::new(0, 0, 20, 3);
-
-        pv.scroll_offset = 6;
-        pv.ensure_chunk_visible(/*idx*/ 0, area);
-
-        assert_eq!(pv.scroll_offset, 0);
-    }
-
-    #[test]
-    fn pager_view_is_scrolled_to_bottom_accounts_for_wrapped_height() {
-        let mut pv = pager_view(
-            vec![paragraph_block("a", /*lines*/ 10)],
-            "T",
-            /*scroll_offset*/ 0,
-        );
-        let area = Rect::new(0, 0, 20, 8);
-        let mut buf = Buffer::empty(area);
-
-        pv.render(area, &mut buf);
-
-        assert!(
-            !pv.is_scrolled_to_bottom(),
-            "expected view to report not at bottom when offset < max"
-        );
-
-        pv.scroll_offset = usize::MAX;
-        pv.render(area, &mut buf);
-
-        assert!(
-            pv.is_scrolled_to_bottom(),
-            "expected view to report at bottom after scrolling to end"
-        );
     }
 }
