@@ -63,7 +63,6 @@ use crate::multi_agents::next_agent_shortcut_matches;
 use crate::multi_agents::previous_agent_shortcut_matches;
 use crate::pager_overlay::Overlay;
 use crate::render::highlight::highlight_bash_to_lines;
-use crate::render::renderable::Renderable;
 use crate::resume_picker::SessionSelection;
 use crate::resume_picker::SessionTarget;
 use crate::session_state::ThreadSessionState;
@@ -201,6 +200,7 @@ mod background_requests;
 mod config_persistence;
 mod event_dispatch;
 mod history_ui;
+mod inline_history;
 mod input;
 mod loaded_threads;
 mod pending_interactive_replay;
@@ -469,12 +469,6 @@ struct SessionSummary {
     resume_hint: Option<String>,
 }
 
-#[derive(Debug, Default)]
-struct InitialHistoryReplayBuffer {
-    retained_lines: VecDeque<crate::terminal_hyperlinks::HyperlinkLine>,
-    render_from_transcript_tail: bool,
-}
-
 pub(crate) struct App {
     model_catalog: Arc<ModelCatalog>,
     pub(crate) session_telemetry: SessionTelemetry,
@@ -494,13 +488,12 @@ pub(crate) struct App {
     pub(crate) file_search: FileSearchManager,
 
     pub(crate) transcript_cells: HistoryTranscript,
+    inline_history: inline_history::InlineHistoryState,
 
     // Pager overlay state (Transcript or Static like Diff)
     pub(crate) overlay: Option<Overlay>,
-    pub(crate) deferred_history_lines: Vec<crate::terminal_hyperlinks::HyperlinkLine>,
     has_emitted_history_lines: bool,
     transcript_reflow: TranscriptReflowState,
-    initial_history_replay_buffer: Option<InitialHistoryReplayBuffer>,
 
     pub(crate) enhanced_keys_supported: bool,
     pub(crate) keymap: RuntimeKeymap,
@@ -1005,11 +998,10 @@ See the Codex keymap documentation for supported actions and examples."
             enhanced_keys_supported,
             keymap: runtime_keymap,
             transcript_cells: HistoryTranscript::default(),
+            inline_history: Default::default(),
             overlay: None,
-            deferred_history_lines: Vec::new(),
             has_emitted_history_lines: false,
             transcript_reflow: TranscriptReflowState::default(),
-            initial_history_replay_buffer: None,
             commit_anim_running: Arc::new(AtomicBool::new(false)),
             status_line_invalid_items_warned: status_line_invalid_items_warned.clone(),
             terminal_title_invalid_items_warned: terminal_title_invalid_items_warned.clone(),
@@ -1322,28 +1314,60 @@ See the Codex keymap documentation for supported actions and examples."
         tui: &mut tui::Tui,
         terminal_resize_reflow_enabled: bool,
     ) -> Result<Rect> {
-        let desired_height = self.chat_widget.desired_height(tui.terminal.size()?.width);
+        let terminal_size = tui.terminal.size()?;
+        let history_width = self.chat_widget.history_wrap_width(terminal_size.width);
+        self.inline_history
+            .refresh(&self.transcript_cells, &self.chat_widget, history_width);
+        let composer_height = self
+            .chat_widget
+            .surface_composer_desired_height(terminal_size.width)
+            .min(terminal_size.height);
+        let tail_height = self
+            .inline_history
+            .live_tail_height(terminal_size.height.saturating_sub(composer_height));
+        let desired_height = composer_height.saturating_add(tail_height);
+        let live_snapshot = self
+            .inline_history
+            .live_tail_snapshot(history_width, tail_height);
+        let wrap_policy = self.history_line_wrap_policy();
+        let insert_mode = tui.history_insert_mode(wrap_policy);
         let mut rendered_area = Rect::default();
+        let inline_history = &mut self.inline_history;
+        let chat_widget = &self.chat_widget;
+        let mut draw_frame = |frame: &mut crate::custom_terminal::Frame| {
+            let area = frame.area();
+            rendered_area = area;
+            let tail_area = Rect::new(
+                area.x,
+                area.y,
+                history_width.min(area.width),
+                tail_height.min(area.height),
+            );
+            inline_history::render_snapshot(&live_snapshot, tail_area, frame.buffer);
+            let composer_area = Rect::new(
+                area.x,
+                area.y.saturating_add(tail_area.height),
+                area.width,
+                area.height.saturating_sub(tail_area.height),
+            );
+            chat_widget.render_surface_composer(composer_area, frame.buffer);
+            if let Some((x, y)) = chat_widget.surface_composer_cursor_pos(composer_area) {
+                frame.set_cursor_style(chat_widget.surface_composer_cursor_style(composer_area));
+                frame.set_cursor_position((x, y));
+            }
+        };
         if terminal_resize_reflow_enabled {
-            tui.draw_with_resize_reflow(desired_height, |frame| {
-                let area = frame.area();
-                rendered_area = area;
-                self.chat_widget.render(area, frame.buffer);
-                if let Some((x, y)) = self.chat_widget.cursor_pos(area) {
-                    frame.set_cursor_style(self.chat_widget.cursor_style(area));
-                    frame.set_cursor_position((x, y));
-                }
-            })?;
+            tui.draw_with_resize_reflow_after_history(
+                desired_height,
+                |terminal| inline_history.commit(terminal, history_width, insert_mode, wrap_policy),
+                &mut draw_frame,
+            )?;
         } else {
-            tui.draw(desired_height, |frame| {
-                let area = frame.area();
-                rendered_area = area;
-                self.chat_widget.render(area, frame.buffer);
-                if let Some((x, y)) = self.chat_widget.cursor_pos(area) {
-                    frame.set_cursor_style(self.chat_widget.cursor_style(area));
-                    frame.set_cursor_position((x, y));
-                }
-            })?;
+            tui.draw_after_history(
+                desired_height,
+                |terminal| inline_history.commit(terminal, history_width, insert_mode, wrap_policy),
+                &mut draw_frame,
+            )?;
         }
         Ok(rendered_area)
     }

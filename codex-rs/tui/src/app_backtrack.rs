@@ -276,13 +276,6 @@ impl App {
     pub(crate) fn close_transcript_overlay(&mut self, tui: &mut tui::Tui) {
         let _ = tui.leave_alt_screen();
         let was_backtrack = self.backtrack.overlay_preview_active;
-        if !self.deferred_history_lines.is_empty() {
-            let lines = std::mem::take(&mut self.deferred_history_lines);
-            tui.insert_history_hyperlink_lines_with_wrap_policy(
-                lines,
-                self.history_line_wrap_policy(),
-            );
-        }
         self.overlay = None;
         self.backtrack.overlay_preview_active = false;
         if was_backtrack {
@@ -610,9 +603,7 @@ impl App {
             };
             self.apply_backtrack_selection_internal(next_selection);
         }
-        // While overlay is open, we buffer rendered history lines and flush them on close.
-        // If rollback trimmed cells meanwhile, those buffered lines can reference removed turns.
-        self.deferred_history_lines.clear();
+        self.reset_history_emission_state();
     }
 }
 
