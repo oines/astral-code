@@ -146,6 +146,32 @@ fn grok_key_and_double_click_actions_share_one_retained_surface() {
         host.surface().row_count() - usize::from(short_area.height)
     );
     assert!(!host.viewport().is_following_bottom());
+
+    let mut first = ConversationState::from_thread(&thread(vec![turn(vec![user("first")])]));
+    let mut gesture_host = FullscreenHost::new(&first, area, ScrollbackKeyMode::Vim);
+    let down = MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: 8,
+        row: 0,
+        modifiers: KeyModifiers::NONE,
+    };
+    assert_eq!(
+        gesture_host.handle_mouse_event_at(down, Instant::now(), &mut first),
+        FullscreenOutcome::Unchanged
+    );
+    let mut second = ConversationState::from_thread(&thread_with_id(
+        "thread-2",
+        vec![turn(vec![user("second")])],
+    ));
+    gesture_host.refresh_surface(&second, area);
+    let up = MouseEvent {
+        kind: MouseEventKind::Up(MouseButton::Left),
+        ..down
+    };
+    assert_eq!(
+        gesture_host.handle_mouse_event_at(up, Instant::now(), &mut second),
+        FullscreenOutcome::Unchanged
+    );
 }
 
 fn press(
@@ -199,8 +225,12 @@ fn buffer_text(buffer: &Buffer, area: Rect) -> String {
 }
 
 fn thread(turns: Vec<Turn>) -> Thread {
+    thread_with_id("thread-1", turns)
+}
+
+fn thread_with_id(id: &str, turns: Vec<Turn>) -> Thread {
     Thread {
-        id: "thread-1".to_string(),
+        id: id.to_string(),
         session_id: "session-1".to_string(),
         forked_from_id: None,
         parent_thread_id: None,

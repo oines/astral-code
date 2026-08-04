@@ -1,8 +1,5 @@
-//! Retained fullscreen host for the shared conversation surface.
-//!
-//! This module owns viewport and interaction policy only. App-server events
-//! stay in [`crate::AstralRuntime`], while transcript projection stays in
-//! [`crate::ConversationState`].
+//! Retained fullscreen viewport and input policy over the shared conversation
+//! surface. Runtime events and transcript projection remain in their owners.
 
 use std::time::Duration;
 use std::time::Instant;
@@ -59,12 +56,10 @@ enum NodeDisplayAction {
     ToggleRaw,
 }
 
-/// Fullscreen conversation controller over one canonical rendered surface.
-///
-/// Call [`Self::refresh_surface`] after a transcript update or resize, then
-/// render and route input against the same cached geometry. Presentation
-/// actions refresh the cache internally before returning.
+/// Fullscreen controller over one canonical rendered conversation surface.
+/// Refresh after transcript updates or resize; display actions refresh in place.
 pub struct FullscreenHost {
+    thread_id: String,
     area: Rect,
     surface: ConversationSurface,
     viewport: SurfaceViewport,
@@ -81,6 +76,7 @@ impl FullscreenHost {
         let mut viewport = SurfaceViewport::default();
         viewport.prepare(&surface, area.height);
         Self {
+            thread_id: conversation.transcript().thread_id().to_string(),
             area,
             surface,
             viewport,
@@ -107,10 +103,14 @@ impl FullscreenHost {
     /// Rebuild after transcript growth or resize, retaining semantic targets.
     pub fn refresh_surface(&mut self, conversation: &ConversationState, area: Rect) {
         let resized = self.area != area;
+        let thread_changed = self.thread_id != conversation.transcript().thread_id();
+        if thread_changed {
+            self.thread_id = conversation.transcript().thread_id().to_string();
+        }
         self.area = area;
         self.surface = render_surface(conversation, area);
         self.viewport.prepare(&self.surface, area.height);
-        if resized {
+        if resized || thread_changed {
             self.cancel_pointer_gesture();
         } else {
             self.pending_click = self
