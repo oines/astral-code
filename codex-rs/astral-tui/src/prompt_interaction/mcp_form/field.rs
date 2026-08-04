@@ -177,12 +177,16 @@ impl McpFormField {
             McpFormControl::Select {
                 selected,
                 committed,
+                multiple,
                 min_selected,
                 max_selected,
                 ..
             } => {
                 if !committed {
                     return self.require_answer();
+                }
+                if self.required && !multiple && selected.is_empty() {
+                    return Err("This field is required".to_string());
                 }
                 let count = selected.len() as u64;
                 if let Some(minimum) = min_selected
@@ -392,10 +396,10 @@ fn parse_number(draft: &str, integer: bool) -> Result<f64, String> {
             .map(|value| value as f64)
             .map_err(|_| "Enter a whole number".to_string())
     } else {
-        draft
-            .trim()
-            .parse::<f64>()
-            .map_err(|_| "Enter a valid number".to_string())
+        match draft.trim().parse::<f64>() {
+            Ok(value) if value.is_finite() => Ok(value),
+            _ => Err("Enter a valid number".to_string()),
+        }
     }
 }
 
