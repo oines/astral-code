@@ -1,0 +1,17 @@
+---
+source: astral-tui/src/fullscreen_tests.rs
+expression: "buffer_text(&buffer, area)"
+---
+   › Inspect the interaction host
+┌                                                             ┐
+│┃ ◆ Thought                                                  │
+│┃                                                            │
+│┃   Follow the canonical transcript and presentation state.  │
+│                                                             │
+│┃ ◆ Searched 2 websites                                      │
+│                                                             │
+│❙ ◆ Web Search grok fullscreen input routing                 │
+│❙ ◆ Web Search ratatui stable selection                      │
+└                                                             ┘
+   The host routes interaction without reprojecting transcript
+   data.
