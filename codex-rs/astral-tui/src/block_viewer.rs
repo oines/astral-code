@@ -14,6 +14,10 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
+use crossterm::event::MouseButton;
+use crossterm::event::MouseEvent;
+use crossterm::event::MouseEventKind;
+use ratatui::layout::Rect;
 
 use crate::ConversationState;
 use crate::ModalOutcome;
@@ -25,6 +29,7 @@ mod render;
 
 const COPY_SHORTCUT: usize = 0;
 const RAW_SHORTCUT: usize = 1;
+const WHEEL_ROWS: usize = 3;
 
 /// Result of routing one viewer input event.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,6 +54,9 @@ pub struct BlockViewerHost {
     content_height: u16,
     content_width: u16,
     follow_bottom: bool,
+    content_area: Option<Rect>,
+    scrollbar_area: Option<Rect>,
+    scrollbar_dragging: bool,
     modal: ModalWindow,
 }
 
@@ -77,6 +85,9 @@ impl BlockViewerHost {
                 entry.lifecycle(),
                 astral_tui_scrollback::EntryLifecycle::Running { .. }
             ),
+            content_area: None,
+            scrollbar_area: None,
+            scrollbar_dragging: false,
             modal: ModalWindow::default(),
         })
     }
@@ -150,6 +161,52 @@ impl BlockViewerHost {
         }
     }
 
+    pub fn handle_mouse_event(
+        &mut self,
+        mouse: MouseEvent,
+        conversation: &ConversationState,
+    ) -> BlockViewerOutcome {
+        match self.modal.handle_mouse_event(mouse) {
+            ModalOutcome::CloseRequested => return BlockViewerOutcome::Close,
+            ModalOutcome::ShortcutActivated(COPY_SHORTCUT) => {
+                return self
+                    .copy_text(conversation)
+                    .map_or(BlockViewerOutcome::Unchanged, BlockViewerOutcome::Copy);
+            }
+            ModalOutcome::ShortcutActivated(RAW_SHORTCUT) if self.supports_raw(conversation) => {
+                self.raw = !self.raw;
+                self.scroll_offset = 0;
+                self.follow_bottom = false;
+                return BlockViewerOutcome::Changed;
+            }
+            ModalOutcome::Handled | ModalOutcome::TabChanged(_) => {
+                return BlockViewerOutcome::Changed;
+            }
+            ModalOutcome::ShortcutActivated(_) | ModalOutcome::Unhandled => {}
+        }
+
+        match mouse.kind {
+            MouseEventKind::ScrollUp if self.pointer_in_content(mouse) => {
+                changed(self.scroll_up(WHEEL_ROWS))
+            }
+            MouseEventKind::ScrollDown if self.pointer_in_content(mouse) => {
+                changed(self.scroll_down(WHEEL_ROWS))
+            }
+            MouseEventKind::Down(MouseButton::Left) if self.pointer_in_scrollbar(mouse) => {
+                self.scrollbar_dragging = true;
+                changed(self.apply_scrollbar_row(mouse.row))
+            }
+            MouseEventKind::Drag(MouseButton::Left) if self.scrollbar_dragging => {
+                changed(self.apply_scrollbar_row(mouse.row))
+            }
+            MouseEventKind::Up(MouseButton::Left) if self.scrollbar_dragging => {
+                self.scrollbar_dragging = false;
+                changed(self.apply_scrollbar_row(mouse.row))
+            }
+            _ => BlockViewerOutcome::Unchanged,
+        }
+    }
+
     fn scroll_up(&mut self, rows: usize) -> bool {
         let before = self.scroll_offset;
         self.scroll_offset = self.scroll_offset.saturating_sub(rows);
@@ -195,6 +252,44 @@ impl BlockViewerHost {
 
     fn half_page_rows(&self) -> usize {
         (usize::from(self.content_height) / 2).max(1)
+    }
+
+    fn pointer_in_content(&self, mouse: MouseEvent) -> bool {
+        self.content_area.is_some_and(|area| contains(area, mouse))
+            || self.pointer_in_scrollbar(mouse)
+    }
+
+    fn pointer_in_scrollbar(&self, mouse: MouseEvent) -> bool {
+        self.scrollbar_area
+            .is_some_and(|area| contains(area, mouse))
+    }
+
+    fn apply_scrollbar_row(&mut self, row: u16) -> bool {
+        let Some(area) = self.scrollbar_area else {
+            return false;
+        };
+        let height = usize::from(area.height);
+        let maximum = self.maximum_scroll();
+        if height == 0 || maximum == 0 {
+            return false;
+        }
+        let click = usize::from(
+            row.saturating_sub(area.y)
+                .min(area.height.saturating_sub(1)),
+        );
+        let thumb_height = height
+            .saturating_mul(height)
+            .div_ceil(self.row_count)
+            .clamp(1, height);
+        let travel = height.saturating_sub(thumb_height);
+        let target = maximum
+            .saturating_mul(click.saturating_sub(thumb_height / 2).min(travel))
+            .checked_div(travel)
+            .unwrap_or(0);
+        let changed = self.scroll_offset != target;
+        self.scroll_offset = target;
+        self.follow_bottom = target == maximum;
+        changed
     }
 
     fn supports_raw(&self, conversation: &ConversationState) -> bool {
@@ -292,6 +387,13 @@ fn reconciled_raw(
             display.raw()
         }),
     }
+}
+
+fn contains(area: Rect, mouse: MouseEvent) -> bool {
+    mouse.column >= area.x
+        && mouse.column < area.right()
+        && mouse.row >= area.y
+        && mouse.row < area.bottom()
 }
 
 fn changed(changed: bool) -> BlockViewerOutcome {

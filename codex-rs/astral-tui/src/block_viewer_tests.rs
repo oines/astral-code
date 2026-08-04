@@ -12,6 +12,9 @@ use codex_utils_absolute_path::AbsolutePathBuf;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
+use crossterm::event::MouseButton;
+use crossterm::event::MouseEvent;
+use crossterm::event::MouseEventKind;
 use pretty_assertions::assert_eq;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -95,6 +98,53 @@ fn viewer_scroll_copy_and_close_follow_one_canonical_document() {
     let mut buffer = Buffer::empty(area);
     assert!(viewer.render(&mut buffer, area, &conversation));
     let first_page = buffer_text(&buffer, area);
+    insta::assert_snapshot!("scrollable_assistant_viewer", first_page);
+
+    let content = viewer.content_area.expect("viewer content geometry");
+    assert_eq!(
+        viewer.handle_mouse_event(
+            mouse(MouseEventKind::ScrollDown, content.x, content.y),
+            &conversation,
+        ),
+        BlockViewerOutcome::Changed
+    );
+    assert_eq!(viewer.scroll_offset, 3);
+
+    let scrollbar = viewer.scrollbar_area.expect("scrollbar geometry");
+    assert_eq!(
+        viewer.handle_mouse_event(
+            mouse(
+                MouseEventKind::Down(MouseButton::Left),
+                scrollbar.x,
+                scrollbar.bottom().saturating_sub(1),
+            ),
+            &conversation,
+        ),
+        BlockViewerOutcome::Changed
+    );
+    assert!(viewer.scrollbar_dragging);
+    assert_eq!(viewer.scroll_offset, viewer.maximum_scroll());
+    assert_eq!(
+        viewer.handle_mouse_event(
+            mouse(
+                MouseEventKind::Drag(MouseButton::Left),
+                scrollbar.x,
+                scrollbar.y,
+            ),
+            &conversation,
+        ),
+        BlockViewerOutcome::Changed
+    );
+    assert_eq!(viewer.scroll_offset, 0);
+    let _ = viewer.handle_mouse_event(
+        mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            scrollbar.x,
+            scrollbar.y,
+        ),
+        &conversation,
+    );
+    assert!(!viewer.scrollbar_dragging);
 
     assert_eq!(
         viewer.handle_key_event(key(KeyCode::PageDown), &conversation),
@@ -178,6 +228,15 @@ fn running_viewer_follows_new_content_until_the_user_moves_the_viewport() {
 
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
+}
+
+fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+    MouseEvent {
+        kind,
+        column,
+        row,
+        modifiers: KeyModifiers::NONE,
+    }
 }
 
 fn buffer_text(buffer: &Buffer, area: Rect) -> String {
