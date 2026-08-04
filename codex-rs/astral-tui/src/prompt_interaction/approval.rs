@@ -6,6 +6,7 @@ use codex_app_server_protocol::CommandExecutionRequestApprovalResponse;
 use codex_app_server_protocol::FileChangeApprovalDecision;
 use codex_app_server_protocol::FileChangeRequestApprovalParams;
 use codex_app_server_protocol::FileChangeRequestApprovalResponse;
+use codex_app_server_protocol::McpServerElicitationRequestResponse;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerRequest;
 use crossterm::event::KeyCode;
@@ -19,6 +20,7 @@ use ratatui::style::Style;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
 
+use crate::ModalOutcome;
 use crate::ModalPresentation;
 use crate::ModalShortcut;
 use crate::ModalSizing;
@@ -29,10 +31,13 @@ use crate::prompt_interaction::PromptInteractionSubmission;
 use crate::prompt_interaction::choice_list::ChoiceList;
 use crate::prompt_interaction::choice_list::ChoiceListOutcome;
 
+mod mcp;
+
 #[derive(Clone)]
 enum ApprovalChoice {
     Command(CommandExecutionApprovalDecision),
     FileChange(FileChangeApprovalDecision),
+    Mcp(mcp::Response),
 }
 
 struct ApprovalOption {
@@ -40,10 +45,17 @@ struct ApprovalOption {
     choice: ApprovalChoice,
 }
 
+#[derive(Clone, Copy)]
+enum ApprovalBodyTone {
+    Dim,
+    Plain,
+}
+
 pub(super) struct ApprovalPrompt {
     request_id: RequestId,
-    title: &'static str,
+    title: String,
     body: Vec<String>,
+    body_tone: ApprovalBodyTone,
     options: Vec<ApprovalOption>,
     cancel: ApprovalChoice,
     choices: ChoiceList,
@@ -58,6 +70,9 @@ impl ApprovalPrompt {
             }
             ServerRequest::FileChangeRequestApproval { request_id, params } => {
                 Some(Self::file_change(request_id.clone(), params))
+            }
+            ServerRequest::McpServerElicitationRequest { request_id, params } => {
+                mcp::from_request(request_id.clone(), params)
             }
             _ => None,
         }
@@ -88,8 +103,9 @@ impl ApprovalPrompt {
             .collect();
         Self {
             request_id,
-            title: "Allow command?",
+            title: "Allow command?".to_string(),
             body,
+            body_tone: ApprovalBodyTone::Dim,
             options,
             cancel: ApprovalChoice::Command(CommandExecutionApprovalDecision::Cancel),
             choices: ChoiceList::default(),
@@ -124,8 +140,9 @@ impl ApprovalPrompt {
         .collect();
         Self {
             request_id,
-            title: "Allow file changes?",
+            title: "Allow file changes?".to_string(),
             body,
+            body_tone: ApprovalBodyTone::Dim,
             options,
             cancel: ApprovalChoice::FileChange(FileChangeApprovalDecision::Cancel),
             choices: ChoiceList::default(),
@@ -191,6 +208,7 @@ impl ApprovalPrompt {
                 options_y.saturating_sub(layout.content.y),
             ),
             &self.body,
+            self.body_tone,
         );
         for (index, option) in self
             .options
@@ -240,6 +258,13 @@ impl ApprovalPrompt {
         mouse: MouseEvent,
         now: Instant,
     ) -> PromptInteractionOutcome {
+        match self.window.handle_mouse_event(mouse) {
+            ModalOutcome::CloseRequested => return self.submit(self.cancel.clone()),
+            ModalOutcome::Handled | ModalOutcome::ShortcutActivated(_) => {
+                return PromptInteractionOutcome::Changed;
+            }
+            ModalOutcome::TabChanged(_) | ModalOutcome::Unhandled => {}
+        }
         let outcome = self.choices.handle_mouse(mouse, now, self.options.len());
         self.handle_choice_outcome(outcome)
     }
@@ -264,6 +289,13 @@ impl ApprovalPrompt {
             }
             ApprovalChoice::FileChange(decision) => {
                 serde_json::to_value(FileChangeRequestApprovalResponse { decision })
+            }
+            ApprovalChoice::Mcp(response) => {
+                serde_json::to_value(McpServerElicitationRequestResponse {
+                    action: response.action,
+                    content: None,
+                    meta: response.meta,
+                })
             }
         };
         match result {
@@ -354,7 +386,7 @@ fn command_decision_label(
     }
 }
 
-fn render_body(buffer: &mut Buffer, area: Rect, body: &[String]) {
+fn render_body(buffer: &mut Buffer, area: Rect, body: &[String], body_tone: ApprovalBodyTone) {
     if area.is_empty() {
         return;
     }
@@ -364,10 +396,10 @@ fn render_body(buffer: &mut Buffer, area: Rect, body: &[String]) {
             if row >= area.bottom() {
                 return;
             }
-            let style = if text.starts_with("$ ") {
-                Style::default().cyan()
-            } else {
-                Style::default().dim()
+            let style = match (text.starts_with("$ "), body_tone) {
+                (true, _) => Style::default().cyan(),
+                (false, ApprovalBodyTone::Dim) => Style::default().dim(),
+                (false, ApprovalBodyTone::Plain) => Style::default(),
             };
             buffer.set_line(
                 area.x,
