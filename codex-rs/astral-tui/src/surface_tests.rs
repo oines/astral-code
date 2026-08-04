@@ -1,5 +1,10 @@
 use astral_tui_scrollback::DisplayMode;
+use astral_tui_scrollback::EntryLifecycle;
 use astral_tui_scrollback::EntryRenderOptions;
+use astral_tui_scrollback::LineJoiner;
+use astral_tui_scrollback::MarkdownLine;
+use astral_tui_scrollback::MarkdownLink;
+use astral_tui_scrollback::TranscriptEntryId;
 use codex_app_server_protocol::SessionSource;
 use codex_app_server_protocol::Thread;
 use codex_app_server_protocol::ThreadItem;
@@ -12,10 +17,128 @@ use codex_utils_absolute_path::AbsolutePathBuf;
 use pretty_assertions::assert_eq;
 
 use super::ConversationSurface;
+use super::MaterializedSurfaceEntry;
+use super::SurfaceEntryPresentation;
 use super::SurfaceNodeId;
 use super::SurfaceNodeKind;
 use crate::ConversationState;
 use crate::VerbGroupDisplayAction;
+use ratatui::style::Stylize;
+use ratatui::text::Line;
+
+#[test]
+fn materialized_surface_preserves_external_order_and_identity() {
+    let first_presentation = SurfaceEntryPresentation {
+        lifecycle: EntryLifecycle::Running {
+            started_at_ms: Some(17),
+        },
+        mode: DisplayMode::Collapsed,
+        foldable: true,
+        groupable: false,
+        turn_settled: false,
+        presentation_stable: true,
+    };
+    let second_presentation = SurfaceEntryPresentation {
+        lifecycle: EntryLifecycle::Restored,
+        mode: DisplayMode::Expanded,
+        foldable: false,
+        groupable: true,
+        turn_settled: true,
+        presentation_stable: false,
+    };
+    let first = TranscriptEntryId::new(41);
+    let second = TranscriptEntryId::new(7);
+    let first_lines = vec![
+        MarkdownLine {
+            line: vec!["first ".into(), "link".cyan().underlined()].into(),
+            joiner_to_previous: LineJoiner::HardBreak,
+            links: vec![MarkdownLink {
+                id: 9,
+                columns: 6..10,
+                target: "https://example.com/first".to_string(),
+            }],
+        },
+        MarkdownLine {
+            line: Line::from("continued".italic()),
+            joiner_to_previous: LineJoiner::Space,
+            links: Vec::new(),
+        },
+    ];
+    let second_lines = vec![MarkdownLine {
+        line: Line::from("second".bold()),
+        joiner_to_previous: LineJoiner::None,
+        links: Vec::new(),
+    }];
+    let surface = ConversationSurface::from_materialized(
+        30,
+        [
+            MaterializedSurfaceEntry::new(first, "turn-a", first_presentation, first_lines.clone()),
+            MaterializedSurfaceEntry::new(
+                second,
+                "turn-b",
+                second_presentation,
+                second_lines.clone(),
+            ),
+        ],
+    );
+
+    assert_eq!(
+        surface
+            .nodes()
+            .iter()
+            .map(super::SurfaceNode::id)
+            .collect::<Vec<_>>(),
+        vec![SurfaceNodeId::Entry(first), SurfaceNodeId::Entry(second)]
+    );
+    assert_eq!(surface.nodes()[0].turn_id(), "turn-a");
+    assert_eq!(surface.nodes()[1].turn_id(), "turn-b");
+    assert_eq!(
+        surface.nodes()[0].kind(),
+        &SurfaceNodeKind::Entry {
+            lifecycle: EntryLifecycle::Running {
+                started_at_ms: Some(17),
+            },
+            mode: DisplayMode::Collapsed,
+            foldable: true,
+            groupable: false,
+            turn_settled: false,
+            presentation_stable: true,
+        }
+    );
+    assert_eq!(
+        surface.nodes()[1].kind(),
+        &SurfaceNodeKind::Entry {
+            lifecycle: EntryLifecycle::Restored,
+            mode: DisplayMode::Expanded,
+            foldable: false,
+            groupable: true,
+            turn_settled: true,
+            presentation_stable: false,
+        }
+    );
+    assert_eq!(surface.nodes()[0].rendered().lines(), first_lines);
+    assert_eq!(surface.nodes()[1].rendered().lines(), second_lines);
+    insta::assert_snapshot!(surface_text(&surface), @"\
+first link
+continued
+
+second
+");
+}
+
+fn surface_text(surface: &ConversationSurface) -> String {
+    surface
+        .lines()
+        .map(|line| {
+            line.line
+                .spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
 
 #[test]
 fn one_surface_preserves_source_order_and_group_hit_geometry() {

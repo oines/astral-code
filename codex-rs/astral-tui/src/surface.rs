@@ -77,6 +77,47 @@ pub enum SurfaceNodeKind {
     },
 }
 
+/// Presentation metadata supplied by an authoritative transcript source.
+///
+/// The shared surface owns geometry and interaction hit testing, not event
+/// projection. Sources such as the app-server reducer or Codex `HistoryCell`
+/// transcript decide these semantics before materialization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SurfaceEntryPresentation {
+    pub lifecycle: EntryLifecycle,
+    pub mode: DisplayMode,
+    pub foldable: bool,
+    pub groupable: bool,
+    pub turn_settled: bool,
+    pub presentation_stable: bool,
+}
+
+/// One stable, ordered entry already rendered by an authoritative transcript
+/// projector.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MaterializedSurfaceEntry {
+    id: TranscriptEntryId,
+    turn_id: String,
+    presentation: SurfaceEntryPresentation,
+    rendered: RenderedEntry,
+}
+
+impl MaterializedSurfaceEntry {
+    pub fn new(
+        id: TranscriptEntryId,
+        turn_id: impl Into<String>,
+        presentation: SurfaceEntryPresentation,
+        lines: Vec<MarkdownLine>,
+    ) -> Self {
+        Self {
+            id,
+            turn_id: turn_id.into(),
+            presentation,
+            rendered: RenderedEntry::from_lines(lines),
+        }
+    }
+}
+
 /// One ordered, width-resolved conversation node.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SurfaceNode {
@@ -171,16 +212,7 @@ impl ConversationSurface {
     /// replaces only its claimed members; transparent entries inside the span
     /// remain visible at their original source position.
     pub fn render(conversation: &ConversationState, options: EntryRenderOptions) -> Self {
-        let mut surface = Self {
-            width: options.width,
-            row_count: 0,
-            nodes: Vec::new(),
-            gap_line: MarkdownLine {
-                line: Default::default(),
-                joiner_to_previous: LineJoiner::HardBreak,
-                links: Vec::new(),
-            },
-        };
+        let mut surface = Self::empty(options.width);
 
         for turn in conversation.transcript().turns() {
             let groups = conversation.verb_groups(turn.id());
@@ -256,6 +288,36 @@ impl ConversationSurface {
             }
         }
 
+        surface.finish();
+        surface
+    }
+
+    /// Build the shared surface from entries materialized by another
+    /// authoritative transcript projector.
+    ///
+    /// Input order is preserved exactly. No event reduction, item merging, or
+    /// semantic reordering occurs at this boundary.
+    pub fn from_materialized(
+        width: u16,
+        entries: impl IntoIterator<Item = MaterializedSurfaceEntry>,
+    ) -> Self {
+        let mut surface = Self::empty(width);
+        for entry in entries {
+            let presentation = entry.presentation;
+            surface.push(
+                SurfaceNodeId::Entry(entry.id),
+                &entry.turn_id,
+                SurfaceNodeKind::Entry {
+                    lifecycle: presentation.lifecycle,
+                    mode: presentation.mode,
+                    foldable: presentation.foldable,
+                    groupable: presentation.groupable,
+                    turn_settled: presentation.turn_settled,
+                    presentation_stable: presentation.presentation_stable,
+                },
+                entry.rendered,
+            );
+        }
         surface.finish();
         surface
     }
@@ -389,6 +451,19 @@ impl ConversationSurface {
             gap_after: 0,
             rendered,
         });
+    }
+
+    fn empty(width: u16) -> Self {
+        Self {
+            width: width.max(1),
+            row_count: 0,
+            nodes: Vec::new(),
+            gap_line: MarkdownLine {
+                line: Default::default(),
+                joiner_to_previous: LineJoiner::HardBreak,
+                links: Vec::new(),
+            },
+        }
     }
 
     fn finish(&mut self) {

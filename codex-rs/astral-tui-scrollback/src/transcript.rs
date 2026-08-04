@@ -18,6 +18,21 @@ mod turn;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TranscriptEntryId(u64);
 
+impl TranscriptEntryId {
+    /// Construct a presentation-local entry identity.
+    ///
+    /// Canonical transcript reducers allocate these values automatically.
+    /// Presentation sources that already own stable local identities can use
+    /// this constructor when materializing the shared conversation surface.
+    pub fn new(id: u64) -> Self {
+        Self(id)
+    }
+
+    pub fn value(self) -> u64 {
+        self.0
+    }
+}
+
 /// Lifecycle state for one transcript item.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntryLifecycle {
