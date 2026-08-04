@@ -1,0 +1,25 @@
+---
+source: astral-tui/src/block_viewer_tests.rs
+expression: first_page
+---
+
+
+
+
+
+
+
+    ┌─ Response ───────────────────────────────────────────── [×] ─┐
+    │                                                              │
+    │                                                              │
+    │  • canonical line 00                                      █  │
+    │  • canonical line 01                                      █  │
+    │  • canonical line 02                                      │  │
+    │  • canonical line 03                                      │  │
+    │  • canonical line 04                                      │  │
+    │  • canonical line 05                                      │  │
+    │  • canonical line 06                                      │  │
+    │  • canonical line 07                                      │  │
+    │                                                              │
+    │        Esc close  |  y copy  |  r raw  |  j/k scroll         │
+    └──────────────────────────────────────────────────────────────┘
