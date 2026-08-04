@@ -7,6 +7,7 @@
 
 use std::collections::HashSet;
 use std::io;
+use std::ops::Range;
 
 use astral_terminal_inline::Terminal;
 use astral_tui_scrollback::DisplayMode;
@@ -47,9 +48,18 @@ pub struct InlineHost {
 
 impl InlineHost {
     pub fn new(conversation: &ConversationState, terminal_width: u16) -> Self {
+        Self::from_surface(
+            conversation.transcript().thread_id(),
+            render_surface(conversation, terminal_width),
+        )
+    }
+
+    /// Construct an inline host from a surface materialized by an external,
+    /// authoritative transcript projector.
+    pub fn from_surface(thread_id: impl Into<String>, surface: ConversationSurface) -> Self {
         Self {
-            thread_id: conversation.transcript().thread_id().to_string(),
-            surface: render_surface(conversation, terminal_width),
+            thread_id: thread_id.into(),
+            surface,
             frontier: CommitFrontier::default(),
             renderer: SurfaceRenderer::default(),
         }
@@ -62,12 +72,25 @@ impl InlineHost {
     /// Rebuild after transcript growth or terminal reflow. A new thread owns a
     /// fresh terminal transcript, so its print-once frontier starts empty.
     pub fn refresh_surface(&mut self, conversation: &ConversationState, terminal_width: u16) {
-        let thread_id = conversation.transcript().thread_id();
+        self.refresh_materialized_surface(
+            conversation.transcript().thread_id(),
+            render_surface(conversation, terminal_width),
+        );
+    }
+
+    /// Replace the externally materialized surface while retaining committed
+    /// identities for the same thread.
+    pub fn refresh_materialized_surface(
+        &mut self,
+        thread_id: impl Into<String>,
+        surface: ConversationSurface,
+    ) {
+        let thread_id = thread_id.into();
         if self.thread_id != thread_id {
-            self.thread_id = thread_id.to_string();
+            self.thread_id = thread_id;
             self.frontier = CommitFrontier::default();
         }
-        self.surface = render_surface(conversation, terminal_width);
+        self.surface = surface;
     }
 
     /// Insert the leading run of stable nodes into native scrollback.
@@ -102,22 +125,34 @@ impl InlineHost {
             ));
         }
 
+        let renderer = self.renderer;
+        self.commit_with(|surface, rows| {
+            let height = commit_height(rows.len());
+            terminal.insert_before(height, move |buffer| {
+                render_committed(buffer, renderer, surface, rows);
+            })
+        })
+    }
+
+    /// Commit the leading run of stable nodes through a caller-owned terminal
+    /// writer. A successful callback advances the print-once frontier; a
+    /// failure leaves that node and every later node available for retry.
+    pub fn commit_with<F>(&mut self, mut commit_node: F) -> io::Result<InlineCommitResult>
+    where
+        F: FnMut(&ConversationSurface, Range<usize>) -> io::Result<()>,
+    {
         let ready = self.frontier.ready_nodes(&self.surface);
         let mut committed_nodes = 0usize;
         for id in ready {
-            let Some(node) = self.surface.node(id) else {
-                return Err(io::Error::other(
-                    "inline commit frontier referenced a missing surface node",
-                ));
+            let (rows, mark) = {
+                let Some(node) = self.surface.node(id) else {
+                    return Err(io::Error::other(
+                        "inline commit frontier referenced a missing surface node",
+                    ));
+                };
+                (node.footprint_rows(), CommitMark::from_node(node))
             };
-            let rows = node.footprint_rows();
-            let mark = CommitMark::from_node(node);
-            let height = commit_height(rows.len());
-            let renderer = self.renderer;
-            let surface = &self.surface;
-            terminal.insert_before(height, move |buffer| {
-                render_committed(buffer, renderer, surface, rows);
-            })?;
+            commit_node(&self.surface, rows)?;
             self.frontier.mark(mark);
             committed_nodes += 1;
         }
