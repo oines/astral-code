@@ -192,36 +192,21 @@ impl App {
                 tui.frame_requester().schedule_frame();
             }
             AppEvent::BeginInitialHistoryReplayBuffer => {
-                self.begin_initial_history_replay_buffer();
+                self.begin_initial_history_replay();
             }
             AppEvent::BeginThreadSwitchHistoryReplayBuffer => {
-                self.begin_thread_switch_history_replay_buffer();
+                self.begin_thread_switch_history_replay();
             }
             AppEvent::InsertHistoryCell(cell) => {
                 let cell: Arc<dyn HistoryCell> = cell.into();
                 let id = self.transcript_cells.push(cell.clone());
                 if let Some(Overlay::Transcript(t)) = &mut self.overlay {
                     t.insert_cell(id, cell.clone());
-                    tui.frame_requester().schedule_frame();
                 }
-                if self.initial_history_replay_buffer.as_ref().is_some() {
-                    self.insert_history_cell_lines_with_initial_replay_buffer(
-                        tui,
-                        cell.as_ref(),
-                        self.chat_widget
-                            .history_wrap_width(tui.terminal.last_known_screen_size.width),
-                    );
-                } else {
-                    self.insert_history_cell_lines(
-                        tui,
-                        cell.as_ref(),
-                        self.chat_widget
-                            .history_wrap_width(tui.terminal.last_known_screen_size.width),
-                    );
-                }
+                tui.frame_requester().schedule_frame();
             }
             AppEvent::EndInitialHistoryReplayBuffer => {
-                self.finish_initial_history_replay_buffer(tui);
+                self.finish_initial_history_replay(tui);
             }
             AppEvent::ConsolidateAgentMessage {
                 source,
@@ -263,14 +248,8 @@ impl App {
                     let id = self.transcript_cells.push(consolidated.clone());
                     if let Some(Overlay::Transcript(t)) = &mut self.overlay {
                         t.insert_cell(id, consolidated.clone());
-                        tui.frame_requester().schedule_frame();
                     }
-                    self.insert_history_cell_lines(
-                        tui,
-                        consolidated.as_ref(),
-                        self.chat_widget
-                            .history_wrap_width(tui.terminal.last_known_screen_size.width),
-                    );
+                    tui.frame_requester().schedule_frame();
 
                     self.maybe_finish_stream_reflow(tui)?;
                 }
