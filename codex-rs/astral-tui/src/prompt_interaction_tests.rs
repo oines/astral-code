@@ -4,6 +4,9 @@ use std::time::Instant;
 use codex_app_server_protocol::CommandExecutionRequestApprovalParams;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerRequest;
+use codex_app_server_protocol::ToolRequestUserInputOption;
+use codex_app_server_protocol::ToolRequestUserInputParams;
+use codex_app_server_protocol::ToolRequestUserInputQuestion;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
@@ -75,6 +78,70 @@ fn front_approval_owns_input_until_its_exact_request_is_resolved() {
     };
     assert_eq!(accept.request_id, RequestId::Integer(2));
     assert_eq!(accept.result, serde_json::json!({ "decision": "accept" }));
+}
+
+#[test]
+fn ask_user_preserves_question_semantics_and_masks_secret_notes() {
+    let question = |id: &str, header: &str, options: Option<Vec<ToolRequestUserInputOption>>| {
+        ToolRequestUserInputQuestion {
+            id: id.to_string(),
+            header: header.to_string(),
+            question: format!("Choose {header}"),
+            is_other: options.is_some(),
+            is_secret: options.is_none(),
+            options,
+        }
+    };
+    let option = |label: &str, description: &str| ToolRequestUserInputOption {
+        label: label.to_string(),
+        description: description.to_string(),
+    };
+    let mut pending = PendingInteractions::new("thread-1");
+    pending.observe_request(ServerRequest::ToolRequestUserInput {
+        request_id: RequestId::Integer(7),
+        params: ToolRequestUserInputParams {
+            thread_id: "thread-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            item_id: "questions-1".to_string(),
+            questions: vec![
+                question(
+                    "scope",
+                    "Scope",
+                    Some(vec![
+                        option("Alpha", "Change the first target"),
+                        option("Beta", "Change the second target"),
+                    ]),
+                ),
+                question("token", "Token", None),
+            ],
+        },
+    });
+    let mut host = PromptInteractionHost::new();
+    assert!(host.sync(&pending));
+    let area = Rect::new(0, 0, 72, host.desired_height(72, 14));
+    let mut buffer = Buffer::empty(area);
+    host.render(&mut buffer, area);
+    insta::assert_snapshot!(buffer_text(&buffer));
+
+    host.handle_key_event(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    host.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    host.handle_paste("s3cr3t");
+    let mut secret_buffer = Buffer::empty(area);
+    host.render(&mut secret_buffer, area);
+    assert!(!buffer_text(&secret_buffer).contains("s3cr3t"));
+    let PromptInteractionOutcome::Submit(submission) =
+        host.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+    else {
+        panic!("last question should submit");
+    };
+    assert_eq!(submission.request_id, RequestId::Integer(7));
+    assert_eq!(
+        submission.result,
+        serde_json::json!({"answers": {
+            "scope": {"answers": ["Beta"]},
+            "token": {"answers": ["user_note: s3cr3t"]}
+        }})
+    );
 }
 
 fn command_request(request_id: i64, command: &str) -> ServerRequest {
