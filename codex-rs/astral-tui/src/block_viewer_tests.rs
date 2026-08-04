@@ -1,3 +1,6 @@
+use astral_tui_scrollback::ApplyOutcome;
+use codex_app_server_protocol::AgentMessageDeltaNotification;
+use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::SessionSource;
 use codex_app_server_protocol::Thread;
 use codex_app_server_protocol::ThreadItem;
@@ -116,6 +119,63 @@ fn viewer_scroll_copy_and_close_follow_one_canonical_document() {
     );
 }
 
+#[test]
+fn running_viewer_follows_new_content_until_the_user_moves_the_viewport() {
+    let mut snapshot = thread(Vec::new());
+    snapshot.turns.clear();
+    let mut conversation = ConversationState::from_thread(&snapshot);
+    let initial = lines("initial", 24);
+    assert_eq!(
+        conversation.apply(&agent_delta("assistant", &initial)),
+        ApplyOutcome::Applied
+    );
+    let entry_id = conversation.transcript().turns()[0].entries()[0].id();
+    let mut viewer = BlockViewerHost::open(&conversation, SurfaceNodeId::Entry(entry_id))
+        .expect("running assistant entry should open");
+    let area = Rect::new(0, 0, 64, 20);
+    let mut buffer = Buffer::empty(area);
+    assert!(viewer.render(&mut buffer, area, &conversation));
+    let first_bottom = viewer.scroll_offset;
+    assert!(viewer.follow_bottom);
+    assert!(first_bottom > 0);
+
+    assert_eq!(
+        conversation.apply(&agent_delta("assistant", &lines("followed", 8))),
+        ApplyOutcome::Applied
+    );
+    let mut followed_buffer = Buffer::empty(area);
+    assert!(viewer.render(&mut followed_buffer, area, &conversation));
+    assert!(viewer.scroll_offset > first_bottom);
+
+    assert_eq!(
+        viewer.handle_key_event(key(KeyCode::Up), &conversation),
+        BlockViewerOutcome::Changed
+    );
+    let manual_offset = viewer.scroll_offset;
+    assert!(!viewer.follow_bottom);
+    assert_eq!(
+        conversation.apply(&agent_delta("assistant", &lines("anchored", 8))),
+        ApplyOutcome::Applied
+    );
+    let mut anchored_buffer = Buffer::empty(area);
+    assert!(viewer.render(&mut anchored_buffer, area, &conversation));
+    assert_eq!(viewer.scroll_offset, manual_offset);
+
+    assert_eq!(
+        viewer.handle_key_event(key(KeyCode::End), &conversation),
+        BlockViewerOutcome::Changed
+    );
+    let resumed_bottom = viewer.scroll_offset;
+    assert!(viewer.follow_bottom);
+    assert_eq!(
+        conversation.apply(&agent_delta("assistant", &lines("resumed", 8))),
+        ApplyOutcome::Applied
+    );
+    let mut resumed_buffer = Buffer::empty(area);
+    assert!(viewer.render(&mut resumed_buffer, area, &conversation));
+    assert!(viewer.scroll_offset > resumed_bottom);
+}
+
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
 }
@@ -186,4 +246,19 @@ fn assistant(id: &str, text: &str) -> ThreadItem {
         phase: None,
         memory_citation: None,
     }
+}
+
+fn agent_delta(item_id: &str, delta: &str) -> ServerNotification {
+    ServerNotification::AgentMessageDelta(AgentMessageDeltaNotification {
+        thread_id: "thread-1".to_string(),
+        turn_id: "turn-stream".to_string(),
+        item_id: item_id.to_string(),
+        delta: delta.to_string(),
+    })
+}
+
+fn lines(prefix: &str, count: usize) -> String {
+    (0..count)
+        .map(|index| format!("{prefix} line {index:02}\n"))
+        .collect()
 }
