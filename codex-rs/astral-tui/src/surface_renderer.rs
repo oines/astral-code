@@ -91,13 +91,8 @@ impl SurfaceRenderer {
         Clear.render(area, buffer);
         let columns = Columns::for_area(area);
         let visible = visible_rows(area, surface, viewport);
-        let lines = visible
-            .clone()
-            .filter_map(|row| surface.line_at_row(row).map(|line| line.line.clone()))
-            .collect::<Vec<Line<'static>>>();
-        Paragraph::new(lines).render(columns.content, buffer);
+        self.paint_rows(area, buffer, surface, &visible, columns);
 
-        self.paint_rails(area, buffer, surface, &visible, columns);
         if let Some(hovered) = viewport
             .hovered()
             .filter(|hovered| Some(*hovered) != viewport.selected())
@@ -131,6 +126,50 @@ impl SurfaceRenderer {
         }
         self.paint_expandable_indicator(area, buffer, surface, &visible, columns, viewport);
         self.paint_scrollbar(area, buffer, surface, viewport, columns);
+    }
+
+    /// Paint a fixed range from the shared surface without viewport-only
+    /// selection, hover, or scrollbar chrome.
+    ///
+    /// Inline live-tail and terminal-native commit paths use this method so a
+    /// node has identical wrapping, spacing, styles, and rails on both sides of
+    /// the print-once frontier.
+    pub fn render_rows(
+        &self,
+        area: Rect,
+        buffer: &mut Buffer,
+        surface: &ConversationSurface,
+        rows: Range<usize>,
+    ) {
+        if area.is_empty() {
+            return;
+        }
+
+        Clear.render(area, buffer);
+        let start = rows.start.min(surface.row_count());
+        let visible = start
+            ..rows
+                .end
+                .min(surface.row_count())
+                .min(start.saturating_add(usize::from(area.height)));
+        self.paint_rows(area, buffer, surface, &visible, Columns::for_area(area));
+    }
+
+    fn paint_rows(
+        &self,
+        area: Rect,
+        buffer: &mut Buffer,
+        surface: &ConversationSurface,
+        visible: &Range<usize>,
+        columns: Columns,
+    ) {
+        let lines = visible
+            .clone()
+            .filter_map(|row| surface.line_at_row(row).map(|line| line.line.clone()))
+            .collect::<Vec<Line<'static>>>();
+        Paragraph::new(lines).render(columns.content, buffer);
+
+        self.paint_rails(area, buffer, surface, visible, columns);
     }
 
     fn paint_rails(

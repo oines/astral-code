@@ -50,6 +50,9 @@ fn one_surface_preserves_source_order_and_group_hit_geometry() {
         &SurfaceNodeKind::VerbGroup {
             mode: DisplayMode::Collapsed,
             members: vec![search_1, search_2],
+            running: false,
+            turn_settled: true,
+            presentation_stable: true,
         }
     );
     assert_exact_gaps(&collapsed, &[1, 1]);
@@ -81,6 +84,9 @@ fn one_surface_preserves_source_order_and_group_hit_geometry() {
         &SurfaceNodeKind::VerbGroup {
             mode: DisplayMode::Expanded,
             members: vec![search_1, search_2],
+            running: false,
+            turn_settled: true,
+            presentation_stable: true,
         }
     );
     assert_exact_gaps(&expanded, &[1, 0, 1, 1]);

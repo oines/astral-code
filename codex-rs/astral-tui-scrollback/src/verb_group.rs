@@ -35,6 +35,26 @@ pub struct VerbGroupSpan {
     failed: bool,
 }
 
+/// Derived verb groups plus the trailing source suffix whose presentation can
+/// still change when more items arrive.
+///
+/// A completed collapsed Thought at the end of a running turn is not yet safe
+/// to print into terminal-native scrollback: a later Read/Search item can turn
+/// it into the first member of a synthetic verb group. The unstable suffix
+/// makes that view-time rewrite explicit without changing transcript order or
+/// protocol lifecycle semantics.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerbGroupProjection {
+    spans: Vec<VerbGroupSpan>,
+    unstable_suffix_start: Option<usize>,
+}
+
+impl VerbGroupProjection {
+    pub fn into_parts(self) -> (Vec<VerbGroupSpan>, Option<usize>) {
+        (self.spans, self.unstable_suffix_start)
+    }
+}
+
 impl VerbGroupSpan {
     pub fn anchor(&self) -> TranscriptEntryId {
         self.anchor
@@ -167,14 +187,26 @@ pub fn scan_verb_groups(
     turn: &TranscriptTurn,
     display_state: impl Fn(&TranscriptEntry) -> Option<EntryDisplayState>,
 ) -> Vec<VerbGroupSpan> {
+    project_verb_groups(turn, display_state).spans
+}
+
+/// Project groups and the open trailing run in one scan.
+pub fn project_verb_groups(
+    turn: &TranscriptTurn,
+    display_state: impl Fn(&TranscriptEntry) -> Option<EntryDisplayState>,
+) -> VerbGroupProjection {
     let entries = turn.entries();
     let mut spans = Vec::new();
+    let mut unstable_suffix_start = None;
     let mut index = 0;
     while index < entries.len() {
         let Some(scan) = scan_run(entries, index, &display_state) else {
             index += 1;
             continue;
         };
+        if scan.stop == entries.len() && !scan.claimed.is_empty() {
+            unstable_suffix_start = Some(index);
+        }
         if scan.members == 0 {
             index = scan.stop;
             continue;
@@ -196,7 +228,10 @@ pub fn scan_verb_groups(
         });
         index = scan.end;
     }
-    spans
+    VerbGroupProjection {
+        spans,
+        unstable_suffix_start,
+    }
 }
 
 struct RunScan {

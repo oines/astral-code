@@ -1,0 +1,20 @@
+---
+source: astral-tui/src/inline_tests.rs
+expression: "format!(\"COMMITTED TERMINAL\\n{committed}\\n\\nPINNED LIVE TAIL\\n{}\",\nbuffer_text(&live, area))"
+---
+COMMITTED TERMINAL
+   › Inspect the repository
+
+ ❙ ◆ Searched 1 website
+
+
+
+
+
+
+
+
+
+
+PINNED LIVE TAIL
+   Streaming answer…

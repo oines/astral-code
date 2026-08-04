@@ -9,7 +9,7 @@ use astral_tui_scrollback::Transcript;
 use astral_tui_scrollback::TranscriptEntryId;
 use astral_tui_scrollback::VerbGroupDisplayState;
 use astral_tui_scrollback::VerbGroupSpan;
-use astral_tui_scrollback::scan_verb_groups;
+use astral_tui_scrollback::project_verb_groups;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::Thread;
 
@@ -35,6 +35,7 @@ pub enum VerbGroupDisplayAction {
 struct TurnPresentationState {
     groups: Vec<VerbGroupSpan>,
     display: VerbGroupDisplayState,
+    unstable_suffix_start: Option<usize>,
 }
 
 /// TUI-owned interaction state over the canonical app-server transcript.
@@ -135,6 +136,14 @@ impl ConversationState {
             .map(|state| state.display.mode(group))
     }
 
+    /// First source entry whose view-time grouping may still change when the
+    /// running turn appends more items.
+    pub fn unstable_group_suffix_start(&self, turn_id: &str) -> Option<usize> {
+        self.turn_presentation
+            .get(turn_id)
+            .and_then(|state| state.unstable_suffix_start)
+    }
+
     pub fn apply_verb_group_display_action(
         &mut self,
         turn_id: &str,
@@ -189,14 +198,16 @@ impl ConversationState {
         let mut active_turns = HashSet::new();
         for turn in self.transcript.turns() {
             active_turns.insert(turn.id().to_string());
-            let groups =
-                scan_verb_groups(turn, |entry| self.entry_display.get(&entry.id()).copied());
+            let (groups, unstable_suffix_start) =
+                project_verb_groups(turn, |entry| self.entry_display.get(&entry.id()).copied())
+                    .into_parts();
             let state = self
                 .turn_presentation
                 .entry(turn.id().to_string())
                 .or_default();
             state.display.reconcile(&state.groups, &groups);
             state.groups = groups;
+            state.unstable_suffix_start = unstable_suffix_start;
         }
         self.turn_presentation
             .retain(|turn_id, _| active_turns.contains(turn_id));

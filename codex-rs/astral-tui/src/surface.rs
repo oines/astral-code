@@ -17,6 +17,7 @@ use astral_tui_scrollback::RenderedEntry;
 use astral_tui_scrollback::TranscriptEntryId;
 use astral_tui_scrollback::render_entry;
 use astral_tui_scrollback::render_verb_group_header;
+use codex_app_server_protocol::TurnStatus;
 
 use crate::ConversationState;
 
@@ -64,10 +65,15 @@ pub enum SurfaceNodeKind {
         mode: DisplayMode,
         foldable: bool,
         groupable: bool,
+        turn_settled: bool,
+        presentation_stable: bool,
     },
     VerbGroup {
         mode: DisplayMode,
         members: Vec<TranscriptEntryId>,
+        running: bool,
+        turn_settled: bool,
+        presentation_stable: bool,
     },
 }
 
@@ -104,6 +110,12 @@ impl SurfaceNode {
         self.gap_after
     }
 
+    /// Complete print-once footprint, including the shared spacer after this
+    /// node. Inline commit and live rendering must use this exact range.
+    pub fn footprint_rows(&self) -> Range<usize> {
+        self.rows.start..self.rows.end.saturating_add(self.gap_after)
+    }
+
     pub fn display_mode(&self) -> DisplayMode {
         match &self.kind {
             SurfaceNodeKind::Entry { mode, .. } | SurfaceNodeKind::VerbGroup { mode, .. } => *mode,
@@ -121,6 +133,21 @@ impl SurfaceNode {
         match &self.kind {
             SurfaceNodeKind::Entry { groupable, .. } => *groupable,
             SurfaceNodeKind::VerbGroup { .. } => true,
+        }
+    }
+
+    /// Whether appending another item can no longer rewrite this node's
+    /// view-time grouping.
+    pub fn is_presentation_stable(&self) -> bool {
+        match &self.kind {
+            SurfaceNodeKind::Entry {
+                presentation_stable,
+                ..
+            }
+            | SurfaceNodeKind::VerbGroup {
+                presentation_stable,
+                ..
+            } => *presentation_stable,
         }
     }
 
@@ -157,9 +184,13 @@ impl ConversationSurface {
 
         for turn in conversation.transcript().turns() {
             let groups = conversation.verb_groups(turn.id());
+            let turn_settled = turn.status() != &TurnStatus::InProgress;
+            let unstable_suffix_start = conversation.unstable_group_suffix_start(turn.id());
             let mut group_index = 0usize;
 
             for (entry_index, entry) in turn.entries().iter().enumerate() {
+                let presentation_stable =
+                    turn_settled || unstable_suffix_start.is_none_or(|start| entry_index < start);
                 while groups
                     .get(group_index)
                     .is_some_and(|group| group.range().end <= entry_index)
@@ -184,7 +215,13 @@ impl ConversationSurface {
                     surface.push(
                         SurfaceNodeId::VerbGroup(group.anchor()),
                         turn.id(),
-                        SurfaceNodeKind::VerbGroup { mode, members },
+                        SurfaceNodeKind::VerbGroup {
+                            mode,
+                            members,
+                            running: group.running(),
+                            turn_settled,
+                            presentation_stable,
+                        },
                         render_verb_group_header(group, options),
                     );
                 }
@@ -211,6 +248,8 @@ impl ConversationSurface {
                         mode: display.mode(),
                         foldable: block.is_foldable(),
                         groupable: block.is_groupable(),
+                        turn_settled,
+                        presentation_stable,
                     },
                     rendered,
                 );

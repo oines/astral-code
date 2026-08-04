@@ -6,6 +6,7 @@
 
 mod conversation;
 mod fullscreen;
+mod inline;
 mod runtime;
 mod session;
 mod surface;
@@ -18,6 +19,8 @@ pub use conversation::VerbGroupDisplayAction;
 pub use fullscreen::FullscreenHost;
 pub use fullscreen::FullscreenOutcome;
 pub use fullscreen::ScrollbackKeyMode;
+pub use inline::InlineCommitResult;
+pub use inline::InlineHost;
 pub use runtime::AstralRuntime;
 pub use runtime::RuntimeError;
 pub use runtime::RuntimeEvent;

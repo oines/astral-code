@@ -1309,6 +1309,12 @@ fn compute_inline_size<B: Backend>(
 }
 
 impl<B: Backend> Terminal<B> {
+    /// Whether this terminal can insert finalized rows above a pinned inline
+    /// viewport.
+    pub fn is_inline(&self) -> bool {
+        matches!(self.viewport, Viewport::Inline(_))
+    }
+
     /// HACK: this is added
     pub fn viewport_area(&self) -> Rect {
         self.viewport_area

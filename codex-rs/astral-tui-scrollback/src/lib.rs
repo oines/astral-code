@@ -51,6 +51,8 @@ pub use transcript::TranscriptEntryId;
 pub use transcript::TranscriptGap;
 pub use transcript::TranscriptTurn;
 pub use verb_group::VerbGroupDisplayState;
+pub use verb_group::VerbGroupProjection;
 pub use verb_group::VerbGroupSpan;
+pub use verb_group::project_verb_groups;
 pub use verb_group::scan_verb_groups;
 pub use web_search::WebSearchBlock;
