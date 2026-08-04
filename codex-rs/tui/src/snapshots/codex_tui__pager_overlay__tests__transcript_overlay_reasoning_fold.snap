@@ -1,0 +1,30 @@
+---
+source: tui/src/pager_overlay.rs
+expression: "format!(\"COLLAPSED\\n{}\\nEXPANDED\\n{}\", buffer_to_text(&collapsed, area),\nbuffer_to_text(&expanded, area),)"
+---
+COLLAPSED
+│❙ › Thought                                                                  │
+└                                                                             ┘
+
+
+
+
+
+
+
+ ↑/↓ to select   pgup/pgdn to page   home/end to jump
+ q to quit   esc to edit prev   ←/→ to fold   e to toggle
+
+
+EXPANDED
+│┃ ◆ Thought                                                                  │
+│┃                                                                            │
+│┃   Checked the source.                                                      │
+│┃                                                                            │
+│┃   Found the ordering issue.                                                │
+└                                                                             ┘
+
+
+
+ ↑/↓ to select   pgup/pgdn to page   home/end to jump
+ q to quit   esc to edit prev   ←/→ to fold   e to toggle

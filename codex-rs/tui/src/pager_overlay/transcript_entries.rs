@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use crate::history_cell::HistoryCell;
 use crate::history_transcript::HistoryEntryId;
+use astral_tui::TranscriptEntryId;
 
 #[derive(Clone)]
 pub(super) struct TranscriptEntry {
@@ -38,6 +39,16 @@ impl TranscriptEntries {
 
     pub(super) fn iter(&self) -> impl ExactSizeIterator<Item = &TranscriptEntry> {
         self.entries.iter()
+    }
+
+    pub(super) fn get_by_surface_id(&self, id: TranscriptEntryId) -> Option<&TranscriptEntry> {
+        self.entries
+            .iter()
+            .find(|entry| entry.id.value() == id.value())
+    }
+
+    pub(super) fn contains(&self, id: HistoryEntryId) -> bool {
+        self.entries.iter().any(|entry| entry.id == id)
     }
 
     #[cfg(test)]

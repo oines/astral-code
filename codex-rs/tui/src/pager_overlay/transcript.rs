@@ -5,6 +5,7 @@ pub(crate) struct TranscriptOverlay {
     pub(super) viewport: SurfaceViewport,
     renderer: SurfaceRenderer,
     pub(super) cells: TranscriptEntries,
+    display: TranscriptDisplayState,
     live_tail_key: Option<LiveTailKey>,
     live_tail_lines: Vec<HyperlinkLine>,
     surface_dirty: bool,
@@ -37,6 +38,7 @@ impl TranscriptOverlay {
             viewport: SurfaceViewport::default(),
             renderer: SurfaceRenderer::default(),
             cells: TranscriptEntries::new(transcript_cells),
+            display: TranscriptDisplayState::default(),
             live_tail_key: None,
             live_tail_lines: Vec::new(),
             surface_dirty: true,
@@ -57,6 +59,7 @@ impl TranscriptOverlay {
     /// transcript overlay immediately reflects the same committed cells as the main transcript.
     pub(crate) fn replace_cells(&mut self, cells: Vec<(HistoryEntryId, Arc<dyn HistoryCell>)>) {
         self.cells.replace(cells);
+        self.display.retain(|id| self.cells.contains(id));
         self.surface_dirty = true;
     }
 
@@ -73,6 +76,7 @@ impl TranscriptOverlay {
         consolidated: Arc<dyn HistoryCell>,
     ) {
         if self.cells.consolidate(range, consolidated) {
+            self.display.retain(|id| self.cells.contains(id));
             self.surface_dirty = true;
         }
     }
@@ -133,10 +137,13 @@ impl TranscriptOverlay {
                 lines: self.live_tail_lines.as_slice(),
                 is_stream_continuation: key.is_stream_continuation,
             });
-            self.surface = materialize_history_surface(
-                self.cells.iter().map(|entry| (entry.id(), entry.cell())),
+            let cells = &self.cells;
+            let display = &mut self.display;
+            self.surface = crate::history_surface::materialize_history_surface_with_modes(
+                cells.iter().map(|entry| (entry.id(), entry.cell())),
                 tail,
                 width,
+                |id, cell| Some(display.mode_for(id, cell)),
             );
             self.surface_dirty = false;
         }
@@ -189,8 +196,34 @@ impl TranscriptOverlay {
                 let selected = self.viewport.select_last(&self.surface);
                 scrolled || selected
             }
+            event if key_hint::plain(KeyCode::Left).is_press(event) => {
+                self.apply_fold_action(FoldAction::Collapse)
+            }
+            event if key_hint::plain(KeyCode::Right).is_press(event) => {
+                self.apply_fold_action(FoldAction::Expand)
+            }
+            event if key_hint::plain(KeyCode::Char('e')).is_press(event) => {
+                self.apply_fold_action(FoldAction::Toggle)
+            }
             _ => false,
         }
+    }
+
+    fn apply_fold_action(&mut self, action: FoldAction) -> bool {
+        let Some(SurfaceNodeId::Entry(id)) = self.viewport.selected() else {
+            return false;
+        };
+        let Some(entry) = self.cells.get_by_surface_id(id) else {
+            return false;
+        };
+        if !self
+            .display
+            .apply(entry.id(), entry.cell().as_ref(), action)
+        {
+            return false;
+        }
+        self.surface_dirty = true;
+        true
     }
 
     fn handle_key_event(&mut self, tui: &mut tui::Tui, key_event: KeyEvent) {
@@ -246,6 +279,21 @@ impl TranscriptOverlay {
             pairs.push((vec![key_hint::plain(KeyCode::Enter)], "to edit message"));
         } else {
             pairs.push((vec![key_hint::plain(KeyCode::Esc)], "to edit prev"));
+            if self
+                .viewport
+                .selected()
+                .and_then(|id| self.surface.node(id))
+                .is_some_and(astral_tui::SurfaceNode::is_foldable)
+            {
+                pairs.push((
+                    vec![
+                        key_hint::plain(KeyCode::Left),
+                        key_hint::plain(KeyCode::Right),
+                    ],
+                    "to fold",
+                ));
+                pairs.push((vec![key_hint::plain(KeyCode::Char('e'))], "to toggle"));
+            }
         }
         render_key_hints(line2, buf, &pairs);
     }
