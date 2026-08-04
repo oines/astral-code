@@ -1,12 +1,14 @@
 use codex_app_server_client::AppServerEvent;
 use codex_app_server_protocol::AgentMessageDeltaNotification;
 use codex_app_server_protocol::CommandExecutionOutputDeltaNotification;
+use codex_app_server_protocol::CommandExecutionRequestApprovalParams;
 use codex_app_server_protocol::DynamicToolCallParams;
 use codex_app_server_protocol::ItemCompletedNotification;
 use codex_app_server_protocol::ItemStartedNotification;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ServerRequest;
+use codex_app_server_protocol::ServerRequestResolvedNotification;
 use codex_app_server_protocol::SessionSource;
 use codex_app_server_protocol::Thread;
 use codex_app_server_protocol::ThreadItem;
@@ -18,10 +20,13 @@ use super::RuntimeEvent;
 use super::TranscriptUpdate;
 use super::apply_event;
 use crate::ConversationState;
+use crate::PendingInteractionUpdate;
+use crate::PendingInteractions;
 
 #[test]
 fn notification_projection_recovers_dropped_starts_and_ignores_unusable_deltas() {
     let mut conversation = ConversationState::from_thread(&thread());
+    let mut pending = PendingInteractions::new("thread-1");
     let started = ServerNotification::ItemStarted(ItemStartedNotification {
         item: assistant("assistant", ""),
         thread_id: "thread-1".to_string(),
@@ -31,6 +36,7 @@ fn notification_projection_recovers_dropped_starts_and_ignores_unusable_deltas()
 
     let action = apply_event(
         &mut conversation,
+        &mut pending,
         AppServerEvent::ServerNotification(started),
     );
     assert!(matches!(
@@ -56,6 +62,7 @@ fn notification_projection_recovers_dropped_starts_and_ignores_unusable_deltas()
     assert!(matches!(
         apply_event(
             &mut conversation,
+            &mut pending,
             AppServerEvent::ServerNotification(inferred)
         ),
         Some(RuntimeEvent::ServerNotification {
@@ -73,6 +80,7 @@ fn notification_projection_recovers_dropped_starts_and_ignores_unusable_deltas()
     assert!(matches!(
         apply_event(
             &mut conversation,
+            &mut pending,
             AppServerEvent::ServerNotification(ServerNotification::ItemCompleted(
                 ItemCompletedNotification {
                     item: assistant("assistant", "done"),
@@ -94,7 +102,11 @@ fn notification_projection_recovers_dropped_starts_and_ignores_unusable_deltas()
         delta: "too late".to_string(),
     });
     assert!(matches!(
-        apply_event(&mut conversation, AppServerEvent::ServerNotification(late)),
+        apply_event(
+            &mut conversation,
+            &mut pending,
+            AppServerEvent::ServerNotification(late)
+        ),
         Some(RuntimeEvent::ServerNotification {
             transcript_update: TranscriptUpdate::Unchanged,
             ..
@@ -111,6 +123,7 @@ fn notification_projection_recovers_dropped_starts_and_ignores_unusable_deltas()
     assert!(matches!(
         apply_event(
             &mut conversation,
+            &mut pending,
             AppServerEvent::ServerNotification(best_effort_output)
         ),
         Some(RuntimeEvent::ServerNotification {
@@ -121,9 +134,17 @@ fn notification_projection_recovers_dropped_starts_and_ignores_unusable_deltas()
 }
 
 #[test]
-fn event_boundary_hides_lag_markers_and_preserves_server_requests() {
+fn event_boundary_owns_active_interactions_and_preserves_other_server_requests() {
     let mut conversation = ConversationState::from_thread(&thread());
-    assert!(apply_event(&mut conversation, AppServerEvent::Lagged { skipped: 42 }).is_none());
+    let mut pending = PendingInteractions::new("thread-1");
+    assert!(
+        apply_event(
+            &mut conversation,
+            &mut pending,
+            AppServerEvent::Lagged { skipped: 42 }
+        )
+        .is_none()
+    );
 
     let request = ServerRequest::DynamicToolCall {
         request_id: RequestId::Integer(7),
@@ -138,15 +159,70 @@ fn event_boundary_hides_lag_markers_and_preserves_server_requests() {
     };
     let action = apply_event(
         &mut conversation,
+        &mut pending,
         AppServerEvent::ServerRequest(request.clone()),
     );
     let Some(RuntimeEvent::ServerRequest(forwarded)) = action else {
-        panic!("server request should be forwarded to the modal owner");
+        panic!("server request should be forwarded to the assembly layer");
     };
     assert_eq!(forwarded, request);
 
+    let approval = ServerRequest::CommandExecutionRequestApproval {
+        request_id: RequestId::Integer(8),
+        params: CommandExecutionRequestApprovalParams {
+            thread_id: "thread-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            item_id: "command-1".to_string(),
+            started_at_ms: 1,
+            approval_id: None,
+            environment_id: None,
+            reason: None,
+            network_approval_context: None,
+            command: Some("ls".to_string()),
+            cwd: None,
+            command_actions: None,
+            additional_permissions: None,
+            proposed_execpolicy_amendment: None,
+            proposed_network_policy_amendments: None,
+            available_decisions: None,
+        },
+    };
+    assert!(matches!(
+        apply_event(
+            &mut conversation,
+            &mut pending,
+            AppServerEvent::ServerRequest(approval)
+        ),
+        Some(RuntimeEvent::PendingInteraction(
+            PendingInteractionUpdate::Added {
+                request_id: RequestId::Integer(8),
+            }
+        ))
+    ));
+    assert_eq!(pending.len(), 1);
+
+    assert!(matches!(
+        apply_event(
+            &mut conversation,
+            &mut pending,
+            AppServerEvent::ServerNotification(ServerNotification::ServerRequestResolved(
+                ServerRequestResolvedNotification {
+                    thread_id: "thread-1".to_string(),
+                    request_id: RequestId::Integer(8),
+                }
+            ))
+        ),
+        Some(RuntimeEvent::PendingInteraction(
+            PendingInteractionUpdate::Resolved {
+                request_id: RequestId::Integer(8),
+            }
+        ))
+    ));
+    assert!(pending.is_empty());
+
     let action = apply_event(
         &mut conversation,
+        &mut pending,
         AppServerEvent::Disconnected {
             message: "closed".to_string(),
         },
