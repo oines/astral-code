@@ -55,7 +55,7 @@ impl App {
             let consolidated: Arc<dyn HistoryCell> =
                 Arc::new(history_cell::AgentMarkdownCell::new(source, &cwd));
             self.transcript_cells
-                .splice(start..end, std::iter::once(consolidated.clone()));
+                .consolidate(start..end, consolidated.clone());
 
             if let Some(Overlay::Transcript(t)) = &mut self.overlay {
                 t.consolidate_cells(start..end, consolidated.clone());

@@ -3870,7 +3870,8 @@ async fn render_clear_ui_header_after_long_transcript_for_snapshot() -> String {
         agent_cell(story_part_two),
         user_cell("Finish the story with a storm and a resolution."),
         agent_cell(story_part_three),
-    ];
+    ]
+    .into();
     app.has_emitted_history_lines = true;
 
     let rendered = app
@@ -3973,7 +3974,7 @@ async fn make_test_app() -> App {
         runtime_approval_policy_override: None,
         runtime_permission_profile_override: None,
         file_search,
-        transcript_cells: Vec::new(),
+        transcript_cells: Default::default(),
         overlay: None,
         deferred_history_lines: Vec::new(),
         has_emitted_history_lines: false,
@@ -4039,7 +4040,7 @@ async fn make_test_app_with_channels() -> (
             runtime_approval_policy_override: None,
             runtime_permission_profile_override: None,
             file_search,
-            transcript_cells: Vec::new(),
+            transcript_cells: Default::default(),
             overlay: None,
             deferred_history_lines: Vec::new(),
             has_emitted_history_lines: false,
@@ -4174,7 +4175,8 @@ async fn resize_reflow_wraps_transcript_early_when_pet_is_enabled() {
     app.transcript_cells = vec![Arc::new(AgentMarkdownCell::new(
         "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda".to_string(),
         Path::new("/tmp"),
-    ))];
+    )) as Arc<dyn HistoryCell>]
+    .into();
 
     let without_pet = app.render_transcript_lines_for_reflow(/*width*/ 40);
     app.chat_widget
@@ -4747,7 +4749,8 @@ async fn backtrack_selection_with_duplicate_history_targets_unique_turn() {
             vec!["https://example.com/backtrack.png".to_string()],
         ),
         agent_cell("answer edited"),
-    ];
+    ]
+    .into();
 
     assert_eq!(user_count(&app.transcript_cells), 2);
 
@@ -4817,7 +4820,8 @@ async fn backtrack_remote_image_only_selection_clears_existing_composer_draft() 
         text_elements: Vec::new(),
         local_image_paths: Vec::new(),
         remote_image_urls: Vec::new(),
-    }) as Arc<dyn HistoryCell>];
+    }) as Arc<dyn HistoryCell>]
+    .into();
     app.chat_widget
         .set_composer_text("stale draft".to_string(), Vec::new(), Vec::new());
 
@@ -4850,7 +4854,8 @@ async fn cancelled_turn_edit_restores_prompt_and_rolls_back_latest_turn() {
         text_elements: Vec::new(),
         local_image_paths: Vec::new(),
         remote_image_urls: Vec::new(),
-    }) as Arc<dyn HistoryCell>];
+    }) as Arc<dyn HistoryCell>]
+    .into();
     let prompt = crate::chatwidget::UserMessage {
         text: "edit me".to_string(),
         local_images: Vec::new(),
@@ -4932,7 +4937,8 @@ async fn backtrack_resubmit_preserves_data_image_urls_in_user_turn() {
         text_elements: Vec::new(),
         local_image_paths: Vec::new(),
         remote_image_urls: vec![data_image_url.clone()],
-    }) as Arc<dyn HistoryCell>];
+    }) as Arc<dyn HistoryCell>]
+    .into();
 
     app.apply_backtrack_rollback(BacktrackSelection {
         nth_user_message: 0,
@@ -5215,9 +5221,10 @@ async fn queued_rollback_syncs_overlay_and_clears_deferred_history() {
             vec![Line::from("after second")],
             /*is_first_line*/ false,
         )) as Arc<dyn HistoryCell>,
-    ];
+    ]
+    .into();
     app.overlay = Some(Overlay::new_transcript(
-        app.transcript_cells.clone(),
+        app.transcript_cells.clone_cells(),
         app.keymap.pager.clone(),
     ));
     app.deferred_history_lines = vec![Line::from("stale buffered line").into()];
@@ -5777,9 +5784,10 @@ async fn clear_only_ui_reset_preserves_chat_session_state() {
         text_elements: Vec::new(),
         local_image_paths: Vec::new(),
         remote_image_urls: Vec::new(),
-    }) as Arc<dyn HistoryCell>];
+    }) as Arc<dyn HistoryCell>]
+    .into();
     app.overlay = Some(Overlay::new_transcript(
-        app.transcript_cells.clone(),
+        app.transcript_cells.clone_cells(),
         crate::keymap::RuntimeKeymap::defaults().pager,
     ));
     app.deferred_history_lines = vec![Line::from("stale buffered line").into()];

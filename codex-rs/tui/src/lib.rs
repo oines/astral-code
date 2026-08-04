@@ -134,6 +134,7 @@ mod get_git_diff;
 mod git_action_directives;
 mod goal_display;
 mod history_cell;
+mod history_transcript;
 mod hooks_rpc;
 mod ide_context;
 pub(crate) mod insert_history;
