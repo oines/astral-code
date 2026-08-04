@@ -21,7 +21,6 @@ use std::sync::Arc;
 use crate::chatwidget::ActiveCellTranscriptKey;
 use crate::history_cell::HistoryCell;
 use crate::history_surface::HistorySurfaceTail;
-use crate::history_surface::materialize_history_surface;
 use crate::history_transcript::HistoryEntryId;
 use crate::key_hint;
 use crate::key_hint::KeyBinding;
@@ -54,9 +53,12 @@ use ratatui::widgets::WidgetRef;
 use ratatui::widgets::Wrap;
 
 mod transcript;
+mod transcript_display;
 mod transcript_entries;
 
 use transcript::TranscriptOverlay;
+use transcript_display::FoldAction;
+use transcript_display::TranscriptDisplayState;
 use transcript_entries::TranscriptEntries;
 
 pub(crate) enum Overlay {
@@ -622,6 +624,36 @@ mod tests {
             ))),
         );
         assert_snapshot!(term.backend());
+    }
+
+    #[test]
+    fn transcript_overlay_reasoning_folds_by_stable_node() {
+        let mut overlay =
+            transcript_overlay(vec![Arc::new(history_cell::ReasoningSummaryCell::new(
+                "**Inspecting the renderer**".to_string(),
+                "Checked the source.\n\nFound the ordering issue.".to_string(),
+                PathBuf::from("/tmp").as_path(),
+                /*transcript_only*/ false,
+            ))]);
+        let area = Rect::new(
+            /*x*/ 0, /*y*/ 0, /*width*/ 80, /*height*/ 12,
+        );
+        assert!(overlay.apply_key_event(area, KeyEvent::from(KeyCode::Down)));
+
+        let mut collapsed = Buffer::empty(area);
+        overlay.render(area, &mut collapsed);
+        assert!(overlay.apply_key_event(area, KeyEvent::from(KeyCode::Right)));
+        let mut expanded = Buffer::empty(area);
+        overlay.render(area, &mut expanded);
+
+        assert_snapshot!(
+            "transcript_overlay_reasoning_fold",
+            format!(
+                "COLLAPSED\n{}\nEXPANDED\n{}",
+                buffer_to_text(&collapsed, area),
+                buffer_to_text(&expanded, area),
+            )
+        );
     }
 
     #[test]

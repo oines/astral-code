@@ -214,7 +214,7 @@ impl ReasoningSummaryCell {
         }
     }
 
-    fn lines(&self, width: u16) -> Vec<Line<'static>> {
+    fn summary_lines(&self, width: u16) -> Vec<Line<'static>> {
         let mut lines: Vec<Line<'static>> = Vec::new();
         append_markdown(
             &self.content,
@@ -223,7 +223,7 @@ impl ReasoningSummaryCell {
             &mut lines,
         );
         let summary_style = Style::default().dim().italic();
-        let summary_lines = lines
+        lines
             .into_iter()
             .map(|mut line| {
                 line.spans = line
@@ -233,14 +233,36 @@ impl ReasoningSummaryCell {
                     .collect();
                 line
             })
-            .collect::<Vec<_>>();
+            .collect()
+    }
 
+    fn lines(&self, width: u16) -> Vec<Line<'static>> {
         adaptive_wrap_lines(
-            &summary_lines,
+            self.summary_lines(width),
             RtOptions::new(width as usize)
                 .initial_indent("• ".dim().into())
                 .subsequent_indent("  ".into()),
         )
+    }
+
+    fn transcript_lines_for_presentation(
+        &self,
+        width: u16,
+        mode: astral_tui::DisplayMode,
+    ) -> Vec<Line<'static>> {
+        let header: Line<'static> = vec!["◆ ".dim(), "Thought".bold()].into();
+        if mode == astral_tui::DisplayMode::Collapsed {
+            return vec![header];
+        }
+
+        let mut lines = vec![header, Line::from("")];
+        lines.extend(adaptive_wrap_lines(
+            self.summary_lines(width),
+            RtOptions::new(width as usize)
+                .initial_indent("  ".into())
+                .subsequent_indent("  ".into()),
+        ));
+        lines
     }
 }
 
@@ -255,6 +277,18 @@ impl HistoryCell for ReasoningSummaryCell {
 
     fn transcript_lines(&self, width: u16) -> Vec<Line<'static>> {
         self.lines(width)
+    }
+
+    fn transcript_presentation(&self) -> HistoryCellPresentation {
+        HistoryCellPresentation::two_state(astral_tui::DisplayMode::Collapsed).with_groupable()
+    }
+
+    fn transcript_hyperlink_lines_for_presentation(
+        &self,
+        width: u16,
+        mode: astral_tui::DisplayMode,
+    ) -> Vec<HyperlinkLine> {
+        plain_hyperlink_lines(self.transcript_lines_for_presentation(width, mode))
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {

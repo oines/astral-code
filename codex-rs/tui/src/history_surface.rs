@@ -40,13 +40,28 @@ pub(crate) struct HistorySurfaceTail<'a> {
     pub(crate) is_stream_continuation: bool,
 }
 
+#[cfg(test)]
 pub(crate) fn materialize_history_surface<'a>(
     entries: impl IntoIterator<Item = (HistoryEntryId, &'a Arc<dyn HistoryCell>)>,
     live_tail: Option<HistorySurfaceTail<'_>>,
     width: u16,
 ) -> ConversationSurface {
-    materialize_history_surface_with(entries, live_tail, width, |cell, width| {
-        cell.transcript_hyperlink_lines(width)
+    materialize_history_surface_with_modes(entries, live_tail, width, |_, _| None)
+}
+
+pub(crate) fn materialize_history_surface_with_modes<'a>(
+    entries: impl IntoIterator<Item = (HistoryEntryId, &'a Arc<dyn HistoryCell>)>,
+    live_tail: Option<HistorySurfaceTail<'_>>,
+    width: u16,
+    mut mode_for: impl FnMut(HistoryEntryId, &dyn HistoryCell) -> Option<DisplayMode>,
+) -> ConversationSurface {
+    materialize_history_surface_with(entries, live_tail, width, |id, cell, width| {
+        let policy = cell.transcript_presentation();
+        let mode = policy.normalize(mode_for(id, cell));
+        (
+            cell.transcript_hyperlink_lines_for_presentation(width, mode),
+            settled_presentation(mode, policy.is_foldable(), policy.is_groupable()),
+        )
     })
 }
 
@@ -58,8 +73,11 @@ pub(crate) fn materialize_history_display_surface<'a>(
     width: u16,
     mode: HistoryRenderMode,
 ) -> ConversationSurface {
-    materialize_history_surface_with(entries, live_tail, width, |cell, width| {
-        cell.display_hyperlink_lines_for_mode(width, mode)
+    materialize_history_surface_with(entries, live_tail, width, |_, cell, width| {
+        (
+            cell.display_hyperlink_lines_for_mode(width, mode),
+            settled_presentation(DisplayMode::Expanded, false, false),
+        )
     })
 }
 
@@ -67,15 +85,19 @@ fn materialize_history_surface_with<'a>(
     entries: impl IntoIterator<Item = (HistoryEntryId, &'a Arc<dyn HistoryCell>)>,
     live_tail: Option<HistorySurfaceTail<'_>>,
     width: u16,
-    mut render_cell: impl FnMut(&dyn HistoryCell, u16) -> Vec<HyperlinkLine>,
+    mut render_cell: impl FnMut(
+        HistoryEntryId,
+        &dyn HistoryCell,
+        u16,
+    ) -> (Vec<HyperlinkLine>, SurfaceEntryPresentation),
 ) -> ConversationSurface {
     let committed = entries.into_iter().map(|(id, cell)| {
-        let lines = render_cell(cell.as_ref(), width);
+        let (lines, presentation) = render_cell(id, cell.as_ref(), width);
         materialize_entry(
             TranscriptEntryId::new(id.value()),
             lines,
             spacing(cell.is_stream_continuation()),
-            settled_presentation(),
+            presentation,
             width,
         )
     });
@@ -241,12 +263,16 @@ fn spacing(is_stream_continuation: bool) -> SurfaceEntrySpacing {
     }
 }
 
-fn settled_presentation() -> SurfaceEntryPresentation {
+fn settled_presentation(
+    mode: DisplayMode,
+    foldable: bool,
+    groupable: bool,
+) -> SurfaceEntryPresentation {
     SurfaceEntryPresentation {
         lifecycle: EntryLifecycle::Restored,
-        mode: DisplayMode::Expanded,
-        foldable: false,
-        groupable: false,
+        mode,
+        foldable,
+        groupable,
         turn_settled: true,
         presentation_stable: true,
     }

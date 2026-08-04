@@ -118,6 +118,7 @@ mod messages;
 mod notices;
 mod patches;
 mod plans;
+mod presentation;
 mod request_user_input;
 mod search;
 mod separators;
@@ -136,6 +137,7 @@ pub(crate) use messages::*;
 pub(crate) use notices::*;
 pub(crate) use patches::*;
 pub(crate) use plans::*;
+pub(crate) use presentation::HistoryCellPresentation;
 pub(crate) use request_user_input::*;
 pub(crate) use search::*;
 pub(crate) use separators::*;
@@ -254,6 +256,23 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
     /// delegate to `display_hyperlink_lines`.
     fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         plain_hyperlink_lines(self.transcript_lines(width))
+    }
+
+    /// Declares the presentation modes this cell can render in the interactive transcript.
+    ///
+    /// Fixed expanded presentation preserves the original Codex behavior. Cells opt into
+    /// Grok-style folding only when their source data has a meaningful compact representation.
+    fn transcript_presentation(&self) -> HistoryCellPresentation {
+        HistoryCellPresentation::fixed(astral_tui::DisplayMode::Expanded)
+    }
+
+    /// Render this cell in one of the modes declared by [`Self::transcript_presentation`].
+    fn transcript_hyperlink_lines_for_presentation(
+        &self,
+        width: u16,
+        _mode: astral_tui::DisplayMode,
+    ) -> Vec<HyperlinkLine> {
+        self.transcript_hyperlink_lines(width)
     }
 
     fn is_stream_continuation(&self) -> bool {
