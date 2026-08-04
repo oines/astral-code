@@ -11,5 +11,5 @@ expression: snapshot
        2 +world                                                                │
                                                                                │
    ✔ You approved codex to run ls this time                                    │
- ↑/↓ to scroll   pgup/pgdn to page   home/end to jump
+ ↑/↓ to select   pgup/pgdn to page   home/end to jump
  q to quit   esc to edit prev

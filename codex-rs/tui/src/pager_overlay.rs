@@ -597,8 +597,7 @@ mod tests {
 
     #[test]
     fn transcript_overlay_snapshot_basic() {
-        // Prepare a transcript overlay with a selected middle entry.
-        let mut overlay = transcript_overlay(vec![
+        let (mut overlay, transcript) = transcript_overlay_and_source(vec![
             Arc::new(TestCell {
                 lines: vec![Line::from("alpha")],
             }),
@@ -609,15 +608,17 @@ mod tests {
                 lines: vec![Line::from("gamma")],
             }),
         ]);
-        overlay.set_highlight_cell(Some(1));
-        let highlighted = overlay.cells.highlighted().expect("highlighted entry");
+        let expected = transcript.entries().nth(1).expect("middle entry").0;
+        let area = Rect::new(0, 0, 40, 10);
+        assert!(overlay.apply_key_event(area, KeyEvent::from(KeyCode::Down)));
+        assert!(overlay.apply_key_event(area, KeyEvent::from(KeyCode::Down)));
         let mut term = Terminal::new(TestBackend::new(40, 10)).expect("term");
         term.draw(|f| overlay.render(f.area(), f.buffer_mut()))
             .expect("draw");
         assert_eq!(
             overlay.viewport.selected(),
             Some(SurfaceNodeId::Entry(astral_tui::TranscriptEntryId::new(
-                highlighted.value(),
+                expected.value(),
             ))),
         );
         assert_snapshot!(term.backend());
@@ -1079,10 +1080,10 @@ mod tests {
             page1_len,
             "second page should have the same number of visible lines as the first page"
         );
-        let expected_page2_first = *page1.last().unwrap() + 1;
+        let expected_page2_first = *page1.last().expect("first page has content");
         assert_eq!(
             page2[0], expected_page2_first,
-            "second page after PageDown should immediately follow the first page"
+            "node paging should retain one visible entry of reading context"
         );
 
         // Scenario 2: from an interior offset (start=3), PageDown then PageUp should round-trip.
