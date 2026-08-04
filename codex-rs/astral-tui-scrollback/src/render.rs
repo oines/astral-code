@@ -107,6 +107,15 @@ pub struct RenderedEntry {
 }
 
 impl RenderedEntry {
+    /// Construct an entry from width-resolved presentation lines.
+    ///
+    /// This is the boundary used by transcript sources whose canonical
+    /// projector already produced styled, wrapped lines. Rendering and
+    /// viewport code still consume the same [`RenderedEntry`] representation.
+    pub fn from_lines(lines: Vec<MarkdownLine>) -> Self {
+        Self { lines }
+    }
+
     pub fn lines(&self) -> &[MarkdownLine] {
         &self.lines
     }
