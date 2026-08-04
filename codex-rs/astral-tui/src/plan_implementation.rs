@@ -30,13 +30,6 @@ use crate::prompt_interaction::choice_list::ChoiceList;
 use crate::prompt_interaction::choice_list::ChoiceListOutcome;
 
 const TITLE: &str = "Implement this plan?";
-const IMPLEMENT_MESSAGE: &str = "Implement the plan.";
-const FRESH_CONTEXT_PREFIX: &str = concat!(
-    "A previous agent produced the plan below to accomplish the user's task. ",
-    "Implement the plan in a fresh context. Treat the plan as the source of ",
-    "user intent, re-read files as needed, and carry the work through ",
-    "implementation and verification."
-);
 
 const OPTIONS: [(&str, &str); 3] = [
     (
@@ -75,8 +68,13 @@ impl PlanImplementationRequest {
 /// Semantic action selected from the post-plan prompt.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlanImplementationSelection {
-    ImplementCurrentThread { input: String },
-    ImplementFreshThread { input: String },
+    ImplementCurrentThread,
+    /// Start from the existing structured plan. The assembly layer must use
+    /// the authoritative context-building path rather than turning this into
+    /// an unbounded synthetic user message.
+    ImplementFreshThread {
+        request: PlanImplementationRequest,
+    },
     StayInPlanMode,
 }
 
@@ -257,9 +255,7 @@ impl PlanImplementationHost {
             ChoiceListOutcome::Unchanged => PlanImplementationOutcome::Unchanged,
             ChoiceListOutcome::Changed => PlanImplementationOutcome::Changed,
             ChoiceListOutcome::Activate(0) => PlanImplementationOutcome::Selected(
-                PlanImplementationSelection::ImplementCurrentThread {
-                    input: IMPLEMENT_MESSAGE.to_string(),
-                },
+                PlanImplementationSelection::ImplementCurrentThread,
             ),
             ChoiceListOutcome::Activate(1) => {
                 let Some(request) = self.request.as_ref() else {
@@ -267,7 +263,7 @@ impl PlanImplementationHost {
                 };
                 PlanImplementationOutcome::Selected(
                     PlanImplementationSelection::ImplementFreshThread {
-                        input: format!("{FRESH_CONTEXT_PREFIX}\n\n{}", request.plan_markdown),
+                        request: request.clone(),
                     },
                 )
             }
