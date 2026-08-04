@@ -282,19 +282,60 @@ fn mcp_form_elicitation_omits_unselected_optional_field() {
 }
 
 #[test]
-fn empty_mcp_action_form_is_not_typed_form() {
-    let mut request = mcp_form_request(14);
-    let ServerRequest::McpServerElicitationRequest { params, .. } = &mut request else {
-        unreachable!();
-    };
-    let McpServerElicitationRequest::Form {
-        requested_schema, ..
-    } = &mut params.request
-    else {
-        unreachable!();
-    };
-    requested_schema.properties.clear();
+fn mcp_tool_action_form_preserves_parameters_and_persist_choice() {
+    let request = mcp_action_request(
+        14,
+        "Allow Calendar to create an event?",
+        serde_json::json!({
+            "codex_approval_kind": "mcp_tool_call",
+            "tool_name": "create_event",
+            "persist": ["session", "always"],
+            "tool_params_display": [
+                {
+                    "name": "title",
+                    "display_name": "Title",
+                    "value": "Roadmap review with a deliberately long description that must remain bounded inside the approval modal"
+                },
+                {"name": "calendar", "display_name": "Calendar", "value": "Astral"},
+                {"name": "timezone", "display_name": "Timezone", "value": "Asia/Singapore"},
+                {"name": "notify", "display_name": "Notify", "value": true}
+            ]
+        }),
+    );
     assert!(McpFormPrompt::from_request(&request).is_none());
+    let mut pending = PendingInteractions::new("thread-1");
+    pending.observe_request(request);
+    let mut host = PromptInteractionHost::new();
+    assert!(host.sync(&pending));
+    assert!(host.is_presentable());
+
+    let area = Rect::new(0, 0, 76, host.desired_height(76, 16));
+    let mut buffer = Buffer::empty(area);
+    host.render(&mut buffer, area);
+    insta::assert_snapshot!(buffer_text(&buffer));
+
+    assert_eq!(
+        host.handle_key_event(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
+        PromptInteractionOutcome::Changed
+    );
+    assert_eq!(
+        host.handle_key_event(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
+        PromptInteractionOutcome::Changed
+    );
+    let PromptInteractionOutcome::Submit(submission) =
+        host.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+    else {
+        panic!("persistent approval should submit");
+    };
+    assert_eq!(submission.request_id, RequestId::Integer(14));
+    assert_eq!(
+        submission.result,
+        serde_json::json!({
+            "action": "accept",
+            "content": null,
+            "_meta": {"persist": "always"}
+        })
+    );
 }
 
 fn command_request(request_id: i64, command: &str) -> ServerRequest {
@@ -368,6 +409,26 @@ fn mcp_form_request(request_id: i64) -> ServerRequest {
                     "required": ["a_project"]
                 }))
                 .expect("form schema should deserialize"),
+            },
+        },
+    }
+}
+
+fn mcp_action_request(request_id: i64, message: &str, meta: serde_json::Value) -> ServerRequest {
+    ServerRequest::McpServerElicitationRequest {
+        request_id: RequestId::Integer(request_id),
+        params: McpServerElicitationRequestParams {
+            thread_id: "thread-1".to_string(),
+            turn_id: Some("turn-1".to_string()),
+            server_name: "codex-apps".to_string(),
+            request: McpServerElicitationRequest::Form {
+                meta: Some(meta),
+                message: message.to_string(),
+                requested_schema: serde_json::from_value(serde_json::json!({
+                    "type": "object",
+                    "properties": {}
+                }))
+                .expect("empty action schema should deserialize"),
             },
         },
     }
