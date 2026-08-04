@@ -1,0 +1,10 @@
+---
+source: astral-tui/src/prompt_interaction_tests.rs
+expression: buffer_text(&buffer)
+---
+Allow command? · 2 requests waiting
+ Reason: The command needs explicit approval
+ $ cargo test -p astral-tui
+ › 1. Yes, proceed
+   2. No, and tell Astral Code what to do differently
+                ↑/↓ navigate  |  Enter confirm  |  Esc cancel

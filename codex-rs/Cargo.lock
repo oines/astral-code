@@ -585,6 +585,8 @@ dependencies = [
  "insta",
  "pretty_assertions",
  "ratatui",
+ "serde_json",
+ "textwrap 0.16.2",
 ]
 
 [[package]]

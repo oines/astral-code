@@ -12,6 +12,8 @@ codex-app-server-protocol = { workspace = true }
 codex-protocol = { workspace = true }
 crossterm = { workspace = true }
 ratatui = { workspace = true }
+serde_json = { workspace = true }
+textwrap = { workspace = true }
 
 [dev-dependencies]
 codex-utils-absolute-path = { workspace = true }
