@@ -5,6 +5,7 @@ use ratatui::style::Style;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
 
+use super::DECLINE_ACTION;
 use super::McpFormPrompt;
 use crate::ModalPresentation;
 use crate::ModalShortcut;
@@ -25,9 +26,7 @@ impl McpFormPrompt {
             .model
             .active_field()
             .and_then(|field| field.description.as_deref())
-            .map_or(0, |description| {
-                textwrap::wrap(description, content_width).len().min(2)
-            });
+            .map_or(0, |text| textwrap::wrap(text, content_width).len().min(2));
         let input_rows = self
             .model
             .active_field()
@@ -47,7 +46,10 @@ impl McpFormPrompt {
         queue_len: usize,
         responding: bool,
     ) {
-        let title = self.title(queue_len);
+        let mut title = format!("Provide details · {}", self.server_name);
+        if queue_len > 1 {
+            title.push_str(&format!(" · {queue_len} requests waiting"));
+        }
         let tab_labels = self
             .model
             .fields()
@@ -86,11 +88,11 @@ impl McpFormPrompt {
         if area.is_empty() {
             return;
         }
-        let field = self.model.active_field().cloned();
+        let Some(field) = self.model.active_field().cloned() else {
+            return;
+        };
         let mut y = area.y;
-        let reserve = field.as_ref().map_or(1, |field| {
-            5 + usize::from(field.description.is_some()) as u16
-        });
+        let reserve = 5 + usize::from(field.description.is_some()) as u16;
         let message_rows = area.height.saturating_sub(reserve).min(4);
         let rendered_message = render_wrapped(
             buffer,
@@ -102,25 +104,16 @@ impl McpFormPrompt {
         if y < area.bottom() && rendered_message > 0 {
             y += 1;
         }
-        let Some(field) = field else {
-            buffer.set_line(
-                area.x,
-                y.min(area.bottom().saturating_sub(1)),
-                &Line::from("No fields requested. Press Enter to continue.").dim(),
-                area.width,
-            );
-            return;
-        };
         if y < area.bottom() {
+            let requirement = if field.required {
+                "required"
+            } else {
+                "optional"
+            };
             let progress = format!(
-                "Field {}/{} · {}",
+                "Field {}/{} · {requirement}",
                 self.model.active_index() + 1,
                 self.model.field_count(),
-                if field.required {
-                    "required"
-                } else {
-                    "optional"
-                }
             );
             buffer.set_line(area.x, y, &Line::from(progress).dim(), area.width);
             y += 1;
@@ -136,14 +129,10 @@ impl McpFormPrompt {
             y += 1;
         }
         if let Some(description) = field.description.as_deref() {
+            let height = area.bottom().saturating_sub(y).min(2);
             y += render_wrapped(
                 buffer,
-                Rect::new(
-                    area.x,
-                    y,
-                    area.width,
-                    area.bottom().saturating_sub(y).min(2),
-                ),
+                Rect::new(area.x, y, area.width, height),
                 description,
                 Style::default().dim(),
             );
@@ -158,12 +147,8 @@ impl McpFormPrompt {
             y += 1;
         }
         let error_rows = u16::from(self.model.error().is_some() && y < area.bottom());
-        let control = Rect::new(
-            area.x,
-            y,
-            area.width,
-            area.bottom().saturating_sub(y).saturating_sub(error_rows),
-        );
+        let control_height = area.bottom().saturating_sub(y).saturating_sub(error_rows);
+        let control = Rect::new(area.x, y, area.width, control_height);
         match &field.control {
             McpFormControl::Text { draft, cursor, .. } => {
                 self.render_text(buffer, control, draft, *cursor);
@@ -173,12 +158,8 @@ impl McpFormPrompt {
         if let Some(error) = self.model.error()
             && error_rows > 0
         {
-            buffer.set_line(
-                area.x,
-                area.bottom() - 1,
-                &Line::from(format!("! {error}")).red().bold(),
-                area.width,
-            );
+            let line = Line::from(format!("! {error}")).red().bold();
+            buffer.set_line(area.x, area.bottom() - 1, &line, area.width);
         }
     }
 
@@ -189,11 +170,11 @@ impl McpFormPrompt {
         let available = usize::from(area.width.saturating_sub(3));
         let (before, after) = editor_slices(draft, cursor, available);
         let mut spans = vec!["› ".cyan().bold(), before.into(), "▏".cyan().bold()];
-        if draft.is_empty() {
-            spans.push("Type a value".dim());
+        spans.push(if draft.is_empty() {
+            "Type a value".dim()
         } else {
-            spans.push(after.into());
-        }
+            after.into()
+        });
         buffer.set_line(area.x, area.y, &Line::from(spans), area.width);
     }
 
@@ -228,17 +209,11 @@ impl McpFormPrompt {
             .enumerate()
         {
             let focused = index == *cursor;
-            let prefix = if focused { "›" } else { " " };
-            let marker = if *multiple {
-                if selected.contains(&index) {
-                    "[✓]"
-                } else {
-                    "[ ]"
-                }
-            } else if selected.contains(&index) {
-                "(●)"
-            } else {
-                "(○)"
+            let marker = match (*multiple, selected.contains(&index)) {
+                (true, true) => "[✓]",
+                (true, false) => "[ ]",
+                (false, true) => "(●)",
+                (false, false) => "(○)",
             };
             let shortcut = if index < 9 {
                 (index + 1).to_string()
@@ -248,28 +223,17 @@ impl McpFormPrompt {
             let style = if focused {
                 Style::default().cyan().bold()
             } else {
-                Style::default()
+                Default::default()
             };
-            let row = Rect::new(area.x, area.y + offset as u16, area.width, 1);
-            buffer.set_line(
-                row.x,
-                row.y,
-                &Line::from(format!("{prefix} {shortcut} {marker} {}", option.label)).style(style),
-                row.width,
-            );
+            let prefix = if focused { "›" } else { " " };
+            let line =
+                Line::from(format!("{prefix} {shortcut} {marker} {}", option.label)).style(style);
+            buffer.set_line(area.x, area.y + offset as u16, &line, area.width);
         }
-    }
-
-    fn title(&self, queue_len: usize) -> String {
-        let mut title = format!("Provide details · {}", self.server_name);
-        if queue_len > 1 {
-            title.push_str(&format!(" · {queue_len} requests waiting"));
-        }
-        title
     }
 
     fn shortcuts(&self) -> Vec<ModalShortcut<'static>> {
-        match self.model.active_field().map(|field| &field.control) {
+        let mut shortcuts = match self.model.active_field().map(|field| &field.control) {
             Some(McpFormControl::Select { .. }) => vec![
                 ModalShortcut::hint("↑/↓ navigate"),
                 ModalShortcut::hint("Space select"),
@@ -283,11 +247,10 @@ impl McpFormPrompt {
                 ModalShortcut::hint("Shift+Enter newline"),
                 ModalShortcut::hint("Esc cancel"),
             ],
-            None => vec![
-                ModalShortcut::hint("Enter submit"),
-                ModalShortcut::hint("Esc cancel"),
-            ],
-        }
+            None => Vec::new(),
+        };
+        shortcuts.push(ModalShortcut::action(DECLINE_ACTION, "Ctrl+D decline"));
+        shortcuts
     }
 }
 
@@ -298,12 +261,8 @@ fn render_wrapped(buffer: &mut Buffer, area: Rect, text: &str, style: Style) -> 
     let lines = textwrap::wrap(text, usize::from(area.width.max(1)));
     let visible = lines.len().min(usize::from(area.height));
     for (offset, line) in lines.into_iter().take(visible).enumerate() {
-        buffer.set_line(
-            area.x,
-            area.y + offset as u16,
-            &Line::from(line.into_owned()).style(style),
-            area.width,
-        );
+        let line = Line::from(line.into_owned()).style(style);
+        buffer.set_line(area.x, area.y + offset as u16, &line, area.width);
     }
     visible as u16
 }
@@ -354,9 +313,9 @@ fn control_hint(control: &McpFormControl) -> String {
 }
 
 fn join_hints(base: &str, minimum: Option<String>, maximum: Option<String>) -> String {
-    std::iter::once(base.to_string())
-        .chain(minimum)
-        .chain(maximum)
+    [Some(base.to_string()), minimum, maximum]
+        .into_iter()
+        .flatten()
         .collect::<Vec<_>>()
         .join(" · ")
 }
@@ -374,9 +333,8 @@ fn editor_slices(draft: &str, cursor: usize, width: usize) -> (String, String) {
     let before = sanitize_text(&draft[..cursor]);
     let after = sanitize_text(&draft[cursor..]);
     let after_budget = width.saturating_sub(1) / 2;
-    let before_budget = width
-        .saturating_sub(1)
-        .saturating_sub(Line::from(after.as_str()).width().min(after_budget));
+    let after_width = Line::from(after.as_str()).width().min(after_budget);
+    let before_budget = width.saturating_sub(1).saturating_sub(after_width);
     let visible_before = tail_within_width(&before, before_budget);
     let remaining = width
         .saturating_sub(1)
@@ -389,29 +347,23 @@ fn sanitize_text(text: &str) -> String {
 }
 
 fn head_within_width(text: &str, width: usize) -> String {
-    let mut result = String::new();
-    let mut used = 0;
-    for character in text.chars() {
-        let character_width = Line::from(character.to_string()).width();
-        if used + character_width > width {
-            break;
-        }
-        result.push(character);
-        used += character_width;
-    }
-    result
+    text.chars()
+        .scan(0, |used, character| {
+            *used += Line::from(character.to_string()).width();
+            (*used <= width).then_some(character)
+        })
+        .collect()
 }
 
 fn tail_within_width(text: &str, width: usize) -> String {
-    let mut reversed = Vec::new();
-    let mut used = 0;
-    for character in text.chars().rev() {
-        let character_width = Line::from(character.to_string()).width();
-        if used + character_width > width {
-            break;
-        }
-        reversed.push(character);
-        used += character_width;
-    }
-    reversed.into_iter().rev().collect()
+    text.chars()
+        .rev()
+        .scan(0, |used, character| {
+            *used += Line::from(character.to_string()).width();
+            (*used <= width).then_some(character)
+        })
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect()
 }

@@ -396,10 +396,10 @@ fn parse_number(draft: &str, integer: bool) -> Result<f64, String> {
             .map(|value| value as f64)
             .map_err(|_| "Enter a whole number".to_string())
     } else {
-        draft
-            .trim()
-            .parse::<f64>()
-            .map_err(|_| "Enter a valid number".to_string())
+        match draft.trim().parse::<f64>() {
+            Ok(value) if value.is_finite() => Ok(value),
+            _ => Err("Enter a valid number".to_string()),
+        }
     }
 }
 

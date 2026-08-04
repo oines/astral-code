@@ -23,6 +23,8 @@ use crate::prompt_interaction::PromptInteractionSubmission;
 
 mod render;
 
+const DECLINE_ACTION: usize = 0;
+
 pub(in crate::prompt_interaction) struct McpFormPrompt {
     request_id: RequestId,
     server_name: String,
@@ -44,6 +46,9 @@ impl McpFormPrompt {
         else {
             return None;
         };
+        if requested_schema.properties.is_empty() {
+            return None;
+        }
         Some(Self {
             request_id: request_id.clone(),
             server_name: params.server_name.clone(),
@@ -71,6 +76,7 @@ impl McpFormPrompt {
         }
         match (key.code, key.modifiers) {
             (KeyCode::Esc, KeyModifiers::NONE) => return self.cancel(),
+            (KeyCode::Char('d'), KeyModifiers::CONTROL) => return self.decline(),
             (KeyCode::Char('p'), KeyModifiers::CONTROL)
             | (KeyCode::PageUp, KeyModifiers::NONE)
             | (KeyCode::BackTab, _) => return self.move_field(/*delta*/ -1),
@@ -99,6 +105,7 @@ impl McpFormPrompt {
                 self.model.set_active_index(tab);
                 return PromptInteractionOutcome::Changed;
             }
+            ModalOutcome::ShortcutActivated(DECLINE_ACTION) => return self.decline(),
             ModalOutcome::Handled | ModalOutcome::ShortcutActivated(_) => {
                 return PromptInteractionOutcome::Changed;
             }
@@ -216,6 +223,10 @@ impl McpFormPrompt {
         self.submit(McpServerElicitationAction::Cancel, None)
     }
 
+    fn decline(&self) -> PromptInteractionOutcome {
+        self.submit(McpServerElicitationAction::Decline, None)
+    }
+
     fn submit(
         &self,
         action: McpServerElicitationAction,
@@ -237,14 +248,14 @@ impl McpFormPrompt {
     }
 
     fn single_select_needs_choice(&self) -> bool {
-        matches!(
-            self.model.active_field().map(|field| &field.control),
-            Some(McpFormControl::Select {
-                selected,
-                multiple: false,
-                ..
-            }) if selected.is_empty()
-        )
+        self.model.active_field().is_some_and(|field| {
+            field.required
+                && matches!(
+                    &field.control,
+                    McpFormControl::Select { selected, multiple: false, .. }
+                        if selected.is_empty()
+                )
+        })
     }
 
     fn active_select_is_multiple(&self) -> bool {

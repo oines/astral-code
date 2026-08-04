@@ -21,6 +21,7 @@ use ratatui::layout::Rect;
 
 use super::PromptInteractionHost;
 use super::PromptInteractionOutcome;
+use super::mcp_form::McpFormPrompt;
 use crate::PendingInteractions;
 
 #[test]
@@ -240,7 +241,7 @@ fn mcp_url_elicitation_blocks_every_unsafe_url_shape() {
 }
 
 #[test]
-fn mcp_form_elicitation_edits_fields_and_submits_exact_content() {
+fn mcp_form_elicitation_omits_unselected_optional_field() {
     let mut pending = PendingInteractions::new("thread-1");
     pending.observe_request(mcp_form_request(13));
     let mut host = PromptInteractionHost::new();
@@ -251,6 +252,11 @@ fn mcp_form_elicitation_edits_fields_and_submits_exact_content() {
     host.render(&mut buffer, area);
     insta::assert_snapshot!(buffer_text(&buffer));
 
+    assert!(matches!(
+        host.handle_key_event(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL)),
+        PromptInteractionOutcome::Submit(submission)
+            if submission.result == serde_json::json!({"action":"decline","content":null,"_meta":null})
+    ));
     assert_eq!(
         host.handle_paste("Astral"),
         PromptInteractionOutcome::Changed
@@ -259,7 +265,6 @@ fn mcp_form_elicitation_edits_fields_and_submits_exact_content() {
         host.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
         PromptInteractionOutcome::Changed
     );
-    host.handle_key_event(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
     let PromptInteractionOutcome::Submit(submission) =
         host.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
     else {
@@ -270,10 +275,26 @@ fn mcp_form_elicitation_edits_fields_and_submits_exact_content() {
         submission.result,
         serde_json::json!({
             "action": "accept",
-            "content": {"a_project": "Astral", "b_tier": "pro"},
+            "content": {"a_project": "Astral"},
             "_meta": null
         })
     );
+}
+
+#[test]
+fn empty_mcp_action_form_is_not_typed_form() {
+    let mut request = mcp_form_request(14);
+    let ServerRequest::McpServerElicitationRequest { params, .. } = &mut request else {
+        unreachable!();
+    };
+    let McpServerElicitationRequest::Form {
+        requested_schema, ..
+    } = &mut params.request
+    else {
+        unreachable!();
+    };
+    requested_schema.properties.clear();
+    assert!(McpFormPrompt::from_request(&request).is_none());
 }
 
 fn command_request(request_id: i64, command: &str) -> ServerRequest {
@@ -344,7 +365,7 @@ fn mcp_form_request(request_id: i64) -> ServerRequest {
                             ]
                         }
                     },
-                    "required": ["a_project", "b_tier"]
+                    "required": ["a_project"]
                 }))
                 .expect("form schema should deserialize"),
             },
