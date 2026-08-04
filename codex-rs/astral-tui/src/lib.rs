@@ -66,6 +66,7 @@ pub use surface::ConversationSurface;
 pub use surface::MaterializedSurfaceEntry;
 pub use surface::SurfaceAnchor;
 pub use surface::SurfaceEntryPresentation;
+pub use surface::SurfaceEntrySpacing;
 pub use surface::SurfaceNode;
 pub use surface::SurfaceNodeId;
 pub use surface::SurfaceNodeKind;

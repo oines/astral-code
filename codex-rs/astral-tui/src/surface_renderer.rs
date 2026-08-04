@@ -409,6 +409,9 @@ fn dense_group_rows(surface: &ConversationSurface, selected: &SurfaceNode) -> Ra
     if !selected.is_groupable() {
         return selected.rows();
     }
+    let Some(presentation_group) = selected.presentation_group() else {
+        return selected.rows();
+    };
     let nodes = surface.nodes();
     let Some(index) = nodes.iter().position(|node| node.id() == selected.id()) else {
         return selected.rows();
@@ -416,14 +419,14 @@ fn dense_group_rows(surface: &ConversationSurface, selected: &SurfaceNode) -> Ra
     let mut start = index;
     while start > 0
         && nodes[start - 1].is_groupable()
-        && nodes[start - 1].turn_id() == selected.turn_id()
+        && nodes[start - 1].presentation_group() == Some(presentation_group)
     {
         start -= 1;
     }
     let mut end = index.saturating_add(1);
     while end < nodes.len()
         && nodes[end].is_groupable()
-        && nodes[end].turn_id() == selected.turn_id()
+        && nodes[end].presentation_group() == Some(presentation_group)
     {
         end += 1;
     }

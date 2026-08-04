@@ -19,6 +19,7 @@ use pretty_assertions::assert_eq;
 use super::ConversationSurface;
 use super::MaterializedSurfaceEntry;
 use super::SurfaceEntryPresentation;
+use super::SurfaceEntrySpacing;
 use super::SurfaceNodeId;
 use super::SurfaceNodeKind;
 use crate::ConversationState;
@@ -72,10 +73,17 @@ fn materialized_surface_preserves_external_order_and_identity() {
     let surface = ConversationSurface::from_materialized(
         30,
         [
-            MaterializedSurfaceEntry::new(first, "turn-a", first_presentation, first_lines.clone()),
+            MaterializedSurfaceEntry::new(
+                first,
+                "turn-a",
+                SurfaceEntrySpacing::Separate,
+                first_presentation,
+                first_lines.clone(),
+            ),
             MaterializedSurfaceEntry::new(
                 second,
                 "turn-b",
+                SurfaceEntrySpacing::Continue,
                 second_presentation,
                 second_lines.clone(),
             ),
@@ -90,8 +98,9 @@ fn materialized_surface_preserves_external_order_and_identity() {
             .collect::<Vec<_>>(),
         vec![SurfaceNodeId::Entry(first), SurfaceNodeId::Entry(second)]
     );
-    assert_eq!(surface.nodes()[0].turn_id(), "turn-a");
-    assert_eq!(surface.nodes()[1].turn_id(), "turn-b");
+    assert_eq!(surface.nodes()[0].presentation_group(), Some("turn-a"));
+    assert_eq!(surface.nodes()[1].presentation_group(), Some("turn-b"));
+    assert_eq!(surface.nodes()[0].gap_after(), 0);
     assert_eq!(
         surface.nodes()[0].kind(),
         &SurfaceNodeKind::Entry {
@@ -121,9 +130,49 @@ fn materialized_surface_preserves_external_order_and_identity() {
     insta::assert_snapshot!(surface_text(&surface), @"\
 first link
 continued
-
 second
 ");
+}
+
+#[test]
+fn ungrouped_materialized_spacing_does_not_invent_grouping_semantics() {
+    let presentation = SurfaceEntryPresentation {
+        lifecycle: EntryLifecycle::Restored,
+        mode: DisplayMode::Collapsed,
+        foldable: false,
+        groupable: true,
+        turn_settled: true,
+        presentation_stable: true,
+    };
+    let surface = ConversationSurface::from_materialized(
+        20,
+        [
+            MaterializedSurfaceEntry::ungrouped(
+                TranscriptEntryId::new(1),
+                SurfaceEntrySpacing::Separate,
+                presentation,
+                vec![MarkdownLine {
+                    line: Line::from("first"),
+                    joiner_to_previous: LineJoiner::HardBreak,
+                    links: Vec::new(),
+                }],
+            ),
+            MaterializedSurfaceEntry::ungrouped(
+                TranscriptEntryId::new(2),
+                SurfaceEntrySpacing::Separate,
+                presentation,
+                vec![MarkdownLine {
+                    line: Line::from("second"),
+                    joiner_to_previous: LineJoiner::HardBreak,
+                    links: Vec::new(),
+                }],
+            ),
+        ],
+    );
+
+    assert_eq!(surface.nodes()[0].presentation_group(), None);
+    assert_eq!(surface.nodes()[1].presentation_group(), None);
+    assert_eq!(surface.nodes()[0].gap_after(), 1);
 }
 
 fn surface_text(surface: &ConversationSurface) -> String {
