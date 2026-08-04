@@ -336,6 +336,84 @@ fn mcp_tool_action_form_preserves_parameters_and_persist_choice() {
             "_meta": {"persist": "always"}
         })
     );
+
+    let mut pending = PendingInteractions::new("thread-1");
+    pending.observe_request(mcp_action_request(
+        15,
+        "Allow Calendar to read events?",
+        serde_json::json!({
+            "codex_approval_kind": "mcp_tool_call",
+            "tool_name": "read_events",
+            "persist": "session",
+            "tool_params": {"z_last": 3, "a_first": "one"}
+        }),
+    ));
+    let mut host = PromptInteractionHost::new();
+    assert!(host.sync(&pending));
+    let area = Rect::new(0, 0, 76, host.desired_height(76, 16));
+    let mut buffer = Buffer::empty(area);
+    host.render(&mut buffer, area);
+    let rendered = buffer_text(&buffer);
+    let first = rendered
+        .find("a_first: one")
+        .expect("raw parameters should be visible");
+    let last = rendered
+        .find("z_last: 3")
+        .expect("raw parameters should be visible");
+    assert!(first < last, "raw parameters should have stable ordering");
+    assert_eq!(
+        host.handle_key_event(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
+        PromptInteractionOutcome::Changed
+    );
+    let PromptInteractionOutcome::Submit(submission) =
+        host.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+    else {
+        panic!("session approval should submit");
+    };
+    assert_eq!(
+        submission.result,
+        serde_json::json!({
+            "action": "accept",
+            "content": null,
+            "_meta": {"persist": "session"}
+        })
+    );
+}
+
+#[test]
+fn generic_mcp_action_distinguishes_decline_from_cancel() {
+    let new_host = || {
+        let mut pending = PendingInteractions::new("thread-1");
+        pending.observe_request(mcp_action_request(
+            16,
+            "Allow this MCP request?",
+            serde_json::json!({}),
+        ));
+        let mut host = PromptInteractionHost::new();
+        assert!(host.sync(&pending));
+        host
+    };
+
+    let mut host = new_host();
+    host.handle_key_event(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    assert!(matches!(
+        host.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        PromptInteractionOutcome::Submit(submission)
+            if submission.request_id == RequestId::Integer(16)
+                && submission.result == serde_json::json!({
+                    "action": "decline", "content": null, "_meta": null
+                })
+    ));
+
+    let mut host = new_host();
+    assert!(matches!(
+        host.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        PromptInteractionOutcome::Submit(submission)
+            if submission.request_id == RequestId::Integer(16)
+                && submission.result == serde_json::json!({
+                    "action": "cancel", "content": null, "_meta": null
+                })
+    ));
 }
 
 fn command_request(request_id: i64, command: &str) -> ServerRequest {
