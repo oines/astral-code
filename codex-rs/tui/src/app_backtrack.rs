@@ -266,7 +266,7 @@ impl App {
     pub(crate) fn open_transcript_overlay(&mut self, tui: &mut tui::Tui) {
         let _ = tui.enter_alt_screen();
         self.overlay = Some(Overlay::new_transcript(
-            self.transcript_cells.clone(),
+            self.transcript_cells.clone_cells(),
             self.keymap.pager.clone(),
         ));
         tui.frame_requester().schedule_frame();
@@ -598,7 +598,7 @@ impl App {
     ///    for cells that were just removed by the trim.
     fn sync_overlay_after_transcript_trim(&mut self) {
         if let Some(Overlay::Transcript(t)) = &mut self.overlay {
-            t.replace_cells(self.transcript_cells.clone());
+            t.replace_cells(self.transcript_cells.clone_cells());
         }
         if self.backtrack.overlay_preview_active {
             let total_users = user_count(&self.transcript_cells);
@@ -618,7 +618,7 @@ impl App {
 }
 
 fn trim_transcript_cells_to_nth_user(
-    transcript_cells: &mut Vec<Arc<dyn crate::history_cell::HistoryCell>>,
+    transcript_cells: &mut crate::history_transcript::HistoryTranscript,
     nth_user_message: usize,
 ) -> bool {
     if nth_user_message == usize::MAX {
@@ -634,7 +634,7 @@ fn trim_transcript_cells_to_nth_user(
 }
 
 pub(crate) fn trim_transcript_cells_drop_last_n_user_turns(
-    transcript_cells: &mut Vec<Arc<dyn crate::history_cell::HistoryCell>>,
+    transcript_cells: &mut crate::history_transcript::HistoryTranscript,
     num_turns: u32,
 ) -> bool {
     if num_turns == 0 {
@@ -744,7 +744,7 @@ mod tests {
 
     #[test]
     fn trim_transcript_for_first_user_drops_user_and_newer_cells() {
-        let mut cells: Vec<Arc<dyn HistoryCell>> = vec![
+        let mut cells: crate::history_transcript::HistoryTranscript = vec![
             Arc::new(UserHistoryCell {
                 message: "first user".to_string(),
                 text_elements: Vec::new(),
@@ -755,7 +755,8 @@ mod tests {
                 vec![Line::from("assistant")],
                 /*is_first_line*/ true,
             )) as Arc<dyn HistoryCell>,
-        ];
+        ]
+        .into();
         trim_transcript_cells_to_nth_user(&mut cells, /*nth_user_message*/ 0);
 
         assert!(cells.is_empty());
@@ -763,7 +764,7 @@ mod tests {
 
     #[test]
     fn trim_transcript_preserves_cells_before_selected_user() {
-        let mut cells: Vec<Arc<dyn HistoryCell>> = vec![
+        let mut cells: crate::history_transcript::HistoryTranscript = vec![
             Arc::new(AgentMessageCell::new(
                 vec![Line::from("intro")],
                 /*is_first_line*/ true,
@@ -778,7 +779,8 @@ mod tests {
                 vec![Line::from("after")],
                 /*is_first_line*/ false,
             )) as Arc<dyn HistoryCell>,
-        ];
+        ]
+        .into();
         trim_transcript_cells_to_nth_user(&mut cells, /*nth_user_message*/ 0);
 
         assert_eq!(cells.len(), 1);
@@ -798,7 +800,7 @@ mod tests {
 
     #[test]
     fn trim_transcript_for_later_user_keeps_prior_history() {
-        let mut cells: Vec<Arc<dyn HistoryCell>> = vec![
+        let mut cells: crate::history_transcript::HistoryTranscript = vec![
             Arc::new(AgentMessageCell::new(
                 vec![Line::from("intro")],
                 /*is_first_line*/ true,
@@ -823,7 +825,8 @@ mod tests {
                 vec![Line::from("tail")],
                 /*is_first_line*/ false,
             )) as Arc<dyn HistoryCell>,
-        ];
+        ]
+        .into();
         trim_transcript_cells_to_nth_user(&mut cells, /*nth_user_message*/ 1);
 
         assert_eq!(cells.len(), 3);
@@ -860,7 +863,7 @@ mod tests {
 
     #[test]
     fn trim_drop_last_n_user_turns_applies_rollback_semantics() {
-        let mut cells: Vec<Arc<dyn HistoryCell>> = vec![
+        let mut cells: crate::history_transcript::HistoryTranscript = vec![
             Arc::new(UserHistoryCell {
                 message: "first".to_string(),
                 text_elements: Vec::new(),
@@ -881,7 +884,8 @@ mod tests {
                 vec![Line::from("after second")],
                 /*is_first_line*/ false,
             )) as Arc<dyn HistoryCell>,
-        ];
+        ]
+        .into();
 
         let changed =
             trim_transcript_cells_drop_last_n_user_turns(&mut cells, /*num_turns*/ 1);
@@ -897,7 +901,7 @@ mod tests {
 
     #[test]
     fn trim_drop_last_n_user_turns_allows_overflow() {
-        let mut cells: Vec<Arc<dyn HistoryCell>> = vec![
+        let mut cells: crate::history_transcript::HistoryTranscript = vec![
             Arc::new(AgentMessageCell::new(
                 vec![Line::from("intro")],
                 /*is_first_line*/ true,
@@ -912,7 +916,8 @@ mod tests {
                 vec![Line::from("after")],
                 /*is_first_line*/ false,
             )) as Arc<dyn HistoryCell>,
-        ];
+        ]
+        .into();
 
         let changed = trim_transcript_cells_drop_last_n_user_turns(&mut cells, u32::MAX);
 
