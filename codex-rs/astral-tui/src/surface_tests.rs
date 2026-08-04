@@ -52,7 +52,7 @@ fn one_surface_preserves_source_order_and_group_hit_geometry() {
             members: vec![search_1, search_2],
         }
     );
-    assert_contiguous(&collapsed);
+    assert_exact_gaps(&collapsed, &[1, 1]);
 
     assert_eq!(
         conversation.apply_verb_group_display_action(
@@ -83,10 +83,18 @@ fn one_surface_preserves_source_order_and_group_hit_geometry() {
             members: vec![search_1, search_2],
         }
     );
-    assert_contiguous(&expanded);
+    assert_exact_gaps(&expanded, &[1, 0, 1, 1]);
 }
 
-fn assert_contiguous(surface: &ConversationSurface) {
+fn assert_exact_gaps(surface: &ConversationSurface, expected_gaps: &[usize]) {
+    assert_eq!(
+        surface
+            .nodes()
+            .iter()
+            .map(super::SurfaceNode::gap_after)
+            .collect::<Vec<_>>(),
+        expected_gaps
+    );
     let mut row = 0usize;
     for node in surface.nodes() {
         assert_eq!(node.rows().start, row);
@@ -96,7 +104,16 @@ fn assert_contiguous(surface: &ConversationSurface) {
                 Some(node.id())
             );
         }
-        row = node.rows().end;
+        for gap_row in node.rows().end..node.rows().end + node.gap_after() {
+            assert_eq!(surface.node_at_row(gap_row), None);
+            assert_eq!(
+                surface
+                    .anchor_at_row(gap_row)
+                    .map(super::SurfaceAnchor::node),
+                Some(node.id())
+            );
+        }
+        row = node.rows().end + node.gap_after();
     }
     assert_eq!(surface.row_count(), row);
     assert_eq!(surface.lines().count(), row);

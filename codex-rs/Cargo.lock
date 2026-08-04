@@ -580,7 +580,9 @@ dependencies = [
  "codex-app-server-protocol",
  "codex-protocol",
  "codex-utils-absolute-path",
+ "insta",
  "pretty_assertions",
+ "ratatui",
 ]
 
 [[package]]
