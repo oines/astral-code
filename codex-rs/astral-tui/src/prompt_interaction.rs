@@ -20,6 +20,7 @@ use crate::PendingInteractions;
 mod approval;
 mod ask_user;
 mod choice_list;
+mod mcp_form;
 mod mcp_url;
 
 use approval::ApprovalPrompt;
