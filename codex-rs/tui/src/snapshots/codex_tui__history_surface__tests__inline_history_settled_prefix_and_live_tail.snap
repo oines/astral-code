@@ -1,0 +1,9 @@
+---
+source: tui/src/history_surface_tests.rs
+expression: "format!(\"COMMITTED PREFIX\\n{}\\n\\nPINNED LIVE TAIL\\n{}\",\nhyperlink_line_text(&committed), buffer_text(&live, area),)"
+---
+COMMITTED PREFIX
+   • settled assistant response
+
+PINNED LIVE TAIL
+   streaming assistant tail

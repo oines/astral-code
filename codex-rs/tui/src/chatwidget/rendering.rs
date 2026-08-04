@@ -28,15 +28,41 @@ impl ChatWidget {
         flex.push(/*flex*/ 0, active_hook_cell_renderable);
         flex.push(
             /*flex*/ 0,
-            RenderableItem::Owned(Box::new(BottomPaneComposerReserveRenderable {
-                bottom_pane: &self.bottom_pane,
-                right_reserve: active_cell_right_reserve,
-            }))
-            .inset(Insets::tlbr(
+            self.surface_composer_renderable().inset(Insets::tlbr(
                 /*top*/ 1, /*left*/ 0, /*bottom*/ 0, /*right*/ 0,
             )),
         );
         RenderableItem::Owned(Box::new(flex))
+    }
+
+    fn surface_composer_renderable(&self) -> RenderableItem<'_> {
+        RenderableItem::Owned(Box::new(BottomPaneComposerReserveRenderable {
+            bottom_pane: &self.bottom_pane,
+            right_reserve: self.ambient_pet_wrap_reserved_cols(),
+        }))
+    }
+
+    /// Composer-only half of the shared Surface layout. The Surface owns the
+    /// separating row after its live tail, so this path deliberately omits the
+    /// legacy transcript top inset.
+    pub(crate) fn surface_composer_desired_height(&self, width: u16) -> u16 {
+        self.surface_composer_renderable().desired_height(width)
+    }
+
+    pub(crate) fn render_surface_composer(&self, area: Rect, buf: &mut Buffer) {
+        self.surface_composer_renderable().render(area, buf);
+        self.last_rendered_width.set(Some(area.width as usize));
+    }
+
+    pub(crate) fn surface_composer_cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
+        self.surface_composer_renderable().cursor_pos(area)
+    }
+
+    pub(crate) fn surface_composer_cursor_style(
+        &self,
+        area: Rect,
+    ) -> crossterm::cursor::SetCursorStyle {
+        self.surface_composer_renderable().cursor_style(area)
     }
 }
 
