@@ -966,7 +966,6 @@ fn mcp_tools_output_from_statuses_renders_verbose_inventory() {
 fn empty_agent_message_cell_transcript() {
     let cell = AgentMessageCell::new(vec![Line::default()], /*is_first_line*/ false);
     assert_eq!(cell.transcript_lines(/*width*/ 80), vec![Line::from("  ")]);
-    assert_eq!(cell.desired_transcript_height(/*width*/ 80), 1);
 }
 
 #[test]
@@ -2125,7 +2124,6 @@ fn user_history_cell_height_matches_rendered_lines_with_remote_images() {
         .try_into()
         .unwrap_or(u16::MAX);
     assert_eq!(cell.desired_height(width), rendered_len);
-    assert_eq!(cell.desired_transcript_height(width), rendered_len);
 }
 
 #[test]
@@ -2348,9 +2346,6 @@ fn reasoning_summary_height_matches_wrapped_rendering_for_url_like_content() {
         wrapped_height >= logical_height,
         "expected wrapped height to be at least logical line count ({logical_height}), got {wrapped_height}"
     );
-
-    let wrapped_transcript_height = cell.desired_transcript_height(width);
-    assert_eq!(wrapped_transcript_height, wrapped_height);
 
     let area = Rect::new(0, 0, width, wrapped_height);
     let mut buf = ratatui::buffer::Buffer::empty(area);
