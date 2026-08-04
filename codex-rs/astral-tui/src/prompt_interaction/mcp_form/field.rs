@@ -177,12 +177,16 @@ impl McpFormField {
             McpFormControl::Select {
                 selected,
                 committed,
+                multiple,
                 min_selected,
                 max_selected,
                 ..
             } => {
                 if !committed {
                     return self.require_answer();
+                }
+                if self.required && !multiple && selected.is_empty() {
+                    return Err("This field is required".to_string());
                 }
                 let count = selected.len() as u64;
                 if let Some(minimum) = min_selected

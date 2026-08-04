@@ -1,0 +1,16 @@
+---
+source: astral-tui/src/prompt_interaction_tests.rs
+expression: buffer_text(&buffer)
+---
+Provide details · workspace-tools
+  Project  Tier
+────────────────────────────────────────────────────────────────────────────
+ Configure the generated workspace.
+
+ Field 1/2 · required
+ ◆ Project *
+ Name shown in the generated workspace.
+ Text · min 2 chars
+ › ▏Type a value
+        Ctrl+P/N field  |  Enter next/submit  |  Shift+Enter newline
+                                 Esc cancel

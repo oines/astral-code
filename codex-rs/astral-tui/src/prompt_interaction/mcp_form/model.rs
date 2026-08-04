@@ -46,10 +46,15 @@ impl McpFormModel {
         self.active
     }
 
-    fn active_field(&self) -> Option<&McpFormField> {
+    pub(super) fn fields(&self) -> &[McpFormField] {
+        &self.fields
+    }
+
+    pub(super) fn active_field(&self) -> Option<&McpFormField> {
         self.fields.get(self.active)
     }
 
+    #[cfg(test)]
     pub(super) fn active_field_name(&self) -> Option<&str> {
         self.active_field().map(|field| field.name.as_str())
     }
@@ -63,6 +68,11 @@ impl McpFormModel {
             return;
         }
         self.active = (self.active as i32 + delta).rem_euclid(self.fields.len() as i32) as usize;
+        self.error = None;
+    }
+
+    pub(super) fn set_active_index(&mut self, active: usize) {
+        self.active = active.min(self.fields.len().saturating_sub(1));
         self.error = None;
     }
 
@@ -91,6 +101,16 @@ impl McpFormModel {
         };
         *current = cursor.min(options.len().saturating_sub(1));
         self.error = None;
+    }
+
+    pub(super) fn move_choice(&mut self, delta: i32) -> bool {
+        let count = self.choice_count();
+        if count == 0 {
+            return false;
+        }
+        let cursor = (self.choice_cursor() as i32 + delta).rem_euclid(count as i32) as usize;
+        self.set_choice_cursor(cursor);
+        true
     }
 
     pub(super) fn activate_choice(&mut self) {

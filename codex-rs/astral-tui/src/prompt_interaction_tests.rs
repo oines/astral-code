@@ -239,6 +239,43 @@ fn mcp_url_elicitation_blocks_every_unsafe_url_shape() {
     }
 }
 
+#[test]
+fn mcp_form_elicitation_edits_fields_and_submits_exact_content() {
+    let mut pending = PendingInteractions::new("thread-1");
+    pending.observe_request(mcp_form_request(13));
+    let mut host = PromptInteractionHost::new();
+    assert!(host.sync(&pending));
+
+    let area = Rect::new(0, 0, 76, host.desired_height(76, 16));
+    let mut buffer = Buffer::empty(area);
+    host.render(&mut buffer, area);
+    insta::assert_snapshot!(buffer_text(&buffer));
+
+    assert_eq!(
+        host.handle_paste("Astral"),
+        PromptInteractionOutcome::Changed
+    );
+    assert_eq!(
+        host.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        PromptInteractionOutcome::Changed
+    );
+    host.handle_key_event(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    let PromptInteractionOutcome::Submit(submission) =
+        host.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+    else {
+        panic!("the final field should submit the form");
+    };
+    assert_eq!(submission.request_id, RequestId::Integer(13));
+    assert_eq!(
+        submission.result,
+        serde_json::json!({
+            "action": "accept",
+            "content": {"a_project": "Astral", "b_tier": "pro"},
+            "_meta": null
+        })
+    );
+}
+
 fn command_request(request_id: i64, command: &str) -> ServerRequest {
     ServerRequest::CommandExecutionRequestApproval {
         request_id: RequestId::Integer(request_id),
@@ -274,6 +311,42 @@ fn mcp_url_request(request_id: i64, url: &str) -> ServerRequest {
                 message: "Review the payment details to continue.".to_string(),
                 url: url.to_string(),
                 elicitation_id: "payment-123".to_string(),
+            },
+        },
+    }
+}
+
+fn mcp_form_request(request_id: i64) -> ServerRequest {
+    ServerRequest::McpServerElicitationRequest {
+        request_id: RequestId::Integer(request_id),
+        params: McpServerElicitationRequestParams {
+            thread_id: "thread-1".to_string(),
+            turn_id: Some("turn-1".to_string()),
+            server_name: "workspace-tools".to_string(),
+            request: McpServerElicitationRequest::Form {
+                meta: None,
+                message: "Configure the generated workspace.".to_string(),
+                requested_schema: serde_json::from_value(serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "a_project": {
+                            "type": "string",
+                            "title": "Project",
+                            "description": "Name shown in the generated workspace.",
+                            "minLength": 2
+                        },
+                        "b_tier": {
+                            "type": "string",
+                            "title": "Tier",
+                            "oneOf": [
+                                {"const": "flash", "title": "Flash"},
+                                {"const": "pro", "title": "Pro"}
+                            ]
+                        }
+                    },
+                    "required": ["a_project", "b_tier"]
+                }))
+                .expect("form schema should deserialize"),
             },
         },
     }
