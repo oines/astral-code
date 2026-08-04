@@ -2,6 +2,8 @@ use std::time::Duration;
 use std::time::Instant;
 
 use codex_app_server_protocol::CommandExecutionRequestApprovalParams;
+use codex_app_server_protocol::McpServerElicitationRequest;
+use codex_app_server_protocol::McpServerElicitationRequestParams;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerRequest;
 use codex_app_server_protocol::ToolRequestUserInputOption;
@@ -144,6 +146,99 @@ fn ask_user_preserves_question_semantics_and_masks_secret_notes() {
     );
 }
 
+#[test]
+fn mcp_url_elicitation_opens_only_safe_links_and_preserves_two_stage_flow() {
+    let mut pending = PendingInteractions::new("thread-1");
+    pending.observe_request(mcp_url_request(8, "https://payments.example/checkout/123"));
+    let mut host = PromptInteractionHost::new();
+    assert!(host.sync(&pending));
+    let area = Rect::new(0, 0, 72, host.desired_height(72, 16));
+    let mut buffer = Buffer::empty(area);
+    host.render(&mut buffer, area);
+    insta::assert_snapshot!(buffer_text(&buffer));
+
+    assert_eq!(
+        host.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        PromptInteractionOutcome::OpenExternalUrl {
+            url: "https://payments.example/checkout/123".to_string()
+        }
+    );
+    let waiting_area = Rect::new(0, 0, 72, host.desired_height(72, 16));
+    let mut waiting_buffer = Buffer::empty(waiting_area);
+    host.render(&mut waiting_buffer, waiting_area);
+    insta::assert_snapshot!(
+        "mcp_url_elicitation_waits_for_browser_confirmation",
+        buffer_text(&waiting_buffer)
+    );
+    assert_eq!(
+        host.handle_key_event(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
+        PromptInteractionOutcome::Changed
+    );
+    assert_eq!(
+        host.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        PromptInteractionOutcome::Changed
+    );
+    assert_eq!(
+        host.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        PromptInteractionOutcome::OpenExternalUrl {
+            url: "https://payments.example/checkout/123".to_string()
+        }
+    );
+    let PromptInteractionOutcome::Submit(accepted) =
+        host.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+    else {
+        panic!("finishing the browser action should submit");
+    };
+    assert_eq!(accepted.request_id, RequestId::Integer(8));
+    assert_eq!(
+        accepted.result,
+        serde_json::json!({
+            "action": "accept", "content": null, "_meta": null
+        })
+    );
+}
+
+#[test]
+fn mcp_url_elicitation_blocks_every_unsafe_url_shape() {
+    let unsafe_urls = [
+        "http://example.com/action",
+        "not a URL",
+        "https://user@example.com/action",
+        "https://user:pass@example.com/action",
+    ];
+
+    for (offset, url) in unsafe_urls.into_iter().enumerate() {
+        let request_id = 9 + offset as i64;
+        let mut pending = PendingInteractions::new("thread-1");
+        pending.observe_request(mcp_url_request(request_id, url));
+        let mut host = PromptInteractionHost::new();
+        assert!(host.sync(&pending));
+
+        if offset == 0 {
+            let area = Rect::new(0, 0, 72, host.desired_height(72, 16));
+            let mut buffer = Buffer::empty(area);
+            host.render(&mut buffer, area);
+            insta::assert_snapshot!(
+                "mcp_url_elicitation_blocks_unsafe_link",
+                buffer_text(&buffer)
+            );
+        }
+
+        let PromptInteractionOutcome::Submit(declined) =
+            host.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        else {
+            panic!("unsafe URL {url:?} should offer only decline");
+        };
+        assert_eq!(declined.request_id, RequestId::Integer(request_id));
+        assert_eq!(
+            declined.result,
+            serde_json::json!({
+                "action": "decline", "content": null, "_meta": null
+            })
+        );
+    }
+}
+
 fn command_request(request_id: i64, command: &str) -> ServerRequest {
     ServerRequest::CommandExecutionRequestApproval {
         request_id: RequestId::Integer(request_id),
@@ -163,6 +258,23 @@ fn command_request(request_id: i64, command: &str) -> ServerRequest {
             proposed_execpolicy_amendment: None,
             proposed_network_policy_amendments: None,
             available_decisions: None,
+        },
+    }
+}
+
+fn mcp_url_request(request_id: i64, url: &str) -> ServerRequest {
+    ServerRequest::McpServerElicitationRequest {
+        request_id: RequestId::Integer(request_id),
+        params: McpServerElicitationRequestParams {
+            thread_id: "thread-1".to_string(),
+            turn_id: Some("turn-1".to_string()),
+            server_name: "payments".to_string(),
+            request: McpServerElicitationRequest::Url {
+                meta: None,
+                message: "Review the payment details to continue.".to_string(),
+                url: url.to_string(),
+                elicitation_id: "payment-123".to_string(),
+            },
         },
     }
 }

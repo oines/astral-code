@@ -20,9 +20,11 @@ use crate::PendingInteractions;
 mod approval;
 mod ask_user;
 mod choice_list;
+mod mcp_url;
 
 use approval::ApprovalPrompt;
 use ask_user::AskUserPrompt;
+use mcp_url::McpUrlPrompt;
 
 /// One response ready for [`AstralRuntime::resolve_server_request`].
 #[derive(Debug, Clone, PartialEq)]
@@ -33,9 +35,11 @@ pub struct PromptInteractionSubmission {
 
 /// Result of routing input through the active prompt-area interaction.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum PromptInteractionOutcome {
     Unchanged,
     Changed,
+    OpenExternalUrl { url: String },
     Submit(PromptInteractionSubmission),
     Failed(String),
 }
@@ -43,6 +47,7 @@ pub enum PromptInteractionOutcome {
 enum PromptPresenter {
     Approval(ApprovalPrompt),
     AskUser(AskUserPrompt),
+    McpUrl(McpUrlPrompt),
 }
 
 /// Retained presenter for the front item in [`PendingInteractions`].
@@ -170,12 +175,14 @@ impl PromptPresenter {
         ApprovalPrompt::from_request(request)
             .map(Self::Approval)
             .or_else(|| AskUserPrompt::from_request(request).map(Self::AskUser))
+            .or_else(|| McpUrlPrompt::from_request(request).map(Self::McpUrl))
     }
 
     fn selected_index(&self) -> usize {
         match self {
             Self::Approval(prompt) => prompt.selected_index(),
             Self::AskUser(_) => 0,
+            Self::McpUrl(prompt) => prompt.selected_index(),
         }
     }
 
@@ -183,6 +190,7 @@ impl PromptPresenter {
         match self {
             Self::Approval(prompt) => prompt.set_selected_index(selected),
             Self::AskUser(_) => {}
+            Self::McpUrl(prompt) => prompt.set_selected_index(selected),
         }
     }
 
@@ -190,6 +198,7 @@ impl PromptPresenter {
         match self {
             Self::Approval(prompt) => prompt.desired_height(width, available),
             Self::AskUser(prompt) => prompt.desired_height(width, available),
+            Self::McpUrl(prompt) => prompt.desired_height(width, available),
         }
     }
 
@@ -197,6 +206,7 @@ impl PromptPresenter {
         match self {
             Self::Approval(prompt) => prompt.render(buffer, area, queue_len, responding),
             Self::AskUser(prompt) => prompt.render(buffer, area, queue_len, responding),
+            Self::McpUrl(prompt) => prompt.render(buffer, area, queue_len, responding),
         }
     }
 
@@ -204,6 +214,7 @@ impl PromptPresenter {
         match self {
             Self::Approval(prompt) => prompt.handle_key_event(key),
             Self::AskUser(prompt) => prompt.handle_key_event(key),
+            Self::McpUrl(prompt) => prompt.handle_key_event(key),
         }
     }
 
@@ -215,6 +226,7 @@ impl PromptPresenter {
         match self {
             Self::Approval(prompt) => prompt.handle_mouse_event_at(mouse, now),
             Self::AskUser(prompt) => prompt.handle_mouse_event_at(mouse, now),
+            Self::McpUrl(prompt) => prompt.handle_mouse_event_at(mouse, now),
         }
     }
 
@@ -222,6 +234,7 @@ impl PromptPresenter {
         match self {
             Self::Approval(_) => PromptInteractionOutcome::Unchanged,
             Self::AskUser(prompt) => prompt.handle_paste(text),
+            Self::McpUrl(_) => PromptInteractionOutcome::Unchanged,
         }
     }
 }
