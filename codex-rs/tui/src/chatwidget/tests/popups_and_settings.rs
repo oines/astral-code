@@ -2194,6 +2194,18 @@ async fn memories_settings_popup_snapshot() {
 }
 
 #[tokio::test]
+async fn settings_root_popup_snapshot() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.2")).await;
+    chat.config.memories.use_memories = true;
+    chat.config.memories.generate_memories = false;
+
+    chat.open_settings_popup();
+
+    let popup = render_bottom_popup(&chat, /*width*/ 80);
+    assert_chatwidget_snapshot!("settings_root_popup", popup);
+}
+
+#[tokio::test]
 async fn memories_reset_confirmation_snapshot() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.set_feature_enabled(Feature::MemoryTool, /*enabled*/ true);

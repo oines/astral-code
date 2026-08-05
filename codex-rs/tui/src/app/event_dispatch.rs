@@ -1787,6 +1787,9 @@ impl App {
             AppEvent::OpenPermissionsPopup => {
                 self.chat_widget.open_permissions_popup();
             }
+            AppEvent::OpenSettingsSection(section) => {
+                self.chat_widget.open_settings_section(section);
+            }
             AppEvent::OpenReviewBranchPicker(cwd) => {
                 self.chat_widget.show_review_branch_picker(&cwd).await;
             }

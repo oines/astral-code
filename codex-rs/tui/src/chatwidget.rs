@@ -259,6 +259,7 @@ fn queued_message_edit_hint_binding(
 use crate::app_event::AppEvent;
 use crate::app_event::ExitMode;
 use crate::app_event::PermissionProfileSelection;
+use crate::app_event::SettingsSection;
 #[cfg(any(target_os = "windows", test))]
 use crate::app_event::WindowsSandboxEnableMode;
 use crate::app_event_sender::AppEventSender;

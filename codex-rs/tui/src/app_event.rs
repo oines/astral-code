@@ -113,6 +113,16 @@ pub(crate) enum KeymapEditIntent {
     ReplaceOne { old_key: String },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SettingsSection {
+    Models,
+    Memory,
+    Appearance,
+    Permissions,
+    Features,
+    Voice,
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub(crate) enum AppEvent {
@@ -849,6 +859,9 @@ pub(crate) enum AppEvent {
 
     /// Re-open the permissions presets popup.
     OpenPermissionsPopup,
+
+    /// Open one of the implemented pages from the unified Settings entry point.
+    OpenSettingsSection(SettingsSection),
 
     /// Live update for the in-progress voice recording placeholder. Carries
     /// the placeholder `id` and the text to display (e.g., an ASCII meter).
