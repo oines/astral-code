@@ -109,6 +109,7 @@ const RAW_TOOL_OUTPUT_WIDTH: usize = 10_000;
 
 mod approvals;
 mod base;
+mod compaction;
 mod core_tool;
 mod dynamic_tool;
 mod exec;
@@ -126,6 +127,7 @@ mod session;
 
 pub(crate) use approvals::*;
 pub(crate) use base::*;
+pub(crate) use compaction::*;
 pub(crate) use core_tool::*;
 pub(crate) use dynamic_tool::*;
 pub(crate) use exec::*;

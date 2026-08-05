@@ -121,7 +121,7 @@ pub(crate) fn runtime_metrics_label(summary: RuntimeMetricsSummary) -> Option<St
     }
 }
 
-fn format_duration_ms(duration_ms: u64) -> String {
+pub(crate) fn format_duration_ms(duration_ms: u64) -> String {
     if duration_ms >= 1_000 {
         let seconds = duration_ms as f64 / 1_000.0;
         format!("{seconds:.1}s")

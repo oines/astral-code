@@ -12,7 +12,9 @@ impl ChatWidget {
     /// both the agent turn lifecycle and MCP startup lifecycle.
     pub(super) fn update_task_running_state(&mut self) {
         self.bottom_pane.set_task_running(
-            self.turn_lifecycle.agent_turn_running || self.mcp_startup_status.is_some(),
+            self.turn_lifecycle.agent_turn_running
+                || self.compaction_lifecycle.is_active()
+                || self.mcp_startup_status.is_some(),
         );
         self.refresh_plan_mode_nudge();
         self.refresh_status_surfaces();
@@ -54,7 +56,9 @@ impl ChatWidget {
         self.bottom_pane
             .set_interrupt_hint_visible(/*visible*/ true);
         self.status_state.terminal_title_status_kind = TerminalTitleStatusKind::Working;
-        if self.mcp_startup_status.is_none() || !self.status_header_is_mcp_startup_owned() {
+        if self.compaction_lifecycle.is_active() {
+            self.set_status_header("Compacting…".to_string());
+        } else if self.mcp_startup_status.is_none() || !self.status_header_is_mcp_startup_owned() {
             self.set_status_header(String::from("Working"));
         }
         self.full_reasoning_buffer.clear();
@@ -152,6 +156,7 @@ impl ChatWidget {
         self.status_state.pending_status_indicator_restore = false;
         self.input_queue.user_turn_pending_start = false;
         self.turn_lifecycle.finish();
+        self.compaction_lifecycle.clear();
         self.update_task_running_state();
         self.running_commands.clear();
         self.suppressed_exec_calls.clear();
@@ -449,10 +454,14 @@ impl ChatWidget {
     }
 
     pub(super) fn interrupted_turn_message(&self, reason: TurnAbortReason) -> String {
-        if reason == TurnAbortReason::BudgetLimited {
-            return "Goal budget reached - the turn was stopped.".to_string();
+        match reason {
+            TurnAbortReason::Interrupted => {
+                "Conversation interrupted - tell the model what to do differently.".to_string()
+            }
+            TurnAbortReason::BudgetLimited => {
+                "Goal budget reached - the turn was stopped.".to_string()
+            }
+            TurnAbortReason::CompactionCancelled => "Compaction cancelled.".to_string(),
         }
-
-        "Conversation interrupted - tell the model what to do differently.".to_string()
     }
 }

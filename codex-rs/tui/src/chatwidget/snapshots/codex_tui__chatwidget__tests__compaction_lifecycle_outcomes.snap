@@ -1,0 +1,26 @@
+---
+source: tui/src/chatwidget/tests/compact_lifecycle.rs
+expression: "format!(\"completed\\n{completed}\\n\\nfailed\\n{failed}\\n\\ncancelled\\n{cancelled}\\n\\nreplayed\\n{replayed}\")"
+---
+completed
+Compaction completed in 2.5s.
+
+
+failed
+■ Compaction failed: backend unavailable
+
+
+direct failure
+■ Compaction failed: backend unavailable
+
+
+direct failure without error
+■ Compaction failed.
+
+
+cancelled
+■ Compaction cancelled.
+
+
+replayed
+Compaction completed.

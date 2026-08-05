@@ -122,14 +122,11 @@ impl ChatWidget {
                         );
                     }
                 } else {
-                    self.last_non_retry_error = Some((
-                        notification.turn_id.clone(),
-                        notification.error.message.clone(),
-                    ));
-                    self.handle_non_retry_error(
-                        notification.error.message,
-                        notification.error.codex_error_info,
-                    );
+                    let original_message = notification.error.message;
+                    let message = self.compaction_failure_message(original_message.clone());
+                    self.last_non_retry_error =
+                        Some((notification.turn_id.clone(), original_message));
+                    self.handle_non_retry_error(message, notification.error.codex_error_info);
                 }
             }
             ServerNotification::SkillsChanged(_) => {
@@ -249,6 +246,7 @@ impl ChatWidget {
         self.last_rendered_user_message_display = None;
         match notification.turn.status {
             TurnStatus::Completed => {
+                self.compaction_lifecycle.clear();
                 self.last_non_retry_error = None;
                 self.on_task_complete(
                     /*last_agent_message*/ None,
@@ -263,20 +261,31 @@ impl ChatWidget {
                     .take_budget_limited(notification.turn.id.as_str())
                 {
                     TurnAbortReason::BudgetLimited
+                } else if self.compaction_lifecycle.take_active() {
+                    TurnAbortReason::CompactionCancelled
                 } else {
                     TurnAbortReason::Interrupted
                 };
                 self.on_interrupted_turn(reason);
             }
             TurnStatus::Failed => {
+                let compaction_failed = self.compaction_lifecycle.take_active();
                 if let Some(error) = notification.turn.error {
+                    let message = if compaction_failed {
+                        compaction_failure_message(error.message)
+                    } else {
+                        error.message
+                    };
                     if self.last_non_retry_error.as_ref()
-                        == Some(&(notification.turn.id.clone(), error.message.clone()))
+                        == Some(&(notification.turn.id.clone(), message.clone()))
                     {
                         self.last_non_retry_error = None;
                     } else {
-                        self.handle_non_retry_error(error.message, error.codex_error_info);
+                        self.handle_non_retry_error(message, error.codex_error_info);
                     }
+                } else if compaction_failed {
+                    self.last_non_retry_error = None;
+                    self.on_error("Compaction failed.".to_string());
                 } else {
                     self.last_non_retry_error = None;
                     self.finalize_turn();
@@ -293,6 +302,7 @@ impl ChatWidget {
         notification: ItemStartedNotification,
         from_replay: bool,
     ) {
+        let started_at_ms = notification.started_at_ms;
         match notification.item {
             item @ ThreadItem::CommandExecution { .. } => self.on_command_execution_started(item),
             ThreadItem::FileChange { id, changes, .. } => {
@@ -309,6 +319,9 @@ impl ChatWidget {
             }
             ThreadItem::ImageGeneration { .. } => {
                 self.on_image_generation_begin();
+            }
+            ThreadItem::ContextCompaction { id } => {
+                self.on_context_compaction_started(id, started_at_ms);
             }
             ThreadItem::CollabAgentToolCall {
                 id,
@@ -343,10 +356,15 @@ impl ChatWidget {
         notification: ItemCompletedNotification,
         replay_kind: Option<ReplayKind>,
     ) {
-        self.handle_thread_item(
-            notification.item,
-            notification.turn_id,
-            replay_kind.map_or(ThreadItemRenderSource::Live, ThreadItemRenderSource::Replay),
-        );
+        match notification.item {
+            ThreadItem::ContextCompaction { id } => {
+                self.on_context_compaction_completed(id, notification.completed_at_ms);
+            }
+            item => self.handle_thread_item(
+                item,
+                notification.turn_id,
+                replay_kind.map_or(ThreadItemRenderSource::Live, ThreadItemRenderSource::Replay),
+            ),
+        }
     }
 }
