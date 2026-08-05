@@ -1,0 +1,15 @@
+---
+source: tui/src/chatwidget/tests/popups_and_settings.rs
+expression: popup
+---
+  Settings
+  Only implemented settings are shown.
+
+  Search settings
+› Model & Thinking       Current: gpt-5.2 (provider default).
+  Memories               Use memories: on; generate memories: off.
+  Theme                  Theme: built in.
+  Permissions            Choose what Astral may do in this session.
+  Experimental Features  Enable or disable implemented experimental features.
+
+  Press enter to confirm or esc to go back

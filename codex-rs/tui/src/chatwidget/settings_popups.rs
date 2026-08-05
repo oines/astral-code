@@ -6,6 +6,82 @@
 use super::*;
 
 impl ChatWidget {
+    pub(crate) fn open_settings_popup(&mut self) {
+        let effort = self
+            .current_reasoning_effort()
+            .map(|effort| effort.to_string())
+            .unwrap_or_else(|| "provider default".to_string());
+        let mut items = vec![
+            settings_section_item(
+                "Model & Thinking",
+                format!("Current: {} ({effort}).", self.current_model()),
+                "model provider thinking reasoning effort",
+                SettingsSection::Models,
+            ),
+            settings_section_item(
+                "Memories",
+                format!(
+                    "Use memories: {}; generate memories: {}.",
+                    on_off(self.config.memories.use_memories),
+                    on_off(self.config.memories.generate_memories)
+                ),
+                "memory memories use generate compact",
+                SettingsSection::Memory,
+            ),
+            settings_section_item(
+                "Theme",
+                format!(
+                    "Theme: {}.",
+                    self.config.tui_theme.as_deref().unwrap_or("built in")
+                ),
+                "appearance input theme colour color",
+                SettingsSection::Appearance,
+            ),
+            settings_section_item(
+                "Permissions",
+                "Choose what Astral may do in this session.".to_string(),
+                "permission safety approval sandbox",
+                SettingsSection::Permissions,
+            ),
+            settings_section_item(
+                "Experimental Features",
+                "Enable or disable implemented experimental features.".to_string(),
+                "feature experimental beta",
+                SettingsSection::Features,
+            ),
+        ];
+        if self.realtime_audio_device_selection_enabled() {
+            items.push(settings_section_item(
+                "Voice Devices",
+                "Choose the realtime microphone and speaker.".to_string(),
+                "voice audio microphone speaker",
+                SettingsSection::Voice,
+            ));
+        }
+
+        self.bottom_pane.show_selection_view(SelectionViewParams {
+            view_id: Some("settings-root"),
+            title: Some("Settings".to_string()),
+            subtitle: Some("Only implemented settings are shown.".to_string()),
+            footer_hint: Some(standard_popup_hint_line()),
+            items,
+            is_searchable: true,
+            search_placeholder: Some("Search settings".to_string()),
+            ..Default::default()
+        });
+    }
+
+    pub(crate) fn open_settings_section(&mut self, section: SettingsSection) {
+        match section {
+            SettingsSection::Models => self.open_model_popup(),
+            SettingsSection::Memory => self.open_memories_popup(),
+            SettingsSection::Appearance => self.open_theme_picker(),
+            SettingsSection::Permissions => self.open_permissions_popup(),
+            SettingsSection::Features => self.open_experimental_popup(),
+            SettingsSection::Voice => self.open_realtime_audio_popup(),
+        }
+    }
+
     pub(super) fn open_theme_picker(&mut self) {
         let codex_home = codex_utils_home_dir::find_codex_home().ok();
         let terminal_width = self
@@ -285,4 +361,26 @@ impl ChatWidget {
             Personality::Pragmatic => "Concise, task-focused, and direct.",
         }
     }
+}
+
+fn settings_section_item(
+    name: &str,
+    description: String,
+    search_terms: &str,
+    section: SettingsSection,
+) -> SelectionItem {
+    SelectionItem {
+        name: name.to_string(),
+        description: Some(description),
+        search_value: Some(format!("{name} {search_terms}")),
+        actions: vec![Box::new(move |tx| {
+            tx.send(AppEvent::OpenSettingsSection(section));
+        })],
+        dismiss_on_select: true,
+        ..Default::default()
+    }
+}
+
+fn on_off(enabled: bool) -> &'static str {
+    if enabled { "on" } else { "off" }
 }
