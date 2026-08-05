@@ -2,14 +2,14 @@
 source: tui/src/pager_overlay.rs
 expression: snapshot
 ---
-   • Added foo.txt (+2 -0)                                                     █
-       1 +hello                                                                █
-       2 +world                                                                █
-                                                                               █
-   • Added foo.txt (+2 -0)                                                     █
-       1 +hello                                                                █
-       2 +world                                                                │
-                                                                               │
+ ┃ • Added foo.txt (+2 -0)                                                     █
+ ┃     1 +hello                                                                █
+ ┃     2 +world                                                                █
+┌                                                                             ┐█
+│┃ • Added foo.txt (+2 -0)                                                    │█
+│┃     1 +hello                                                               │█
+│┃     2 +world                                                               │█
+└                                                                             ┘│
    ✔ You approved codex to run ls this time                                    │
  ↑/↓ to select   pgup/pgdn to page   home/end to jump
- q to quit   esc to edit prev
+ q to quit   esc to edit prev   ←/→ to fold   e to toggle   enter to open

@@ -182,6 +182,18 @@ pub(crate) fn plain_lines(lines: impl IntoIterator<Item = Line<'static>>) -> Vec
         .collect()
 }
 
+pub(crate) fn viewer_document_from_lines(
+    title: impl Into<String>,
+    lines: Vec<Line<'static>>,
+    width: u16,
+) -> Option<astral_tui::BlockViewerDocument> {
+    let lines = lines
+        .iter()
+        .flat_map(|line| astral_tui_scrollback::wrap_styled_line_with_metadata(line, width.max(1)))
+        .collect();
+    astral_tui::BlockViewerDocument::new(title, lines)
+}
+
 /// A single renderable unit of conversation history.
 ///
 /// Each cell produces logical `Line`s and reports how many viewport

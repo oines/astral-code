@@ -904,6 +904,99 @@ mod tests {
         out
     }
 
+    fn render_opened_transcript_viewer(cell: Arc<dyn HistoryCell>, area: Rect) -> String {
+        let mut overlay = transcript_overlay(vec![cell]);
+        assert!(overlay.apply_key_event(area, KeyEvent::from(KeyCode::Down)));
+        assert!(overlay.apply_key_event(area, KeyEvent::from(KeyCode::Enter)));
+        let mut buffer = Buffer::empty(area);
+        overlay.render(area, &mut buffer);
+        buffer_to_text(&buffer, area)
+    }
+
+    #[test]
+    fn transcript_overlay_tool_details_fold_and_open_canonical_viewers() {
+        let transcript_area = Rect::new(
+            /*x*/ 0, /*y*/ 0, /*width*/ 72, /*height*/ 14,
+        );
+        let viewer_area = Rect::new(
+            /*x*/ 0, /*y*/ 0, /*width*/ 72, /*height*/ 24,
+        );
+
+        let mut exec_cell = crate::exec_cell::new_active_exec_command(
+            "exec-viewer".into(),
+            vec![
+                "bash".into(),
+                "-lc".into(),
+                "printf 'alpha\\nbeta\\n'".into(),
+            ],
+            vec![ParsedCommand::Unknown {
+                cmd: "printf".into(),
+            }],
+            ExecCommandSource::Agent,
+            /*interaction_input*/ None,
+            /*animations_enabled*/ false,
+        );
+        assert!(exec_cell.complete_call(
+            "exec-viewer",
+            CommandOutput {
+                exit_code: 0,
+                aggregated_output: "alpha\nbeta\n".into(),
+                // Streaming updates populate aggregated output first. The viewer must not go
+                // blank while waiting for the completed formatted copy.
+                formatted_output: String::new(),
+            },
+            Duration::from_millis(120),
+        ));
+        let exec_viewer = render_opened_transcript_viewer(Arc::new(exec_cell), viewer_area);
+
+        let read_cell = history_cell::new_core_tool_call_cell(
+            codex_app_server_protocol::ThreadItem::CoreToolCall {
+                id: "read-viewer".into(),
+                tool: "Read".into(),
+                arguments: serde_json::json!({"file_path": "/repo/src/lib.rs"}),
+                status: codex_app_server_protocol::CoreToolCallStatus::Completed,
+                result: Some("1\tpub fn alpha() {}\n2\tpub fn beta() {}\n".into()),
+                error: None,
+                duration_ms: Some(8),
+            },
+        )
+        .expect("read tool cell");
+        let read_viewer = render_opened_transcript_viewer(Arc::new(read_cell), viewer_area);
+
+        let original = "status: old\nnote: keep\n";
+        let modified = "status: edited\nnote: keep\nadded: true\n";
+        let mut changes = HashMap::new();
+        changes.insert(
+            PathBuf::from("src/config.txt"),
+            FileChange::Update {
+                unified_diff: diffy::create_patch(original, modified).to_string(),
+                move_path: None,
+            },
+        );
+        let patch_cell: Arc<dyn HistoryCell> =
+            Arc::new(new_patch_event(changes, &PathBuf::from("/repo")));
+        let mut patch_overlay = transcript_overlay(vec![patch_cell]);
+        assert!(patch_overlay.apply_key_event(transcript_area, KeyEvent::from(KeyCode::Down)));
+        let mut patch_collapsed = Buffer::empty(transcript_area);
+        patch_overlay.render(transcript_area, &mut patch_collapsed);
+        assert!(patch_overlay.apply_key_event(transcript_area, KeyEvent::from(KeyCode::Right)));
+        let mut patch_expanded = Buffer::empty(transcript_area);
+        patch_overlay.render(transcript_area, &mut patch_expanded);
+        assert!(patch_overlay.apply_key_event(transcript_area, KeyEvent::from(KeyCode::Enter)));
+        let mut patch_viewer = Buffer::empty(viewer_area);
+        patch_overlay.render(viewer_area, &mut patch_viewer);
+
+        assert_snapshot!(
+            "transcript_overlay_tool_details_and_viewers",
+            format!(
+                "EXEC VIEWER\n{exec_viewer}\nREAD VIEWER\n{read_viewer}\nPATCH COLLAPSED\n{}\nPATCH EXPANDED\n{}\nPATCH VIEWER\n{}",
+                buffer_to_text(&patch_collapsed, transcript_area),
+                buffer_to_text(&patch_expanded, transcript_area),
+                buffer_to_text(&patch_viewer, viewer_area),
+            ),
+        );
+    }
+
     #[test]
     fn transcript_overlay_apply_patch_scroll_vt100_clears_previous_page() {
         let cwd = PathBuf::from("/repo");
@@ -961,6 +1054,13 @@ mod tests {
         let area = Rect::new(0, 0, 80, 12);
         let mut buf = Buffer::empty(area);
 
+        // This regression specifically exercises clearing after scrolling between pages. Patch
+        // cells now default to Grok-style collapsed rows, so expand both fixtures explicitly to
+        // preserve the long transcript that makes the test meaningful.
+        assert!(overlay.apply_key_event(area, KeyEvent::from(KeyCode::Down)));
+        assert!(overlay.apply_key_event(area, KeyEvent::from(KeyCode::Right)));
+        assert!(overlay.apply_key_event(area, KeyEvent::from(KeyCode::Down)));
+        assert!(overlay.apply_key_event(area, KeyEvent::from(KeyCode::Right)));
         overlay.render(area, &mut buf);
         overlay.viewport.scroll_to_top(&overlay.surface);
         overlay.render(area, &mut buf);

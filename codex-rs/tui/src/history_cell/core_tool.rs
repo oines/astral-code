@@ -1,6 +1,8 @@
 //! Astral core tool-call history cells.
 
 use super::*;
+use codex_ansi_escape::ansi_escape_line;
+use std::borrow::Cow;
 
 #[derive(Debug)]
 pub(crate) struct CoreToolCallCell {
@@ -61,38 +63,8 @@ impl CoreToolCallCell {
 
 impl HistoryCell for CoreToolCallCell {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
-        let status = self.succeeded();
-        let bullet = match status {
-            Some(true) => "•".green().bold(),
-            Some(false) => "•".red().bold(),
-            None => "•".dim(),
-        };
-        let header_text = if status.is_some() {
-            "Called"
-        } else {
-            "Calling"
-        };
-        let invocation_line = Line::from(format_core_tool_invocation(&self.tool, &self.arguments));
-        let mut compact_spans = vec![bullet.clone(), " ".into(), header_text.bold(), " ".into()];
-        let mut compact_header = Line::from(compact_spans.clone());
-        let reserved = compact_header.width();
-        let inline_invocation =
-            invocation_line.width() <= (width as usize).saturating_sub(reserved);
-
-        let mut lines = Vec::new();
-        if inline_invocation {
-            compact_header.extend(invocation_line.spans.clone());
-            lines.push(compact_header);
-        } else {
-            compact_spans.pop();
-            lines.push(Line::from(compact_spans));
-            let opts = RtOptions::new((width as usize).saturating_sub(4).max(1))
-                .initial_indent("".into())
-                .subsequent_indent("    ".into());
-            let wrapped = adaptive_wrap_line(&invocation_line, opts);
-            let body_lines = wrapped.iter().map(line_to_static).collect::<Vec<_>>();
-            lines.extend(prefix_lines(body_lines, "  └ ".dim(), "    ".into()));
-        }
+        let mut lines = self.invocation_lines(width);
+        let inline_invocation = lines.len() == 1;
 
         if let Some(detail) = self.detail_summary(width as usize) {
             let detail_line = Line::from(detail.dim());
@@ -129,6 +101,131 @@ impl HistoryCell for CoreToolCallCell {
             lines.push(Line::from(detail));
         }
         lines
+    }
+
+    fn transcript_presentation(&self) -> HistoryCellPresentation {
+        if self.has_detail() {
+            HistoryCellPresentation::two_state(astral_tui::DisplayMode::Collapsed).with_groupable()
+        } else {
+            HistoryCellPresentation::fixed(astral_tui::DisplayMode::Expanded)
+        }
+    }
+
+    fn transcript_hyperlink_lines_for_presentation(
+        &self,
+        width: u16,
+        mode: astral_tui::DisplayMode,
+    ) -> Vec<HyperlinkLine> {
+        let mut lines = self.invocation_lines(width);
+        if mode != astral_tui::DisplayMode::Collapsed {
+            let details = self.full_detail_lines(width.saturating_sub(4).max(1));
+            if !details.is_empty() {
+                lines.push(Line::default());
+                lines.extend(prefix_lines(details, "  │ ".dim(), "  │ ".dim()));
+            }
+        }
+        plain_hyperlink_lines(lines)
+    }
+
+    fn transcript_viewer_document(
+        &self,
+        width: u16,
+        mode: astral_tui::BlockViewerMode,
+    ) -> Option<astral_tui::BlockViewerDocument> {
+        let astral_tui::BlockViewerMode::Rich = mode else {
+            return None;
+        };
+        viewer_document_from_lines(
+            format_core_tool_invocation(&self.tool, &self.arguments),
+            self.full_detail_lines(width),
+            width,
+        )
+    }
+}
+
+impl CoreToolCallCell {
+    fn invocation_lines(&self, width: u16) -> Vec<Line<'static>> {
+        let status = self.succeeded();
+        let bullet = match status {
+            Some(true) => "•".green().bold(),
+            Some(false) => "•".red().bold(),
+            None => "•".dim(),
+        };
+        let header_text = if status.is_some() {
+            "Called"
+        } else {
+            "Calling"
+        };
+        let invocation_line = Line::from(format_core_tool_invocation(&self.tool, &self.arguments));
+        let mut compact_spans = vec![bullet.clone(), " ".into(), header_text.bold(), " ".into()];
+        let mut compact_header = Line::from(compact_spans.clone());
+        let reserved = compact_header.width();
+        let inline_invocation =
+            invocation_line.width() <= (width as usize).saturating_sub(reserved);
+
+        let mut lines = Vec::new();
+        if inline_invocation {
+            compact_header.extend(invocation_line.spans.clone());
+            lines.push(compact_header);
+        } else {
+            compact_spans.pop();
+            lines.push(Line::from(compact_spans));
+            let opts = RtOptions::new((width as usize).saturating_sub(4).max(1))
+                .initial_indent("".into())
+                .subsequent_indent("    ".into());
+            let wrapped = adaptive_wrap_line(&invocation_line, opts);
+            let body_lines = wrapped.iter().map(line_to_static).collect::<Vec<_>>();
+            lines.extend(prefix_lines(body_lines, "  └ ".dim(), "    ".into()));
+        }
+
+        lines
+    }
+
+    fn has_detail(&self) -> bool {
+        self.error
+            .as_deref()
+            .is_some_and(|error| !error.trim().is_empty())
+            || self
+                .result
+                .as_deref()
+                .is_some_and(|result| !result.trim().is_empty())
+    }
+
+    fn detail_text(&self) -> Option<Cow<'_, str>> {
+        if let Some(error) = self
+            .error
+            .as_deref()
+            .filter(|error| !error.trim().is_empty())
+        {
+            return Some(Cow::Owned(format!("Error: {error}")));
+        }
+        self.result
+            .as_deref()
+            .filter(|result| !result.trim().is_empty())
+            .map(Cow::Borrowed)
+    }
+
+    fn full_detail_lines(&self, width: u16) -> Vec<Line<'static>> {
+        let Some(detail) = self.detail_text() else {
+            return Vec::new();
+        };
+        let is_error = self.error.is_some();
+        let options = RtOptions::new(usize::from(width.max(1)));
+        detail
+            .lines()
+            .flat_map(|line| {
+                let mut line = ansi_escape_line(line);
+                if is_error {
+                    for span in &mut line.spans {
+                        span.style = span.style.patch(Style::default().red());
+                    }
+                }
+                adaptive_wrap_line(&line, options.clone())
+                    .iter()
+                    .map(line_to_static)
+                    .collect::<Vec<_>>()
+            })
+            .collect()
     }
 }
 
