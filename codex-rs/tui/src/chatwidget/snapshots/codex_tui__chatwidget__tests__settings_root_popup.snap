@@ -6,7 +6,7 @@ expression: popup
   Only implemented settings are shown.
 
   Search settings
-› Model & Thinking       Current: gpt-5.2 (provider default).
+› Models & Providers     Current: gpt-5.2 (provider default).
   Memories               Use memories: on; generate memories: off.
   Theme                  Theme: built in.
   Permissions            Choose what Astral may do in this session.

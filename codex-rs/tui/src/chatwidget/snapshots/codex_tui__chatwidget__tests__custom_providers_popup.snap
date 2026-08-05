@@ -1,0 +1,13 @@
+---
+source: tui/src/chatwidget/tests/popups_and_settings.rs
+expression: popup
+---
+  Custom providers
+  Built-in providers are managed by Astral and are not shown here.
+
+  Search providers
+› Add custom provider  Configure an OpenAI-compatible or Anthropic Messages endpoint.
+  DeepSeek (current)   Current · deepseek · chat_completions · User · /Users/test/.astral-code/
+                       config.toml
+
+  Press enter to confirm or esc to go back
