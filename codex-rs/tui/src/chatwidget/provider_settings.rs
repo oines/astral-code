@@ -10,6 +10,8 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
+const MAX_PROVIDER_ID_LEN: usize = 64;
+
 #[derive(Debug, Clone)]
 pub(crate) enum ProviderSettingsAction {
     OpenModelPicker,
@@ -53,7 +55,7 @@ impl ProviderWire {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct ProviderWriteTarget {
     file_path: String,
     expected_version: String,
@@ -154,6 +156,7 @@ impl ProviderEditorDraft {
         if id.is_empty() {
             return Err("Provider ID is required".to_string());
         }
+        validate_provider_id(id)?;
         if base_url.is_empty() {
             return Err("Base URL is required".to_string());
         }
@@ -224,8 +227,8 @@ impl ChatWidget {
 
     pub(crate) fn open_custom_providers_popup(&mut self, response: ConfigReadResponse) {
         let providers = configured_providers(&response);
-        let definitions = configured_provider_definitions(&response);
         let target = write_target(&response);
+        let definitions = configured_provider_definitions(&response, target.as_ref());
         let existing_ids = providers.keys().cloned().collect::<BTreeSet<_>>();
         let mut items = vec![SelectionItem {
             name: "Add custom provider".to_string(),
@@ -500,7 +503,7 @@ fn configured_providers(response: &ConfigReadResponse) -> BTreeMap<String, Map<S
         .unwrap_or_default()
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct ProviderSource {
     label: String,
     user_writable: bool,
@@ -514,6 +517,7 @@ struct ProviderDefinition {
 
 fn configured_provider_definitions(
     response: &ConfigReadResponse,
+    target: Option<&ProviderWriteTarget>,
 ) -> BTreeMap<String, ProviderDefinition> {
     let mut definitions = BTreeMap::new();
     let Some(layers) = response.layers.as_deref() else {
@@ -530,7 +534,7 @@ fn configured_provider_definitions(
         else {
             continue;
         };
-        let source = provider_source(&layer.name);
+        let source = provider_source(&layer.name, target);
         for (id, raw) in providers {
             let Some(raw) = raw.as_object() else {
                 continue;
@@ -547,36 +551,40 @@ fn configured_provider_definitions(
 }
 
 fn write_target(response: &ConfigReadResponse) -> Option<ProviderWriteTarget> {
-    response.layers.as_deref()?.iter().find_map(|layer| {
-        let ConfigLayerSource::User {
-            file,
-            profile: None,
-        } = &layer.name
-        else {
-            return None;
-        };
-        Some(ProviderWriteTarget {
-            file_path: file.to_string_lossy().to_string(),
-            expected_version: layer.version.clone(),
+    response
+        .layers
+        .as_deref()?
+        .iter()
+        .filter(|layer| layer.disabled_reason.is_none())
+        .find_map(|layer| {
+            let ConfigLayerSource::User { file, .. } = &layer.name else {
+                return None;
+            };
+            Some(ProviderWriteTarget {
+                file_path: file.to_string_lossy().to_string(),
+                expected_version: layer.version.clone(),
+            })
         })
-    })
 }
 
-fn provider_source(source: &ConfigLayerSource) -> ProviderSource {
+fn provider_source(
+    source: &ConfigLayerSource,
+    target: Option<&ProviderWriteTarget>,
+) -> ProviderSource {
     match source {
         ConfigLayerSource::User {
             file,
             profile: None,
         } => ProviderSource {
             label: format!("User · {}", file.display()),
-            user_writable: true,
+            user_writable: target.is_some_and(|target| target.file_path == file.to_string_lossy()),
         },
         ConfigLayerSource::User {
             file,
             profile: Some(profile),
         } => ProviderSource {
             label: format!("User profile {profile} · {}", file.display()),
-            user_writable: false,
+            user_writable: target.is_some_and(|target| target.file_path == file.to_string_lossy()),
         },
         ConfigLayerSource::Project { dot_codex_folder } => ProviderSource {
             label: format!(
@@ -612,6 +620,24 @@ fn provider_source(source: &ConfigLayerSource) -> ProviderSource {
     }
 }
 
+fn validate_provider_id(id: &str) -> Result<(), String> {
+    let mut chars = id.chars();
+    if !chars.next().is_some_and(|ch| ch.is_ascii_alphanumeric())
+        || !chars.all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+    {
+        return Err(
+            "Provider ID must start with a letter or number and contain only letters, numbers, - or _"
+                .to_string(),
+        );
+    }
+    if id.len() > MAX_PROVIDER_ID_LEN {
+        return Err(format!(
+            "Provider ID must be at most {MAX_PROVIDER_ID_LEN} characters"
+        ));
+    }
+    Ok(())
+}
+
 fn quoted_key(root: &str, key: &str) -> String {
     let escaped = key.replace('\\', "\\\\").replace('"', "\\\"");
     format!("{root}.\"{escaped}\"")
@@ -623,3 +649,7 @@ fn string_value(raw: &Map<String, Value>, key: &str) -> String {
         .unwrap_or_default()
         .to_string()
 }
+
+#[cfg(test)]
+#[path = "provider_settings_tests.rs"]
+mod tests;
