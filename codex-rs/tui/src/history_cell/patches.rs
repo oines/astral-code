@@ -20,6 +20,54 @@ impl HistoryCell for PatchHistoryCell {
             RAW_DIFF_SUMMARY_WIDTH,
         ))
     }
+
+    fn transcript_presentation(&self) -> HistoryCellPresentation {
+        HistoryCellPresentation::two_state(astral_tui::DisplayMode::Collapsed).with_groupable()
+    }
+
+    fn transcript_hyperlink_lines_for_presentation(
+        &self,
+        width: u16,
+        mode: astral_tui::DisplayMode,
+    ) -> Vec<HyperlinkLine> {
+        let mut lines = self.display_lines(width);
+        if mode == astral_tui::DisplayMode::Collapsed {
+            lines.truncate(1);
+        }
+        plain_hyperlink_lines(lines)
+    }
+
+    fn transcript_viewer_document(
+        &self,
+        width: u16,
+        mode: astral_tui::BlockViewerMode,
+    ) -> Option<astral_tui::BlockViewerDocument> {
+        let astral_tui::BlockViewerMode::Rich = mode else {
+            return None;
+        };
+        viewer_document_from_lines(
+            self.viewer_title(),
+            create_diff_summary(&self.changes, &self.cwd, usize::from(width.max(5))),
+            width,
+        )
+    }
+}
+
+impl PatchHistoryCell {
+    fn viewer_title(&self) -> String {
+        if self.changes.len() != 1 {
+            return format!("Edit {} files", self.changes.len());
+        }
+        let Some((path, change)) = self.changes.iter().next() else {
+            return "Edit files".into();
+        };
+        let action = match change {
+            FileChange::Add { .. } => "Create",
+            FileChange::Delete { .. } => "Delete",
+            FileChange::Update { .. } => "Edit",
+        };
+        format!("{action} {}", display_path_for(path, &self.cwd))
+    }
 }
 /// Create a new `PendingPatch` cell that lists the file‑level summary of
 /// a proposed patch. The summary lines should already be formatted (e.g.

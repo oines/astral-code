@@ -221,7 +221,12 @@ impl HistoryCell for ExecCell {
                 if !call.is_unified_exec_interaction() {
                     let wrap_width = width.max(1) as usize;
                     let wrap_opts = RtOptions::new(wrap_width);
-                    for unwrapped in output.formatted_output.lines().map(ansi_escape_line) {
+                    let output_text = if output.formatted_output.is_empty() {
+                        &output.aggregated_output
+                    } else {
+                        &output.formatted_output
+                    };
+                    for unwrapped in output_text.lines().map(ansi_escape_line) {
                         let wrapped = adaptive_wrap_line(&unwrapped, wrap_opts.clone());
                         push_owned_lines(&wrapped, &mut lines);
                     }
@@ -247,6 +252,39 @@ impl HistoryCell for ExecCell {
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
         plain_lines(self.transcript_lines(u16::MAX))
+    }
+
+    fn transcript_presentation(&self) -> crate::history_cell::HistoryCellPresentation {
+        crate::history_cell::HistoryCellPresentation::two_state(astral_tui::DisplayMode::Collapsed)
+            .with_groupable()
+    }
+
+    fn transcript_hyperlink_lines_for_presentation(
+        &self,
+        width: u16,
+        mode: astral_tui::DisplayMode,
+    ) -> Vec<crate::terminal_hyperlinks::HyperlinkLine> {
+        let lines = if mode == astral_tui::DisplayMode::Collapsed {
+            self.display_lines(width).into_iter().take(1).collect()
+        } else {
+            self.transcript_lines(width)
+        };
+        crate::terminal_hyperlinks::plain_hyperlink_lines(lines)
+    }
+
+    fn transcript_viewer_document(
+        &self,
+        width: u16,
+        mode: astral_tui::BlockViewerMode,
+    ) -> Option<astral_tui::BlockViewerDocument> {
+        let astral_tui::BlockViewerMode::Rich = mode else {
+            return None;
+        };
+        crate::history_cell::viewer_document_from_lines(
+            "Command",
+            self.transcript_lines(width),
+            width,
+        )
     }
 }
 

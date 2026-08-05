@@ -1,0 +1,112 @@
+---
+source: tui/src/pager_overlay.rs
+expression: "format!(\"EXEC VIEWER\\n{exec_viewer}\\nREAD VIEWER\\n{read_viewer}\\nPATCH COLLAPSED\\n{}\\nPATCH EXPANDED\\n{}\\nPATCH VIEWER\\n{}\",\nbuffer_to_text(&patch_collapsed, transcript_area),\nbuffer_to_text(&patch_expanded, transcript_area),\nbuffer_to_text(&patch_viewer, viewer_area),)"
+---
+EXEC VIEWER
+│❙ › Ran printf 'alpha\nbeta\n'                                       │
+└                                                                     ┘
+
+
+
+
+
+    ┌─ Command ────────────────────────────────────────────── [×] ─┐
+    │                                                              │
+    │                                                              │
+    │  $ printf 'alpha\nbeta\n'                                    │
+    │  alpha                                                       │
+    │  beta                                                        │
+    │  ✓ • 120ms                                                   │
+    │                                                              │
+    │             Esc close  |  y copy  |  j/k scroll              │
+    └──────────────────────────────────────────────────────────────┘
+
+
+
+
+ ↑/↓ to select   pgup/pgdn to page   home/end to jump
+ q to quit   esc to edit prev   ←/→ to fold   e to toggle   enter to ope
+
+
+READ VIEWER
+│❙ › Called Read(/repo/src/lib.rs)                                    │
+└                                                                     ┘
+
+
+
+
+
+    ┌─ Read(/repo/src/lib.rs) ─────────────────────────────── [×] ─┐
+    │                                                              │
+    │                                                              │
+    │  1    pub fn alpha() {}                                      │
+    │  2    pub fn beta() {}                                       │
+    │                                                              │
+    │                                                              │
+    │                                                              │
+    │             Esc close  |  y copy  |  j/k scroll              │
+    └──────────────────────────────────────────────────────────────┘
+
+
+
+
+ ↑/↓ to select   pgup/pgdn to page   home/end to jump
+ q to quit   esc to edit prev   ←/→ to fold   e to toggle   enter to ope
+
+
+PATCH COLLAPSED
+│❙ › Edited src/config.txt (+2 -1)                                    │
+└                                                                     ┘
+
+
+
+
+
+
+
+
+
+ ↑/↓ to select   pgup/pgdn to page   home/end to jump
+ q to quit   esc to edit prev   ←/→ to fold   e to toggle   enter to ope
+
+
+PATCH EXPANDED
+│┃ • Edited src/config.txt (+2 -1)                                    │
+│┃     1 -status: old                                                 │
+│┃     1 +status: edited                                              │
+│┃     2  note: keep                                                  │
+│┃     3 +added: true                                                 │
+└                                                                     ┘
+
+
+
+
+
+ ↑/↓ to select   pgup/pgdn to page   home/end to jump
+ q to quit   esc to edit prev   ←/→ to fold   e to toggle   enter to ope
+
+
+PATCH VIEWER
+│┃ • Edited src/config.txt (+2 -1)                                    │
+│┃     1 -status: old                                                 │
+│┃     1 +status: edited                                              │
+│┃     2  note: keep                                                  │
+│┃     3 +added: true                                                 │
+└                                                                     ┘
+
+    ┌─ Edit src/config.txt ────────────────────────────────── [×] ─┐
+    │                                                              │
+    │                                                              │
+    │  • Edited src/config.txt (+2 -1)                          █  │
+    │      1 -status: old                                       █  │
+    │      1 +status: edited                                    █  │
+    │      2  note: keep                                        █  │
+    │                                                              │
+    │             Esc close  |  y copy  |  j/k scroll              │
+    └──────────────────────────────────────────────────────────────┘
+
+
+
+
+ ↑/↓ to select   pgup/pgdn to page   home/end to jump
+ q to quit   esc to edit prev   ←/→ to fold   e to toggle   enter to ope
