@@ -15,6 +15,7 @@ mod prompt_interaction;
 mod runtime;
 mod session;
 mod surface;
+mod surface_pointer;
 mod surface_renderer;
 mod viewport;
 
@@ -76,6 +77,8 @@ pub use surface::SurfaceEntrySpacing;
 pub use surface::SurfaceNode;
 pub use surface::SurfaceNodeId;
 pub use surface::SurfaceNodeKind;
+pub use surface_pointer::SurfacePointer;
+pub use surface_pointer::SurfacePointerOutcome;
 pub use surface_renderer::SurfaceRenderStyle;
 pub use surface_renderer::SurfaceRenderer;
 pub use viewport::ScrollDirection;

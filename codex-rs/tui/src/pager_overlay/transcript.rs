@@ -1,6 +1,10 @@
 use super::*;
+use std::time::Instant;
+
 use astral_tui::BlockViewerHost;
 use astral_tui::BlockViewerOutcome;
+use astral_tui::SurfacePointer;
+use crossterm::event::MouseEvent;
 
 pub(crate) struct TranscriptOverlay {
     pub(super) surface: ConversationSurface,
@@ -8,6 +12,7 @@ pub(crate) struct TranscriptOverlay {
     renderer: SurfaceRenderer,
     pub(super) cells: TranscriptEntries,
     display: TranscriptDisplayState,
+    pointer: SurfacePointer,
     viewer: Option<BlockViewerHost>,
     pending_copy: Option<String>,
     clipboard_lease: Option<crate::clipboard_copy::ClipboardLease>,
@@ -44,6 +49,7 @@ impl TranscriptOverlay {
             renderer: SurfaceRenderer::default(),
             cells: TranscriptEntries::new(transcript_cells),
             display: TranscriptDisplayState::default(),
+            pointer: SurfacePointer::default(),
             viewer: None,
             pending_copy: None,
             clipboard_lease: None,
@@ -158,6 +164,7 @@ impl TranscriptOverlay {
             self.surface_dirty = false;
         }
         self.viewport.prepare(&self.surface, area.height);
+        self.pointer.prepare(area, &self.surface);
         if self.cells.highlighted().is_some() {
             self.sync_highlight();
         }
@@ -224,10 +231,27 @@ impl TranscriptOverlay {
     }
 
     fn apply_viewer_key_event(&mut self, key_event: KeyEvent) -> bool {
-        let Some(viewer) = self.viewer.as_mut() else {
-            return false;
+        let outcome = {
+            let Some(viewer) = self.viewer.as_mut() else {
+                return false;
+            };
+            viewer.handle_key_event(key_event, &self.cells)
         };
-        match viewer.handle_key_event(key_event, &self.cells) {
+        self.apply_viewer_outcome(outcome)
+    }
+
+    fn apply_viewer_mouse_event(&mut self, mouse: MouseEvent) -> bool {
+        let outcome = {
+            let Some(viewer) = self.viewer.as_mut() else {
+                return false;
+            };
+            viewer.handle_mouse_event(mouse, &self.cells)
+        };
+        self.apply_viewer_outcome(outcome)
+    }
+
+    fn apply_viewer_outcome(&mut self, outcome: BlockViewerOutcome) -> bool {
+        match outcome {
             BlockViewerOutcome::Unchanged => false,
             BlockViewerOutcome::Changed => true,
             BlockViewerOutcome::Close => {
@@ -263,7 +287,14 @@ impl TranscriptOverlay {
     }
 
     fn apply_fold_action(&mut self, action: FoldAction) -> bool {
-        let Some(SurfaceNodeId::Entry(id)) = self.viewport.selected() else {
+        let Some(node) = self.viewport.selected() else {
+            return false;
+        };
+        self.apply_node_fold_action(node, action)
+    }
+
+    fn apply_node_fold_action(&mut self, node: SurfaceNodeId, action: FoldAction) -> bool {
+        let SurfaceNodeId::Entry(id) = node else {
             return false;
         };
         let Some(entry) = self.cells.get_by_surface_id(id) else {
@@ -279,8 +310,42 @@ impl TranscriptOverlay {
         true
     }
 
+    pub(super) fn apply_mouse_event(
+        &mut self,
+        viewport_area: Rect,
+        mouse: MouseEvent,
+        now: Instant,
+    ) -> bool {
+        if self.viewer.is_some() {
+            return self.apply_viewer_mouse_event(mouse);
+        }
+        // Backtrack preview owns selection semantics. Keep its existing key-only state machine
+        // isolated from pointer selection until it has a dedicated interaction design.
+        if self.cells.highlighted().is_some() {
+            return false;
+        }
+        let area = Self::conversation_area(viewport_area);
+        self.ensure_surface(area);
+        let outcome =
+            self.pointer
+                .handle_event(mouse, now, area, &self.surface, &mut self.viewport);
+        let folded = outcome
+            .activated()
+            .is_some_and(|node| self.apply_node_fold_action(node, FoldAction::Toggle));
+        outcome.changed() || folded
+    }
+
     fn handle_key_event(&mut self, tui: &mut tui::Tui, key_event: KeyEvent) {
-        let mut changed = self.apply_key_event(tui.terminal.viewport_area, key_event);
+        let changed = self.apply_key_event(tui.terminal.viewport_area, key_event);
+        self.finish_input(tui, changed);
+    }
+
+    fn handle_mouse_event(&mut self, tui: &mut tui::Tui, mouse: MouseEvent) {
+        let changed = self.apply_mouse_event(tui.terminal.viewport_area, mouse, Instant::now());
+        self.finish_input(tui, changed);
+    }
+
+    fn finish_input(&mut self, tui: &mut tui::Tui, mut changed: bool) {
         if let Some(text) = self.pending_copy.take() {
             match crate::clipboard_copy::copy_to_clipboard(&text) {
                 Ok(lease) => self.clipboard_lease = lease,
@@ -425,6 +490,10 @@ impl TranscriptOverlay {
                     Ok(())
                 }
             },
+            TuiEvent::Mouse(mouse) => {
+                self.handle_mouse_event(tui, mouse);
+                Ok(())
+            }
             TuiEvent::Draw | TuiEvent::Resize => {
                 tui.draw(u16::MAX, |frame| {
                     self.render(frame.area(), frame.buffer);

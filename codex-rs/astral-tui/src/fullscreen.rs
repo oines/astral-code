@@ -1,7 +1,6 @@
 //! Retained fullscreen viewport and input policy over the shared conversation
 //! surface. Runtime events and transcript projection remain in their owners.
 
-use std::time::Duration;
 use std::time::Instant;
 
 use astral_tui_scrollback::EntryRenderOptions;
@@ -9,9 +8,7 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
-use crossterm::event::MouseButton;
 use crossterm::event::MouseEvent;
-use crossterm::event::MouseEventKind;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 
@@ -20,12 +17,10 @@ use crate::ConversationSurface;
 use crate::EntryDisplayAction;
 use crate::ScrollDirection;
 use crate::SurfaceNodeId;
+use crate::SurfacePointer;
 use crate::SurfaceRenderer;
 use crate::SurfaceViewport;
 use crate::VerbGroupDisplayAction;
-
-const MULTI_CLICK_TIMEOUT: Duration = Duration::from_millis(300);
-const FALLBACK_WHEEL_ROWS: i32 = 3;
 
 /// Whether bare-letter Grok navigation is active while scrollback is focused.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -65,9 +60,7 @@ pub struct FullscreenHost {
     viewport: SurfaceViewport,
     renderer: SurfaceRenderer,
     key_mode: ScrollbackKeyMode,
-    pending_click: Option<SurfaceNodeId>,
-    last_click: Option<(SurfaceNodeId, Instant)>,
-    scrollbar_dragging: bool,
+    pointer: SurfacePointer,
 }
 
 impl FullscreenHost {
@@ -75,6 +68,8 @@ impl FullscreenHost {
         let surface = render_surface(conversation, area);
         let mut viewport = SurfaceViewport::default();
         viewport.prepare(&surface, area.height);
+        let mut pointer = SurfacePointer::default();
+        pointer.prepare(area, &surface);
         Self {
             thread_id: conversation.transcript().thread_id().to_string(),
             area,
@@ -82,9 +77,7 @@ impl FullscreenHost {
             viewport,
             renderer: SurfaceRenderer::default(),
             key_mode,
-            pending_click: None,
-            last_click: None,
-            scrollbar_dragging: false,
+            pointer,
         }
     }
 
@@ -111,15 +104,9 @@ impl FullscreenHost {
         self.surface = render_surface(conversation, area);
         self.viewport.prepare(&self.surface, area.height);
         if resized || thread_changed {
-            self.cancel_pointer_gesture();
-        } else {
-            self.pending_click = self
-                .pending_click
-                .filter(|node| self.surface.node(*node).is_some());
-            self.last_click = self
-                .last_click
-                .filter(|click| self.surface.node(click.0).is_some());
+            self.pointer.reset();
         }
+        self.pointer.prepare(area, &self.surface);
     }
 
     pub fn render(&self, buffer: &mut Buffer) {
@@ -135,7 +122,7 @@ impl FullscreenHost {
         if key.kind == KeyEventKind::Release {
             return FullscreenOutcome::Unchanged;
         }
-        self.cancel_pointer_gesture();
+        self.pointer.cancel_gesture();
 
         if key.modifiers.is_empty()
             && (matches!(key.code, KeyCode::Tab | KeyCode::Char(' '))
@@ -222,48 +209,18 @@ impl FullscreenHost {
         now: Instant,
         conversation: &mut ConversationState,
     ) -> FullscreenOutcome {
-        match mouse.kind {
-            MouseEventKind::Moved => self.update_hover(mouse.column, mouse.row),
-            MouseEventKind::ScrollUp => self.handle_scroll_lines(-FALLBACK_WHEEL_ROWS),
-            MouseEventKind::ScrollDown => self.handle_scroll_lines(FALLBACK_WHEEL_ROWS),
-            MouseEventKind::Down(MouseButton::Left) => {
-                if self.scrollbar_hit(mouse.column, mouse.row) {
-                    self.scrollbar_dragging = true;
-                    self.pending_click = None;
-                    self.last_click = None;
-                    return changed(self.apply_scrollbar_row(mouse.row));
-                }
-                self.pending_click = self.node_at_pointer(mouse.column, mouse.row);
-                if self.pending_click.is_none() {
-                    self.last_click = None;
-                }
-                FullscreenOutcome::Unchanged
-            }
-            MouseEventKind::Drag(MouseButton::Left) => {
-                if self.scrollbar_dragging {
-                    return changed(self.apply_scrollbar_row(mouse.row));
-                }
-                self.pending_click = None;
-                self.last_click = None;
-                self.update_hover(mouse.column, mouse.row)
-            }
-            MouseEventKind::Up(MouseButton::Left) => {
-                if self.scrollbar_dragging {
-                    self.scrollbar_dragging = false;
-                    return changed(self.apply_scrollbar_row(mouse.row));
-                }
-                let Some(pending) = self.pending_click.take() else {
-                    return FullscreenOutcome::Unchanged;
-                };
-                self.complete_click(pending, now, conversation)
-            }
-            _ => FullscreenOutcome::Unchanged,
-        }
+        let outcome =
+            self.pointer
+                .handle_event(mouse, now, self.area, &self.surface, &mut self.viewport);
+        let folded = outcome.activated().is_some_and(|node| {
+            self.apply_node_display(conversation, node, NodeDisplayAction::Toggle)
+        });
+        changed(outcome.changed() || folded)
     }
 
     /// Apply a signed, terminal-normalized line delta. Positive moves down.
     pub fn handle_scroll_lines(&mut self, lines: i32) -> FullscreenOutcome {
-        self.cancel_pointer_gesture();
+        self.pointer.cancel_gesture();
         if lines == 0 {
             return FullscreenOutcome::Unchanged;
         }
@@ -311,36 +268,6 @@ impl FullscreenHost {
             return self.apply_selected_display(conversation, NodeDisplayAction::Toggle);
         }
         FullscreenOutcome::OpenViewer(selected)
-    }
-
-    fn complete_click(
-        &mut self,
-        node: SurfaceNodeId,
-        now: Instant,
-        conversation: &mut ConversationState,
-    ) -> FullscreenOutcome {
-        let selected = self.viewport.select_node(&self.surface, Some(node));
-        let double_click = self.last_click.is_some_and(|last| {
-            last.0 == node && now.saturating_duration_since(last.1) < MULTI_CLICK_TIMEOUT
-        });
-        if double_click {
-            self.last_click = None;
-            let folded = self.apply_node_display(conversation, node, NodeDisplayAction::Toggle);
-            return changed(selected || folded);
-        }
-        self.last_click = Some((node, now));
-        changed(selected)
-    }
-
-    fn update_hover(&mut self, column: u16, row: u16) -> FullscreenOutcome {
-        let before = self.viewport.hovered();
-        if self.area_contains(column, row) && !self.scrollbar_column(column) {
-            let screen_row = row.saturating_sub(self.area.y);
-            self.viewport.hover_screen_row(&self.surface, screen_row);
-        } else {
-            self.viewport.clear_hover();
-        }
-        changed(self.viewport.hovered() != before)
     }
 
     fn apply_selected_display(
@@ -420,63 +347,6 @@ impl FullscreenHost {
                     .map(super::surface::SurfaceNode::id)
             });
         self.viewport.select_node(&self.surface, fallback);
-    }
-
-    fn node_at_pointer(&self, column: u16, row: u16) -> Option<SurfaceNodeId> {
-        if !self.area_contains(column, row) || self.scrollbar_column(column) {
-            return None;
-        }
-        let virtual_row = self
-            .viewport
-            .top()
-            .saturating_add(usize::from(row.saturating_sub(self.area.y)));
-        self.surface
-            .node_at_row(virtual_row)
-            .map(super::surface::SurfaceNode::id)
-    }
-
-    fn area_contains(&self, column: u16, row: u16) -> bool {
-        column >= self.area.x
-            && column < self.area.right()
-            && row >= self.area.y
-            && row < self.area.bottom()
-    }
-
-    fn cancel_pointer_gesture(&mut self) {
-        self.pending_click = None;
-        self.last_click = None;
-        self.scrollbar_dragging = false;
-    }
-
-    fn scrollbar_hit(&self, column: u16, row: u16) -> bool {
-        self.area_contains(column, row)
-            && self.scrollbar_column(column)
-            && self.surface.row_count() > usize::from(self.area.height)
-    }
-
-    fn scrollbar_column(&self, column: u16) -> bool {
-        self.area.width > 1 && column == self.area.right().saturating_sub(1)
-    }
-
-    fn apply_scrollbar_row(&mut self, row: u16) -> bool {
-        let height = usize::from(self.area.height);
-        let total = self.surface.row_count();
-        let maximum = total.saturating_sub(height);
-        let click = usize::from(
-            row.saturating_sub(self.area.y)
-                .min(self.area.height.saturating_sub(1)),
-        );
-        let thumb_height = height
-            .saturating_mul(height)
-            .div_ceil(total)
-            .clamp(1, height);
-        let travel = height.saturating_sub(thumb_height);
-        let thumb_top = click.saturating_sub(thumb_height / 2).min(travel);
-        let target = maximum
-            .saturating_mul(thumb_top)
-            .checked_div(travel)
-            .unwrap_or(0);
-        self.viewport.scroll_to_row(&self.surface, target)
     }
 }
 
