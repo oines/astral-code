@@ -291,6 +291,29 @@ impl HistoryCell for ReasoningSummaryCell {
         plain_hyperlink_lines(self.transcript_lines_for_presentation(width, mode))
     }
 
+    fn transcript_viewer_document(
+        &self,
+        width: u16,
+        mode: astral_tui::BlockViewerMode,
+    ) -> Option<astral_tui::BlockViewerDocument> {
+        let astral_tui::BlockViewerMode::Rich = mode else {
+            return None;
+        };
+        let source = self.content.trim();
+        if source.is_empty() {
+            return None;
+        }
+        let options = astral_tui_scrollback::EntryRenderOptions::new(width);
+        astral_tui::BlockViewerDocument::new(
+            "Thought",
+            astral_tui_scrollback::render_markdown_with_metadata(
+                source,
+                width,
+                options.markdown_style,
+            ),
+        )
+    }
+
     fn raw_lines(&self) -> Vec<Line<'static>> {
         if self.transcript_only {
             Vec::new()

@@ -1,0 +1,98 @@
+---
+source: tui/src/pager_overlay.rs
+expression: "format!(\"OPENED\\n{}\\nUPDATED\\n{}\\nEMPTY SOURCE CLOSES VIEWER\\n{}\",\nbuffer_to_text(&opened, area), buffer_to_text(&updated, area),\nbuffer_to_text(&empty, area),)"
+---
+OPENED
+│❙ › Thought                                                                  │
+└                                                                             ┘
+
+
+
+
+
+    ┌─ Thought ────────────────────────────────────────────────────── [×] ─┐
+    │                                                                      │
+    │                                                                      │
+    │  Visible even when the cell is transcript only.                      │
+    │                                                                      │
+    │                                                                      │
+    │                                                                      │
+    │                                                                      │
+    │                                                                      │
+    │                                                                      │
+    │                                                                      │
+    │                                                                      │
+    │                                                                      │
+    │                                                                      │
+    │                 Esc close  |  y copy  |  j/k scroll                  │
+    └──────────────────────────────────────────────────────────────────────┘
+
+
+
+
+ ↑/↓ to select   pgup/pgdn to page   home/end to jump
+ q to quit   esc to edit prev   ←/→ to fold   e to toggle   enter to open
+
+
+UPDATED
+│❙ › Thought                                                                  │
+└                                                                             ┘
+
+
+
+
+
+    ┌─ Thought ────────────────────────────────────────────────────── [×] ─┐
+    │                                                                      │
+    │                                                                      │
+    │  The same stable entry now has updated content.                      │
+    │                                                                      │
+    │                                                                      │
+    │                                                                      │
+    │                                                                      │
+    │                                                                      │
+    │                                                                      │
+    │                                                                      │
+    │                                                                      │
+    │                                                                      │
+    │                                                                      │
+    │                 Esc close  |  y copy  |  j/k scroll                  │
+    └──────────────────────────────────────────────────────────────────────┘
+
+
+
+
+ ↑/↓ to select   pgup/pgdn to page   home/end to jump
+ q to quit   esc to edit prev   ←/→ to fold   e to toggle   enter to open
+
+
+EMPTY SOURCE CLOSES VIEWER
+│❙ › Thought                                                                  │
+└                                                                             ┘
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ ↑/↓ to select   pgup/pgdn to page   home/end to jump
+ q to quit   esc to edit prev   ←/→ to fold   e to toggle

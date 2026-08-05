@@ -3,6 +3,9 @@ use std::sync::Arc;
 
 use crate::history_cell::HistoryCell;
 use crate::history_transcript::HistoryEntryId;
+use astral_tui::BlockViewerDocument;
+use astral_tui::BlockViewerMode;
+use astral_tui::BlockViewerSource;
 use astral_tui::TranscriptEntryId;
 
 #[derive(Clone)]
@@ -110,5 +113,18 @@ impl TranscriptEntries {
         {
             self.highlighted = None;
         }
+    }
+}
+
+impl BlockViewerSource for TranscriptEntries {
+    fn block_viewer_document(
+        &self,
+        entry_id: TranscriptEntryId,
+        width: u16,
+        mode: BlockViewerMode,
+    ) -> Option<BlockViewerDocument> {
+        self.get_by_surface_id(entry_id)?
+            .cell
+            .transcript_viewer_document(width, mode)
     }
 }
