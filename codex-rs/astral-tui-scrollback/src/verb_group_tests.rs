@@ -85,12 +85,12 @@ fn groups_exact_lookup_entries_without_flattening_source_order() {
     assert_eq!(groups[0].members(), 6);
     assert_eq!(
         groups[0].label(),
-        "Reading 1 skill, Reading 1 file, Searching 1 pattern, Searching 1 website, Fetching 2 websites"
+        "Reading 1 skill, Reading 1 file, Searching 1 pattern, Searching 1 query, Fetching 2 pages"
     );
     assert!(groups[0].running());
     assert!(groups.iter().all(|group| !group.contains_member(7)));
     assert_eq!(groups[1].range(), 8..9);
-    assert_eq!(groups[1].label(), "Fetched 1 website");
+    assert_eq!(groups[1].label(), "Fetched 1 page");
     assert!(groups.iter().all(|group| !group.contains_member(9)));
     assert_eq!(groups[2].range(), 12..13);
     assert_eq!(groups[2].label(), "Searched 1 pattern");
@@ -112,7 +112,7 @@ fn groups_exact_lookup_entries_without_flattening_source_order() {
     assert_snapshot!(text, @r###"
     ◇ Reading 1 skill, Reading 1 file,
       Searching 1 pattern, Searching 1
-      website, Fetching 2 websites
+      query, Fetching 2 pages
     "###);
 
     let mut web_lifecycle = transcript(Vec::new());
@@ -126,10 +126,7 @@ fn groups_exact_lookup_entries_without_flattening_source_order() {
         web_lifecycle.apply(&item_started(item.clone()));
     }
     let running = scan_verb_groups(&web_lifecycle.turns()[0], default_display_state);
-    assert_eq!(
-        running[0].label(),
-        "Searching 1 website, Fetching 1 website"
-    );
+    assert_eq!(running[0].label(), "Searching 1 query, Fetching 1 page");
     web_lifecycle.apply(&item_completed(search));
     web_lifecycle.apply(&item_completed(dynamic_fetch(
         "live-fetch",
@@ -137,10 +134,7 @@ fn groups_exact_lookup_entries_without_flattening_source_order() {
         DynamicToolCallStatus::Completed,
     )));
     let completed = scan_verb_groups(&web_lifecycle.turns()[0], default_display_state);
-    assert_eq!(
-        completed[0].label(),
-        "Searched 1 website, Fetched 1 website"
-    );
+    assert_eq!(completed[0].label(), "Searched 1 query, Fetched 1 page");
 
     let mut failed_lifecycle = transcript(Vec::new());
     failed_lifecycle.apply(&item_started(dynamic_fetch(
@@ -154,19 +148,29 @@ fn groups_exact_lookup_entries_without_flattening_source_order() {
         DynamicToolCallStatus::Failed,
     )));
     let failed = scan_verb_groups(&failed_lifecycle.turns()[0], default_display_state);
-    assert_eq!(failed[0].label(), "Fetched 1 website · 1 failed");
+    assert_eq!(failed[0].label(), "Fetched 1 page · 1 failed");
     assert!(failed[0].failed());
     assert!(!failed[0].running());
     assert_eq!(
         render_verb_group_header(&failed[0], EntryRenderOptions::new(/*width*/ 40)).lines()[0]
             .line
             .to_string(),
-        "× Fetched 1 website · 1 failed",
+        "× Fetched 1 page · 1 failed",
     );
 }
 
 #[test]
 fn opened_member_stays_visible_inside_the_same_run() {
+    let mut opened_read = core_tool(
+        "read-b",
+        "Read",
+        json!({"file_path": "b.rs"}),
+        CoreToolCallStatus::Completed,
+    );
+    let ThreadItem::CoreToolCall { result, .. } = &mut opened_read else {
+        panic!("read helper should create a core tool call");
+    };
+    *result = Some("line one\nline two".to_string());
     let transcript = transcript(vec![
         core_tool(
             "read-a",
@@ -174,13 +178,8 @@ fn opened_member_stays_visible_inside_the_same_run() {
             json!({"file_path": "a.rs"}),
             CoreToolCallStatus::Completed,
         ),
+        opened_read,
         web_fetch("fetch", "https://example.com/docs"),
-        core_tool(
-            "read-b",
-            "Read",
-            json!({"file_path": "b.rs"}),
-            CoreToolCallStatus::Completed,
-        ),
     ]);
     let turn = &transcript.turns()[0];
     let mut states = turn
@@ -193,12 +192,12 @@ fn opened_member_stays_visible_inside_the_same_run() {
             )
         })
         .collect::<HashMap<TranscriptEntryId, EntryDisplayState>>();
-    let fetch = &turn.entries()[1];
+    let read = &turn.entries()[1];
     assert!(
         states
-            .get_mut(&fetch.id())
-            .expect("fetch state")
-            .expand(&EntryBlock::from_entry(fetch))
+            .get_mut(&read.id())
+            .expect("read state")
+            .expand(&EntryBlock::from_entry(read))
     );
 
     let groups = scan_verb_groups(turn, |entry| states.get(&entry.id()).copied());
@@ -206,7 +205,7 @@ fn opened_member_stays_visible_inside_the_same_run() {
     assert_eq!(groups.len(), 1);
     assert_eq!(groups[0].range(), 0..3);
     assert_eq!(groups[0].claimed(), &[0, 2]);
-    assert_eq!(groups[0].label(), "Read 2 files");
+    assert_eq!(groups[0].label(), "Read 1 file, Fetched 1 page");
     let state = VerbGroupDisplayState::default();
     assert!(state.hides(&groups[0], 0));
     assert!(!state.hides(&groups[0], 1));

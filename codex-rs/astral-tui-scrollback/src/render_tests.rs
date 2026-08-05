@@ -223,18 +223,16 @@ fn web_search_actions_render_from_exact_protocol_data() {
     let other = EntryBlock::from_parts(&other_item, &LiveItem::None, EntryLifecycle::Restored);
     let options = EntryRenderOptions::new(/*width*/ 34);
     let output = [
-        ("STARTING", starting, false),
-        ("SEARCH", search, true),
-        ("FETCH", fetch, true),
-        ("FIND", find, true),
-        ("OTHER", other, false),
+        ("STARTING", starting),
+        ("SEARCH", search),
+        ("FETCH", fetch),
+        ("FIND", find),
+        ("OTHER", other),
     ]
     .into_iter()
-    .map(|(label, block, expand)| {
-        let mut state = EntryDisplayState::for_block(&block).expect("web search state");
-        if expand {
-            assert!(state.expand(&block));
-        }
+    .map(|(label, block)| {
+        let state = EntryDisplayState::for_block(&block).expect("web search state");
+        assert!(!block.is_foldable());
         let rendered = render_entry(&block, state, options).expect("web search renderer");
         format!("{label}\n{}", plain(&rendered))
     })
@@ -246,12 +244,10 @@ fn web_search_actions_render_from_exact_protocol_data() {
     ◇ Web Search fallback query
 
     SEARCH
-    ◆ Web Search first complementary
-                 query ...
+    ◆ Web Search first complementary …
 
     FETCH
-    ◆ Fetch https://example.com/a/very
-            /long/page  1.2s
+    ◆ Fetch https://example.com/a/ve …
 
     FIND
     ◆ Find "cached input"

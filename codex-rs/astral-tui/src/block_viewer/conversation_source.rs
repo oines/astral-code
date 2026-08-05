@@ -50,12 +50,15 @@ impl BlockViewerSource for ConversationState {
                 }
                 render_markdown_with_metadata(&source, width, options.markdown_style)
             }
+            // Unlike Grok's native search block, the app-server item does not
+            // carry result content, citations, or an error body. Opening a
+            // modal that only repeats the compact header is misleading.
+            EntryBlock::WebSearch(_) => return None,
             EntryBlock::User { .. }
             | EntryBlock::ContextCompaction(_)
             | EntryBlock::CollabAgentToolCall(_)
             | EntryBlock::DynamicToolCall(_)
             | EntryBlock::McpToolCall(_)
-            | EntryBlock::WebSearch(_)
             | EntryBlock::ProtocolItem { .. } => {
                 let mut display = self.entry_display_state(entry_id)?;
                 display.expand(&block);
