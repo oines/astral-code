@@ -13,9 +13,9 @@ impl ChatWidget {
             .unwrap_or_else(|| "provider default".to_string());
         let mut items = vec![
             settings_section_item(
-                "Model & Thinking",
+                "Models & Providers",
                 format!("Current: {} ({effort}).", self.current_model()),
-                "model provider thinking reasoning effort",
+                "model models provider providers thinking reasoning effort",
                 SettingsSection::Models,
             ),
             settings_section_item(
@@ -73,7 +73,7 @@ impl ChatWidget {
 
     pub(crate) fn open_settings_section(&mut self, section: SettingsSection) {
         match section {
-            SettingsSection::Models => self.open_model_popup(),
+            SettingsSection::Models => self.open_model_settings_popup(),
             SettingsSection::Memory => self.open_memories_popup(),
             SettingsSection::Appearance => self.open_theme_picker(),
             SettingsSection::Permissions => self.open_permissions_popup(),

@@ -1790,6 +1790,10 @@ impl App {
             AppEvent::OpenSettingsSection(section) => {
                 self.chat_widget.open_settings_section(section);
             }
+            AppEvent::ProviderSettings(action) => {
+                self.handle_provider_settings_action(app_server, action)
+                    .await;
+            }
             AppEvent::OpenReviewBranchPicker(cwd) => {
                 self.chat_widget.show_review_branch_picker(&cwd).await;
             }

@@ -156,17 +156,43 @@ pub(crate) async fn write_config_batch(
     request_handle: AppServerRequestHandle,
     edits: Vec<ConfigEdit>,
 ) -> Result<ConfigWriteResponse> {
+    write_config_batch_request(
+        request_handle,
+        ConfigBatchWriteParams {
+            edits,
+            file_path: None,
+            expected_version: None,
+            reload_user_config: true,
+        },
+    )
+    .await
+}
+
+pub(crate) async fn write_config_batch_to_file(
+    request_handle: AppServerRequestHandle,
+    edits: Vec<ConfigEdit>,
+    file_path: String,
+    expected_version: String,
+) -> Result<ConfigWriteResponse> {
+    write_config_batch_request(
+        request_handle,
+        ConfigBatchWriteParams {
+            edits,
+            file_path: Some(file_path),
+            expected_version: Some(expected_version),
+            reload_user_config: true,
+        },
+    )
+    .await
+}
+
+async fn write_config_batch_request(
+    request_handle: AppServerRequestHandle,
+    params: ConfigBatchWriteParams,
+) -> Result<ConfigWriteResponse> {
     let request_id = RequestId::String(format!("tui-config-write-{}", Uuid::new_v4()));
     request_handle
-        .request_typed(ClientRequest::ConfigBatchWrite {
-            request_id,
-            params: ConfigBatchWriteParams {
-                edits,
-                file_path: None,
-                expected_version: None,
-                reload_user_config: true,
-            },
-        })
+        .request_typed(ClientRequest::ConfigBatchWrite { request_id, params })
         .await
         .wrap_err("config/batchWrite failed in TUI")
 }
@@ -182,12 +208,33 @@ pub(crate) async fn read_effective_config(
     request_handle: AppServerRequestHandle,
     cwd: String,
 ) -> Result<ConfigReadResponse> {
+    read_effective_config_request(request_handle, cwd, ConfigLayers::EffectiveOnly).await
+}
+
+pub(crate) async fn read_effective_config_with_layers(
+    request_handle: AppServerRequestHandle,
+    cwd: String,
+) -> Result<ConfigReadResponse> {
+    read_effective_config_request(request_handle, cwd, ConfigLayers::Include).await
+}
+
+#[derive(Clone, Copy)]
+enum ConfigLayers {
+    EffectiveOnly,
+    Include,
+}
+
+async fn read_effective_config_request(
+    request_handle: AppServerRequestHandle,
+    cwd: String,
+    layers: ConfigLayers,
+) -> Result<ConfigReadResponse> {
     let request_id = RequestId::String(format!("tui-config-read-{}", Uuid::new_v4()));
     request_handle
         .request_typed(ClientRequest::ConfigRead {
             request_id,
             params: ConfigReadParams {
-                include_layers: false,
+                include_layers: matches!(layers, ConfigLayers::Include),
                 cwd: Some(cwd),
             },
         })

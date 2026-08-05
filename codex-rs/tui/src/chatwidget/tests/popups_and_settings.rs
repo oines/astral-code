@@ -2206,6 +2206,49 @@ async fn settings_root_popup_snapshot() {
 }
 
 #[tokio::test]
+async fn custom_providers_popup_snapshot() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.2")).await;
+    chat.config.model_provider_id = "deepseek".to_string();
+    let response = serde_json::from_value(serde_json::json!({
+        "config": {
+            "model_providers": {
+                "deepseek": {
+                    "name": "DeepSeek",
+                    "base_url": "https://api.deepseek.com/v1",
+                    "wire_api": "chat_completions",
+                    "env_key": "DEEPSEEK_API_KEY"
+                }
+            }
+        },
+        "origins": {},
+        "layers": [{
+            "name": {
+                "type": "user",
+                "file": "/Users/test/.astral-code/config.toml",
+                "profile": null
+            },
+            "version": "sha256:test",
+            "config": {
+                "model_providers": {
+                    "deepseek": {
+                        "name": "DeepSeek",
+                        "base_url": "https://api.deepseek.com/v1",
+                        "wire_api": "chat_completions",
+                        "env_key": "DEEPSEEK_API_KEY"
+                    }
+                }
+            }
+        }]
+    }))
+    .expect("valid config/read response");
+
+    chat.open_custom_providers_popup(response);
+
+    let popup = render_bottom_popup(&chat, /*width*/ 100);
+    assert_chatwidget_snapshot!("custom_providers_popup", popup);
+}
+
+#[tokio::test]
 async fn memories_reset_confirmation_snapshot() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.set_feature_enabled(Feature::MemoryTool, /*enabled*/ true);

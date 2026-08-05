@@ -35,6 +35,7 @@ use crate::bottom_pane::ApprovalRequest;
 use crate::bottom_pane::StatusLineItem;
 use crate::bottom_pane::TerminalTitleItem;
 use crate::chatwidget::UserMessage;
+use crate::chatwidget::provider_settings::ProviderSettingsAction;
 use codex_app_server_protocol::AskForApproval;
 use codex_config::types::ApprovalsReviewer;
 use codex_features::Feature;
@@ -862,6 +863,9 @@ pub(crate) enum AppEvent {
 
     /// Open one of the implemented pages from the unified Settings entry point.
     OpenSettingsSection(SettingsSection),
+
+    /// Navigate or persist the custom-provider flow under Settings.
+    ProviderSettings(ProviderSettingsAction),
 
     /// Live update for the in-progress voice recording placeholder. Carries
     /// the placeholder `id` and the text to display (e.g., an ASCII meter).
