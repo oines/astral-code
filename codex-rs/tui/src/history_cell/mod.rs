@@ -275,6 +275,19 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
         self.transcript_hyperlink_lines(width)
     }
 
+    /// Resolve this cell's canonical detail document for the interactive transcript viewer.
+    ///
+    /// Cells opt in only when they retain meaningful source or full output. This prevents compact
+    /// summary rows from opening empty modals and leaves future tool-specific detail rendering with
+    /// the cell that already owns that tool's presentation semantics.
+    fn transcript_viewer_document(
+        &self,
+        _width: u16,
+        _mode: astral_tui::BlockViewerMode,
+    ) -> Option<astral_tui::BlockViewerDocument> {
+        None
+    }
+
     fn is_stream_continuation(&self) -> bool {
         false
     }

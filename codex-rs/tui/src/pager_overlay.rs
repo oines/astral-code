@@ -657,6 +657,60 @@ mod tests {
     }
 
     #[test]
+    fn transcript_overlay_reasoning_viewer_reads_canonical_cell() {
+        let mut overlay =
+            transcript_overlay(vec![Arc::new(history_cell::ReasoningSummaryCell::new(
+                String::new(),
+                "Visible even when the cell is **transcript only**.".to_string(),
+                PathBuf::from("/tmp").as_path(),
+                /*transcript_only*/ true,
+            ))]);
+        let id = overlay.cells.iter().next().expect("reasoning cell").id();
+        let area = Rect::new(
+            /*x*/ 0, /*y*/ 0, /*width*/ 80, /*height*/ 30,
+        );
+        assert!(overlay.apply_key_event(area, KeyEvent::from(KeyCode::Down)));
+        assert!(overlay.apply_key_event(area, KeyEvent::from(KeyCode::Enter)));
+
+        let mut opened = Buffer::empty(area);
+        overlay.render(area, &mut opened);
+
+        overlay.replace_cells(vec![(
+            id,
+            Arc::new(history_cell::ReasoningSummaryCell::new(
+                String::new(),
+                "The same stable entry now has **updated content**.".to_string(),
+                PathBuf::from("/tmp").as_path(),
+                /*transcript_only*/ true,
+            )),
+        )]);
+        let mut updated = Buffer::empty(area);
+        overlay.render(area, &mut updated);
+
+        overlay.replace_cells(vec![(
+            id,
+            Arc::new(history_cell::ReasoningSummaryCell::new(
+                String::new(),
+                String::new(),
+                PathBuf::from("/tmp").as_path(),
+                /*transcript_only*/ true,
+            )),
+        )]);
+        let mut empty = Buffer::empty(area);
+        overlay.render(area, &mut empty);
+
+        assert_snapshot!(
+            "transcript_overlay_reasoning_viewer_canonical_content",
+            format!(
+                "OPENED\n{}\nUPDATED\n{}\nEMPTY SOURCE CLOSES VIEWER\n{}",
+                buffer_to_text(&opened, area),
+                buffer_to_text(&updated, area),
+                buffer_to_text(&empty, area),
+            )
+        );
+    }
+
+    #[test]
     fn transcript_overlay_preserves_semantic_web_links() {
         let destination = "https://example.com/a/very/long/path";
         let mut overlay = transcript_overlay(vec![Arc::new(history_cell::AgentMarkdownCell::new(

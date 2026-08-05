@@ -5,10 +5,7 @@
 //! app-server transcript state remains authoritative while this host owns only
 //! viewport and raw/summary presentation state.
 
-use astral_tui_scrollback::EntryBlock;
-use astral_tui_scrollback::EntryDisplayState;
-use astral_tui_scrollback::ReasoningVisibility;
-use astral_tui_scrollback::TranscriptEntry;
+use astral_tui_scrollback::MarkdownLine;
 use astral_tui_scrollback::TranscriptEntryId;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
@@ -19,11 +16,12 @@ use crossterm::event::MouseEvent;
 use crossterm::event::MouseEventKind;
 use ratatui::layout::Rect;
 
-use crate::ConversationState;
 use crate::ModalOutcome;
 use crate::ModalWindow;
 use crate::SurfaceNodeId;
 
+#[path = "block_viewer/conversation_source.rs"]
+mod conversation_source;
 #[path = "block_viewer/render.rs"]
 mod render;
 
@@ -40,11 +38,74 @@ pub enum BlockViewerOutcome {
     Copy(String),
 }
 
+/// Which canonical representation a block viewer is displaying.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlockViewerMode {
+    Rich,
+    Raw,
+}
+
+impl BlockViewerMode {
+    const fn alternate(self) -> Self {
+        match self {
+            Self::Rich => Self::Raw,
+            Self::Raw => Self::Rich,
+        }
+    }
+}
+
+/// One width-resolved viewer document produced by an authoritative transcript source.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BlockViewerDocument {
+    title: String,
+    lines: Vec<MarkdownLine>,
+}
+
+impl BlockViewerDocument {
+    /// Construct a viewer document, rejecting empty content before a modal can open.
+    pub fn new(title: impl Into<String>, lines: Vec<MarkdownLine>) -> Option<Self> {
+        (!lines.is_empty()).then(|| Self {
+            title: title.into(),
+            lines,
+        })
+    }
+
+    fn title(&self) -> &str {
+        &self.title
+    }
+
+    fn lines(&self) -> &[MarkdownLine] {
+        &self.lines
+    }
+}
+
+/// Resolves viewer content by stable transcript id on every interaction and render.
+///
+/// Implementations must read their current authoritative transcript state rather than cache a
+/// cloned entry. Returning `None` for a mode means that representation is not available; returning
+/// `None` for both modes prevents the viewer from opening.
+pub trait BlockViewerSource {
+    fn block_viewer_document(
+        &self,
+        entry_id: TranscriptEntryId,
+        width: u16,
+        mode: BlockViewerMode,
+    ) -> Option<BlockViewerDocument>;
+
+    fn block_viewer_default_mode(&self, _entry_id: TranscriptEntryId) -> BlockViewerMode {
+        BlockViewerMode::Rich
+    }
+
+    fn block_viewer_follow_bottom(&self, _entry_id: TranscriptEntryId) -> bool {
+        false
+    }
+}
+
 /// Retained interaction state for one selected transcript entry.
 ///
-/// The entry itself is deliberately not cloned. Re-rendering resolves the
-/// stable local id against [`ConversationState`], so streaming updates and
-/// resume replacement cannot leave the viewer on stale content.
+/// The entry itself is deliberately not cloned. Re-rendering resolves the stable local id
+/// through [`BlockViewerSource`], so streaming updates and resume replacement cannot leave the
+/// viewer on stale content.
 #[derive(Debug)]
 pub struct BlockViewerHost {
     entry_id: TranscriptEntryId,
@@ -66,25 +127,19 @@ impl BlockViewerHost {
     /// Synthetic verb-group headers retain Enter as their expand/collapse
     /// action. Opaque reasoning has no displayable body and is rejected here,
     /// which prevents the empty Thought modal seen in the prototype.
-    pub fn open(conversation: &ConversationState, node: SurfaceNodeId) -> Option<Self> {
+    pub fn open(source: &(impl BlockViewerSource + ?Sized), node: SurfaceNodeId) -> Option<Self> {
         let SurfaceNodeId::Entry(entry_id) = node else {
             return None;
         };
-        let entry = find_entry(conversation, entry_id)?;
-        let block = EntryBlock::from_entry(entry);
-        let display = conversation.entry_display_state(entry_id)?;
-        let raw = reconciled_raw(&block, display, display.raw())?;
+        let mode = available_mode(source, entry_id, source.block_viewer_default_mode(entry_id))?;
         Some(Self {
             entry_id,
-            raw,
+            raw: mode == BlockViewerMode::Raw,
             scroll_offset: 0,
             row_count: 0,
             content_height: 0,
             content_width: 1,
-            follow_bottom: matches!(
-                entry.lifecycle(),
-                astral_tui_scrollback::EntryLifecycle::Running { .. }
-            ),
+            follow_bottom: source.block_viewer_follow_bottom(entry_id),
             content_area: None,
             scrollbar_area: None,
             scrollbar_dragging: false,
@@ -101,20 +156,14 @@ impl BlockViewerHost {
     }
 
     /// Whether the canonical entry still exists and has viewer content.
-    pub fn is_available(&self, conversation: &ConversationState) -> bool {
-        find_entry(conversation, self.entry_id).is_some_and(|entry| {
-            let block = EntryBlock::from_entry(entry);
-            conversation
-                .entry_display_state(self.entry_id)
-                .and_then(|display| reconciled_raw(&block, display, self.raw))
-                .is_some()
-        })
+    pub fn is_available(&self, source: &(impl BlockViewerSource + ?Sized)) -> bool {
+        available_mode(source, self.entry_id, self.mode()).is_some()
     }
 
     pub fn handle_key_event(
         &mut self,
         key: KeyEvent,
-        conversation: &ConversationState,
+        source: &(impl BlockViewerSource + ?Sized),
     ) -> BlockViewerOutcome {
         if key.kind == KeyEventKind::Release {
             return BlockViewerOutcome::Unchanged;
@@ -148,14 +197,14 @@ impl BlockViewerHost {
             | (KeyCode::Char('G'), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
                 changed(self.goto_bottom())
             }
-            (KeyCode::Char('r'), KeyModifiers::NONE) if self.supports_raw(conversation) => {
+            (KeyCode::Char('r'), KeyModifiers::NONE) if self.supports_raw(source) => {
                 self.raw = !self.raw;
                 self.scroll_offset = 0;
                 self.follow_bottom = false;
                 BlockViewerOutcome::Changed
             }
             (KeyCode::Char('y'), KeyModifiers::NONE) => self
-                .copy_text(conversation)
+                .copy_text(source)
                 .map_or(BlockViewerOutcome::Unchanged, BlockViewerOutcome::Copy),
             _ => BlockViewerOutcome::Unchanged,
         }
@@ -164,16 +213,16 @@ impl BlockViewerHost {
     pub fn handle_mouse_event(
         &mut self,
         mouse: MouseEvent,
-        conversation: &ConversationState,
+        source: &(impl BlockViewerSource + ?Sized),
     ) -> BlockViewerOutcome {
         match self.modal.handle_mouse_event(mouse) {
             ModalOutcome::CloseRequested => return BlockViewerOutcome::Close,
             ModalOutcome::ShortcutActivated(COPY_SHORTCUT) => {
                 return self
-                    .copy_text(conversation)
+                    .copy_text(source)
                     .map_or(BlockViewerOutcome::Unchanged, BlockViewerOutcome::Copy);
             }
-            ModalOutcome::ShortcutActivated(RAW_SHORTCUT) if self.supports_raw(conversation) => {
+            ModalOutcome::ShortcutActivated(RAW_SHORTCUT) if self.supports_raw(source) => {
                 self.raw = !self.raw;
                 self.scroll_offset = 0;
                 self.follow_bottom = false;
@@ -292,101 +341,50 @@ impl BlockViewerHost {
         changed
     }
 
-    fn supports_raw(&self, conversation: &ConversationState) -> bool {
-        let Some(entry) = find_entry(conversation, self.entry_id) else {
-            return false;
-        };
-        let block = EntryBlock::from_entry(entry);
-        conversation
-            .entry_display_state(self.entry_id)
-            .is_some_and(|display| supports_raw(&block, display))
+    fn mode(&self) -> BlockViewerMode {
+        if self.raw {
+            BlockViewerMode::Raw
+        } else {
+            BlockViewerMode::Rich
+        }
     }
 
-    fn reconcile(&mut self, conversation: &ConversationState) -> bool {
-        let Some(entry) = find_entry(conversation, self.entry_id) else {
+    fn supports_raw(&self, source: &(impl BlockViewerSource + ?Sized)) -> bool {
+        source
+            .block_viewer_document(
+                self.entry_id,
+                self.content_width.max(1),
+                BlockViewerMode::Rich,
+            )
+            .is_some()
+            && source
+                .block_viewer_document(
+                    self.entry_id,
+                    self.content_width.max(1),
+                    BlockViewerMode::Raw,
+                )
+                .is_some()
+    }
+
+    fn reconcile(&mut self, source: &(impl BlockViewerSource + ?Sized)) -> bool {
+        let Some(mode) = available_mode(source, self.entry_id, self.mode()) else {
             return false;
         };
-        let block = EntryBlock::from_entry(entry);
-        let Some(display) = conversation.entry_display_state(self.entry_id) else {
-            return false;
-        };
-        let Some(raw) = reconciled_raw(&block, display, self.raw) else {
-            return false;
-        };
-        self.raw = raw;
+        self.raw = mode == BlockViewerMode::Raw;
         true
     }
 }
 
-fn find_entry(
-    conversation: &ConversationState,
+fn available_mode(
+    source: &(impl BlockViewerSource + ?Sized),
     entry_id: TranscriptEntryId,
-) -> Option<&TranscriptEntry> {
-    conversation
-        .transcript()
-        .turns()
-        .iter()
-        .flat_map(astral_tui_scrollback::TranscriptTurn::entries)
-        .find(|entry| entry.id() == entry_id)
-}
-
-fn supports_raw(block: &EntryBlock<'_>, mut display: EntryDisplayState) -> bool {
-    match block {
-        EntryBlock::Reasoning(reasoning) => {
-            reasoning.has_visible_body(ReasoningVisibility::Summary)
-                && reasoning
-                    .content()
-                    .iter()
-                    .any(|part| !part.trim().is_empty())
-        }
-        EntryBlock::User { .. }
-        | EntryBlock::Assistant { .. }
-        | EntryBlock::ProposedPlan { .. }
-        | EntryBlock::ContextCompaction(_)
-        | EntryBlock::CollabAgentToolCall(_)
-        | EntryBlock::DynamicToolCall(_)
-        | EntryBlock::McpToolCall(_)
-        | EntryBlock::WebSearch(_)
-        | EntryBlock::ProtocolItem { .. } => display.toggle_raw(block),
-    }
-}
-
-fn reconciled_raw(
-    block: &EntryBlock<'_>,
-    display: EntryDisplayState,
-    requested_raw: bool,
-) -> Option<bool> {
-    match block {
-        EntryBlock::Reasoning(reasoning) => {
-            if !reasoning.has_visible_body(ReasoningVisibility::Raw) {
-                return None;
-            }
-            let summary_visible = reasoning.has_visible_body(ReasoningVisibility::Summary);
-            let raw_visible = reasoning
-                .content()
-                .iter()
-                .any(|part| !part.trim().is_empty());
-            Some(match (summary_visible, raw_visible) {
-                (false, true) => true,
-                (true, false) => false,
-                (true, true) => requested_raw,
-                (false, false) => return None,
-            })
-        }
-        EntryBlock::User { .. }
-        | EntryBlock::Assistant { .. }
-        | EntryBlock::ProposedPlan { .. }
-        | EntryBlock::ContextCompaction(_)
-        | EntryBlock::CollabAgentToolCall(_)
-        | EntryBlock::DynamicToolCall(_)
-        | EntryBlock::McpToolCall(_)
-        | EntryBlock::WebSearch(_)
-        | EntryBlock::ProtocolItem { .. } => Some(if supports_raw(block, display) {
-            requested_raw
-        } else {
-            display.raw()
-        }),
-    }
+    requested: BlockViewerMode,
+) -> Option<BlockViewerMode> {
+    [requested, requested.alternate()].into_iter().find(|mode| {
+        source
+            .block_viewer_document(entry_id, /*width*/ 1, *mode)
+            .is_some()
+    })
 }
 
 fn contains(area: Rect, mouse: MouseEvent) -> bool {

@@ -1,4 +1,6 @@
 use super::*;
+use astral_tui::BlockViewerHost;
+use astral_tui::BlockViewerOutcome;
 
 pub(crate) struct TranscriptOverlay {
     pub(super) surface: ConversationSurface,
@@ -6,6 +8,9 @@ pub(crate) struct TranscriptOverlay {
     renderer: SurfaceRenderer,
     pub(super) cells: TranscriptEntries,
     display: TranscriptDisplayState,
+    viewer: Option<BlockViewerHost>,
+    pending_copy: Option<String>,
+    clipboard_lease: Option<crate::clipboard_copy::ClipboardLease>,
     live_tail_key: Option<LiveTailKey>,
     live_tail_lines: Vec<HyperlinkLine>,
     surface_dirty: bool,
@@ -39,6 +44,9 @@ impl TranscriptOverlay {
             renderer: SurfaceRenderer::default(),
             cells: TranscriptEntries::new(transcript_cells),
             display: TranscriptDisplayState::default(),
+            viewer: None,
+            pending_copy: None,
+            clipboard_lease: None,
             live_tail_key: None,
             live_tail_lines: Vec::new(),
             surface_dirty: true,
@@ -60,6 +68,7 @@ impl TranscriptOverlay {
     pub(crate) fn replace_cells(&mut self, cells: Vec<(HistoryEntryId, Arc<dyn HistoryCell>)>) {
         self.cells.replace(cells);
         self.display.retain(|id| self.cells.contains(id));
+        self.reconcile_viewer();
         self.surface_dirty = true;
     }
 
@@ -77,6 +86,7 @@ impl TranscriptOverlay {
     ) {
         if self.cells.consolidate(range, consolidated) {
             self.display.retain(|id| self.cells.contains(id));
+            self.reconcile_viewer();
             self.surface_dirty = true;
         }
     }
@@ -162,6 +172,9 @@ impl TranscriptOverlay {
     }
 
     pub(super) fn apply_key_event(&mut self, viewport_area: Rect, key_event: KeyEvent) -> bool {
+        if self.viewer.is_some() {
+            return self.apply_viewer_key_event(key_event);
+        }
         self.ensure_surface(Self::conversation_area(viewport_area));
         match key_event {
             event if self.keymap.scroll_up.is_pressed(event) => self
@@ -205,7 +218,47 @@ impl TranscriptOverlay {
             event if key_hint::plain(KeyCode::Char('e')).is_press(event) => {
                 self.apply_fold_action(FoldAction::Toggle)
             }
+            event if key_hint::plain(KeyCode::Enter).is_press(event) => self.open_selected_viewer(),
             _ => false,
+        }
+    }
+
+    fn apply_viewer_key_event(&mut self, key_event: KeyEvent) -> bool {
+        let Some(viewer) = self.viewer.as_mut() else {
+            return false;
+        };
+        match viewer.handle_key_event(key_event, &self.cells) {
+            BlockViewerOutcome::Unchanged => false,
+            BlockViewerOutcome::Changed => true,
+            BlockViewerOutcome::Close => {
+                self.viewer = None;
+                true
+            }
+            BlockViewerOutcome::Copy(text) => {
+                self.pending_copy = Some(text);
+                true
+            }
+        }
+    }
+
+    fn open_selected_viewer(&mut self) -> bool {
+        let Some(node) = self.viewport.selected() else {
+            return false;
+        };
+        let Some(viewer) = BlockViewerHost::open(&self.cells, node) else {
+            return false;
+        };
+        self.viewer = Some(viewer);
+        true
+    }
+
+    fn reconcile_viewer(&mut self) {
+        if self
+            .viewer
+            .as_ref()
+            .is_some_and(|viewer| !viewer.is_available(&self.cells))
+        {
+            self.viewer = None;
         }
     }
 
@@ -227,7 +280,14 @@ impl TranscriptOverlay {
     }
 
     fn handle_key_event(&mut self, tui: &mut tui::Tui, key_event: KeyEvent) {
-        let changed = self.apply_key_event(tui.terminal.viewport_area, key_event);
+        let mut changed = self.apply_key_event(tui.terminal.viewport_area, key_event);
+        if let Some(text) = self.pending_copy.take() {
+            match crate::clipboard_copy::copy_to_clipboard(&text) {
+                Ok(lease) => self.clipboard_lease = lease,
+                Err(error) => tracing::warn!("failed to copy transcript viewer content: {error}"),
+            }
+            changed = true;
+        }
         if changed {
             tui.frame_requester()
                 .schedule_frame_in(crate::tui::TARGET_FRAME_INTERVAL);
@@ -294,6 +354,14 @@ impl TranscriptOverlay {
                 ));
                 pairs.push((vec![key_hint::plain(KeyCode::Char('e'))], "to toggle"));
             }
+            if self
+                .viewport
+                .selected()
+                .and_then(|node| BlockViewerHost::open(&self.cells, node))
+                .is_some()
+            {
+                pairs.push((vec![key_hint::plain(KeyCode::Enter)], "to open"));
+            }
         }
         render_key_hints(line2, buf, &pairs);
     }
@@ -307,6 +375,11 @@ impl TranscriptOverlay {
             .render(top, buf, &self.surface, &self.viewport);
         self.mark_visible_hyperlinks(top, buf);
         self.render_hints(bottom, buf);
+        if let Some(viewer) = self.viewer.as_mut()
+            && !viewer.render(buf, area, &self.cells)
+        {
+            self.viewer = None;
+        }
     }
 
     fn mark_visible_hyperlinks(&self, area: Rect, buf: &mut Buffer) {
@@ -336,6 +409,10 @@ impl TranscriptOverlay {
 
     pub(crate) fn handle_event(&mut self, tui: &mut tui::Tui, event: TuiEvent) -> Result<()> {
         match event {
+            TuiEvent::Key(key_event) if self.viewer.is_some() => {
+                self.handle_key_event(tui, key_event);
+                Ok(())
+            }
             TuiEvent::Key(key_event) => match key_event {
                 e if self.keymap.close.is_pressed(e)
                     || self.keymap.close_transcript.is_pressed(e) =>
