@@ -2128,6 +2128,15 @@ async fn status_line_model_with_reasoning_context_remaining_footer_snapshot() {
         "status_line_model_with_reasoning_context_remaining_footer",
         normalized_backend_snapshot(terminal.backend())
     );
+
+    chat.set_reasoning_effort(Some(ReasoningEffortConfig::None));
+    terminal
+        .draw(|f| chat.render(f.area(), f.buffer_mut()))
+        .expect("draw no-reasoning footer");
+    assert_chatwidget_snapshot!(
+        "status_line_model_with_reasoning_none_footer",
+        normalized_backend_snapshot(terminal.backend())
+    );
 }
 
 #[tokio::test]

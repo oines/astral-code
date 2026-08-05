@@ -8,7 +8,7 @@ expression: "buffer_text(&buffer, area)"
 │┃                                                            │
 │┃   Follow the canonical transcript and presentation state.  │
 │                                                             │
-│┃ ◆ Searched 2 websites                                      │
+│┃ ◆ Searched 2 queries                                       │
 │                                                             │
 │❙ ◆ Web Search grok fullscreen input routing                 │
 │❙ ◆ Web Search ratatui stable selection                      │

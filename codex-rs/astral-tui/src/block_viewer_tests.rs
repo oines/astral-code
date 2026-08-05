@@ -82,6 +82,14 @@ fn thought_viewer_uses_visible_reasoning_and_refuses_opaque_content() {
     let opaque = conversation(vec![reasoning("opaque", &[], &[])]);
     let opaque_id = opaque.transcript().turns()[0].entries()[0].id();
     assert!(BlockViewerHost::open(&opaque, SurfaceNodeId::Entry(opaque_id)).is_none());
+
+    let search = conversation(vec![ThreadItem::WebSearch {
+        id: "search".to_string(),
+        query: "current Astral release".to_string(),
+        action: None,
+    }]);
+    let search_id = search.transcript().turns()[0].entries()[0].id();
+    assert!(BlockViewerHost::open(&search, SurfaceNodeId::Entry(search_id)).is_none());
 }
 
 #[test]

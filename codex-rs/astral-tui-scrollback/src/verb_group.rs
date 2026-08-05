@@ -354,8 +354,10 @@ impl GroupBucket {
             (Self::Skill, _) => "skills",
             (Self::Search, 1) => "pattern",
             (Self::Search, _) => "patterns",
-            (Self::WebFetch | Self::WebSearch, 1) => "website",
-            (Self::WebFetch | Self::WebSearch, _) => "websites",
+            (Self::WebFetch, 1) => "page",
+            (Self::WebFetch, _) => "pages",
+            (Self::WebSearch, 1) => "query",
+            (Self::WebSearch, _) => "queries",
         }
     }
 }
@@ -363,6 +365,7 @@ impl GroupBucket {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct MemberMeta {
     kind: GroupBucket,
+    count: usize,
     running: bool,
     failed: bool,
 }
@@ -370,16 +373,21 @@ struct MemberMeta {
 fn member_meta(block: &EntryBlock<'_>) -> Option<MemberMeta> {
     match block {
         EntryBlock::ProtocolItem { item, .. } => protocol_member_meta(item),
-        EntryBlock::WebSearch(search) => Some(MemberMeta {
-            kind: match search.kind() {
-                WebSearchKind::Search => GroupBucket::WebSearch,
-                WebSearchKind::Fetch => GroupBucket::WebFetch,
-            },
-            running: search.running(),
-            failed: false,
-        }),
+        EntryBlock::WebSearch(search) => {
+            let (kind, count) = match search.kind() {
+                WebSearchKind::Search => (GroupBucket::WebSearch, search.query_count()),
+                WebSearchKind::Fetch => (GroupBucket::WebFetch, 1),
+            };
+            Some(MemberMeta {
+                kind,
+                count,
+                running: search.running(),
+                failed: false,
+            })
+        }
         EntryBlock::DynamicToolCall(call) if call.is_web_fetch() => Some(MemberMeta {
             kind: GroupBucket::WebFetch,
+            count: 1,
             running: call.running(),
             failed: call.failed(),
         }),
@@ -408,6 +416,7 @@ fn protocol_member_meta(item: &ThreadItem) -> Option<MemberMeta> {
     };
     Some(MemberMeta {
         kind,
+        count: 1,
         running: status == CoreToolCallStatus::InProgress,
         failed: matches!(
             status,
@@ -443,9 +452,9 @@ fn aggregate_label(entries: &[TranscriptEntry], indices: &[usize]) -> GroupLabel
             continue;
         };
         if let Some((_, count)) = buckets.iter_mut().find(|(bucket, _)| *bucket == meta.kind) {
-            *count += 1;
+            *count += meta.count;
         } else {
-            buckets.push((meta.kind, 1));
+            buckets.push((meta.kind, meta.count));
         }
         running |= meta.running;
         failed_count += usize::from(meta.failed);

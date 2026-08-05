@@ -197,9 +197,12 @@ impl EntryBlock<'_> {
                 has_raw_mode: false,
                 fold_cycle: FoldCycle::TwoState,
             }),
-            Self::WebSearch(search) => Some(DisplayPolicy {
+            Self::WebSearch(_) => Some(DisplayPolicy {
                 default_mode: DisplayMode::Collapsed,
-                foldable: !search.detail().is_empty(),
+                // The app-server item currently carries only the operation and
+                // its arguments. Match Grok's invariant that a web-search card
+                // is foldable only when it has a result body to reveal.
+                foldable: false,
                 has_raw_mode: false,
                 fold_cycle: FoldCycle::TwoState,
             }),

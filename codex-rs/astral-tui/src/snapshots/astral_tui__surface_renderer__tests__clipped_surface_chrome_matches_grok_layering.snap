@@ -4,7 +4,7 @@ expression: "buffer_text(&buffer, area)"
 ---
    › Inspect the renderer                                  █
 ┌                                                         ┐█
-│❙ › Searched 2 websites                                  │█
+│❙ › Searched 2 queries                                   │█
 └                                                         ┘█
 │  The surface now keeps one geometry for:                │█
 │                                                         │█

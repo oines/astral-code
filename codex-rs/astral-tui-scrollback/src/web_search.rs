@@ -85,6 +85,26 @@ impl<'a> WebSearchBlock<'a> {
             }
         }
     }
+
+    pub(crate) fn query_count(self) -> usize {
+        match self.action {
+            Some(WebSearchAction::Search { query, queries }) => {
+                if query.as_deref().is_some_and(|query| !query.is_empty()) {
+                    1
+                } else {
+                    queries
+                        .as_ref()
+                        .map(|queries| queries.iter().filter(|query| !query.is_empty()).count())
+                        .filter(|count| *count > 0)
+                        .unwrap_or(1)
+                }
+            }
+            Some(WebSearchAction::OpenPage { .. })
+            | Some(WebSearchAction::FindInPage { .. })
+            | Some(WebSearchAction::Other)
+            | None => 1,
+        }
+    }
 }
 
 fn search_detail<'a>(query: &'a Option<String>, queries: &'a Option<Vec<String>>) -> Cow<'a, str> {
