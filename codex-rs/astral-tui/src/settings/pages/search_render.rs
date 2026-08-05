@@ -292,11 +292,7 @@ fn render_editor(state: &mut SettingsState, area: Rect, buffer: &mut Buffer, the
     );
     let mut hits = Vec::new();
     match editor {
-        SearchEditor::Text {
-            field,
-            input,
-            secret,
-        } => {
+        SearchEditor::Text { field, input } => {
             Paragraph::new(field.description())
                 .wrap(ratatui::widgets::Wrap { trim: false })
                 .render(
@@ -318,14 +314,8 @@ fn render_editor(state: &mut SettingsState, area: Rect, buffer: &mut Buffer, the
             buffer.set_style(field_area, Style::default().bg(theme.panel_background));
             let text = input.text();
             let cursor = input.cursor().min(text.len());
-            let (before, after) = if secret {
-                (
-                    "•".repeat(text[..cursor].chars().count()),
-                    "•".repeat(text[cursor..].chars().count()),
-                )
-            } else {
-                (text[..cursor].to_string(), text[cursor..].to_string())
-            };
+            let before = "•".repeat(text[..cursor].chars().count());
+            let after = "•".repeat(text[cursor..].chars().count());
             Paragraph::new(Line::from(vec![
                 "  ".into(),
                 before.into(),

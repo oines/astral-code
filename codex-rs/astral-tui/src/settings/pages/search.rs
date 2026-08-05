@@ -14,38 +14,16 @@ use super::super::SettingsStore;
 pub(super) enum SearchField {
     Provider,
     ApiKey,
-    ContextSize,
-    AllowedDomains,
-    Country,
-    Region,
-    City,
-    Timezone,
     Save,
 }
 
 impl SearchField {
-    pub(super) const ALL: [Self; 9] = [
-        Self::Provider,
-        Self::ApiKey,
-        Self::ContextSize,
-        Self::AllowedDomains,
-        Self::Country,
-        Self::Region,
-        Self::City,
-        Self::Timezone,
-        Self::Save,
-    ];
+    pub(super) const ALL: [Self; 3] = [Self::Provider, Self::ApiKey, Self::Save];
 
     pub(super) const fn label(self) -> &'static str {
         match self {
             Self::Provider => "Provider",
             Self::ApiKey => "API key",
-            Self::ContextSize => "Context size",
-            Self::AllowedDomains => "Allowed domains",
-            Self::Country => "Country",
-            Self::Region => "Region",
-            Self::City => "City",
-            Self::Timezone => "Timezone",
             Self::Save => "Save search settings",
         }
     }
@@ -54,12 +32,6 @@ impl SearchField {
         match self {
             Self::Provider => "Tavily, Exa, Jina, Brave, or SerpAPI",
             Self::ApiKey => "Keep, replace, or clear the stored secret",
-            Self::ContextSize => "Optional provider result context: low, medium, or high",
-            Self::AllowedDomains => "Optional default domain allowlist, separated by commas",
-            Self::Country => "Optional ISO country code sent as approximate user location",
-            Self::Region => "Optional region used for localized search",
-            Self::City => "Optional city used for localized search",
-            Self::Timezone => "Optional IANA timezone, for example Asia/Singapore",
             Self::Save => "Write every changed field atomically to the user config",
         }
     }
@@ -68,12 +40,6 @@ impl SearchField {
         match self {
             Self::Provider => Some("tools.web_search.provider"),
             Self::ApiKey => Some("tools.web_search.api_key"),
-            Self::ContextSize => Some("tools.web_search.context_size"),
-            Self::AllowedDomains => Some("tools.web_search.allowed_domains"),
-            Self::Country => Some("tools.web_search.location.country"),
-            Self::Region => Some("tools.web_search.location.region"),
-            Self::City => Some("tools.web_search.location.city"),
-            Self::Timezone => Some("tools.web_search.location.timezone"),
             Self::Save => None,
         }
     }
@@ -91,7 +57,6 @@ pub(super) enum SearchEditor {
     Text {
         field: SearchField,
         input: Box<ComposerState>,
-        secret: bool,
     },
     Picker {
         field: SearchField,
@@ -110,12 +75,6 @@ pub(in crate::settings) struct SearchPageState {
     pub(super) provider: Option<String>,
     pub(super) secret: SecretDraft,
     pub(super) secret_configured: bool,
-    pub(super) context_size: Option<String>,
-    pub(super) allowed_domains: String,
-    pub(super) country: String,
-    pub(super) region: String,
-    pub(super) city: String,
-    pub(super) timezone: String,
     pub(super) editor: Option<SearchEditor>,
     pub(super) changed: BTreeSet<SearchField>,
     pub(super) error: Option<String>,
@@ -130,12 +89,6 @@ impl std::fmt::Debug for SearchPageState {
             .field("provider", &self.provider)
             .field("secret", &"<redacted>")
             .field("secret_configured", &self.secret_configured)
-            .field("context_size", &self.context_size)
-            .field("allowed_domains", &self.allowed_domains)
-            .field("country", &self.country)
-            .field("region", &self.region)
-            .field("city", &self.city)
-            .field("timezone", &self.timezone)
             .field("editor", &self.editor.as_ref().map(|_| "<redacted>"))
             .field("changed", &self.changed)
             .field("error", &self.error)
@@ -152,18 +105,6 @@ impl SearchPageState {
                 .and_then(Value::as_str)
                 .map(str::to_string)
         };
-        let allowed_domains = store
-            .effective_value("tools.web_search.allowed_domains")
-            .or_else(|| store.user_value("tools.web_search.allowed_domains"))
-            .and_then(Value::as_array)
-            .map(|domains| {
-                domains
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            })
-            .unwrap_or_default();
         let secret_configured = store
             .effective_value("tools.web_search.api_key")
             .or_else(|| store.user_value("tools.web_search.api_key"))
@@ -175,12 +116,6 @@ impl SearchPageState {
             provider: value("tools.web_search.provider"),
             secret: SecretDraft::Keep,
             secret_configured,
-            context_size: value("tools.web_search.context_size"),
-            allowed_domains,
-            country: value("tools.web_search.location.country").unwrap_or_default(),
-            region: value("tools.web_search.location.region").unwrap_or_default(),
-            city: value("tools.web_search.location.city").unwrap_or_default(),
-            timezone: value("tools.web_search.location.timezone").unwrap_or_default(),
             editor: None,
             changed: BTreeSet::new(),
             error: None,
@@ -220,16 +155,6 @@ impl SearchPageState {
                 SecretDraft::Replace(_) => "Replace on save".to_string(),
                 SecretDraft::Clear => "Clear on save".to_string(),
             },
-            SearchField::ContextSize => self
-                .context_size
-                .as_deref()
-                .unwrap_or("Provider default")
-                .into(),
-            SearchField::AllowedDomains => empty_label(&self.allowed_domains),
-            SearchField::Country => empty_label(&self.country),
-            SearchField::Region => empty_label(&self.region),
-            SearchField::City => empty_label(&self.city),
-            SearchField::Timezone => empty_label(&self.timezone),
             SearchField::Save => {
                 if self.is_dirty() {
                     "Unsaved changes".to_string()
@@ -299,32 +224,8 @@ impl SearchPageState {
                     /*allow_none*/ true,
                 )
             }
-            SearchField::ContextSize => {
-                let current = self.context_size.clone();
-                self.open_picker(
-                    SearchField::ContextSize,
-                    &["low", "medium", "high"],
-                    current.as_deref(),
-                    /*allow_none*/ true,
-                )
-            }
             SearchField::ApiKey => {
                 self.editor = Some(SearchEditor::Secret { selected: 0 });
-                SettingsInput::Redraw
-            }
-            SearchField::AllowedDomains
-            | SearchField::Country
-            | SearchField::Region
-            | SearchField::City
-            | SearchField::Timezone => {
-                let field = self.field();
-                let mut input = ComposerState::default();
-                input.replace(self.raw_value(field));
-                self.editor = Some(SearchEditor::Text {
-                    field,
-                    input: Box::new(input),
-                    secret: false,
-                });
                 SettingsInput::Redraw
             }
             SearchField::Save => self.save(store),
@@ -394,14 +295,6 @@ impl SearchPageState {
 
     pub(in crate::settings) fn is_dirty(&self) -> bool {
         !self.changed.is_empty()
-    }
-}
-
-fn empty_label(value: &str) -> String {
-    if value.trim().is_empty() {
-        "Not set".to_string()
-    } else {
-        value.to_string()
     }
 }
 

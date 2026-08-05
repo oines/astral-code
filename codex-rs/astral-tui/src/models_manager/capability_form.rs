@@ -20,37 +20,13 @@ mod values;
 
 pub(super) use render::render;
 use values::set_optional_number;
-use values::set_trimmed_string;
 use values::text_value;
 
-const BASIC_FIELDS: [CapabilityField; 9] = [
+const FIELDS: [CapabilityField; 5] = [
     CapabilityField::ModelId,
     CapabilityField::ContextWindow,
     CapabilityField::MaxOutputTokens,
-    CapabilityField::ToolMode,
-    CapabilityField::SupportsTools,
     CapabilityField::SupportsVision,
-    CapabilityField::SupportsReasoning,
-    CapabilityField::Advanced,
-    CapabilityField::Save,
-];
-
-const ADVANCED_FIELDS: [CapabilityField; 16] = [
-    CapabilityField::ModelId,
-    CapabilityField::ContextWindow,
-    CapabilityField::MaxOutputTokens,
-    CapabilityField::ToolMode,
-    CapabilityField::SupportsTools,
-    CapabilityField::SupportsVision,
-    CapabilityField::SupportsReasoning,
-    CapabilityField::MaxContextWindow,
-    CapabilityField::SupportsParallelTools,
-    CapabilityField::SupportsPromptCache,
-    CapabilityField::SupportsNativeStreaming,
-    CapabilityField::LiteLlmProvider,
-    CapabilityField::Mode,
-    CapabilityField::SupportedEndpoints,
-    CapabilityField::Advanced,
     CapabilityField::Save,
 ];
 
@@ -59,18 +35,7 @@ pub(super) enum CapabilityField {
     ModelId,
     ContextWindow,
     MaxOutputTokens,
-    ToolMode,
-    SupportsTools,
     SupportsVision,
-    SupportsReasoning,
-    MaxContextWindow,
-    SupportsParallelTools,
-    SupportsPromptCache,
-    SupportsNativeStreaming,
-    LiteLlmProvider,
-    Mode,
-    SupportedEndpoints,
-    Advanced,
     Save,
 }
 
@@ -82,7 +47,6 @@ pub(super) struct CapabilityFormState {
     pub(super) model_id: String,
     pub(super) raw: Map<String, Value>,
     pub(super) effective: ModelCapabilities,
-    pub(super) advanced: bool,
     pub(super) selected: usize,
     pub(super) editor: ComposerState,
     pub(super) error: Option<String>,
@@ -134,7 +98,6 @@ impl CapabilityFormState {
             model_id,
             raw,
             effective,
-            advanced: false,
             selected: 0,
             editor: ComposerState::default(),
             error: None,
@@ -146,11 +109,7 @@ impl CapabilityFormState {
     }
 
     pub(super) fn fields(&self) -> &'static [CapabilityField] {
-        if self.advanced {
-            &ADVANCED_FIELDS
-        } else {
-            &BASIC_FIELDS
-        }
+        &FIELDS
     }
 
     pub(super) fn move_selection(&mut self, delta: isize) {
@@ -255,17 +214,6 @@ impl CapabilityFormState {
         existing_ids: &BTreeSet<String>,
     ) -> ModelsManagerInput {
         match self.field() {
-            CapabilityField::Advanced => {
-                self.save_editor();
-                self.advanced = !self.advanced;
-                self.selected = self
-                    .fields()
-                    .iter()
-                    .position(|field| *field == CapabilityField::Advanced)
-                    .unwrap_or_default();
-                self.load_editor();
-                ModelsManagerInput::Redraw
-            }
             CapabilityField::Save => match self.build_write(target, existing_ids) {
                 Ok(write) => ModelsManagerInput::WriteConfig(write),
                 Err(error) => {
@@ -283,21 +231,11 @@ impl CapabilityFormState {
             }
             CapabilityField::ModelId
             | CapabilityField::ContextWindow
-            | CapabilityField::MaxOutputTokens
-            | CapabilityField::MaxContextWindow
-            | CapabilityField::LiteLlmProvider
-            | CapabilityField::Mode
-            | CapabilityField::SupportedEndpoints => {
+            | CapabilityField::MaxOutputTokens => {
                 self.move_selection(1);
                 ModelsManagerInput::Redraw
             }
-            CapabilityField::ToolMode
-            | CapabilityField::SupportsTools
-            | CapabilityField::SupportsVision
-            | CapabilityField::SupportsReasoning
-            | CapabilityField::SupportsParallelTools
-            | CapabilityField::SupportsPromptCache
-            | CapabilityField::SupportsNativeStreaming => ModelsManagerInput::None,
+            CapabilityField::SupportsVision => ModelsManagerInput::None,
         }
     }
 
@@ -344,24 +282,7 @@ impl CapabilityFormState {
         let mut raw = self.raw.clone();
         for field in text_fields() {
             let key = config_key(field);
-            if field.is_number() {
-                set_optional_number(&mut raw, key, self.draft(field))?;
-            } else if field == CapabilityField::SupportedEndpoints {
-                let values = self
-                    .draft(field)
-                    .split(',')
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .map(|value| Value::String(value.to_string()))
-                    .collect::<Vec<_>>();
-                if values.is_empty() {
-                    raw.remove(key);
-                } else {
-                    raw.insert(key.to_string(), Value::Array(values));
-                }
-            } else {
-                set_trimmed_string(&mut raw, key, self.draft(field));
-            }
+            set_optional_number(&mut raw, key, self.draft(field))?;
         }
         Ok(capability_write(
             target,
@@ -378,33 +299,17 @@ impl CapabilityFormState {
     fn cycle_choice(&mut self, delta: isize) {
         let field = self.field();
         let key = config_key(field);
-        if field == CapabilityField::ToolMode {
-            let values = [
-                None,
-                Some("direct"),
-                Some("code_mode"),
-                Some("code_mode_only"),
-            ];
-            let current = self.raw.get(key).and_then(Value::as_str);
-            let index = values
-                .iter()
-                .position(|value| *value == current)
-                .unwrap_or_default();
-            let next = (index as isize + delta).rem_euclid(values.len() as isize) as usize;
-            set_choice_string(&mut self.raw, key, values[next]);
+        let values = [None, Some(true), Some(false)];
+        let current = self.raw.get(key).and_then(Value::as_bool);
+        let index = values
+            .iter()
+            .position(|value| *value == current)
+            .unwrap_or_default();
+        let next = (index as isize + delta).rem_euclid(values.len() as isize) as usize;
+        if let Some(value) = values[next] {
+            self.raw.insert(key.to_string(), Value::Bool(value));
         } else {
-            let values = [None, Some(true), Some(false)];
-            let current = self.raw.get(key).and_then(Value::as_bool);
-            let index = values
-                .iter()
-                .position(|value| *value == current)
-                .unwrap_or_default();
-            let next = (index as isize + delta).rem_euclid(values.len() as isize) as usize;
-            if let Some(value) = values[next] {
-                self.raw.insert(key.to_string(), Value::Bool(value));
-            } else {
-                self.raw.remove(key);
-            }
+            self.raw.remove(key);
         }
         self.dirty = true;
         self.error = None;
@@ -433,34 +338,12 @@ impl CapabilityField {
     pub(super) fn is_text(self) -> bool {
         matches!(
             self,
-            Self::ModelId
-                | Self::ContextWindow
-                | Self::MaxOutputTokens
-                | Self::MaxContextWindow
-                | Self::LiteLlmProvider
-                | Self::Mode
-                | Self::SupportedEndpoints
-        )
-    }
-
-    fn is_number(self) -> bool {
-        matches!(
-            self,
-            Self::ContextWindow | Self::MaxOutputTokens | Self::MaxContextWindow
+            Self::ModelId | Self::ContextWindow | Self::MaxOutputTokens
         )
     }
 
     fn is_choice(self) -> bool {
-        matches!(
-            self,
-            Self::ToolMode
-                | Self::SupportsTools
-                | Self::SupportsVision
-                | Self::SupportsReasoning
-                | Self::SupportsParallelTools
-                | Self::SupportsPromptCache
-                | Self::SupportsNativeStreaming
-        )
+        self == Self::SupportsVision
     }
 }
 
@@ -468,36 +351,14 @@ pub(super) fn config_key(field: CapabilityField) -> &'static str {
     match field {
         CapabilityField::ContextWindow => "context_window",
         CapabilityField::MaxOutputTokens => "max_output_tokens",
-        CapabilityField::ToolMode => "tool_mode",
-        CapabilityField::SupportsTools => "supports_tools",
         CapabilityField::SupportsVision => "supports_vision",
-        CapabilityField::SupportsReasoning => "supports_reasoning",
-        CapabilityField::MaxContextWindow => "max_context_window",
-        CapabilityField::SupportsParallelTools => "supports_parallel_tools",
-        CapabilityField::SupportsPromptCache => "supports_prompt_cache",
-        CapabilityField::SupportsNativeStreaming => "supports_native_streaming",
-        CapabilityField::LiteLlmProvider => "litellm_provider",
-        CapabilityField::Mode => "mode",
-        CapabilityField::SupportedEndpoints => "supported_endpoints",
-        CapabilityField::ModelId | CapabilityField::Advanced | CapabilityField::Save => "",
+        CapabilityField::ModelId | CapabilityField::Save => "",
     }
 }
 
-fn text_fields() -> [CapabilityField; 6] {
+fn text_fields() -> [CapabilityField; 2] {
     [
         CapabilityField::ContextWindow,
         CapabilityField::MaxOutputTokens,
-        CapabilityField::MaxContextWindow,
-        CapabilityField::LiteLlmProvider,
-        CapabilityField::Mode,
-        CapabilityField::SupportedEndpoints,
     ]
-}
-
-fn set_choice_string(raw: &mut Map<String, Value>, key: &str, value: Option<&str>) {
-    if let Some(value) = value {
-        raw.insert(key.to_string(), Value::String(value.to_string()));
-    } else {
-        raw.remove(key);
-    }
 }

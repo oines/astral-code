@@ -186,14 +186,7 @@ fn config() -> ConfigReadResponse {
                 "surface": "claude",
                 "web_search": {
                     "provider": "tavily",
-                    "api_key": "[redacted]",
-                    "context_size": "medium",
-                    "allowed_domains": ["docs.rs", "github.com"],
-                    "location": {
-                        "country": "SG",
-                        "city": "Singapore",
-                        "timezone": "Asia/Singapore"
-                    }
+                    "api_key": "[redacted]"
                 }
             },
             "experimental_session_memory_compact": false,
@@ -207,8 +200,7 @@ fn config() -> ConfigReadResponse {
                 "use_memories": true
             },
             "tui": {
-                "theme": "day",
-                "animations": true
+                "theme": "day"
             }
         },
         "origins": {
@@ -242,14 +234,7 @@ fn config() -> ConfigReadResponse {
                         "surface": "claude",
                         "web_search": {
                             "provider": "tavily",
-                            "api_key": "[redacted]",
-                            "context_size": "medium",
-                            "allowed_domains": ["docs.rs", "github.com"],
-                            "location": {
-                                "country": "SG",
-                                "city": "Singapore",
-                                "timezone": "Asia/Singapore"
-                            }
+                            "api_key": "[redacted]"
                         }
                     },
                     "session_memory_template": "Keep decisions and active work."

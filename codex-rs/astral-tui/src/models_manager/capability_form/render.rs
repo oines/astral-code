@@ -1,4 +1,3 @@
-use codex_protocol::openai_models::ToolMode;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
@@ -73,7 +72,7 @@ pub(in crate::models_manager) fn render(
     buffer.set_stringn(
         frame.content.x,
         note_y,
-        "Blank/Inherit keeps discovered metadata; entered values are manual overrides.",
+        "Only context, output limit, and vision are user overrides; other capabilities stay provider-owned.",
         usize::from(frame.content.width),
         Style::default().fg(theme.gray).bg(theme.bg_base),
     );
@@ -115,37 +114,11 @@ fn display_value(form: &CapabilityFormState, field: CapabilityField, selected: b
             selected,
             form.effective.context_window,
         ),
-        CapabilityField::MaxContextWindow => editor_value(
-            form,
-            form.draft(field),
-            selected,
-            form.effective.max_context_window,
-        ),
         CapabilityField::MaxOutputTokens => editor_value(
             form,
             form.draft(field),
             selected,
             form.effective.max_output_tokens,
-        ),
-        CapabilityField::ToolMode => choice_value(
-            tool_mode_label(
-                form.raw
-                    .get(config_key(field))
-                    .and_then(serde_json::Value::as_str),
-            ),
-            form.effective.tool_mode.map(effective_tool_mode),
-        ),
-        CapabilityField::SupportsTools => bool_value(
-            form.raw
-                .get(config_key(field))
-                .and_then(serde_json::Value::as_bool),
-            form.effective.supports_tools,
-        ),
-        CapabilityField::SupportsParallelTools => bool_value(
-            form.raw
-                .get(config_key(field))
-                .and_then(serde_json::Value::as_bool),
-            form.effective.supports_parallel_tools,
         ),
         CapabilityField::SupportsVision => bool_value(
             form.raw
@@ -153,36 +126,6 @@ fn display_value(form: &CapabilityFormState, field: CapabilityField, selected: b
                 .and_then(serde_json::Value::as_bool),
             form.effective.supports_vision,
         ),
-        CapabilityField::SupportsPromptCache => bool_value(
-            form.raw
-                .get(config_key(field))
-                .and_then(serde_json::Value::as_bool),
-            form.effective.supports_prompt_cache,
-        ),
-        CapabilityField::SupportsReasoning => bool_value(
-            form.raw
-                .get(config_key(field))
-                .and_then(serde_json::Value::as_bool),
-            form.effective.supports_reasoning,
-        ),
-        CapabilityField::SupportsNativeStreaming => bool_value(
-            form.raw
-                .get(config_key(field))
-                .and_then(serde_json::Value::as_bool),
-            form.effective.supports_native_streaming,
-        ),
-        CapabilityField::LiteLlmProvider => editor_value(form, form.draft(field), selected, None),
-        CapabilityField::Mode => editor_value(form, form.draft(field), selected, None),
-        CapabilityField::SupportedEndpoints => {
-            editor_value(form, form.draft(field), selected, None)
-        }
-        CapabilityField::Advanced => {
-            if form.advanced {
-                "Hide advanced fields".to_string()
-            } else {
-                "Show advanced fields".to_string()
-            }
-        }
         CapabilityField::Save => "Write manual overrides to user config".to_string(),
     }
 }
@@ -225,40 +168,12 @@ fn choice_value(value: &str, effective: Option<&str>) -> String {
     )
 }
 
-fn tool_mode_label(value: Option<&str>) -> &'static str {
-    match value {
-        Some("direct") => "Direct",
-        Some("code_mode") => "Code mode",
-        Some("code_mode_only") => "Code mode only",
-        Some(_) | None => "Inherit",
-    }
-}
-
-fn effective_tool_mode(value: ToolMode) -> &'static str {
-    match value {
-        ToolMode::Direct => "direct",
-        ToolMode::CodeMode => "code mode",
-        ToolMode::CodeModeOnly => "code mode only",
-    }
-}
-
 fn field_label(field: CapabilityField) -> &'static str {
     match field {
         CapabilityField::ModelId => "Model ID",
         CapabilityField::ContextWindow => "Context window",
         CapabilityField::MaxOutputTokens => "Max output tokens",
-        CapabilityField::ToolMode => "Tool mode",
-        CapabilityField::SupportsTools => "Tools",
         CapabilityField::SupportsVision => "Vision",
-        CapabilityField::SupportsReasoning => "Reasoning",
-        CapabilityField::MaxContextWindow => "Max context window",
-        CapabilityField::SupportsParallelTools => "Parallel tools",
-        CapabilityField::SupportsPromptCache => "Prompt cache",
-        CapabilityField::SupportsNativeStreaming => "Native streaming",
-        CapabilityField::LiteLlmProvider => "LiteLLM provider",
-        CapabilityField::Mode => "LiteLLM mode",
-        CapabilityField::SupportedEndpoints => "Supported endpoints",
-        CapabilityField::Advanced => "Advanced",
         CapabilityField::Save => "Save model",
     }
 }

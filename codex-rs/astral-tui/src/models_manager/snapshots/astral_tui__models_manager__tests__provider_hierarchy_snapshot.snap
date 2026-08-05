@@ -93,11 +93,7 @@ ADD MODEL
                │  ❯ Model ID              ▏                                         │
                │    Context window        Inherit                                   │
                │    Max output tokens     Inherit                                   │
-               │    Tool mode             Inherit  ←/→                              │
-               │    Tools                 Inherit  ←/→                              │
                │    Vision                Inherit  ←/→                              │
-               │    Reasoning             Inherit  ←/→                              │
-               │    Advanced              Show advanced fields                      │
                │    Save model            Write manual overrides to user config     │
                │                                                                    │
                │                                                                    │
@@ -109,7 +105,11 @@ ADD MODEL
                │                                                                    │
                │                                                                    │
                │                                                                    │
-               │  Blank/Inherit keeps discovered metadata; entered values are manu  │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │  Only context, output limit, and vision are user overrides; other  │
                │                                                                    │
                │            j/k · h/l choice · Enter · Ctrl+S save · Esc            │
                └────────────────────────────────────────────────────────────────────┘
@@ -149,11 +149,7 @@ MODEL OVERRIDES
                │  ❯ Model ID              deepseek-chat  (read-only)                │
                │    Context window        128000                                    │
                │    Max output tokens     Inherit (effective: 8192)                 │
-               │    Tool mode             Inherit (effective: direct)  ←/→          │
-               │    Tools                 Yes  ←/→                                  │
                │    Vision                Inherit (effective: no)  ←/→              │
-               │    Reasoning             Inherit (effective: no)  ←/→              │
-               │    Advanced              Show advanced fields                      │
                │    Save model            Write manual overrides to user config     │
                │                                                                    │
                │                                                                    │
@@ -165,7 +161,11 @@ MODEL OVERRIDES
                │                                                                    │
                │                                                                    │
                │                                                                    │
-               │  Blank/Inherit keeps discovered metadata; entered values are manu  │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │                                                                    │
+               │  Only context, output limit, and vision are user overrides; other  │
                │                                                                    │
                │            j/k · h/l choice · Enter · Ctrl+S save · Esc            │
                └────────────────────────────────────────────────────────────────────┘

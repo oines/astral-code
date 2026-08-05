@@ -31,30 +31,6 @@ impl SearchPageState {
                         edits.push(edit("tools.web_search.api_key", Value::Null));
                     }
                 },
-                SearchField::ContextSize => edits.push(edit(
-                    "tools.web_search.context_size",
-                    optional_string(&self.context_size),
-                )),
-                SearchField::AllowedDomains => edits.push(edit(
-                    "tools.web_search.allowed_domains",
-                    domains_value(&self.allowed_domains),
-                )),
-                SearchField::Country => edits.push(edit(
-                    "tools.web_search.location.country",
-                    text_value(&self.country),
-                )),
-                SearchField::Region => edits.push(edit(
-                    "tools.web_search.location.region",
-                    text_value(&self.region),
-                )),
-                SearchField::City => edits.push(edit(
-                    "tools.web_search.location.city",
-                    text_value(&self.city),
-                )),
-                SearchField::Timezone => edits.push(edit(
-                    "tools.web_search.location.timezone",
-                    text_value(&self.timezone),
-                )),
                 SearchField::Save => {}
             }
         }
@@ -76,28 +52,6 @@ fn edit(key_path: &str, value: Value) -> ConfigEdit {
     }
 }
 
-fn text_value(value: &str) -> Value {
-    if value.trim().is_empty() {
-        Value::Null
-    } else {
-        Value::String(value.trim().to_string())
-    }
-}
-
 fn optional_string(value: &Option<String>) -> Value {
     value.clone().map_or(Value::Null, Value::String)
-}
-
-fn domains_value(value: &str) -> Value {
-    let domains = value
-        .split([',', '\n'])
-        .map(str::trim)
-        .filter(|domain| !domain.is_empty())
-        .map(|domain| Value::String(domain.to_string()))
-        .collect::<Vec<_>>();
-    if domains.is_empty() {
-        Value::Null
-    } else {
-        Value::Array(domains)
-    }
 }

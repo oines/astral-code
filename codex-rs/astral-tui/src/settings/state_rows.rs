@@ -91,16 +91,10 @@ impl SettingsState {
             return definition.default.to_string();
         };
         match definition.kind {
-            SettingKind::Bool => {
-                if definition.key == "tui.notifications" && value.is_array() {
-                    "Custom command".to_string()
-                } else {
-                    value
-                        .as_bool()
-                        .map(|enabled| if enabled { "On" } else { "Off" }.to_string())
-                        .unwrap_or_else(|| definition.default.to_string())
-                }
-            }
+            SettingKind::Bool => value
+                .as_bool()
+                .map(|enabled| if enabled { "On" } else { "Off" }.to_string())
+                .unwrap_or_else(|| definition.default.to_string()),
             SettingKind::Enum(options) => option_label(options, value)
                 .map(str::to_string)
                 .unwrap_or_else(|| display_value(value)),
@@ -213,8 +207,8 @@ impl SettingsState {
                     _ => "Claude",
                 };
                 let search = match string_value("web_search", "disabled").as_str() {
-                    "live" => "Live search",
-                    "cached" => "Cached search",
+                    "live" => "Search on",
+                    "cached" => "Hosted search",
                     _ => "Search off",
                 };
                 format!("{surface} · {search}")

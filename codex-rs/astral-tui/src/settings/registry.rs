@@ -24,10 +24,10 @@ impl Category {
 
     pub(crate) const fn description(self) -> &'static str {
         match self {
-            Self::Models => "Default models, providers, discovery, and capabilities",
+            Self::Models => "Default models, providers, discovery, and essential overrides",
             Self::Tools => "Tool surface, web search, and provider credentials",
             Self::Memory => "Session compaction and long-term memories",
-            Self::Appearance => "Theme, terminal behavior, input, and notifications",
+            Self::Appearance => "Theme and terminal presentation",
             Self::Permissions => "Default permission profile and legacy safety controls",
             Self::Features => "Stable and beta capabilities reported by app-server",
             Self::Advanced => "Prompts, templates, experimental, and legacy settings",
@@ -133,15 +133,11 @@ const TOOL_SURFACE: &[SettingOption] = &[
 
 const WEB_SEARCH: &[SettingOption] = &[
     SettingOption {
-        label: "Disabled",
+        label: "Off",
         value: "disabled",
     },
     SettingOption {
-        label: "Cached",
-        value: "cached",
-    },
-    SettingOption {
-        label: "Live",
+        label: "On",
         value: "live",
     },
 ];
@@ -173,43 +169,6 @@ const ALT_SCREEN: &[SettingOption] = &[
     SettingOption {
         label: "Never",
         value: "never",
-    },
-];
-
-const SESSION_PICKER: &[SettingOption] = &[
-    SettingOption {
-        label: "Comfortable",
-        value: "comfortable",
-    },
-    SettingOption {
-        label: "Dense",
-        value: "dense",
-    },
-];
-
-const NOTIFICATION_METHOD: &[SettingOption] = &[
-    SettingOption {
-        label: "Automatic",
-        value: "auto",
-    },
-    SettingOption {
-        label: "OSC 9",
-        value: "osc9",
-    },
-    SettingOption {
-        label: "Terminal bell",
-        value: "bel",
-    },
-];
-
-const NOTIFICATION_CONDITION: &[SettingOption] = &[
-    SettingOption {
-        label: "When unfocused",
-        value: "unfocused",
-    },
-    SettingOption {
-        label: "Always",
-        value: "always",
     },
 ];
 
@@ -278,7 +237,7 @@ const DEFINITIONS: &[SettingDefinition] = &[
         "models-manager",
         "",
         "Manage models & providers",
-        "Add providers, discover models, and edit capability declarations",
+        "Add providers, discover models, and edit essential model overrides",
         Models,
         SettingKind::Subpage(Subpage::Models),
         "",
@@ -327,8 +286,8 @@ const DEFINITIONS: &[SettingDefinition] = &[
     setting!(
         "web-search-mode",
         "web_search",
-        "Web search mode",
-        "Disable search, prefer cached results, or allow live search",
+        "Web search",
+        "Expose provider-neutral web search and fetch tools to the model",
         Tools,
         SettingKind::Enum(WEB_SEARCH),
         "Disabled",
@@ -338,7 +297,7 @@ const DEFINITIONS: &[SettingDefinition] = &[
         "search-provider",
         "",
         "Search provider",
-        "Configure provider, API key, result size, domains, and location",
+        "Configure the provider and API key used by web search",
         Tools,
         SettingKind::Subpage(Subpage::Search),
         "",
@@ -445,46 +404,6 @@ const DEFINITIONS: &[SettingDefinition] = &[
         "Preview immediately"
     ),
     setting!(
-        "animations",
-        "tui.animations",
-        "Animations",
-        "Enable welcome animation, shimmer, and activity effects",
-        Appearance,
-        SettingKind::Bool,
-        "On",
-        "Immediately"
-    ),
-    setting!(
-        "tooltips",
-        "tui.show_tooltips",
-        "Tooltips",
-        "Show startup tips and discoverability hints",
-        Appearance,
-        SettingKind::Bool,
-        "On",
-        "Next startup"
-    ),
-    setting!(
-        "vim-mode",
-        "tui.vim_mode_default",
-        "Vim mode by default",
-        "Start the composer in Vim normal mode",
-        Appearance,
-        SettingKind::Bool,
-        "Off",
-        "Next startup"
-    ),
-    setting!(
-        "raw-output",
-        "tui.raw_output_mode",
-        "Raw output mode",
-        "Start with copy-friendly raw transcript output",
-        Appearance,
-        SettingKind::Bool,
-        "Off",
-        "Next startup"
-    ),
-    setting!(
         "alternate-screen",
         "tui.alternate_screen",
         "Alternate screen",
@@ -493,46 +412,6 @@ const DEFINITIONS: &[SettingDefinition] = &[
         SettingKind::Enum(ALT_SCREEN),
         "Auto",
         "Next startup"
-    ),
-    setting!(
-        "notifications",
-        "tui.notifications",
-        "Notifications",
-        "Enable terminal notifications when Astral needs attention",
-        Appearance,
-        SettingKind::Bool,
-        "On",
-        "Immediately"
-    ),
-    setting!(
-        "notification-method",
-        "tui.notification_method",
-        "Notification method",
-        "Choose automatic terminal integration, OSC 9, or the terminal bell",
-        Appearance,
-        SettingKind::Enum(NOTIFICATION_METHOD),
-        "Automatic",
-        "Next notification"
-    ),
-    setting!(
-        "notification-condition",
-        "tui.notification_condition",
-        "Notification condition",
-        "Notify only while the terminal is unfocused or always",
-        Appearance,
-        SettingKind::Enum(NOTIFICATION_CONDITION),
-        "When unfocused",
-        "Next notification"
-    ),
-    setting!(
-        "session-picker",
-        "tui.session_picker_view",
-        "Session picker layout",
-        "Choose a comfortable or dense resume and fork list",
-        Appearance,
-        SettingKind::Enum(SESSION_PICKER),
-        "Dense",
-        "Next picker"
     ),
     setting!(
         "default-permissions",

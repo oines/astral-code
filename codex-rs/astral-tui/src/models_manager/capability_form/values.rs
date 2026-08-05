@@ -34,12 +34,3 @@ pub(super) fn set_optional_number(
     raw.insert(key.to_string(), Value::Number(Number::from(value)));
     Ok(())
 }
-
-pub(super) fn set_trimmed_string(raw: &mut Map<String, Value>, key: &str, value: &str) {
-    let value = value.trim();
-    if value.is_empty() {
-        raw.remove(key);
-    } else {
-        raw.insert(key.to_string(), Value::String(value.to_string()));
-    }
-}

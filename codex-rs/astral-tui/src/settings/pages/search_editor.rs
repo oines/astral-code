@@ -66,29 +66,16 @@ impl SearchPageState {
             return SettingsInput::None;
         };
         match editor {
-            SearchEditor::Text {
-                field,
-                input,
-                secret,
-            } => {
+            SearchEditor::Text { field, input } => {
                 let value = input.text().to_string();
-                if secret {
-                    if value.trim().is_empty() || value == "[redacted]" {
-                        self.error =
-                            Some("Enter a real API key; [redacted] is never written".to_string());
-                        self.editor = Some(SearchEditor::Text {
-                            field,
-                            input,
-                            secret,
-                        });
-                        return SettingsInput::Redraw;
-                    }
-                    self.secret = SecretDraft::Replace(value);
-                    self.changed.insert(SearchField::ApiKey);
-                } else {
-                    self.set_raw_value(field, value);
-                    self.changed.insert(field);
+                if value.trim().is_empty() || value == "[redacted]" {
+                    self.error =
+                        Some("Enter a real API key; [redacted] is never written".to_string());
+                    self.editor = Some(SearchEditor::Text { field, input });
+                    return SettingsInput::Redraw;
                 }
+                self.secret = SecretDraft::Replace(value);
+                self.changed.insert(SearchField::ApiKey);
             }
             SearchEditor::Picker {
                 field,
@@ -98,14 +85,7 @@ impl SearchPageState {
                 let value = options.get(selected).and_then(|(_, value)| value.clone());
                 match field {
                     SearchField::Provider => self.provider = value,
-                    SearchField::ContextSize => self.context_size = value,
-                    SearchField::ApiKey
-                    | SearchField::AllowedDomains
-                    | SearchField::Country
-                    | SearchField::Region
-                    | SearchField::City
-                    | SearchField::Timezone
-                    | SearchField::Save => {}
+                    SearchField::ApiKey | SearchField::Save => {}
                 }
                 self.changed.insert(field);
             }
@@ -119,7 +99,6 @@ impl SearchPageState {
                     self.editor = Some(SearchEditor::Text {
                         field: SearchField::ApiKey,
                         input: Box::new(input),
-                        secret: true,
                     });
                     return SettingsInput::Redraw;
                 }
@@ -143,14 +122,7 @@ impl SearchPageState {
         if allow_none {
             let label = match field {
                 SearchField::Provider => "Not configured",
-                SearchField::ContextSize => "Provider default",
-                SearchField::ApiKey
-                | SearchField::AllowedDomains
-                | SearchField::Country
-                | SearchField::Region
-                | SearchField::City
-                | SearchField::Timezone
-                | SearchField::Save => "Not set",
+                SearchField::ApiKey | SearchField::Save => "Not set",
             };
             options.push((label.to_string(), None));
         }
@@ -176,45 +148,11 @@ impl SearchPageState {
         match field {
             SearchField::Provider => self.provider = None,
             SearchField::ApiKey => self.secret = SecretDraft::Clear,
-            SearchField::ContextSize => self.context_size = None,
-            SearchField::AllowedDomains => self.allowed_domains.clear(),
-            SearchField::Country => self.country.clear(),
-            SearchField::Region => self.region.clear(),
-            SearchField::City => self.city.clear(),
-            SearchField::Timezone => self.timezone.clear(),
             SearchField::Save => {
                 return SettingsInput::Notice("Select a field to reset".to_string());
             }
         }
         self.changed.insert(field);
         SettingsInput::Redraw
-    }
-
-    pub(super) fn raw_value(&self, field: SearchField) -> String {
-        match field {
-            SearchField::AllowedDomains => self.allowed_domains.clone(),
-            SearchField::Country => self.country.clone(),
-            SearchField::Region => self.region.clone(),
-            SearchField::City => self.city.clone(),
-            SearchField::Timezone => self.timezone.clone(),
-            SearchField::Provider
-            | SearchField::ApiKey
-            | SearchField::ContextSize
-            | SearchField::Save => String::new(),
-        }
-    }
-
-    fn set_raw_value(&mut self, field: SearchField, value: String) {
-        match field {
-            SearchField::AllowedDomains => self.allowed_domains = value,
-            SearchField::Country => self.country = value,
-            SearchField::Region => self.region = value,
-            SearchField::City => self.city = value,
-            SearchField::Timezone => self.timezone = value,
-            SearchField::Provider
-            | SearchField::ApiKey
-            | SearchField::ContextSize
-            | SearchField::Save => {}
-        }
     }
 }

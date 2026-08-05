@@ -9,13 +9,13 @@ ROOT
               │    Search settings by name, description, or key…                │
               │                                                                 │
               │  ❯ › Models & Providers                   deepseek-chat · high  │
-              │      Default models, providers, discovery, and capabilities     │
-              │    › Tools & Search                        Codex · Live search  │
+              │      Default models, providers, discovery, and essential over…  │
+              │    › Tools & Search                          Codex · Search on  │
               │      Tool surface, web search, and provider credentials         │
               │    › Memory                      Session off · compact enqueue  │
               │      Session compaction and long-term memories                  │
               │    › Appearance & Input                             Astral Day  │
-              │      Theme, terminal behavior, input, and notifications         │
+              │      Theme and terminal presentation                            │
               │    › Permissions & Safety                            workspace  │
               │      Default permission profile and legacy safety controls      │
               │    › Features                                      0/0 enabled  │
@@ -37,7 +37,7 @@ TOOLS
               │    Search settings by name, description, or key…                │
               │                                                                 │
               │  ❯ ▸ Tool surface                                        Codex  │
-              │    ▸ Web search mode                                      Live  │
+              │    ▸ Web search                                             On  │
               │    › Search provider                                      Open  │
               │                                                                 │
               │                                                                 │
@@ -66,12 +66,12 @@ SEARCH
               │                                                                 │
               │  ❯ › Provider                                           tavily  │
               │    › API key                                 Configured · keep  │
-              │    › Context size                                       medium  │
-              │    › Allowed domains                       docs.rs, github.com  │
-              │    › Country                                                SG  │
-              │    › Region                                            Not set  │
-              │    › City                                            Singapore  │
-              │    › Timezone                                   Asia/Singapore  │
+              │                                                                 │
+              │                                                                 │
+              │                                                                 │
+              │                                                                 │
+              │                                                                 │
+              │                                                                 │
               │                                                                 │
               │                                                                 │
               │                                                                 │
@@ -115,7 +115,7 @@ NARROW
     │  ❯ › Models & Providers                  │
     │      deepseek-chat · hi…                 │
     │    › Tools & Search                      │
-    │      Codex · Live search                 │
+    │      Codex · Search on                   │
     │    › Memory                              │
     │      Session off · comp…                 │
     │                                          │
