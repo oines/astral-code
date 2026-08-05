@@ -136,6 +136,7 @@ impl ChatWidget {
             last_unified_wait: None,
             unified_exec_wait_streak: None,
             turn_lifecycle: TurnLifecycleState::new(prevent_idle_sleep),
+            compaction_lifecycle: CompactionLifecycle::default(),
             task_complete_pending: false,
             unified_exec_processes: Vec::new(),
             live_activities: LiveActivityStore::default(),

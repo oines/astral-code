@@ -215,6 +215,7 @@ macro_rules! assert_chatwidget_snapshot {
 
 mod app_server;
 mod approval_requests;
+mod compact_lifecycle;
 mod composer_submission;
 #[path = "tests/config_errors_tests.rs"]
 mod config_errors;

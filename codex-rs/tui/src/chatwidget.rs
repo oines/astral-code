@@ -325,8 +325,11 @@ use crate::status_indicator_widget::StatusDetailsCapitalization;
 use crate::text_formatting::truncate_text;
 use crate::tui::FrameRequester;
 mod command_lifecycle;
+mod compaction;
 mod connectors;
 mod constructor;
+use self::compaction::CompactionLifecycle;
+use self::compaction::compaction_failure_message;
 use self::connectors::ConnectorsState;
 mod exec_state;
 use self::exec_state::RunningCommand;
@@ -569,6 +572,7 @@ pub(crate) struct ChatWidget {
     last_unified_wait: Option<UnifiedExecWaitState>,
     unified_exec_wait_streak: Option<UnifiedExecWaitStreak>,
     turn_lifecycle: TurnLifecycleState,
+    compaction_lifecycle: CompactionLifecycle,
     task_complete_pending: bool,
     unified_exec_processes: Vec<UnifiedExecProcessSummary>,
     live_activities: LiveActivityStore,
@@ -790,6 +794,7 @@ enum PlanModeNudgeScope {
 pub(crate) enum TurnAbortReason {
     Interrupted,
     BudgetLimited,
+    CompactionCancelled,
 }
 
 /// Returns whether `text` contains the standalone word `plan`.
