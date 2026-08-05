@@ -494,6 +494,7 @@ pub(crate) async fn run_onboarding_app(
                         TuiEvent::Paste(text) => {
                             onboarding_screen.handle_paste(text);
                         }
+                        TuiEvent::Mouse(_) => {}
                         TuiEvent::Draw | TuiEvent::Resize => {
                             let _ = tui.draw(u16::MAX, |frame| {
                                 frame.render_widget_ref(&onboarding_screen, frame.area());

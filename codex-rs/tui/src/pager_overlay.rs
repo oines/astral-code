@@ -487,6 +487,7 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::time::Duration;
+    use std::time::Instant;
 
     use crate::diff_model::FileChange;
     use crate::exec_cell::CommandOutput;
@@ -495,6 +496,10 @@ mod tests {
     use crate::history_cell::new_patch_event;
     use crate::history_transcript::HistoryTranscript;
     use codex_protocol::parse_command::ParsedCommand;
+    use crossterm::event::KeyModifiers;
+    use crossterm::event::MouseButton;
+    use crossterm::event::MouseEvent;
+    use crossterm::event::MouseEventKind;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::text::Text;
@@ -653,6 +658,69 @@ mod tests {
                 buffer_to_text(&collapsed, area),
                 buffer_to_text(&expanded, area),
             )
+        );
+    }
+
+    #[test]
+    fn transcript_overlay_mouse_selects_and_double_clicks_to_fold() {
+        let mut overlay =
+            transcript_overlay(vec![Arc::new(history_cell::ReasoningSummaryCell::new(
+                "**Inspecting the renderer**".to_string(),
+                "Checked the source.\n\nFound the pointer routing gap.".to_string(),
+                PathBuf::from("/tmp").as_path(),
+                /*transcript_only*/ false,
+            ))]);
+        let area = Rect::new(
+            /*x*/ 0, /*y*/ 0, /*width*/ 80, /*height*/ 12,
+        );
+        let conversation_area = TranscriptOverlay::conversation_area(area);
+        overlay.ensure_surface(conversation_area);
+        overlay.viewport.scroll_to_top(&overlay.surface);
+        let node = overlay.surface.nodes()[0].id();
+        let row = conversation_area.y
+            + overlay
+                .surface
+                .node(node)
+                .expect("reasoning node")
+                .rows()
+                .start as u16;
+        let now = Instant::now();
+        let mouse = |kind| MouseEvent {
+            kind,
+            column: 8,
+            row,
+            modifiers: KeyModifiers::NONE,
+        };
+
+        assert!(overlay.apply_mouse_event(area, mouse(MouseEventKind::Moved), now));
+        assert_eq!(overlay.viewport.hovered(), Some(node));
+        assert!(!overlay.apply_mouse_event(
+            area,
+            mouse(MouseEventKind::Down(MouseButton::Left)),
+            now,
+        ));
+        assert!(
+            overlay.apply_mouse_event(area, mouse(MouseEventKind::Up(MouseButton::Left)), now,)
+        );
+        assert_eq!(overlay.viewport.selected(), Some(node));
+
+        let second = now + Duration::from_millis(100);
+        assert!(!overlay.apply_mouse_event(
+            area,
+            mouse(MouseEventKind::Down(MouseButton::Left)),
+            second,
+        ));
+        assert!(overlay.apply_mouse_event(
+            area,
+            mouse(MouseEventKind::Up(MouseButton::Left)),
+            second,
+        ));
+
+        let mut expanded = Buffer::empty(area);
+        overlay.render(area, &mut expanded);
+        assert_snapshot!(
+            "transcript_overlay_reasoning_mouse_expand",
+            buffer_to_text(&expanded, area),
         );
     }
 

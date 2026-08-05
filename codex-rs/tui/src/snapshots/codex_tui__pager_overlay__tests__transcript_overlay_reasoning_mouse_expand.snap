@@ -1,0 +1,15 @@
+---
+source: tui/src/pager_overlay.rs
+expression: "buffer_to_text(&expanded, area)"
+---
+│┃ ◆ Thought                                                                  │
+│┃                                                                            │
+│┃   Checked the source.                                                      │
+│┃                                                                            │
+│┃   Found the pointer routing gap.                                           │
+└                                                                             ┘
+
+
+
+ ↑/↓ to select   pgup/pgdn to page   home/end to jump
+ q to quit   esc to edit prev   ←/→ to fold   e to toggle   enter to open
