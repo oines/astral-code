@@ -253,10 +253,7 @@ impl ChatWidget {
         selected_model: &str,
         selected_effort: Option<ReasoningEffortConfig>,
     ) -> bool {
-        if !self.collaboration_modes_enabled()
-            || self.active_mode_kind() != ModeKind::Plan
-            || selected_model != self.current_model()
-        {
+        if !self.collaboration_modes_enabled() || self.active_mode_kind() != ModeKind::Plan {
             return false;
         }
 

@@ -757,7 +757,8 @@ impl ChatWidget {
             let mut message = format!("Model changed to {next_model}");
             if !next_model.starts_with("codex-auto-") {
                 let reasoning_label = match next_effort.as_ref() {
-                    None | Some(ReasoningEffortConfig::None) => "default",
+                    None => "default",
+                    Some(ReasoningEffortConfig::None) => "none",
                     Some(effort) => effort.as_str(),
                 };
                 message.push(' ');
