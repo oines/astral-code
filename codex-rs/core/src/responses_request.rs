@@ -8,6 +8,7 @@ use codex_model_provider_info::ResponsesBuiltinTools;
 use codex_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
+use codex_tools::ResponsesApiNamespaceTool;
 use codex_tools::ToolSpec;
 use codex_tools::create_tools_json_for_responses_api;
 use std::collections::BTreeSet;
@@ -111,16 +112,40 @@ fn select_tools(tools: &[ToolSpec], builtin_tools: &ResponsesBuiltinTools) -> Ve
 
     tools
         .iter()
-        .filter(|tool| {
+        .filter_map(|tool| {
             if is_provider_hosted(tool) {
-                active_builtin_names.contains(tool.name())
-                    && (explicit_selection || !local_names.contains(tool.name()))
+                (active_builtin_names.contains(tool.name())
+                    && (explicit_selection || !local_names.contains(tool.name())))
+                .then(|| tool.clone())
+            } else if explicit_selection {
+                remove_explicit_builtin_collisions(tool, &active_builtin_names)
             } else {
-                !explicit_selection || !active_builtin_names.contains(tool.name())
+                Some(tool.clone())
             }
         })
-        .cloned()
         .collect()
+}
+
+fn remove_explicit_builtin_collisions(
+    tool: &ToolSpec,
+    active_builtin_names: &BTreeSet<&str>,
+) -> Option<ToolSpec> {
+    if active_builtin_names.contains(tool.name()) {
+        return None;
+    }
+
+    let ToolSpec::Namespace(namespace) = tool else {
+        return Some(tool.clone());
+    };
+    let mut namespace = namespace.clone();
+    let namespace_name = namespace.name.clone();
+    namespace.tools.retain(|tool| match tool {
+        ResponsesApiNamespaceTool::Function(tool) => {
+            let hosted_name = format!("{namespace_name}_{}", tool.name);
+            !active_builtin_names.contains(hosted_name.as_str())
+        }
+    });
+    (!namespace.tools.is_empty()).then_some(ToolSpec::Namespace(namespace))
 }
 
 fn is_provider_hosted(tool: &ToolSpec) -> bool {
