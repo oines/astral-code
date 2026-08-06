@@ -152,11 +152,7 @@ fn model_provider_from_proto(
     }
     let id = provider.id;
     let wire_api = match proto::WireApi::try_from(provider.wire_api) {
-        Ok(proto::WireApi::Responses) => {
-            return Err(parse_error(
-                "remote thread config returned unsupported wire_api: responses",
-            ));
-        }
+        Ok(proto::WireApi::Responses) => WireApi::Responses,
         Ok(proto::WireApi::AnthropicMessages) => WireApi::AnthropicMessages,
         Ok(proto::WireApi::ChatCompletions) => WireApi::ChatCompletions,
         Ok(proto::WireApi::Unspecified) => {
@@ -181,6 +177,7 @@ fn model_provider_from_proto(
             .transpose()?,
         aws: None,
         wire_api,
+        responses_builtin_tools: Default::default(),
         provider_flavor: None,
         query_params: provider.query_params.map(|map| map.values),
         request_body: None,
@@ -216,6 +213,7 @@ fn model_provider_to_proto(
         auth,
         aws: _,
         wire_api,
+        responses_builtin_tools: _,
         provider_flavor: _,
         query_params,
         request_body: _,
@@ -517,6 +515,7 @@ mod tests {
                 cwd: workspace_dir(),
             }),
             wire_api: WireApi::ChatCompletions,
+            responses_builtin_tools: Default::default(),
             provider_flavor: None,
             query_params: Some(HashMap::from([(
                 "api-version".to_string(),
