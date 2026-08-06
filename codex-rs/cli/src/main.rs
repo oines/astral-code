@@ -1413,9 +1413,8 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                     .parse_overrides()
                     .map_err(anyhow::Error::msg)?;
 
-                // Preserve `--search` as config state. Astral v1 keeps the
-                // legacy OpenAI-native web_search tool disabled until
-                // provider-neutral search is implemented.
+                // Preserve `--search` as config state so the active provider
+                // and tool surface can expose their live search implementation.
                 if interactive.web_search {
                     cli_kv_overrides.push((
                         "web_search".to_string(),

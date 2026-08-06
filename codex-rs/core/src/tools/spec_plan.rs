@@ -552,10 +552,8 @@ fn add_tool_sources(context: &CoreToolPlanContext<'_>, planned_tools: &mut Plann
     add_mcp_runtime_tools(context, planned_tools);
     add_extension_tools(context, planned_tools);
     add_dynamic_tools(context, planned_tools);
-    if effective_tool_surface(context.step_context.turn.as_ref()) == ToolSurface::Codex {
-        for spec in hosted_model_tool_specs(context) {
-            planned_tools.add_hosted_spec(spec);
-        }
+    for spec in hosted_model_tool_specs(context) {
+        planned_tools.add_hosted_spec(spec);
     }
 }
 

@@ -6,6 +6,7 @@ use codex_model_provider_info::WireApi;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::Settings;
+use codex_protocol::config_types::WebSearchMode;
 use codex_protocol::items::AgentMessageContent;
 use codex_protocol::items::TurnItem;
 use codex_protocol::models::PermissionProfile;
@@ -283,13 +284,22 @@ async fn reasoning_item_is_emitted() -> anyhow::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "Responses wire API stream web_search_call items are not supported by the provider-neutral Chat path"]
 async fn web_search_item_is_emitted() -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
 
-    let TestCodex { codex, .. } = test_codex().build(&server).await?;
+    let model_provider = responses_api_model_provider(&server);
+    let TestCodex { codex, .. } = test_codex()
+        .with_config(move |config| {
+            config.model_provider = model_provider;
+            config
+                .web_search_mode
+                .set(WebSearchMode::Live)
+                .expect("test config should allow live web search");
+        })
+        .build(&server)
+        .await?;
 
     let web_search_added = ev_web_search_call_added_partial("web-search-1", "in_progress");
     let web_search_done = ev_web_search_call_done("web-search-1", "completed", "weather seattle");
@@ -300,7 +310,7 @@ async fn web_search_item_is_emitted() -> anyhow::Result<()> {
         web_search_done,
         ev_completed("resp-1"),
     ]);
-    mount_sse_once(&server, first_response).await;
+    let request = mount_responses_sse_once(&server, first_response).await;
 
     codex
         .submit(Op::UserInput {
@@ -350,6 +360,14 @@ async fn web_search_item_is_emitted() -> anyhow::Result<()> {
             query: Some("weather seattle".to_string()),
             queries: None,
         }
+    );
+    let request_body = request.single_request().body_json();
+    assert!(
+        request_body
+            .get("tools")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|tools| tools.iter().any(|tool| tool["type"] == "web_search")),
+        "Responses request should expose the provider-hosted web_search tool"
     );
 
     Ok(())
