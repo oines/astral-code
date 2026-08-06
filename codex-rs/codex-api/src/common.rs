@@ -97,6 +97,48 @@ pub struct Reasoning {
     pub summary: Option<String>,
 }
 
+/// Optional structured-output controls for the Responses API.
+#[derive(Debug, Serialize, Clone, PartialEq)]
+pub struct ResponsesTextFormat {
+    pub r#type: String,
+    pub name: String,
+    pub strict: bool,
+    pub schema: Value,
+}
+
+#[derive(Debug, Serialize, Clone, PartialEq)]
+pub struct ResponsesTextControls {
+    pub format: ResponsesTextFormat,
+}
+
+/// HTTP request body for an OpenAI-compatible Responses endpoint.
+///
+/// This intentionally speaks in the canonical transcript and tool types rather
+/// than passing through the provider-neutral Agent IR used by Chat Completions
+/// and Anthropic Messages.
+#[derive(Debug, Serialize, Clone, PartialEq)]
+pub struct ResponsesApiRequest {
+    pub model: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub instructions: String,
+    pub input: Vec<TranscriptItem>,
+    pub tools: Vec<Value>,
+    pub tool_choice: String,
+    pub parallel_tool_calls: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<Reasoning>,
+    pub store: bool,
+    pub stream: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub include: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service_tier: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_cache_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<ResponsesTextControls>,
+}
+
 pub struct ResponseStream {
     pub rx_event: mpsc::Receiver<Result<ModelStreamEvent, ApiError>>,
     /// Server-assigned `x-request-id` response header, when present.
