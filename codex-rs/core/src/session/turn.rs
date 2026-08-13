@@ -304,6 +304,8 @@ pub(crate) async fn run_turn(
                         Arc::clone(&sess),
                         Arc::clone(&turn_context),
                         candidate,
+                        token_status.auto_compact_scope_tokens,
+                        token_status.auto_compact_scope_limit,
                     )
                     .await;
                 }

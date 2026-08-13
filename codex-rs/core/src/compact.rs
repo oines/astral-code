@@ -181,6 +181,7 @@ async fn run_compact_task_inner(
         Arc::clone(&turn_context),
         input,
         initial_context_injection,
+        trigger,
         compaction_metadata,
         matches!(trigger, CompactionTrigger::Auto),
     )
@@ -243,6 +244,7 @@ async fn run_compact_task_inner_impl(
     turn_context: Arc<TurnContext>,
     input: Vec<UserInput>,
     initial_context_injection: InitialContextInjection,
+    trigger: CompactionTrigger,
     compaction_metadata: CompactionTurnMetadata,
     suppress_follow_up_questions: bool,
 ) -> CodexResult<String> {
@@ -255,7 +257,7 @@ async fn run_compact_task_inner_impl(
             Arc::clone(&sess),
             Arc::clone(&turn_context),
             &initial_context_injection,
-            suppress_follow_up_questions,
+            trigger,
             &compaction_item,
         )
         .await

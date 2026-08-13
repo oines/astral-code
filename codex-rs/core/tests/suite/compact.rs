@@ -1028,6 +1028,7 @@ async fn session_memory_compact_uses_summary_without_legacy_summarization_reques
     let mut builder = test_codex().with_config(move |config| {
         config.model_provider = model_provider;
         enable_test_session_memory_compact(config);
+        config.session_memory_minimum_tokens_between_update = 100_000;
     });
     let test = builder.build(&server).await.unwrap();
     let summary_path = test
@@ -1056,12 +1057,38 @@ async fn session_memory_compact_uses_summary_without_legacy_summarization_reques
         ),
         ev_completed_with_tokens("r-sidechain-compact-edit", 10_010),
     ]);
+    let raw_tail_turn = sse(vec![
+        ev_assistant_message("m-raw-tail", "raw tail ready to compact"),
+        ev_completed_with_tokens("r-raw-tail", 20_000),
+    ]);
+    let manual_final_refresh = sse(vec![
+        ev_function_call(
+            "session-memory-manual-final-refresh",
+            "Edit",
+            &json!({
+                "file_path": summary_path_str,
+                "old_string": "- Main loop directly organized the session memory.\n\n# Task specification",
+                "new_string": "- Main loop directly organized the session memory.\n- Manual Final Refresh completed.\n\n# Task specification"
+            })
+            .to_string(),
+        ),
+        ev_completed_with_tokens("r-session-memory-manual-final-refresh", 60_010),
+    ]);
     let post_compact_turn = sse(vec![
         ev_assistant_message("m-post-session-memory-compact", "after compact"),
         ev_completed_with_tokens("r-post-session-memory-compact", 10_030),
     ]);
-    let mock =
-        mount_sse_sequence(&server, vec![main_turn, sidechain_edit, post_compact_turn]).await;
+    let mock = mount_sse_sequence(
+        &server,
+        vec![
+            main_turn,
+            sidechain_edit,
+            raw_tail_turn,
+            manual_final_refresh,
+            post_compact_turn,
+        ],
+    )
+    .await;
 
     let setup_message = format!(
         "session memory compact setup\n{}\nSESSION_MEMORY_RAW_TAIL_MARKER",
@@ -1071,23 +1098,45 @@ async fn session_memory_compact_uses_summary_without_legacy_summarization_reques
     wait_for_request_count(&mock, 2).await;
     wait_for_file_contains(&state_path, "\"last_summary_fingerprint\": \"").await;
 
+    test.submit_turn("SESSION_MEMORY_RAW_TAIL_BEFORE_FINAL_REFRESH")
+        .await
+        .expect("submit raw tail turn");
+    wait_for_request_count(&mock, 3).await;
+    let summary = fs::read_to_string(summary_path.as_path()).expect("read summary before compact");
+    fs::write(
+        summary_path.as_path(),
+        summary.replace(
+            "- Session memory compact has a durable summary.",
+            "- Main loop directly organized the session memory.",
+        ),
+    )
+    .expect("main loop edit should update live summary");
+
     test.codex.submit(Op::Compact).await.unwrap();
     wait_for_event(&test.codex, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
-    wait_for_file_contains(&state_path, "\"last_summary_index\": null").await;
+    wait_for_file_contains(&state_path, "\"last_summary_index\": 0").await;
 
     test.submit_turn("after session memory compact")
         .await
         .unwrap();
-    let requests = wait_for_request_count(&mock, 3).await;
+    let requests = wait_for_request_count(&mock, 5).await;
     assert_eq!(
         requests.len(),
-        3,
-        "session-memory compact should not issue a legacy summarization request"
+        5,
+        "manual Final Refresh and Session Memory Compact should not issue a legacy summarization request"
     );
-    let post_compact_body = requests[2].body_json().to_string();
+    let final_refresh_body = requests[3].body_json().to_string();
+    assert!(
+        body_contains_text(
+            &final_refresh_body,
+            "Main loop directly organized the session memory."
+        ),
+        "manual Final Refresh should read direct main-loop edits from summary.md"
+    );
+    let post_compact_body = requests[4].body_json().to_string();
     assert!(
         body_contains_text(
             &post_compact_body,
@@ -1096,11 +1145,8 @@ async fn session_memory_compact_uses_summary_without_legacy_summarization_reques
         "post-compact request should include session-memory summary"
     );
     assert!(
-        body_contains_text(
-            &post_compact_body,
-            "Session memory compact has a durable summary."
-        ),
-        "post-compact request should include durable summary content"
+        body_contains_text(&post_compact_body, "Manual Final Refresh completed."),
+        "post-compact request should include the Final Refresh result"
     );
     assert!(
         !body_contains_text(&post_compact_body, SUMMARIZATION_PROMPT),
@@ -1109,17 +1155,267 @@ async fn session_memory_compact_uses_summary_without_legacy_summarization_reques
     let context_index = post_compact_body
         .find("<environment_context>")
         .expect("post-compact request should include initial context");
-    let raw_tail_index = post_compact_body
-        .find("SESSION_MEMORY_RAW_TAIL_MARKER")
-        .expect("post-compact request should include preserved raw tail");
     let summary_index = post_compact_body
         .find(
             "This session is being continued from a previous conversation that ran out of context.",
         )
         .expect("post-compact request should include session-memory summary");
     assert!(
-        summary_index < raw_tail_index && raw_tail_index < context_index,
-        "session-memory compact should keep summary before raw tail, then let the next turn reinject initial context"
+        summary_index < context_index,
+        "session-memory compact should keep the summary before context reinjected by the next turn"
+    );
+}
+
+#[test]
+fn session_memory_final_refresh_runs_before_auto_compact() {
+    run_session_memory_test_on_large_stack(
+        "session_memory_final_refresh_runs_before_auto_compact",
+        session_memory_final_refresh_runs_before_auto_compact_impl,
+    );
+}
+
+async fn session_memory_final_refresh_runs_before_auto_compact_impl() {
+    skip_if_no_network!();
+
+    let server = start_mock_server().await;
+    let model_provider = responses_mock_model_provider(&server);
+    let mut builder = test_codex().with_config(move |config| {
+        config.model_provider = model_provider;
+        enable_test_session_memory_compact(config);
+        config.session_memory_minimum_message_tokens_to_init = 1;
+        config.session_memory_minimum_tokens_between_update = 100_000;
+        config.session_memory_tool_calls_between_updates = 100;
+        config.model_context_window = Some(100_000);
+        config.model_auto_compact_token_limit = Some(90_000);
+    });
+    let test = builder.build(&server).await.unwrap();
+    let summary_path = test
+        .config
+        .codex_home
+        .join("session-memory")
+        .join(test.session_configured.thread_id.to_string())
+        .join("summary.md");
+    let state_path = summary_path.as_path().with_file_name("state.json");
+    let summary_path_str = summary_path.as_path().to_string_lossy().to_string();
+
+    let setup_turn = sse(vec![
+        ev_assistant_message("m-final-refresh-setup", "setup complete"),
+        ev_completed_with_tokens("r-final-refresh-setup", 50_000),
+    ]);
+    let routine_refresh = sse(vec![
+        ev_function_call(
+            "session-memory-routine-before-final",
+            "Edit",
+            &json!({
+                "file_path": summary_path_str,
+                "old_string": "_What is actively being worked on right now? Pending tasks not yet completed. Immediate next steps._\n\n# Task specification",
+                "new_string": "_What is actively being worked on right now? Pending tasks not yet completed. Immediate next steps._\n- Routine summary baseline.\n\n# Task specification"
+            })
+            .to_string(),
+        ),
+        ev_completed_with_tokens("r-session-memory-routine-before-final", 50_010),
+    ]);
+    let over_limit_turn = sse(vec![
+        ev_assistant_message(
+            "m-final-refresh-over-limit",
+            "FINAL_REFRESH_RAW_TAIL_MARKER",
+        ),
+        ev_completed_with_tokens("r-final-refresh-over-limit", 90_001),
+    ]);
+    let final_refresh = sse(vec![
+        ev_function_call(
+            "session-memory-auto-final-refresh",
+            "Edit",
+            &json!({
+                "file_path": summary_path_str,
+                "old_string": "- Routine summary baseline.\n\n# Task specification",
+                "new_string": "- Routine summary baseline.\n- Automatic Final Refresh completed.\n\n# Task specification"
+            })
+            .to_string(),
+        ),
+        ev_completed_with_tokens("r-session-memory-auto-final-refresh", 90_010),
+    ]);
+    let post_compact_turn = sse(vec![
+        ev_assistant_message("m-after-auto-session-memory-compact", "done"),
+        ev_completed_with_tokens("r-after-auto-session-memory-compact", 20),
+    ]);
+    let mock = mount_sse_sequence(
+        &server,
+        vec![
+            setup_turn,
+            routine_refresh,
+            over_limit_turn,
+            final_refresh,
+            post_compact_turn,
+        ],
+    )
+    .await;
+
+    test.submit_turn("initialize automatic Final Refresh")
+        .await
+        .unwrap();
+    wait_for_request_count(&mock, 2).await;
+    wait_for_file_contains(&state_path, "\"last_summary_fingerprint\": \"").await;
+
+    test.submit_turn("cross the automatic compact threshold")
+        .await
+        .unwrap();
+    let requests = wait_for_request_count(&mock, 4).await;
+    wait_for_file_contains(&summary_path, "Automatic Final Refresh completed.").await;
+    assert!(
+        body_contains_text(
+            &requests[3].body_json().to_string(),
+            "FINAL_REFRESH_RAW_TAIL_MARKER"
+        ),
+        "Final Refresh should include the latest history before automatic compact"
+    );
+
+    test.submit_turn("continue after automatic compact")
+        .await
+        .unwrap();
+    let requests = wait_for_request_count(&mock, 5).await;
+    assert_eq!(
+        requests.len(),
+        5,
+        "automatic compact should reuse the completed Final Refresh without another sidechain or legacy compact request"
+    );
+    let post_compact_body = requests[4].body_json().to_string();
+    assert!(
+        body_contains_text(&post_compact_body, "Automatic Final Refresh completed."),
+        "automatic compact should use the Final Refresh summary"
+    );
+    assert!(
+        body_contains_text(&post_compact_body, "FINAL_REFRESH_RAW_TAIL_MARKER"),
+        "automatic compact should retain messages after the prior summary boundary"
+    );
+    assert!(
+        !requests.iter().any(|request| body_contains_text(
+            &request.body_json().to_string(),
+            SUMMARIZATION_PROMPT
+        )),
+        "automatic Session Memory Compact should not issue a legacy summarization request"
+    );
+}
+
+#[test]
+fn session_memory_effective_window_compact_preserves_over_40k_mandatory_tail() {
+    run_session_memory_test_on_large_stack(
+        "session_memory_effective_window_compact_preserves_over_40k_mandatory_tail",
+        session_memory_effective_window_compact_preserves_over_40k_mandatory_tail_impl,
+    );
+}
+
+async fn session_memory_effective_window_compact_preserves_over_40k_mandatory_tail_impl() {
+    skip_if_no_network!();
+
+    let server = start_mock_server().await;
+    let model_provider = responses_mock_model_provider(&server);
+    let mut builder = test_codex().with_config(move |config| {
+        config.model_provider = model_provider;
+        enable_test_session_memory_compact(config);
+        config.session_memory_minimum_message_tokens_to_init = 1;
+        config.session_memory_minimum_tokens_between_update = 100_000;
+        config.model_context_window = Some(100_000);
+        config.model_auto_compact_token_limit = Some(99_000);
+    });
+    let test = builder.build(&server).await.unwrap();
+    let summary_path = test
+        .config
+        .codex_home
+        .join("session-memory")
+        .join(test.session_configured.thread_id.to_string())
+        .join("summary.md");
+    let summary_path_str = summary_path.as_path().to_string_lossy().to_string();
+    let state_path = summary_path.as_path().with_file_name("state.json");
+
+    let setup_turn = sse(vec![
+        ev_assistant_message("m-over-40k-setup", "setup complete"),
+        ev_completed_with_tokens("r-over-40k-setup", 10),
+    ]);
+    let setup_refresh = sse(vec![
+        ev_function_call(
+            "session-memory-over-40k-setup-refresh",
+            "Edit",
+            &json!({
+                "file_path": summary_path_str,
+                "old_string": "_What is actively being worked on right now? Pending tasks not yet completed. Immediate next steps._\n\n# Task specification",
+                "new_string": "_What is actively being worked on right now? Pending tasks not yet completed. Immediate next steps._\n- Summary before mandatory tail.\n\n# Task specification"
+            })
+            .to_string(),
+        ),
+        ev_completed_with_tokens("r-session-memory-over-40k-setup-refresh", 20),
+    ]);
+    let effective_window_turn = sse(vec![
+        ev_function_call(DUMMY_CALL_ID, DUMMY_FUNCTION_NAME, "{}"),
+        ev_completed_with_tokens("r-over-40k-effective-window", 95_001),
+    ]);
+    let post_compact_turn = sse(vec![
+        ev_assistant_message("m-over-40k-post-compact", FINAL_REPLY),
+        ev_completed_with_tokens("r-over-40k-post-compact", 20),
+    ]);
+    let mock = mount_sse_sequence(
+        &server,
+        vec![
+            setup_turn,
+            setup_refresh,
+            effective_window_turn,
+            post_compact_turn,
+        ],
+    )
+    .await;
+
+    test.submit_turn("initialize boundary before the large mandatory tail")
+        .await
+        .unwrap();
+    wait_for_request_count(&mock, 2).await;
+    wait_for_file_contains(&state_path, "\"last_summary_fingerprint\": \"").await;
+
+    let over_40k_tail = format!(
+        "{}\nSESSION_MEMORY_OVER_40K_MANDATORY_TAIL",
+        "mandatory-tail-token ".repeat(12_000)
+    );
+    test.codex
+        .submit(Op::UserInput {
+            items: vec![UserInput::Text {
+                text: format!("{FUNCTION_CALL_LIMIT_MSG}\n{over_40k_tail}"),
+                text_elements: Vec::new(),
+            }],
+            final_output_json_schema: None,
+            model_client_metadata: None,
+            additional_context: Default::default(),
+            thread_settings: Default::default(),
+        })
+        .await
+        .unwrap();
+    loop {
+        let event = test.codex.next_event().await.unwrap();
+        if matches!(event.msg, EventMsg::TurnComplete(_)) && !event.id.starts_with("auto-compact-")
+        {
+            break;
+        }
+    }
+
+    let requests = wait_for_request_count(&mock, 4).await;
+    assert_eq!(
+        requests.len(),
+        4,
+        "effective-window protection should use the previous summary boundary without starting a new sidechain or legacy compact request"
+    );
+    let post_compact_body = requests[3].body_json().to_string();
+    assert!(
+        body_contains_text(&post_compact_body, "SESSION_MEMORY_OVER_40K_MANDATORY_TAIL"),
+        "Session Memory Compact should preserve mandatory raw tail beyond the 40k backfill cap"
+    );
+    assert!(
+        body_contains_text(&post_compact_body, "Summary before mandatory tail."),
+        "Session Memory Compact should reuse the previous valid summary when Final Refresh is unsafe"
+    );
+    assert!(
+        !requests.iter().any(|request| body_contains_text(
+            &request.body_json().to_string(),
+            SUMMARIZATION_PROMPT
+        )),
+        "effective-window recovery should not issue a legacy summarization request"
     );
 }
 
@@ -1171,6 +1467,13 @@ async fn session_memory_compact_failure_falls_back_and_allows_later_extraction_i
         ),
         ev_completed_with_tokens("r-sidechain-fallback-setup", 10_010),
     ]);
+    let failed_manual_final_refresh = sse(vec![
+        ev_assistant_message(
+            "m-manual-final-refresh-without-edit",
+            "did not update session memory",
+        ),
+        ev_completed_with_tokens("r-manual-final-refresh-without-edit", 10_015),
+    ]);
     let legacy_compact_turn = sse(vec![
         ev_assistant_message("m-legacy-fallback-summary", "LEGACY_FALLBACK_SUMMARY"),
         ev_completed_with_tokens("r-legacy-fallback-summary", 20),
@@ -1197,6 +1500,7 @@ async fn session_memory_compact_failure_falls_back_and_allows_later_extraction_i
         vec![
             main_turn,
             sidechain_edit,
+            failed_manual_final_refresh,
             legacy_compact_turn,
             post_legacy_turn,
             post_legacy_sidechain,
@@ -1217,8 +1521,8 @@ async fn session_memory_compact_failure_falls_back_and_allows_later_extraction_i
     })
     .await;
 
-    let requests = wait_for_request_count(&mock, 3).await;
-    let legacy_request = requests[2].body_json().to_string();
+    let requests = wait_for_request_count(&mock, 4).await;
+    let legacy_request = requests[3].body_json().to_string();
     assert!(
         body_contains_text(&legacy_request, SUMMARIZATION_PROMPT),
         "failed session-memory compact should fall back to legacy summarization"
@@ -1234,7 +1538,7 @@ async fn session_memory_compact_failure_falls_back_and_allows_later_extraction_i
     test.submit_turn("after legacy fallback extraction")
         .await
         .unwrap();
-    wait_for_request_count(&mock, 5).await;
+    wait_for_request_count(&mock, 6).await;
     wait_for_file_contains(summary_path.as_path(), "Post fallback extraction works.").await;
 }
 

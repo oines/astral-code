@@ -78,24 +78,21 @@ pub(super) fn raw_tail_after_summary_boundary(
         .rev()
         .find_map(|(index, item)| is_compaction_boundary(item).then_some(index));
     let floor = last_compaction_index.map_or(0, |index| index.saturating_add(1));
-    let start = match state.last_summary_index {
-        Some(boundary_index) => {
-            let boundary = items
-                .get(boundary_index)
-                .ok_or_else(|| CodexErr::Fatal("session memory boundary not found".to_string()))?;
-            let expected_fingerprint =
-                state.last_summary_fingerprint.as_deref().ok_or_else(|| {
-                    CodexErr::Fatal("session memory boundary fingerprint missing".to_string())
-                })?;
-            if item_fingerprint(boundary) != expected_fingerprint {
-                return Err(CodexErr::Fatal(
-                    "session memory boundary fingerprint mismatch".to_string(),
-                ));
-            }
-            boundary_index.saturating_add(1)
-        }
-        None => items.len(),
-    };
+    let boundary_index = state
+        .last_summary_index
+        .ok_or_else(|| CodexErr::Fatal("session memory boundary missing".to_string()))?;
+    let boundary = items
+        .get(boundary_index)
+        .ok_or_else(|| CodexErr::Fatal("session memory boundary not found".to_string()))?;
+    let expected_fingerprint = state.last_summary_fingerprint.as_deref().ok_or_else(|| {
+        CodexErr::Fatal("session memory boundary fingerprint missing".to_string())
+    })?;
+    if item_fingerprint(boundary) != expected_fingerprint {
+        return Err(CodexErr::Fatal(
+            "session memory boundary fingerprint mismatch".to_string(),
+        ));
+    }
+    let start = boundary_index.saturating_add(1);
     let start = calculate_tail_start(items, start.max(floor), floor);
     let tail = filter_reinjectable_context_items(&items[start..]);
     validate_tail_pairs(&tail)?;
@@ -108,16 +105,6 @@ pub(super) fn validate_summary(summary: &str, template: &str) -> CodexResult<()>
         return Err(CodexErr::Fatal(
             "session memory summary is missing or still the template".to_string(),
         ));
-    }
-    Ok(())
-}
-
-pub(super) fn validate_tail_budget(tail: &[TranscriptItem]) -> CodexResult<()> {
-    let tokens = estimate_items_tokens(tail);
-    if usize::try_from(tokens).unwrap_or(usize::MAX) > MAX_RAW_TAIL_TOKENS {
-        return Err(CodexErr::Fatal(format!(
-            "session memory raw tail exceeds {MAX_RAW_TAIL_TOKENS} tokens"
-        )));
     }
     Ok(())
 }
