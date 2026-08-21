@@ -59,9 +59,12 @@ impl ModelCapabilitiesCache {
 
     fn lookup_by_litellm_suffix(&self, model: &str) -> Option<&ModelCapability> {
         let suffix = format!("/{model}");
-        self.models
+        let mut matches = self
+            .models
             .iter()
-            .find_map(|(key, capability)| key.ends_with(&suffix).then_some(capability))
+            .filter_map(|(key, capability)| key.ends_with(&suffix).then_some(capability));
+        let capability = matches.next()?;
+        matches.next().is_none().then_some(capability)
     }
 }
 
@@ -73,6 +76,8 @@ pub struct ModelCapability {
     pub mode: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_mode: Option<ToolMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_context_window: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -109,6 +114,7 @@ impl ModelCapability {
             litellm_provider: hint.litellm_provider,
             mode: hint.mode,
             tool_mode: None,
+            context_window: hint.max_input_tokens,
             max_context_window: hint.max_input_tokens,
             max_output_tokens: hint.max_output_tokens.or(hint.max_tokens),
             supports_tools: hint.supports_function_calling,
@@ -122,18 +128,21 @@ impl ModelCapability {
         }
     }
 
-    pub fn apply_to_model_info(&self, model: &mut ModelInfo) {
-        if let Some(tool_mode) = self.tool_mode {
+    pub fn apply_fallback_to_model_info(&self, model: &mut ModelInfo) {
+        if model.tool_mode.is_none()
+            && let Some(tool_mode) = self.tool_mode
+        {
             model.tool_mode = Some(tool_mode);
         }
 
-        if let Some(max_context_window) = self.max_context_window.and_then(u64_to_i64) {
-            if model.max_context_window.is_none() {
-                model.max_context_window = Some(max_context_window);
-            }
-            if model.context_window.is_none() {
-                model.context_window = Some(max_context_window);
-            }
+        if model.context_window.is_none() {
+            model.context_window = self
+                .context_window
+                .or(self.max_context_window)
+                .and_then(u64_to_i64);
+        }
+        if model.max_context_window.is_none() {
+            model.max_context_window = self.max_context_window.and_then(u64_to_i64);
         }
         if let Some(max_output_tokens) = self.max_output_tokens.and_then(u64_to_i64)
             && model.max_output_tokens.is_none()
@@ -141,29 +150,48 @@ impl ModelCapability {
             model.max_output_tokens = Some(max_output_tokens);
         }
 
-        if let Some(supports_parallel_tools) = self.supports_parallel_tools {
-            model.supports_parallel_tool_calls = supports_parallel_tools;
-        }
-
-        if let Some(supports_vision) = self.supports_vision {
-            model.input_modalities = if supports_vision {
-                vec![InputModality::Text, InputModality::Image]
-            } else {
-                vec![InputModality::Text]
-            };
+        if model.used_fallback_model_metadata {
+            if let Some(supports_parallel_tools) = self.supports_parallel_tools {
+                model.supports_parallel_tool_calls = supports_parallel_tools;
+            }
+            if let Some(supports_vision) = self.supports_vision {
+                set_vision_support(model, supports_vision);
+            }
         }
 
         if self.supports_reasoning == Some(true) && model.supported_reasoning_levels.is_empty() {
-            model.supported_reasoning_levels = vec![
-                ReasoningEffortPreset {
-                    effort: ReasoningEffort::High,
-                    description: "High".to_string(),
-                },
-                ReasoningEffortPreset {
-                    effort: ReasoningEffort::Custom("max".to_string()),
-                    description: "Max".to_string(),
-                },
-            ];
+            set_default_reasoning_support(model);
+        }
+    }
+
+    pub fn apply_override_to_model_info(&self, model: &mut ModelInfo) {
+        if let Some(tool_mode) = self.tool_mode {
+            model.tool_mode = Some(tool_mode);
+        }
+        if let Some(context_window) = self.context_window.and_then(u64_to_i64) {
+            model.context_window = Some(context_window);
+        }
+        if let Some(max_context_window) = self.max_context_window.and_then(u64_to_i64) {
+            model.max_context_window = Some(max_context_window);
+        }
+        if let Some(max_output_tokens) = self.max_output_tokens.and_then(u64_to_i64) {
+            model.max_output_tokens = Some(max_output_tokens);
+        }
+        if let Some(supports_parallel_tools) = self.supports_parallel_tools {
+            model.supports_parallel_tool_calls = supports_parallel_tools;
+        }
+        if let Some(supports_vision) = self.supports_vision {
+            set_vision_support(model, supports_vision);
+        }
+        match self.supports_reasoning {
+            Some(true) if model.supported_reasoning_levels.is_empty() => {
+                set_default_reasoning_support(model);
+            }
+            Some(false) => {
+                model.default_reasoning_level = None;
+                model.supported_reasoning_levels.clear();
+            }
+            Some(true) | None => {}
         }
     }
 
@@ -171,6 +199,7 @@ impl ModelCapability {
         self.litellm_provider.is_some()
             || self.mode.is_some()
             || self.tool_mode.is_some()
+            || self.context_window.is_some()
             || self.max_context_window.is_some()
             || self.max_output_tokens.is_some()
             || self.supports_tools.is_some()
@@ -182,6 +211,27 @@ impl ModelCapability {
             || !self.supported_endpoints.is_empty()
             || self.pricing.is_some()
     }
+}
+
+fn set_vision_support(model: &mut ModelInfo, supports_vision: bool) {
+    model.input_modalities = if supports_vision {
+        vec![InputModality::Text, InputModality::Image]
+    } else {
+        vec![InputModality::Text]
+    };
+}
+
+fn set_default_reasoning_support(model: &mut ModelInfo) {
+    model.supported_reasoning_levels = vec![
+        ReasoningEffortPreset {
+            effort: ReasoningEffort::High,
+            description: "High".to_string(),
+        },
+        ReasoningEffortPreset {
+            effort: ReasoningEffort::Custom("max".to_string()),
+            description: "Max".to_string(),
+        },
+    ];
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]

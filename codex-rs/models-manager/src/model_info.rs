@@ -56,11 +56,14 @@ pub fn model_instructions(
 }
 
 pub fn with_config_overrides(mut model: ModelInfo, config: &ModelsManagerConfig) -> ModelInfo {
+    if let Some(capability) = config.lookup_model_capability_fallback(&model.slug) {
+        capability.apply_fallback_to_model_info(&mut model);
+    }
+    if let Some(capability) = config.lookup_model_capability_override(&model.slug) {
+        capability.apply_override_to_model_info(&mut model);
+    }
     if let Some(input_modalities) = &config.model_input_modalities {
         model.input_modalities = input_modalities.clone();
-    }
-    if let Some(capability) = config.lookup_model_capability(&model.slug) {
-        capability.apply_to_model_info(&mut model);
     }
     if let Some(supports_reasoning_summaries) = config.model_supports_reasoning_summaries
         && supports_reasoning_summaries

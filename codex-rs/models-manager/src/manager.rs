@@ -325,11 +325,25 @@ impl OpenAiModelsManager {
                     return Ok(());
                 }
                 info!("models cache: cache miss, fetching remote models");
-                self.fetch_and_update_models().await
+                self.fetch_with_stale_fallback().await
             }
             RefreshStrategy::Online => {
                 // Always fetch from network
-                self.fetch_and_update_models().await
+                self.fetch_with_stale_fallback().await
+            }
+        }
+    }
+
+    async fn fetch_with_stale_fallback(&self) -> CoreResult<()> {
+        match self.fetch_and_update_models().await {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                if self.try_load_stale_cache().await {
+                    info!("models cache: online refresh failed; using stale provider cache");
+                    Ok(())
+                } else {
+                    Err(err)
+                }
             }
         }
     }
@@ -387,6 +401,17 @@ impl OpenAiModelsManager {
             etag = ?cache.etag,
             "models cache: cache entry applied"
         );
+        true
+    }
+
+    async fn try_load_stale_cache(&self) -> bool {
+        let client_version = crate::client_version_to_whole();
+        let Some(cache) = self.cache_manager.load_stale(&client_version).await else {
+            return false;
+        };
+        let models = cache.models;
+        *self.etag.write().await = cache.etag;
+        self.apply_remote_models(models).await;
         true
     }
 }
@@ -475,7 +500,7 @@ pub(crate) fn construct_model_info_from_candidates(
         .or_else(|| find_model_by_namespaced_suffix(model, candidates))
         .or_else(|| find_model_by_longest_prefix(model, BUNDLED_MODEL_CATALOG.as_slice()))
         .or_else(|| find_model_by_namespaced_suffix(model, BUNDLED_MODEL_CATALOG.as_slice()));
-    let has_configured_capability = config.lookup_model_capability(model).is_some();
+    let has_configured_capability = config.has_model_capability(model);
     let model_info = if let Some(remote) = remote {
         ModelInfo {
             slug: model.to_string(),
@@ -483,14 +508,13 @@ pub(crate) fn construct_model_info_from_candidates(
             ..remote
         }
     } else {
-        let mut model_info =
-            model_info::model_info_from_slug_with_warning(model, !has_configured_capability);
-        if has_configured_capability {
-            model_info.used_fallback_model_metadata = false;
-        }
-        model_info
+        model_info::model_info_from_slug_with_warning(model, !has_configured_capability)
     };
-    model_info::with_config_overrides(model_info, config)
+    let mut model_info = model_info::with_config_overrides(model_info, config);
+    if has_configured_capability {
+        model_info.used_fallback_model_metadata = false;
+    }
+    model_info
 }
 
 #[cfg(test)]

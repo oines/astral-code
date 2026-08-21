@@ -95,6 +95,16 @@ pub struct Reasoning {
     pub effort: Option<ReasoningEffortConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<ReasoningContext>,
+}
+
+#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReasoningContext {
+    Auto,
+    CurrentTurn,
+    AllTurns,
 }
 
 /// Optional structured-output controls for the Responses API.

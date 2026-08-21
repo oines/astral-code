@@ -4,6 +4,7 @@ use codex_api::AuthProvider;
 use codex_api::SharedAuthProvider;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
+use codex_model_provider_info::ManagedAuthKind;
 use codex_model_provider_info::ModelProviderInfo;
 use http::HeaderMap;
 
@@ -32,9 +33,21 @@ pub(crate) fn auth_manager_for_provider(
 ) -> Option<Arc<AuthManager>> {
     match provider.auth.clone() {
         Some(config) => Some(AuthManager::external_bearer_only(config)),
+        None if provider.managed_auth == Some(ManagedAuthKind::CodexOAuth) => auth_manager,
         None if provider.requires_astral_auth => auth_manager,
         None => None,
     }
+}
+
+pub(crate) fn provider_info_for_request(provider: &ModelProviderInfo) -> ModelProviderInfo {
+    let mut provider = provider.clone();
+    if provider.managed_auth == Some(ManagedAuthKind::CodexOAuth) {
+        provider.http_headers.get_or_insert_default().insert(
+            "originator".to_string(),
+            codex_login::default_client::codex_oauth_originator(),
+        );
+    }
+    provider
 }
 
 pub(crate) fn resolve_provider_auth(
@@ -69,8 +82,8 @@ fn bearer_auth_for_provider(
 pub fn auth_provider_from_auth(auth: &CodexAuth) -> SharedAuthProvider {
     Arc::new(BearerAuthProvider {
         token: auth.get_token().ok(),
-        account_id: None,
-        is_fedramp_account: false,
+        account_id: auth.get_account_id(),
+        is_fedramp_account: auth.is_fedramp_account(),
     })
 }
 

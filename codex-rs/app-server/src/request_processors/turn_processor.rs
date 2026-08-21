@@ -558,11 +558,21 @@ impl TurnRequestProcessor {
         // `thread/settings/update` only acknowledges that the update was queued.
         // Clients that send dependent partial updates should wait for
         // `thread/settings/updated` or combine the fields in one request.
-        let snapshot = if permissions.is_some() {
+        let snapshot = if permissions.is_some() || model_provider.is_some() {
             Some(thread.config_snapshot().await)
         } else {
             None
         };
+        if let Some(requested_provider) = model_provider.as_deref()
+            && model.is_none()
+            && snapshot
+                .as_ref()
+                .is_some_and(|snapshot| requested_provider != snapshot.model_provider_id)
+        {
+            return Err(invalid_request(
+                "switching modelProvider requires model in the same request",
+            ));
+        }
 
         let has_any_overrides = has_environment_override
             || runtime_workspace_roots_request.is_some()

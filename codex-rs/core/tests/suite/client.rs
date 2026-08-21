@@ -59,6 +59,7 @@ use core_test_support::responses::ev_completed_with_tokens;
 use core_test_support::responses::ev_message_item_added;
 use core_test_support::responses::ev_output_text_delta;
 use core_test_support::responses::ev_response_created;
+use core_test_support::responses::mount_responses_sse_once;
 use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::mount_sse_once_match;
 use core_test_support::responses::mount_sse_sequence;
@@ -859,6 +860,7 @@ async fn send_provider_auth_request(server: &MockServer, auth: ModelProviderAuth
         experimental_bearer_token: None,
         auth: Some(auth),
         aws: None,
+        managed_auth: None,
         wire_api: WireApi::ChatCompletions,
         responses_builtin_tools: Default::default(),
         provider_flavor: None,
@@ -1778,11 +1780,12 @@ async fn configured_reasoning_summary_is_not_sent_for_generic_openai_chat() -> a
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn responses_lite_flag_does_not_change_request_shape() -> anyhow::Result<()> {
+async fn responses_lite_sets_all_turns_reasoning_and_disables_parallel_tools() -> anyhow::Result<()>
+{
     skip_if_no_network!(Ok(()));
     let server = MockServer::start().await;
 
-    let resp_mock = mount_sse_once(
+    let resp_mock = mount_responses_sse_once(
         &server,
         sse(vec![ev_response_created("resp1"), ev_completed("resp1")]),
     )
@@ -1792,6 +1795,9 @@ async fn responses_lite_flag_does_not_change_request_shape() -> anyhow::Result<(
         .with_model_info_override("gpt-5.4", |model_info| {
             model_info.use_responses_lite = true;
             model_info.supports_parallel_tool_calls = true;
+        })
+        .with_config(|config| {
+            config.model_provider.wire_api = WireApi::Responses;
         })
         .build(&server)
         .await?;
@@ -1817,9 +1823,9 @@ async fn responses_lite_flag_does_not_change_request_shape() -> anyhow::Result<(
             .get("reasoning")
             .and_then(|reasoning| reasoning.get("context"))
             .and_then(|value| value.as_str()),
-        None
+        Some("all_turns")
     );
-    pretty_assertions::assert_eq!(request_body.get("parallel_tool_calls"), Some(&json!(true)));
+    pretty_assertions::assert_eq!(request_body.get("parallel_tool_calls"), Some(&json!(false)));
 
     Ok(())
 }
@@ -2244,6 +2250,7 @@ async fn azure_chat_completions_request_serializes_model_context() {
         experimental_bearer_token: None,
         auth: None,
         aws: None,
+        managed_auth: None,
         wire_api: WireApi::ChatCompletions,
         responses_builtin_tools: Default::default(),
         provider_flavor: None,
@@ -2879,6 +2886,7 @@ async fn azure_overrides_assign_properties_used_for_chat_completions_url() {
         experimental_bearer_token: None,
         auth: None,
         aws: None,
+        managed_auth: None,
         query_params: Some(std::collections::HashMap::from([(
             "api-version".to_string(),
             "2025-04-01-preview".to_string(),
@@ -2978,6 +2986,7 @@ async fn env_var_overrides_loaded_auth() {
         experimental_bearer_token: None,
         auth: None,
         aws: None,
+        managed_auth: None,
         wire_api: WireApi::ChatCompletions,
         responses_builtin_tools: Default::default(),
         provider_flavor: None,

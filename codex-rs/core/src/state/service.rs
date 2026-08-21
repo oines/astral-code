@@ -29,6 +29,7 @@ use codex_hooks::Hooks;
 use codex_login::AuthManager;
 use codex_mcp::McpConfig;
 use codex_mcp::McpConnectionManager;
+use codex_model_provider::ProviderModelsRegistry;
 use codex_models_manager::manager::SharedModelsManager;
 use codex_otel::SessionTelemetry;
 use codex_rollout::state_db::StateDbHandle;
@@ -58,6 +59,7 @@ pub(crate) struct SessionServices {
     pub(crate) exec_policy: Arc<ExecPolicyManager>,
     pub(crate) auth_manager: Arc<AuthManager>,
     pub(crate) models_manager: SharedModelsManager,
+    pub(crate) models_registry: Arc<ProviderModelsRegistry>,
     pub(crate) session_telemetry: SessionTelemetry,
     pub(crate) tool_approvals: Mutex<ApprovalStore>,
     pub(crate) guardian_rejections: Mutex<HashMap<String, GuardianRejection>>,

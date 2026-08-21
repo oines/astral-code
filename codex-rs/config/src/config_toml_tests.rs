@@ -5,12 +5,15 @@ use std::collections::HashMap;
 
 #[test]
 fn astral_provider_id_is_reserved() {
-    let providers = HashMap::from([("astral".to_string(), ModelProviderInfo::default())]);
+    let providers = HashMap::from([
+        ("astral".to_string(), ModelProviderInfo::default()),
+        ("codex".to_string(), ModelProviderInfo::default()),
+    ]);
 
     assert_eq!(
         validate_reserved_model_provider_ids(&providers),
         Err(
-            "model_providers contains reserved built-in provider IDs: `astral`. Built-in providers cannot be overridden. Rename your custom provider (for example, `provider-custom`)."
+            "model_providers contains reserved built-in provider IDs: `astral`, `codex`. Built-in providers cannot be overridden. Rename your custom provider (for example, `provider-custom`)."
                 .to_string()
         )
     );

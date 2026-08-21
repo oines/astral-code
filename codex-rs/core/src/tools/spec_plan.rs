@@ -72,6 +72,7 @@ use crate::tools::router::ToolRouter;
 use crate::tools::router::ToolRouterParams;
 use codex_features::Feature;
 use codex_mcp::ToolInfo;
+use codex_model_provider_info::CODEX_PROVIDER_ID;
 use codex_models_manager::model_info;
 use codex_protocol::config_types::WebSearchMode;
 use codex_protocol::dynamic_tools::DynamicToolSpec;
@@ -582,17 +583,19 @@ fn provider_neutral_web_tools_enabled(turn_context: &TurnContext) -> bool {
 
 fn standalone_web_search_enabled(turn_context: &TurnContext) -> bool {
     namespace_tools_enabled(turn_context)
-        && (turn_context.model_info.use_responses_lite
-            || turn_context
-                .config
-                .features
-                .get()
-                .enabled(Feature::StandaloneWebSearch))
+        && turn_context.config.model_provider_id != CODEX_PROVIDER_ID
+        && turn_context
+            .config
+            .features
+            .get()
+            .enabled(Feature::StandaloneWebSearch)
 }
 
 fn hosted_model_tool_specs(context: &CoreToolPlanContext<'_>) -> Vec<ToolSpec> {
     let turn_context = context.step_context.turn.as_ref();
-    if turn_context.model_info.use_responses_lite {
+    if turn_context.model_info.use_responses_lite
+        || turn_context.config.model_provider_id == CODEX_PROVIDER_ID
+    {
         return Vec::new();
     }
 

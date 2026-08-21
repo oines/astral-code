@@ -29,6 +29,7 @@ pub use crate::common::ModelStreamEvent;
 pub use crate::common::RawMemory;
 pub use crate::common::RawMemoryMetadata;
 pub use crate::common::Reasoning;
+pub use crate::common::ReasoningContext;
 pub use crate::common::ResponseStream;
 pub use crate::common::ResponsesApiRequest;
 pub use crate::common::ResponsesTextControls;

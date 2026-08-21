@@ -6,9 +6,9 @@ use codex_app_server_protocol::ModelCapabilitySource;
 use codex_app_server_protocol::ModelServiceTier;
 use codex_app_server_protocol::ModelUpgradeInfo;
 use codex_app_server_protocol::ReasoningEffortOption;
+use codex_core::ThreadManager;
 use codex_core::config::Config;
-use codex_login::AuthManager;
-use codex_model_provider::create_model_provider;
+use codex_model_provider::CODEX_PROVIDER_ID;
 use codex_models_manager::capabilities::ModelCapability;
 use codex_models_manager::manager::RefreshStrategy;
 use codex_protocol::openai_models::InputModality;
@@ -18,10 +18,14 @@ use codex_protocol::openai_models::ReasoningEffortPreset;
 use std::collections::BTreeSet;
 use toml::Value as TomlValue;
 
+const MODEL_PROVIDER_REFRESH_CONCURRENCY: usize = 4;
+
 pub async fn configured_models(
     config: &Config,
-    auth_manager: Arc<AuthManager>,
+    thread_manager: Arc<ThreadManager>,
     model_provider_filter: Option<&str>,
+    codex_available: bool,
+    include_hidden: bool,
 ) -> Vec<Model> {
     let mut specs = configured_model_specs(config);
     if let Some(model_provider_filter) = model_provider_filter {
@@ -29,28 +33,57 @@ pub async fn configured_models(
     }
 
     let mut models = Vec::new();
-    let provider_ids = specs
+    let mut provider_ids = specs
         .iter()
         .map(|(provider_id, _)| provider_id.clone())
         .chain(model_provider_filter.map(str::to_owned))
         .collect::<BTreeSet<_>>();
-    for provider_id in provider_ids {
-        let Some(provider) = config.model_providers.get(&provider_id) else {
-            continue;
-        };
-        let provider_name = provider_name(&provider_id, provider.name.as_str());
-        let runtime_provider = create_model_provider(provider.clone(), Some(auth_manager.clone()));
-        let configured_catalog = (provider_id == config.model_provider_id)
-            .then(|| config.model_catalog.clone())
-            .flatten();
-        let manager =
-            runtime_provider.models_manager(config.codex_home.to_path_buf(), configured_catalog);
-        let refresh_strategy = if model_provider_filter.is_some() {
-            RefreshStrategy::OnlineIfUncached
-        } else {
-            RefreshStrategy::Offline
-        };
-        let discovered = manager.raw_model_catalog(refresh_strategy).await;
+    if model_provider_filter.is_none() {
+        provider_ids.insert(config.model_provider_id.clone());
+        if codex_available {
+            provider_ids.insert(CODEX_PROVIDER_ID.to_string());
+        }
+        if let Some(TomlValue::Table(configured_providers)) = config
+            .config_layer_stack
+            .effective_config()
+            .get("model_providers")
+        {
+            provider_ids.extend(configured_providers.keys().cloned());
+        }
+    }
+    let mut provider_requests = provider_ids
+        .into_iter()
+        .filter_map(|provider_id| {
+            let provider = config.model_providers.get(&provider_id)?;
+            let provider_name = provider_name(&provider_id, provider.name.as_str());
+            let configured_catalog = (provider_id == config.model_provider_id)
+                .then(|| config.model_catalog.clone())
+                .flatten();
+            let mut provider_config = config.clone();
+            provider_config.model_provider_id.clone_from(&provider_id);
+            provider_config.model_provider = provider.clone();
+            provider_config.model_catalog = configured_catalog;
+            let manager = thread_manager.models_manager_for_config(&provider_config);
+            Some((provider_id, provider_name, manager))
+        })
+        .collect::<Vec<_>>();
+    let mut discovered_catalogs = Vec::with_capacity(provider_requests.len());
+    while !provider_requests.is_empty() {
+        let batch_len = provider_requests
+            .len()
+            .min(MODEL_PROVIDER_REFRESH_CONCURRENCY);
+        let batch = provider_requests.drain(..batch_len).map(
+            |(provider_id, provider_name, manager)| async move {
+                let discovered = manager
+                    .raw_model_catalog(RefreshStrategy::OnlineIfUncached)
+                    .await;
+                (provider_id, provider_name, manager, discovered)
+            },
+        );
+        discovered_catalogs.extend(futures::future::join_all(batch).await);
+    }
+
+    for (provider_id, provider_name, manager, discovered) in discovered_catalogs {
         let discovered_metadata = discovered
             .models
             .iter()
@@ -62,37 +95,43 @@ pub async fn configured_models(
                 (configured_provider == &provider_id).then_some(model.clone())
             })
             .collect::<BTreeSet<_>>();
-        if model_provider_filter.is_some() {
-            provider_models.extend(discovered.models.into_iter().map(|model| model.slug));
-        }
+        provider_models.extend(discovered.models.into_iter().map(|model| model.slug));
 
         let mut manager_config = config.to_models_manager_config();
         manager_config.model_provider_id = Some(provider_id.clone());
         for model_name in provider_models {
+            let explicitly_configured = specs.iter().any(|(configured_provider, model)| {
+                configured_provider == &provider_id && model == &model_name
+            });
             let model_info = manager.get_model_info(&model_name, &manager_config).await;
             let capabilities = effective_capabilities(
                 &model_info,
-                model_capability(config, &provider_id, &model_name),
+                manual_model_capability(config, &provider_id, &model_name),
+                fallback_model_capability(config, &provider_id, &model_name),
                 discovered_metadata
                     .get(&model_name)
                     .copied()
                     .unwrap_or(false),
-                has_manual_capability(config, &provider_id, &model_name),
             );
             let mut preset = ModelPreset::from(model_info);
             preset.id.clone_from(&model_name);
             preset.model.clone_from(&model_name);
             preset.model_provider = Some(provider_id.clone());
             preset.model_provider_name = Some(provider_name.clone());
+            if explicitly_configured {
+                preset.show_in_picker = true;
+            }
             preset.is_default = config.model.as_deref() == Some(model_name.as_str())
                 && provider_id == config.model_provider_id;
-            preset.show_in_picker = true;
-            models.push(model_from_preset(
+            let model = model_from_preset(
                 preset,
                 provider_id.as_str(),
                 provider_name.as_str(),
                 capabilities,
-            ));
+            );
+            if include_hidden || !model.hidden {
+                models.push(model);
+            }
         }
     }
 
@@ -154,50 +193,49 @@ fn provider_name(provider_id: &str, configured_name: &str) -> String {
     }
 }
 
-fn model_capability<'a>(
+fn manual_model_capability<'a>(
     config: &'a Config,
     provider_id: &str,
     model_name: &str,
 ) -> Option<&'a ModelCapability> {
-    let cache = config.model_capabilities.as_ref()?;
+    let cache = config.model_capability_overrides.as_ref()?;
     let provider_model = format!("{provider_id}/{model_name}");
+    cache.models.get(&provider_model)
+}
+
+fn fallback_model_capability<'a>(
+    config: &'a Config,
+    provider_id: &str,
+    model_name: &str,
+) -> Option<&'a ModelCapability> {
+    let provider_model = format!("{provider_id}/{model_name}");
+    if let Some(overrides) = config.model_capability_overrides.as_ref()
+        && let Some(capability) = overrides.models.get(model_name)
+    {
+        return Some(capability);
+    }
+    let cache = config.model_capabilities.as_ref()?;
     cache
         .models
         .get(&provider_model)
         .or_else(|| cache.lookup(model_name))
 }
 
-fn has_manual_capability(config: &Config, provider_id: &str, model_name: &str) -> bool {
-    let effective_config = config.config_layer_stack.effective_config();
-    let Some(TomlValue::Table(model_capabilities)) = effective_config.get("model_capabilities")
-    else {
-        return false;
-    };
-    model_capabilities.keys().any(|model_key| {
-        configured_model_spec_from_key(model_key, config.model_provider_id.as_str()).is_some_and(
-            |(configured_provider, configured_model)| {
-                configured_provider == provider_id && configured_model == model_name
-            },
-        )
-    })
-}
-
 fn effective_capabilities(
     model: &ModelInfo,
-    configured: Option<&ModelCapability>,
+    manual: Option<&ModelCapability>,
+    fallback: Option<&ModelCapability>,
     has_provider_metadata: bool,
-    has_manual_capability: bool,
 ) -> ModelCapabilities {
     let mut sources = Vec::new();
     if has_provider_metadata {
         sources.push(ModelCapabilitySource::Provider);
     }
-    if configured.is_some() {
-        sources.push(if has_manual_capability {
-            ModelCapabilitySource::Manual
-        } else {
-            ModelCapabilitySource::LiteLlm
-        });
+    if manual.is_some() {
+        sources.push(ModelCapabilitySource::Manual);
+    }
+    if fallback.is_some() {
+        sources.push(ModelCapabilitySource::LiteLlm);
     }
     if !has_provider_metadata {
         sources.push(ModelCapabilitySource::Fallback);
@@ -208,27 +246,35 @@ fn effective_capabilities(
         max_context_window: model.max_context_window,
         max_output_tokens: model.max_output_tokens,
         tool_mode: model.tool_mode,
-        supports_tools: configured
+        supports_tools: manual
             .and_then(|capability| capability.supports_tools)
+            .or_else(|| fallback.and_then(|capability| capability.supports_tools))
             .or_else(|| model.tool_mode.map(|_| true)),
-        supports_parallel_tools: configured
+        supports_parallel_tools: manual
             .and_then(|capability| capability.supports_parallel_tools)
+            .or_else(|| fallback.and_then(|capability| capability.supports_parallel_tools))
             .or_else(|| has_provider_metadata.then_some(model.supports_parallel_tool_calls)),
-        supports_vision: configured
+        supports_vision: manual
             .and_then(|capability| capability.supports_vision)
+            .or_else(|| fallback.and_then(|capability| capability.supports_vision))
             .or_else(|| {
                 has_provider_metadata
                     .then(|| model.input_modalities.contains(&InputModality::Image))
             }),
-        supports_prompt_cache: configured.and_then(|capability| capability.supports_prompt_cache),
-        supports_reasoning: configured
+        supports_prompt_cache: manual
+            .and_then(|capability| capability.supports_prompt_cache)
+            .or_else(|| fallback.and_then(|capability| capability.supports_prompt_cache)),
+        supports_reasoning: manual
             .and_then(|capability| capability.supports_reasoning)
+            .or_else(|| fallback.and_then(|capability| capability.supports_reasoning))
             .or_else(|| {
                 has_provider_metadata.then_some(!model.supported_reasoning_levels.is_empty())
             }),
-        supports_native_streaming: configured
-            .and_then(|capability| capability.supports_native_streaming),
-        supported_endpoints: configured
+        supports_native_streaming: manual
+            .and_then(|capability| capability.supports_native_streaming)
+            .or_else(|| fallback.and_then(|capability| capability.supports_native_streaming)),
+        supported_endpoints: manual
+            .or(fallback)
             .map(|capability| capability.supported_endpoints.clone())
             .unwrap_or_default(),
         sources,

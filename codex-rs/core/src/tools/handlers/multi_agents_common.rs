@@ -311,9 +311,15 @@ pub(crate) async fn apply_requested_spawn_agent_model_overrides(
             ));
         };
         apply_spawn_agent_provider_override(config, requested_model_provider)?;
-        let selected_model_info = session
-            .services
-            .models_manager
+        let provider_models_manager = session.services.models_registry.manager_for(
+            &config.model_provider_id,
+            &config.model_provider,
+            config.model_catalog.clone(),
+        );
+        provider_models_manager
+            .list_models(RefreshStrategy::OnlineIfUncached)
+            .await;
+        let selected_model_info = provider_models_manager
             .get_model_info(requested_model, &config.to_models_manager_config())
             .await;
         if selected_model_info.used_fallback_model_metadata {
@@ -342,19 +348,20 @@ pub(crate) async fn apply_requested_spawn_agent_model_overrides(
     }
 
     if let Some(requested_model) = requested_model {
-        let available_models = session
-            .services
-            .models_manager
-            .list_models(RefreshStrategy::Offline)
+        let provider_models_manager = session.services.models_registry.manager_for(
+            &config.model_provider_id,
+            &config.model_provider,
+            config.model_catalog.clone(),
+        );
+        let available_models = provider_models_manager
+            .list_models(RefreshStrategy::OnlineIfUncached)
             .await;
         let selected_model_name = find_spawn_agent_model_name(
             &available_models,
             requested_model,
             &config.model_provider_id,
         )?;
-        let selected_model_info = session
-            .services
-            .models_manager
+        let selected_model_info = provider_models_manager
             .get_model_info(&selected_model_name, &config.to_models_manager_config())
             .await;
 
@@ -447,9 +454,12 @@ pub(crate) async fn apply_spawn_agent_service_tier(
             "spawn_agent could not resolve the child model for service tier validation".to_string(),
         )
     })?;
-    let model_info = session
-        .services
-        .models_manager
+    let provider_models_manager = session.services.models_registry.manager_for(
+        &config.model_provider_id,
+        &config.model_provider,
+        config.model_catalog.clone(),
+    );
+    let model_info = provider_models_manager
         .get_model_info(model.as_str(), &config.to_models_manager_config())
         .await;
 
@@ -523,6 +533,13 @@ fn configured_models_for_provider(config: &Config, provider_id: &str) -> Vec<Str
     let provider_prefix = format!("{provider_id}/");
 
     if let Some(capabilities) = &config.model_capabilities {
+        models.extend(capabilities.models.keys().filter_map(|model| {
+            model
+                .strip_prefix(&provider_prefix)
+                .map(ToString::to_string)
+        }));
+    }
+    if let Some(capabilities) = &config.model_capability_overrides {
         models.extend(capabilities.models.keys().filter_map(|model| {
             model
                 .strip_prefix(&provider_prefix)

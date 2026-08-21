@@ -1,6 +1,7 @@
 use super::*;
 use crate::models::configured_models;
 use codex_config::config_toml::ConfigToml;
+use codex_model_provider::CODEX_PROVIDER_ID;
 use futures::StreamExt;
 
 #[derive(Clone)]
@@ -159,9 +160,15 @@ impl CatalogRequestProcessor {
         params: ModelListParams,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
         let config = Arc::new(self.load_latest_config(/*fallback_cwd*/ None).await?);
-        Self::list_models(config, self.auth_manager.clone(), params)
-            .await
-            .map(|response| Some(response.into()))
+        let codex_available = self.auth_manager.codex_oauth_auth_cached().is_some();
+        Self::list_models(
+            config,
+            Arc::clone(&self.thread_manager),
+            codex_available,
+            params,
+        )
+        .await
+        .map(|response| Some(response.into()))
     }
 
     pub(crate) async fn experimental_feature_list(
@@ -249,14 +256,15 @@ impl CatalogRequestProcessor {
 
     async fn list_models(
         config: Arc<Config>,
-        auth_manager: Arc<AuthManager>,
+        thread_manager: Arc<ThreadManager>,
+        codex_available: bool,
         params: ModelListParams,
     ) -> Result<ModelListResponse, JSONRPCErrorError> {
         let ModelListParams {
             limit,
             cursor,
             model_provider,
-            include_hidden: _,
+            include_hidden,
         } = params;
         if let Some(model_provider_id) = model_provider.as_deref()
             && !config.model_providers.contains_key(model_provider_id)
@@ -265,9 +273,20 @@ impl CatalogRequestProcessor {
                 "unknown model provider: {model_provider_id}"
             )));
         }
+        if model_provider.as_deref() == Some(CODEX_PROVIDER_ID) && !codex_available {
+            return Err(invalid_request(
+                "Codex provider requires `astral login codex`".to_string(),
+            ));
+        }
 
-        let models =
-            configured_models(config.as_ref(), auth_manager, model_provider.as_deref()).await;
+        let models = configured_models(
+            config.as_ref(),
+            thread_manager,
+            model_provider.as_deref(),
+            codex_available,
+            include_hidden.unwrap_or(false),
+        )
+        .await;
         let total = models.len();
 
         if total == 0 {

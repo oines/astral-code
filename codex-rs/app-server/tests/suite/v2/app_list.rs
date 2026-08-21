@@ -113,6 +113,7 @@ async fn list_apps_returns_empty_with_api_key_auth() -> Result<()> {
         &AuthDotJson {
             auth_mode: Some("apikey".to_string()),
             api_key: Some("test-api-key".to_string()),
+            tokens: None,
             last_refresh: None,
         },
         AuthCredentialsStoreMode::File,

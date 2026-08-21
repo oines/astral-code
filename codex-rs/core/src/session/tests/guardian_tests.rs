@@ -18,6 +18,7 @@ use codex_execpolicy::Decision;
 use codex_execpolicy::Evaluation;
 use codex_execpolicy::RuleMatch;
 use codex_features::Feature;
+use codex_model_provider::ProviderModelsRegistry;
 use codex_model_provider::create_model_provider;
 use codex_protocol::config_types::ApprovalsReviewer;
 use codex_protocol::models::AdditionalPermissionProfile as PermissionProfile;
@@ -650,6 +651,10 @@ async fn guardian_subagent_does_not_inherit_parent_exec_policy_rules() {
         auth_manager.clone(),
         config.model_provider.clone(),
     );
+    let models_registry = Arc::new(ProviderModelsRegistry::new(
+        config.codex_home.to_path_buf(),
+        Arc::clone(&auth_manager),
+    ));
     let plugins_manager = Arc::new(PluginsManager::new(config.codex_home.to_path_buf()));
     let skills_manager = Arc::new(SkillsManager::new(
         config.codex_home.clone(),
@@ -666,6 +671,7 @@ async fn guardian_subagent_does_not_inherit_parent_exec_policy_rules() {
         installation_id: "11111111-1111-4111-8111-111111111111".to_string(),
         auth_manager,
         models_manager,
+        models_registry,
         environment_manager: Arc::new(EnvironmentManager::default_for_tests()),
         skills_manager,
         plugins_manager,

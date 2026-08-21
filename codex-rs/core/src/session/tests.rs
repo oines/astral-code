@@ -4943,12 +4943,17 @@ async fn session_new_fails_when_zsh_fork_enabled_without_packaged_zsh() {
         config.codex_home.clone(),
         /*bundled_skills_enabled*/ true,
     ));
+    let models_registry = Arc::new(ProviderModelsRegistry::new(
+        config.codex_home.to_path_buf(),
+        Arc::clone(&auth_manager),
+    ));
     let result = Session::new(
         session_configuration,
         Arc::clone(&config),
         "11111111-1111-4111-8111-111111111111".to_string(),
         auth_manager,
         models_manager,
+        models_registry,
         Arc::new(ExecPolicyManager::default()),
         tx_event,
         agent_status_tx,
@@ -5089,6 +5094,10 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
     );
     let mcp_runtime =
         crate::session::McpRuntimeSnapshot::new_uninitialized_for_test(config.as_ref());
+    let models_registry = Arc::new(ProviderModelsRegistry::new(
+        config.codex_home.to_path_buf(),
+        Arc::clone(&auth_manager),
+    ));
 
     let services = SessionServices {
         mcp_runtime: arc_swap::ArcSwapOption::from(Some(mcp_runtime)),
@@ -5111,6 +5120,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         auth_manager: auth_manager.clone(),
         session_telemetry: session_telemetry.clone(),
         models_manager: Arc::clone(&models_manager),
+        models_registry,
         tool_approvals: Mutex::new(ApprovalStore::default()),
         guardian_rejections: Mutex::new(std::collections::HashMap::new()),
         guardian_rejection_circuit_breaker: Mutex::new(Default::default()),
@@ -5304,6 +5314,10 @@ async fn make_session_with_config_and_rx(
         config.codex_home.clone(),
         /*bundled_skills_enabled*/ true,
     ));
+    let models_registry = Arc::new(ProviderModelsRegistry::new(
+        config.codex_home.to_path_buf(),
+        Arc::clone(&auth_manager),
+    ));
 
     let session = Session::new(
         session_configuration,
@@ -5311,6 +5325,7 @@ async fn make_session_with_config_and_rx(
         "11111111-1111-4111-8111-111111111111".to_string(),
         auth_manager,
         models_manager,
+        models_registry,
         Arc::new(ExecPolicyManager::default()),
         tx_event,
         agent_status_tx,
@@ -5408,6 +5423,10 @@ async fn make_session_with_history_source_and_agent_control_and_rx(
         config.codex_home.clone(),
         /*bundled_skills_enabled*/ true,
     ));
+    let models_registry = Arc::new(ProviderModelsRegistry::new(
+        config.codex_home.to_path_buf(),
+        Arc::clone(&auth_manager),
+    ));
 
     let session = Session::new(
         session_configuration,
@@ -5415,6 +5434,7 @@ async fn make_session_with_history_source_and_agent_control_and_rx(
         "11111111-1111-4111-8111-111111111111".to_string(),
         auth_manager,
         models_manager,
+        models_registry,
         Arc::new(ExecPolicyManager::default()),
         tx_event,
         agent_status_tx,
@@ -7125,6 +7145,10 @@ where
     );
     let mcp_runtime =
         crate::session::McpRuntimeSnapshot::new_uninitialized_for_test(config.as_ref());
+    let models_registry = Arc::new(ProviderModelsRegistry::new(
+        config.codex_home.to_path_buf(),
+        Arc::clone(&auth_manager),
+    ));
 
     let services = SessionServices {
         mcp_runtime: arc_swap::ArcSwapOption::from(Some(mcp_runtime)),
@@ -7147,6 +7171,7 @@ where
         auth_manager: Arc::clone(&auth_manager),
         session_telemetry: session_telemetry.clone(),
         models_manager: Arc::clone(&models_manager),
+        models_registry,
         tool_approvals: Mutex::new(ApprovalStore::default()),
         guardian_rejections: Mutex::new(std::collections::HashMap::new()),
         guardian_rejection_circuit_breaker: Mutex::new(Default::default()),

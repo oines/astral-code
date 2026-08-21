@@ -16,19 +16,37 @@ pub struct ModelsManagerConfig {
     pub model_supports_reasoning_summaries: Option<bool>,
     pub model_catalog: Option<ModelsResponse>,
     pub model_capabilities: Option<ModelCapabilitiesCache>,
+    pub model_capability_overrides: Option<ModelCapabilitiesCache>,
 }
 
 impl ModelsManagerConfig {
-    pub(crate) fn lookup_model_capability(&self, model: &str) -> Option<&ModelCapability> {
-        let cache = self.model_capabilities.as_ref()?;
-        if let Some(provider_id) = self.model_provider_id.as_ref()
-            && !model.contains('/')
+    pub(crate) fn lookup_model_capability_override(&self, model: &str) -> Option<&ModelCapability> {
+        let overrides = self.model_capability_overrides.as_ref()?;
+        if let Some(provider_id) = self.model_provider_id.as_ref() {
+            let provider_model = format!("{provider_id}/{model}");
+            return overrides.models.get(&provider_model);
+        }
+        None
+    }
+
+    pub(crate) fn lookup_model_capability_fallback(&self, model: &str) -> Option<&ModelCapability> {
+        if let Some(overrides) = self.model_capability_overrides.as_ref()
+            && let Some(capability) = overrides.models.get(model)
         {
+            return Some(capability);
+        }
+        let cache = self.model_capabilities.as_ref()?;
+        if let Some(provider_id) = self.model_provider_id.as_ref() {
             let provider_model = format!("{provider_id}/{model}");
             if let Some(capability) = cache.models.get(&provider_model) {
                 return Some(capability);
             }
         }
         cache.lookup(model)
+    }
+
+    pub(crate) fn has_model_capability(&self, model: &str) -> bool {
+        self.lookup_model_capability_override(model).is_some()
+            || self.lookup_model_capability_fallback(model).is_some()
     }
 }

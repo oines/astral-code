@@ -108,6 +108,7 @@ pub struct TurnContext {
     pub config: Arc<Config>,
     pub(crate) auth_manager: Option<Arc<AuthManager>>,
     pub(crate) model_info: ModelInfo,
+    pub(crate) models_manager: SharedModelsManager,
     pub(crate) session_telemetry: SessionTelemetry,
     pub(crate) provider: SharedModelProvider,
     pub(crate) reasoning_effort: Option<ReasoningEffortConfig>,
@@ -255,6 +256,7 @@ impl TurnContext {
             config: Arc::new(config),
             auth_manager: self.auth_manager.clone(),
             model_info: model_info.clone(),
+            models_manager: Arc::clone(models_manager),
             session_telemetry: self
                 .session_telemetry
                 .clone()
@@ -569,6 +571,7 @@ impl Session {
             config: per_turn_config.clone(),
             auth_manager: auth_manager_for_context,
             model_info: model_info.clone(),
+            models_manager: Arc::clone(models_manager),
             session_telemetry: session_telemetry_for_context,
             provider: provider_for_context,
             reasoning_effort,
@@ -722,15 +725,17 @@ impl Session {
                 .set_permission_profile(session_configuration.permission_profile());
         }
 
-        let model_info = self
-            .services
-            .models_manager
+        let models_manager = self.services.models_registry.manager_for(
+            &per_turn_config.model_provider_id,
+            &session_configuration.provider,
+            per_turn_config.model_catalog.clone(),
+        );
+        let model_info = models_manager
             .get_model_info(
                 session_configuration.collaboration_mode.model(),
                 &per_turn_config.to_models_manager_config(),
             )
             .await;
-
         let multi_agent_version =
             self.resolve_multi_agent_version_for_model(&model_info, &per_turn_config);
         let plugin_outcome = self
@@ -761,7 +766,7 @@ impl Session {
             self.services.main_execve_wrapper_exe.as_ref(),
             per_turn_config,
             model_info,
-            &self.services.models_manager,
+            &models_manager,
             self.services
                 .network_proxy
                 .load_full()
@@ -777,6 +782,30 @@ impl Session {
             sub_id,
             skills_outcome,
         );
+        let current_provider_id = turn_context.config.model_provider_id.clone();
+        let mut available_models = BTreeMap::new();
+        for (provider_id, presets) in self
+            .services
+            .models_registry
+            .try_list_cached_models_for_all()
+        {
+            let provider_name = turn_context
+                .config
+                .model_providers
+                .get(&provider_id)
+                .map(|provider| provider.name.clone());
+            for mut preset in presets {
+                preset.model_provider = Some(provider_id.clone());
+                preset.model_provider_name = provider_name.clone();
+                available_models.insert((provider_id.clone(), preset.model.clone()), preset);
+            }
+        }
+        for mut preset in std::mem::take(&mut turn_context.available_models) {
+            preset.model_provider = Some(current_provider_id.clone());
+            preset.model_provider_name = Some(session_configuration.provider.name.clone());
+            available_models.insert((current_provider_id.clone(), preset.model.clone()), preset);
+        }
+        turn_context.available_models = available_models.into_values().collect();
         turn_context.realtime_active = self.conversation.running_state().await.is_some();
 
         if let Some(final_schema) = final_output_json_schema {

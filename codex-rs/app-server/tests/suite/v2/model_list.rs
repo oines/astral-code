@@ -170,8 +170,8 @@ async fn list_models_returns_configured_models_with_large_limit() -> Result<()> 
     assert_eq!(
         items[0].capabilities,
         ModelCapabilities {
-            context_window: Some(272_000),
-            max_context_window: Some(272_000),
+            context_window: Some(200_000),
+            max_context_window: Some(1_000_000),
             max_output_tokens: Some(32_000),
             supports_tools: Some(true),
             supports_vision: Some(false),
@@ -534,5 +534,34 @@ async fn list_models_rejects_invalid_cursor() -> Result<()> {
     assert_eq!(error.id, RequestId::Integer(request_id));
     assert_eq!(error.error.code, INVALID_REQUEST_ERROR_CODE);
     assert_eq!(error.error.message, "invalid cursor: invalid");
+    Ok(())
+}
+
+#[tokio::test]
+async fn list_models_codex_requires_login() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    let mut mcp = TestAppServer::new(codex_home.path()).await?;
+    timeout(DEFAULT_TIMEOUT, mcp.initialize()).await??;
+
+    let request_id = mcp
+        .send_list_models_request(ModelListParams {
+            limit: None,
+            cursor: None,
+            model_provider: Some("codex".to_string()),
+            include_hidden: None,
+        })
+        .await?;
+    let error: JSONRPCError = timeout(
+        DEFAULT_TIMEOUT,
+        mcp.read_stream_until_error_message(RequestId::Integer(request_id)),
+    )
+    .await??;
+
+    assert_eq!(error.id, RequestId::Integer(request_id));
+    assert_eq!(error.error.code, INVALID_REQUEST_ERROR_CODE);
+    assert_eq!(
+        error.error.message,
+        "Codex provider requires `astral login codex`"
+    );
     Ok(())
 }

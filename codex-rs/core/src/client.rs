@@ -469,10 +469,7 @@ impl ModelClientSession {
         turn_metadata_header: Option<&str>,
         inference_trace: &InferenceTraceContext,
     ) -> Result<ResponseStream> {
-        let auth_manager = provider.auth_manager();
-        let mut auth_recovery = auth_manager
-            .as_ref()
-            .map(AuthManager::unauthorized_recovery);
+        let mut auth_recovery = provider.unauthorized_recovery();
         let mut pending_retry = PendingUnauthorizedRetry::default();
         loop {
             let client_setup = self.client.current_client_setup(&provider).await?;
@@ -587,10 +584,7 @@ impl ModelClientSession {
         wire_api: WireApi,
         anthropic_cached_fold_enabled: bool,
     ) -> Result<ResponseStream> {
-        let auth_manager = provider.auth_manager();
-        let mut auth_recovery = auth_manager
-            .as_ref()
-            .map(AuthManager::unauthorized_recovery);
+        let mut auth_recovery = provider.unauthorized_recovery();
         let mut pending_retry = PendingUnauthorizedRetry::default();
         loop {
             let client_setup = self.client.current_client_setup(&provider).await?;
@@ -1064,6 +1058,7 @@ impl AuthRequestTelemetryContext {
         Self {
             auth_mode: auth_mode.map(|mode| match mode {
                 AuthMode::ApiKey => "ApiKey",
+                AuthMode::Chatgpt => "Chatgpt",
             }),
             auth_header_attached: auth_telemetry.attached,
             auth_header_name: auth_telemetry.name,

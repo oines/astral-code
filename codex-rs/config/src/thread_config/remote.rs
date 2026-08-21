@@ -4,6 +4,7 @@ use std::num::NonZeroU64;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use codex_model_provider_info::CODEX_PROVIDER_ID;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::WireApi;
 use codex_protocol::config_types::ModelProviderAuthInfo;
@@ -151,6 +152,9 @@ fn model_provider_from_proto(
         ));
     }
     let id = provider.id;
+    if id == CODEX_PROVIDER_ID {
+        return Ok((id, ModelProviderInfo::create_codex_provider()));
+    }
     let wire_api = match proto::WireApi::try_from(provider.wire_api) {
         Ok(proto::WireApi::Responses) => WireApi::Responses,
         Ok(proto::WireApi::AnthropicMessages) => WireApi::AnthropicMessages,
@@ -176,6 +180,7 @@ fn model_provider_from_proto(
             .map(model_provider_auth_from_proto)
             .transpose()?,
         aws: None,
+        managed_auth: None,
         wire_api,
         responses_builtin_tools: Default::default(),
         provider_flavor: None,
@@ -212,6 +217,7 @@ fn model_provider_to_proto(
         experimental_bearer_token,
         auth,
         aws: _,
+        managed_auth: _,
         wire_api,
         responses_builtin_tools: _,
         provider_flavor: _,
@@ -514,6 +520,7 @@ mod tests {
                 refresh_interval_ms: 300_000,
                 cwd: workspace_dir(),
             }),
+            managed_auth: None,
             wire_api: WireApi::ChatCompletions,
             responses_builtin_tools: Default::default(),
             provider_flavor: None,

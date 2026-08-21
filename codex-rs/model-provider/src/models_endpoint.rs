@@ -16,6 +16,7 @@ use codex_login::AuthManager;
 use codex_login::CodexAuth;
 use codex_login::collect_auth_env_telemetry;
 use codex_login::default_client::build_reqwest_client;
+use codex_model_provider_info::ManagedAuthKind;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_models_manager::manager::ModelsEndpointClient;
 use codex_models_manager::manager::RemoteModelCatalog;
@@ -28,6 +29,7 @@ use codex_response_debug_context::telemetry_transport_error_message;
 use http::HeaderMap;
 use tokio::time::timeout;
 
+use crate::auth::provider_info_for_request;
 use crate::auth::resolve_provider_auth;
 
 const MODELS_REFRESH_TIMEOUT: Duration = Duration::from_secs(5);
@@ -53,6 +55,11 @@ impl OpenAiModelsEndpoint {
 
     async fn auth(&self) -> Option<CodexAuth> {
         match self.auth_manager.as_ref() {
+            Some(auth_manager)
+                if self.provider_info.managed_auth == Some(ManagedAuthKind::CodexOAuth) =>
+            {
+                auth_manager.codex_oauth_auth().await
+            }
             Some(auth_manager) => auth_manager.auth().await,
             None => None,
         }
@@ -70,15 +77,25 @@ impl OpenAiModelsEndpoint {
 #[async_trait]
 impl ModelsEndpointClient for OpenAiModelsEndpoint {
     fn cache_key(&self) -> String {
-        format!(
+        let mut cache_key = format!(
             "name={};base_url={};wire_api={};env_key={};auth={};aws={}",
             self.provider_info.name,
             self.provider_info.base_url.as_deref().unwrap_or_default(),
             self.provider_info.wire_api,
             self.provider_info.env_key.as_deref().unwrap_or_default(),
             self.provider_info.auth.is_some(),
-            self.provider_info.aws.is_some()
-        )
+            self.provider_info.aws.is_some(),
+        );
+        if self.provider_info.managed_auth == Some(ManagedAuthKind::CodexOAuth) {
+            let account_id = self
+                .auth_manager
+                .as_ref()
+                .and_then(|manager| manager.codex_oauth_auth_cached())
+                .and_then(|auth| auth.get_account_id())
+                .unwrap_or_default();
+            cache_key.push_str(&format!(";account={account_id}"));
+        }
+        cache_key
     }
 
     fn has_command_auth(&self) -> bool {
@@ -88,6 +105,12 @@ impl ModelsEndpointClient for OpenAiModelsEndpoint {
     fn has_provider_auth(&self) -> bool {
         self.provider_info.experimental_bearer_token.is_some()
             || (self.provider_info.requires_astral_auth && self.auth_manager.is_some())
+            || (self.provider_info.managed_auth == Some(ManagedAuthKind::CodexOAuth)
+                && self
+                    .auth_manager
+                    .as_ref()
+                    .and_then(|manager| manager.codex_oauth_auth_cached())
+                    .is_some())
             || self
                 .provider_info
                 .env_key
@@ -98,39 +121,68 @@ impl ModelsEndpointClient for OpenAiModelsEndpoint {
     async fn list_models(&self, client_version: &str) -> CoreResult<RemoteModelCatalog> {
         let _timer =
             codex_otel::start_global_timer("codex.remote_models.fetch_update.duration_ms", &[]);
-        let auth = self.auth().await;
-        let auth_mode = auth.as_ref().map(CodexAuth::auth_mode);
-        let api_provider = self.provider_info.to_api_provider(auth_mode)?;
-        let api_auth = resolve_provider_auth(auth.as_ref(), &self.provider_info)?;
-        let transport = ReqwestTransport::new(build_reqwest_client());
-        let auth_telemetry = auth_header_telemetry(api_auth.as_ref());
-        let request_telemetry: Arc<dyn RequestTelemetry> = Arc::new(ModelsRequestTelemetry {
-            auth_mode: auth_mode.map(|mode| TelemetryAuthMode::from(mode).to_string()),
-            auth_header_attached: auth_telemetry.attached,
-            auth_header_name: auth_telemetry.name,
-            auth_env: self.auth_env(),
-        });
-        let client = ModelsClient::new(transport, api_provider, api_auth)
-            .with_telemetry(Some(request_telemetry));
+        let mut unauthorized_recovery =
+            if self.provider_info.managed_auth == Some(ManagedAuthKind::CodexOAuth) {
+                self.auth_manager
+                    .as_ref()
+                    .map(AuthManager::codex_oauth_unauthorized_recovery)
+            } else {
+                None
+            };
+        loop {
+            let auth = self.auth().await;
+            let auth_mode = auth.as_ref().map(CodexAuth::auth_mode);
+            let api_provider =
+                provider_info_for_request(&self.provider_info).to_api_provider(auth_mode)?;
+            let api_auth = resolve_provider_auth(auth.as_ref(), &self.provider_info)?;
+            let transport = ReqwestTransport::new(build_reqwest_client());
+            let auth_telemetry = auth_header_telemetry(api_auth.as_ref());
+            let request_telemetry: Arc<dyn RequestTelemetry> = Arc::new(ModelsRequestTelemetry {
+                auth_mode: auth_mode.map(|mode| TelemetryAuthMode::from(mode).to_string()),
+                auth_header_attached: auth_telemetry.attached,
+                auth_header_name: auth_telemetry.name,
+                auth_env: self.auth_env(),
+            });
+            let client = ModelsClient::new(transport, api_provider, api_auth)
+                .with_telemetry(Some(request_telemetry));
 
-        let response = timeout(
-            MODELS_REFRESH_TIMEOUT,
-            client.list_models(client_version, HeaderMap::new()),
-        )
-        .await
-        .map_err(|_| codex_protocol::error::CodexErr::Timeout)?;
-        let (models, etag) = match response {
-            Ok(result) => result,
-            Err(err) if model_catalog_unavailable(&err) => {
-                return Ok(RemoteModelCatalog::Unavailable);
-            }
-            Err(err) => return Err(map_api_error(err)),
-        };
+            let response = timeout(
+                MODELS_REFRESH_TIMEOUT,
+                client.list_models(client_version, HeaderMap::new()),
+            )
+            .await
+            .map_err(|_| codex_protocol::error::CodexErr::Timeout)?;
+            let (models, etag) = match response {
+                Ok(result) => result,
+                Err(err) => {
+                    let unauthorized = matches!(
+                        &err,
+                        ApiError::Transport(TransportError::Http { status, .. })
+                            if *status == http::StatusCode::UNAUTHORIZED
+                    );
+                    if unauthorized
+                        && let Some(recovery) = unauthorized_recovery.as_mut()
+                        && recovery.has_next()
+                    {
+                        recovery.next().await.map_err(|err| {
+                            codex_protocol::error::CodexErr::Fatal(format!(
+                                "Codex model catalog authentication recovery failed: {err}"
+                            ))
+                        })?;
+                        continue;
+                    }
+                    if model_catalog_unavailable(&err) {
+                        return Ok(RemoteModelCatalog::Unavailable);
+                    }
+                    return Err(map_api_error(err));
+                }
+            };
 
-        Ok(RemoteModelCatalog::Catalog {
-            models: enrich_provider_model_listings(models),
-            etag,
-        })
+            return Ok(RemoteModelCatalog::Catalog {
+                models: enrich_provider_model_listings(models),
+                etag,
+            });
+        }
     }
 }
 

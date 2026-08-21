@@ -34,6 +34,9 @@ const MAX_REQUEST_MAX_RETRIES: u64 = 100;
 
 const OPENAI_PROVIDER_NAME: &str = "OpenAI";
 pub const OPENAI_PROVIDER_ID: &str = "openai";
+const CODEX_PROVIDER_NAME: &str = "Codex";
+pub const CODEX_PROVIDER_ID: &str = "codex";
+pub const CHATGPT_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
 const ASTRAL_PROVIDER_NAME: &str = "Astral";
 pub const ASTRAL_PROVIDER_ID: &str = "astral";
 pub const ASTRAL_API_KEY_ENV_VAR: &str = "ASTRAL_API_KEY";
@@ -77,6 +80,12 @@ pub enum WireApi {
     /// OpenAI-compatible Chat Completions API exposed at `/v1/chat/completions`.
     #[default]
     ChatCompletions,
+}
+
+/// Built-in credential authority owned by Astral rather than user provider config.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManagedAuthKind {
+    CodexOAuth,
 }
 
 impl fmt::Display for WireApi {
@@ -229,6 +238,10 @@ pub struct ModelProviderInfo {
     pub auth: Option<ModelProviderAuthInfo>,
     /// AWS SigV4 auth configuration for this provider.
     pub aws: Option<ModelProviderAwsAuthInfo>,
+    /// Internal managed-auth binding. This is deliberately not configurable.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub managed_auth: Option<ManagedAuthKind>,
     /// Which wire protocol this provider expects.
     #[serde(default)]
     pub wire_api: WireApi,
@@ -516,6 +529,7 @@ impl ModelProviderInfo {
             experimental_bearer_token: None,
             auth: None,
             aws: None,
+            managed_auth: None,
             wire_api: WireApi::ChatCompletions,
             responses_builtin_tools: Default::default(),
             provider_flavor: None,
@@ -549,6 +563,7 @@ impl ModelProviderInfo {
             experimental_bearer_token: None,
             auth: None,
             aws: None,
+            managed_auth: None,
             wire_api: WireApi::ChatCompletions,
             responses_builtin_tools: Default::default(),
             provider_flavor: None,
@@ -571,6 +586,36 @@ impl ModelProviderInfo {
         }
     }
 
+    pub fn create_codex_provider() -> ModelProviderInfo {
+        ModelProviderInfo {
+            name: CODEX_PROVIDER_NAME.into(),
+            base_url: Some(CHATGPT_CODEX_BASE_URL.into()),
+            env_key: None,
+            env_key_instructions: None,
+            experimental_bearer_token: None,
+            auth: None,
+            aws: None,
+            managed_auth: Some(ManagedAuthKind::CodexOAuth),
+            wire_api: WireApi::Responses,
+            responses_builtin_tools: Default::default(),
+            provider_flavor: None,
+            query_params: None,
+            request_body: None,
+            request_body_remove: Vec::new(),
+            http_headers: Some(HashMap::from([(
+                "version".to_string(),
+                env!("CARGO_PKG_VERSION").to_string(),
+            )])),
+            env_http_headers: None,
+            request_max_retries: None,
+            stream_max_retries: None,
+            stream_idle_timeout_ms: None,
+            websocket_connect_timeout_ms: None,
+            requires_astral_auth: false,
+            supports_websockets: false,
+        }
+    }
+
     pub fn create_anthropic_provider() -> ModelProviderInfo {
         ModelProviderInfo {
             name: ANTHROPIC_PROVIDER_NAME.into(),
@@ -582,6 +627,7 @@ impl ModelProviderInfo {
             experimental_bearer_token: None,
             auth: None,
             aws: None,
+            managed_auth: None,
             wire_api: WireApi::AnthropicMessages,
             responses_builtin_tools: Default::default(),
             provider_flavor: None,
@@ -620,6 +666,7 @@ impl ModelProviderInfo {
                 profile: None,
                 region: None,
             })),
+            managed_auth: None,
             wire_api: WireApi::ChatCompletions,
             responses_builtin_tools: Default::default(),
             provider_flavor: None,
@@ -671,6 +718,7 @@ pub const OLLAMA_OSS_PROVIDER_ID: &str = "ollama";
 pub fn built_in_model_providers() -> HashMap<String, ModelProviderInfo> {
     use ModelProviderInfo as P;
     let astral_provider = P::create_astral_provider();
+    let codex_provider = P::create_codex_provider();
     let anthropic_provider = P::create_anthropic_provider();
     let amazon_bedrock_provider = P::create_amazon_bedrock_provider(/*aws*/ None);
 
@@ -679,6 +727,7 @@ pub fn built_in_model_providers() -> HashMap<String, ModelProviderInfo> {
     // to add their own entries under `model_providers` in config.toml.
     [
         (ASTRAL_PROVIDER_ID, astral_provider),
+        (CODEX_PROVIDER_ID, codex_provider),
         (ANTHROPIC_PROVIDER_ID, anthropic_provider),
         (AMAZON_BEDROCK_PROVIDER_ID, amazon_bedrock_provider),
         (
@@ -739,6 +788,7 @@ pub fn create_oss_provider_with_base_url(base_url: &str, wire_api: WireApi) -> M
         experimental_bearer_token: None,
         auth: None,
         aws: None,
+        managed_auth: None,
         wire_api,
         responses_builtin_tools: Default::default(),
         provider_flavor: None,

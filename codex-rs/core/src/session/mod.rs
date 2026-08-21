@@ -66,6 +66,7 @@ use codex_login::default_client::originator;
 use codex_mcp::McpConnectionManager;
 use codex_mcp::McpRuntimeContext;
 use codex_mcp::codex_apps_tools_cache_key;
+use codex_model_provider::ProviderModelsRegistry;
 use codex_models_manager::manager::RefreshStrategy;
 use codex_models_manager::manager::SharedModelsManager;
 use codex_network_proxy::NetworkProxy;
@@ -397,6 +398,7 @@ pub(crate) struct CodexSpawnArgs {
     pub(crate) installation_id: String,
     pub(crate) auth_manager: Arc<AuthManager>,
     pub(crate) models_manager: SharedModelsManager,
+    pub(crate) models_registry: Arc<ProviderModelsRegistry>,
     pub(crate) environment_manager: Arc<EnvironmentManager>,
     pub(crate) skills_manager: Arc<SkillsManager>,
     pub(crate) plugins_manager: Arc<PluginsManager>,
@@ -480,6 +482,7 @@ impl Codex {
             installation_id,
             auth_manager,
             models_manager,
+            models_registry,
             environment_manager,
             skills_manager,
             plugins_manager,
@@ -639,6 +642,7 @@ impl Codex {
             installation_id,
             auth_manager.clone(),
             models_manager.clone(),
+            models_registry,
             exec_policy,
             tx_event.clone(),
             agent_status_tx.clone(),

@@ -91,6 +91,7 @@ pub(crate) async fn run_codex_thread_interactive(
         installation_id: parent_session.installation_id.clone(),
         auth_manager,
         models_manager,
+        models_registry: Arc::clone(&parent_session.services.models_registry),
         environment_manager: parent_session
             .services
             .turn_environments

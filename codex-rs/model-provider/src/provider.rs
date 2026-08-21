@@ -6,6 +6,8 @@ use codex_api::Provider;
 use codex_api::SharedAuthProvider;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
+use codex_login::UnauthorizedRecovery;
+use codex_model_provider_info::ManagedAuthKind;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::WireApi;
 use codex_models_manager::manager::OpenAiModelsManager;
@@ -16,6 +18,7 @@ use codex_protocol::openai_models::ModelsResponse;
 
 use crate::amazon_bedrock::AmazonBedrockModelProvider;
 use crate::auth::auth_manager_for_provider;
+use crate::auth::provider_info_for_request;
 use crate::auth::resolve_provider_auth;
 use crate::models_endpoint::OpenAiModelsEndpoint;
 
@@ -46,6 +49,7 @@ impl Default for ProviderCapabilities {
 pub struct ProviderAccountState {
     pub account: Option<ProviderAccount>,
     pub requires_astral_auth: bool,
+    pub requires_openai_auth: bool,
 }
 
 /// Runtime provider abstraction used by model execution.
@@ -76,6 +80,12 @@ pub trait ModelProvider: fmt::Debug + Send + Sync {
     /// manager throughout the codebase; that is a larger refactor than this change.
     fn auth_manager(&self) -> Option<Arc<AuthManager>>;
 
+    /// Returns bounded 401 recovery for this provider's credential authority.
+    fn unauthorized_recovery(&self) -> Option<UnauthorizedRecovery> {
+        self.auth_manager()
+            .map(|manager| manager.unauthorized_recovery())
+    }
+
     /// Returns the current provider-scoped auth value, if one is configured.
     async fn auth(&self) -> Option<CodexAuth>;
 
@@ -85,7 +95,7 @@ pub trait ModelProvider: fmt::Debug + Send + Sync {
     /// Returns provider configuration adapted for the API client.
     async fn api_provider(&self) -> codex_protocol::error::Result<Provider> {
         let auth = self.auth().await;
-        self.info()
+        provider_info_for_request(self.info())
             .to_api_provider(auth.as_ref().map(CodexAuth::auth_mode))
     }
 
@@ -166,32 +176,52 @@ impl ModelProvider for ConfiguredModelProvider {
 
     async fn auth(&self) -> Option<CodexAuth> {
         match self.auth_manager.as_ref() {
+            Some(auth_manager) if self.info.managed_auth == Some(ManagedAuthKind::CodexOAuth) => {
+                auth_manager.codex_oauth_auth().await
+            }
             Some(auth_manager) => auth_manager.auth().await,
             None => None,
         }
+    }
+
+    fn unauthorized_recovery(&self) -> Option<UnauthorizedRecovery> {
+        self.auth_manager.as_ref().map(|manager| {
+            if self.info.managed_auth == Some(ManagedAuthKind::CodexOAuth) {
+                manager.codex_oauth_unauthorized_recovery()
+            } else {
+                manager.unauthorized_recovery()
+            }
+        })
     }
 
     fn account_state(&self) -> ProviderAccountState {
         let account = if self.info.api_key().ok().flatten().is_some() {
             Some(ProviderAccount::ApiKey)
         } else {
-            self.auth_manager
-                .as_ref()
-                .and_then(|auth_manager| {
-                    let auth = auth_manager.auth_cached()?;
-                    if auth_manager.refresh_failure_for_auth(&auth).is_some() {
-                        return None;
-                    }
-                    Some(auth)
-                })
-                .map(|auth| match auth {
-                    CodexAuth::ApiKey(_) => ProviderAccount::ApiKey,
-                })
+            let provider_auth = self.auth_manager.as_ref().and_then(|auth_manager| {
+                let auth = if self.info.managed_auth == Some(ManagedAuthKind::CodexOAuth) {
+                    auth_manager.codex_oauth_auth_cached()?
+                } else {
+                    auth_manager.auth_cached()?
+                };
+                if auth_manager.refresh_failure_for_auth(&auth).is_some() {
+                    return None;
+                }
+                Some(auth)
+            });
+            provider_auth.map(|auth| match auth {
+                CodexAuth::ApiKey(_) => ProviderAccount::ApiKey,
+                CodexAuth::Chatgpt(_) => ProviderAccount::Chatgpt {
+                    email: auth.account_email(),
+                    plan_type: auth.account_plan_type().unwrap_or_default(),
+                },
+            })
         };
 
         ProviderAccountState {
             account,
             requires_astral_auth: self.info.requires_astral_auth,
+            requires_openai_auth: self.info.managed_auth == Some(ManagedAuthKind::CodexOAuth),
         }
     }
 
@@ -234,6 +264,11 @@ impl ModelProvider for ConfiguredModelProvider {
 mod tests {
     use std::num::NonZeroU64;
 
+    use codex_login::AuthCredentialsStoreMode;
+    use codex_login::AuthDotJson;
+    use codex_login::TokenData;
+    use codex_login::save_codex_oauth_auth;
+    use codex_login::token_data::parse_chatgpt_jwt_claims;
     use codex_model_provider_info::ModelProviderAwsAuthInfo;
     use codex_models_manager::manager::RefreshStrategy;
     use codex_protocol::config_types::ModelProviderAuthInfo;
@@ -280,6 +315,7 @@ mod tests {
             experimental_bearer_token: None,
             auth: None,
             aws: None,
+            managed_auth: None,
             wire_api: WireApi::ChatCompletions,
             responses_builtin_tools: Default::default(),
             provider_flavor: None,
@@ -420,6 +456,7 @@ mod tests {
             ProviderAccountState {
                 account: None,
                 requires_astral_auth: false,
+                requires_openai_auth: false,
             }
         );
     }
@@ -438,6 +475,7 @@ mod tests {
             ProviderAccountState {
                 account: None,
                 requires_astral_auth: false,
+                requires_openai_auth: false,
             }
         );
     }
@@ -456,6 +494,7 @@ mod tests {
             ProviderAccountState {
                 account: None,
                 requires_astral_auth: false,
+                requires_openai_auth: false,
             }
         );
     }
@@ -478,6 +517,7 @@ mod tests {
             ProviderAccountState {
                 account: None,
                 requires_astral_auth: false,
+                requires_openai_auth: false,
             }
         );
     }
@@ -494,6 +534,7 @@ mod tests {
             ProviderAccountState {
                 account: Some(ProviderAccount::AmazonBedrock),
                 requires_astral_auth: false,
+                requires_openai_auth: false,
             }
         );
     }
@@ -598,6 +639,63 @@ mod tests {
                 .iter()
                 .any(|model| model.slug == "provider-model")
         );
+    }
+
+    #[tokio::test]
+    async fn codex_models_request_has_chatgpt_headers() -> Result<(), Box<dyn std::error::Error>> {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/models"))
+            .and(header_regex("Authorization", "Bearer codex-access"))
+            .and(header_regex("ChatGPT-Account-ID", "workspace-123"))
+            .and(header_regex("originator", "codex_cli_rs"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(ModelsResponse {
+                models: vec![remote_model("codex-model")],
+            }))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let home = test_codex_home().join("codex-oauth");
+        std::fs::create_dir_all(&home)?;
+        let id_token = concat!(
+            "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.",
+            "eyJlbWFpbCI6InVzZXJAZXhhbXBsZS5jb20iLCJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgi",
+            "OnsiY2hhdGdwdF9hY2NvdW50X2lkIjoid29ya3NwYWNlLTEyMyIsImNoYXRncHRfcGxhbl90eXBl",
+            "IjoicGx1cyJ9fQ.sig"
+        );
+        save_codex_oauth_auth(
+            &home,
+            &AuthDotJson {
+                auth_mode: Some("chatgpt".to_string()),
+                api_key: None,
+                tokens: Some(TokenData {
+                    id_token: parse_chatgpt_jwt_claims(id_token)?,
+                    access_token: "codex-access".to_string(),
+                    refresh_token: "codex-refresh".to_string(),
+                    account_id: Some("workspace-123".to_string()),
+                }),
+                last_refresh: None,
+            },
+            AuthCredentialsStoreMode::File,
+        )?;
+        let auth_manager = Arc::new(
+            AuthManager::new(
+                home.clone(),
+                /*enable_astral_api_key_env*/ false,
+                AuthCredentialsStoreMode::File,
+            )
+            .await,
+        );
+        let mut provider_info = ModelProviderInfo::create_codex_provider();
+        provider_info.base_url = Some(server.uri());
+        let provider = create_model_provider(provider_info, Some(auth_manager));
+        let manager = provider.models_manager(home, /*config_model_catalog*/ None);
+
+        let models = manager.list_models(RefreshStrategy::Online).await;
+
+        assert!(models.iter().any(|model| model.model == "codex-model"));
+        Ok(())
     }
 
     #[tokio::test]

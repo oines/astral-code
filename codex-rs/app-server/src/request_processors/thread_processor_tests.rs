@@ -606,6 +606,7 @@ mod thread_processor_behavior_tests {
             experimental_bearer_token: None,
             auth: None,
             aws: None,
+            managed_auth: None,
             wire_api: WireApi::ChatCompletions,
             responses_builtin_tools: Default::default(),
             provider_flavor: None,

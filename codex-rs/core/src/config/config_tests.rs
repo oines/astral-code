@@ -5339,7 +5339,18 @@ tool_mode = "direct"
         config
             .model_capabilities
             .as_ref()
-            .and_then(|capabilities| capabilities.lookup("mimo/mimo-v2.5"))
+            .and_then(|capabilities| capabilities.models.get("mimo/mimo-v2.5")),
+        Some(&ModelCapability {
+            tool_mode: Some(ToolMode::Direct),
+            supports_vision: Some(false),
+            ..Default::default()
+        })
+    );
+    assert_eq!(
+        config
+            .model_capability_overrides
+            .as_ref()
+            .and_then(|capabilities| capabilities.models.get("mimo/mimo-v2.5"))
             .cloned(),
         Some(ModelCapability {
             tool_mode: Some(ToolMode::CodeMode),

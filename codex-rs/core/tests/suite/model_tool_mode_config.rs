@@ -92,12 +92,13 @@ async fn configured_tool_mode_follows_the_model_selected_for_each_turn() -> Resu
         .with_auth(CodexAuth::create_dummy_api_key_auth_for_testing())
         .with_config(|config| {
             config.model = Some(DIRECT_MODEL.to_string());
-            config.model_capabilities = Some(ModelCapabilitiesCache {
+            let model_key = format!("{}/{CODE_MODE_MODEL}", config.model_provider_id);
+            config.model_capability_overrides = Some(ModelCapabilitiesCache {
                 version: 1,
                 source: "config.toml".to_string(),
                 generated_at_unix_seconds: 0,
                 models: BTreeMap::from([(
-                    CODE_MODE_MODEL.to_string(),
+                    model_key,
                     ModelCapability {
                         tool_mode: Some(ToolMode::CodeMode),
                         ..Default::default()

@@ -1,6 +1,7 @@
 use chrono::DateTime;
 use chrono::Utc;
 use codex_protocol::openai_models::ModelInfo;
+use codex_utils_path::write_atomically;
 use serde::Deserialize;
 use serde::Serialize;
 use std::io;
@@ -73,6 +74,23 @@ impl ModelsCacheManager {
         Some(cache)
     }
 
+    /// Load a cache entry for the current client version without enforcing its TTL.
+    ///
+    /// Callers use this only as a same-provider fallback after an online refresh fails.
+    pub(crate) async fn load_stale(&self, expected_version: &str) -> Option<ModelsCache> {
+        let cache = match self.load().await {
+            Ok(cache) => cache?,
+            Err(err) => {
+                error!("failed to load stale models cache: {err}");
+                return None;
+            }
+        };
+        if cache.client_version.as_deref() != Some(expected_version) {
+            return None;
+        }
+        Some(cache)
+    }
+
     /// Persist the cache to disk, creating parent directories as needed.
     pub(crate) async fn persist_cache(
         &self,
@@ -114,12 +132,12 @@ impl ModelsCacheManager {
     }
 
     async fn save_internal(&self, cache: &ModelsCache) -> io::Result<()> {
-        if let Some(parent) = self.cache_path.parent() {
-            fs::create_dir_all(parent).await?;
-        }
-        let json = serde_json::to_vec_pretty(cache)
+        let json = serde_json::to_string_pretty(cache)
             .map_err(|err| io::Error::new(ErrorKind::InvalidData, err.to_string()))?;
-        fs::write(&self.cache_path, json).await
+        let cache_path = self.cache_path.clone();
+        tokio::task::spawn_blocking(move || write_atomically(&cache_path, &json))
+            .await
+            .map_err(|err| io::Error::other(format!("models cache write task failed: {err}")))?
     }
 
     #[cfg(test)]

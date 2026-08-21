@@ -405,7 +405,7 @@ async fn provider_capability_for_bare_model_takes_precedence_over_litellm_suffix
 }
 
 #[tokio::test]
-async fn model_capability_vision_signal_overrides_global_input_modalities() {
+async fn global_input_modalities_override_model_capability_vision_signal() {
     let mut models = BTreeMap::new();
     models.insert(
         "mimo/mimo-v2.5-pro".to_string(),
@@ -429,7 +429,10 @@ async fn model_capability_vision_signal_overrides_global_input_modalities() {
 
     let model_info = manager.get_model_info("mimo-v2.5-pro", &config).await;
 
-    assert_eq!(model_info.input_modalities, vec![InputModality::Text]);
+    assert_eq!(
+        model_info.input_modalities,
+        vec![InputModality::Text, InputModality::Image]
+    );
 }
 
 #[tokio::test]

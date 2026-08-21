@@ -964,6 +964,9 @@ pub struct Config {
     /// Optional local model capability hints loaded from `model-capabilities.toml`.
     pub model_capabilities: Option<ModelCapabilitiesCache>,
 
+    /// Optional exact model capability overrides declared in `config.toml`.
+    pub model_capability_overrides: Option<ModelCapabilitiesCache>,
+
     /// Optional verbosity control for models that support provider-side verbosity hints.
     pub model_verbosity: Option<Verbosity>,
 
@@ -1408,6 +1411,7 @@ impl Config {
             model_supports_reasoning_summaries: self.model_supports_reasoning_summaries,
             model_catalog: self.model_catalog.clone(),
             model_capabilities: self.model_capabilities.clone(),
+            model_capability_overrides: self.model_capability_overrides.clone(),
         }
     }
 
@@ -1777,34 +1781,26 @@ fn load_model_capabilities_cache(
     }
 }
 
-fn merge_model_capabilities_config(
-    file_capabilities: Option<ModelCapabilitiesCache>,
+fn model_capability_overrides_from_config(
     config_capabilities: Option<ModelCapabilitiesToml>,
 ) -> Option<ModelCapabilitiesCache> {
-    let Some(config_capabilities) = config_capabilities else {
-        return file_capabilities;
-    };
+    let config_capabilities = config_capabilities?;
     if config_capabilities.is_empty() {
-        return file_capabilities;
+        return None;
     }
 
-    let mut merged = file_capabilities.unwrap_or_else(|| ModelCapabilitiesCache {
+    let mut overrides = ModelCapabilitiesCache {
         version: 1,
         source: "config.toml".to_string(),
         generated_at_unix_seconds: 0,
         models: BTreeMap::new(),
-    });
+    };
     for (model, capability) in config_capabilities {
-        merged
+        overrides
             .models
             .insert(model, model_capability_from_config(capability));
     }
-    merged.source = if merged.source == "config.toml" {
-        merged.source
-    } else {
-        format!("{} + config.toml", merged.source)
-    };
-    Some(merged)
+    Some(overrides)
 }
 
 fn model_capability_from_config(capability: ModelCapabilityToml) -> ModelCapability {
@@ -1812,7 +1808,8 @@ fn model_capability_from_config(capability: ModelCapabilityToml) -> ModelCapabil
         litellm_provider: capability.litellm_provider,
         mode: capability.mode,
         tool_mode: capability.tool_mode,
-        max_context_window: capability.max_context_window.or(capability.context_window),
+        context_window: capability.context_window,
+        max_context_window: capability.max_context_window,
         max_output_tokens: capability.max_output_tokens,
         supports_tools: capability.supports_tools,
         supports_parallel_tools: capability.supports_parallel_tools,
@@ -3494,10 +3491,10 @@ impl Config {
 
         let check_for_update_on_startup = cfg.check_for_update_on_startup.unwrap_or(true);
         let model_catalog = load_model_catalog(cfg.model_catalog_json.clone())?;
-        let model_capabilities = merge_model_capabilities_config(
-            load_model_capabilities_cache(&codex_home, &mut startup_warnings),
-            cfg.model_capabilities.clone(),
-        );
+        let model_capabilities =
+            load_model_capabilities_cache(&codex_home, &mut startup_warnings);
+        let model_capability_overrides =
+            model_capability_overrides_from_config(cfg.model_capabilities.clone());
 
         let log_dir = cfg
             .log_dir
@@ -3770,6 +3767,7 @@ impl Config {
             model_supports_reasoning_summaries: cfg.model_supports_reasoning_summaries,
             model_catalog,
             model_capabilities,
+            model_capability_overrides,
             model_verbosity: cfg.model_verbosity,
             hosted_base_url: cfg.hosted_base_url.unwrap_or_default(),
             apps_mcp_path_override,

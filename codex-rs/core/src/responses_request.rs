@@ -1,6 +1,7 @@
 use crate::client_common::Prompt;
 use crate::context_manager::strip_images_when_unsupported;
 use codex_api::Reasoning;
+use codex_api::ReasoningContext;
 use codex_api::ResponsesApiRequest;
 use codex_api::ResponsesTextControls;
 use codex_api::ResponsesTextFormat;
@@ -68,7 +69,7 @@ pub(crate) fn build_responses_request(
         input,
         tools,
         tool_choice: "auto".to_string(),
-        parallel_tool_calls: prompt.parallel_tool_calls,
+        parallel_tool_calls: prompt.parallel_tool_calls && !model_info.use_responses_lite,
         reasoning,
         store: false,
         stream: true,
@@ -177,11 +178,18 @@ fn build_reasoning(
     let summary = (model_info.supports_reasoning_summaries
         && summary != ReasoningSummaryConfig::None)
         .then(|| summary.to_string());
+    let context = model_info
+        .use_responses_lite
+        .then_some(ReasoningContext::AllTurns);
 
-    if effort.is_none() && summary.is_none() {
+    if effort.is_none() && summary.is_none() && context.is_none() {
         None
     } else {
-        Some(Reasoning { effort, summary })
+        Some(Reasoning {
+            effort,
+            summary,
+            context,
+        })
     }
 }
 

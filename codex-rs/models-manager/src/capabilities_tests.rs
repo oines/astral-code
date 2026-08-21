@@ -59,7 +59,7 @@ fn capability_cache_updates_fallback_model_metadata() {
     cache
         .lookup("vision-model")
         .expect("capability exists")
-        .apply_to_model_info(&mut model);
+        .apply_fallback_to_model_info(&mut model);
 
     assert_eq!(model.context_window, Some(65_536));
     assert_eq!(model.max_context_window, Some(65_536));

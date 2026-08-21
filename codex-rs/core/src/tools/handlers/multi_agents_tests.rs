@@ -153,7 +153,11 @@ fn add_provider_model_capability(
 
 async fn make_session_and_context_with_bundled_models()
 -> (crate::session::session::Session, TurnContext) {
-    let (mut session, turn) = make_session_and_context().await;
+    let (mut session, mut turn) = make_session_and_context().await;
+    let model_catalog = bundled_models_response().expect("bundled models.json should parse");
+    let mut config = (*turn.config).clone();
+    config.model_catalog = Some(model_catalog);
+    set_turn_config(&mut turn, config);
     session.services.models_manager = bundled_models_manager();
     (session, turn)
 }

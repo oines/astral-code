@@ -28,6 +28,7 @@ use codex_extension_api::empty_extension_registry;
 use codex_features::Feature;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
+use codex_model_provider::ProviderModelsRegistry;
 use codex_model_provider::create_model_provider;
 use codex_model_provider_info::ASTRAL_PROVIDER_ID;
 use codex_model_provider_info::ModelProviderInfo;
@@ -204,6 +205,7 @@ pub(crate) struct ThreadManagerState {
     thread_created_tx: broadcast::Sender<ThreadId>,
     auth_manager: Arc<AuthManager>,
     models_manager: SharedModelsManager,
+    models_registry: Arc<ProviderModelsRegistry>,
     environment_manager: Arc<EnvironmentManager>,
     skills_manager: Arc<SkillsManager>,
     plugins_manager: Arc<PluginsManager>,
@@ -279,11 +281,21 @@ impl ThreadManager {
             config.bundled_skills_enabled(),
             restriction_product,
         ));
+        let models_registry = Arc::new(ProviderModelsRegistry::new(
+            config.codex_home.to_path_buf(),
+            auth_manager.clone(),
+        ));
+        let models_manager = models_registry.manager_for(
+            &config.model_provider_id,
+            &config.model_provider,
+            config.model_catalog.clone(),
+        );
         Self {
             state: Arc::new(ThreadManagerState {
                 threads: Arc::new(RwLock::new(HashMap::new())),
                 thread_created_tx,
-                models_manager: build_models_manager(config, auth_manager.clone()),
+                models_manager,
+                models_registry,
                 environment_manager,
                 skills_manager,
                 plugins_manager,
@@ -374,12 +386,21 @@ impl ThreadManager {
             /*bundled_skills_enabled*/ true,
             restriction_product,
         ));
+        let models_registry = Arc::new(ProviderModelsRegistry::new(
+            codex_home.clone(),
+            auth_manager.clone(),
+        ));
+        let models_manager = models_registry.manager_for(
+            ASTRAL_PROVIDER_ID,
+            &provider,
+            /*config_model_catalog*/ None,
+        );
         // This test constructor has no Config input. Tests that need a non-local
         // process store should construct ThreadManager::new with an explicit store.
         let thread_store: Arc<dyn ThreadStore> = Arc::new(LocalThreadStore::new(
             LocalThreadStoreConfig {
                 codex_home: codex_home.clone(),
-                sqlite_home: codex_home.clone(),
+                sqlite_home: codex_home,
                 default_model_provider_id: ASTRAL_PROVIDER_ID.to_string(),
             },
             state_db.clone(),
@@ -388,8 +409,8 @@ impl ThreadManager {
             state: Arc::new(ThreadManagerState {
                 threads: Arc::new(RwLock::new(HashMap::new())),
                 thread_created_tx,
-                models_manager: create_model_provider(provider, Some(auth_manager.clone()))
-                    .models_manager(codex_home, /*config_model_catalog*/ None),
+                models_manager,
+                models_registry,
                 environment_manager,
                 skills_manager,
                 plugins_manager,
@@ -468,6 +489,18 @@ impl ThreadManager {
 
     pub fn get_models_manager(&self) -> SharedModelsManager {
         self.state.models_manager.clone()
+    }
+
+    pub fn models_manager_for_config(&self, config: &Config) -> SharedModelsManager {
+        self.state.models_registry.manager_for(
+            &config.model_provider_id,
+            &config.model_provider,
+            config.model_catalog.clone(),
+        )
+    }
+
+    pub fn invalidate_model_provider(&self, provider_id: &str) {
+        self.state.models_registry.invalidate_provider(provider_id);
     }
 
     pub async fn list_models(&self, refresh_strategy: RefreshStrategy) -> Vec<ModelPreset> {
@@ -1296,6 +1329,11 @@ impl ThreadManagerState {
         environments: Vec<TurnEnvironmentSelection>,
         user_shell_override: Option<crate::shell::Shell>,
     ) -> CodexResult<NewThread> {
+        let models_manager = self.models_registry.manager_for(
+            &config.model_provider_id,
+            &config.model_provider,
+            config.model_catalog.clone(),
+        );
         let is_resumed_thread = matches!(&initial_history, InitialHistory::Resumed(_));
         if let InitialHistory::Resumed(resumed) = &initial_history {
             let mut threads = self.threads.write().await;
@@ -1336,7 +1374,8 @@ impl ThreadManagerState {
             config,
             installation_id: self.installation_id.clone(),
             auth_manager,
-            models_manager: Arc::clone(&self.models_manager),
+            models_manager,
+            models_registry: Arc::clone(&self.models_registry),
             environment_manager: Arc::clone(&self.environment_manager),
             skills_manager: Arc::clone(&self.skills_manager),
             plugins_manager: Arc::clone(&self.plugins_manager),
