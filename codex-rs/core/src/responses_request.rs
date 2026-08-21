@@ -5,6 +5,7 @@ use codex_api::ReasoningContext;
 use codex_api::ResponsesApiRequest;
 use codex_api::ResponsesTextControls;
 use codex_api::ResponsesTextFormat;
+use codex_model_provider_info::ManagedAuthKind;
 use codex_model_provider_info::ResponsesBuiltinTools;
 use codex_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use codex_protocol::models::ContentItem;
@@ -13,9 +14,15 @@ use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::TranscriptItem;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
+use codex_tools::AdditionalProperties;
+use codex_tools::JsonSchema;
+use codex_tools::JsonSchemaPrimitiveType;
+use codex_tools::JsonSchemaType;
 use codex_tools::ResponsesApiNamespaceTool;
+use codex_tools::ResponsesApiTool;
 use codex_tools::ToolSpec;
 use codex_tools::create_tools_json_for_responses_api;
+use codex_tools::provider_neutral_tool_name_for_tool_name;
 use std::collections::BTreeSet;
 
 pub(crate) struct ResponsesRequestParams<'a> {
@@ -26,6 +33,7 @@ pub(crate) struct ResponsesRequestParams<'a> {
     pub(crate) service_tier: Option<String>,
     pub(crate) prompt_cache_key: String,
     pub(crate) builtin_tools: &'a ResponsesBuiltinTools,
+    pub(crate) managed_auth: Option<ManagedAuthKind>,
 }
 
 pub(crate) fn build_responses_request(
@@ -39,10 +47,15 @@ pub(crate) fn build_responses_request(
         service_tier,
         prompt_cache_key,
         builtin_tools,
+        managed_auth,
     } = params;
     let mut input = project_responses_input(prompt.get_formatted_input());
     strip_images_when_unsupported(&model_info.input_modalities, &mut input);
-    let tools = select_tools(&prompt.tools, builtin_tools);
+    let mut tools = select_tools(&prompt.tools, builtin_tools);
+    if managed_auth == Some(ManagedAuthKind::CodexOAuth) {
+        flatten_reserved_codex_namespaces(&mut tools);
+        relax_incompatible_strict_tools(&mut tools);
+    }
     let tools = create_tools_json_for_responses_api(&tools)
         .map_err(|err| codex_protocol::error::CodexErr::InvalidRequest(err.to_string()))?;
     let reasoning = build_reasoning(model_info, effort, summary);
@@ -78,6 +91,109 @@ pub(crate) fn build_responses_request(
         prompt_cache_key: Some(prompt_cache_key),
         text,
     })
+}
+
+fn flatten_reserved_codex_namespaces(tools: &mut Vec<ToolSpec>) {
+    let mut projected = Vec::with_capacity(tools.len());
+    for tool in tools.drain(..) {
+        match tool {
+            ToolSpec::Namespace(namespace) if namespace.name == "web" => {
+                for tool in namespace.tools {
+                    match tool {
+                        ResponsesApiNamespaceTool::Function(mut tool) => {
+                            tool.name = provider_neutral_tool_name_for_tool_name(
+                                &codex_tools::ToolName::namespaced("web", tool.name),
+                            );
+                            projected.push(ToolSpec::Function(tool));
+                        }
+                    }
+                }
+            }
+            tool => projected.push(tool),
+        }
+    }
+    *tools = projected;
+}
+
+fn relax_incompatible_strict_tools(tools: &mut [ToolSpec]) {
+    for tool in tools {
+        match tool {
+            ToolSpec::Function(tool) => relax_incompatible_strict_tool(tool),
+            ToolSpec::Namespace(namespace) => {
+                for tool in &mut namespace.tools {
+                    match tool {
+                        ResponsesApiNamespaceTool::Function(tool) => {
+                            relax_incompatible_strict_tool(tool);
+                        }
+                    }
+                }
+            }
+            ToolSpec::ToolSearch { .. }
+            | ToolSpec::ImageGeneration { .. }
+            | ToolSpec::WebSearch { .. }
+            | ToolSpec::Freeform(_) => {}
+        }
+    }
+}
+
+fn relax_incompatible_strict_tool(tool: &mut ResponsesApiTool) {
+    if tool.strict && !is_strict_compatible_tool_schema(&tool.parameters) {
+        tool.strict = false;
+    }
+}
+
+fn is_strict_compatible_tool_schema(schema: &JsonSchema) -> bool {
+    schema_is_object(schema) && is_strict_compatible_schema(schema)
+}
+
+fn schema_is_object(schema: &JsonSchema) -> bool {
+    match &schema.schema_type {
+        Some(JsonSchemaType::Single(JsonSchemaPrimitiveType::Object)) => true,
+        Some(JsonSchemaType::Multiple(types)) => types.contains(&JsonSchemaPrimitiveType::Object),
+        Some(JsonSchemaType::Single(_)) | None => schema.properties.is_some(),
+    }
+}
+
+fn is_strict_compatible_schema(schema: &JsonSchema) -> bool {
+    if schema_is_object(schema) {
+        let Some(properties) = schema.properties.as_ref() else {
+            return false;
+        };
+        let Some(required) = schema.required.as_ref() else {
+            return false;
+        };
+        if !matches!(
+            schema.additional_properties,
+            Some(AdditionalProperties::Boolean(false))
+        ) || required.len() != properties.len()
+            || properties.keys().any(|key| !required.contains(key))
+        {
+            return false;
+        }
+    }
+
+    schema
+        .properties
+        .iter()
+        .flat_map(|properties| properties.values())
+        .all(is_strict_compatible_schema)
+        && schema
+            .items
+            .as_deref()
+            .is_none_or(is_strict_compatible_schema)
+        && schema
+            .any_of
+            .iter()
+            .chain(&schema.one_of)
+            .chain(&schema.all_of)
+            .flat_map(|schemas| schemas.iter())
+            .all(is_strict_compatible_schema)
+        && schema
+            .defs
+            .iter()
+            .chain(&schema.definitions)
+            .flat_map(|schemas| schemas.values())
+            .all(is_strict_compatible_schema)
 }
 
 fn project_responses_input(input: Vec<TranscriptItem>) -> Vec<TranscriptItem> {

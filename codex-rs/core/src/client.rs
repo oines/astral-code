@@ -500,6 +500,7 @@ impl ModelClientSession {
                 service_tier: service_tier.clone(),
                 prompt_cache_key: self.client.prompt_cache_key(),
                 builtin_tools: &provider_info.responses_builtin_tools,
+                managed_auth: provider_info.managed_auth,
             })?;
             let inference_trace_attempt = inference_trace.start_attempt();
             inference_trace_attempt.add_request_headers(&mut options.extra_headers);

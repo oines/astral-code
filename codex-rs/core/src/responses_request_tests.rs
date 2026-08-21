@@ -1,9 +1,13 @@
 use super::*;
 use codex_model_provider_info::ResponsesBuiltinToolsKeyword;
+use codex_tools::AdditionalProperties;
 use codex_tools::JsonSchema;
+use codex_tools::JsonSchemaPrimitiveType;
+use codex_tools::JsonSchemaType;
 use codex_tools::ResponsesApiNamespace;
 use codex_tools::ResponsesApiNamespaceTool;
 use codex_tools::ResponsesApiTool;
+use std::collections::BTreeMap;
 
 #[test]
 fn local_compaction_projects_to_plain_user_input() {
@@ -96,6 +100,62 @@ fn provider_web_search() -> ToolSpec {
     }
 }
 
+fn strict_object_schema(required: Vec<&str>) -> JsonSchema {
+    JsonSchema {
+        schema_type: Some(JsonSchemaType::Single(JsonSchemaPrimitiveType::Object)),
+        properties: Some(BTreeMap::from([
+            ("file_path".to_string(), JsonSchema::string(None)),
+            ("limit".to_string(), JsonSchema::integer(None)),
+        ])),
+        required: Some(required.into_iter().map(str::to_string).collect()),
+        additional_properties: Some(AdditionalProperties::Boolean(false)),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn codex_oauth_relaxes_only_incompatible_strict_tools() {
+    let mut tools = vec![
+        ToolSpec::Function(ResponsesApiTool {
+            name: "Read".to_string(),
+            description: String::new(),
+            strict: true,
+            defer_loading: None,
+            parameters: strict_object_schema(vec!["file_path"]),
+            output_schema: None,
+        }),
+        ToolSpec::Function(ResponsesApiTool {
+            name: "Complete".to_string(),
+            description: String::new(),
+            strict: true,
+            defer_loading: None,
+            parameters: strict_object_schema(vec!["file_path", "limit"]),
+            output_schema: None,
+        }),
+        ToolSpec::Function(ResponsesApiTool {
+            name: "Empty".to_string(),
+            description: String::new(),
+            strict: true,
+            defer_loading: None,
+            parameters: JsonSchema::default(),
+            output_schema: None,
+        }),
+    ];
+    let mut expected = tools.clone();
+    let ToolSpec::Function(incompatible) = &mut expected[0] else {
+        unreachable!();
+    };
+    incompatible.strict = false;
+    let ToolSpec::Function(empty) = &mut expected[2] else {
+        unreachable!();
+    };
+    empty.strict = false;
+
+    relax_incompatible_strict_tools(&mut tools);
+
+    assert_eq!(tools, expected);
+}
+
 fn web_namespace() -> ToolSpec {
     ToolSpec::Namespace(ResponsesApiNamespace {
         name: "web".to_string(),
@@ -105,6 +165,22 @@ fn web_namespace() -> ToolSpec {
             ResponsesApiNamespaceTool::Function(local_api_tool("fetch")),
         ],
     })
+}
+
+#[test]
+fn codex_oauth_flattens_the_reserved_web_namespace() {
+    let mut tools = vec![web_namespace(), local_function("plain")];
+
+    flatten_reserved_codex_namespaces(&mut tools);
+
+    assert_eq!(
+        tools,
+        vec![
+            local_function("web__search"),
+            local_function("web__fetch"),
+            local_function("plain"),
+        ]
+    );
 }
 
 #[test]
