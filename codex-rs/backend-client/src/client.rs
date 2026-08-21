@@ -91,8 +91,12 @@ pub enum PathStyle {
 }
 
 impl PathStyle {
-    pub fn from_base_url(_base_url: &str) -> Self {
-        PathStyle::CodexApi
+    pub fn from_base_url(base_url: &str) -> Self {
+        if base_url.contains("/backend-api") {
+            PathStyle::HostedApi
+        } else {
+            PathStyle::CodexApi
+        }
     }
 }
 
@@ -236,14 +240,20 @@ impl Client {
     }
 
     pub async fn get_rate_limits_many(&self) -> Result<Vec<RateLimitSnapshot>> {
-        let url = match self.path_style {
-            PathStyle::CodexApi => format!("{}/api/codex/usage", self.base_url),
-            PathStyle::HostedApi => format!("{}/wham/usage", self.base_url),
-        };
+        let url = self.rate_limits_url();
         let req = self.http.get(&url).headers(self.headers());
         let (body, ct) = self.exec_request(req, "GET", &url).await?;
         let payload: RateLimitStatusPayload = self.decode_json(&url, &ct, &body)?;
         Ok(Self::rate_limit_snapshots_from_payload(payload))
+    }
+
+    fn rate_limits_url(&self) -> String {
+        match self.path_style {
+            PathStyle::CodexApi => format!("{}/api/codex/usage", self.base_url),
+            PathStyle::HostedApi => {
+                format!("{}/wham/usage", self.base_url.trim_end_matches("/codex"))
+            }
+        }
     }
 
     pub async fn get_accounts_check(&self) -> Result<AccountsCheckResponse> {
@@ -778,10 +788,18 @@ mod tests {
     }
 
     #[test]
-    fn base_url_does_not_infer_legacy_hosted_path_style() {
+    fn backend_api_base_url_uses_hosted_paths() {
         assert_eq!(
             PathStyle::from_base_url("https://hosted.example/backend-api"),
-            PathStyle::CodexApi
+            PathStyle::HostedApi
+        );
+        let client = test_client(
+            "https://chatgpt.com/backend-api/codex",
+            PathStyle::HostedApi,
+        );
+        assert_eq!(
+            client.rate_limits_url(),
+            "https://chatgpt.com/backend-api/wham/usage"
         );
     }
 

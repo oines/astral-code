@@ -8,12 +8,16 @@ use chrono::DateTime;
 use chrono::Utc;
 use codex_config::types::AuthCredentialsStoreMode;
 use codex_login::AuthDotJson;
+use codex_login::TokenData;
 use codex_login::save_auth;
+use codex_login::save_codex_oauth_auth;
+use codex_login::token_data::parse_chatgpt_jwt_claims;
 use serde_json::json;
 
 /// Builder for writing a fake legacy hosted auth.json in tests.
 #[derive(Debug, Clone)]
 pub struct ChatGptAuthFixture {
+    access_token: String,
     refresh_token: String,
     account_id: Option<String>,
     claims: ChatGptIdTokenClaims,
@@ -21,8 +25,9 @@ pub struct ChatGptAuthFixture {
 }
 
 impl ChatGptAuthFixture {
-    pub fn new(_access_token: impl Into<String>) -> Self {
+    pub fn new(access_token: impl Into<String>) -> Self {
         Self {
+            access_token: access_token.into(),
             refresh_token: "refresh-token".to_string(),
             account_id: None,
             claims: ChatGptIdTokenClaims::default(),
@@ -133,10 +138,35 @@ pub fn write_chatgpt_auth(
     let auth = AuthDotJson {
         auth_mode: Some("chatgpt".to_string()),
         api_key: None,
+        tokens: None,
         last_refresh,
     };
 
     save_auth(codex_home, &auth, cli_auth_credentials_store_mode).context("write auth.json")
+}
+
+pub fn write_codex_auth(
+    codex_home: &Path,
+    fixture: ChatGptAuthFixture,
+    cli_auth_credentials_store_mode: AuthCredentialsStoreMode,
+) -> Result<()> {
+    let last_refresh = fixture.last_refresh.unwrap_or_else(|| Some(Utc::now()));
+    let raw_id_token = encode_id_token(&fixture.claims)?;
+    let tokens = TokenData {
+        id_token: parse_chatgpt_jwt_claims(&raw_id_token)?,
+        access_token: fixture.access_token,
+        refresh_token: fixture.refresh_token,
+        account_id: fixture.account_id,
+    };
+    let auth = AuthDotJson {
+        auth_mode: Some("chatgpt".to_string()),
+        api_key: None,
+        tokens: Some(tokens),
+        last_refresh,
+    };
+
+    save_codex_oauth_auth(codex_home, &auth, cli_auth_credentials_store_mode)
+        .context("write auth/codex.json")
 }
 
 pub fn write_api_key_auth(
@@ -147,6 +177,7 @@ pub fn write_api_key_auth(
     let auth = AuthDotJson {
         auth_mode: Some("apikey".to_string()),
         api_key: Some(api_key.into()),
+        tokens: None,
         last_refresh: None,
     };
 

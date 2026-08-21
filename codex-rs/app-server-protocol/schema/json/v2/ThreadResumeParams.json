@@ -1032,6 +1032,27 @@
           "type": "object"
         },
         {
+          "description": "Provider-neutral summary produced by Astral's local compaction flows.",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "local_compaction"
+              ],
+              "title": "LocalCompactionTranscriptItemType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
+            "type"
+          ],
+          "title": "LocalCompactionTranscriptItem",
+          "type": "object"
+        },
+        {
           "properties": {
             "encrypted_content": {
               "type": "string"

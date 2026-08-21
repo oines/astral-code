@@ -64,6 +64,7 @@ fn chatgpt_auth() -> AuthDotJson {
     AuthDotJson {
         auth_mode: Some("chatgpt".to_string()),
         api_key: None,
+        tokens: None,
         last_refresh: None,
     }
 }

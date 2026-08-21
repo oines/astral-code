@@ -25,6 +25,32 @@
         },
         {
           "properties": {
+            "email": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "plan_type": {
+              "$ref": "#/definitions/PlanType"
+            },
+            "type": {
+              "enum": [
+                "chatgpt"
+              ],
+              "title": "ChatgptAccountType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "plan_type",
+            "type"
+          ],
+          "title": "ChatgptAccount",
+          "type": "object"
+        },
+        {
+          "properties": {
             "type": {
               "enum": [
                 "amazonBedrock"
@@ -41,6 +67,53 @@
         }
       ]
     },
+    "AccountLoginCompletedNotification": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "loginId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "success"
+      ],
+      "title": "AccountLoginCompletedNotification",
+      "type": "object"
+    },
+    "AccountRateLimitsUpdatedNotification": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "rateLimits": {
+          "$ref": "#/definitions/RateLimitSnapshot"
+        },
+        "rateLimitsByLimitId": {
+          "additionalProperties": {
+            "$ref": "#/definitions/RateLimitSnapshot"
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "rateLimits"
+      ],
+      "title": "AccountRateLimitsUpdatedNotification",
+      "type": "object"
+    },
     "AccountUpdatedNotification": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
@@ -48,6 +121,16 @@
           "anyOf": [
             {
               "$ref": "#/definitions/AuthMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "planType": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PlanType"
             },
             {
               "type": "null"
@@ -835,6 +918,13 @@
             "apikey"
           ],
           "type": "string"
+        },
+        {
+          "description": "ChatGPT OAuth managed and refreshed by Astral for the Codex provider.",
+          "enum": [
+            "chatgpt"
+          ],
+          "type": "string"
         }
       ]
     },
@@ -882,6 +972,39 @@
         "start"
       ],
       "type": "object"
+    },
+    "CancelLoginAccountParams": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "loginId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "loginId"
+      ],
+      "title": "CancelLoginAccountParams",
+      "type": "object"
+    },
+    "CancelLoginAccountResponse": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "status": {
+          "$ref": "#/definitions/CancelLoginAccountStatus"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "title": "CancelLoginAccountResponse",
+      "type": "object"
+    },
+    "CancelLoginAccountStatus": {
+      "enum": [
+        "canceled",
+        "notFound"
+      ],
+      "type": "string"
     },
     "ClientInfo": {
       "properties": {
@@ -2742,6 +2865,100 @@
             },
             "method": {
               "enum": [
+                "account/login/start"
+              ],
+              "title": "Account/login/startRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/LoginAccountParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Account/login/startRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "enum": [
+                "account/login/cancel"
+              ],
+              "title": "Account/login/cancelRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/CancelLoginAccountParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Account/login/cancelRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "enum": [
+                "account/logout"
+              ],
+              "title": "Account/logoutRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "id",
+            "method"
+          ],
+          "title": "Account/logoutRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "enum": [
+                "account/rateLimits/read"
+              ],
+              "title": "Account/rateLimits/readRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "id",
+            "method"
+          ],
+          "title": "Account/rateLimits/readRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "enum": [
                 "fuzzyFileSearch"
               ],
               "title": "FuzzyFileSearchRequestMethod",
@@ -4403,6 +4620,27 @@
       ],
       "type": "string"
     },
+    "CreditsSnapshot": {
+      "properties": {
+        "balance": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hasCredits": {
+          "type": "boolean"
+        },
+        "unlimited": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "hasCredits",
+        "unlimited"
+      ],
+      "type": "object"
+    },
     "DeprecationNoticeNotification": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
@@ -5738,6 +5976,28 @@
       "title": "GetAccountParams",
       "type": "object"
     },
+    "GetAccountRateLimitsResponse": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "rateLimits": {
+          "$ref": "#/definitions/RateLimitSnapshot"
+        },
+        "rateLimitsByLimitId": {
+          "additionalProperties": {
+            "$ref": "#/definitions/RateLimitSnapshot"
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "rateLimits"
+      ],
+      "title": "GetAccountRateLimitsResponse",
+      "type": "object"
+    },
     "GetAccountResponse": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
@@ -5753,10 +6013,14 @@
         },
         "requiresAstralAuth": {
           "type": "boolean"
+        },
+        "requiresOpenaiAuth": {
+          "type": "boolean"
         }
       },
       "required": [
-        "requiresAstralAuth"
+        "requiresAstralAuth",
+        "requiresOpenaiAuth"
       ],
       "title": "GetAccountResponse",
       "type": "object"
@@ -6837,6 +7101,110 @@
         "incomplete"
       ],
       "type": "string"
+    },
+    "LoginAccountParams": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "oneOf": [
+        {
+          "properties": {
+            "codexStreamlinedLogin": {
+              "type": "boolean"
+            },
+            "type": {
+              "enum": [
+                "chatgpt"
+              ],
+              "title": "Chatgptv2::LoginAccountParamsType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "Chatgptv2::LoginAccountParams",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "chatgptDeviceCode"
+              ],
+              "title": "ChatgptDeviceCodev2::LoginAccountParamsType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "ChatgptDeviceCodev2::LoginAccountParams",
+          "type": "object"
+        }
+      ],
+      "title": "LoginAccountParams"
+    },
+    "LoginAccountResponse": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "oneOf": [
+        {
+          "properties": {
+            "auth_url": {
+              "type": "string"
+            },
+            "login_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "chatgpt"
+              ],
+              "title": "Chatgptv2::LoginAccountResponseType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "auth_url",
+            "login_id",
+            "type"
+          ],
+          "title": "Chatgptv2::LoginAccountResponse",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "loginId": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "chatgptDeviceCode"
+              ],
+              "title": "ChatgptDeviceCodev2::LoginAccountResponseType",
+              "type": "string"
+            },
+            "userCode": {
+              "type": "string"
+            },
+            "verificationUrl": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "loginId",
+            "type",
+            "userCode",
+            "verificationUrl"
+          ],
+          "title": "ChatgptDeviceCodev2::LoginAccountResponse",
+          "type": "object"
+        }
+      ],
+      "title": "LoginAccountResponse"
+    },
+    "LogoutAccountResponse": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "LogoutAccountResponse",
+      "type": "object"
     },
     "ManagedHooksRequirements": {
       "properties": {
@@ -8366,6 +8734,28 @@
       "title": "PlanDeltaNotification",
       "type": "object"
     },
+    "PlanType": {
+      "enum": [
+        "free",
+        "go",
+        "plus",
+        "pro",
+        "prolite",
+        "team",
+        "self_serve_business_prolite",
+        "self_serve_business_usage_based",
+        "business",
+        "ent26",
+        "enterprise_cbp_automation",
+        "enterprise_cbp_usage_based",
+        "enterprise",
+        "edu",
+        "edu_plus",
+        "edu_pro",
+        "unknown"
+      ],
+      "type": "string"
+    },
     "PluginAuthPolicy": {
       "enum": [
         "ON_INSTALL",
@@ -9551,6 +9941,109 @@
       "required": [
         "cols",
         "rows"
+      ],
+      "type": "object"
+    },
+    "RateLimitReachedType": {
+      "enum": [
+        "rate_limit_reached",
+        "workspace_owner_credits_depleted",
+        "workspace_member_credits_depleted",
+        "workspace_owner_usage_limit_reached",
+        "workspace_member_usage_limit_reached"
+      ],
+      "type": "string"
+    },
+    "RateLimitSnapshot": {
+      "properties": {
+        "credits": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CreditsSnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "individualLimit": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SpendControlLimitSnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limitId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limitName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "primary": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RateLimitWindow"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rateLimitReachedType": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RateLimitReachedType"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "secondary": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RateLimitWindow"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "RateLimitWindow": {
+      "properties": {
+        "resetsAt": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "usedPercent": {
+          "format": "int32",
+          "type": "integer"
+        },
+        "windowDurationMins": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "usedPercent"
       ],
       "type": "object"
     },
@@ -11174,6 +11667,46 @@
           "properties": {
             "method": {
               "enum": [
+                "account/login/completed"
+              ],
+              "title": "Account/login/completedNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/AccountLoginCompletedNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "Account/login/completedNotification",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "account/rateLimits/updated"
+              ],
+              "title": "Account/rateLimits/updatedNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/AccountRateLimitsUpdatedNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "Account/rateLimits/updatedNotification",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
                 "app/list/updated"
               ],
               "title": "App/list/updatedNotificationMethod",
@@ -12182,6 +12715,31 @@
         "desc"
       ],
       "type": "string"
+    },
+    "SpendControlLimitSnapshot": {
+      "properties": {
+        "limit": {
+          "type": "string"
+        },
+        "remainingPercent": {
+          "format": "int32",
+          "type": "integer"
+        },
+        "resetsAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "used": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "limit",
+        "remainingPercent",
+        "resetsAt",
+        "used"
+      ],
+      "type": "object"
     },
     "SubAgentSource": {
       "oneOf": [
@@ -15654,6 +16212,27 @@
             "type"
           ],
           "title": "ImageGenerationCallTranscriptItem",
+          "type": "object"
+        },
+        {
+          "description": "Provider-neutral summary produced by Astral's local compaction flows.",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "local_compaction"
+              ],
+              "title": "LocalCompactionTranscriptItemType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
+            "type"
+          ],
+          "title": "LocalCompactionTranscriptItem",
           "type": "object"
         },
         {

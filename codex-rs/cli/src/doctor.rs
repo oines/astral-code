@@ -3219,6 +3219,7 @@ mod tests {
         let auth = AuthDotJson {
             auth_mode: Some("apikey".to_string()),
             api_key: None,
+            tokens: None,
             last_refresh: None,
         };
 
@@ -3234,6 +3235,7 @@ mod tests {
         let auth = AuthDotJson {
             auth_mode: None,
             api_key: None,
+            tokens: None,
             last_refresh: None,
         };
 
@@ -3249,6 +3251,7 @@ mod tests {
         let auth = AuthDotJson {
             auth_mode: None,
             api_key: None,
+            tokens: None,
             last_refresh: None,
         };
 
@@ -3261,6 +3264,7 @@ mod tests {
         let auth = AuthDotJson {
             auth_mode: Some("personalAccessToken".to_string()),
             api_key: None,
+            tokens: None,
             last_refresh: None,
         };
         assert_eq!(
@@ -3274,6 +3278,7 @@ mod tests {
         let api_key_auth = AuthDotJson {
             auth_mode: Some("apikey".to_string()),
             api_key: Some("sk-test".to_string()),
+            tokens: None,
             last_refresh: None,
         };
 

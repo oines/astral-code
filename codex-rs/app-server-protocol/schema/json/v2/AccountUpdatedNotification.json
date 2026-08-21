@@ -10,8 +10,37 @@
             "apikey"
           ],
           "type": "string"
+        },
+        {
+          "description": "ChatGPT OAuth managed and refreshed by Astral for the Codex provider.",
+          "enum": [
+            "chatgpt"
+          ],
+          "type": "string"
         }
       ]
+    },
+    "PlanType": {
+      "enum": [
+        "free",
+        "go",
+        "plus",
+        "pro",
+        "prolite",
+        "team",
+        "self_serve_business_prolite",
+        "self_serve_business_usage_based",
+        "business",
+        "ent26",
+        "enterprise_cbp_automation",
+        "enterprise_cbp_usage_based",
+        "enterprise",
+        "edu",
+        "edu_plus",
+        "edu_pro",
+        "unknown"
+      ],
+      "type": "string"
     }
   },
   "properties": {
@@ -19,6 +48,16 @@
       "anyOf": [
         {
           "$ref": "#/definitions/AuthMode"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "planType": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/PlanType"
         },
         {
           "type": "null"

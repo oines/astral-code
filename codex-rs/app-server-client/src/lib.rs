@@ -1450,6 +1450,7 @@ supports_vision = true
                     result: serde_json::to_value(GetAccountResponse {
                         account: None,
                         requires_astral_auth: false,
+                        requires_openai_auth: false,
                     })
                     .expect("response should serialize"),
                 }),
@@ -1503,6 +1504,7 @@ supports_vision = true
                     result: serde_json::to_value(GetAccountResponse {
                         account: None,
                         requires_astral_auth: false,
+                        requires_openai_auth: false,
                     })
                     .expect("response should serialize"),
                 }),
@@ -1552,6 +1554,7 @@ supports_vision = true
                     result: serde_json::json!({
                         "account": null,
                         "requiresAstralAuth": false,
+                        "requiresOpenaiAuth": false,
                         "padding": padding,
                     }),
                 }),
@@ -1578,6 +1581,7 @@ supports_vision = true
             GetAccountResponse {
                 account: None,
                 requires_astral_auth: false,
+                requires_openai_auth: false,
             }
         );
 
@@ -1679,6 +1683,7 @@ supports_vision = true
                     result: serde_json::to_value(GetAccountResponse {
                         account: None,
                         requires_astral_auth: false,
+                        requires_openai_auth: false,
                     })
                     .expect("response should serialize"),
                 }),
@@ -1732,6 +1737,7 @@ supports_vision = true
             GetAccountResponse {
                 account: None,
                 requires_astral_auth: false,
+                requires_openai_auth: false,
             }
         );
 
@@ -1747,7 +1753,10 @@ supports_vision = true
                 JSONRPCMessage::Notification(
                     serde_json::from_value(
                         serde_json::to_value(ServerNotification::AccountUpdated(
-                            AccountUpdatedNotification { auth_mode: None },
+                            AccountUpdatedNotification {
+                                auth_mode: None,
+                                plan_type: None,
+                            },
                         ))
                         .expect("notification should serialize"),
                     )

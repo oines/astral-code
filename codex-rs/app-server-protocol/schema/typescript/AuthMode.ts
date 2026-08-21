@@ -5,4 +5,4 @@
 /**
  * Authentication mode for Astral-managed credentials.
  */
-export type AuthMode = "apikey";
+export type AuthMode = "apikey" | "chatgpt";

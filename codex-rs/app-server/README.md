@@ -1760,25 +1760,31 @@ $demo-app Pull the latest updates from the team.
 
 ## Auth endpoints
 
-The JSON-RPC auth/account surface exposes read-only account state. Astral is
-BYOK: provider API keys come from `config.toml`, `ASTRAL_API_KEY`, or the active
-provider's configured auth environment. The app-server does not expose login,
-logout, billing-plan, or API-key storage endpoints.
+The JSON-RPC auth/account surface exposes provider account state plus managed
+ChatGPT OAuth for the built-in `codex` provider. Existing BYOK providers still
+read API keys from configuration or their provider-specific environment.
 
 ### Authentication modes
 
-Astral supports API-key auth for provider-managed credentials. The current mode
-is surfaced in `account/updated` (`authMode`) and can be inferred from
-`account/read`.
+The current mode is surfaced in `account/updated` (`authMode`) and can be
+inferred from `account/read`.
 
 - **API key (`apiKey`)**: The active provider found an API key in configuration
   or environment.
-- Legacy OpenAI account auth modes are not accepted by Astral.
+- **ChatGPT (`chatgpt`)**: Astral has a persisted Codex OAuth login. These
+  credentials are scoped to the built-in `codex` provider and are never sent to
+  BYOK providers.
 
 ### API Overview
 
 - `account/read` — fetch current account info; optionally refresh tokens.
-- `account/updated` (notify) — emitted whenever auth mode changes (`authMode`: `apikey` or `null`).
+- `account/login/start` — start browser (`chatgpt`) or device-code (`chatgptDeviceCode`) login.
+- `account/login/cancel` — cancel the matching active login.
+- `account/logout` — revoke and remove only the persisted Codex login.
+- `account/rateLimits/read` — read Codex quota buckets from the hosted usage endpoint.
+- `account/updated` (notify) — emitted whenever managed account state changes.
+- `account/login/completed` (notify) — reports asynchronous login completion.
+- `account/rateLimits/updated` (notify) — reports explicit quota reads and live rate-limit snapshots from model responses.
 - `mcpServer/oauthLogin/completed` (notify) — emitted after a `mcpServer/oauth/login` flow finishes for a server; payload includes `{ name, success, error? }`.
 - `mcpServer/startupStatus/updated` (notify) — emitted when a configured MCP server's startup status changes; payload includes `{ threadId, name, status, error }`, where `threadId` is the owning thread when startup is thread-scoped and `null` when it is app-scoped, and `status` is `starting`, `ready`, `failed`, or `cancelled`.
 
@@ -1793,14 +1799,17 @@ Request:
 Response examples:
 
 ```json
-{ "id": 1, "result": { "account": null, "requiresAstralAuth": false } } // Provider auth is not configured
-{ "id": 1, "result": { "account": { "type": "apiKey" }, "requiresAstralAuth": false } } // API key present via config or environment
+{ "id": 1, "result": { "account": null, "requiresAstralAuth": false, "requiresOpenaiAuth": true } } // Codex login is required
+{ "id": 1, "result": { "account": { "type": "chatgpt", "email": "user@example.com", "planType": "plus" }, "requiresAstralAuth": false, "requiresOpenaiAuth": true } }
+{ "id": 1, "result": { "account": { "type": "apiKey" }, "requiresAstralAuth": false, "requiresOpenaiAuth": false } } // BYOK provider
 ```
 
 Field notes:
 
 - `refreshToken` (bool): set `true` to force a token refresh.
-- `requiresAstralAuth` is retained for compatibility. Astral is BYOK-only, and new provider configs should report `false`; legacy configs that request Astral-managed credentials are rejected during provider validation.
+- `requiresAstralAuth` is retained for compatibility with existing clients.
+- `requiresOpenaiAuth` is `true` when the active provider is the built-in
+  `codex` provider and it requires a ChatGPT login.
 
 ## Experimental API Opt-in
 

@@ -1,0 +1,58 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "oneOf": [
+    {
+      "properties": {
+        "auth_url": {
+          "type": "string"
+        },
+        "login_id": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "chatgpt"
+          ],
+          "title": "Chatgptv2::LoginAccountResponseType",
+          "type": "string"
+        }
+      },
+      "required": [
+        "auth_url",
+        "login_id",
+        "type"
+      ],
+      "title": "Chatgptv2::LoginAccountResponse",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "loginId": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "chatgptDeviceCode"
+          ],
+          "title": "ChatgptDeviceCodev2::LoginAccountResponseType",
+          "type": "string"
+        },
+        "userCode": {
+          "type": "string"
+        },
+        "verificationUrl": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "loginId",
+        "type",
+        "userCode",
+        "verificationUrl"
+      ],
+      "title": "ChatgptDeviceCodev2::LoginAccountResponse",
+      "type": "object"
+    }
+  ],
+  "title": "LoginAccountResponse"
+}

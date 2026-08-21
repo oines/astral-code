@@ -1,4 +1,5 @@
 use crate::protocol::common::AuthMode;
+use codex_protocol::account::PlanType;
 use codex_protocol::account::ProviderAccount;
 use codex_protocol::protocol::CreditsSnapshot as CoreCreditsSnapshot;
 use codex_protocol::protocol::RateLimitReachedType as CoreRateLimitReachedType;
@@ -8,6 +9,7 @@ use codex_protocol::protocol::SpendControlLimitSnapshot as CoreSpendControlLimit
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use std::collections::HashMap;
 use ts_rs::TS;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -19,6 +21,11 @@ pub enum Account {
     #[ts(rename = "apiKey", rename_all = "camelCase")]
     ApiKey {},
 
+    Chatgpt {
+        email: Option<String>,
+        plan_type: PlanType,
+    },
+
     #[serde(rename = "amazonBedrock", rename_all = "camelCase")]
     #[ts(rename = "amazonBedrock", rename_all = "camelCase")]
     AmazonBedrock {},
@@ -28,10 +35,72 @@ impl From<ProviderAccount> for Account {
     fn from(account: ProviderAccount) -> Self {
         match account {
             ProviderAccount::ApiKey => Self::ApiKey {},
+            ProviderAccount::Chatgpt { email, plan_type } => Self::Chatgpt { email, plan_type },
             ProviderAccount::AmazonBedrock => Self::AmazonBedrock {},
         }
     }
 }
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(tag = "type")]
+#[ts(tag = "type")]
+#[ts(export_to = "v2/")]
+pub enum LoginAccountParams {
+    #[serde(rename = "chatgpt", rename_all = "camelCase")]
+    #[ts(rename = "chatgpt", rename_all = "camelCase")]
+    Chatgpt {
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        codex_streamlined_login: bool,
+    },
+    #[serde(rename = "chatgptDeviceCode")]
+    #[ts(rename = "chatgptDeviceCode")]
+    ChatgptDeviceCode,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(tag = "type", rename_all = "camelCase")]
+#[ts(tag = "type")]
+#[ts(export_to = "v2/")]
+pub enum LoginAccountResponse {
+    Chatgpt {
+        login_id: String,
+        auth_url: String,
+    },
+    #[serde(rename = "chatgptDeviceCode", rename_all = "camelCase")]
+    #[ts(rename = "chatgptDeviceCode", rename_all = "camelCase")]
+    ChatgptDeviceCode {
+        login_id: String,
+        verification_url: String,
+        user_code: String,
+    },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct CancelLoginAccountParams {
+    pub login_id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub enum CancelLoginAccountStatus {
+    Canceled,
+    NotFound,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct CancelLoginAccountResponse {
+    pub status: CancelLoginAccountStatus,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct LogoutAccountResponse {}
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
@@ -50,6 +119,7 @@ pub struct GetAccountParams {
 pub struct GetAccountResponse {
     pub account: Option<Account>,
     pub requires_astral_auth: bool,
+    pub requires_openai_auth: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -57,6 +127,32 @@ pub struct GetAccountResponse {
 #[ts(export_to = "v2/")]
 pub struct AccountUpdatedNotification {
     pub auth_mode: Option<AuthMode>,
+    pub plan_type: Option<PlanType>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct AccountLoginCompletedNotification {
+    pub login_id: Option<String>,
+    pub success: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct GetAccountRateLimitsResponse {
+    pub rate_limits: RateLimitSnapshot,
+    pub rate_limits_by_limit_id: Option<HashMap<String, RateLimitSnapshot>>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct AccountRateLimitsUpdatedNotification {
+    pub rate_limits: RateLimitSnapshot,
+    pub rate_limits_by_limit_id: Option<HashMap<String, RateLimitSnapshot>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]

@@ -21,6 +21,8 @@ use ts_rs::TS;
 pub enum AuthMode {
     /// Provider API key supplied by the caller and stored locally.
     ApiKey,
+    /// ChatGPT OAuth managed and refreshed by Astral for the Codex provider.
+    Chatgpt,
 }
 
 macro_rules! experimental_reason_expr {
@@ -1014,6 +1016,26 @@ client_request_definitions! {
         serialization: global("account-auth"),
         response: v2::GetAccountResponse,
     },
+    LoginAccount => "account/login/start" {
+        params: v2::LoginAccountParams,
+        serialization: global("account-auth"),
+        response: v2::LoginAccountResponse,
+    },
+    CancelLoginAccount => "account/login/cancel" {
+        params: v2::CancelLoginAccountParams,
+        serialization: global("account-auth"),
+        response: v2::CancelLoginAccountResponse,
+    },
+    LogoutAccount => "account/logout" {
+        params: #[ts(type = "undefined")] #[serde(skip_serializing_if = "Option::is_none")] Option<()>,
+        serialization: global("account-auth"),
+        response: v2::LogoutAccountResponse,
+    },
+    GetAccountRateLimits => "account/rateLimits/read" {
+        params: #[ts(type = "undefined")] #[serde(skip_serializing_if = "Option::is_none")] Option<()>,
+        serialization: global("account-auth"),
+        response: v2::GetAccountRateLimitsResponse,
+    },
 
     /// DEPRECATED APIs below
     GetConversationSummary {
@@ -1492,6 +1514,8 @@ server_notification_definitions! {
     McpServerOauthLoginCompleted => "mcpServer/oauthLogin/completed" (v2::McpServerOauthLoginCompletedNotification),
     McpServerStatusUpdated => "mcpServer/startupStatus/updated" (v2::McpServerStatusUpdatedNotification),
     AccountUpdated => "account/updated" (v2::AccountUpdatedNotification),
+    AccountLoginCompleted => "account/login/completed" (v2::AccountLoginCompletedNotification),
+    AccountRateLimitsUpdated => "account/rateLimits/updated" (v2::AccountRateLimitsUpdatedNotification),
     AppListUpdated => "app/list/updated" (v2::AppListUpdatedNotification),
     RemoteControlStatusChanged => "remoteControl/status/changed" (v2::RemoteControlStatusChangedNotification),
     ExternalAgentConfigImportCompleted => "externalAgentConfig/import/completed" (v2::ExternalAgentConfigImportCompletedNotification),

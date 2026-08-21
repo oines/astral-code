@@ -123,6 +123,17 @@ pub fn originator() -> Originator {
     get_originator_value(/*provided*/ None)
 }
 
+/// Returns the upstream-compatible originator for Codex OAuth and ChatGPT routes.
+/// Explicit App Server client originators pass through unchanged.
+pub fn codex_oauth_originator() -> String {
+    let originator = originator().value;
+    if originator == DEFAULT_ORIGINATOR {
+        "codex_cli_rs".to_string()
+    } else {
+        originator
+    }
+}
+
 pub fn is_first_party_originator(originator_value: &str) -> bool {
     originator_value == DEFAULT_ORIGINATOR
         || originator_value == "astral-tui"

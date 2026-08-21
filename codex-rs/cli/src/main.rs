@@ -35,6 +35,7 @@ mod app_cmd;
 mod astral_tui_launcher;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 mod doctor;
+mod login;
 mod marketplace_cmd;
 mod mcp_cmd;
 mod plugin_cmd;
@@ -119,6 +120,12 @@ enum Subcommand {
     /// Run a code review non-interactively.
     Review(ReviewCommand),
 
+    /// Sign in to a managed model provider.
+    Login(LoginCommand),
+
+    /// Sign out of a managed model provider.
+    Logout(LogoutCommand),
+
     /// Manage external MCP servers for Astral.
     Mcp(McpCli),
 
@@ -183,6 +190,39 @@ enum Subcommand {
 
     /// Inspect feature flags.
     Features(FeaturesCli),
+}
+
+#[derive(Debug, Parser)]
+struct LoginCommand {
+    #[command(subcommand)]
+    subcommand: LoginSubcommand,
+}
+
+#[derive(Debug, clap::Subcommand)]
+enum LoginSubcommand {
+    /// Sign in with a ChatGPT/Codex account.
+    Codex(CodexLoginArgs),
+    /// Show the current Codex login state.
+    Status,
+}
+
+#[derive(Debug, Args)]
+struct CodexLoginArgs {
+    /// Use device authorization instead of a localhost browser callback.
+    #[arg(long)]
+    device_auth: bool,
+}
+
+#[derive(Debug, Parser)]
+struct LogoutCommand {
+    #[command(subcommand)]
+    subcommand: LogoutSubcommand,
+}
+
+#[derive(Debug, clap::Subcommand)]
+enum LogoutSubcommand {
+    /// Revoke and remove only the persisted Codex login.
+    Codex,
 }
 
 #[derive(Debug, Parser)]
@@ -943,6 +983,33 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                 root_config_overrides.clone(),
             );
             codex_exec::run_main(exec_cli, arg0_paths.clone()).await?;
+        }
+        Some(Subcommand::Login(login_cli)) => {
+            reject_remote_mode_for_subcommand(
+                root_remote.as_deref(),
+                root_remote_auth_token_env.as_deref(),
+                "login",
+            )?;
+            match login_cli.subcommand {
+                LoginSubcommand::Codex(args) => {
+                    login::login_codex(root_config_overrides, args.device_auth).await?;
+                }
+                LoginSubcommand::Status => {
+                    login::login_status(root_config_overrides).await;
+                }
+            }
+        }
+        Some(Subcommand::Logout(logout_cli)) => {
+            reject_remote_mode_for_subcommand(
+                root_remote.as_deref(),
+                root_remote_auth_token_env.as_deref(),
+                "logout",
+            )?;
+            match logout_cli.subcommand {
+                LogoutSubcommand::Codex => {
+                    login::logout_codex(root_config_overrides).await?;
+                }
+            }
         }
         Some(Subcommand::McpServer(McpServerCommand { strict_config })) => {
             reject_remote_mode_for_subcommand(
@@ -1913,6 +1980,8 @@ fn unsupported_subcommand_name_for_strict_config(
         }
         Some(Subcommand::RemoteControl(remote_control)) => Some(remote_control.subcommand_name()),
         Some(Subcommand::Mcp(_)) => Some("mcp"),
+        Some(Subcommand::Login(_)) => Some("login"),
+        Some(Subcommand::Logout(_)) => Some("logout"),
         Some(Subcommand::Plugin(_)) => Some("plugin"),
         #[cfg(any(target_os = "macos", target_os = "windows"))]
         Some(Subcommand::App(_)) => Some("app"),
@@ -2287,6 +2356,45 @@ mod tests {
     use codex_protocol::ThreadId;
     use codex_tui::TokenUsage;
     use pretty_assertions::assert_eq;
+
+    #[test]
+    fn codex_login_commands_parse() {
+        let browser = MultitoolCli::try_parse_from(["astral", "login", "codex"])
+            .expect("parse browser login");
+        assert_matches!(
+            browser.subcommand,
+            Some(Subcommand::Login(LoginCommand {
+                subcommand: LoginSubcommand::Codex(CodexLoginArgs { device_auth: false })
+            }))
+        );
+
+        let device = MultitoolCli::try_parse_from(["astral", "login", "codex", "--device-auth"])
+            .expect("parse device login");
+        assert_matches!(
+            device.subcommand,
+            Some(Subcommand::Login(LoginCommand {
+                subcommand: LoginSubcommand::Codex(CodexLoginArgs { device_auth: true })
+            }))
+        );
+
+        let status = MultitoolCli::try_parse_from(["astral", "login", "status"])
+            .expect("parse login status");
+        assert_matches!(
+            status.subcommand,
+            Some(Subcommand::Login(LoginCommand {
+                subcommand: LoginSubcommand::Status
+            }))
+        );
+
+        let logout = MultitoolCli::try_parse_from(["astral", "logout", "codex"])
+            .expect("parse Codex logout");
+        assert_matches!(
+            logout.subcommand,
+            Some(Subcommand::Logout(LogoutCommand {
+                subcommand: LogoutSubcommand::Codex
+            }))
+        );
+    }
 
     #[test]
     fn exec_server_remote_auth_accepts_api_key_auth() {

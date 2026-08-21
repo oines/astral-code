@@ -74,6 +74,7 @@ fn logout_removes_auth_file() -> Result<(), std::io::Error> {
     let auth_dot_json = AuthDotJson {
         auth_mode: Some("apikey".to_string()),
         api_key: Some("sk-test-key".to_string()),
+        tokens: None,
         last_refresh: None,
     };
     super::save_auth(dir.path(), &auth_dot_json, AuthCredentialsStoreMode::File)?;
@@ -101,6 +102,8 @@ async fn unauthorized_recovery_reports_mode_and_step_names() {
         manager,
         step: UnauthorizedRecoveryStep::ExternalRefresh,
         mode: UnauthorizedRecoveryMode::External,
+        expected_account_id: None,
+        expected_access_token: None,
     };
     assert_eq!(external.mode_name(), "external");
     assert_eq!(external.step_name(), "external_refresh");

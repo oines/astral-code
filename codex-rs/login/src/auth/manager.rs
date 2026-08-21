@@ -1,4 +1,6 @@
 use async_trait::async_trait;
+use chrono::DateTime;
+use chrono::Utc;
 #[cfg(test)]
 use serial_test::serial;
 use std::env;
@@ -12,11 +14,14 @@ use tokio::sync::watch;
 
 use codex_app_server_protocol::AuthMode;
 use codex_app_server_protocol::AuthMode as ApiAuthMode;
+use codex_protocol::account::PlanType as AccountPlanType;
 use codex_protocol::config_types::ModelProviderAuthInfo;
 
+use super::codex_oauth::CodexOAuthManager;
 use super::external_bearer::BearerTokenRefresher;
 pub use crate::auth::storage::AuthDotJson;
 use crate::auth::storage::create_auth_storage;
+use crate::token_data::TokenData;
 use codex_config::types::AuthCredentialsStoreMode;
 use codex_protocol::auth::RefreshTokenFailedError;
 use codex_protocol::auth::RefreshTokenFailedReason;
@@ -26,12 +31,15 @@ use thiserror::Error;
 #[derive(Debug, Clone)]
 pub enum CodexAuth {
     ApiKey(ApiKeyAuth),
+    Chatgpt(ChatgptAuth),
 }
 
 impl PartialEq for CodexAuth {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::ApiKey(a), Self::ApiKey(b)) => a.api_key == b.api_key,
+            (Self::Chatgpt(a), Self::Chatgpt(b)) => a == b,
+            _ => false,
         }
     }
 }
@@ -39,6 +47,30 @@ impl PartialEq for CodexAuth {
 #[derive(Debug, Clone)]
 pub struct ApiKeyAuth {
     api_key: String,
+}
+
+#[derive(Clone, PartialEq)]
+pub struct ChatgptAuth {
+    tokens: TokenData,
+    last_refresh: Option<DateTime<Utc>>,
+}
+
+impl Debug for ChatgptAuth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ChatgptAuth")
+            .field("tokens", &self.tokens)
+            .field("last_refresh", &self.last_refresh)
+            .finish()
+    }
+}
+
+impl ChatgptAuth {
+    pub(crate) fn new(tokens: TokenData, last_refresh: Option<DateTime<Utc>>) -> Self {
+        Self {
+            tokens,
+            last_refresh,
+        }
+    }
 }
 
 const UNSUPPORTED_LEGACY_HOSTED_AUTH_MESSAGE: &str =
@@ -151,12 +183,14 @@ impl CodexAuth {
     pub fn auth_mode(&self) -> AuthMode {
         match self {
             Self::ApiKey(_) => AuthMode::ApiKey,
+            Self::Chatgpt(_) => AuthMode::Chatgpt,
         }
     }
 
     pub fn api_auth_mode(&self) -> ApiAuthMode {
         match self {
             Self::ApiKey(_) => ApiAuthMode::ApiKey,
+            Self::Chatgpt(_) => ApiAuthMode::Chatgpt,
         }
     }
 
@@ -168,6 +202,7 @@ impl CodexAuth {
     pub fn api_key(&self) -> Option<&str> {
         match self {
             Self::ApiKey(auth) => Some(auth.api_key.as_str()),
+            Self::Chatgpt(_) => None,
         }
     }
 
@@ -175,6 +210,35 @@ impl CodexAuth {
     pub fn get_token(&self) -> Result<String, std::io::Error> {
         match self {
             Self::ApiKey(auth) => Ok(auth.api_key.clone()),
+            Self::Chatgpt(auth) => Ok(auth.tokens.access_token.clone()),
+        }
+    }
+
+    pub fn get_account_id(&self) -> Option<String> {
+        self.current_token_data()
+            .and_then(|tokens| tokens.account_id.or(tokens.id_token.chatgpt_account_id))
+    }
+
+    pub fn is_fedramp_account(&self) -> bool {
+        self.current_token_data()
+            .is_some_and(|tokens| tokens.id_token.is_fedramp_account())
+    }
+
+    pub fn account_email(&self) -> Option<String> {
+        self.current_token_data()
+            .and_then(|tokens| tokens.id_token.email)
+    }
+
+    pub fn account_plan_type(&self) -> Option<AccountPlanType> {
+        self.current_token_data()
+            .and_then(|tokens| tokens.id_token.chatgpt_plan_type)
+            .map(Into::into)
+    }
+
+    pub fn current_token_data(&self) -> Option<TokenData> {
+        match self {
+            Self::Chatgpt(auth) => Some(auth.tokens.clone()),
+            Self::ApiKey(_) => None,
         }
     }
 
@@ -187,6 +251,10 @@ impl CodexAuth {
         Self::ApiKey(ApiKeyAuth {
             api_key: api_key.to_owned(),
         })
+    }
+
+    pub(crate) fn from_chatgpt_auth(auth: ChatgptAuth) -> Self {
+        Self::Chatgpt(auth)
     }
 }
 
@@ -331,6 +399,8 @@ impl Debug for CachedAuth {
 }
 
 enum UnauthorizedRecoveryStep {
+    ReloadCodexOAuth,
+    RefreshCodexOAuth,
     ExternalRefresh,
     Done,
 }
@@ -348,6 +418,8 @@ pub struct UnauthorizedRecovery {
     manager: Arc<AuthManager>,
     step: UnauthorizedRecoveryStep,
     mode: UnauthorizedRecoveryMode,
+    expected_account_id: Option<String>,
+    expected_access_token: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -376,6 +448,21 @@ impl UnauthorizedRecovery {
             manager,
             step,
             mode,
+            expected_account_id: None,
+            expected_access_token: None,
+        }
+    }
+
+    fn new_codex_oauth(manager: Arc<AuthManager>) -> Self {
+        let auth = manager.codex_oauth_auth_cached();
+        Self {
+            manager,
+            step: UnauthorizedRecoveryStep::ReloadCodexOAuth,
+            mode: UnauthorizedRecoveryMode::Managed,
+            expected_account_id: auth.as_ref().and_then(CodexAuth::get_account_id),
+            expected_access_token: auth
+                .and_then(|auth| auth.current_token_data())
+                .map(|tokens| tokens.access_token),
         }
     }
 
@@ -385,7 +472,10 @@ impl UnauthorizedRecovery {
                 self.manager.has_external_api_key_auth()
                     && !matches!(self.step, UnauthorizedRecoveryStep::Done)
             }
-            UnauthorizedRecoveryMode::Managed => false,
+            UnauthorizedRecoveryMode::Managed => {
+                self.manager.codex_oauth_auth_cached().is_some()
+                    && !matches!(self.step, UnauthorizedRecoveryStep::Done)
+            }
         }
     }
 
@@ -404,6 +494,9 @@ impl UnauthorizedRecovery {
                 "ready"
             }
             UnauthorizedRecoveryMode::Managed => {
+                if self.manager.codex_oauth_auth_cached().is_none() {
+                    return "not_refreshable_auth";
+                }
                 if matches!(self.step, UnauthorizedRecoveryStep::Done) {
                     return "recovery_exhausted";
                 }
@@ -421,6 +514,8 @@ impl UnauthorizedRecovery {
 
     pub fn step_name(&self) -> &'static str {
         match self.step {
+            UnauthorizedRecoveryStep::ReloadCodexOAuth => "reload",
+            UnauthorizedRecoveryStep::RefreshCodexOAuth => "refresh_token",
             UnauthorizedRecoveryStep::ExternalRefresh => "external_refresh",
             UnauthorizedRecoveryStep::Done => "done",
         }
@@ -435,6 +530,41 @@ impl UnauthorizedRecovery {
         }
 
         match self.step {
+            UnauthorizedRecoveryStep::ReloadCodexOAuth => {
+                let changed = self.manager.reload_codex_oauth().await;
+                let current_account_id = self
+                    .manager
+                    .codex_oauth_auth_cached()
+                    .as_ref()
+                    .and_then(CodexAuth::get_account_id);
+                if current_account_id != self.expected_account_id {
+                    self.step = UnauthorizedRecoveryStep::Done;
+                    return Err(RefreshTokenError::Permanent(RefreshTokenFailedError::new(
+                        RefreshTokenFailedReason::Other,
+                        "Codex account changed while recovering authentication. Retry with the current account.",
+                    )));
+                }
+                self.step = if changed {
+                    UnauthorizedRecoveryStep::Done
+                } else {
+                    UnauthorizedRecoveryStep::RefreshCodexOAuth
+                };
+                Ok(UnauthorizedRecoveryStepResult {
+                    auth_state_changed: Some(changed),
+                })
+            }
+            UnauthorizedRecoveryStep::RefreshCodexOAuth => {
+                self.manager
+                    .refresh_codex_oauth_from_authority_if_unchanged(
+                        self.expected_account_id.as_deref(),
+                        self.expected_access_token.as_deref(),
+                    )
+                    .await?;
+                self.step = UnauthorizedRecoveryStep::Done;
+                Ok(UnauthorizedRecoveryStepResult {
+                    auth_state_changed: Some(true),
+                })
+            }
             UnauthorizedRecoveryStep::ExternalRefresh => {
                 self.manager
                     .refresh_external_auth(ExternalAuthRefreshReason::Unauthorized)
@@ -467,6 +597,7 @@ pub struct AuthManager {
     auth_credentials_store_mode: AuthCredentialsStoreMode,
     refresh_lock: Semaphore,
     external_auth: RwLock<Option<Arc<dyn ExternalAuth>>>,
+    codex_oauth: Arc<CodexOAuthManager>,
 }
 
 /// Configuration view required to construct a shared [`AuthManager`].
@@ -516,6 +647,8 @@ impl AuthManager {
         .await
         .ok()
         .flatten();
+        let codex_oauth =
+            Arc::new(CodexOAuthManager::new(codex_home.clone(), auth_credentials_store_mode).await);
         let (auth_change_tx, _auth_change_rx) = watch::channel(0);
         Self {
             codex_home,
@@ -525,6 +658,7 @@ impl AuthManager {
             auth_credentials_store_mode,
             refresh_lock: Semaphore::new(/*permits*/ 1),
             external_auth: RwLock::new(None),
+            codex_oauth,
         }
     }
 
@@ -541,6 +675,7 @@ impl AuthManager {
             auth_credentials_store_mode: AuthCredentialsStoreMode::File,
             refresh_lock: Semaphore::new(/*permits*/ 1),
             external_auth: RwLock::new(None),
+            codex_oauth: Arc::new(CodexOAuthManager::empty_for_testing()),
         })
     }
 
@@ -556,6 +691,7 @@ impl AuthManager {
             auth_credentials_store_mode: AuthCredentialsStoreMode::File,
             refresh_lock: Semaphore::new(/*permits*/ 1),
             external_auth: RwLock::new(None),
+            codex_oauth: Arc::new(CodexOAuthManager::empty_for_testing()),
         })
     }
 
@@ -571,6 +707,7 @@ impl AuthManager {
             external_auth: RwLock::new(Some(
                 Arc::new(BearerTokenRefresher::new(config)) as Arc<dyn ExternalAuth>
             )),
+            codex_oauth: Arc::new(CodexOAuthManager::empty_for_testing()),
         })
     }
 
@@ -585,7 +722,10 @@ impl AuthManager {
     }
 
     pub fn refresh_failure_for_auth(&self, _auth: &CodexAuth) -> Option<RefreshTokenFailedError> {
-        None
+        match _auth {
+            CodexAuth::Chatgpt(_) => self.codex_oauth.refresh_failure_for_auth(_auth),
+            CodexAuth::ApiKey(_) => None,
+        }
     }
 
     /// Current cached auth (clone). May be `None` if not logged in or load failed.
@@ -610,6 +750,9 @@ impl AuthManager {
             (None, None) => true,
             (Some(a), Some(b)) => match (a.api_auth_mode(), b.api_auth_mode()) {
                 (ApiAuthMode::ApiKey, ApiAuthMode::ApiKey) => a.api_key() == b.api_key(),
+                (ApiAuthMode::Chatgpt, ApiAuthMode::Chatgpt) => a == b,
+                (ApiAuthMode::ApiKey, ApiAuthMode::Chatgpt)
+                | (ApiAuthMode::Chatgpt, ApiAuthMode::ApiKey) => false,
             },
             _ => false,
         }
@@ -702,6 +845,48 @@ impl AuthManager {
 
     pub fn unauthorized_recovery(self: &Arc<Self>) -> UnauthorizedRecovery {
         UnauthorizedRecovery::new(Arc::clone(self))
+    }
+
+    pub fn codex_oauth_unauthorized_recovery(self: &Arc<Self>) -> UnauthorizedRecovery {
+        UnauthorizedRecovery::new_codex_oauth(Arc::clone(self))
+    }
+
+    pub fn codex_oauth_auth_cached(&self) -> Option<CodexAuth> {
+        self.codex_oauth.auth_cached()
+    }
+
+    pub async fn codex_oauth_auth(&self) -> Option<CodexAuth> {
+        self.codex_oauth.auth().await
+    }
+
+    pub async fn reload_codex_oauth(&self) -> bool {
+        let changed = self.codex_oauth.reload().await;
+        if changed {
+            self.auth_change_tx.send_modify(|revision| *revision += 1);
+        }
+        changed
+    }
+
+    pub async fn refresh_codex_oauth_from_authority(&self) -> Result<(), RefreshTokenError> {
+        self.codex_oauth.refresh_from_authority().await
+    }
+
+    async fn refresh_codex_oauth_from_authority_if_unchanged(
+        &self,
+        expected_account_id: Option<&str>,
+        expected_access_token: Option<&str>,
+    ) -> Result<(), RefreshTokenError> {
+        self.codex_oauth
+            .refresh_from_authority_if_unchanged(expected_account_id, expected_access_token)
+            .await
+    }
+
+    pub async fn logout_codex_oauth(&self) -> std::io::Result<bool> {
+        let removed = self.codex_oauth.logout_with_revoke().await?;
+        if removed {
+            self.auth_change_tx.send_modify(|revision| *revision += 1);
+        }
+        Ok(removed)
     }
 
     fn external_auth(&self) -> Option<Arc<dyn ExternalAuth>> {

@@ -162,6 +162,17 @@
       ],
       "type": "object"
     },
+    "CancelLoginAccountParams": {
+      "properties": {
+        "loginId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "loginId"
+      ],
+      "type": "object"
+    },
     "ClientInfo": {
       "properties": {
         "name": {
@@ -1249,6 +1260,45 @@
         "incomplete"
       ],
       "type": "string"
+    },
+    "LoginAccountParams": {
+      "oneOf": [
+        {
+          "properties": {
+            "codexStreamlinedLogin": {
+              "type": "boolean"
+            },
+            "type": {
+              "enum": [
+                "chatgpt"
+              ],
+              "title": "ChatgptLoginAccountParamsType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "ChatgptLoginAccountParams",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "chatgptDeviceCode"
+              ],
+              "title": "ChatgptDeviceCodeLoginAccountParamsType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "ChatgptDeviceCodeLoginAccountParams",
+          "type": "object"
+        }
+      ]
     },
     "MarketplaceAddParams": {
       "properties": {
@@ -3802,6 +3852,27 @@
           "type": "object"
         },
         {
+          "description": "Provider-neutral summary produced by Astral's local compaction flows.",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "local_compaction"
+              ],
+              "title": "LocalCompactionTranscriptItemType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
+            "type"
+          ],
+          "title": "LocalCompactionTranscriptItem",
+          "type": "object"
+        },
+        {
           "properties": {
             "encrypted_content": {
               "type": "string"
@@ -6080,6 +6151,100 @@
         "params"
       ],
       "title": "Account/readRequest",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "enum": [
+            "account/login/start"
+          ],
+          "title": "Account/login/startRequestMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/LoginAccountParams"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "title": "Account/login/startRequest",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "enum": [
+            "account/login/cancel"
+          ],
+          "title": "Account/login/cancelRequestMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/CancelLoginAccountParams"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "title": "Account/login/cancelRequest",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "enum": [
+            "account/logout"
+          ],
+          "title": "Account/logoutRequestMethod",
+          "type": "string"
+        },
+        "params": {
+          "type": "null"
+        }
+      },
+      "required": [
+        "id",
+        "method"
+      ],
+      "title": "Account/logoutRequest",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "enum": [
+            "account/rateLimits/read"
+          ],
+          "title": "Account/rateLimits/readRequestMethod",
+          "type": "string"
+        },
+        "params": {
+          "type": "null"
+        }
+      },
+      "required": [
+        "id",
+        "method"
+      ],
+      "title": "Account/rateLimits/readRequest",
       "type": "object"
     },
     {

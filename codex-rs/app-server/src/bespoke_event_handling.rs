@@ -11,6 +11,7 @@ use crate::thread_state::TurnSummary;
 use crate::thread_state::resolve_server_request_on_thread_listener;
 use crate::thread_status::ThreadWatchActiveGuard;
 use crate::thread_status::ThreadWatchManager;
+use codex_app_server_protocol::AccountRateLimitsUpdatedNotification;
 use codex_app_server_protocol::AdditionalPermissionProfile as V2AdditionalPermissionProfile;
 use codex_app_server_protocol::CodexErrorInfo as V2CodexErrorInfo;
 use codex_app_server_protocol::CommandAction as V2ParsedCommand;
@@ -1591,10 +1592,7 @@ async fn handle_token_count_event(
     token_count_event: TokenCountEvent,
     outgoing: &ThreadScopedOutgoingMessageSender,
 ) {
-    let TokenCountEvent {
-        info,
-        rate_limits: _,
-    } = token_count_event;
+    let TokenCountEvent { info, rate_limits } = token_count_event;
     if let Some(token_usage) = info.map(ThreadTokenUsage::from) {
         let notification = ThreadTokenUsageUpdatedNotification {
             thread_id: conversation_id.to_string(),
@@ -1603,6 +1601,21 @@ async fn handle_token_count_event(
         };
         outgoing
             .send_server_notification(ServerNotification::ThreadTokenUsageUpdated(notification))
+            .await;
+    }
+    if let Some(rate_limits) = rate_limits {
+        let rate_limits = codex_app_server_protocol::RateLimitSnapshot::from(rate_limits);
+        let rate_limits_by_limit_id = rate_limits
+            .limit_id
+            .as_ref()
+            .map(|limit_id| HashMap::from([(limit_id.clone(), rate_limits.clone())]));
+        outgoing
+            .send_server_notification(ServerNotification::AccountRateLimitsUpdated(
+                AccountRateLimitsUpdatedNotification {
+                    rate_limits,
+                    rate_limits_by_limit_id,
+                },
+            ))
             .await;
     }
 }
@@ -3512,7 +3525,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_handle_token_count_event_emits_usage() -> Result<()> {
+    async fn test_handle_token_count_event_emits_usage_and_rate_limits() -> Result<()> {
         let conversation_id = ThreadId::new();
         let turn_id = "turn-123".to_string();
         let (tx, mut rx) = mpsc::channel(CHANNEL_CAPACITY);
@@ -3584,6 +3597,22 @@ mod tests {
                 assert_eq!(usage.total.cached_input_tokens, 25);
                 assert_eq!(usage.last.output_tokens, 7);
                 assert_eq!(usage.model_context_window, Some(4096));
+            }
+            other => bail!("unexpected notification: {other:?}"),
+        }
+        let second = recv_broadcast_message(&mut rx).await?;
+        match second {
+            OutgoingMessage::AppServerNotification(
+                ServerNotification::AccountRateLimitsUpdated(payload),
+            ) => {
+                assert_eq!(payload.rate_limits.limit_id.as_deref(), Some("codex"));
+                assert_eq!(
+                    payload
+                        .rate_limits_by_limit_id
+                        .as_ref()
+                        .and_then(|limits| limits.get("codex")),
+                    Some(&payload.rate_limits)
+                );
             }
             other => bail!("unexpected notification: {other:?}"),
         }

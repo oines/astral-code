@@ -4,12 +4,14 @@ use app_test_support::to_response;
 
 use app_test_support::ChatGptAuthFixture;
 use app_test_support::write_chatgpt_auth;
+use app_test_support::write_codex_auth;
 use codex_app_server_protocol::Account;
 use codex_app_server_protocol::GetAccountParams;
 use codex_app_server_protocol::GetAccountResponse;
 use codex_app_server_protocol::JSONRPCResponse;
 use codex_app_server_protocol::RequestId;
 use codex_config::types::AuthCredentialsStoreMode;
+use codex_protocol::account::PlanType;
 use pretty_assertions::assert_eq;
 use std::path::Path;
 use tempfile::TempDir;
@@ -135,6 +137,7 @@ async fn get_account_with_api_key() -> Result<()> {
     let expected = GetAccountResponse {
         account: Some(Account::ApiKey {}),
         requires_astral_auth: false,
+        requires_openai_auth: false,
     };
     assert_eq!(received, expected);
     Ok(())
@@ -168,6 +171,7 @@ async fn get_account_when_auth_not_required() -> Result<()> {
     let expected = GetAccountResponse {
         account: None,
         requires_astral_auth: false,
+        requires_openai_auth: false,
     };
     assert_eq!(received, expected);
     Ok(())
@@ -209,6 +213,7 @@ region = "us-west-2"
     let expected = GetAccountResponse {
         account: None,
         requires_astral_auth: false,
+        requires_openai_auth: false,
     };
     assert_eq!(received, expected);
     Ok(())
@@ -249,7 +254,55 @@ async fn get_account_omits_managed_auth() -> Result<()> {
     let expected = GetAccountResponse {
         account: None,
         requires_astral_auth: false,
+        requires_openai_auth: false,
     };
     assert_eq!(received, expected);
+    Ok(())
+}
+
+#[tokio::test]
+async fn get_account_restores_persisted_codex_login() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    create_config_toml(
+        codex_home.path(),
+        CreateConfigTomlParams {
+            model_provider_id: Some("codex".to_string()),
+            ..Default::default()
+        },
+    )?;
+    write_codex_auth(
+        codex_home.path(),
+        ChatGptAuthFixture::new("access-chatgpt")
+            .email("user@example.com")
+            .account_id("account-123")
+            .chatgpt_account_id("account-123"),
+        AuthCredentialsStoreMode::File,
+    )?;
+
+    let mut mcp = TestAppServer::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+
+    let request_id = mcp
+        .send_get_account_request(GetAccountParams {
+            refresh_token: false,
+        })
+        .await?;
+    let response: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+    )
+    .await??;
+
+    assert_eq!(
+        to_response::<GetAccountResponse>(response)?,
+        GetAccountResponse {
+            account: Some(Account::Chatgpt {
+                email: Some("user@example.com".to_string()),
+                plan_type: PlanType::Free,
+            }),
+            requires_astral_auth: false,
+            requires_openai_auth: true,
+        }
+    );
     Ok(())
 }

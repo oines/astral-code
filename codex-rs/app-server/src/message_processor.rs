@@ -261,8 +261,12 @@ impl MessageProcessor {
         let thread_list_state_permit = Arc::new(Semaphore::new(/*permits*/ 1));
         let workspace_settings_cache = Arc::new(workspace_settings::WorkspaceSettingsCache);
         let app_list_shutdown_token = CancellationToken::new();
-        let account_processor =
-            AccountRequestProcessor::new(auth_manager.clone(), Arc::clone(&config));
+        let account_processor = AccountRequestProcessor::new(
+            auth_manager.clone(),
+            outgoing.clone(),
+            Arc::clone(&thread_manager),
+            Arc::clone(&config),
+        );
         let apps_processor = AppsRequestProcessor::new(
             auth_manager.clone(),
             Arc::clone(&thread_manager),
@@ -1210,6 +1214,18 @@ impl MessageProcessor {
             }
             ClientRequest::GetAccount { params, .. } => {
                 self.account_processor.get_account(params).await
+            }
+            ClientRequest::LoginAccount { params, .. } => {
+                self.account_processor.login_account(params).await
+            }
+            ClientRequest::CancelLoginAccount { params, .. } => {
+                self.account_processor.cancel_login_account(params).await
+            }
+            ClientRequest::LogoutAccount { params: _, .. } => {
+                self.account_processor.logout_account().await
+            }
+            ClientRequest::GetAccountRateLimits { params: _, .. } => {
+                self.account_processor.get_account_rate_limits().await
             }
             ClientRequest::GetAuthStatus { params, .. } => {
                 self.account_processor.get_auth_status(params).await
