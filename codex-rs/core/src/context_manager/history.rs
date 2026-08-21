@@ -403,6 +403,7 @@ impl ContextManager {
             | TranscriptItem::WebSearchCall { .. }
             | TranscriptItem::ImageGenerationCall { .. }
             | TranscriptItem::CustomToolCall { .. }
+            | TranscriptItem::LocalCompaction { .. }
             | TranscriptItem::Compaction { .. }
             | TranscriptItem::CompactionTrigger
             | TranscriptItem::ContextCompaction { .. }
@@ -494,6 +495,7 @@ fn is_api_message(message: &TranscriptItem) -> bool {
         | TranscriptItem::Reasoning { .. }
         | TranscriptItem::WebSearchCall { .. }
         | TranscriptItem::ImageGenerationCall { .. }
+        | TranscriptItem::LocalCompaction { .. }
         | TranscriptItem::Compaction { .. }
         | TranscriptItem::ContextCompaction { .. } => true,
         TranscriptItem::CompactionTrigger => false,
@@ -552,6 +554,7 @@ fn estimate_response_item_model_visible_bytes(item: &TranscriptItem) -> i64 {
         | TranscriptItem::ContextCompaction {
             encrypted_content: Some(content),
         } => i64::try_from(estimate_reasoning_length(content.len())).unwrap_or(i64::MAX),
+        TranscriptItem::LocalCompaction { text } => i64::try_from(text.len()).unwrap_or(i64::MAX),
         item => {
             let raw = serde_json::to_string(item)
                 .map(|serialized| i64::try_from(serialized.len()).unwrap_or(i64::MAX))
@@ -724,6 +727,7 @@ fn is_model_generated_item(item: &TranscriptItem) -> bool {
         | TranscriptItem::ImageGenerationCall { .. }
         | TranscriptItem::CustomToolCall { .. }
         | TranscriptItem::LocalShellCall { .. }
+        | TranscriptItem::LocalCompaction { .. }
         | TranscriptItem::Compaction { .. }
         | TranscriptItem::ContextCompaction { .. } => true,
         TranscriptItem::CompactionTrigger => false,

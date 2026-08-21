@@ -897,6 +897,10 @@ pub enum TranscriptItem {
         revised_prompt: Option<String>,
         result: String,
     },
+    /// Provider-neutral summary produced by Astral's local compaction flows.
+    LocalCompaction {
+        text: String,
+    },
     #[serde(alias = "compaction_summary")]
     Compaction {
         encrypted_content: String,
@@ -2543,6 +2547,24 @@ mod tests {
                 encrypted_content: "abc".into(),
             }
         );
+        Ok(())
+    }
+
+    #[test]
+    fn round_trips_local_compaction() -> Result<()> {
+        let item = TranscriptItem::LocalCompaction {
+            text: "local summary".into(),
+        };
+
+        let value = serde_json::to_value(&item)?;
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "type": "local_compaction",
+                "text": "local summary",
+            })
+        );
+        assert_eq!(serde_json::from_value::<TranscriptItem>(value)?, item);
         Ok(())
     }
 

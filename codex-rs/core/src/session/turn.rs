@@ -32,6 +32,7 @@ use crate::mentions::collect_explicit_app_ids;
 use crate::mentions::collect_explicit_plugin_mentions;
 use crate::mentions::collect_tool_mentions_from_messages;
 use crate::plugins::build_plugin_injections;
+use crate::responses_request::strip_responses_encrypted_state;
 use crate::responses_retry::ResponsesStreamRequest;
 use crate::responses_retry::handle_retryable_response_stream_error;
 use crate::session::PreviousTurnSettings;
@@ -72,6 +73,7 @@ use codex_extension_api::TurnInputContext;
 use codex_extension_api::TurnInputEnvironment;
 use codex_features::Feature;
 use codex_git_utils::get_git_repo_root_with_fs;
+use codex_model_provider_info::WireApi;
 use codex_protocol::config_types::AutoCompactTokenLimitScope;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::ServiceTier;
@@ -88,11 +90,13 @@ use codex_protocol::models::TranscriptItem;
 use codex_protocol::protocol::AgentMessageContentDeltaEvent;
 use codex_protocol::protocol::AgentReasoningSectionBreakEvent;
 use codex_protocol::protocol::CodexErrorInfo;
+use codex_protocol::protocol::CompactedItem;
 use codex_protocol::protocol::ErrorEvent;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::PlanDeltaEvent;
 use codex_protocol::protocol::ReasoningContentDeltaEvent;
 use codex_protocol::protocol::ReasoningRawContentDeltaEvent;
+use codex_protocol::protocol::RolloutItem;
 use codex_protocol::protocol::TurnDiffEvent;
 use codex_protocol::protocol::WarningEvent;
 use codex_protocol::user_input::UserInput;
@@ -1006,6 +1010,7 @@ async fn run_sampling_request(
     );
     let max_retries = turn_context.provider.info().stream_max_retries();
     let mut retries = 0;
+    let mut invalid_encrypted_content_retried = false;
     let mut initial_input = Some(input);
     loop {
         let prompt_input = if let Some(input) = initial_input.take() {
@@ -1059,6 +1064,22 @@ async fn run_sampling_request(
             Err(err) => err,
         };
 
+        if !invalid_encrypted_content_retried
+            && turn_context.provider.info().wire_api == WireApi::Responses
+            && is_invalid_encrypted_content_error(&err)
+        {
+            invalid_encrypted_content_retried = true;
+            let removed = reset_responses_encrypted_history(&sess, turn_context.as_ref()).await;
+            if removed > 0 {
+                warn!(
+                    removed_items = removed,
+                    "retrying Responses request after invalid encrypted content"
+                );
+                initial_input = None;
+                continue;
+            }
+        }
+
         if !err.is_retryable() {
             return Err(err);
         }
@@ -1075,6 +1096,38 @@ async fn run_sampling_request(
         .await?;
         turn_context.turn_timing_state.record_sampling_retry();
     }
+}
+
+fn is_invalid_encrypted_content_error(err: &CodexErr) -> bool {
+    const CODE: &str = "invalid_encrypted_content";
+    match err {
+        CodexErr::InvalidRequest(message) | CodexErr::Stream(message, _) => message.contains(CODE),
+        CodexErr::UnexpectedStatus(response) => response.body.contains(CODE),
+        _ => false,
+    }
+}
+
+async fn reset_responses_encrypted_history(sess: &Session, turn_context: &TurnContext) -> usize {
+    let history = sess.clone_history().await.into_raw_items();
+    let (clean_history, removed) = strip_responses_encrypted_state(history);
+    if removed == 0 {
+        return 0;
+    }
+
+    let reference_context_item = sess.reference_context_item().await;
+    sess.replace_history(clean_history.clone(), reference_context_item.clone())
+        .await;
+
+    let mut rollout_items = vec![RolloutItem::Compacted(CompactedItem {
+        message: "responses state reset: invalid_encrypted_content".to_string(),
+        replacement_history: Some(clean_history),
+    })];
+    if let Some(reference_context_item) = reference_context_item {
+        rollout_items.push(RolloutItem::TurnContext(reference_context_item));
+    }
+    sess.persist_rollout_items(&rollout_items).await;
+    sess.recompute_token_usage(turn_context).await;
+    removed
 }
 
 #[instrument(level = "trace",
@@ -1922,6 +1975,7 @@ async fn try_run_sampling_request(
                     | TranscriptItem::ToolSearchOutput { .. }
                     | TranscriptItem::WebSearchCall { .. }
                     | TranscriptItem::ImageGenerationCall { .. }
+                    | TranscriptItem::LocalCompaction { .. }
                     | TranscriptItem::Compaction { .. }
                     | TranscriptItem::CompactionTrigger
                     | TranscriptItem::ContextCompaction { .. }

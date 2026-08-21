@@ -6,6 +6,10 @@ use codex_api::ResponsesTextControls;
 use codex_api::ResponsesTextFormat;
 use codex_model_provider_info::ResponsesBuiltinTools;
 use codex_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
+use codex_protocol::models::ContentItem;
+use codex_protocol::models::FunctionCallOutputBody;
+use codex_protocol::models::FunctionCallOutputContentItem;
+use codex_protocol::models::TranscriptItem;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
 use codex_tools::ResponsesApiNamespaceTool;
@@ -35,7 +39,7 @@ pub(crate) fn build_responses_request(
         prompt_cache_key,
         builtin_tools,
     } = params;
-    let mut input = prompt.get_formatted_input();
+    let mut input = project_responses_input(prompt.get_formatted_input());
     strip_images_when_unsupported(&model_info.input_modalities, &mut input);
     let tools = select_tools(&prompt.tools, builtin_tools);
     let tools = create_tools_json_for_responses_api(&tools)
@@ -73,6 +77,90 @@ pub(crate) fn build_responses_request(
         prompt_cache_key: Some(prompt_cache_key),
         text,
     })
+}
+
+fn project_responses_input(input: Vec<TranscriptItem>) -> Vec<TranscriptItem> {
+    input
+        .into_iter()
+        .map(|item| match item {
+            TranscriptItem::LocalCompaction { text } => TranscriptItem::Message {
+                id: None,
+                role: "user".to_string(),
+                content: vec![ContentItem::InputText { text }],
+                phase: None,
+            },
+            item => item,
+        })
+        .collect()
+}
+
+pub(crate) fn strip_responses_encrypted_state(
+    input: Vec<TranscriptItem>,
+) -> (Vec<TranscriptItem>, usize) {
+    let mut removed = 0usize;
+    let input = input
+        .into_iter()
+        .filter_map(|item| match item {
+            TranscriptItem::Reasoning {
+                encrypted_content: Some(_),
+                ..
+            }
+            | TranscriptItem::Compaction { .. }
+            | TranscriptItem::ContextCompaction {
+                encrypted_content: Some(_),
+            } => {
+                removed += 1;
+                None
+            }
+            TranscriptItem::AgentMessage { content, .. }
+                if content.iter().any(|content| {
+                    matches!(
+                        content,
+                        codex_protocol::models::AgentMessageInputContent::EncryptedContent { .. }
+                    )
+                }) =>
+            {
+                removed += 1;
+                None
+            }
+            TranscriptItem::FunctionCallOutput {
+                call_id,
+                mut output,
+            } => {
+                removed += strip_encrypted_tool_output(&mut output.body);
+                Some(TranscriptItem::FunctionCallOutput { call_id, output })
+            }
+            TranscriptItem::CustomToolCallOutput {
+                call_id,
+                name,
+                mut output,
+            } => {
+                removed += strip_encrypted_tool_output(&mut output.body);
+                Some(TranscriptItem::CustomToolCallOutput {
+                    call_id,
+                    name,
+                    output,
+                })
+            }
+            item => Some(item),
+        })
+        .collect();
+    (input, removed)
+}
+
+fn strip_encrypted_tool_output(output: &mut FunctionCallOutputBody) -> usize {
+    let FunctionCallOutputBody::ContentItems(items) = output else {
+        return 0;
+    };
+    let original_len = items.len();
+    items.retain(|item| !matches!(item, FunctionCallOutputContentItem::EncryptedContent { .. }));
+    let removed = original_len.saturating_sub(items.len());
+    if removed > 0 && items.is_empty() {
+        *output = FunctionCallOutputBody::Text(
+            "[encrypted tool output unavailable after provider state reset]".to_string(),
+        );
+    }
+    removed
 }
 
 fn build_reasoning(

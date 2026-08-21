@@ -1156,6 +1156,7 @@ impl SessionTelemetry {
             TranscriptItem::CustomToolCallOutput { .. } => "custom_tool_call_output".into(),
             TranscriptItem::WebSearchCall { .. } => "web_search_call".into(),
             TranscriptItem::ImageGenerationCall { .. } => "image_generation_call".into(),
+            TranscriptItem::LocalCompaction { .. } => "local_compaction".into(),
             TranscriptItem::Compaction { .. } => "compaction".into(),
             TranscriptItem::CompactionTrigger => "compaction_trigger".into(),
             TranscriptItem::ContextCompaction { .. } => "context_compaction".into(),

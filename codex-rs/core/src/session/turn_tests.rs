@@ -35,6 +35,16 @@ fn assistant_output_text(text: &str) -> TranscriptItem {
     }
 }
 
+#[test]
+fn encrypted_content_recovery_matches_only_the_exact_error_code() {
+    assert!(is_invalid_encrypted_content_error(
+        &CodexErr::InvalidRequest(r#"{"error":{"code":"invalid_encrypted_content"}}"#.to_string(),)
+    ));
+    assert!(!is_invalid_encrypted_content_error(
+        &CodexErr::InvalidRequest(r#"{"error":{"code":"invalid_request_error"}}"#.to_string(),)
+    ));
+}
+
 #[tokio::test]
 async fn plan_mode_uses_contributed_turn_item_for_last_agent_message() {
     let (mut session, turn_context) = crate::session::tests::make_session_and_context().await;

@@ -34,8 +34,10 @@ use core_test_support::responses::ev_response_created;
 use core_test_support::responses::ev_web_search_call_added_partial;
 use core_test_support::responses::ev_web_search_call_done;
 use core_test_support::responses::mount_responses_sse_once;
+use core_test_support::responses::mount_responses_sse_sequence;
 use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::sse;
+use core_test_support::responses::sse_failed;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::TestCodex;
@@ -279,6 +281,87 @@ async fn reasoning_item_is_emitted() -> anyhow::Result<()> {
         completed.raw_content.join(""),
         "Detailed reasoning traceConsider inputsCompute output"
     );
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn responses_invalid_encrypted_content_resets_state_and_retries_once() -> anyhow::Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = start_mock_server().await;
+    let model_provider = responses_api_model_provider(&server);
+    let TestCodex {
+        codex,
+        session_configured,
+        ..
+    } = test_codex()
+        .with_config(move |config| {
+            config.model_provider = model_provider;
+        })
+        .build(&server)
+        .await?;
+
+    let responses = mount_responses_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_reasoning_item("reasoning-1", &["thinking"], &[]),
+                ev_assistant_message("message-1", "first turn complete"),
+                ev_completed("resp-1"),
+            ]),
+            sse_failed(
+                "resp-2",
+                "invalid_encrypted_content",
+                "The encrypted content could not be verified.",
+            ),
+            sse(vec![
+                ev_response_created("resp-3"),
+                ev_reasoning_item("reasoning-3", &["fresh thinking"], &[]),
+                ev_assistant_message("message-3", "recovered"),
+                ev_completed("resp-3"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-4"),
+                ev_assistant_message("message-4", "follow-up complete"),
+                ev_completed("resp-4"),
+            ]),
+        ],
+    )
+    .await;
+
+    for text in ["first turn", "second turn", "third turn"] {
+        codex
+            .submit(Op::UserInput {
+                items: vec![UserInput::Text {
+                    text: text.to_string(),
+                    text_elements: Vec::new(),
+                }],
+                final_output_json_schema: None,
+                model_client_metadata: None,
+                additional_context: Default::default(),
+                thread_settings: Default::default(),
+            })
+            .await?;
+        wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+    }
+
+    let requests = responses.requests();
+    assert_eq!(requests.len(), 4);
+    assert_eq!(requests[1].inputs_of_type("reasoning").len(), 1);
+    assert!(requests[2].inputs_of_type("reasoning").is_empty());
+    assert_eq!(requests[3].inputs_of_type("reasoning").len(), 1);
+    assert!(requests[2].body_contains_text("first turn"));
+    assert!(requests[2].body_contains_text("first turn complete"));
+    assert!(requests[2].body_contains_text("second turn"));
+
+    let rollout_path = session_configured
+        .rollout_path
+        .as_ref()
+        .expect("rollout path");
+    let rollout = std::fs::read_to_string(rollout_path)?;
+    assert!(rollout.contains("responses state reset: invalid_encrypted_content"));
 
     Ok(())
 }

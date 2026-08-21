@@ -236,6 +236,7 @@ fn recent_images(history: &[TranscriptItem], count: usize) -> Vec<ImageUrl> {
             | TranscriptItem::ToolSearchOutput { .. }
             | TranscriptItem::WebSearchCall { .. }
             | TranscriptItem::ImageGenerationCall { .. }
+            | TranscriptItem::LocalCompaction { .. }
             | TranscriptItem::Compaction { .. }
             | TranscriptItem::CompactionTrigger
             | TranscriptItem::ContextCompaction { .. }
@@ -277,6 +278,7 @@ fn recent_images(history: &[TranscriptItem], count: usize) -> Vec<ImageUrl> {
             | TranscriptItem::ToolSearchOutput { .. }
             | TranscriptItem::WebSearchCall { .. }
             | TranscriptItem::ImageGenerationCall { .. }
+            | TranscriptItem::LocalCompaction { .. }
             | TranscriptItem::Compaction { .. }
             | TranscriptItem::CompactionTrigger
             | TranscriptItem::ContextCompaction { .. }

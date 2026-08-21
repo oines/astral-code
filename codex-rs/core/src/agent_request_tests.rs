@@ -129,8 +129,8 @@ fn build_agent_request_maps_prompt_history_tools_and_metadata() {
                     success: Some(true),
                 },
             },
-            TranscriptItem::Compaction {
-                encrypted_content: "compacted summary".to_string(),
+            TranscriptItem::LocalCompaction {
+                text: "compacted summary".to_string(),
             },
         ],
         tools: vec![bash_tool_spec()],

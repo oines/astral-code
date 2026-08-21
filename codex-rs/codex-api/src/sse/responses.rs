@@ -341,6 +341,16 @@ pub fn process_responses_event(
                     } else if is_cyber_policy_error(&error) {
                         let message = cyber_policy_message(error.message);
                         response_error = ApiError::CyberPolicy { message };
+                    } else if is_invalid_encrypted_content_error(&error) {
+                        let message = error
+                            .message
+                            .unwrap_or_else(|| "Invalid encrypted content.".to_string());
+                        let message = if message.contains("invalid_encrypted_content") {
+                            message
+                        } else {
+                            format!("[invalid_encrypted_content] {message}")
+                        };
+                        response_error = ApiError::InvalidRequest { message };
                     } else if is_invalid_prompt_error(&error) {
                         let message = error
                             .message
@@ -508,6 +518,14 @@ pub async fn process_sse(
             }
         };
     }
+}
+
+fn is_invalid_encrypted_content_error(error: &Error) -> bool {
+    error.code.as_deref() == Some("invalid_encrypted_content")
+        || error
+            .message
+            .as_deref()
+            .is_some_and(|message| message.contains("invalid_encrypted_content"))
 }
 
 fn try_parse_retry_after(err: &Error) -> Option<Duration> {
@@ -980,6 +998,25 @@ mod tests {
                 assert_eq!(
                     message,
                     "Invalid prompt: we've limited access to this content for safety reasons."
+                );
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn invalid_encrypted_content_code_is_preserved_for_recovery() {
+        let raw_error = r#"{"type":"response.failed","response":{"id":"resp-invalid-encrypted","error":{"code":"invalid_encrypted_content","message":"The encrypted content could not be verified."}}}"#;
+        let sse1 = format!("event: response.failed\ndata: {raw_error}\n\n");
+
+        let events = collect_events(&[sse1.as_bytes()]).await;
+
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            Err(ApiError::InvalidRequest { message }) => {
+                assert_eq!(
+                    message,
+                    "[invalid_encrypted_content] The encrypted content could not be verified."
                 );
             }
             other => panic!("unexpected event: {other:?}"),

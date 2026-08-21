@@ -217,7 +217,7 @@ fn build_token_limited_compacted_history_truncates_overlong_user_messages() {
     );
 
     let summary_text = match summary_message {
-        TranscriptItem::Compaction { encrypted_content } => encrypted_content.clone(),
+        TranscriptItem::LocalCompaction { text } => text.clone(),
         other => panic!("unexpected item in history: {other:?}"),
     };
     assert_eq!(summary_text, "SUMMARY");
@@ -237,7 +237,7 @@ fn build_token_limited_compacted_history_appends_compaction_summary() {
 
     let last = history.last().expect("history should have a summary entry");
     let summary = match last {
-        TranscriptItem::Compaction { encrypted_content } => encrypted_content.clone(),
+        TranscriptItem::LocalCompaction { text } => text.clone(),
         other => panic!("expected compaction summary, found {other:?}"),
     };
     assert_eq!(summary, summary_text);
@@ -598,8 +598,8 @@ fn insert_initial_context_before_last_real_user_or_summary_keeps_summary_last() 
 
 #[test]
 fn insert_initial_context_before_last_real_user_or_summary_keeps_compaction_last() {
-    let compacted_history = vec![TranscriptItem::Compaction {
-        encrypted_content: "encrypted".to_string(),
+    let compacted_history = vec![TranscriptItem::LocalCompaction {
+        text: "summary".to_string(),
     }];
     let initial_context = vec![TranscriptItem::Message {
         id: None,
@@ -621,8 +621,8 @@ fn insert_initial_context_before_last_real_user_or_summary_keeps_compaction_last
             }],
             phase: None,
         },
-        TranscriptItem::Compaction {
-            encrypted_content: "encrypted".to_string(),
+        TranscriptItem::LocalCompaction {
+            text: "summary".to_string(),
         },
     ];
     assert_eq!(refreshed, expected);

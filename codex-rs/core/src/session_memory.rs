@@ -494,8 +494,11 @@ async fn try_compact_inner(
         .iter()
         .enumerate()
         .find_map(|(index, item)| {
-            matches!(item, TranscriptItem::Compaction { .. })
-                .then(|| (index, tail::item_fingerprint(item)))
+            matches!(
+                item,
+                TranscriptItem::LocalCompaction { .. } | TranscriptItem::Compaction { .. }
+            )
+            .then(|| (index, tail::item_fingerprint(item)))
         })
         .ok_or_else(|| {
             CodexErr::Fatal("session memory compacted history has no summary boundary".to_string())
@@ -650,9 +653,7 @@ fn build_session_memory_compacted_history(
     tail: Vec<TranscriptItem>,
     summary_text: String,
 ) -> Vec<TranscriptItem> {
-    let mut history = vec![TranscriptItem::Compaction {
-        encrypted_content: summary_text,
-    }];
+    let mut history = vec![TranscriptItem::LocalCompaction { text: summary_text }];
     history.extend(tail);
     history
 }

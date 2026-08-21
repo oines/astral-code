@@ -377,6 +377,7 @@ fn response_item_records_turn_ttft(item: &TranscriptItem) -> bool {
         | TranscriptItem::ToolSearchCall { .. }
         | TranscriptItem::WebSearchCall { .. }
         | TranscriptItem::ImageGenerationCall { .. }
+        | TranscriptItem::LocalCompaction { .. }
         | TranscriptItem::Compaction { .. }
         | TranscriptItem::ContextCompaction { .. } => true,
         TranscriptItem::CompactionTrigger => false,

@@ -138,7 +138,9 @@ fn is_reinjectable_context_item(item: &TranscriptItem) -> bool {
         TranscriptItem::Message { role, content, .. } if role == "user" => {
             is_contextual_user_message_content(content)
         }
-        TranscriptItem::Compaction { .. } | TranscriptItem::ContextCompaction { .. } => true,
+        TranscriptItem::LocalCompaction { .. }
+        | TranscriptItem::Compaction { .. }
+        | TranscriptItem::ContextCompaction { .. } => true,
         TranscriptItem::Message { .. }
         | TranscriptItem::AgentMessage { .. }
         | TranscriptItem::Reasoning { .. }
@@ -576,6 +578,8 @@ pub(super) fn item_fingerprint(item: &TranscriptItem) -> String {
 fn is_compaction_boundary(item: &TranscriptItem) -> bool {
     matches!(
         item,
-        TranscriptItem::Compaction { .. } | TranscriptItem::ContextCompaction { .. }
+        TranscriptItem::LocalCompaction { .. }
+            | TranscriptItem::Compaction { .. }
+            | TranscriptItem::ContextCompaction { .. }
     )
 }

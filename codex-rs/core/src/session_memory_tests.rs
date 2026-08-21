@@ -219,8 +219,8 @@ fn session_memory_compacted_history_places_summary_before_tail() {
 
     let history = build_session_memory_compacted_history(tail.clone(), "summary".to_string());
 
-    let mut expected = vec![TranscriptItem::Compaction {
-        encrypted_content: "summary".to_string(),
+    let mut expected = vec![TranscriptItem::LocalCompaction {
+        text: "summary".to_string(),
     }];
     expected.extend(tail);
     assert_eq!(history, expected);
@@ -230,8 +230,8 @@ fn session_memory_compacted_history_places_summary_before_tail() {
 fn session_memory_compacted_history_allows_empty_tail() {
     let history = build_session_memory_compacted_history(Vec::new(), "summary".to_string());
 
-    let expected = vec![TranscriptItem::Compaction {
-        encrypted_content: "summary".to_string(),
+    let expected = vec![TranscriptItem::LocalCompaction {
+        text: "summary".to_string(),
     }];
     assert_eq!(history, expected);
 }

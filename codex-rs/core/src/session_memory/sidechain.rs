@@ -367,6 +367,7 @@ async fn handle_sidechain_item(
         | TranscriptItem::ToolSearchOutput { .. }
         | TranscriptItem::WebSearchCall { .. }
         | TranscriptItem::ImageGenerationCall { .. }
+        | TranscriptItem::LocalCompaction { .. }
         | TranscriptItem::Compaction { .. }
         | TranscriptItem::CompactionTrigger
         | TranscriptItem::ContextCompaction { .. }
