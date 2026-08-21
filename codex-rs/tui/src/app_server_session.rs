@@ -282,6 +282,13 @@ impl AppServerSession {
                 FeedbackAudience::External,
                 false,
             ),
+            Some(Account::Chatgpt { email, .. }) => (
+                email.clone(),
+                Some(TelemetryAuthMode::Chatgpt),
+                Some(StatusAccountDisplay::Chatgpt { email }),
+                FeedbackAudience::External,
+                true,
+            ),
             Some(Account::AmazonBedrock {}) => {
                 (None, None, None, FeedbackAudience::External, false)
             }
@@ -1143,7 +1150,10 @@ fn thread_realtime_start_params(
 pub(crate) fn status_account_display_from_auth_mode(
     auth_mode: Option<AuthMode>,
 ) -> Option<StatusAccountDisplay> {
-    auth_mode.map(|AuthMode::ApiKey| StatusAccountDisplay::ApiKey)
+    auth_mode.map(|auth_mode| match auth_mode {
+        AuthMode::ApiKey => StatusAccountDisplay::ApiKey,
+        AuthMode::Chatgpt => StatusAccountDisplay::Chatgpt { email: None },
+    })
 }
 
 fn model_preset_from_api_model(model: ApiModel) -> ModelPreset {

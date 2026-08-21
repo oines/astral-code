@@ -32,6 +32,7 @@ pub(crate) struct ModelSuggestion {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ModelResolveError {
     UnknownModel(String),
+    AmbiguousModel(String),
     UnsupportedEffort { model: String, effort: String },
 }
 
@@ -39,6 +40,12 @@ impl std::fmt::Display for ModelResolveError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::UnknownModel(model) => write!(formatter, "Unknown model: {model}"),
+            Self::AmbiguousModel(model) => {
+                write!(
+                    formatter,
+                    "Model name is ambiguous; use provider/model: {model}"
+                )
+            }
             Self::UnsupportedEffort { model, effort } => {
                 write!(
                     formatter,
@@ -94,8 +101,9 @@ impl ModelCatalog {
 
     pub(crate) fn suggestions(&self, args_query: &str) -> Vec<ModelSuggestion> {
         if let Some((model, effort_query)) = self.effort_phase(args_query) {
+            let qualified = qualified_model_name(model);
             return self.effort_suggestions_for(model, effort_query, |effort| {
-                format!("/model {} {effort}", model.display_name)
+                format!("/model {qualified} {effort}")
             });
         }
 
@@ -120,12 +128,15 @@ impl ModelCatalog {
             .into_iter()
             .map(|(model, _, current, _)| ModelSuggestion {
                 display: if current {
-                    format!("{} (current)", model.display_name)
+                    format!(
+                        "{} · {} (current)",
+                        model.display_name, model.model_provider_name
+                    )
                 } else {
-                    model.display_name.clone()
+                    format!("{} · {}", model.display_name, model.model_provider_name)
                 },
                 description: model.description.clone(),
-                insert_text: format!("/model {} ", model.display_name),
+                insert_text: format!("/model {} ", qualified_model_name(model)),
             })
             .collect()
     }
@@ -151,17 +162,27 @@ impl ModelCatalog {
 
     pub(crate) fn resolve(&self, args: &str) -> Result<ModelSelection, ModelResolveError> {
         let args = args.trim();
-        if let Some(model) = self
+        let exact_matches = self
             .models
             .iter()
-            .find(|model| model_name_matches(model, args))
-        {
+            .filter(|model| model_name_matches(model, args))
+            .collect::<Vec<_>>();
+        if exact_matches.len() == 1 {
+            let model = exact_matches[0];
             return Ok(selection(model, model.default_reasoning_effort.clone()));
+        }
+        if exact_matches.len() > 1 {
+            return Err(ModelResolveError::AmbiguousModel(args.to_string()));
         }
         let mut candidates = self
             .models
             .iter()
-            .flat_map(|model| model_names(model).map(move |name| (model, name)))
+            .flat_map(|model| {
+                model_names(model)
+                    .into_iter()
+                    .filter(|name| self.model_name_is_unique(model, name))
+                    .map(move |name| (model, name))
+            })
             .filter(|(_, name)| {
                 args.get(..name.len())
                     .is_some_and(|prefix| prefix.eq_ignore_ascii_case(name))
@@ -243,7 +264,12 @@ impl ModelCatalog {
         let mut matches = self
             .models
             .iter()
-            .flat_map(|model| model_names(model).map(move |name| (model, name)))
+            .flat_map(|model| {
+                model_names(model)
+                    .into_iter()
+                    .filter(|name| self.model_name_is_unique(model, name))
+                    .map(move |name| (model, name))
+            })
             .filter(|(_, name)| {
                 args_query.len() > name.len()
                     && args_query
@@ -256,6 +282,17 @@ impl ModelCatalog {
         matches
             .first()
             .map(|(model, name)| (*model, args_query[name.len()..].trim_start()))
+    }
+
+    fn model_name_is_unique(&self, model: &Model, name: &str) -> bool {
+        name.eq_ignore_ascii_case(&qualified_model_name(model))
+            || self
+                .models
+                .iter()
+                .filter(|candidate| model_name_matches(candidate, name))
+                .take(2)
+                .count()
+                == 1
     }
 
     fn is_current(&self, model: &Model) -> bool {
@@ -308,21 +345,29 @@ impl ModelCatalog {
 
 fn model_match(model: &Model, query: &str) -> Option<u32> {
     model_names(model)
-        .filter_map(|name| fuzzy_match(name, query).map(|(score, _)| score))
+        .into_iter()
+        .filter_map(|name| fuzzy_match(&name, query).map(|(score, _)| score))
         .max()
 }
 
 fn model_name_matches(model: &Model, name: &str) -> bool {
-    model_names(model).any(|candidate| candidate.eq_ignore_ascii_case(name))
+    model_names(model)
+        .into_iter()
+        .any(|candidate| candidate.eq_ignore_ascii_case(name))
 }
 
-fn model_names(model: &Model) -> impl Iterator<Item = &str> {
-    [
-        model.display_name.as_str(),
-        model.model.as_str(),
-        model.id.as_str(),
+fn model_names(model: &Model) -> Vec<String> {
+    vec![
+        qualified_model_name(model),
+        format!("{}/{}", model.model_provider, model.display_name),
+        model.display_name.clone(),
+        model.model.clone(),
+        model.id.clone(),
     ]
-    .into_iter()
+}
+
+fn qualified_model_name(model: &Model) -> String {
+    format!("{}/{}", model.model_provider, model.model)
 }
 
 fn model_identity(model: &Model) -> (String, String) {

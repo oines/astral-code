@@ -659,6 +659,10 @@ impl HistoryCell for StatusHistoryCell {
 
         let account_value = self.account.as_ref().map(|account| match account {
             StatusAccountDisplay::ApiKey => "API key configured".to_string(),
+            StatusAccountDisplay::Chatgpt { email } => email.as_ref().map_or_else(
+                || "ChatGPT account".to_string(),
+                |email| format!("ChatGPT: {email}"),
+            ),
         });
 
         let mut labels: Vec<String> = vec!["Model", "Directory", "Permissions", "Agents.md"]

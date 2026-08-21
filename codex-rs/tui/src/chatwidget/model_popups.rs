@@ -78,7 +78,7 @@ impl ChatWidget {
         let current_label = presets
             .iter()
             .find(|preset| self.preset_matches_current_model(preset))
-            .map(|preset| preset.model.to_string())
+            .map(model_picker_label)
             .unwrap_or_else(|| self.model_display_name().to_string());
 
         let (mut auto_presets, other_presets): (Vec<ModelPreset>, Vec<ModelPreset>) = presets
@@ -103,13 +103,13 @@ impl ChatWidget {
                     Some(preset.default_reasoning_effort.clone()),
                 );
                 let actions = Self::model_selection_actions(
-                    model.clone(),
+                    model,
                     model_provider,
                     Some(preset.default_reasoning_effort.clone()),
                     should_prompt_plan_mode_scope,
                 );
                 SelectionItem {
-                    name: model,
+                    name: model_picker_label(&preset),
                     description,
                     is_current: self.preset_matches_current_model(&preset),
                     is_default: preset.is_default,
@@ -196,7 +196,7 @@ impl ChatWidget {
                 });
             })];
             items.push(SelectionItem {
-                name: preset.model.clone(),
+                name: model_picker_label(&preset),
                 description,
                 is_current,
                 is_default: preset.is_default,
@@ -371,6 +371,7 @@ impl ChatWidget {
     /// Open a popup to choose the reasoning effort (stage 2) for the given model.
     pub(crate) fn open_reasoning_popup(&mut self, preset: ModelPreset) {
         let is_current_model = self.preset_matches_current_model(&preset);
+        let model_label = model_picker_label(&preset);
         let default_effort = preset.default_reasoning_effort;
         let supported = preset.supported_reasoning_efforts;
         let in_plan_mode =
@@ -496,7 +497,7 @@ impl ChatWidget {
 
         let mut header = ColumnRenderable::new();
         header.push(Line::from(
-            format!("Select Reasoning Level for {model_slug}").bold(),
+            format!("Select Reasoning Level for {model_label}").bold(),
         ));
 
         self.bottom_pane.show_selection_view(SelectionViewParams {
@@ -539,4 +540,16 @@ impl ChatWidget {
             effort,
         });
     }
+}
+
+fn model_picker_label(preset: &ModelPreset) -> String {
+    let provider = preset
+        .model_provider_name
+        .as_deref()
+        .or(preset.model_provider.as_deref())
+        .filter(|provider| !provider.is_empty());
+    provider.map_or_else(
+        || preset.model.clone(),
+        |provider| format!("{} · {provider}", preset.model),
+    )
 }

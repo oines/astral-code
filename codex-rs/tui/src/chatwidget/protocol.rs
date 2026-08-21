@@ -25,6 +25,18 @@ impl ChatWidget {
                     notification.token_usage,
                 )));
             }
+            ServerNotification::AccountRateLimitsUpdated(notification) => {
+                match notification.rate_limits_by_limit_id {
+                    Some(rate_limits) if !rate_limits.is_empty() => {
+                        for rate_limit in rate_limits.into_values() {
+                            self.on_rolling_rate_limit_snapshot(rate_limit);
+                        }
+                    }
+                    Some(_) | None => {
+                        self.on_rolling_rate_limit_snapshot(notification.rate_limits);
+                    }
+                }
+            }
             ServerNotification::ThreadNameUpdated(notification) => {
                 match ThreadId::from_string(&notification.thread_id) {
                     Ok(thread_id) => {
@@ -212,6 +224,7 @@ impl ChatWidget {
             }
             ServerNotification::ServerRequestResolved(_)
             | ServerNotification::AccountUpdated(_)
+            | ServerNotification::AccountLoginCompleted(_)
             | ServerNotification::ThreadStarted(_)
             | ServerNotification::ThreadStatusChanged(_)
             | ServerNotification::ThreadArchived(_)

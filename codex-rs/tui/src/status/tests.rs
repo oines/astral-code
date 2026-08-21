@@ -314,6 +314,40 @@ async fn status_snapshot_includes_reasoning_details() {
 }
 
 #[tokio::test]
+async fn status_snapshot_displays_chatgpt_account() {
+    let temp_home = TempDir::new().expect("temp home");
+    let mut config = test_config(&temp_home).await;
+    set_workspace_cwd(&mut config, test_path_buf("/workspace/tests").abs());
+    let usage = TokenUsage::default();
+    let captured_at = chrono::Local
+        .with_ymd_and_hms(2024, 1, 2, 3, 4, 5)
+        .single()
+        .expect("timestamp");
+    let model_slug = crate::legacy_core::test_support::get_model_offline(config.model.as_deref());
+    let account = StatusAccountDisplay::Chatgpt {
+        email: Some("user@example.com".to_string()),
+    };
+    let composite = new_status_output(
+        &config,
+        Some(&account),
+        /*token_info*/ None,
+        &usage,
+        &None,
+        /*thread_name*/ None,
+        /*forked_from*/ None,
+        /*rate_limits*/ None,
+        captured_at,
+        &model_slug,
+        /*collaboration_mode*/ None,
+        /*reasoning_effort_override*/ None,
+    );
+
+    let sanitized =
+        sanitize_directory(render_lines(&composite.display_lines(/*width*/ 80))).join("\n");
+    assert_snapshot!(sanitized);
+}
+
+#[tokio::test]
 async fn status_permissions_non_default_workspace_write_uses_workspace_label() {
     let temp_home = TempDir::new().expect("temp home");
     let mut config = test_config(&temp_home).await;

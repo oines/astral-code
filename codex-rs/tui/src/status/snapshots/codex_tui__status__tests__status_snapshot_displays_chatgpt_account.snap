@@ -1,0 +1,19 @@
+---
+source: tui/src/status/tests.rs
+expression: sanitized
+---
+/status
+
+╭─────────────────────────────────────────────────────────────────────────────╮
+│  >_ Astral-Code (v0.0.0)                                                    │
+│                                                                             │
+│  Model:            deepseek-v4-pro                                          │
+│  Model provider:   Astral                                                   │
+│  Directory: [[workspace]]                                                   │
+│  Permissions:      Custom (workspace with network access, Ask for approval) │
+│  Agents.md:        <none>                                                   │
+│  Account:          ChatGPT: user@example.com                                │
+│                                                                             │
+│  Token usage:      0 total  (0 input + 0 output)                            │
+│  Limits:           data not available yet                                   │
+╰─────────────────────────────────────────────────────────────────────────────╯

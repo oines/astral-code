@@ -21,7 +21,7 @@ expression: "render_at_size(&mut state, &session, 80, 24)"
   ╰──────────────────────────────────────────────────────────────────────────╯
 
   ╭──────────────────────────────────────────────────────────────────────────╮
-  │ ❯ /model Claude Sonnet 4                                                 │
+  │ ❯ /model anthropic/claude-sonnet-4                                       │
   ╰───────────────────────────────────── claude-sonnet-4 (high) · workspace ─╯
 
   ↑/↓:navigate  │  Tab:complete  │  Esc:close

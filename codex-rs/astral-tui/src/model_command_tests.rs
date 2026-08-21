@@ -12,15 +12,15 @@ use super::ModelSelection;
 fn model_phase_filters_and_marks_the_current_model() {
     let catalog = catalog();
     let suggestions = catalog.suggestions("cod");
-    assert_eq!(suggestions[0].display, "Codex 5.2 (current)");
-    assert_eq!(suggestions[0].insert_text, "/model Codex 5.2 ");
+    assert_eq!(suggestions[0].display, "Codex 5.2 · OpenAI (current)");
+    assert_eq!(suggestions[0].insert_text, "/model openai/gpt-5.2 ");
 }
 
 #[test]
 fn effort_phase_chains_from_the_selected_model() {
     let catalog = catalog();
     let suggestions = catalog.suggestions("Codex 5.2 xh");
-    assert_eq!(suggestions[0].insert_text, "/model Codex 5.2 xhigh");
+    assert_eq!(suggestions[0].insert_text, "/model openai/gpt-5.2 xhigh");
     assert!(!catalog.is_complete_selection("Codex 5.2"));
     assert!(!catalog.is_complete_selection("Codex 5.2 "));
     assert!(catalog.is_complete_selection("Codex 5.2 xhigh"));
@@ -54,14 +54,14 @@ fn current_reasoning_effort_restores_missing_provider_options() {
         catalog.suggestions(""),
         vec![
             super::ModelSuggestion {
-                display: "DeepSeek V4 Pro (current)".to_string(),
+                display: "DeepSeek V4 Pro · OpenAI (current)".to_string(),
                 description: "General coding model".to_string(),
-                insert_text: "/model DeepSeek V4 Pro ".to_string(),
+                insert_text: "/model openai/deepseek-v4-pro ".to_string(),
             },
             super::ModelSuggestion {
-                display: "DeepSeek V4 Flash".to_string(),
+                display: "DeepSeek V4 Flash · OpenAI".to_string(),
                 description: "General coding model".to_string(),
-                insert_text: "/model DeepSeek V4 Flash ".to_string(),
+                insert_text: "/model openai/deepseek-v4-flash ".to_string(),
             },
         ]
     );
@@ -74,17 +74,20 @@ fn current_reasoning_effort_restores_missing_provider_options() {
         vec![
             (
                 "xhigh (active)".to_string(),
-                "/model DeepSeek V4 Pro xhigh".to_string(),
+                "/model openai/deepseek-v4-pro xhigh".to_string(),
             ),
             (
                 "high".to_string(),
-                "/model DeepSeek V4 Pro high".to_string(),
+                "/model openai/deepseek-v4-pro high".to_string(),
             ),
             (
                 "medium".to_string(),
-                "/model DeepSeek V4 Pro medium".to_string(),
+                "/model openai/deepseek-v4-pro medium".to_string(),
             ),
-            ("low".to_string(), "/model DeepSeek V4 Pro low".to_string(),),
+            (
+                "low".to_string(),
+                "/model openai/deepseek-v4-pro low".to_string(),
+            ),
         ]
     );
     assert_eq!(
@@ -119,7 +122,7 @@ fn current_reasoning_effort_restores_missing_provider_options() {
             .collect::<Vec<_>>(),
         vec![(
             "none (active)".to_string(),
-            "/model DeepSeek V4 Flash none".to_string(),
+            "/model openai/deepseek-v4-flash none".to_string(),
         )]
     );
     assert_eq!(
@@ -129,10 +132,10 @@ fn current_reasoning_effort_restores_missing_provider_options() {
             .map(|suggestion| suggestion.insert_text)
             .collect::<Vec<_>>(),
         vec![
-            "/model DeepSeek V4 Pro xhigh".to_string(),
-            "/model DeepSeek V4 Pro high".to_string(),
-            "/model DeepSeek V4 Pro medium".to_string(),
-            "/model DeepSeek V4 Pro low".to_string(),
+            "/model openai/deepseek-v4-pro xhigh".to_string(),
+            "/model openai/deepseek-v4-pro high".to_string(),
+            "/model openai/deepseek-v4-pro medium".to_string(),
+            "/model openai/deepseek-v4-pro low".to_string(),
         ]
     );
 }
@@ -153,6 +156,37 @@ fn resolver_accepts_display_name_model_id_and_effort() {
         Err(ModelResolveError::UnsupportedEffort {
             model: "Codex 5.2".to_string(),
             effort: "impossible".to_string(),
+        })
+    );
+}
+
+#[test]
+fn duplicate_model_names_require_provider_qualification() {
+    let openai = model("shared-model", "Shared Model", vec![ReasoningEffort::High]);
+    let mut codex = openai.clone();
+    codex.model_provider = "codex".to_string();
+    codex.model_provider_name = "Codex".to_string();
+    let mut catalog = ModelCatalog::default();
+    catalog.replace(
+        vec![openai, codex],
+        "shared-model",
+        "openai",
+        Some(ReasoningEffort::High),
+    );
+
+    assert_eq!(
+        catalog.resolve("shared-model"),
+        Err(ModelResolveError::AmbiguousModel(
+            "shared-model".to_string()
+        ))
+    );
+    assert_eq!(
+        catalog.resolve("codex/shared-model"),
+        Ok(ModelSelection {
+            model: "shared-model".to_string(),
+            model_provider: "codex".to_string(),
+            display_name: "Shared Model".to_string(),
+            effort: ReasoningEffort::High,
         })
     );
 }

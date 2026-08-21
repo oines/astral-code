@@ -521,7 +521,7 @@ fn model_argument_menu_snapshot() {
         ),
         InputAction::Redraw
     );
-    assert_eq!(state.composer(), "/model Claude Sonnet 4 ");
+    assert_eq!(state.composer(), "/model anthropic/claude-sonnet-4 ");
     insta::assert_snapshot!(
         "model_effort_argument_menu_snapshot",
         render_at_size(&mut state, &session, 80, 24)
@@ -534,7 +534,7 @@ fn model_argument_menu_snapshot() {
         panic!("terminal effort selection should execute with the same Enter");
     };
     assert_eq!(invocation.command, crate::SlashCommandId::Model);
-    assert_eq!(invocation.args, "Claude Sonnet 4 xhigh");
+    assert_eq!(invocation.args, "anthropic/claude-sonnet-4 xhigh");
 }
 
 #[test]
@@ -569,7 +569,7 @@ fn model_picker_snapshot_and_effort_selection() {
         panic!("effort selection should dispatch /model");
     };
     assert_eq!(invocation.command, crate::SlashCommandId::Model);
-    assert_eq!(invocation.args, "Claude Sonnet 4 xhigh");
+    assert_eq!(invocation.args, "anthropic/claude-sonnet-4 xhigh");
 }
 
 fn set_test_model_catalog(state: &mut SurfaceState, session: &SessionState) {

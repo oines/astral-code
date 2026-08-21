@@ -46,6 +46,7 @@ use codex_exec_server::EnvironmentManager;
 use codex_exec_server::ExecServerRuntimePaths;
 use codex_login::default_client::originator;
 use codex_login::default_client::set_default_client_residency_requirement;
+use codex_model_provider_info::ManagedAuthKind;
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::AltScreenMode;
 use codex_protocol::config_types::SandboxMode;
@@ -1918,13 +1919,16 @@ async fn get_login_status(
     app_server: &mut AppServerSession,
     config: &Config,
 ) -> color_eyre::Result<LoginStatus> {
-    if !config.model_provider.requires_astral_auth {
+    if !config.model_provider.requires_astral_auth
+        && config.model_provider.managed_auth != Some(ManagedAuthKind::CodexOAuth)
+    {
         return Ok(LoginStatus::NotAuthenticated);
     }
 
     let account = app_server.read_account().await?;
     Ok(match account.account {
         Some(AppServerAccount::ApiKey {}) => LoginStatus::AuthMode(AppServerAuthMode::ApiKey),
+        Some(AppServerAccount::Chatgpt { .. }) => LoginStatus::AuthMode(AppServerAuthMode::Chatgpt),
         Some(AppServerAccount::AmazonBedrock {}) => LoginStatus::NotAuthenticated,
         None => LoginStatus::NotAuthenticated,
     })

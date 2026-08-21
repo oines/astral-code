@@ -10,7 +10,7 @@ expression: "render_at_size(&mut state, &session, 80, 24)"
                   │                                          │
                   │  Search:                                 │
   I’m tracing the │                                          │
-                  │  ❯ Claude Sonnet 4 (current)             │
+                  │  ❯ Claude Sonnet 4 · Anthropic (curren   │
                   │                                          │
                   │                                          │
                   │                                          │
