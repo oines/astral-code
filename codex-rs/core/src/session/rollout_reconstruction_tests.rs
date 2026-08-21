@@ -1009,12 +1009,52 @@ async fn reconstruct_history_legacy_compaction_without_replacement_history_does_
         reconstructed.history,
         vec![
             user_message("before compact"),
-            TranscriptItem::Compaction {
-                encrypted_content: "legacy summary".to_string(),
+            TranscriptItem::LocalCompaction {
+                text: "legacy summary".to_string(),
             },
         ]
     );
     assert!(reconstructed.reference_context_item.is_none());
+}
+
+#[tokio::test]
+async fn reconstruct_history_upgrades_matching_legacy_local_compaction() {
+    let (session, turn_context) = make_session_and_context().await;
+    let rollout_items = vec![RolloutItem::Compacted(CompactedItem {
+        message: "local summary".to_string(),
+        replacement_history: Some(vec![TranscriptItem::Compaction {
+            encrypted_content: "local summary".to_string(),
+        }]),
+    })];
+
+    let reconstructed = session
+        .reconstruct_history_from_rollout(&turn_context, &rollout_items)
+        .await;
+
+    assert_eq!(
+        reconstructed.history,
+        vec![TranscriptItem::LocalCompaction {
+            text: "local summary".to_string(),
+        }]
+    );
+}
+
+#[tokio::test]
+async fn reconstruct_history_preserves_nonmatching_native_compaction() {
+    let (session, turn_context) = make_session_and_context().await;
+    let native = TranscriptItem::Compaction {
+        encrypted_content: "opaque native state".to_string(),
+    };
+    let rollout_items = vec![RolloutItem::Compacted(CompactedItem {
+        message: "human-readable summary".to_string(),
+        replacement_history: Some(vec![native.clone()]),
+    })];
+
+    let reconstructed = session
+        .reconstruct_history_from_rollout(&turn_context, &rollout_items)
+        .await;
+
+    assert_eq!(reconstructed.history, vec![native]);
 }
 
 #[tokio::test]

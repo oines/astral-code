@@ -156,15 +156,15 @@ fn raw_tail_rejects_boundary_fingerprint_mismatch() {
 }
 
 #[test]
-fn raw_tail_without_boundary_keeps_recent_text_messages() {
+fn raw_tail_without_boundary_is_not_safe_to_rebuild() {
     let items = (0..8)
         .map(|index| user_message(&format!("message {index}")))
         .collect::<Vec<_>>();
     let state = SessionMemoryState::default();
 
-    let tail = raw_tail_after_summary_boundary(&items, &state).expect("tail is valid");
+    let err = raw_tail_after_summary_boundary(&items, &state).expect_err("boundary is required");
 
-    assert_eq!(tail, items);
+    assert!(err.to_string().contains("session memory boundary missing"));
 }
 
 #[test]
@@ -205,18 +205,6 @@ fn compact_summary_does_not_apply_total_body_cap() {
 }
 
 #[test]
-fn claude_code_golden_raw_tail_rejects_more_than_40k_tokens() {
-    let tail = vec![user_message(&"token ".repeat(45_000))];
-
-    let err = validate_tail_budget(&tail).expect_err("tail should exceed compact budget");
-
-    assert!(
-        err.to_string()
-            .contains("session memory raw tail exceeds 40000 tokens")
-    );
-}
-
-#[test]
 fn compact_summary_validation_allows_previous_template_headings() {
     let current_template = "# IM State\n_Current chat handoff_\n\n# Follow-ups\n_Open items_";
     let summary = summary_with_current_state("- Old template content.");
@@ -231,8 +219,8 @@ fn session_memory_compacted_history_places_summary_before_tail() {
 
     let history = build_session_memory_compacted_history(tail.clone(), "summary".to_string());
 
-    let mut expected = vec![TranscriptItem::Compaction {
-        encrypted_content: "summary".to_string(),
+    let mut expected = vec![TranscriptItem::LocalCompaction {
+        text: "summary".to_string(),
     }];
     expected.extend(tail);
     assert_eq!(history, expected);
@@ -242,8 +230,8 @@ fn session_memory_compacted_history_places_summary_before_tail() {
 fn session_memory_compacted_history_allows_empty_tail() {
     let history = build_session_memory_compacted_history(Vec::new(), "summary".to_string());
 
-    let expected = vec![TranscriptItem::Compaction {
-        encrypted_content: "summary".to_string(),
+    let expected = vec![TranscriptItem::LocalCompaction {
+        text: "summary".to_string(),
     }];
     assert_eq!(history, expected);
 }
@@ -289,7 +277,7 @@ fn extraction_candidate_records_raw_boundary_for_normalized_image_history() {
 }
 
 #[test]
-fn compact_baseline_resets_to_post_compact_tokens() {
+fn compact_baseline_records_new_summary_boundary_and_post_compact_tokens() {
     let mut state = SessionMemoryState {
         last_summary_index: Some(7),
         last_summary_fingerprint: Some("fingerprint".to_string()),
@@ -297,11 +285,20 @@ fn compact_baseline_resets_to_post_compact_tokens() {
         last_summary_tool_calls: Some(40),
         ..Default::default()
     };
+    let boundary = ExtractionBoundary {
+        index: 1,
+        fingerprint: "new-boundary".to_string(),
+        tokens: 20_000,
+        tool_calls: 2,
+    };
 
-    state.record_post_compact_baseline(20_000, 2);
+    state.record_post_compact_baseline(20_000, 2, Some(boundary));
 
-    assert_eq!(state.last_summary_index, None);
-    assert_eq!(state.last_summary_fingerprint, None);
+    assert_eq!(state.last_summary_index, Some(1));
+    assert_eq!(
+        state.last_summary_fingerprint,
+        Some("new-boundary".to_string())
+    );
     assert_eq!(state.last_summary_tokens, Some(20_000));
     assert_eq!(state.last_summary_tool_calls, Some(2));
 
@@ -343,6 +340,61 @@ fn test_thresholds() -> ExtractionThresholds {
         minimum_tokens_between_update: 5_000,
         tool_calls_between_updates: 3,
     }
+}
+
+#[test]
+fn final_refresh_uses_nominal_and_dynamic_trigger_points() {
+    let auto_compact_scope_limit = 244_800;
+    let physical_context_window = Some(272_000);
+    let nominal_active_context_tokens = 234_800;
+    let nominal_estimated_input_tokens = 240_000;
+    assert!(final_refresh_due(
+        nominal_active_context_tokens,
+        nominal_active_context_tokens,
+        auto_compact_scope_limit,
+        physical_context_window,
+        nominal_estimated_input_tokens,
+    ));
+
+    let dynamic_active_context_tokens = 225_000;
+    let dynamic_estimated_input_tokens = 260_000;
+    assert!(final_refresh_due(
+        dynamic_active_context_tokens,
+        dynamic_active_context_tokens,
+        auto_compact_scope_limit,
+        physical_context_window,
+        dynamic_estimated_input_tokens,
+    ));
+}
+
+#[test]
+fn sidechain_preflight_respects_effective_and_physical_windows() {
+    let effective_context_window = Some(258_400);
+    let physical_context_window = Some(272_000);
+    let safe_active_context_tokens = 250_000;
+    let safe_estimated_input_tokens = 255_000;
+    assert!(sidechain_can_start(
+        safe_active_context_tokens,
+        effective_context_window,
+        physical_context_window,
+        safe_estimated_input_tokens,
+    ));
+
+    let effective_limit_active_context_tokens = 258_400;
+    assert!(!sidechain_can_start(
+        effective_limit_active_context_tokens,
+        effective_context_window,
+        physical_context_window,
+        safe_estimated_input_tokens,
+    ));
+
+    let oversized_estimated_input_tokens = 261_000;
+    assert!(!sidechain_can_start(
+        safe_active_context_tokens,
+        effective_context_window,
+        physical_context_window,
+        oversized_estimated_input_tokens,
+    ));
 }
 
 #[tokio::test]
@@ -413,103 +465,6 @@ async fn write_state_persists_via_atomic_tempfile_without_leaving_temps() {
         file_names,
         vec!["state.json".to_string(), "summary.md".to_string()]
     );
-}
-
-#[tokio::test]
-async fn wait_for_extraction_completion_observes_finished_state() {
-    let temp = tempfile::tempdir().expect("create temp dir");
-    let store = SessionMemoryStore {
-        thread_key: "thread".to_string(),
-        dir: temp.path().to_path_buf(),
-        summary_path: temp.path().join("summary.md"),
-        state_path: temp.path().join("state.json"),
-    };
-    store
-        .ensure(tail::DEFAULT_SUMMARY)
-        .await
-        .expect("initialize store");
-    let state = SessionMemoryState {
-        extraction_started_at_unix: None,
-        last_summary_tokens: Some(12_000),
-        ..Default::default()
-    };
-    store.write_state(&state).await.expect("write state");
-
-    wait_for_extraction_completion(&store, Duration::from_millis(50))
-        .await
-        .expect("finished extraction should not block");
-}
-
-#[tokio::test]
-async fn wait_for_extraction_completion_clears_started_state_on_timeout() {
-    let temp = tempfile::tempdir().expect("create temp dir");
-    let store = SessionMemoryStore {
-        thread_key: "thread".to_string(),
-        dir: temp.path().to_path_buf(),
-        summary_path: temp.path().join("summary.md"),
-        state_path: temp.path().join("state.json"),
-    };
-    store
-        .ensure(tail::DEFAULT_SUMMARY)
-        .await
-        .expect("initialize store");
-    let state = SessionMemoryState {
-        extraction_started_at_unix: Some(now_unix_seconds()),
-        ..Default::default()
-    };
-    store.write_state(&state).await.expect("write state");
-
-    let err = wait_for_extraction_completion(&store, Duration::from_millis(1))
-        .await
-        .expect_err("unfinished extraction should time out");
-
-    assert!(
-        err.to_string()
-            .contains("session memory extraction did not finish before shutdown timeout")
-    );
-    let state = store.read_state().await.expect("read state");
-    let expected = SessionMemoryState {
-        extraction_started_at_unix: None,
-        last_error: Some("session memory extraction interrupted during shutdown".to_string()),
-        ..Default::default()
-    };
-    assert_eq!(state, expected);
-}
-
-#[tokio::test]
-async fn wait_for_running_extraction_timeout_continues_and_clears_marker() {
-    let temp = tempfile::tempdir().expect("create temp dir");
-    let store = SessionMemoryStore {
-        thread_key: "thread".to_string(),
-        dir: temp.path().to_path_buf(),
-        summary_path: temp.path().join("summary.md"),
-        state_path: temp.path().join("state.json"),
-    };
-    store
-        .ensure(tail::DEFAULT_SUMMARY)
-        .await
-        .expect("initialize store");
-    let original = SessionMemoryState {
-        extraction_started_at_unix: Some(now_unix_seconds()),
-        ..Default::default()
-    };
-    store.write_state(&original).await.expect("write state");
-    let mut state = original;
-
-    wait_for_running_extraction_with_timeout(&store, &mut state, Duration::from_millis(1))
-        .await
-        .expect("compact wait timeout should continue");
-
-    let expected = SessionMemoryState {
-        extraction_started_at_unix: None,
-        last_error: Some(
-            "session memory extraction did not finish before compact timeout".to_string(),
-        ),
-        ..Default::default()
-    };
-    assert_eq!(state, expected);
-    let stored = store.read_state().await.expect("read state");
-    assert_eq!(stored, expected);
 }
 
 #[test]

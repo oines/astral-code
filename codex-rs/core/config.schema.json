@@ -1683,6 +1683,15 @@
           "description": "Legacy Astral-managed credential flag. Hosted credentials are no longer supported; provider validation rejects this when true. Configure provider-specific BYOK auth instead.",
           "type": "boolean"
         },
+        "responses_builtin_tools": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ResponsesBuiltinTools"
+            }
+          ],
+          "default": "all",
+          "description": "Provider-hosted tools forwarded on the Responses wire."
+        },
         "stream_idle_timeout_ms": {
           "description": "Idle timeout (in milliseconds) to wait for activity on a streaming response before treating the connection as lost.",
           "format": "uint64",
@@ -1697,7 +1706,7 @@
         },
         "supports_websockets": {
           "default": false,
-          "description": "Legacy Responses API WebSocket transport flag. Astral no longer supports Responses transports; use streaming Chat Completions over HTTP instead.",
+          "description": "Legacy Responses API WebSocket transport flag. HTTP Responses support does not enable this transport.",
           "type": "boolean"
         },
         "websocket_connect_timeout_ms": {
@@ -2723,6 +2732,26 @@
           "type": "string"
         }
       ]
+    },
+    "ResponsesBuiltinTools": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ResponsesBuiltinToolsKeyword"
+        },
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      ],
+      "description": "Which provider-hosted Responses tools Astral may send.\n\nThe config accepts either the string `\"all\"` or an explicit array of tool names. An empty array disables provider-hosted tools."
+    },
+    "ResponsesBuiltinToolsKeyword": {
+      "enum": [
+        "all"
+      ],
+      "type": "string"
     },
     "SandboxMode": {
       "enum": [
@@ -4587,7 +4616,7 @@
       "description": "Wire protocol that the provider speaks.",
       "oneOf": [
         {
-          "description": "Legacy OpenAI Responses API. This variant remains only for internal migration code; external provider config rejects `wire_api = \"responses\"`.",
+          "description": "OpenAI-compatible Responses API exposed at `/v1/responses`.",
           "enum": [
             "responses"
           ],

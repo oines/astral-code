@@ -35,7 +35,25 @@ struct ActiveReplaySegment<'a> {
     previous_turn_settings: Option<PreviousTurnSettings>,
     reference_context_item: TurnReferenceContextItem,
     world_state_replay: Vec<&'a RolloutItem>,
-    base_replacement_history: Option<&'a [TranscriptItem]>,
+    base_compaction: Option<&'a CompactedItem>,
+}
+
+fn normalized_replacement_history(compacted: &CompactedItem) -> Option<Vec<TranscriptItem>> {
+    compacted.replacement_history.as_ref().map(|history| {
+        history
+            .iter()
+            .map(|item| match item {
+                TranscriptItem::Compaction { encrypted_content }
+                    if encrypted_content == &compacted.message =>
+                {
+                    TranscriptItem::LocalCompaction {
+                        text: encrypted_content.clone(),
+                    }
+                }
+                item => item.clone(),
+            })
+            .collect()
+    })
 }
 
 fn turn_ids_are_compatible(active_turn_id: Option<&str>, item_turn_id: Option<&str>) -> bool {
@@ -45,7 +63,7 @@ fn turn_ids_are_compatible(active_turn_id: Option<&str>, item_turn_id: Option<&s
 
 fn finalize_active_segment<'a>(
     active_segment: ActiveReplaySegment<'a>,
-    base_replacement_history: &mut Option<&'a [TranscriptItem]>,
+    base_compaction: &mut Option<&'a CompactedItem>,
     previous_turn_settings: &mut Option<PreviousTurnSettings>,
     reference_context_item: &mut TurnReferenceContextItem,
     world_state_replay: &mut Vec<&'a RolloutItem>,
@@ -65,10 +83,10 @@ fn finalize_active_segment<'a>(
 
     // A surviving replacement-history checkpoint is a complete history base. Once we
     // know the newest surviving one, older rollout items do not affect rebuilt history.
-    if base_replacement_history.is_none()
-        && let Some(segment_base_replacement_history) = active_segment.base_replacement_history
+    if base_compaction.is_none()
+        && let Some(segment_base_compaction) = active_segment.base_compaction
     {
-        *base_replacement_history = Some(segment_base_replacement_history);
+        *base_compaction = Some(segment_base_compaction);
     }
 
     // `previous_turn_settings` come from the newest surviving user turn that established them.
@@ -100,7 +118,7 @@ impl Session {
         // stopping once a surviving replacement-history checkpoint and the required resume metadata
         // are both known; then replay only the buffered surviving tail forward to preserve exact
         // history semantics.
-        let mut base_replacement_history: Option<&[TranscriptItem]> = None;
+        let mut base_compaction: Option<&CompactedItem> = None;
         let mut previous_turn_settings = None;
         let mut reference_context_item = TurnReferenceContextItem::NeverSet;
         let mut world_state_replay = Vec::new();
@@ -128,10 +146,10 @@ impl Session {
                     ) {
                         active_segment.reference_context_item = TurnReferenceContextItem::Cleared;
                     }
-                    if active_segment.base_replacement_history.is_none()
-                        && let Some(replacement_history) = &compacted.replacement_history
+                    if active_segment.base_compaction.is_none()
+                        && compacted.replacement_history.is_some()
                     {
-                        active_segment.base_replacement_history = Some(replacement_history);
+                        active_segment.base_compaction = Some(compacted);
                         rollout_suffix = &rollout_items[index + 1..];
                     }
                 }
@@ -208,7 +226,7 @@ impl Session {
                     {
                         finalize_active_segment(
                             active_segment,
-                            &mut base_replacement_history,
+                            &mut base_compaction,
                             &mut previous_turn_settings,
                             &mut reference_context_item,
                             &mut world_state_replay,
@@ -224,7 +242,7 @@ impl Session {
                 RolloutItem::EventMsg(_) | RolloutItem::SessionMeta(_) => {}
             }
 
-            if base_replacement_history.is_some()
+            if base_compaction.is_some()
                 && previous_turn_settings.is_some()
                 && !matches!(reference_context_item, TurnReferenceContextItem::NeverSet)
             {
@@ -238,7 +256,7 @@ impl Session {
         if let Some(active_segment) = active_segment.take() {
             finalize_active_segment(
                 active_segment,
-                &mut base_replacement_history,
+                &mut base_compaction,
                 &mut previous_turn_settings,
                 &mut reference_context_item,
                 &mut world_state_replay,
@@ -248,8 +266,10 @@ impl Session {
 
         let mut history = ContextManager::new();
         let mut saw_legacy_compaction_without_replacement_history = false;
-        if let Some(base_replacement_history) = base_replacement_history {
-            history.replace(base_replacement_history.to_vec());
+        if let Some(base_compaction) = base_compaction
+            && let Some(replacement_history) = normalized_replacement_history(base_compaction)
+        {
+            history.replace(replacement_history);
         }
         // Materialize exact history semantics from the replay-derived suffix. The eventual lazy
         // design should keep this same replay shape, but drive it from a resumable reverse source
@@ -263,10 +283,10 @@ impl Session {
                     );
                 }
                 RolloutItem::Compacted(compacted) => {
-                    if let Some(replacement_history) = &compacted.replacement_history {
+                    if let Some(replacement_history) = normalized_replacement_history(compacted) {
                         // This should actually never happen, because the reverse loop above (to build rollout_suffix)
                         // should stop before any compaction that has Some replacement_history
-                        history.replace(replacement_history.clone());
+                        history.replace(replacement_history);
                     } else {
                         saw_legacy_compaction_without_replacement_history = true;
                         // Legacy rollouts without `replacement_history` should rebuild the

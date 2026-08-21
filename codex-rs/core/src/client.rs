@@ -26,6 +26,8 @@ use codex_api::RealtimeCallClient as ApiRealtimeCallClient;
 use codex_api::RealtimeSessionConfig as ApiRealtimeSessionConfig;
 use codex_api::RequestTelemetry;
 use codex_api::ReqwestTransport;
+use codex_api::ResponsesClient as ApiResponsesClient;
+use codex_api::ResponsesOptions as ApiResponsesOptions;
 use codex_api::SharedAuthProvider;
 use codex_api::SseTelemetry;
 use codex_api::TransportError;
@@ -77,6 +79,8 @@ use crate::client_common::ModelStreamEvent;
 use crate::client_common::Prompt;
 use crate::client_common::ResponseStream;
 use crate::feedback_tags;
+use crate::responses_request::ResponsesRequestParams;
+use crate::responses_request::build_responses_request;
 use crate::util::emit_feedback_auth_recovery_tags;
 use codex_api::map_api_error;
 use codex_feedback::FeedbackRequestTags;
@@ -99,12 +103,8 @@ pub const X_ASTRAL_PARENT_THREAD_ID_HEADER: &str = "x-astral-parent-thread-id";
 pub const X_ASTRAL_WINDOW_ID_HEADER: &str = "x-astral-window-id";
 const ANTHROPIC_MESSAGES_ENDPOINT: &str = "/messages";
 const CHAT_COMPLETIONS_ENDPOINT: &str = "/chat/completions";
-const RESPONSES_API_UNSUPPORTED_MESSAGE: &str = "Responses API is no longer supported. Configure the provider with wire_api = \"chat_completions\" and a standard OpenAI-compatible /v1/chat/completions endpoint.";
+const RESPONSES_ENDPOINT: &str = "/responses";
 const DEFAULT_ANTHROPIC_MAX_TOKENS: u64 = 4096;
-
-fn responses_api_unsupported_error() -> CodexErr {
-    CodexErr::UnsupportedOperation(RESPONSES_API_UNSUPPORTED_MESSAGE.to_string())
-}
 
 fn anthropic_max_tokens(model_info: &ModelInfo) -> u64 {
     model_info
@@ -445,6 +445,117 @@ impl ModelClient {
 }
 
 impl ModelClientSession {
+    #[allow(clippy::too_many_arguments)]
+    #[instrument(
+        name = "model_client.stream_responses_api",
+        level = "info",
+        skip_all,
+        fields(
+            model = %model_info.slug,
+            wire_api = "responses",
+            transport = "responses_http",
+            http.method = "POST"
+        )
+    )]
+    async fn stream_responses_api(
+        &self,
+        provider: SharedModelProvider,
+        prompt: &Prompt,
+        model_info: &ModelInfo,
+        session_telemetry: &SessionTelemetry,
+        effort: Option<ReasoningEffortConfig>,
+        summary: ReasoningSummaryConfig,
+        service_tier: Option<String>,
+        turn_metadata_header: Option<&str>,
+        inference_trace: &InferenceTraceContext,
+    ) -> Result<ResponseStream> {
+        let auth_manager = provider.auth_manager();
+        let mut auth_recovery = auth_manager
+            .as_ref()
+            .map(AuthManager::unauthorized_recovery);
+        let mut pending_retry = PendingUnauthorizedRetry::default();
+        loop {
+            let client_setup = self.client.current_client_setup(&provider).await?;
+            let transport = ReqwestTransport::new(build_reqwest_client());
+            let request_auth_context = AuthRequestTelemetryContext::new(
+                client_setup.auth.as_ref().map(CodexAuth::auth_mode),
+                client_setup.api_auth.as_ref(),
+                pending_retry,
+            );
+            let (request_telemetry, sse_telemetry) = Self::build_streaming_telemetry(
+                session_telemetry,
+                request_auth_context,
+                RequestRouteTelemetry::for_endpoint(RESPONSES_ENDPOINT),
+                client_setup.auth_env_telemetry.clone(),
+            );
+            let mut options = ApiResponsesOptions {
+                extra_headers: self
+                    .client
+                    .build_agent_headers(&provider, turn_metadata_header)
+                    .await,
+            };
+            let provider_info = provider.info();
+            let request = build_responses_request(ResponsesRequestParams {
+                prompt,
+                model_info,
+                effort: effort.clone(),
+                summary,
+                service_tier: service_tier.clone(),
+                prompt_cache_key: self.client.prompt_cache_key(),
+                builtin_tools: &provider_info.responses_builtin_tools,
+            })?;
+            let inference_trace_attempt = inference_trace.start_attempt();
+            inference_trace_attempt.add_request_headers(&mut options.extra_headers);
+            inference_trace_attempt.record_started(&request);
+            let client = ApiResponsesClient::new(
+                transport,
+                client_setup.api_provider,
+                client_setup.api_auth,
+            )
+            .with_telemetry(Some(request_telemetry), Some(sse_telemetry));
+
+            match client.stream_request(request, options).await {
+                Ok(stream) => {
+                    return Ok(map_response_stream(
+                        stream,
+                        session_telemetry.clone(),
+                        inference_trace_attempt,
+                    ));
+                }
+                Err(ApiError::Transport(
+                    unauthorized_transport @ TransportError::Http { status, .. },
+                )) if status == StatusCode::UNAUTHORIZED => {
+                    let response_debug_context =
+                        extract_response_debug_context(&unauthorized_transport);
+                    inference_trace_attempt.record_failed(
+                        &unauthorized_transport,
+                        response_debug_context.request_id.as_deref(),
+                        /*output_items*/ &[],
+                    );
+                    pending_retry = PendingUnauthorizedRetry::from_recovery(
+                        handle_unauthorized(
+                            unauthorized_transport,
+                            &mut auth_recovery,
+                            session_telemetry,
+                        )
+                        .await?,
+                    );
+                }
+                Err(err) => {
+                    let response_debug_context =
+                        extract_response_debug_context_from_api_error(&err);
+                    let err = map_api_error(err);
+                    inference_trace_attempt.record_failed(
+                        &err,
+                        response_debug_context.request_id.as_deref(),
+                        /*output_items*/ &[],
+                    );
+                    return Err(err);
+                }
+            }
+        }
+    }
+
     /// Streams a turn via a provider-neutral wire API.
     ///
     /// The request is built as Astral's internal Agent IR, then encoded by the
@@ -492,7 +603,11 @@ impl ModelClientSession {
             let route = match wire_api {
                 WireApi::AnthropicMessages => ANTHROPIC_MESSAGES_ENDPOINT,
                 WireApi::ChatCompletions => CHAT_COMPLETIONS_ENDPOINT,
-                WireApi::Responses => return Err(responses_api_unsupported_error()),
+                WireApi::Responses => {
+                    return Err(CodexErr::InvalidRequest(
+                        "Responses requests must use the direct Responses transport".to_string(),
+                    ));
+                }
             };
             let (request_telemetry, sse_telemetry) = Self::build_streaming_telemetry(
                 session_telemetry,
@@ -679,7 +794,20 @@ impl ModelClientSession {
     ) -> Result<ResponseStream> {
         let wire_api = provider.info().wire_api;
         match wire_api {
-            WireApi::Responses => Err(responses_api_unsupported_error()),
+            WireApi::Responses => {
+                self.stream_responses_api(
+                    provider,
+                    prompt,
+                    model_info,
+                    session_telemetry,
+                    effort,
+                    summary,
+                    service_tier,
+                    turn_metadata_header,
+                    inference_trace,
+                )
+                .await
+            }
             WireApi::AnthropicMessages | WireApi::ChatCompletions => {
                 self.stream_agent_api(
                     provider,

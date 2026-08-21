@@ -1,9 +1,7 @@
-use std::collections::HashSet;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::LazyLock;
 use std::time::Duration;
 
 use crate::Prompt;
@@ -12,6 +10,7 @@ use crate::config::Config;
 use crate::context_manager::ContextManager;
 use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
+use codex_analytics::CompactionTrigger;
 use codex_protocol::config_types::AutoCompactTokenLimitScope;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
@@ -21,13 +20,15 @@ use codex_protocol::openai_models::ToolMode;
 use codex_protocol::protocol::CompactedItem;
 use serde::Deserialize;
 use serde::Serialize;
-use tokio::sync::Mutex;
 use tracing::warn;
 
+mod coordinator;
 mod sidechain;
 mod tail;
 
-use sidechain::run_extraction;
+use coordinator::ExtractionCoordinator;
+use coordinator::ExtractionKind;
+use coordinator::ExtractionWork;
 pub(crate) use tail::DEFAULT_SUMMARY;
 use tail::ExtractionBoundary;
 use tail::count_tool_calls;
@@ -38,7 +39,6 @@ use tail::raw_tail_after_summary_boundary;
 use tail::truncate_summary_for_compact;
 use tail::validate_post_compact_budget;
 use tail::validate_summary;
-use tail::validate_tail_budget;
 
 const SUMMARY_FILE_NAME: &str = "summary.md";
 const STATE_FILE_NAME: &str = "state.json";
@@ -47,10 +47,9 @@ pub(crate) const DEFAULT_MINIMUM_TOKENS_BETWEEN_UPDATE: i64 = 20_000;
 pub(crate) const DEFAULT_TOOL_CALLS_BETWEEN_UPDATES: usize = 10;
 const EXTRACTION_WAIT_TIMEOUT: Duration = Duration::from_secs(15);
 const EXTRACTION_SHUTDOWN_WAIT_TIMEOUT: Duration = Duration::from_secs(20);
-const EXTRACTION_STALE_AFTER_SECS: u64 = 60;
-
-static RUNNING_EXTRACTIONS: LazyLock<Mutex<HashSet<String>>> =
-    LazyLock::new(|| Mutex::new(HashSet::new()));
+const TARGET_RAW_TAIL_TOKENS: i64 = 10_000;
+const SIDECHAIN_OUTPUT_RESERVE_TOKENS: i64 = 10_000;
+const SIDECHAIN_ESTIMATION_MARGIN_TOKENS: i64 = 2_000;
 
 #[derive(Clone, Debug)]
 pub(crate) struct PromptTemplate {
@@ -116,6 +115,15 @@ impl ExtractionCandidate {
             natural_break,
         }
     }
+
+    fn prompt_template(&self) -> PromptTemplate {
+        let mut prompt = self.prompt.clone();
+        prompt.input.clear();
+        PromptTemplate {
+            prompt,
+            tool_context: self.tool_context.clone(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -135,15 +143,17 @@ struct SessionMemoryState {
 }
 
 impl SessionMemoryState {
-    fn clear_summary_boundary(&mut self) {
-        self.last_summary_index = None;
-        self.last_summary_fingerprint = None;
-    }
-
-    fn record_post_compact_baseline(&mut self, tokens: i64, tool_calls: usize) {
-        self.clear_summary_boundary();
+    fn record_post_compact_baseline(
+        &mut self,
+        tokens: i64,
+        tool_calls: usize,
+        boundary: Option<ExtractionBoundary>,
+    ) {
+        self.last_summary_index = boundary.as_ref().map(|boundary| boundary.index);
+        self.last_summary_fingerprint = boundary.map(|boundary| boundary.fingerprint);
         self.last_summary_tokens = Some(tokens);
         self.last_summary_tool_calls = Some(tool_calls);
+        self.extraction_started_at_unix = None;
     }
 }
 
@@ -231,23 +241,30 @@ pub(crate) async fn wait_for_pending_extraction_on_shutdown(sess: &Arc<Session>)
         return;
     }
 
-    let store = SessionMemoryStore::for_thread(config.as_ref(), sess.thread_id().to_string());
-    if let Err(err) = wait_for_extraction_completion(&store, EXTRACTION_SHUTDOWN_WAIT_TIMEOUT).await
+    let thread_key = sess.thread_id().to_string();
+    let coordinator = coordinator::for_thread(&thread_key).await;
+    if let Err(err) =
+        coordinator::wait_for_shutdown(&coordinator, EXTRACTION_SHUTDOWN_WAIT_TIMEOUT).await
     {
         warn!("failed to wait for session memory extraction during shutdown: {err:#}");
     }
+    coordinator::remove_thread(&thread_key).await;
 }
 
 pub(crate) async fn maybe_spawn_post_sampling_extraction(
     sess: Arc<Session>,
     turn_context: Arc<TurnContext>,
     candidate: ExtractionCandidate,
+    auto_compact_scope_tokens: i64,
+    auto_compact_scope_limit: i64,
 ) {
     if !turn_context.config.experimental_session_memory_compact {
         return;
     }
 
     let store = SessionMemoryStore::new(turn_context.as_ref(), sess.as_ref());
+    let coordinator = coordinator::for_thread(&store.thread_key).await;
+    coordinator::remember_template(&coordinator, candidate.prompt_template()).await;
     if let Err(err) = store.ensure(turn_context.session_memory_template()).await {
         warn!("failed to initialize session memory store: {err:#}");
         return;
@@ -260,57 +277,122 @@ pub(crate) async fn maybe_spawn_post_sampling_extraction(
             return;
         }
     };
-    if !should_extract(
+    let summary = match store.read_summary().await {
+        Ok(summary) => summary,
+        Err(err) => {
+            warn!("failed to read session memory summary: {err:#}");
+            return;
+        }
+    };
+    let estimated_input_tokens = sidechain::estimate_extraction_input_tokens(
+        &candidate,
+        turn_context.as_ref(),
+        &store,
+        &summary,
+    );
+    let final_refresh_due = final_refresh_due(
+        candidate.active_context_tokens,
+        auto_compact_scope_tokens,
+        auto_compact_scope_limit,
+        turn_context.model_info.resolved_context_window(),
+        estimated_input_tokens,
+    );
+    let kind = if final_refresh_due {
+        if coordinator::final_refresh_completed(&coordinator).await {
+            return;
+        }
+        if !sidechain_can_start(
+            candidate.active_context_tokens,
+            turn_context.model_context_window(),
+            turn_context.model_info.resolved_context_window(),
+            estimated_input_tokens,
+        ) {
+            return;
+        }
+        ExtractionKind::FinalRefresh
+    } else if should_extract(
         &state,
         &candidate,
         ExtractionThresholds::from_config(&turn_context.config),
     ) {
-        return;
-    }
-
-    let Some(mut boundary) = candidate.raw_boundary.clone() else {
+        ExtractionKind::Routine
+    } else {
         return;
     };
+
+    let Some(boundary) = extraction_work_boundary(&candidate) else {
+        return;
+    };
+    coordinator::submit_background(
+        coordinator,
+        ExtractionWork {
+            kind,
+            sess,
+            turn_context,
+            store,
+            candidate,
+            boundary,
+        },
+    )
+    .await;
+}
+
+fn final_refresh_due(
+    active_context_tokens: i64,
+    auto_compact_scope_tokens: i64,
+    auto_compact_scope_limit: i64,
+    physical_context_window: Option<i64>,
+    estimated_input_tokens: i64,
+) -> bool {
+    let nominal_trigger = auto_compact_scope_limit.saturating_sub(TARGET_RAW_TAIL_TOKENS);
+    if auto_compact_scope_tokens >= nominal_trigger {
+        return true;
+    }
+
+    let Some(physical_context_window) = physical_context_window else {
+        return false;
+    };
+    let request_overhead = estimated_input_tokens.saturating_sub(active_context_tokens);
+    let dynamic_trigger = physical_context_window
+        .saturating_sub(request_overhead)
+        .saturating_sub(SIDECHAIN_OUTPUT_RESERVE_TOKENS)
+        .saturating_sub(SIDECHAIN_ESTIMATION_MARGIN_TOKENS);
+    active_context_tokens >= dynamic_trigger
+}
+
+fn sidechain_can_start(
+    active_context_tokens: i64,
+    effective_context_window: Option<i64>,
+    physical_context_window: Option<i64>,
+    estimated_input_tokens: i64,
+) -> bool {
+    if effective_context_window
+        .is_some_and(|effective_window| active_context_tokens >= effective_window)
+    {
+        return false;
+    }
+    physical_context_window.is_none_or(|physical_context_window| {
+        estimated_input_tokens
+            .saturating_add(SIDECHAIN_OUTPUT_RESERVE_TOKENS)
+            .saturating_add(SIDECHAIN_ESTIMATION_MARGIN_TOKENS)
+            <= physical_context_window
+    })
+}
+
+fn extraction_work_boundary(candidate: &ExtractionCandidate) -> Option<ExtractionBoundary> {
+    let mut boundary = candidate.raw_boundary.clone()?;
     boundary.tokens = candidate
         .active_context_tokens
         .max(estimate_prompt_tokens(&candidate.prompt));
     boundary.tool_calls = count_tool_calls(&candidate.prompt.input);
-
-    {
-        let mut running = RUNNING_EXTRACTIONS.lock().await;
-        if !running.insert(store.thread_key.clone()) {
-            return;
-        }
-    }
-
-    if let Err(err) = mark_extraction_started(&store, state).await {
-        warn!("failed to mark session memory extraction started: {err:#}");
-        clear_running_extraction(&store.thread_key).await;
-        return;
-    }
-
-    let handle = sess.services.runtime_handle.clone();
-    handle.spawn(async move {
-        let result = run_extraction(
-            Arc::clone(&sess),
-            Arc::clone(&turn_context),
-            store.clone(),
-            candidate,
-            boundary,
-        )
-        .await;
-        if let Err(err) = finish_extraction(&store, result).await {
-            warn!("failed to finish session memory extraction: {err:#}");
-        }
-        clear_running_extraction(&store.thread_key).await;
-    });
+    Some(boundary)
 }
 
 pub(crate) async fn try_compact(
     sess: Arc<Session>,
     turn_context: Arc<TurnContext>,
     initial_context_injection: &InitialContextInjection,
-    _is_auto_compact: bool,
+    trigger: CompactionTrigger,
     compaction_item: &codex_protocol::items::TurnItem,
 ) -> CodexResult<SessionMemoryCompactOutcome> {
     if !turn_context.config.experimental_session_memory_compact {
@@ -321,7 +403,18 @@ pub(crate) async fn try_compact(
 
     let store = SessionMemoryStore::new(turn_context.as_ref(), sess.as_ref());
     store.ensure(turn_context.session_memory_template()).await?;
+    let coordinator = coordinator::for_thread(&store.thread_key).await;
+    prepare_final_refresh_before_compact(
+        Arc::clone(&sess),
+        Arc::clone(&turn_context),
+        &store,
+        Arc::clone(&coordinator),
+        trigger,
+    )
+    .await?;
+    coordinator::invalidate_for_compact(&coordinator).await;
     let mut state = store.read_state().await?;
+    state.extraction_started_at_unix = None;
 
     let result = try_compact_inner(
         Arc::clone(&sess),
@@ -358,14 +451,11 @@ async fn try_compact_inner(
     compaction_item: &codex_protocol::items::TurnItem,
     state: &mut SessionMemoryState,
 ) -> CodexResult<String> {
-    wait_for_running_extraction(store, state).await?;
-
     let summary = store.read_summary().await?;
     validate_summary(&summary, turn_context.session_memory_template())?;
     let history_snapshot = sess.clone_history().await;
     let history_items = history_snapshot.raw_items();
     let tail = raw_tail_after_summary_boundary(history_items, state)?;
-    validate_tail_budget(&tail)?;
 
     let (summary_for_compact, was_truncated_for_compact) = truncate_summary_for_compact(&summary);
     let transcript_path = sess.current_rollout_path().await.ok().flatten();
@@ -400,6 +490,19 @@ async fn try_compact_inner(
         post_compact_token_limit(turn_context.as_ref()),
     )?;
     let post_compact_baseline_tool_calls = count_tool_calls(&new_history);
+    let (summary_boundary_index, summary_boundary_fingerprint) = new_history
+        .iter()
+        .enumerate()
+        .find_map(|(index, item)| {
+            matches!(
+                item,
+                TranscriptItem::LocalCompaction { .. } | TranscriptItem::Compaction { .. }
+            )
+            .then(|| (index, tail::item_fingerprint(item)))
+        })
+        .ok_or_else(|| {
+            CodexErr::Fatal("session memory compacted history has no summary boundary".to_string())
+        })?;
 
     let compacted_item = CompactedItem {
         message: summary_text.clone(),
@@ -419,9 +522,92 @@ async fn try_compact_inner(
     state.record_post_compact_baseline(
         post_compact_baseline_tokens,
         post_compact_baseline_tool_calls,
+        Some(ExtractionBoundary {
+            index: summary_boundary_index,
+            fingerprint: summary_boundary_fingerprint,
+            tokens: post_compact_baseline_tokens,
+            tool_calls: post_compact_baseline_tool_calls,
+        }),
     );
 
     Ok(summary_text)
+}
+
+async fn prepare_final_refresh_before_compact(
+    sess: Arc<Session>,
+    turn_context: Arc<TurnContext>,
+    store: &SessionMemoryStore,
+    coordinator: Arc<ExtractionCoordinator>,
+    trigger: CompactionTrigger,
+) -> CodexResult<()> {
+    let has_active_extraction = coordinator::has_active_extraction(&coordinator).await;
+    let needs_final_refresh = matches!(trigger, CompactionTrigger::Manual)
+        || !coordinator::final_refresh_completed(&coordinator).await;
+    if !has_active_extraction
+        && needs_final_refresh
+        && let Some(work) = build_final_refresh_work(
+            Arc::clone(&sess),
+            Arc::clone(&turn_context),
+            store,
+            &coordinator,
+        )
+        .await?
+    {
+        coordinator::submit_background(Arc::clone(&coordinator), work).await;
+    }
+
+    if !coordinator::wait_until_idle(&coordinator, EXTRACTION_WAIT_TIMEOUT).await {
+        warn!(
+            "session memory extraction did not finish before compact timeout; using the last committed boundary"
+        );
+    }
+    Ok(())
+}
+
+async fn build_final_refresh_work(
+    sess: Arc<Session>,
+    turn_context: Arc<TurnContext>,
+    store: &SessionMemoryStore,
+    coordinator: &ExtractionCoordinator,
+) -> CodexResult<Option<ExtractionWork>> {
+    let Some(template) = coordinator::latest_template(coordinator).await else {
+        return Ok(None);
+    };
+    let active_context_tokens = sess.get_total_token_usage().await;
+    let history = sess.clone_history().await;
+    let candidate = ExtractionCandidate::from_history(
+        template,
+        history,
+        &turn_context.model_info.input_modalities,
+        active_context_tokens,
+        true,
+    );
+    let summary = store.read_summary().await?;
+    let estimated_input_tokens = sidechain::estimate_extraction_input_tokens(
+        &candidate,
+        turn_context.as_ref(),
+        store,
+        &summary,
+    );
+    if !sidechain_can_start(
+        candidate.active_context_tokens,
+        turn_context.model_context_window(),
+        turn_context.model_info.resolved_context_window(),
+        estimated_input_tokens,
+    ) {
+        return Ok(None);
+    }
+    let Some(boundary) = extraction_work_boundary(&candidate) else {
+        return Ok(None);
+    };
+    Ok(Some(ExtractionWork {
+        kind: ExtractionKind::FinalRefresh,
+        sess,
+        turn_context,
+        store: store.clone(),
+        candidate,
+        boundary,
+    }))
 }
 
 pub(crate) async fn record_post_legacy_compact_baseline(
@@ -457,6 +643,7 @@ async fn record_post_legacy_compact_baseline_for_store(
     state.record_post_compact_baseline(
         sess.get_total_token_usage().await,
         count_tool_calls(post_compact_history),
+        None,
     );
     state.last_error = None;
     store.write_state(&state).await
@@ -466,9 +653,7 @@ fn build_session_memory_compacted_history(
     tail: Vec<TranscriptItem>,
     summary_text: String,
 ) -> Vec<TranscriptItem> {
-    let mut history = vec![TranscriptItem::Compaction {
-        encrypted_content: summary_text,
-    }];
+    let mut history = vec![TranscriptItem::LocalCompaction { text: summary_text }];
     history.extend(tail);
     history
 }
@@ -535,10 +720,8 @@ fn post_compact_token_limit(turn_context: &TurnContext) -> i64 {
         })
 }
 
-async fn mark_extraction_started(
-    store: &SessionMemoryStore,
-    mut state: SessionMemoryState,
-) -> CodexResult<()> {
+async fn mark_extraction_started(store: &SessionMemoryStore) -> CodexResult<()> {
+    let mut state = store.read_state().await?;
     state.extraction_started_at_unix = Some(now_unix_seconds());
     state.last_error = None;
     store.write_state(&state).await
@@ -563,92 +746,6 @@ async fn finish_extraction(
         }
     }
     store.write_state(&state).await
-}
-
-async fn clear_running_extraction(thread_key: &str) {
-    let mut running = RUNNING_EXTRACTIONS.lock().await;
-    running.remove(thread_key);
-}
-
-async fn wait_for_running_extraction(
-    store: &SessionMemoryStore,
-    state: &mut SessionMemoryState,
-) -> CodexResult<()> {
-    wait_for_running_extraction_with_timeout(store, state, EXTRACTION_WAIT_TIMEOUT).await
-}
-
-async fn wait_for_running_extraction_with_timeout(
-    store: &SessionMemoryStore,
-    state: &mut SessionMemoryState,
-    timeout: Duration,
-) -> CodexResult<()> {
-    let Some(started_at) = state.extraction_started_at_unix else {
-        return Ok(());
-    };
-    if now_unix_seconds().saturating_sub(started_at) > EXTRACTION_STALE_AFTER_SECS {
-        state.extraction_started_at_unix = None;
-        state.last_error = Some("session memory extraction was stale before compact".to_string());
-        store.write_state(state).await?;
-        warn!("session memory extraction was stale before compact; continuing compact");
-        return Ok(());
-    }
-
-    match poll_for_extraction_completion(store, timeout).await? {
-        true => {
-            *state = store.read_state().await?;
-        }
-        false => {
-            state.extraction_started_at_unix = None;
-            state.last_error =
-                Some("session memory extraction did not finish before compact timeout".to_string());
-            store.write_state(state).await?;
-            warn!(
-                "session memory extraction did not finish before compact timeout; continuing compact"
-            );
-        }
-    }
-    Ok(())
-}
-
-async fn wait_for_extraction_completion(
-    store: &SessionMemoryStore,
-    timeout: Duration,
-) -> CodexResult<()> {
-    if poll_for_extraction_completion(store, timeout).await? {
-        return Ok(());
-    }
-
-    let mut state = store.read_state().await.unwrap_or_default();
-    if state.extraction_started_at_unix.is_some() {
-        state.extraction_started_at_unix = None;
-        state.last_error =
-            Some("session memory extraction interrupted during shutdown".to_string());
-        store.write_state(&state).await?;
-    }
-    Err(CodexErr::Fatal(
-        "session memory extraction did not finish before shutdown timeout".to_string(),
-    ))
-}
-
-async fn poll_for_extraction_completion(
-    store: &SessionMemoryStore,
-    timeout: Duration,
-) -> CodexResult<bool> {
-    let result = tokio::time::timeout(timeout, async {
-        loop {
-            let state = store.read_state().await?;
-            if state.extraction_started_at_unix.is_none() {
-                return Ok(true);
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-    })
-    .await;
-
-    match result {
-        Ok(result) => result,
-        Err(_) => Ok(false),
-    }
 }
 
 fn now_unix_seconds() -> u64 {

@@ -22,6 +22,7 @@ base_url = "http://localhost:11434/v1"
         auth: None,
         aws: None,
         wire_api: WireApi::ChatCompletions,
+        responses_builtin_tools: Default::default(),
         provider_flavor: None,
         query_params: None,
         request_body: None,
@@ -57,6 +58,7 @@ query_params = { api-version = "2025-04-01-preview" }
         auth: None,
         aws: None,
         wire_api: WireApi::ChatCompletions,
+        responses_builtin_tools: Default::default(),
         provider_flavor: None,
         query_params: Some(maplit::hashmap! {
             "api-version".to_string() => "2025-04-01-preview".to_string(),
@@ -95,6 +97,7 @@ env_http_headers = { "X-Example-Env-Header" = "EXAMPLE_ENV_VAR" }
         auth: None,
         aws: None,
         wire_api: WireApi::ChatCompletions,
+        responses_builtin_tools: Default::default(),
         provider_flavor: None,
         query_params: None,
         request_body: None,
@@ -318,6 +321,7 @@ fn test_create_astral_provider_defaults_to_chat_completions() {
             auth: None,
             aws: None,
             wire_api: WireApi::ChatCompletions,
+            responses_builtin_tools: Default::default(),
             provider_flavor: None,
             query_params: None,
             request_body: None,
@@ -349,19 +353,28 @@ websocket_connect_timeout_ms = 15000
 }
 
 #[test]
-fn test_deserialize_responses_wire_api_is_rejected() {
+fn test_deserialize_responses_wire_api_and_builtin_tool_policy() {
     let provider_toml = r#"
 name = "OpenAI"
 base_url = "https://api.openai.com/v1"
 wire_api = "responses"
+responses_builtin_tools = ["web_search"]
         "#;
 
-    let err = toml::from_str::<ModelProviderInfo>(provider_toml)
-        .expect_err("responses wire API should be rejected");
+    let provider = toml::from_str::<ModelProviderInfo>(provider_toml)
+        .expect("responses provider config should parse");
 
-    assert!(
-        err.to_string().contains("chat_completions"),
-        "unexpected error: {err}"
+    assert_eq!(
+        provider,
+        ModelProviderInfo {
+            name: "OpenAI".to_string(),
+            base_url: Some("https://api.openai.com/v1".to_string()),
+            wire_api: WireApi::Responses,
+            responses_builtin_tools: ResponsesBuiltinTools::Selected(vec![
+                "web_search".to_string()
+            ]),
+            ..ModelProviderInfo::default()
+        }
     );
 }
 
@@ -457,6 +470,7 @@ fn test_create_amazon_bedrock_provider() {
                 region: None,
             }),
             wire_api: WireApi::ChatCompletions,
+            responses_builtin_tools: Default::default(),
             provider_flavor: None,
             query_params: None,
             request_body: None,
@@ -617,7 +631,7 @@ fn test_validate_provider_aws_rejects_websockets() {
     assert_eq!(
         provider.validate(),
         Err(
-            "provider supports_websockets is no longer supported because Responses API transports have been removed"
+            "provider supports_websockets is not supported; use streaming Responses over HTTP"
                 .to_string()
         )
     );

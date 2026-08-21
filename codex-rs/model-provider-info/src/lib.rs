@@ -54,8 +54,7 @@ const AMAZON_BEDROCK_MANTLE_CLIENT_AGENT_HEADER: &str = "x-amzn-mantle-client-ag
 const AMAZON_BEDROCK_MANTLE_CLIENT_AGENT_VALUE: &str = "codex";
 const OPENAI_API_KEY_ENV_VAR: &str = "OPENAI_API_KEY";
 const CHAT_WIRE_API_REMOVED_ERROR: &str = "`wire_api = \"chat\"` is no longer supported.\nHow to fix: set `wire_api = \"chat_completions\"` in your provider config.";
-const RESPONSES_WIRE_API_REMOVED_ERROR: &str = "`wire_api = \"responses\"` is no longer supported.\nHow to fix: set `wire_api = \"chat_completions\"` and use a standard OpenAI-compatible `/v1/chat/completions` endpoint.";
-const WIRE_API_VARIANTS: &[&str] = &["anthropic_messages", "chat_completions"];
+const WIRE_API_VARIANTS: &[&str] = &["responses", "anthropic_messages", "chat_completions"];
 const PROVIDER_FLAVOR_VARIANTS: &[&str] = &[
     "generic_openai",
     "deepseek",
@@ -71,8 +70,7 @@ pub const OLLAMA_CHAT_PROVIDER_REMOVED_ERROR: &str = "`ollama-chat` is no longer
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum WireApi {
-    /// Legacy OpenAI Responses API. This variant remains only for internal
-    /// migration code; external provider config rejects `wire_api = "responses"`.
+    /// OpenAI-compatible Responses API exposed at `/v1/responses`.
     Responses,
     /// Anthropic Messages API exposed at `/v1/messages`.
     AnthropicMessages,
@@ -99,12 +97,48 @@ impl<'de> Deserialize<'de> for WireApi {
     {
         let value = String::deserialize(deserializer)?;
         match value.as_str() {
-            "responses" => Err(serde::de::Error::custom(RESPONSES_WIRE_API_REMOVED_ERROR)),
+            "responses" => Ok(Self::Responses),
             "anthropic_messages" => Ok(Self::AnthropicMessages),
             "chat_completions" => Ok(Self::ChatCompletions),
             "chat" => Err(serde::de::Error::custom(CHAT_WIRE_API_REMOVED_ERROR)),
             _ => Err(serde::de::Error::unknown_variant(&value, WIRE_API_VARIANTS)),
         }
+    }
+}
+
+/// Which provider-hosted Responses tools Astral may send.
+///
+/// The config accepts either the string `"all"` or an explicit array of tool
+/// names. An empty array disables provider-hosted tools.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[serde(untagged)]
+pub enum ResponsesBuiltinTools {
+    All(ResponsesBuiltinToolsKeyword),
+    Selected(Vec<String>),
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ResponsesBuiltinToolsKeyword {
+    All,
+}
+
+impl Default for ResponsesBuiltinTools {
+    fn default() -> Self {
+        Self::All(ResponsesBuiltinToolsKeyword::All)
+    }
+}
+
+impl ResponsesBuiltinTools {
+    pub fn allows(&self, tool_name: &str) -> bool {
+        match self {
+            Self::All(ResponsesBuiltinToolsKeyword::All) => true,
+            Self::Selected(tool_names) => tool_names.iter().any(|name| name == tool_name),
+        }
+    }
+
+    pub fn is_explicit_selection(&self) -> bool {
+        matches!(self, Self::Selected(_))
     }
 }
 
@@ -198,6 +232,9 @@ pub struct ModelProviderInfo {
     /// Which wire protocol this provider expects.
     #[serde(default)]
     pub wire_api: WireApi,
+    /// Provider-hosted tools forwarded on the Responses wire.
+    #[serde(default)]
+    pub responses_builtin_tools: ResponsesBuiltinTools,
     /// Optional provider dialect within the selected wire protocol.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_flavor: Option<ProviderFlavor>,
@@ -239,8 +276,8 @@ pub struct ModelProviderInfo {
     /// provider-specific BYOK auth instead.
     #[serde(default)]
     pub requires_astral_auth: bool,
-    /// Legacy Responses API WebSocket transport flag. Astral no longer supports
-    /// Responses transports; use streaming Chat Completions over HTTP instead.
+    /// Legacy Responses API WebSocket transport flag. HTTP Responses support
+    /// does not enable this transport.
     #[serde(default)]
     pub supports_websockets: bool,
 }
@@ -266,7 +303,7 @@ impl ModelProviderInfo {
 
         if self.supports_websockets {
             return Err(
-                "provider supports_websockets is no longer supported because Responses API transports have been removed"
+                "provider supports_websockets is not supported; use streaming Responses over HTTP"
                     .to_string(),
             );
         }
@@ -480,6 +517,7 @@ impl ModelProviderInfo {
             auth: None,
             aws: None,
             wire_api: WireApi::ChatCompletions,
+            responses_builtin_tools: Default::default(),
             provider_flavor: None,
             query_params: None,
             request_body: None,
@@ -512,6 +550,7 @@ impl ModelProviderInfo {
             auth: None,
             aws: None,
             wire_api: WireApi::ChatCompletions,
+            responses_builtin_tools: Default::default(),
             provider_flavor: None,
             query_params: None,
             request_body: None,
@@ -544,6 +583,7 @@ impl ModelProviderInfo {
             auth: None,
             aws: None,
             wire_api: WireApi::AnthropicMessages,
+            responses_builtin_tools: Default::default(),
             provider_flavor: None,
             query_params: None,
             request_body: None,
@@ -581,6 +621,7 @@ impl ModelProviderInfo {
                 region: None,
             })),
             wire_api: WireApi::ChatCompletions,
+            responses_builtin_tools: Default::default(),
             provider_flavor: None,
             query_params: None,
             request_body: None,
@@ -699,6 +740,7 @@ pub fn create_oss_provider_with_base_url(base_url: &str, wire_api: WireApi) -> M
         auth: None,
         aws: None,
         wire_api,
+        responses_builtin_tools: Default::default(),
         provider_flavor: None,
         query_params: None,
         request_body: None,

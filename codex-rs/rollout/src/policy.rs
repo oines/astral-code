@@ -42,6 +42,7 @@ pub fn should_persist_response_item(item: &TranscriptItem) -> bool {
         | TranscriptItem::CustomToolCallOutput { .. }
         | TranscriptItem::WebSearchCall { .. }
         | TranscriptItem::ImageGenerationCall { .. }
+        | TranscriptItem::LocalCompaction { .. }
         | TranscriptItem::Compaction { .. }
         | TranscriptItem::ContextCompaction { .. } => true,
         TranscriptItem::CompactionTrigger => false,
@@ -65,6 +66,7 @@ pub fn should_persist_response_item_for_memories(item: &TranscriptItem) -> bool 
         TranscriptItem::AgentMessage { .. }
         | TranscriptItem::Reasoning { .. }
         | TranscriptItem::ImageGenerationCall { .. }
+        | TranscriptItem::LocalCompaction { .. }
         | TranscriptItem::Compaction { .. }
         | TranscriptItem::CompactionTrigger
         | TranscriptItem::ContextCompaction { .. }

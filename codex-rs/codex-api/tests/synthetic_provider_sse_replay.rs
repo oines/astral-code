@@ -325,6 +325,7 @@ fn output_item_summary(item: &TranscriptItem) -> Option<String> {
         | TranscriptItem::ToolSearchOutput { .. }
         | TranscriptItem::WebSearchCall { .. }
         | TranscriptItem::ImageGenerationCall { .. }
+        | TranscriptItem::LocalCompaction { .. }
         | TranscriptItem::Compaction { .. }
         | TranscriptItem::CompactionTrigger
         | TranscriptItem::ContextCompaction { .. }

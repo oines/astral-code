@@ -62,6 +62,7 @@ mod tests {
             auth: None,
             aws: None,
             wire_api: WireApi::ChatCompletions,
+            responses_builtin_tools: Default::default(),
             provider_flavor: None,
             query_params: None,
             request_body: None,

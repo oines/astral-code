@@ -51,6 +51,7 @@ fn keep_forked_rollout_item(item: &RolloutItem, preserve_reference_context_item:
             | TranscriptItem::ToolSearchOutput { .. }
             | TranscriptItem::WebSearchCall { .. }
             | TranscriptItem::ImageGenerationCall { .. }
+            | TranscriptItem::LocalCompaction { .. }
             | TranscriptItem::Compaction { .. }
             | TranscriptItem::CompactionTrigger
             | TranscriptItem::ContextCompaction { .. }

@@ -181,6 +181,7 @@ async fn run_compact_task_inner(
         Arc::clone(&turn_context),
         input,
         initial_context_injection,
+        trigger,
         compaction_metadata,
         matches!(trigger, CompactionTrigger::Auto),
     )
@@ -243,6 +244,7 @@ async fn run_compact_task_inner_impl(
     turn_context: Arc<TurnContext>,
     input: Vec<UserInput>,
     initial_context_injection: InitialContextInjection,
+    trigger: CompactionTrigger,
     compaction_metadata: CompactionTurnMetadata,
     suppress_follow_up_questions: bool,
 ) -> CodexResult<String> {
@@ -255,7 +257,7 @@ async fn run_compact_task_inner_impl(
             Arc::clone(&sess),
             Arc::clone(&turn_context),
             &initial_context_injection,
-            suppress_follow_up_questions,
+            trigger,
             &compaction_item,
         )
         .await
@@ -588,7 +590,9 @@ pub(crate) fn insert_initial_context_before_last_real_user_or_summary(
         .find_map(|(i, item)| {
             matches!(
                 item,
-                TranscriptItem::Compaction { .. } | TranscriptItem::ContextCompaction { .. }
+                TranscriptItem::LocalCompaction { .. }
+                    | TranscriptItem::Compaction { .. }
+                    | TranscriptItem::ContextCompaction { .. }
             )
             .then_some(i)
         });
@@ -658,7 +662,9 @@ pub(crate) fn should_keep_compacted_history_item(item: &TranscriptItem) -> bool 
         TranscriptItem::Message { role, .. } if role == "assistant" => true,
         TranscriptItem::Message { .. } => false,
         TranscriptItem::AgentMessage { .. } => true,
-        TranscriptItem::Compaction { .. } | TranscriptItem::ContextCompaction { .. } => true,
+        TranscriptItem::LocalCompaction { .. }
+        | TranscriptItem::Compaction { .. }
+        | TranscriptItem::ContextCompaction { .. } => true,
         TranscriptItem::CompactionTrigger => false,
         TranscriptItem::Reasoning { .. }
         | TranscriptItem::LocalShellCall { .. }
@@ -730,9 +736,7 @@ fn build_compacted_history_with_limit(
         summary_text.to_string()
     };
 
-    history.push(TranscriptItem::Compaction {
-        encrypted_content: summary_text,
-    });
+    history.push(TranscriptItem::LocalCompaction { text: summary_text });
 
     history
 }

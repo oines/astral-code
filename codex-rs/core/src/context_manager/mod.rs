@@ -1,5 +1,6 @@
 mod history;
 mod normalize;
+pub(crate) use normalize::strip_images_when_unsupported;
 pub(crate) mod updates;
 
 pub(crate) use history::ContextManager;

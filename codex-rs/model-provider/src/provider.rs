@@ -147,10 +147,12 @@ impl ModelProvider for ConfiguredModelProvider {
     }
 
     fn capabilities(&self) -> ProviderCapabilities {
+        let responses = self.info.wire_api == WireApi::Responses;
         ProviderCapabilities {
             namespace_tools: true,
-            image_generation: false,
-            web_search: false,
+            image_generation: responses
+                && self.info.responses_builtin_tools.allows("image_generation"),
+            web_search: responses && self.info.responses_builtin_tools.allows("web_search"),
         }
     }
 
@@ -279,6 +281,7 @@ mod tests {
             auth: None,
             aws: None,
             wire_api: WireApi::ChatCompletions,
+            responses_builtin_tools: Default::default(),
             provider_flavor: None,
             query_params: None,
             request_body: None,

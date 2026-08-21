@@ -378,6 +378,11 @@ fn response_item_to_agent_message(
             }],
             id: None,
         }),
+        TranscriptItem::LocalCompaction { text } => Some(AgentMessage {
+            role: MessageRole::User,
+            content: vec![ContentBlock::Compaction { text: text.clone() }],
+            id: None,
+        }),
         TranscriptItem::ContextCompaction {
             encrypted_content: Some(encrypted_content),
         } => Some(AgentMessage {

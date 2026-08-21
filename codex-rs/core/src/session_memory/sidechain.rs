@@ -13,13 +13,14 @@ use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::TranscriptItem;
 use codex_rollout_trace::InferenceTraceContext;
 use codex_tools::EDIT_TOOL_NAME;
+use codex_utils_output_truncation::approx_token_count;
 use futures::StreamExt;
 
 use super::ExtractionCandidate;
 use super::SessionMemoryStore;
 use super::SessionMemoryToolContext;
-use super::atomic_write;
 use super::tail::ExtractionBoundary;
+use super::tail::estimate_prompt_tokens;
 use super::tail::summary_budget_reminder;
 
 mod code_mode;
@@ -41,6 +42,36 @@ const MAX_SIDECHAIN_TOOL_ROUNDS: usize = 6;
 pub(super) enum SummaryUpdateTool {
     Edit,
     ApplyPatch,
+}
+
+pub(super) fn estimate_extraction_input_tokens(
+    candidate: &ExtractionCandidate,
+    turn_context: &TurnContext,
+    store: &SessionMemoryStore,
+    current_summary: &str,
+) -> i64 {
+    let update_tool = SummaryUpdateTool::for_context(&candidate.tool_context);
+    let budget_reminder = summary_budget_reminder(current_summary);
+    let update_prompt = updater_prompt(
+        turn_context.session_memory_update_prompt.as_deref(),
+        update_tool,
+        &store.summary_path,
+        current_summary,
+        &budget_reminder,
+    );
+    let tool_tokens = serde_json::to_string(&candidate.prompt.tools)
+        .map(|tools| i64::try_from(approx_token_count(&tools)).unwrap_or(i64::MAX))
+        .unwrap_or_default();
+    let schema_tokens = candidate
+        .prompt
+        .output_schema
+        .as_ref()
+        .map(|schema| i64::try_from(approx_token_count(&schema.to_string())).unwrap_or(i64::MAX))
+        .unwrap_or_default();
+    estimate_prompt_tokens(&candidate.prompt)
+        .saturating_add(i64::try_from(approx_token_count(&update_prompt)).unwrap_or(i64::MAX))
+        .saturating_add(tool_tokens)
+        .saturating_add(schema_tokens)
 }
 
 impl SummaryUpdateTool {
@@ -65,9 +96,9 @@ pub(super) async fn run_extraction(
     store: SessionMemoryStore,
     mut candidate: ExtractionCandidate,
     boundary: ExtractionBoundary,
+    current_summary: String,
 ) -> CodexResult<ExtractionBoundary> {
-    let current_summary = store.read_summary().await?;
-    let result = run_extraction_inner(
+    run_extraction_inner(
         sess,
         turn_context,
         &store,
@@ -75,11 +106,7 @@ pub(super) async fn run_extraction(
         boundary,
         &current_summary,
     )
-    .await;
-    if result.is_err() {
-        let _ = atomic_write(&store.summary_path, current_summary.into_bytes()).await;
-    }
-    result
+    .await
 }
 
 async fn run_extraction_inner(
@@ -340,6 +367,7 @@ async fn handle_sidechain_item(
         | TranscriptItem::ToolSearchOutput { .. }
         | TranscriptItem::WebSearchCall { .. }
         | TranscriptItem::ImageGenerationCall { .. }
+        | TranscriptItem::LocalCompaction { .. }
         | TranscriptItem::Compaction { .. }
         | TranscriptItem::CompactionTrigger
         | TranscriptItem::ContextCompaction { .. }
