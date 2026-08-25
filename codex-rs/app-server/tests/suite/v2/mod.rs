@@ -18,7 +18,8 @@ mod external_agent_config;
 mod feedback;
 mod fs;
 mod hooks_list;
-// Astral v1 does not default-install the legacy OpenAI-hosted image generation extension.
+// The legacy imagegen fixture targets a configurable OpenAI provider; Codex OAuth installation is
+// covered by the production registry tests in `app_server::extensions`.
 mod initialize;
 mod marketplace_add;
 mod marketplace_remove;

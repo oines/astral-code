@@ -55,6 +55,7 @@ mod tests {
     use crate::provider::RetryConfig;
     use crate::search::AllowedCaller;
     use crate::search::ApproximateLocation;
+    use crate::search::ExternalWebAccess;
     use crate::search::LocationType;
     use crate::search::OpenOperation;
     use crate::search::SearchCommands;
@@ -144,6 +145,11 @@ mod tests {
         );
         let client = SearchClient::new(transport.clone(), provider(), Arc::new(DummyAuth));
 
+        let mut extra_headers = HeaderMap::new();
+        extra_headers.insert(
+            "x-astral-turn-metadata",
+            "turn-metadata".parse().expect("valid header value"),
+        );
         let response = client
             .search(
                 &SearchRequest {
@@ -194,11 +200,11 @@ mod tests {
                             caption: Some(true),
                         }),
                         allowed_callers: Some(vec![AllowedCaller::Direct]),
-                        external_web_access: Some(true),
+                        external_web_access: Some(ExternalWebAccess::Boolean(true)),
                     }),
                     max_output_tokens: Some(2500),
                 },
-                HeaderMap::new(),
+                extra_headers,
             )
             .await
             .expect("search request should succeed");
@@ -217,6 +223,14 @@ mod tests {
             .expect("lock request store")
             .clone()
             .expect("request should be captured");
+        assert_eq!(request.url, "https://example.com/v1/alpha/search");
+        assert_eq!(
+            request
+                .headers
+                .get("x-astral-turn-metadata")
+                .and_then(|value| value.to_str().ok()),
+            Some("turn-metadata")
+        );
         let body = request
             .body
             .as_ref()

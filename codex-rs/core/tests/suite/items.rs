@@ -570,8 +570,8 @@ async fn image_generation_call_event_is_emitted() -> anyhow::Result<()> {
             .body_json()
             .get("tools")
             .and_then(serde_json::Value::as_array)
-            .is_some_and(|tools| tools.iter().any(|tool| tool["type"] == "image_generation")),
-        "Codex Full Responses should expose hosted image_generation"
+            .is_none_or(|tools| tools.iter().all(|tool| tool["type"] != "image_generation")),
+        "Codex Full Responses should not advertise hosted image_generation"
     );
     let _ = std::fs::remove_file(&expected_saved_path);
 

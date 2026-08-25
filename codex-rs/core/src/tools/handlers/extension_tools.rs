@@ -109,11 +109,17 @@ impl TurnItemEmitter for CoreTurnItemEmitter {
 async fn to_extension_call(invocation: &ToolInvocation) -> ExtensionToolCall {
     let conversation_history =
         ConversationHistory::new(invocation.session.clone_history().await.into_raw_items());
+    let window_id = invocation.session.services.model_client.current_window_id();
+    let codex_turn_metadata = invocation
+        .turn
+        .turn_metadata_state
+        .current_header_value_for_model_request(&window_id);
     ExtensionToolCall {
         turn_id: invocation.turn.sub_id.clone(),
         call_id: invocation.call_id.clone(),
         tool_name: invocation.tool_name.clone(),
         model: invocation.turn.model_info.slug.clone(),
+        codex_turn_metadata,
         truncation_policy: invocation.turn.truncation_policy,
         conversation_history,
         turn_item_emitter: Arc::new(CoreTurnItemEmitter {
@@ -334,6 +340,7 @@ mod tests {
             codex_tools::ToolName::plain("extension_echo")
         );
         assert_eq!(captured_call.model, model);
+        assert!(captured_call.codex_turn_metadata.is_some());
         assert_eq!(captured_call.truncation_policy, truncation_policy);
         assert_eq!(
             captured_call.conversation_history.items(),

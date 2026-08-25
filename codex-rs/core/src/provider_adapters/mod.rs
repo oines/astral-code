@@ -30,9 +30,12 @@ pub(crate) fn build_responses_request(
     }
 }
 
-pub(crate) fn hosted_model_tool_specs(turn_context: &TurnContext) -> Vec<ToolSpec> {
+pub(crate) fn hosted_model_tool_specs(
+    turn_context: &TurnContext,
+    registered_tool_names: &[ToolName],
+) -> Vec<ToolSpec> {
     if is_codex(turn_context.provider.as_ref()) {
-        codex::hosted_model_tool_specs(turn_context)
+        codex::hosted_model_tool_specs(turn_context, registered_tool_names)
     } else {
         generic::hosted_model_tool_specs()
     }

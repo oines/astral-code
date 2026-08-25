@@ -543,7 +543,15 @@ fn add_tool_sources(context: &CoreToolPlanContext<'_>, planned_tools: &mut Plann
     add_mcp_runtime_tools(context, planned_tools);
     add_extension_tools(context, planned_tools);
     add_dynamic_tools(context, planned_tools);
-    for spec in provider_adapters::hosted_model_tool_specs(context.step_context.turn.as_ref()) {
+    let registered_tool_names = planned_tools
+        .runtimes()
+        .iter()
+        .map(|runtime| runtime.tool_name())
+        .collect::<Vec<_>>();
+    for spec in provider_adapters::hosted_model_tool_specs(
+        context.step_context.turn.as_ref(),
+        &registered_tool_names,
+    ) {
         planned_tools.add_hosted_spec(spec);
     }
 }

@@ -1862,16 +1862,23 @@ async fn hosted_and_extension_web_tools_follow_surface() {
     .await;
     generic_responses.assert_visible_lacks(&["web_search", "image_generation"]);
 
-    let codex_full = probe(|turn| {
-        use_codex_provider(turn);
-        set_feature(turn, Feature::ImageGeneration, /*enabled*/ true);
-        set_web_search_mode(turn, WebSearchMode::Indexed);
-        turn.model_info.supports_web_search = true;
-        turn.model_info.supports_image_generation = true;
-        turn.model_info.input_modalities = vec![InputModality::Text, InputModality::Image];
-    })
+    let codex_full = probe_with(
+        |turn| {
+            use_codex_provider(turn);
+            set_feature(turn, Feature::ImageGeneration, /*enabled*/ true);
+            set_web_search_mode(turn, WebSearchMode::Indexed);
+            turn.model_info.supports_web_search = true;
+            turn.model_info.supports_image_generation = true;
+            turn.model_info.input_modalities = vec![InputModality::Text, InputModality::Image];
+        },
+        ToolPlanInputs {
+            extension_tool_executors: vec![Arc::new(ImageGenerationExtensionTool)],
+            ..Default::default()
+        },
+    )
     .await;
-    codex_full.assert_visible_contains(&["web_search", "image_generation"]);
+    codex_full.assert_visible_contains(&["web_search", "image_gen"]);
+    codex_full.assert_visible_lacks(&["image_generation"]);
     assert!(codex_full.visible_specs.iter().any(|spec| matches!(
         spec,
         ToolSpec::WebSearch {
@@ -1884,14 +1891,7 @@ async fn hosted_and_extension_web_tools_follow_surface() {
     let codex_lite = probe_with(
         |turn| {
             use_codex_provider(turn);
-            set_features(
-                turn,
-                &[
-                    Feature::StandaloneWebSearch,
-                    Feature::ImageGeneration,
-                    Feature::ImageGenExt,
-                ],
-            );
+            set_features(turn, &[Feature::ImageGeneration, Feature::ImageGenExt]);
             set_web_search_mode(turn, WebSearchMode::Live);
             turn.model_info.use_responses_lite = true;
             turn.model_info.supports_web_search = true;
@@ -1915,6 +1915,31 @@ async fn hosted_and_extension_web_tools_follow_surface() {
         codex_lite.namespace_function_names("web"),
         &["run".to_string()]
     );
+
+    let codex_capabilities_disabled = probe_with(
+        |turn| {
+            use_codex_provider(turn);
+            set_feature(turn, Feature::ImageGeneration, /*enabled*/ true);
+            set_web_search_mode(turn, WebSearchMode::Live);
+            turn.model_info.supports_web_search = false;
+            turn.model_info.supports_image_generation = false;
+            turn.model_info.input_modalities = vec![InputModality::Text, InputModality::Image];
+        },
+        ToolPlanInputs {
+            extension_tool_executors: vec![
+                Arc::new(WebRunExtensionTool),
+                Arc::new(ImageGenerationExtensionTool),
+            ],
+            ..Default::default()
+        },
+    )
+    .await;
+    codex_capabilities_disabled.assert_visible_lacks(&[
+        "web_search",
+        "web",
+        "image_generation",
+        "image_gen",
+    ]);
 
     let api_key_auth = probe(|turn| {
         set_feature(turn, Feature::ImageGeneration, /*enabled*/ true);
@@ -1991,9 +2016,10 @@ async fn hosted_and_extension_web_tools_follow_surface() {
         use_codex_provider(turn);
         set_feature(turn, Feature::StandaloneWebSearch, /*enabled*/ true);
         set_web_search_mode(turn, WebSearchMode::Live);
+        turn.model_info.supports_web_search = true;
     })
     .await;
-    codex_standalone_without_web_run.assert_visible_lacks(&["web_search"]);
+    codex_standalone_without_web_run.assert_visible_contains(&["web_search"]);
 
     let standalone_web_search = probe_with(
         |turn| {
@@ -2015,6 +2041,7 @@ async fn hosted_and_extension_web_tools_follow_surface() {
             use_codex_provider(turn);
             set_feature(turn, Feature::StandaloneWebSearch, /*enabled*/ true);
             set_web_search_mode(turn, WebSearchMode::Live);
+            turn.model_info.supports_web_search = true;
         },
         ToolPlanInputs {
             extension_tool_executors: vec![Arc::new(WebRunExtensionTool)],
@@ -2022,7 +2049,11 @@ async fn hosted_and_extension_web_tools_follow_surface() {
         },
     )
     .await;
-    codex_standalone_web_search.assert_visible_lacks(&["web"]);
+    codex_standalone_web_search.assert_visible_contains(&["web"]);
+    assert_eq!(
+        codex_standalone_web_search.namespace_function_names("web"),
+        &["run".to_string()]
+    );
     codex_standalone_web_search.assert_visible_lacks(&["web_search"]);
 
     let provider_neutral_web_inputs = || ToolPlanInputs {

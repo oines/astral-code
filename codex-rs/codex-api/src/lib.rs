@@ -66,6 +66,8 @@ pub use crate::provider::RetryConfig;
 pub use crate::search::AllowedCaller;
 pub use crate::search::ApproximateLocation;
 pub use crate::search::ClickOperation;
+pub use crate::search::ExternalWebAccess;
+pub use crate::search::ExternalWebAccessMode;
 pub use crate::search::FinanceAssetType;
 pub use crate::search::FinanceOperation;
 pub use crate::search::FindOperation;

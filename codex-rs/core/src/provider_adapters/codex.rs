@@ -22,8 +22,6 @@ use codex_tools::ToolName;
 use codex_tools::ToolSpec;
 use codex_tools::provider_neutral_tool_name_for_tool_name;
 
-const IMAGE_OUTPUT_FORMAT: &str = "png";
-
 pub(super) fn build_responses_request(
     params: ResponsesRequestParams<'_>,
 ) -> codex_protocol::error::Result<ResponsesApiRequest> {
@@ -63,13 +61,19 @@ pub(super) fn build_responses_request(
     Ok(request)
 }
 
-pub(super) fn hosted_model_tool_specs(turn_context: &TurnContext) -> Vec<ToolSpec> {
+pub(super) fn hosted_model_tool_specs(
+    turn_context: &TurnContext,
+    registered_tool_names: &[ToolName],
+) -> Vec<ToolSpec> {
     if turn_context.model_info.use_responses_lite {
         return Vec::new();
     }
 
     let mut specs = Vec::new();
-    if turn_context.model_info.supports_web_search
+    let standalone_web_search_available = standalone_web_search_enabled(turn_context)
+        && registered_tool_names.contains(&ToolName::namespaced("web", "run"));
+    if !standalone_web_search_available
+        && turn_context.model_info.supports_web_search
         && let Some(web_search) = create_web_search_tool(WebSearchToolOptions {
             web_search_mode: Some(turn_context.config.web_search_mode.value()),
             web_search_config: turn_context.config.web_search_config.as_ref(),
@@ -78,11 +82,6 @@ pub(super) fn hosted_model_tool_specs(turn_context: &TurnContext) -> Vec<ToolSpe
     {
         specs.push(web_search);
     }
-    if image_generation_available(turn_context) {
-        specs.push(ToolSpec::ImageGeneration {
-            output_format: IMAGE_OUTPUT_FORMAT.to_string(),
-        });
-    }
     specs
 }
 
@@ -90,19 +89,21 @@ pub(super) fn extension_tool_visible(turn_context: &TurnContext, tool_name: &Too
     match (tool_name.namespace.as_deref(), tool_name.name.as_str()) {
         (Some("web"), "search" | "fetch") => false,
         (Some("web"), "run") => {
-            turn_context.model_info.use_responses_lite
-                && turn_context.model_info.supports_web_search
+            standalone_web_search_enabled(turn_context)
                 && turn_context.config.web_search_mode.value() != WebSearchMode::Disabled
-                && turn_context
-                    .features
-                    .get()
-                    .enabled(Feature::StandaloneWebSearch)
         }
-        (Some("image_gen"), "imagegen") => {
-            turn_context.model_info.use_responses_lite && image_generation_available(turn_context)
-        }
+        (Some("image_gen"), "imagegen") => image_generation_available(turn_context),
         _ => true,
     }
+}
+
+fn standalone_web_search_enabled(turn_context: &TurnContext) -> bool {
+    turn_context.model_info.supports_web_search
+        && (turn_context.model_info.use_responses_lite
+            || turn_context
+                .features
+                .get()
+                .enabled(Feature::StandaloneWebSearch))
 }
 
 fn image_generation_available(turn_context: &TurnContext) -> bool {

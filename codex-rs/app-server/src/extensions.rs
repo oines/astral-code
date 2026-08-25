@@ -144,6 +144,8 @@ mod tests {
     use codex_extension_api::ThreadStartInput;
     use codex_extension_api::ToolName;
     use codex_login::CodexAuth;
+    use codex_model_provider_info::CODEX_PROVIDER_ID;
+    use codex_model_provider_info::ModelProviderInfo;
     use codex_protocol::protocol::SessionSource;
     use codex_protocol::protocol::ThreadGoal as CoreThreadGoal;
     use codex_protocol::protocol::ThreadGoalStatus;
@@ -254,6 +256,83 @@ mod tests {
 
         assert!(tool_names.contains(&ToolName::namespaced("web", "search")));
         assert!(tool_names.contains(&ToolName::namespaced("web", "fetch")));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn thread_extensions_follow_codex_provider_hot_switches() -> anyhow::Result<()> {
+        let codex_home = tempfile::tempdir()?;
+        let config = Config::load_default_with_cli_overrides_for_codex_home(
+            codex_home.path().to_path_buf(),
+            vec![(
+                "web_search".to_string(),
+                toml::Value::String("live".to_string()),
+            )],
+        )
+        .await?;
+        let mut codex_config = config.clone();
+        codex_config.model_provider_id = CODEX_PROVIDER_ID.to_string();
+        codex_config.model_provider = ModelProviderInfo::create_codex_provider();
+        let registry = thread_extensions(
+            guardian_agent_spawner(Weak::new()),
+            Arc::new(NoopExtensionEventSink),
+            AuthManager::from_auth_for_testing(CodexAuth::from_api_key("dummy")),
+            None,
+            Weak::new(),
+            Arc::new(GoalService::new()),
+        );
+        let session_store = ExtensionData::new("session");
+        let thread_store = ExtensionData::new("11111111-1111-4111-8111-111111111111");
+
+        for contributor in registry.thread_lifecycle_contributors() {
+            contributor
+                .on_thread_start(ThreadStartInput {
+                    config: &config,
+                    session_source: &SessionSource::Mcp,
+                    persistent_thread_state_available: true,
+                    session_store: &session_store,
+                    thread_store: &thread_store,
+                })
+                .await;
+        }
+
+        let codex_tool_names = [
+            ToolName::namespaced("web", "run"),
+            ToolName::namespaced("image_gen", "imagegen"),
+        ];
+        let tool_names = || {
+            registry
+                .tool_contributors()
+                .iter()
+                .flat_map(|contributor| contributor.tools(&session_store, &thread_store))
+                .map(|tool| tool.tool_name())
+                .collect::<Vec<_>>()
+        };
+        assert!(
+            codex_tool_names
+                .iter()
+                .all(|tool_name| !tool_names().contains(tool_name))
+        );
+
+        for contributor in registry.config_contributors() {
+            contributor.on_config_changed(&session_store, &thread_store, &config, &codex_config);
+        }
+        let active_codex_tools = tool_names();
+        assert!(
+            codex_tool_names
+                .iter()
+                .all(|tool_name| active_codex_tools.contains(tool_name))
+        );
+
+        for contributor in registry.config_contributors() {
+            contributor.on_config_changed(&session_store, &thread_store, &codex_config, &config);
+        }
+        assert!(
+            codex_tool_names
+                .iter()
+                .all(|tool_name| !tool_names().contains(tool_name))
+        );
 
         Ok(())
     }
