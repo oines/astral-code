@@ -357,7 +357,7 @@ websocket_connect_timeout_ms = 15000
 }
 
 #[test]
-fn test_deserialize_responses_wire_api_and_builtin_tool_policy() {
+fn test_legacy_builtin_tool_policy_parses_but_validation_requires_adapter() {
     let provider_toml = r#"
 name = "OpenAI"
 base_url = "https://api.openai.com/v1"
@@ -379,6 +379,13 @@ responses_builtin_tools = ["web_search"]
             ]),
             ..ModelProviderInfo::default()
         }
+    );
+    assert_eq!(
+        provider.validate(),
+        Err(
+            "provider responses_builtin_tools is no longer supported; use a built-in provider adapter for hosted tools"
+                .to_string()
+        )
     );
 }
 

@@ -115,10 +115,11 @@ impl<'de> Deserialize<'de> for WireApi {
     }
 }
 
-/// Which provider-hosted Responses tools Astral may send.
+/// Legacy provider-hosted Responses tool configuration.
 ///
-/// The config accepts either the string `"all"` or an explicit array of tool
-/// names. An empty array disables provider-hosted tools.
+/// This remains deserializable for one migration window, but non-empty values
+/// are rejected by provider validation. Hosted tools must be implemented by a
+/// built-in provider adapter instead of inferred from user configuration.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 #[serde(untagged)]
 pub enum ResponsesBuiltinTools {
@@ -134,20 +135,13 @@ pub enum ResponsesBuiltinToolsKeyword {
 
 impl Default for ResponsesBuiltinTools {
     fn default() -> Self {
-        Self::All(ResponsesBuiltinToolsKeyword::All)
+        Self::Selected(Vec::new())
     }
 }
 
 impl ResponsesBuiltinTools {
-    pub fn allows(&self, tool_name: &str) -> bool {
-        match self {
-            Self::All(ResponsesBuiltinToolsKeyword::All) => true,
-            Self::Selected(tool_names) => tool_names.iter().any(|name| name == tool_name),
-        }
-    }
-
-    pub fn is_explicit_selection(&self) -> bool {
-        matches!(self, Self::Selected(_))
+    fn is_empty(&self) -> bool {
+        matches!(self, Self::Selected(tool_names) if tool_names.is_empty())
     }
 }
 
@@ -245,8 +239,8 @@ pub struct ModelProviderInfo {
     /// Which wire protocol this provider expects.
     #[serde(default)]
     pub wire_api: WireApi,
-    /// Provider-hosted tools forwarded on the Responses wire.
-    #[serde(default)]
+    /// Legacy provider-hosted tool selection. Only the disabled empty value is accepted.
+    #[serde(default, skip_serializing_if = "ResponsesBuiltinTools::is_empty")]
     pub responses_builtin_tools: ResponsesBuiltinTools,
     /// Optional provider dialect within the selected wire protocol.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -307,6 +301,16 @@ pub struct ModelProviderAwsAuthInfo {
 
 impl ModelProviderInfo {
     pub fn validate(&self) -> std::result::Result<(), String> {
+        if !matches!(
+            &self.responses_builtin_tools,
+            ResponsesBuiltinTools::Selected(tool_names) if tool_names.is_empty()
+        ) {
+            return Err(
+                "provider responses_builtin_tools is no longer supported; use a built-in provider adapter for hosted tools"
+                    .to_string(),
+            );
+        }
+
         if self.requires_astral_auth {
             return Err(
                 "provider requires_astral_auth is no longer supported; configure provider BYOK auth with env_key, auth, or experimental_bearer_token"

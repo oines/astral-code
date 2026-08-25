@@ -175,6 +175,10 @@ write-config-schema:
 write-app-server-schema *args:
     cargo run -p codex-app-server-protocol --bin write_schema_fixtures -- {args}
 
+# Keep provider-specific behavior out of Core's shared request and session paths.
+provider-boundary-lint:
+    {{ python }} scripts/provider_boundary_lint.py
+
 [no-cd]
 write-hooks-schema:
     cargo run --manifest-path {{ justfile_directory() }}/codex-rs/Cargo.toml -p codex-hooks --bin write_hooks_schema_fixtures
