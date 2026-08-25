@@ -18,8 +18,8 @@ use codex_protocol::openai_models::ModelsResponse;
 
 use crate::amazon_bedrock::AmazonBedrockModelProvider;
 use crate::auth::auth_manager_for_provider;
-use crate::auth::provider_info_for_request;
 use crate::auth::resolve_provider_auth;
+use crate::codex::CodexModelProvider;
 use crate::models_endpoint::OpenAiModelsEndpoint;
 
 /// Optional provider-backed features that Codex may expose at runtime.
@@ -92,10 +92,22 @@ pub trait ModelProvider: fmt::Debug + Send + Sync {
     /// Returns the current app-visible account state for this provider.
     fn account_state(&self) -> ProviderAccountState;
 
+    /// Returns the opaque authentication identity that scopes model caches.
+    fn models_cache_identity(&self) -> Option<String> {
+        None
+    }
+
+    /// Applies provider-owned defaults to a model returned by its catalog.
+    fn apply_model_capability_defaults(
+        &self,
+        _model: &mut codex_protocol::openai_models::ModelInfo,
+    ) {
+    }
+
     /// Returns provider configuration adapted for the API client.
     async fn api_provider(&self) -> codex_protocol::error::Result<Provider> {
         let auth = self.auth().await;
-        provider_info_for_request(self.info())
+        self.info()
             .to_api_provider(auth.as_ref().map(CodexAuth::auth_mode))
     }
 
@@ -128,6 +140,8 @@ pub fn create_model_provider(
 ) -> SharedModelProvider {
     if provider_info.is_amazon_bedrock() {
         Arc::new(AmazonBedrockModelProvider::new(provider_info))
+    } else if provider_info.managed_auth == Some(ManagedAuthKind::CodexOAuth) {
+        Arc::new(CodexModelProvider::new(provider_info, auth_manager))
     } else {
         Arc::new(ConfiguredModelProvider::new(provider_info, auth_manager))
     }
@@ -157,13 +171,7 @@ impl ModelProvider for ConfiguredModelProvider {
     }
 
     fn capabilities(&self) -> ProviderCapabilities {
-        let responses = self.info.wire_api == WireApi::Responses;
-        ProviderCapabilities {
-            namespace_tools: true,
-            image_generation: responses
-                && self.info.responses_builtin_tools.allows("image_generation"),
-            web_search: responses && self.info.responses_builtin_tools.allows("web_search"),
-        }
+        ProviderCapabilities::default()
     }
 
     fn auth_manager(&self) -> Option<Arc<AuthManager>> {
@@ -176,22 +184,9 @@ impl ModelProvider for ConfiguredModelProvider {
 
     async fn auth(&self) -> Option<CodexAuth> {
         match self.auth_manager.as_ref() {
-            Some(auth_manager) if self.info.managed_auth == Some(ManagedAuthKind::CodexOAuth) => {
-                auth_manager.codex_oauth_auth().await
-            }
             Some(auth_manager) => auth_manager.auth().await,
             None => None,
         }
-    }
-
-    fn unauthorized_recovery(&self) -> Option<UnauthorizedRecovery> {
-        self.auth_manager.as_ref().map(|manager| {
-            if self.info.managed_auth == Some(ManagedAuthKind::CodexOAuth) {
-                manager.codex_oauth_unauthorized_recovery()
-            } else {
-                manager.unauthorized_recovery()
-            }
-        })
     }
 
     fn account_state(&self) -> ProviderAccountState {
@@ -199,11 +194,7 @@ impl ModelProvider for ConfiguredModelProvider {
             Some(ProviderAccount::ApiKey)
         } else {
             let provider_auth = self.auth_manager.as_ref().and_then(|auth_manager| {
-                let auth = if self.info.managed_auth == Some(ManagedAuthKind::CodexOAuth) {
-                    auth_manager.codex_oauth_auth_cached()?
-                } else {
-                    auth_manager.auth_cached()?
-                };
+                let auth = auth_manager.auth_cached()?;
                 if auth_manager.refresh_failure_for_auth(&auth).is_some() {
                     return None;
                 }
@@ -221,7 +212,7 @@ impl ModelProvider for ConfiguredModelProvider {
         ProviderAccountState {
             account,
             requires_astral_auth: self.info.requires_astral_auth,
-            requires_openai_auth: self.info.managed_auth == Some(ManagedAuthKind::CodexOAuth),
+            requires_openai_auth: false,
         }
     }
 
@@ -246,10 +237,7 @@ impl ModelProvider for ConfiguredModelProvider {
                 ModelsResponse { models: Vec::new() },
             )),
             WireApi::Responses | WireApi::ChatCompletions => {
-                let endpoint = Arc::new(OpenAiModelsEndpoint::new(
-                    self.info.clone(),
-                    self.auth_manager.clone(),
-                ));
+                let endpoint = Arc::new(OpenAiModelsEndpoint::new(Arc::new(self.clone())));
                 Arc::new(OpenAiModelsManager::new(
                     codex_home,
                     endpoint,
@@ -695,6 +683,14 @@ mod tests {
         let models = manager.list_models(RefreshStrategy::Online).await;
 
         assert!(models.iter().any(|model| model.model == "codex-model"));
+        let catalog = manager.raw_model_catalog(RefreshStrategy::Offline).await;
+        let model = catalog
+            .models
+            .iter()
+            .find(|model| model.slug == "codex-model")
+            .expect("Codex catalog should retain the remote model");
+        assert!(model.supports_web_search);
+        assert!(model.supports_image_generation);
         Ok(())
     }
 

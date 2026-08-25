@@ -39,17 +39,6 @@ pub(crate) fn auth_manager_for_provider(
     }
 }
 
-pub(crate) fn provider_info_for_request(provider: &ModelProviderInfo) -> ModelProviderInfo {
-    let mut provider = provider.clone();
-    if provider.managed_auth == Some(ManagedAuthKind::CodexOAuth) {
-        provider.http_headers.get_or_insert_default().insert(
-            "originator".to_string(),
-            codex_login::default_client::codex_oauth_originator(),
-        );
-    }
-    provider
-}
-
 pub(crate) fn resolve_provider_auth(
     auth: Option<&CodexAuth>,
     provider: &ModelProviderInfo,

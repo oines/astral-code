@@ -7,7 +7,6 @@ use std::sync::Arc;
 use std::sync::RwLock;
 
 use codex_login::AuthManager;
-use codex_model_provider_info::ManagedAuthKind;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_models_manager::ModelsManagerConfig;
 use codex_models_manager::manager::RefreshStrategy;
@@ -48,7 +47,9 @@ impl ProviderModelsRegistry {
         provider: &ModelProviderInfo,
         config_model_catalog: Option<ModelsResponse>,
     ) -> SharedModelsManager {
-        let provider_fingerprint = self.provider_fingerprint(provider);
+        let runtime_provider =
+            create_model_provider(provider.clone(), Some(self.auth_manager.clone()));
+        let provider_fingerprint = provider_fingerprint(runtime_provider.as_ref());
         let catalog_fingerprint = config_model_catalog.as_ref().map(catalog_fingerprint);
         if let Ok(managers) = self.managers.read()
             && let Some(entry) = managers.get(provider_id)
@@ -60,8 +61,8 @@ impl ProviderModelsRegistry {
             return Arc::clone(&entry.manager);
         }
 
-        let manager = create_model_provider(provider.clone(), Some(self.auth_manager.clone()))
-            .models_manager(self.codex_home.clone(), config_model_catalog);
+        let manager =
+            runtime_provider.models_manager(self.codex_home.clone(), config_model_catalog);
         if let Ok(mut managers) = self.managers.write() {
             managers.insert(
                 provider_id.to_string(),
@@ -121,27 +122,22 @@ impl ProviderModelsRegistry {
             managers.remove(provider_id);
         }
     }
+}
 
-    fn provider_fingerprint(&self, provider: &ModelProviderInfo) -> String {
-        let auth_identity = if provider.managed_auth == Some(ManagedAuthKind::CodexOAuth) {
-            self.auth_manager
-                .codex_oauth_auth_cached()
-                .and_then(|auth| auth.get_account_id())
-                .map(|account_id| opaque_hash(&account_id))
-                .unwrap_or_else(|| "signed-out".to_string())
-        } else {
-            "provider-auth".to_string()
-        };
-        format!(
-            "base={};wire={};env={};command={};aws={};managed={:?};auth={auth_identity}",
-            provider.base_url.as_deref().unwrap_or_default(),
-            provider.wire_api,
-            provider.env_key.as_deref().unwrap_or_default(),
-            provider.auth.is_some(),
-            provider.aws.is_some(),
-            provider.managed_auth,
-        )
-    }
+fn provider_fingerprint(provider: &dyn crate::ModelProvider) -> String {
+    let info = provider.info();
+    let auth_identity = provider
+        .models_cache_identity()
+        .unwrap_or_else(|| "provider-auth".to_string());
+    format!(
+        "base={};wire={};env={};command={};aws={};managed={:?};auth={auth_identity}",
+        info.base_url.as_deref().unwrap_or_default(),
+        info.wire_api,
+        info.env_key.as_deref().unwrap_or_default(),
+        info.auth.is_some(),
+        info.aws.is_some(),
+        info.managed_auth,
+    )
 }
 
 fn catalog_fingerprint(catalog: &ModelsResponse) -> String {

@@ -12,12 +12,9 @@ use codex_api::map_api_error;
 use codex_feedback::FeedbackRequestTags;
 use codex_feedback::emit_feedback_request_tags_with_auth_env;
 use codex_login::AuthEnvTelemetry;
-use codex_login::AuthManager;
 use codex_login::CodexAuth;
 use codex_login::collect_auth_env_telemetry;
 use codex_login::default_client::build_reqwest_client;
-use codex_model_provider_info::ManagedAuthKind;
-use codex_model_provider_info::ModelProviderInfo;
 use codex_models_manager::manager::ModelsEndpointClient;
 use codex_models_manager::manager::RemoteModelCatalog;
 use codex_models_manager::model_info;
@@ -29,8 +26,7 @@ use codex_response_debug_context::telemetry_transport_error_message;
 use http::HeaderMap;
 use tokio::time::timeout;
 
-use crate::auth::provider_info_for_request;
-use crate::auth::resolve_provider_auth;
+use crate::provider::SharedModelProvider;
 
 const MODELS_REFRESH_TIMEOUT: Duration = Duration::from_secs(5);
 const MODELS_ENDPOINT: &str = "/models";
@@ -38,39 +34,21 @@ const MODELS_ENDPOINT: &str = "/models";
 /// Provider-owned OpenAI-compatible `/models` endpoint.
 #[derive(Debug)]
 pub(crate) struct OpenAiModelsEndpoint {
-    provider_info: ModelProviderInfo,
-    auth_manager: Option<Arc<AuthManager>>,
+    provider: SharedModelProvider,
 }
 
 impl OpenAiModelsEndpoint {
-    pub(crate) fn new(
-        provider_info: ModelProviderInfo,
-        auth_manager: Option<Arc<AuthManager>>,
-    ) -> Self {
-        Self {
-            provider_info,
-            auth_manager,
-        }
-    }
-
-    async fn auth(&self) -> Option<CodexAuth> {
-        match self.auth_manager.as_ref() {
-            Some(auth_manager)
-                if self.provider_info.managed_auth == Some(ManagedAuthKind::CodexOAuth) =>
-            {
-                auth_manager.codex_oauth_auth().await
-            }
-            Some(auth_manager) => auth_manager.auth().await,
-            None => None,
-        }
+    pub(crate) fn new(provider: SharedModelProvider) -> Self {
+        Self { provider }
     }
 
     fn auth_env(&self) -> AuthEnvTelemetry {
         let astral_api_key_env_enabled = self
-            .auth_manager
-            .as_ref()
-            .is_some_and(|auth_manager| auth_manager.astral_api_key_env_enabled());
-        collect_auth_env_telemetry(&self.provider_info, astral_api_key_env_enabled)
+            .provider
+            .auth_manager()
+            .as_deref()
+            .is_some_and(codex_login::AuthManager::astral_api_key_env_enabled);
+        collect_auth_env_telemetry(self.provider.info(), astral_api_key_env_enabled)
     }
 }
 
@@ -79,40 +57,29 @@ impl ModelsEndpointClient for OpenAiModelsEndpoint {
     fn cache_key(&self) -> String {
         let mut cache_key = format!(
             "name={};base_url={};wire_api={};env_key={};auth={};aws={}",
-            self.provider_info.name,
-            self.provider_info.base_url.as_deref().unwrap_or_default(),
-            self.provider_info.wire_api,
-            self.provider_info.env_key.as_deref().unwrap_or_default(),
-            self.provider_info.auth.is_some(),
-            self.provider_info.aws.is_some(),
+            self.provider.info().name,
+            self.provider.info().base_url.as_deref().unwrap_or_default(),
+            self.provider.info().wire_api,
+            self.provider.info().env_key.as_deref().unwrap_or_default(),
+            self.provider.info().auth.is_some(),
+            self.provider.info().aws.is_some(),
         );
-        if self.provider_info.managed_auth == Some(ManagedAuthKind::CodexOAuth) {
-            let account_id = self
-                .auth_manager
-                .as_ref()
-                .and_then(|manager| manager.codex_oauth_auth_cached())
-                .and_then(|auth| auth.get_account_id())
-                .unwrap_or_default();
-            cache_key.push_str(&format!(";account={account_id}"));
+        if let Some(auth_identity) = self.provider.models_cache_identity() {
+            cache_key.push_str(&format!(";account={auth_identity}"));
         }
         cache_key
     }
 
     fn has_command_auth(&self) -> bool {
-        self.provider_info.has_command_auth()
+        self.provider.info().has_command_auth()
     }
 
     fn has_provider_auth(&self) -> bool {
-        self.provider_info.experimental_bearer_token.is_some()
-            || (self.provider_info.requires_astral_auth && self.auth_manager.is_some())
-            || (self.provider_info.managed_auth == Some(ManagedAuthKind::CodexOAuth)
-                && self
-                    .auth_manager
-                    .as_ref()
-                    .and_then(|manager| manager.codex_oauth_auth_cached())
-                    .is_some())
+        self.provider.info().experimental_bearer_token.is_some()
+            || self.provider.account_state().account.is_some()
             || self
-                .provider_info
+                .provider
+                .info()
                 .env_key
                 .as_ref()
                 .is_some_and(|env_key| std::env::var_os(env_key).is_some())
@@ -121,20 +88,12 @@ impl ModelsEndpointClient for OpenAiModelsEndpoint {
     async fn list_models(&self, client_version: &str) -> CoreResult<RemoteModelCatalog> {
         let _timer =
             codex_otel::start_global_timer("codex.remote_models.fetch_update.duration_ms", &[]);
-        let mut unauthorized_recovery =
-            if self.provider_info.managed_auth == Some(ManagedAuthKind::CodexOAuth) {
-                self.auth_manager
-                    .as_ref()
-                    .map(AuthManager::codex_oauth_unauthorized_recovery)
-            } else {
-                None
-            };
+        let mut unauthorized_recovery = self.provider.unauthorized_recovery();
         loop {
-            let auth = self.auth().await;
+            let auth = self.provider.auth().await;
             let auth_mode = auth.as_ref().map(CodexAuth::auth_mode);
-            let api_provider =
-                provider_info_for_request(&self.provider_info).to_api_provider(auth_mode)?;
-            let api_auth = resolve_provider_auth(auth.as_ref(), &self.provider_info)?;
+            let api_provider = self.provider.api_provider().await?;
+            let api_auth = self.provider.api_auth().await?;
             let transport = ReqwestTransport::new(build_reqwest_client());
             let auth_telemetry = auth_header_telemetry(api_auth.as_ref());
             let request_telemetry: Arc<dyn RequestTelemetry> = Arc::new(ModelsRequestTelemetry {
@@ -166,7 +125,7 @@ impl ModelsEndpointClient for OpenAiModelsEndpoint {
                     {
                         recovery.next().await.map_err(|err| {
                             codex_protocol::error::CodexErr::Fatal(format!(
-                                "Codex model catalog authentication recovery failed: {err}"
+                                "model catalog authentication recovery failed: {err}"
                             ))
                         })?;
                         continue;
@@ -178,10 +137,11 @@ impl ModelsEndpointClient for OpenAiModelsEndpoint {
                 }
             };
 
-            return Ok(RemoteModelCatalog::Catalog {
-                models: enrich_provider_model_listings(models),
-                etag,
-            });
+            let mut models = enrich_provider_model_listings(models);
+            for model in &mut models {
+                self.provider.apply_model_capability_defaults(model);
+            }
+            return Ok(RemoteModelCatalog::Catalog { models, etag });
         }
     }
 }
@@ -314,6 +274,8 @@ mod tests {
     use std::num::NonZeroU64;
 
     use super::*;
+    use crate::provider::create_model_provider;
+    use codex_model_provider_info::ModelProviderInfo;
     use codex_protocol::config_types::ModelProviderAuthInfo;
 
     fn provider_info_with_command_auth() -> ModelProviderInfo {
@@ -335,20 +297,20 @@ mod tests {
 
     #[test]
     fn command_auth_provider_reports_command_auth_without_cached_auth() {
-        let endpoint = OpenAiModelsEndpoint::new(
+        let endpoint = OpenAiModelsEndpoint::new(create_model_provider(
             provider_info_with_command_auth(),
             /*auth_manager*/ None,
-        );
+        ));
 
         assert!(endpoint.has_command_auth());
     }
 
     #[test]
     fn provider_without_command_auth_reports_no_command_auth() {
-        let endpoint = OpenAiModelsEndpoint::new(
+        let endpoint = OpenAiModelsEndpoint::new(create_model_provider(
             ModelProviderInfo::create_openai_provider(/*base_url*/ None),
             /*auth_manager*/ None,
-        );
+        ));
 
         assert!(!endpoint.has_command_auth());
     }
