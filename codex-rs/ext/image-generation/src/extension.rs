@@ -10,22 +10,34 @@ use codex_extension_api::ToolCall;
 use codex_extension_api::ToolContributor;
 use codex_extension_api::ToolExecutor;
 use codex_login::AuthManager;
+use codex_model_provider::create_model_provider;
+use codex_model_provider_info::ManagedAuthKind;
+use codex_model_provider_info::ModelProviderInfo;
+use codex_utils_absolute_path::AbsolutePathBuf;
+
+use crate::backend::CodexImagesBackend;
+use crate::tool::ImageGenerationTool;
 
 #[derive(Clone)]
-struct ImageGenerationExtension;
+struct ImageGenerationExtension {
+    auth_manager: Arc<AuthManager>,
+}
 
 #[derive(Clone)]
 struct ImageGenerationExtensionConfig {
     available: bool,
+    provider: ModelProviderInfo,
+    codex_home: AbsolutePathBuf,
 }
 
 impl From<&Config> for ImageGenerationExtensionConfig {
     /// Resolves whether standalone image generation should be available for a thread.
-    fn from(_config: &Config) -> Self {
+    fn from(config: &Config) -> Self {
         Self {
-            // Astral v1 keeps image-generation history/replay support in core,
-            // but does not expose the legacy OpenAI-hosted standalone tool.
-            available: false,
+            // Core applies per-turn feature, model, and account capability gates.
+            available: config.model_provider.managed_auth == Some(ManagedAuthKind::CodexOAuth),
+            provider: config.model_provider.clone(),
+            codex_home: config.codex_home.clone(),
         }
     }
 }
@@ -67,14 +79,25 @@ impl ToolContributor for ImageGenerationExtension {
             return Vec::new();
         }
 
-        Vec::new()
+        vec![Arc::new(ImageGenerationTool::new(
+            CodexImagesBackend::new(create_model_provider(
+                config.provider.clone(),
+                Some(self.auth_manager.clone()),
+            )),
+            config.codex_home.clone(),
+            thread_store.level_id().to_string(),
+        ))]
     }
 }
 
 /// Installs the standalone image-generation extension contributors.
-pub fn install(registry: &mut ExtensionRegistryBuilder<Config>, _auth_manager: Arc<AuthManager>) {
-    let extension = Arc::new(ImageGenerationExtension);
+pub fn install(registry: &mut ExtensionRegistryBuilder<Config>, auth_manager: Arc<AuthManager>) {
+    let extension = Arc::new(ImageGenerationExtension { auth_manager });
     registry.thread_lifecycle_contributor(extension.clone());
     registry.config_contributor(extension.clone());
     registry.tool_contributor(extension);
 }
+
+#[cfg(test)]
+#[path = "extension_tests.rs"]
+mod tests;

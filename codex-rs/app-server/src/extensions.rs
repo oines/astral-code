@@ -54,7 +54,8 @@ where
         Arc::clone(&auth_manager),
         thread_manager,
     );
-    codex_web_search_extension::install(&mut builder, auth_manager);
+    codex_web_search_extension::install(&mut builder, auth_manager.clone());
+    codex_image_generation_extension::install(&mut builder, auth_manager);
     Arc::new(builder.build())
 }
 

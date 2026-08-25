@@ -2033,6 +2033,7 @@ dependencies = [
  "codex-goal-extension",
  "codex-guardian",
  "codex-hooks",
+ "codex-image-generation-extension",
  "codex-login",
  "codex-mcp",
  "codex-memories-extension",
@@ -3173,6 +3174,9 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde_json",
+ "tempfile",
+ "tokio",
+ "wiremock",
 ]
 
 [[package]]
