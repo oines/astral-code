@@ -644,6 +644,7 @@ fn build_agent_request_rejects_responses_only_hosted_tools() {
     let prompt = Prompt {
         tools: vec![ToolSpec::WebSearch {
             external_web_access: None,
+            indexed_web_access: None,
             filters: None,
             user_location: None,
             search_context_size: None,

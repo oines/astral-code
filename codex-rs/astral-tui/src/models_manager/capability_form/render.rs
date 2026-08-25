@@ -72,7 +72,7 @@ pub(in crate::models_manager) fn render(
     buffer.set_stringn(
         frame.content.x,
         note_y,
-        "Only context, output limit, and vision are user overrides; other capabilities stay provider-owned.",
+        "Model overrides: context, output, vision, web, and image.",
         usize::from(frame.content.width),
         Style::default().fg(theme.gray).bg(theme.bg_base),
     );
@@ -126,6 +126,18 @@ fn display_value(form: &CapabilityFormState, field: CapabilityField, selected: b
                 .and_then(serde_json::Value::as_bool),
             form.effective.supports_vision,
         ),
+        CapabilityField::SupportsWebSearch => bool_value(
+            form.raw
+                .get(config_key(field))
+                .and_then(serde_json::Value::as_bool),
+            form.effective.supports_web_search,
+        ),
+        CapabilityField::SupportsImageGeneration => bool_value(
+            form.raw
+                .get(config_key(field))
+                .and_then(serde_json::Value::as_bool),
+            form.effective.supports_image_generation,
+        ),
         CapabilityField::Save => "Write manual overrides to user config".to_string(),
     }
 }
@@ -174,6 +186,8 @@ fn field_label(field: CapabilityField) -> &'static str {
         CapabilityField::ContextWindow => "Context window",
         CapabilityField::MaxOutputTokens => "Max output tokens",
         CapabilityField::SupportsVision => "Vision",
+        CapabilityField::SupportsWebSearch => "Web search",
+        CapabilityField::SupportsImageGeneration => "Image generation",
         CapabilityField::Save => "Save model",
     }
 }

@@ -1507,6 +1507,9 @@
           },
           "type": "array"
         },
+        "supports_image_generation": {
+          "type": "boolean"
+        },
         "supports_native_streaming": {
           "type": "boolean"
         },
@@ -1523,6 +1526,9 @@
           "type": "boolean"
         },
         "supports_vision": {
+          "type": "boolean"
+        },
+        "supports_web_search": {
           "type": "boolean"
         },
         "tool_mode": {
@@ -1689,8 +1695,8 @@
               "$ref": "#/definitions/ResponsesBuiltinTools"
             }
           ],
-          "default": "all",
-          "description": "Provider-hosted tools forwarded on the Responses wire."
+          "default": [],
+          "description": "Legacy provider-hosted tool selection. Only the disabled empty value is accepted."
         },
         "stream_idle_timeout_ms": {
           "description": "Idle timeout (in milliseconds) to wait for activity on a streaming response before treating the connection as lost.",
@@ -2745,7 +2751,7 @@
           "type": "array"
         }
       ],
-      "description": "Which provider-hosted Responses tools Astral may send.\n\nThe config accepts either the string `\"all\"` or an explicit array of tool names. An empty array disables provider-hosted tools."
+      "description": "Legacy provider-hosted Responses tool configuration.\n\nThis remains deserializable for one migration window, but non-empty values are rejected by provider validation. Hosted tools must be implemented by a built-in provider adapter instead of inferred from user configuration."
     },
     "ResponsesBuiltinToolsKeyword": {
       "enum": [
@@ -4557,6 +4563,7 @@
       "enum": [
         "disabled",
         "cached",
+        "indexed",
         "live"
       ],
       "type": "string"

@@ -91,6 +91,8 @@ async fn exact_capability_override_applies_false_and_separate_context_limits() {
     let mut catalog_model = remote_model(model_slug, "Configured Model", /*priority*/ 0);
     catalog_model.input_modalities = vec![InputModality::Text, InputModality::Image];
     catalog_model.supports_parallel_tool_calls = true;
+    catalog_model.supports_web_search = true;
+    catalog_model.supports_image_generation = true;
     let config = ModelsManagerConfig {
         model_provider_id: Some("custom".to_string()),
         model_capability_overrides: Some(ModelCapabilitiesCache {
@@ -104,6 +106,8 @@ async fn exact_capability_override_applies_false_and_separate_context_limits() {
                     max_context_window: Some(1_000_000),
                     supports_parallel_tools: Some(false),
                     supports_vision: Some(false),
+                    supports_web_search: Some(false),
+                    supports_image_generation: Some(false),
                     supports_reasoning: Some(false),
                     ..Default::default()
                 },
@@ -121,5 +125,7 @@ async fn exact_capability_override_applies_false_and_separate_context_limits() {
     assert_eq!(model_info.max_context_window, Some(1_000_000));
     assert_eq!(model_info.input_modalities, vec![InputModality::Text]);
     assert!(!model_info.supports_parallel_tool_calls);
+    assert!(!model_info.supports_web_search);
+    assert!(!model_info.supports_image_generation);
     assert!(model_info.supported_reasoning_levels.is_empty());
 }

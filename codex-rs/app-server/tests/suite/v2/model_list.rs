@@ -106,6 +106,8 @@ max_context_window = 1000000
 max_output_tokens = 32000
 supports_tools = true
 supports_vision = false
+supports_web_search = true
+supports_image_generation = false
 
 [model_capabilities."deepseek/deepseek-v4-flash"]
 context_window = 200000
@@ -175,6 +177,8 @@ async fn list_models_returns_configured_models_with_large_limit() -> Result<()> 
             max_output_tokens: Some(32_000),
             supports_tools: Some(true),
             supports_vision: Some(false),
+            supports_web_search: Some(true),
+            supports_image_generation: Some(false),
             sources: vec![
                 ModelCapabilitySource::Manual,
                 ModelCapabilitySource::Fallback,
@@ -325,6 +329,8 @@ wire_api = "chat_completions"
         ModelCapabilities {
             supports_parallel_tools: Some(false),
             supports_vision: Some(false),
+            supports_web_search: Some(false),
+            supports_image_generation: Some(false),
             supports_reasoning: Some(false),
             sources: vec![ModelCapabilitySource::Provider],
             ..ModelCapabilities::default()

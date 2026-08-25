@@ -94,6 +94,8 @@ ADD MODEL
                │    Context window        Inherit                                   │
                │    Max output tokens     Inherit                                   │
                │    Vision                Inherit  ←/→                              │
+               │    Web search            Inherit  ←/→                              │
+               │    Image generation      Inherit  ←/→                              │
                │    Save model            Write manual overrides to user config     │
                │                                                                    │
                │                                                                    │
@@ -107,9 +109,7 @@ ADD MODEL
                │                                                                    │
                │                                                                    │
                │                                                                    │
-               │                                                                    │
-               │                                                                    │
-               │  Only context, output limit, and vision are user overrides; other  │
+               │  Model overrides: context, output, vision, web, and image.         │
                │                                                                    │
                │            j/k · h/l choice · Enter · Ctrl+S save · Esc            │
                └────────────────────────────────────────────────────────────────────┘
@@ -130,13 +130,13 @@ MODEL DETAIL
                │  Tools             yes                                             │
                │  Parallel tools    yes                                             │
                │  Vision            no                                              │
+               │  Web search        no                                              │
+               │  Image generation  no                                              │
                │  Prompt cache      yes                                             │
                │  Reasoning         no                                              │
                │  Native streaming  yes                                             │
                │  Endpoints         /v1/chat/completions                            │
                │  Sources           provider                                        │
-               │                                                                    │
-               │                                                                    │
                │                                                                    │
                │                                                                    │
                │                 j/k scroll · Enter edit · Esc back                 │
@@ -150,6 +150,8 @@ MODEL OVERRIDES
                │    Context window        128000                                    │
                │    Max output tokens     Inherit (effective: 8192)                 │
                │    Vision                Inherit (effective: no)  ←/→              │
+               │    Web search            Inherit (effective: no)  ←/→              │
+               │    Image generation      Inherit (effective: no)  ←/→              │
                │    Save model            Write manual overrides to user config     │
                │                                                                    │
                │                                                                    │
@@ -163,9 +165,7 @@ MODEL OVERRIDES
                │                                                                    │
                │                                                                    │
                │                                                                    │
-               │                                                                    │
-               │                                                                    │
-               │  Only context, output limit, and vision are user overrides; other  │
+               │  Model overrides: context, output, vision, web, and image.         │
                │                                                                    │
                │            j/k · h/l choice · Enter · Ctrl+S save · Esc            │
                └────────────────────────────────────────────────────────────────────┘

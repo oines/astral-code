@@ -320,6 +320,14 @@ fn render_detail(
         ),
         ("Vision", optional_bool(capabilities.supports_vision)),
         (
+            "Web search",
+            optional_bool(capabilities.supports_web_search),
+        ),
+        (
+            "Image generation",
+            optional_bool(capabilities.supports_image_generation),
+        ),
+        (
             "Prompt cache",
             optional_bool(capabilities.supports_prompt_cache),
         ),
@@ -515,6 +523,12 @@ fn compact_capabilities(model: &Model) -> String {
     }
     if model.capabilities.supports_vision == Some(true) {
         labels.push("vision");
+    }
+    if model.capabilities.supports_web_search == Some(true) {
+        labels.push("web");
+    }
+    if model.capabilities.supports_image_generation == Some(true) {
+        labels.push("image gen");
     }
     if model.capabilities.supports_reasoning == Some(true) {
         labels.push("reasoning");

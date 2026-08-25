@@ -261,6 +261,14 @@ fn effective_capabilities(
                 has_provider_metadata
                     .then(|| model.input_modalities.contains(&InputModality::Image))
             }),
+        supports_web_search: manual
+            .and_then(|capability| capability.supports_web_search)
+            .or_else(|| fallback.and_then(|capability| capability.supports_web_search))
+            .or_else(|| has_provider_metadata.then_some(model.supports_web_search)),
+        supports_image_generation: manual
+            .and_then(|capability| capability.supports_image_generation)
+            .or_else(|| fallback.and_then(|capability| capability.supports_image_generation))
+            .or_else(|| has_provider_metadata.then_some(model.supports_image_generation)),
         supports_prompt_cache: manual
             .and_then(|capability| capability.supports_prompt_cache)
             .or_else(|| fallback.and_then(|capability| capability.supports_prompt_cache)),

@@ -105,6 +105,8 @@ fn provider_hierarchy_snapshot() {
             supports_tools: Some(true),
             supports_parallel_tools: Some(true),
             supports_vision: Some(false),
+            supports_web_search: Some(false),
+            supports_image_generation: Some(false),
             supports_prompt_cache: Some(true),
             supports_reasoning: Some(false),
             supports_native_streaming: Some(true),

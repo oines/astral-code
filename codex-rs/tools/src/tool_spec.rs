@@ -37,13 +37,15 @@ pub enum ToolSpec {
     ImageGeneration { output_format: String },
     // TODO: Understand why some OpenAI-compatible providers reject
     // `web_search` although the API docs say it's supported.
-    // The `external_web_access` field determines whether the web search is over
-    // cached or live content.
+    // `external_web_access` distinguishes cached from live-capable search, while
+    // `indexed_web_access` restricts live fetches to indexed URLs.
     // https://platform.openai.com/docs/guides/tools-web-search#live-internet-access
     #[serde(rename = "web_search")]
     WebSearch {
         #[serde(skip_serializing_if = "Option::is_none")]
         external_web_access: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        indexed_web_access: Option<bool>,
         #[serde(skip_serializing_if = "Option::is_none")]
         filters: Option<ResponsesApiWebSearchFilters>,
         #[serde(skip_serializing_if = "Option::is_none")]

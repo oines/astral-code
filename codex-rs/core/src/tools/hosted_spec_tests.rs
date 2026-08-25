@@ -29,6 +29,7 @@ fn web_search_tool_preserves_configured_options() {
         }),
         Some(ToolSpec::WebSearch {
             external_web_access: Some(true),
+            indexed_web_access: None,
             filters: Some(ResponsesApiWebSearchFilters {
                 allowed_domains: Some(vec!["example.com".to_string()]),
             }),
@@ -54,5 +55,24 @@ fn web_search_tool_is_absent_when_disabled() {
             web_search_tool_type: WebSearchToolType::Text,
         }),
         None
+    );
+}
+
+#[test]
+fn indexed_web_search_restricts_external_access_to_indexed_urls() {
+    assert_eq!(
+        create_web_search_tool(WebSearchToolOptions {
+            web_search_mode: Some(WebSearchMode::Indexed),
+            web_search_config: None,
+            web_search_tool_type: WebSearchToolType::Text,
+        }),
+        Some(ToolSpec::WebSearch {
+            external_web_access: Some(true),
+            indexed_web_access: Some(true),
+            filters: None,
+            user_location: None,
+            search_context_size: None,
+            search_content_types: None,
+        })
     );
 }

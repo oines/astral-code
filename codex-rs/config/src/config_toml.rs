@@ -504,6 +504,8 @@ pub struct ModelCapabilityToml {
     pub supports_tools: Option<bool>,
     pub supports_parallel_tools: Option<bool>,
     pub supports_vision: Option<bool>,
+    pub supports_web_search: Option<bool>,
+    pub supports_image_generation: Option<bool>,
     pub supports_prompt_cache: Option<bool>,
     pub supports_reasoning: Option<bool>,
     pub supports_native_streaming: Option<bool>,

@@ -1814,6 +1814,8 @@ fn model_capability_from_config(capability: ModelCapabilityToml) -> ModelCapabil
         supports_tools: capability.supports_tools,
         supports_parallel_tools: capability.supports_parallel_tools,
         supports_vision: capability.supports_vision,
+        supports_web_search: capability.supports_web_search,
+        supports_image_generation: capability.supports_image_generation,
         supports_prompt_cache: capability.supports_prompt_cache,
         supports_reasoning: capability.supports_reasoning,
         supports_native_streaming: capability.supports_native_streaming,
@@ -2595,6 +2597,7 @@ pub(crate) fn resolve_web_search_mode_for_turn(
     {
         for mode in [
             WebSearchMode::Live,
+            WebSearchMode::Indexed,
             WebSearchMode::Cached,
             WebSearchMode::Disabled,
         ] {
@@ -2608,6 +2611,7 @@ pub(crate) fn resolve_web_search_mode_for_turn(
         }
         for mode in [
             WebSearchMode::Cached,
+            WebSearchMode::Indexed,
             WebSearchMode::Live,
             WebSearchMode::Disabled,
         ] {

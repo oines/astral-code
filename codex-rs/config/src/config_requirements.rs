@@ -667,6 +667,7 @@ fn is_glob_metacharacter(ch: char) -> bool {
 pub enum WebSearchModeRequirement {
     Disabled,
     Cached,
+    Indexed,
     Live,
 }
 
@@ -675,6 +676,7 @@ impl From<WebSearchMode> for WebSearchModeRequirement {
         match mode {
             WebSearchMode::Disabled => WebSearchModeRequirement::Disabled,
             WebSearchMode::Cached => WebSearchModeRequirement::Cached,
+            WebSearchMode::Indexed => WebSearchModeRequirement::Indexed,
             WebSearchMode::Live => WebSearchModeRequirement::Live,
         }
     }
@@ -685,6 +687,7 @@ impl From<WebSearchModeRequirement> for WebSearchMode {
         match mode {
             WebSearchModeRequirement::Disabled => WebSearchMode::Disabled,
             WebSearchModeRequirement::Cached => WebSearchMode::Cached,
+            WebSearchModeRequirement::Indexed => WebSearchMode::Indexed,
             WebSearchModeRequirement::Live => WebSearchMode::Live,
         }
     }
@@ -695,6 +698,7 @@ impl fmt::Display for WebSearchModeRequirement {
         match self {
             WebSearchModeRequirement::Disabled => write!(f, "disabled"),
             WebSearchModeRequirement::Cached => write!(f, "cached"),
+            WebSearchModeRequirement::Indexed => write!(f, "indexed"),
             WebSearchModeRequirement::Live => write!(f, "live"),
         }
     }
@@ -1335,6 +1339,8 @@ impl TryFrom<ConfigRequirementsWithSources> for ConfigRequirements {
 
                 let initial_value = if accepted.contains(&WebSearchModeRequirement::Cached) {
                     WebSearchMode::Cached
+                } else if accepted.contains(&WebSearchModeRequirement::Indexed) {
+                    WebSearchMode::Indexed
                 } else if accepted.contains(&WebSearchModeRequirement::Live) {
                     WebSearchMode::Live
                 } else {

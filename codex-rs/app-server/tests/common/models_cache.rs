@@ -62,6 +62,8 @@ fn preset_to_info(preset: &ModelPreset, priority: i32) -> ModelInfo {
         input_modalities: default_input_modalities(),
         used_fallback_model_metadata: false,
         supports_search_tool: false,
+        supports_web_search: false,
+        supports_image_generation: false,
         use_responses_lite: false,
         auto_review_model_override: None,
         tool_mode: None,

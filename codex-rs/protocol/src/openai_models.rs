@@ -414,6 +414,12 @@ pub struct ModelInfo {
     pub used_fallback_model_metadata: bool,
     #[serde(default)]
     pub supports_search_tool: bool,
+    /// Whether the model can use the active provider's Web search integration.
+    #[serde(default)]
+    pub supports_web_search: bool,
+    /// Whether the model can use the active provider's image-generation integration.
+    #[serde(default)]
+    pub supports_image_generation: bool,
     #[serde(default)]
     pub use_responses_lite: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -695,6 +701,8 @@ mod tests {
             input_modalities: default_input_modalities(),
             used_fallback_model_metadata: false,
             supports_search_tool: false,
+            supports_web_search: false,
+            supports_image_generation: false,
             use_responses_lite: false,
             auto_review_model_override: None,
             tool_mode: None,

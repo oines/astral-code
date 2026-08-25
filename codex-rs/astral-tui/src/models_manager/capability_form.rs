@@ -22,11 +22,13 @@ pub(super) use render::render;
 use values::set_optional_number;
 use values::text_value;
 
-const FIELDS: [CapabilityField; 5] = [
+const FIELDS: [CapabilityField; 7] = [
     CapabilityField::ModelId,
     CapabilityField::ContextWindow,
     CapabilityField::MaxOutputTokens,
     CapabilityField::SupportsVision,
+    CapabilityField::SupportsWebSearch,
+    CapabilityField::SupportsImageGeneration,
     CapabilityField::Save,
 ];
 
@@ -36,6 +38,8 @@ pub(super) enum CapabilityField {
     ContextWindow,
     MaxOutputTokens,
     SupportsVision,
+    SupportsWebSearch,
+    SupportsImageGeneration,
     Save,
 }
 
@@ -235,7 +239,9 @@ impl CapabilityFormState {
                 self.move_selection(1);
                 ModelsManagerInput::Redraw
             }
-            CapabilityField::SupportsVision => ModelsManagerInput::None,
+            CapabilityField::SupportsVision
+            | CapabilityField::SupportsWebSearch
+            | CapabilityField::SupportsImageGeneration => ModelsManagerInput::None,
         }
     }
 
@@ -343,7 +349,10 @@ impl CapabilityField {
     }
 
     fn is_choice(self) -> bool {
-        self == Self::SupportsVision
+        matches!(
+            self,
+            Self::SupportsVision | Self::SupportsWebSearch | Self::SupportsImageGeneration
+        )
     }
 }
 
@@ -352,6 +361,8 @@ pub(super) fn config_key(field: CapabilityField) -> &'static str {
         CapabilityField::ContextWindow => "context_window",
         CapabilityField::MaxOutputTokens => "max_output_tokens",
         CapabilityField::SupportsVision => "supports_vision",
+        CapabilityField::SupportsWebSearch => "supports_web_search",
+        CapabilityField::SupportsImageGeneration => "supports_image_generation",
         CapabilityField::ModelId | CapabilityField::Save => "",
     }
 }

@@ -85,6 +85,8 @@ fn provider_model_id_to_model_info(id: String, index: usize) -> ModelInfo {
         input_modalities: vec![InputModality::Text],
         used_fallback_model_metadata: true,
         supports_search_tool: false,
+        supports_web_search: false,
+        supports_image_generation: false,
         use_responses_lite: false,
         auto_review_model_override: None,
         tool_mode: None,

@@ -12,4 +12,4 @@ contextWindow: bigint | null,
 /**
  * Maximum context window accepted by model-level overrides, when known.
  */
-maxContextWindow: bigint | null, maxOutputTokens: bigint | null, toolMode: ToolMode | null, supportsTools: boolean | null, supportsParallelTools: boolean | null, supportsVision: boolean | null, supportsPromptCache: boolean | null, supportsReasoning: boolean | null, supportsNativeStreaming: boolean | null, supportedEndpoints: Array<string>, sources: Array<ModelCapabilitySource>, };
+maxContextWindow: bigint | null, maxOutputTokens: bigint | null, toolMode: ToolMode | null, supportsTools: boolean | null, supportsParallelTools: boolean | null, supportsVision: boolean | null, supportsWebSearch: boolean | null, supportsImageGeneration: boolean | null, supportsPromptCache: boolean | null, supportsReasoning: boolean | null, supportsNativeStreaming: boolean | null, supportedEndpoints: Array<string>, sources: Array<ModelCapabilitySource>, };

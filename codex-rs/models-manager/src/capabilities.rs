@@ -89,6 +89,10 @@ pub struct ModelCapability {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supports_vision: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_web_search: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_image_generation: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supports_prompt_cache: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supports_reasoning: Option<bool>,
@@ -120,6 +124,8 @@ impl ModelCapability {
             supports_tools: hint.supports_function_calling,
             supports_parallel_tools: hint.supports_parallel_function_calling,
             supports_vision,
+            supports_web_search: None,
+            supports_image_generation: None,
             supports_prompt_cache: hint.supports_prompt_caching,
             supports_reasoning: hint.supports_reasoning,
             supports_native_streaming: hint.supports_native_streaming,
@@ -157,6 +163,12 @@ impl ModelCapability {
             if let Some(supports_vision) = self.supports_vision {
                 set_vision_support(model, supports_vision);
             }
+            if let Some(supports_web_search) = self.supports_web_search {
+                model.supports_web_search = supports_web_search;
+            }
+            if let Some(supports_image_generation) = self.supports_image_generation {
+                model.supports_image_generation = supports_image_generation;
+            }
         }
 
         if self.supports_reasoning == Some(true) && model.supported_reasoning_levels.is_empty() {
@@ -183,6 +195,12 @@ impl ModelCapability {
         if let Some(supports_vision) = self.supports_vision {
             set_vision_support(model, supports_vision);
         }
+        if let Some(supports_web_search) = self.supports_web_search {
+            model.supports_web_search = supports_web_search;
+        }
+        if let Some(supports_image_generation) = self.supports_image_generation {
+            model.supports_image_generation = supports_image_generation;
+        }
         match self.supports_reasoning {
             Some(true) if model.supported_reasoning_levels.is_empty() => {
                 set_default_reasoning_support(model);
@@ -205,6 +223,8 @@ impl ModelCapability {
             || self.supports_tools.is_some()
             || self.supports_parallel_tools.is_some()
             || self.supports_vision.is_some()
+            || self.supports_web_search.is_some()
+            || self.supports_image_generation.is_some()
             || self.supports_prompt_cache.is_some()
             || self.supports_reasoning.is_some()
             || self.supports_native_streaming.is_some()

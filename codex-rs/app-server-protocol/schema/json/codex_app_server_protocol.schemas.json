@@ -11417,12 +11417,14 @@
               "maxOutputTokens": null,
               "sources": [],
               "supportedEndpoints": [],
+              "supportsImageGeneration": null,
               "supportsNativeStreaming": null,
               "supportsParallelTools": null,
               "supportsPromptCache": null,
               "supportsReasoning": null,
               "supportsTools": null,
               "supportsVision": null,
+              "supportsWebSearch": null,
               "toolMode": null
             }
           },
@@ -11569,6 +11571,12 @@
             },
             "type": "array"
           },
+          "supportsImageGeneration": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "supportsNativeStreaming": {
             "type": [
               "boolean",
@@ -11600,6 +11608,12 @@
             ]
           },
           "supportsVision": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "supportsWebSearch": {
             "type": [
               "boolean",
               "null"
@@ -19239,6 +19253,7 @@
         "enum": [
           "disabled",
           "cached",
+          "indexed",
           "live"
         ],
         "type": "string"

@@ -150,6 +150,8 @@ pub(crate) fn model_info_from_slug_with_warning(slug: &str, warn: bool) -> Model
         input_modalities: vec![InputModality::Text],
         used_fallback_model_metadata: true, // this is the fallback model metadata
         supports_search_tool: false,
+        supports_web_search: false,
+        supports_image_generation: false,
         use_responses_lite: false,
         auto_review_model_override: None,
         tool_mode: None,

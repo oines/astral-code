@@ -305,6 +305,7 @@ pub enum WebSearchMode {
     Disabled,
     #[default]
     Cached,
+    Indexed,
     Live,
 }
 

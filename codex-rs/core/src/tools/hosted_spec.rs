@@ -12,9 +12,10 @@ pub struct WebSearchToolOptions<'a> {
 }
 
 pub fn create_web_search_tool(options: WebSearchToolOptions<'_>) -> Option<ToolSpec> {
-    let external_web_access = match options.web_search_mode {
-        Some(WebSearchMode::Cached) => false,
-        Some(WebSearchMode::Live) => true,
+    let (external_web_access, indexed_web_access) = match options.web_search_mode {
+        Some(WebSearchMode::Cached) => (false, None),
+        Some(WebSearchMode::Indexed) => (true, Some(true)),
+        Some(WebSearchMode::Live) => (true, None),
         Some(WebSearchMode::Disabled) | None => return None,
     };
 
@@ -30,6 +31,7 @@ pub fn create_web_search_tool(options: WebSearchToolOptions<'_>) -> Option<ToolS
 
     Some(ToolSpec::WebSearch {
         external_web_access: Some(external_web_access),
+        indexed_web_access,
         filters: options
             .web_search_config
             .and_then(|config| config.filters.clone().map(Into::into)),
