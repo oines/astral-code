@@ -306,6 +306,20 @@ fn use_codex_provider(turn: &mut TurnContext) {
     turn.provider = create_model_provider(provider_info, turn.auth_manager.clone());
 }
 
+fn use_generic_responses_provider(turn: &mut TurnContext) {
+    let provider_info = ModelProviderInfo {
+        name: "Generic Responses".to_string(),
+        base_url: Some("https://responses.example/v1".to_string()),
+        wire_api: WireApi::Responses,
+        ..Default::default()
+    };
+    update_config(turn, |config| {
+        config.model_provider_id = "generic-responses".to_string();
+        config.model_provider = provider_info.clone();
+    });
+    turn.provider = create_model_provider(provider_info, turn.auth_manager.clone());
+}
+
 struct WebRunExtensionTool;
 
 impl ToolExecutor<ExtensionToolCall> for WebRunExtensionTool {
@@ -337,6 +351,35 @@ impl ToolExecutor<ExtensionToolCall> for WebRunExtensionTool {
 
 struct WebNamespaceExtensionTool {
     name: &'static str,
+}
+
+struct ImageGenerationExtensionTool;
+
+impl ToolExecutor<ExtensionToolCall> for ImageGenerationExtensionTool {
+    fn tool_name(&self) -> ToolName {
+        ToolName::namespaced("image_gen", "imagegen")
+    }
+
+    fn spec(&self) -> ToolSpec {
+        ToolSpec::Namespace(codex_tools::ResponsesApiNamespace {
+            name: "image_gen".to_string(),
+            description: "Test image generation namespace.".to_string(),
+            tools: vec![ResponsesApiNamespaceTool::Function(ResponsesApiTool {
+                name: "imagegen".to_string(),
+                description: "Test standalone image generation tool.".to_string(),
+                strict: false,
+                defer_loading: None,
+                parameters: codex_tools::JsonSchema::default(),
+                output_schema: None,
+            })],
+        })
+    }
+
+    fn handle(&self, _call: ExtensionToolCall) -> codex_tools::ToolExecutorFuture<'_> {
+        Box::pin(async {
+            Ok(Box::new(codex_tools::JsonToolOutput::new(json!({}))) as Box<dyn ToolOutput>)
+        })
+    }
 }
 
 impl ToolExecutor<ExtensionToolCall> for WebNamespaceExtensionTool {
@@ -1808,6 +1851,71 @@ async fn code_mode_only_can_expose_namespaced_multi_agent_v2_as_normal_tools() {
 
 #[tokio::test]
 async fn hosted_and_extension_web_tools_follow_surface() {
+    let generic_responses = probe(|turn| {
+        use_generic_responses_provider(turn);
+        set_feature(turn, Feature::ImageGeneration, /*enabled*/ true);
+        set_web_search_mode(turn, WebSearchMode::Live);
+        turn.model_info.supports_web_search = true;
+        turn.model_info.supports_image_generation = true;
+        turn.model_info.input_modalities = vec![InputModality::Text, InputModality::Image];
+    })
+    .await;
+    generic_responses.assert_visible_lacks(&["web_search", "image_generation"]);
+
+    let codex_full = probe(|turn| {
+        use_codex_provider(turn);
+        set_feature(turn, Feature::ImageGeneration, /*enabled*/ true);
+        set_web_search_mode(turn, WebSearchMode::Indexed);
+        turn.model_info.supports_web_search = true;
+        turn.model_info.supports_image_generation = true;
+        turn.model_info.input_modalities = vec![InputModality::Text, InputModality::Image];
+    })
+    .await;
+    codex_full.assert_visible_contains(&["web_search", "image_generation"]);
+    assert!(codex_full.visible_specs.iter().any(|spec| matches!(
+        spec,
+        ToolSpec::WebSearch {
+            external_web_access: Some(true),
+            indexed_web_access: Some(true),
+            ..
+        }
+    )));
+
+    let codex_lite = probe_with(
+        |turn| {
+            use_codex_provider(turn);
+            set_features(
+                turn,
+                &[
+                    Feature::StandaloneWebSearch,
+                    Feature::ImageGeneration,
+                    Feature::ImageGenExt,
+                ],
+            );
+            set_web_search_mode(turn, WebSearchMode::Live);
+            turn.model_info.use_responses_lite = true;
+            turn.model_info.supports_web_search = true;
+            turn.model_info.supports_image_generation = true;
+            turn.model_info.input_modalities = vec![InputModality::Text, InputModality::Image];
+        },
+        ToolPlanInputs {
+            extension_tool_executors: vec![
+                Arc::new(WebRunExtensionTool),
+                Arc::new(ImageGenerationExtensionTool),
+                Arc::new(WebNamespaceExtensionTool { name: "search" }),
+                Arc::new(WebNamespaceExtensionTool { name: "fetch" }),
+            ],
+            ..Default::default()
+        },
+    )
+    .await;
+    codex_lite.assert_visible_lacks(&["web_search", "image_generation"]);
+    codex_lite.assert_visible_contains(&["web", "image_gen"]);
+    assert_eq!(
+        codex_lite.namespace_function_names("web"),
+        &["run".to_string()]
+    );
+
     let api_key_auth = probe(|turn| {
         set_feature(turn, Feature::ImageGeneration, /*enabled*/ true);
         turn.model_info.input_modalities = vec![InputModality::Image];
@@ -1958,12 +2066,8 @@ async fn hosted_and_extension_web_tools_follow_surface() {
         provider_neutral_web_inputs(),
     )
     .await;
-    codex_provider_neutral_web_tools.assert_visible_contains(&["web"]);
-    assert_eq!(
-        codex_provider_neutral_web_tools.namespace_function_names("web"),
-        &["fetch".to_string(), "search".to_string()]
-    );
-    codex_provider_neutral_web_tools.assert_registered_contains(&["websearch", "webfetch"]);
+    codex_provider_neutral_web_tools.assert_visible_lacks(&["web"]);
+    codex_provider_neutral_web_tools.assert_registered_lacks(&["websearch", "webfetch"]);
 
     let code_mode_provider_neutral_web_tools = probe_with(
         |turn| {
@@ -2018,6 +2122,8 @@ async fn hosted_and_extension_web_tools_follow_surface() {
             use_codex_provider(turn);
             set_feature(turn, Feature::StandaloneWebSearch, /*enabled*/ true);
             set_web_search_mode(turn, WebSearchMode::Live);
+            turn.model_info.use_responses_lite = true;
+            turn.model_info.supports_web_search = true;
         },
         ToolPlanInputs {
             extension_tool_executors: vec![
@@ -2031,7 +2137,7 @@ async fn hosted_and_extension_web_tools_follow_surface() {
     .await;
     assert_eq!(
         codex_web_namespace_tools.namespace_function_names("web"),
-        &["fetch".to_string(), "search".to_string()]
+        &["run".to_string()]
     );
 
     let unsupported_provider = probe(|turn| {

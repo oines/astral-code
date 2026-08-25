@@ -79,8 +79,8 @@ use crate::client_common::ModelStreamEvent;
 use crate::client_common::Prompt;
 use crate::client_common::ResponseStream;
 use crate::feedback_tags;
+use crate::provider_adapters;
 use crate::responses_request::ResponsesRequestParams;
-use crate::responses_request::build_responses_request;
 use crate::util::emit_feedback_auth_recovery_tags;
 use codex_api::map_api_error;
 use codex_feedback::FeedbackRequestTags;
@@ -491,17 +491,17 @@ impl ModelClientSession {
                     .build_agent_headers(&provider, turn_metadata_header)
                     .await,
             };
-            let provider_info = provider.info();
-            let request = build_responses_request(ResponsesRequestParams {
-                prompt,
-                model_info,
-                effort: effort.clone(),
-                summary,
-                service_tier: service_tier.clone(),
-                prompt_cache_key: self.client.prompt_cache_key(),
-                builtin_tools: &provider_info.responses_builtin_tools,
-                managed_auth: provider_info.managed_auth,
-            })?;
+            let request = provider_adapters::build_responses_request(
+                provider.as_ref(),
+                ResponsesRequestParams {
+                    prompt,
+                    model_info,
+                    effort: effort.clone(),
+                    summary,
+                    service_tier: service_tier.clone(),
+                    prompt_cache_key: self.client.prompt_cache_key(),
+                },
+            )?;
             let inference_trace_attempt = inference_trace.start_attempt();
             inference_trace_attempt.add_request_headers(&mut options.extra_headers);
             inference_trace_attempt.record_started(&request);

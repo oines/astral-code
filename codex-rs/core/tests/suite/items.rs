@@ -1,6 +1,7 @@
 #![cfg(not(target_os = "windows"))]
 
 use anyhow::Ok;
+use codex_model_provider::CODEX_PROVIDER_ID;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::WireApi;
 use codex_protocol::config_types::CollaborationMode;
@@ -54,6 +55,12 @@ use std::path::PathBuf;
 fn responses_api_model_provider(server: &wiremock::MockServer) -> ModelProviderInfo {
     let mut provider = responses_mock_model_provider(format!("{}/v1", server.uri()));
     provider.wire_api = WireApi::Responses;
+    provider
+}
+
+fn codex_responses_provider(server: &wiremock::MockServer) -> ModelProviderInfo {
+    let mut provider = ModelProviderInfo::create_codex_provider();
+    provider.base_url = Some(format!("{}/v1", server.uri()));
     provider
 }
 
@@ -372,10 +379,16 @@ async fn web_search_item_is_emitted() -> anyhow::Result<()> {
 
     let server = start_mock_server().await;
 
-    let model_provider = responses_api_model_provider(&server);
+    let model_provider = codex_responses_provider(&server);
     let TestCodex { codex, .. } = test_codex()
         .with_config(move |config| {
+            config.model_provider_id = CODEX_PROVIDER_ID.to_string();
             config.model_provider = model_provider;
+            if let Some(catalog) = config.model_catalog.as_mut() {
+                for model in &mut catalog.models {
+                    model.supports_web_search = true;
+                }
+            }
             config
                 .web_search_mode
                 .set(WebSearchMode::Live)
@@ -457,13 +470,12 @@ async fn web_search_item_is_emitted() -> anyhow::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "Responses wire API stream image_generation_call items are not supported by the provider-neutral Chat path"]
 async fn image_generation_call_event_is_emitted() -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
 
-    let model_provider = responses_api_model_provider(&server);
+    let model_provider = codex_responses_provider(&server);
     let TestCodex {
         codex,
         config,
@@ -471,7 +483,13 @@ async fn image_generation_call_event_is_emitted() -> anyhow::Result<()> {
         ..
     } = test_codex()
         .with_config(move |config| {
+            config.model_provider_id = CODEX_PROVIDER_ID.to_string();
             config.model_provider = model_provider;
+            if let Some(catalog) = config.model_catalog.as_mut() {
+                for model in &mut catalog.models {
+                    model.supports_image_generation = true;
+                }
+            }
         })
         .build(&server)
         .await?;
@@ -488,7 +506,7 @@ async fn image_generation_call_event_is_emitted() -> anyhow::Result<()> {
         ev_image_generation_call(call_id, "completed", "A tiny blue square", "Zm9v"),
         ev_completed("resp-1"),
     ]);
-    mount_responses_sse_once(&server, first_response).await;
+    let request = mount_responses_sse_once(&server, first_response).await;
 
     codex
         .submit(Op::UserInput {
@@ -546,6 +564,15 @@ async fn image_generation_call_event_is_emitted() -> anyhow::Result<()> {
         Some(expected_saved_path.as_path())
     );
     assert_eq!(std::fs::read(&expected_saved_path)?, b"foo");
+    assert!(
+        request
+            .single_request()
+            .body_json()
+            .get("tools")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|tools| tools.iter().any(|tool| tool["type"] == "image_generation")),
+        "Codex Full Responses should expose hosted image_generation"
+    );
     let _ = std::fs::remove_file(&expected_saved_path);
 
     Ok(())

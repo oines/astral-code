@@ -13,6 +13,7 @@ use codex_features::Feature;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
 use codex_login::default_client::originator;
+use codex_model_provider::CODEX_PROVIDER_ID;
 use codex_model_provider::create_model_provider;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::WireApi;
@@ -1797,7 +1798,11 @@ async fn responses_lite_sets_all_turns_reasoning_and_disables_parallel_tools() -
             model_info.supports_parallel_tool_calls = true;
         })
         .with_config(|config| {
-            config.model_provider.wire_api = WireApi::Responses;
+            let base_url = config.model_provider.base_url.clone();
+            let mut provider = ModelProviderInfo::create_codex_provider();
+            provider.base_url = base_url;
+            config.model_provider_id = CODEX_PROVIDER_ID.to_string();
+            config.model_provider = provider;
         })
         .build(&server)
         .await?;

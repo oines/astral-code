@@ -1,6 +1,7 @@
 use crate::agent::exceeds_thread_spawn_depth_limit;
 use crate::agent::next_thread_spawn_depth;
 use crate::config::ToolSurface;
+use crate::provider_adapters;
 use crate::session::step_context::StepContext;
 use crate::session::turn_context::TurnContext;
 use crate::tools::code_mode::execute_spec::create_code_mode_tool;
@@ -62,8 +63,6 @@ use crate::tools::handlers::multi_agents_v2::SendMessageHandler as SendMessageHa
 use crate::tools::handlers::multi_agents_v2::SpawnAgentHandler as SpawnAgentHandlerV2;
 use crate::tools::handlers::multi_agents_v2::WaitAgentHandler as WaitAgentHandlerV2;
 use crate::tools::handlers::view_image_spec::ViewImageToolOptions;
-use crate::tools::hosted_spec::WebSearchToolOptions;
-use crate::tools::hosted_spec::create_web_search_tool;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::ToolExposure;
 use crate::tools::registry::ToolRegistry;
@@ -72,9 +71,7 @@ use crate::tools::router::ToolRouter;
 use crate::tools::router::ToolRouterParams;
 use codex_features::Feature;
 use codex_mcp::ToolInfo;
-use codex_model_provider_info::CODEX_PROVIDER_ID;
 use codex_models_manager::model_info;
-use codex_protocol::config_types::WebSearchMode;
 use codex_protocol::dynamic_tools::DynamicToolSpec;
 use codex_protocol::openai_models::ConfigShellToolType;
 use codex_protocol::openai_models::ModelPreset;
@@ -108,9 +105,6 @@ use toml::Value as TomlValue;
 use tracing::warn;
 
 const MULTI_AGENT_V2_NAMESPACE_DESCRIPTION: &str = "Tools for spawning and managing sub-agents.";
-const IMAGE_GEN_NAMESPACE: &str = "image_gen";
-const IMAGEGEN_TOOL_NAME: &str = "imagegen";
-
 type PlannedRuntime = Arc<dyn CoreToolRuntime>;
 
 #[derive(Default)]
@@ -343,10 +337,6 @@ fn agent_jobs_worker_tools_enabled(turn_context: &TurnContext) -> bool {
         )
 }
 
-fn standalone_image_generation_model_visible(_turn_context: &TurnContext) -> bool {
-    false
-}
-
 fn wait_agent_timeout_options(turn_context: &TurnContext) -> WaitAgentTimeoutOptions {
     if multi_agent_v2_enabled(turn_context) {
         return WaitAgentTimeoutOptions {
@@ -553,7 +543,7 @@ fn add_tool_sources(context: &CoreToolPlanContext<'_>, planned_tools: &mut Plann
     add_mcp_runtime_tools(context, planned_tools);
     add_extension_tools(context, planned_tools);
     add_dynamic_tools(context, planned_tools);
-    for spec in hosted_model_tool_specs(context) {
+    for spec in provider_adapters::hosted_model_tool_specs(context.step_context.turn.as_ref()) {
         planned_tools.add_hosted_spec(spec);
     }
 }
@@ -575,49 +565,6 @@ fn add_astral_file_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut 
     ] {
         planned_tools.add(AstralFileToolHandler::new(kind));
     }
-}
-
-fn provider_neutral_web_tools_enabled(turn_context: &TurnContext) -> bool {
-    turn_context.config.web_search_mode.value() == WebSearchMode::Live
-}
-
-fn standalone_web_search_enabled(turn_context: &TurnContext) -> bool {
-    namespace_tools_enabled(turn_context)
-        && turn_context.config.model_provider_id != CODEX_PROVIDER_ID
-        && turn_context
-            .config
-            .features
-            .get()
-            .enabled(Feature::StandaloneWebSearch)
-}
-
-fn hosted_model_tool_specs(context: &CoreToolPlanContext<'_>) -> Vec<ToolSpec> {
-    let turn_context = context.step_context.turn.as_ref();
-    if turn_context.model_info.use_responses_lite
-        || turn_context.config.model_provider_id == CODEX_PROVIDER_ID
-    {
-        return Vec::new();
-    }
-
-    let standalone_web_search_available = standalone_web_search_enabled(turn_context)
-        && context
-            .extension_tool_executors
-            .iter()
-            .any(|executor| executor.tool_name() == ToolName::namespaced("web", "run"));
-    let web_search_mode = (!standalone_web_search_available
-        && turn_context.provider.capabilities().web_search)
-        .then_some(turn_context.config.web_search_mode.value());
-    let web_search_config = web_search_mode
-        .as_ref()
-        .and(turn_context.config.web_search_config.as_ref());
-
-    create_web_search_tool(WebSearchToolOptions {
-        web_search_mode,
-        web_search_config,
-        web_search_tool_type: turn_context.model_info.web_search_tool_type,
-    })
-    .into_iter()
-    .collect()
 }
 
 fn add_shell_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut PlannedTools) {
@@ -1142,33 +1089,9 @@ fn append_extension_tool_executors(
         reserved_tool_names.insert(ToolName::plain(TOOL_SEARCH_TOOL_NAME));
     }
 
-    let surface = effective_tool_surface(turn_context);
-    let provider_neutral_web_tools_enabled = provider_neutral_web_tools_enabled(turn_context);
-    let standalone_web_search_enabled = standalone_web_search_enabled(turn_context);
-    let web_search_mode_on = turn_context.config.web_search_mode.value() != WebSearchMode::Disabled;
-
     for executor in executors.iter().cloned() {
         let tool_name = executor.tool_name();
-        if is_provider_neutral_web_tool(&tool_name) && !provider_neutral_web_tools_enabled {
-            continue;
-        }
-        match surface {
-            ToolSurface::Claude => {
-                if tool_name == ToolName::namespaced("web", "run") {
-                    continue;
-                }
-            }
-            ToolSurface::Codex => {
-                if tool_name == ToolName::namespaced("web", "run")
-                    && (!standalone_web_search_enabled || !web_search_mode_on)
-                {
-                    continue;
-                }
-            }
-        }
-        if tool_name == ToolName::namespaced(IMAGE_GEN_NAMESPACE, IMAGEGEN_TOOL_NAME)
-            && !standalone_image_generation_model_visible(turn_context)
-        {
+        if !provider_adapters::extension_tool_visible(turn_context, &tool_name) {
             continue;
         }
         if !reserved_tool_names.insert(tool_name.clone()) {
@@ -1177,13 +1100,6 @@ fn append_extension_tool_executors(
         }
         planned_tools.add(ExtensionToolAdapter::new(executor));
     }
-}
-
-fn is_provider_neutral_web_tool(tool_name: &ToolName) -> bool {
-    matches!(
-        (tool_name.namespace.as_deref(), tool_name.name.as_str()),
-        (Some("web"), "search" | "fetch")
-    )
 }
 
 fn multi_agent_v2_handler(
