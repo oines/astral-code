@@ -1,16 +1,22 @@
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::TranscriptItem;
 use codex_protocol::openai_models::InputModality;
 use codex_tools::TOOL_SEARCH_TOOL_NAME;
+use codex_utils_image::PromptImageMode;
+use codex_utils_image::load_for_prompt_bytes;
 use std::collections::HashSet;
+use std::path::Path;
 
 use crate::util::error_or_panic;
 use tracing::info;
 
 const IMAGE_CONTENT_OMITTED_PLACEHOLDER: &str =
     "image content omitted because you do not support image input";
+const INVALID_IMAGE_CONTENT_PLACEHOLDER: &str = "invalid image content omitted";
 
 pub(crate) fn ensure_call_outputs_present(items: &mut Vec<TranscriptItem>) {
     // Collect synthetic outputs to insert immediately after their calls.
@@ -331,45 +337,154 @@ pub(crate) fn strip_images_when_unsupported(
         return;
     }
 
+    replace_images_with_placeholder(items, IMAGE_CONTENT_OMITTED_PLACEHOLDER);
+}
+
+/// Validate model-visible image inputs and canonicalize inline image MIME types from their
+/// decoded bytes. Remote HTTP(S) images are left for the provider to fetch. Invalid or
+/// provider-inaccessible image inputs become a compact text placeholder.
+pub(crate) fn normalize_inline_images(items: &mut [TranscriptItem]) {
     for item in items.iter_mut() {
         match item {
             TranscriptItem::Message { content, .. } => {
-                let mut normalized_content = Vec::with_capacity(content.len());
-                for content_item in content.iter() {
-                    match content_item {
-                        ContentItem::InputImage { .. } => {
-                            normalized_content.push(ContentItem::InputText {
-                                text: IMAGE_CONTENT_OMITTED_PLACEHOLDER.to_string(),
-                            });
+                for content_item in content.iter_mut() {
+                    let ContentItem::InputImage { image_url, .. } = content_item else {
+                        continue;
+                    };
+                    match normalize_inline_image_url(image_url) {
+                        InlineImageNormalization::Unchanged => {}
+                        InlineImageNormalization::Normalized(normalized) => {
+                            *image_url = normalized;
                         }
-                        _ => normalized_content.push(content_item.clone()),
+                        InlineImageNormalization::Invalid => {
+                            *content_item = ContentItem::InputText {
+                                text: INVALID_IMAGE_CONTENT_PLACEHOLDER.to_string(),
+                            };
+                        }
                     }
                 }
-                *content = normalized_content;
+            }
+            TranscriptItem::FunctionCallOutput { output, .. }
+            | TranscriptItem::CustomToolCallOutput { output, .. } => {
+                let Some(content_items) = output.content_items_mut() else {
+                    continue;
+                };
+                for content_item in content_items.iter_mut() {
+                    let FunctionCallOutputContentItem::InputImage { image_url, .. } = content_item
+                    else {
+                        continue;
+                    };
+                    match normalize_inline_image_url(image_url) {
+                        InlineImageNormalization::Unchanged => {}
+                        InlineImageNormalization::Normalized(normalized) => {
+                            *image_url = normalized;
+                        }
+                        InlineImageNormalization::Invalid => {
+                            *content_item = FunctionCallOutputContentItem::InputText {
+                                text: INVALID_IMAGE_CONTENT_PLACEHOLDER.to_string(),
+                            };
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Replace every image currently visible to the model. Returns the number of replaced images.
+pub(crate) fn replace_images_with_placeholder(
+    items: &mut [TranscriptItem],
+    placeholder: &str,
+) -> usize {
+    let mut replaced = 0;
+
+    for item in items.iter_mut() {
+        match item {
+            TranscriptItem::Message { content, .. } => {
+                for content_item in content.iter_mut() {
+                    if matches!(content_item, ContentItem::InputImage { .. }) {
+                        *content_item = ContentItem::InputText {
+                            text: placeholder.to_string(),
+                        };
+                        replaced += 1;
+                    }
+                }
             }
             TranscriptItem::FunctionCallOutput { output, .. }
             | TranscriptItem::CustomToolCallOutput { output, .. } => {
                 if let Some(content_items) = output.content_items_mut() {
-                    let mut normalized_content_items = Vec::with_capacity(content_items.len());
-                    for content_item in content_items.iter() {
-                        match content_item {
-                            FunctionCallOutputContentItem::InputImage { .. } => {
-                                normalized_content_items.push(
-                                    FunctionCallOutputContentItem::InputText {
-                                        text: IMAGE_CONTENT_OMITTED_PLACEHOLDER.to_string(),
-                                    },
-                                );
-                            }
-                            _ => normalized_content_items.push(content_item.clone()),
+                    for content_item in content_items.iter_mut() {
+                        if matches!(
+                            content_item,
+                            FunctionCallOutputContentItem::InputImage { .. }
+                        ) {
+                            *content_item = FunctionCallOutputContentItem::InputText {
+                                text: placeholder.to_string(),
+                            };
+                            replaced += 1;
                         }
                     }
-                    *content_items = normalized_content_items;
                 }
             }
             TranscriptItem::ImageGenerationCall { result, .. } => {
+                if !result.is_empty() {
+                    replaced += 1;
+                }
                 result.clear();
             }
             _ => {}
         }
     }
+
+    replaced
+}
+
+enum InlineImageNormalization {
+    Unchanged,
+    Normalized(String),
+    Invalid,
+}
+
+fn normalize_inline_image_url(image_url: &str) -> InlineImageNormalization {
+    let is_http = image_url
+        .get(..7)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("http://"));
+    let is_https = image_url
+        .get(..8)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("https://"));
+    if is_http || is_https {
+        return InlineImageNormalization::Unchanged;
+    }
+
+    let Some(prefix) = image_url.get(..5) else {
+        return InlineImageNormalization::Invalid;
+    };
+    if !prefix.eq_ignore_ascii_case("data:") {
+        return InlineImageNormalization::Invalid;
+    }
+
+    let Some((header, encoded)) = image_url.split_once(',') else {
+        return InlineImageNormalization::Invalid;
+    };
+    let is_base64 = header
+        .split(';')
+        .skip(1)
+        .any(|parameter| parameter.eq_ignore_ascii_case("base64"));
+    if !is_base64 {
+        return InlineImageNormalization::Invalid;
+    }
+
+    let Ok(bytes) = BASE64_STANDARD.decode(encoded) else {
+        return InlineImageNormalization::Invalid;
+    };
+    let Ok(image) = load_for_prompt_bytes(
+        Path::new("<inline-image>"),
+        bytes,
+        PromptImageMode::Original,
+    ) else {
+        return InlineImageNormalization::Invalid;
+    };
+
+    InlineImageNormalization::Normalized(image.into_data_url())
 }

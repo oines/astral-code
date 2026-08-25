@@ -38,9 +38,13 @@ use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_function_call;
 use core_test_support::responses::ev_response_created;
 use core_test_support::responses::mount_models_once;
+#[cfg(not(debug_assertions))]
+use core_test_support::responses::mount_response_sequence;
 use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::request_input_items;
 use core_test_support::responses::sse;
+#[cfg(not(debug_assertions))]
+use core_test_support::responses::sse_response;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::TestCodex;
@@ -68,8 +72,6 @@ use wiremock::BodyPrintLimit;
 use wiremock::MockServer;
 #[cfg(not(debug_assertions))]
 use wiremock::ResponseTemplate;
-#[cfg(not(debug_assertions))]
-use wiremock::matchers::body_string_contains;
 
 const VIEW_IMAGE_TURN_COMPLETE_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -1442,7 +1444,7 @@ async fn view_image_tool_returns_unsupported_message_for_text_only_model() -> an
 
 #[cfg(not(debug_assertions))]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn replaces_invalid_local_image_after_bad_request() -> anyhow::Result<()> {
+async fn retries_without_visible_images_after_bad_request() -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
@@ -1450,22 +1452,21 @@ async fn replaces_invalid_local_image_after_bad_request() -> anyhow::Result<()> 
     const INVALID_IMAGE_ERROR: &str =
         "The image data you provided does not represent a valid image";
 
-    let invalid_image_mock = responses::mount_response_once_match(
-        &server,
-        body_string_contains("\"input_image\""),
-        ResponseTemplate::new(400)
-            .insert_header("content-type", "text/plain")
-            .set_body_string(INVALID_IMAGE_ERROR),
-    )
-    .await;
-
     let success_response = sse(vec![
         ev_response_created("resp-2"),
         ev_assistant_message("msg-1", "done"),
         ev_completed("resp-2"),
     ]);
-
-    let completion_mock = responses::mount_sse_once(&server, success_response).await;
+    let response_mock = mount_response_sequence(
+        &server,
+        vec![
+            ResponseTemplate::new(400)
+                .insert_header("content-type", "text/plain")
+                .set_body_string(INVALID_IMAGE_ERROR),
+            sse_response(success_response),
+        ],
+    )
+    .await;
 
     let mut builder = test_codex();
     let test = builder.build_with_remote_env(&server).await?;
@@ -1498,20 +1499,25 @@ async fn replaces_invalid_local_image_after_bad_request() -> anyhow::Result<()> 
     )
     .await;
 
-    let first_body = invalid_image_mock.single_request().body_json();
+    let requests = response_mock.requests();
+    assert_eq!(requests.len(), 2, "invalid images should trigger one retry");
+    let first_body = requests[0].body_json();
     assert!(
         find_image_message(&first_body).is_some(),
         "initial request should include the uploaded image"
     );
 
-    let second_request = completion_mock.single_request();
+    let second_request = &requests[1];
     let second_body = second_request.body_json();
     assert!(
         find_image_message(&second_body).is_none(),
         "second request should replace the invalid image"
     );
     let user_texts = second_request.message_input_texts("user");
-    assert!(user_texts.iter().any(|text| text == "Invalid image"));
+    assert!(
+        user_texts.iter().any(|text| text.contains("Invalid image")),
+        "second request should retain an image placeholder: {user_texts:?}"
+    );
 
     Ok(())
 }

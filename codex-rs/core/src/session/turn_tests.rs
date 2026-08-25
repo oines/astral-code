@@ -45,6 +45,24 @@ fn encrypted_content_recovery_matches_only_the_exact_error_code() {
     ));
 }
 
+#[test]
+fn responses_state_recovery_matches_incompatible_reasoning_content() {
+    let error = CodexErr::InvalidRequest(
+        r#"{"error":{"message":"Invalid 'input[1].content': array too long. Expected an array with maximum length 0, but got an array with length 1 instead.","type":"invalid_request_error","param":"input[1].content","code":"array_above_max_length"}}"#
+            .to_string(),
+    );
+    assert_eq!(
+        responses_state_reset_reason(&error),
+        Some("incompatible_reasoning_content")
+    );
+    assert_eq!(
+        responses_state_reset_reason(&CodexErr::InvalidRequest(
+            r#"{"error":{"code":"array_above_max_length"}}"#.to_string(),
+        )),
+        None
+    );
+}
+
 #[tokio::test]
 async fn plan_mode_uses_contributed_turn_item_for_last_agent_message() {
     let (mut session, turn_context) = crate::session::tests::make_session_and_context().await;

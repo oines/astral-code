@@ -1437,10 +1437,16 @@ impl Session {
 
     pub(crate) async fn get_config(&self) -> std::sync::Arc<Config> {
         let state = self.state.lock().await;
-        state
-            .session_configuration
+        let session_configuration = &state.session_configuration;
+        let mut config = (*session_configuration.original_config_do_not_use).clone();
+        config.model = Some(session_configuration.collaboration_mode.model().to_string());
+        config.model_reasoning_effort = session_configuration.collaboration_mode.reasoning_effort();
+        config.model_provider_id = session_configuration
             .original_config_do_not_use
-            .clone()
+            .model_provider_id
+            .clone();
+        config.model_provider = session_configuration.provider.clone();
+        Arc::new(config)
     }
 
     pub(crate) async fn provider(&self) -> ModelProviderInfo {

@@ -98,6 +98,9 @@ pub(crate) fn strip_responses_encrypted_state(
                 encrypted_content: Some(_),
                 ..
             }
+            | TranscriptItem::Reasoning {
+                content: Some(_), ..
+            }
             | TranscriptItem::Compaction { .. }
             | TranscriptItem::ContextCompaction {
                 encrypted_content: Some(_),

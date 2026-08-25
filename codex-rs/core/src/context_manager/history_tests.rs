@@ -26,16 +26,31 @@ use codex_protocol::protocol::SandboxPolicy;
 use codex_protocol::protocol::TurnContextItem;
 use codex_utils_output_truncation::TruncationPolicy;
 use codex_utils_output_truncation::truncate_text;
+use image::DynamicImage;
 use image::ImageBuffer;
 use image::ImageFormat;
 use image::Luma;
+use image::Rgb;
 use image::Rgba;
 use pretty_assertions::assert_eq;
 use regex_lite::Regex;
+use std::io::Cursor;
 use std::path::PathBuf;
 
 const EXEC_FORMAT_MAX_BYTES: usize = 10_000;
 const EXEC_FORMAT_MAX_TOKENS: usize = 2_500;
+
+fn inline_image_url(format: ImageFormat, declared_mime: &str) -> String {
+    let image = ImageBuffer::from_pixel(2, 2, Rgb([10u8, 20, 30]));
+    let mut encoded = Cursor::new(Vec::new());
+    DynamicImage::ImageRgb8(image)
+        .write_to(&mut encoded, format)
+        .expect("encode test image");
+    format!(
+        "data:{declared_mime};base64,{}",
+        BASE64_STANDARD.encode(encoded.into_inner())
+    )
+}
 
 fn assistant_msg(text: &str) -> TranscriptItem {
     TranscriptItem::Message {
@@ -785,9 +800,17 @@ fn remove_first_item_removes_matching_call_for_output() {
 }
 
 #[test]
-fn replace_last_turn_images_replaces_tool_output_images() {
+fn replace_all_images_replaces_images_across_turns_and_output_types() {
     let items = vec![
-        user_input_text_msg("hi"),
+        TranscriptItem::Message {
+            id: None,
+            role: "user".to_string(),
+            content: vec![ContentItem::InputImage {
+                image_url: "https://example.com/user.png".to_string(),
+                detail: Some(DEFAULT_IMAGE_DETAIL),
+            }],
+            phase: None,
+        },
         TranscriptItem::FunctionCallOutput {
             call_id: "call-1".to_string(),
             output: FunctionCallOutputPayload {
@@ -800,15 +823,40 @@ fn replace_last_turn_images_replaces_tool_output_images() {
                 success: Some(true),
             },
         },
+        TranscriptItem::CustomToolCallOutput {
+            call_id: "custom-call-1".to_string(),
+            name: None,
+            output: FunctionCallOutputPayload::from_content_items(vec![
+                FunctionCallOutputContentItem::InputImage {
+                    image_url: "data:image/jpeg;base64,BBB".to_string(),
+                    detail: Some(DEFAULT_IMAGE_DETAIL),
+                },
+            ]),
+        },
+        user_input_text_msg("later turn"),
+        TranscriptItem::ImageGenerationCall {
+            id: "generated-1".to_string(),
+            status: "completed".to_string(),
+            revised_prompt: None,
+            result: "CCC".to_string(),
+        },
     ];
     let mut history = create_history_with_items(items);
 
-    assert!(history.replace_last_turn_images("Invalid image"));
+    assert_eq!(history.replace_all_images("Invalid image"), 4);
+    assert_eq!(history.replace_all_images("Invalid image"), 0);
 
     assert_eq!(
         history.raw_items(),
         vec![
-            user_input_text_msg("hi"),
+            TranscriptItem::Message {
+                id: None,
+                role: "user".to_string(),
+                content: vec![ContentItem::InputText {
+                    text: "Invalid image".to_string(),
+                }],
+                phase: None,
+            },
             TranscriptItem::FunctionCallOutput {
                 call_id: "call-1".to_string(),
                 output: FunctionCallOutputPayload {
@@ -820,25 +868,124 @@ fn replace_last_turn_images_replaces_tool_output_images() {
                     success: Some(true),
                 },
             },
+            TranscriptItem::CustomToolCallOutput {
+                call_id: "custom-call-1".to_string(),
+                name: None,
+                output: FunctionCallOutputPayload::from_content_items(vec![
+                    FunctionCallOutputContentItem::InputText {
+                        text: "Invalid image".to_string(),
+                    },
+                ]),
+            },
+            user_input_text_msg("later turn"),
+            TranscriptItem::ImageGenerationCall {
+                id: "generated-1".to_string(),
+                status: "completed".to_string(),
+                revised_prompt: None,
+                result: String::new(),
+            },
         ]
     );
 }
 
 #[test]
-fn replace_last_turn_images_does_not_touch_user_images() {
-    let items = vec![TranscriptItem::Message {
+fn for_prompt_normalizes_mislabeled_images_across_turns() {
+    let actual_jpeg_labeled_png = inline_image_url(ImageFormat::Jpeg, "image/png");
+    let actual_png_labeled_jpeg = inline_image_url(ImageFormat::Png, "image/jpeg");
+    let history = create_history_with_items(vec![
+        TranscriptItem::Message {
+            id: None,
+            role: "user".to_string(),
+            content: vec![ContentItem::InputImage {
+                image_url: actual_jpeg_labeled_png,
+                detail: Some(DEFAULT_IMAGE_DETAIL),
+            }],
+            phase: None,
+        },
+        TranscriptItem::CustomToolCall {
+            id: None,
+            status: None,
+            call_id: "custom-call-1".to_string(),
+            name: "js_repl".to_string(),
+            input: "image(...)".to_string(),
+        },
+        TranscriptItem::CustomToolCallOutput {
+            call_id: "custom-call-1".to_string(),
+            name: None,
+            output: FunctionCallOutputPayload::from_content_items(vec![
+                FunctionCallOutputContentItem::InputImage {
+                    image_url: actual_png_labeled_jpeg,
+                    detail: Some(DEFAULT_IMAGE_DETAIL),
+                },
+            ]),
+        },
+        user_input_text_msg("later turn"),
+    ]);
+
+    let original_history = history.raw_items().to_vec();
+    let prompt = history.clone().for_prompt(&default_input_modalities());
+    assert_eq!(history.raw_items(), original_history);
+    let TranscriptItem::Message { content, .. } = &prompt[0] else {
+        panic!("expected user message");
+    };
+    let ContentItem::InputImage { image_url, .. } = &content[0] else {
+        panic!("expected user image");
+    };
+    assert!(image_url.starts_with("data:image/jpeg;base64,"));
+
+    let TranscriptItem::CustomToolCallOutput { output, .. } = &prompt[2] else {
+        panic!("expected custom tool output");
+    };
+    let FunctionCallOutputBody::ContentItems(output) = &output.body else {
+        panic!("expected structured custom tool output");
+    };
+    let FunctionCallOutputContentItem::InputImage { image_url, .. } = &output[0] else {
+        panic!("expected custom tool image");
+    };
+    assert!(image_url.starts_with("data:image/png;base64,"));
+}
+
+#[test]
+fn for_prompt_replaces_invalid_inline_images_but_preserves_remote_images() {
+    let history = create_history_with_items(vec![TranscriptItem::Message {
         id: None,
         role: "user".to_string(),
-        content: vec![ContentItem::InputImage {
-            image_url: "data:image/png;base64,AAA".to_string(),
-            detail: Some(DEFAULT_IMAGE_DETAIL),
-        }],
+        content: vec![
+            ContentItem::InputImage {
+                image_url: "data:image/png;base64,not-base64".to_string(),
+                detail: Some(DEFAULT_IMAGE_DETAIL),
+            },
+            ContentItem::InputImage {
+                image_url: "file:///tmp/image.png".to_string(),
+                detail: Some(DEFAULT_IMAGE_DETAIL),
+            },
+            ContentItem::InputImage {
+                image_url: "https://example.com/image.png".to_string(),
+                detail: Some(DEFAULT_IMAGE_DETAIL),
+            },
+        ],
         phase: None,
-    }];
-    let mut history = create_history_with_items(items.clone());
+    }]);
 
-    assert!(!history.replace_last_turn_images("Invalid image"));
-    assert_eq!(history.raw_items(), items);
+    let prompt = history.for_prompt(&default_input_modalities());
+    let TranscriptItem::Message { content, .. } = &prompt[0] else {
+        panic!("expected user message");
+    };
+    assert_eq!(
+        content,
+        &vec![
+            ContentItem::InputText {
+                text: "invalid image content omitted".to_string(),
+            },
+            ContentItem::InputText {
+                text: "invalid image content omitted".to_string(),
+            },
+            ContentItem::InputImage {
+                image_url: "https://example.com/image.png".to_string(),
+                detail: Some(DEFAULT_IMAGE_DETAIL),
+            },
+        ]
+    );
 }
 
 #[test]

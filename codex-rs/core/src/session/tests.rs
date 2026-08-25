@@ -52,6 +52,7 @@ use codex_protocol::models::PermissionProfile;
 use codex_protocol::models::SandboxEnforcement;
 use codex_protocol::openai_models::ConfigShellToolType;
 use codex_protocol::openai_models::ModelServiceTier;
+use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::permissions::FileSystemAccessMode;
 use codex_protocol::permissions::FileSystemPath;
 use codex_protocol::permissions::FileSystemSandboxEntry;
@@ -3614,6 +3615,70 @@ async fn session_settings_model_provider_update_changes_effective_config() {
     let effective_config = Session::build_effective_session_config(&updated);
     assert_eq!(effective_config.model_provider_id, provider_id);
     assert_eq!(effective_config.model_provider, provider);
+}
+
+#[tokio::test]
+async fn get_config_returns_effective_runtime_model_provider_and_reasoning() {
+    let provider_a =
+        create_oss_provider_with_base_url("http://127.0.0.1:9875/v1", WireApi::Responses);
+    let provider_b =
+        create_oss_provider_with_base_url("http://127.0.0.1:9876/v1", WireApi::ChatCompletions);
+    let provider_a_id = "luna".to_string();
+    let provider_b_id = "longcat".to_string();
+    let model_a = "gpt-5.6-luna".to_string();
+    let model_b = "LongCat-2.0".to_string();
+
+    let (session, _turn_context, _rx) = make_session_and_context_with_auth_and_config_and_rx(
+        CodexAuth::from_api_key("Test API Key"),
+        Vec::new(),
+        |config| {
+            config.model = Some(model_a.clone());
+            config.model_provider_id = provider_a_id.clone();
+            config.model_provider = provider_a.clone();
+            config
+                .model_providers
+                .insert(provider_a_id.clone(), provider_a.clone());
+            config
+                .model_providers
+                .insert(provider_b_id.clone(), provider_b.clone());
+        },
+    )
+    .await;
+
+    session
+        .update_settings(SessionSettingsUpdate {
+            collaboration_mode: Some(CollaborationMode {
+                mode: ModeKind::Default,
+                settings: Settings {
+                    model: model_b.clone(),
+                    reasoning_effort: Some(ReasoningEffort::High),
+                    developer_instructions: None,
+                },
+            }),
+            model_provider: Some(provider_b_id.clone()),
+            ..Default::default()
+        })
+        .await
+        .expect("runtime model and provider update should apply");
+
+    let effective_config = session.get_config().await;
+    assert_eq!(effective_config.model.as_deref(), Some(model_b.as_str()));
+    assert_eq!(effective_config.model_provider_id, provider_b_id);
+    assert_eq!(effective_config.model_provider, provider_b);
+    assert_eq!(
+        effective_config.model_reasoning_effort,
+        Some(ReasoningEffort::High)
+    );
+
+    let state = session.state.lock().await;
+    assert_eq!(
+        state
+            .session_configuration
+            .original_config_do_not_use
+            .model
+            .as_deref(),
+        Some(model_a.as_str())
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

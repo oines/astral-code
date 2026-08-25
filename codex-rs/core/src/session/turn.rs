@@ -387,14 +387,16 @@ pub(crate) async fn run_turn(
                 break;
             }
             Err(codex_error @ CodexErr::InvalidImageRequest()) => {
-                {
+                let replaced_images = {
                     let mut state = sess.state.lock().await;
-                    error_or_panic(
-                        "Invalid image detected; sanitizing tool output to prevent poisoning",
+                    state.history.replace_all_images("Invalid image")
+                };
+                if replaced_images > 0 {
+                    warn!(
+                        replaced_images,
+                        "model rejected image input; retrying after isolating visible images"
                     );
-                    if state.history.replace_last_turn_images("Invalid image") {
-                        continue;
-                    }
+                    continue;
                 }
 
                 sess.track_turn_codex_error(turn_context.as_ref(), &codex_error);
@@ -402,7 +404,7 @@ pub(crate) async fn run_turn(
                 sess.emit_turn_error_lifecycle(turn_context.as_ref(), error.clone())
                     .await;
                 let event = EventMsg::Error(ErrorEvent {
-                    message: "Invalid image in your last message. Please remove it and try again."
+                    message: "The model rejected image input after Astral sanitized the visible context. Please try again."
                         .to_string(),
                     codex_error_info: Some(error),
                 });
@@ -1010,7 +1012,7 @@ async fn run_sampling_request(
     );
     let max_retries = turn_context.provider.info().stream_max_retries();
     let mut retries = 0;
-    let mut invalid_encrypted_content_retried = false;
+    let mut responses_state_reset_retried = false;
     let mut initial_input = Some(input);
     loop {
         let prompt_input = if let Some(input) = initial_input.take() {
@@ -1064,16 +1066,17 @@ async fn run_sampling_request(
             Err(err) => err,
         };
 
-        if !invalid_encrypted_content_retried
+        if !responses_state_reset_retried
             && turn_context.provider.info().wire_api == WireApi::Responses
-            && is_invalid_encrypted_content_error(&err)
+            && let Some(reset_reason) = responses_state_reset_reason(&err)
         {
-            invalid_encrypted_content_retried = true;
-            let removed = reset_responses_encrypted_history(&sess, turn_context.as_ref()).await;
+            responses_state_reset_retried = true;
+            let removed =
+                reset_responses_encrypted_history(&sess, turn_context.as_ref(), reset_reason).await;
             if removed > 0 {
                 warn!(
                     removed_items = removed,
-                    "retrying Responses request after invalid encrypted content"
+                    reset_reason, "retrying Responses request after incompatible provider state"
                 );
                 initial_input = None;
                 continue;
@@ -1107,7 +1110,31 @@ fn is_invalid_encrypted_content_error(err: &CodexErr) -> bool {
     }
 }
 
-async fn reset_responses_encrypted_history(sess: &Session, turn_context: &TurnContext) -> usize {
+fn responses_state_reset_reason(err: &CodexErr) -> Option<&'static str> {
+    if is_invalid_encrypted_content_error(err) {
+        return Some("invalid_encrypted_content");
+    }
+
+    let message = match err {
+        CodexErr::InvalidRequest(message) | CodexErr::Stream(message, _) => message.as_str(),
+        CodexErr::UnexpectedStatus(response) => response.body.as_str(),
+        _ => return None,
+    };
+    if message.contains("array_above_max_length")
+        && message.contains("Expected an array with maximum length 0")
+        && message.contains(".content")
+    {
+        Some("incompatible_reasoning_content")
+    } else {
+        None
+    }
+}
+
+async fn reset_responses_encrypted_history(
+    sess: &Session,
+    turn_context: &TurnContext,
+    reset_reason: &str,
+) -> usize {
     let history = sess.clone_history().await.into_raw_items();
     let (clean_history, removed) = strip_responses_encrypted_state(history);
     if removed == 0 {
@@ -1119,7 +1146,7 @@ async fn reset_responses_encrypted_history(sess: &Session, turn_context: &TurnCo
         .await;
 
     let mut rollout_items = vec![RolloutItem::Compacted(CompactedItem {
-        message: "responses state reset: invalid_encrypted_content".to_string(),
+        message: format!("responses state reset: {reset_reason}"),
         replacement_history: Some(clean_history),
     })];
     if let Some(reference_context_item) = reference_context_item {

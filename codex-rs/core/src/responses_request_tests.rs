@@ -48,6 +48,17 @@ fn encrypted_state_reset_preserves_visible_history() {
         encrypted_content: Some("opaque".to_string()),
         provider_metadata: None,
     };
+    let provider_reasoning = TranscriptItem::Reasoning {
+        id: "reasoning-2".to_string(),
+        summary: Vec::new(),
+        content: Some(vec![
+            codex_protocol::models::ReasoningItemContent::ReasoningText {
+                text: "provider-private reasoning".to_string(),
+            },
+        ]),
+        encrypted_content: None,
+        provider_metadata: None,
+    };
     let native_compaction = TranscriptItem::Compaction {
         encrypted_content: "opaque-compaction".to_string(),
     };
@@ -58,10 +69,11 @@ fn encrypted_state_reset_preserves_visible_history() {
     let (cleaned, removed) = strip_responses_encrypted_state(vec![
         visible_user.clone(),
         encrypted_reasoning,
+        provider_reasoning,
         native_compaction,
         local_compaction.clone(),
     ]);
 
-    assert_eq!(removed, 2);
+    assert_eq!(removed, 3);
     assert_eq!(cleaned, vec![visible_user, local_compaction]);
 }

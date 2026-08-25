@@ -215,38 +215,13 @@ impl ContextManager {
         self.world_state_baseline = None;
     }
 
-    /// Replace image content in the last turn if it originated from a tool output.
-    /// Returns true when a tool image was replaced, false otherwise.
-    pub(crate) fn replace_last_turn_images(&mut self, placeholder: &str) -> bool {
-        let Some(index) = self.items.iter().rposition(|item| {
-            matches!(item, TranscriptItem::FunctionCallOutput { .. }) || is_user_turn_boundary(item)
-        }) else {
-            return false;
-        };
-
-        match &mut self.items[index] {
-            TranscriptItem::FunctionCallOutput { output, .. } => {
-                let Some(content_items) = output.content_items_mut() else {
-                    return false;
-                };
-                let mut replaced = false;
-                let placeholder = placeholder.to_string();
-                for item in content_items.iter_mut() {
-                    if matches!(item, FunctionCallOutputContentItem::InputImage { .. }) {
-                        *item = FunctionCallOutputContentItem::InputText {
-                            text: placeholder.clone(),
-                        };
-                        replaced = true;
-                    }
-                }
-                if replaced {
-                    self.history_version = self.history_version.saturating_add(1);
-                }
-                replaced
-            }
-            TranscriptItem::Message { .. } => false,
-            _ => false,
+    /// Replace every image retained in the model-visible history. Returns the number replaced.
+    pub(crate) fn replace_all_images(&mut self, placeholder: &str) -> usize {
+        let replaced = normalize::replace_images_with_placeholder(&mut self.items, placeholder);
+        if replaced > 0 {
+            self.history_version = self.history_version.saturating_add(1);
         }
+        replaced
     }
 
     /// Drop the last `num_turns` instruction turns from this history.
@@ -368,8 +343,12 @@ impl ContextManager {
         // all outputs must have a corresponding function/tool call
         normalize::remove_orphan_outputs(&mut self.items);
 
-        // strip images when model does not support them
+        // Strip images when the model does not support them. Otherwise validate inline image
+        // bytes and canonicalize their MIME types before projecting history to the provider.
         normalize::strip_images_when_unsupported(input_modalities, &mut self.items);
+        if input_modalities.contains(&InputModality::Image) {
+            normalize::normalize_inline_images(&mut self.items);
+        }
     }
 
     fn process_item(&self, item: &TranscriptItem, policy: TruncationPolicy) -> TranscriptItem {
