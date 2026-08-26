@@ -124,6 +124,32 @@ impl TestModelsEndpoint {
     }
 }
 
+#[derive(Debug)]
+struct FailingModelsEndpoint {
+    cache_key: String,
+}
+
+#[async_trait]
+impl ModelsEndpointClient for FailingModelsEndpoint {
+    fn cache_key(&self) -> String {
+        self.cache_key.clone()
+    }
+
+    fn has_command_auth(&self) -> bool {
+        false
+    }
+
+    fn has_provider_auth(&self) -> bool {
+        true
+    }
+
+    async fn list_models(&self, _client_version: &str) -> CoreResult<RemoteModelCatalog> {
+        Err(codex_protocol::error::CodexErr::InvalidRequest(
+            "model catalog unavailable".to_string(),
+        ))
+    }
+}
+
 fn catalog_response(models: Vec<ModelInfo>) -> RemoteModelCatalog {
     RemoteModelCatalog::Catalog { models, etag: None }
 }
@@ -245,6 +271,90 @@ async fn get_model_info_tracks_fallback_usage() {
         .await;
     assert!(unknown.used_fallback_model_metadata);
     assert_eq!(unknown.slug, "model-that-does-not-exist");
+}
+
+#[tokio::test]
+async fn resolve_model_info_refreshes_stale_cache_before_lookup() {
+    let config = ModelsManagerConfig::default();
+    let codex_home = tempdir().expect("temp dir");
+    let cache_key = "resolve-stale-provider";
+    let stale_model = remote_model("resolve-stale", "Resolve Stale", /*priority*/ 0);
+    let fresh_model = remote_model("resolve-fresh", "Resolve Fresh", /*priority*/ 0);
+
+    let cache_endpoint =
+        TestModelsEndpoint::with_cache_key(cache_key, vec![catalog_response(vec![stale_model])]);
+    let cache_manager = openai_manager_for_tests(codex_home.path().to_path_buf(), cache_endpoint);
+    cache_manager
+        .list_models(RefreshStrategy::OnlineIfUncached)
+        .await;
+    cache_manager
+        .cache_manager
+        .manipulate_cache_for_test(|fetched_at| {
+            *fetched_at = Utc::now() - chrono::Duration::hours(1);
+        })
+        .await
+        .expect("cache manipulation succeeds");
+
+    let refresh_endpoint = TestModelsEndpoint::with_cache_key(
+        cache_key,
+        vec![catalog_response(vec![fresh_model.clone()])],
+    );
+    let manager =
+        openai_manager_for_tests(codex_home.path().to_path_buf(), refresh_endpoint.clone());
+    let resolved = manager
+        .resolve_model_info(
+            &fresh_model.slug,
+            &config,
+            RefreshStrategy::OnlineIfUncached,
+        )
+        .await;
+
+    assert_eq!(resolved.slug, fresh_model.slug);
+    assert_eq!(resolved.context_window, Some(272_000));
+    assert!(!resolved.used_fallback_model_metadata);
+    assert_eq!(refresh_endpoint.fetch_count(), 1);
+}
+
+#[tokio::test]
+async fn resolve_model_info_uses_stale_cache_when_refresh_fails() {
+    let config = ModelsManagerConfig::default();
+    let codex_home = tempdir().expect("temp dir");
+    let cache_key = "resolve-stale-fallback-provider";
+    let cached_model = remote_model("resolve-cached", "Resolve Cached", /*priority*/ 0);
+
+    let cache_endpoint = TestModelsEndpoint::with_cache_key(
+        cache_key,
+        vec![catalog_response(vec![cached_model.clone()])],
+    );
+    let cache_manager = openai_manager_for_tests(codex_home.path().to_path_buf(), cache_endpoint);
+    cache_manager
+        .list_models(RefreshStrategy::OnlineIfUncached)
+        .await;
+    cache_manager
+        .cache_manager
+        .manipulate_cache_for_test(|fetched_at| {
+            *fetched_at = Utc::now() - chrono::Duration::hours(1);
+        })
+        .await
+        .expect("cache manipulation succeeds");
+
+    let manager = openai_manager_for_tests(
+        codex_home.path().to_path_buf(),
+        Arc::new(FailingModelsEndpoint {
+            cache_key: cache_key.to_string(),
+        }),
+    );
+    let resolved = manager
+        .resolve_model_info(
+            &cached_model.slug,
+            &config,
+            RefreshStrategy::OnlineIfUncached,
+        )
+        .await;
+
+    assert_eq!(resolved.slug, cached_model.slug);
+    assert_eq!(resolved.context_window, Some(272_000));
+    assert!(!resolved.used_fallback_model_metadata);
 }
 
 #[tokio::test]

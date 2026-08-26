@@ -555,7 +555,11 @@ impl Codex {
         // 2. conversation history => session_meta.base_instructions
         // 3. base_instructions for current model
         let model_info = models_manager
-            .get_model_info(model.as_str(), &config.to_models_manager_config())
+            .resolve_model_info(
+                model.as_str(),
+                &config.to_models_manager_config(),
+                refresh_strategy,
+            )
             .await;
         let multi_agent_version =
             resolve_multi_agent_version(&conversation_history, inherited_multi_agent_version);

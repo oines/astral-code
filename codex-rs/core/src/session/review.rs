@@ -20,7 +20,11 @@ pub(super) async fn spawn_review_thread(
         config.model_catalog.clone(),
     );
     let review_model_info = models_manager
-        .get_model_info(&model, &config.to_models_manager_config())
+        .resolve_model_info(
+            &model,
+            &config.to_models_manager_config(),
+            RefreshStrategy::OnlineIfUncached,
+        )
         .await;
     // For reviews, disable web_search and view_image regardless of global settings.
     let mut review_features = sess.features.clone();

@@ -195,6 +195,25 @@ pub trait ModelsManager: fmt::Debug + Send + Sync {
         .await
     }
 
+    /// Refresh the active provider catalog before resolving model metadata from that snapshot.
+    async fn resolve_model_info(
+        &self,
+        model: &str,
+        config: &ModelsManagerConfig,
+        refresh_strategy: RefreshStrategy,
+    ) -> ModelInfo {
+        async move {
+            let catalog = self.raw_model_catalog(refresh_strategy).await;
+            construct_model_info_from_candidates(model, &catalog.models, config)
+        }
+        .instrument(tracing::info_span!(
+            "resolve_model_info",
+            model = model,
+            refresh_strategy = %refresh_strategy
+        ))
+        .await
+    }
+
     /// Refresh models if the provided ETag differs from the cached ETag.
     ///
     /// Uses `Online` strategy to fetch latest models when ETags differ.

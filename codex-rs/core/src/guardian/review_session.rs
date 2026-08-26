@@ -44,6 +44,7 @@ use crate::session::turn_context::TurnContext;
 use codex_config::types::McpServerConfig;
 use codex_features::Feature;
 use codex_model_provider_info::ModelProviderInfo;
+use codex_models_manager::manager::RefreshStrategy;
 use codex_utils_absolute_path::AbsolutePathBuf;
 
 use super::GUARDIAN_REVIEW_TIMEOUT;
@@ -656,9 +657,10 @@ async fn run_review_on_session(
         .parent_session
         .services
         .models_manager
-        .get_model_info(
+        .resolve_model_info(
             params.model.as_str(),
             &params.spawn_config.to_models_manager_config(),
+            RefreshStrategy::OnlineIfUncached,
         )
         .await;
     let guardian_reasoning_effort = if model_info.supports_reasoning_summaries {

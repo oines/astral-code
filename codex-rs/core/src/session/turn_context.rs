@@ -213,7 +213,11 @@ impl TurnContext {
         let mut config = (*self.config).clone();
         config.model = Some(model.clone());
         let model_info = models_manager
-            .get_model_info(model.as_str(), &config.to_models_manager_config())
+            .resolve_model_info(
+                model.as_str(),
+                &config.to_models_manager_config(),
+                RefreshStrategy::OnlineIfUncached,
+            )
             .await;
         let truncation_policy = model_info.truncation_policy.into();
         let supported_reasoning_levels = model_info
@@ -731,9 +735,10 @@ impl Session {
             per_turn_config.model_catalog.clone(),
         );
         let model_info = models_manager
-            .get_model_info(
+            .resolve_model_info(
                 session_configuration.collaboration_mode.model(),
                 &per_turn_config.to_models_manager_config(),
+                RefreshStrategy::OnlineIfUncached,
             )
             .await;
         let multi_agent_version =
