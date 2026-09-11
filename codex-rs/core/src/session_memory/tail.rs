@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::Prompt;
+use crate::context_manager::estimate_item_token_count;
 use crate::event_mapping::is_contextual_dev_message_content;
 use crate::event_mapping::is_contextual_user_message_content;
 use codex_protocol::error::CodexErr;
@@ -561,11 +562,7 @@ pub(super) fn estimate_prompt_tokens(prompt: &Prompt) -> i64 {
 fn estimate_items_tokens(items: &[TranscriptItem]) -> i64 {
     items
         .iter()
-        .map(|item| {
-            serde_json::to_string(item)
-                .map(|text| i64::try_from(approx_token_count(&text)).unwrap_or(i64::MAX))
-                .unwrap_or_default()
-        })
+        .map(estimate_item_token_count)
         .fold(0i64, i64::saturating_add)
 }
 

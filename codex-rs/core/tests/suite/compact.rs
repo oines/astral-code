@@ -291,6 +291,7 @@ async fn session_memory_sidechain_updates_summary_without_polluting_main_history
     let rmcp_test_server_bin = stdio_server_bin().expect("resolve rmcp test server");
     let mut builder = test_codex().with_config(move |config| {
         config.model_provider = model_provider;
+        config.model_context_window = Some(272_000);
         enable_test_session_memory_compact(config);
         let mut servers = config.mcp_servers.get().clone();
         servers.insert(
@@ -357,7 +358,40 @@ async fn session_memory_sidechain_updates_summary_without_polluting_main_history
     ]);
     let mock = mount_sse_sequence(&server, vec![main_turn, sidechain_edit, next_main_turn]).await;
 
-    test.submit_turn("first session memory turn").await.unwrap();
+    // A large encoded image must not make sidechain preflight treat its base64 as text tokens.
+    let image = image::RgbImage::from_fn(768, 768, |_, _| image::Rgb(rand::random()));
+    let mut png = std::io::Cursor::new(Vec::new());
+    image
+        .write_to(&mut png, image::ImageFormat::Png)
+        .expect("encode screenshot");
+    let image_url = format!(
+        "data:image/png;base64,{}",
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, png.into_inner())
+    );
+    assert!(image_url.len() > 1_100_000);
+    test.codex
+        .submit(Op::UserInput {
+            items: vec![
+                UserInput::Text {
+                    text: "first session memory turn".to_string(),
+                    text_elements: Vec::new(),
+                },
+                UserInput::Image {
+                    image_url,
+                    detail: None,
+                },
+            ],
+            final_output_json_schema: None,
+            model_client_metadata: None,
+            additional_context: Default::default(),
+            thread_settings: Default::default(),
+        })
+        .await
+        .unwrap();
+    wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
     let requests = wait_for_request_count(&mock, 2).await;
     assert_eq!(requests.len(), 2);
     wait_for_file_contains(

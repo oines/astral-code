@@ -368,6 +368,68 @@ fn final_refresh_uses_nominal_and_dynamic_trigger_points() {
 }
 
 #[test]
+fn sidechain_preflight_and_compact_budget_use_image_aware_estimates() {
+    let image_url = format!("data:image/png;base64,{}", "A".repeat(1_200_000));
+    let items = vec![
+        user_message(&"x".repeat(600_000)),
+        function_call("image"),
+        TranscriptItem::FunctionCallOutput {
+            call_id: "image".to_string(),
+            output: FunctionCallOutputPayload::from_content_items(vec![
+                codex_protocol::models::FunctionCallOutputContentItem::InputImage {
+                    image_url,
+                    detail: Some(DEFAULT_IMAGE_DETAIL),
+                },
+            ]),
+        },
+    ];
+    let prompt = Prompt {
+        input: items.clone(),
+        base_instructions: codex_protocol::models::BaseInstructions {
+            text: String::new(),
+        },
+        ..Default::default()
+    };
+    let tokens = estimate_prompt_tokens(&prompt);
+    assert!(tokens > 150_000 && tokens < 155_000);
+    assert!(sidechain_can_start(
+        tokens,
+        Some(258_400),
+        Some(272_000),
+        tokens + 20_000,
+    ));
+    tail::validate_post_compact_budget(&items, 244_800).expect("image fits compact budget");
+
+    let oversized = vec![user_message(&"x".repeat(1_100_000))];
+    assert!(tail::validate_post_compact_budget(&oversized, 244_800).is_err());
+}
+
+#[test]
+fn session_memory_estimates_encrypted_reasoning_like_main_history() {
+    let items = vec![TranscriptItem::Reasoning {
+        id: "reasoning".to_string(),
+        summary: Vec::new(),
+        content: None,
+        encrypted_content: Some("A".repeat(4_000)),
+        provider_metadata: None,
+    }];
+    let prompt = Prompt {
+        input: items.clone(),
+        base_instructions: codex_protocol::models::BaseInstructions {
+            text: String::new(),
+        },
+        ..Default::default()
+    };
+    let mut history = ContextManager::new();
+    history.replace(items);
+    assert_eq!(
+        Some(estimate_prompt_tokens(&prompt)),
+        history.estimate_token_count_with_base_instructions(&prompt.base_instructions),
+    );
+    assert_eq!(estimate_prompt_tokens(&prompt), 588);
+}
+
+#[test]
 fn sidechain_preflight_respects_effective_and_physical_windows() {
     let effective_context_window = Some(258_400);
     let physical_context_window = Some(272_000);
