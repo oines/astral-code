@@ -476,6 +476,9 @@
             "connectors": {
               "type": "boolean"
             },
+            "context_management": {
+              "type": "boolean"
+            },
             "default_mode_request_user_input": {
               "type": "boolean"
             },
@@ -1695,7 +1698,6 @@
               "$ref": "#/definitions/ResponsesBuiltinTools"
             }
           ],
-          "default": [],
           "description": "Legacy provider-hosted tool selection. Only the disabled empty value is accepted."
         },
         "stream_idle_timeout_ms": {
@@ -4882,6 +4884,9 @@
           "type": "boolean"
         },
         "connectors": {
+          "type": "boolean"
+        },
+        "context_management": {
           "type": "boolean"
         },
         "default_mode_request_user_input": {

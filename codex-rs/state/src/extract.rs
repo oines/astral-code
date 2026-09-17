@@ -22,6 +22,7 @@ pub fn apply_rollout_item(
         RolloutItem::TurnContext(turn_ctx) => apply_turn_context(metadata, turn_ctx),
         RolloutItem::EventMsg(event) => apply_event_msg(metadata, event),
         RolloutItem::TranscriptItem(item) => apply_response_item(metadata, item),
+        RolloutItem::TranscriptEnvelope(envelope) => apply_response_item(metadata, &envelope.item),
         RolloutItem::Compacted(_) => {}
         RolloutItem::WorldState(_) => {}
     }
@@ -39,6 +40,7 @@ pub fn rollout_item_affects_thread_metadata(item: &RolloutItem) -> bool {
         ) => true,
         RolloutItem::EventMsg(_)
         | RolloutItem::TranscriptItem(_)
+        | RolloutItem::TranscriptEnvelope(_)
         | RolloutItem::Compacted(_)
         | RolloutItem::WorldState(_) => false,
     }

@@ -479,12 +479,12 @@ mod job {
     ) -> codex_protocol::error::Result<String> {
         let filtered = items
             .iter()
-            .filter_map(|item| {
-                if let RolloutItem::TranscriptItem(item) = item {
-                    sanitize_response_item_for_memories(item)
-                } else {
-                    None
+            .filter_map(|item| match item {
+                RolloutItem::TranscriptItem(item) => sanitize_response_item_for_memories(item),
+                RolloutItem::TranscriptEnvelope(envelope) => {
+                    sanitize_response_item_for_memories(&envelope.item)
                 }
+                _ => None,
             })
             .collect::<Vec<_>>();
         let serialized = serde_json::to_string(&filtered).map_err(|err| {
@@ -741,7 +741,42 @@ fn emit_metrics(context: &StageOneRequestContext, counts: &Stats) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use codex_protocol::protocol::TranscriptEnvelope;
+    use codex_protocol::protocol::TranscriptIdentity;
     use pretty_assertions::assert_eq;
+
+    #[test]
+    fn serializes_enveloped_rollout_items_for_memory() {
+        let message = TranscriptItem::Message {
+            id: None,
+            role: "user".to_string(),
+            content: vec![ContentItem::InputText {
+                text: "remember this".to_string(),
+            }],
+            phase: None,
+        };
+        let serialized =
+            job::serialize_filtered_rollout_response_items(&[RolloutItem::TranscriptEnvelope(
+                TranscriptEnvelope {
+                    item: message.clone(),
+                    identity: TranscriptIdentity {
+                        thread_id: "thread".to_string(),
+                        agent_path: None,
+                        window_id: "window".to_string(),
+                        window_number: 0,
+                        turn_id: Some("turn".to_string()),
+                        ordinal: 0,
+                        item_id: "item".to_string(),
+                    },
+                },
+            )])
+            .expect("serialize");
+
+        assert_eq!(
+            serde_json::from_str::<Vec<TranscriptItem>>(&serialized).expect("parse"),
+            vec![message]
+        );
+    }
 
     #[test]
     fn serializes_memory_rollout_with_agents_removed_but_environment_kept() {

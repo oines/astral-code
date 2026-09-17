@@ -507,6 +507,7 @@ async fn try_compact_inner(
     let compacted_item = CompactedItem {
         message: summary_text.clone(),
         replacement_history: Some(new_history.clone()),
+        ..Default::default()
     };
     sess.replace_compacted_history(
         new_history,

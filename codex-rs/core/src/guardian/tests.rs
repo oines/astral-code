@@ -241,8 +241,10 @@ async fn seed_guardian_parent_history(session: &Arc<Session>, turn: &Arc<TurnCon
 }
 
 fn rollout_item_contains_message_text(item: &RolloutItem, needle: &str) -> bool {
-    let RolloutItem::TranscriptItem(response_item) = item else {
-        return false;
+    let response_item = match item {
+        RolloutItem::TranscriptItem(item) => item,
+        RolloutItem::TranscriptEnvelope(envelope) => &envelope.item,
+        _ => return false,
     };
     response_item_contains_message_text(response_item, needle)
 }

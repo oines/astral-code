@@ -27,10 +27,14 @@ use crate::tools::handlers::CodeModeWaitHandler;
 use crate::tools::handlers::DynamicToolHandler;
 use crate::tools::handlers::ExecCommandHandler;
 use crate::tools::handlers::ExecCommandHandlerOptions;
+use crate::tools::handlers::GetContextRemainingHandler;
+use crate::tools::handlers::HistoryNotesAction;
+use crate::tools::handlers::HistoryNotesHandler;
 use crate::tools::handlers::ListAvailablePluginsToInstallHandler;
 use crate::tools::handlers::ListMcpResourceTemplatesHandler;
 use crate::tools::handlers::ListMcpResourcesHandler;
 use crate::tools::handlers::McpHandler;
+use crate::tools::handlers::NewContextWindowHandler;
 use crate::tools::handlers::PlanHandler;
 use crate::tools::handlers::ReadMcpResourceHandler;
 use crate::tools::handlers::RequestPermissionsHandler;
@@ -687,6 +691,18 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut
     let turn_context = context.step_context.turn.as_ref();
     let features = turn_context.features.get();
     let environment_mode = tool_environment_mode(context.step_context);
+
+    if features.enabled(Feature::ContextManagement) {
+        planned_tools.add_with_exposure(GetContextRemainingHandler, ToolExposure::DirectModelOnly);
+        planned_tools.add_with_exposure(NewContextWindowHandler, ToolExposure::DirectModelOnly);
+        let namespace_tools_enabled = namespace_tools_enabled(turn_context);
+        for action in HistoryNotesAction::ALL {
+            planned_tools.add_with_exposure(
+                HistoryNotesHandler::new(action, namespace_tools_enabled),
+                ToolExposure::DirectModelOnly,
+            );
+        }
+    }
 
     match effective_tool_surface(turn_context) {
         ToolSurface::Claude => {

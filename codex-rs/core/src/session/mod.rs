@@ -197,7 +197,9 @@ use codex_protocol::exec_output::StreamOutput;
 
 mod code_mode_warning;
 mod config_lock;
+pub(crate) mod context_window;
 mod handlers;
+pub(crate) mod history_archive;
 mod inject;
 mod input_queue;
 mod mcp;
@@ -208,6 +210,7 @@ mod rollout_reconstruction;
 #[allow(clippy::module_inception)]
 pub(crate) mod session;
 pub(crate) mod step_context;
+pub(crate) mod token_budget;
 pub(crate) mod turn;
 pub(crate) mod turn_context;
 mod world_state;
@@ -362,6 +365,8 @@ use codex_protocol::protocol::ThreadMemoryMode;
 use codex_protocol::protocol::TokenCountEvent;
 use codex_protocol::protocol::TokenUsage;
 use codex_protocol::protocol::TokenUsageInfo;
+use codex_protocol::protocol::TranscriptEnvelope;
+use codex_protocol::protocol::TranscriptIdentity;
 use codex_protocol::protocol::TurnModerationMetadataEvent;
 use codex_protocol::protocol::WarningEvent;
 use codex_protocol::user_input::UserInput;
@@ -926,6 +931,53 @@ fn render_world_state_sections(
         .collect()
 }
 
+fn set_compacted_item_window(
+    compacted_item: &mut codex_protocol::protocol::CompactedItem,
+    window_number: u64,
+    window_ids: crate::state::AutoCompactWindowIds,
+) {
+    compacted_item.window_number = Some(window_number);
+    compacted_item.first_window_id = Some(window_ids.first_window_id.to_string());
+    compacted_item.previous_window_id = window_ids.previous_window_id.map(|id| id.to_string());
+    compacted_item.window_id = Some(window_ids.window_id.to_string());
+}
+
+fn recent_context_note_paths(
+    codex_home: &std::path::Path,
+    thread_id: ThreadId,
+    agent_path: Option<String>,
+    limit: usize,
+) -> Vec<String> {
+    let scope = agent_path
+        .as_deref()
+        .map(crate::tools::handlers::history_notes::note_scope_component)
+        .unwrap_or_else(|| "root".to_string());
+    let root = codex_home
+        .join("context-notes")
+        .join(thread_id.to_string())
+        .join(scope);
+    if !root.exists() {
+        return Vec::new();
+    }
+    let mut paths = walkdir::WalkDir::new(&root)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_file())
+        .filter_map(|entry| {
+            let relative = entry.path().strip_prefix(&root).ok()?;
+            let modified = entry.metadata().ok()?.modified().ok()?;
+            Some((modified, relative.to_string_lossy().replace('\\', "/")))
+        })
+        .collect::<Vec<_>>();
+    paths.sort_by(|left, right| right.0.cmp(&left.0));
+    paths
+        .into_iter()
+        .take(limit)
+        .map(|(_, path)| path)
+        .collect()
+}
+
 impl Session {
     pub(crate) async fn app_server_client_metadata(&self) -> AppServerClientMetadata {
         let state = self.state.lock().await;
@@ -1170,6 +1222,22 @@ impl Session {
         state.auto_compact_window_snapshot()
     }
 
+    pub(crate) async fn current_context_window(&self) -> (u64, crate::state::AutoCompactWindowIds) {
+        let state = self.state.lock().await;
+        (
+            state.auto_compact_window_number(),
+            state.auto_compact_window_ids(),
+        )
+    }
+
+    pub(crate) async fn request_new_context_window(&self) {
+        self.state.lock().await.request_new_context_window();
+    }
+
+    pub(crate) async fn new_context_window_requested(&self) -> bool {
+        self.state.lock().await.new_context_window_requested()
+    }
+
     pub(crate) async fn total_token_usage(&self) -> Option<TokenUsage> {
         let state = self.state.lock().await;
         state.token_info().map(|info| info.total_token_usage)
@@ -1320,6 +1388,9 @@ impl Session {
             .await;
         let previous_turn_settings = reconstructed_rollout.previous_turn_settings.clone();
         let world_state_baseline = reconstructed_rollout.world_state_baseline;
+        let auto_compact_window = reconstructed_rollout.auto_compact_window;
+        let next_transcript_ordinal = reconstructed_rollout.next_transcript_ordinal;
+        let pending_new_context = reconstructed_rollout.pending_new_context;
         self.replace_history(
             reconstructed_rollout.history,
             reconstructed_rollout.reference_context_item,
@@ -1331,6 +1402,24 @@ impl Session {
                 .await
                 .history
                 .set_world_state_baseline(world_state);
+        }
+        if let Some((window_number, window_ids)) = auto_compact_window {
+            self.state
+                .lock()
+                .await
+                .restore_auto_compact_window(window_number, window_ids);
+        }
+        self.state
+            .lock()
+            .await
+            .restore_next_transcript_ordinal(next_transcript_ordinal);
+        if turn_context.features.enabled(Feature::ContextManagement) {
+            if pending_new_context {
+                self.state.lock().await.request_new_context_window();
+            }
+            let current_ids = self.state.lock().await.auto_compact_window_ids();
+            *self.history_archive.write().await =
+                history_archive::HistoryArchive::from_rollout(rollout_items, current_ids);
         }
         let prefix_tokens = if matches!(
             turn_context.config.model_auto_compact_token_limit_scope,
@@ -2573,6 +2662,36 @@ impl Session {
         }
     }
 
+    fn create_transcript_envelopes(
+        &self,
+        turn_context: &TurnContext,
+        state: &mut crate::state::SessionState,
+        items: &[TranscriptItem],
+    ) -> Vec<TranscriptEnvelope> {
+        let window_number = state.auto_compact_window_number();
+        let window_id = state.auto_compact_window_ids().window_id.to_string();
+        let agent_path = turn_context
+            .session_source
+            .get_agent_path()
+            .map(|path| path.to_string());
+        items
+            .iter()
+            .cloned()
+            .map(|item| TranscriptEnvelope {
+                item,
+                identity: TranscriptIdentity {
+                    thread_id: self.thread_id.to_string(),
+                    agent_path: agent_path.clone(),
+                    window_id: window_id.clone(),
+                    window_number,
+                    turn_id: Some(turn_context.sub_id.clone()),
+                    ordinal: state.allocate_transcript_ordinal(),
+                    item_id: uuid::Uuid::now_v7().to_string(),
+                },
+            })
+            .collect()
+    }
+
     /// Records conversation items: append to history, persist to rollout, and
     /// notify clients observing raw response items.
     pub(crate) async fn record_conversation_items(
@@ -2580,11 +2699,28 @@ impl Session {
         turn_context: &TurnContext,
         items: &[TranscriptItem],
     ) {
-        {
+        let context_management_enabled = turn_context.features.enabled(Feature::ContextManagement);
+        let envelopes = {
             let mut state = self.state.lock().await;
-            state.record_items(items.iter(), turn_context.truncation_policy);
+            if !context_management_enabled {
+                state.record_items(items.iter(), turn_context.truncation_policy);
+                None
+            } else {
+                let envelopes = self.create_transcript_envelopes(turn_context, &mut state, items);
+                state.record_envelopes(envelopes.iter(), turn_context.truncation_policy);
+                Some(envelopes)
+            }
+        };
+        if let Some(envelopes) = envelopes {
+            if self.persist_rollout_transcript_envelopes(&envelopes).await {
+                self.history_archive
+                    .write()
+                    .await
+                    .append_envelopes(&envelopes);
+            }
+        } else {
+            self.persist_rollout_response_items(items).await;
         }
-        self.persist_rollout_response_items(items).await;
         self.send_raw_response_items(turn_context, items).await;
     }
 
@@ -2702,9 +2838,32 @@ impl Session {
         items: Vec<TranscriptItem>,
         reference_context_item: Option<TurnContextItem>,
         world_state_baseline: Option<Arc<WorldState>>,
-        compacted_item: CompactedItem,
+        mut compacted_item: CompactedItem,
     ) {
-        // Compaction starts a new history window, so its WorldState baseline must be full.
+        let (window_number, window_ids) = {
+            let mut state = self.state.lock().await;
+            state.start_next_auto_compact_window()
+        };
+        set_compacted_item_window(&mut compacted_item, window_number, window_ids);
+        self.replace_compacted_history_in_current_window(
+            items,
+            reference_context_item,
+            world_state_baseline,
+            compacted_item,
+            &[],
+        )
+        .await;
+    }
+
+    async fn replace_compacted_history_in_current_window(
+        &self,
+        items: Vec<TranscriptItem>,
+        reference_context_item: Option<TurnContextItem>,
+        world_state_baseline: Option<Arc<WorldState>>,
+        compacted_item: CompactedItem,
+        replacement_envelopes: &[TranscriptEnvelope],
+    ) {
+        // A history replacement establishes a full WorldState baseline for the active window.
         let mut world_state_item = None;
         {
             let mut state = self.state.lock().await;
@@ -2714,29 +2873,107 @@ impl Session {
                 world_state_item = Some(WorldStateItem::full(snapshot.clone().into_value()));
                 state.history.set_world_state_baseline(snapshot);
             }
-            state.start_next_auto_compact_window();
         }
         self.services
             .model_client
             .reset_anthropic_cache_fold()
             .await;
 
-        self.persist_rollout_items(&[RolloutItem::Compacted(compacted_item)])
-            .await;
+        let mut rollout_items = vec![RolloutItem::Compacted(compacted_item)];
         // Persist the baseline after the replacement history that established it.
         if let Some(world_state_item) = world_state_item {
-            self.persist_rollout_items(&[RolloutItem::WorldState(world_state_item)])
-                .await;
+            rollout_items.push(RolloutItem::WorldState(world_state_item));
         }
-        if let Some(turn_context_item) = reference_context_item {
-            self.persist_rollout_items(&[RolloutItem::TurnContext(turn_context_item)])
-                .await;
+        if let Some(turn_context_item) = reference_context_item.clone() {
+            rollout_items.push(RolloutItem::TurnContext(turn_context_item));
+        }
+        rollout_items.extend(
+            replacement_envelopes
+                .iter()
+                .cloned()
+                .map(RolloutItem::TranscriptEnvelope),
+        );
+        if self.try_persist_rollout_items(&rollout_items).await && !replacement_envelopes.is_empty()
+        {
+            self.history_archive
+                .write()
+                .await
+                .append_envelopes(replacement_envelopes);
         }
         {
             let mut state = self.state.lock().await;
             state.queue_pending_session_start_source(codex_hooks::SessionStartSource::Compact);
         }
         self.services.model_client.advance_window_generation();
+    }
+
+    pub(crate) async fn start_new_context_window(
+        &self,
+        step_context: &step_context::StepContext,
+        world_state: Arc<WorldState>,
+    ) {
+        let (window_number, window_ids) = {
+            let mut state = self.state.lock().await;
+            state.start_next_auto_compact_window()
+        };
+        let mut items = self
+            .build_initial_context_with_mcp_and_world_state_fragments(
+                step_context.turn.as_ref(),
+                step_context.mcp.as_ref(),
+                step_context.base_instructions.as_str(),
+                step_context.exec_policy.as_ref(),
+                step_context.reference_context_item.as_ref(),
+                step_context.previous_turn_settings.as_ref(),
+                render_world_state_sections(world_state.render_full()),
+            )
+            .await;
+        let recent_notes = recent_context_note_paths(
+            step_context.turn.config.codex_home.as_path(),
+            self.thread_id,
+            step_context
+                .turn
+                .session_source
+                .get_agent_path()
+                .map(|path| path.to_string()),
+            20,
+        );
+        if !recent_notes.is_empty() {
+            items.push(TranscriptItem::Message {
+                id: None,
+                role: "developer".to_string(),
+                content: vec![codex_protocol::models::ContentItem::InputText {
+                    text: format!(
+                        "<recent_notes>\nRecent private Note paths for this agent scope:\n{}\nRead the checkpoint files useful for the current task, then use the read-only History tools to recover any missing details.\n</recent_notes>",
+                        recent_notes.join("\n")
+                    ),
+                }],
+                phase: None,
+            });
+        }
+        let envelopes = {
+            let mut state = self.state.lock().await;
+            self.create_transcript_envelopes(step_context.turn.as_ref(), &mut state, &items)
+        };
+        let mut model_history = ContextManager::new();
+        model_history.record_envelopes(envelopes.iter(), step_context.turn.truncation_policy);
+        let mut compacted_item = CompactedItem {
+            message: String::new(),
+            // The checkpoint clears the previous model window. The authoritative initial items
+            // for the new window follow as transcript envelopes so their stable IDs survive
+            // resume and fork without storing model-only annotations in the rollout.
+            replacement_history: Some(Vec::new()),
+            ..Default::default()
+        };
+        set_compacted_item_window(&mut compacted_item, window_number, window_ids);
+        self.replace_compacted_history_in_current_window(
+            model_history.into_raw_items(),
+            Some(step_context.turn.to_turn_context_item()),
+            Some(world_state),
+            compacted_item,
+            &envelopes,
+        )
+        .await;
+        self.recompute_token_usage(step_context.turn.as_ref()).await;
     }
 
     async fn persist_rollout_response_items(&self, items: &[TranscriptItem]) {
@@ -2746,6 +2983,19 @@ impl Session {
             .map(RolloutItem::TranscriptItem)
             .collect();
         self.persist_rollout_items(&rollout_items).await;
+    }
+
+    /// Persists authoritative transcript envelopes before updating the process-local archive.
+    ///
+    /// A failed or disabled rollout must not be exposed through History, otherwise the archive
+    /// could contain records that do not exist in the source of truth.
+    async fn persist_rollout_transcript_envelopes(&self, items: &[TranscriptEnvelope]) -> bool {
+        let rollout_items: Vec<RolloutItem> = items
+            .iter()
+            .cloned()
+            .map(RolloutItem::TranscriptEnvelope)
+            .collect();
+        self.try_persist_rollout_items(&rollout_items).await
     }
 
     pub fn enabled(&self, feature: Feature) -> bool {
@@ -2804,9 +3054,22 @@ impl Session {
         world_state: &WorldState,
     ) -> Vec<TranscriptItem> {
         let mcp = self.services.latest_mcp_runtime();
+        let base_instructions = self.get_base_instructions().await;
+        let exec_policy = self.services.exec_policy.current();
+        let (reference_context_item, previous_turn_settings) = {
+            let state = self.state.lock().await;
+            (
+                state.reference_context_item(),
+                state.previous_turn_settings(),
+            )
+        };
         self.build_initial_context_with_mcp_and_world_state_fragments(
             turn_context,
             &mcp,
+            &base_instructions.text,
+            exec_policy.as_ref(),
+            reference_context_item.as_ref(),
+            previous_turn_settings.as_ref(),
             render_world_state_sections(world_state.render_full()),
         )
         .await
@@ -2816,34 +3079,49 @@ impl Session {
         &self,
         turn_context: &TurnContext,
         mcp: &McpRuntimeSnapshot,
+        base_instructions: &str,
+        exec_policy: &codex_execpolicy::Policy,
+        reference_context_item: Option<&TurnContextItem>,
+        previous_turn_settings: Option<&PreviousTurnSettings>,
         world_state_sections: Vec<(String, String)>,
     ) -> Vec<TranscriptItem> {
         let mut developer_sections = Vec::<String>::with_capacity(8);
         let mut contextual_user_sections = Vec::<String>::with_capacity(2);
         let mut separate_developer_sections = Vec::<String>::new();
-        let (
-            reference_context_item,
-            previous_turn_settings,
-            collaboration_mode,
-            base_instructions,
-            session_source,
-        ) = {
-            let state = self.state.lock().await;
-            (
-                state.reference_context_item(),
-                state.previous_turn_settings(),
-                state.session_configuration.collaboration_mode.clone(),
-                state.session_configuration.base_instructions.clone(),
-                state.session_configuration.session_source.clone(),
-            )
-        };
+        let collaboration_mode = &turn_context.collaboration_mode;
+        let session_source = &turn_context.session_source;
         if let Some(model_switch_message) =
             crate::context_manager::updates::build_model_instructions_update_item(
-                previous_turn_settings.as_ref(),
+                previous_turn_settings,
                 turn_context,
             )
         {
             developer_sections.push(model_switch_message);
+        }
+        if turn_context
+            .config
+            .features
+            .enabled(Feature::ContextManagement)
+        {
+            let (window_number, window_ids) = self.current_context_window().await;
+            let previous_window_id = window_ids
+                .previous_window_id
+                .map(|id| id.to_string())
+                .unwrap_or_else(|| "none".to_string());
+            developer_sections.push(format!(
+                concat!(
+                    "<context_window>\n",
+                    "This task uses durable context windows. Current window: {window_number} ({current_window_id}); first window: {first_window_id}; previous window: {previous_window_id}.\n\n",
+                    "For tasks that may span context windows, use `notes` to maintain a concise checkpoint of the goal, decisions, progress, learnings, and next steps. Include the current window ID and the item ID of every relevant user request still being solved, together with important actions and tool calls needed for future recovery. Every non-assistant item, such as user, developer, and tool response items, has an item ID `[id: ...]` immediately after its content. Notes are a working index; use the read-only `history` tools to recover authoritative transcript details.\n\n",
+                    "Take incremental notes while you work so important state is not lost. Use `get_context_remaining` to check the remaining budget. Before the window is exhausted, save the state needed to continue and call `new_context`. The new window starts without a generated summary and continues the same turn; prior transcript items remain recoverable through History.\n\n",
+                    "If the previous window ID is not `none`, a context reset occurred. Read the relevant checkpoint first. When a window ID and item ID are known, prefer `history.read_item`; when they are missing or uncertain, use `history.list_items` or `history.search_contents` to locate the item. Treat Notes and History as private internal bookkeeping and do not mention their existence, paths, contents, or use in user-facing messages.\n",
+                    "</context_window>"
+                ),
+                window_number = window_number,
+                current_window_id = window_ids.window_id,
+                first_window_id = window_ids.first_window_id,
+                previous_window_id = previous_window_id,
+            ));
         }
         if turn_context.config.include_permissions_instructions {
             developer_sections.push(
@@ -2851,7 +3129,7 @@ impl Session {
                     &turn_context.permission_profile,
                     turn_context.approval_policy.value(),
                     turn_context.config.approvals_reviewer,
-                    self.services.exec_policy.current().as_ref(),
+                    exec_policy,
                     #[allow(deprecated)]
                     &turn_context.cwd,
                     turn_context
@@ -2865,7 +3143,7 @@ impl Session {
             );
         }
         let separate_guardian_developer_message =
-            crate::guardian::is_guardian_reviewer_source(&session_source);
+            crate::guardian::is_guardian_reviewer_source(session_source);
         // Keep the guardian policy prompt out of the aggregated developer bundle so it
         // stays isolated as its own top-level developer message for guardian subagents.
         if !separate_guardian_developer_message
@@ -2877,13 +3155,13 @@ impl Session {
         // Add developer instructions from collaboration_mode if they exist and are non-empty
         if turn_context.config.include_collaboration_mode_instructions
             && let Some(collab_instructions) =
-                CollaborationModeInstructions::from_collaboration_mode(&collaboration_mode)
+                CollaborationModeInstructions::from_collaboration_mode(collaboration_mode)
         {
             developer_sections.push(collab_instructions.render());
         }
         if let Some(realtime_update) = crate::context_manager::updates::build_initial_realtime_item(
-            reference_context_item.as_ref(),
-            previous_turn_settings.as_ref(),
+            reference_context_item,
+            previous_turn_settings,
             turn_context,
         ) {
             developer_sections.push(realtime_update);
@@ -2986,7 +3264,7 @@ impl Session {
         }
 
         let multi_agent_v2_usage_hint_text =
-            multi_agents::usage_hint_text(turn_context, &session_source);
+            multi_agents::usage_hint_text(turn_context, session_source);
 
         let mut items = Vec::with_capacity(4);
         if let Some(developer_message) =
@@ -3030,10 +3308,19 @@ impl Session {
     }
 
     pub(crate) async fn persist_rollout_items(&self, items: &[RolloutItem]) {
-        if let Some(live_thread) = self.live_thread()
-            && let Err(e) = live_thread.append_items(items).await
-        {
-            error!("failed to record rollout items: {e:#}");
+        self.try_persist_rollout_items(items).await;
+    }
+
+    async fn try_persist_rollout_items(&self, items: &[RolloutItem]) -> bool {
+        let Some(live_thread) = self.live_thread() else {
+            return false;
+        };
+        match live_thread.append_items(items).await {
+            Ok(()) => true,
+            Err(error) => {
+                error!("failed to record rollout items: {error:#}");
+                false
+            }
         }
     }
 
@@ -3067,11 +3354,24 @@ impl Session {
             .await;
         let loaded_agents_md = self.services.agents_md_manager.get_loaded().await;
         let mcp = self.services.latest_mcp_runtime();
+        let base_instructions = self.get_base_instructions().await.text;
+        let exec_policy = self.services.exec_policy.current();
+        let (reference_context_item, previous_turn_settings) = {
+            let state = self.state.lock().await;
+            (
+                state.reference_context_item(),
+                state.previous_turn_settings(),
+            )
+        };
         Arc::new(step_context::StepContext::new(
             turn_context,
             environments,
             loaded_agents_md,
             mcp,
+            base_instructions,
+            exec_policy,
+            reference_context_item,
+            previous_turn_settings,
         ))
     }
 
@@ -3112,6 +3412,10 @@ impl Session {
                 .build_initial_context_with_mcp_and_world_state_fragments(
                     turn_context,
                     step_context.mcp.as_ref(),
+                    step_context.base_instructions.as_str(),
+                    step_context.exec_policy.as_ref(),
+                    step_context.reference_context_item.as_ref(),
+                    step_context.previous_turn_settings.as_ref(),
                     world_state_sections,
                 )
                 .await;

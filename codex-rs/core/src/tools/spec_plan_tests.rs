@@ -1011,6 +1011,10 @@ async fn environment_tools_follow_the_step_context() {
         environments,
         /*loaded_agents_md*/ None,
         mcp,
+        String::new(),
+        Arc::new(codex_execpolicy::Policy::empty()),
+        None,
+        None,
     ));
 
     let plan = ToolPlanProbe::from_router(ToolRouter::from_context(

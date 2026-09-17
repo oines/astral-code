@@ -142,11 +142,19 @@ pub(crate) async fn run_turn(
     cancellation_token: CancellationToken,
 ) -> Option<String> {
     let mut client_session = sess.services.model_client.new_session();
+    let first_step_context = sess.capture_step_context(Arc::clone(&turn_context)).await;
     // TODO(ccunningham): Pre-turn compaction runs before context updates and the
     // new user message are recorded. Estimate pending incoming items (context
     // diffs/full reinjection + user input) and trigger compaction preemptively
     // when they would push the thread over the compaction threshold.
-    if let Err(err) = run_pre_sampling_compact(&sess, &turn_context, &mut client_session).await {
+    if let Err(err) = run_pre_sampling_compact(
+        &sess,
+        &turn_context,
+        &first_step_context,
+        &mut client_session,
+    )
+    .await
+    {
         let error = err.to_codex_protocol_error();
         sess.emit_turn_error_lifecycle(turn_context.as_ref(), error.clone())
             .await;
@@ -154,7 +162,6 @@ pub(crate) async fn run_turn(
         return None;
     }
 
-    let first_step_context = sess.capture_step_context(Arc::clone(&turn_context)).await;
     // Keep the exact model-visible state used by this turn and its inline compactions.
     let mut world_state = sess
         .record_context_updates_and_set_reference_context_item(first_step_context.as_ref())
@@ -270,8 +277,11 @@ pub(crate) async fn run_turn(
                 can_drain_pending_input = true;
                 let has_pending_input = sess.input_queue.has_pending_input(&sess.active_turn).await;
                 let needs_follow_up = model_needs_follow_up || has_pending_input;
-                let token_status =
-                    auto_compact_token_status(sess.as_ref(), turn_context.as_ref()).await;
+                let token_status = super::context_window::context_window_token_status(
+                    sess.as_ref(),
+                    turn_context.as_ref(),
+                )
+                .await;
                 let token_limit_reached = token_status.token_limit_reached;
 
                 let estimated_token_count =
@@ -282,7 +292,7 @@ pub(crate) async fn run_turn(
                     total_usage_tokens = token_status.active_context_tokens,
                     auto_compact_scope_tokens = token_status.auto_compact_scope_tokens,
                     estimated_token_count = ?estimated_token_count,
-                    auto_compact_scope_limit = token_status.auto_compact_scope_limit,
+                    auto_compact_scope_limit = ?token_status.auto_compact_scope_limit,
                     auto_compact_limit_scope = ?turn_context.config.model_auto_compact_token_limit_scope,
                     auto_compact_window_ordinal = ?token_status.auto_compact_window_ordinal,
                     auto_compact_window_prefill_tokens = ?token_status.auto_compact_window_prefill_tokens,
@@ -295,7 +305,12 @@ pub(crate) async fn run_turn(
                     "post sampling token usage"
                 );
 
-                if let Some(template) = session_memory_prompt_template {
+                if !turn_context
+                    .config
+                    .features
+                    .enabled(Feature::ContextManagement)
+                    && let Some(template) = session_memory_prompt_template
+                {
                     let history = sess.clone_history().await;
                     let candidate = crate::session_memory::ExtractionCandidate::from_history(
                         template,
@@ -309,28 +324,62 @@ pub(crate) async fn run_turn(
                         Arc::clone(&turn_context),
                         candidate,
                         token_status.auto_compact_scope_tokens,
-                        token_status.auto_compact_scope_limit,
+                        token_status.auto_compact_scope_limit.unwrap_or(i64::MAX),
                     )
                     .await;
                 }
 
-                // as long as compaction works well in getting us way below the token limit, we shouldn't worry about being in an infinite loop.
-                if token_limit_reached && needs_follow_up {
-                    if let Err(err) = run_auto_compact(
-                        &sess,
-                        &turn_context,
-                        &mut client_session,
-                        InitialContextInjection::BeforeLastUserMessage(Arc::clone(&world_state)),
-                        CompactionReason::ContextLimit,
-                        CompactionPhase::MidTurn,
-                    )
-                    .await
-                    {
+                let context_management_enabled = turn_context
+                    .config
+                    .features
+                    .enabled(Feature::ContextManagement);
+                let should_roll_over = needs_follow_up
+                    && (sess.new_context_window_requested().await || token_limit_reached);
+                super::token_budget::maybe_record(
+                    sess.as_ref(),
+                    turn_context.as_ref(),
+                    token_status.base_window_tokens_remaining,
+                )
+                .await;
+
+                // A requested or forced clean reset keeps the same Turn running, but rebuilds
+                // model-visible context from the exact StepContext used for this sampling step.
+                if should_roll_over {
+                    let result = if context_management_enabled {
+                        crate::compact::run_clean_context_reset(
+                            Arc::clone(&sess),
+                            Arc::clone(&step_context),
+                            Arc::clone(&world_state),
+                            codex_analytics::CompactionTrigger::Auto,
+                        )
+                        .await
+                    } else {
+                        run_auto_compact(
+                            &sess,
+                            &turn_context,
+                            &mut client_session,
+                            InitialContextInjection::BeforeLastUserMessage(Arc::clone(
+                                &world_state,
+                            )),
+                            CompactionReason::ContextLimit,
+                            CompactionPhase::MidTurn,
+                        )
+                        .await
+                    };
+                    if let Err(err) = result {
                         let error = err.to_codex_protocol_error();
                         sess.emit_turn_error_lifecycle(turn_context.as_ref(), error.clone())
                             .await;
                         return None;
                     }
+                    if run_pending_session_start_hooks(&sess, &turn_context).await {
+                        return None;
+                    }
+                    // The first request in the new window must use the same immutable step that
+                    // rebuilt its initial context. Otherwise an MCP, AGENTS.md, permission, or
+                    // environment update racing with the reset could advertise a different world
+                    // than the one captured in the replacement history.
+                    next_step_context = Some(Arc::clone(&step_context));
                     can_drain_pending_input = !model_needs_follow_up;
                     continue;
                 }
@@ -733,91 +782,48 @@ async fn track_turn_resolved_config_analytics(
         });
 }
 
-#[derive(Debug)]
-struct AutoCompactTokenStatus {
-    // Full active context usage, independent of the configured auto-compact scope.
-    active_context_tokens: i64,
-    // Usage counted against `model_auto_compact_token_limit` for the current scope.
-    auto_compact_scope_tokens: i64,
-    auto_compact_scope_limit: i64,
-    full_context_window_limit: Option<i64>,
-    auto_compact_window_ordinal: Option<u64>,
-    auto_compact_window_prefill_tokens: Option<i64>,
-    full_context_window_limit_reached: bool,
-    token_limit_reached: bool,
-}
-
-async fn auto_compact_token_status(
-    sess: &Session,
-    turn_context: &TurnContext,
-) -> AutoCompactTokenStatus {
-    let active_context_tokens = sess.get_total_token_usage().await;
-    let mut auto_compact_window_ordinal = None;
-    let mut auto_compact_window_prefill_tokens = None;
-    let (auto_compact_scope_tokens, auto_compact_scope_limit, full_context_window_limit) =
-        match turn_context.config.model_auto_compact_token_limit_scope {
-            AutoCompactTokenLimitScope::Total => (
-                active_context_tokens,
-                turn_context
-                    .config
-                    .model_auto_compact_token_limit
-                    .or_else(|| turn_context.model_info.auto_compact_token_limit())
-                    .unwrap_or(i64::MAX),
-                turn_context.model_context_window(),
-            ),
-            AutoCompactTokenLimitScope::BodyAfterPrefix => {
-                let window = sess.auto_compact_window_snapshot().await;
-                auto_compact_window_ordinal = Some(window.ordinal);
-                auto_compact_window_prefill_tokens = window.prefill_input_tokens;
-                let baseline = window.prefill_input_tokens.unwrap_or(active_context_tokens);
-                (
-                    active_context_tokens.saturating_sub(baseline),
-                    turn_context
-                        .config
-                        .model_auto_compact_token_limit
-                        .or_else(|| turn_context.model_info.auto_compact_token_limit())
-                        .unwrap_or(i64::MAX),
-                    turn_context.model_context_window(),
-                )
-            }
-        };
-    let full_context_window_limit_reached =
-        full_context_window_limit.is_some_and(|full_context_window_limit| {
-            active_context_tokens >= full_context_window_limit
-        });
-    let token_limit_reached =
-        auto_compact_scope_tokens >= auto_compact_scope_limit || full_context_window_limit_reached;
-
-    AutoCompactTokenStatus {
-        active_context_tokens,
-        auto_compact_scope_tokens,
-        auto_compact_scope_limit,
-        full_context_window_limit,
-        auto_compact_window_ordinal,
-        auto_compact_window_prefill_tokens,
-        full_context_window_limit_reached,
-        token_limit_reached,
-    }
-}
-
 async fn run_pre_sampling_compact(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
+    step_context: &Arc<StepContext>,
     client_session: &mut ModelClientSession,
 ) -> CodexResult<()> {
-    maybe_run_previous_model_inline_compact(sess, turn_context, client_session).await?;
-    let token_status = auto_compact_token_status(sess.as_ref(), turn_context.as_ref()).await;
-    // Compact if the configured auto-compaction budget or usable context window is exhausted.
-    if token_status.token_limit_reached {
-        run_auto_compact(
-            sess,
-            turn_context,
-            client_session,
-            InitialContextInjection::DoNotInject,
-            CompactionReason::ContextLimit,
-            CompactionPhase::PreTurn,
-        )
+    maybe_run_previous_model_inline_compact(sess, turn_context, step_context, client_session)
         .await?;
+    let token_status =
+        super::context_window::context_window_token_status(sess.as_ref(), turn_context.as_ref())
+            .await;
+    let new_context_requested = turn_context
+        .config
+        .features
+        .enabled(Feature::ContextManagement)
+        && sess.new_context_window_requested().await;
+    // Compact if the configured auto-compaction budget or usable context window is exhausted.
+    if new_context_requested || token_status.token_limit_reached {
+        if turn_context
+            .config
+            .features
+            .enabled(Feature::ContextManagement)
+        {
+            let world_state = Arc::new(sess.build_world_state_for_step(step_context).await);
+            crate::compact::run_clean_context_reset(
+                Arc::clone(sess),
+                Arc::clone(step_context),
+                world_state,
+                codex_analytics::CompactionTrigger::Auto,
+            )
+            .await?;
+        } else {
+            run_auto_compact(
+                sess,
+                turn_context,
+                client_session,
+                InitialContextInjection::DoNotInject,
+                CompactionReason::ContextLimit,
+                CompactionPhase::PreTurn,
+            )
+            .await?;
+        }
     }
     Ok(())
 }
@@ -829,6 +835,7 @@ async fn run_pre_sampling_compact(
 async fn maybe_run_previous_model_inline_compact(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
+    step_context: &Arc<StepContext>,
     client_session: &mut ModelClientSession,
 ) -> CodexResult<()> {
     let Some(previous_turn_settings) = sess.previous_turn_settings().await else {
@@ -865,15 +872,30 @@ async fn maybe_run_previous_model_inline_compact(
         && previous_model_turn_context.model_info.slug != turn_context.model_info.slug
         && old_context_window > new_context_window;
     if should_run {
-        run_auto_compact(
-            sess,
-            &previous_model_turn_context,
-            client_session,
-            InitialContextInjection::DoNotInject,
-            CompactionReason::ModelDownshift,
-            CompactionPhase::PreTurn,
-        )
-        .await?;
+        if turn_context
+            .config
+            .features
+            .enabled(Feature::ContextManagement)
+        {
+            let world_state = Arc::new(sess.build_world_state_for_step(step_context).await);
+            crate::compact::run_clean_context_reset(
+                Arc::clone(sess),
+                Arc::clone(step_context),
+                world_state,
+                codex_analytics::CompactionTrigger::Auto,
+            )
+            .await?;
+        } else {
+            run_auto_compact(
+                sess,
+                &previous_model_turn_context,
+                client_session,
+                InitialContextInjection::DoNotInject,
+                CompactionReason::ModelDownshift,
+                CompactionPhase::PreTurn,
+            )
+            .await?;
+        }
     }
     Ok(())
 }
@@ -1042,7 +1064,12 @@ async fn run_sampling_request(
         .await
         {
             Ok(mut output) => {
-                if turn_context.config.experimental_session_memory_compact {
+                if turn_context.config.experimental_session_memory_compact
+                    && !turn_context
+                        .config
+                        .features
+                        .enabled(Feature::ContextManagement)
+                {
                     output.session_memory_prompt_template =
                         Some(crate::session_memory::PromptTemplate::from_prompt(
                             &prompt,
@@ -1148,6 +1175,7 @@ async fn reset_responses_encrypted_history(
     let mut rollout_items = vec![RolloutItem::Compacted(CompactedItem {
         message: format!("responses state reset: {reset_reason}"),
         replacement_history: Some(clean_history),
+        ..Default::default()
     })];
     if let Some(reference_context_item) = reference_context_item {
         rollout_items.push(RolloutItem::TurnContext(reference_context_item));

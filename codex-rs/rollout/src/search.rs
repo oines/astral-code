@@ -272,6 +272,21 @@ fn conversation_text_from_item(item: &RolloutItem) -> Option<String> {
                 Some(text)
             }
         }
+        RolloutItem::TranscriptEnvelope(envelope) => match &envelope.item {
+            TranscriptItem::Message { role, content, .. } => {
+                let text = content
+                    .iter()
+                    .filter_map(content_item_text)
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                if text.trim().is_empty() || (role != "user" && role != "assistant") {
+                    None
+                } else {
+                    Some(text)
+                }
+            }
+            _ => None,
+        },
         RolloutItem::SessionMeta(_)
         | RolloutItem::TurnContext(_)
         | RolloutItem::EventMsg(_)

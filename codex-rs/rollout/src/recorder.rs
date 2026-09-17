@@ -880,6 +880,9 @@ impl RolloutRecorder {
                     RolloutItem::TranscriptItem(item) => {
                         items.push(RolloutItem::TranscriptItem(item));
                     }
+                    RolloutItem::TranscriptEnvelope(envelope) => {
+                        items.push(RolloutItem::TranscriptEnvelope(envelope));
+                    }
                     RolloutItem::Compacted(item) => {
                         items.push(RolloutItem::Compacted(item));
                     }
@@ -1778,6 +1781,7 @@ async fn resume_candidate_matches_cwd(
             RolloutItem::TurnContext(turn_context) => Some(turn_context.cwd.as_path()),
             RolloutItem::SessionMeta(_)
             | RolloutItem::TranscriptItem(_)
+            | RolloutItem::TranscriptEnvelope(_)
             | RolloutItem::Compacted(_)
             | RolloutItem::WorldState(_)
             | RolloutItem::EventMsg(_) => None,

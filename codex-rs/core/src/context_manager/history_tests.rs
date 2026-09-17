@@ -23,6 +23,8 @@ use codex_protocol::openai_models::default_input_modalities;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::InterAgentCommunication;
 use codex_protocol::protocol::SandboxPolicy;
+use codex_protocol::protocol::TranscriptEnvelope;
+use codex_protocol::protocol::TranscriptIdentity;
 use codex_protocol::protocol::TurnContextItem;
 use codex_utils_output_truncation::TruncationPolicy;
 use codex_utils_output_truncation::truncate_text;
@@ -87,6 +89,74 @@ fn create_history_with_items(items: Vec<TranscriptItem>) -> ContextManager {
     // behavior, not on a specific model's token limit.
     h.record_items(items.iter(), TruncationPolicy::Tokens(10_000));
     h
+}
+
+fn envelope(item_id: &str, item: TranscriptItem) -> TranscriptEnvelope {
+    TranscriptEnvelope {
+        item,
+        identity: TranscriptIdentity {
+            thread_id: "thread".to_string(),
+            agent_path: None,
+            window_id: "window".to_string(),
+            window_number: 0,
+            turn_id: Some("turn".to_string()),
+            ordinal: 0,
+            item_id: item_id.to_string(),
+        },
+    }
+}
+
+#[test]
+fn envelope_identity_is_model_visible_without_mutating_authoritative_item() {
+    let user = user_input_text_msg("hello");
+    let tool_call = TranscriptItem::FunctionCall {
+        id: None,
+        name: "read".to_string(),
+        namespace: None,
+        arguments: "{}".to_string(),
+        call_id: "call-1".to_string(),
+    };
+    let tool_output = TranscriptItem::FunctionCallOutput {
+        call_id: "call-1".to_string(),
+        output: FunctionCallOutputPayload::from_text("result".to_string()),
+    };
+    let assistant = assistant_msg("done");
+    let envelopes = vec![
+        envelope("user-id", user.clone()),
+        envelope("call-id", tool_call.clone()),
+        envelope("output-id", tool_output.clone()),
+        envelope("assistant-id", assistant.clone()),
+    ];
+    let mut history = ContextManager::new();
+
+    history.record_envelopes(envelopes.iter(), TruncationPolicy::Tokens(10_000));
+
+    assert_eq!(envelopes[0].item, user);
+    assert_eq!(envelopes[2].item, tool_output);
+    assert_eq!(
+        history.raw_items(),
+        &[
+            TranscriptItem::Message {
+                id: None,
+                role: "user".to_string(),
+                content: vec![
+                    ContentItem::InputText {
+                        text: "hello".to_string(),
+                    },
+                    ContentItem::InputText {
+                        text: "[id: user-id]".to_string(),
+                    },
+                ],
+                phase: None,
+            },
+            tool_call,
+            TranscriptItem::FunctionCallOutput {
+                call_id: "call-1".to_string(),
+                output: FunctionCallOutputPayload::from_text("result\n[id: output-id]".to_string(),),
+            },
+            assistant,
+        ]
+    );
 }
 
 struct TestWorldStateSection;

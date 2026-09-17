@@ -32,36 +32,39 @@ pub(super) fn agent_nickname_candidates(config: &Config, role_name: Option<&str>
 
 fn keep_forked_rollout_item(item: &RolloutItem, preserve_reference_context_item: bool) -> bool {
     match item {
-        RolloutItem::TranscriptItem(TranscriptItem::Message { role, phase, .. }) => {
-            match role.as_str() {
-                "system" | "developer" | "user" => true,
-                "assistant" => *phase == Some(MessagePhase::FinalAnswer),
-                _ => false,
-            }
-        }
-        RolloutItem::TranscriptItem(
-            TranscriptItem::AgentMessage { .. }
-            | TranscriptItem::Reasoning { .. }
-            | TranscriptItem::LocalShellCall { .. }
-            | TranscriptItem::FunctionCall { .. }
-            | TranscriptItem::ToolSearchCall { .. }
-            | TranscriptItem::FunctionCallOutput { .. }
-            | TranscriptItem::CustomToolCall { .. }
-            | TranscriptItem::CustomToolCallOutput { .. }
-            | TranscriptItem::ToolSearchOutput { .. }
-            | TranscriptItem::WebSearchCall { .. }
-            | TranscriptItem::ImageGenerationCall { .. }
-            | TranscriptItem::LocalCompaction { .. }
-            | TranscriptItem::Compaction { .. }
-            | TranscriptItem::CompactionTrigger
-            | TranscriptItem::ContextCompaction { .. }
-            | TranscriptItem::Other,
-        ) => false,
+        RolloutItem::TranscriptItem(item) => keep_forked_transcript_item(item),
+        RolloutItem::TranscriptEnvelope(envelope) => keep_forked_transcript_item(&envelope.item),
         // Full-history forks preserve the cached prompt prefix and can keep diffing
         // from the parent's durable baseline. Truncated forks drop part of that prompt,
         // so they must rebuild context on their first child turn.
         RolloutItem::TurnContext(_) | RolloutItem::WorldState(_) => preserve_reference_context_item,
         RolloutItem::Compacted(_) | RolloutItem::EventMsg(_) | RolloutItem::SessionMeta(_) => true,
+    }
+}
+
+fn keep_forked_transcript_item(item: &TranscriptItem) -> bool {
+    match item {
+        TranscriptItem::Message { role, phase, .. } => match role.as_str() {
+            "system" | "developer" | "user" => true,
+            "assistant" => *phase == Some(MessagePhase::FinalAnswer),
+            _ => false,
+        },
+        TranscriptItem::AgentMessage { .. }
+        | TranscriptItem::Reasoning { .. }
+        | TranscriptItem::LocalShellCall { .. }
+        | TranscriptItem::FunctionCall { .. }
+        | TranscriptItem::ToolSearchCall { .. }
+        | TranscriptItem::FunctionCallOutput { .. }
+        | TranscriptItem::CustomToolCall { .. }
+        | TranscriptItem::CustomToolCallOutput { .. }
+        | TranscriptItem::ToolSearchOutput { .. }
+        | TranscriptItem::WebSearchCall { .. }
+        | TranscriptItem::ImageGenerationCall { .. }
+        | TranscriptItem::LocalCompaction { .. }
+        | TranscriptItem::Compaction { .. }
+        | TranscriptItem::CompactionTrigger
+        | TranscriptItem::ContextCompaction { .. }
+        | TranscriptItem::Other => false,
     }
 }
 

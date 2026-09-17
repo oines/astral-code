@@ -1,8 +1,30 @@
 use codex_protocol::protocol::TokenUsage;
+use uuid::Uuid;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AutoCompactWindowIds {
+    pub(crate) first_window_id: Uuid,
+    pub(crate) previous_window_id: Option<Uuid>,
+    pub(crate) window_id: Uuid,
+}
+
+impl AutoCompactWindowIds {
+    pub(crate) fn new_initial() -> Self {
+        let window_id = Uuid::now_v7();
+        Self {
+            first_window_id: window_id,
+            previous_window_id: None,
+            window_id,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct AutoCompactWindowSnapshot {
+    /// Legacy one-based generation used by existing compact telemetry.
     pub(crate) ordinal: u64,
+    pub(crate) window_number: u64,
+    pub(crate) ids: AutoCompactWindowIds,
     pub(crate) prefill_input_tokens: Option<i64>,
 }
 
@@ -14,20 +36,32 @@ enum AutoCompactWindowPrefill {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct AutoCompactWindow {
-    ordinal: u64,
+    window_number: u64,
+    ids: AutoCompactWindowIds,
+    new_context_window_requested: bool,
     /// Absolute input-token baseline for the current compaction window.
     ///
     /// `body_after_prefix` subtracts this from later active-context usage. It is
     /// not the growth itself; server-observed usage replaces estimated
     /// resume/recompute baselines when available.
     prefill_input_tokens: Option<AutoCompactWindowPrefill>,
+    token_budget_reminder_delivered: bool,
+    auto_compact_fallback_delivered: bool,
 }
 
 impl AutoCompactWindow {
     pub(super) fn new() -> Self {
+        Self::new_with_ids(AutoCompactWindowIds::new_initial())
+    }
+
+    pub(super) fn new_with_ids(ids: AutoCompactWindowIds) -> Self {
         Self {
-            ordinal: 1,
+            window_number: 0,
+            ids,
+            new_context_window_requested: false,
             prefill_input_tokens: None,
+            token_budget_reminder_delivered: false,
+            auto_compact_fallback_delivered: false,
         }
     }
 
@@ -35,9 +69,48 @@ impl AutoCompactWindow {
         self.prefill_input_tokens = None;
     }
 
-    pub(super) fn start_next(&mut self) {
-        self.ordinal = self.ordinal.saturating_add(1);
+    pub(super) fn window_number(&self) -> u64 {
+        self.window_number
+    }
+
+    pub(super) fn ids(&self) -> AutoCompactWindowIds {
+        self.ids
+    }
+
+    pub(super) fn restore(&mut self, window_number: u64, ids: AutoCompactWindowIds) {
+        self.window_number = window_number;
+        self.ids = ids;
+        self.new_context_window_requested = false;
+        self.token_budget_reminder_delivered = false;
+        self.auto_compact_fallback_delivered = false;
         self.clear_prefill();
+    }
+
+    pub(super) fn start_next(&mut self) -> (u64, AutoCompactWindowIds) {
+        self.window_number = self.window_number.saturating_add(1);
+        self.ids.previous_window_id = Some(self.ids.window_id);
+        self.ids.window_id = Uuid::now_v7();
+        self.new_context_window_requested = false;
+        self.token_budget_reminder_delivered = false;
+        self.auto_compact_fallback_delivered = false;
+        self.clear_prefill();
+        (self.window_number, self.ids)
+    }
+
+    pub(super) fn claim_token_budget_reminder(&mut self) -> bool {
+        !std::mem::replace(&mut self.token_budget_reminder_delivered, true)
+    }
+
+    pub(super) fn claim_auto_compact_fallback(&mut self) -> bool {
+        !std::mem::replace(&mut self.auto_compact_fallback_delivered, true)
+    }
+
+    pub(super) fn request_new_context_window(&mut self) {
+        self.new_context_window_requested = true;
+    }
+
+    pub(super) fn new_context_window_requested(&self) -> bool {
+        self.new_context_window_requested
     }
 
     /// Records the request-input side of the first server usage sample. The
@@ -74,7 +147,9 @@ impl AutoCompactWindow {
             None => None,
         };
         AutoCompactWindowSnapshot {
-            ordinal: self.ordinal,
+            ordinal: self.window_number.saturating_add(1),
+            window_number: self.window_number,
+            ids: self.ids,
             prefill_input_tokens,
         }
     }
@@ -88,11 +163,18 @@ mod tests {
     #[test]
     fn tracks_prefill_and_window_boundaries() {
         let mut window = AutoCompactWindow::new();
+        let first_window_id = window.ids().window_id;
 
         assert_eq!(
             window.snapshot(),
             AutoCompactWindowSnapshot {
                 ordinal: 1,
+                window_number: 0,
+                ids: AutoCompactWindowIds {
+                    first_window_id,
+                    previous_window_id: None,
+                    window_id: first_window_id,
+                },
                 prefill_input_tokens: None,
             }
         );
@@ -102,6 +184,8 @@ mod tests {
             window.snapshot(),
             AutoCompactWindowSnapshot {
                 ordinal: 1,
+                window_number: 0,
+                ids: window.ids(),
                 prefill_input_tokens: Some(150),
             }
         );
@@ -115,6 +199,8 @@ mod tests {
             window.snapshot(),
             AutoCompactWindowSnapshot {
                 ordinal: 1,
+                window_number: 0,
+                ids: window.ids(),
                 prefill_input_tokens: Some(120),
             }
         );
@@ -129,17 +215,34 @@ mod tests {
             window.snapshot(),
             AutoCompactWindowSnapshot {
                 ordinal: 1,
+                window_number: 0,
+                ids: window.ids(),
                 prefill_input_tokens: Some(120),
             }
         );
 
+        window.request_new_context_window();
+        assert!(window.new_context_window_requested());
+        let previous_window_id = window.ids().window_id;
         window.start_next();
+        assert!(!window.new_context_window_requested());
         assert_eq!(
             window.snapshot(),
             AutoCompactWindowSnapshot {
                 ordinal: 2,
+                window_number: 1,
+                ids: AutoCompactWindowIds {
+                    first_window_id,
+                    previous_window_id: Some(previous_window_id),
+                    window_id: window.ids().window_id,
+                },
                 prefill_input_tokens: None,
             }
         );
+        assert_ne!(window.ids().window_id, previous_window_id);
+        assert!(window.claim_token_budget_reminder());
+        assert!(!window.claim_token_budget_reminder());
+        assert!(window.claim_auto_compact_fallback());
+        assert!(!window.claim_auto_compact_fallback());
     }
 }

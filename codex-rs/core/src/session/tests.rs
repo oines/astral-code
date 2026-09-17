@@ -185,11 +185,20 @@ impl StepContext {
     pub(crate) fn for_test(turn: Arc<TurnContext>) -> Arc<Self> {
         let environments = turn.environments.clone();
         let mcp = crate::session::McpRuntimeSnapshot::new_uninitialized_for_test(&turn.config);
+        let base_instructions = turn
+            .config
+            .base_instructions
+            .clone()
+            .unwrap_or_else(|| turn.model_info.get_model_instructions(turn.personality));
         Arc::new(Self::new(
             turn,
             environments,
             /*loaded_agents_md*/ None,
             mcp,
+            base_instructions,
+            Arc::new(codex_execpolicy::Policy::empty()),
+            None,
+            None,
         ))
     }
 }
@@ -1519,6 +1528,7 @@ async fn reconstruct_history_uses_replacement_history_verbatim() {
     let rollout_items = vec![RolloutItem::Compacted(CompactedItem {
         message: String::new(),
         replacement_history: Some(replacement_history.clone()),
+        ..Default::default()
     })];
 
     let reconstructed = session
@@ -2813,6 +2823,7 @@ async fn thread_rollback_restores_cleared_reference_context_item_after_compactio
         RolloutItem::Compacted(CompactedItem {
             message: "summary after compaction".to_string(),
             replacement_history: Some(compacted_history.clone()),
+            ..Default::default()
         }),
         RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
             turn_id: compact_turn_id,
@@ -5279,6 +5290,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         tx_event,
         agent_status: agent_status_tx,
         state: Mutex::new(state),
+        history_archive: RwLock::new(crate::session::history_archive::HistoryArchive::default()),
         managed_network_proxy_refresh_lock: Semaphore::new(/*permits*/ 1),
         features: config.features.clone(),
         multi_agent_version: OnceLock::from(config.multi_agent_version_from_features()),
@@ -7330,6 +7342,7 @@ where
         tx_event,
         agent_status: agent_status_tx,
         state: Mutex::new(state),
+        history_archive: RwLock::new(crate::session::history_archive::HistoryArchive::default()),
         managed_network_proxy_refresh_lock: Semaphore::new(/*permits*/ 1),
         features: config.features.clone(),
         multi_agent_version: OnceLock::from(config.multi_agent_version_from_features()),
@@ -10165,6 +10178,7 @@ async fn sample_rollout(
     rollout_items.push(RolloutItem::Compacted(CompactedItem {
         message: summary1.to_string(),
         replacement_history: None,
+        ..Default::default()
     }));
 
     let user2 = TranscriptItem::Message {
@@ -10205,6 +10219,7 @@ async fn sample_rollout(
     rollout_items.push(RolloutItem::Compacted(CompactedItem {
         message: summary2.to_string(),
         replacement_history: None,
+        ..Default::default()
     }));
 
     let user3 = TranscriptItem::Message {

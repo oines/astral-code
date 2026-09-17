@@ -2754,6 +2754,7 @@ fn multi_agent_version_from_items(
             RolloutItem::TurnContext(turn_context) => turn_context.multi_agent_version,
             RolloutItem::SessionMeta(_)
             | RolloutItem::TranscriptItem(_)
+            | RolloutItem::TranscriptEnvelope(_)
             | RolloutItem::Compacted(_)
             | RolloutItem::WorldState(_)
             | RolloutItem::EventMsg(_) => None,
@@ -2845,12 +2846,50 @@ pub struct SessionMetaLine {
     pub git: Option<GitInfo>,
 }
 
+/// Stable, provider-neutral identity for one model-visible transcript item.
+///
+/// This metadata belongs to the local harness and rollout. It is deliberately
+/// kept outside `TranscriptItem` so the authoritative provider-neutral item
+/// stays unchanged; model request projection may expose the stable item ID.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+pub struct TranscriptIdentity {
+    pub thread_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub agent_path: Option<String>,
+    pub window_id: String,
+    pub window_number: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub turn_id: Option<String>,
+    pub ordinal: u64,
+    pub item_id: String,
+}
+
+/// Rollout representation for a transcript item with durable local identity.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+pub struct TranscriptEnvelope {
+    pub item: TranscriptItem,
+    pub identity: TranscriptIdentity,
+}
+
+impl std::ops::Deref for TranscriptEnvelope {
+    type Target = TranscriptItem;
+
+    fn deref(&self) -> &Self::Target {
+        &self.item
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, JsonSchema, TS)]
 #[serde(tag = "type", content = "payload", rename_all = "snake_case")]
 pub enum RolloutItem {
     SessionMeta(SessionMetaLine),
     #[serde(rename = "response_item")]
     TranscriptItem(TranscriptItem),
+    /// New rollouts persist stable history identity without changing legacy
+    /// `response_item` decoding or provider-visible transcript payloads.
+    TranscriptEnvelope(TranscriptEnvelope),
     Compacted(CompactedItem),
     TurnContext(TurnContextItem),
     WorldState(WorldStateItem),
@@ -2875,11 +2914,20 @@ impl WorldStateItem {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, JsonSchema, TS)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, JsonSchema, TS)]
 pub struct CompactedItem {
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replacement_history: Option<Vec<TranscriptItem>>,
+    /// Durable context-window checkpoint installed by this history replacement.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_number: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_window_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_window_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_id: Option<String>,
 }
 
 impl From<CompactedItem> for TranscriptItem {
@@ -4061,6 +4109,35 @@ mod tests {
         assert_eq!(phase, &None);
         assert_eq!(legacy_json, serde_json::to_string(&item)?);
 
+        Ok(())
+    }
+
+    #[test]
+    fn rollout_transcript_envelope_round_trips_stable_identity() -> Result<()> {
+        let item = RolloutItem::TranscriptEnvelope(TranscriptEnvelope {
+            item: TranscriptItem::Message {
+                id: None,
+                role: "user".to_string(),
+                content: vec![ContentItem::InputText {
+                    text: "hello".to_string(),
+                }],
+                phase: None,
+            },
+            identity: TranscriptIdentity {
+                thread_id: "thread-1".to_string(),
+                agent_path: Some("root/worker".to_string()),
+                window_id: "window-1".to_string(),
+                window_number: 2,
+                turn_id: Some("turn-1".to_string()),
+                ordinal: 9,
+                item_id: "item-1".to_string(),
+            },
+        });
+
+        let serialized = serde_json::to_string(&item)?;
+        assert!(serialized.contains("\"type\":\"transcript_envelope\""));
+        let decoded = serde_json::from_str::<RolloutItem>(&serialized)?;
+        assert_eq!(serde_json::to_string(&decoded)?, serialized);
         Ok(())
     }
 

@@ -12,6 +12,7 @@ use crate::hook_runtime::run_pre_compact_hooks;
 #[cfg(test)]
 use crate::session::PreviousTurnSettings;
 use crate::session::session::Session;
+use crate::session::step_context::StepContext;
 use crate::session::turn::get_last_assistant_message_from_turn;
 use crate::session::turn_context::TurnContext;
 use crate::session_memory::SessionMemoryCompactOutcome;
@@ -26,6 +27,7 @@ use codex_analytics::CompactionStrategy;
 use codex_analytics::CompactionTrigger;
 use codex_analytics::now_unix_seconds;
 use codex_extension_api::CompactStartInput;
+use codex_features::Feature;
 use codex_model_provider_info::WireApi;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
@@ -136,6 +138,63 @@ pub(crate) async fn run_compact_task(
         CompactionPhase::StandaloneTurn,
     )
     .await?;
+    Ok(())
+}
+
+pub(crate) async fn run_manual_clean_context_reset(
+    sess: Arc<Session>,
+    turn_context: Arc<TurnContext>,
+) -> CodexResult<()> {
+    let start_event = EventMsg::TurnStarted(TurnStartedEvent {
+        turn_id: turn_context.sub_id.clone(),
+        trace_id: turn_context.trace_id.clone(),
+        started_at: turn_context.turn_timing_state.started_at_unix_secs().await,
+        model_context_window: turn_context.model_context_window(),
+        collaboration_mode_kind: turn_context.collaboration_mode.mode,
+    });
+    sess.send_event(&turn_context, start_event).await;
+    let step_context = sess.capture_step_context(Arc::clone(&turn_context)).await;
+    let world_state = Arc::new(sess.build_world_state_for_step(step_context.as_ref()).await);
+    run_clean_context_reset(sess, step_context, world_state, CompactionTrigger::Manual).await
+}
+
+/// Starts a fresh model context without generating or injecting a summary.
+///
+/// The replacement is still persisted as a compaction checkpoint so rollout
+/// reconstruction, hooks, UI lifecycle events, and model cache generations use
+/// the existing compaction path.
+pub(crate) async fn run_clean_context_reset(
+    sess: Arc<Session>,
+    step_context: Arc<StepContext>,
+    world_state: Arc<WorldState>,
+    trigger: CompactionTrigger,
+) -> CodexResult<()> {
+    let turn_context = &step_context.turn;
+    let pre_compact_outcome = run_pre_compact_hooks(&sess, turn_context, trigger).await;
+    match pre_compact_outcome {
+        PreCompactHookOutcome::Continue => {}
+        PreCompactHookOutcome::Stopped { .. } => return Err(CodexErr::TurnAborted),
+    }
+    run_extension_before_compact(&sess, turn_context, trigger).await;
+
+    let compaction_item = TurnItem::ContextCompaction(ContextCompactionItem::new());
+    sess.emit_turn_item_started(turn_context, &compaction_item)
+        .await;
+    sess.start_new_context_window(step_context.as_ref(), world_state)
+        .await;
+    sess.emit_turn_item_completed(turn_context, compaction_item)
+        .await;
+    turn_context.session_telemetry.counter(
+        "codex.context_window.reset",
+        /*inc*/ 1,
+        &[("trigger", compaction_trigger_label(trigger))],
+    );
+
+    if let PostCompactHookOutcome::Stopped =
+        run_post_compact_hooks(&sess, turn_context, trigger).await
+    {
+        return Err(CodexErr::TurnAborted);
+    }
     Ok(())
 }
 
@@ -252,7 +311,12 @@ async fn run_compact_task_inner_impl(
     sess.emit_turn_item_started(&turn_context, &compaction_item)
         .await;
 
-    if turn_context.config.experimental_session_memory_compact {
+    if turn_context.config.experimental_session_memory_compact
+        && !turn_context
+            .config
+            .features
+            .enabled(Feature::ContextManagement)
+    {
         match crate::session_memory::try_compact(
             Arc::clone(&sess),
             Arc::clone(&turn_context),
@@ -399,6 +463,7 @@ async fn run_compact_task_inner_impl(
     let compacted_item = CompactedItem {
         message: summary_text.clone(),
         replacement_history: Some(new_history.clone()),
+        ..Default::default()
     };
     let post_compact_history = new_history.clone();
     sess.replace_compacted_history(

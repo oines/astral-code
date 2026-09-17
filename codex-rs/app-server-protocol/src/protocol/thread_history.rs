@@ -232,6 +232,7 @@ impl ThreadHistoryBuilder {
             RolloutItem::EventMsg(event) => self.handle_event(event),
             RolloutItem::Compacted(payload) => self.handle_compacted(payload),
             RolloutItem::TranscriptItem(item) => self.handle_response_item(item),
+            RolloutItem::TranscriptEnvelope(envelope) => self.handle_response_item(&envelope.item),
             RolloutItem::TurnContext(_)
             | RolloutItem::WorldState(_)
             | RolloutItem::SessionMeta(_) => {}
@@ -2972,6 +2973,7 @@ mod tests {
             RolloutItem::Compacted(CompactedItem {
                 message: String::new(),
                 replacement_history: None,
+                ..Default::default()
             }),
             RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
                 turn_id: "turn-compact".into(),

@@ -6,6 +6,7 @@ use super::emit_compact_metric;
 use crate::session::TurnInput;
 use crate::session::turn_context::TurnContext;
 use crate::state::TaskKind;
+use codex_features::Feature;
 use codex_protocol::user_input::UserInput;
 use tokio_util::sync::CancellationToken;
 
@@ -34,6 +35,10 @@ impl SessionTask for CompactTask {
             "local",
             /*manual*/ true,
         );
+        if ctx.config.features.enabled(Feature::ContextManagement) {
+            let _ = crate::compact::run_manual_clean_context_reset(session, ctx).await;
+            return None;
+        }
         // Custom compact prompts are scoped to the synthetic summarization turn only; they must not
         // rewrite the session's persistent developer or initial-context instructions.
         let input = vec![UserInput::Text {

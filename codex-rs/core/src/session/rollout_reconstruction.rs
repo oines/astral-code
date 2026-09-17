@@ -1,6 +1,8 @@
 use super::*;
 use crate::context::world_state::WorldStateSnapshot;
 use crate::context_manager::is_user_turn_boundary;
+use crate::state::AutoCompactWindowIds;
+use uuid::Uuid;
 
 // Return value of `Session::reconstruct_history_from_rollout`, bundling the rebuilt history with
 // the resume/fork hydration metadata derived from the same replay.
@@ -10,6 +12,9 @@ pub(super) struct RolloutReconstruction {
     pub(super) previous_turn_settings: Option<PreviousTurnSettings>,
     pub(super) reference_context_item: Option<TurnContextItem>,
     pub(super) world_state_baseline: Option<WorldStateSnapshot>,
+    pub(super) auto_compact_window: Option<(u64, AutoCompactWindowIds)>,
+    pub(super) next_transcript_ordinal: u64,
+    pub(super) pending_new_context: bool,
 }
 
 #[derive(Debug, Default)]
@@ -54,6 +59,28 @@ fn normalized_replacement_history(compacted: &CompactedItem) -> Option<Vec<Trans
             })
             .collect()
     })
+}
+
+fn reconstructed_window(compacted: &CompactedItem) -> Option<(u64, AutoCompactWindowIds)> {
+    let window_number = compacted.window_number?;
+    let first_window_id = parse_window_id(compacted.first_window_id.as_deref()?)?;
+    let window_id = parse_window_id(compacted.window_id.as_deref()?)?;
+    let previous_window_id = compacted
+        .previous_window_id
+        .as_deref()
+        .and_then(parse_window_id);
+    Some((
+        window_number,
+        AutoCompactWindowIds {
+            first_window_id,
+            previous_window_id,
+            window_id,
+        },
+    ))
+}
+
+fn parse_window_id(value: &str) -> Option<Uuid> {
+    Uuid::parse_str(value).ok()
 }
 
 fn turn_ids_are_compatible(active_turn_id: Option<&str>, item_turn_id: Option<&str>) -> bool {
@@ -113,6 +140,27 @@ impl Session {
         turn_context: &TurnContext,
         rollout_items: &[RolloutItem],
     ) -> RolloutReconstruction {
+        let persisted_item_count = rollout_items
+            .iter()
+            .filter(|item| {
+                matches!(
+                    item,
+                    RolloutItem::TranscriptItem(_) | RolloutItem::TranscriptEnvelope(_)
+                )
+            })
+            .count() as u64;
+        let next_transcript_ordinal = rollout_items
+            .iter()
+            .filter_map(|item| match item {
+                RolloutItem::TranscriptEnvelope(envelope) => {
+                    Some(envelope.identity.ordinal.saturating_add(1))
+                }
+                _ => None,
+            })
+            .max()
+            .unwrap_or(0)
+            .max(persisted_item_count);
+
         // Replay metadata should already match the shape of the future lazy reverse loader, even
         // while history materialization still uses an eager bridge. Scan newest-to-oldest,
         // stopping once a surviving replacement-history checkpoint and the required resume metadata
@@ -239,6 +287,11 @@ impl Session {
                         active_segment.get_or_insert_with(ActiveReplaySegment::default);
                     active_segment.counts_as_user_turn |= is_user_turn_boundary(response_item);
                 }
+                RolloutItem::TranscriptEnvelope(envelope) => {
+                    let active_segment =
+                        active_segment.get_or_insert_with(ActiveReplaySegment::default);
+                    active_segment.counts_as_user_turn |= is_user_turn_boundary(&envelope.item);
+                }
                 RolloutItem::EventMsg(_) | RolloutItem::SessionMeta(_) => {}
             }
 
@@ -264,6 +317,16 @@ impl Session {
             );
         }
 
+        let has_rollback = rollout_items
+            .iter()
+            .any(|item| matches!(item, RolloutItem::EventMsg(EventMsg::ThreadRolledBack(_))));
+        let auto_compact_window = base_compaction.and_then(reconstructed_window).or_else(|| {
+            if has_rollback {
+                super::context_window::infer_initial_window_lineage(rollout_items)
+            } else {
+                super::context_window::infer_window_lineage(rollout_items)
+            }
+        });
         let mut history = ContextManager::new();
         let mut saw_legacy_compaction_without_replacement_history = false;
         if let Some(base_compaction) = base_compaction
@@ -281,6 +344,19 @@ impl Session {
                         std::iter::once(response_item),
                         turn_context.truncation_policy,
                     );
+                }
+                RolloutItem::TranscriptEnvelope(envelope) => {
+                    if turn_context.features.enabled(Feature::ContextManagement) {
+                        history.record_envelopes(
+                            std::iter::once(envelope),
+                            turn_context.truncation_policy,
+                        );
+                    } else {
+                        history.record_items(
+                            std::iter::once(&envelope.item),
+                            turn_context.truncation_policy,
+                        );
+                    }
                 }
                 RolloutItem::Compacted(compacted) => {
                     if let Some(replacement_history) = normalized_replacement_history(compacted) {
@@ -356,6 +432,7 @@ impl Session {
                 }
                 RolloutItem::SessionMeta(_)
                 | RolloutItem::TranscriptItem(_)
+                | RolloutItem::TranscriptEnvelope(_)
                 | RolloutItem::TurnContext(_)
                 | RolloutItem::EventMsg(_) => {
                     unreachable!("only world-state replay items are collected")
@@ -363,11 +440,16 @@ impl Session {
             }
         }
 
+        let pending_new_context =
+            super::context_window::infer_pending_new_context(history.raw_items());
         RolloutReconstruction {
             history: history.raw_items().to_vec(),
             previous_turn_settings,
             reference_context_item,
             world_state_baseline,
+            auto_compact_window,
+            next_transcript_ordinal,
+            pending_new_context,
         }
     }
 }

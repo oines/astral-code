@@ -4114,12 +4114,18 @@ fn summary_from_thread_metadata(metadata: &ThreadMetadata) -> ConversationSummar
 fn preview_from_rollout_items(items: &[RolloutItem]) -> String {
     items
         .iter()
-        .find_map(|item| match item {
-            RolloutItem::TranscriptItem(item) => match codex_core::parse_turn_item(item) {
+        .find_map(|item| {
+            let turn_item = match item {
+                RolloutItem::TranscriptItem(item) => codex_core::parse_turn_item(item),
+                RolloutItem::TranscriptEnvelope(envelope) => {
+                    codex_core::parse_turn_item(&envelope.item)
+                }
+                _ => None,
+            };
+            match turn_item {
                 Some(codex_protocol::items::TurnItem::UserMessage(user)) => Some(user.message()),
                 _ => None,
-            },
-            _ => None,
+            }
         })
         .map(|preview| match preview.find(USER_MESSAGE_BEGIN) {
             Some(idx) => preview[idx + USER_MESSAGE_BEGIN.len()..].trim().to_string(),

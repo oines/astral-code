@@ -47,6 +47,7 @@ mod codex_delegate;
 mod collaboration_instructions;
 mod compact;
 mod compact_resume_fork;
+mod context_management;
 mod deprecation_notice;
 mod exec;
 mod exec_policy;

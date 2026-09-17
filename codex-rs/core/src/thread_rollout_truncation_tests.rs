@@ -6,6 +6,8 @@ use codex_protocol::models::ContentItem;
 use codex_protocol::models::ReasoningItemReasoningSummary;
 use codex_protocol::protocol::InterAgentCommunication;
 use codex_protocol::protocol::ThreadRolledBackEvent;
+use codex_protocol::protocol::TranscriptEnvelope;
+use codex_protocol::protocol::TranscriptIdentity;
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
 
@@ -51,6 +53,38 @@ fn inter_agent_msg(text: &str, trigger_turn: bool) -> TranscriptItem {
         trigger_turn,
     );
     communication.to_response_input_item().into()
+}
+
+fn enveloped(item: TranscriptItem, ordinal: u64) -> RolloutItem {
+    RolloutItem::TranscriptEnvelope(TranscriptEnvelope {
+        item,
+        identity: TranscriptIdentity {
+            thread_id: "thread".to_string(),
+            agent_path: None,
+            window_id: "window".to_string(),
+            window_number: 0,
+            turn_id: Some("turn".to_string()),
+            ordinal,
+            item_id: format!("item-{ordinal}"),
+        },
+    })
+}
+
+#[test]
+fn truncation_recognizes_enveloped_user_boundaries() {
+    let rollout = vec![
+        RolloutItem::TranscriptItem(user_msg("u1")),
+        enveloped(assistant_msg("a1"), 1),
+        enveloped(user_msg("u2"), 2),
+        enveloped(assistant_msg("a2"), 3),
+    ];
+
+    assert_eq!(user_message_positions_in_rollout(&rollout), vec![0, 2]);
+    let truncated = truncate_rollout_before_nth_user_message_from_start(&rollout, 1);
+    assert_eq!(
+        serde_json::to_value(truncated).unwrap(),
+        serde_json::to_value(&rollout[..2]).unwrap()
+    );
 }
 
 #[test]

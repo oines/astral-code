@@ -19,6 +19,7 @@ use codex_protocol::openai_models::InputModality;
 use codex_protocol::protocol::InterAgentCommunication;
 use codex_protocol::protocol::TokenUsage;
 use codex_protocol::protocol::TokenUsageInfo;
+use codex_protocol::protocol::TranscriptEnvelope;
 use codex_protocol::protocol::TurnContextItem;
 use codex_protocol::protocol::WorldStateItem;
 use codex_utils_cache::BlockingLruCache;
@@ -144,6 +145,26 @@ impl ContextManager {
 
             let processed = self.process_item(item_ref, policy);
             self.items.push(processed);
+        }
+    }
+
+    /// Records authoritative transcript envelopes while projecting their stable local IDs into
+    /// the model-visible history. The persisted envelope keeps the original item unchanged; only
+    /// this disposable prompt cache receives the `[id: ...]` annotation.
+    pub(crate) fn record_envelopes<'a, I>(&mut self, envelopes: I, policy: TruncationPolicy)
+    where
+        I: IntoIterator<Item = &'a TranscriptEnvelope>,
+    {
+        for envelope in envelopes {
+            if !is_api_message(&envelope.item) {
+                continue;
+            }
+
+            let processed = self.process_item(&envelope.item, policy);
+            self.items.extend(project_item_identity(
+                processed,
+                envelope.identity.item_id.as_str(),
+            ));
         }
     }
 
@@ -435,6 +456,57 @@ impl ContextManager {
             }
         }
         cut_idx
+    }
+}
+
+fn project_item_identity(mut item: TranscriptItem, item_id: &str) -> Vec<TranscriptItem> {
+    let marker = format!("[id: {item_id}]");
+    match &mut item {
+        TranscriptItem::Message { role, content, .. } if role != "assistant" => {
+            content.push(ContentItem::InputText { text: marker });
+            vec![item]
+        }
+        TranscriptItem::FunctionCallOutput { output, .. }
+        | TranscriptItem::CustomToolCallOutput { output, .. } => {
+            append_identity_to_tool_output(output, marker);
+            vec![item]
+        }
+        TranscriptItem::LocalCompaction { text } => {
+            if !text.is_empty() {
+                text.push('\n');
+            }
+            text.push_str(&marker);
+            vec![item]
+        }
+        // This provider-native tool result does not have a free-text field. Keep its wire shape
+        // intact and place the trusted identity annotation immediately after the item instead.
+        TranscriptItem::ToolSearchOutput { .. } => {
+            vec![item, identity_marker_message(marker)]
+        }
+        _ => vec![item],
+    }
+}
+
+fn append_identity_to_tool_output(output: &mut FunctionCallOutputPayload, marker: String) {
+    match &mut output.body {
+        FunctionCallOutputBody::Text(text) => {
+            if !text.is_empty() {
+                text.push('\n');
+            }
+            text.push_str(&marker);
+        }
+        FunctionCallOutputBody::ContentItems(items) => {
+            items.push(FunctionCallOutputContentItem::InputText { text: marker });
+        }
+    }
+}
+
+fn identity_marker_message(marker: String) -> TranscriptItem {
+    TranscriptItem::Message {
+        id: None,
+        role: "developer".to_string(),
+        content: vec![ContentItem::InputText { text: marker }],
+        phase: None,
     }
 }
 

@@ -17,16 +17,21 @@ pub(crate) fn initial_history_has_prior_user_turns(conversation_history: &Initia
 }
 
 fn rollout_item_is_user_turn_boundary(item: &RolloutItem) -> bool {
+    rollout_transcript_item(item).is_some_and(is_user_turn_boundary)
+}
+
+fn rollout_transcript_item(item: &RolloutItem) -> Option<&TranscriptItem> {
     match item {
-        RolloutItem::TranscriptItem(item) => is_user_turn_boundary(item),
-        _ => false,
+        RolloutItem::TranscriptItem(item) => Some(item),
+        RolloutItem::TranscriptEnvelope(envelope) => Some(&envelope.item),
+        _ => None,
     }
 }
 
 /// Return the indices of user message boundaries in a rollout.
 ///
-/// A user message boundary is a `RolloutItem::TranscriptItem(TranscriptItem::Message { .. })`
-/// whose parsed turn item is `TurnItem::UserMessage`.
+/// A user message boundary is a transcript message whose parsed turn item is
+/// `TurnItem::UserMessage`. Both legacy transcript items and identity envelopes count.
 ///
 /// Rollouts can contain `ThreadRolledBack` markers. Those markers indicate that the
 /// last N user turns were removed from the effective thread history; we apply them here so
@@ -35,18 +40,13 @@ pub(crate) fn user_message_positions_in_rollout(items: &[RolloutItem]) -> Vec<us
     let mut user_positions = Vec::new();
     for (idx, item) in items.iter().enumerate() {
         match item {
-            RolloutItem::TranscriptItem(item @ TranscriptItem::Message { .. })
-                if matches!(
-                    event_mapping::parse_turn_item(item),
-                    Some(TurnItem::UserMessage(_))
-                ) =>
-            {
-                user_positions.push(idx);
-            }
             RolloutItem::EventMsg(EventMsg::ThreadRolledBack(rollback)) => {
                 let num_turns = usize::try_from(rollback.num_turns).unwrap_or(usize::MAX);
                 let new_len = user_positions.len().saturating_sub(num_turns);
                 user_positions.truncate(new_len);
+            }
+            _ if rollout_transcript_item(item).is_some_and(is_real_user_message_boundary) => {
+                user_positions.push(idx);
             }
             _ => {}
         }
@@ -69,14 +69,6 @@ pub(crate) fn fork_turn_positions_in_rollout(items: &[RolloutItem]) -> Vec<usize
     let mut fork_turn_positions = Vec::new();
     for (idx, item) in items.iter().enumerate() {
         match item {
-            RolloutItem::TranscriptItem(item) => {
-                if is_user_turn_boundary(item) {
-                    rollback_turn_positions.push(idx);
-                }
-                if is_real_user_message_boundary(item) || is_trigger_turn_boundary(item) {
-                    fork_turn_positions.push(idx);
-                }
-            }
             RolloutItem::EventMsg(EventMsg::ThreadRolledBack(rollback)) => {
                 let num_turns = usize::try_from(rollback.num_turns).unwrap_or(usize::MAX);
                 if num_turns == 0 {
@@ -93,6 +85,18 @@ pub(crate) fn fork_turn_positions_in_rollout(items: &[RolloutItem]) -> Vec<usize
                 let new_rollback_len = rollback_turn_positions.len().saturating_sub(num_turns);
                 rollback_turn_positions.truncate(new_rollback_len);
                 fork_turn_positions.retain(|position| *position < rollback_start_idx);
+            }
+            _ if rollout_transcript_item(item).is_some() => {
+                let transcript_item =
+                    rollout_transcript_item(item).expect("guarded by transcript item presence");
+                if is_user_turn_boundary(transcript_item) {
+                    rollback_turn_positions.push(idx);
+                }
+                if is_real_user_message_boundary(transcript_item)
+                    || is_trigger_turn_boundary(transcript_item)
+                {
+                    fork_turn_positions.push(idx);
+                }
             }
             _ => {}
         }

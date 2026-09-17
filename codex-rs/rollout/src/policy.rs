@@ -6,6 +6,7 @@ use codex_protocol::models::TranscriptItem;
 pub fn is_persisted_rollout_item(item: &RolloutItem) -> bool {
     match item {
         RolloutItem::TranscriptItem(item) => should_persist_response_item(item),
+        RolloutItem::TranscriptEnvelope(envelope) => should_persist_response_item(&envelope.item),
         RolloutItem::EventMsg(ev) => should_persist_event_msg(ev),
         // Persist Codex executive markers so we can analyze flows (e.g., compaction, API turns).
         RolloutItem::Compacted(_)

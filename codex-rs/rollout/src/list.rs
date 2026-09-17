@@ -1121,7 +1121,7 @@ async fn read_head_summary(path: &Path, head_limit: usize) -> io::Result<HeadTai
                     summary.saw_session_meta = true;
                 }
             }
-            RolloutItem::TranscriptItem(_) => {
+            RolloutItem::TranscriptItem(_) | RolloutItem::TranscriptEnvelope(_) => {
                 summary.created_at = summary
                     .created_at
                     .clone()
@@ -1184,6 +1184,11 @@ pub async fn read_head_for_summary(path: &Path) -> io::Result<Vec<serde_json::Va
                 }
                 RolloutItem::TranscriptItem(item) => {
                     if let Ok(value) = serde_json::to_value(item) {
+                        head.push(value);
+                    }
+                }
+                RolloutItem::TranscriptEnvelope(envelope) => {
+                    if let Ok(value) = serde_json::to_value(envelope.item) {
                         head.push(value);
                     }
                 }

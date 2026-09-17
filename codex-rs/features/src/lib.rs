@@ -127,6 +127,8 @@ pub enum Feature {
     RuntimeMetrics,
     /// Enable startup memory extraction and file-backed memory consolidation.
     MemoryTool,
+    /// Replace summary-based compaction with durable context windows and local history recovery.
+    ContextManagement,
     /// Compress cold local thread-store rollout files.
     LocalThreadStoreCompression,
     /// Enable the Chronicle sidecar for passive screen-context memories.
@@ -769,6 +771,12 @@ pub const FEATURES: &[FeatureSpec] = &[
     FeatureSpec {
         id: Feature::DeferredExecutor,
         key: "deferred_executor",
+        stage: Stage::UnderDevelopment,
+        default_enabled: false,
+    },
+    FeatureSpec {
+        id: Feature::ContextManagement,
+        key: "context_management",
         stage: Stage::UnderDevelopment,
         default_enabled: false,
     },

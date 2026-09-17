@@ -1,6 +1,5 @@
 use super::*;
 use crate::session::tests::make_session_configuration_for_tests;
-use crate::state::AutoCompactWindowSnapshot;
 use codex_protocol::protocol::CreditsSnapshot;
 use codex_protocol::protocol::RateLimitWindow;
 use codex_protocol::protocol::SpendControlLimitSnapshot;
@@ -70,15 +69,26 @@ async fn replace_history_clears_auto_compact_window_prefill_without_advancing() 
 
     state.start_next_auto_compact_window();
     state.set_auto_compact_window_estimated_prefill(/*tokens*/ 100);
+    let before = state.auto_compact_window_snapshot();
     state.replace_history(Vec::new(), /*reference_context_item*/ None);
 
-    assert_eq!(
-        state.auto_compact_window_snapshot(),
-        AutoCompactWindowSnapshot {
-            ordinal: 2,
-            prefill_input_tokens: None,
-        }
-    );
+    let after = state.auto_compact_window_snapshot();
+    assert_eq!(after.ordinal, 2);
+    assert_eq!(after.window_number, before.window_number);
+    assert_eq!(after.ids, before.ids);
+    assert_eq!(after.prefill_input_tokens, None);
+}
+
+#[tokio::test]
+async fn transcript_ordinals_resume_from_restored_value() {
+    let session_configuration = make_session_configuration_for_tests().await;
+    let mut state = SessionState::new(session_configuration);
+
+    assert_eq!(state.allocate_transcript_ordinal(), 0);
+    assert_eq!(state.allocate_transcript_ordinal(), 1);
+    state.restore_next_transcript_ordinal(41);
+    assert_eq!(state.allocate_transcript_ordinal(), 41);
+    assert_eq!(state.allocate_transcript_ordinal(), 42);
 }
 
 #[tokio::test]

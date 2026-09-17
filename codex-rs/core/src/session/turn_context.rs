@@ -444,10 +444,10 @@ impl Session {
     pub(crate) fn build_per_turn_config(
         session_configuration: &SessionConfiguration,
         cwd: AbsolutePathBuf,
-    ) -> Config {
+    ) -> Box<Config> {
         // todo(aibrahim): store this state somewhere else so we don't need to mut config
         let config = session_configuration.original_config_do_not_use.clone();
-        let mut per_turn_config = (*config).clone();
+        let mut per_turn_config = Box::new((*config).clone());
         per_turn_config.cwd = cwd;
         per_turn_config.workspace_roots = session_configuration.workspace_roots.clone();
         per_turn_config
@@ -488,8 +488,10 @@ impl Session {
     pub(crate) fn build_effective_session_config(
         session_configuration: &SessionConfiguration,
     ) -> Config {
-        let mut config =
-            Self::build_per_turn_config(session_configuration, session_configuration.cwd().clone());
+        let mut config = *Self::build_per_turn_config(
+            session_configuration,
+            session_configuration.cwd().clone(),
+        );
         config.model = Some(session_configuration.collaboration_mode.model().to_string());
         config.model_provider_id = session_configuration
             .original_config_do_not_use
@@ -516,7 +518,7 @@ impl Session {
         user_shell: &shell::Shell,
         shell_zsh_path: Option<&PathBuf>,
         main_execve_wrapper_exe: Option<&PathBuf>,
-        per_turn_config: Config,
+        per_turn_config: Box<Config>,
         model_info: ModelInfo,
         models_manager: &SharedModelsManager,
         network: Option<NetworkProxy>,
@@ -551,7 +553,7 @@ impl Session {
             per_turn_config.features.enabled(Feature::FastMode),
             &model_info,
         );
-        let per_turn_config = Arc::new(per_turn_config);
+        let per_turn_config: Arc<Config> = Arc::from(per_turn_config);
         let turn_metadata_state = Arc::new(TurnMetadataState::new(
             session_id.to_string(),
             thread_id.to_string(),

@@ -9,6 +9,7 @@ use std::collections::VecDeque;
 
 use super::AdditionalContextStore;
 use super::auto_compact_window::AutoCompactWindow;
+use super::auto_compact_window::AutoCompactWindowIds;
 use super::auto_compact_window::AutoCompactWindowSnapshot;
 use crate::context_manager::ContextManager;
 use crate::session::PreviousTurnSettings;
@@ -16,6 +17,7 @@ use crate::session::session::SessionConfiguration;
 use codex_protocol::protocol::RateLimitSnapshot;
 use codex_protocol::protocol::TokenUsage;
 use codex_protocol::protocol::TokenUsageInfo;
+use codex_protocol::protocol::TranscriptEnvelope;
 use codex_protocol::protocol::TurnContextItem;
 use codex_utils_output_truncation::TruncationPolicy;
 
@@ -37,6 +39,7 @@ pub(crate) struct SessionState {
     pub(crate) pending_session_start_sources: VecDeque<codex_hooks::SessionStartSource>,
     granted_permissions_by_environment_id: HashMap<String, AdditionalPermissionProfile>,
     next_turn_is_first: bool,
+    next_transcript_ordinal: u64,
 }
 
 impl SessionState {
@@ -56,6 +59,7 @@ impl SessionState {
             pending_session_start_sources: VecDeque::new(),
             granted_permissions_by_environment_id: HashMap::new(),
             next_turn_is_first: true,
+            next_transcript_ordinal: 0,
         }
     }
 
@@ -66,6 +70,13 @@ impl SessionState {
         I::Item: std::ops::Deref<Target = TranscriptItem>,
     {
         self.history.record_items(items, policy);
+    }
+
+    pub(crate) fn record_envelopes<'a, I>(&mut self, envelopes: I, policy: TruncationPolicy)
+    where
+        I: IntoIterator<Item = &'a TranscriptEnvelope>,
+    {
+        self.history.record_envelopes(envelopes, policy);
     }
 
     pub(crate) fn previous_turn_settings(&self) -> Option<PreviousTurnSettings> {
@@ -136,12 +147,54 @@ impl SessionState {
         self.auto_compact_window.set_estimated_prefill(tokens);
     }
 
-    pub(crate) fn start_next_auto_compact_window(&mut self) {
-        self.auto_compact_window.start_next();
+    pub(crate) fn start_next_auto_compact_window(&mut self) -> (u64, AutoCompactWindowIds) {
+        self.auto_compact_window.start_next()
     }
 
     pub(crate) fn auto_compact_window_snapshot(&self) -> AutoCompactWindowSnapshot {
         self.auto_compact_window.snapshot()
+    }
+
+    pub(crate) fn auto_compact_window_number(&self) -> u64 {
+        self.auto_compact_window.window_number()
+    }
+
+    pub(crate) fn auto_compact_window_ids(&self) -> AutoCompactWindowIds {
+        self.auto_compact_window.ids()
+    }
+
+    pub(crate) fn restore_auto_compact_window(
+        &mut self,
+        window_number: u64,
+        ids: AutoCompactWindowIds,
+    ) {
+        self.auto_compact_window.restore(window_number, ids);
+    }
+
+    pub(crate) fn claim_token_budget_reminder(&mut self) -> bool {
+        self.auto_compact_window.claim_token_budget_reminder()
+    }
+
+    pub(crate) fn claim_auto_compact_fallback(&mut self) -> bool {
+        self.auto_compact_window.claim_auto_compact_fallback()
+    }
+
+    pub(crate) fn request_new_context_window(&mut self) {
+        self.auto_compact_window.request_new_context_window();
+    }
+
+    pub(crate) fn new_context_window_requested(&self) -> bool {
+        self.auto_compact_window.new_context_window_requested()
+    }
+
+    pub(crate) fn allocate_transcript_ordinal(&mut self) -> u64 {
+        let ordinal = self.next_transcript_ordinal;
+        self.next_transcript_ordinal = self.next_transcript_ordinal.saturating_add(1);
+        ordinal
+    }
+
+    pub(crate) fn restore_next_transcript_ordinal(&mut self, ordinal: u64) {
+        self.next_transcript_ordinal = ordinal;
     }
 
     pub(crate) fn token_info(&self) -> Option<TokenUsageInfo> {
